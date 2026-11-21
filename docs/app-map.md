@@ -82,7 +82,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | Tabs: Macros | Steps done in turn, a card each: Run (the name alone does nothing); the chevron opens its steps (Earlier, Remove, Add a step…); ⋯ for Colour, Run When SoftPresenter Opens, Rename, Duplicate, Delete | `macros`, `macro run NAME`, `macro new\|add\|remove\|delete` |
 | Tabs: Stage | Which stage screen (with more than one; all by default); every layout as a tile with a picture of the stage in it, the one in use ticked, a click switches; Edit layouts…; the stage message (Show on stage, Change it, Clear) | `stage on\|off`, `stage layout SCREEN LAYOUT`, `stage message TEXT\|clear` |
 | Tabs: Audio | Audio playlists (chosen at its head; ⋯ and + to rename, make, delete); the player: a line to drag, previous, −15, play or pause, +15, next, volume with mute, Play through, Shuffle, Crossfade; the tracks (click to play, drag to move, ⋯ for Move Up, Move Down, Rename, Remove; Add tracks…) | `audio`, `audio play\|pause\|stop\|next\|previous`, `audio volume N`, `audio add FILE…` |
-| Tabs: VoxLive (once VoxLive is connected) | The church's VoxLive screens as buttons: a click puts that screen's captions on the screens in place of a verse | `voxlive show N\|NAME` |
+| Tabs: VoxLive (once VoxLive is connected) | The church's VoxLive screens, a card each: Show puts that screen's captions on the screens in place of a verse (it reads On screen, on an orange-tinted card, while they show) | `voxlive show N\|NAME` |
 
 ### Keys in the Show view
 

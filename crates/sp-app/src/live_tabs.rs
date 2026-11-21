@@ -17,8 +17,8 @@ use crate::messages::Message;
 use crate::screens::Kind;
 use crate::studio::{
     ACCENT, CARD, CARD_RUNNING, CARD_SHOWN, Flat, PANEL, RADIUS_CARD, READY, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, Tabs,
-    caption, fixed, fixed_semibold, flat_button, flat_button_width, icon_key, paint_spaced, quiet_icon, semibold,
-    spaced, tab_switch, tab_switch_height,
+    fixed, fixed_semibold, flat_button, flat_button_width, icon_key, paint_spaced, quiet_icon, semibold, spaced,
+    tab_switch, tab_switch_height,
 };
 use crate::timers::{self, Timer};
 
@@ -2257,51 +2257,63 @@ fn stage_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, t
     }
 }
 
-/// The VoxLive tab: the church's VoxLive screens, a button each. A click puts that screen's
-/// captions on the screens in place of what is there (a verse, a song); a click on a verse
-/// brings the verse back. On the Bible page too, where this column stays.
+/// The VoxLive tab: the church's VoxLive screens, a card each. Show puts that screen's captions
+/// on the screens in place of what is there (a verse, a song); a click on a verse brings the
+/// verse back. On the Bible page too, where this column stays.
 fn voxlive_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) {
     let Some(slot) = state.voxlive_slot else { return };
     let Some(item) = show.presentations().get(slot) else { return };
-    caption(ui, "VOXLIVE");
-    ui.add_space(2.0);
+    heading(ui, "VoxLive screens", None);
     let live = show.live().filter(|at| at.presentation == slot).map(|at| at.slide);
-    let width = ui.available_width();
+    let button_font = FontId::proportional(12.5);
+    let button_wide = flat_button_width(ui, &["Show", "On screen"], &button_font, 13.0);
     for (index, (group, _)) in item.slides().enumerate() {
         let on = live == Some(index);
-        let (row, response) = ui.allocate_exact_size(vec2(width, 38.0), Sense::click());
-        let fill = if on {
-            crate::integrations::VOXLIVE
-        } else if response.hovered() {
-            Color32::from_white_alpha(18)
-        } else {
-            CARD
-        };
-        ui.painter().rect_filled(row, 8.0, fill);
-        ui.painter().text(
-            row.left_center() + vec2(12.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            group.name.as_str(),
-            crate::studio::semibold(13.0),
-            TEXT,
-        );
-        if on {
-            ui.painter().circle_filled(row.right_center() - vec2(14.0, 0.0), 4.0, TALLY);
-        }
-        let response = response.on_hover_text(if on {
-            "On the screens now"
-        } else {
-            "Put these captions on the screens, in place of what is there"
+        card(ui, if on { CARD_SHOWN } else { CARD }, |ui| {
+            let width = ui.available_width();
+            let text_wide = width - button_wide - CARD_GAP;
+            let name = fitted(ui, &group.name, name_font(), TEXT, text_wide, 2);
+            // Under the name, the screen's language and what it shows, as VoxLive says them.
+            let about = state.voxlive.screens.iter().find(|screen| screen.name == group.name).map(|screen| {
+                let shows = match screen.mode.as_str() {
+                    "captions" => "Captions",
+                    "reference" => "Bible passage",
+                    other => other,
+                };
+                [screen.language.to_uppercase(), shows.to_owned()]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" \u{b7} ")
+            });
+            let sub = about
+                .filter(|about| !about.is_empty())
+                .map(|about| fitted(ui, &about, FontId::proportional(12.0), TEXT_FAINT, text_wide, 1));
+            let block = name.size().y + sub.as_ref().map_or(0.0, |sub| sub.size().y);
+            let (row, _) = ui.allocate_exact_size(vec2(width, block.max(30.0)), Sense::hover());
+            let y = row.center().y;
+            let top = y - block / 2.0;
+            let name_tall = name.size().y;
+            ui.painter().galley(pos2(row.min.x, top), name, TEXT);
+            if let Some(sub) = sub {
+                ui.painter().galley(pos2(row.min.x, top + name_tall), sub, TEXT_FAINT);
+            }
+            let button = Rect::from_min_size(pos2(row.max.x - button_wide, y - 15.0), vec2(button_wide, 30.0));
+            let (words, look, hint) = if on {
+                ("On screen", Flat::On, "On the screens now. A verse or a slide clicked brings it back")
+            } else {
+                ("Show", Flat::Plain, "Put these captions on the screens, in place of what is there")
+            };
+            let id = egui::Id::unique(("voxlive show", index));
+            if flat_button(ui, button, id, words, button_font.clone(), look, true).on_hover_text(hint).clicked() {
+                state.voxlive_go = Some(index);
+            }
         });
-        if response.clicked() {
-            state.voxlive_go = Some(index);
-        }
-        ui.add_space(4.0);
     }
-    ui.add_space(4.0);
     ui.label(
-        egui::RichText::new("A verse clicked after brings the verse back; this brings the captions back.")
-            .size(11.5)
-            .color(TEXT_FAINT),
+        egui::RichText::new("LIVE CAPTIONS TAKE THE PLACE OF THE SLIDE. CLICK A VERSE OR A SLIDE TO BRING IT BACK.")
+            .font(fixed(11.5))
+            .extra_letter_spacing(0.6)
+            .color(TEXT_DIM),
     );
 }

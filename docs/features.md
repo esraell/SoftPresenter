@@ -538,7 +538,7 @@ feature changes, this page changes in the same commit.
   to show it by itself). Clicking one of its slides puts that screen's live captions on the
   screens in place of what was there (a verse, a song); clicking the verse brings it back. The
   **VoxLive tab** beside Timers, Messages and the rest (in the right column, so on the Bible page
-  too) has the same screens as buttons. A screen's live display, which can start a paid
+  too) has the same screens as cards, each with Show (On screen while it shows). A screen's live display, which can start a paid
   translation, is opened only on the real screens; thumbnails and the editor show its free test
   pattern. Once shown, it keeps running for 15 minutes after it leaves the screens, so going back
   to the captions from a verse is at once, with no reload.
