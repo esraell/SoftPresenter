@@ -1,0 +1,33 @@
+name: Windows
+
+on:
+  push:
+    branches: [master, windows-ci]
+  pull_request:
+
+concurrency:
+  group: windows-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Build and tests on Windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      SOFTPRESENTER_QUIET: "1"
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the Rust version in rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Build
+        run: cargo build --workspace
+      - name: Tests
+        run: cargo test --workspace --exclude sp-render --no-fail-fast
+      - name: Tests (sp-render, without the picture tests)
+        run: cargo test -p sp-render --lib --no-fail-fast
