@@ -1204,9 +1204,10 @@ impl HomeState {
     pub fn edit_kind(&self) -> Option<EditKind> {
         if self.theme_edit.is_some() {
             Some(EditKind::Themes)
-        } else {
-            let draft = self.editing.as_ref()?;
+        } else if let Some(draft) = self.editing.as_ref() {
             Some(if draft.at.presentation == crate::props::PROP_SLOT { EditKind::Props } else { EditKind::Slides })
+        } else {
+            self.stage_editor_open.then_some(EditKind::Stage)
         }
     }
 
@@ -1389,7 +1390,7 @@ pub fn home_ui(
     // with neither list last clicked, the slide picked out by a right-click.
     let delete_key = ui.input(|input| input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace));
     if delete_key
-        && state.editing.is_none()
+        && state.edit_kind().is_none()
         && !ui.ctx().text_edit_focused()
         && !state.alert_open()
         && !egui::Popup::is_any_open(ui.ctx())
@@ -1426,6 +1427,10 @@ pub fn home_ui(
     library_search(ui, show, state, &mut commands);
     if state.editing.is_some() {
         edit_view(ui, show, state, theme, thumb, canvas, preview, &mut commands);
+        return commands;
+    }
+    if state.edit_kind() == Some(EditKind::Stage) {
+        stage_view(ui, show, state, preview, &mut commands);
         return commands;
     }
     crate::studio::library(ui, show, state, &mut commands);
@@ -2966,6 +2971,34 @@ fn edit_view(
     {
         state.editing = Some(draft);
     }
+}
+
+/// The Edit view on the stage layouts: the layouts down the left under the switch, the picture
+/// of the stage screen with its boxes in the middle, and the chosen box's settings in the right
+/// column, where the inspector is for a slide.
+fn stage_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, preview: Preview, commands: &mut Vec<Command>) {
+    use crate::studio::Column;
+    crate::stage_editor::prepare(state);
+    let left = egui::Panel::left("edit stage layouts")
+        .resizable(false)
+        .show_separator_line(false)
+        .exact_size(crate::studio::column_outer(crate::studio::LEFT_WIDTH))
+        .frame(crate::studio::column_frame(Column::Left));
+    let left = left.show(ui, |ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        crate::studio::edit_kinds(ui, state);
+        let lists = Frame::new().inner_margin(egui::Margin { left: 12, right: 12, top: 14, bottom: 12 });
+        lists.show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
+            crate::stage_editor::list(ui, state);
+        });
+    });
+    crate::studio::round_corners(ui, crate::studio::column_panel(left.response.rect, Column::Left));
+    crate::studio::right_column(ui, show, state, preview, commands, crate::stage_editor::item);
+    let middle = crate::studio::column_panel(ui.available_rect_before_wrap(), Column::Middle);
+    let frame = panel_frame(CANVAS, 16).outer_margin(crate::studio::column_margin(Column::Middle));
+    egui::CentralPanel::default().frame(frame).show(ui, |ui| crate::stage_editor::canvas(ui, state));
+    crate::studio::round_corners(ui, middle);
 }
 
 /// The props, in the Edit view's left column while a prop is edited: a click opens another.
@@ -7696,7 +7729,7 @@ mod tests {
     }
 
     #[test]
-    fn the_edit_views_switch_goes_between_slides_themes_and_props() {
+    fn the_edit_views_switch_goes_between_slides_themes_props_and_stage() {
         let (ctx, show) = (egui::Context::default(), three_songs());
         let mut state = HomeState::default();
         state.props.push(crate::props::Prop::new("Logo".to_owned()));
@@ -7730,10 +7763,23 @@ mod tests {
         (state.theme_edit, state.editing) = (None, None);
         frame_with(&ctx, &show, &mut state, None);
         assert_eq!(state.edit_kind(), Some(EditKind::Props));
+        // Stage has no slide of its own open; a slide opened after it takes its place.
+        state.edit_kind_request = Some(EditKind::Stage);
+        frame_with(&ctx, &show, &mut state, None);
+        assert_eq!(state.edit_kind(), Some(EditKind::Stage));
+        assert!(state.editing.is_none() && !state.stage_layouts.is_empty());
+        state.edit_kind_request = Some(EditKind::Slides);
+        frame_with(&ctx, &show, &mut state, None);
+        frame_with(&ctx, &show, &mut state, None);
+        assert_eq!((state.edit_kind(), state.stage_editor_open), (Some(EditKind::Slides), false));
+        state.edit_kind_request = Some(EditKind::Stage);
+        frame_with(&ctx, &show, &mut state, None);
+        assert_eq!(state.edit_kind(), Some(EditKind::Stage));
         // Show leaves the Edit view whichever kind is open.
         state.view_request = Some(0);
         frame_with(&ctx, &show, &mut state, None);
         assert_eq!(state.edit_kind(), None);
+        assert!(!state.stage_editor_open);
         // With no props there is nothing for Props to open: things stay as they are.
         state.props.clear();
         state.edit_kind_request = Some(EditKind::Props);

@@ -219,7 +219,7 @@ feature changes, this page changes in the same commit.
   keys, a `?` (it opens Settings at Key Mappings) and Settings.
 - **The Edit view** edits four kinds of thing, chosen by a switch at the top of its left
   column: a song's Slides, the Themes and their templates, the Props, and the Stage screens'
-  layouts (which open in their own window). View › Themes, Control-T and `sp view themes` open
+  layouts. View › Themes, Control-T and `sp view themes` open
   it on the themes.
 - **The right column**: the preview block, six layer keys (Slide, Media, Props, Messages, Audio,
   Announce: each is lit while its layer shows, and pressing it clears that layer alone), Clear
@@ -236,8 +236,8 @@ feature changes, this page changes in the same commit.
   until it draws again. (The warning covers those two cases. It does not see a picture the GPU dropped
   after it was worked out, or a window macOS is not showing.)
 - **Stage layouts**: each stage screen picks a layout in the Stage tab (Words and Next, Words
-  Only, Words and Notes, Clock and Timer, or your own). Screens > Edit Stage Layouts… lays them
-  out: the current and next slide, the next label, the clock, a timer, the slide's notes, the
+  Only, Words and Notes, Clock and Timer, or your own). Edit › Stage (also Screens > Edit Stage
+  Layouts…) lays them out: the current and next slide, the next label, the clock, a timer, the slide's notes, the
   song's title and group, and the stage message, each dragged into place and resized, with its
   size, colour and alignment.
 

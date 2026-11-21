@@ -713,6 +713,10 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         // as Show, Bible, Edit.
         const ORDER: [usize; 3] = [0, 2, 1];
         use crate::home::EditKind;
+        // A slide, a theme or a prop opened some other way takes the stage layouts' place.
+        if state.editing.is_some() || state.theme_edit.is_some() {
+            state.stage_editor_open = false;
+        }
         let kind = state.edit_kind();
         let view = if kind.is_some() {
             1
@@ -747,7 +751,10 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
                 // Leaving the Theme Editor goes through the app, which saves the theme.
                 match state.theme_edit.as_mut() {
                     Some(edit) => edit.leave = true,
-                    None => state.editing = None,
+                    None => {
+                        state.editing = None;
+                        state.stage_editor_open = false;
+                    }
                 }
                 state.bible_open = to == 2;
             }
@@ -885,8 +892,11 @@ fn open_edit_kind(show: &Show, state: &mut HomeState) {
                 state.editing = Some(draft);
             }
         }
-        // The stage layouts have a window of their own.
-        EditKind::Stage => state.stage_editor_open = true,
+        // The stage layouts have no draft: the kind is open while this says so.
+        EditKind::Stage => {
+            state.editing = None;
+            state.stage_editor_open = true;
+        }
     }
 }
 
@@ -2015,11 +2025,7 @@ pub fn song_picker(ui: &mut egui::Ui, show: &Show, state: &HomeState) -> Option<
 /// Whether ↑ and ↓ go through the song list or the playlist: in the Show view, with nothing
 /// being typed and the song search closed.
 fn list_keys_work(ui: &egui::Ui, state: &HomeState) -> bool {
-    !ui.ctx().text_edit_focused()
-        && state.library_search.is_none()
-        && state.editing.is_none()
-        && state.theme_edit.is_none()
-        && !state.bible_open
+    !ui.ctx().text_edit_focused() && state.library_search.is_none() && state.edit_kind().is_none() && !state.bible_open
 }
 
 fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {

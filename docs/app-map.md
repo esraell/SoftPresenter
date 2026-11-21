@@ -121,9 +121,9 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 - **Left**: at the top a switch, Slides · Themes · Props · Stage, for what is edited. Under it,
   for Slides the song's slides (click to edit another); for Themes the themes and the open
   theme's templates; for Props the props (click to edit another; props are made, renamed and
-  deleted in the Props tab of the Show view, and Props is faint until there is one); Stage opens
-  the Stage Layouts window. Then the objects of the slide, front first (lock, hide, rename, drag
-  to reorder).
+  deleted in the Props tab of the Show view, and Props is faint until there is one); for Stage
+  the stage layouts, with +, − and Duplicate at the foot. For a slide, a template or a prop, the
+  objects come next, front first (lock, hide, rename, drag to reorder).
 - **Canvas**: Add Text, Shapes, Media… (a picture or a video, which plays in its box when the
   slide is on screen), Web Page (a box showing a live web page; its address is typed in the
   Shape tab); pictures and videos can be dropped on it from the Finder. Double-click a
@@ -133,6 +133,11 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   (how an object comes on and goes off).
 - **Footer** (at the foot of the inspector): Slide Notes, Live Edit (changes reach the screens
   as they are made), Done.
+- **Stage** (Edit › Stage; Screens › Edit Stage Layouts… and the Stage tab's Edit Layouts… open
+  it): the layouts for the stage screens (now, next, notes, clock, timer, message). The middle
+  is a picture of the stage screen with the layout's boxes, dragged to move and by a corner to
+  resize; the chosen box's size, colour and alignment, and Add Item, are in the right column
+  under Clear All. While it is open the keyboard does not run the show, as in the rest of Edit.
 - **Themes** (Edit › Themes; View › Themes, Control-T and `sp view themes` open it): the same canvas, tools and inspector, editing a theme's
   layouts (templates). A layout's text boxes say where each kind of words goes; its shapes,
   pictures and videos are drawn behind the words on every slide that uses it. The list on the
@@ -165,7 +170,6 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 |---|---|---|
 | Screens | Settings, Screens; or Screens, Configure Screens… | Audience and stage screens: where each goes (a display, a window, NDI, off), its name, its look (which layers, colour, covered edges); what each is doing now (for NDI, how many receivers are watching, or that nobody is); Identify |
 | Settings | ⚙ or Command-comma | General (copyright line, start-up choices), Screens, Groups (names and colours), Key Mappings, Integrations (VoxLive: its API key, its state, the church's screens; click a screen to change its look, with a preview, and save it to VoxLive; `voxlive …`, `voxlive look`) |
-| Stage Layouts | Screens, Edit Stage Layouts… | Layouts for the stage screens: now, next, notes, clock, timer, message |
 
 ## Where the app keeps things
 

@@ -219,7 +219,6 @@ fn open_panel_window(
     let attrs = Window::default_attributes()
         .with_title(kind.title())
         .with_inner_size(match kind {
-            Panel::StageLayouts => winit::dpi::LogicalSize::new(1160.0, 620.0),
             Panel::Screens => winit::dpi::LogicalSize::new(780.0, 640.0),
             Panel::Settings => winit::dpi::LogicalSize::new(760.0, 520.0),
         })
@@ -816,17 +815,15 @@ fn paint_ui(
 enum Panel {
     Screens,
     Settings,
-    StageLayouts,
 }
 
 impl Panel {
-    const ALL: [Panel; 3] = [Panel::Screens, Panel::Settings, Panel::StageLayouts];
+    const ALL: [Panel; 2] = [Panel::Screens, Panel::Settings];
 
     fn title(self) -> &'static str {
         match self {
             Panel::Screens => "Screens",
             Panel::Settings => "Settings",
-            Panel::StageLayouts => "Stage Layouts",
         }
     }
 
@@ -835,7 +832,6 @@ impl Panel {
         match self {
             Panel::Screens => state.settings_open,
             Panel::Settings => state.preferences_open,
-            Panel::StageLayouts => state.stage_editor_open,
         }
     }
 
@@ -847,7 +843,6 @@ impl Panel {
                 state.identify = false;
             }
             Panel::Settings => state.preferences_open = false,
-            Panel::StageLayouts => state.stage_editor_open = false,
         }
     }
 }
@@ -5756,9 +5751,9 @@ impl App {
             if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_PLAYLIST").is_some() {
                 running.home_state.playlist_open = true;
             }
-            // Testing aid: open the Stage Layouts window.
+            // Testing aid: open the Edit view on the stage layouts, with a box chosen.
             if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_CAPTURE_STAGE_LAYOUTS").is_some() {
-                running.home_state.stage_editor_open = true;
+                running.home_state.edit_kind_request = Some(home::EditKind::Stage);
                 running.home_state.stage_edit = (0, Some(0));
             }
             // Testing aid: show the stage picture in the Program preview.
@@ -5997,7 +5992,6 @@ impl App {
         let mut full = panel.ctx.run_ui(raw_input, |ui| match kind {
             Panel::Screens => commands.extend(home::screens_ui(ui, home_state, output_on)),
             Panel::Settings => home::settings_ui(ui, home_state),
-            Panel::StageLayouts => stage_editor::ui(ui, home_state),
         });
         panel.state.handle_platform_output(&panel.window, std::mem::take(&mut full.platform_output));
         let delay = full.viewport_output.get(&egui::ViewportId::ROOT).map_or(Duration::MAX, |v| v.repaint_delay);
@@ -6017,7 +6011,6 @@ impl App {
         let ending = match kind {
             Panel::Screens => "screens.png",
             Panel::Settings => "settings.png",
-            Panel::StageLayouts => "stage.png",
         };
         if let Some(path) = &self.options.capture_home
             && panel.frames >= 2
@@ -6550,7 +6543,7 @@ impl App {
             }
             A::ConfigureScreens => state.settings_open = true,
             A::SetUp => state.setup = Some(setup::Setup::new()),
-            A::StageLayouts => state.stage_editor_open = true,
+            A::StageLayouts => state.edit_kind_request = Some(home::EditKind::Stage),
             A::NewSong => state.new_song = true,
             // Handled above, before the window's state is borrowed.
             A::ImportSongs | A::ImportLibraryFolder | A::ImportSlides | A::ReloadSongs | A::ExportSongs => {}
@@ -6697,7 +6690,7 @@ impl App {
             let state = &running.home_state;
             let view = if state.theme_edit.is_some() {
                 A::ThemesView
-            } else if state.editing.is_some() {
+            } else if state.edit_kind().is_some() {
                 A::EditView
             } else if state.bible_open {
                 A::BibleView
@@ -7033,7 +7026,7 @@ impl ApplicationHandler<AppEvent> for App {
         if let WindowEvent::KeyboardInput { event: key, .. } = &event
             && key.state == ElementState::Pressed
             && !running.egui_ctx.text_edit_focused()
-            && running.home_state.editing.is_none()
+            && running.home_state.edit_kind().is_none()
             && running.home_state.new_song_sheet.is_none()
             && !running.home_state.alert_open()
             && !self.held.super_key()

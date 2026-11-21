@@ -1143,7 +1143,7 @@ fn stage_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             state.settings_open = true;
         }
         if ui.button("Edit Layouts…").on_hover_text("Lay out what the stage screens show").clicked() {
-            state.stage_editor_open = true;
+            state.edit_kind_request = Some(crate::home::EditKind::Stage);
         }
     });
     ui.add_space(10.0);
