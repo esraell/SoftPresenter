@@ -8,10 +8,16 @@
 //! decides who may connect. If either can't be set or read, or names anybody else, the app does
 //! not listen.
 //!
-//! What that does not cover on Windows: the folder is made first and its list set a moment
-//! later, so somebody who could already write in the folder above might get in between (in the
-//! usual place nobody else can: the user's own profile, which this code does not check). And a
-//! program run by the same user with fewer rights than usual is not kept out by the list.
+//! Known limits on Windows, all resting on the folder above being the user's own (as it is in
+//! the usual place, the user's profile, which this code does not check):
+//! - The folder is made first and its list set a moment later, so somebody who could already
+//!   write in the folder above might get in between, or put another folder in its place after
+//!   it was looked at. The folder is not held open against that.
+//! - The owner is set, and the tool's word is taken that it was; it is not read back.
+//! - The command line does not check the folder before it sends: it trusts the path.
+//! - A program run by the same user with fewer rights than usual (low integrity) is not kept
+//!   out by anything set here; whether Windows keeps it out by itself is what a test in
+//!   `control` finds out.
 //!
 //! Windows offers no way to do this without `unsafe` code except through its own tools, so the
 //! lists are set and read with `icacls.exe` and the user is found with `whoami.exe`, both taken
@@ -24,6 +30,9 @@ pub struct Private {
     /// The user the app runs as, as Windows writes it (S-1-5-21-…).
     #[cfg(windows)]
     user: String,
+    /// The folder itself: once private, the place for the notes access lists are read through.
+    #[cfg(windows)]
+    folder: std::path::PathBuf,
 }
 
 /// Whether a file is a socket: one left by an app that stopped may be removed, anything else
@@ -63,6 +72,12 @@ impl Private {
     pub fn check_socket(&self, socket: &Path) -> Result<(), String> {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600));
+        Ok(())
+    }
+
+    /// A socket that was already there. On Unix nobody else can have reached it, the folder
+    /// being closed to them, so there is nothing to look at and it is not touched.
+    pub fn check_existing(&self, _socket: &Path) -> Result<(), String> {
         Ok(())
     }
 }
@@ -123,14 +138,19 @@ pub(crate) fn user() -> Result<String, String> {
     user_in(&printed).ok_or_else(|| format!("could not tell which user this is from: {}", printed.trim()))
 }
 
-/// The access list of a file or folder, read through a note `icacls` writes. The note goes in
-/// the user's own temporary folder, not the folder being looked at (somebody still let into
-/// that could change the note before it is read), under a name nobody can guess beforehand.
+/// How the notes access lists are read through are named: nothing like a socket's name, so one
+/// left behind is known for what it is.
 #[cfg(windows)]
-pub(crate) fn access_list(of: &Path) -> Result<String, String> {
+const NOTE: &str = "softpresenter-access-note-";
+
+/// The access list of a file or folder, read through a note `icacls` writes in `notes`, under
+/// a name nobody can guess beforehand. The note is removed as soon as it is read, whatever
+/// went wrong.
+#[cfg(windows)]
+pub(crate) fn access_list(of: &Path, notes: &Path) -> Result<String, String> {
     use std::hash::{BuildHasher, Hasher};
     let unguessable = std::collections::hash_map::RandomState::new().build_hasher().finish();
-    let note = std::env::temp_dir().join(format!("softpresenter-access-{}-{unguessable:016x}.txt", std::process::id()));
+    let note = notes.join(format!("{NOTE}{}-{unguessable:016x}.txt", std::process::id()));
     // /L: of the thing itself, never of what a link points to.
     let saved = run(tool("icacls.exe")?.arg(of).arg("/save").arg(&note).arg("/L"));
     let read = std::fs::read(&note);
@@ -164,11 +184,39 @@ pub fn keep_private(folder: &Path) -> Result<Private, String> {
         .arg(format!("*{user}:(OI)(CI)F"))
         .arg("/L"))
     .map_err(private)?;
-    let list = access_list(folder).map_err(private)?;
-    only_this_user(&list, &user, true).map_err(|who| others(folder, &who))?;
+    // The list is read back twice, through notes in two places, and both must show a private
+    // folder. A note is a file, and whoever can change it can make the list look private:
+    // somebody still let into this folder could change a note kept here, and on a computer
+    // whose temporary folder is shared somebody else might change one kept there. Nobody but
+    // this user can do both unless both places are already theirs to write in. The temporary
+    // folder comes first, so nothing is written here until one reading says it is private.
+    for notes in [std::env::temp_dir().as_path(), folder] {
+        let list = access_list(folder, notes).map_err(private)?;
+        only_this_user(&list, &user, true).map_err(|who| others_in_folder(folder, &who))?;
+    }
+    // From here on the notes are kept in the folder, which is this user's alone. One left by a
+    // copy that was stopped half-way is cleared: only plain files with a note's name, never a
+    // socket.
+    clear_notes(folder);
     // Still the folder that was looked at, not a link put in its place meanwhile.
     real_folder(folder)?;
-    Ok(Private { user })
+    Ok(Private { user, folder: folder.to_owned() })
+}
+
+/// Removes notes left in the folder by a copy that was stopped before it could.
+#[cfg(windows)]
+fn clear_notes(folder: &Path) {
+    use std::os::windows::fs::MetadataExt;
+    let Ok(entries) = std::fs::read_dir(folder) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let plain = std::fs::symlink_metadata(entry.path())
+            .is_ok_and(|meta| meta.is_file() && meta.file_attributes() & REPARSE_POINT == 0);
+        if plain && name.starts_with(NOTE) && name.ends_with(".txt") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -176,9 +224,20 @@ impl Private {
     /// The socket just made is for this user only: its own access list decides who may
     /// connect, so it is read back too.
     pub fn check_socket(&self, socket: &Path) -> Result<(), String> {
-        let list =
-            access_list(socket).map_err(|problem| format!("Could not keep {} private: {problem}", socket.display()))?;
+        let list = access_list(socket, &self.folder)
+            .map_err(|problem| format!("Could not keep {} private: {problem}", socket.display()))?;
         only_this_user(&list, &self.user, false).map_err(|who| others(socket, &who))
+    }
+
+    /// A socket that was already there keeps the access list it had, whatever the folder's is
+    /// now. One that lets anybody else in is not asked whether an app answers on it, and is
+    /// not replaced: it is in the way.
+    pub fn check_existing(&self, socket: &Path) -> Result<(), String> {
+        let in_the_way = |why: String| format!("{} is in the way of the control socket: {why}", socket.display());
+        let list = access_list(socket, &self.folder)
+            .map_err(|problem| in_the_way(format!("its access list can't be read ({problem}).")))?;
+        only_this_user(&list, &self.user, false)
+            .map_err(|who| in_the_way(format!("it is not private ({who}). Delete it, then start SoftPresenter again.")))
     }
 }
 
@@ -188,14 +247,36 @@ fn others(path: &Path, who: &str) -> String {
     format!("{} is not private ({who}), so SoftPresenter is not listening for commands there.", path.display())
 }
 
-/// The user in what `whoami /user` prints: the first S-1-… in it.
+/// The same for the folder, with what to do about it: entries a folder already had for other
+/// people are not taken off here (they may have been put there on purpose), so the folder has
+/// to go.
+#[cfg(windows)]
+fn others_in_folder(folder: &Path, who: &str) -> String {
+    format!(
+        "{} Delete that folder and start SoftPresenter again: it makes the folder afresh, for you alone.",
+        others(folder, who)
+    )
+}
+
+/// The user in what `whoami /user /fo csv /nh` prints: the last field of its line, which must
+/// be written the way Windows writes a person's account (S-1-5-21-… with four numbers after
+/// it, or S-1-12-1-… for an account kept by an organisation's directory in the cloud) or the
+/// system's own (S-1-5-18). The field before it holds the computer's and the account's names,
+/// which somebody else may have chosen, so nothing is looked for in there.
 #[cfg(any(windows, test))]
 fn user_in(printed: &str) -> Option<String> {
-    let from = printed.find("S-1-")?;
-    let user: String = printed[from + 2..].chars().take_while(|c| c.is_ascii_digit() || *c == '-').collect();
-    let user = format!("S-{}", user.trim_matches('-'));
-    // S-1-5-21-a-b-c-n at least has more parts than a group everybody is in.
-    (user.split('-').count() >= 4).then_some(user)
+    let line = printed.lines().map(str::trim).rfind(|line| !line.is_empty())?;
+    let (_names, field) = line.rsplit_once(',')?;
+    let field = field.trim().strip_prefix('"')?.strip_suffix('"')?;
+    let parts: Vec<&str> = field.split('-').collect();
+    let numbers =
+        parts.iter().skip(2).all(|part| (1..=10).contains(&part.len()) && part.bytes().all(|b| b.is_ascii_digit()));
+    let shape = match parts.as_slice() {
+        ["S", "1", "5", "18"] => true,
+        ["S", "1", "5", "21", rest @ ..] | ["S", "1", "12", "1", rest @ ..] => rest.len() == 4,
+        _ => false,
+    };
+    (numbers && shape).then(|| field.to_owned())
 }
 
 /// The access list in a note `icacls /save` wrote: its last line, whether the note is in
@@ -296,9 +377,42 @@ mod tests {
     #[test]
     fn the_user_is_found_in_what_whoami_prints() {
         assert_eq!(user_in("\"desk\\operator\",\"S-1-5-21-1111-2222-3333-1001\"\r\n").as_deref(), Some(USER));
-        assert_eq!(user_in("desk\\operator S-1-5-21-1111-2222-3333-1001").as_deref(), Some(USER));
-        assert_eq!(user_in("nothing of the kind"), None);
-        assert_eq!(user_in("\"x\",\"S-1-\""), None);
+        assert_eq!(user_in("\"nt authority\\system\",\"S-1-5-18\"\r\n").as_deref(), Some("S-1-5-18"));
+        assert_eq!(user_in("\"cloud\\operator\",\"S-1-12-1-11-22-33-44\"").as_deref(), Some("S-1-12-1-11-22-33-44"));
+        for not_a_user in [
+            "nothing of the kind",
+            "\"x\",\"S-1-\"",
+            "\"x\",\"\"",
+            // Not in the last field, or not a field at all.
+            "desk\\operator S-1-5-21-1111-2222-3333-1001",
+            "\"S-1-5-21-1111-2222-3333-1001\"",
+            "\"S-1-5-21-1111-2222-3333-1001\",\"operator\"",
+            // A group everybody is in, a list's short names, too few or too many numbers, rubbish.
+            "\"x\",\"S-1-1-0\"",
+            "\"x\",\"S-1-5-32-544\"",
+            "\"x\",\"WD\"",
+            "\"x\",\"S-1-5-21-1111-2222-3333\"",
+            "\"x\",\"S-1-5-21-1111-2222-3333-1001-5\"",
+            "\"x\",\"S-1-5-21-1111-2222-3333-1001 \"",
+            "\"x\",\"S-1-5-21-1111-2222-3333-1001:(OI)(CI)F\"",
+            "\"x\",\"S-1-5-21-1111--3333-1001\"",
+            "\"x\",S-1-5-21-1111-2222-3333-1001",
+        ] {
+            assert_eq!(user_in(not_a_user), None, "{not_a_user}");
+        }
+    }
+
+    /// The names in front are somebody else's to choose; an account written into them is not
+    /// taken for the user.
+    #[test]
+    fn a_computer_or_account_named_like_a_user_is_not_taken_for_one() {
+        for names in ["S-1-5-21-9-9-9-500\\operator", "desk\\S-1-5-18", "S-1-1-0\\S-1-5-21-9-9-9-500"] {
+            let printed = format!("\"{names}\",\"{USER}\"\r\n");
+            assert_eq!(user_in(&printed).as_deref(), Some(USER), "{printed}");
+            // And with no proper last field there is no user at all, rather than the name's.
+            assert_eq!(user_in(&format!("\"{names}\",\"\"")), None);
+            assert_eq!(user_in(&format!("\"{names}\"")), None);
+        }
     }
 
     #[test]

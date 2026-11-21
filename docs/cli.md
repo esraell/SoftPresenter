@@ -992,7 +992,17 @@ These need the window for now; some can be reached with `sp menu`.
   the socket file's own list once it is made. If either can't be set or read, or names anyone
   but that user, the system and the administrators, the app does not listen and its log says
   why. It does this with Windows' own `icacls` and `whoami`. A folder that is a link or a
-  junction is refused, as a linked folder is on a Mac.
+  junction is refused, as a linked folder is on a Mac. A folder that was already there with
+  entries for other people is not changed: the app says so and does not listen until the folder
+  is deleted (it makes it again, for the user alone). The same goes for a socket file already
+  there that others may open.
+- Two things the app does not check, on any system. The folder above the socket's folder: a
+  socket path pointed at a shared place with `SOFTPRESENTER_CONTROL_SOCKET` is only as safe as
+  that place, where somebody else may be able to put a folder of their own in the way. And
+  `sp` trusts the path it is given: it does not look at the folder before it sends.
+- On Windows, a program the same user runs with fewer rights than usual (low integrity, as the
+  sandboxed part of a browser is) is not kept out by anything the app sets. Whether Windows
+  keeps it out by itself has a test of its own, not yet run.
 - Nothing listens on the network: no other computer, and no web page in a browser, can reach
   it. A program running as the same user can, which is no more than that program could do by
   changing the app's files.

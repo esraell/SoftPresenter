@@ -137,6 +137,9 @@ fn listen_at(path: PathBuf, deliver: impl Fn(Incoming) + Send + Sync + 'static) 
         if !private_folder::is_socket(&meta) {
             return Err(format!("{} is in the way of the control socket.", path.display()));
         }
+        // On Windows a socket keeps the access list it was made with: one that lets others in
+        // is in the way too, and is neither asked nor replaced. (Nothing to look at on Unix.)
+        private.check_existing(&path)?;
         if UnixStream::connect(&path).is_ok() {
             return Err("Another SoftPresenter is already listening for commands.".to_owned());
         }
@@ -3224,14 +3227,25 @@ mod tests {
         assert!(user.starts_with("S-1-"), "{user}");
         let folder = socket_folder("kept");
         private_folder::keep_private(&folder).expect("kept private");
-        let list = private_folder::access_list(&folder).expect("its access list");
+        let list = private_folder::access_list(&folder, &folder).expect("its access list");
         assert!(list.contains("D:P"), "closed to the folder above: {list}");
         assert!(!list.contains(";WD)") && !list.contains(";BU)") && !list.contains(";AU)"), "{list}");
         // A file made in it takes the same list.
         let inside = folder.join("inside.txt");
         std::fs::write(&inside, "x").expect("a file inside");
-        let list = private_folder::access_list(&inside).expect("the file's access list");
+        let list = private_folder::access_list(&inside, &folder).expect("the file's access list");
         assert!(!list.contains(";WD)") && !list.contains(";BU)") && !list.contains(";AU)"), "{list}");
+        // A note left by a copy that was stopped is cleared at the next start, and the notes
+        // of this reading are gone: only the file made above is left.
+        let left = folder.join("softpresenter-access-note-1-0000000000000000.txt");
+        std::fs::write(&left, "left behind").expect("a note left behind");
+        private_folder::keep_private(&folder).expect("kept private again");
+        let names: Vec<String> = std::fs::read_dir(&folder)
+            .expect("the folder")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["inside.txt"], "no note is left in the folder");
         let _ = std::fs::remove_dir_all(&folder);
     }
 
@@ -3246,8 +3260,114 @@ mod tests {
         icacls(&folder, &["/grant", "*S-1-1-0:(OI)(CI)F"]);
         let said = echo_at(&path).err().expect("refused");
         assert!(said.contains("is not private"), "{said}");
+        assert!(said.contains("Delete that folder and start SoftPresenter again"), "it says what to do: {said}");
         assert!(std::fs::symlink_metadata(&path).is_err(), "no socket was made");
+        let left: Vec<_> =
+            std::fs::read_dir(&folder).expect("the folder").flatten().map(|entry| entry.path()).collect();
+        assert!(left.is_empty(), "nothing was left in a folder that is not private: {left:?}");
+        // Doing what it says works: the folder made afresh is private.
+        std::fs::remove_dir_all(&folder).expect("the folder deleted");
+        let _listening = echo_at(&path).expect("listening in the folder made afresh");
+        assert!(say_to(&path, &["status"]).expect("a reply").ok);
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// A socket that was already there keeps its own access list, whatever the folder's is. If
+    /// this fails with "Another SoftPresenter is already listening", the socket's list was not
+    /// read before the socket was tried, or Windows did not put Everyone on a socket file's
+    /// list when asked.
+    #[cfg(windows)]
+    #[test]
+    fn windows_does_not_take_over_a_socket_others_may_open() {
+        let folder = socket_folder("openfile");
+        let path = folder.join("c.sock");
+        let _first = echo_at(&path).expect("listening");
+        // Everyone (S-1-1-0) is let in to the socket file itself; the folder stays private.
+        icacls(&path, &["/grant", "*S-1-1-0:F", "/L"]);
+        let said = echo_at(&path).err().expect("refused");
+        assert!(said.contains("is in the way of the control socket: it is not private"), "{said}");
+        assert!(std::fs::symlink_metadata(&path).is_ok(), "the socket was left where it was");
+        assert!(say_to(&path, &["status"]).expect("the first still answers").ok);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// Not a test of its own: what the test below runs a copy of this test program to do, with
+    /// low rights. It says how it was run and whether it could connect to each socket named.
+    #[cfg(windows)]
+    #[test]
+    fn windows_low_rights_helper() {
+        let (Some(private), Some(open)) =
+            (std::env::var_os("SP_TEST_LOW_PRIVATE"), std::env::var_os("SP_TEST_LOW_OPEN"))
+        else {
+            return;
+        };
+        // S-1-16-4096 is the label Windows gives a program run with low rights.
+        let groups =
+            private_folder::run(private_folder::tool("whoami.exe").expect("whoami").args(["/groups", "/fo", "csv"]));
+        let level = match groups {
+            Ok(groups) if groups.contains("S-1-16-4096") => "low".to_owned(),
+            Ok(_) => "not low".to_owned(),
+            Err(problem) => format!("unknown ({problem})"),
+        };
+        println!("helper level: {level}");
+        for (name, path) in [("private", private), ("open", open)] {
+            match UnixStream::connect(Path::new(&path)) {
+                Ok(_) => println!("helper {name}: connected"),
+                Err(problem) => println!("helper {name}: refused ({problem})"),
+            }
+        }
+    }
+
+    /// Whether a program run by the same user with low rights (low integrity: a browser's
+    /// sandboxed part, say) can reach the control socket. The app sets nothing against it;
+    /// Windows by itself lets such a program read the user's files but not write to them, and
+    /// connecting to a socket is taken here to need writing.
+    ///
+    /// A copy of this test program, marked to run with low rights, tries two sockets: the
+    /// control socket as the app makes it, and one marked as open to low-rights programs, to
+    /// show that such a program can connect at all.
+    #[cfg(windows)]
+    #[test]
+    fn windows_keeps_a_low_rights_program_of_the_same_user_out() {
+        let folder = socket_folder("low");
+        let private = folder.join("c.sock");
+        let _listening = echo_at(&private).expect("listening");
+        let open_folder = socket_folder("lowopen");
+        let open = open_folder.join("c.sock");
+        let _open_listening = echo_at(&open).expect("listening");
+        icacls(&open_folder, &["/setintegritylevel", "(OI)(CI)Low"]);
+        icacls(&open, &["/setintegritylevel", "Low", "/L"]);
+        // The copy sits outside both folders, where a low-rights program may read it.
+        let programs = socket_folder("lowexe");
+        std::fs::create_dir_all(&programs).expect("a folder for the copy");
+        let copy = programs.join("low.exe");
+        std::fs::copy(std::env::current_exe().expect("this test program"), &copy).expect("a copy of this test program");
+        icacls(&copy, &["/setintegritylevel", "Low"]);
+        let ran = std::process::Command::new(&copy)
+            .args(["control::tests::windows_low_rights_helper", "--exact", "--nocapture", "--test-threads=1"])
+            .env("SP_TEST_LOW_PRIVATE", &private)
+            .env("SP_TEST_LOW_OPEN", &open)
+            .output();
+        let _ = std::fs::remove_dir_all(&programs);
+        let ran = ran.expect("the copy ran");
+        let said = format!("{}\n{}", String::from_utf8_lossy(&ran.stdout), String::from_utf8_lossy(&ran.stderr));
+        assert!(
+            said.contains("helper level: low"),
+            "NOTHING LEARNT: the copy did not run with low rights, so this says nothing about such programs. It said:\n{said}"
+        );
+        assert!(
+            said.contains("helper open: connected"),
+            "NOTHING LEARNT: the low-rights copy could not connect even to a socket marked as open to it, so its \
+             being refused at the control socket would prove nothing. It said:\n{said}"
+        );
+        assert!(
+            said.contains("helper private: refused"),
+            "LEARNT: a low-rights program of the same user CAN connect to the control socket. Windows does not keep \
+             it out by itself, and nothing the app sets does either; keeping it out would need a label on the folder \
+             that refuses reading as well as writing from below. It said:\n{said}"
+        );
+        let _ = std::fs::remove_dir_all(&folder);
+        let _ = std::fs::remove_dir_all(&open_folder);
     }
 
     /// The whole of the privacy rests on this: Windows lets a program connect only if the
