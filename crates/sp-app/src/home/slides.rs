@@ -193,6 +193,8 @@ pub struct PassageDecks {
     /// installed); one made with something else is made again.
     with: String,
     frame: u64,
+    /// A passage is still to be made: the window is drawn again to make it.
+    waiting: bool,
 }
 
 struct MadePassage {
@@ -206,6 +208,7 @@ impl PassageDecks {
     /// Called once a frame, before any passage is asked for.
     fn begin(&mut self, bible: &BiblePage) {
         self.frame += 1;
+        self.waiting = false;
         let with = (bible.template, &bible.boxes, bible.shelf.bibles.len());
         self.with.clear();
         use std::fmt::Write;
@@ -226,6 +229,7 @@ impl PassageDecks {
             return Some(made.deck.clone());
         }
         if *budget == 0 {
+            self.waiting = true;
             return None;
         }
         *budget -= 1;
@@ -578,7 +582,9 @@ fn keep_in_step(show: &Show, state: &mut HomeState, songs: &[Option<usize>], com
         }
         return true;
     }
-    if was_selected != selected && !state.hidden_slots().contains(&selected) {
+    // A Bible passage on the Bible page's own places leaves the playlist showing.
+    let passage = state.bible.slots.is_some_and(|slots| slots.contains(&selected));
+    if was_selected != selected && !passage {
         let from = chosen.unwrap_or(0).min(songs.len());
         let found = songs[from..]
             .iter()
@@ -699,6 +705,9 @@ pub fn slide_scroll(
 ) {
     let view = state.slide_view;
     state.rows.begin();
+    if state.passages.waiting {
+        ui.ctx().request_repaint();
+    }
     let mut ask: Option<ItemAsk> = None;
     let mut asks = SongAsks::default();
     let alone = matches!(decks, [Deck::Slides(SlideDeck { item: None, .. })]);
@@ -771,6 +780,11 @@ pub fn slide_scroll(
                 })
                 .max_by_key(|(_, is_open, _)| *is_open);
             if let Some((at, _, slide)) = found {
+                // The item whose slide has just gone on screen is the open one: Next going on
+                // into the next song takes the open item with it.
+                if let Some(item) = decks[at].item() {
+                    state.services.chosen = Some(item);
+                }
                 let rect = sheet.slide(&places[at], &shapes[at].body, slide);
                 let range = egui::Rangef::new(rect.min.y - origin.y, rect.max.y - origin.y);
                 if let Some(to) = follow_offset(viewport.min.y, viewport.height(), range) {
@@ -1059,6 +1073,13 @@ fn draw_slides(
             }
         }
         let near = ui.rect_contains_pointer(rect);
+        // The key that jumps to a group is said on the group's first slide.
+        if first
+            && !deck.made
+            && let Some(key) = sp_model::key_for_group(&group.name)
+        {
+            response.clone().on_hover_text(format!("{} (key {key})", group.name));
+        }
         let is_live = live == Some(index);
         let picked = here.is_some_and(|here| state.selected_slide == Some(here) || state.picked_slides.contains(&here));
         // The slide that was on screen before it was cleared: Next goes on from it.
@@ -2555,6 +2576,110 @@ mod tests {
         // Open on the Bible Page, in its menu, is how it gets there.
         crate::studio::carry_out_item_ask(&show, &mut state, &mut Vec::new(), ItemAsk::Bible(3));
         assert!(state.bible_open && state.bible.pending.is_some());
+    }
+
+    #[test]
+    fn the_view_goes_to_the_slide_on_screen_and_then_stays_where_it_is_scrolled() {
+        let (mut show, mut state) = playlist(&[("Alpha", 60), ("Beta", 30)]);
+        let (ctx, mut time) = (egui::Context::default(), 0.0);
+        run(&ctx, &show, &mut state, Vec::new(), &mut time);
+        let top = rect_of(&state, 0, 0).min.y - INSET - SONG_BAR;
+        let bottom = 800.0 - crate::studio::GAP - 151.0 - 49.0;
+        // A slide far down Beta goes on screen (Next going on into it, say).
+        let far = SlideRef { presentation: 1, slide: 20 };
+        assert!(rect_of(&state, 1, 20).min.y > bottom, "it starts out of sight");
+        show.apply(Command::GoTo(far));
+        for _ in 0..4 {
+            run(&ctx, &show, &mut state, Vec::new(), &mut time);
+        }
+        let now = rect_of(&state, 1, 20);
+        assert!(now.min.y >= top + CLEAR_ABOVE - 1.0, "clear of the bar at the top: {now:?}");
+        assert!(now.max.y <= bottom - CLEAR_BELOW + 1.0, "clear of the fade at the bottom: {now:?}");
+        assert_eq!(state.services.chosen, Some(1), "and its item is the open one");
+        // Scrolled away by hand: the view stays there while the same slide is on screen.
+        let over = pos2(now.center().x, now.center().y);
+        run(&ctx, &show, &mut state, vec![Event::PointerMoved(over)], &mut time);
+        let wheel = Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, 900.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+        };
+        run(&ctx, &show, &mut state, vec![wheel], &mut time);
+        for _ in 0..30 {
+            run(&ctx, &show, &mut state, Vec::new(), &mut time);
+        }
+        let away = rect_of(&state, 1, 20);
+        assert!(away.min.y > bottom, "the operator's scrolling is left alone: {away:?}");
+    }
+
+    #[test]
+    fn a_playlist_of_many_passages_is_made_a_few_a_frame_and_asks_to_be_drawn_until_all_are() {
+        let (mut show, mut state) = playlist(&[("Alpha", 1)]);
+        let slots = [show.add_presentation(song("", 0)), show.add_presentation(song("", 0))];
+        state.bible.slots = Some(slots);
+        for verse in 1..=5 {
+            let saved = SavedPassage { lookup: format!("John 3:{verse}"), ..state.bible.settings() };
+            state.services.add(Item::Passage(saved));
+        }
+        state.services.chosen = Some(0);
+        let made =
+            |decks: &[Deck]| decks.iter().filter(|deck| matches!(deck, Deck::Slides(slides) if slides.bible)).count();
+        let first = decks(&show, &mut state, &mut Vec::new());
+        assert_eq!(made(&first), 2, "two in the first frame");
+        assert!(state.passages.waiting, "and the window is to be drawn again for the rest");
+        let second = decks(&show, &mut state, &mut Vec::new());
+        assert_eq!(made(&second), 4);
+        let third = decks(&show, &mut state, &mut Vec::new());
+        assert_eq!(made(&third), 5);
+        assert!(!state.passages.waiting, "all made: nothing more is asked for");
+        // Made once: the same slides, with the same ids, from then on.
+        let ids = |decks: &[Deck]| -> Vec<Uuid> {
+            decks
+                .iter()
+                .filter_map(|deck| match deck {
+                    Deck::Slides(slides) if slides.bible => slides.deck.slides().next().map(|(_, slide)| slide.id),
+                    _ => None,
+                })
+                .collect()
+        };
+        let again = decks(&show, &mut state, &mut Vec::new());
+        assert_eq!(ids(&third), ids(&again));
+    }
+
+    #[test]
+    fn songs_carried_out_of_the_list_can_be_dropped_on_a_playlist_in_the_chooser() {
+        let songs = ["Alpha", "Beta", "Gamma"].map(|title| song(title, 1));
+        let show = Show::new(songs.to_vec());
+        let song_keys = ["Alpha", "Beta", "Gamma"].map(|title| format!("title:{title}")).to_vec();
+        let mut state = HomeState { song_keys, ..HomeState::default() };
+        let (ctx, mut time) = (egui::Context::default(), 0.0);
+        run(&ctx, &show, &mut state, Vec::new(), &mut time);
+        let first = crate::studio::TOP_BAR + 16.0 + 36.0 + 39.6;
+        let from = pos2(110.0, first + 21.0);
+        let press = |at: egui::Pos2, pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        run(&ctx, &show, &mut state, vec![Event::PointerMoved(from)], &mut time);
+        run(&ctx, &show, &mut state, vec![press(from, true)], &mut time);
+        // Out of the list, into the middle: the song is carried, and the chooser shows.
+        for at in [from + vec2(40.0, 4.0), pos2(400.0, 300.0), pos2(500.0, 300.0)] {
+            run(&ctx, &show, &mut state, vec![Event::PointerMoved(at)], &mut time);
+        }
+        assert!(!state.chooser_open, "the chooser shows only while the song is carried");
+        // Back onto the one playlist's row: under the Playlists heading.
+        let row = pos2(110.0, first + 36.0 + 18.0);
+        for _ in 0..2 {
+            run(&ctx, &show, &mut state, vec![Event::PointerMoved(row)], &mut time);
+        }
+        run(&ctx, &show, &mut state, vec![press(row, false)], &mut time);
+        run(&ctx, &show, &mut state, Vec::new(), &mut time);
+        let items = &state.services.front().items;
+        assert!(matches!(items.as_slice(), [Item::Song { title, .. }] if title == "Alpha"), "{items:?}");
     }
 
     #[test]

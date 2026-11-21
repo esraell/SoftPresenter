@@ -504,7 +504,8 @@ feature changes, this page changes in the same commit.
   are slides, one a screen, named after it; the item follows VoxLive's list as screens are
   made, renamed or deleted there, and is never edited, saved, deleted or put in a song pack.
   It is not a row among the libraries: Add to playlist (or `sp playlist add VoxLive`) puts it in
-  the playlist in front, and `sp select VoxLive` shows it by itself. Clicking one of its slides puts that screen's live captions on the
+  the playlist in front, and `sp select VoxLive` shows it by itself (the window has no other way
+  to show it by itself). Clicking one of its slides puts that screen's live captions on the
   screens in place of what was there (a verse, a song); clicking the verse brings it back. The
   **VoxLive tab** beside Timers, Messages and the rest (in the right column, so on the Bible page
   too) has the same screens as buttons. A screen's live display, which can start a paid

@@ -1164,7 +1164,7 @@ fn list_row(ui: &mut egui::Ui, look: &ListRow) -> (egui::Response, Rect) {
             pos2(right, row.center().y),
             Align2::RIGHT_CENTER,
             count.to_string(),
-            fixed(10.5),
+            fixed(11.0),
             TEXT_FAINT,
         );
         right = drawn.min.x - 8.0;
@@ -3285,7 +3285,9 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
         ] {
             let cell = Rect::from_min_size(pos2(x, track.min.y + 3.0), vec2(width, 24.2));
             x += width + 2.0;
-            let response = ui.interact(cell, ui.scope_id().with(("transition", index)), Sense::click());
+            // A little taller than it is drawn, so nothing to click is under 26 high.
+            let reach = cell.expand2(vec2(0.0, (LEAST_CLICK - cell.height()) / 2.0));
+            let response = ui.interact(reach, ui.scope_id().with(("transition", index)), Sense::click());
             paint_pill(ui.painter(), cell, on);
             let ink = if on || response.hovered() { TEXT } else { TEXT_DIM };
             if index == 2 {
@@ -3382,7 +3384,8 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
         {
             let cell =
                 Rect::from_min_size(pos2(views.min.x + 3.0 + 32.0 * index as f32, views.min.y + 3.0), vec2(30.0, 24.2));
-            let response = ui.interact(cell, ui.scope_id().with(("slide view", index)), Sense::click());
+            let reach = cell.expand2(vec2(0.0, (LEAST_CLICK - cell.height()) / 2.0));
+            let response = ui.interact(reach, ui.scope_id().with(("slide view", index)), Sense::click());
             let on = state.slide_view == view;
             paint_pill(ui.painter(), cell, on);
             let ink = if on || response.hovered() { TEXT } else { TEXT_DIM };
