@@ -1001,8 +1001,9 @@ These need the window for now; some can be reached with `sp menu`.
   that place, where somebody else may be able to put a folder of their own in the way. And
   `sp` trusts the path it is given: it does not look at the folder before it sends.
 - On Windows, a program the same user runs with fewer rights than usual (low integrity, as the
-  sandboxed part of a browser is) is not kept out by anything the app sets. Whether Windows
-  keeps it out by itself has a test of its own, not yet run.
+  sandboxed part of a browser is) is not kept out by anything the app sets. Windows keeps it
+  out by itself: a test run on Windows shows such a program refused, beside one let into a
+  socket marked for it.
 - Nothing listens on the network: no other computer, and no web page in a browser, can reach
   it. A program running as the same user can, which is no more than that program could do by
   changing the app's files.

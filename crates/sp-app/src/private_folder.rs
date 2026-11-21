@@ -16,8 +16,8 @@
 //! - The owner is set, and the tool's word is taken that it was; it is not read back.
 //! - The command line does not check the folder before it sends: it trusts the path.
 //! - A program run by the same user with fewer rights than usual (low integrity) is not kept
-//!   out by anything set here; whether Windows keeps it out by itself is what a test in
-//!   `control` finds out.
+//!   out by anything set here. Windows keeps it out by itself, which a test in `control`
+//!   shows on Windows (with a socket marked for such programs, which lets it in, beside).
 //!
 //! Windows offers no way to do this without `unsafe` code except through its own tools, so the
 //! lists are set and read with `icacls.exe` and the user is found with `whoami.exe`, both taken
