@@ -11,6 +11,7 @@ use sp_model::{Group, Object, Presentation, Rgba, Role, Slide, Uuid};
 use crate::home::BibleTarget;
 
 /// Where a Bible's file is.
+#[derive(Clone)]
 enum Kept {
     /// Inside the app.
     Shipped(&'static [u8]),
@@ -33,6 +34,31 @@ pub struct Shelved {
     kept: Kept,
     /// Read the first time it is asked for, so an unused Bible costs no memory.
     loaded: Option<Result<Arc<Bible>, String>>,
+}
+
+/// A Bible to be read away from the window's thread: see [`Shelf::reader`].
+pub struct BibleReader {
+    pub id: String,
+    pub short: String,
+    /// The Bible, when the shelf has read it already.
+    pub loaded: Option<Arc<Bible>>,
+    name: String,
+    kept: Kept,
+}
+
+impl BibleReader {
+    /// The Bible, read now if it has not been. Slow the first time: not for the window's thread.
+    pub fn read(self) -> Result<Arc<Bible>, String> {
+        if let Some(bible) = self.loaded {
+            return Ok(bible);
+        }
+        match &self.kept {
+            Kept::Shipped(bytes) => Bible::from_bytes(bytes).map(Arc::new),
+            Kept::File(path) => std::fs::read(path)
+                .map_err(|e| format!("Could not read the {}: {e}", self.name))
+                .and_then(|bytes| Bible::from_bytes(&bytes).map(Arc::new)),
+        }
+    }
 }
 
 /// The Bibles installed: the ones that come with the app, then the ones added since.
@@ -112,6 +138,29 @@ impl Shelf {
         }
         self.bibles.remove(index);
         Ok(())
+    }
+
+    /// What it takes to read the Bible at a place on the shelf somewhere other than the
+    /// window's thread (the find box searches there): the Bible itself when it has been read
+    /// already, otherwise where it is kept.
+    pub fn reader(&self, index: usize) -> Option<BibleReader> {
+        let shelved = self.bibles.get(index)?;
+        Some(BibleReader {
+            id: shelved.id.clone(),
+            short: shelved.short.clone(),
+            loaded: shelved.loaded.as_ref().and_then(|loaded| loaded.as_ref().ok().cloned()),
+            name: shelved.name.clone(),
+            kept: shelved.kept.clone(),
+        })
+    }
+
+    /// Keeps a Bible that was read somewhere else, so it is not read again here.
+    pub fn keep(&mut self, id: &str, bible: Arc<Bible>) {
+        if let Some(shelved) = self.bibles.iter_mut().find(|shelved| shelved.id == id)
+            && shelved.loaded.is_none()
+        {
+            shelved.loaded = Some(Ok(bible));
+        }
     }
 
     pub fn position(&self, id: &str) -> Option<usize> {

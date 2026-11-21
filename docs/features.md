@@ -212,8 +212,11 @@ feature changes, this page changes in the same commit.
   stage, in tabs under Clear All in the right column. A slide can carry the same actions, done when it goes on screen.
 - **The window** is three round panels on a dark window: the left column, the middle, and a
   right column that is the same in every view. Along the top: the views (Show, Bible, Edit), a
-  find box (it searches the song library: titles first, then lines of the songs'
-  words; it does not search the Bible, playlists or media), the clock (on a 12-hour or a
+  find box (press `/`, or Command-F: it finds songs by title and then by a line of their
+  words, a Bible passage when a reference is typed, and verses of the Bibles in use that hold
+  the words; Return opens what is picked without putting anything on the screens, and
+  Command-Return adds it to the playlist in front; it does not search playlists or media), the
+  clock (on a 12-hour or a
   24-hour clock as the computer is set, with the computer's own words for morning and
   afternoon), the Audience and Stage
   keys, a `?` (it opens Settings at Key Mappings) and Settings.

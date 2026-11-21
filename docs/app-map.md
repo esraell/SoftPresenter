@@ -34,7 +34,7 @@ sources) drawn by their own thread.
 | Part | Does | Command line |
 |---|---|---|
 | Show / Bible / Edit | Switches the view. Edit has four kinds, chosen at the top of its left column: Slides, Themes, Props and Stage | `view show\|edit\|bible`; `view themes` opens Edit on the themes |
-| Find box | Searches the song library as you type: titles first, then lines of the songs' words. Return opens the song picked, Command-Return (Ctrl on other computers) adds it to the playlist in front, Escape or a click elsewhere ends the search. Command-F goes to it. It does not search the Bible, playlists or media | |
+| Find box | Finds as you type, listed under it: a Bible passage first when the words are a reference (`John 3:16`, `Ин 3:16-18`, `ps 23`); then songs, by title and then by a line of their words; then verses of the Bibles in use that hold the words. Return or a click opens the one picked (a song in the Show view, a passage or verse in the Bible view; nothing goes on the screens), Command-Return (Ctrl on other computers) adds it to the playlist in front, Escape or a click elsewhere ends the search. `/` goes to it, and so does Command-F. It does not search playlists or media (`find.rs`) | |
 | Clock | The time of day, on a 12-hour or a 24-hour clock as the computer is set (`clock.rs`) | |
 | Audience ON/OFF | The audience screens on or off (Command-1) | `audience on\|off` |
 | Stage ON/OFF | The stage screens on or off (Command-2) | `stage on\|off` |
@@ -50,7 +50,7 @@ sources) drawn by their own thread.
 | Song list (a library chosen) | Click opens a song; Command/Shift-click and dragging pick several; drag picked songs onto a playlist or library; Delete asks, then deletes; right-click for Duplicate, Theme, Transition, Reflow, Play on Announcements Layer, Delete… | `select SONG`, `song delete SONG --yes`, `announce SONG` |
 | VoxLive row (under LIBRARY, once VoxLive is connected) | The VoxLive item: the church's VoxLive screens, a slide each; right-click to add it to the playlist in front | `voxlive screens`, `voxlive show N\|NAME` |
 | Playlist items (a playlist chosen) | Songs, Bible passages, pictures and videos, media playlists, placeholders and headers in running order; drag to reorder; + adds a header or a placeholder; a picture or video dragged from the bin goes in where the line shows, or fills a placeholder; a placeholder's right-click Fill with Song | `playlist [NAME]`, `slides item N [in PLAYLIST]`, `playlist add SONG to PLAYLIST`, `playlist media\|media-playlist\|placeholder NAME`, `playlist fill PLACEHOLDER with SONG` |
-| Search | Filters the list (the find box in the top bar searches titles and words) | |
+| Search | Filters the list (the find box in the top bar finds songs by title and words, and Bible verses) | |
 
 ### Middle: the slides
 

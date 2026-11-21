@@ -942,7 +942,8 @@ pub fn edit_kinds(ui: &mut egui::Ui, state: &mut HomeState) {
 }
 
 /// The find box: typing in it searches the song library (titles first, then the words of the
-/// songs), with what it finds listed under it by `library_search` in `home.rs`. It holds the
+/// songs) and the Bibles in use (a reference gives its passage, words give verses), with what
+/// it finds listed under it by `library_search` in `home.rs`. It holds the
 /// search's own words, so Find in the menu, its shortcut and the box are one thing.
 fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
     let id = find_box_id();
@@ -958,7 +959,7 @@ fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
         Rect::from_min_max(pos2(find.min.x + 16.0, find.min.y + 2.0), pos2(find.max.x - 44.0, find.max.y - 2.0));
     let field = egui::TextEdit::singleline(text)
         .id(id)
-        .hint_text(egui::RichText::new("Find a song or a line").color(TEXT_FAINT))
+        .hint_text(egui::RichText::new("Find a song, a line, or a verse").color(TEXT_FAINT))
         .font(FontId::proportional(13.0))
         .background_color(Color32::TRANSPARENT)
         .frame(Frame::new())
@@ -973,17 +974,14 @@ fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
     }
     // The key that finds, at the right end, until the box has the keyboard.
     if !focused && !open {
-        let key = if cfg!(target_os = "macos") { "\u{2318}F" } else { "Ctrl F" };
-        let font = fixed(11.0);
-        let wide = (ui.painter().layout_no_wrap(key.to_owned(), font.clone(), TEXT_DIM).size().x + 10.0).max(20.0);
-        let cap = Rect::from_min_size(pos2(find.max.x - 10.0 - wide, find.center().y - 10.0), vec2(wide, 20.0));
+        let cap = Rect::from_min_size(pos2(find.max.x - 30.0, find.center().y - 10.0), vec2(20.0, 20.0));
         ui.painter().rect_filled(cap, 5.0, CARD);
-        ui.painter().text(cap.center(), Align2::CENTER_CENTER, key, font, TEXT_DIM);
+        ui.painter().text(cap.center(), Align2::CENTER_CENTER, "/", fixed(11.0), TEXT_DIM);
     }
     let hint = if cfg!(target_os = "macos") {
-        "Find a song by its title or by a line of its words (Command-F)"
+        "Find a song by its title or a line of its words, or a Bible passage or verse (press /, or Command-F)"
     } else {
-        "Find a song by its title or by a line of its words (Ctrl-F)"
+        "Find a song by its title or a line of its words, or a Bible passage or verse (press /, or Ctrl-F)"
     };
     response.on_hover_text(hint);
     state.find_rect = Some(find);

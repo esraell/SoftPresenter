@@ -11,6 +11,7 @@ mod convert;
 mod deck;
 mod displays;
 mod editor;
+mod find;
 mod home;
 mod icons;
 mod images;
@@ -570,6 +571,8 @@ fn show_key_command(key: &Key, show: &Show) -> Option<Command> {
         Key::Named(NamedKey::F4) => Some(Command::Clear(sp_engine::Layer::Props)),
         Key::Named(NamedKey::F5) => Some(Command::Clear(sp_engine::Layer::Audio)),
         Key::Named(NamedKey::F6) => Some(Command::Clear(sp_engine::Layer::Messages)),
+        // The key that opens find is never a slide's hot key or a group's letter.
+        key if opens_find(key) => None,
         Key::Character(typed) => {
             let mut letters = typed.chars();
             let (Some(letter), None) = (letters.next(), letters.next()) else { return None };
@@ -577,6 +580,21 @@ fn show_key_command(key: &Key, show: &Show) -> Option<Command> {
         }
         _ => None,
     }
+}
+
+/// Whether `/` is free to open the find box: the keyboard is not in a text field, the Edit view
+/// is not open, and no sheet, question or menu is up.
+fn find_key_is_free(state: &home::HomeState, ctx: &egui::Context) -> bool {
+    !ctx.text_edit_focused()
+        && state.edit_kind().is_none()
+        && state.new_song_sheet.is_none()
+        && !state.alert_open()
+        && !egui::Popup::is_any_open(ctx)
+}
+
+/// True for the key that opens the find box in the bar along the top: `/`.
+fn opens_find(key: &Key) -> bool {
+    matches!(key, Key::Character(typed) if typed == "/")
 }
 
 fn surface_format(surface: &wgpu::Surface<'_>, adapter: &wgpu::Adapter) -> Result<wgpu::TextureFormat, String> {
@@ -7021,6 +7039,21 @@ impl ApplicationHandler<AppEvent> for App {
         if id != running.home_window.id() {
             return;
         }
+        // `/` opens the find box, from wherever the keyboard runs the show: not while something is
+        // being typed, not in the Edit view (its keyboard is the editor's), not over a sheet, a
+        // question or a menu. It is not passed on, so the box opens empty.
+        if let WindowEvent::KeyboardInput { event: key, .. } = &event
+            && key.state == ElementState::Pressed
+            && opens_find(&key.logical_key)
+            && find_key_is_free(&running.home_state, &running.egui_ctx)
+            && !self.held.super_key()
+            && !self.held.control_key()
+            && !self.held.alt_key()
+        {
+            running.home_state.library_search = Some((String::new(), 0));
+            running.home_window.request_redraw();
+            return;
+        }
         // Show keys act at once and are not passed on, so Space can never also press whatever
         // control happens to have the keyboard. Typing in a text box is left alone.
         if let WindowEvent::KeyboardInput { event: key, .. } = &event
@@ -7826,6 +7859,34 @@ mod tests {
         clock.frame = Some(sp_model::SlideRect { x: 60.0, y: 40.0, w: 600.0, h: 120.0 });
         fourth.objects.push(clock);
         load::save_song(std::path::Path::new(&path), &song).unwrap();
+    }
+
+    #[test]
+    fn slash_goes_to_find_and_is_never_a_hot_key() {
+        // Even a slide that somehow carries `/` as its hot key is not reached by it.
+        let mut keyed = sp_model::parse_song_text("Song", "[Verse 1]\nOne\n\nTwo\n");
+        keyed.groups[0].slides[0].hot_key = Some('/');
+        keyed.groups[0].slides[1].hot_key = Some('K');
+        let show = Show::new(vec![Arc::new(keyed)]);
+        let slash = Key::Character("/".into());
+        assert!(opens_find(&slash));
+        assert_eq!(show_key_command(&slash, &show), None);
+        // Other keys are as they were: a hot key still goes to its slide, and is not find.
+        let k = Key::Character("k".into());
+        assert!(!opens_find(&k) && !opens_find(&Key::Named(NamedKey::Space)));
+        assert_eq!(show_key_command(&k, &show), Some(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 1 })));
+        // It is free in the Show view, and not while the Edit view is open or a sheet is up.
+        let ctx = egui::Context::default();
+        let mut state = home::HomeState::default();
+        assert!(find_key_is_free(&state, &ctx));
+        state.stage_editor_open = true;
+        assert!(!find_key_is_free(&state, &ctx), "the Edit view's keyboard is the editor's");
+        state.stage_editor_open = false;
+        state.editing = EditDraft::of(&show, sp_engine::SlideRef { presentation: 0, slide: 0 });
+        assert!(state.editing.is_some() && !find_key_is_free(&state, &ctx));
+        state.editing = None;
+        state.new_song_sheet = Some(home::NewSong::default());
+        assert!(!find_key_is_free(&state, &ctx));
     }
 
     #[test]

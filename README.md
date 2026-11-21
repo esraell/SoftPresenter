@@ -200,7 +200,7 @@ status` instead of `sp status`.
 | B, N, M | jump to Bridge 1, 2, 3 |
 | P, T, I, E, O | Pre-chorus, Tag, Intro, Ending, Outro |
 | Cmd+N | new song |
-| Cmd+F | search the library (titles and words) |
+| / or Cmd+F | find a song (title or words) or a Bible passage or verse |
 | Cmd+, | Settings |
 | Option+Cmd+1 | Screens |
 | Cmd+1 / Cmd+2 | audience / stage screens on or off |

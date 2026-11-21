@@ -267,6 +267,8 @@ pub struct HomeState {
     /// Where the find box is in the bar along the top, when the window is wide enough for it:
     /// what a search finds is listed under it.
     pub find_rect: Option<Rect>,
+    /// The find box's Bible results, found on a thread of their own.
+    pub finder: crate::find::Finder,
     /// How the computer writes the time of day, for the clock in the bar along the top.
     pub clock: crate::clock::SystemClock,
     /// A change to the media bin asked for.
@@ -1116,6 +1118,7 @@ impl Default for HomeState {
             media_request: None,
             library_search: None,
             find_rect: None,
+            finder: crate::find::Finder::default(),
             clock: crate::clock::SystemClock::default(),
             reflow: None,
             reflow_done: None,
@@ -3411,14 +3414,25 @@ fn search_songs(show: &Show, listed: impl Fn(usize) -> bool, query: &str) -> Vec
     by_title
 }
 
-/// The library search pop-up: a field, the songs it finds, and what Return does.
+/// How many songs the find box lists.
+const SONGS_LISTED: usize = 6;
+
+/// What the find box in the top bar finds for the words typed in it, listed under it: a Bible
+/// passage first, when the words are a reference; then songs (titles first, then lines of their
+/// words); then Bible verses that hold the words. Return, or a click, opens the one picked: a
+/// song in the Show view, a passage or verse in the Bible view. Nothing goes on the screens.
+/// With Command (Ctrl elsewhere), Return adds it to the playlist in front instead.
 fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
     let hidden = state.hidden_slots();
+    // A Bible the search read for the first time stays read.
+    for (id, bible) in state.finder.take_read() {
+        state.bible.shelf.keep(&id, bible);
+    }
     let Some((query, picked)) = state.library_search.as_mut() else { return };
     // Worked out again only when what is typed, or the songs, change: not on every frame the
-    // pop-up is open (the cursor blinking, the mouse moving).
+    // list is open (the cursor blinking, the mouse moving).
     let epoch = state.lists.songs.epoch();
-    let found = match state.lists.search.get(|(made_in, typed)| *made_in == epoch && typed == query) {
+    let songs = match state.lists.search.get(|(made_in, typed)| *made_in == epoch && typed == query) {
         Some(found) => found,
         None => {
             let removed = &state.removed_songs;
@@ -3426,7 +3440,28 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             state.lists.search.keep((epoch, query.clone()), found)
         }
     };
-    *picked = (*picked).min(found.len().saturating_sub(1));
+    let songs = &songs[..songs.len().min(SONGS_LISTED)];
+    // The Bibles' part is found on a thread of its own and comes when it is ready; until then
+    // the songs are listed without it.
+    let typed = query.trim();
+    let (shelf, rows) = (&state.bible.shelf, &state.bible.rows);
+    let bible_rows = if typed.is_empty() {
+        Some(&[][..])
+    } else {
+        let in_use: Vec<String> =
+            rows.iter().filter_map(|row| Some(shelf.bibles.get(row.bible?)?.id.clone())).collect();
+        let readers = || rows.iter().filter_map(|row| shelf.reader(row.bible?)).collect();
+        state.finder.rows(typed, &in_use, readers, ui.ctx())
+    };
+    let answered = bible_rows.is_some();
+    let bible_rows = bible_rows.unwrap_or(&[]);
+    // A passage stands before the songs; verses found by their words after them.
+    let (passage, verses) = match bible_rows.first() {
+        Some(first) if first.passage => (bible_rows, &[][..]),
+        _ => (&[][..], bible_rows),
+    };
+    let total = passage.len() + songs.len() + verses.len();
+    *picked = (*picked).min(total.saturating_sub(1));
     let (up, down, enter, command, escape) = ui.input(|input| {
         (
             input.key_pressed(egui::Key::ArrowUp),
@@ -3439,81 +3474,138 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     if up {
         *picked = picked.saturating_sub(1);
     }
-    if down && *picked + 1 < found.len() {
+    if down && *picked + 1 < total {
         *picked += 1;
     }
-    let mut chosen: Option<(usize, bool)> = None;
+    let picked = *picked;
+    // What a place in the list holds.
+    enum Pick<'a> {
+        Song(usize),
+        Bible(&'a crate::find::BibleRow),
+    }
+    let at = |place: usize| -> Option<Pick<'_>> {
+        if let Some(row) = passage.get(place) {
+            return Some(Pick::Bible(row));
+        }
+        let place = place - passage.len();
+        if let Some((index, _)) = songs.get(place) {
+            return Some(Pick::Song(*index));
+        }
+        verses.get(place - songs.len()).map(Pick::Bible)
+    };
+    let mut clicked = None;
     // What is found is listed under the find box, where the words are typed (in the middle of
     // a window too narrow to have the box).
     let screen = ui.ctx().content_rect();
-    let under = state
-        .find_rect
-        .map_or(pos2(screen.center().x - 222.0, screen.min.y + 49.0), |find| pos2(find.min.x, find.max.y + 6.0));
-    let typed = !query.trim().is_empty();
+    let (under, wide) = state.find_rect.map_or((pos2(screen.center().x - 180.0, screen.min.y + 49.0), 360.0), |find| {
+        (pos2(find.min.x, find.max.y + 6.0), find.width().max(360.0))
+    });
     let mut list = None;
-    if typed {
+    if !typed.is_empty() {
+        use crate::studio::{CARD, LINE, PANEL, TEXT, TEXT_DIM, TEXT_FAINT};
         let area = egui::Area::new(egui::Id::unique("library search"))
             .order(egui::Order::Foreground)
             .fade_in(false)
             .fixed_pos(under);
+        let frame = Frame::new()
+            .fill(PANEL)
+            .stroke(Stroke::new(1.0, LINE))
+            .corner_radius(14)
+            .inner_margin(6)
+            .shadow(egui::Shadow { offset: [0, 12], blur: 30, spread: 0, color: Color32::from_black_alpha(140) });
         let shown = area.show(ui.ctx(), |ui| {
-            Frame::popup(ui.style()).inner_margin(12).show(ui, |ui| {
-                ui.set_width(420.0);
-                if found.is_empty() {
-                    ui.label(egui::RichText::new("No song matches.").color(DIM));
-                }
-                for (row, (index, line)) in found.iter().take(12).enumerate() {
-                    let Some(song) = show.presentations().get(*index) else { continue };
-                    let height = if line.is_some() { 40.0 } else { 26.0 };
+            frame.show(ui, |ui| {
+                ui.set_width(wide - 12.0);
+                ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                // One result: its name, what it is at the right, and a line of its words under.
+                let mut row = |ui: &mut egui::Ui, place: usize, title: &str, tag: &str, line: Option<&str>| {
+                    let height = if line.is_some() { 48.0 } else { 34.0 };
                     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
-                    if row == *picked || response.hovered() {
-                        ui.painter().rect_filled(
-                            rect,
-                            6.0,
-                            crate::studio::ACCENT.gamma_multiply(if row == *picked { 0.4 } else { 0.2 }),
-                        );
+                    if place == picked || response.hovered() {
+                        ui.painter().rect_filled(rect, 9.0, CARD);
                     }
-                    ui.painter().text(
-                        pos2(rect.min.x + 10.0, rect.min.y + 13.0),
+                    let first = if line.is_some() { rect.min.y + 16.0 } else { rect.center().y };
+                    let tag_at = pos2(rect.max.x - 10.0, first);
+                    let font = crate::studio::fixed(11.0);
+                    let tagged =
+                        crate::studio::paint_spaced(ui, tag_at, Align2::RIGHT_CENTER, tag, font, TEXT_DIM, 0.6);
+                    let words =
+                        Rect::from_min_max(pos2(rect.min.x + 10.0, rect.min.y), pos2(tagged.min.x - 10.0, rect.max.y));
+                    ui.painter().with_clip_rect(words).text(
+                        pos2(words.min.x, first),
                         Align2::LEFT_CENTER,
-                        song.title.as_str(),
-                        FontId::proportional(14.0),
-                        crate::studio::TEXT,
-                    );
-                    ui.painter().text(
-                        pos2(rect.max.x - 10.0, rect.min.y + 13.0),
-                        Align2::RIGHT_CENTER,
-                        "Library",
-                        FontId::proportional(11.5),
-                        crate::studio::TEXT_FAINT,
+                        title,
+                        crate::studio::semibold(13.0),
+                        TEXT,
                     );
                     if let Some(line) = line {
-                        ui.painter().with_clip_rect(rect).text(
-                            pos2(rect.min.x + 10.0, rect.min.y + 30.0),
+                        let under = Rect::from_min_max(pos2(rect.min.x + 10.0, rect.min.y), rect.max - vec2(10.0, 0.0));
+                        ui.painter().with_clip_rect(under).text(
+                            pos2(under.min.x, rect.min.y + 34.0),
                             Align2::LEFT_CENTER,
-                            line.as_str(),
+                            line,
                             FontId::proportional(12.0),
-                            DIM,
+                            TEXT_FAINT,
                         );
                     }
                     if response.clicked() {
-                        chosen = Some((*index, false));
+                        clicked = Some(place);
                     }
+                };
+                for (place, found) in passage.iter().enumerate() {
+                    row(ui, place, &found.title, &found.tag, Some(&found.line));
                 }
-                ui.add_space(6.0);
+                for (place, (index, line)) in songs.iter().enumerate() {
+                    let Some(song) = show.presentations().get(*index) else { continue };
+                    row(ui, passage.len() + place, &song.title, "SONG", line.as_deref());
+                }
+                for (place, found) in verses.iter().enumerate() {
+                    row(ui, passage.len() + songs.len() + place, &found.title, &found.tag, Some(&found.line));
+                }
+                if total == 0 {
+                    let words = if answered { "Nothing found" } else { "Looking in the Bibles…" };
+                    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
+                    ui.painter().text(
+                        rect.left_center() + vec2(10.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        words,
+                        FontId::proportional(13.0),
+                        TEXT_FAINT,
+                    );
+                }
                 let keys = if cfg!(target_os = "macos") {
                     "↵ Open    ⌘↵ Add to Playlist    esc Close"
                 } else {
                     "Enter: Open    Ctrl+Enter: Add to Playlist    Esc: Close"
                 };
-                ui.label(egui::RichText::new(keys).size(11.0).color(DIM));
+                let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
+                ui.painter().text(
+                    rect.left_center() + vec2(10.0, 2.0),
+                    Align2::LEFT_CENTER,
+                    keys,
+                    FontId::proportional(11.0),
+                    TEXT_FAINT,
+                );
             });
         });
         list = Some(shown.response.rect);
     }
-    if enter && let Some((index, _)) = found.get(*picked) {
-        chosen = Some((*index, command));
+    // What to do, worked out while the lists are still at hand: a song by its place, a passage
+    // by what to look up; and whether to add it to the playlist in front instead of opening it.
+    enum Do {
+        Song(usize),
+        Passage(String),
     }
+    let chosen = clicked.map(|place| (place, false)).or((enter && total > 0).then_some((picked, command)));
+    let chosen = chosen.and_then(|(place, add)| {
+        Some((
+            match at(place)? {
+                Pick::Song(index) => Do::Song(index),
+                Pick::Bible(row) => Do::Passage(row.lookup.clone()),
+            },
+            add,
+        ))
+    });
     // A press anywhere but in the find box or the list ends the search (and does what it would
     // have done anyway).
     let pressed_outside = ui.input(|input| {
@@ -3522,17 +3614,33 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         Some(!inside(state.find_rect) && !inside(list))
     }) == Some(true);
     let ended = chosen.is_some() || escape || pressed_outside;
-    if let Some((index, add)) = chosen {
-        if add {
+    match chosen {
+        Some((Do::Song(index), true)) => {
             if let (Some(key), Some(song)) = (state.song_keys.get(index), show.presentations().get(index)) {
                 state.services.add(crate::service::Item::Song { key: key.clone(), title: song.title.clone() });
             }
-        } else {
+        }
+        Some((Do::Song(index), false)) => {
             commands.push(Command::Select(index));
             state.editing = None;
             state.bible_open = false;
             state.reflow = None;
         }
+        // Kept in the playlist with the translations and choices the Bible view has now, as its
+        // own Add does.
+        Some((Do::Passage(lookup), true)) => {
+            let saved = crate::service::SavedPassage { lookup, ..state.bible.settings() };
+            state.services.add(crate::service::Item::Passage(saved));
+        }
+        // The Bible view opens on the passage. It is made in the place that is not on screen,
+        // so the screens keep what they show.
+        Some((Do::Passage(lookup), false)) => {
+            state.view_request = Some(2);
+            state.reflow = None;
+            state.bible.lookup = lookup;
+            state.bible.look_up(show.live().map(|at| at.presentation));
+        }
+        None => {}
     }
     if ended {
         // The find box gives the keyboard back, so the keys run the show again.
@@ -3648,6 +3756,7 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
                         ("Show", "Clear Props", "F4"),
                         ("Show", "Clear Messages", "F6"),
                         ("Show", "Jump to a group", "its letter (see Groups)"),
+                        ("Show", "Find a song, a line or a verse", "/"),
                     ];
                     for (area, command, key) in show_keys {
                         ui.label(egui::RichText::new(area).color(TEXT_DIM));
@@ -7813,6 +7922,101 @@ mod tests {
             stayed += usize::from(state.edit_kind() == Some(EditKind::Props));
         }
         assert!(stayed > 8, "some of the clicks were on Edit, and elsewhere in the bar: {stayed}");
+    }
+
+    /// One frame of the window with these events, returning the commands it gave.
+    fn frame_commands(
+        ctx: &egui::Context,
+        show: &Show,
+        state: &mut HomeState,
+        events: Vec<Event>,
+        time: f64,
+    ) -> Vec<Command> {
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+            time: Some(time),
+            events,
+            ..RawInput::default()
+        };
+        let mut commands = Vec::new();
+        let output = ctx.run_ui(raw, |ui| {
+            commands.extend(home_ui(ui, show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None));
+        });
+        output.drop_without_applying_deltas();
+        commands
+    }
+
+    #[test]
+    fn a_reference_in_the_find_box_opens_the_bible_view_on_its_passage() {
+        let (ctx, show) = (egui::Context::default(), three_songs());
+        let key =
+            |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        let mut state = HomeState { library_search: Some(("jn 3:16-18".to_owned(), 0)), ..HomeState::default() };
+        let mut commands = frame_commands(&ctx, &show, &mut state, vec![], 0.0);
+        // The passage is the first thing listed: Return opens it.
+        commands.extend(frame_commands(&ctx, &show, &mut state, vec![key(Key::Enter)], 0.1));
+        assert!(state.library_search.is_none(), "the search ends");
+        let lead = state.bible.lead().and_then(|lead| state.bible.shelf.get(lead).ok()).expect("a Bible");
+        let range = sp_bible::parse_reference_in(&state.bible.lookup, &lead.info.language).expect("a reference");
+        assert_eq!((range.start.book, range.start.chapter, range.start.verse), (42, 3, 16), "{}", state.bible.lookup);
+        assert_eq!(range.end.verse, 18);
+        commands.extend(frame_commands(&ctx, &show, &mut state, vec![], 0.2));
+        assert!(state.bible_open && !ctx.text_edit_focused(), "the Bible view opens, and the keys are free");
+        assert!(commands.is_empty(), "nothing is put on the screens: {commands:?}");
+    }
+
+    #[test]
+    fn words_in_the_find_box_find_songs_and_verses_and_a_verse_can_be_added_to_the_playlist() {
+        let ctx = egui::Context::default();
+        let show = Show::new(vec![
+            Arc::new(parse_song_text("Still waters", "The shepherd leads me on\n")),
+            Arc::new(parse_song_text("Another", "Words\n")),
+        ]);
+        let mut state = HomeState { library_search: Some(("shepherd".to_owned(), 0)), ..HomeState::default() };
+        state.song_keys = vec!["one".to_owned(), "two".to_owned()];
+        frame_commands(&ctx, &show, &mut state, vec![], 0.0);
+        // The song is found by a line of its words, and the Bibles in use give verses.
+        let songs = search_songs(&show, |_| true, "shepherd");
+        assert_eq!(songs, vec![(0, Some("The shepherd leads me on".to_owned()))]);
+        let in_use: Vec<String> =
+            state.bible.rows.iter().filter_map(|row| Some(state.bible.shelf.bibles[row.bible?].id.clone())).collect();
+        let verses = state.finder.rows("shepherd", &in_use, Vec::new, &ctx).expect("answered").to_vec();
+        assert_eq!(verses.len(), crate::find::VERSES_LISTED);
+        assert!(verses.iter().all(|verse| !verse.passage && verse.line.to_lowercase().contains("shepherd")));
+        // The list is the song, then the verses. Down to the last verse; Command-Return adds it
+        // to the playlist in front and nothing is put on the screens.
+        let key = |key: Key, modifiers: Modifiers| Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let mut commands = Vec::new();
+        for step in 0..songs.len() + verses.len() - 1 {
+            let down = vec![key(Key::ArrowDown, Modifiers::NONE)];
+            commands.extend(frame_commands(&ctx, &show, &mut state, down, 0.1 + step as f64 * 0.1));
+        }
+        let before = state.services.front().items.len();
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+            time: Some(1.0),
+            events: vec![Event::ModifiersChanged(Modifiers::COMMAND), key(Key::Enter, Modifiers::COMMAND)],
+            ..RawInput::default()
+        };
+        let output = ctx.run_ui(raw, |ui| {
+            commands.extend(home_ui(ui, &show, &mut state, &Theme::builtin(), &mut |_| None, Preview::default(), None));
+        });
+        output.drop_without_applying_deltas();
+        let items = &state.services.front().items;
+        assert_eq!(items.len(), before + 1);
+        let last = verses.last().expect("a verse");
+        assert!(
+            matches!(items.last(), Some(crate::service::Item::Passage(saved)) if saved.lookup == last.lookup),
+            "{:?}",
+            items.last()
+        );
+        assert!(state.library_search.is_none() && !state.bible_open && commands.is_empty());
     }
 
     #[test]
