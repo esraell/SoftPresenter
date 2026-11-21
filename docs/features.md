@@ -211,12 +211,16 @@ feature changes, this page changes in the same commit.
   seconds from one track into the next; F5 or Clear All stops it), and a **Stage Message** for the people on
   stage, in tabs under Clear All in the right column. A slide can carry the same actions, done when it goes on screen.
 - **The window** is three round panels on a dark window: the left column, the middle, and a
-  right column that is the same in every view. Along the top: the views (Show, Bible, Edit,
-  Themes), a find box (it searches the song library: titles first, then lines of the songs'
+  right column that is the same in every view. Along the top: the views (Show, Bible, Edit), a
+  find box (it searches the song library: titles first, then lines of the songs'
   words; it does not search the Bible, playlists or media), the clock (on a 12-hour or a
   24-hour clock as the computer is set, with the computer's own words for morning and
   afternoon), the Audience and Stage
   keys, a `?` (it opens Settings at Key Mappings) and Settings.
+- **The Edit view** edits four kinds of thing, chosen by a switch at the top of its left
+  column: a song's Slides, the Themes and their templates, the Props, and the Stage screens'
+  layouts (which open in their own window). View › Themes, Control-T and `sp view themes` open
+  it on the themes.
 - **The right column**: the preview block, six layer keys (Slide, Media, Props, Messages, Audio,
   Announce: each is lit while its layer shows, and pressing it clears that layer alone), Clear
   All (orange while anything shows, grey when nothing does), and under it the tool tabs, or in

@@ -58,7 +58,7 @@ person:
 | `SOFTPRESENTER_CONTROL_SOCKET=<path>` | Where `sp` and the app meet; a short path for a test copy (a socket file on Windows too) |
 | `--capture-home FILE` | Go to the third slide, save a PNG of the home window, quit |
 | `SOFTPRESENTER_CAPTURE_AFTER=<seconds>` | How long a capture run waits before taking its picture |
-| `SOFTPRESENTER_CAPTURE_*` | Capture a particular window instead (`_BIBLE`, `_EDITOR`, `_THEMES`, `_SETTINGS`, `_STAGE_LAYOUTS`, `_OUTPUT`…) |
+| `SOFTPRESENTER_CAPTURE_*` | Capture a particular view or window instead (`_BIBLE`, `_EDITOR` (`=props` for the props), `_THEMES`, `_SETTINGS`, `_STAGE_LAYOUTS`, `_OUTPUT`…) |
 | `SOFTPRESENTER_GO_LIVE=1` | Start with the first slide on screen and the first media item behind it |
 | `SOFTPRESENTER_OPEN_ITEM=<n>` | Open the nth item of the playlist in front, as a click does |
 | `SOFTPRESENTER_PICK=songs:0,2` | Pick out songs or media items by place, as Command-clicks do |

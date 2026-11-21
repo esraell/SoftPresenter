@@ -391,9 +391,10 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
             );
         } else {
             let tab_names = [InspectorTab::Shape, InspectorTab::Text, InspectorTab::Build];
-            let tabs = crate::studio::Tabs { labels: &["Shape", "Text", "Build"], hints: &[], dots: &[] };
+            let tabs = crate::studio::Tabs::plain(&["Shape", "Text", "Build"]);
             let width = ui.available_width();
-            let (place, _) = ui.allocate_exact_size(vec2(width, crate::studio::tab_switch_height(3)), Sense::hover());
+            let (place, _) =
+                ui.allocate_exact_size(vec2(width, crate::studio::tab_switch_height(&tabs)), Sense::hover());
             let open = tab_names.iter().position(|tab| *tab == state.inspector.tab);
             let (_, clicked) = crate::studio::tab_switch(ui, "inspector tab", place.min, width, &tabs, open);
             if let Some(clicked) = clicked {

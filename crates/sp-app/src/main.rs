@@ -5867,9 +5867,20 @@ impl App {
             // Testing aid: `selected` edits the first slide of the song open in the window (once
             // SOFTPRESENTER_OPEN_ITEM has opened it), with its top object selected; otherwise the
             // first song's third slide.
+            // Testing aid: SOFTPRESENTER_CAPTURE_EDITOR=props opens the Edit view on the props
+            // instead (on a prop made for the picture when there is none).
+            let on_props = std::env::var("SOFTPRESENTER_CAPTURE_EDITOR").as_deref() == Ok("props");
+            if running.frames == GO_LIVE_AT + 2 && on_props {
+                let state = &mut running.home_state;
+                if state.props.is_empty() {
+                    state.props.push(props::Prop::new("Logo".to_owned()));
+                }
+                state.edit_kind_request = Some(home::EditKind::Props);
+            }
             let picked = std::env::var("SOFTPRESENTER_CAPTURE_EDITOR").as_deref() == Ok("selected");
             if running.frames == GO_LIVE_AT + if picked { 6 } else { 2 }
                 && std::env::var_os("SOFTPRESENTER_CAPTURE_EDITOR").is_some()
+                && !on_props
             {
                 let at = if picked {
                     sp_engine::SlideRef { presentation: self.show.selected(), slide: 0 }

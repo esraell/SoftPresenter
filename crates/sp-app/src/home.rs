@@ -100,6 +100,19 @@ pub enum ExportRequest {
     Playlist(usize),
 }
 
+/// What the Edit view is editing, chosen by the switch at the top of its left column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditKind {
+    /// A song's slides.
+    Slides,
+    /// The themes and their templates (the Theme Editor).
+    Themes,
+    /// The props.
+    Props,
+    /// The stage screens' layouts.
+    Stage,
+}
+
 pub struct HomeState {
     /// How slides are laid out, and how many fit across the grid (2 to 7).
     pub slide_view: SlideView,
@@ -438,8 +451,9 @@ pub struct HomeState {
     pub theme_for_bible: usize,
     /// What the Theme menu or the Theme Editor has just asked for. The app takes this.
     pub theme_request: Option<ThemeRequest>,
-    /// Set when Edit was pressed in the Theme Editor: the slide editor opens once it has closed.
-    pub open_editor_next: bool,
+    /// A kind of the Edit view asked for (by its switch, the View menu, the command line, the
+    /// Stage tab), until the top bar carries it out.
+    pub edit_kind_request: Option<EditKind>,
     /// What is typed in the Bible page's two fields, and its rows of translations.
     pub bible: BiblePage,
 }
@@ -1179,13 +1193,23 @@ impl Default for HomeState {
             theme_for_songs: 0,
             theme_for_bible: 0,
             theme_request: None,
-            open_editor_next: false,
+            edit_kind_request: None,
             bible: BiblePage::default(),
         }
     }
 }
 
 impl HomeState {
+    /// Which kind of the Edit view is open, if it is: the one answer to "is the editor open".
+    pub fn edit_kind(&self) -> Option<EditKind> {
+        if self.theme_edit.is_some() {
+            Some(EditKind::Themes)
+        } else {
+            let draft = self.editing.as_ref()?;
+            Some(if draft.at.presentation == crate::props::PROP_SLOT { EditKind::Props } else { EditKind::Slides })
+        }
+    }
+
     /// True for a presentation the app makes itself (a Bible passage, the VoxLive item): shown,
     /// never edited, moved or deleted.
     pub fn app_made(&self, presentation: usize) -> bool {
@@ -1759,6 +1783,7 @@ fn edit_view(
         }
     }
     let mut chosen_template = None;
+    let mut open_prop = None;
     // The left column, as wide here as in every other view.
     use crate::studio::Column;
     let left = egui::Panel::left("edit slides")
@@ -1768,8 +1793,12 @@ fn edit_view(
         .frame(crate::studio::column_frame(Column::Left));
     let left = left.show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        crate::studio::edit_kinds(ui, state);
+        ui.add_space(10.0);
         if theme_mode {
             theme_list(ui, state);
+        } else if prop_mode {
+            open_prop = prop_list(ui, state);
         } else if let Some(presentation) = presentation {
             Frame::new().fill(EDIT_HEADER).inner_margin(egui::Margin::symmetric(8, 5)).show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -2932,7 +2961,58 @@ fn edit_view(
         state.editing = None;
     } else if let Some(here) = chosen {
         state.editing = EditDraft::of(show, here);
+    } else if let Some(prop) = open_prop
+        && let Some(draft) = crate::studio::prop_draft(state, prop)
+    {
+        state.editing = Some(draft);
     }
+}
+
+/// The props, in the Edit view's left column while a prop is edited: a click opens another.
+/// Returns the one clicked. (Props are made, renamed and deleted in the Props tab.)
+fn prop_list(ui: &mut egui::Ui, state: &HomeState) -> Option<usize> {
+    let open = state.editing.as_ref().map(|draft| draft.at.slide);
+    let mut clicked = None;
+    Frame::new().inner_margin(egui::Margin { left: 10, right: 10, top: 4, bottom: 8 }).show(ui, |ui| {
+        let (heading, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
+        crate::studio::paint_spaced(
+            ui,
+            heading.left_center() + vec2(8.0, 0.0),
+            Align2::LEFT_CENTER,
+            "PROPS",
+            crate::studio::fixed_semibold(11.5),
+            crate::studio::TEXT_DIM,
+            0.6,
+        );
+        egui::ScrollArea::vertical().id_salt("edit props").max_height(170.0).show(ui, |ui| {
+            for (index, prop) in state.props.iter().enumerate() {
+                let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
+                let chosen = open == Some(index);
+                if chosen {
+                    ui.painter().rect_filled(row, crate::studio::RADIUS, crate::studio::CARD);
+                } else if response.hovered() {
+                    ui.painter().rect_filled(row, crate::studio::RADIUS, Color32::from_rgb(0x1f, 0x1f, 0x1f));
+                }
+                let (ink, font) = if chosen {
+                    (crate::studio::TEXT, crate::studio::semibold(13.5))
+                } else {
+                    (crate::studio::TEXT_DIM, FontId::proportional(13.5))
+                };
+                let words = Rect::from_min_max(row.min + vec2(10.0, 0.0), row.max - vec2(10.0, 0.0));
+                ui.painter().with_clip_rect(words).text(
+                    words.left_center(),
+                    Align2::LEFT_CENTER,
+                    &prop.name,
+                    font,
+                    ink,
+                );
+                if response.clicked() && !chosen {
+                    clicked = Some(index);
+                }
+            }
+        });
+    });
+    clicked
 }
 
 /// What an output is called in the Screens window's menus.
@@ -7613,6 +7693,80 @@ mod tests {
             assert_eq!(click(&mut state, pos2(1090.0, 526.0)), vec![Command::ClearAll], "editing: {editing}");
             assert_eq!(state.editing.is_some(), editing, "clearing leaves the view as it was");
         }
+    }
+
+    #[test]
+    fn the_edit_views_switch_goes_between_slides_themes_and_props() {
+        let (ctx, show) = (egui::Context::default(), three_songs());
+        let mut state = HomeState::default();
+        state.props.push(crate::props::Prop::new("Logo".to_owned()));
+        state.props.push(crate::props::Prop::new("Name".to_owned()));
+        // Asked for by name (the View menu, the command line), Edit is the slide editor.
+        state.view_request = Some(1);
+        frame_with(&ctx, &show, &mut state, None);
+        assert_eq!(state.edit_kind(), Some(EditKind::Slides));
+        // Props opens the first prop; a click on another in the list opens that one.
+        state.edit_kind_request = Some(EditKind::Props);
+        frame_with(&ctx, &show, &mut state, None);
+        assert_eq!(state.edit_kind(), Some(EditKind::Props));
+        assert_eq!(state.editing.as_ref().map(|draft| draft.at.slide), Some(0));
+        // Asked for again by name, Edit goes back to the slides.
+        state.view_request = Some(1);
+        frame_with(&ctx, &show, &mut state, None);
+        assert_eq!(state.edit_kind(), Some(EditKind::Slides));
+        // Themes is opened by the app (it holds the themes): it is asked to.
+        state.view_request = Some(3);
+        frame_with(&ctx, &show, &mut state, None);
+        assert!(matches!(state.theme_request, Some(ThemeRequest::Edit(_))));
+        // From the Theme Editor, another kind waits for the app to save the theme and close it.
+        let theme = Theme::builtin();
+        state.editing = Some(EditDraft::of_slide(theme.templates[0].as_slide(), 0));
+        state.theme_edit = Some(ThemeEdit::of(0, theme));
+        assert_eq!(state.edit_kind(), Some(EditKind::Themes));
+        state.edit_kind_request = Some(EditKind::Props);
+        frame_with(&ctx, &show, &mut state, None);
+        assert!(state.theme_edit.as_ref().is_some_and(|edit| edit.leave), "the app is asked to close the theme");
+        assert_eq!(state.edit_kind(), Some(EditKind::Themes));
+        (state.theme_edit, state.editing) = (None, None);
+        frame_with(&ctx, &show, &mut state, None);
+        assert_eq!(state.edit_kind(), Some(EditKind::Props));
+        // Show leaves the Edit view whichever kind is open.
+        state.view_request = Some(0);
+        frame_with(&ctx, &show, &mut state, None);
+        assert_eq!(state.edit_kind(), None);
+        // With no props there is nothing for Props to open: things stay as they are.
+        state.props.clear();
+        state.edit_kind_request = Some(EditKind::Props);
+        frame_with(&ctx, &show, &mut state, None);
+        assert_eq!((state.edit_kind(), state.edit_kind_request), (None, None));
+    }
+
+    #[test]
+    fn a_click_on_edit_in_the_top_bar_while_a_prop_is_edited_changes_nothing() {
+        let show = three_songs();
+        let press = |at: egui::Pos2, pressed: bool| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        // Click all along the switch between the views. Show and Bible leave the Edit view;
+        // Edit, the view that is open, must not swap the prop for a song's slide.
+        let mut stayed = 0;
+        for x in (150..460).step_by(6) {
+            let ctx = egui::Context::default();
+            let mut state = HomeState::default();
+            state.props.push(crate::props::Prop::new("Logo".to_owned()));
+            state.edit_kind_request = Some(EditKind::Props);
+            let at = pos2(x as f32, 26.0);
+            frame_events(&ctx, &show, &mut state, vec![Event::PointerMoved(at)], 0.0);
+            frame_events(&ctx, &show, &mut state, vec![press(at, true)], 0.1);
+            frame_events(&ctx, &show, &mut state, vec![press(at, false)], 0.2);
+            frame_events(&ctx, &show, &mut state, vec![], 0.3);
+            assert_ne!(state.edit_kind(), Some(EditKind::Slides), "clicked at {x}");
+            stayed += usize::from(state.edit_kind() == Some(EditKind::Props));
+        }
+        assert!(stayed > 8, "some of the clicks were on Edit, and elsewhere in the bar: {stayed}");
     }
 
     #[test]

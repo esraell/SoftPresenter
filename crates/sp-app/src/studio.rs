@@ -269,10 +269,10 @@ pub fn pill_switch(
     (track, clicked)
 }
 
-/// How tall a row of tabs made by [`tab_switch`] is, for that many tabs.
-pub fn tab_switch_height(count: usize) -> f32 {
-    let rows = count.div_ceil(TABS_IN_A_ROW).max(1) as f32;
-    6.0 + rows * 26.9 + (rows - 1.0) * 2.0
+/// How tall a block of tabs made by [`tab_switch`] is.
+pub fn tab_switch_height(tabs: &Tabs) -> f32 {
+    let rows = tabs.labels.len().div_ceil(TABS_IN_A_ROW).max(1) as f32;
+    6.0 + rows * tabs.tall + (rows - 1.0) * 2.0
 }
 
 /// The tabs of a [`tab_switch`]: their names, their tooltips (one each, or none at all), and
@@ -282,6 +282,19 @@ pub struct Tabs<'a> {
     pub labels: &'a [&'a str],
     pub hints: &'a [&'a str],
     pub dots: &'a [Option<Color32>],
+    /// The tabs that cannot be chosen now (none, when empty): drawn faint, and not clickable.
+    pub off: &'a [bool],
+    /// How tall a tab is drawn (it takes clicks from at least [`LEAST_CLICK`]), and the size
+    /// of its words.
+    pub tall: f32,
+    pub size: f32,
+}
+
+impl<'a> Tabs<'a> {
+    /// Tabs of the usual size with nothing but their names.
+    pub fn plain(labels: &'a [&'a str]) -> Tabs<'a> {
+        Tabs { labels, hints: &[], dots: &[], off: &[], tall: 26.9, size: 12.5 }
+    }
 }
 
 /// How many tabs stand in one row; more go on to a second row and share it evenly.
@@ -299,15 +312,15 @@ pub fn tab_switch(
     tabs: &Tabs,
     chosen: Option<usize>,
 ) -> (Rect, Option<usize>) {
-    let Tabs { labels, hints, dots } = *tabs;
+    let Tabs { labels, hints, dots, off, tall, size } = *tabs;
     const BETWEEN: f32 = 2.0;
     const INSET: f32 = 3.0;
-    const TALL: f32 = 26.9;
-    let block = Rect::from_min_size(min, vec2(width, tab_switch_height(labels.len())));
+    let block = Rect::from_min_size(min, vec2(width, tab_switch_height(tabs)));
     // One row is fully round; two rows are a block with a rounder corner than a card's.
     let round = if labels.len() > TABS_IN_A_ROW { 14.0 } else { block.height() / 2.0 };
     ui.painter().rect_filled(block, round, CARD);
-    let font = FontId::proportional(12.5);
+    let font = FontId::proportional(size);
+    let reach = ((LEAST_CLICK - tall) / 2.0).clamp(0.0, INSET);
     let mut clicked = None;
     for (row, names) in labels.chunks(TABS_IN_A_ROW).enumerate() {
         let each = (width - 2.0 * INSET - BETWEEN * (names.len() - 1) as f32) / names.len() as f32;
@@ -315,13 +328,19 @@ pub fn tab_switch(
             let index = row * TABS_IN_A_ROW + place;
             let corner = pos2(
                 block.min.x + INSET + (each + BETWEEN) * place as f32,
-                block.min.y + INSET + (TALL + BETWEEN) * row as f32,
+                block.min.y + INSET + (tall + BETWEEN) * row as f32,
             );
-            let cell = Rect::from_min_size(corner, vec2(each, TALL));
-            let mut response = ui.interact(cell, ui.scope_id().with((salt, index)), Sense::click());
+            let cell = Rect::from_min_size(corner, vec2(each, tall));
+            let is_off = off.get(index).copied().unwrap_or(false);
+            let sense = if is_off { Sense::hover() } else { Sense::click() };
+            let mut response = ui.interact(cell.expand2(vec2(0.0, reach)), ui.scope_id().with((salt, index)), sense);
             let on = chosen == Some(index);
             paint_pill(ui.painter(), cell, on);
-            let ink = if on || response.hovered() { TEXT } else { TEXT_DIM };
+            let ink = match (is_off, on || response.hovered()) {
+                (true, _) => TEXT_FAINT,
+                (false, true) => TEXT,
+                (false, false) => TEXT_DIM,
+            };
             let words = ui.painter().text(cell.center(), Align2::CENTER_CENTER, *label, font.clone(), ink);
             if let Some(Some(colour)) = dots.get(index) {
                 ui.painter().circle_filled(pos2(words.max.x + 6.5, cell.center().y), 2.5, *colour);
@@ -689,14 +708,13 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             TEXT,
         );
 
-        // The views. Themes is one of them until it is folded into Edit: it opens the Theme
-        // Editor. They are numbered as the View menu and the command line number them (Show,
-        // Edit, Bible, Themes), and stand in the switch as Show, Bible, Edit, Themes.
-        const ORDER: [usize; 4] = [0, 2, 1, 3];
-        let editing_theme = state.theme_edit.is_some();
-        let view = if editing_theme {
-            3
-        } else if state.editing.is_some() {
+        // The views. They are numbered as the View menu and the command line number them (Show,
+        // Edit, Bible, and Themes, which is a kind of the Edit view), and stand in the switch
+        // as Show, Bible, Edit.
+        const ORDER: [usize; 3] = [0, 2, 1];
+        use crate::home::EditKind;
+        let kind = state.edit_kind();
+        let view = if kind.is_some() {
             1
         } else if state.bible_open {
             2
@@ -704,53 +722,38 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             0
         };
         let hints: &[&str] = if cfg!(target_os = "macos") {
-            &["Show (Control-S)", "Bible (Control-B)", "Edit (Control-E)", "Themes (Control-T)"]
+            &["Show (Control-S)", "Bible (Control-B)", "Edit (Control-E)"]
         } else {
-            &["Show", "Bible", "Edit", "Themes"]
+            &["Show", "Bible", "Edit"]
         };
         let (switch, clicked) = pill_switch(
             ui,
             "views",
             pos2(name.max.x + 14.0, middle - 16.45),
-            &["Show", "Bible", "Edit", "Themes"],
+            &["Show", "Bible", "Edit"],
             hints,
             ORDER.iter().position(|shown| *shown == view),
             &SwitchLook::views(),
         );
-        let picked = clicked.map(|place| ORDER[place]).or(state.view_request.take().filter(|asked| *asked != view));
-        match picked {
-            Some(3) if !editing_theme => {
-                state.theme_request = Some(crate::home::ThemeRequest::Edit(state.theme_for_songs))
-            }
-            Some(3) => {}
-            // Leaving the Theme Editor goes through the app, which saves the theme.
-            Some(to) if editing_theme => {
-                if let Some(edit) = state.theme_edit.as_mut() {
-                    edit.leave = true;
+        // A click on the view that is open does nothing. Asked for by name (the View menu, the
+        // command line), Edit is the slide editor and Themes the Theme Editor, whichever kind
+        // of the Edit view is open.
+        let clicked = clicked.map(|place| ORDER[place]).filter(|to| *to != view);
+        match clicked.or(state.view_request.take()) {
+            Some(1) if kind != Some(EditKind::Slides) => state.edit_kind_request = Some(EditKind::Slides),
+            Some(3) if kind != Some(EditKind::Themes) => state.edit_kind_request = Some(EditKind::Themes),
+            Some(to @ (0 | 2)) if to != view || kind.is_some() => {
+                state.edit_kind_request = None;
+                // Leaving the Theme Editor goes through the app, which saves the theme.
+                match state.theme_edit.as_mut() {
+                    Some(edit) => edit.leave = true,
+                    None => state.editing = None,
                 }
                 state.bible_open = to == 2;
-                if to == 1 {
-                    state.open_editor_next = true;
-                }
-            }
-            Some(0) => {
-                state.editing = None;
-                state.bible_open = false;
-            }
-            Some(2) => {
-                state.editing = None;
-                state.bible_open = true;
-            }
-            Some(1) if state.editing.is_none() => {
-                state.editing = EditDraft::of(show, slide_to_edit(show, state));
             }
             _ => {}
         }
-        // Asked for while the Theme Editor was open: it has closed now, so open the slide editor.
-        if state.open_editor_next && state.theme_edit.is_none() {
-            state.open_editor_next = false;
-            state.editing = EditDraft::of(show, slide_to_edit(show, state));
-        }
+        open_edit_kind(show, state);
 
         // From the right: Settings, the keys' button, Stage, Audience and the clock.
         let gear = Rect::from_min_size(pos2(bar.max.x - 14.0 - 30.0, middle - 15.0), vec2(30.0, 30.0));
@@ -850,6 +853,82 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             state.find_rect = None;
         }
     });
+}
+
+/// Carries out a request for one of the Edit view's kinds (from the switch at the top of its
+/// left column, the View menu, the command line, the Stage tab or a testing switch). The Theme
+/// Editor is left through the app, which saves the theme, so a request made while it is open
+/// waits a frame for that. A kind that has nothing to open (no song, no prop) leaves things as
+/// they are.
+fn open_edit_kind(show: &Show, state: &mut HomeState) {
+    use crate::home::EditKind;
+    let Some(kind) = state.edit_kind_request else { return };
+    let now = state.edit_kind();
+    if now == Some(kind) {
+        state.edit_kind_request = None;
+        return;
+    }
+    if let Some(edit) = state.theme_edit.as_mut() {
+        edit.leave = true;
+        return;
+    }
+    state.edit_kind_request = None;
+    match kind {
+        EditKind::Slides => {
+            if let Some(draft) = EditDraft::of(show, slide_to_edit(show, state)) {
+                state.editing = Some(draft);
+            }
+        }
+        EditKind::Themes => state.theme_request = Some(crate::home::ThemeRequest::Edit(state.theme_for_songs)),
+        EditKind::Props => {
+            if let Some(draft) = prop_draft(state, 0) {
+                state.editing = Some(draft);
+            }
+        }
+        // The stage layouts have a window of their own.
+        EditKind::Stage => state.stage_editor_open = true,
+    }
+}
+
+/// A prop opened in the editor, as a slide of its own.
+pub fn prop_draft(state: &HomeState, index: usize) -> Option<EditDraft> {
+    let mut draft = EditDraft::of_slide(state.props.get(index)?.slide.clone(), index);
+    draft.at.presentation = crate::props::PROP_SLOT;
+    Some(draft)
+}
+
+/// The switch at the top of the Edit view's left column: what is being edited, slides, themes,
+/// props or stage layouts. It takes the column's width, less 10 either side, 12 down.
+pub fn edit_kinds(ui: &mut egui::Ui, state: &mut HomeState) {
+    use crate::home::EditKind;
+    const KINDS: [EditKind; 4] = [EditKind::Slides, EditKind::Themes, EditKind::Props, EditKind::Stage];
+    let no_props = state.props.is_empty();
+    let hints: [&str; 4] = [
+        "Edit a song's slides",
+        "Edit the themes and their templates",
+        if no_props {
+            "There are no props yet. Make one in the Props tab of the Show view, then edit it here"
+        } else {
+            "Edit the props"
+        },
+        "Edit the stage screens' layouts",
+    ];
+    let tabs = Tabs {
+        labels: &["Slides", "Themes", "Props", "Stage"],
+        hints: &hints,
+        dots: &[],
+        off: &[false, false, no_props, false],
+        tall: 23.5,
+        size: 11.5,
+    };
+    let width = ui.available_width() - 20.0;
+    let (place, _) =
+        ui.allocate_exact_size(vec2(ui.available_width(), 12.0 + tab_switch_height(&tabs)), Sense::hover());
+    let open = state.edit_kind().and_then(|kind| KINDS.iter().position(|each| *each == kind));
+    let (_, clicked) = tab_switch(ui, "edit kinds", place.min + vec2(10.0, 12.0), width, &tabs, open);
+    if let Some(clicked) = clicked.filter(|clicked| Some(*clicked) != open) {
+        state.edit_kind_request = Some(KINDS[clicked]);
+    }
 }
 
 /// The find box: typing in it searches the song library (titles first, then the words of the

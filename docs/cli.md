@@ -271,7 +271,7 @@ each time with the token the last reply gave.
 | `stage message TEXT`, `stage message clear` | Words for the stage screens only (`\n` starts a new line) |
 | `stage layout SCREEN LAYOUT` | Which stage layout a stage screen shows |
 | `test bars\|grid\|white\|off` | A test pattern on the audience screens |
-| `view show\|edit\|bible\|themes`, `view reflow [SONG]` | Switches the window's view |
+| `view show\|edit\|bible\|themes`, `view reflow [SONG]` | Switches the window's view (`themes` is the Edit view on the themes; `edit` is the Edit view on a song's slides) |
 
     $ sp go "River Song"
     On screen: River Song, slide 1 of 3 (Verse 1).

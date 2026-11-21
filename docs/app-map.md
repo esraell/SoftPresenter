@@ -7,12 +7,12 @@ finding their way around. For the command line itself see [cli.md](cli.md).
 ## The main window
 
 One window: a bar along the top, and under it three round panels, the left column, the middle
-and the right column, which is the same in every view. Four views are chosen in the bar. The
+and the right column, which is the same in every view. Three views are chosen in the bar (Show, Bible and Edit). The
 operator's window never shows on the audience screens; the screens are separate windows (or NDI
 sources) drawn by their own thread.
 
 ```
-  ▬ SoftPresenter [Show|Bible|Edit|Themes] (Find a song or a line)  12:00:00 [● Audience ON] [● Stage ON] ? ⚙
+  ▬ SoftPresenter [Show|Bible|Edit] (Find a song or a line)         12:00:00 [● Audience ON] [● Stage ON] ? ⚙
 ╭──────────────────╮ ╭─────────────────────────────────────────╮ ╭────────────────────────────────╮
 │ LIBRARY        + │ │ Song title   8 slides     (i) ≡ ∞ ▤      │ │ ● [AUDIENCE|STAGE]    ON SCREEN│
 │   All Songs      │ │ ┌──────┐ ┌──────┐ ┌──────┐                │ │ ┌────────────────────────────┐ │
@@ -33,7 +33,7 @@ sources) drawn by their own thread.
 
 | Part | Does | Command line |
 |---|---|---|
-| Show / Bible / Edit / Themes | Switches the view | `view show\|edit\|bible\|themes` |
+| Show / Bible / Edit | Switches the view. Edit has four kinds, chosen at the top of its left column: Slides, Themes, Props and Stage | `view show\|edit\|bible`; `view themes` opens Edit on the themes |
 | Find box | Searches the song library as you type: titles first, then lines of the songs' words. Return opens the song picked, Command-Return (Ctrl on other computers) adds it to the playlist in front, Escape or a click elsewhere ends the search. Command-F goes to it. It does not search the Bible, playlists or media | |
 | Clock | The time of day, on a 12-hour or a 24-hour clock as the computer is set (`clock.rs`) | |
 | Audience ON/OFF | The audience screens on or off (Command-1) | `audience on\|off` |
@@ -102,7 +102,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can be chosen with
 `sp menu ITEM`.
 
-## The Edit view (and the theme editor)
+## The Edit view (slides, themes, props, stage)
 
 ```
 ┌──────────────────┬─────────────────────────────────────────────┬───────────────────────────┐
@@ -118,8 +118,12 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 └──────────────────┴──────────────────────────────────────────────┴───────────────────────────┘
 ```
 
-- **Left**: the song's slides (click to edit another), then the slide's objects, front first
-  (lock, hide, rename, drag to reorder).
+- **Left**: at the top a switch, Slides · Themes · Props · Stage, for what is edited. Under it,
+  for Slides the song's slides (click to edit another); for Themes the themes and the open
+  theme's templates; for Props the props (click to edit another; props are made, renamed and
+  deleted in the Props tab of the Show view, and Props is faint until there is one); Stage opens
+  the Stage Layouts window. Then the objects of the slide, front first (lock, hide, rename, drag
+  to reorder).
 - **Canvas**: Add Text, Shapes, Media… (a picture or a video, which plays in its box when the
   slide is on screen), Web Page (a box showing a live web page; its address is typed in the
   Shape tab); pictures and videos can be dropped on it from the Finder. Double-click a
@@ -129,7 +133,7 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   (how an object comes on and goes off).
 - **Footer** (at the foot of the inspector): Slide Notes, Live Edit (changes reach the screens
   as they are made), Done.
-- **Theme editor** (the Themes view): the same canvas, tools and inspector, editing a theme's
+- **Themes** (Edit › Themes; View › Themes, Control-T and `sp view themes` open it): the same canvas, tools and inspector, editing a theme's
   layouts (templates). A layout's text boxes say where each kind of words goes; its shapes,
   pictures and videos are drawn behind the words on every slide that uses it. The list on the
   left holds the themes (tagged Songs and Bible by what uses them) and the layouts.

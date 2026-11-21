@@ -49,8 +49,8 @@ pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeStat
         state.audio_playing.track.is_some().then_some(TALLY),
         None,
     ];
-    let tabs = Tabs { labels: &NAMES[..count], hints: &HINTS[..count.min(HINTS.len())], dots: &dots[..count] };
-    let (place, _) = ui.allocate_exact_size(vec2(width, tab_switch_height(count)), Sense::hover());
+    let tabs = Tabs { hints: &HINTS[..count.min(HINTS.len())], dots: &dots[..count], ..Tabs::plain(&NAMES[..count]) };
+    let (place, _) = ui.allocate_exact_size(vec2(width, tab_switch_height(&tabs)), Sense::hover());
     if let (_, Some(tab)) = tab_switch(ui, "live tabs", place.min, width, &tabs, Some(state.live_tab)) {
         state.live_tab = tab;
     }
@@ -620,9 +620,7 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             }
             Ask::Edit => {
                 // The prop opens in the editor, as a slide of its own.
-                let mut draft = crate::editor::EditDraft::of_slide(state.props[index].slide.clone(), index);
-                draft.at.presentation = crate::props::PROP_SLOT;
-                state.editing = Some(draft);
+                state.editing = crate::studio::prop_draft(state, index);
                 state.bible_open = false;
                 state.reflow = None;
             }

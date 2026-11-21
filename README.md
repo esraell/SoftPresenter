@@ -204,7 +204,7 @@ status` instead of `sp status`.
 | Cmd+, | Settings |
 | Option+Cmd+1 | Screens |
 | Cmd+1 / Cmd+2 | audience / stage screens on or off |
-| Control+S, E, B, T | Show, Edit, Bible, Themes |
+| Control+S, E, B, T | Show, Edit, Bible, Edit on the themes |
 
 The letter for each group is shown on its first slide.
 
