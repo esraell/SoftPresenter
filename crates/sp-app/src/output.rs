@@ -1815,10 +1815,10 @@ impl Output {
             let scene = self.scene_for(id, &frame, w, h);
             let stage = self.is_stage(id);
             // What the next fade starts from: the last whole picture, or for a fade cut short,
-            // the whole picture nearer to what the window shows.
+            // one of its two whole pictures.
             let target = &mut self.targets[index];
             let before = match target.fade.take() {
-                Some((from, to)) => Some(fade_from(from, to, amount.unwrap_or(1.0))),
+                Some((from, to)) => Some(fade_start(from, to, amount.unwrap_or(1.0), new_picture)),
                 None => target.shown.take(),
             };
             // Stage screens change at once: the people on stage need the words now.
@@ -2237,6 +2237,15 @@ impl Output {
 /// frame, each slower to draw than the last, and keep the memory for all of them.
 fn fade_from<T>(from: T, to: T, amount: f32) -> T {
     if amount < 0.5 { from } else { to }
+}
+
+/// What the next fade starts from when one is cut short. By a new picture: the picture the fade
+/// was going to, however far it had got, as the operator's preview does. Stepping on faster than
+/// fades finish then shows each slide in turn; starting from the nearer picture instead kept
+/// the first slide on the screen for as long as the steps came quickly, the others passing
+/// behind it. By a redraw of the same picture: the nearer of the two, as `fade_from` gives.
+fn fade_start<T>(from: T, to: T, amount: f32, new_picture: bool) -> T {
+    if new_picture { to } else { fade_from(from, to, amount) }
 }
 
 /// How a screen being identified is marked: three quick breaths of its colour, from a tenth to a
@@ -2793,5 +2802,21 @@ mod tests {
         assert_eq!(size(&frame), one, "each frame holds two slides, however many fades were cut short");
         assert_eq!(fade_from(1, 2, 0.49), 1);
         assert_eq!(fade_from(1, 2, 0.5), 2);
+    }
+
+    #[test]
+    fn stepping_on_quickly_leaves_no_slide_stuck_on_the_screen() {
+        // Five slides stepped through, each before the fade to it is a fifth done: each new
+        // fade starts from the slide before, never from the first one again.
+        let mut from = 1;
+        let mut starts = Vec::new();
+        for to in 2..=5 {
+            starts.push(from);
+            from = fade_start(from, to, 0.2, true);
+        }
+        assert_eq!(starts, [1, 2, 3, 4]);
+        // The same picture drawn again part-way keeps the nearer of the two.
+        assert_eq!(fade_start(1, 2, 0.2, false), 1);
+        assert_eq!(fade_start(1, 2, 0.8, false), 2);
     }
 }
