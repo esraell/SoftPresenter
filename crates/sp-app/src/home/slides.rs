@@ -1871,24 +1871,9 @@ pub fn slide_area(
             reflow_editor(ui, &song.title, state);
             return;
         }
-        // The bar under the slides: Add Slide on the left; the transition, the slide view and
-        // the slide size on the right.
-        egui::Panel::bottom("slide bar").resizable(false).frame(panel_frame(BAR, 6)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let from_bible = state.app_made(show.selected());
-                if !from_bible {
-                    let add = ui.button("+  Add Slide").on_hover_text("Add a slide laid out like the last one");
-                    if add.clicked() {
-                        state.add_slide = Some(show.selected());
-                    }
-                    // A media item dropped on it is added as a slide.
-                    if let Some(dropped) = add.dnd_release_payload::<MediaDrag>() {
-                        state.media_request = Some(MediaRequest::AddAsSlide(dropped.0));
-                    }
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| crate::studio::view_controls(ui, state));
-            });
-        });
+        // The bar under the slides: the transition, Continuous, Undo and Redo, the slide view
+        // and the slide size.
+        crate::studio::dock_bar(ui, state);
         // Operator notes: the notes of the slide on screen, or of the one picked out.
         if state.show_notes {
             let at = show.live().or(state.selected_slide).or(show.cursor());
@@ -2503,6 +2488,32 @@ mod tests {
         broken.show_slide(&show, &mut state, 0, &mut Vec::new());
         assert!(state.bible.pending.is_none(), "{:?}", state.bible.pending.as_ref().map(|(_, deck)| &deck.title));
         assert!(state.bible.go_live.is_none());
+    }
+
+    #[test]
+    fn the_bar_under_the_slides_switches_continuous_and_asks_for_undo() {
+        let (show, mut state) = playlist(&[("Alpha", 2)]);
+        let (ctx, mut time) = (egui::Context::default(), 0.0);
+        run(&ctx, &show, &mut state, Vec::new(), &mut time);
+        // The bar is over the media strip, at the foot of the middle column, which starts
+        // after the left column. In it: the transition switch, a line, Continuous, a line,
+        // Undo and Redo.
+        let middle = 800.0 - crate::studio::GAP - 151.0 - 49.0 + 25.0;
+        let left = crate::studio::LEFT_WIDTH + 2.0 * crate::studio::GAP + 20.0;
+        let continuous = pos2(left + 210.7 + 13.0 + 47.0, middle);
+        let asked = click(&ctx, &show, &mut state, continuous, &mut time);
+        assert!(state.continuous, "Continuous is switched on");
+        assert!(asked.is_empty(), "{asked:?}");
+        click(&ctx, &show, &mut state, continuous, &mut time);
+        assert!(!state.continuous, "and off again");
+        let undo = continuous + vec2(47.0 + 13.0 + 29.0, 0.0);
+        click(&ctx, &show, &mut state, undo, &mut time);
+        assert_eq!(state.menu_asked, Some(crate::menubar::Action::Undo));
+        // The transition: Cut is the first part of the switch.
+        assert_ne!(state.transition.kind, sp_model::TransitionKind::Cut);
+        click(&ctx, &show, &mut state, pos2(left + 20.0, middle), &mut time);
+        assert_eq!(state.transition.kind, sp_model::TransitionKind::Cut);
+        assert!(show.live().is_none());
     }
 
     #[test]

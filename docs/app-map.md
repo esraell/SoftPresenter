@@ -21,10 +21,10 @@ sources) drawn by their own thread.
 │ 02 Song one    ⋯ │ │ 01 ●VERSE 1  02 ●VERSE 1  03 ●CHORUS only,│ │ 03/08  CHORUS · SONG TITLE     │
 │ 03 Song two  ● ⋯ │ │ Next item ──────────────────  or a table) │ │ (a row for what is playing)    │
 │ THE WORD         │ │                                          │ │ [Slide]   [Media]  [Props]     │
-│ 04 John 3:16   ⋯ │ │ [+ Add Slide]   Cut Dissolve Advanced ▾  │ │ [Messages][Audio]  [Announce]  │
-│                  │ │                 grid/easy/table  size ── │ │ [          Clear All         ] │
-│ [+ Add to        │ ├─────────────────────────────────────────┤ │ Timers Messages Props Macros   │
-│    playlist    ] │ │ ▾ MEDIA  All Media ▾   Dissolve ▾   [+]  │ │ Stage  Audio  (tabs)           │
+│ 04 John 3:16   ⋯ │ ├─────────────────────────────────────────┤ │ [Messages][Audio]  [Announce]  │
+│                  │ │ [Cut|Dissolve|Advanced▾] [Continuous]     │ │ [          Clear All         ] │
+│ [+ Add to        │ │ [Undo][Redo]     [grid|words|table] size │ │ Timers Messages Props Macros   │
+│    playlist    ] │ │ MEDIA  (All Media ▾)    (Dissolve ▾) ⌄ + │ │ Stage  Audio  (tabs)           │
 │ (Filter)         │ │ [pic] [pic] [video ▶]                    │ │   …the open tab's list…        │
 ╰──────────────────╯ ╰─────────────────────────────────────────╯ ╰────────────────────────────────╯
 ```
@@ -62,8 +62,8 @@ sources) drawn by their own thread.
 | An item's bar | A dot when it is the open item; the name (a song's renames on a double click); for a song its tools: details (writer, CCLI), words as text, arrangement (groups in another order, shown as pills under the bar), notes, ⋯ (the song's menu, Add Slide, its place in the playlist); for anything else a small label saying what it is | `song info`, `song text`, `song arrangement` |
 | Slides | Tiles (the picture, and a strip with the number, the group's dot and name, tags, a pencil for the editor and ⋯), words only, or a table. Click puts a slide on screen; ⋯ or a right-click opens its menu (Edit, Cut, Copy, Paste, Delete…, Group, Media, Transition, Actions, Go to Next, Hot Key, Copy/Paste Text Style, Label, Disable, Template); Command/Shift-click and dragging a box pick several without going live; Delete asks, then deletes | `go SONG SLIDE`, `next`, `previous`, `first`, `last` |
 | Other items | A Bible passage's slides, drawn by the Bible theme (click one to put it on screen); a picture or video's tile (click to show it); a media playlist's tile (click to play it); a placeholder's box (Choose a song…, or drop a picture or video on it); a header as a small capital line | `playlist go ITEM [SLIDE]` |
-| Bottom bar | + Add Slide; the transition for all slides (Cut, Dissolve, Advanced ▾ with 19 kinds); grid, easy (words only) or table view; slide size | `menu NewSlide` |
-| Media bin | Pictures and videos; click shows one behind the words; drag onto a slide (its media) or under the slides (a slide of its own); Command/Shift-click or a box picks several; Delete asks; right-click for Scaling, Loop, playlists, Delete…; MEDIA ▾ picks a media playlist (Play This Playlist, Follow a Folder…); the chevron folds the bin away | `media`, `media show ITEM`, `media add FILE…`, `media delete ITEM --yes`, `media-playlist play NAME` |
+| The dock: the bar under the slides | The transition for all slides (Cut, Dissolve, Advanced ▾ with every other kind and how long it takes); Continuous; Undo, Redo; grid, words only or table; slide size. Add Slide is in a song's ⋯ menu and the File menu | `continuous on\|off`, `undo`, `redo`, `menu NewSlide` |
+| The dock: the media strip | Pictures and videos with their names; click shows one behind the words (it is ringed in orange); drag onto a slide (its media) or under a song shown by itself (a slide of its own); Command/Shift-click or a box picks several; Delete asks; ⋯ or right-click for Scaling, Loop, playlists, Delete…; the menu beside MEDIA picks a media playlist (Play This Playlist, Follow a Folder…); the menu at the right is how one gives way to the next; + adds some; the chevron folds the strip away | `media`, `media show ITEM`, `media add FILE…`, `media delete ITEM --yes`, `media-playlist play NAME` |
 
 ### Right column: what is on screen
 

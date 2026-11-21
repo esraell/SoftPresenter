@@ -3195,14 +3195,200 @@ fn video_row(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
     ui.painter().text(pos2(row.max.x - 64.0, y), Align2::RIGHT_CENTER, left, fixed(12.0), SCREEN_DIM);
 }
 
-/// The strip under the slides that holds pictures to show behind the words. It is slim until
-/// it has something in it.
-/// The room the columns leave under what they hold, at the bottom of the window.
-const COLUMN_BOTTOM: f32 = 8.0;
-/// How tall the open media bin is: its top margin, its bar, a picture and its name (whose
-/// letters reach 2 points below their row), and the room under them.
-const MEDIA_STRIP_HEIGHT: f32 = 10.0 + 24.0 + 6.0 + 4.0 + 3.0 + 81.0 + 18.0 + 2.0 + COLUMN_BOTTOM;
+/// How tall the open media strip is: its top margin, its head, the room under that, a picture
+/// with the room round it for its ring, its name, and the room under them.
+const MEDIA_STRIP_HEIGHT: f32 = 4.0 + 30.0 + 6.0 + 3.0 + 72.0 + 22.2 + 3.0 + 14.0;
 
+/// The ring round media items picked out to change several at once.
+const PICKED: Color32 = Color32::from_rgb(0x6a, 0xa5, 0xff);
+
+/// A thin upright line between two groups of controls in the bar under the slides.
+fn dock_divider(ui: &egui::Ui, x: f32, middle: f32) {
+    ui.painter().vline(x, egui::Rangef::new(middle - 10.0, middle + 10.0), Stroke::new(1.0, LINE));
+}
+
+/// The bar under the slides, the top of the dock: the transition for all slides (Cut,
+/// Dissolve, or another from Advanced), Continuous, Undo and Redo, the three ways to lay the
+/// slides out and their size. It is a shelf, a step darker than the panel, with a line along
+/// its top, and stays put while the slides scroll. In a narrow window Undo and Redo, then
+/// Continuous, then the size, are left out rather than squeezed (each is in the menu bar too).
+pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
+    use sp_model::TransitionKind as K;
+    let panel = egui::Panel::bottom("slide bar")
+        .resizable(false)
+        .show_separator_line(false)
+        .exact_size(49.0)
+        .frame(Frame::new().fill(SHELF));
+    panel.show(ui, |ui| {
+        let bar = ui.max_rect();
+        ui.painter().hline(bar.x_range(), bar.min.y + 0.5, Stroke::new(1.0, LINE));
+        let middle = bar.min.y + 10.0 + 15.1;
+        let (left, right) = (bar.min.x + 20.0, bar.max.x - 20.0);
+        // What there is room for, the least needed first to go.
+        const SWITCH: f32 = 210.7;
+        const VIEWS: f32 = 3.0 * 30.0 + 2.0 * 2.0 + 6.0;
+        const CONTINUOUS: f32 = 94.0;
+        const UNDO: f32 = 58.0;
+        const SLIDER: f32 = 110.0;
+        let room = right - left;
+        let with_continuous = room >= SWITCH + 13.0 + CONTINUOUS + 12.0 + VIEWS;
+        let with_undo = room >= SWITCH + 13.0 + CONTINUOUS + 13.0 + 2.0 * UNDO + 8.0 + 12.0 + VIEWS;
+        let with_slider = room
+            >= SWITCH
+                + 12.0
+                + VIEWS
+                + 12.0
+                + 60.0
+                + if with_continuous { 13.0 + CONTINUOUS } else { 0.0 }
+                + if with_undo { 13.0 + 2.0 * UNDO + 8.0 } else { 0.0 };
+        // The transition: one switch of a fixed width, so nothing beside it moves when the
+        // name in its third part changes.
+        let kind = state.transition.kind;
+        let track = Rect::from_min_size(pos2(left, middle - 15.1), vec2(SWITCH.min(room), 30.2));
+        ui.painter().rect_filled(track, 15.1, CARD);
+        let other = !matches!(kind, K::Cut | K::Dissolve);
+        let third = if other { kind.name() } else { "Advanced" };
+        let mut x = track.min.x + 3.0;
+        let mut more = None;
+        for (index, label, width, on, hint) in [
+            (0, "Cut", 40.4, kind == K::Cut, "Slides switch at once"),
+            (1, "Dissolve", 68.5, kind == K::Dissolve, "Each slide fades into the next"),
+            (
+                2,
+                third,
+                track.max.x - 3.0 - (track.min.x + 3.0 + 40.4 + 2.0 + 68.5 + 2.0),
+                other,
+                "Every other transition, and how long it takes",
+            ),
+        ] {
+            let cell = Rect::from_min_size(pos2(x, track.min.y + 3.0), vec2(width, 24.2));
+            x += width + 2.0;
+            let response = ui.interact(cell, ui.scope_id().with(("transition", index)), Sense::click());
+            paint_pill(ui.painter(), cell, on);
+            let ink = if on || response.hovered() { TEXT } else { TEXT_DIM };
+            if index == 2 {
+                // The name, cut short if it is long, and the arrow that says it opens a list.
+                let words =
+                    Rect::from_min_max(pos2(cell.min.x + 10.0, cell.min.y), pos2(cell.max.x - 20.0, cell.max.y));
+                ui.painter().with_clip_rect(words).text(
+                    words.left_center(),
+                    Align2::LEFT_CENTER,
+                    label,
+                    FontId::proportional(12.0),
+                    ink,
+                );
+                ui.painter().text(
+                    pos2(cell.max.x - 12.0, cell.center().y),
+                    Align2::CENTER_CENTER,
+                    "\u{25be}",
+                    FontId::proportional(12.0),
+                    ink,
+                );
+            } else {
+                ui.painter().text(cell.center(), Align2::CENTER_CENTER, label, FontId::proportional(12.0), ink);
+            }
+            let response = response.on_hover_text(hint);
+            match index {
+                0 if response.clicked() => state.transition = sp_model::Transition::of(K::Cut),
+                1 if response.clicked() && kind != K::Dissolve => {
+                    state.transition = sp_model::Transition::of(K::Dissolve);
+                }
+                2 => more = Some(response),
+                _ => {}
+            }
+        }
+        if let Some(more) = more {
+            egui::Popup::from_toggle_button_response(&more)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| transition_picker(ui, &mut state.transition, "slides"));
+        }
+        let mut x = track.max.x;
+        if with_continuous {
+            dock_divider(ui, x + 6.5, middle);
+            x += 13.0;
+            let place = Rect::from_min_size(pos2(x, middle - 15.0), vec2(CONTINUOUS, 30.0));
+            let button = flat_button(ui, place, ui.scope_id().with("continuous"), "Continuous", None, state.continuous);
+            if button.on_hover_text("Next at the end of a song goes on to the next song").clicked() {
+                state.continuous = !state.continuous;
+            }
+            x += CONTINUOUS;
+        }
+        if with_undo {
+            use crate::menubar::Action;
+            dock_divider(ui, x + 6.5, middle);
+            x += 13.0;
+            for (label, action, hint) in
+                [("Undo", Action::Undo, "Undo (Command-Z)"), ("Redo", Action::Redo, "Redo (Shift-Command-Z)")]
+            {
+                let place = Rect::from_min_size(pos2(x, middle - 15.0), vec2(UNDO, 30.0));
+                if flat_button(ui, place, ui.scope_id().with(label), label, None, false).on_hover_text(hint).clicked() {
+                    state.menu_asked = Some(action);
+                }
+                x += UNDO + 8.0;
+            }
+        }
+        // From the right: the slide size, then the three views.
+        let mut edge = right;
+        if with_slider {
+            let wide = SLIDER.min(edge - x - 12.0 - VIEWS - 12.0).max(60.0);
+            let place = Rect::from_min_size(pos2(edge - wide, middle - 10.0), vec2(wide, 20.0));
+            // Further right is bigger, so fewer slides fit across.
+            let mut size = 7 - state.columns.clamp(2, 7);
+            let slider = ui
+                .scope_builder(
+                    egui::UiBuilder::new().max_rect(place).layout(Layout::left_to_right(Align::Center)),
+                    |ui| {
+                        ui.spacing_mut().slider_width = wide;
+                        ui.add(egui::Slider::new(&mut size, 0..=5).show_value(false))
+                    },
+                )
+                .inner;
+            if slider.on_hover_text("Slide size").changed() {
+                state.columns = 7 - size;
+            }
+            edge -= wide + 12.0;
+        }
+        let views = Rect::from_min_size(pos2(edge - VIEWS, middle - 15.1), vec2(VIEWS, 30.2));
+        ui.painter().rect_filled(views, 15.1, CARD);
+        for (index, (view, icon, hint)) in [
+            (SlideView::Grid, Icon::Grid, "Grid"),
+            (SlideView::Easy, Icon::Rows, "Words only"),
+            (SlideView::Table, Icon::Table, "Table"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let cell =
+                Rect::from_min_size(pos2(views.min.x + 3.0 + 32.0 * index as f32, views.min.y + 3.0), vec2(30.0, 24.2));
+            let response = ui.interact(cell, ui.scope_id().with(("slide view", index)), Sense::click());
+            let on = state.slide_view == view;
+            paint_pill(ui.painter(), cell, on);
+            let ink = if on || response.hovered() { TEXT } else { TEXT_DIM };
+            icons::paint(ui.painter(), icon, Rect::from_center_size(cell.center(), vec2(13.0, 13.0)), ink);
+            if response.on_hover_text(hint).clicked() {
+                state.slide_view = view;
+            }
+        }
+    });
+}
+
+/// A small round label that opens a menu: its words and an arrow, on a pill a step lighter
+/// than the shelf.
+fn menu_pill(ui: &egui::Ui, id: &str, left: f32, middle: f32, words: &str, right_aligned: bool) -> egui::Response {
+    let galley = spaced(ui, &format!("{words} \u{25be}"), fixed_semibold(11.0), TEXT_DIM, 0.7);
+    let size = vec2(galley.size().x + 18.0, 21.0);
+    let min = pos2(if right_aligned { left - size.x } else { left }, middle - size.y / 2.0);
+    let pill = Rect::from_min_size(min, size);
+    let response = ui.interact(pill.expand2(vec2(0.0, 2.5)), ui.scope_id().with(id), Sense::click());
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&response));
+    ui.painter().rect_filled(pill, 10.5, if response.hovered() || open { BUTTON } else { CARD });
+    ui.painter().galley(pos2(pill.min.x + 9.0, middle - galley.size().y / 2.0), galley, TEXT_DIM);
+    response
+}
+
+/// The media strip, the foot of the dock: "Media", the menu that shows all media or one media
+/// playlist, how one picture or video gives way to the next, the button that adds some, then
+/// the pictures and videos with their names. The one showing is ringed in orange.
 pub fn media_strip(
     ui: &mut egui::Ui,
     show: &Show,
@@ -3214,108 +3400,83 @@ pub fn media_strip(
     // opened by itself while there is something to say or a file is being dropped.
     let folded = state.media_hidden && state.notice.is_none() && !state.drop_hover;
     let empty = show.media().is_empty();
-    // Open, it is as tall as its contents (the bar, the pictures and their names) with the same
-    // room under them as the left column leaves under its filter, so the three columns end on
-    // one line.
     let height = if folded { 30.0 } else { MEDIA_STRIP_HEIGHT } + GAP;
-    let margin = if folded {
-        egui::Margin::symmetric(16, 4)
-    } else {
-        egui::Margin { left: 16, right: 16, top: 10, bottom: COLUMN_BOTTOM as i8 }
-    };
+    let margin =
+        if folded { egui::Margin::symmetric(20, 0) } else { egui::Margin { left: 20, right: 20, top: 4, bottom: 14 } };
     // The foot of the middle column: its lower corners are the column's.
     let corner = RADIUS_PANEL as u8;
     let frame = Frame::new()
-        .fill(PANEL)
+        .fill(SHELF)
         .corner_radius(CornerRadius { nw: 0, ne: 0, sw: corner, se: corner })
         .inner_margin(margin)
         .outer_margin(column_margin(Column::Middle));
-    egui::Panel::bottom("media bin").resizable(false).exact_size(height).frame(frame).show(ui, |ui| {
-        let area = ui.max_rect().expand2(vec2(16.0, 10.0));
+    let panel =
+        egui::Panel::bottom("media bin").resizable(false).show_separator_line(false).exact_size(height).frame(frame);
+    panel.show(ui, |ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        let area = ui.max_rect().expand2(vec2(20.0, 4.0));
+        let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
+        let middle = head.center().y;
+        let label = cap(ui, pos2(head.min.x, middle), Align2::LEFT_CENTER, "Media", TEXT_DIM);
         if folded {
-            ui.horizontal(|ui| {
-                let (place, response) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
-                let ink = if response.hovered() { TEXT } else { TEXT_DIM };
-                icons::paint(
-                    ui.painter(),
-                    Icon::ChevronUp,
-                    Rect::from_center_size(place.left_center() + vec2(7.0, 0.0), vec2(11.0, 11.0)),
-                    ink,
-                );
-                let count = show.media().len();
-                let words = match count {
-                    0 => "MEDIA".to_owned(),
-                    1 => "MEDIA  ·  1 item".to_owned(),
-                    n => format!("MEDIA  ·  {n} items"),
-                };
-                ui.painter().text(
-                    place.left_center() + vec2(20.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    words,
-                    semibold(11.5),
-                    ink,
-                );
-                if response.on_hover_text("Show the media bin").clicked() {
-                    state.media_hidden = false;
-                }
-            });
+            let count = show.media().len();
+            let words = match count {
+                0 => String::new(),
+                1 => "1 item".to_owned(),
+                n => format!("{n} items"),
+            };
+            ui.painter().text(pos2(label.max.x + 12.0, middle), Align2::LEFT_CENTER, words, fixed(11.0), TEXT_FAINT);
+            let place = Rect::from_center_size(pos2(head.max.x - 15.0, middle), egui::Vec2::splat(ICON_BUTTON));
+            let open = icon_button(ui, place, ui.scope_id().with("unfold media"), Icon::ChevronUp, 1.0, false);
+            if open.on_hover_text("Show the media strip").clicked() {
+                state.media_hidden = false;
+            }
             return;
         }
-        ui.horizontal(|ui| {
-            // Folds the bin down to a slim bar.
-            let (fold, response) = ui.allocate_exact_size(vec2(16.0, 18.0), Sense::click());
-            let ink = if response.hovered() { TEXT } else { TEXT_FAINT };
-            icons::paint(ui.painter(), Icon::ChevronDown, Rect::from_center_size(fold.center(), vec2(11.0, 11.0)), ink);
-            if response.on_hover_text("Hide the media bin").clicked() {
-                state.media_hidden = true;
-            }
-            caption(ui, "MEDIA");
-            media_playlist_picker(ui, state);
-            let note = match &state.notice {
-                Some(notice) => egui::RichText::new(notice.as_str()).size(12.0).color(Color32::from_rgb(255, 170, 120)),
-                // The empty bin says it itself, below.
-                None if empty => egui::RichText::new("").size(12.0).color(TEXT_FAINT),
-                None => egui::RichText::new("Click a picture or video to put it behind the words")
-                    .size(12.0)
-                    .color(TEXT_FAINT),
-            };
-            ui.add_space(6.0);
-            // Cut off before the controls at the right, rather than run under them; the whole of
-            // it shows on hover.
-            let full = note.text().to_owned();
-            ui.scope(|ui| {
-                ui.set_max_width((ui.available_width() - 150.0).max(0.0));
-                ui.add(egui::Label::new(note).truncate()).on_hover_text(full);
-            });
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.small_button("+").on_hover_text("Add pictures and videos").clicked() {
-                    state.media_request = Some(crate::home::MediaRequest::Choose);
-                }
-                // The media bin's own transition: how one picture or video gives way to the next.
-                let label = ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new(format!("{} ▾", state.media_transition.label()))
-                                .size(12.0)
-                                .color(TEXT_DIM),
-                        )
-                        .frame(false),
-                    )
-                    .on_hover_text("How one picture or video gives way to the next");
-                egui::Popup::from_toggle_button_response(&label)
-                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                    .show(|ui| transition_picker(ui, &mut state.media_transition, "media"));
-            });
-        });
+        // From the right: the button that adds pictures and videos, the one that folds the
+        // strip away, and how one picture or video gives way to the next.
+        let place = Rect::from_center_size(pos2(head.max.x - 15.0, middle), egui::Vec2::splat(30.0));
+        let add = icon_button(ui, place, ui.scope_id().with("add media"), Icon::Plus, 1.0, false);
+        if add.on_hover_text("Add pictures or videos").clicked() {
+            state.media_request = Some(crate::home::MediaRequest::Choose);
+        }
+        let place = place.translate(vec2(-32.0, 0.0));
+        let fold = icon_button(ui, place, ui.scope_id().with("fold media"), Icon::ChevronDown, 0.6, false);
+        if fold.on_hover_text("Hide the media strip").clicked() {
+            state.media_hidden = true;
+        }
+        let transition =
+            menu_pill(ui, "media transition", place.min.x - 8.0, middle, &state.media_transition.label(), true)
+                .on_hover_text("How one picture or video gives way to the next");
+        egui::Popup::from_toggle_button_response(&transition)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| transition_picker(ui, &mut state.media_transition, "media"));
+        // From the left: the menu of media playlists, then anything there is to say (a file
+        // that could not be added, a song that could not be saved).
+        let source = media_playlist_picker(ui, state, label.max.x + 12.0, middle);
+        if let Some(notice) = &state.notice {
+            let room = Rect::from_min_max(
+                pos2(source.max.x + 12.0, head.min.y),
+                pos2(transition.rect.min.x - 12.0, head.max.y),
+            );
+            let said = ui.interact(room, ui.scope_id().with("notice"), Sense::hover());
+            ui.painter().with_clip_rect(room).text(
+                room.left_center(),
+                Align2::LEFT_CENTER,
+                notice,
+                FontId::proportional(12.0),
+                CARE,
+            );
+            said.on_hover_text(notice.as_str());
+        }
+        ui.add_space(6.0);
         // Nothing in it yet: a big place to click, or to drop files on.
         if empty && !state.drop_hover {
-            ui.add_space(6.0);
-            // A little short of the bottom, so the dashed edge is never cut off.
-            let room = ui.available_size() - vec2(0.0, 4.0);
+            let room = ui.available_size() - vec2(0.0, 2.0);
             let (place, response) = ui.allocate_exact_size(room, Sense::click());
             let hot = response.hovered();
             let painter = ui.painter();
-            painter.rect_filled(place, 10.0, if hot { CARD } else { PANEL });
+            painter.rect_filled(place, RADIUS_CARD, if hot { CARD } else { PANEL });
             dashed_rect(painter, place.shrink(1.0), Stroke::new(1.5, if hot { TEXT_DIM } else { LINE }));
             // The icon, and beside it what to do and what comes after, centred together.
             let ink = if hot { TEXT } else { TEXT_DIM };
@@ -3350,8 +3511,7 @@ pub fn media_strip(
             }
         }
         if !empty {
-            ui.add_space(4.0);
-            let image_size = vec2(144.0, 81.0);
+            let image_size = vec2(128.0, 72.0);
             // The strip the items sit in: a drag that starts between them draws a box, and
             // picks out every item it touches, as in the Finder; a click there picks nothing.
             let bin = ui.available_rect_before_wrap();
@@ -3395,19 +3555,19 @@ pub fn media_strip(
                 ui,
                 |ui| {
                     let mut placed: Vec<(usize, Rect)> = Vec::new();
-                    // Room round the row, so the outline of an item on screen or picked out is
+                    // Room round the row, so the ring of an item on screen or picked out is
                     // not cut off at the edges.
                     ui.add_space(3.0);
                     ui.horizontal(|ui| {
                         ui.add_space(3.0);
-                        ui.spacing_mut().item_spacing.x = 12.0;
+                        ui.spacing_mut().item_spacing.x = 10.0;
                         let several = state.picked_media.len() > 1;
                         for (index, item) in show.media().iter().enumerate() {
                             if !order.contains(&index) {
                                 continue;
                             }
                             let (rect, response) =
-                                ui.allocate_exact_size(image_size + vec2(0.0, 18.0), Sense::click_and_drag());
+                                ui.allocate_exact_size(image_size + vec2(0.0, 22.2), Sense::click_and_drag());
                             placed.push((index, rect));
                             // A drag starting on an item picks out the items it passes over while it
                             // stays in the bin; dragged out onto a slide it becomes what the slide
@@ -3448,49 +3608,54 @@ pub fn media_strip(
                                 continue;
                             }
                             let image = Rect::from_min_size(rect.min, image_size);
-                            ui.painter().rect_filled(image, 6.0, Color32::BLACK);
+                            ui.painter().rect_filled(image, RADIUS, Color32::BLACK);
                             match thumb(ThumbOf::Media(index)) {
                                 Some((texture, _)) => {
                                     egui::Image::from_texture((texture, image_size))
-                                        .corner_radius(6.0)
+                                        .corner_radius(RADIUS)
                                         .paint_at(ui, image);
                                 }
                                 None => ui.ctx().request_repaint(),
                             }
                             // A video says so in its corner.
                             if crate::media::is_video(&item.path) {
-                                let badge =
-                                    Rect::from_min_size(image.left_bottom() + vec2(5.0, -19.0), vec2(22.0, 14.0));
-                                ui.painter().rect_filled(badge, 3.0, Color32::from_black_alpha(170));
-                                ui.painter().text(
-                                    badge.center(),
-                                    Align2::CENTER_CENTER,
-                                    "▶",
-                                    FontId::proportional(9.0),
-                                    Color32::WHITE,
+                                let galley = spaced(ui, "\u{25b6} VIDEO", fixed(11.0), Color32::WHITE, 0.3);
+                                let tag = Rect::from_min_size(
+                                    pos2(image.min.x + 6.0, image.max.y - 6.0 - galley.size().y - 4.0),
+                                    galley.size() + vec2(10.0, 4.0),
                                 );
+                                ui.painter().rect_filled(tag, 3.0, Color32::from_black_alpha(178));
+                                ui.painter().galley(tag.min + vec2(5.0, 2.0), galley, Color32::WHITE);
                             }
                             let live = show.live_media() == Some(index);
                             let picked = state.picked_media.contains(&index);
                             if live {
-                                ui.painter().rect_stroke(image, 6.0, Stroke::new(2.0, TALLY), StrokeKind::Outside);
+                                ui.painter().rect_stroke(image, RADIUS, Stroke::new(3.0, TALLY), StrokeKind::Outside);
                             } else if picked {
-                                ui.painter().rect_stroke(image, 6.0, Stroke::new(2.0, ACCENT), StrokeKind::Outside);
-                            } else if response.hovered() {
-                                ui.painter().rect_stroke(image, 6.0, Stroke::new(1.0, TEXT_FAINT), StrokeKind::Outside);
+                                ui.painter().rect_stroke(image, RADIUS, Stroke::new(3.0, PICKED), StrokeKind::Outside);
                             }
-                            // Picked out and on screen: a light ring inside the red one.
+                            // Picked out and on screen: a blue ring inside the orange one.
                             if live && picked {
-                                ui.painter().rect_stroke(image, 6.0, Stroke::new(1.5, ACCENT), StrokeKind::Inside);
+                                ui.painter().rect_stroke(image, RADIUS, Stroke::new(2.0, PICKED), StrokeKind::Inside);
                             }
-                            let label = Rect::from_min_max(pos2(rect.min.x, image.max.y + 3.0), rect.max);
-                            ui.painter().with_clip_rect(label).text(
-                                label.left_center(),
-                                Align2::LEFT_CENTER,
-                                item.name.as_str(),
-                                FontId::proportional(11.5),
-                                TEXT_DIM,
+                            let label = Rect::from_min_max(pos2(rect.min.x, image.max.y + 6.0), rect.max);
+                            let (font, ink) =
+                                if live { (fixed_semibold(12.0), TALLY) } else { (fixed(12.0), TEXT_DIM) };
+                            let name = spaced(ui, &item.name.to_uppercase(), font, ink, 0.6);
+                            ui.painter().with_clip_rect(label).galley(
+                                pos2(label.min.x, label.center().y - name.size().y / 2.0),
+                                name,
+                                ink,
                             );
+                            // The "more" button, on the picture: what a right-click opens.
+                            let near = ui.rect_contains_pointer(rect);
+                            let place = Rect::from_min_size(
+                                pos2(image.max.x - 5.0 - MORE_BUTTON, image.min.y + 5.0),
+                                egui::Vec2::splat(MORE_BUTTON),
+                            );
+                            ui.painter().rect_filled(place, 6.0, Color32::from_black_alpha(178));
+                            let more = more_button(ui, place, ui.scope_id().with(("media more", index)), near);
+                            egui::Popup::menu(&more).show(|ui| media_item_menu(ui, state, index, item));
                             response.on_hover_text(item.name.as_str()).context_menu(|ui| {
                                 media_item_menu(ui, state, index, item);
                             });
@@ -3502,8 +3667,8 @@ pub fn media_strip(
         }
         if state.drop_hover {
             let painter = ui.painter();
-            painter.rect_filled(area, 0.0, ACCENT.gamma_multiply(0.18));
-            painter.rect_stroke(area.shrink(4.0), RADIUS, Stroke::new(2.0, ACCENT), StrokeKind::Inside);
+            painter.rect_filled(area, 0.0, TEXT.gamma_multiply(0.08));
+            painter.rect_stroke(area.shrink(4.0), RADIUS, Stroke::new(2.0, TEXT), StrokeKind::Inside);
             painter.text(
                 area.center(),
                 Align2::CENTER_CENTER,
@@ -3514,7 +3679,6 @@ pub fn media_strip(
         }
     });
 }
-
 /// A rounded-looking dashed outline: short dashes along each side of `rect`.
 fn dashed_rect(painter: &egui::Painter, rect: Rect, stroke: Stroke) {
     let (dash, gap) = (7.0, 5.0);
@@ -3789,16 +3953,21 @@ fn video_bar(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
 
 /// The menu beside MEDIA: all media or one media playlist, a new playlist, and renaming or
 /// deleting the one shown.
-fn media_playlist_picker(ui: &mut egui::Ui, state: &mut HomeState) {
+fn media_playlist_picker(ui: &egui::Ui, state: &mut HomeState, left: f32, middle: f32) -> Rect {
     let shown = state.media_playlist_shown.and_then(|id| state.media_playlists.iter().find(|p| p.id == id));
     if shown.is_none() {
         state.media_playlist_shown = None;
     }
-    let label = shown.map_or_else(|| "All Media ▾".to_owned(), |playlist| format!("{} ▾", playlist.name));
-    let picker = ui
-        .add(egui::Label::new(egui::RichText::new(label).font(semibold(11.5)).color(TEXT_DIM)).sense(Sense::click()))
-        .on_hover_text("Choose a media playlist");
-    egui::Popup::from_toggle_button_response(&picker)
+    let label = shown.map_or_else(|| "All Media".to_owned(), |playlist| playlist.name.clone());
+    let picker = menu_pill(ui, "media source", left, middle, &label, false).on_hover_text("Choose a media playlist");
+    let place = picker.rect;
+    media_playlist_menu(state, &picker);
+    place
+}
+
+/// What the menu beside MEDIA offers.
+fn media_playlist_menu(state: &mut HomeState, picker: &egui::Response) {
+    egui::Popup::from_toggle_button_response(picker)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.set_min_width(200.0);

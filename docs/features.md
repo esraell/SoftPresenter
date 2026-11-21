@@ -132,6 +132,15 @@ feature changes, this page changes in the same commit.
   can be dragged into a new order. **Add to playlist**, at the foot, adds a song, a header, a
   placeholder, a picture or video, a media playlist or (once VoxLive is connected) the VoxLive
   item after the open item, and opens the Bible page for a passage; under it is the filter.
+- **The dock** under the slides stays put while they scroll: a bar with the transition for all
+  slides (Cut, Dissolve, or another from Advanced, in a switch of a fixed width), Continuous,
+  Undo and Redo, the three views and the slide size, and under it the media strip ("Media",
+  the menu of media playlists, how one picture or video gives way to the next, a chevron that
+  folds the strip away, + to add some, then the pictures and videos with their names, each
+  with ⋯ for its menu; the one showing is ringed in orange). The slides fade into the panel
+  just above it. In a narrow window the bar leaves out Undo and Redo, then Continuous, then
+  the size, rather than squeeze them (each is in the menu bar too). Add Slide is in a song's ⋯
+  menu on its bar, and in the File menu.
 - While the left column lists a playlist, the middle shows **the whole playlist as one scroll**,
   item after item, each under a bar with its name that stays at the top while its slides
   scroll under it. The open item's bar has a dot; a song's bar carries its tools (details,
