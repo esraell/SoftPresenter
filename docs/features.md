@@ -258,9 +258,13 @@ feature changes, this page changes in the same commit.
   or Hide (the card is tinted orange while it shows), and ⋯ with Edit in the Editor (a
   double-click does the same), Clears Itself, Rename, Duplicate and Delete. F4 or the Props key
   takes them all off.
-- **Macros** (coloured buttons that clear layers, show or
-  hide messages and props, start, stop or reset timers, switch the audience screens and go to
-  songs, show a picture from the media bin, optionally when the app starts), **Audio** (playlists of tracks such as walk-in music: play, pause,
+- **Macros**: steps done in turn, which clear layers, show or hide messages and props, start,
+  stop or reset timers, switch the audience screens, go to songs and show a picture from the
+  media bin, optionally when the app opens. Each is a card with its colour as a dot, its name,
+  how many steps, a Run key (the only thing that runs it), a chevron that opens its steps (each
+  with Earlier and Remove, then Add a step…), and ⋯ with Edit Steps…, Colour, Run When
+  SoftPresenter Opens, Rename, Duplicate and Delete.
+- **Audio** (playlists of tracks such as walk-in music: play, pause,
   skip 15 seconds, volume, Play Through to the next track, Shuffle, and a crossfade of up to ten
   seconds from one track into the next; F5 or Clear All stops it), and a **Stage Message** for the people on
   stage, in tabs under Clear All in the right column. A slide can carry the same actions, done when it goes on screen.

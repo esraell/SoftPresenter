@@ -1114,57 +1114,126 @@ pub fn add_action_menu(ui: &mut egui::Ui, show: &sp_engine::Show, state: &HomeSt
     chosen
 }
 
+/// Something asked of a macro from its card.
+enum MacroAsk {
+    Run,
+    Steps,
+    Rename,
+    Color(sp_model::Rgba),
+    Startup,
+    Add(sp_model::ShowAction),
+    Earlier(usize),
+    Remove(usize),
+    Duplicate,
+    Delete,
+}
+
+/// A macro's menu, behind its ⋯ and a right-click on its card.
+fn macro_menu(ui: &mut egui::Ui, made: &crate::macros::Macro, open: bool) -> Option<MacroAsk> {
+    let mut asked = None;
+    if ui.add(egui::Button::selectable(open, "Edit Steps…")).clicked() {
+        asked = Some(MacroAsk::Steps);
+    }
+    ui.menu_button("Colour", |ui| {
+        for (name, color) in crate::macros::COLORS {
+            if ui.add(egui::Button::selectable(made.color == color, name)).clicked() {
+                asked = Some(MacroAsk::Color(color));
+                ui.close();
+            }
+        }
+    });
+    if ui.add(egui::Button::selectable(made.on_startup, "Run When SoftPresenter Opens")).clicked() {
+        asked = Some(MacroAsk::Startup);
+    }
+    if ui.button("Rename").clicked() {
+        asked = Some(MacroAsk::Rename);
+    }
+    if ui.button("Duplicate").clicked() {
+        asked = Some(MacroAsk::Duplicate);
+    }
+    ui.separator();
+    if ui.button("Delete").clicked() {
+        asked = Some(MacroAsk::Delete);
+    }
+    asked
+}
+
+/// The room inside a macro's card, round its first line.
+const MACRO_MARGIN: egui::Margin = egui::Margin { left: 12, right: 4, top: 6, bottom: 6 };
+
 fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) {
     use crate::macros::Macro;
-    if heading_with_add(ui, "MACROS", "Add a macro") {
+    // The macro whose steps are open under it, kept by the window.
+    let open_id = egui::Id::unique("macro steps open");
+    let mut open_macro = ui.data(|data| data.get_temp::<sp_model::Uuid>(open_id));
+    let (_, add) = heading(ui, "Macros", Some("New macro"));
+    if add {
         let taken = |name: &str| state.macros.iter().any(|m| m.name == name);
         let name = (1..).map(|n| format!("Macro {n}")).find(|name| !taken(name)).unwrap_or_default();
         let made = Macro::new(name.clone());
         state.macro_rename = Some((made.id, name));
         state.rename_started = true;
+        open_macro = Some(made.id);
         state.macros.push(made);
         state.macros_changed = true;
     }
     if state.macros.is_empty() {
-        ui.label(
-            egui::RichText::new(
-                "No macros. A macro does several things at once, such as clearing the screen and starting a timer.",
-            )
-            .size(12.0)
-            .color(TEXT_FAINT),
+        empty_note(
+            ui,
+            "No macros. A macro does several things at once, such as clearing the screen and starting a timer.",
         );
         return;
     }
-    enum Ask {
-        Run,
-        Rename,
-        Color(sp_model::Rgba),
-        Add(sp_model::ShowAction),
-        Remove(usize),
-        Startup,
-        Duplicate,
-        Delete,
-    }
-    let mut asked: Option<(usize, Ask)> = None;
+    let mut asked: Option<(usize, MacroAsk)> = None;
     let mut renamed: Option<Option<(sp_model::Uuid, String)>> = None;
     let mut rename_started = std::mem::take(&mut state.rename_started);
-    let tile = vec2(96.0, 60.0);
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-        for (index, made) in state.macros.iter().enumerate() {
-            let (rect, response) = ui.allocate_exact_size(tile, Sense::click());
-            let color = crate::home::color32(made.color);
-            ui.painter().rect_filled(rect, 8.0, if response.hovered() { color } else { color.gamma_multiply(0.85) });
-            match state.macro_rename.as_mut().filter(|(id, _)| *id == made.id) {
+    let run_font = semibold(12.5);
+    let run_wide =
+        12.0 + 10.0 + 6.0 + ui.painter().layout_no_wrap("Run".to_owned(), run_font.clone(), TEXT).size().x + 12.0;
+    for index in 0..state.macros.len() {
+        let made = &state.macros[index];
+        let id = made.id;
+        let open = open_macro == Some(id);
+        let steps: Vec<String> = made.actions.iter().map(|action| describe_action(show, state, action)).collect();
+        egui::Frame::new().fill(CARD).corner_radius(RADIUS_CARD as u8).inner_margin(MACRO_MARGIN).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let made = &state.macros[index];
+            let width = ui.available_width();
+            let (row, _) = ui.allocate_exact_size(vec2(width, 34.7), Sense::hover());
+            let reach = Rect::from_min_max(
+                row.min - vec2(f32::from(MACRO_MARGIN.left), f32::from(MACRO_MARGIN.top)),
+                row.max + vec2(f32::from(MACRO_MARGIN.right), f32::from(MACRO_MARGIN.bottom)),
+            );
+            let back = ui.interact(reach, egui::Id::unique(("macro card", id)), Sense::click());
+            let y = row.center().y;
+            // From the right: ⋯, the chevron that opens the steps, and Run.
+            let more = Rect::from_min_size(pos2(row.max.x - 28.0, y - 14.0), vec2(28.0, 28.0));
+            let chevron = Rect::from_min_size(pos2(more.min.x - 4.0 - 26.0, y - 14.0), vec2(26.0, 28.0));
+            let run = Rect::from_min_size(pos2(chevron.min.x - 6.0 - run_wide, y - 15.0), vec2(run_wide, 30.0));
+            let text_wide = run.min.x - 8.0 - row.min.x;
+            // The name with the macro's colour as a dot before it, and under it how many steps.
+            let colour = crate::home::color32(made.color);
+            let name_left = row.min.x + 9.0 + 7.0;
+            let name = fitted(ui, &made.name, name_font(), TEXT, text_wide - 16.0, 1);
+            let count = made.actions.len();
+            let mut said = if count == 1 { "1 step".to_owned() } else { format!("{count} steps") };
+            if made.on_startup {
+                said.push_str(" \u{b7} when SoftPresenter opens");
+            }
+            let sub = fitted(ui, &said, FontId::proportional(12.0), TEXT_FAINT, text_wide, 1);
+            let name_y = row.min.y + 17.5 / 2.0;
+            ui.painter().circle_filled(pos2(row.min.x + 4.5, name_y), 4.5, colour);
+            match state.macro_rename.as_mut().filter(|(renaming, _)| *renaming == id) {
                 Some((_, typed)) => {
+                    let start = pos2(name_left, name_y);
                     let field = crate::studio::rename_field_at(
                         ui,
                         typed,
-                        FontId::proportional(12.0),
-                        Color32::WHITE,
-                        Color32::WHITE,
-                        rect.left_center() + vec2(8.0, 0.0),
-                        rect.max.x - 4.0,
+                        name_font(),
+                        TEXT,
+                        ACCENT,
+                        start,
+                        row.min.x + text_wide,
                     );
                     if std::mem::take(&mut rename_started) {
                         field.request_focus();
@@ -1174,83 +1243,122 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
                     if escape {
                         renamed = Some(None);
                     } else if enter || field.lost_focus() {
-                        renamed = Some(Some((made.id, typed.clone())));
+                        renamed = Some(Some((id, typed.clone())));
                     }
                 }
                 None => {
-                    ui.painter().with_clip_rect(rect.shrink(4.0)).text(
-                        rect.center() - vec2(0.0, 6.0),
-                        egui::Align2::CENTER_CENTER,
-                        made.name.as_str(),
-                        FontId::proportional(12.5),
-                        Color32::WHITE,
-                    );
-                    let count = made.actions.len();
-                    let note = if count == 1 { "1 action".to_owned() } else { format!("{count} actions") };
-                    ui.painter().text(
-                        rect.center() + vec2(0.0, 12.0),
-                        egui::Align2::CENTER_CENTER,
-                        note,
-                        FontId::proportional(10.5),
-                        Color32::from_white_alpha(200),
-                    );
+                    ui.painter().galley(pos2(name_left, name_y - name.size().y / 2.0), name, TEXT);
                 }
             }
-            let summary: Vec<String> = made.actions.iter().map(|action| describe_action(show, state, action)).collect();
-            let hint = if summary.is_empty() {
-                "No actions yet: right-click to add one".to_owned()
-            } else {
-                summary.join("\n")
-            };
-            if response.clicked() {
-                asked = Some((index, Ask::Run));
+            ui.painter().galley(pos2(row.min.x, row.min.y + 18.5), sub, TEXT_FAINT);
+            // Run: the only thing that runs the macro.
+            let run_response = ui.interact(run, egui::Id::unique(("macro run", id)), Sense::click());
+            crate::studio::paint_flat(ui.painter(), run, 9.0, Flat::Plain, run_response.hovered());
+            let word = ui.painter().layout_no_wrap("Run".to_owned(), run_font.clone(), TEXT);
+            let icon = Rect::from_center_size(pos2(run.min.x + 12.0 + 5.0, y), vec2(10.0, 10.0));
+            crate::icons::paint(ui.painter(), Icon::Play, icon, TEXT);
+            ui.painter().galley(pos2(icon.max.x + 6.0, y - word.size().y / 2.0), word, TEXT);
+            if run_response.on_hover_text("Run this macro now").clicked() {
+                asked = Some((index, MacroAsk::Run));
             }
-            response.on_hover_text(hint).context_menu(|ui| {
-                ui.menu_button("Add Action", |ui| {
-                    if let Some(action) = add_action_menu(ui, show, state) {
-                        asked = Some((index, Ask::Add(action)));
-                        ui.close();
-                    }
-                });
-                if !made.actions.is_empty() {
-                    ui.menu_button("Remove Action", |ui| {
-                        for (at, words) in summary.iter().enumerate() {
-                            if ui.button(words.as_str()).clicked() {
-                                asked = Some((index, Ask::Remove(at)));
-                                ui.close();
-                            }
-                        }
-                    });
+            let glyph = if open { Icon::ChevronUp } else { Icon::ChevronDown };
+            let hint = if open { "Hide its steps" } else { "Its steps" };
+            if quiet_icon(ui, chevron, egui::Id::unique(("macro steps", id)), glyph, 13.0, 0.78, None)
+                .on_hover_text(hint)
+                .clicked()
+            {
+                asked = Some((index, MacroAsk::Steps));
+            }
+            let more = quiet_icon(ui, more, egui::Id::unique(("macro more", id)), Icon::More, 16.0, 0.6, None)
+                .on_hover_text("More");
+            egui::Popup::menu(&more).show(|ui| {
+                if let Some(ask) = macro_menu(ui, made, open) {
+                    asked = Some((index, ask));
                 }
-                ui.separator();
-                if ui.button("Rename").clicked() {
-                    asked = Some((index, Ask::Rename));
-                    ui.close();
+            });
+            let summary = if steps.is_empty() { "No steps yet".to_owned() } else { steps.join("\n") };
+            back.on_hover_text(summary).context_menu(|ui| {
+                if let Some(ask) = macro_menu(ui, made, open) {
+                    asked = Some((index, ask));
                 }
-                ui.menu_button("Change Color", |ui| {
-                    for (name, color) in crate::macros::COLORS {
-                        if ui.add(egui::Button::selectable(made.color == color, name)).clicked() {
-                            asked = Some((index, Ask::Color(color)));
-                            ui.close();
-                        }
-                    }
-                });
-                if ui.add(egui::Button::selectable(made.on_startup, "Trigger on Startup")).clicked() {
-                    asked = Some((index, Ask::Startup));
-                    ui.close();
+            });
+            if !open {
+                return;
+            }
+            // Its steps, in the order they are done, each with Earlier and Remove; then a menu
+            // of steps to add.
+            ui.add_space(6.0);
+            ui.spacing_mut().item_spacing.y = 2.0;
+            let inner = width - 4.0;
+            if steps.is_empty() {
+                empty_note(ui, "No steps yet");
+            }
+            for (at, words) in steps.iter().enumerate() {
+                let (line, _) = ui.allocate_exact_size(vec2(inner, 26.0), Sense::hover());
+                let cy = line.center().y;
+                let number = format!("{}", at + 1);
+                ui.painter().text(pos2(line.min.x, cy), Align2::LEFT_CENTER, number, fixed(12.0), TEXT_FAINT);
+                let remove = Rect::from_min_size(pos2(line.max.x - 26.0, cy - 13.0), vec2(26.0, 26.0));
+                let earlier = remove.translate(vec2(-28.0, 0.0));
+                let text =
+                    fitted(ui, words, FontId::proportional(12.5), TEXT, earlier.min.x - 6.0 - line.min.x - 22.0, 1);
+                ui.painter().galley(pos2(line.min.x + 22.0, cy - text.size().y / 2.0), text, TEXT);
+                if at > 0
+                    && quiet_icon(
+                        ui,
+                        earlier,
+                        egui::Id::unique(("macro step earlier", id, at)),
+                        Icon::ChevronUp,
+                        12.0,
+                        0.6,
+                        Some(crate::studio::BUTTON),
+                    )
+                    .on_hover_text("Do this step earlier")
+                    .clicked()
+                {
+                    asked = Some((index, MacroAsk::Earlier(at)));
                 }
-                ui.separator();
-                if ui.button("Duplicate").clicked() {
-                    asked = Some((index, Ask::Duplicate));
-                    ui.close();
+                if quiet_icon(
+                    ui,
+                    remove,
+                    egui::Id::unique(("macro step remove", id, at)),
+                    Icon::Close,
+                    11.0,
+                    0.6,
+                    Some(crate::studio::BUTTON),
+                )
+                .on_hover_text("Remove this step")
+                .clicked()
+                {
+                    asked = Some((index, MacroAsk::Remove(at)));
                 }
-                if ui.button("Delete").clicked() {
-                    asked = Some((index, Ask::Delete));
+            }
+            ui.add_space(4.0);
+            let (place, _) = ui.allocate_exact_size(vec2(inner, 28.0), Sense::hover());
+            let adding = ui.interact(place, egui::Id::unique(("macro add step", id)), Sense::click());
+            ui.painter().rect_filled(
+                place,
+                crate::studio::RADIUS,
+                if adding.hovered() { crate::studio::BUTTON } else { PANEL },
+            );
+            ui.painter().text(
+                place.left_center() + vec2(10.0, 0.0),
+                Align2::LEFT_CENTER,
+                "Add a step…",
+                FontId::proportional(12.5),
+                TEXT_DIM,
+            );
+            let mark = Rect::from_center_size(place.right_center() - vec2(14.0, 0.0), vec2(11.0, 11.0));
+            crate::icons::paint(ui.painter(), Icon::ChevronDown, mark, TEXT_DIM);
+            egui::Popup::menu(&adding).show(|ui| {
+                if let Some(action) = add_action_menu(ui, show, state) {
+                    asked = Some((index, MacroAsk::Add(action)));
                     ui.close();
                 }
             });
-        }
-    });
+            ui.add_space(3.0);
+        });
+    }
     state.rename_started = rename_started;
     match renamed {
         Some(Some((id, name))) => {
@@ -1266,28 +1374,38 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
         None => {}
     }
     if let Some((index, ask)) = asked {
+        let id = state.macros[index].id;
+        // Running a macro or opening its steps changes nothing to save.
+        state.macros_changed |= !matches!(ask, MacroAsk::Run | MacroAsk::Steps);
         match ask {
-            Ask::Run => state.actions_to_run.extend(state.macros[index].actions.iter().cloned()),
-            Ask::Rename => {
-                state.macro_rename = Some((state.macros[index].id, state.macros[index].name.clone()));
+            MacroAsk::Run => state.actions_to_run.extend(state.macros[index].actions.iter().cloned()),
+            MacroAsk::Steps => open_macro = if open_macro == Some(id) { None } else { Some(id) },
+            MacroAsk::Rename => {
+                state.macro_rename = Some((id, state.macros[index].name.clone()));
                 state.rename_started = true;
             }
-            Ask::Color(color) => state.macros[index].color = color,
-            Ask::Add(action) => state.macros[index].actions.push(action),
-            Ask::Remove(at) => {
+            MacroAsk::Color(color) => state.macros[index].color = color,
+            MacroAsk::Startup => state.macros[index].on_startup = !state.macros[index].on_startup,
+            MacroAsk::Add(action) => state.macros[index].actions.push(action),
+            MacroAsk::Earlier(at) => state.macros[index].actions.swap(at - 1, at),
+            MacroAsk::Remove(at) => {
                 state.macros[index].actions.remove(at);
             }
-            Ask::Startup => state.macros[index].on_startup = !state.macros[index].on_startup,
-            Ask::Duplicate => {
+            MacroAsk::Duplicate => {
                 let copy = state.macros[index].duplicate();
                 state.macros.insert(index + 1, copy);
             }
-            Ask::Delete => {
+            MacroAsk::Delete => {
                 state.macros.remove(index);
             }
         }
-        state.macros_changed = true;
     }
+    ui.data_mut(|data| match open_macro {
+        Some(id) => {
+            data.insert_temp(open_id, id);
+        }
+        None => data.remove::<sp_model::Uuid>(open_id),
+    });
 }
 
 /// The audio playlists: the one shown, with a menu to choose another, make one, rename it or

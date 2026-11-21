@@ -79,7 +79,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | Tabs: Timers | A card each: count down, count up, to a time of day; Reset, Start or Stop; ⋯ (or right-click) for Edit… and Delete; + makes one | `timers`, `timer start\|stop\|reset NAME`, `timer new\|set\|delete` |
 | Tabs: Messages | A card each, with fill-in tokens (the time, a timer), shown over the slides: Show or Hide; ⋯ for Edit…, Rename, Duplicate, Cut, Copy, Paste, Delete; Words once… shows typed words at once (kept as Quick message) | `messages`, `message show NAME`, `message hide`, `message show --text WORDS` |
 | Tabs: Props | Slides of their own laid over the show (logos, lower thirds), a card each with its picture: Show or Hide; ⋯ for Edit in the Editor, Clears Itself, Rename, Duplicate, Delete | `props`, `prop show\|hide NAME`, `prop new\|delete` |
-| Tabs: Macros | Lists of actions done in turn | `macros`, `macro run NAME` |
+| Tabs: Macros | Steps done in turn, a card each: Run (the name alone does nothing); the chevron opens its steps (Earlier, Remove, Add a step…); ⋯ for Colour, Run When SoftPresenter Opens, Rename, Duplicate, Delete | `macros`, `macro run NAME`, `macro new\|add\|remove\|delete` |
 | Tabs: Stage | Each stage screen's layout, and the stage message | `stage on\|off` |
 | Tabs: Audio | Audio playlists: play, pause, skip, volume, shuffle, crossfade | `audio`, `audio play\|pause\|stop`, `audio volume N` |
 | Tabs: VoxLive (once VoxLive is connected) | The church's VoxLive screens as buttons: a click puts that screen's captions on the screens in place of a verse | `voxlive show N\|NAME` |
