@@ -1036,6 +1036,9 @@ pub enum ThumbOf<'a> {
     SongSlide(usize, &'a Slide),
     /// A media item, by its index in the show.
     Media(usize),
+    /// A slide drawn with a theme of its own (a prop's, a stage layout's), kept under the
+    /// slide's id; `true` draws it again first, for when what it shows has changed.
+    Own(&'a Slide, &'a sp_model::Theme, bool),
 }
 
 impl Default for HomeState {
@@ -1467,7 +1470,7 @@ pub fn home_ui(
     }
     crate::studio::library(ui, show, state, &mut commands);
     crate::studio::right_column(ui, show, state, preview, &mut commands, |ui, state| {
-        crate::live_tabs::live_tabs(ui, show, state);
+        crate::live_tabs::live_tabs(ui, show, state, &mut *thumb);
     });
     // The middle column is what the side columns leave: the slides (or the Bible page) with
     // the media bin at its foot.
@@ -6264,6 +6267,7 @@ mod tests {
                             | ThumbOf::BibleSlide(_)
                             | ThumbOf::Layout(..) => slides += 1,
                             ThumbOf::Media(_) => media += 1,
+                            ThumbOf::Own(..) => {}
                         }
                         None
                     },

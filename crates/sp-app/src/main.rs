@@ -5610,6 +5610,12 @@ impl App {
                     kept.id = Uuid::from_u128(0x7068_656d_655f_6c61_796f_7574_0000_0000 + index as u128);
                     thumbs.get(gpu, egui_renderer, &kept, None, theme)
                 }
+                ThumbOf::Own(slide, own, again) => {
+                    if again {
+                        thumbs.forget(slide.id, egui_renderer);
+                    }
+                    thumbs.get(gpu, egui_renderer, slide, None, own)
+                }
                 ThumbOf::Media(index) => {
                     let item = show.media().get(index)?;
                     match pictures.small(item.id) {

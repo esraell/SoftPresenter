@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use egui::{Align, Align2, Color32, FontId, Layout, Rect, Sense, pos2, vec2};
 
-use crate::home::HomeState;
+use crate::home::{HomeState, ThumbOf};
 use crate::icons::Icon;
 use crate::messages::Message;
 use crate::screens::Kind;
@@ -22,8 +22,9 @@ use crate::studio::{
 };
 use crate::timers::{self, Timer};
 
-/// Draws the tabs and the one that is open.
-pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) {
+/// Draws the tabs and the one that is open. `thumb` draws the small pictures of props and stage
+/// layouts.
+pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, thumb: &mut Thumb) {
     let width = ui.available_width();
     // VoxLive's tab, once it is connected and has screens.
     let voxlive =
@@ -72,7 +73,7 @@ pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeStat
         match state.live_tab {
             0 => timers_tab(ui, state),
             1 => messages_tab(ui, state),
-            2 => props_tab(ui, state),
+            2 => props_tab(ui, state, thumb),
             3 => macros_tab(ui, show, state),
             4 => stage_tab(ui, state),
             5 => audio_tab(ui, state),
@@ -764,9 +765,99 @@ fn message_settings(ui: &mut egui::Ui, message: &mut Message, timer_names: &[Str
     changed
 }
 
-fn props_tab(ui: &mut egui::Ui, state: &mut HomeState) {
+/// Asks for a picture of a slide; see [`ThumbOf`].
+type Thumb<'t> = dyn FnMut(ThumbOf) -> Option<(egui::TextureId, bool)> + 't;
+
+/// A small picture of a slide drawn with a theme of its own, in `rect` with round corners: a
+/// prop's, or a stage layout's. `key` keeps it apart from other pictures of the same slide;
+/// it is drawn again when `slide` says something else than when it was last drawn, and black
+/// until it is ready.
+fn own_picture(
+    ui: &egui::Ui,
+    thumb: &mut Thumb,
+    rect: Rect,
+    corner: f32,
+    key: sp_model::Uuid,
+    slide: &sp_model::Slide,
+    theme: &sp_model::Theme,
+) {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    serde_json::to_string(slide).unwrap_or_default().hash(&mut hasher);
+    theme.templates.first().map(|template| serde_json::to_string(template).unwrap_or_default()).hash(&mut hasher);
+    let said = hasher.finish();
+    let drawn = egui::Id::unique(("own picture drawn", key));
+    let again = ui.data(|data| data.get_temp::<u64>(drawn)) != Some(said);
+    let kept = sp_model::Slide { id: key, ..slide.clone() };
+    ui.painter().rect_filled(rect, corner, Color32::BLACK);
+    match thumb(ThumbOf::Own(&kept, theme, again)) {
+        Some((texture, _)) => {
+            ui.data_mut(|data| data.insert_temp(drawn, said));
+            egui::Image::from_texture((texture, rect.size())).corner_radius(corner).paint_at(ui, rect);
+        }
+        None => {
+            // Forgotten already: the next frame draws it from fresh.
+            ui.data_mut(|data| data.insert_temp(drawn, said));
+            ui.ctx().request_repaint();
+        }
+    }
+}
+
+/// The theme a prop's picture is drawn with: the built-in one's boxes on black, as a prop lies
+/// over whatever is on screen.
+fn prop_theme() -> &'static sp_model::Theme {
+    static THEME: std::sync::OnceLock<sp_model::Theme> = std::sync::OnceLock::new();
+    THEME.get_or_init(|| sp_model::Theme {
+        id: sp_model::Uuid::from_u128(0x7072_6f70_0000_0000_0000_0000_0000_0001),
+        name: "Props".to_owned(),
+        background: None,
+        background_picture: None,
+        ..sp_model::Theme::builtin()
+    })
+}
+
+/// Something asked of a prop from its card.
+enum PropAsk {
+    Toggle,
+    Edit,
+    Rename,
+    Duplicate,
+    AutoClear(Option<u32>),
+    Delete,
+}
+
+/// A prop's menu, behind its ⋯ and a right-click on its card.
+fn prop_menu(ui: &mut egui::Ui, auto_clear: Option<u32>) -> Option<PropAsk> {
+    let mut asked = None;
+    if ui.button("Edit in the Editor").clicked() {
+        asked = Some(PropAsk::Edit);
+    }
+    ui.menu_button("Clears Itself", |ui| {
+        for choice in [None, Some(5), Some(10), Some(15), Some(20), Some(30), Some(45), Some(60)] {
+            let label = choice.map_or("Never".to_owned(), |seconds| format!("After {seconds} seconds"));
+            if ui.add(egui::Button::selectable(auto_clear == choice, label)).clicked() {
+                asked = Some(PropAsk::AutoClear(choice));
+                ui.close();
+            }
+        }
+    });
+    if ui.button("Rename").clicked() {
+        asked = Some(PropAsk::Rename);
+    }
+    if ui.button("Duplicate").clicked() {
+        asked = Some(PropAsk::Duplicate);
+    }
+    ui.separator();
+    if ui.button("Delete").clicked() {
+        asked = Some(PropAsk::Delete);
+    }
+    asked
+}
+
+fn props_tab(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut Thumb) {
     use crate::props::Prop;
-    if heading_with_add(ui, "PROPS", "Add a prop") {
+    let (_, add) = heading(ui, "Props", Some("New prop"));
+    if add {
         let taken = |name: &str| state.props.iter().any(|prop| prop.name == name);
         let name = (1..).map(|n| format!("Prop {n}")).find(|name| !taken(name)).unwrap_or_default();
         let prop = Prop::new(name.clone());
@@ -776,49 +867,44 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         state.props_changed = true;
     }
     if state.props.is_empty() {
-        ui.label(
-            egui::RichText::new(
-                "No props. A prop stays over the slides until it is taken off, such as a name in a corner.",
-            )
-            .size(12.0)
-            .color(TEXT_FAINT),
-        );
+        empty_note(ui, "No props. A prop stays over the slides until it is taken off, such as a name in a corner.");
         return;
     }
-    enum Ask {
-        Toggle,
-        Edit,
-        Rename,
-        Duplicate,
-        AutoClear(Option<u32>),
-        Delete,
-    }
-    let mut asked: Option<(usize, Ask)> = None;
+    let mut asked: Option<(usize, PropAsk)> = None;
     let mut renamed: Option<Option<(sp_model::Uuid, String)>> = None;
     let mut rename_started = std::mem::take(&mut state.rename_started);
-    let tile = vec2(96.0, 54.0);
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-        for (index, prop) in state.props.iter().enumerate() {
-            let live = state.props_live.iter().any(|(id, _)| *id == prop.id);
-            let (rect, response) = ui.allocate_exact_size(tile, Sense::click());
-            ui.painter().rect_filled(rect, 6.0, CARD);
-            if live {
-                ui.painter().rect_stroke(rect, 6.0, egui::Stroke::new(2.0, TALLY), egui::StrokeKind::Outside);
-            } else if response.hovered() {
-                ui.painter().rect_stroke(rect, 6.0, egui::Stroke::new(1.0, TEXT_FAINT), egui::StrokeKind::Outside);
-            }
-            match state.prop_rename.as_mut().filter(|(id, _)| *id == prop.id) {
+    let button_font = FontId::proportional(12.5);
+    let button_wide = flat_button_width(ui, &["Show", "Hide"], &button_font, 13.0);
+    // The picture, 16 to 9.
+    let picture = vec2(62.0, 62.0 * 9.0 / 16.0);
+    for index in 0..state.props.len() {
+        let id = state.props[index].id;
+        let showing = state.props_live.iter().any(|(live, _)| *live == id);
+        card(ui, if showing { CARD_SHOWN } else { CARD }, |ui| {
+            let prop = &state.props[index];
+            let width = ui.available_width();
+            let text_wide = width - picture.x - CARD_KEY - button_wide - 3.0 * CARD_GAP;
+            let name = fitted(ui, &prop.name, name_font(), TEXT, text_wide, 2);
+            let leaves = match prop.auto_clear {
+                None => "Stays until taken off".to_owned(),
+                Some(seconds) => format!("Clears itself after {seconds} s"),
+            };
+            let sub = fitted(ui, &leaves, FontId::proportional(12.0), TEXT_FAINT, text_wide, 1);
+            let block = name.size().y + sub.size().y;
+            let (row, _) = ui.allocate_exact_size(vec2(width, block.max(CARD_KEY).max(picture.y)), Sense::hover());
+            let back = card_back(ui, row, egui::Id::unique(("prop card", id)));
+            let y = row.center().y;
+            let place = Rect::from_min_size(pos2(row.min.x, y - picture.y / 2.0), picture);
+            let key = sp_model::Uuid::from_u128(prop.id.as_u128() ^ 0x7072_6f70_7069_6374_7572_6500_0000_0000);
+            own_picture(ui, thumb, place, 4.0, key, &prop.slide, prop_theme());
+            let left = place.max.x + CARD_GAP;
+            let top = y - block / 2.0;
+            let (name_tall, first_line) = (name.size().y, name.rows.first().map_or(15.0, |row| row.height()));
+            match state.prop_rename.as_mut().filter(|(renaming, _)| *renaming == id) {
                 Some((_, typed)) => {
-                    let field = crate::studio::rename_field_at(
-                        ui,
-                        typed,
-                        FontId::proportional(12.0),
-                        TEXT,
-                        ACCENT,
-                        rect.left_center() + vec2(8.0, 0.0),
-                        rect.max.x - 4.0,
-                    );
+                    let start = pos2(left, top + first_line / 2.0);
+                    let field =
+                        crate::studio::rename_field_at(ui, typed, name_font(), TEXT, ACCENT, start, left + text_wide);
                     if std::mem::take(&mut rename_started) {
                         field.request_focus();
                     }
@@ -827,54 +913,43 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                     if escape {
                         renamed = Some(None);
                     } else if enter || field.lost_focus() {
-                        renamed = Some(Some((prop.id, typed.clone())));
+                        renamed = Some(Some((id, typed.clone())));
                     }
                 }
                 None => {
-                    ui.painter().with_clip_rect(rect.shrink(4.0)).text(
-                        rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        prop.name.as_str(),
-                        FontId::proportional(12.0),
-                        if live { TEXT } else { TEXT_DIM },
-                    );
+                    ui.painter().galley(pos2(left, top), name, TEXT);
                 }
             }
-            if response.double_clicked() {
-                asked = Some((index, Ask::Edit));
-            } else if response.clicked() {
-                asked = Some((index, Ask::Toggle));
+            ui.painter().galley(pos2(left, top + name_tall), sub, TEXT_FAINT);
+            let more = Rect::from_min_size(pos2(row.max.x - CARD_KEY, y - CARD_KEY / 2.0), vec2(CARD_KEY, CARD_KEY));
+            let button =
+                Rect::from_min_size(pos2(more.min.x - CARD_GAP - button_wide, y - 15.0), vec2(button_wide, 30.0));
+            let (words, look, hint) = if showing {
+                ("Hide", Flat::On, "Take this prop off the screens")
+            } else {
+                ("Show", Flat::Plain, "Show this prop over the slides on the audience screens")
+            };
+            let toggle = egui::Id::unique(("prop show", id));
+            if flat_button(ui, button, toggle, words, button_font.clone(), look, true).on_hover_text(hint).clicked() {
+                asked = Some((index, PropAsk::Toggle));
             }
-            response.on_hover_text("Click to show or take off; double-click to edit").context_menu(|ui| {
-                if ui.button("Edit…").clicked() {
-                    asked = Some((index, Ask::Edit));
-                    ui.close();
-                }
-                if ui.button("Rename").clicked() {
-                    asked = Some((index, Ask::Rename));
-                    ui.close();
-                }
-                if ui.button("Duplicate").clicked() {
-                    asked = Some((index, Ask::Duplicate));
-                    ui.close();
-                }
-                ui.menu_button("Auto-Clear", |ui| {
-                    for choice in [None, Some(5), Some(10), Some(15), Some(20), Some(30), Some(45), Some(60)] {
-                        let label = choice.map_or("Never".to_owned(), |seconds| format!("After {seconds} seconds"));
-                        if ui.add(egui::Button::selectable(prop.auto_clear == choice, label)).clicked() {
-                            asked = Some((index, Ask::AutoClear(choice)));
-                            ui.close();
-                        }
-                    }
-                });
-                ui.separator();
-                if ui.button("Delete").clicked() {
-                    asked = Some((index, Ask::Delete));
-                    ui.close();
+            let auto_clear = prop.auto_clear;
+            let more = more_key(ui, more, egui::Id::unique(("prop more", id)));
+            egui::Popup::menu(&more).show(|ui| {
+                if let Some(ask) = prop_menu(ui, auto_clear) {
+                    asked = Some((index, ask));
                 }
             });
-        }
-    });
+            if back.double_clicked() {
+                asked = Some((index, PropAsk::Edit));
+            }
+            back.on_hover_text("Double-click to change it in the editor").context_menu(|ui| {
+                if let Some(ask) = prop_menu(ui, auto_clear) {
+                    asked = Some((index, ask));
+                }
+            });
+        });
+    }
     state.rename_started = rename_started;
     match renamed {
         Some(Some((id, name))) => {
@@ -889,46 +964,40 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         Some(None) => state.prop_rename = None,
         None => {}
     }
-    if let Some((index, ask)) = asked {
-        let id = state.props[index].id;
-        match ask {
-            Ask::Toggle => {
-                if state.props_live.iter().any(|(live, _)| *live == id) {
-                    state.props_live.retain(|(live, _)| *live != id);
-                } else {
-                    state.props_live.push((id, Instant::now()));
-                }
-            }
-            Ask::Edit => {
-                // The prop opens in the editor, as a slide of its own.
-                state.editing = crate::studio::prop_draft(state, index);
-                state.bible_open = false;
-                state.reflow = None;
-            }
-            Ask::Rename => {
-                state.prop_rename = Some((id, state.props[index].name.clone()));
-                state.rename_started = true;
-            }
-            Ask::Duplicate => {
-                let copy = state.props[index].duplicate();
-                state.props.insert(index + 1, copy);
-                state.props_changed = true;
-            }
-            Ask::AutoClear(choice) => {
-                state.props[index].auto_clear = choice;
-                state.props_changed = true;
-            }
-            Ask::Delete => {
-                state.props.remove(index);
+    let Some((index, ask)) = asked else { return };
+    let id = state.props[index].id;
+    match ask {
+        PropAsk::Toggle => {
+            if state.props_live.iter().any(|(live, _)| *live == id) {
                 state.props_live.retain(|(live, _)| *live != id);
-                state.props_changed = true;
+            } else {
+                state.props_live.push((id, Instant::now()));
             }
         }
-    }
-    ui.add_space(8.0);
-    let clear = ui.add_enabled(!state.props_live.is_empty(), egui::Button::new("Clear Props"));
-    if clear.on_hover_text("Take every prop off (F4)").clicked() {
-        state.props_live.clear();
+        PropAsk::Edit => {
+            // The prop opens in the editor, as a slide of its own.
+            state.editing = crate::studio::prop_draft(state, index);
+            state.bible_open = false;
+            state.reflow = None;
+        }
+        PropAsk::Rename => {
+            state.prop_rename = Some((id, state.props[index].name.clone()));
+            state.rename_started = true;
+        }
+        PropAsk::Duplicate => {
+            let copy = state.props[index].duplicate();
+            state.props.insert(index + 1, copy);
+            state.props_changed = true;
+        }
+        PropAsk::AutoClear(choice) => {
+            state.props[index].auto_clear = choice;
+            state.props_changed = true;
+        }
+        PropAsk::Delete => {
+            state.props.remove(index);
+            state.props_live.retain(|(live, _)| *live != id);
+            state.props_changed = true;
+        }
     }
 }
 

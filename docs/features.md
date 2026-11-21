@@ -253,8 +253,12 @@ feature changes, this page changes in the same commit.
   orange while it shows), and ⋯ with Edit…, Rename, Duplicate, Cut, Copy, Paste and Delete.
   Words once… in the tab's heading shows words typed there at once, kept as the message Quick
   message (as `sp message show --text` does).
-- **Props** (things that stay over the slides until taken off, made in the editor, with an
-  optional time to clear themselves), **Macros** (coloured buttons that clear layers, show or
+- **Props**: things that stay over the slides until taken off, made in the editor, with an
+  optional time to clear themselves. Each is a card with a small picture of it, its name, Show
+  or Hide (the card is tinted orange while it shows), and ⋯ with Edit in the Editor (a
+  double-click does the same), Clears Itself, Rename, Duplicate and Delete. F4 or the Props key
+  takes them all off.
+- **Macros** (coloured buttons that clear layers, show or
   hide messages and props, start, stop or reset timers, switch the audience screens and go to
   songs, show a picture from the media bin, optionally when the app starts), **Audio** (playlists of tracks such as walk-in music: play, pause,
   skip 15 seconds, volume, Play Through to the next track, Shuffle, and a crossfade of up to ten
