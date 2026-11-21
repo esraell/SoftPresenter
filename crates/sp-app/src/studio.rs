@@ -1,8 +1,9 @@
 //! The look of the app and the parts of the main window drawn in it: the top bar, the song
 //! list, the Program panel and the media strip.
 //!
-//! The look is a studio one: near-black surfaces in three tones with almost no lines, one
-//! colour for "selected" and one, tally red, kept only for what is on screen right now.
+//! The look is of a piece of equipment: near-black surfaces in steps with almost no lines, a
+//! lighter grey for "on" and "chosen", and one colour, orange, kept only for what is on screen
+//! right now.
 
 use std::sync::Arc;
 
@@ -16,37 +17,52 @@ use crate::editor::EditDraft;
 use crate::home::{HomeState, SlideView, ThumbOf, matches_filter};
 use crate::icons::{self, Icon};
 
-// A grey studio: neutral greys with no tint, light grey for what is chosen, and red only for
-// what is on screen.
+// A dark, quiet window built like a piece of equipment: greys in steps, each thing that sits on
+// another a step lighter than it, and one colour, orange, kept for what is on screen.
 
-/// The window behind everything.
-pub const BG: Color32 = Color32::from_rgb(28, 28, 29);
-/// Side panels and bars.
-pub const PANEL: Color32 = Color32::from_rgb(38, 38, 39);
-/// Things raised off a panel: buttons, cards, fields.
-pub const CARD: Color32 = Color32::from_rgb(52, 52, 54);
-pub const HOVER: Color32 = Color32::from_rgb(64, 64, 66);
+/// The window behind the panels.
+pub const BG: Color32 = Color32::from_rgb(0x0c, 0x0c, 0x0c);
+/// The three columns, and bars.
+pub const PANEL: Color32 = Color32::from_rgb(0x19, 0x19, 0x19);
+/// A region set into a panel: the dock under the slides, the objects shelf in Edit.
+#[allow(dead_code)] // Used as each page of the new design lands.
+pub const SHELF: Color32 = Color32::from_rgb(0x15, 0x15, 0x15);
+/// Things that sit on a panel: cards, rows that are chosen, fields.
+pub const CARD: Color32 = Color32::from_rgb(0x23, 0x23, 0x23);
+/// A row or cell under the pointer: lighter than what it lies on, never darker.
+pub const HOVER: Color32 = Color32::from_rgb(0x2b, 0x2b, 0x2b);
 /// The rare line between two areas.
-pub const LINE: Color32 = Color32::from_rgb(60, 60, 62);
-pub const TEXT: Color32 = Color32::from_rgb(236, 236, 236);
-pub const TEXT_DIM: Color32 = Color32::from_rgb(168, 168, 170);
-pub const TEXT_FAINT: Color32 = Color32::from_rgb(118, 118, 120);
+pub const LINE: Color32 = Color32::from_rgb(0x33, 0x33, 0x33);
+pub const TEXT: Color32 = Color32::from_rgb(0xf3, 0xf3, 0xef);
+pub const TEXT_DIM: Color32 = Color32::from_rgb(0xb9, 0xb9, 0xb2);
+pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x8f, 0x8f, 0x88);
 /// Chosen, in focus: outlines, lines and marks in light grey (and, faded, a lighter row).
-pub const ACCENT: Color32 = Color32::from_rgb(205, 205, 208);
-/// The fill of a chosen tab or button, under white words.
-pub const SELECTED: Color32 = Color32::from_rgb(88, 88, 92);
+pub const ACCENT: Color32 = Color32::from_rgb(0xb9, 0xb9, 0xb2);
+/// Switched on or chosen: the fill of a chosen tab or button. A lighter grey, never white.
+pub const SELECTED: Color32 = Color32::from_rgb(0x50, 0x50, 0x50);
 /// On screen right now. Used for nothing else.
-pub const TALLY: Color32 = Color32::from_rgb(255, 69, 58);
+pub const TALLY: Color32 = Color32::from_rgb(0xff, 0x4a, 0x1a);
+/// Take care; the tags that show an action's key.
+#[allow(dead_code)] // Used as each page of the new design lands.
+pub const CARE: Color32 = Color32::from_rgb(0xff, 0xc4, 0x00);
 /// The output is on and ready.
-pub const READY: Color32 = Color32::from_rgb(50, 208, 116);
-/// The corner radius of buttons, fields and cards.
-pub const RADIUS: f32 = 8.0;
-/// A button: its fill, lighter under the pointer, and its outline. Lighter than a card and
-/// outlined, so a button stands out from the panel or window behind it.
-pub const BUTTON: Color32 = Color32::from_rgb(62, 62, 66);
-pub const BUTTON_HOVER: Color32 = Color32::from_rgb(80, 80, 85);
-pub const BUTTON_EDGE: Color32 = Color32::from_rgb(94, 94, 99);
-const BUTTON_EDGE_HOVER: Color32 = Color32::from_rgb(120, 120, 126);
+pub const READY: Color32 = Color32::from_rgb(0x2f, 0xd3, 0x6b);
+/// The corner of rows, small buttons and fields.
+pub const RADIUS: f32 = 7.0;
+/// The corner of keys, cards and sheets.
+pub const RADIUS_CARD: f32 = 11.0;
+/// The corner of the three columns.
+#[allow(dead_code)] // Used as each page of the new design lands.
+pub const RADIUS_PANEL: f32 = 18.0;
+/// A button: its fill, and lighter under the pointer. Buttons are flat, with no outline (the
+/// edge is the fill's own colour, kept so that nothing changes size where one was drawn).
+pub const BUTTON: Color32 = Color32::from_rgb(0x30, 0x30, 0x30);
+pub const BUTTON_HOVER: Color32 = Color32::from_rgb(0x3b, 0x3b, 0x3b);
+pub const BUTTON_EDGE: Color32 = BUTTON;
+const BUTTON_EDGE_HOVER: Color32 = BUTTON_HOVER;
+/// The edge under a raised key (the layer keys and Clear All).
+#[allow(dead_code)] // Used as each page of the new design lands.
+pub const KEY_EDGE: Color32 = Color32::from_rgb(0x05, 0x05, 0x05);
 
 /// Paints a button's block, as every button is drawn: its fill, lighter under the pointer (or
 /// while it is on), and its outline.
@@ -63,13 +79,13 @@ pub fn apply_style(ctx: &egui::Context) {
     visuals.panel_fill = BG;
     visuals.window_fill = PANEL;
     visuals.window_stroke = Stroke::new(1.0, LINE);
-    visuals.window_corner_radius = CornerRadius::same(12);
-    visuals.menu_corner_radius = CornerRadius::same(10);
+    visuals.window_corner_radius = CornerRadius::same(RADIUS_CARD as u8);
+    visuals.menu_corner_radius = CornerRadius::same(RADIUS_CARD as u8);
     visuals.extreme_bg_color = BG;
     visuals.faint_bg_color = CARD;
     visuals.override_text_color = Some(TEXT);
-    visuals.selection.bg_fill = ACCENT.gamma_multiply(0.55);
-    visuals.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+    visuals.selection.bg_fill = SELECTED;
+    visuals.selection.stroke = Stroke::new(1.0, TEXT);
     visuals.hyperlink_color = ACCENT;
     let radius = CornerRadius::same(RADIUS as u8);
     // Buttons, menus and fields are lighter than the panels and outlined, so they stand out.
@@ -85,14 +101,16 @@ pub fn apply_style(ctx: &egui::Context) {
         widget.weak_bg_fill = fill;
         widget.bg_stroke = Stroke::new(1.0, edge);
         widget.fg_stroke = Stroke::new(1.0, TEXT);
+        // Nothing grows or moves under the pointer or when pressed.
+        widget.expansion = 0.0;
     }
     visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, LINE);
     visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT_DIM);
     ctx.set_visuals(visuals);
     ctx.all_styles_mut(|style| {
         use egui::TextStyle::{Body, Button, Heading, Monospace, Small};
-        style.text_styles.insert(Body, FontId::new(13.5, FontFamily::Proportional));
-        style.text_styles.insert(Button, FontId::new(13.5, FontFamily::Proportional));
+        style.text_styles.insert(Body, FontId::new(13.0, FontFamily::Proportional));
+        style.text_styles.insert(Button, FontId::new(13.0, FontFamily::Proportional));
         style.text_styles.insert(Small, FontId::new(11.5, FontFamily::Proportional));
         style.text_styles.insert(Heading, FontId::new(18.0, FontFamily::Proportional));
         style.text_styles.insert(Monospace, FontId::new(12.5, FontFamily::Monospace));
@@ -104,6 +122,12 @@ pub fn apply_style(ctx: &egui::Context) {
 
 /// The name of the heavier cut of the interface font, for headings and buttons.
 const SEMIBOLD: &str = "semibold";
+
+/// The fixed-width face at a size.
+#[allow(dead_code)] // Used as each page of the new design lands.
+pub fn fixed(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Monospace)
+}
 
 /// The heavier cut of the interface font at a size.
 pub fn semibold(size: f32) -> FontId {
@@ -122,6 +146,14 @@ fn load_fonts(ctx: &egui::Context) {
         ("/System/Library/Fonts/HelveticaNeue.ttc", "/System/Library/Fonts/HelveticaNeue.ttc"),
         ("C:\\Windows\\Fonts\\segoeui.ttf", "C:\\Windows\\Fonts\\seguisb.ttf"),
         ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+    ];
+    // The fixed-width face, for numbers, clocks, slide numbers, key caps and small capital labels.
+    const FIXED: [&str; 5] = [
+        "/System/Library/Fonts/SFNSMono.ttf",
+        "/System/Library/Fonts/Menlo.ttc",
+        "C:\\Windows\\Fonts\\consola.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
     ];
     const WIDE: [&str; 2] =
         ["/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "C:\\Windows\\Fonts\\arialuni.ttf"];
@@ -150,6 +182,10 @@ fn load_fonts(ctx: &egui::Context) {
     }
     fonts.families.insert(FontFamily::Proportional, regular_first);
     fonts.families.insert(FontFamily::Name(SEMIBOLD.into()), heavy_first);
+    if let Some(bytes) = FIXED.iter().find_map(|path| std::fs::read(path).ok()) {
+        fonts.font_data.insert("fixed".to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
+        fonts.families.entry(FontFamily::Monospace).or_default().insert(0, "fixed".to_owned());
+    }
     if let Some(bytes) = WIDE.iter().find_map(|path| std::fs::read(path).ok()) {
         fonts.font_data.insert("wide".to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
         for family in fonts.families.values_mut() {
