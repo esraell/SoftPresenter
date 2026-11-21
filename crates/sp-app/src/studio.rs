@@ -1036,7 +1036,7 @@ pub fn paint_tally(painter: &egui::Painter, centre: egui::Pos2) {
 
 /// A flat button with its words in the middle and an icon before them if one is given. `on`
 /// gives it the lighter grey of a choice that is on.
-pub fn flat_button(
+pub fn labelled_button(
     ui: &egui::Ui,
     rect: Rect,
     id: egui::Id,
@@ -1328,13 +1328,19 @@ fn left_foot(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &m
         }
         let add = Rect::from_min_size(pos2(area.min.x, top), vec2(area.width(), 30.0));
         if library {
-            let button = flat_button(ui, add, ui.scope_id().with("new song"), "New song", Some(Icon::Plus), false);
+            let button = labelled_button(ui, add, ui.scope_id().with("new song"), "New song", Some(Icon::Plus), false);
             if button.on_hover_text("New song (Command-N)").clicked() {
                 state.new_song = true;
             }
         } else {
-            let button =
-                flat_button(ui, add, ui.scope_id().with("add to playlist"), "Add to playlist", Some(Icon::Plus), false);
+            let button = labelled_button(
+                ui,
+                add,
+                ui.scope_id().with("add to playlist"),
+                "Add to playlist",
+                Some(Icon::Plus),
+                false,
+            );
             egui::Popup::menu(&button).show(|ui| add_to_playlist_menu(ui, show, state, commands));
         }
         // The filter: a round field, a step lighter than the panel.
@@ -3331,7 +3337,8 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
             dock_divider(ui, x + 6.5, middle);
             x += 13.0;
             let place = Rect::from_min_size(pos2(x, middle - 15.0), vec2(CONTINUOUS, 30.0));
-            let button = flat_button(ui, place, ui.scope_id().with("continuous"), "Continuous", None, state.continuous);
+            let button =
+                labelled_button(ui, place, ui.scope_id().with("continuous"), "Continuous", None, state.continuous);
             if button.on_hover_text("Next at the end of a song goes on to the next song").clicked() {
                 state.continuous = !state.continuous;
             }
@@ -3345,7 +3352,10 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
                 [("Undo", Action::Undo, "Undo (Command-Z)"), ("Redo", Action::Redo, "Redo (Shift-Command-Z)")]
             {
                 let place = Rect::from_min_size(pos2(x, middle - 15.0), vec2(UNDO, 30.0));
-                if flat_button(ui, place, ui.scope_id().with(label), label, None, false).on_hover_text(hint).clicked() {
+                if labelled_button(ui, place, ui.scope_id().with(label), label, None, false)
+                    .on_hover_text(hint)
+                    .clicked()
+                {
                     state.menu_asked = Some(action);
                 }
                 x += UNDO + 8.0;
