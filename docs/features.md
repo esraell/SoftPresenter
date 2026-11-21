@@ -213,7 +213,9 @@ feature changes, this page changes in the same commit.
 - **The window** is three round panels on a dark window: the left column, the middle, and a
   right column that is the same in every view. Along the top: the views (Show, Bible, Edit,
   Themes), a find box (it searches the song library: titles first, then lines of the songs'
-  words; it does not search the Bible, playlists or media), the clock, the Audience and Stage
+  words; it does not search the Bible, playlists or media), the clock (on a 12-hour or a
+  24-hour clock as the computer is set, with the computer's own words for morning and
+  afternoon), the Audience and Stage
   keys, a `?` (it opens Settings at Key Mappings) and Settings.
 - **The right column**: the preview block, six layer keys (Slide, Media, Props, Messages, Audio,
   Announce: each is lit while its layer shows, and pressing it clears that layer alone), Clear

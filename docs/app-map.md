@@ -35,7 +35,7 @@ sources) drawn by their own thread.
 |---|---|---|
 | Show / Bible / Edit / Themes | Switches the view | `view show\|edit\|bible\|themes` |
 | Find box | Searches the song library as you type: titles first, then lines of the songs' words. Return opens the song picked, Command-Return (Ctrl on other computers) adds it to the playlist in front, Escape or a click elsewhere ends the search. Command-F goes to it. It does not search the Bible, playlists or media | |
-| Clock | The time of day | |
+| Clock | The time of day, on a 12-hour or a 24-hour clock as the computer is set (`clock.rs`) | |
 | Audience ON/OFF | The audience screens on or off (Command-1) | `audience on\|off` |
 | Stage ON/OFF | The stage screens on or off (Command-2) | `stage on\|off` |
 | ? | Opens Settings at Key Mappings | |

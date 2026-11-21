@@ -800,16 +800,44 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             commands.push(Command::SetOutputEnabled(!on));
         }
 
-        // The clock: the time of day to the second, in a dark window of its own. The window is
-        // drawn again when the next second starts, and for nothing else on its account.
+        // The clock: the time of day to the second, in a dark window of its own, on a 12-hour or
+        // a 24-hour clock as the computer is set. Its box is as wide as its widest time (two
+        // figures for the hour, and the wider of the two words), so nothing moves as time
+        // passes. The window is drawn again when the next second starts, and for nothing else
+        // on its account.
         let now = chrono::Local::now();
+        let (hour, minute, second) =
+            (chrono::Timelike::hour(&now), chrono::Timelike::minute(&now), chrono::Timelike::second(&now));
+        let in_front = ui.input(|input| input.focused);
+        let form = state.clock.form(in_front);
         let font = fixed(14.0);
-        let wide = spaced(ui, "00:00:00", font.clone(), TEXT, 0.6).size().x + 24.0;
+        let word_font = fixed_semibold(11.0);
+        let figures = spaced(ui, &form.figures(hour, minute, second), font.clone(), TEXT, 0.6);
+        let figures_wide = spaced(ui, &form.figures(0, 0, 0).replace('1', "0"), font.clone(), TEXT, 0.6)
+            .size()
+            .x
+            .max(spaced(ui, &form.figures(10, 0, 0).replace('1', "0"), font, TEXT, 0.6).size().x);
+        let word = form.marker(hour).map(|word| spaced(ui, word, word_font.clone(), TEXT_DIM, 0.6));
+        let word_wide = if form.twelve {
+            let wide = |word: &str| spaced(ui, word, word_font.clone(), TEXT_DIM, 0.6).size().x;
+            wide(&form.am).max(wide(&form.pm)) + 6.0
+        } else {
+            0.0
+        };
+        let word_first = form.marker_first;
+        let wide = figures_wide + word_wide + 24.0;
         let clock = Rect::from_min_size(pos2(left - 10.0 - wide, middle - 14.5), vec2(wide, 29.0));
         ui.painter().rect_filled(clock, RADIUS, Color32::BLACK);
         ui.painter().rect_stroke(clock, RADIUS, Stroke::new(1.0, LINE), StrokeKind::Inside);
-        let time = now.format("%H:%M:%S").to_string();
-        paint_spaced(ui, pos2(clock.min.x + 12.0, middle), Align2::LEFT_CENTER, &time, font, TEXT, 0.6);
+        // The figures end at one place, so the seconds stay where they are when the hour gains
+        // or loses a figure; the word has a place of its own before or after them.
+        let figures_end = if word_first { clock.max.x - 12.0 } else { clock.min.x + 12.0 + figures_wide };
+        let at = pos2(figures_end - figures.size().x, middle - figures.size().y / 2.0);
+        ui.painter().galley(at, figures, TEXT);
+        if let Some(word) = word {
+            let x = if word_first { clock.min.x + 12.0 } else { figures_end + 6.0 };
+            ui.painter().galley(pos2(x, middle - word.size().y / 2.0), word, TEXT_DIM);
+        }
         let into_second = u64::from(chrono::Timelike::nanosecond(&now) % 1_000_000_000);
         ui.ctx().request_repaint_after(std::time::Duration::from_nanos(1_000_000_000 - into_second));
 

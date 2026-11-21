@@ -5,6 +5,7 @@ mod audio;
 mod bible;
 mod bible_store;
 mod bin_pictures;
+mod clock;
 mod control;
 mod convert;
 mod deck;

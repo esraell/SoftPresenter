@@ -254,6 +254,8 @@ pub struct HomeState {
     /// Where the find box is in the bar along the top, when the window is wide enough for it:
     /// what a search finds is listed under it.
     pub find_rect: Option<Rect>,
+    /// How the computer writes the time of day, for the clock in the bar along the top.
+    pub clock: crate::clock::SystemClock,
     /// A change to the media bin asked for.
     pub media_request: Option<MediaRequest>,
     /// Songs taken out of the library this run, by their place in the show.
@@ -1100,6 +1102,7 @@ impl Default for HomeState {
             media_request: None,
             library_search: None,
             find_rect: None,
+            clock: crate::clock::SystemClock::default(),
             reflow: None,
             reflow_done: None,
             screens: crate::screens::starting(None),
