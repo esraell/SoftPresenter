@@ -3,7 +3,7 @@
 //!
 //! The computer's own setting is read, not only its language's habit. Reading it means running
 //! one of the system's small programs, so it is done on a thread of its own: once when the
-//! window opens, then at most once a minute, and when the window comes to the front again. The
+//! window opens, then at most every ten minutes, and when the window comes to the front again. The
 //! clock is drawn with what was last read; nothing waits for the reading.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -270,7 +270,7 @@ fn read_system() -> Option<TimeForm> {
 }
 
 /// How often the computer's setting is read again while the window stays open.
-const READ_AGAIN: Duration = Duration::from_secs(60);
+const READ_AGAIN: Duration = Duration::from_secs(600);
 /// The least time between two readings, however often the window comes to the front.
 const NOT_SOONER: Duration = Duration::from_secs(5);
 
