@@ -3,6 +3,7 @@
 mod applog;
 mod audio;
 mod bible;
+mod bible_language;
 mod bible_store;
 mod bin_pictures;
 mod clock;
@@ -46,6 +47,7 @@ mod stage;
 mod stage_editor;
 mod studio;
 mod sweep;
+mod system_language;
 mod theme_cli;
 mod theme_store;
 mod thumbs;
@@ -6791,6 +6793,8 @@ impl ApplicationHandler<AppEvent> for App {
                     running.home_state.bible.apply_settings(&page);
                 }
                 running.home_state.bible.history = service::load_bible_history();
+                // The language a session of the Bible view starts in, read once on a thread.
+                running.home_state.bible.system_language.start();
                 self.bible_page_saved = running.home_state.bible.choices();
                 let prefs = service::load_prefs();
                 running.home_state.apply_prefs(&prefs);

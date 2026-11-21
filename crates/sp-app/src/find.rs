@@ -21,14 +21,19 @@ const LEAST_LETTERS: usize = 3;
 /// One Bible result: a passage, or a verse.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BibleRow {
-    /// The passage's or the verse's name, as its Bible writes it: `John 3:16-18`.
+    /// The passage's or the verse's name as the operator reads it: the book in the language
+    /// typed (for a verse, of the Bible it was found in), the numbers the first Bible's.
     pub title: String,
     /// What it is, at the right of its row, in capitals: `BIBLE`, or `BIBLE · KJV`.
     pub tag: String,
-    /// The words of its first verse.
+    /// The words of its first verse, from the Bible the operator reads it in.
     pub line: String,
-    /// What to type in Scripture Lookup to get it.
+    /// What the Bible view looks up for it, and a playlist keeps: its name as the first Bible
+    /// writes it, as the Bible view's own Add keeps a passage.
     pub lookup: String,
+    /// The language the operator reads it in (`en`, `ru`, `uk`…), for the Bible view to go on
+    /// in when it is opened; `None` when the words said nothing of one.
+    pub language: Option<String>,
     /// A passage named by a reference, not a verse found by its words.
     pub passage: bool,
 }
@@ -40,43 +45,56 @@ fn names_a_passage(typed: &str) -> bool {
     letters.is_some_and(|at| typed[at..].contains(|c: char| c.is_ascii_digit()))
 }
 
-/// What the Bibles in use have for what is typed, in the order they are listed. A reference
-/// gives its passage, named and quoted from the first Bible. Anything else of three letters or
-/// more is searched for as words: the first verses holding them, from the first Bible that has
+/// What the Bibles in use have for what is typed, in the order they are listed (`bibles` in
+/// the translations' order, the first being the one the slides are numbered by). `session` is
+/// the language the operator reads in when the words say nothing of one.
+///
+/// A reference gives its passage, read as the Bible view reads it (so it is the passage its
+/// slides will be), named in the language it was typed in and quoted from the first Bible in
+/// use of that language (the first Bible when that language has none). Anything else of three
+/// letters or more is searched for as words in the Bibles written in their alphabet (all of
+/// them, in order, when none is): the first verses holding them, from the first Bible that has
 /// any, then the next, up to [`VERSES_LISTED`] in all.
-pub fn search_bibles(typed: &str, bibles: &[(String, Arc<Bible>)]) -> Vec<BibleRow> {
+pub fn search_bibles(typed: &str, bibles: &[(String, Arc<Bible>)], session: &str) -> Vec<BibleRow> {
+    use crate::bible_language::{language_of, search_order, typed_bible};
     let typed = typed.trim();
     let Some((_, lead)) = bibles.first() else { return Vec::new() };
+    let languages: Vec<String> = bibles.iter().map(|(_, bible)| language_of(&bible.info.language)).collect();
     if names_a_passage(typed)
-        && let Ok(range) = sp_bible::parse_reference_in(typed, &lead.info.language)
+        && let Ok(reference) = sp_bible::read_reference(typed, &lead.info.language)
     {
-        let verses = lead.verses(range);
-        return match (verses.first(), verses.last()) {
-            (Some((first, words)), Some((last, _))) => {
-                let title = lead.label(*first, *last);
-                vec![BibleRow {
-                    lookup: title.clone(),
-                    title,
-                    tag: "BIBLE".to_owned(),
-                    line: (*words).to_owned(),
-                    passage: true,
-                }]
-            }
-            _ => Vec::new(),
-        };
+        let verses = lead.verses(reference.range);
+        let (Some((first, words)), Some((last, _))) = (verses.first(), verses.last()) else { return Vec::new() };
+        let (reader, language) = typed_bible(&reference.languages, session, &languages);
+        let reader_bible = &bibles[reader].1;
+        // The operator's words: the same verse in their Bible, as the slides line it up.
+        let there = sp_bible::convert(*first, lead.info.numbering, reader_bible.info.numbering);
+        let line = reader_bible.verse(there).unwrap_or(words);
+        return vec![BibleRow {
+            title: sp_bible::label_in(&languages[reader], *first, *last),
+            tag: "BIBLE".to_owned(),
+            line: line.to_owned(),
+            lookup: lead.label(*first, *last),
+            language,
+            passage: true,
+        }];
     }
     let mut rows = Vec::new();
     if typed.chars().count() < LEAST_LETTERS {
         return rows;
     }
-    for (short, bible) in bibles {
+    let order = search_order(typed, session, &languages).unwrap_or_else(|| (0..bibles.len()).collect());
+    for at in order {
+        let (short, bible) = &bibles[at];
         for (place, words) in bible.search(typed, VERSES_LISTED - rows.len()) {
-            let title = bible.label(place, place);
+            // Named and opened as the first Bible numbers it, which the slides follow.
+            let there = sp_bible::convert(place, bible.info.numbering, lead.info.numbering);
             rows.push(BibleRow {
-                lookup: title.clone(),
-                title,
+                title: sp_bible::label_in(&languages[at], there, there),
                 tag: format!("BIBLE \u{b7} {}", short.to_uppercase()),
                 line: words.to_owned(),
+                lookup: lead.label(there, there),
+                language: Some(languages[at].clone()).filter(|language| !language.is_empty()),
                 passage: false,
             });
         }
@@ -87,8 +105,9 @@ pub fn search_bibles(typed: &str, bibles: &[(String, Arc<Bible>)]) -> Vec<BibleR
     rows
 }
 
-/// What was asked: the words typed, and which Bibles (by their ids, in order).
-type Asked = (String, Vec<String>);
+/// What was asked: the words typed, which Bibles (by their ids, in order), and the session's
+/// language.
+type Asked = (String, Vec<String>, String);
 
 /// An answer from the find box's thread.
 struct Answer {
@@ -117,7 +136,7 @@ fn answer(job: Job) -> Answer {
             bibles.push((short, bible));
         }
     }
-    Answer { rows: search_bibles(&job.asked.0, &bibles), asked: job.asked, read }
+    Answer { rows: search_bibles(&job.asked.0, &bibles, &job.asked.2), asked: job.asked, read }
 }
 
 /// The find box's Bible results, asked for as the words change and taken when they come.
@@ -133,18 +152,19 @@ pub struct Finder {
 
 impl Finder {
     /// The Bible results for what is typed, or `None` while they are still being found. Asks
-    /// for them when the words or the Bibles in use have changed (`bibles` is called only
-    /// then). Never waits.
+    /// for them when the words, the Bibles in use or the session's language have changed
+    /// (`bibles` is called only then). Never waits.
     pub fn rows(
         &mut self,
         typed: &str,
         in_use: &[String],
+        session: &str,
         bibles: impl FnOnce() -> Vec<BibleReader>,
         wake: &egui::Context,
     ) -> Option<&[BibleRow]> {
-        let current = |asked: &Asked| asked.0 == typed && asked.1 == in_use;
+        let current = |asked: &Asked| asked.0 == typed && asked.1 == in_use && asked.2 == session;
         if !self.asked.as_ref().is_some_and(current) {
-            let asked: Asked = (typed.to_owned(), in_use.to_vec());
+            let asked: Asked = (typed.to_owned(), in_use.to_vec(), session.to_owned());
             self.asked = Some(asked.clone());
             let job = Job { asked, bibles: bibles(), wake: wake.clone() };
             if cfg!(test) {
@@ -208,41 +228,127 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn a_reference_gives_its_passage_from_the_first_bible() {
-        let bibles = shipped();
-        for typed in ["John 3:16-18", "jn 3:16-18", "Ин 3:16-18", "Ів 3:16-18"] {
-            let rows = search_bibles(typed, &bibles);
-            assert_eq!(rows.len(), 1, "{typed}");
-            assert_eq!((rows[0].title.as_str(), rows[0].tag.as_str()), ("John 3:16-18", "BIBLE"), "{typed}");
-            assert_eq!(rows[0].lookup, "John 3:16-18");
-            assert!(rows[0].line.starts_with("For God so loved the world"), "{}", rows[0].line);
-        }
-        // A chapter alone is the whole chapter.
-        let psalm = search_bibles("ps 23", &bibles);
-        assert_eq!(psalm.len(), 1);
-        assert!(psalm[0].title.ends_with("23:1-6"), "{}", psalm[0].title);
-        // A book alone, or a book that is a number and a name, is not offered whole.
-        assert!(search_bibles("john", &bibles).iter().all(|row| !row.passage));
-        assert!(search_bibles("1 john", &bibles).iter().all(|row| !row.passage));
+    /// The shipped Bibles named, in that order.
+    fn these(names: &[&str]) -> Vec<(String, Arc<Bible>)> {
+        let all = shipped();
+        names.iter().map(|name| all.iter().find(|(short, _)| short == name).expect("shipped").clone()).collect()
+    }
+
+    /// A Bible made for a test, with words written for it.
+    fn made(short: &str, language: &str, lines: &str) -> (String, Arc<Bible>) {
+        let info = sp_bible::Info {
+            id: short.to_lowercase(),
+            name: format!("Test {short}"),
+            short: short.to_owned(),
+            language: language.to_owned(),
+            terms: "Written for a test".to_owned(),
+            credit: String::new(),
+            source: "a test".to_owned(),
+            numbering: sp_bible::Numbering::English,
+            loose: false,
+        };
+        (short.to_owned(), Arc::new(Bible::from_verse_lines(info, lines, str::to_owned)))
     }
 
     #[test]
-    fn words_give_the_first_verses_that_hold_them() {
+    fn a_reference_gives_its_passage_named_in_the_language_typed() {
+        // The King James Version first, as the shipped Bibles are listed.
         let bibles = shipped();
-        let rows = search_bibles("valley of the shadow", &bibles);
+        for typed in ["John 3:16-18", "jn 3:16-18"] {
+            let rows = search_bibles(typed, &bibles, "en");
+            assert_eq!(rows.len(), 1, "{typed}");
+            assert_eq!((rows[0].title.as_str(), rows[0].tag.as_str()), ("John 3:16-18", "BIBLE"), "{typed}");
+            assert_eq!((rows[0].lookup.as_str(), rows[0].language.as_deref()), ("John 3:16-18", Some("en")));
+            assert!(rows[0].line.starts_with("For God so loved the world"), "{}", rows[0].line);
+        }
+        // Typed in Russian: named and quoted in Russian; looked up as the first Bible names it.
+        let russian = search_bibles("Ин 3:16-18", &bibles, "en");
+        assert_eq!((russian[0].title.as_str(), russian[0].lookup.as_str()), ("От Иоанна 3:16-18", "John 3:16-18"));
+        assert!(russian[0].line.starts_with("Ибо так возлюбил"), "{}", russian[0].line);
+        assert_eq!(russian[0].language.as_deref(), Some("ru"));
+        // Typed in Ukrainian with no Ukrainian Bible in use: the first Bible.
+        let ukrainian = search_bibles("Ів 3:16-18", &bibles, "en");
+        assert_eq!(ukrainian[0].title, "John 3:16-18");
+        assert!(ukrainian[0].line.starts_with("For God so loved"));
+        // A chapter alone is the whole chapter.
+        let psalm = search_bibles("ps 23", &bibles, "en");
+        assert_eq!(psalm.len(), 1);
+        assert!(psalm[0].title.ends_with("23:1-6"), "{}", psalm[0].title);
+        // A book alone, or a book that is a number and a name, is not offered whole.
+        assert!(search_bibles("john", &bibles, "en").iter().all(|row| !row.passage));
+        assert!(search_bibles("1 john", &bibles, "en").iter().all(|row| !row.passage));
+    }
+
+    #[test]
+    fn with_russian_first_an_english_reference_is_read_in_english() {
+        let bibles = these(&["SYN", "KJV"]);
+        let genesis = search_bibles("gen 1 1", &bibles, "ru");
+        assert_eq!((genesis[0].title.as_str(), genesis[0].lookup.as_str()), ("Genesis 1:1", "Бытие 1:1"));
+        assert!(genesis[0].line.starts_with("In the beginning"), "{}", genesis[0].line);
+        let russian = search_bibles("Быт 1 1", &bibles, "en");
+        assert_eq!((russian[0].title.as_str(), russian[0].lookup.as_str()), ("Бытие 1:1", "Бытие 1:1"));
+        assert!(russian[0].line.starts_with("В начале"));
+        // Numbers stay the first Bible's, so a name written back reads as the same passage:
+        // "Psalm 23" is the Synodal 23rd psalm, the English 24th, and the operator is shown its
+        // English words, as the slides will have them.
+        let psalm = search_bibles("Psalm 23:1", &bibles, "en");
+        assert_eq!((psalm[0].title.as_str(), psalm[0].lookup.as_str()), ("Psalms 23:1", "Псалтирь 23:1"));
+        assert!(psalm[0].line.contains("The earth is the LORD"), "{}", psalm[0].line);
+    }
+
+    #[test]
+    fn a_name_spelt_alike_in_russian_and_ukrainian_follows_the_session() {
+        let russian = made("RT", "ru", "PSA 23:1 Слова русского теста\nJOH 3:16 Русский тест");
+        let ukrainian = made("UT", "uk", "PSA 23:1 Слова українського тесту\nJOH 3:16 Український тест");
+        let bibles = vec![russian, ukrainian];
+        assert!(search_bibles("Пс 23:1", &bibles, "uk")[0].line.contains("українського"));
+        assert!(search_bibles("Пс 23:1", &bibles, "ru")[0].line.contains("русского"));
+        // Neither: the first in the translations; named in its language.
+        let row = &search_bibles("Пс 23:1", &bibles, "en")[0];
+        assert_eq!((row.title.as_str(), row.language.as_deref()), ("Псалтирь 23:1", Some("ru")));
+        // Clearly Ukrainian: the Ukrainian Bible, whatever the session.
+        let row = &search_bibles("Ів 3:16", &bibles, "ru")[0];
+        assert_eq!((row.title.as_str(), row.line.as_str()), ("Від Івана 3:16", "Український тест"));
+    }
+
+    #[test]
+    fn words_are_searched_for_in_the_bibles_of_their_alphabet() {
+        // The Russian Synodal first: English words are looked for in the English Bible.
+        let bibles = these(&["SYN", "KJV"]);
+        let rows = search_bibles("valley of the shadow", &bibles, "ru");
         assert!(!rows.is_empty() && rows.len() <= VERSES_LISTED);
-        assert!(rows.iter().all(|row| row.tag.starts_with("BIBLE \u{b7} ") && !row.passage), "{rows:?}");
-        assert!(rows.iter().any(|row| row.title.ends_with("23:4")), "{rows:?}");
+        assert!(rows.iter().all(|row| row.tag == "BIBLE \u{b7} KJV" && !row.passage), "{rows:?}");
         // Verses holding the words together come before those holding them apart.
         assert!(rows[0].line.to_lowercase().contains("valley of the shadow"), "{rows:?}");
-        // Words of another language are found in the Bible of that language.
-        let russian = search_bibles("долиною смертной тени", &bibles);
-        assert!(!russian.is_empty(), "the Russian Bible is searched after the English ones");
+        // Named in English with the first Bible's numbers, and opened as the first Bible names
+        // it: the English 23rd psalm is the Synodal 22nd.
+        let psalm = rows.iter().find(|row| row.line.contains("valley of the shadow of death")).expect("Psalm 23:4");
+        assert_eq!((psalm.title.as_str(), psalm.lookup.as_str()), ("Psalms 22:4", "Псалтирь 22:4"));
+        assert_eq!(psalm.language.as_deref(), Some("en"));
+        // Russian words, in the Russian Bible.
+        let russian = search_bibles("долиною смертной тени", &bibles, "en");
+        assert!(!russian.is_empty() && russian.iter().all(|row| row.tag == "BIBLE \u{b7} SYN"), "{russian:?}");
+        assert_eq!(russian[0].language.as_deref(), Some("ru"));
         // Fewer than three letters, or nothing any Bible has, finds nothing.
-        assert!(search_bibles("of", &bibles).is_empty());
-        assert!(search_bibles("zzzqqqxxx", &bibles).is_empty());
-        assert!(search_bibles("valley", &[]).is_empty());
+        assert!(search_bibles("of", &bibles, "en").is_empty());
+        assert!(search_bibles("zzzqqqxxx", &bibles, "en").is_empty());
+        assert!(search_bibles("valley", &[], "en").is_empty());
+    }
+
+    #[test]
+    fn cyrillic_words_are_looked_for_in_the_sessions_bible_first_and_then_the_other() {
+        let russian = made("RT", "ru", "GEN 1:1 любов в начале\nGEN 1:2 любов вторая");
+        let ukrainian = made("UT", "uk", "GEN 1:1 любов на початку\nGEN 1:2 любов друга");
+        let english = made("ET", "en", "GEN 1:1 love at first");
+        let bibles = vec![russian, english, ukrainian];
+        let tags = |session: &str| -> Vec<String> {
+            search_bibles("любов", &bibles, session).into_iter().map(|row| row.tag).collect()
+        };
+        assert_eq!(tags("ru"), ["BIBLE \u{b7} RT", "BIBLE \u{b7} RT", "BIBLE \u{b7} UT"]);
+        assert_eq!(tags("uk"), ["BIBLE \u{b7} UT", "BIBLE \u{b7} UT", "BIBLE \u{b7} RT"]);
+        // No Bible in the words' alphabet: all of them, in the translations' order, as before.
+        let only_russian = vec![made("RT", "ru", "GEN 1:1 Аминь, amen")];
+        assert_eq!(search_bibles("amen", &only_russian, "en").len(), 1);
     }
 
     /// Not a check: says how long a one-word search of the Bibles that come with the app takes.
@@ -255,7 +361,7 @@ mod tests {
         eprintln!("reading {} Bibles: {:?}", bibles.len(), started.elapsed());
         for typed in ["shepherd", "zzzqqqxxx", "the", "John 3:16"] {
             let started = std::time::Instant::now();
-            let rows = search_bibles(typed, &bibles);
+            let rows = search_bibles(typed, &bibles, "en");
             eprintln!("{typed:?}: {} rows in {:?}", rows.len(), started.elapsed());
         }
     }

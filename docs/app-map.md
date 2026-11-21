@@ -34,7 +34,7 @@ sources) drawn by their own thread.
 | Part | Does | Command line |
 |---|---|---|
 | Show / Bible / Edit | Switches the view. Edit has four kinds, chosen at the top of its left column: Slides, Themes, Props and Stage | `view show\|edit\|bible`; `view themes` opens Edit on the themes |
-| Find box | Finds as you type, listed under it: a Bible passage first when the words are a reference (`John 3:16`, `Ин 3:16-18`, `ps 23`); then songs, by title and then by a line of their words; then verses of the Bibles in use that hold the words. Return or a click opens the one picked (a song in the Show view, a passage or verse in the Bible view; nothing goes on the screens), Command-Return (Ctrl on other computers) adds it to the playlist in front, Escape or a click elsewhere ends the search. `/` goes to it, and so does Command-F. It does not search playlists or media (`find.rs`) | |
+| Find box | Finds as you type, listed under it: a Bible passage first when the words are a reference (`John 3:16`, `Ин 3:16-18`, `ps 23`), named and quoted in the language it was typed in; then songs, by title and then by a line of their words; then verses that hold the words, from the Bibles in use written in their alphabet (each tagged with its Bible). Return or a click opens the one picked (a song in the Show view, a passage or verse in the Bible view; nothing goes on the screens), Command-Return (Ctrl on other computers) adds it to the playlist in front, Escape or a click elsewhere ends the search. `/` goes to it, and so does Command-F. It does not search playlists or media (`find.rs`) | |
 | Clock | The time of day, on a 12-hour or a 24-hour clock as the computer is set (`clock.rs`) | |
 | Audience ON/OFF | The audience screens on or off (Command-1) | `audience on\|off` |
 | Stage ON/OFF | The stage screens on or off (Command-2) | `stage on\|off` |
@@ -165,6 +165,11 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 - Options: how verses become slides, the theme and layout for Bible slides, and the Bibles
   installed (more can be downloaded).
 - Add to "…" keeps the passage in a playlist, to open again with these settings.
+- What the operator reads (Scripture Lookup after a lookup, the books in the lists, Search's
+  verses, the find box's passage) is in the language the reference was typed in, or with
+  nothing typed the session's (at first the computer's); the slides follow the rows above
+  whatever the language. Chapter and verse numbers are the first row's. The rule is in
+  `bible_language.rs`; the computer's language is read once at start in `system_language.rs`.
 - Command line: `bible REFERENCE [--show]`.
 
 ## Other windows
@@ -236,7 +241,8 @@ how long drawing took.
   `_CAPTURE_EDITOR`, `_CAPTURE_BIBLE`, `_CAPTURE_THEMES`, `_CAPTURE_SETTINGS`,
   `_PLAYLIST`, `_OPEN_ITEM=N`, `_MENU=ItemId,ItemId`, `_DROP=FILE`, `_PICK=songs:0,2`,
   `_WINDOW_SIZE=WxH`, `_NDI=NAME`, `_HIDE_NDI=1`, `_TRACE_PREVIEW=1`, `_LIVE_TAB=NAME` (open a
-  tool tab), `_TAB_SCROLL=POINTS` (scroll the open tab down, for a picture of its foot).
+  tool tab), `_TAB_SCROLL=POINTS` (scroll the open tab down, for a picture of its foot),
+  `_LANGUAGE=ru|uk|en` (as if the computer were set to that language, for the Bible view's start).
 - A quiet copy never tidies the library (moves unused pictures to the Trash) unless
   `SOFTPRESENTER_SWEEP=DAYS` is set with a data folder of its own; it then tidies as if every file
   were that many days older. `touch -t` can't make a file look old to it: it goes by the newest of

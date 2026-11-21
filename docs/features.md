@@ -285,8 +285,9 @@ feature changes, this page changes in the same commit.
 - **The window** is three round panels on a dark window: the left column, the middle, and a
   right column that is the same in every view. Along the top: the views (Show, Bible, Edit), a
   find box (press `/`, or Command-F: it finds songs by title and then by a line of their
-  words, a Bible passage when a reference is typed, and verses of the Bibles in use that hold
-  the words; Return opens what is picked without putting anything on the screens, and
+  words, a Bible passage when a reference is typed (named and quoted in the language it was
+  typed in), and verses that hold the words, from the Bibles in use written in the words'
+  alphabet, each saying which Bible it is from; Return opens what is picked without putting anything on the screens, and
   Command-Return adds it to the playlist in front; it does not search playlists or media), the
   clock (on a 12-hour or a
   24-hour clock as the computer is set, with the computer's own words for morning and
@@ -323,6 +324,26 @@ feature changes, this page changes in the same commit.
   `Пс 22:1-3`, `Ів 3:16`) and word search. A short form is read in the language of the first
   translation first ("1 Цар" is 1 Samuel to a Russian Bible, 1 Kings to a Ukrainian one), and a
   Ukrainian Bible shows its books' Ukrainian names.
+- **What the operator reads follows the language typed; what the screens show does not.** A
+  reference typed with an English book name (`gen 1 1`) is named back in English in Scripture
+  Lookup (`Genesis 1:1`), and in the find box quoted from the first English Bible in use; typed
+  in Russian (`Быт 1 1`), in Russian; in Ukrainian, in Ukrainian. A name spelt alike in Russian
+  and Ukrainian (`Пс`, `1 Кор`) stays with whichever of the two the operator was reading. A
+  language with no Bible in use falls back to the first translation. The slides are the same
+  whatever language the reference was typed in: which Bible goes in which box, and the
+  reference on them, are as the translations are set. Chapter and verse numbers are always the
+  first translation's, so with the Russian Synodal first, `Psalm 23` is its 23rd psalm (the
+  English 24th), named back as `Psalms 23:1-10`.
+- With nothing typed to go by (the Bible page opened fresh, a book or verse clicked in the
+  lists, a passage from History or a playlist), the operator reads in the language last typed
+  this session; at the start of a session, in the computer's: Russian if its first language is
+  Russian, Ukrainian if Ukrainian, otherwise English (falling back to the first translation when
+  that language has no Bible in use). There is no switch for it.
+- Search, on the Bible page, looks for the words in the Bibles in use written in their
+  alphabet (Cyrillic words in the Russian and the Ukrainian Bibles, the session's language
+  first; Latin letters in the English ones), or in the first translation when none is; each
+  verse found is named in its Bible's language and, when they come from more than one Bible,
+  says which.
 - The slides follow what is typed in Scripture Lookup a moment after typing stops, without
   waiting for Return (nothing goes on screen until a slide is clicked). While a book's name is
   being typed, the books it could be are offered under the field (arrows pick, Tab or Return
@@ -342,7 +363,8 @@ feature changes, this page changes in the same commit.
   changes as they are clicked (the passage showing, or two sample verses). Manage Bibles… opens
   the Bibles window. ‹ Verse and Verse › make the passage a verse longer at either end; search
   results open a verse or its whole chapter.
-- Book, chapter and verse lists beside the slides, each column with its heading, in one plain
+- Book, chapter and verse lists beside the slides (the books named in the operator's
+  language, the chapters and verses as the first translation numbers them), each column with its heading, in one plain
   shade so only the rows chosen stand out (Hide, at their top, puts them away and Books brings them back; the choice is kept). A click
   on a book opens it at chapter 1, a double-click looks that chapter up; a double-click on a
   chapter looks the whole chapter up; a click on a verse looks it up at once, Shift-click makes

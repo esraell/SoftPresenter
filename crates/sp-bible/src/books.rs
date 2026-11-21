@@ -226,6 +226,18 @@ pub fn find_book(typed: &str) -> Option<usize> {
 /// The same, reading what was typed in a language first (`en`, `ru` or `uk`): the same short
 /// form can name different books ("1 Цар" is 1 Samuel in Russian but 1 Kings in Ukrainian).
 pub fn find_book_in(typed: &str, language: &str) -> Option<usize> {
+    find_book_typed(typed, language).map(|(book, _)| book)
+}
+
+/// The languages a book's names are written in, in the order they are tried when none is
+/// preferred.
+const LANGUAGES: [&str; 3] = ["en", "ru", "uk"];
+
+/// [`find_book_in`], also saying which languages what was typed names the book in (`en`, `ru`,
+/// `uk`, in that order). More than one when a name or short form is the same in two: "Пс",
+/// "Лев" and "1 Кор" are Russian and Ukrainian alike. An exact name or short form decides the
+/// languages when there is one; otherwise every language whose name starts with what was typed.
+pub fn find_book_typed(typed: &str, language: &str) -> Option<(usize, Vec<&'static str>)> {
     let typed = plain(typed);
     if typed.is_empty() {
         return None;
@@ -236,19 +248,41 @@ pub fn find_book_in(typed: &str, language: &str) -> Option<usize> {
         "uk" => plain(book.ukrainian) == typed || book.ukrainian_short.contains(&typed.as_str()),
         _ => false,
     };
+    let starts_in = |book: &Book, language: &str| match language {
+        "en" => name_starts(book.english, &[], &typed),
+        "ru" => name_starts(book.russian, &["от", "к"], &typed),
+        "uk" => name_starts(book.ukrainian, &["від", "до"], &typed),
+        _ => false,
+    };
+    let exact_languages = |book: &Book| -> Vec<&'static str> {
+        let mut found: Vec<&'static str> = LANGUAGES.into_iter().filter(|language| exact_in(book, language)).collect();
+        // A book's code is written in Latin letters, as English is.
+        if found.is_empty() && book.code.eq_ignore_ascii_case(&typed) {
+            found.push("en");
+        }
+        found
+    };
     if let Some(found) = BOOKS.iter().position(|book| exact_in(book, language)) {
-        return Some(found);
+        return Some((found, exact_languages(&BOOKS[found])));
     }
     let exact = BOOKS.iter().position(|book| {
-        book.code.eq_ignore_ascii_case(&typed) || ["en", "ru", "uk"].iter().any(|language| exact_in(book, language))
+        book.code.eq_ignore_ascii_case(&typed) || LANGUAGES.iter().any(|language| exact_in(book, language))
     });
-    exact.or_else(|| {
-        BOOKS.iter().position(|book| {
-            name_starts(book.english, &[], &typed)
-                || name_starts(book.russian, &["от", "к"], &typed)
-                || name_starts(book.ukrainian, &["від", "до"], &typed)
-        })
-    })
+    if let Some(found) = exact {
+        return Some((found, exact_languages(&BOOKS[found])));
+    }
+    let found = BOOKS.iter().position(|book| LANGUAGES.iter().any(|language| starts_in(book, language)))?;
+    Some((found, LANGUAGES.into_iter().filter(|language| starts_in(&BOOKS[found], language)).collect()))
+}
+
+/// A book's name as a language writes it (`ru`, `uk`; English for any other).
+pub fn book_name(book: usize, language: &str) -> &'static str {
+    let names = &BOOKS[book.min(BOOKS.len() - 1)];
+    match language {
+        "ru" => names.russian,
+        "uk" => names.ukrainian,
+        _ => names.english,
+    }
 }
 
 /// A book's place in [`BOOKS`] from its code in a Bible file.
@@ -316,6 +350,49 @@ mod tests {
                 assert_eq!(find_book_in(short, "uk"), Some(at), "{short} should find {}", book.ukrainian);
             }
         }
+    }
+
+    #[test]
+    fn the_languages_a_book_was_typed_in_are_said() {
+        let typed = |text: &str, language: &str| {
+            find_book_typed(text, language).map(|(book, languages)| (BOOKS[book].code, languages))
+        };
+        assert_eq!(typed("gen", ""), Some(("GEN", vec!["en"])));
+        assert_eq!(typed("Genesis", "ru"), Some(("GEN", vec!["en"])), "a preference never changes the language");
+        assert_eq!(typed("Быт", "en"), Some(("GEN", vec!["ru"])));
+        assert_eq!(typed("Бут", "ru"), Some(("GEN", vec!["uk"])));
+        assert_eq!(typed("Ин", ""), Some(("JOH", vec!["ru"])));
+        assert_eq!(typed("Ів", "ru"), Some(("JOH", vec!["uk"])));
+        // Spelt alike in Russian and Ukrainian: both.
+        assert_eq!(typed("Пс", "ru"), Some(("PSA", vec!["ru", "uk"])));
+        assert_eq!(typed("1 Кор", ""), Some(("1CO", vec!["ru", "uk"])));
+        assert_eq!(typed("Левит", "uk"), Some(("LEV", vec!["ru", "uk"])));
+        // "1 Цар" is a different book in each; the one read is the one said.
+        assert_eq!(typed("1 Цар", "ru"), Some(("1SA", vec!["ru"])));
+        assert_eq!(typed("1 Цар", "uk"), Some(("1KI", vec!["uk"])));
+        // The start of a name, and a book's code.
+        assert_eq!(typed("Gene", ""), Some(("GEN", vec!["en"])));
+        assert_eq!(typed("Быти", ""), Some(("GEN", vec!["ru"])));
+        assert_eq!(typed("JHN", ""), Some(("JOH", vec!["en"])));
+        assert_eq!(typed("3:16", ""), None);
+        assert_eq!(typed("", "en"), None);
+    }
+
+    #[test]
+    fn every_full_name_finds_its_book_whichever_language_is_preferred() {
+        // The Bible page writes a passage's name back in the operator's language and reads it
+        // again with the first Bible's language preferred: it must come back the same book.
+        for (at, book) in BOOKS.iter().enumerate() {
+            for name in [book.english, book.russian, book.ukrainian] {
+                for preferred in ["", "en", "ru", "uk"] {
+                    assert_eq!(find_book_in(name, preferred), Some(at), "{name} with {preferred:?} preferred");
+                }
+            }
+            for language in LANGUAGES {
+                assert_eq!(find_book_in(book_name(at, language), language), Some(at));
+            }
+        }
+        assert_eq!(book_name(0, "fr"), "Genesis", "a language without names of its own is English");
     }
 
     #[test]

@@ -398,7 +398,7 @@ Macro steps: `clear all|slide|media|props|messages`, `show|hide message NAME`,
 | `bible REFERENCE` | Looks a passage up on the Bible page, with the translations and options chosen there |
 | `bible REFERENCE --show` | The same, and puts its first verse on screen; `next` and `previous` then go verse by verse |
 | `bible REFERENCE --add [to PLAYLIST]` | Looks it up and keeps it in a playlist, as the page's Add to button does |
-| `bible search WORDS` | Verses with those words, in the first translation |
+| `bible search WORDS` | Verses with those words, in the Bibles in use written in their alphabet (in the first translation when none is), each named in its Bible's language with the first translation's numbers; each line names its Bible when more than one has them |
 | `bible rows [BIBLE…]` | The translations shown, first to last; with names (short or whole), sets them |
 | `bible options [verses=on\|off break=on\|off translation=on\|off reference=verse\|passage\|last\|none]` | Verse numbers, a new slide for each verse, the translation's name, where the reference goes |
 | `bible history` | The passages looked up |
@@ -407,8 +407,11 @@ Macro steps: `clear all|slide|media|props|messages`, `show|hide message NAME`,
 
 References are typed as on the Bible page, in English, Russian or Ukrainian: `John 3:16-18`,
 `jn 3:16`, `Psalm 23`, `Genesis 1` (the whole chapter), `Пс 22:1-3`, `Ів 3:16`. Chapter and
-verse numbers are read in the first translation's numbering, and replies name the book as the
-first translation does.
+verse numbers are read in the first translation's numbering. Replies name the book in the
+language the reference was typed in, as the Bible page then names it to the operator (in the
+first translation's language when no Bible in use is in that language); the slides are made
+from the translations chosen on the Bible page, whatever the language typed, and a playlist
+keeps the passage as the first translation names it.
 
     $ sp bible "John 3:16-18"
     Looked up John 3:16-18; it is on the Bible page.
@@ -426,6 +429,27 @@ first translation does.
     Installed the American Standard Version.
     $ sp bible remove KJV --yes
     The King James Version comes with the app and stays.
+
+With the Russian Synodal first and the King James Version second (as the app starts), a reply
+names the passage as it was typed, while the screens and the playlist follow the translations:
+
+    $ sp bible "gen 1 1"
+    Looked up Genesis 1:1; it is on the Bible page.
+    $ sp bible "Быт 1 1"
+    Looked up Бытие 1:1; it is on the Bible page.
+    $ sp bible "Ів 3:16"                 # no Ukrainian Bible in use: the first translation's
+    Looked up От Иоанна 3:16; it is on the Bible page.
+    $ sp bible "jn 3:16" --show
+    John 3:16: On screen: От Иоанна 3:16, slide 1 of 1 (От Иоанна 3:16).
+    $ sp bible "gen 1 1-2" --add
+    Added Genesis 1:1-2 to Service.
+    $ sp playlist
+    Service
+      1. Бытие 1:1-2
+    $ sp bible "Psalm 23"                # the Synodal 23rd psalm (the English 24th)
+    Looked up Psalms 23:1-10; it is on the Bible page.
+    $ sp bible search valley of the shadow
+      1. Psalms 22:4: Yea, though I walk through the valley of the shadow of death, …
 
 ## Songs
 
@@ -954,7 +978,7 @@ the command's facts where it has any:
 | `song text SONG` | `{"song": "River Song", "text": "[Verse 1]\n…"}` |
 | `song info SONG` | `id`, `title`, `artist`, `author`, `publisher`, `year`, `ccli`, `slides`, `theme`, `transition`, `loops` |
 | `search WORDS` | `[{"song": "Blessed Assurance", "number": 1, "title": false, "slides": [1]}]` |
-| `bible search WORDS` | `[{"verse": "John 3:16", "chapter": …, "words": "…"}]` |
+| `bible search WORDS` | `[{"verse": "John 3:16", "chapter": …, "words": "…", "bible": "KJV"}]` |
 | `song import` | `imported`, `making` (presentations still being turned into slides), `problems` |
 | `settings` | Every setting, as the app keeps it |
 | A command that starts a job | `job`: its number |

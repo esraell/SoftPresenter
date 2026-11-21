@@ -43,12 +43,21 @@ impl crate::App {
         if state.bible.found.is_empty() {
             return Err(state.bible.message.clone().unwrap_or_else(|| "Nothing found.".to_owned()));
         }
-        let lines: Vec<String> = state.bible.found.iter().map(|(label, _, text)| format!("{label}: {text}")).collect();
-        let data: Vec<serde_json::Value> = state
-            .bible
-            .found
+        // Found in more than one Bible: each line says which.
+        let found = &state.bible.found;
+        let mixed = found.iter().any(|verse| verse.bible != found[0].bible);
+        let lines: Vec<String> = found
             .iter()
-            .map(|(label, chapter, text)| serde_json::json!({"verse": label, "chapter": chapter, "words": text}))
+            .map(|verse| match mixed {
+                true => format!("{} ({}): {}", verse.reference, verse.bible, verse.words),
+                false => format!("{}: {}", verse.reference, verse.words),
+            })
+            .collect();
+        let data: Vec<serde_json::Value> = found
+            .iter()
+            .map(|verse| {
+                serde_json::json!({"verse": verse.reference, "chapter": verse.chapter, "words": verse.words, "bible": verse.bible})
+            })
             .collect();
         Ok(Reply::with(numbered(&lines), serde_json::json!(data)))
     }

@@ -182,6 +182,33 @@ impl Shelf {
     }
 }
 
+/// A passage named as the first translation names it (as `build_passage` titles its slides),
+/// named again for the operator: the book in `language` (`en`, `ru`, `uk`), the numbers as they
+/// are, so the name reads back as the same passage. The name as it was when it can't be read.
+pub fn name_for_operator(kept: &str, lead: &Bible, language: &str) -> String {
+    match parse_reference_in(kept, &lead.info.language) {
+        Ok(range) => sp_bible::label_in(language, range.start, range.end),
+        Err(_) => kept.to_owned(),
+    }
+}
+
+/// A verse found by the Bible page's Search.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FoundVerse {
+    /// The verse and its chapter as the operator reads them: the book named in the language of
+    /// the Bible it was found in, the numbers the first translation's.
+    pub reference: String,
+    pub chapter: String,
+    pub words: String,
+    /// The Bible it was found in: its short name, and its language.
+    pub bible: String,
+    pub language: String,
+    /// What is looked up for the verse, and for its chapter: named as the first translation
+    /// names them.
+    pub kept: String,
+    pub kept_chapter: String,
+}
+
 /// One translation on the Bible page: its text and where its words and reference go.
 pub struct RowChoice {
     pub bible: Arc<Bible>,
@@ -788,11 +815,12 @@ pub const LISTS_WIDTH: f32 = 300.0;
 /// How tall the bar along the top of the lists is, with Hide in it.
 const LISTS_BAR: f32 = 28.0;
 
-/// The book, chapter and verse lists beside the Bible page's slides, in the first
-/// translation's language. A book opens its chapters, a chapter its verses; a verse is looked
-/// up at once (its slides appear beside the lists), Shift-click makes a passage from the verse
-/// before, and All takes the whole chapter. What is showing is lit, whichever way it was
-/// looked up. Nothing goes on screen until a slide is clicked.
+/// The book, chapter and verse lists beside the Bible page's slides: the books named in the
+/// operator's language (the session's), the chapters and verses as the first translation
+/// numbers them. A book opens its chapters, a chapter its verses; a verse is looked up at once
+/// (its slides appear beside the lists), Shift-click makes a passage from the verse before, and
+/// All takes the whole chapter. What is showing is lit, whichever way it was looked up. Nothing
+/// goes on screen until a slide is clicked.
 pub fn lists(ui: &mut egui::Ui, page: &mut crate::home::BiblePage, live: Option<usize>) {
     let bible = page.lead().and_then(|lead| page.shelf.get(lead).ok());
     let Some(bible) = bible else {
@@ -800,6 +828,7 @@ pub fn lists(ui: &mut egui::Ui, page: &mut crate::home::BiblePage, live: Option<
         nothing(ui, "Choose a Bible for the first row.");
         return;
     };
+    let names = page.names_language();
     let shown = parse_reference_in(&page.shown, &bible.info.language).ok();
     let lit = |book: usize, chapter: u16, verse: u16| {
         shown.is_some_and(|range| {
@@ -867,7 +896,8 @@ pub fn lists(ui: &mut egui::Ui, page: &mut crate::home::BiblePage, live: Option<
                     }
                     let open = page.list_book == book;
                     let showing = shown.is_some_and(|range| range.start.book == book);
-                    let row = list_row(ui, ("book", book), bible.book_name(book), open, showing, Align::Min);
+                    let name = sp_bible::book_name(book, &names);
+                    let row = list_row(ui, ("book", book), name, open, showing, Align::Min);
                     if open && scroll {
                         row.scroll_to_me(Some(Align::Center));
                     }
@@ -957,8 +987,9 @@ pub fn lists(ui: &mut egui::Ui, page: &mut crate::home::BiblePage, live: Option<
         }
     });
     if let Some(reference) = chosen {
-        page.lookup = reference;
-        page.look_up(live);
+        // Named as the first translation names it; the field then says it in the operator's
+        // language.
+        page.open(reference, live);
         // Put on screen once the chapter is made; nothing if it couldn't be.
         page.go_live = go_live.filter(|_| page.pending.is_some());
     }

@@ -10,7 +10,7 @@ mod numbering;
 
 use std::io::{Read, Write};
 
-pub use books::{BOOKS, Book, book_by_code, find_book, find_book_in, suggest_books};
+pub use books::{BOOKS, Book, book_by_code, book_name, find_book, find_book_in, find_book_typed, suggest_books};
 pub use numbering::{Numbering, convert};
 
 const FIRST_LINE: &str = "softpresenter-bible 1";
@@ -323,25 +323,27 @@ impl Bible {
 
     /// A book's name as this Bible's language writes it.
     pub fn book_name(&self, book: usize) -> &'static str {
-        let names = &BOOKS[book.min(BOOKS.len() - 1)];
-        match self.info.language.as_str() {
-            "ru" => names.russian,
-            "uk" => names.ukrainian,
-            _ => names.english,
-        }
+        book_name(book, &self.info.language)
     }
 
     /// How a run of verses is named, such as "John 3:16-18" or "Psalms 23". `first` and `last`
     /// are the first and last verses actually shown.
     pub fn label(&self, first: VerseRef, last: VerseRef) -> String {
-        let book = self.book_name(first.book);
-        if first == last {
-            format!("{book} {}:{}", first.chapter, first.verse)
-        } else if first.chapter == last.chapter {
-            format!("{book} {}:{}-{}", first.chapter, first.verse, last.verse)
-        } else {
-            format!("{book} {}:{}-{}:{}", first.chapter, first.verse, last.chapter, last.verse)
-        }
+        label_in(&self.info.language, first, last)
+    }
+}
+
+/// How a run of verses is named in a language (`en`, `ru`, `uk`; English for any other), as a
+/// Bible of that language names it: "John 3:16-18", "От Иоанна 3:16-18". The numbers are used
+/// as they are given; nothing is converted.
+pub fn label_in(language: &str, first: VerseRef, last: VerseRef) -> String {
+    let book = book_name(first.book, language);
+    if first == last {
+        format!("{book} {}:{}", first.chapter, first.verse)
+    } else if first.chapter == last.chapter {
+        format!("{book} {}:{}-{}", first.chapter, first.verse, last.verse)
+    } else {
+        format!("{book} {}:{}-{}:{}", first.chapter, first.verse, last.chapter, last.verse)
     }
 }
 
@@ -363,6 +365,22 @@ pub fn parse_reference(typed: &str) -> Result<Range, String> {
 /// The same, reading the book's name in a language first (`en`, `ru` or `uk`), as
 /// [`books::find_book_in`] does.
 pub fn parse_reference_in(typed: &str, language: &str) -> Result<Range, String> {
+    read_reference(typed, language).map(|reference| reference.range)
+}
+
+/// A reference as it was typed: the verses it names, and the languages its book's name was
+/// typed in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Reference {
+    pub range: Range,
+    /// `en`, `ru` or `uk`, in that order; two when the name is spelt alike in two languages
+    /// ("Пс 23" and "1 Кор 13" are Russian and Ukrainian alike). See [`books::find_book_typed`].
+    pub languages: Vec<&'static str>,
+}
+
+/// [`parse_reference_in`], also saying which languages the book's name was typed in. The verses
+/// are exactly the ones `parse_reference_in` reads: the language only says how it was written.
+pub fn read_reference(typed: &str, language: &str) -> Result<Reference, String> {
     let typed = typed.trim();
     if typed.is_empty() {
         return Err("Type a reference, such as John 3:16.".to_owned());
@@ -380,7 +398,7 @@ pub fn parse_reference_in(typed: &str, language: &str) -> Result<Range, String> 
         Some(at) => (&typed[..at], &typed[at..]),
         None => (typed, ""),
     };
-    let book = find_book_in(book_text, language)
+    let (book, languages) = find_book_typed(book_text, language)
         .ok_or_else(|| format!("No book of the Bible is called \"{}\".", book_text.trim()))?;
     let unclear = || format!("\"{}\" is not a chapter and verse. Try something like 3:16 or 3:16-18.", numbers.trim());
     let number = |text: &str| text.trim().parse::<u16>().ok().filter(|n| *n > 0);
@@ -410,9 +428,12 @@ pub fn parse_reference_in(typed: &str, language: &str) -> Result<Range, String> 
     };
     if numbers.is_empty() {
         // A whole book with one chapter is fine; otherwise start at chapter 1.
-        return Ok(Range {
-            start: VerseRef { book, chapter: 1, verse: 1 },
-            end: VerseRef { book, chapter: 1, verse: LAST },
+        return Ok(Reference {
+            range: Range {
+                start: VerseRef { book, chapter: 1, verse: 1 },
+                end: VerseRef { book, chapter: 1, verse: LAST },
+            },
+            languages,
         });
     }
     let (first, second) = match numbers.split_once(['-', '\u{2013}', '\u{2014}']) {
@@ -434,7 +455,7 @@ pub fn parse_reference_in(typed: &str, language: &str) -> Result<Range, String> 
     if end < start {
         return Err("The reference ends before it starts.".to_owned());
     }
-    Ok(Range { start, end })
+    Ok(Reference { range: Range { start, end }, languages })
 }
 
 #[cfg(test)]
@@ -502,6 +523,42 @@ mod tests {
         assert_eq!(parse_reference("Пс 22:1-3"), Ok(range("PSA", (22, 1), (22, 3))));
         assert_eq!(parse_reference("1 Кор 13"), Ok(range("1CO", (13, 1), (13, LAST))));
         assert_eq!(parse_reference("3 Царств 8:1"), Ok(range("1KI", (8, 1), (8, 1))));
+    }
+
+    #[test]
+    fn a_reference_says_which_language_it_was_typed_in() {
+        let languages = |typed: &str, preferred: &str| read_reference(typed, preferred).map(|r| r.languages);
+        // English, Russian and Ukrainian, whole names and short forms.
+        for typed in ["gen 1 1", "Genesis 1:1", "John 3:16", "jn 3:16-18", "1 Cor 13", "ps 23"] {
+            assert_eq!(languages(typed, "ru"), Ok(vec!["en"]), "{typed}");
+        }
+        for typed in ["Быт 1 1", "Бытие 1:1", "Ин 3:16", "От Иоанна 3:16", "Иоанна 3:16"] {
+            assert_eq!(languages(typed, "en"), Ok(vec!["ru"]), "{typed}");
+        }
+        for typed in ["Бут 1 1", "Буття 1:1", "Ів 3:16", "Від Івана 3:16", "1м 1:1"] {
+            assert_eq!(languages(typed, "ru"), Ok(vec!["uk"]), "{typed}");
+        }
+        // Spelt alike in Russian and Ukrainian.
+        assert_eq!(languages("Пс 23", "ru"), Ok(vec!["ru", "uk"]));
+        assert_eq!(languages("1 Кор 13:4", "en"), Ok(vec!["ru", "uk"]));
+        // Digits alone name no book, so no language.
+        assert!(languages("23", "en").is_err());
+        assert!(languages("3:16", "ru").is_err());
+        // The verses are the ones parse_reference_in reads, whatever the language.
+        for (typed, preferred) in [("Пс 22:1-3", "ru"), ("1 Цар 1", "uk"), ("gen 1 1", "ru"), ("jn 3", "")] {
+            assert_eq!(read_reference(typed, preferred).map(|r| r.range), parse_reference_in(typed, preferred));
+        }
+    }
+
+    #[test]
+    fn a_passage_is_named_in_any_language_with_its_numbers_as_given() {
+        let john = book_by_code("JOH").unwrap();
+        let at = |chapter, verse| VerseRef { book: john, chapter, verse };
+        assert_eq!(label_in("en", at(3, 16), at(3, 18)), "John 3:16-18");
+        assert_eq!(label_in("ru", at(3, 16), at(3, 16)), "От Иоанна 3:16");
+        assert_eq!(label_in("uk", at(3, 16), at(4, 2)), "Від Івана 3:16-4:2");
+        assert_eq!(label_in("de", at(3, 16), at(3, 16)), "John 3:16");
+        assert_eq!(small().label(at(3, 16), at(3, 17)), label_in("en", at(3, 16), at(3, 17)));
     }
 
     #[test]

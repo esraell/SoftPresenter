@@ -2426,13 +2426,15 @@ impl crate::App {
         }
         let live = self.show.live().map(|at| at.presentation);
         // A chapter or verse the book doesn't have is said, rather than read as the last one
-        // (as typing in Scripture Lookup reads it).
+        // (as typing in Scripture Lookup reads it): counted in the first translation, which
+        // numbers the passage, and named in the language typed.
         if let Some(running) = self.running.as_mut() {
             let page = &mut running.home_state.bible;
+            let language = page.typed_language(&reference);
             if let Some(bible) = page.lead().and_then(|lead| page.shelf.get(lead).ok())
                 && let Ok(range) = sp_bible::parse_reference_in(&reference, &bible.info.language)
             {
-                let book = bible.book_name(range.start.book);
+                let book = sp_bible::book_name(range.start.book, &language);
                 let chapters = bible.chapter_count(range.start.book);
                 if chapters > 0 && (range.start.chapter > chapters || range.end.chapter > chapters) {
                     return Err(format!("{book} has {chapters} chapters."));
@@ -2443,19 +2445,20 @@ impl crate::App {
                 }
             }
         }
-        let (found, message) = {
+        let (found, message, title) = {
             let running = self.running.as_mut().ok_or("The app isn't ready.")?;
             let state = &mut running.home_state;
             state.bible_open = true;
             state.editing = None;
             state.bible.lookup = reference.clone();
             state.bible.look_up(live);
-            (state.bible.pending.take(), state.bible.message.clone())
+            // Said back as the Bible page names it to the operator, in the language typed; the
+            // slides are made from the translations chosen there, as before.
+            (state.bible.pending.take(), state.bible.message.clone(), state.bible.reading.clone())
         };
         let Some((slot, passage)) = found else {
             return Err(message.unwrap_or_else(|| format!("Could not look up {reference}.")));
         };
-        let title = passage.title.clone();
         self.show.replace_presentation(slot, std::sync::Arc::new(passage));
         if let Some(into) = add_to {
             let list = self.playlist_at_for_cli(into.as_deref())?;
