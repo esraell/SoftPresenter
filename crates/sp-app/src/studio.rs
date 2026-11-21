@@ -2492,9 +2492,8 @@ pub fn carry_out_item_ask(show: &Show, state: &mut HomeState, commands: &mut Vec
             let Some(item) = state.services.front().items.get(index).cloned() else { return };
             state.services.chosen = Some(index);
             state.picking = crate::home::Picking::Nothing;
-            // The slide area scrolls to it, even if it was the one last scrolled to.
-            state.slides_scrolled_to = None;
-            state.slides_picked_here = false;
+            // The slides scroll to it, even if it was the one last scrolled to.
+            state.slides_jump_to = Some(index);
             match item {
                 Item::Song { key, .. } => {
                     if let Some(at) = playlist_song(show, state, &key) {

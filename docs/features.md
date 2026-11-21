@@ -9,12 +9,17 @@ SoftPresenter is young: some of this is rough, and file formats may still change
 feature changes, this page changes in the same commit.
 
 ## Running a service
-- Songs shown as a grid of slides, an Easy view (words only) or a Table view, with a size
-  slider. Click a slide, or use the [keys](../README.md#keys), to put it on the audience screen.
+- Songs shown as a grid of slides, a words-only view or a table (number, group, words, notes),
+  with a size slider. Click a slide, or use the [keys](../README.md#keys), to put it on the
+  audience screen. A slide in the grid is its picture with a strip under it: its number, its
+  group's dot and name (heavier on the group's first slide), small tags for a hot key, a time
+  after which it goes on, actions, a transition of its own or being switched off, then a pencil
+  (the editor) and ⋯ (its menu, as a right-click). The slide on screen has an orange ring and
+  orange words; slides picked out have a blue ring.
 - In the Show view, ↑ and ↓ open the song above or below in the song list (with Shift, picking
   out the songs on the way), or the item above or below in a playlist (passing over headers);
   ← → and Space go on moving the slides.
-- Groups (Verse 1, Chorus, Bridge…) with coloured bars and one-key jumps.
+- Groups (Verse 1, Chorus, Bridge…) with a dot in the group's colour and one-key jumps.
 - **Songs changed outside the app** (in a text editor, by a script or an agent) come in when the
   song is next opened: chosen in the list or a playlist, opened in the editor, or named in an
   `sp` command. The app never saves over a song or theme file changed since it read it: a bar
@@ -127,10 +132,22 @@ feature changes, this page changes in the same commit.
   can be dragged into a new order. **Add to playlist**, at the foot, adds a song, a header, a
   placeholder, a picture or video, a media playlist or (once VoxLive is connected) the VoxLive
   item after the open item, and opens the Bible page for a passage; under it is the filter.
-  A song opened from a playlist is shown with the playlist's other songs above and below it,
-  each under a bar with its name, so scrolling down goes on into the next song; clicking a slide
-  of another song puts it on screen. With View, Continuous Playlist on, Next at the end of a
-  song goes on to the next song in the playlist.
+- While the left column lists a playlist, the middle shows **the whole playlist as one scroll**,
+  item after item, each under a bar with its name that stays at the top while its slides
+  scroll under it. The open item's bar has a dot; a song's bar carries its tools (details,
+  words as text, arrangement, notes, and ⋯ for the song's menu, Add Slide and its place in the
+  playlist), and a song played in an arrangement has that arrangement's groups as a row of
+  pills under its bar. Other items say what they are in a small label. A **Bible passage** kept
+  in the playlist is shown as its slides, drawn by the Bible theme as the Bible page draws
+  them; a click on one looks the passage up as the Bible page would and puts that verse on
+  screen, and Next and Previous then go verse by verse. Clicking a slide of any item puts it
+  on screen and makes that item the open one. The view goes to the slide that has just gone on
+  screen, at once, keeping it clear of the bar at the top and of the fade at the bottom; it
+  stays where it was scrolled otherwise. Only what is in view is drawn, so a playlist of
+  thousands of slides scrolls like a short one, and each song's slides are drawn with that
+  song's own theme. A song chosen that the playlist doesn't have (a new song, one found with
+  the find box) is shown by itself, with the left column back on a library. With View,
+  Continuous Playlist on, Next at the end of a song goes on to the next song in the playlist.
 - A playlist also holds **pictures and videos** from the media bin (the countdown video),
   **media playlists** (the announcement loop) and **placeholders** (a place kept for the sermon
   slides). A picture or video goes in from its right-click menu (Add to Playlist "Sunday"), by

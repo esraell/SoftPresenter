@@ -1335,10 +1335,7 @@ impl App {
             }
             let changes = self.show.apply(command);
             output_changed |= changes.slides || changes.media || changes.output_enabled || changes.builds;
-            if changes.selection {
-                let media: Vec<Uuid> = self.show.media().iter().map(|m| m.id).collect();
-                running.thumbs.clear_except(&mut running.egui_renderer, |id| media.contains(id));
-            }
+
             any |= changes.slides || changes.media || changes.output_enabled || changes.selection || changes.builds;
         }
         if output_changed {
@@ -5574,6 +5571,7 @@ impl App {
             _ => home::Preview { now: running.preview, before: running.preview_before, amount, undrawn },
         };
         let (show, pictures) = (&self.show, &self.bin_pictures);
+        let (theme_arcs, main_theme) = (&self.theme_arcs, &self.theme);
         let (songs_theme, bible_theme): (&Theme, &Theme) = (&front_theme, &self.theme_for_bible);
         running.home_state.song_templates = song_templates(songs_theme);
         // The theme the part of the window in front works with: the one being edited, the
@@ -5598,6 +5596,12 @@ impl App {
             };
             let mut thumb = |which: ThumbOf| match which {
                 ThumbOf::Slide(slide) => thumbs.get(gpu, egui_renderer, slide, media_for(slide), songs_theme),
+                // A song's slide among a playlist's: drawn as that song's own theme draws it.
+                ThumbOf::SongSlide(at, slide) => {
+                    let own = show.presentations().get(at).and_then(|song| song.theme);
+                    let theme = own.and_then(|id| theme_arcs.iter().find(|theme| theme.id == id)).unwrap_or(main_theme);
+                    thumbs.get(gpu, egui_renderer, slide, media_for(slide), theme)
+                }
                 ThumbOf::BibleSlide(slide) => thumbs.get(gpu, egui_renderer, slide, None, bible_theme),
                 ThumbOf::Layout(index, slide) => {
                     // A layout is made anew each frame; a fixed id lets its thumbnail be kept
@@ -5751,9 +5755,11 @@ impl App {
                     Some(
                         service::Item::Media { .. }
                         | service::Item::MediaPlaylist { .. }
-                        | service::Item::Placeholder { .. },
+                        | service::Item::Placeholder { .. }
+                        | service::Item::Passage(_),
                     ) => {
                         state.services.chosen = Some(item);
+                        state.slides_jump_to = Some(item);
                         state.bible_open = false;
                         None
                     }
@@ -5761,9 +5767,19 @@ impl App {
                 };
                 if let Some(at) = key.and_then(|key| studio::playlist_song(&self.show, state, &key)) {
                     state.services.chosen = Some(item);
+                    state.slides_jump_to = Some(item);
                     state.bible_open = false;
                     commands.push(Command::Select(at));
                 }
+            }
+            // Testing aid: SOFTPRESENTER_CAPTURE_SLIDE=N puts the Nth slide of the song chosen
+            // (the one SOFTPRESENTER_OPEN_ITEM opened, say) on screen, in place of the sample's.
+            if running.frames == GO_LIVE_AT + 6
+                && let Some(slide) =
+                    std::env::var("SOFTPRESENTER_CAPTURE_SLIDE").ok().and_then(|s| s.parse::<usize>().ok())
+            {
+                let presentation = self.show.selected();
+                commands.push(Command::GoTo(sp_engine::SlideRef { presentation, slide: slide.saturating_sub(1) }));
             }
             // Testing aid: list the playlist in front in the left column.
             if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_PLAYLIST").is_some() {

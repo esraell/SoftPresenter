@@ -14,12 +14,12 @@ sources) drawn by their own thread.
 ```
   ▬ SoftPresenter [Show|Bible|Edit] (Find a song or a line)         12:00:00 [● Audience ON] [● Stage ON] ? ⚙
 ╭──────────────────╮ ╭─────────────────────────────────────────╮ ╭────────────────────────────────╮
-│ PLAYLIST       ⤓ │ │ Song title   8 slides     (i) ≡ ∞ ▤      │ │ ● [AUDIENCE|STAGE]    ON SCREEN│
+│ PLAYLIST       ⤓ │ │ ● Song title  (i) ≡ ∞ ▤ ⋯ ────────────── │ │ ● [AUDIENCE|STAGE]    ON SCREEN│
 │ ≡ Sunday       ⌄ │ │ ┌──────┐ ┌──────┐ ┌──────┐                │ │ ┌────────────────────────────┐ │
 │ 01 Countdown   ⋯ │ │ │slide │ │slide │ │slide │   slide grid   │ │ │  what the screens show     │ │
-│ WORSHIP          │ │ │1 V1 A│ │2     │ │3 Ch C│   (or Easy /   │ │ └────────────────────────────┘ │
-│ 02 Song one    ⋯ │ │ └──────┘ └──────┘ └──────┘   Table view)  │ │ 03/08  CHORUS · SONG TITLE     │
-│ 03 Song two  ● ⋯ │ │                                          │ │ (a row for what is playing)    │
+│ WORSHIP          │ │ └──────┘ └──────┘ └──────┘   (or words    │ │ └────────────────────────────┘ │
+│ 02 Song one    ⋯ │ │ 01 ●VERSE 1  02 ●VERSE 1  03 ●CHORUS only,│ │ 03/08  CHORUS · SONG TITLE     │
+│ 03 Song two  ● ⋯ │ │ Next item ──────────────────  or a table) │ │ (a row for what is playing)    │
 │ THE WORD         │ │                                          │ │ [Slide]   [Media]  [Props]     │
 │ 04 John 3:16   ⋯ │ │ [+ Add Slide]   Cut Dissolve Advanced ▾  │ │ [Messages][Audio]  [Announce]  │
 │                  │ │                 grid/easy/table  size ── │ │ [          Clear All         ] │
@@ -58,9 +58,10 @@ sources) drawn by their own thread.
 
 | Part | Does | Command line |
 |---|---|---|
-| Song header | Title (double-click renames), slide count, and four icons: Info (writer, CCLI), Reflow (edit the words as text), Arrangement (groups in another order), Notes (operator notes) | `slides SONG [--full]` |
-| Slide grid | Click puts a slide on screen; right-click picks it out and opens its menu (Edit, Cut, Copy, Paste, Delete…, Group, Media, Transition, Actions, Go to Next, Hot Key, Copy/Paste Text Style, Label, Disable, Template); Command/Shift-click and dragging a box pick several without going live; Delete asks, then deletes | `go SONG SLIDE`, `next`, `previous`, `first`, `last` |
-| Playlist view | A song opened from a playlist shows the playlist's items one after another, each under a bar with its name: a song's slides; a picture or video's tile (click to show it); a media playlist's tile (click to play it); a placeholder's tile (Choose a Song…, or drop a picture or video on it) | `playlist go ITEM [SLIDE]` |
+| The scroll | With a playlist listed on the left: every item of it, one after another, each under a bar with its name that stays at the top while its slides scroll under it. With a library listed: the song chosen, the same way | `playlist go ITEM [SLIDE]`, `slides SONG [--full]` |
+| An item's bar | A dot when it is the open item; the name (a song's renames on a double click); for a song its tools: details (writer, CCLI), words as text, arrangement (groups in another order, shown as pills under the bar), notes, ⋯ (the song's menu, Add Slide, its place in the playlist); for anything else a small label saying what it is | `song info`, `song text`, `song arrangement` |
+| Slides | Tiles (the picture, and a strip with the number, the group's dot and name, tags, a pencil for the editor and ⋯), words only, or a table. Click puts a slide on screen; ⋯ or a right-click opens its menu (Edit, Cut, Copy, Paste, Delete…, Group, Media, Transition, Actions, Go to Next, Hot Key, Copy/Paste Text Style, Label, Disable, Template); Command/Shift-click and dragging a box pick several without going live; Delete asks, then deletes | `go SONG SLIDE`, `next`, `previous`, `first`, `last` |
+| Other items | A Bible passage's slides, drawn by the Bible theme (click one to put it on screen); a picture or video's tile (click to show it); a media playlist's tile (click to play it); a placeholder's box (Choose a song…, or drop a picture or video on it); a header as a small capital line | `playlist go ITEM [SLIDE]` |
 | Bottom bar | + Add Slide; the transition for all slides (Cut, Dissolve, Advanced ▾ with 19 kinds); grid, easy (words only) or table view; slide size | `menu NewSlide` |
 | Media bin | Pictures and videos; click shows one behind the words; drag onto a slide (its media) or under the slides (a slide of its own); Command/Shift-click or a box picks several; Delete asks; right-click for Scaling, Loop, playlists, Delete…; MEDIA ▾ picks a media playlist (Play This Playlist, Follow a Folder…); the chevron folds the bin away | `media`, `media show ITEM`, `media add FILE…`, `media delete ITEM --yes`, `media-playlist play NAME` |
 
