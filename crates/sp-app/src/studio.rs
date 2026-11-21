@@ -2361,33 +2361,26 @@ pub fn right_column(
         let fixed_height = 10.0 + 316.0 + 12.0 + 44.0 + 10.0 + 44.0 + 13.0 + 50.0 + 14.0;
         let short_by = (LEAST_BODY - (column.height() - SIDE - fixed_height)).clamp(0.0, 180.0 - LEAST_PICTURE);
         let block = Rect::from_min_size(pos2(left, column.min.y + 10.0), vec2(width, 316.0 - short_by));
-        preview_block(ui, show, state, preview, commands, block);
+        // What shows, layer by layer. The screens show five of the layers; the sixth is heard.
+        let slide = show.live().is_some();
+        let media = show.live_media().is_some();
+        let props = !state.props_live.is_empty();
+        let message = state.message_live.is_some();
+        let audio = state.audio_playing.track.is_some();
+        let announcing = state.announcement_live.is_some();
+        let on_screen = slide || media || props || message || announcing;
+        preview_block(ui, show, state, preview, commands, block, on_screen);
 
         // The six layer keys: each is lit while its layer shows, and clears that layer alone.
         let keys_top = block.max.y + 12.0;
         let each = (width - 2.0 * 7.0) / 3.0;
         let layers = [
-            ("SLIDE", Layer::Slides, show.live().is_some(), "Clear the slide: take the words off the screens (F2)"),
-            (
-                "MEDIA",
-                Layer::Media,
-                show.live_media().is_some(),
-                "Clear the media: take the picture or video off the screens (F3)",
-            ),
-            ("PROPS", Layer::Props, !state.props_live.is_empty(), "Clear the props: take them off the screens (F4)"),
-            (
-                "MESSAGES",
-                Layer::Messages,
-                state.message_live.is_some(),
-                "Clear the message: take it off the screens (F6)",
-            ),
-            ("AUDIO", Layer::Audio, state.audio_playing.track.is_some(), "Clear the audio: stop it playing (F5)"),
-            (
-                "ANNOUNCE",
-                Layer::Announcements,
-                state.announcement_live.is_some(),
-                "Clear the announcements: take them off the screens",
-            ),
+            ("SLIDE", Layer::Slides, slide, "Clear the slide: take the words off the screens (F2)"),
+            ("MEDIA", Layer::Media, media, "Clear the media: take the picture or video off the screens (F3)"),
+            ("PROPS", Layer::Props, props, "Clear the props: take them off the screens (F4)"),
+            ("MESSAGES", Layer::Messages, message, "Clear the message: take it off the screens (F6)"),
+            ("AUDIO", Layer::Audio, audio, "Clear the audio: stop it playing (F5)"),
+            ("ANNOUNCE", Layer::Announcements, announcing, "Clear the announcements: take them off the screens"),
         ];
         for (place, (name, layer, lit, hint)) in layers.into_iter().enumerate() {
             let corner = pos2(left + (each + 7.0) * (place % 3) as f32, keys_top + 54.0 * (place / 3) as f32);
@@ -2403,8 +2396,9 @@ pub fn right_column(
             }
         }
 
-        // Clear All: orange while anything shows, grey when nothing does, always in its place.
-        let any_live = show.anything_live();
+        // Clear All: orange while any layer shows or plays, grey when none does, always in its
+        // place.
+        let any_live = on_screen || audio;
         let rect = Rect::from_min_size(pos2(left, keys_top + 98.0 + 13.0), vec2(width, 50.0));
         let (fill, edge, ink) =
             if any_live { (TALLY, CLEAR_ALL_EDGE, Color32::WHITE) } else { (BUTTON, KEY_EDGE, TEXT_FAINT) };
@@ -2423,7 +2417,8 @@ pub fn right_column(
     round_corners(ui, column_panel(shown.response.rect, Column::Right));
 }
 
-/// The preview block, in `block`: black, with a head (the on-screen light, the switch between
+/// The preview block, in `block` (`anything_shows` says whether any layer the screens show has
+/// something on it): black, with a head (the on-screen light, the switch between
 /// the audience's picture and the stage's, and ON SCREEN or CLEAR), the picture, the readout
 /// (the slide's number large, then its group and song), and one row, always there, for whatever
 /// is playing.
@@ -2434,9 +2429,10 @@ fn preview_block(
     preview: crate::home::Preview,
     commands: &mut Vec<Command>,
     block: Rect,
+    anything_shows: bool,
 ) {
     let on = show.output_enabled();
-    let on_screen = show.anything_live() && on;
+    let on_screen = anything_shows && on;
     ui.painter().rect_filled(block, 13.0, Color32::BLACK);
     let inner = block.shrink(10.0);
 
@@ -2549,7 +2545,7 @@ fn preview_block(
             painter.galley(pos2(after.x, first_y - title.size().y / 2.0), title, SCREEN_DIM);
         }
         _ => {
-            let words_now = if show.anything_live() { "NO SLIDE ON SCREEN" } else { "NOTHING ON SCREEN" };
+            let words_now = if anything_shows { "NO SLIDE ON SCREEN" } else { "NOTHING ON SCREEN" };
             let line = spaced(ui, words_now, label.clone(), SCREEN_DIM, 0.7);
             painter.galley(pos2(words.min.x, first_y - line.size().y / 2.0), line, SCREEN_DIM);
         }

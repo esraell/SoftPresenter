@@ -7562,6 +7562,57 @@ mod tests {
     }
 
     #[test]
+    fn a_layer_key_and_clear_all_clear_in_the_show_view_and_in_the_edit_view() {
+        use sp_engine::Layer;
+        let show = three_songs();
+        let press = |at: egui::Pos2, pressed: bool| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        // In a window of 1280 by 800 the right column's keys start 390 down and 920 across:
+        // Slide is the first of them, Props the third, and Clear All lies under the two rows.
+        let click = |state: &mut HomeState, at: egui::Pos2| {
+            let ctx = egui::Context::default();
+            let mut asked = Vec::new();
+            let frames = [vec![Event::PointerMoved(at)], vec![press(at, true)], vec![press(at, false)], vec![]];
+            for (n, events) in frames.into_iter().enumerate() {
+                let raw = RawInput {
+                    screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+                    time: Some(n as f64 * 0.1),
+                    events,
+                    ..RawInput::default()
+                };
+                let output = ctx.run_ui(raw, |ui| {
+                    asked.extend(home_ui(ui, &show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None));
+                });
+                output.drop_without_applying_deltas();
+            }
+            asked
+        };
+        for editing in [false, true] {
+            let mut state = HomeState::default();
+            if editing {
+                state.editing = EditDraft::of(&show, SlideRef { presentation: 0, slide: 0 });
+                assert!(state.editing.is_some());
+            }
+            assert_eq!(
+                click(&mut state, pos2(960.0, 412.0)),
+                vec![Command::Clear(Layer::Slides)],
+                "editing: {editing}"
+            );
+            assert_eq!(
+                click(&mut state, pos2(1200.0, 412.0)),
+                vec![Command::Clear(Layer::Props)],
+                "editing: {editing}"
+            );
+            assert_eq!(click(&mut state, pos2(1090.0, 526.0)), vec![Command::ClearAll], "editing: {editing}");
+            assert_eq!(state.editing.is_some(), editing, "clearing leaves the view as it was");
+        }
+    }
+
+    #[test]
     fn a_search_that_ends_gives_the_keyboard_back_to_the_show() {
         let show = three_songs();
         let ctx = egui::Context::default();
