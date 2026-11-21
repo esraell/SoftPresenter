@@ -364,7 +364,8 @@ pub struct Prefs {
     pub ndi_name: String,
     #[serde(skip_serializing)]
     pub ndi_on: bool,
-    /// How tall the service's part of the left column was dragged to be. `None` until it is.
+    /// From before the left column listed one thing at a time: how tall its upper part was
+    /// dragged to be. Still read, so an older file opens; no longer used.
     pub service_height: Option<f32>,
     /// True when the stage screens were switched off.
     pub stage_off: bool,
@@ -387,6 +388,12 @@ pub struct Prefs {
     /// True when the Bible page's table of translations was left open.
     #[serde(default)]
     pub bible_rows_open: bool,
+    /// True when the left column was left listing a playlist, not a library's songs.
+    #[serde(default)]
+    pub playlist_in_front: bool,
+    /// The order a library's songs are listed in: `listed`, `az` or `longest`.
+    #[serde(default)]
+    pub song_order: String,
 }
 
 /// When a song's copyright line is shown.
@@ -445,6 +452,8 @@ impl Default for Prefs {
             setup_done: false,
             bible_lists_hidden: false,
             bible_rows_open: false,
+            playlist_in_front: false,
+            song_order: "listed".to_owned(),
         }
     }
 }

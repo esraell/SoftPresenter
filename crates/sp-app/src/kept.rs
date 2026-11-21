@@ -96,9 +96,52 @@ pub struct SongList {
     pub shown: Vec<usize>,
 }
 
+/// The order a library's songs are listed in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SongOrder {
+    /// As the library has them.
+    #[default]
+    Listed,
+    /// By title, A to Z.
+    AZ,
+    /// The songs with the most slides first.
+    Longest,
+}
+
+impl SongOrder {
+    pub const ALL: [SongOrder; 3] = [SongOrder::Listed, SongOrder::AZ, SongOrder::Longest];
+
+    /// The word the order is saved as.
+    pub fn name(self) -> &'static str {
+        match self {
+            SongOrder::Listed => "listed",
+            SongOrder::AZ => "az",
+            SongOrder::Longest => "longest",
+        }
+    }
+
+    /// The order saved as this word; as listed for any other.
+    pub fn named(name: &str) -> SongOrder {
+        SongOrder::ALL.into_iter().find(|order| order.name() == name).unwrap_or_default()
+    }
+
+    /// Puts songs (by their places in the show) in this order. Songs that tie keep the order
+    /// they were given in.
+    pub fn sort(self, show: &Show, songs: &mut [usize]) {
+        let song = |at: &usize| show.presentations().get(*at);
+        match self {
+            SongOrder::Listed => {}
+            SongOrder::AZ => songs.sort_by_cached_key(|at| song(at).map(|song| song.title.to_lowercase())),
+            SongOrder::Longest => {
+                songs.sort_by_cached_key(|at| std::cmp::Reverse(song(at).map_or(0, |song| song.slide_count())));
+            }
+        }
+    }
+}
+
 /// What the song list was made from: the songs, the library shown (its songs by key, `None`
-/// for All Songs) and what was typed in the filter.
-pub type SongListFrom = (u64, Option<Vec<String>>, String);
+/// for All Songs), what was typed in the filter, and the order chosen.
+pub type SongListFrom = (u64, Option<Vec<String>>, String, SongOrder);
 
 /// The lists the window keeps.
 #[derive(Default)]
@@ -161,6 +204,30 @@ mod tests {
         let before = seen.epoch();
         seen.check(&show, &renamed, [0, usize::MAX, usize::MAX], &[1]);
         assert_ne!(seen.epoch(), before, "a slot hidden is seen");
+    }
+
+    #[test]
+    fn songs_are_listed_as_the_library_has_them_by_title_or_longest_first() {
+        let song = |title: &str, slides: usize| {
+            let words = (0..slides).map(|n| format!("Line {n}\n")).collect::<Vec<_>>().join("\n");
+            Arc::new(sp_model::parse_song_text(title, &words))
+        };
+        let show = Show::new(vec![song("morning", 2), song("Evening", 5), song("Noon", 2), song("afternoon", 3)]);
+        let ordered = |order: SongOrder| {
+            let mut songs = vec![0, 1, 2, 3];
+            order.sort(&show, &mut songs);
+            songs
+        };
+        assert_eq!(ordered(SongOrder::Listed), [0, 1, 2, 3]);
+        // By title, whatever the case of its first letter.
+        assert_eq!(ordered(SongOrder::AZ), [3, 1, 0, 2]);
+        // The most slides first; songs with as many keep the order they had.
+        assert_eq!(ordered(SongOrder::Longest), [1, 3, 0, 2]);
+        // The order is saved as a word, and an unknown word is the library's own order.
+        for order in SongOrder::ALL {
+            assert_eq!(SongOrder::named(order.name()), order);
+        }
+        assert_eq!(SongOrder::named(""), SongOrder::Listed);
     }
 
     #[test]

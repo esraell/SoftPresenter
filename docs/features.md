@@ -107,14 +107,26 @@ feature changes, this page changes in the same commit.
   "Припев", "Приспів"…); slides break at blank lines, and more than four lines without one are
   shared out evenly (eight lines make two slides of four). A song the library already has,
   word for word under the same title, isn't added twice.
-- The left column: **LIBRARY** rows (All Songs and libraries of your own,
-  such as Christmas or Youth) and **PLAYLISTS** rows on top, and the songs or items of the one
-  chosen below, with a filter at the bottom. + beside each heading makes a new one; double-click
-  or right-click a row to rename or delete it; the line under the rows can be dragged. A song
-  dragged onto a library or a playlist goes into it, as does one added with the + on its row or
-  from its right-click menu; a new song made while a library is shown goes into it.
-- A playlist lists songs (with the library each is in) and saved Bible passages in running
-  order; items can be dragged into a new order, and headers (+ over the items) group them.
+- The left column lists one thing at a time, a playlist or a library, and says which in a small
+  label at its top (with a button there that imports songs or slides). Under the label is the
+  name of what is listed; a click on it opens the **chooser**, which puts the list away and
+  shows only things to open: the playlists first (each with how many items it has), then the
+  song libraries under a line (All Songs, then libraries of your own such as Christmas or
+  Youth). The one that is open has a lighter row, a heavier name and a tick. + beside each
+  heading makes a new one; a row's ⋯ (or a right-click, or a double click for Rename) renames,
+  exports or deletes it. Choosing puts the list back. A library lists its songs, each with how
+  many slides it has (and, in All Songs, the library it is in); at the foot are the order they
+  are listed in (**As listed, A–Z, Longest**, kept between runs), **New song** and a filter. A
+  song's ⋯, or a right-click, opens its menu. While songs are dragged the chooser shows above
+  the list, so they can be dropped on a playlist or a library; a new song made while a library
+  is shown goes into it. Which of the two the column was left listing is kept between runs.
+- A playlist lists its items in running order: each with its number, its title, a small mark
+  for a Bible passage, a picture or video, a media playlist or a placeholder, the orange dot on
+  the one on screen (whose row is brought into view when it goes on screen), and ⋯ for its
+  menu (for a song, the song's own menu is under Song). Headers are small capital lines. Items
+  can be dragged into a new order. **Add to playlist**, at the foot, adds a song, a header, a
+  placeholder, a picture or video, a media playlist or (once VoxLive is connected) the VoxLive
+  item after the open item, and opens the Bible page for a passage; under it is the filter.
   A song opened from a playlist is shown with the playlist's other songs above and below it,
   each under a bar with its name, so scrolling down goes on into the next song; clicking a slide
   of another song puts it on screen. With View, Continuous Playlist on, Next at the end of a
@@ -123,8 +135,8 @@ feature changes, this page changes in the same commit.
   **media playlists** (the announcement loop) and **placeholders** (a place kept for the sermon
   slides). A picture or video goes in from its right-click menu (Add to Playlist "Sunday"), by
   dragging it from the bin onto the items (between two, where the line shows) or onto a
-  playlist's name; a media playlist from the menu beside MEDIA; a placeholder from the + over the
-  items, named as it is made. In the slide area each is a bar with one tile: clicking a picture
+  playlist's name in the chooser; a media playlist from the menu beside MEDIA, or either from Add
+  to playlist; a placeholder from Add to playlist, named as it is made. In the slide area each is a bar with one tile: clicking a picture
   or video's tile shows it, a media playlist's plays it round and round; opening one from the
   list only scrolls to it, changing nothing on the screens, and Continuous Playlist passes over
   them, as it does passages. A placeholder is filled with a song chosen from a list (its tile's
@@ -197,7 +209,8 @@ feature changes, this page changes in the same commit.
   these changes in the Show view and on the Bible page, and the audience stays on the same slide.
   `sp undo` and `sp redo` do the same from the command line whatever the window shows, and say
   which song and slides changed.
-- A song's right-click menu: Add to the playlist in front, Libraries, Rename, Duplicate, Theme (a theme of its own, or
+- A song's menu (its ⋯, or a right-click): Add to the playlist in front, Add to Playlist (any
+  playlist, or a new one), Libraries, Rename, Duplicate, Theme (a theme of its own, or
   the songs theme), Reflow, and Delete (a song made in the app goes to the Trash).
 - **Timers** (count down, count down to a time of day, or count up), **Messages** shown over
   the slides (with the time or a timer in them, an optional time to leave by themselves, a look
@@ -458,11 +471,11 @@ feature changes, this page changes in the same commit.
   the screen changes at once wherever it is showing. If the screen was changed in VoxLive since
   its look was opened, nothing is written: the page says so and offers VoxLive's look or saving
   over it. Revert lets the changes go; leaving the page or closing Settings closes the preview.
-- **The VoxLive item**: once VoxLive is connected and has screens, a VoxLive row under LIBRARY
-  (in VoxLive's colour, with how many screens) opens the church's VoxLive screens as slides, one
-  a screen, named after it; it follows VoxLive's list as screens are made, renamed or deleted
-  there, and is never edited, saved, deleted or put in a song pack. Its right-click menu puts it
-  in the playlist in front. Clicking one of its slides puts that screen's live captions on the
+- **The VoxLive item**: once VoxLive is connected and has screens, the church's VoxLive screens
+  are slides, one a screen, named after it; the item follows VoxLive's list as screens are
+  made, renamed or deleted there, and is never edited, saved, deleted or put in a song pack.
+  It is not a row among the libraries: Add to playlist (or `sp playlist add VoxLive`) puts it in
+  the playlist in front, and `sp select VoxLive` shows it by itself. Clicking one of its slides puts that screen's live captions on the
   screens in place of what was there (a verse, a song); clicking the verse brings it back. The
   **VoxLive tab** beside Timers, Messages and the rest (in the right column, so on the Bible page
   too) has the same screens as buttons. A screen's live display, which can start a paid

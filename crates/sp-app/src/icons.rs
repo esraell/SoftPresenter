@@ -60,11 +60,23 @@ pub enum Icon {
     Muted,
     /// Back to the beginning: a bar and a triangle pointing at it.
     ToStart,
+    /// A tick: the one that is open, or in use.
+    Check,
+    /// An arrow coming down onto a line: bring something in.
+    Import,
+    /// A list with a dot before each line: a playlist.
+    Playlist,
+    /// A table: a heading row and columns.
+    Table,
+    /// A frame with a play mark: a video.
+    Film,
+    /// Pictures one behind another: a media playlist.
+    Stack,
 }
 
 /// Every icon, so a test can draw them all.
 #[cfg(test)]
-pub const ALL: [Icon; 50] = [
+pub const ALL: [Icon; 56] = [
     Icon::Search,
     Icon::Theme,
     Icon::Play,
@@ -115,6 +127,12 @@ pub const ALL: [Icon; 50] = [
     Icon::Sound,
     Icon::Muted,
     Icon::ToStart,
+    Icon::Check,
+    Icon::Import,
+    Icon::Playlist,
+    Icon::Table,
+    Icon::Film,
+    Icon::Stack,
 ];
 
 /// Draws inside a square using coordinates from 0 to 1.
@@ -409,6 +427,32 @@ pub fn paint(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
         Icon::ToStart => {
             p.fill_rect(0.18, 0.2, 0.28, 0.8, 0.02);
             p.filled(&[(0.82, 0.2), (0.34, 0.5), (0.82, 0.8)]);
+        }
+        Icon::Check => p.line(&[(0.18, 0.54), (0.4, 0.76), (0.82, 0.26)]),
+        Icon::Import => {
+            p.line(&[(0.5, 0.12), (0.5, 0.62)]);
+            p.line(&[(0.3, 0.44), (0.5, 0.64), (0.7, 0.44)]);
+            p.line(&[(0.18, 0.84), (0.82, 0.84)]);
+        }
+        Icon::Playlist => {
+            for y in [0.24, 0.5, 0.76] {
+                p.dot(0.16, y, 0.06);
+                p.line(&[(0.34, y), (0.88, y)]);
+            }
+        }
+        Icon::Table => {
+            p.rect(0.12, 0.16, 0.88, 0.84, 0.08);
+            p.line(&[(0.12, 0.4), (0.88, 0.4)]);
+            p.line(&[(0.42, 0.4), (0.42, 0.84)]);
+        }
+        Icon::Film => {
+            p.rect(0.1, 0.2, 0.9, 0.8, 0.08);
+            p.filled(&[(0.42, 0.36), (0.66, 0.5), (0.42, 0.64)]);
+        }
+        Icon::Stack => {
+            p.rect(0.1, 0.34, 0.74, 0.86, 0.06);
+            p.line(&[(0.26, 0.24), (0.84, 0.24), (0.84, 0.7)]);
+            p.line(&[(0.4, 0.14), (0.92, 0.14), (0.92, 0.58)]);
         }
     }
 }

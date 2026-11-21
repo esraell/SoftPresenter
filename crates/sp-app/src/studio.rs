@@ -987,170 +987,295 @@ fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
     state.find_rect = Some(find);
 }
 
-/// One row of a list in the left column. Returns its response; `live` puts a tally light at
-/// the right, and `trailing` is room kept clear there for a button.
-fn list_row(ui: &mut egui::Ui, icon: Icon, title: &str, chosen: bool, live: bool, missing: bool) -> egui::Response {
-    let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click_and_drag());
-    let painter = ui.painter();
-    if chosen {
-        painter.rect_filled(row, RADIUS, ACCENT.gamma_multiply(0.22));
-    } else if response.hovered() {
-        painter.rect_filled(row, RADIUS, CARD);
+/// The tints of the playlist's and the library's marks in the left column; nothing else has
+/// these colours.
+const PLAYLIST_TINT: Color32 = Color32::from_rgb(0x8f, 0xb4, 0xff);
+const LIBRARY_TINT: Color32 = Color32::from_rgb(0xc3, 0xa6, 0xff);
+/// A row under the pointer: a little lighter than the panel, darker than a chosen row.
+pub const ROW_HOVER: Color32 = Color32::from_rgb(0x1f, 0x1f, 0x1f);
+/// The side of a button that is only its icon, and of the "more" button at the end of a row.
+pub const ICON_BUTTON: f32 = 28.0;
+pub const MORE_BUTTON: f32 = 26.0;
+/// How tall a row of the left column's list is, and a row of the chooser.
+const LIST_ROW: f32 = 42.0;
+const CHOOSER_ROW: f32 = 36.0;
+
+/// A small capital label in the fixed-width face, as sections and strips are headed.
+pub fn cap(ui: &egui::Ui, at: egui::Pos2, anchor: Align2, text: &str, ink: Color32) -> Rect {
+    paint_spaced(ui, at, anchor, &text.to_uppercase(), fixed_semibold(11.5), ink, 0.6)
+}
+
+/// A button that is only its icon: lighter under the pointer, and drawn at `strength` (1 for
+/// full) until the pointer is on it. `on` gives it the lighter grey of a choice that is on.
+pub fn icon_button(ui: &egui::Ui, rect: Rect, id: egui::Id, icon: Icon, strength: f32, on: bool) -> egui::Response {
+    let response = ui.interact(rect, id, Sense::click());
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&response));
+    let hot = response.hovered() || open;
+    if on {
+        ui.painter().rect_filled(rect, RADIUS, SELECTED);
+    } else if hot {
+        ui.painter().rect_filled(rect, RADIUS, BUTTON);
     }
-    let ink = if missing {
-        TEXT_FAINT
-    } else if chosen {
-        Color32::WHITE
-    } else {
-        TEXT
-    };
-    icons::paint(
-        painter,
-        icon,
-        Rect::from_center_size(row.left_center() + vec2(15.0, 0.0), vec2(13.0, 13.0)),
-        TEXT_FAINT,
-    );
-    if live {
-        painter.circle_filled(row.right_center() - vec2(12.0, 0.0), 3.5, TALLY);
-    }
-    let clip = Rect::from_min_max(row.min, pos2(row.max.x - 26.0, row.max.y));
-    painter.with_clip_rect(clip).text(
-        row.left_center() + vec2(30.0, 0.0),
-        Align2::LEFT_CENTER,
-        title,
-        FontId::proportional(13.5),
-        ink,
-    );
+    let ink = if hot || on { TEXT } else { TEXT_DIM.gamma_multiply(strength) };
+    icons::paint(ui.painter(), icon, Rect::from_center_size(rect.center(), egui::Vec2::splat(14.0)), ink);
     response
+}
+
+/// The "more" button at the end of a row, a strip or a bar: three dots, always there at half
+/// strength and full when the pointer is `near` (over its row). It opens what a right-click
+/// on the row opens.
+pub fn more_button(ui: &egui::Ui, rect: Rect, id: egui::Id, near: bool) -> egui::Response {
+    icon_button(ui, rect, id, Icon::More, if near { 1.0 } else { 0.5 }, false).on_hover_text("More")
+}
+
+/// The dot that says a thing is on the screens: orange, with a faint ring round it.
+pub fn paint_tally(painter: &egui::Painter, centre: egui::Pos2) {
+    painter.circle_filled(centre, 7.0, TALLY.gamma_multiply(0.25));
+    painter.circle_filled(centre, 4.0, TALLY);
+}
+
+/// A flat button with its words in the middle and an icon before them if one is given. `on`
+/// gives it the lighter grey of a choice that is on.
+pub fn flat_button(
+    ui: &egui::Ui,
+    rect: Rect,
+    id: egui::Id,
+    label: &str,
+    icon: Option<Icon>,
+    on: bool,
+) -> egui::Response {
+    let response = ui.interact(rect, id, Sense::click());
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&response));
+    let painter = ui.painter();
+    if on {
+        painter.rect_filled(rect, 9.0, SELECTED);
+        painter.rect_stroke(rect, 9.0, Stroke::new(1.0, Color32::from_white_alpha(26)), StrokeKind::Inside);
+    } else {
+        painter.rect_filled(rect, 9.0, if response.hovered() || open { BUTTON_HOVER } else { BUTTON });
+    }
+    let words = painter.layout_no_wrap(label.to_owned(), FontId::proportional(12.5), TEXT);
+    let mark = if icon.is_some() { 12.0 + 7.0 } else { 0.0 };
+    let left = rect.center().x - (words.size().x + mark) / 2.0;
+    if let Some(icon) = icon {
+        icons::paint(painter, icon, Rect::from_center_size(pos2(left + 6.0, rect.center().y), vec2(12.0, 12.0)), TEXT);
+    }
+    painter.galley(pos2(left + mark, rect.center().y - words.size().y / 2.0), words, TEXT);
+    response
+}
+
+/// A segmented switch whose pills share `track`'s width evenly, the chosen one the lighter
+/// grey. Returns the choice clicked.
+pub fn even_switch(
+    ui: &egui::Ui,
+    salt: &str,
+    track: Rect,
+    labels: &[&str],
+    hints: &[&str],
+    chosen: Option<usize>,
+    font: FontId,
+) -> Option<usize> {
+    const BETWEEN: f32 = 2.0;
+    const INSET: f32 = 3.0;
+    ui.painter().rect_filled(track, track.height() / 2.0, CARD);
+    let each = (track.width() - 2.0 * INSET - BETWEEN * labels.len().saturating_sub(1) as f32) / labels.len() as f32;
+    let reach = ((LEAST_CLICK - (track.height() - 2.0 * INSET)) / 2.0).max(0.0);
+    let mut clicked = None;
+    for (index, label) in labels.iter().enumerate() {
+        let corner = pos2(track.min.x + INSET + (each + BETWEEN) * index as f32, track.min.y + INSET);
+        let cell = Rect::from_min_size(corner, vec2(each, track.height() - 2.0 * INSET));
+        let mut response =
+            ui.interact(cell.expand2(vec2(0.0, reach)), ui.scope_id().with((salt, index)), Sense::click());
+        let on = chosen == Some(index);
+        paint_pill(ui.painter(), cell, on);
+        let ink = if on || response.hovered() { TEXT } else { TEXT_DIM };
+        ui.painter().text(cell.center(), Align2::CENTER_CENTER, *label, font.clone(), ink);
+        if let Some(hint) = hints.get(index) {
+            response = response.on_hover_text(*hint);
+        }
+        if response.clicked() {
+            clicked = Some(index);
+        }
+    }
+    clicked
+}
+
+/// What one row of the left column's list shows.
+#[derive(Default)]
+struct ListRow<'a> {
+    /// The item's number in the playlist, in the fixed-width face at the left.
+    number: Option<usize>,
+    title: &'a str,
+    /// A small word after the title, in capitals (the library a song is in).
+    tag: Option<&'a str>,
+    /// The open item or song: the lighter row, its title heavier.
+    chosen: bool,
+    /// On the screens now: its number is orange and the tally dot shows.
+    live: bool,
+    /// What it names has gone, or it is a place kept for something to come.
+    faint: bool,
+    /// The mark of its kind, at the right (a passage, a video…), where the tally dot goes.
+    icon: Option<Icon>,
+    /// A small number at the right (how many slides a song has).
+    count: Option<usize>,
+}
+
+/// Draws one row of the left column's list, 42 high. Returns its response and where its
+/// "more" button goes (the caller makes the button after, so that it takes its own clicks).
+fn list_row(ui: &mut egui::Ui, look: &ListRow) -> (egui::Response, Rect) {
+    let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), LIST_ROW), Sense::click_and_drag());
+    let more = Rect::from_center_size(
+        pos2(row.max.x - 10.0 - MORE_BUTTON / 2.0, row.center().y),
+        egui::Vec2::splat(MORE_BUTTON),
+    );
+    if !ui.is_rect_visible(row) {
+        return (response, more);
+    }
+    let painter = ui.painter();
+    if look.chosen {
+        painter.rect_filled(row, RADIUS, CARD);
+    } else if response.hovered() {
+        painter.rect_filled(row, RADIUS, ROW_HOVER);
+    }
+    let mut left = row.min.x + 10.0;
+    if let Some(number) = look.number {
+        let cell = Rect::from_min_size(pos2(left, row.center().y - 12.8), vec2(28.0, 25.6));
+        painter.rect_filled(cell, 4.0, CARD);
+        let ink = if look.live {
+            TALLY
+        } else if look.chosen {
+            TEXT
+        } else {
+            TEXT_FAINT
+        };
+        paint_spaced(ui, cell.center(), Align2::CENTER_CENTER, &format!("{number:02}"), fixed(19.0), ink, -0.8);
+        left += 28.0 + 10.0;
+    }
+    // From the right: the "more" button, then the tally dot, the kind's mark or the count.
+    let mut right = more.min.x - 10.0;
+    if look.live {
+        paint_tally(ui.painter(), pos2(right - 4.0, row.center().y));
+        right -= 8.0 + 8.0;
+    } else if let Some(icon) = look.icon {
+        let mark = Rect::from_center_size(pos2(right - 7.0, row.center().y), vec2(14.0, 14.0));
+        icons::paint(ui.painter(), icon, mark, TEXT_FAINT);
+        right -= 14.0 + 8.0;
+    } else if let Some(count) = look.count.filter(|count| *count > 0) {
+        let drawn = ui.painter().text(
+            pos2(right, row.center().y),
+            Align2::RIGHT_CENTER,
+            count.to_string(),
+            fixed(10.5),
+            TEXT_FAINT,
+        );
+        right = drawn.min.x - 8.0;
+    }
+    let (font, ink) = if look.faint {
+        (FontId::proportional(13.5), TEXT_FAINT.gamma_multiply(0.7))
+    } else if look.chosen {
+        (semibold(13.5), TEXT)
+    } else {
+        (FontId::proportional(13.5), TEXT_DIM)
+    };
+    let clip = Rect::from_min_max(pos2(left, row.min.y), pos2(right.max(left), row.max.y));
+    let painter = ui.painter().with_clip_rect(clip);
+    let title = painter.text(pos2(left, row.center().y), Align2::LEFT_CENTER, look.title, font, ink);
+    if let Some(tag) = look.tag {
+        let galley = spaced(ui, &tag.to_uppercase(), fixed_semibold(11.0), TEXT_FAINT, 0.6);
+        painter.galley(pos2(title.max.x + 8.0, row.center().y - galley.size().y / 2.0), galley, TEXT_FAINT);
+    }
+    (response, more)
 }
 
 /// Songs being dragged from the library, by their places among the songs.
 #[derive(Clone)]
 struct SongDrag(Vec<usize>);
 
-/// A row in the list of libraries and playlists: an icon and a name, renamed in place.
-/// Shows when a dragged song would be dropped on it.
-/// The VoxLive item's row under LIBRARY, once VoxLive is connected and has screens: its mark
-/// in VoxLive's colour; a click opens its slides (one a screen), and its right-click menu puts
-/// it in the playlist in front.
-fn voxlive_row(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
-    let Some(slot) = state.voxlive_slot else { return };
-    let screens = show.presentations().get(slot).map_or(0, |item| item.slide_count());
-    if screens == 0 {
-        return;
-    }
-    let chosen = show.selected() == slot && !state.playlist_open;
-    let response =
-        list_row(ui, Icon::Live, "VoxLive", chosen, show.live().is_some_and(|at| at.presentation == slot), false);
-    // The mark over the row's icon, in VoxLive's colour, so it reads as VoxLive's, not a song.
-    let mark = Rect::from_center_size(response.rect.left_center() + vec2(15.0, 0.0), vec2(16.0, 16.0));
-    ui.painter().rect_filled(mark, 4.0, crate::integrations::VOXLIVE);
-    ui.painter().text(mark.center(), Align2::CENTER_CENTER, "V", semibold(10.0), Color32::WHITE);
-    let count = if screens == 1 { "1 screen".to_owned() } else { format!("{screens} screens") };
-    ui.painter().text(
-        response.rect.right_center() - vec2(8.0, 0.0),
-        Align2::RIGHT_CENTER,
-        count,
-        FontId::proportional(11.0),
-        crate::integrations::VOXLIVE_LIGHT,
-    );
-    let front = state.services.front().name.clone();
-    let response =
-        response.on_hover_text("Your VoxLive screens, a slide each: click one to put its captions on the screens");
-    if response.clicked() {
-        state.playlist_open = false;
-        state.bible_open = false;
-        commands.push(Command::Select(slot));
-    }
-    response.context_menu(|ui| {
-        if ui.button(format!("Add to Playlist \u{201c}{front}\u{201d}")).clicked() {
-            state.services.add(crate::service::Item::Song {
-                key: crate::voxlive::ITEM_KEY.to_owned(),
-                title: "VoxLive".to_owned(),
-            });
-            ui.close();
-        }
-    });
-}
-
-fn source_row(ui: &mut egui::Ui, icon: Icon, name: &str, chosen: bool) -> egui::Response {
-    let response = list_row(ui, icon, name, chosen, false, false);
-    if response.dnd_hover_payload::<SongDrag>().is_some() {
-        ui.painter().rect_stroke(response.rect, RADIUS, Stroke::new(2.0, ACCENT), StrokeKind::Inside);
-    }
-    response
-}
-
-/// A heading over a group of rows, with a + and an arrow that folds the rows away.
-/// Returns whether + was clicked.
-fn source_heading(ui: &mut egui::Ui, text: &str, collapsed: &mut bool, add_hint: &str) -> bool {
-    let mut add = false;
-    ui.horizontal(|ui| {
-        caption(ui, text);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let (arrow, hint) = if *collapsed { ("⌄", "Show") } else { ("⌃", "Fold away") };
-            if ui
-                .add(egui::Button::new(egui::RichText::new(arrow).color(TEXT_FAINT)).frame(false))
-                .on_hover_text(hint)
-                .clicked()
-            {
-                *collapsed = !*collapsed;
-            }
-            let (plus, response) = ui.allocate_exact_size(vec2(20.0, 18.0), Sense::click());
-            let ink = if response.hovered() { TEXT } else { TEXT_FAINT };
-            icons::paint(ui.painter(), Icon::Plus, Rect::from_center_size(plus.center(), vec2(10.0, 10.0)), ink);
-            add = response.on_hover_text(add_hint).clicked();
-        });
-    });
-    add
-}
-
-/// The left column: the libraries and the playlists as rows on top, the
-/// songs or items of the one chosen below, and a filter at the bottom.
+/// The left column: a small label saying whether a playlist or a library is listed, the name
+/// of the one that is (which opens the chooser of playlists and libraries), its items or
+/// songs, and at the foot what adds to it and a filter.
 pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
-    let frame = column_frame(Column::Left).inner_margin(egui::Margin {
-        left: 10,
-        right: 10,
-        top: 14,
-        bottom: COLUMN_BOTTOM as i8,
-    });
+    let frame = column_frame(Column::Left).inner_margin(egui::Margin { left: 10, right: 10, top: 16, bottom: 12 });
     let panel = egui::Panel::left("library")
         .resizable(false)
         .show_separator_line(false)
         .exact_size(column_outer(LEFT_WIDTH))
         .frame(frame);
     let shown = panel.show(ui, |ui| {
-        let column_height = ui.available_height();
-        let rows = state.libraries.len() + state.services.list.len() + 1;
-        let fitted = (rows as f32 * 32.0 + 70.0).min(column_height * 0.45);
-        // The line between the rows on top and the list under them can be dragged.
-        let sources = egui::Panel::top("sources")
-            .resizable(true)
-            .size_range(90.0..=(column_height * 0.7).max(90.0))
-            .default_size(state.service_height.unwrap_or(fitted))
-            .frame(Frame::new());
-        let shown = sources.show(ui, |ui| {
-            egui::ScrollArea::vertical().id_salt("sources").auto_shrink([false, false]).show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                source_rows(ui, show, state, commands);
-            });
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        let width = ui.available_width();
+        // The label, with the button that brings songs and slides in.
+        let (head, _) = ui.allocate_exact_size(vec2(width, 36.0), Sense::hover());
+        let label = if state.playlist_open { "Playlist" } else { "Library" };
+        cap(ui, pos2(head.min.x + 8.0, head.min.y + 14.0), Align2::LEFT_CENTER, label, TEXT_DIM);
+        let place =
+            Rect::from_min_size(pos2(head.max.x - 8.0 - ICON_BUTTON, head.min.y), egui::Vec2::splat(ICON_BUTTON));
+        let import = icon_button(ui, place, ui.scope_id().with("import"), Icon::Import, 1.0, false)
+            .on_hover_text("Import songs or slides");
+        egui::Popup::menu(&import).show(|ui| {
+            use crate::menubar::Action;
+            for (action, words, hint) in [
+                (
+                    Action::ImportSongs,
+                    "Songs\u{2026}",
+                    "Text, lyric, ChordPro, rich-text and Word files, and song packs",
+                ),
+                (
+                    Action::ImportLibraryFolder,
+                    "A Library Folder\u{2026}",
+                    "A folder of songs; each folder in it becomes a library",
+                ),
+                (
+                    Action::ImportSlides,
+                    "Slides\u{2026}",
+                    "A presentation, a PDF or a folder of pictures, as picture slides",
+                ),
+            ] {
+                if ui.button(words).on_hover_text(hint).clicked() {
+                    state.menu_asked = Some(action);
+                    ui.close();
+                }
+            }
         });
-        state.service_height = Some(shown.response.rect.height());
-
-        // The filter, fixed to the bottom.
-        egui::Panel::bottom("filter")
-            .frame(Frame::new().inner_margin(egui::Margin { top: 8, ..Default::default() }))
-            .show(ui, |ui| {
-                let hint = if state.playlist_open { "Filter" } else { "Search songs" };
-                ui.add(
-                    egui::TextEdit::singleline(&mut state.filter)
-                        .hint_text(hint)
-                        .desired_width(f32::INFINITY)
-                        .margin(egui::Margin::symmetric(10, 6))
-                        .background_color(CARD),
-                );
+        // The name of what is listed: a click opens the chooser, or puts it away.
+        let (row, name) = ui.allocate_exact_size(vec2(width, 39.6), Sense::click());
+        let middle = row.min.y + 16.8;
+        let (icon, tint) =
+            if state.playlist_open { (Icon::Playlist, PLAYLIST_TINT) } else { (Icon::Library, LIBRARY_TINT) };
+        icons::paint(
+            ui.painter(),
+            icon,
+            Rect::from_center_size(pos2(row.min.x + 16.0, middle), vec2(16.0, 16.0)),
+            tint,
+        );
+        let chevron = Rect::from_center_size(pos2(row.max.x - 8.0 - 6.5, middle), vec2(13.0, 13.0));
+        let arrow = if state.chooser_open { Icon::ChevronUp } else { Icon::ChevronDown };
+        icons::paint(ui.painter(), arrow, chevron, if name.hovered() { TEXT } else { TEXT_FAINT });
+        let title = source_name(state);
+        let ink = if state.chooser_open { TEXT_DIM } else { TEXT };
+        let clip = Rect::from_min_max(pos2(row.min.x + 32.0, row.min.y), pos2(chevron.min.x - 8.0, row.max.y));
+        let galley = spaced(ui, &title, semibold(19.0), ink, -0.38);
+        ui.painter().with_clip_rect(clip).galley(pos2(clip.min.x, middle - galley.size().y / 2.0), galley, ink);
+        if name.on_hover_text("Choose a playlist or a library").clicked() {
+            state.chooser_open = !state.chooser_open;
+        }
+        if state.chooser_open {
+            // Only things to open: the list and the foot are put away.
+            egui::ScrollArea::vertical().id_salt("chooser").auto_shrink([false, false]).show(ui, |ui| {
+                chooser(ui, show, state);
             });
-        ui.add_space(10.0);
+            return;
+        }
+        left_foot(ui, show, state, commands);
+        // While songs are carried the chooser shows above the list, so they can be dropped
+        // on a playlist or a library.
+        if egui::DragAndDrop::has_payload_of_type::<SongDrag>(ui.ctx()) {
+            let most = ui.available_height() * 0.6;
+            egui::ScrollArea::vertical().id_salt("chooser").max_height(most).show(ui, |ui| {
+                chooser(ui, show, state);
+            });
+            let (line, _) = ui.allocate_exact_size(vec2(width, 9.0), Sense::hover());
+            ui.painter().hline(line.x_range(), line.center().y, Stroke::new(1.0, LINE));
+        }
         if state.playlist_open {
             playlist_items(ui, show, state, commands);
         } else {
@@ -1160,133 +1285,280 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
     round_corners(ui, column_panel(shown.response.rect, Column::Left));
 }
 
-/// The LIBRARY rows (All Songs and each library) and the PLAYLISTS rows. A song dragged from
-/// the list below and dropped on one goes into it.
-fn source_rows(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
+/// The name of what the left column lists: the playlist in front, the library shown, or All
+/// Songs.
+fn source_name(state: &HomeState) -> String {
+    if state.playlist_open {
+        return state.services.front().name.clone();
+    }
+    let library = state.library_shown.and_then(|id| state.libraries.iter().find(|library| library.id == id));
+    match library {
+        Some(library) if library.name.trim().is_empty() => "Untitled".to_owned(),
+        Some(library) => library.name.clone(),
+        None => "All Songs".to_owned(),
+    }
+}
+
+/// The foot of the left column: for a library the order its songs are listed in and New song,
+/// for a playlist Add to playlist; then the filter.
+fn left_foot(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
+    let library = !state.playlist_open;
+    let height = 8.0 + if library { 26.8 + 8.0 } else { 0.0 } + 30.0 + 10.0 + 32.0;
+    let foot = egui::Panel::bottom("left foot")
+        .resizable(false)
+        .show_separator_line(false)
+        .exact_size(height)
+        .frame(Frame::new());
+    foot.show(ui, |ui| {
+        let area = ui.max_rect();
+        let mut top = area.min.y + 8.0;
+        if library {
+            let row = Rect::from_min_size(pos2(area.min.x, top), vec2(area.width(), 26.8));
+            let label = cap(ui, pos2(row.min.x, row.center().y), Align2::LEFT_CENTER, "Order", TEXT_DIM);
+            let track = Rect::from_min_max(pos2(label.max.x + 8.0, row.min.y), row.max);
+            let orders = crate::kept::SongOrder::ALL;
+            let chosen = orders.iter().position(|order| *order == state.song_order);
+            let hints = ["As the library has them", "By title", "The songs with the most slides first"];
+            let labels = ["As listed", "A\u{2013}Z", "Longest"];
+            if let Some(at) = even_switch(ui, "song order", track, &labels, &hints, chosen, FontId::proportional(11.0))
+            {
+                state.song_order = orders[at];
+            }
+            top += 26.8 + 8.0;
+        }
+        let add = Rect::from_min_size(pos2(area.min.x, top), vec2(area.width(), 30.0));
+        if library {
+            let button = flat_button(ui, add, ui.scope_id().with("new song"), "New song", Some(Icon::Plus), false);
+            if button.on_hover_text("New song (Command-N)").clicked() {
+                state.new_song = true;
+            }
+        } else {
+            let button =
+                flat_button(ui, add, ui.scope_id().with("add to playlist"), "Add to playlist", Some(Icon::Plus), false);
+            egui::Popup::menu(&button).show(|ui| add_to_playlist_menu(ui, show, state, commands));
+        }
+        // The filter: a round field, a step lighter than the panel.
+        let field = Rect::from_min_size(pos2(area.min.x, top + 30.0 + 10.0), vec2(area.width(), 32.0));
+        ui.painter().rect_filled(field, 16.0, CARD);
+        let inner = field.shrink2(vec2(12.0, 0.0));
+        let typed = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(inner).layout(Layout::left_to_right(Align::Center)), |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut state.filter)
+                        .hint_text("Filter")
+                        .frame(Frame::NONE)
+                        .background_color(Color32::TRANSPARENT)
+                        .margin(egui::Margin::ZERO)
+                        .min_size(vec2(inner.width(), inner.height()))
+                        .align(Align2::LEFT_CENTER)
+                        .desired_width(inner.width()),
+                )
+            })
+            .inner;
+        if typed.has_focus() {
+            ui.painter().rect_stroke(field, 16.0, Stroke::new(1.5, TEXT_FAINT), StrokeKind::Inside);
+        }
+    });
+}
+
+/// What Add to playlist offers: a song, a Bible passage (looked up on the Bible page), a
+/// header, a placeholder, a picture or video, a media playlist, and the VoxLive item once
+/// VoxLive is connected. What is added goes after the open item, or at the end.
+fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
     use crate::service::Item;
+    let mut made: Option<(Item, bool)> = None;
+    ui.menu_button("A Song", |ui| {
+        if let Some(song) = song_picker(ui, show, state)
+            && let (Some(key), Some(found)) = (state.song_keys.get(song), show.presentations().get(song))
+        {
+            made = Some((Item::Song { key: key.clone(), title: found.title.clone() }, false));
+            ui.close();
+        }
+    });
+    if ui
+        .button("A Bible Passage\u{2026}")
+        .on_hover_text("Opens the Bible page: look the passage up there, then Add to the playlist")
+        .clicked()
+    {
+        state.bible_open = true;
+        state.bible.focus_lookup = true;
+        ui.close();
+    }
+    if ui.button("A Header").on_hover_text("A heading over the items under it").clicked() {
+        made = Some((Item::Header { name: "Header".to_owned() }, true));
+        ui.close();
+    }
+    if ui
+        .button("A Placeholder")
+        .on_hover_text("A place kept for something to come, such as the sermon slides")
+        .clicked()
+    {
+        made = Some((Item::Placeholder { name: "Placeholder".to_owned() }, true));
+        ui.close();
+    }
+    ui.menu_button("A Picture or Video", |ui| {
+        if show.media().is_empty() {
+            ui.label(egui::RichText::new("The media bin is empty.").color(TEXT_DIM));
+        }
+        for media in show.media() {
+            if ui.button(media.name.as_str()).clicked() {
+                made = Some((Item::Media { id: media.id, name: media.name.clone() }, false));
+                ui.close();
+            }
+        }
+    });
+    ui.menu_button("A Media Playlist", |ui| {
+        if state.media_playlists.is_empty() {
+            ui.label(
+                egui::RichText::new("No media playlists yet. Make one from the menu beside MEDIA.").color(TEXT_DIM),
+            );
+        }
+        for playlist in &state.media_playlists {
+            if ui.button(playlist.name.as_str()).clicked() {
+                made = Some((Item::MediaPlaylist { id: playlist.id, name: playlist.name.clone() }, false));
+                ui.close();
+            }
+        }
+    });
+    // The VoxLive item: the church's VoxLive screens, a slide each.
+    let screens =
+        state.voxlive_slot.and_then(|slot| show.presentations().get(slot)).map_or(0, |item| item.slide_count());
+    if screens > 0
+        && ui
+            .button("VoxLive")
+            .on_hover_text("Your VoxLive screens, a slide each: a click on one puts its captions on the screens")
+            .clicked()
+    {
+        made = Some((Item::Song { key: crate::voxlive::ITEM_KEY.to_owned(), title: "VoxLive".to_owned() }, false));
+        ui.close();
+    }
+    let Some((item, rename)) = made else { return };
+    let name = item.title().to_owned();
+    let song = matches!(item, Item::Song { .. });
+    let count = state.services.front().items.len();
+    let at = state.services.chosen.map_or(count, |open| (open + 1).min(count));
+    state.services.insert(at, item);
+    // A song already in the playlist is not added twice; nothing new is at `at` then.
+    let added = state.services.front().items.len() > count;
+    if !added {
+        if song {
+            state.notice = Some(format!("{name} is already in {}.", state.services.front().name));
+        }
+        return;
+    }
+    if rename {
+        // A header or a placeholder is named as it is made.
+        state.renaming_header = Some((at, name));
+        state.rename_started = true;
+    }
+    let _ = commands;
+}
+
+/// One row of the chooser. Returns the row's response, its "more" button's place when it has
+/// one, and where its name starts and ends (for a field to retype it).
+#[allow(clippy::too_many_arguments)]
+fn chooser_row(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    tint: Color32,
+    name: &str,
+    count: usize,
+    counted: &str,
+    on: bool,
+    menu: bool,
+) -> (egui::Response, Option<Rect>, egui::Pos2, f32) {
+    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), CHOOSER_ROW), Sense::hover());
+    let button = if menu { Rect::from_min_max(row.min, pos2(row.max.x - ICON_BUTTON, row.max.y)) } else { row };
+    let response = ui.interact(button, ui.scope_id().with("chooser row"), Sense::click());
+    let carried = response.dnd_hover_payload::<SongDrag>().is_some()
+        || response.dnd_hover_payload::<crate::home::MediaDrag>().is_some();
+    let painter = ui.painter();
+    if on {
+        painter.rect_filled(button, RADIUS, CARD);
+    } else if response.hovered() || carried {
+        painter.rect_filled(button, RADIUS, ROW_HOVER);
+    }
+    if carried {
+        painter.rect_stroke(button, RADIUS, Stroke::new(2.0, TEXT), StrokeKind::Inside);
+    }
+    let middle = row.center().y;
+    icons::paint(painter, icon, Rect::from_center_size(pos2(row.min.x + 16.0, middle), vec2(16.0, 16.0)), tint);
+    // From the right: the tick on the one that is open, then how much is in it.
+    let mut right = button.max.x - 8.0;
+    if on {
+        let tick = Rect::from_center_size(pos2(right - 6.5, middle), vec2(13.0, 13.0));
+        icons::paint(painter, Icon::Check, tick, TEXT);
+        right -= 13.0 + 10.0;
+    }
+    let number = painter.text(pos2(right, middle), Align2::RIGHT_CENTER, count.to_string(), fixed(12.0), TEXT_FAINT);
+    right = number.min.x - 8.0;
+    let start = pos2(row.min.x + 34.0, middle);
+    let font = if on { semibold(14.0) } else { FontId::proportional(14.0) };
+    let clip = Rect::from_min_max(pos2(start.x, row.min.y), pos2(right, row.max.y));
+    painter.with_clip_rect(clip).text(start, Align2::LEFT_CENTER, name, font, TEXT);
+    let noun = if count == 1 { counted.to_owned() } else { format!("{counted}s") };
+    let more = menu
+        .then(|| Rect::from_center_size(pos2(row.max.x - ICON_BUTTON / 2.0, middle), egui::Vec2::splat(ICON_BUTTON)));
+    (response.on_hover_text(format!("{count} {noun}")), more, start, right)
+}
+
+/// A heading of the chooser with a + at its right; `second` sets it apart from the rows above
+/// with a line. Returns whether + was clicked.
+fn chooser_head(ui: &mut egui::Ui, text: &str, add_hint: &str, second: bool) -> bool {
+    let height = if second { 43.0 + 10.0 } else { 36.0 };
+    let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    let top = if second {
+        ui.painter().hline(head.x_range(), head.min.y + 10.0, Stroke::new(1.0, LINE));
+        head.min.y + 10.0 + 12.0
+    } else {
+        head.min.y + 4.0
+    };
+    let place = Rect::from_min_size(pos2(head.max.x - 8.0 - ICON_BUTTON, top), egui::Vec2::splat(ICON_BUTTON));
+    cap(ui, pos2(head.min.x + 8.0, place.center().y), Align2::LEFT_CENTER, text, TEXT_DIM);
+    icon_button(ui, place, ui.scope_id().with(("chooser add", second)), Icon::Plus, 1.0, false)
+        .on_hover_text(add_hint)
+        .clicked()
+}
+
+/// The chooser: only things to open. The playlists first, then the song libraries under a
+/// line (All Songs, then each library); the one that is open has the lighter row, a heavier
+/// name and a tick. Songs carried from the list, and a picture or video from the media bin,
+/// can be dropped on a row.
+fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
+    use crate::service::Item;
+    ui.spacing_mut().item_spacing = vec2(0.0, 1.0);
     let song_item = |state: &HomeState, index: usize| {
         let key = state.song_keys.get(index)?;
         let song = show.presentations().get(index)?;
         Some(Item::Song { key: key.clone(), title: song.title.clone() })
     };
-    if source_heading(ui, "LIBRARY", &mut state.library_collapsed, "New Library") {
-        let made = crate::libraries::Library::new(crate::libraries::new_name(&state.libraries));
-        state.renaming_library = Some((made.id, made.name.clone()));
-        state.rename_started = true;
-        state.library_shown = Some(made.id);
-        state.playlist_open = false;
-        state.libraries.push(made);
-        state.libraries_changed = true;
-    }
-    if !state.library_collapsed {
-        let all = source_row(ui, Icon::Library, "All Songs", !state.playlist_open && state.library_shown.is_none());
-        if all.clicked() {
-            state.library_shown = None;
-            state.playlist_open = false;
-        }
-        voxlive_row(ui, show, state, commands);
-        let mut delete = None;
-        let ids: Vec<(sp_model::Uuid, String)> =
-            state.libraries.iter().map(|library| (library.id, library.name.clone())).collect();
-        for (id, name) in ids {
-            let renaming = state.renaming_library.as_ref().is_some_and(|(have, _)| *have == id);
-            let chosen = !state.playlist_open && state.library_shown == Some(id);
-            let shown = if name.trim().is_empty() { "Untitled" } else { name.as_str() };
-            let response = source_row(ui, Icon::Library, if renaming { "" } else { shown }, chosen);
-            if renaming && let Some((_, typed)) = state.renaming_library.as_mut() {
-                let field = rename_field_at(
-                    ui,
-                    typed,
-                    FontId::proportional(13.5),
-                    TEXT,
-                    ACCENT,
-                    response.rect.left_center() + vec2(26.0, 0.0),
-                    response.rect.max.x - 4.0,
-                );
-                if std::mem::take(&mut state.rename_started) {
-                    field.request_focus();
-                }
-                let (enter, escape) =
-                    ui.input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
-                if escape {
-                    state.renaming_library = None;
-                } else if enter || field.lost_focus() {
-                    let typed = typed.trim().to_owned();
-                    if let Some(library) = state.libraries.iter_mut().find(|library| library.id == id)
-                        && !typed.is_empty()
-                    {
-                        library.name = typed;
-                        state.libraries_changed = true;
-                    }
-                    state.renaming_library = None;
-                }
-                continue;
-            }
-            if response.clicked() {
-                state.library_shown = Some(id);
-                state.playlist_open = false;
-            }
-            if response.double_clicked() {
-                state.renaming_library = Some((id, name.clone()));
-                state.rename_started = true;
-            }
-            if let Some(dropped) = response.dnd_release_payload::<SongDrag>() {
-                let keys: Vec<String> = dropped.0.iter().filter_map(|at| state.song_keys.get(*at).cloned()).collect();
-                if let Some(library) = state.libraries.iter_mut().find(|library| library.id == id) {
-                    for key in keys {
-                        if !library.has(&key) {
-                            library.toggle(&key);
-                            state.libraries_changed = true;
-                        }
-                    }
-                }
-            }
-            response.on_hover_text("Drag songs here to add them").context_menu(|ui| {
-                if ui.button("Rename").clicked() {
-                    state.renaming_library = Some((id, name.clone()));
-                    state.rename_started = true;
-                    ui.close();
-                }
-                if ui.button("Delete Library").on_hover_text("The songs stay in All Songs").clicked() {
-                    delete = Some(id);
-                    ui.close();
-                }
-            });
-        }
-        if let Some(id) = delete {
-            state.libraries.retain(|library| library.id != id);
-            if state.library_shown == Some(id) {
-                state.library_shown = None;
-            }
-            state.libraries_changed = true;
-        }
-    }
-    ui.add_space(8.0);
-    if source_heading(ui, "PLAYLISTS", &mut state.playlists_collapsed, "New Playlist") {
+    if chooser_head(ui, "Playlists", "New playlist", false) {
         state.services.add_service();
         state.playlist_open = true;
         state.renaming_service = Some(state.services.front().name.clone());
         state.rename_started = true;
     }
-    if state.playlists_collapsed {
-        return;
-    }
-    let names: Vec<String> = state.services.list.iter().map(|playlist| playlist.name.clone()).collect();
+    let playlists: Vec<(String, usize)> = state
+        .services
+        .list
+        .iter()
+        .map(|playlist| {
+            (playlist.name.clone(), playlist.items.iter().filter(|item| !matches!(item, Item::Header { .. })).count())
+        })
+        .collect();
     let mut delete = false;
-    for (index, name) in names.iter().enumerate() {
+    for (index, (name, count)) in playlists.iter().enumerate() {
         let front = index == state.services.current;
         let renaming = front && state.renaming_service.is_some();
-        let response = source_row(ui, Icon::Rows, if renaming { "" } else { name }, state.playlist_open && front);
+        let on = state.playlist_open && front;
+        let shown = if renaming { "" } else { name.as_str() };
+        let (response, more, start, right) = ui
+            .push_id(("playlist", index), |ui| {
+                chooser_row(ui, Icon::Playlist, PLAYLIST_TINT, shown, *count, "item", on, true)
+            })
+            .inner;
         if renaming && let Some(typed) = state.renaming_service.as_mut() {
-            let field = rename_field_at(
-                ui,
-                typed,
-                FontId::proportional(13.5),
-                TEXT,
-                ACCENT,
-                response.rect.left_center() + vec2(26.0, 0.0),
-                response.rect.max.x - 4.0,
-            );
+            let field = rename_field_at(ui, typed, FontId::proportional(14.0), TEXT, ACCENT, start, right);
             if std::mem::take(&mut state.rename_started) {
                 field.request_focus();
             }
@@ -1304,9 +1576,12 @@ fn source_rows(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         if response.clicked() {
             state.services.show(index);
             state.playlist_open = true;
+            state.chooser_open = false;
+            state.filter.clear();
         }
         if response.double_clicked() {
             state.services.show(index);
+            state.chooser_open = true;
             state.renaming_service = Some(name.clone());
             state.rename_started = true;
         }
@@ -1322,36 +1597,150 @@ fn source_rows(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         {
             state.services.add_to(index, Item::Media { id: media.id, name: media.name.clone() });
         }
-        response.on_hover_text("Drag songs, pictures or videos here to add them").context_menu(|ui| {
+        let several = playlists.len() > 1;
+        let mut menu = |ui: &mut egui::Ui| {
             if ui.button("Rename").clicked() {
                 state.services.show(index);
+                state.chooser_open = true;
                 state.renaming_service = Some(name.clone());
                 state.rename_started = true;
                 ui.close();
             }
-            if ui.button("Export…").on_hover_text("Save the playlist and its songs as a song pack").clicked() {
+            if ui.button("Export\u{2026}").on_hover_text("Save the playlist and its songs as a song pack").clicked() {
                 state.export_request = Some(crate::home::ExportRequest::Playlist(index));
                 ui.close();
             }
-            if ui.add_enabled(names.len() > 1, egui::Button::new("Delete Playlist")).clicked() {
+            if ui.add_enabled(several, egui::Button::new("Delete Playlist")).clicked() {
                 state.services.show(index);
                 delete = true;
                 ui.close();
             }
-        });
+        };
+        if let Some(place) = more {
+            let button = more_button(ui, place, ui.scope_id().with(("playlist more", index)), response.hovered());
+            egui::Popup::menu(&button).show(&mut menu);
+        }
+        response.context_menu(&mut menu);
     }
     if delete {
         state.services.remove_service();
     }
+    if chooser_head(ui, "Song libraries", "New library", true) {
+        let made = crate::libraries::Library::new(crate::libraries::new_name(&state.libraries));
+        state.renaming_library = Some((made.id, made.name.clone()));
+        state.rename_started = true;
+        state.library_shown = Some(made.id);
+        state.playlist_open = false;
+        state.libraries.push(made);
+        state.libraries_changed = true;
+    }
+    let hidden = state.hidden_slots();
+    let songs =
+        (0..show.presentations().len()).filter(|at| !hidden.contains(at) && !state.removed_songs.contains(at)).count();
+    let on = !state.playlist_open && state.library_shown.is_none();
+    let (all, ..) = ui
+        .push_id("all songs", |ui| chooser_row(ui, Icon::Library, LIBRARY_TINT, "All Songs", songs, "song", on, false))
+        .inner;
+    if all.clicked() {
+        state.library_shown = None;
+        state.playlist_open = false;
+        state.chooser_open = false;
+        state.filter.clear();
+    }
+    let mut delete = None;
+    let libraries: Vec<(sp_model::Uuid, String, usize)> =
+        state.libraries.iter().map(|library| (library.id, library.name.clone(), library.songs.len())).collect();
+    for (id, name, count) in libraries {
+        let renaming = state.renaming_library.as_ref().is_some_and(|(have, _)| *have == id);
+        let on = !state.playlist_open && state.library_shown == Some(id);
+        let shown = if renaming {
+            ""
+        } else if name.trim().is_empty() {
+            "Untitled"
+        } else {
+            name.as_str()
+        };
+        let (response, more, start, right) = ui
+            .push_id(("library", id), |ui| chooser_row(ui, Icon::Library, LIBRARY_TINT, shown, count, "song", on, true))
+            .inner;
+        if renaming && let Some((_, typed)) = state.renaming_library.as_mut() {
+            let field = rename_field_at(ui, typed, FontId::proportional(14.0), TEXT, ACCENT, start, right);
+            if std::mem::take(&mut state.rename_started) {
+                field.request_focus();
+            }
+            let (enter, escape) =
+                ui.input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
+            if escape {
+                state.renaming_library = None;
+            } else if enter || field.lost_focus() {
+                let typed = typed.trim().to_owned();
+                if let Some(library) = state.libraries.iter_mut().find(|library| library.id == id)
+                    && !typed.is_empty()
+                {
+                    library.name = typed;
+                    state.libraries_changed = true;
+                }
+                state.renaming_library = None;
+            }
+            continue;
+        }
+        if response.clicked() {
+            state.library_shown = Some(id);
+            state.playlist_open = false;
+            state.chooser_open = false;
+            state.filter.clear();
+        }
+        if response.double_clicked() {
+            state.chooser_open = true;
+            state.renaming_library = Some((id, name.clone()));
+            state.rename_started = true;
+        }
+        if let Some(dropped) = response.dnd_release_payload::<SongDrag>() {
+            let keys: Vec<String> = dropped.0.iter().filter_map(|at| state.song_keys.get(*at).cloned()).collect();
+            if let Some(library) = state.libraries.iter_mut().find(|library| library.id == id) {
+                for key in keys {
+                    if !library.has(&key) {
+                        library.toggle(&key);
+                        state.libraries_changed = true;
+                    }
+                }
+            }
+        }
+        let mut menu = |ui: &mut egui::Ui| {
+            if ui.button("Rename").clicked() {
+                state.chooser_open = true;
+                state.renaming_library = Some((id, name.clone()));
+                state.rename_started = true;
+                ui.close();
+            }
+            if ui.button("Delete Library").on_hover_text("The songs stay in All Songs").clicked() {
+                delete = Some(id);
+                ui.close();
+            }
+        };
+        if let Some(place) = more {
+            let button = more_button(ui, place, ui.scope_id().with(("library more", id)), response.hovered());
+            egui::Popup::menu(&button).show(&mut menu);
+        }
+        response.context_menu(&mut menu);
+    }
+    if let Some(id) = delete {
+        state.libraries.retain(|library| library.id != id);
+        if state.library_shown == Some(id) {
+            state.library_shown = None;
+        }
+        state.libraries_changed = true;
+    }
+    ui.add_space(8.0);
 }
-
 /// The name of the first library a song is in, shown at the right of its row in a playlist.
 fn library_of<'a>(state: &'a HomeState, key: &str) -> Option<&'a str> {
     state.libraries.iter().find(|library| library.has(key)).map(|library| library.name.as_str())
 }
 
 /// The songs the left column lists: how many the library (or All Songs) has, and those whose
-/// titles have what is typed in the filter, by their place among the songs, in order.
+/// titles have what is typed in the filter, by their place among the songs, in the order
+/// chosen.
 fn song_list(show: &Show, state: &HomeState, library: Option<&crate::libraries::Library>) -> crate::kept::SongList {
     let hidden = state.hidden_slots();
     let listed = |index: usize| !hidden.contains(&index) && !state.removed_songs.contains(&index);
@@ -1371,64 +1760,93 @@ fn song_list(show: &Show, state: &HomeState, library: Option<&crate::libraries::
             }
         }
     }
+    state.song_order.sort(show, &mut shown);
     crate::kept::SongList { total, shown }
 }
 
-/// The songs of the library chosen (or every song), each with a + to put it in the playlist in
-/// front; a song can also be dragged onto a playlist or a library above.
+/// What a song's menu asked for that changes a playlist: the song added to the playlist in
+/// front, or to another playlist (`None` for a new one).
+#[derive(Default)]
+pub struct SongAsks {
+    pub add: Option<usize>,
+    pub add_to: Option<(usize, Option<usize>)>,
+}
+
+impl SongAsks {
+    /// Carries out what was asked.
+    pub fn carry_out(self, show: &Show, state: &mut HomeState) {
+        use crate::service::Item;
+        if let Some(index) = self.add
+            && let (Some(key), Some(song)) = (state.song_keys.get(index), show.presentations().get(index))
+        {
+            state.services.add(Item::Song { key: key.clone(), title: song.title.clone() });
+        }
+        // To the playlist chosen, or to a new one, which is then shown with its name ready to type.
+        if let Some((index, playlist)) = self.add_to
+            && let (Some(key), Some(song)) = (state.song_keys.get(index).cloned(), show.presentations().get(index))
+        {
+            let item = Item::Song { key, title: song.title.clone() };
+            match playlist {
+                Some(at) => {
+                    let name = state.services.list.get(at).map_or_else(String::new, |p| p.name.clone());
+                    state.notice = Some(if state.services.add_to(at, item) {
+                        format!("Added {} to {name}.", song.title)
+                    } else {
+                        format!("{} is already in {name}.", song.title)
+                    });
+                }
+                None => {
+                    state.services.add_service();
+                    state.services.add(item);
+                    state.playlist_open = true;
+                    state.chooser_open = true;
+                    state.renaming_service = Some(state.services.front().name.clone());
+                    state.rename_started = true;
+                }
+            }
+        }
+    }
+}
+
+/// The songs of the library chosen (or every song): a click opens a song, its "more" button
+/// (or a right-click) opens its menu, and it can be dragged onto a playlist or a library in
+/// the chooser, which shows while songs are carried.
 fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
-    use crate::service::Item;
     let library = state.library_shown.and_then(|id| state.libraries.iter().position(|library| library.id == id));
     if library.is_none() {
         state.library_shown = None;
     }
-    // The list is made again only when the songs, the library shown or the filter change, so
-    // a library of thousands of songs doesn't slow every frame.
+    // The list is made again only when the songs, the library shown, the filter or the order
+    // change, so a library of thousands of songs doesn't slow every frame.
     let epoch = state.lists.songs.epoch();
     let songs_of =
         |at: Option<usize>| at.and_then(|at| state.libraries.get(at)).map(|library| library.songs.as_slice());
-    let kept = state.lists.song_list.get(|(made_in, made_of, filter)| {
-        *made_in == epoch && made_of.as_deref() == songs_of(library) && *filter == state.filter
+    let order = state.song_order;
+    let kept = state.lists.song_list.get(|(made_in, made_of, filter, in_order)| {
+        *made_in == epoch && made_of.as_deref() == songs_of(library) && *filter == state.filter && *in_order == order
     });
     let list = match kept {
         Some(list) => list,
         None => {
             let made = song_list(show, state, library.and_then(|at| state.libraries.get(at)));
             let made_of = songs_of(library).map(<[String]>::to_vec);
-            state.lists.song_list.keep((epoch, made_of, state.filter.clone()), made)
+            state.lists.song_list.keep((epoch, made_of, state.filter.clone(), order), made)
         }
     };
     let (total, shown) = (list.total, &list.shown);
-    let library = library.and_then(|at| state.libraries.get(at)).map(|library| library.name.to_uppercase());
-    let heading = library.clone().unwrap_or_else(|| "ALL SONGS".to_owned());
+    let in_library = library.is_some();
     let live_in = show.live().map(|at| at.presentation);
-    let mut add = None;
-    let mut add_to: Option<(usize, Option<usize>)> = None;
-    ui.horizontal(|ui| {
-        caption(ui, &heading);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let (plus, response) = ui.allocate_exact_size(vec2(20.0, 18.0), Sense::click());
-            let ink = if response.hovered() { TEXT } else { TEXT_FAINT };
-            icons::paint(ui.painter(), Icon::Plus, Rect::from_center_size(plus.center(), vec2(10.0, 10.0)), ink);
-            if response.on_hover_text("New song (Command-N)").clicked() {
-                state.new_song = true;
-            }
-            let count = if shown.len() == total { total.to_string() } else { format!("{} of {total}", shown.len()) };
-            ui.label(egui::RichText::new(count).size(11.0).color(TEXT_FAINT));
-        });
-    });
-    ui.add_space(4.0);
+    let mut asks = SongAsks::default();
     let list = ui.available_rect_before_wrap();
     let (pointer, mods, down) =
         ui.input(|input| (input.pointer.interact_pos(), input.modifiers, input.pointer.primary_down()));
-    // Songs picked out lose the ones no longer listed (`shown` is in order).
-    state.picked_songs.retain(|at| shown.binary_search(at).is_ok());
-    let spacing = ui.spacing().item_spacing.y;
-    ui.spacing_mut().item_spacing.y = 2.0;
+    // Songs picked out lose the ones no longer listed.
+    if !state.picked_songs.is_empty() {
+        state.picked_songs.retain(|at| shown.contains(at));
+    }
     // ↑ and ↓ open the song above or below in the list, as a click on it does; with Shift they
     // pick out the songs on the way, as the Finder does. Not while typing, with the song search
     // open, editing, or on the Bible page.
-    const ROW: f32 = 30.0;
     let mut scroll_to = None;
     if list_keys_work(ui, state) && !shown.is_empty() {
         let (up, down, shift) = ui.input(|input| {
@@ -1467,14 +1885,14 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
     if let Some(row) = scroll_to {
         let id = ui.make_persistent_id("song list");
         let offset = egui::scroll_area::State::load(ui.ctx(), id).map_or(0.0, |state| state.clamped_offset().y);
-        let (top, height) = (row as f32 * (ROW + 2.0), list.height());
+        let (top, height) = (row as f32 * LIST_ROW, list.height());
         if top < offset {
             scroll = scroll.vertical_scroll_offset(top);
-        } else if top + ROW > offset + height {
-            scroll = scroll.vertical_scroll_offset(top + ROW - height);
+        } else if top + LIST_ROW > offset + height {
+            scroll = scroll.vertical_scroll_offset(top + LIST_ROW - height);
         }
     }
-    scroll.show_rows(ui, ROW, shown.len(), |ui, in_view| {
+    scroll.show_rows(ui, LIST_ROW, shown.len(), |ui, in_view| {
         let several = state.picked_songs.len() > 1;
         let mut rows: Vec<(usize, Rect)> = Vec::new();
         for index in shown[in_view].iter().copied() {
@@ -1485,7 +1903,17 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
             } else {
                 index == show.selected() && !state.bible_open
             };
-            let response = list_row(ui, Icon::Document, song.title.as_str(), chosen, live_in == Some(index), false);
+            // In All Songs, the first library a song is in is named after its title.
+            let tag = if in_library { None } else { state.song_keys.get(index).and_then(|key| library_of(state, key)) };
+            let look = ListRow {
+                title: song.title.as_str(),
+                tag,
+                chosen,
+                live: live_in == Some(index),
+                count: Some(song.slide_count()),
+                ..ListRow::default()
+            };
+            let (response, more) = list_row(ui, &look);
             rows.push((index, response.rect));
             // A drag starting on a song picks out the songs it passes over, and carries them
             // once it leaves the list; on one of several already picked, it carries them all.
@@ -1506,39 +1934,6 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
                     carried: false,
                 });
             }
-            // A "+" at the right of the row under the pointer opens a menu of the playlists to
-            // put the song in, the one in front first, so it is always said which one.
-            let plus = Rect::from_center_size(response.rect.right_center() - vec2(13.0, 0.0), vec2(20.0, 20.0));
-            let plus_id = ui.scope_id().with(("add to playlist", index));
-            let menu_open = egui::Popup::is_id_open(ui.ctx(), plus_id.with("popup"));
-            if response.hovered() || ui.rect_contains_pointer(plus) || menu_open {
-                let button = ui.interact(plus, plus_id, Sense::click());
-                let lit = button.hovered() || menu_open;
-                let ink = if lit { Color32::WHITE } else { TEXT_DIM };
-                ui.painter().rect_filled(plus, 5.0, if lit { SELECTED } else { HOVER });
-                icons::paint(ui.painter(), Icon::Plus, Rect::from_center_size(plus.center(), vec2(10.0, 10.0)), ink);
-                let button = button.on_hover_text("Add to a playlist");
-                egui::Popup::menu(&button).show(|ui| {
-                    ui.label(egui::RichText::new("Add to playlist").size(11.0).color(TEXT_FAINT));
-                    let order = std::iter::once(state.services.current)
-                        .chain((0..state.services.list.len()).filter(|at| *at != state.services.current));
-                    for at in order {
-                        let Some(name) = state.services.list.get(at).map(|p| p.name.clone()) else { continue };
-                        if ui.button(name).clicked() {
-                            add_to = Some((index, Some(at)));
-                            ui.close();
-                        }
-                    }
-                    ui.separator();
-                    if ui.button("New Playlist…").clicked() {
-                        add_to = Some((index, None));
-                        ui.close();
-                    }
-                });
-                if menu_open {
-                    continue;
-                }
-            }
             if response.clicked() {
                 state.picking = crate::home::Picking::Songs;
                 crate::home::pick(&mut state.picked_songs, &mut state.song_anchor, shown, index, mods);
@@ -1555,53 +1950,30 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
                     state.services.chosen = None;
                 }
             }
-            response.context_menu(|ui| song_menu(ui, show, state, commands, index, &mut add));
+            // The "more" button opens what a right-click on the row does.
+            let near = response.hovered() || ui.rect_contains_pointer(more);
+            let button = more_button(ui, more, ui.scope_id().with(("song more", index)), near);
+            egui::Popup::menu(&button).show(|ui| song_menu(ui, show, state, commands, index, &mut asks));
+            response.context_menu(|ui| song_menu(ui, show, state, commands, index, &mut asks));
         }
         let ctx = ui.ctx().clone();
         sweep_rows(ui, state, crate::home::Picking::Songs, &rows, shown, list, pointer, down, |picked| {
             egui::DragAndDrop::set_payload(&ctx, SongDrag(picked));
         });
         if total == 0 {
-            let empty = if library.is_some() {
-                "No songs in this library yet. Drag songs onto it, or use a song's right-click menu."
+            let empty = if in_library {
+                "No songs here yet. Make one, import some, or drag songs onto this library\u{2019}s name."
             } else {
-                "No songs loaded."
+                "No songs yet. Make one, or import some."
             };
-            ui.label(egui::RichText::new(empty).size(12.0).color(TEXT_DIM));
+            ui.add_space(12.0);
+            ui.label(egui::RichText::new(empty).size(12.5).color(TEXT_FAINT));
         } else if shown.is_empty() {
-            ui.label(egui::RichText::new("No song matches.").color(TEXT_DIM));
+            ui.add_space(12.0);
+            ui.label(egui::RichText::new("No songs match.").size(12.5).color(TEXT_FAINT));
         }
     });
-    ui.spacing_mut().item_spacing.y = spacing;
-    if let Some(index) = add
-        && let (Some(key), Some(song)) = (state.song_keys.get(index), show.presentations().get(index))
-    {
-        state.services.add(Item::Song { key: key.clone(), title: song.title.clone() });
-    }
-    // A song added from its "+" menu: to the playlist chosen, or to a new one, which is then
-    // shown with its name ready to type.
-    if let Some((index, playlist)) = add_to
-        && let (Some(key), Some(song)) = (state.song_keys.get(index).cloned(), show.presentations().get(index))
-    {
-        let item = Item::Song { key, title: song.title.clone() };
-        match playlist {
-            Some(at) => {
-                let name = state.services.list.get(at).map_or_else(String::new, |p| p.name.clone());
-                state.notice = Some(if state.services.add_to(at, item) {
-                    format!("Added {} to {name}.", song.title)
-                } else {
-                    format!("{} is already in {name}.", song.title)
-                });
-            }
-            None => {
-                state.services.add_service();
-                state.services.add(item);
-                state.playlist_open = true;
-                state.renaming_service = Some(state.services.front().name.clone());
-                state.rename_started = true;
-            }
-        }
-    }
+    asks.carry_out(show, state);
     // Songs being carried say how many beside the pointer, until they are dropped.
     if let Some(carried) = egui::DragAndDrop::payload::<SongDrag>(ui.ctx())
         && let Some(at) = ui.ctx().pointer_latest_pos()
@@ -1619,7 +1991,6 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
         painter.galley(chip.min + vec2(9.0, 5.0), text, Color32::WHITE);
     }
 }
-
 /// The song a playlist names, among the open songs: found by the name its file gave it, or by
 /// its title for one saved before it had a file. `None` when it isn't open (or is hidden).
 pub fn playlist_song(show: &Show, state: &HomeState, key: &str) -> Option<usize> {
@@ -1827,24 +2198,41 @@ fn sweep_rows(
 }
 
 /// A song's right-click menu in the library.
-fn song_menu(
+pub fn song_menu(
     ui: &mut egui::Ui,
     show: &Show,
     state: &mut HomeState,
     commands: &mut Vec<Command>,
     index: usize,
-    add: &mut Option<usize>,
+    asks: &mut SongAsks,
 ) {
     let front = state.services.front().name.clone();
     if ui.button(format!("Add to {front}")).clicked() {
-        *add = Some(index);
+        asks.add = Some(index);
         ui.close();
     }
+    // Another playlist, or a new one.
+    ui.menu_button("Add to Playlist", |ui| {
+        for (at, playlist) in state.services.list.iter().enumerate() {
+            if ui.button(playlist.name.as_str()).clicked() {
+                asks.add_to = Some((index, Some(at)));
+                ui.close();
+            }
+        }
+        ui.separator();
+        if ui.button("New Playlist\u{2026}").clicked() {
+            asks.add_to = Some((index, None));
+            ui.close();
+        }
+    });
     // The libraries the song is in.
     if let Some(key) = state.song_keys.get(index).cloned() {
         ui.menu_button("Libraries", |ui| {
             if state.libraries.is_empty() {
-                ui.label(egui::RichText::new("No libraries yet. Make one with + beside LIBRARY.").color(TEXT_DIM));
+                ui.label(
+                    egui::RichText::new("No libraries yet. Make one where playlists and libraries are chosen.")
+                        .color(TEXT_DIM),
+                );
             }
             for library in &mut state.libraries {
                 if ui.add(egui::Button::selectable(library.has(&key), library.name.as_str())).clicked() {
@@ -2017,15 +2405,146 @@ pub fn song_picker(ui: &mut egui::Ui, show: &Show, state: &HomeState) -> Option<
     picked
 }
 
-/// The items of the playlist in front: headers, songs (with the library each is in), Bible
-/// passages, pictures and videos, media playlists and placeholders, dragged up and down to
-/// change the order.
+/// What a playlist item's row, its bar over the slides or its menu asks for, carried out
+/// once the frame is drawn.
+pub enum ItemAsk {
+    /// Open the item: it becomes the open one and the slides scroll to it. Nothing changes on
+    /// the screens.
+    Open(usize),
+    Earlier(usize),
+    Later(usize),
+    Remove(usize),
+    Rename(usize),
+    /// A placeholder filled with a song, by its place among the songs.
+    Fill(usize, usize),
+}
+
+/// A playlist item's menu, from its "more" button or a right-click: for a song, the song's
+/// own menu under Song; then what [`item_moves`] offers.
+#[allow(clippy::too_many_arguments)]
+pub fn item_menu(
+    ui: &mut egui::Ui,
+    show: &Show,
+    state: &mut HomeState,
+    commands: &mut Vec<Command>,
+    index: usize,
+    ask: &mut Option<ItemAsk>,
+    asks: &mut SongAsks,
+) {
+    use crate::service::Item;
+    let song = match state.services.front().items.get(index) {
+        Some(Item::Song { key, .. }) => playlist_song(show, state, key).filter(|at| !state.app_made(*at)),
+        _ => None,
+    };
+    if let Some(song) = song {
+        ui.menu_button("Song", |ui| song_menu(ui, show, state, commands, song, asks));
+        ui.separator();
+    }
+    item_moves(ui, show, state, index, ask);
+}
+
+/// The part of a playlist item's menu that is about its place in the playlist: filling a
+/// placeholder, renaming a header or a placeholder, moving it up or down, taking it out.
+pub fn item_moves(ui: &mut egui::Ui, show: &Show, state: &HomeState, index: usize, ask: &mut Option<ItemAsk>) {
+    use crate::service::Item;
+    let items = &state.services.front().items;
+    let item = items.get(index);
+    if matches!(item, Some(Item::Placeholder { .. })) {
+        ui.menu_button("Fill with Song", |ui| {
+            if let Some(song) = song_picker(ui, show, state) {
+                *ask = Some(ItemAsk::Fill(index, song));
+                ui.close();
+            }
+        });
+    }
+    if matches!(item, Some(Item::Placeholder { .. } | Item::Header { .. })) {
+        if ui.button("Rename").clicked() {
+            *ask = Some(ItemAsk::Rename(index));
+            ui.close();
+        }
+        ui.separator();
+    }
+    if ui.add_enabled(index > 0, egui::Button::new("Move Up")).clicked() {
+        *ask = Some(ItemAsk::Earlier(index));
+        ui.close();
+    }
+    if ui.add_enabled(index + 1 < items.len(), egui::Button::new("Move Down")).clicked() {
+        *ask = Some(ItemAsk::Later(index));
+        ui.close();
+    }
+    ui.separator();
+    if ui.button("Remove from Playlist").clicked() {
+        *ask = Some(ItemAsk::Remove(index));
+        ui.close();
+    }
+}
+
+/// Carries out what a playlist item's row, bar or menu asked for.
+pub fn carry_out_item_ask(show: &Show, state: &mut HomeState, commands: &mut Vec<Command>, ask: ItemAsk) {
+    use crate::service::Item;
+    match ask {
+        ItemAsk::Rename(index) => {
+            let name = state.services.front().items.get(index).map(|item| item.title().to_owned());
+            state.renaming_header = Some((index, name.unwrap_or_default()));
+            state.rename_started = true;
+        }
+        ItemAsk::Open(index) => {
+            let Some(item) = state.services.front().items.get(index).cloned() else { return };
+            state.services.chosen = Some(index);
+            state.picking = crate::home::Picking::Nothing;
+            // The slide area scrolls to it, even if it was the one last scrolled to.
+            state.slides_scrolled_to = None;
+            state.slides_picked_here = false;
+            match item {
+                Item::Song { key, .. } => {
+                    if let Some(at) = playlist_song(show, state, &key) {
+                        commands.push(Command::Select(at));
+                        state.bible_open = false;
+                    }
+                }
+                Item::Passage(saved) => {
+                    state.bible_open = true;
+                    state.bible.open_saved(&saved, show.live().map(|at| at.presentation));
+                }
+                // Shown with the rest of the playlist, as a tile to click to put it on the
+                // screens (a placeholder shows nothing). Opening changes nothing on the screens.
+                Item::Media { .. } | Item::MediaPlaylist { .. } | Item::Placeholder { .. } => {
+                    state.bible_open = false;
+                }
+                Item::Header { .. } => {}
+            }
+        }
+        ItemAsk::Fill(index, song) => {
+            if let (Some(key), Some(found)) = (state.song_keys.get(song), show.presentations().get(song)) {
+                let item = Item::Song { key: key.clone(), title: found.title.clone() };
+                if state.services.fill(index, item) {
+                    commands.push(Command::Select(song));
+                    state.bible_open = false;
+                }
+            }
+        }
+        ItemAsk::Earlier(index) => {
+            state.services.nudge(index, true);
+        }
+        ItemAsk::Later(index) => {
+            state.services.nudge(index, false);
+        }
+        ItemAsk::Remove(index) => {
+            state.services.remove(index);
+        }
+    }
+}
+
 /// Whether ↑ and ↓ go through the song list or the playlist: in the Show view, with nothing
 /// being typed and the song search closed.
 fn list_keys_work(ui: &egui::Ui, state: &HomeState) -> bool {
     !ui.ctx().text_edit_focused() && state.library_search.is_none() && state.edit_kind().is_none() && !state.bible_open
 }
 
+/// The items of the playlist in front, in running order: each with its number, its title, a
+/// small mark for a Bible passage, a video or picture, a media playlist or a placeholder, the
+/// tally dot on the one on screen, and a "more" button; headers are small capital lines. Rows
+/// are dragged up and down to change the order.
 fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
     use crate::service::Item;
     let hidden = state.bible.slots.unwrap_or([usize::MAX; 2]);
@@ -2064,55 +2583,15 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         }
     };
     let live_in = show.live().map(|at| at.presentation);
+    let live_passage = live_in
+        .filter(|at| hidden.contains(at))
+        .and_then(|at| show.presentations().get(at))
+        .map(|passage| passage.title.clone());
     let filtering = !state.filter.trim().is_empty();
-    ui.horizontal(|ui| {
-        let count = items.iter().filter(|item| !matches!(item, Item::Header { .. })).count();
-        let noun = if count == 1 { "ITEM" } else { "ITEMS" };
-        // The playlist's name, so it is plain which one the items are of.
-        caption(ui, &format!("{} \u{b7} {count} {noun}", state.services.front().name.to_uppercase()));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            // + adds a header (a heading that groups the items under it) or a placeholder (a
-            // place kept for something to come), named as it is made.
-            let (plus, response) = ui.allocate_exact_size(vec2(20.0, 18.0), Sense::click());
-            let ink = if response.hovered() { TEXT } else { TEXT_FAINT };
-            icons::paint(ui.painter(), Icon::Plus, Rect::from_center_size(plus.center(), vec2(10.0, 10.0)), ink);
-            let response = response.on_hover_text("New Header or Placeholder");
-            egui::Popup::menu(&response).show(|ui| {
-                let made = if ui.button("New Header").on_hover_text("A heading over the items under it").clicked() {
-                    Some(Item::Header { name: "Header".to_owned() })
-                } else if ui
-                    .button("New Placeholder")
-                    .on_hover_text("A place kept for something to come, such as the sermon slides")
-                    .clicked()
-                {
-                    Some(Item::Placeholder { name: "Placeholder".to_owned() })
-                } else {
-                    None
-                };
-                if let Some(item) = made {
-                    let name = item.title().to_owned();
-                    state.services.add(item);
-                    let at = state.services.front().items.len() - 1;
-                    state.renaming_header = Some((at, name));
-                    state.rename_started = true;
-                    ui.close();
-                }
-            });
-        });
-    });
-    ui.add_space(4.0);
 
     // What a click on a row asks for, carried out after the list is drawn.
-    enum Ask {
-        Open(usize),
-        Earlier(usize),
-        Later(usize),
-        Remove(usize),
-        Rename(usize),
-        /// A placeholder filled with a song, by its place among the songs.
-        Fill(usize, usize),
-    }
-    let mut ask = None;
+    let mut ask: Option<ItemAsk> = None;
+    let mut asks = SongAsks::default();
     // Rows can be dragged up and down to change the order (not while the list is filtered).
     let mut rows: Vec<Rect> = Vec::new();
     // The item each row is, in step with `rows`.
@@ -2121,44 +2600,62 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     let mut dropped = None;
     let mut renamed: Option<Option<(usize, String)>> = None;
     let mut rename_started = std::mem::take(&mut state.rename_started);
+    // The row of the item on screen is brought into view when another item goes on screen.
+    let on_screen = items.iter().enumerate().position(|(index, item)| match item {
+        Item::Song { .. } => live_in.is_some() && looked_up.get(index).and_then(|(found, _)| *found) == live_in,
+        Item::Passage(saved) => live_passage.as_deref() == Some(saved.lookup.as_str()),
+        Item::Media { id, .. } => show.live_media().and_then(|at| show.media().get(at)).is_some_and(|m| m.id == *id),
+        Item::MediaPlaylist { id, .. } => state.media_playing == Some(*id),
+        Item::Header { .. } | Item::Placeholder { .. } => false,
+    });
+    let follow = if on_screen != state.live_row_seen {
+        state.live_row_seen = on_screen;
+        on_screen
+    } else {
+        None
+    };
     let list = egui::ScrollArea::vertical().id_salt("playlist items").auto_shrink([false, false]).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = 2.0;
         if items.is_empty() {
+            ui.add_space(12.0);
             ui.label(
                 egui::RichText::new(
-                    "Nothing yet. Drag songs onto this playlist, use + on a song in a library, Add to on \
-                     the Bible page, or drag a picture or video here from the media bin.",
+                    "Nothing yet. Use Add to playlist below, drag songs here from a library, or drag a \
+                     picture or video here from the media strip.",
                 )
-                .size(12.0)
+                .size(12.5)
                 .color(TEXT_FAINT),
             );
         }
+        let mut number = 0;
         for (index, item) in items.iter().enumerate() {
+            let is_header = matches!(item, Item::Header { .. });
+            if !is_header {
+                number += 1;
+            }
             if filtering && !matches_filter(item.title(), &state.filter) {
                 continue;
             }
-            // A header: bold, full width, and renamed in place.
+            // What the row's menu offers, from its "more" button or a right-click.
+            let song = looked_up.get(index).and_then(|(found, _)| *found);
+            let mut menu =
+                |ui: &mut egui::Ui, state: &mut HomeState, ask: &mut Option<ItemAsk>, asks: &mut SongAsks| {
+                    item_menu(ui, show, state, commands, index, ask, asks);
+                };
+            // A header: a small capital line, renamed in place.
             if let Item::Header { name } = item {
-                let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click_and_drag());
+                let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 34.5), Sense::click_and_drag());
                 rows.push(row);
                 row_items.push(index);
+                let at = pos2(row.min.x + 10.0, row.min.y + 21.75);
                 match state.renaming_header.as_mut().filter(|(at, _)| *at == index) {
                     Some((_, typed)) => {
-                        let at = row.left_center() + vec2(6.0, 0.0);
                         let focus = std::mem::take(&mut rename_started);
-                        if let Some(done) = rename_in_row(ui, typed, semibold(13.0), at, row.max.x - 4.0, focus) {
+                        if let Some(done) = rename_in_row(ui, typed, fixed_semibold(11.5), at, row.max.x - 4.0, focus) {
                             renamed = Some(done.map(|name| (index, name)));
                         }
                     }
                     None => {
-                        ui.painter().text(
-                            row.left_center() + vec2(6.0, 0.0),
-                            Align2::LEFT_CENTER,
-                            name.as_str(),
-                            semibold(13.0),
-                            TEXT,
-                        );
-                        ui.painter().hline(row.x_range(), row.max.y - 1.0, Stroke::new(1.0, LINE));
+                        cap(ui, at, Align2::LEFT_CENTER, name, TEXT_DIM);
                     }
                 }
                 if response.dragged() && !filtering {
@@ -2168,72 +2665,60 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                     dropped = Some(index);
                 }
                 if response.double_clicked() {
-                    ask = Some(Ask::Rename(index));
+                    ask = Some(ItemAsk::Rename(index));
                 }
-                response.context_menu(|ui| {
-                    if ui.button("Rename").clicked() {
-                        ask = Some(Ask::Rename(index));
-                        ui.close();
-                    }
-                    if ui.button("Remove from Playlist").clicked() {
-                        ask = Some(Ask::Remove(index));
-                        ui.close();
-                    }
-                });
+                response.context_menu(|ui| menu(ui, state, &mut ask, &mut asks));
                 continue;
             }
-            // Each kind's mark; whether what it names is still here, and on screen now; and a
-            // word at the right (the library a song is in, or what kind of item it is).
-            let (icon, missing, live, beside, gone) = match item {
+            // Each kind's mark; whether what it names is still here, and on screen now.
+            let (icon, missing, live, gone) = match item {
                 Item::Song { .. } => {
-                    let (found, library) = looked_up.get(index).cloned().unwrap_or_default();
-                    let live = found.is_some() && found == live_in;
-                    (Icon::Document, found.is_none(), live, library, "This song is not open in the library")
+                    let live = song.is_some() && song == live_in;
+                    (None, song.is_none(), live, "This song is not open in the library")
                 }
-                Item::Passage(_) => (Icon::Book, false, false, None, ""),
+                Item::Passage(saved) => {
+                    let live = live_passage.as_deref() == Some(saved.lookup.as_str());
+                    (Some(Icon::Book), false, live, "")
+                }
                 Item::Media { id, .. } => {
                     let found = show.media().iter().position(|media| media.id == *id);
                     let video = found.is_some_and(|at| crate::media::is_video(&show.media()[at].path));
-                    let (icon, word) = if video { (Icon::Camera, "video") } else { (Icon::Picture, "picture") };
+                    let icon = if video { Icon::Film } else { Icon::Picture };
                     let live = found.is_some() && found == show.live_media();
-                    let gone = "This picture or video is no longer in the media bin";
-                    (icon, found.is_none(), live, Some(word.to_owned()), gone)
+                    (Some(icon), found.is_none(), live, "This picture or video is no longer in the media bin")
                 }
                 Item::MediaPlaylist { id, .. } => {
                     let found = state.media_playlists.iter().any(|playlist| playlist.id == *id);
                     let live = state.media_playing == Some(*id);
-                    let gone = "This media playlist has been deleted";
-                    (Icon::Loop, !found, live, Some("media playlist".to_owned()), gone)
+                    (Some(Icon::Loop), !found, live, "This media playlist has been deleted")
                 }
                 // Not missing, but faint: a place kept for something to come.
-                Item::Placeholder { .. } => (Icon::Target, true, false, Some("placeholder".to_owned()), ""),
+                Item::Placeholder { .. } => (Some(Icon::Target), true, false, ""),
                 Item::Header { .. } => continue,
             };
             let chosen = state.services.chosen == Some(index);
-            let mut response = list_row(ui, icon, item.title(), chosen, live, missing);
-            // A placeholder is renamed in place, as a header is.
-            if let Some((_, typed)) = state
+            let renaming = state
                 .renaming_header
-                .as_mut()
-                .filter(|(at, _)| *at == index && matches!(item, Item::Placeholder { .. }))
-            {
+                .as_ref()
+                .is_some_and(|(at, _)| *at == index && matches!(item, Item::Placeholder { .. }));
+            let look = ListRow {
+                number: Some(number),
+                title: if renaming { "" } else { item.title() },
+                chosen,
+                live,
+                faint: missing,
+                icon,
+                ..ListRow::default()
+            };
+            let (mut response, more) = list_row(ui, &look);
+            // A placeholder is renamed in place, as a header is.
+            if renaming && let Some((_, typed)) = state.renaming_header.as_mut() {
                 let row = response.rect;
-                ui.painter().rect_filled(Rect::from_min_max(row.min + vec2(26.0, 0.0), row.max), RADIUS, PANEL);
                 let focus = std::mem::take(&mut rename_started);
-                let at = row.left_center() + vec2(30.0, 0.0);
-                if let Some(done) = rename_in_row(ui, typed, FontId::proportional(13.5), at, row.max.x - 4.0, focus) {
+                let at = pos2(row.min.x + 48.0, row.center().y);
+                if let Some(done) = rename_in_row(ui, typed, FontId::proportional(13.5), at, more.min.x - 4.0, focus) {
                     renamed = Some(done.map(|name| (index, name)));
                 }
-            }
-            // The library the song is in, or the kind of item, at the right.
-            if let Some(library) = beside.filter(|_| !live) {
-                ui.painter().text(
-                    response.rect.right_center() - vec2(8.0, 0.0),
-                    Align2::RIGHT_CENTER,
-                    library,
-                    FontId::proportional(11.0),
-                    TEXT_FAINT,
-                );
             }
             rows.push(response.rect);
             row_items.push(index);
@@ -2243,56 +2728,39 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             if response.drag_stopped() && !filtering {
                 dropped = Some(index);
             }
+            // The library a song is in is said when the pointer rests on its row.
+            if let Some(library) = looked_up.get(index).and_then(|(_, library)| library.as_deref()) {
+                response = response.on_hover_text(format!("In the library {library}"));
+            }
             if missing && !gone.is_empty() {
                 response = response.on_hover_text(gone);
             }
             if matches!(item, Item::Placeholder { .. }) {
                 response = response.on_hover_text(
-                    "A place kept for something to come: right-click to fill it with a song, or drag a \
+                    "A place kept for something to come: fill it with a song from its menu, or drag a \
                      picture or video onto it",
                 );
             }
             if response.double_clicked() && matches!(item, Item::Placeholder { .. }) {
-                ask = Some(Ask::Rename(index));
+                ask = Some(ItemAsk::Rename(index));
             }
             if response.clicked() {
-                ask = Some(Ask::Open(index));
+                ask = Some(ItemAsk::Open(index));
             }
-            // Gone to with ↑ or ↓: kept in sight.
-            if state.playlist_scroll_to == Some(index) {
-                response.scroll_to_me(None);
-                state.playlist_scroll_to = None;
+            // Gone to with ↑ or ↓, or just gone on screen: kept in sight, at once.
+            if state.playlist_scroll_to == Some(index) || follow == Some(index) {
+                response.scroll_to_me_animation(None, egui::style::ScrollAnimation::none());
+                if state.playlist_scroll_to == Some(index) {
+                    state.playlist_scroll_to = None;
+                }
             }
-            response.context_menu(|ui| {
-                if matches!(item, Item::Placeholder { .. }) {
-                    ui.menu_button("Fill with Song", |ui| {
-                        if let Some(song) = song_picker(ui, show, state) {
-                            ask = Some(Ask::Fill(index, song));
-                            ui.close();
-                        }
-                    });
-                    if ui.button("Rename").clicked() {
-                        ask = Some(Ask::Rename(index));
-                        ui.close();
-                    }
-                    ui.separator();
-                }
-                if ui.add_enabled(index > 0, egui::Button::new("Move Up")).clicked() {
-                    ask = Some(Ask::Earlier(index));
-                    ui.close();
-                }
-                if ui.add_enabled(index + 1 < items.len(), egui::Button::new("Move Down")).clicked() {
-                    ask = Some(Ask::Later(index));
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Remove from Playlist").clicked() {
-                    ask = Some(Ask::Remove(index));
-                    ui.close();
-                }
-            });
+            let near = response.hovered() || ui.rect_contains_pointer(more);
+            let button = more_button(ui, more, ui.scope_id().with(("item more", index)), near);
+            egui::Popup::menu(&button).show(|ui| menu(ui, state, &mut ask, &mut asks));
+            response.context_menu(|ui| menu(ui, state, &mut ask, &mut asks));
         }
     });
+    asks.carry_out(show, state);
     // Where a dragged row would land: a line between rows, and on release the move.
     let pointer = ui.input(|input| input.pointer.interact_pos());
     let pointer_y = pointer.map(|at| at.y);
@@ -2314,12 +2782,12 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         };
         match onto {
             Some((row, _)) => {
-                ui.painter().rect_stroke(*row, RADIUS, Stroke::new(2.0, ACCENT), StrokeKind::Inside);
+                ui.painter().rect_stroke(*row, RADIUS, Stroke::new(2.0, TEXT), StrokeKind::Inside);
             }
             None => {
                 let (left, right) = (list.inner_rect.min.x, list.inner_rect.max.x);
                 let y = line(&rows);
-                ui.painter().line_segment([pos2(left + 4.0, y), pos2(right - 4.0, y)], Stroke::new(2.0, ACCENT));
+                ui.painter().line_segment([pos2(left + 4.0, y), pos2(right - 4.0, y)], Stroke::new(2.0, TEXT));
             }
         }
         if ui.input(|input| input.pointer.any_released()) {
@@ -2340,7 +2808,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     if let (Some(_), Some(slot)) = (dragging, slot) {
         let y = rows.get(slot).map_or_else(|| rows.last().map_or(0.0, |row| row.max.y), |row| row.min.y);
         let (left, right) = rows.first().map_or((0.0, 0.0), |row| (row.min.x, row.max.x));
-        ui.painter().line_segment([pos2(left + 4.0, y), pos2(right - 4.0, y)], Stroke::new(2.0, ACCENT));
+        ui.painter().line_segment([pos2(left + 4.0, y), pos2(right - 4.0, y)], Stroke::new(2.0, TEXT));
     }
     if let (Some(index), Some(slot)) = (dropped, slot) {
         state.services.move_item(index, slot);
@@ -2376,65 +2844,15 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 _ => None,
             };
             if let Some(next) = next {
-                ask = Some(Ask::Open(openable[next]));
+                ask = Some(ItemAsk::Open(openable[next]));
                 state.playlist_scroll_to = Some(openable[next]);
             }
         }
     }
-    match ask {
-        Some(Ask::Rename(index)) => {
-            state.renaming_header =
-                Some((index, items.get(index).map(|item| item.title().to_owned()).unwrap_or_default()));
-            state.rename_started = true;
-        }
-        Some(Ask::Open(index)) => {
-            state.services.chosen = Some(index);
-            state.picking = crate::home::Picking::Nothing;
-            // The slide area scrolls to it, even if it was the one last scrolled to.
-            state.slides_scrolled_to = None;
-            state.slides_picked_here = false;
-            match items.get(index) {
-                Some(Item::Song { key, .. }) => {
-                    if let Some(at) = song_at(&state.song_keys, key) {
-                        commands.push(Command::Select(at));
-                        state.bible_open = false;
-                    }
-                }
-                Some(Item::Passage(saved)) => {
-                    state.bible_open = true;
-                    state.bible.open_saved(saved, live_in);
-                }
-                // Shown in the slide area with the rest of the playlist, as a tile to click to
-                // put it on the screens (a placeholder shows nothing). Opening changes nothing
-                // on the screens.
-                Some(Item::Media { .. } | Item::MediaPlaylist { .. } | Item::Placeholder { .. }) => {
-                    state.bible_open = false;
-                }
-                Some(Item::Header { .. }) | None => {}
-            }
-        }
-        Some(Ask::Fill(index, song)) => {
-            if let (Some(key), Some(found)) = (state.song_keys.get(song), show.presentations().get(song)) {
-                let item = Item::Song { key: key.clone(), title: found.title.clone() };
-                if state.services.fill(index, item) {
-                    commands.push(Command::Select(song));
-                    state.bible_open = false;
-                }
-            }
-        }
-        Some(Ask::Earlier(index)) => {
-            state.services.nudge(index, true);
-        }
-        Some(Ask::Later(index)) => {
-            state.services.nudge(index, false);
-        }
-        Some(Ask::Remove(index)) => {
-            state.services.remove(index);
-        }
-        None => {}
+    if let Some(ask) = ask {
+        carry_out_item_ask(show, state, commands, ask);
     }
 }
-
 /// The least room kept for what is under Clear All (the tool tabs and the open one's
 /// contents, or the inspector). In a window too short for it the preview's picture gives up
 /// height, down to [`LEAST_PICTURE`], so the keys under it move up; this depends only on the
@@ -3554,6 +3972,26 @@ mod tests {
     /// Every row of the list the tests' rows are in, in order.
     fn order() -> Vec<usize> {
         rows().iter().map(|(index, _)| *index).collect()
+    }
+
+    #[test]
+    fn the_song_list_is_in_the_order_chosen_and_the_filter_still_applies() {
+        let song = |title: &str, slides: usize| {
+            let words = (0..slides).map(|n| format!("Line {n}\n")).collect::<Vec<_>>().join("\n");
+            Arc::new(sp_model::parse_song_text(title, &words))
+        };
+        let show = Show::new(vec![song("Morning", 2), song("Evening", 5), song("Noon", 3)]);
+        let mut state = HomeState::default();
+        assert_eq!(song_list(&show, &state, None).shown, [0, 1, 2]);
+        state.song_order = crate::kept::SongOrder::AZ;
+        assert_eq!(song_list(&show, &state, None).shown, [1, 0, 2]);
+        state.song_order = crate::kept::SongOrder::Longest;
+        assert_eq!(song_list(&show, &state, None).shown, [1, 2, 0]);
+        state.filter = "n".to_owned();
+        let list = song_list(&show, &state, None);
+        assert_eq!((list.total, list.shown.as_slice()), (3, &[1, 2, 0][..]), "every title has an n");
+        state.filter = "noon".to_owned();
+        assert_eq!(song_list(&show, &state, None).shown, [2]);
     }
 
     #[test]

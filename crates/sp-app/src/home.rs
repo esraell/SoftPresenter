@@ -143,9 +143,7 @@ pub struct HomeState {
     pub confirm_delete_theme: Option<usize>,
     /// The open theme's name while it is being retyped in the list of themes.
     pub renaming_theme: Option<String>,
-    /// How tall the libraries and playlists rows at the top of the left column are, as last
-    /// drawn; kept between runs.
-    pub service_height: Option<f32>,
+
     /// The song a new slide has just been asked for, at its end. The app adds it.
     pub add_slide: Option<usize>,
     /// Objects copied in the editor, and the words that went to the system clipboard with them.
@@ -329,17 +327,22 @@ pub struct HomeState {
     pub screen_selected: usize,
     /// A service header being renamed, by its place, and its name as typed so far.
     pub renaming_header: Option<(usize, String)>,
-    /// True while the library is folded away.
-    pub library_collapsed: bool,
+
     /// The left column lists a playlist's items, not a library's songs.
     pub playlist_open: bool,
+    /// The chooser of playlists and libraries is open in the left column, in place of the list.
+    pub chooser_open: bool,
+    /// The order a library's songs are listed in.
+    pub song_order: crate::kept::SongOrder,
+    /// The item of the playlist in front that was on screen when the left column last looked:
+    /// its row is brought into view once, when that changes.
+    pub live_row_seen: Option<usize>,
     /// The media bin's playlists, the one shown (all media when none), and whether they changed
     /// since they were last saved.
     pub media_playlists: Vec<crate::media::Playlist>,
     pub media_playlist_shown: Option<sp_model::Uuid>,
     pub media_playlists_changed: bool,
-    /// The PLAYLISTS rows are folded away.
-    pub playlists_collapsed: bool,
+
     /// A library being renamed in its row, and the name typed so far.
     pub renaming_library: Option<(sp_model::Uuid, String)>,
     /// Next at the end of a song goes on to the next song in the service.
@@ -1037,7 +1040,7 @@ impl Default for HomeState {
             pending_group_name: None,
             confirm_delete_theme: None,
             renaming_theme: None,
-            service_height: None,
+
             add_slide: None,
             object_clip: Vec::new(),
             object_clip_text: String::new(),
@@ -1127,9 +1130,11 @@ impl Default for HomeState {
             screen_status: Vec::new(),
             screen_selected: 0,
             show_notes: false,
-            library_collapsed: false,
+
             playlist_open: false,
-            playlists_collapsed: false,
+            chooser_open: false,
+            song_order: crate::kept::SongOrder::Listed,
+            live_row_seen: None,
             media_playlists: Vec::new(),
             media_playlist_shown: None,
             media_playlists_changed: false,
@@ -1251,7 +1256,7 @@ impl HomeState {
                 SlideView::Table => "table",
             }
             .to_owned(),
-            service_height: self.service_height.map(f32::round),
+
             continuous: self.continuous,
             copyright_show: self.copyright_show,
             ccli_licence: self.ccli_licence.clone(),
@@ -1261,6 +1266,8 @@ impl HomeState {
             setup_done: self.setup_done,
             bible_lists_hidden: !self.bible.lists_open,
             bible_rows_open: self.bible.rows_open,
+            playlist_in_front: self.playlist_open,
+            song_order: self.song_order.name().to_owned(),
             ..crate::service::Prefs::default()
         }
     }
@@ -1281,7 +1288,7 @@ impl HomeState {
             "table" => SlideView::Table,
             _ => SlideView::Grid,
         };
-        self.service_height = prefs.service_height;
+
         self.continuous = prefs.continuous;
         self.copyright_show = prefs.copyright_show;
         self.ccli_licence = prefs.ccli_licence.clone();
@@ -1291,6 +1298,8 @@ impl HomeState {
         self.setup_done = prefs.setup_done;
         self.bible.lists_open = !prefs.bible_lists_hidden;
         self.bible.rows_open = prefs.bible_rows_open;
+        self.playlist_open = prefs.playlist_in_front;
+        self.song_order = crate::kept::SongOrder::named(&prefs.song_order);
     }
 
     /// How long a new picture takes to fade in on the output; zero when slides cut.
@@ -8115,6 +8124,43 @@ mod tests {
         });
         output.drop_without_applying_deltas();
         assert!(!asked.iter().any(|c| matches!(c, Command::Select(_))));
+    }
+
+    /// Clicks once at a place in the window: the pointer goes there, presses and lets go.
+    fn click_at(ctx: &egui::Context, show: &Show, state: &mut HomeState, at: egui::Pos2, time: &mut f64) {
+        let press = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        for events in [vec![Event::PointerMoved(at)], vec![press(true)], vec![press(false)], Vec::new()] {
+            *time += 0.1;
+            frame_events(ctx, show, state, events, *time);
+        }
+    }
+
+    #[test]
+    fn the_name_over_the_list_opens_the_chooser_and_choosing_puts_the_list_back() {
+        let songs = ["Alpha", "Beta"].map(|title| Arc::new(parse_song_text(title, "Words\n")));
+        let show = Show::new(songs.to_vec());
+        let mut state = HomeState { playlist_open: true, filter: "al".to_owned(), ..HomeState::default() };
+        let (ctx, mut time) = (egui::Context::default(), 0.0);
+        frame_events(&ctx, &show, &mut state, Vec::new(), time);
+        // The name of what is listed is under the small label at the top of the left column.
+        let top = crate::studio::TOP_BAR + 16.0 + 36.0;
+        click_at(&ctx, &show, &mut state, pos2(110.0, top + 17.0), &mut time);
+        assert!(state.chooser_open, "a click on the name opens the chooser");
+        assert!(state.playlist_open, "and changes nothing else");
+        // In the chooser: the Playlists heading, the one playlist, the Song libraries heading
+        // (set apart by a line), then All Songs.
+        let all_songs = top + 39.6 + 36.0 + 1.0 + 36.0 + 1.0 + 53.0 + 1.0 + 18.0;
+        click_at(&ctx, &show, &mut state, pos2(110.0, all_songs), &mut time);
+        assert!(!state.playlist_open, "All Songs is listed");
+        assert!(state.library_shown.is_none());
+        assert!(!state.chooser_open, "choosing puts the chooser away");
+        assert!(state.filter.is_empty(), "and starts with nothing filtered out");
+        assert!(show.live().is_none(), "nothing went on screen");
     }
 
     #[test]

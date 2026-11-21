@@ -14,18 +14,18 @@ sources) drawn by their own thread.
 ```
   ▬ SoftPresenter [Show|Bible|Edit] (Find a song or a line)         12:00:00 [● Audience ON] [● Stage ON] ? ⚙
 ╭──────────────────╮ ╭─────────────────────────────────────────╮ ╭────────────────────────────────╮
-│ LIBRARY        + │ │ Song title   8 slides     (i) ≡ ∞ ▤      │ │ ● [AUDIENCE|STAGE]    ON SCREEN│
-│   All Songs      │ │ ┌──────┐ ┌──────┐ ┌──────┐                │ │ ┌────────────────────────────┐ │
-│   Christmas      │ │ │slide │ │slide │ │slide │   slide grid   │ │ │  what the screens show     │ │
-│ PLAYLISTS      + │ │ │1 V1 A│ │2     │ │3 Ch C│   (or Easy /   │ │ └────────────────────────────┘ │
-│   Sunday         │ │ └──────┘ └──────┘ └──────┘   Table view)  │ │ 03/08  CHORUS · SONG TITLE     │
-│ ──────────────── │ │                                          │ │ (a row for what is playing)    │
-│ ALL SONGS    3 + │ │                                          │ │ [Slide]   [Media]  [Props]     │
-│   Song one       │ │ [+ Add Slide]   Cut Dissolve Advanced ▾  │ │ [Messages][Audio]  [Announce]  │
-│   Song two       │ │                 grid/easy/table  size ── │ │ [          Clear All         ] │
-│                  │ ├─────────────────────────────────────────┤ │ Timers Messages Props Macros   │
-│ [Search songs]   │ │ ▾ MEDIA  All Media ▾   Dissolve ▾   [+]  │ │ Stage  Audio  (tabs)           │
-│                  │ │ [pic] [pic] [video ▶]                    │ │   …the open tab's list…        │
+│ PLAYLIST       ⤓ │ │ Song title   8 slides     (i) ≡ ∞ ▤      │ │ ● [AUDIENCE|STAGE]    ON SCREEN│
+│ ≡ Sunday       ⌄ │ │ ┌──────┐ ┌──────┐ ┌──────┐                │ │ ┌────────────────────────────┐ │
+│ 01 Countdown   ⋯ │ │ │slide │ │slide │ │slide │   slide grid   │ │ │  what the screens show     │ │
+│ WORSHIP          │ │ │1 V1 A│ │2     │ │3 Ch C│   (or Easy /   │ │ └────────────────────────────┘ │
+│ 02 Song one    ⋯ │ │ └──────┘ └──────┘ └──────┘   Table view)  │ │ 03/08  CHORUS · SONG TITLE     │
+│ 03 Song two  ● ⋯ │ │                                          │ │ (a row for what is playing)    │
+│ THE WORD         │ │                                          │ │ [Slide]   [Media]  [Props]     │
+│ 04 John 3:16   ⋯ │ │ [+ Add Slide]   Cut Dissolve Advanced ▾  │ │ [Messages][Audio]  [Announce]  │
+│                  │ │                 grid/easy/table  size ── │ │ [          Clear All         ] │
+│ [+ Add to        │ ├─────────────────────────────────────────┤ │ Timers Messages Props Macros   │
+│    playlist    ] │ │ ▾ MEDIA  All Media ▾   Dissolve ▾   [+]  │ │ Stage  Audio  (tabs)           │
+│ (Filter)         │ │ [pic] [pic] [video ▶]                    │ │   …the open tab's list…        │
 ╰──────────────────╯ ╰─────────────────────────────────────────╯ ╰────────────────────────────────╯
 ```
 
@@ -41,16 +41,18 @@ sources) drawn by their own thread.
 | ? | Opens Settings at Key Mappings | |
 | ⚙ | Settings: General, Screens, Groups, Key Mappings, Integrations (Command-comma) | `menu Settings` |
 
-### Left column: library and playlists
+### Left column: a playlist or a library
 
 | Part | Does | Command line |
 |---|---|---|
-| LIBRARY rows | All Songs, and libraries of your own; + makes one; right-click to rename or delete | `songs`, `libraries`, `library open NAME` (or `all`) |
-| PLAYLISTS rows | Playlists; + makes one; drop songs on a row to add them | `playlists`, `playlist open NAME` |
-| Song list (a library chosen) | Click opens a song; Command/Shift-click and dragging pick several; drag picked songs onto a playlist or library; Delete asks, then deletes; right-click for Duplicate, Theme, Transition, Reflow, Play on Announcements Layer, Delete… | `select SONG`, `song delete SONG --yes`, `announce SONG` |
-| VoxLive row (under LIBRARY, once VoxLive is connected) | The VoxLive item: the church's VoxLive screens, a slide each; right-click to add it to the playlist in front | `voxlive screens`, `voxlive show N\|NAME` |
-| Playlist items (a playlist chosen) | Songs, Bible passages, pictures and videos, media playlists, placeholders and headers in running order; drag to reorder; + adds a header or a placeholder; a picture or video dragged from the bin goes in where the line shows, or fills a placeholder; a placeholder's right-click Fill with Song | `playlist [NAME]`, `slides item N [in PLAYLIST]`, `playlist add SONG to PLAYLIST`, `playlist media\|media-playlist\|placeholder NAME`, `playlist fill PLACEHOLDER with SONG` |
-| Search | Filters the list (the find box in the top bar finds songs by title and words, and Bible verses) | |
+| PLAYLIST or LIBRARY, with the import button | Says which kind of thing is listed; the button imports songs, a library folder, or slides | `song import FILE…` |
+| The name of what is listed | A click opens the chooser, or puts it away | |
+| The chooser | Only things to open: the playlists (with how many items), then the song libraries under a line (All Songs, then each library); the open one is ticked; + makes one; ⋯ or right-click to rename, export or delete; drop songs (or a picture or video) on a row to add them | `playlists`, `playlist open NAME`, `libraries`, `library open NAME` (or `all`) |
+| Song list (a library open) | Click opens a song; Command/Shift-click and dragging pick several; drag picked songs onto a playlist or library (the chooser shows while they are carried); Delete asks, then deletes; ⋯ or right-click for Add to Playlist, Duplicate, Theme, Transition, Reflow, Play on Announcements Layer, Delete… | `songs`, `select SONG`, `song delete SONG --yes`, `announce SONG` |
+| Order: As listed, A–Z, Longest; New song (a library open) | The order the songs are listed in; a new song | `song new TITLE` |
+| Playlist items (a playlist open) | Songs, Bible passages, pictures and videos, media playlists, placeholders and headers in running order, each with its number, a mark for its kind, the orange dot while it is on screen, and ⋯ for its menu; drag to reorder; a picture or video dragged from the bin goes in where the line shows, or fills a placeholder; a placeholder's menu has Fill with Song | `playlist [NAME]`, `slides item N [in PLAYLIST]`, `playlist fill PLACEHOLDER with SONG` |
+| Add to playlist (a playlist open) | Adds a song, a header, a placeholder, a picture or video, a media playlist or the VoxLive item after the open item; A Bible Passage… opens the Bible page | `playlist add SONG to PLAYLIST`, `playlist header\|media\|media-playlist\|placeholder NAME`, `bible REF --add` |
+| Filter | Filters the list (the find box in the top bar finds songs by title and words, and Bible verses) | |
 
 ### Middle: the slides
 

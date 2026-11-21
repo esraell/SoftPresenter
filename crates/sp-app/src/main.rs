@@ -5769,6 +5769,11 @@ impl App {
             if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_PLAYLIST").is_some() {
                 running.home_state.playlist_open = true;
             }
+            // Testing aid: SOFTPRESENTER_CAPTURE_CHOOSER=1 opens the chooser of playlists and
+            // libraries in the left column.
+            if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_CAPTURE_CHOOSER").is_some() {
+                running.home_state.chooser_open = true;
+            }
             // Testing aid: open the Edit view on the stage layouts, with a box chosen.
             if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_CAPTURE_STAGE_LAYOUTS").is_some() {
                 running.home_state.edit_kind_request = Some(home::EditKind::Stage);
