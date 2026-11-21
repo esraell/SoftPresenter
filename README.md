@@ -271,6 +271,8 @@ The code is a Rust workspace:
     crates/sp-app      the app and its windows
     third_party/vello  the vello renderer's main crate, changed to size its GPU memory from
                        what is drawn (outside the workspace; its PROVENANCE.md explains)
+    third_party/fontique  the font finder Parley uses, changed to read font files instead of
+                       mapping them (outside the workspace; its PROVENANCE.md explains)
 
 [AGENTS.md](AGENTS.md#rules) says where `unsafe` code is allowed. Before sending a change:
 

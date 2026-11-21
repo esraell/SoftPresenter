@@ -92,6 +92,9 @@ message.
   the owner agreed to that on 2026-11-20. Anywhere else, find a safe way or ask the owner.
   The copy of Vello in `third_party/vello` is not a workspace crate and carries the one
   `unsafe` block Vello itself has (it creates the shader modules); changes made to it here
+  add none. The copy of Fontique in `third_party/fontique` is not a workspace crate either and
+  carries Fontique's own `unsafe` code (calls into the systems' font services, and mapping
+  font files while it looks for fonts); changes made to it here removed two of its maps and
   add none.
 - **Live safety.** Nothing slow (reading files, decoding, network, waiting on NDI) runs on the
   thread that draws the screens. The audience must never see a freeze or the wrong slide because

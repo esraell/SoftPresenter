@@ -222,6 +222,7 @@ how long drawing took.
 | `sp-engine` | The show's state: what is selected, what is on screen, next and previous, clearing layers |
 | `sp-render` | Drawing slides on the GPU with vello: screens, thumbnails, transitions |
 | `third_party/vello` | Not a workspace crate: vello 0.12.0's main crate with SoftPresenter's change, which sizes the renderer's GPU working memory from what is drawn and checks that a picture fitted the first time it is drawn (a picture too heavy to draw is an error, and the one before it stays up) (`PROVENANCE.md` there, and `docs/licences/vello.md`) |
+| `third_party/fontique` | Not a workspace crate: fontique 0.13.0, which finds the computer's fonts for the text layout, with SoftPresenter's change: font files are read into memory, not mapped, and SoftPresenter can read them itself (once for every thread, never on the screens' thread), so a font file rewritten while the app runs cannot crash it (`PROVENANCE.md` there, and `docs/licences/fontique.md`) |
 | `sp-video` | Playing videos: macOS's own player, FFmpeg for other formats; web pages drawn off-screen by macOS's web view (`web`, `web_mac`), copied into frames as a video's are |
 | `sp-ndi` | Sending screens over NDI (the runtime is opened when an NDI screen starts) |
 | `sp-bible` | Bibles: references, verse numbering, search |

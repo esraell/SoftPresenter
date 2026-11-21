@@ -52,13 +52,15 @@ pub fn set_picture_loader(loader: Loader) {
     let _ = LOADER.set(loader);
 }
 
-/// Says this thread draws only pictures already kept, never reading a file itself: one not
-/// kept yet is read by the loader thread meanwhile, and `loaded` is called once it is there,
-/// so the thread can draw again. For the thread that draws the screens.
-pub fn draw_kept_pictures_only(loaded: impl Fn() + Send + Sync + 'static) {
+/// Says this thread draws only pictures and fonts already read, never reading a file itself: a
+/// picture or a font not read yet is read by a loader thread meanwhile, and `loaded` is called
+/// once it is there, so the thread can draw again. For the thread that draws the screens.
+pub fn draw_kept_only(loaded: impl Fn() + Send + Sync + 'static) {
     KEPT_ONLY.with(|only| only.set(true));
+    let loaded: crate::fonts::Loaded = std::sync::Arc::new(loaded);
+    crate::fonts::read_fonts_elsewhere(loaded.clone());
     if let Ok(mut on_loaded) = ON_LOADED.lock() {
-        *on_loaded = Some(Box::new(loaded));
+        *on_loaded = Some(Box::new(move || loaded()));
     }
 }
 
@@ -132,7 +134,7 @@ fn kept_only() -> bool {
 
 /// The picture a file names: read the first time it is asked for, then kept. A file that
 /// can't be read is remembered as missing, so it is not tried again on every frame. On the
-/// screens' thread, one not kept yet is read meanwhile (see [`draw_kept_pictures_only`]), and
+/// screens' thread, one not kept yet is read meanwhile (see [`draw_kept_only`]), and
 /// its small copy, if kept, stands in for it.
 pub(crate) fn picture(file: &str) -> Option<Picture> {
     let kept = KEPT.get_or_init(|| Mutex::new(Kept::new(KEEP_BYTES)));
@@ -316,7 +318,7 @@ mod tests {
         let (tx, rx) = channel();
         let tx = Mutex::new(tx);
         let drawn = std::thread::spawn(move || {
-            draw_kept_pictures_only(move || {
+            draw_kept_only(move || {
                 let _ = tx.lock().map(|tx| tx.send(()));
             });
             // Not kept yet: nothing for now, and it is coming, not missing.

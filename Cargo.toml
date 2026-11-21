@@ -54,6 +54,9 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # third_party/vello/PROVENANCE.md says what was changed and why.
 [patch.crates-io]
 vello = { path = "third_party/vello" }
+# Fontique 0.13.0, which finds the fonts Parley lays text out in, with font files read into
+# memory instead of mapped: third_party/fontique/PROVENANCE.md says why.
+fontique = { path = "third_party/fontique" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -660,12 +660,13 @@ pub fn object_frame(slide: &Slide, object: &Object, theme: &Theme) -> SlideRect 
     object.frame.unwrap_or_else(|| theme.place_on(slide, object.role.as_ref()))
 }
 
-fn lay_out(fonts: &mut Fonts, text: &str, style: &BoxStyle, size: f32, width: f32) -> Layout<()> {
+pub(crate) fn lay_out(fonts: &mut Fonts, text: &str, style: &BoxStyle, size: f32, width: f32) -> Layout<()> {
     lay_out_within(fonts, text, style, size, Some(width))
 }
 
 /// Lays text out at a size, wrapping it at `width`, or on lines as long as they are with `None`.
 fn lay_out_within(fonts: &mut Fonts, text: &str, style: &BoxStyle, size: f32, width: Option<f32>) -> Layout<()> {
+    fonts.starting_layout();
     let mut builder = fonts.layout_cx.ranged_builder(&mut fonts.font_cx, text, 1.0, true);
     builder.push_default(StyleProperty::FontSize(size));
     builder.push_default(StyleProperty::FontWeight(FontWeight::new(f32::from(style.weight))));

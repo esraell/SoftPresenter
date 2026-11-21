@@ -150,6 +150,14 @@ copy in `third_party/vello`, which SoftPresenter has changed: the copy keeps Vel
 files, marks each change, and says what was changed and why in its `PROVENANCE.md`.
 [`docs/licences/vello.md`](docs/licences/vello.md) explains.
 
+### Fontique
+
+SoftPresenter finds fonts with Fontique (<https://github.com/linebender/parley>), copyright the
+Parley Authors, licensed under Apache-2.0 OR MIT. Its `fontique` crate, version 0.13.0, is built
+from the copy in `third_party/fontique`, which SoftPresenter has changed: the copy keeps
+Fontique's licence files, marks each change, and says what was changed and why in its
+`PROVENANCE.md`. [`docs/licences/fontique.md`](docs/licences/fontique.md) explains.
+
 ### Other libraries
 
 SoftPresenter is built from many open-source Rust libraries, each under its own licence (MIT,

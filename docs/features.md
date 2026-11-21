@@ -525,6 +525,14 @@ feature changes, this page changes in the same commit.
 - Each audience screen has a look: which layers it shows (slides, media, props, messages; a
   lobby screen might show only the media), its colour where nothing is drawn, and how much of
   each edge to cover for a screen that cuts them off.
+- A font is read into memory the first time a slide uses it, once for the screens, the
+  thumbnails and the editor together; fonts no slide uses are never read. A font file that a
+  font manager, an update or an installer changes or removes while SoftPresenter runs changes
+  nothing until the next start (it could once crash the app in the middle of a song). The
+  screens never read a font file themselves: one not read yet (normally the slide thumbnails
+  have read it already) is read meanwhile and the slide drawn again once it is there, a few
+  thousandths of a second later; until then its words are drawn in fonts already read, or
+  left out.
 
 <img src="images/screens.png" alt="The Screens window" width="620">
 

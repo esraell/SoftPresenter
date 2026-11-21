@@ -656,7 +656,7 @@ impl OutputHandle {
         let thread = std::thread::Builder::new()
             .name("output".to_owned())
             .spawn(move || {
-                sp_render::draw_kept_pictures_only(move || {
+                sp_render::draw_kept_only(move || {
                     let _ = wake.send(OutputMsg::Redraw);
                 });
                 run(device, queue, theme, (from_ndi, rx), status, shared, waker)
