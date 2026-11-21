@@ -52,8 +52,14 @@ pub const RADIUS: f32 = 7.0;
 /// The corner of keys, cards and sheets.
 pub const RADIUS_CARD: f32 = 11.0;
 /// The corner of the three columns.
-#[allow(dead_code)] // Used as each page of the new design lands.
 pub const RADIUS_PANEL: f32 = 18.0;
+/// The room between the three columns, and between them and the window's edges.
+pub const GAP: f32 = 10.0;
+/// How wide the left and the right column are; the middle takes the rest.
+pub const LEFT_WIDTH: f32 = 244.0;
+pub const RIGHT_WIDTH: f32 = 360.0;
+/// How tall the bar along the top of the window is.
+pub const TOP_BAR: f32 = 52.0;
 /// A button: its fill, and lighter under the pointer. Buttons are flat, with no outline (the
 /// edge is the fill's own colour, kept so that nothing changes size where one was drawn).
 pub const BUTTON: Color32 = Color32::from_rgb(0x30, 0x30, 0x30);
@@ -70,6 +76,50 @@ pub fn paint_button(painter: &egui::Painter, rect: Rect, lit: bool) {
     painter.rect_filled(rect, RADIUS, if lit { BUTTON_HOVER } else { BUTTON });
     let edge = if lit { BUTTON_EDGE_HOVER } else { BUTTON_EDGE };
     painter.rect_stroke(rect, RADIUS, Stroke::new(1.0, edge), egui::StrokeKind::Inside);
+}
+
+/// One of the window's three columns.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Column {
+    Left,
+    Middle,
+    Right,
+}
+
+/// The room a column keeps clear around itself: the side columns on both sides (so the middle,
+/// which takes what is left, needs none), and all three at the foot of the window.
+pub fn column_margin(column: Column) -> egui::Margin {
+    let gap = GAP as i8;
+    match column {
+        Column::Left | Column::Right => egui::Margin { left: gap, right: gap, top: 0, bottom: gap },
+        Column::Middle => egui::Margin { left: 0, right: 0, top: 0, bottom: gap },
+    }
+}
+
+/// The frame of one of the three columns: a panel with round corners, standing clear of the
+/// others and of the window's edges. Give it the inner margin its contents want.
+pub fn column_frame(column: Column) -> Frame {
+    Frame::new().fill(PANEL).corner_radius(RADIUS_PANEL as u8).outer_margin(column_margin(column))
+}
+
+/// How much of the window a side column takes: itself and the room on both sides of it.
+pub fn column_outer(width: f32) -> f32 {
+    width + 2.0 * GAP
+}
+
+/// The panel inside what a column's frame took up (`outer`, the frame's rectangle).
+pub fn column_panel(outer: Rect, column: Column) -> Rect {
+    outer - column_margin(column)
+}
+
+/// Rounds a panel's corners after its contents are drawn: whatever they painted into the four
+/// corners (a bar's fill, a list's row) is painted over in the window's colour. The toolkit
+/// cuts drawing off only at straight edges, so this is how a panel of several parts keeps
+/// round corners.
+pub fn round_corners(ui: &egui::Ui, panel: Rect) {
+    // An outline outside the round shape, kept to the panel's own rectangle: only the corners.
+    // 8 wide covers the whole of a corner of 18 (the corner's point is 7.5 from the curve).
+    ui.painter().with_clip_rect(panel).rect_stroke(panel, RADIUS_PANEL, Stroke::new(8.0, BG), StrokeKind::Outside);
 }
 
 /// Sets the whole window's colours, sizes and font.
@@ -386,136 +436,139 @@ pub fn changed_outside_bar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState
 }
 
 pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
-    let frame = Frame::new().fill(PANEL).inner_margin(egui::Margin::symmetric(14, 9));
-    egui::Panel::top("toolbar").resizable(false).frame(frame).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 10.0;
-            // The four views. Themes is one of them: it opens the Theme Editor.
-            let editing_theme = state.theme_edit.is_some();
-            let view = if editing_theme {
-                3
-            } else if state.editing.is_some() {
-                1
-            } else if state.bible_open {
-                2
-            } else {
-                0
-            };
-            let picked = segmented(ui, "views", vec2(74.0, 28.0), &["Show", "Edit", "Bible", "Themes"], Some(view))
-                .or(state.view_request.take().filter(|asked| *asked != view));
-            match picked {
-                Some(3) if !editing_theme => {
-                    state.theme_request = Some(crate::home::ThemeRequest::Edit(state.theme_for_songs))
-                }
-                Some(3) => {}
-                // Leaving the Theme Editor goes through the app, which saves the theme.
-                Some(to) if editing_theme => {
-                    if let Some(edit) = state.theme_edit.as_mut() {
-                        edit.leave = true;
+    let frame = Frame::new().fill(BG).inner_margin(egui::Margin::symmetric(14, 9));
+    egui::Panel::top("toolbar").resizable(false).show_separator_line(false).exact_size(TOP_BAR).frame(frame).show(
+        ui,
+        |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                // The four views. Themes is one of them: it opens the Theme Editor.
+                let editing_theme = state.theme_edit.is_some();
+                let view = if editing_theme {
+                    3
+                } else if state.editing.is_some() {
+                    1
+                } else if state.bible_open {
+                    2
+                } else {
+                    0
+                };
+                let picked = segmented(ui, "views", vec2(74.0, 28.0), &["Show", "Edit", "Bible", "Themes"], Some(view))
+                    .or(state.view_request.take().filter(|asked| *asked != view));
+                match picked {
+                    Some(3) if !editing_theme => {
+                        state.theme_request = Some(crate::home::ThemeRequest::Edit(state.theme_for_songs))
                     }
-                    state.bible_open = to == 2;
-                    if to == 1 {
-                        state.open_editor_next = true;
+                    Some(3) => {}
+                    // Leaving the Theme Editor goes through the app, which saves the theme.
+                    Some(to) if editing_theme => {
+                        if let Some(edit) = state.theme_edit.as_mut() {
+                            edit.leave = true;
+                        }
+                        state.bible_open = to == 2;
+                        if to == 1 {
+                            state.open_editor_next = true;
+                        }
                     }
+                    Some(0) => {
+                        state.editing = None;
+                        state.bible_open = false;
+                    }
+                    Some(2) => {
+                        state.editing = None;
+                        state.bible_open = true;
+                    }
+                    Some(1) if state.editing.is_none() => {
+                        state.editing = EditDraft::of(show, slide_to_edit(show, state));
+                    }
+                    _ => {}
                 }
-                Some(0) => {
-                    state.editing = None;
-                    state.bible_open = false;
-                }
-                Some(2) => {
-                    state.editing = None;
-                    state.bible_open = true;
-                }
-                Some(1) if state.editing.is_none() => {
+                // Asked for while the Theme Editor was open: it has closed now, so open the slide editor.
+                if state.open_editor_next && state.theme_edit.is_none() {
+                    state.open_editor_next = false;
                     state.editing = EditDraft::of(show, slide_to_edit(show, state));
                 }
-                _ => {}
-            }
-            // Asked for while the Theme Editor was open: it has closed now, so open the slide editor.
-            if state.open_editor_next && state.theme_edit.is_none() {
-                state.open_editor_next = false;
-                state.editing = EditDraft::of(show, slide_to_edit(show, state));
-            }
 
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                // Settings, at the far right.
-                let (gear, response) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::click());
-                let on = state.preferences_open;
-                paint_button(ui.painter(), gear, on || response.hovered());
-                icons::paint(
-                    ui.painter(),
-                    Icon::Gear,
-                    Rect::from_center_size(gear.center(), vec2(15.0, 15.0)),
-                    TEXT_DIM,
-                );
-                if response.on_hover_text("Settings (Command-comma)").clicked() {
-                    state.preferences_open = !state.preferences_open;
-                }
-                // Laid out from the right: Stage, then Audience to its left, so Audience reads first.
-                // The stage screens: a light and whether they are on.
-                let stage_on = state.stage_on;
-                let (rect, response) = ui.allocate_exact_size(vec2(118.0, 30.0), Sense::click());
-                let painter = ui.painter();
-                paint_button(painter, rect, response.hovered());
-                painter.circle_filled(
-                    rect.left_center() + vec2(15.0, 0.0),
-                    4.5,
-                    if stage_on { READY } else { TEXT_FAINT },
-                );
-                painter.text(
-                    rect.left_center() + vec2(28.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    "Stage",
-                    FontId::proportional(13.5),
-                    TEXT,
-                );
-                painter.text(
-                    rect.right_center() - vec2(12.0, 0.0),
-                    Align2::RIGHT_CENTER,
-                    if stage_on { "ON" } else { "OFF" },
-                    FontId::proportional(11.0),
-                    if stage_on { READY } else { TEXT_DIM },
-                );
-                let hint = if stage_on {
-                    "The stage screens are on. Click to switch them off (Command-2)."
-                } else {
-                    "The stage screens are off. Click to switch them on (Command-2)."
-                };
-                if response.on_hover_text(hint).clicked() {
-                    state.stage_on = !stage_on;
-                }
-                // The audience output: a tally light, its name, and whether it is on.
-                let on = show.output_enabled();
-                let (rect, response) = ui.allocate_exact_size(vec2(148.0, 30.0), Sense::click());
-                let painter = ui.painter();
-                paint_button(painter, rect, response.hovered());
-                let light = if on { READY } else { TEXT_FAINT };
-                painter.circle_filled(rect.left_center() + vec2(15.0, 0.0), 4.5, light);
-                painter.text(
-                    rect.left_center() + vec2(28.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    "Audience",
-                    FontId::proportional(13.5),
-                    TEXT,
-                );
-                painter.text(
-                    rect.right_center() - vec2(12.0, 0.0),
-                    Align2::RIGHT_CENTER,
-                    if on { "ON" } else { "OFF" },
-                    FontId::proportional(11.0),
-                    if on { READY } else { TEXT_DIM },
-                );
-                let hint = if on {
-                    "The audience output is on. Click to switch it off."
-                } else {
-                    "The audience output is off. Click to switch it on."
-                };
-                if response.on_hover_text(hint).clicked() {
-                    commands.push(Command::SetOutputEnabled(!on));
-                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    // Settings, at the far right.
+                    let (gear, response) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::click());
+                    let on = state.preferences_open;
+                    paint_button(ui.painter(), gear, on || response.hovered());
+                    icons::paint(
+                        ui.painter(),
+                        Icon::Gear,
+                        Rect::from_center_size(gear.center(), vec2(15.0, 15.0)),
+                        TEXT_DIM,
+                    );
+                    if response.on_hover_text("Settings (Command-comma)").clicked() {
+                        state.preferences_open = !state.preferences_open;
+                    }
+                    // Laid out from the right: Stage, then Audience to its left, so Audience reads first.
+                    // The stage screens: a light and whether they are on.
+                    let stage_on = state.stage_on;
+                    let (rect, response) = ui.allocate_exact_size(vec2(118.0, 30.0), Sense::click());
+                    let painter = ui.painter();
+                    paint_button(painter, rect, response.hovered());
+                    painter.circle_filled(
+                        rect.left_center() + vec2(15.0, 0.0),
+                        4.5,
+                        if stage_on { READY } else { TEXT_FAINT },
+                    );
+                    painter.text(
+                        rect.left_center() + vec2(28.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        "Stage",
+                        FontId::proportional(13.5),
+                        TEXT,
+                    );
+                    painter.text(
+                        rect.right_center() - vec2(12.0, 0.0),
+                        Align2::RIGHT_CENTER,
+                        if stage_on { "ON" } else { "OFF" },
+                        FontId::proportional(11.0),
+                        if stage_on { READY } else { TEXT_DIM },
+                    );
+                    let hint = if stage_on {
+                        "The stage screens are on. Click to switch them off (Command-2)."
+                    } else {
+                        "The stage screens are off. Click to switch them on (Command-2)."
+                    };
+                    if response.on_hover_text(hint).clicked() {
+                        state.stage_on = !stage_on;
+                    }
+                    // The audience output: a tally light, its name, and whether it is on.
+                    let on = show.output_enabled();
+                    let (rect, response) = ui.allocate_exact_size(vec2(148.0, 30.0), Sense::click());
+                    let painter = ui.painter();
+                    paint_button(painter, rect, response.hovered());
+                    let light = if on { READY } else { TEXT_FAINT };
+                    painter.circle_filled(rect.left_center() + vec2(15.0, 0.0), 4.5, light);
+                    painter.text(
+                        rect.left_center() + vec2(28.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        "Audience",
+                        FontId::proportional(13.5),
+                        TEXT,
+                    );
+                    painter.text(
+                        rect.right_center() - vec2(12.0, 0.0),
+                        Align2::RIGHT_CENTER,
+                        if on { "ON" } else { "OFF" },
+                        FontId::proportional(11.0),
+                        if on { READY } else { TEXT_DIM },
+                    );
+                    let hint = if on {
+                        "The audience output is on. Click to switch it off."
+                    } else {
+                        "The audience output is off. Click to switch it on."
+                    };
+                    if response.on_hover_text(hint).clicked() {
+                        commands.push(Command::SetOutputEnabled(!on));
+                    }
+                });
             });
-        });
-    });
+        },
+    );
 }
 
 /// One row of a list in the left column. Returns its response; `live` puts a tally light at
@@ -639,13 +692,18 @@ fn source_heading(ui: &mut egui::Ui, text: &str, collapsed: &mut bool, add_hint:
 /// The left column: the libraries and the playlists as rows on top, the
 /// songs or items of the one chosen below, and a filter at the bottom.
 pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
-    let frame = Frame::new().fill(PANEL).inner_margin(egui::Margin {
-        left: 12,
-        right: 12,
+    let frame = column_frame(Column::Left).inner_margin(egui::Margin {
+        left: 10,
+        right: 10,
         top: 14,
         bottom: COLUMN_BOTTOM as i8,
     });
-    egui::Panel::left("library").resizable(false).exact_size(256.0).frame(frame).show(ui, |ui| {
+    let panel = egui::Panel::left("library")
+        .resizable(false)
+        .show_separator_line(false)
+        .exact_size(column_outer(LEFT_WIDTH))
+        .frame(frame);
+    let shown = panel.show(ui, |ui| {
         let column_height = ui.available_height();
         let rows = state.libraries.len() + state.services.list.len() + 1;
         let fitted = (rows as f32 * 32.0 + 70.0).min(column_height * 0.45);
@@ -683,6 +741,7 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             library_songs(ui, show, state, commands);
         }
     });
+    round_corners(ui, column_panel(shown.response.rect, Column::Left));
 }
 
 /// The LIBRARY rows (All Songs and each library) and the PLAYLISTS rows. A song dragged from
@@ -1974,8 +2033,13 @@ pub fn program_panel(
     commands: &mut Vec<Command>,
 ) {
     let output_stopped = state.output_stopped;
-    let frame = Frame::new().fill(PANEL).inner_margin(egui::Margin { left: 16, right: 16, top: 14, bottom: 12 });
-    egui::Panel::right("live").resizable(false).exact_size(340.0).frame(frame).show(ui, |ui| {
+    let frame = column_frame(Column::Right).inner_margin(egui::Margin { left: 16, right: 16, top: 14, bottom: 12 });
+    let panel = egui::Panel::right("live")
+        .resizable(false)
+        .show_separator_line(false)
+        .exact_size(column_outer(RIGHT_WIDTH))
+        .frame(frame);
+    let shown = panel.show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
         let slide_live = show.live().is_some();
         let media_live = show.live_media().is_some();
@@ -2147,6 +2211,7 @@ pub fn program_panel(
         // Timers, messages and the stage, in tabs under the rest.
         crate::live_tabs::live_tabs(ui, show, state);
     });
+    round_corners(ui, column_panel(shown.response.rect, Column::Right));
 }
 
 /// The strip under the slides that holds pictures to show behind the words. It is slim until
@@ -2171,13 +2236,19 @@ pub fn media_strip(
     // Open, it is as tall as its contents (the bar, the pictures and their names) with the same
     // room under them as the left column leaves under its filter, so the three columns end on
     // one line.
-    let height = if folded { 30.0 } else { MEDIA_STRIP_HEIGHT };
+    let height = if folded { 30.0 } else { MEDIA_STRIP_HEIGHT } + GAP;
     let margin = if folded {
         egui::Margin::symmetric(16, 4)
     } else {
         egui::Margin { left: 16, right: 16, top: 10, bottom: COLUMN_BOTTOM as i8 }
     };
-    let frame = Frame::new().fill(PANEL).inner_margin(margin);
+    // The foot of the middle column: its lower corners are the column's.
+    let corner = RADIUS_PANEL as u8;
+    let frame = Frame::new()
+        .fill(PANEL)
+        .corner_radius(CornerRadius { nw: 0, ne: 0, sw: corner, se: corner })
+        .inner_margin(margin)
+        .outer_margin(column_margin(Column::Middle));
     egui::Panel::bottom("media bin").resizable(false).exact_size(height).frame(frame).show(ui, |ui| {
         let area = ui.max_rect().expand2(vec2(16.0, 10.0));
         if folded {

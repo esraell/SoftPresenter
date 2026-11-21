@@ -23,7 +23,7 @@ const FIELD: Color32 = crate::studio::CARD;
 /// The outline of what is chosen.
 const CHOSEN_LINE: Color32 = crate::studio::ACCENT;
 const SIDE: Color32 = crate::studio::PANEL;
-const CANVAS: Color32 = crate::studio::BG;
+const CANVAS: Color32 = crate::studio::PANEL;
 const ON: Color32 = Color32::from_rgb(50, 208, 116);
 const DIM: Color32 = crate::studio::TEXT_DIM;
 
@@ -1399,12 +1399,16 @@ pub fn home_ui(
     }
     crate::studio::library(ui, show, state, &mut commands);
     crate::studio::program_panel(ui, show, state, preview, &mut commands);
+    // The middle column is what the side columns leave: the slides (or the Bible page) with
+    // the media bin at its foot.
+    let middle = crate::studio::column_panel(ui.available_rect_before_wrap(), crate::studio::Column::Middle);
     crate::studio::media_strip(ui, show, state, thumb, &mut commands);
     if state.bible_open {
         bible_area(ui, show, state, thumb, &mut commands);
     } else {
         slide_area(ui, show, state, theme, thumb, &mut commands);
     }
+    crate::studio::round_corners(ui, middle);
     commands
 }
 
@@ -1742,348 +1746,103 @@ fn edit_view(
         }
     }
     let mut chosen_template = None;
-    // The Theme Editor's column is a little wider, for the list of themes.
-    let column = if theme_mode { 224.0 } else { 186.0 };
-    egui::Panel::left("edit slides").resizable(false).exact_size(column).frame(panel_frame(EDIT_PANEL, 0)).show(
-        ui,
-        |ui| {
-            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-            if theme_mode {
-                theme_list(ui, state);
-            } else if let Some(presentation) = presentation {
+    // The left column, as wide here as in every other view.
+    use crate::studio::Column;
+    let left = egui::Panel::left("edit slides")
+        .resizable(false)
+        .show_separator_line(false)
+        .exact_size(crate::studio::column_outer(crate::studio::LEFT_WIDTH))
+        .frame(crate::studio::column_frame(Column::Left));
+    let left = left.show(ui, |ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        if theme_mode {
+            theme_list(ui, state);
+        } else if let Some(presentation) = presentation {
+            Frame::new().fill(EDIT_HEADER).inner_margin(egui::Margin::symmetric(8, 5)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(presentation.title.as_str()).strong().size(12.5).color(Color32::WHITE),
+                    );
+                    ui.add_space(ui.available_width());
+                });
+            });
+        }
+
+        egui::Panel::bottom("edit objects").resizable(false).exact_size(200.0).frame(panel_frame(EDIT_PANEL, 0)).show(
+            ui,
+            |ui| {
                 Frame::new().fill(EDIT_HEADER).inner_margin(egui::Margin::symmetric(8, 5)).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(presentation.title.as_str()).strong().size(12.5).color(Color32::WHITE),
-                        );
+                        ui.label(egui::RichText::new("Objects").strong().size(12.5).color(Color32::WHITE));
                         ui.add_space(ui.available_width());
                     });
                 });
-            }
-
-            egui::Panel::bottom("edit objects")
-                .resizable(false)
-                .exact_size(200.0)
-                .frame(panel_frame(EDIT_PANEL, 0))
-                .show(ui, |ui| {
-                    Frame::new().fill(EDIT_HEADER).inner_margin(egui::Margin::symmetric(8, 5)).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("Objects").strong().size(12.5).color(Color32::WHITE));
-                            ui.add_space(ui.available_width());
-                        });
-                    });
-                    egui::ScrollArea::vertical().id_salt("edit object list").auto_shrink([false, false]).show(
-                        ui,
-                        |ui| {
-                            ui.add_space(4.0);
-                            let Some(draft) = state.editing.as_mut() else { return };
-                            // The top of the stack is listed first, as it is in front on the slide.
-                            let mut pick = None;
-                            // What a row's icons or its right-click menu asked for.
-                            enum Ask {
-                                Hide(bool),
-                                Lock(bool),
-                                Delete,
-                            }
-                            let mut asked: Option<(sp_model::Uuid, Ask)> = None;
-                            // A rename that has just begun takes the keyboard once; one that has
-                            // ended is carried out after the list is drawn.
-                            let mut rename_started = std::mem::take(&mut state.rename_started);
-                            let mut rename_done: Option<Option<(sp_model::Uuid, String)>> = None;
-                            let mut start_rename = None;
-                            let extend = ui.input(|input| input.modifiers.shift || input.modifiers.command);
-                            // Rows can be dragged up and down: the order is front to back.
-                            let mut rows: Vec<(sp_model::Uuid, Rect)> = Vec::new();
-                            let mut dragging = None;
-                            let mut dropped = None;
-                            for object in draft.slide.objects.iter().rev() {
-                                let selected = draft.is_selected(object.id);
-                                let (row, response) =
-                                    ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click_and_drag());
-                                rows.push((object.id, row));
-                                if response.dragged() {
-                                    dragging = Some(object.id);
-                                }
-                                if response.drag_stopped() {
-                                    dropped = Some(object.id);
-                                }
-                                if selected {
-                                    ui.painter().rect_filled(row, 0.0, EDIT_SELECTED);
-                                } else if response.hovered() {
-                                    ui.painter().rect_filled(row, 0.0, Color32::from_gray(46));
-                                }
-                                // A hidden object's row is greyed.
-                                let ink = if object.hidden { Color32::from_gray(120) } else { Color32::from_gray(230) };
-                                // T for text, a diamond for a shape, a globe for a web page.
-                                let mark = match object.kind {
-                                    sp_model::ObjectKind::Text { .. } => "T",
-                                    sp_model::ObjectKind::Image { .. } => "▣",
-                                    sp_model::ObjectKind::Shape { .. } => "◆",
-                                    sp_model::ObjectKind::Web { .. } => "🌐",
-                                };
-                                ui.painter().text(
-                                    row.left_center() + vec2(12.0, 0.0),
-                                    Align2::LEFT_CENTER,
-                                    mark,
-                                    FontId::proportional(if mark == "T" { 15.0 } else { 12.0 }),
-                                    ink,
-                                );
-                                let name_area = Rect::from_min_max(row.min, pos2(row.max.x - 46.0, row.max.y));
-                                // The name, or a field in its place while it is being retyped.
-                                let being_renamed = draft.renaming.as_ref().is_some_and(|(id, _)| *id == object.id);
-                                if being_renamed && let Some((_, name)) = draft.renaming.as_mut() {
-                                    let field = crate::studio::rename_field_at(
-                                        ui,
-                                        name,
-                                        FontId::proportional(13.0),
-                                        crate::studio::TEXT,
-                                        crate::studio::ACCENT,
-                                        row.left_center() + vec2(32.0, 0.0),
-                                        row.max.x - 46.0,
-                                    );
-                                    if std::mem::take(&mut rename_started) {
-                                        field.request_focus();
-                                    }
-                                    let (enter, escape) = ui.input(|input| {
-                                        (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape))
-                                    });
-                                    if escape {
-                                        rename_done = Some(None);
-                                    } else if enter || field.lost_focus() {
-                                        rename_done = Some(Some((object.id, name.clone())));
-                                    }
-                                } else {
-                                    let shown = if theme_mode { object.name.clone() } else { listed_name(object) };
-                                    ui.painter().with_clip_rect(name_area).text(
-                                        row.left_center() + vec2(32.0, 0.0),
-                                        Align2::LEFT_CENTER,
-                                        shown,
-                                        FontId::proportional(13.0),
-                                        ink,
-                                    );
-                                }
-                                // Hide and lock sit at the right of the row under the pointer, the
-                                // selected row, and any row that is already hidden or locked.
-                                let marks = [
-                                    (object.hidden, "Hide", "Show", pos2(row.max.x - 34.0, row.center().y)),
-                                    (object.locked, "Lock", "Unlock", pos2(row.max.x - 14.0, row.center().y)),
-                                ];
-                                for (index, (on, to_set, to_clear, centre)) in marks.into_iter().enumerate() {
-                                    if !(on || selected || response.hovered()) {
-                                        continue;
-                                    }
-                                    let spot = Rect::from_center_size(centre, vec2(18.0, 18.0));
-                                    let mark = ui.interact(
-                                        spot,
-                                        ui.scope_id().with(("object mark", object.id, index)),
-                                        Sense::click(),
-                                    );
-                                    let mark_ink =
-                                        if on { Color32::from_rgb(240, 190, 40) } else { Color32::from_gray(170) };
-                                    let p = ui.painter();
-                                    if index == 0 {
-                                        // An eye; struck through when the object is hidden.
-                                        p.circle_stroke(centre, 5.0, Stroke::new(1.2, mark_ink));
-                                        p.circle_filled(centre, 2.0, mark_ink);
-                                        if on {
-                                            p.line_segment(
-                                                [centre + vec2(-6.0, 6.0), centre + vec2(6.0, -6.0)],
-                                                Stroke::new(1.4, mark_ink),
-                                            );
-                                        }
-                                    } else {
-                                        // A padlock; its shackle is open when unlocked.
-                                        p.rect_filled(
-                                            Rect::from_center_size(centre + vec2(0.0, 2.5), vec2(9.0, 7.0)),
-                                            1.5,
-                                            mark_ink,
-                                        );
-                                        let lift = if on { 0.0 } else { -2.0 };
-                                        p.line_segment(
-                                            [centre + vec2(-2.5, -1.0), centre + vec2(-2.5, -4.5 + lift)],
-                                            Stroke::new(1.3, mark_ink),
-                                        );
-                                        p.line_segment(
-                                            [centre + vec2(-2.5, -4.5 + lift), centre + vec2(2.5, -4.5 + lift)],
-                                            Stroke::new(1.3, mark_ink),
-                                        );
-                                        if on {
-                                            p.line_segment(
-                                                [centre + vec2(2.5, -1.0), centre + vec2(2.5, -4.5)],
-                                                Stroke::new(1.3, mark_ink),
-                                            );
-                                        }
-                                    }
-                                    if mark.on_hover_text(if on { to_clear } else { to_set }).clicked() {
-                                        asked =
-                                            Some((object.id, if index == 0 { Ask::Hide(!on) } else { Ask::Lock(!on) }));
-                                    }
-                                }
-                                // A click selects; a click on the name of the one already selected,
-                                // or a double click, starts renaming it, as in a file list.
-                                let on_name = response
-                                    .interact_pointer_pos()
-                                    .is_some_and(|at| name_area.contains(at) && at.x > row.min.x + 26.0);
-                                if response.double_clicked()
-                                    || (response.clicked() && !extend && selected && draft.also.is_empty() && on_name)
-                                {
-                                    start_rename = Some((object.id, object.name.clone()));
-                                } else if response.clicked() {
-                                    pick = Some(object.id);
-                                }
-                                response.context_menu(|ui| {
-                                    if ui.button("Rename").clicked() {
-                                        start_rename = Some((object.id, object.name.clone()));
-                                        ui.close();
-                                    }
-                                    ui.separator();
-                                    if ui.button(if object.hidden { "Show" } else { "Hide" }).clicked() {
-                                        asked = Some((object.id, Ask::Hide(!object.hidden)));
-                                        ui.close();
-                                    }
-                                    if ui.button(if object.locked { "Unlock" } else { "Lock" }).clicked() {
-                                        asked = Some((object.id, Ask::Lock(!object.locked)));
-                                        ui.close();
-                                    }
-                                    if ui.button("Delete").clicked() {
-                                        asked = Some((object.id, Ask::Delete));
-                                        ui.close();
-                                    }
-                                });
-                            }
-                            // Where a dragged row would land: a line between the rows, and on
-                            // release the object moves there in the stack.
-                            let pointer_y = ui.input(|input| input.pointer.interact_pos()).map(|at| at.y);
-                            let slot = pointer_y.map(|y| rows.iter().filter(|(_, row)| row.center().y < y).count());
-                            if let (Some(_), Some(slot)) = (dragging, slot) {
-                                let y = rows.get(slot).map_or_else(
-                                    || rows.last().map_or(0.0, |(_, row)| row.max.y),
-                                    |(_, row)| row.min.y,
-                                );
-                                let (left, right) = rows.first().map_or((0.0, 0.0), |(_, row)| (row.min.x, row.max.x));
-                                ui.painter().line_segment(
-                                    [pos2(left + 6.0, y), pos2(right - 6.0, y)],
-                                    Stroke::new(2.0, crate::studio::ACCENT),
-                                );
-                            }
-                            if let (Some(id), Some(slot)) = (dropped, slot) {
-                                draft.move_in_stack(id, slot);
-                            }
-                            if let Some((id, ask)) = asked {
-                                if matches!(ask, Ask::Delete) {
-                                    draft.selected = Some(id);
-                                    draft.delete_selected();
-                                } else if let Some(object) = draft.slide.objects.iter_mut().find(|o| o.id == id) {
-                                    match ask {
-                                        Ask::Hide(hidden) => object.hidden = hidden,
-                                        Ask::Lock(locked) => object.locked = locked,
-                                        Ask::Delete => {}
-                                    }
-                                }
-                            }
-                            if draft.slide.objects.is_empty() {
-                                ui.label(egui::RichText::new("   This slide is empty").size(12.0).color(DIM));
-                            }
-                            if let Some(id) = pick {
-                                if extend {
-                                    draft.toggle_selected(id);
-                                } else {
-                                    draft.select_only(Some(id));
-                                }
-                            }
-                            match rename_done {
-                                Some(Some((id, name))) => {
-                                    if !name.trim().is_empty()
-                                        && let Some(object) = draft.slide.objects.iter_mut().find(|o| o.id == id)
-                                    {
-                                        object.name = name.trim().to_owned();
-                                    }
-                                    draft.renaming = None;
-                                }
-                                Some(None) => draft.renaming = None,
-                                None => {}
-                            }
-                            if let Some((id, name)) = start_rename {
-                                draft.select_only(Some(id));
-                                draft.renaming = Some((id, name));
-                                rename_started = true;
-                            }
-                            state.rename_started = rename_started;
-                        },
-                    );
-                });
-
-            if let Some(edit) = state.theme_edit.as_ref() {
-                // The theme's templates, each drawn as it will look. Tags say what each is for:
-                // a song's slide uses, of the ones for songs, the one that suits what is on it;
-                // Bible slides use the one for Bible slides.
-                let marks: Vec<(bool, bool)> = edit.theme.templates.iter().map(|t| (t.songs, t.bible)).collect();
-                let mut link_bible = None;
-                let mut toggle_songs = None;
-                let layouts: Vec<(usize, String)> =
-                    edit.theme.templates.iter().map(|template| template.name.clone()).enumerate().collect();
-                let only_one = layouts.len() <= 1;
-                let mut renamed_template: Option<Option<(usize, String)>> = None;
-                // Asked for from a template's menu, or the tile after the last: a copy of
-                // a template, or a template to delete.
-                let mut add_after = None;
-                let mut ask_delete = None;
-                let mut rename_started = std::mem::take(&mut state.rename_started);
-                let mut start_rename = None;
-                let slides: Vec<Slide> = edit.theme.templates.iter().map(sp_model::ThemeTemplate::as_slide).collect();
-                let current = edit.template;
-                egui::ScrollArea::vertical().id_salt("theme layout list").auto_shrink([false, false]).show(ui, |ui| {
-                    let width = ui.available_width();
-                    let image_size = vec2(width - 16.0, (width - 16.0) * 9.0 / 16.0);
-                    for (index, ((template, name), slide)) in layouts.into_iter().zip(&slides).enumerate() {
-                        let (cell, response) = ui.allocate_exact_size(vec2(width, image_size.y + 30.0), Sense::click());
-                        let selected = template == current;
-                        ui.painter().rect_filled(
-                            cell,
-                            0.0,
-                            if selected { EDIT_SELECTED } else { Color32::from_gray(52) },
-                        );
-                        let image = Rect::from_min_size(cell.min + vec2(8.0, 8.0), image_size);
-                        ui.painter().rect_filled(image, 0.0, Color32::BLACK);
-                        if let Some(texture) = canvas.filter(|_| selected) {
-                            // The layout on the canvas is shown as it is this instant.
-                            egui::Image::from_texture((texture, image_size)).paint_at(ui, image);
-                        } else {
-                            match thumb(ThumbOf::Layout(index, slide)) {
-                                Some((texture, _)) => {
-                                    egui::Image::from_texture((texture, image_size)).paint_at(ui, image)
-                                }
-                                None => ui.ctx().request_repaint(),
-                            }
+                egui::ScrollArea::vertical().id_salt("edit object list").auto_shrink([false, false]).show(ui, |ui| {
+                    ui.add_space(4.0);
+                    let Some(draft) = state.editing.as_mut() else { return };
+                    // The top of the stack is listed first, as it is in front on the slide.
+                    let mut pick = None;
+                    // What a row's icons or its right-click menu asked for.
+                    enum Ask {
+                        Hide(bool),
+                        Lock(bool),
+                        Delete,
+                    }
+                    let mut asked: Option<(sp_model::Uuid, Ask)> = None;
+                    // A rename that has just begun takes the keyboard once; one that has
+                    // ended is carried out after the list is drawn.
+                    let mut rename_started = std::mem::take(&mut state.rename_started);
+                    let mut rename_done: Option<Option<(sp_model::Uuid, String)>> = None;
+                    let mut start_rename = None;
+                    let extend = ui.input(|input| input.modifiers.shift || input.modifiers.command);
+                    // Rows can be dragged up and down: the order is front to back.
+                    let mut rows: Vec<(sp_model::Uuid, Rect)> = Vec::new();
+                    let mut dragging = None;
+                    let mut dropped = None;
+                    for object in draft.slide.objects.iter().rev() {
+                        let selected = draft.is_selected(object.id);
+                        let (row, response) =
+                            ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click_and_drag());
+                        rows.push((object.id, row));
+                        if response.dragged() {
+                            dragging = Some(object.id);
+                        }
+                        if response.drag_stopped() {
+                            dropped = Some(object.id);
                         }
                         if selected {
-                            ui.painter().rect_stroke(image, 0.0, Stroke::new(2.0, EDIT_OUTLINE), StrokeKind::Outside);
+                            ui.painter().rect_filled(row, 0.0, EDIT_SELECTED);
+                        } else if response.hovered() {
+                            ui.painter().rect_filled(row, 0.0, Color32::from_gray(46));
                         }
-                        // The template's number and name. A click on the name of the template
-                        // on the canvas, or a double click, turns the name into a field.
-                        let ink = Color32::from_gray(230);
-                        let number = ui.painter().text(
-                            pos2(cell.min.x + 9.0, image.max.y + 10.0),
+                        // A hidden object's row is greyed.
+                        let ink = if object.hidden { Color32::from_gray(120) } else { Color32::from_gray(230) };
+                        // T for text, a diamond for a shape, a globe for a web page.
+                        let mark = match object.kind {
+                            sp_model::ObjectKind::Text { .. } => "T",
+                            sp_model::ObjectKind::Image { .. } => "▣",
+                            sp_model::ObjectKind::Shape { .. } => "◆",
+                            sp_model::ObjectKind::Web { .. } => "🌐",
+                        };
+                        ui.painter().text(
+                            row.left_center() + vec2(12.0, 0.0),
                             Align2::LEFT_CENTER,
-                            format!("{}.", index + 1),
-                            FontId::proportional(11.5),
+                            mark,
+                            FontId::proportional(if mark == "T" { 15.0 } else { 12.0 }),
                             ink,
                         );
-                        let name_area = Rect::from_min_max(
-                            pos2(number.max.x + 2.0, image.max.y + 1.0),
-                            pos2(cell.max.x - 96.0, cell.max.y - 1.0),
-                        );
-                        let being_renamed =
-                            state.renaming_template.as_ref().is_some_and(|(which, _)| *which == template);
-                        if being_renamed && let Some((_, typed)) = state.renaming_template.as_mut() {
+                        let name_area = Rect::from_min_max(row.min, pos2(row.max.x - 46.0, row.max.y));
+                        // The name, or a field in its place while it is being retyped.
+                        let being_renamed = draft.renaming.as_ref().is_some_and(|(id, _)| *id == object.id);
+                        if being_renamed && let Some((_, name)) = draft.renaming.as_mut() {
                             let field = crate::studio::rename_field_at(
                                 ui,
-                                typed,
-                                FontId::proportional(11.5),
-                                ink,
-                                ink,
-                                pos2(number.max.x + 6.0, image.max.y + 10.0),
-                                name_area.max.x,
+                                name,
+                                FontId::proportional(13.0),
+                                crate::studio::TEXT,
+                                crate::studio::ACCENT,
+                                row.left_center() + vec2(32.0, 0.0),
+                                row.max.x - 46.0,
                             );
                             if std::mem::take(&mut rename_started) {
                                 field.request_focus();
@@ -2092,88 +1851,595 @@ fn edit_view(
                                 (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape))
                             });
                             if escape {
-                                renamed_template = Some(None);
+                                rename_done = Some(None);
                             } else if enter || field.lost_focus() {
-                                renamed_template = Some(Some((template, typed.clone())));
+                                rename_done = Some(Some((object.id, name.clone())));
                             }
                         } else {
+                            let shown = if theme_mode { object.name.clone() } else { listed_name(object) };
                             ui.painter().with_clip_rect(name_area).text(
-                                pos2(number.max.x + 6.0, image.max.y + 10.0),
+                                row.left_center() + vec2(32.0, 0.0),
                                 Align2::LEFT_CENTER,
-                                name.as_str(),
-                                FontId::proportional(11.5),
+                                shown,
+                                FontId::proportional(13.0),
                                 ink,
                             );
-                            let on_name = response.interact_pointer_pos().is_some_and(|at| name_area.contains(at));
-                            if response.double_clicked() || (response.clicked() && selected && on_name) {
-                                start_rename = Some((template, name.clone()));
-                            }
                         }
-                        // What is linked to this template, at the right of its name.
-                        let mut right = cell.max.x - 8.0;
-                        let (for_songs, for_bible) = marks.get(template).copied().unwrap_or_default();
-                        for (linked, tag) in [(for_bible, "Bible"), (for_songs, "Songs")] {
-                            if !linked {
+                        // Hide and lock sit at the right of the row under the pointer, the
+                        // selected row, and any row that is already hidden or locked.
+                        let marks = [
+                            (object.hidden, "Hide", "Show", pos2(row.max.x - 34.0, row.center().y)),
+                            (object.locked, "Lock", "Unlock", pos2(row.max.x - 14.0, row.center().y)),
+                        ];
+                        for (index, (on, to_set, to_clear, centre)) in marks.into_iter().enumerate() {
+                            if !(on || selected || response.hovered()) {
                                 continue;
                             }
-                            let ink = Color32::from_gray(225);
-                            let text = ui.painter().layout_no_wrap(tag.to_owned(), FontId::proportional(10.0), ink);
-                            let pill = Rect::from_min_size(
-                                pos2(right - text.size().x - 10.0, image.max.y + 2.0),
-                                vec2(text.size().x + 10.0, 16.0),
+                            let spot = Rect::from_center_size(centre, vec2(18.0, 18.0));
+                            let mark = ui.interact(
+                                spot,
+                                ui.scope_id().with(("object mark", object.id, index)),
+                                Sense::click(),
                             );
-                            ui.painter().rect_filled(pill, 8.0, Color32::from_white_alpha(32));
-                            ui.painter().galley(
-                                pos2(pill.min.x + 5.0, pill.center().y - text.size().y / 2.0),
-                                text,
-                                ink,
-                            );
-                            right = pill.min.x - 4.0;
+                            let mark_ink = if on { Color32::from_rgb(240, 190, 40) } else { Color32::from_gray(170) };
+                            let p = ui.painter();
+                            if index == 0 {
+                                // An eye; struck through when the object is hidden.
+                                p.circle_stroke(centre, 5.0, Stroke::new(1.2, mark_ink));
+                                p.circle_filled(centre, 2.0, mark_ink);
+                                if on {
+                                    p.line_segment(
+                                        [centre + vec2(-6.0, 6.0), centre + vec2(6.0, -6.0)],
+                                        Stroke::new(1.4, mark_ink),
+                                    );
+                                }
+                            } else {
+                                // A padlock; its shackle is open when unlocked.
+                                p.rect_filled(
+                                    Rect::from_center_size(centre + vec2(0.0, 2.5), vec2(9.0, 7.0)),
+                                    1.5,
+                                    mark_ink,
+                                );
+                                let lift = if on { 0.0 } else { -2.0 };
+                                p.line_segment(
+                                    [centre + vec2(-2.5, -1.0), centre + vec2(-2.5, -4.5 + lift)],
+                                    Stroke::new(1.3, mark_ink),
+                                );
+                                p.line_segment(
+                                    [centre + vec2(-2.5, -4.5 + lift), centre + vec2(2.5, -4.5 + lift)],
+                                    Stroke::new(1.3, mark_ink),
+                                );
+                                if on {
+                                    p.line_segment(
+                                        [centre + vec2(2.5, -1.0), centre + vec2(2.5, -4.5)],
+                                        Stroke::new(1.3, mark_ink),
+                                    );
+                                }
+                            }
+                            if mark.on_hover_text(if on { to_clear } else { to_set }).clicked() {
+                                asked = Some((object.id, if index == 0 { Ask::Hide(!on) } else { Ask::Lock(!on) }));
+                            }
                         }
-                        if response.clicked() && !selected {
-                            chosen_template = Some(template);
+                        // A click selects; a click on the name of the one already selected,
+                        // or a double click, starts renaming it, as in a file list.
+                        let on_name = response
+                            .interact_pointer_pos()
+                            .is_some_and(|at| name_area.contains(at) && at.x > row.min.x + 26.0);
+                        if response.double_clicked()
+                            || (response.clicked() && !extend && selected && draft.also.is_empty() && on_name)
+                        {
+                            start_rename = Some((object.id, object.name.clone()));
+                        } else if response.clicked() {
+                            pick = Some(object.id);
                         }
                         response.context_menu(|ui| {
-                            // What the template is for: songs pick among the templates for songs;
-                            // Bible slides use one template.
-                            let mut songs = for_songs;
-                            if ui
-                                .checkbox(&mut songs, "Use for Songs")
-                                .on_hover_text("Songs pick, among these, the one that suits each slide")
-                                .clicked()
-                            {
-                                toggle_songs = Some(template);
-                                ui.close();
-                            }
-                            if ui
-                                .add_enabled(!for_bible, egui::Button::new("Use for Bible Slides"))
-                                .on_hover_text("Bible slides are drawn with this template, in this theme")
-                                .clicked()
-                            {
-                                link_bible = Some(template);
+                            if ui.button("Rename").clicked() {
+                                start_rename = Some((object.id, object.name.clone()));
                                 ui.close();
                             }
                             ui.separator();
-                            if ui.button("Rename").clicked() {
-                                start_rename = Some((template, name.clone()));
+                            if ui.button(if object.hidden { "Show" } else { "Hide" }).clicked() {
+                                asked = Some((object.id, Ask::Hide(!object.hidden)));
                                 ui.close();
                             }
-                            if ui.button("Duplicate").clicked() {
-                                add_after = Some(template);
+                            if ui.button(if object.locked { "Unlock" } else { "Lock" }).clicked() {
+                                asked = Some((object.id, Ask::Lock(!object.locked)));
                                 ui.close();
                             }
-                            if ui.add_enabled(!only_one, egui::Button::new("Delete…")).clicked() {
-                                ask_delete = Some(template);
+                            if ui.button("Delete").clicked() {
+                                asked = Some((object.id, Ask::Delete));
                                 ui.close();
                             }
                         });
                     }
-                    // After the last template: a blank tile with a plus. It adds a template
-                    // that starts as a copy of the one being edited.
-                    let (cell, response) = ui.allocate_exact_size(vec2(width, image_size.y + 16.0), Sense::click());
+                    // Where a dragged row would land: a line between the rows, and on
+                    // release the object moves there in the stack.
+                    let pointer_y = ui.input(|input| input.pointer.interact_pos()).map(|at| at.y);
+                    let slot = pointer_y.map(|y| rows.iter().filter(|(_, row)| row.center().y < y).count());
+                    if let (Some(_), Some(slot)) = (dragging, slot) {
+                        let y = rows
+                            .get(slot)
+                            .map_or_else(|| rows.last().map_or(0.0, |(_, row)| row.max.y), |(_, row)| row.min.y);
+                        let (left, right) = rows.first().map_or((0.0, 0.0), |(_, row)| (row.min.x, row.max.x));
+                        ui.painter().line_segment(
+                            [pos2(left + 6.0, y), pos2(right - 6.0, y)],
+                            Stroke::new(2.0, crate::studio::ACCENT),
+                        );
+                    }
+                    if let (Some(id), Some(slot)) = (dropped, slot) {
+                        draft.move_in_stack(id, slot);
+                    }
+                    if let Some((id, ask)) = asked {
+                        if matches!(ask, Ask::Delete) {
+                            draft.selected = Some(id);
+                            draft.delete_selected();
+                        } else if let Some(object) = draft.slide.objects.iter_mut().find(|o| o.id == id) {
+                            match ask {
+                                Ask::Hide(hidden) => object.hidden = hidden,
+                                Ask::Lock(locked) => object.locked = locked,
+                                Ask::Delete => {}
+                            }
+                        }
+                    }
+                    if draft.slide.objects.is_empty() {
+                        ui.label(egui::RichText::new("   This slide is empty").size(12.0).color(DIM));
+                    }
+                    if let Some(id) = pick {
+                        if extend {
+                            draft.toggle_selected(id);
+                        } else {
+                            draft.select_only(Some(id));
+                        }
+                    }
+                    match rename_done {
+                        Some(Some((id, name))) => {
+                            if !name.trim().is_empty()
+                                && let Some(object) = draft.slide.objects.iter_mut().find(|o| o.id == id)
+                            {
+                                object.name = name.trim().to_owned();
+                            }
+                            draft.renaming = None;
+                        }
+                        Some(None) => draft.renaming = None,
+                        None => {}
+                    }
+                    if let Some((id, name)) = start_rename {
+                        draft.select_only(Some(id));
+                        draft.renaming = Some((id, name));
+                        rename_started = true;
+                    }
+                    state.rename_started = rename_started;
+                });
+            },
+        );
+
+        if let Some(edit) = state.theme_edit.as_ref() {
+            // The theme's templates, each drawn as it will look. Tags say what each is for:
+            // a song's slide uses, of the ones for songs, the one that suits what is on it;
+            // Bible slides use the one for Bible slides.
+            let marks: Vec<(bool, bool)> = edit.theme.templates.iter().map(|t| (t.songs, t.bible)).collect();
+            let mut link_bible = None;
+            let mut toggle_songs = None;
+            let layouts: Vec<(usize, String)> =
+                edit.theme.templates.iter().map(|template| template.name.clone()).enumerate().collect();
+            let only_one = layouts.len() <= 1;
+            let mut renamed_template: Option<Option<(usize, String)>> = None;
+            // Asked for from a template's menu, or the tile after the last: a copy of
+            // a template, or a template to delete.
+            let mut add_after = None;
+            let mut ask_delete = None;
+            let mut rename_started = std::mem::take(&mut state.rename_started);
+            let mut start_rename = None;
+            let slides: Vec<Slide> = edit.theme.templates.iter().map(sp_model::ThemeTemplate::as_slide).collect();
+            let current = edit.template;
+            egui::ScrollArea::vertical().id_salt("theme layout list").auto_shrink([false, false]).show(ui, |ui| {
+                let width = ui.available_width();
+                let image_size = vec2(width - 16.0, (width - 16.0) * 9.0 / 16.0);
+                for (index, ((template, name), slide)) in layouts.into_iter().zip(&slides).enumerate() {
+                    let (cell, response) = ui.allocate_exact_size(vec2(width, image_size.y + 30.0), Sense::click());
+                    let selected = template == current;
+                    ui.painter().rect_filled(cell, 0.0, if selected { EDIT_SELECTED } else { Color32::from_gray(52) });
+                    let image = Rect::from_min_size(cell.min + vec2(8.0, 8.0), image_size);
+                    ui.painter().rect_filled(image, 0.0, Color32::BLACK);
+                    if let Some(texture) = canvas.filter(|_| selected) {
+                        // The layout on the canvas is shown as it is this instant.
+                        egui::Image::from_texture((texture, image_size)).paint_at(ui, image);
+                    } else {
+                        match thumb(ThumbOf::Layout(index, slide)) {
+                            Some((texture, _)) => egui::Image::from_texture((texture, image_size)).paint_at(ui, image),
+                            None => ui.ctx().request_repaint(),
+                        }
+                    }
+                    if selected {
+                        ui.painter().rect_stroke(image, 0.0, Stroke::new(2.0, EDIT_OUTLINE), StrokeKind::Outside);
+                    }
+                    // The template's number and name. A click on the name of the template
+                    // on the canvas, or a double click, turns the name into a field.
+                    let ink = Color32::from_gray(230);
+                    let number = ui.painter().text(
+                        pos2(cell.min.x + 9.0, image.max.y + 10.0),
+                        Align2::LEFT_CENTER,
+                        format!("{}.", index + 1),
+                        FontId::proportional(11.5),
+                        ink,
+                    );
+                    let name_area = Rect::from_min_max(
+                        pos2(number.max.x + 2.0, image.max.y + 1.0),
+                        pos2(cell.max.x - 96.0, cell.max.y - 1.0),
+                    );
+                    let being_renamed = state.renaming_template.as_ref().is_some_and(|(which, _)| *which == template);
+                    if being_renamed && let Some((_, typed)) = state.renaming_template.as_mut() {
+                        let field = crate::studio::rename_field_at(
+                            ui,
+                            typed,
+                            FontId::proportional(11.5),
+                            ink,
+                            ink,
+                            pos2(number.max.x + 6.0, image.max.y + 10.0),
+                            name_area.max.x,
+                        );
+                        if std::mem::take(&mut rename_started) {
+                            field.request_focus();
+                        }
+                        let (enter, escape) = ui
+                            .input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
+                        if escape {
+                            renamed_template = Some(None);
+                        } else if enter || field.lost_focus() {
+                            renamed_template = Some(Some((template, typed.clone())));
+                        }
+                    } else {
+                        ui.painter().with_clip_rect(name_area).text(
+                            pos2(number.max.x + 6.0, image.max.y + 10.0),
+                            Align2::LEFT_CENTER,
+                            name.as_str(),
+                            FontId::proportional(11.5),
+                            ink,
+                        );
+                        let on_name = response.interact_pointer_pos().is_some_and(|at| name_area.contains(at));
+                        if response.double_clicked() || (response.clicked() && selected && on_name) {
+                            start_rename = Some((template, name.clone()));
+                        }
+                    }
+                    // What is linked to this template, at the right of its name.
+                    let mut right = cell.max.x - 8.0;
+                    let (for_songs, for_bible) = marks.get(template).copied().unwrap_or_default();
+                    for (linked, tag) in [(for_bible, "Bible"), (for_songs, "Songs")] {
+                        if !linked {
+                            continue;
+                        }
+                        let ink = Color32::from_gray(225);
+                        let text = ui.painter().layout_no_wrap(tag.to_owned(), FontId::proportional(10.0), ink);
+                        let pill = Rect::from_min_size(
+                            pos2(right - text.size().x - 10.0, image.max.y + 2.0),
+                            vec2(text.size().x + 10.0, 16.0),
+                        );
+                        ui.painter().rect_filled(pill, 8.0, Color32::from_white_alpha(32));
+                        ui.painter().galley(pos2(pill.min.x + 5.0, pill.center().y - text.size().y / 2.0), text, ink);
+                        right = pill.min.x - 4.0;
+                    }
+                    if response.clicked() && !selected {
+                        chosen_template = Some(template);
+                    }
+                    response.context_menu(|ui| {
+                        // What the template is for: songs pick among the templates for songs;
+                        // Bible slides use one template.
+                        let mut songs = for_songs;
+                        if ui
+                            .checkbox(&mut songs, "Use for Songs")
+                            .on_hover_text("Songs pick, among these, the one that suits each slide")
+                            .clicked()
+                        {
+                            toggle_songs = Some(template);
+                            ui.close();
+                        }
+                        if ui
+                            .add_enabled(!for_bible, egui::Button::new("Use for Bible Slides"))
+                            .on_hover_text("Bible slides are drawn with this template, in this theme")
+                            .clicked()
+                        {
+                            link_bible = Some(template);
+                            ui.close();
+                        }
+                        ui.separator();
+                        if ui.button("Rename").clicked() {
+                            start_rename = Some((template, name.clone()));
+                            ui.close();
+                        }
+                        if ui.button("Duplicate").clicked() {
+                            add_after = Some(template);
+                            ui.close();
+                        }
+                        if ui.add_enabled(!only_one, egui::Button::new("Delete…")).clicked() {
+                            ask_delete = Some(template);
+                            ui.close();
+                        }
+                    });
+                }
+                // After the last template: a blank tile with a plus. It adds a template
+                // that starts as a copy of the one being edited.
+                let (cell, response) = ui.allocate_exact_size(vec2(width, image_size.y + 16.0), Sense::click());
+                let tile = Rect::from_min_size(cell.min + vec2(8.0, 8.0), image_size);
+                let line = if response.hovered() { crate::studio::ACCENT } else { Color32::from_gray(90) };
+                ui.painter().rect_filled(tile, 4.0, Color32::from_gray(if response.hovered() { 34 } else { 24 }));
+                ui.painter().rect_stroke(tile, 4.0, Stroke::new(1.0, line), StrokeKind::Inside);
+                icons::paint(ui.painter(), Icon::Plus, Rect::from_center_size(tile.center(), vec2(18.0, 18.0)), line);
+                if response.on_hover_text("Add a template. It starts as a copy of the one being edited.").clicked() {
+                    add_after = Some(current);
+                }
+            });
+            // Delete, with no box selected, deletes the template being edited (once confirmed).
+            if delete_template_key && !only_one {
+                ask_delete = Some(current);
+            }
+            if let Some(template) = ask_delete {
+                state.confirm_delete_template = Some(template);
+            }
+            if let (Some(after), Some(edit)) = (add_after, state.theme_edit.as_mut()) {
+                let at = edit.theme.add_template(after);
+                edit.changed = true;
+                chosen_template = Some(at);
+                // Its name is ready to be typed over.
+                start_rename = Some((at, edit.theme.templates[at].name.clone()));
+            }
+            if let Some(edit) = state.theme_edit.as_mut() {
+                if let Some(template) = link_bible {
+                    edit.theme.set_bible_template(template);
+                    edit.changed = true;
+                }
+                if let Some(toggled) = toggle_songs.and_then(|at| edit.theme.templates.get_mut(at)) {
+                    toggled.songs = !toggled.songs;
+                    edit.changed = true;
+                }
+            }
+            if let Some(start) = start_rename {
+                state.renaming_template = Some(start);
+                rename_started = true;
+            }
+            state.rename_started = rename_started;
+            if let Some(outcome) = renamed_template {
+                state.renaming_template = None;
+                if let (Some((template, name)), Some(edit)) = (outcome, state.theme_edit.as_mut()) {
+                    let name = name.trim();
+                    if let Some(renamed) = edit.theme.templates.get_mut(template)
+                        && !name.is_empty()
+                        && renamed.name != name
+                    {
+                        renamed.name = name.to_owned();
+                        edit.changed = true;
+                    }
+                }
+            }
+        } else {
+            egui::ScrollArea::vertical().id_salt("edit slide list").auto_shrink([false, false]).show(ui, |ui| {
+                let width = ui.available_width();
+                let image_size = vec2(width - 16.0, (width - 16.0) * 9.0 / 16.0);
+                let mut index = 0;
+                let groups = presentation.map(|p| p.groups.as_slice()).unwrap_or_default();
+                let movable = !state.app_made(at.presentation);
+                let moving = egui::DragAndDrop::payload::<SlideDrag>(ui.ctx())
+                    .filter(|drag| movable && drag.presentation == at.presentation);
+                scroll_while_dragging(ui);
+                for (group_index, group) in groups.iter().enumerate() {
+                    let (row, bar_response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click());
+                    let bar = Rect::from_min_max(row.min + vec2(8.0, 6.0), row.max - vec2(8.0, 2.0));
+                    ui.painter().rect_filled(bar, 4.0, color32(group.color).gamma_multiply(0.8));
+                    // Slides dropped on a group's name go at its start.
+                    let first_here = index;
+                    if movable
+                        && let Some(dropped) = bar_response
+                            .dnd_release_payload::<SlideDrag>()
+                            .filter(|drag| drag.presentation == at.presentation && !drag.slides.contains(&first_here))
+                    {
+                        state.slide_request = Some((
+                            SlideRef { presentation: at.presentation, slide: dropped.slides[0] },
+                            SlideRequest::Move { slides: dropped.slides.clone(), to: first_here, after: false },
+                        ));
+                    }
+                    if movable && bar_response.dnd_hover_payload::<SlideDrag>().is_some() {
+                        ui.painter().rect_stroke(bar, 4.0, Stroke::new(2.0, DROP_LINE), StrokeKind::Outside);
+                    }
+                    let ink = text_on(group.color);
+                    icons::paint(
+                        ui.painter(),
+                        Icon::ChevronDown,
+                        Rect::from_center_size(bar.left_center() + vec2(9.0, 0.0), vec2(8.0, 8.0)),
+                        ink,
+                    );
+                    // The group's name; a click turns it into a field to retype it.
+                    let renaming = state.renaming_group.as_ref().is_some_and(|(at, _)| *at == group_index);
+                    if renaming && let Some((_, typed)) = state.renaming_group.as_mut() {
+                        let field = crate::studio::rename_field_at(
+                            ui,
+                            typed,
+                            FontId::proportional(12.5),
+                            ink,
+                            ink,
+                            bar.left_center() + vec2(18.0, 0.0),
+                            bar.max.x - 4.0,
+                        );
+                        if std::mem::take(&mut state.rename_started) {
+                            field.request_focus();
+                        }
+                        let (enter, escape) = ui
+                            .input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
+                        if escape {
+                            state.renaming_group = None;
+                        } else if enter || field.lost_focus() {
+                            if typed.trim() != group.name {
+                                state.pending_group_name =
+                                    Some((at.presentation, group_index, typed.trim().to_owned()));
+                            }
+                            state.renaming_group = None;
+                        }
+                    } else {
+                        let name = if group.name.is_empty() { "No group" } else { group.name.as_str() };
+                        ui.painter().text(
+                            bar.left_center() + vec2(18.0, 0.0),
+                            Align2::LEFT_CENTER,
+                            name,
+                            FontId::proportional(12.5),
+                            ink,
+                        );
+                        if bar_response.on_hover_text("Click to rename this group").clicked() {
+                            state.renaming_group = Some((group_index, group.name.clone()));
+                            state.rename_started = true;
+                        }
+                    }
+
+                    // Each slide a card, as in the Show view: its picture, and under it a bar in
+                    // the group's colour with its number (and the group's name on its first
+                    // slide), apart from the next. A card dragged goes to another place.
+                    for (in_group, slide) in group.slides.iter().enumerate() {
+                        let here = SlideRef { presentation: at.presentation, slide: index };
+                        let (cell, response) = ui.allocate_exact_size(
+                            vec2(width, image_size.y + EDIT_CARD_BAR + EDIT_CARD_GAP),
+                            Sense::click_and_drag(),
+                        );
+                        let card = Rect::from_min_size(
+                            cell.min + vec2(8.0, EDIT_CARD_GAP / 2.0),
+                            vec2(image_size.x, image_size.y + EDIT_CARD_BAR),
+                        );
+                        let selected = here == at;
+                        let round = SLIDE_ROUND;
+                        if ui.is_rect_visible(cell) {
+                            let image = Rect::from_min_size(card.min, image_size);
+                            let top = egui::CornerRadius { nw: round, ne: round, sw: 0, se: 0 };
+                            ui.painter().rect_filled(image, top, Color32::BLACK);
+                            let of = if movable { ThumbOf::Slide(slide) } else { ThumbOf::BibleSlide(slide) };
+                            match thumb(of) {
+                                Some((texture, _)) => egui::Image::from_texture((texture, image_size))
+                                    .corner_radius(top)
+                                    .paint_at(ui, image),
+                                None => ui.ctx().request_repaint(),
+                            }
+                            let bar = Rect::from_min_max(pos2(card.min.x, image.max.y), card.max);
+                            let bottom = egui::CornerRadius { nw: 0, ne: 0, sw: round, se: round };
+                            ui.painter().rect_filled(bar, bottom, color32(group.color));
+                            let ink = text_on(group.color);
+                            let words = match (in_group, slide.label.as_deref()) {
+                                (_, Some(label)) => format!("{}  {label}", index + 1),
+                                (0, None) if !group.name.is_empty() => format!("{}  {}", index + 1, group.name),
+                                _ => (index + 1).to_string(),
+                            };
+                            ui.painter().with_clip_rect(bar.shrink(2.0)).text(
+                                bar.left_center() + vec2(8.0, 0.0),
+                                Align2::LEFT_CENTER,
+                                words,
+                                crate::studio::semibold(12.0),
+                                ink,
+                            );
+                            // A hairline round it, so a black slide does not melt into the column.
+                            ui.painter().rect_stroke(
+                                card,
+                                f32::from(round),
+                                Stroke::new(1.0, crate::studio::LINE),
+                                StrokeKind::Outside,
+                            );
+                            let outline = if selected {
+                                Some(Stroke::new(2.0, EDIT_OUTLINE))
+                            } else if state.picked_slides.contains(&here) {
+                                Some(Stroke::new(2.0, SELECTED_OUTLINE))
+                            } else if response.hovered() {
+                                Some(Stroke::new(1.0, crate::studio::TEXT_FAINT))
+                            } else {
+                                None
+                            };
+                            if let Some(stroke) = outline {
+                                ui.painter().rect_stroke(card, f32::from(round) + 1.0, stroke, StrokeKind::Outside);
+                            }
+                            if moving.as_ref().is_some_and(|drag| drag.slides.contains(&index)) {
+                                ui.painter().rect_filled(card, f32::from(round), Color32::from_black_alpha(150));
+                            }
+                        }
+                        if selected && std::mem::take(&mut state.edit_list_scroll) {
+                            response.scroll_to_me(Some(Align::Center));
+                        }
+                        if movable {
+                            // Dragged, it goes with the slides picked out with it.
+                            if response.dragged() {
+                                let mut picked: Vec<usize> = state
+                                    .picked_slides
+                                    .iter()
+                                    .filter(|p| p.presentation == at.presentation)
+                                    .map(|p| p.slide)
+                                    .collect();
+                                picked.sort_unstable();
+                                let slides = if picked.contains(&index) { picked } else { vec![index] };
+                                response.dnd_set_drag_payload(SlideDrag { presentation: at.presentation, slides });
+                            }
+                            let target = |drag: &SlideDrag| {
+                                drag.presentation == at.presentation && !drag.slides.contains(&index)
+                            };
+                            if response.dnd_hover_payload::<SlideDrag>().is_some_and(|drag| target(&drag)) {
+                                paint_drop_line(ui, card, drop_after(ui, card, true), true, EDIT_CARD_GAP);
+                            }
+                            if let Some(dropped) =
+                                response.dnd_release_payload::<SlideDrag>().filter(|drag| target(drag))
+                            {
+                                let after = drop_after(ui, card, true);
+                                state.slide_request = Some((
+                                    SlideRef { presentation: at.presentation, slide: dropped.slides[0] },
+                                    SlideRequest::Move { slides: dropped.slides.clone(), to: index, after },
+                                ));
+                            }
+                            // Or a step at a time, from its menu.
+                            let count = presentation.map_or(0, |song| song.slide_count());
+                            response.context_menu(|ui| {
+                                if ui.add_enabled(index > 0, egui::Button::new("Move Up")).clicked() {
+                                    state.slide_request = Some((
+                                        here,
+                                        SlideRequest::Move { slides: vec![index], to: index - 1, after: false },
+                                    ));
+                                    ui.close();
+                                }
+                                if ui.add_enabled(index + 1 < count, egui::Button::new("Move Down")).clicked() {
+                                    state.slide_request = Some((
+                                        here,
+                                        SlideRequest::Move { slides: vec![index], to: index + 1, after: true },
+                                    ));
+                                    ui.close();
+                                }
+                            });
+                        }
+                        if response.clicked() {
+                            let mods = ui.input(|input| input.modifiers);
+                            if (mods.command || mods.shift) && movable {
+                                // Picked out, to move, copy or delete several; the slide open
+                                // stays open, and is picked out with them.
+                                let total = presentation.map_or(0, |song| song.slide_count());
+                                let order: Vec<SlideRef> =
+                                    (0..total).map(|slide| SlideRef { presentation: at.presentation, slide }).collect();
+                                state.picked_slides.retain(|p| p.presentation == at.presentation);
+                                if state.picked_slides.is_empty() {
+                                    state.picked_slides.push(at);
+                                }
+                                pick_slide(&mut state.picked_slides, &order, here, mods, Some(at));
+                            } else {
+                                state.picked_slides.clear();
+                                if !selected {
+                                    chosen = Some(here);
+                                }
+                            }
+                        }
+                        index += 1;
+                    }
+                }
+                // One of the slides being dragged follows the pointer.
+                if let Some(drag) = &moving {
+                    let first =
+                        drag.slides.first().and_then(|at| presentation.and_then(|p| p.slide(*at))).map(|(_, s)| s);
+                    let texture = first.and_then(|slide| thumb(ThumbOf::Slide(slide)));
+                    paint_drag_ghost(ui, texture.map(|(texture, _)| texture), drag.slides.len());
+                }
+                // After the last slide: a blank tile with a plus. It adds a slide laid out
+                // like the one before it.
+                if !groups.is_empty() || presentation.is_some() {
+                    let (cell, response) = ui.allocate_exact_size(vec2(width, image_size.y + 22.0), Sense::click());
                     let tile = Rect::from_min_size(cell.min + vec2(8.0, 8.0), image_size);
-                    let line = if response.hovered() { crate::studio::ACCENT } else { Color32::from_gray(90) };
-                    ui.painter().rect_filled(tile, 4.0, Color32::from_gray(if response.hovered() { 34 } else { 24 }));
+                    let hovered = response.hovered();
+                    let line = if hovered { crate::studio::ACCENT } else { Color32::from_gray(90) };
+                    ui.painter().rect_filled(tile, 4.0, Color32::from_gray(if hovered { 34 } else { 24 }));
                     ui.painter().rect_stroke(tile, 4.0, Stroke::new(1.0, line), StrokeKind::Inside);
                     icons::paint(
                         ui.painter(),
@@ -2181,306 +2447,23 @@ fn edit_view(
                         Rect::from_center_size(tile.center(), vec2(18.0, 18.0)),
                         line,
                     );
-                    if response.on_hover_text("Add a template. It starts as a copy of the one being edited.").clicked()
-                    {
-                        add_after = Some(current);
-                    }
-                });
-                // Delete, with no box selected, deletes the template being edited (once confirmed).
-                if delete_template_key && !only_one {
-                    ask_delete = Some(current);
-                }
-                if let Some(template) = ask_delete {
-                    state.confirm_delete_template = Some(template);
-                }
-                if let (Some(after), Some(edit)) = (add_after, state.theme_edit.as_mut()) {
-                    let at = edit.theme.add_template(after);
-                    edit.changed = true;
-                    chosen_template = Some(at);
-                    // Its name is ready to be typed over.
-                    start_rename = Some((at, edit.theme.templates[at].name.clone()));
-                }
-                if let Some(edit) = state.theme_edit.as_mut() {
-                    if let Some(template) = link_bible {
-                        edit.theme.set_bible_template(template);
-                        edit.changed = true;
-                    }
-                    if let Some(toggled) = toggle_songs.and_then(|at| edit.theme.templates.get_mut(at)) {
-                        toggled.songs = !toggled.songs;
-                        edit.changed = true;
+                    if response.on_hover_text("Add a slide, laid out like the one before it").clicked() {
+                        state.add_slide = Some(at.presentation);
                     }
                 }
-                if let Some(start) = start_rename {
-                    state.renaming_template = Some(start);
-                    rename_started = true;
-                }
-                state.rename_started = rename_started;
-                if let Some(outcome) = renamed_template {
-                    state.renaming_template = None;
-                    if let (Some((template, name)), Some(edit)) = (outcome, state.theme_edit.as_mut()) {
-                        let name = name.trim();
-                        if let Some(renamed) = edit.theme.templates.get_mut(template)
-                            && !name.is_empty()
-                            && renamed.name != name
-                        {
-                            renamed.name = name.to_owned();
-                            edit.changed = true;
-                        }
-                    }
-                }
-            } else {
-                egui::ScrollArea::vertical().id_salt("edit slide list").auto_shrink([false, false]).show(ui, |ui| {
-                    let width = ui.available_width();
-                    let image_size = vec2(width - 16.0, (width - 16.0) * 9.0 / 16.0);
-                    let mut index = 0;
-                    let groups = presentation.map(|p| p.groups.as_slice()).unwrap_or_default();
-                    let movable = !state.app_made(at.presentation);
-                    let moving = egui::DragAndDrop::payload::<SlideDrag>(ui.ctx())
-                        .filter(|drag| movable && drag.presentation == at.presentation);
-                    scroll_while_dragging(ui);
-                    for (group_index, group) in groups.iter().enumerate() {
-                        let (row, bar_response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click());
-                        let bar = Rect::from_min_max(row.min + vec2(8.0, 6.0), row.max - vec2(8.0, 2.0));
-                        ui.painter().rect_filled(bar, 4.0, color32(group.color).gamma_multiply(0.8));
-                        // Slides dropped on a group's name go at its start.
-                        let first_here = index;
-                        if movable
-                            && let Some(dropped) = bar_response.dnd_release_payload::<SlideDrag>().filter(|drag| {
-                                drag.presentation == at.presentation && !drag.slides.contains(&first_here)
-                            })
-                        {
-                            state.slide_request = Some((
-                                SlideRef { presentation: at.presentation, slide: dropped.slides[0] },
-                                SlideRequest::Move { slides: dropped.slides.clone(), to: first_here, after: false },
-                            ));
-                        }
-                        if movable && bar_response.dnd_hover_payload::<SlideDrag>().is_some() {
-                            ui.painter().rect_stroke(bar, 4.0, Stroke::new(2.0, DROP_LINE), StrokeKind::Outside);
-                        }
-                        let ink = text_on(group.color);
-                        icons::paint(
-                            ui.painter(),
-                            Icon::ChevronDown,
-                            Rect::from_center_size(bar.left_center() + vec2(9.0, 0.0), vec2(8.0, 8.0)),
-                            ink,
-                        );
-                        // The group's name; a click turns it into a field to retype it.
-                        let renaming = state.renaming_group.as_ref().is_some_and(|(at, _)| *at == group_index);
-                        if renaming && let Some((_, typed)) = state.renaming_group.as_mut() {
-                            let field = crate::studio::rename_field_at(
-                                ui,
-                                typed,
-                                FontId::proportional(12.5),
-                                ink,
-                                ink,
-                                bar.left_center() + vec2(18.0, 0.0),
-                                bar.max.x - 4.0,
-                            );
-                            if std::mem::take(&mut state.rename_started) {
-                                field.request_focus();
-                            }
-                            let (enter, escape) = ui.input(|input| {
-                                (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape))
-                            });
-                            if escape {
-                                state.renaming_group = None;
-                            } else if enter || field.lost_focus() {
-                                if typed.trim() != group.name {
-                                    state.pending_group_name =
-                                        Some((at.presentation, group_index, typed.trim().to_owned()));
-                                }
-                                state.renaming_group = None;
-                            }
-                        } else {
-                            let name = if group.name.is_empty() { "No group" } else { group.name.as_str() };
-                            ui.painter().text(
-                                bar.left_center() + vec2(18.0, 0.0),
-                                Align2::LEFT_CENTER,
-                                name,
-                                FontId::proportional(12.5),
-                                ink,
-                            );
-                            if bar_response.on_hover_text("Click to rename this group").clicked() {
-                                state.renaming_group = Some((group_index, group.name.clone()));
-                                state.rename_started = true;
-                            }
-                        }
+            });
+        }
+    });
 
-                        // Each slide a card, as in the Show view: its picture, and under it a bar in
-                        // the group's colour with its number (and the group's name on its first
-                        // slide), apart from the next. A card dragged goes to another place.
-                        for (in_group, slide) in group.slides.iter().enumerate() {
-                            let here = SlideRef { presentation: at.presentation, slide: index };
-                            let (cell, response) = ui.allocate_exact_size(
-                                vec2(width, image_size.y + EDIT_CARD_BAR + EDIT_CARD_GAP),
-                                Sense::click_and_drag(),
-                            );
-                            let card = Rect::from_min_size(
-                                cell.min + vec2(8.0, EDIT_CARD_GAP / 2.0),
-                                vec2(image_size.x, image_size.y + EDIT_CARD_BAR),
-                            );
-                            let selected = here == at;
-                            let round = SLIDE_ROUND;
-                            if ui.is_rect_visible(cell) {
-                                let image = Rect::from_min_size(card.min, image_size);
-                                let top = egui::CornerRadius { nw: round, ne: round, sw: 0, se: 0 };
-                                ui.painter().rect_filled(image, top, Color32::BLACK);
-                                let of = if movable { ThumbOf::Slide(slide) } else { ThumbOf::BibleSlide(slide) };
-                                match thumb(of) {
-                                    Some((texture, _)) => egui::Image::from_texture((texture, image_size))
-                                        .corner_radius(top)
-                                        .paint_at(ui, image),
-                                    None => ui.ctx().request_repaint(),
-                                }
-                                let bar = Rect::from_min_max(pos2(card.min.x, image.max.y), card.max);
-                                let bottom = egui::CornerRadius { nw: 0, ne: 0, sw: round, se: round };
-                                ui.painter().rect_filled(bar, bottom, color32(group.color));
-                                let ink = text_on(group.color);
-                                let words = match (in_group, slide.label.as_deref()) {
-                                    (_, Some(label)) => format!("{}  {label}", index + 1),
-                                    (0, None) if !group.name.is_empty() => format!("{}  {}", index + 1, group.name),
-                                    _ => (index + 1).to_string(),
-                                };
-                                ui.painter().with_clip_rect(bar.shrink(2.0)).text(
-                                    bar.left_center() + vec2(8.0, 0.0),
-                                    Align2::LEFT_CENTER,
-                                    words,
-                                    crate::studio::semibold(12.0),
-                                    ink,
-                                );
-                                // A hairline round it, so a black slide does not melt into the column.
-                                ui.painter().rect_stroke(
-                                    card,
-                                    f32::from(round),
-                                    Stroke::new(1.0, crate::studio::LINE),
-                                    StrokeKind::Outside,
-                                );
-                                let outline = if selected {
-                                    Some(Stroke::new(2.0, EDIT_OUTLINE))
-                                } else if state.picked_slides.contains(&here) {
-                                    Some(Stroke::new(2.0, SELECTED_OUTLINE))
-                                } else if response.hovered() {
-                                    Some(Stroke::new(1.0, crate::studio::TEXT_FAINT))
-                                } else {
-                                    None
-                                };
-                                if let Some(stroke) = outline {
-                                    ui.painter().rect_stroke(card, f32::from(round) + 1.0, stroke, StrokeKind::Outside);
-                                }
-                                if moving.as_ref().is_some_and(|drag| drag.slides.contains(&index)) {
-                                    ui.painter().rect_filled(card, f32::from(round), Color32::from_black_alpha(150));
-                                }
-                            }
-                            if selected && std::mem::take(&mut state.edit_list_scroll) {
-                                response.scroll_to_me(Some(Align::Center));
-                            }
-                            if movable {
-                                // Dragged, it goes with the slides picked out with it.
-                                if response.dragged() {
-                                    let mut picked: Vec<usize> = state
-                                        .picked_slides
-                                        .iter()
-                                        .filter(|p| p.presentation == at.presentation)
-                                        .map(|p| p.slide)
-                                        .collect();
-                                    picked.sort_unstable();
-                                    let slides = if picked.contains(&index) { picked } else { vec![index] };
-                                    response.dnd_set_drag_payload(SlideDrag { presentation: at.presentation, slides });
-                                }
-                                let target = |drag: &SlideDrag| {
-                                    drag.presentation == at.presentation && !drag.slides.contains(&index)
-                                };
-                                if response.dnd_hover_payload::<SlideDrag>().is_some_and(|drag| target(&drag)) {
-                                    paint_drop_line(ui, card, drop_after(ui, card, true), true, EDIT_CARD_GAP);
-                                }
-                                if let Some(dropped) =
-                                    response.dnd_release_payload::<SlideDrag>().filter(|drag| target(drag))
-                                {
-                                    let after = drop_after(ui, card, true);
-                                    state.slide_request = Some((
-                                        SlideRef { presentation: at.presentation, slide: dropped.slides[0] },
-                                        SlideRequest::Move { slides: dropped.slides.clone(), to: index, after },
-                                    ));
-                                }
-                                // Or a step at a time, from its menu.
-                                let count = presentation.map_or(0, |song| song.slide_count());
-                                response.context_menu(|ui| {
-                                    if ui.add_enabled(index > 0, egui::Button::new("Move Up")).clicked() {
-                                        state.slide_request = Some((
-                                            here,
-                                            SlideRequest::Move { slides: vec![index], to: index - 1, after: false },
-                                        ));
-                                        ui.close();
-                                    }
-                                    if ui.add_enabled(index + 1 < count, egui::Button::new("Move Down")).clicked() {
-                                        state.slide_request = Some((
-                                            here,
-                                            SlideRequest::Move { slides: vec![index], to: index + 1, after: true },
-                                        ));
-                                        ui.close();
-                                    }
-                                });
-                            }
-                            if response.clicked() {
-                                let mods = ui.input(|input| input.modifiers);
-                                if (mods.command || mods.shift) && movable {
-                                    // Picked out, to move, copy or delete several; the slide open
-                                    // stays open, and is picked out with them.
-                                    let total = presentation.map_or(0, |song| song.slide_count());
-                                    let order: Vec<SlideRef> = (0..total)
-                                        .map(|slide| SlideRef { presentation: at.presentation, slide })
-                                        .collect();
-                                    state.picked_slides.retain(|p| p.presentation == at.presentation);
-                                    if state.picked_slides.is_empty() {
-                                        state.picked_slides.push(at);
-                                    }
-                                    pick_slide(&mut state.picked_slides, &order, here, mods, Some(at));
-                                } else {
-                                    state.picked_slides.clear();
-                                    if !selected {
-                                        chosen = Some(here);
-                                    }
-                                }
-                            }
-                            index += 1;
-                        }
-                    }
-                    // One of the slides being dragged follows the pointer.
-                    if let Some(drag) = &moving {
-                        let first =
-                            drag.slides.first().and_then(|at| presentation.and_then(|p| p.slide(*at))).map(|(_, s)| s);
-                        let texture = first.and_then(|slide| thumb(ThumbOf::Slide(slide)));
-                        paint_drag_ghost(ui, texture.map(|(texture, _)| texture), drag.slides.len());
-                    }
-                    // After the last slide: a blank tile with a plus. It adds a slide laid out
-                    // like the one before it.
-                    if !groups.is_empty() || presentation.is_some() {
-                        let (cell, response) = ui.allocate_exact_size(vec2(width, image_size.y + 22.0), Sense::click());
-                        let tile = Rect::from_min_size(cell.min + vec2(8.0, 8.0), image_size);
-                        let hovered = response.hovered();
-                        let line = if hovered { crate::studio::ACCENT } else { Color32::from_gray(90) };
-                        ui.painter().rect_filled(tile, 4.0, Color32::from_gray(if hovered { 34 } else { 24 }));
-                        ui.painter().rect_stroke(tile, 4.0, Stroke::new(1.0, line), StrokeKind::Inside);
-                        icons::paint(
-                            ui.painter(),
-                            Icon::Plus,
-                            Rect::from_center_size(tile.center(), vec2(18.0, 18.0)),
-                            line,
-                        );
-                        if response.on_hover_text("Add a slide, laid out like the one before it").clicked() {
-                            state.add_slide = Some(at.presentation);
-                        }
-                    }
-                });
-            }
-        },
-    );
+    crate::studio::round_corners(ui, crate::studio::column_panel(left.response.rect, Column::Left));
 
     // Right: the inspector.
     let leave = crate::inspector::inspector(ui, state, theme);
 
     // Middle: the canvas.
-    egui::CentralPanel::default().frame(panel_frame(EDIT_SURROUND, 0)).show(ui, |ui| {
+    let middle = crate::studio::column_panel(ui.available_rect_before_wrap(), Column::Middle);
+    let surround = panel_frame(EDIT_SURROUND, 0).outer_margin(crate::studio::column_margin(Column::Middle));
+    egui::CentralPanel::default().frame(surround).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         egui::Panel::bottom("edit status").resizable(false).frame(panel_frame(EDIT_STATUS, 4)).show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -2865,6 +2848,7 @@ fn edit_view(
             draft.add_text();
         }
     });
+    crate::studio::round_corners(ui, middle);
 
     // Whatever changed this frame (a drag, typing, a button) is handed to the app, and typing
     // or dragging numbers is gathered into single undo steps.

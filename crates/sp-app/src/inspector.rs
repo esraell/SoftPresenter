@@ -26,7 +26,7 @@ const SIDE: f32 = 12.0;
 const ROW: f32 = 24.0;
 /// The width of the panel and of the controls inside it. Rows are sized from this, not from
 /// the space they find, so a row can never push the panel wider.
-const PANEL_WIDTH: f32 = 300.0;
+const PANEL_WIDTH: f32 = crate::studio::RIGHT_WIDTH;
 const INNER: f32 = PANEL_WIDTH - 2.0 * SIDE;
 /// The width of the column a group's tick box and title sit in.
 const TICK: f32 = 98.0;
@@ -372,7 +372,12 @@ fn fill_kind(ui: &mut egui::Ui, salt: &str, gradient: &mut sp_model::Gradient) {
 /// The whole panel. Returns true when the operator asks to go back to the Show view.
 pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> bool {
     let mut leave = false;
-    egui::Panel::right("edit inspector").resizable(false).exact_size(PANEL_WIDTH).frame(Frame::new().fill(PANEL)).show(
+    let shown = egui::Panel::right("edit inspector")
+        .resizable(false)
+        .show_separator_line(false)
+        .exact_size(crate::studio::column_outer(crate::studio::RIGHT_WIDTH))
+        .frame(crate::studio::column_frame(crate::studio::Column::Right))
+        .show(
         ui,
         |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -492,6 +497,7 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
             });
         },
     );
+    crate::studio::round_corners(ui, crate::studio::column_panel(shown.response.rect, crate::studio::Column::Right));
     leave
 }
 
