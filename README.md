@@ -139,7 +139,7 @@ The full list, area by area, is in [docs/features.md](docs/features.md).
    group (A for Verse 1, C for the chorus). With View, Continuous Playlist on, the last slide of
    a song leads into the next song. Escape clears everything, walk-in music and announcements
    included; F2 to F6 clear one layer at a time. Timers, messages and macros sit in the tabs
-   under the preview.
+   under Clear All.
 8. **Afterwards.** There is nothing to save: every change is written as you make it, and the
    playlist is ready for next week.
 

@@ -6,35 +6,39 @@ finding their way around. For the command line itself see [cli.md](cli.md).
 
 ## The main window
 
-One window, with four views chosen at its top left. The operator's window never shows on the
-audience screens; the screens are separate windows (or NDI sources) drawn by their own thread.
+One window: a bar along the top, and under it three round panels, the left column, the middle
+and the right column, which is the same in every view. Four views are chosen in the bar. The
+operator's window never shows on the audience screens; the screens are separate windows (or NDI
+sources) drawn by their own thread.
 
 ```
-┌────────────────────────────────────────────────────────────────────────────────────────────┐
-│ [Show | Edit | Bible | Themes]                              [● Audience ON] [● Stage ON] [⚙]│
-├──────────────────┬─────────────────────────────────────────┬────────────────────────────────┤
-│ LIBRARY        + │ Song title   8 slides     (i) ≡ ∞ ▤      │ ● PROGRAM  Audience ▾  ON SCREEN│
-│   All Songs      │ ┌──────┐ ┌──────┐ ┌──────┐                │ ┌────────────────────────────┐ │
-│   Christmas      │ │slide │ │slide │ │slide │   slide grid   │ │  what the screens show     │ │
-│ PLAYLISTS      + │ │1 V1 A│ │2     │ │3 Ch C│   (or Easy /   │ └────────────────────────────┘ │
-│   Sunday         │ └──────┘ └──────┘ └──────┘   Table view)  │ [        Clear All      esc ] │
-│ ──────────────── │                                          │ [Clear Slide] [Clear Media]   │
-│ ALL SONGS    3 + │                                          │ [Props] [Messages] [Audio]    │
-│   Song one       │ [+ Add Slide]   Cut Dissolve Advanced ▾  │ [Previous]  3 / 8  [Next]     │
-│   Song two       │                 grid/easy/table  size ── │ Timers Messages Props Macros  │
-│                  ├─────────────────────────────────────────┤ Stage Audio  (tabs)           │
-│ [Search songs]   │ ▾ MEDIA  All Media ▾   Dissolve ▾   [+]  │   …the open tab's list…       │
-│                  │ [pic] [pic] [video ▶]                    │                               │
-└──────────────────┴─────────────────────────────────────────┴────────────────────────────────┘
+  ▬ SoftPresenter [Show|Bible|Edit|Themes] (Find a song or a line)  12:00:00 [● Audience ON] [● Stage ON] ? ⚙
+╭──────────────────╮ ╭─────────────────────────────────────────╮ ╭────────────────────────────────╮
+│ LIBRARY        + │ │ Song title   8 slides     (i) ≡ ∞ ▤      │ │ ● [AUDIENCE|STAGE]    ON SCREEN│
+│   All Songs      │ │ ┌──────┐ ┌──────┐ ┌──────┐                │ │ ┌────────────────────────────┐ │
+│   Christmas      │ │ │slide │ │slide │ │slide │   slide grid   │ │ │  what the screens show     │ │
+│ PLAYLISTS      + │ │ │1 V1 A│ │2     │ │3 Ch C│   (or Easy /   │ │ └────────────────────────────┘ │
+│   Sunday         │ │ └──────┘ └──────┘ └──────┘   Table view)  │ │ 03/08  CHORUS · SONG TITLE     │
+│ ──────────────── │ │                                          │ │ (a row for what is playing)    │
+│ ALL SONGS    3 + │ │                                          │ │ [Slide]   [Media]  [Props]     │
+│   Song one       │ │ [+ Add Slide]   Cut Dissolve Advanced ▾  │ │ [Messages][Audio]  [Announce]  │
+│   Song two       │ │                 grid/easy/table  size ── │ │ [          Clear All         ] │
+│                  │ ├─────────────────────────────────────────┤ │ Timers Messages Props Macros   │
+│ [Search songs]   │ │ ▾ MEDIA  All Media ▾   Dissolve ▾   [+]  │ │ Stage  Audio  (tabs)           │
+│                  │ │ [pic] [pic] [video ▶]                    │ │   …the open tab's list…        │
+╰──────────────────╯ ╰─────────────────────────────────────────╯ ╰────────────────────────────────╯
 ```
 
 ### Top bar
 
 | Part | Does | Command line |
 |---|---|---|
-| Show / Edit / Bible / Themes | Switches the view | `view show\|edit\|bible\|themes` |
+| Show / Bible / Edit / Themes | Switches the view | `view show\|edit\|bible\|themes` |
+| Find box | Searches the song library as you type: titles first, then lines of the songs' words. Return opens the song picked, Command-Return (Ctrl on other computers) adds it to the playlist in front, Escape or a click elsewhere ends the search. Command-F goes to it. It does not search the Bible, playlists or media | |
+| Clock | The time of day | |
 | Audience ON/OFF | The audience screens on or off (Command-1) | `audience on\|off` |
 | Stage ON/OFF | The stage screens on or off (Command-2) | `stage on\|off` |
+| ? | Opens Settings at Key Mappings | |
 | ⚙ | Settings: General, Screens, Groups, Key Mappings, Integrations (Command-comma) | `menu Settings` |
 
 ### Left column: library and playlists
@@ -46,7 +50,7 @@ audience screens; the screens are separate windows (or NDI sources) drawn by the
 | Song list (a library chosen) | Click opens a song; Command/Shift-click and dragging pick several; drag picked songs onto a playlist or library; Delete asks, then deletes; right-click for Duplicate, Theme, Transition, Reflow, Play on Announcements Layer, Delete… | `select SONG`, `song delete SONG --yes`, `announce SONG` |
 | VoxLive row (under LIBRARY, once VoxLive is connected) | The VoxLive item: the church's VoxLive screens, a slide each; right-click to add it to the playlist in front | `voxlive screens`, `voxlive show N\|NAME` |
 | Playlist items (a playlist chosen) | Songs, Bible passages, pictures and videos, media playlists, placeholders and headers in running order; drag to reorder; + adds a header or a placeholder; a picture or video dragged from the bin goes in where the line shows, or fills a placeholder; a placeholder's right-click Fill with Song | `playlist [NAME]`, `slides item N [in PLAYLIST]`, `playlist add SONG to PLAYLIST`, `playlist media\|media-playlist\|placeholder NAME`, `playlist fill PLACEHOLDER with SONG` |
-| Search | Filters the list; Command-F searches titles and words | |
+| Search | Filters the list (the find box in the top bar searches titles and words) | |
 
 ### Middle: the slides
 
@@ -60,12 +64,15 @@ audience screens; the screens are separate windows (or NDI sources) drawn by the
 
 ### Right column: what is on screen
 
+The same in every view. In the Edit view and the Theme Editor the inspector takes the place of
+the tabs. Nothing from the preview down to Clear All moves, whatever is on screen.
+
 | Part | Does | Command line |
 |---|---|---|
-| PROGRAM preview | What the audience screens show, drawn by the screens' own renderer (videos move in it); the chooser shows the stage picture instead | `status`, `status --wait SECONDS --since TOKEN` |
-| Clear All, Clear Slide, Clear Media, Props, Messages, Audio | Clear a layer (Escape clears all; F1 to F6 clear one each); Clear Announcements when that layer plays | `clear all\|slide\|media\|props\|messages\|audio\|announcements` |
-| Previous / Next | Step through the slides | `previous`, `next` |
-| Video controls | Under the preview while a video plays: pause, seek, loop, mute | |
+| Preview block | What the audience screens show, drawn by the screens' own renderer (videos move in it); the switch at its head shows the stage picture instead; ON SCREEN or CLEAR at the right. Under the picture, the slide's number in the song as played, its group and the song | `status`, `status --wait SECONDS --since TOKEN` |
+| The row under the readout | Whatever is playing: a video's keys (play or pause, start over, forward 10 seconds, a bar to drag through, the time left, loop, sound), the song on the Announcements layer with Clear, or a test pattern with Off. Empty, but there, when nothing plays | |
+| Slide, Media, Props, Messages, Audio, Announce | The six layer keys: each is lit while its layer shows, and clears that layer alone (F2 slide, F3 media, F4 props, F5 audio, F6 messages) | `clear slide\|media\|props\|messages\|audio\|announcements` |
+| Clear All | Takes everything off the screens (Escape, F1); orange while anything shows | `clear all` |
 | Tabs: Timers | Count down, count up, to a time of day; start, stop, reset | `timers`, `timer start\|stop\|reset NAME` |
 | Tabs: Messages | Messages with fill-in tokens (the time, a timer), shown over the slides | `messages`, `message show NAME`, `message hide` |
 | Tabs: Props | Slides of their own laid over the show (logos, lower thirds) | `props`, `prop show\|hide NAME` |
@@ -117,10 +124,11 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   slide is on screen), Web Page (a box showing a live web page; its address is typed in the
   Shape tab); pictures and videos can be dropped on it from the Finder. Double-click a
   text box to type in it. The letter keys add objects (T for a text box, one key per shape).
-- **Inspector**: Shape (place, fill, outline, shadow, flip), Text (words, font, size, colour,
+- **Inspector** (in the right column, under Clear All): Shape (place, fill, outline, shadow, flip), Text (words, font, size, colour,
   alignment, spacing, outline, shadow, gradient, linked text such as a clock or a timer), Build
   (how an object comes on and goes off).
-- **Footer**: Slide Notes, Live Edit (changes reach the screens as they are made), Show.
+- **Footer** (at the foot of the inspector): Slide Notes, Live Edit (changes reach the screens
+  as they are made), Done.
 - **Theme editor** (the Themes view): the same canvas, tools and inspector, editing a theme's
   layouts (templates). A layout's text boxes say where each kind of words goes; its shapes,
   pictures and videos are drawn behind the words on every slide that uses it. The list on the

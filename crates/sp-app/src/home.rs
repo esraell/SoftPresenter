@@ -251,6 +251,9 @@ pub struct HomeState {
     /// The library search pop-up (Command-F), while it is open: what is typed, and the row
     /// picked out with the arrow keys.
     pub library_search: Option<(String, usize)>,
+    /// Where the find box is in the bar along the top, when the window is wide enough for it:
+    /// what a search finds is listed under it.
+    pub find_rect: Option<Rect>,
     /// A change to the media bin asked for.
     pub media_request: Option<MediaRequest>,
     /// Songs taken out of the library this run, by their place in the show.
@@ -1096,6 +1099,7 @@ impl Default for HomeState {
             removed_songs: Vec::new(),
             media_request: None,
             library_search: None,
+            find_rect: None,
             reflow: None,
             reflow_done: None,
             screens: crate::screens::starting(None),
@@ -1394,11 +1398,13 @@ pub fn home_ui(
     }
     library_search(ui, show, state, &mut commands);
     if state.editing.is_some() {
-        edit_view(ui, show, state, theme, thumb, canvas);
+        edit_view(ui, show, state, theme, thumb, canvas, preview, &mut commands);
         return commands;
     }
     crate::studio::library(ui, show, state, &mut commands);
-    crate::studio::program_panel(ui, show, state, preview, &mut commands);
+    crate::studio::right_column(ui, show, state, preview, &mut commands, |ui, state| {
+        crate::live_tabs::live_tabs(ui, show, state);
+    });
     // The middle column is what the side columns leave: the slides (or the Bible page) with
     // the media bin at its foot.
     let middle = crate::studio::column_panel(ui.available_rect_before_wrap(), crate::studio::Column::Middle);
@@ -1424,9 +1430,11 @@ const HANDLE: f32 = 4.5;
 /// handle drawn, so it is easy to catch.
 const HANDLE_REACH: f32 = 10.0;
 
-/// The Edit view. It replaces the whole window below the toolbar: the song's slides down the
-/// left with the chosen slide's objects under them, a canvas in the middle where objects are
-/// selected, dragged and resized, and an inspector on the right for the selected object.
+/// The Edit view. It takes the place of the left and middle columns: the song's slides down the
+/// left with the chosen slide's objects under them, and a canvas in the middle where objects
+/// are selected, dragged and resized. The right column stays, with the inspector for the
+/// selected object under Clear All, where the tool tabs are in the other views.
+#[allow(clippy::too_many_arguments)]
 fn edit_view(
     ui: &mut egui::Ui,
     show: &Show,
@@ -1434,6 +1442,8 @@ fn edit_view(
     theme: &Theme,
     thumb: &mut dyn FnMut(ThumbOf) -> Option<(TextureId, bool)>,
     canvas: Option<TextureId>,
+    preview: Preview,
+    commands: &mut Vec<Command>,
 ) {
     let Some(at) = state.editing.as_ref().map(|draft| draft.at) else { return };
     // The draft is a song's slide, or one of a theme's layouts when the Theme Editor is open.
@@ -2457,8 +2467,11 @@ fn edit_view(
 
     crate::studio::round_corners(ui, crate::studio::column_panel(left.response.rect, Column::Left));
 
-    // Right: the inspector.
-    let leave = crate::inspector::inspector(ui, state, theme);
+    // Right: the column every view has, with the inspector where the tool tabs are in the others.
+    let mut leave = false;
+    crate::studio::right_column(ui, show, state, preview, commands, |ui, state| {
+        leave = crate::inspector::inspector(ui, state, theme);
+    });
 
     // Middle: the canvas.
     let middle = crate::studio::column_panel(ui.available_rect_before_wrap(), Column::Middle);
@@ -3314,23 +3327,23 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         *picked += 1;
     }
     let mut chosen: Option<(usize, bool)> = None;
+    // What is found is listed under the find box, where the words are typed (in the middle of
+    // a window too narrow to have the box).
     let screen = ui.ctx().content_rect();
-    egui::Area::new(egui::Id::unique("library search"))
-        .order(egui::Order::Foreground)
-        .fade_in(false)
-        .fixed_pos(pos2(screen.center().x - 260.0, screen.min.y + 90.0))
-        .show(ui.ctx(), |ui| {
+    let under = state
+        .find_rect
+        .map_or(pos2(screen.center().x - 222.0, screen.min.y + 49.0), |find| pos2(find.min.x, find.max.y + 6.0));
+    let typed = !query.trim().is_empty();
+    let mut list = None;
+    if typed {
+        let area = egui::Area::new(egui::Id::unique("library search"))
+            .order(egui::Order::Foreground)
+            .fade_in(false)
+            .fixed_pos(under);
+        let shown = area.show(ui.ctx(), |ui| {
             Frame::popup(ui.style()).inner_margin(12).show(ui, |ui| {
-                ui.set_width(520.0);
-                let field = ui.add(
-                    egui::TextEdit::singleline(query)
-                        .hint_text("Search the library: titles and words")
-                        .desired_width(f32::INFINITY)
-                        .font(FontId::proportional(16.0)),
-                );
-                field.request_focus();
-                ui.add_space(6.0);
-                if found.is_empty() && !query.trim().is_empty() {
+                ui.set_width(420.0);
+                if found.is_empty() {
                     ui.label(egui::RichText::new("No song matches.").color(DIM));
                 }
                 for (row, (index, line)) in found.iter().take(12).enumerate() {
@@ -3372,12 +3385,27 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                     }
                 }
                 ui.add_space(6.0);
-                ui.label(egui::RichText::new("↵ Open    ⌘↵ Add to Playlist    esc Close").size(11.0).color(DIM));
+                let keys = if cfg!(target_os = "macos") {
+                    "↵ Open    ⌘↵ Add to Playlist    esc Close"
+                } else {
+                    "Enter: Open    Ctrl+Enter: Add to Playlist    Esc: Close"
+                };
+                ui.label(egui::RichText::new(keys).size(11.0).color(DIM));
             });
         });
+        list = Some(shown.response.rect);
+    }
     if enter && let Some((index, _)) = found.get(*picked) {
         chosen = Some((*index, command));
     }
+    // A press anywhere but in the find box or the list ends the search (and does what it would
+    // have done anyway).
+    let pressed_outside = ui.input(|input| {
+        let at = input.pointer.interact_pos().filter(|_| input.pointer.any_pressed())?;
+        let inside = |rect: Option<Rect>| rect.is_some_and(|rect| rect.contains(at));
+        Some(!inside(state.find_rect) && !inside(list))
+    }) == Some(true);
+    let ended = chosen.is_some() || escape || pressed_outside;
     if let Some((index, add)) = chosen {
         if add {
             if let (Some(key), Some(song)) = (state.song_keys.get(index), show.presentations().get(index)) {
@@ -3389,9 +3417,11 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             state.bible_open = false;
             state.reflow = None;
         }
+    }
+    if ended {
+        // The find box gives the keyboard back, so the keys run the show again.
         state.library_search = None;
-    } else if escape {
-        state.library_search = None;
+        ui.memory_mut(|memory| memory.surrender_focus(crate::studio::find_box_id()));
     }
 }
 
@@ -7529,6 +7559,49 @@ mod tests {
             home_ui(ui, show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
         });
         output.drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn a_search_that_ends_gives_the_keyboard_back_to_the_show() {
+        let show = three_songs();
+        let ctx = egui::Context::default();
+        let key =
+            |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        let press = |at: egui::Pos2, pressed: bool| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        // Find (from the menu, or its shortcut) hands the find box the keyboard; Escape ends the
+        // search and the keyboard is free again, so Space and Escape run the show.
+        let mut state = HomeState { library_search: Some((String::new(), 0)), ..HomeState::default() };
+        frame_events(&ctx, &show, &mut state, vec![], 0.0);
+        frame_events(&ctx, &show, &mut state, vec![Event::Text("tw".to_owned())], 0.1);
+        assert!(ctx.text_edit_focused(), "the find box has the keyboard");
+        assert_eq!(state.library_search.as_ref().map(|(words, _)| words.as_str()), Some("tw"));
+        frame_events(&ctx, &show, &mut state, vec![key(Key::Escape)], 0.2);
+        frame_events(&ctx, &show, &mut state, vec![], 0.3);
+        assert!(state.library_search.is_none() && !ctx.text_edit_focused(), "Escape ends the search");
+        // A click in the box opens a search; a press anywhere else ends it.
+        let find = state.find_rect.expect("a window this wide has the find box").center();
+        frame_events(&ctx, &show, &mut state, vec![Event::PointerMoved(find)], 0.4);
+        frame_events(&ctx, &show, &mut state, vec![press(find, true)], 0.5);
+        frame_events(&ctx, &show, &mut state, vec![press(find, false)], 0.6);
+        frame_events(&ctx, &show, &mut state, vec![], 0.7);
+        assert!(state.library_search.is_some() && ctx.text_edit_focused(), "a click in the box opens a search");
+        let elsewhere = pos2(640.0, 500.0);
+        frame_events(&ctx, &show, &mut state, vec![Event::PointerMoved(elsewhere)], 0.8);
+        frame_events(&ctx, &show, &mut state, vec![press(elsewhere, true)], 0.9);
+        frame_events(&ctx, &show, &mut state, vec![press(elsewhere, false)], 1.0);
+        frame_events(&ctx, &show, &mut state, vec![], 1.1);
+        assert!(state.library_search.is_none() && !ctx.text_edit_focused(), "a press elsewhere ends it");
+        // Return opens the song found, and that ends the search too.
+        state.library_search = Some(("thr".to_owned(), 0));
+        frame_events(&ctx, &show, &mut state, vec![], 1.2);
+        frame_events(&ctx, &show, &mut state, vec![key(Key::Enter)], 1.3);
+        frame_events(&ctx, &show, &mut state, vec![], 1.4);
+        assert!(state.library_search.is_none() && !ctx.text_edit_focused(), "opening a song ends the search");
     }
 
     #[test]

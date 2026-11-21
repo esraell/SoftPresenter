@@ -1,4 +1,5 @@
-//! The tabs under the Program panel: Timers, Messages and Stage.
+//! The tool tabs under Clear All in the right column: Timers, Messages, Props, Macros, Stage,
+//! Audio and VoxLive.
 
 use std::time::Instant;
 
@@ -7,30 +8,53 @@ use egui::{Align, Color32, FontId, Layout, Sense, vec2};
 use crate::home::HomeState;
 use crate::messages::Message;
 use crate::screens::Kind;
-use crate::studio::{ACCENT, CARD, PANEL, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, caption, segmented};
+use crate::studio::{
+    ACCENT, CARD, PANEL, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, Tabs, caption, tab_switch, tab_switch_height,
+};
 use crate::timers::{self, Timer};
 
 /// Draws the tabs and the one that is open.
 pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) {
-    ui.add_space(4.0);
     let width = ui.available_width();
     // VoxLive's tab, once it is connected and has screens.
     let voxlive =
         state.voxlive_slot.and_then(|slot| show.presentations().get(slot)).is_some_and(|item| item.slide_count() > 0);
-    let names: &[&str] = if voxlive {
-        &["Timers", "Messages", "Props", "Macros", "Stage", "Audio", "VoxLive"]
+    const NAMES: [&str; 7] = ["Timers", "Messages", "Props", "Macros", "Stage", "Audio", "VoxLive"];
+    // Each tab's key is in the View menu, which only a Mac has.
+    const HINTS: &[&str] = if cfg!(target_os = "macos") {
+        &[
+            "Timers (Control-C)",
+            "Messages (Control-M)",
+            "Props (Control-P)",
+            "Macros (Control-Shift-M)",
+            "Stage (Shift-Command-S)",
+            "Audio (Control-A)",
+            "VoxLive",
+        ]
     } else {
-        &["Timers", "Messages", "Props", "Macros", "Stage", "Audio"]
+        &[]
     };
-    if !voxlive && state.live_tab >= names.len() {
+    let count = if voxlive { 7 } else { 6 };
+    if state.live_tab >= count {
         state.live_tab = 0;
     }
-    let picked =
-        segmented(ui, "live tabs", vec2((width - 8.0) / names.len() as f32, 26.0), names, Some(state.live_tab));
-    if let Some(tab) = picked {
+    // A small dot on a tab whose thing is active: orange for what is on screen (a message, a
+    // prop, the audio layer playing), plain for a timer that is running.
+    let dots = [
+        state.timers.iter().any(Timer::running).then_some(TEXT_DIM),
+        state.message_live.is_some().then_some(TALLY),
+        (!state.props_live.is_empty()).then_some(TALLY),
+        None,
+        None,
+        state.audio_playing.track.is_some().then_some(TALLY),
+        None,
+    ];
+    let tabs = Tabs { labels: &NAMES[..count], hints: &HINTS[..count.min(HINTS.len())], dots: &dots[..count] };
+    let (place, _) = ui.allocate_exact_size(vec2(width, tab_switch_height(count)), Sense::hover());
+    if let (_, Some(tab)) = tab_switch(ui, "live tabs", place.min, width, &tabs, Some(state.live_tab)) {
         state.live_tab = tab;
     }
-    ui.add_space(2.0);
+    ui.add_space(4.0);
     let scrolled = egui::ScrollArea::vertical().id_salt("live tab").auto_shrink([false, false]).show(ui, |ui| {
         ui.set_width(width);
         match state.live_tab {

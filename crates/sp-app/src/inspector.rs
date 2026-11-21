@@ -12,8 +12,7 @@ use sp_render::object_frame;
 use crate::editor::MIN_SIDE;
 use crate::home::HomeState;
 
-const PANEL: Color32 = Color32::from_rgb(29, 29, 29);
-const TAB_IDLE: Color32 = Color32::from_rgb(46, 46, 48);
+const PANEL: Color32 = crate::studio::PANEL;
 /// What is chosen: grey, as the rest of the app.
 const BLUE: Color32 = crate::studio::SELECTED;
 const CONTROL: Color32 = Color32::from_rgb(45, 45, 45);
@@ -26,7 +25,7 @@ const SIDE: f32 = 12.0;
 const ROW: f32 = 24.0;
 /// The width of the panel and of the controls inside it. Rows are sized from this, not from
 /// the space they find, so a row can never push the panel wider.
-const PANEL_WIDTH: f32 = crate::studio::RIGHT_WIDTH;
+const PANEL_WIDTH: f32 = crate::studio::RIGHT_WIDTH - 20.0;
 const INNER: f32 = PANEL_WIDTH - 2.0 * SIDE;
 /// The width of the column a group's tick box and title sit in.
 const TICK: f32 = 98.0;
@@ -369,135 +368,124 @@ fn fill_kind(ui: &mut egui::Ui, salt: &str, gradient: &mut sp_model::Gradient) {
     }
 }
 
-/// The whole panel. Returns true when the operator asks to go back to the Show view.
+/// The inspector, drawn in the room it is given: under Clear All in the right column, where the
+/// tool tabs are in the other views. Returns true when the operator asks to go back to the Show
+/// view.
 pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> bool {
     let mut leave = false;
-    let shown = egui::Panel::right("edit inspector")
-        .resizable(false)
-        .show_separator_line(false)
-        .exact_size(crate::studio::column_outer(crate::studio::RIGHT_WIDTH))
-        .frame(crate::studio::column_frame(crate::studio::Column::Right))
-        .show(
-        ui,
-        |ui| {
-            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-            let (tabs, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         let theme_slide =
             state.theme_edit.is_some() && state.editing.as_ref().is_some_and(|draft| draft.selected.is_none());
         if theme_slide {
-            ui.painter().rect_filled(tabs, 0.0, BLUE);
-            ui.painter().text(tabs.center(), Align2::CENTER_CENTER, "Theme Slide", FontId::proportional(12.5), INK);
-        }
-            let tab_width = tabs.width() / 3.0;
-            let tab_names = [(InspectorTab::Shape, "Shape"), (InspectorTab::Text, "Text"), (InspectorTab::Build, "Build")];
-        for (index, (tab, name)) in tab_names.into_iter().enumerate().filter(|_| !theme_slide) {
-                let rect = Rect::from_min_size(
-                    pos2(tabs.min.x + tab_width * index as f32, tabs.min.y),
-                    vec2(tab_width, tabs.height()),
-                );
-                let selected = state.inspector.tab == tab;
-                let response = ui.interact(rect, ui.scope_id().with(("inspector tab", index)), Sense::click());
-                // The open tab stands out: light, with dark words and a bar under it; the others
-                // are dark, with dim words.
-                let (fill, ink, font) = if selected {
-                    (crate::studio::ACCENT, crate::studio::BG, crate::studio::semibold(12.5))
-                } else if response.hovered() {
-                    (crate::studio::HOVER, INK, FontId::proportional(12.5))
-                } else {
-                    (TAB_IDLE, crate::studio::TEXT_DIM, FontId::proportional(12.5))
-                };
-                ui.painter().rect_filled(rect.shrink2(vec2(0.5, 0.0)), 0.0, fill);
-                ui.painter().text(rect.center(), Align2::CENTER_CENTER, name, font, ink);
-                if response.clicked() {
-                    state.inspector.tab = tab;
-                }
-            }
-
-            egui::Panel::bottom("edit footer").resizable(false).frame(Frame::new().fill(PANEL).inner_margin(8)).show(
+            // One section has a plain heading, not a lone tab.
+            let (heading, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
+            crate::studio::paint_spaced(
                 ui,
-                |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        let for_theme = state.theme_edit.is_some();
-                        if !for_theme {
-                            let open = state.inspector.notes_open;
-                            if ui
-                                .add(egui::Button::selectable(open, "Slide Notes"))
-                                .on_hover_text("Notes for whoever runs the slides; the audience never sees them")
-                                .clicked()
-                            {
-                                state.inspector.notes_open = !open;
-                            }
-                        }
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.button("Done").on_hover_text("Go back to the Show view").clicked() {
-                                leave = true;
-                            }
-                            if !for_theme {
-                                ui.checkbox(&mut state.live_edit, "Live Edit").on_hover_text(
-                                    "When on, changes to a slide that is on screen appear on the output as they are made",
-                                );
-                            }
-                        });
-                    });
-                },
+                heading.left_center(),
+                Align2::LEFT_CENTER,
+                "THEME SLIDE",
+                crate::studio::fixed_semibold(11.5),
+                crate::studio::TEXT_DIM,
+                0.6,
             );
-            // The slide's notes, above the footer while they are open.
-            if state.inspector.notes_open
-                && state.theme_edit.is_none()
-                && let Some(draft) = state.editing.as_mut()
-            {
-                egui::Panel::bottom("slide notes").resizable(false).frame(Frame::new().fill(PANEL).inner_margin(8)).show(
-                    ui,
-                    |ui| {
-                        ui.label(egui::RichText::new("SLIDE NOTES").size(10.5).strong().color(DIM));
-                        let mut notes = draft.slide.notes.clone().unwrap_or_default();
-                        let field = egui::TextEdit::multiline(&mut notes)
-                            .desired_rows(4)
-                            .desired_width(f32::INFINITY)
-                            .hint_text("Notes for whoever runs the slides");
-                        if ui.add(field).changed() {
-                            draft.slide.notes = (!notes.trim().is_empty()).then_some(notes);
-                        }
-                    },
-                );
+        } else {
+            let tab_names = [InspectorTab::Shape, InspectorTab::Text, InspectorTab::Build];
+            let tabs = crate::studio::Tabs { labels: &["Shape", "Text", "Build"], hints: &[], dots: &[] };
+            let width = ui.available_width();
+            let (place, _) = ui.allocate_exact_size(vec2(width, crate::studio::tab_switch_height(3)), Sense::hover());
+            let open = tab_names.iter().position(|tab| *tab == state.inspector.tab);
+            let (_, clicked) = crate::studio::tab_switch(ui, "inspector tab", place.min, width, &tabs, open);
+            if let Some(clicked) = clicked {
+                state.inspector.tab = tab_names[clicked];
             }
+        }
+        ui.add_space(4.0);
 
-            egui::ScrollArea::vertical().id_salt("inspector body").auto_shrink([false, false]).show(ui, |ui| {
-                Frame::new()
-                    .inner_margin(egui::Margin { left: SIDE as i8, right: SIDE as i8, top: 8, bottom: 10 })
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                        let visuals = ui.visuals_mut();
-                        visuals.extreme_bg_color = FIELD;
-                        visuals.widgets.inactive.weak_bg_fill = CONTROL;
-                        visuals.widgets.inactive.bg_fill = CONTROL;
-                        visuals.selection.bg_fill = BLUE;
-                        if theme_slide {
-                    theme_slide_panel(ui, state);
-                } else {
-                    // With several objects selected, a change made here is made to them all.
-                    let before = state.editing.as_ref().and_then(|draft| draft.selected_object().cloned());
-                    match state.inspector.tab {
-                        InspectorTab::Shape => shape_tab(ui, state, theme),
-                        InspectorTab::Text => text_tab(ui, state, theme),
-                        InspectorTab::Build => build_tab(ui, state),
+        egui::Panel::bottom("edit footer").resizable(false).frame(Frame::new().fill(PANEL).inner_margin(8)).show(
+            ui,
+            |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let for_theme = state.theme_edit.is_some();
+                    if !for_theme {
+                        let open = state.inspector.notes_open;
+                        if ui
+                            .add(egui::Button::selectable(open, "Slide Notes"))
+                            .on_hover_text("Notes for whoever runs the slides; the audience never sees them")
+                            .clicked()
+                        {
+                            state.inspector.notes_open = !open;
+                        }
                     }
-                    if let (Some(before), Some(draft)) = (before, state.editing.as_mut()) {
-                        draft.share_change(theme, &before);
-                    }
-                }
-                        if let Some(notice) = &state.notice {
-                            rule(ui);
-                            ui.label(
-                                egui::RichText::new(notice.as_str()).size(12.0).color(Color32::from_rgb(255, 150, 120)),
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button("Done").on_hover_text("Go back to the Show view").clicked() {
+                            leave = true;
+                        }
+                        if !for_theme {
+                            ui.checkbox(&mut state.live_edit, "Live Edit").on_hover_text(
+                                "When on, changes to a slide that is on screen appear on the output as they are made",
                             );
                         }
                     });
-            });
-        },
-    );
-    crate::studio::round_corners(ui, crate::studio::column_panel(shown.response.rect, crate::studio::Column::Right));
+                });
+            },
+        );
+        // The slide's notes, above the footer while they are open.
+        if state.inspector.notes_open
+            && state.theme_edit.is_none()
+            && let Some(draft) = state.editing.as_mut()
+        {
+            egui::Panel::bottom("slide notes").resizable(false).frame(Frame::new().fill(PANEL).inner_margin(8)).show(
+                ui,
+                |ui| {
+                    ui.label(egui::RichText::new("SLIDE NOTES").size(10.5).strong().color(DIM));
+                    let mut notes = draft.slide.notes.clone().unwrap_or_default();
+                    let field = egui::TextEdit::multiline(&mut notes)
+                        .desired_rows(4)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("Notes for whoever runs the slides");
+                    if ui.add(field).changed() {
+                        draft.slide.notes = (!notes.trim().is_empty()).then_some(notes);
+                    }
+                },
+            );
+        }
+
+        egui::ScrollArea::vertical().id_salt("inspector body").auto_shrink([false, false]).show(ui, |ui| {
+            Frame::new().inner_margin(egui::Margin { left: SIDE as i8, right: SIDE as i8, top: 8, bottom: 10 }).show(
+                ui,
+                |ui| {
+                    ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                    let visuals = ui.visuals_mut();
+                    visuals.extreme_bg_color = FIELD;
+                    visuals.widgets.inactive.weak_bg_fill = CONTROL;
+                    visuals.widgets.inactive.bg_fill = CONTROL;
+                    visuals.selection.bg_fill = BLUE;
+                    if theme_slide {
+                        theme_slide_panel(ui, state);
+                    } else {
+                        // With several objects selected, a change made here is made to them all.
+                        let before = state.editing.as_ref().and_then(|draft| draft.selected_object().cloned());
+                        match state.inspector.tab {
+                            InspectorTab::Shape => shape_tab(ui, state, theme),
+                            InspectorTab::Text => text_tab(ui, state, theme),
+                            InspectorTab::Build => build_tab(ui, state),
+                        }
+                        if let (Some(before), Some(draft)) = (before, state.editing.as_mut()) {
+                            draft.share_change(theme, &before);
+                        }
+                    }
+                    if let Some(notice) = &state.notice {
+                        rule(ui);
+                        ui.label(
+                            egui::RichText::new(notice.as_str()).size(12.0).color(Color32::from_rgb(255, 150, 120)),
+                        );
+                    }
+                },
+            );
+        });
+    });
     leave
 }
 

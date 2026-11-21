@@ -43,7 +43,6 @@ pub const SELECTED: Color32 = Color32::from_rgb(0x50, 0x50, 0x50);
 /// On screen right now. Used for nothing else.
 pub const TALLY: Color32 = Color32::from_rgb(0xff, 0x4a, 0x1a);
 /// Take care; the tags that show an action's key.
-#[allow(dead_code)] // Used as each page of the new design lands.
 pub const CARE: Color32 = Color32::from_rgb(0xff, 0xc4, 0x00);
 /// The output is on and ready.
 pub const READY: Color32 = Color32::from_rgb(0x2f, 0xd3, 0x6b);
@@ -67,8 +66,19 @@ pub const BUTTON_HOVER: Color32 = Color32::from_rgb(0x3b, 0x3b, 0x3b);
 pub const BUTTON_EDGE: Color32 = BUTTON;
 const BUTTON_EDGE_HOVER: Color32 = BUTTON_HOVER;
 /// The edge under a raised key (the layer keys and Clear All).
-#[allow(dead_code)] // Used as each page of the new design lands.
 pub const KEY_EDGE: Color32 = Color32::from_rgb(0x05, 0x05, 0x05);
+/// A layer key while its layer shows: the orange mixed 22% into a button's grey, and under it
+/// the orange mixed 30% into the edge.
+pub const KEY_LIT: Color32 = Color32::from_rgb(0x5e, 0x36, 0x2b);
+pub const KEY_LIT_EDGE: Color32 = Color32::from_rgb(0x50, 0x1a, 0x0b);
+/// The edge under Clear All while anything shows: the orange, 40% darker.
+pub const CLEAR_ALL_EDGE: Color32 = Color32::from_rgb(0x99, 0x2c, 0x10);
+/// The Audience and Stage keys while their screens are on: the green mixed 12% into a
+/// button's grey; and under the pointer.
+pub const SCREENS_ON: Color32 = Color32::from_rgb(0x30, 0x44, 0x37);
+pub const SCREENS_ON_HOVER: Color32 = Color32::from_rgb(0x3a, 0x4f, 0x41);
+/// Small words on the preview block's black.
+pub const SCREEN_DIM: Color32 = Color32::from_rgb(0xa3, 0xa3, 0x9c);
 
 /// Paints a button's block, as every button is drawn: its fill, lighter under the pointer (or
 /// while it is on), and its outline.
@@ -120,6 +130,245 @@ pub fn round_corners(ui: &egui::Ui, panel: Rect) {
     // An outline outside the round shape, kept to the panel's own rectangle: only the corners.
     // 8 wide covers the whole of a corner of 18 (the corner's point is 7.5 from the curve).
     ui.painter().with_clip_rect(panel).rect_stroke(panel, RADIUS_PANEL, Stroke::new(8.0, BG), StrokeKind::Outside);
+}
+
+/// One line of words in a face with room added between its letters, as the small capital
+/// labels and the numbers in the fixed-width face are set.
+pub fn spaced(ui: &egui::Ui, text: &str, font: FontId, ink: Color32, spacing: f32) -> Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::default();
+    let format = egui::TextFormat { font_id: font, color: ink, extra_letter_spacing: spacing, ..Default::default() };
+    job.append(text, 0.0, format);
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
+}
+
+/// Paints one line set with [`spaced`], anchored at `at`. Returns where it was drawn.
+pub fn paint_spaced(
+    ui: &egui::Ui,
+    at: egui::Pos2,
+    anchor: Align2,
+    text: &str,
+    font: FontId,
+    ink: Color32,
+    spacing: f32,
+) -> Rect {
+    let galley = spaced(ui, text, font, ink, spacing);
+    let rect = anchor.anchor_size(at, galley.size());
+    ui.painter().galley(rect.min, galley, ink);
+    rect
+}
+
+/// A small round light with a halo round it while it is lit, as the layer keys and the
+/// Audience and Stage keys carry. Unlit it is a dark dot.
+pub fn paint_light(painter: &egui::Painter, centre: egui::Pos2, lit: Option<Color32>) {
+    match lit {
+        Some(colour) => {
+            painter.circle_filled(centre, 6.5, colour.gamma_multiply(0.24));
+            painter.circle_filled(centre, 3.5, colour);
+        }
+        None => {
+            painter.circle_filled(centre, 3.5, KEY_EDGE);
+        }
+    }
+}
+
+/// The pill of a segmented switch or of a row of tabs: the chosen one is the lighter grey
+/// with a faint inner edge, the others are only their words.
+fn paint_pill(painter: &egui::Painter, cell: Rect, on: bool) {
+    if on {
+        let round = cell.height() / 2.0;
+        painter.rect_filled(cell, round, SELECTED);
+        painter.rect_stroke(cell, round, Stroke::new(1.0, Color32::from_white_alpha(26)), StrokeKind::Inside);
+    }
+}
+
+/// How a segmented switch is set: its face, the room between its letters, the room either side
+/// of each word, how tall a pill is, the room round the pills, and the track's colour.
+pub struct SwitchLook {
+    pub font: FontId,
+    pub spacing: f32,
+    pub pad: f32,
+    pub height: f32,
+    pub inset: f32,
+    pub track: Color32,
+    pub idle: Color32,
+}
+
+impl SwitchLook {
+    /// The switch between the views, in the bar along the top.
+    pub fn views() -> SwitchLook {
+        SwitchLook {
+            font: FontId::proportional(12.5),
+            spacing: 0.0,
+            pad: 15.0,
+            height: 26.9,
+            inset: 3.0,
+            track: CARD,
+            idle: TEXT_DIM,
+        }
+    }
+
+    /// The small switch in the preview block's head, in capitals.
+    pub fn small_capitals() -> SwitchLook {
+        SwitchLook {
+            font: fixed_semibold(11.0),
+            spacing: 0.7,
+            pad: 9.0,
+            height: 17.0,
+            inset: 2.0,
+            track: Color32::from_rgb(0x16, 0x16, 0x16),
+            idle: SCREEN_DIM,
+        }
+    }
+}
+
+/// The least height of anything that can be clicked: a smaller thing drawn keeps its size and
+/// takes clicks from this much room.
+pub const LEAST_CLICK: f32 = 26.0;
+
+/// A segmented switch: a dark, fully round track with a pill for each choice, each as wide as
+/// its words, the chosen one the lighter grey. Its top left corner goes at `min`. `hints` are
+/// the tooltips, one for each choice (or none at all). Returns the room it took and the choice
+/// clicked.
+pub fn pill_switch(
+    ui: &egui::Ui,
+    salt: &str,
+    min: egui::Pos2,
+    labels: &[&str],
+    hints: &[&str],
+    chosen: Option<usize>,
+    look: &SwitchLook,
+) -> (Rect, Option<usize>) {
+    const BETWEEN: f32 = 2.0;
+    let height = look.height + 2.0 * look.inset;
+    // Laid out twice (once to measure, once to draw); the toolkit keeps each line it has set.
+    let wide = |label: &str| spaced(ui, label, look.font.clone(), look.idle, look.spacing).size().x + 2.0 * look.pad;
+    let total: f32 = labels.iter().map(|label| wide(label)).sum::<f32>()
+        + BETWEEN * labels.len().saturating_sub(1) as f32
+        + 2.0 * look.inset;
+    let track = Rect::from_min_size(min, vec2(total, height));
+    ui.painter().rect_filled(track, height / 2.0, look.track);
+    let reach = ((LEAST_CLICK - look.height) / 2.0).max(0.0);
+    let mut clicked = None;
+    let mut x = track.min.x + look.inset;
+    for (index, label) in labels.iter().enumerate() {
+        let cell = Rect::from_min_size(pos2(x, track.min.y + look.inset), vec2(wide(label), look.height));
+        x += cell.width() + BETWEEN;
+        let mut response =
+            ui.interact(cell.expand2(vec2(0.0, reach)), ui.scope_id().with((salt, index)), Sense::click());
+        let on = chosen == Some(index);
+        paint_pill(ui.painter(), cell, on);
+        let ink = if on || response.hovered() { TEXT } else { look.idle };
+        paint_spaced(ui, cell.center(), Align2::CENTER_CENTER, label, look.font.clone(), ink, look.spacing);
+        if let Some(hint) = hints.get(index) {
+            response = response.on_hover_text(*hint);
+        }
+        if response.clicked() {
+            clicked = Some(index);
+        }
+    }
+    (track, clicked)
+}
+
+/// How tall a row of tabs made by [`tab_switch`] is, for that many tabs.
+pub fn tab_switch_height(count: usize) -> f32 {
+    let rows = count.div_ceil(TABS_IN_A_ROW).max(1) as f32;
+    6.0 + rows * 26.9 + (rows - 1.0) * 2.0
+}
+
+/// The tabs of a [`tab_switch`]: their names, their tooltips (one each, or none at all), and
+/// for each the colour of the small dot after its name while its thing is active.
+#[derive(Clone, Copy)]
+pub struct Tabs<'a> {
+    pub labels: &'a [&'a str],
+    pub hints: &'a [&'a str],
+    pub dots: &'a [Option<Color32>],
+}
+
+/// How many tabs stand in one row; more go on to a second row and share it evenly.
+const TABS_IN_A_ROW: usize = 4;
+
+/// Tabs as one block of pills `width` wide with its top left corner at `min`: four to a row,
+/// the tabs of each row sharing its width evenly, the open one the lighter grey. `dots` gives
+/// a tab a small dot after its name while its thing is active (in that colour). Returns the
+/// room it took and the tab clicked.
+pub fn tab_switch(
+    ui: &egui::Ui,
+    salt: &str,
+    min: egui::Pos2,
+    width: f32,
+    tabs: &Tabs,
+    chosen: Option<usize>,
+) -> (Rect, Option<usize>) {
+    let Tabs { labels, hints, dots } = *tabs;
+    const BETWEEN: f32 = 2.0;
+    const INSET: f32 = 3.0;
+    const TALL: f32 = 26.9;
+    let block = Rect::from_min_size(min, vec2(width, tab_switch_height(labels.len())));
+    // One row is fully round; two rows are a block with a rounder corner than a card's.
+    let round = if labels.len() > TABS_IN_A_ROW { 14.0 } else { block.height() / 2.0 };
+    ui.painter().rect_filled(block, round, CARD);
+    let font = FontId::proportional(12.5);
+    let mut clicked = None;
+    for (row, names) in labels.chunks(TABS_IN_A_ROW).enumerate() {
+        let each = (width - 2.0 * INSET - BETWEEN * (names.len() - 1) as f32) / names.len() as f32;
+        for (place, label) in names.iter().enumerate() {
+            let index = row * TABS_IN_A_ROW + place;
+            let corner = pos2(
+                block.min.x + INSET + (each + BETWEEN) * place as f32,
+                block.min.y + INSET + (TALL + BETWEEN) * row as f32,
+            );
+            let cell = Rect::from_min_size(corner, vec2(each, TALL));
+            let mut response = ui.interact(cell, ui.scope_id().with((salt, index)), Sense::click());
+            let on = chosen == Some(index);
+            paint_pill(ui.painter(), cell, on);
+            let ink = if on || response.hovered() { TEXT } else { TEXT_DIM };
+            let words = ui.painter().text(cell.center(), Align2::CENTER_CENTER, *label, font.clone(), ink);
+            if let Some(Some(colour)) = dots.get(index) {
+                ui.painter().circle_filled(pos2(words.max.x + 6.5, cell.center().y), 2.5, *colour);
+            }
+            if let Some(hint) = hints.get(index) {
+                response = response.on_hover_text(*hint);
+            }
+            if response.clicked() {
+                clicked = Some(index);
+            }
+        }
+    }
+    (block, clicked)
+}
+
+/// How far a raised key stands above what it is on, and so how far it goes down when pressed.
+pub const KEY_TRAVEL: f32 = 3.0;
+
+/// A raised key (only the layer keys and Clear All are raised): a block standing on an edge
+/// 3 deep, drawn under it. While it is pressed the block goes down onto the edge. `rect` is the
+/// block at rest; the edge is drawn below it. Returns the response and where the block is this
+/// frame, to draw its light and its words on.
+pub fn raised_key(ui: &egui::Ui, rect: Rect, id: egui::Id, fill: Color32, edge: Color32) -> (egui::Response, Rect) {
+    let response = ui.interact(rect, id, Sense::click());
+    let down = response.is_pointer_button_down_on();
+    let painter = ui.painter();
+    let face = if down { rect.translate(vec2(0.0, KEY_TRAVEL)) } else { rect };
+    if !down {
+        painter.rect_filled(rect.translate(vec2(0.0, KEY_TRAVEL)), RADIUS_CARD, edge);
+    }
+    painter.rect_filled(face, RADIUS_CARD, fill);
+    (response, face)
+}
+
+/// A small round button that is only its icon, as the keys of the video on screen are: `fill`
+/// under it, lighter under the pointer; `on` gives it the lighter grey of a choice that is on.
+pub fn round_key(ui: &egui::Ui, centre: egui::Pos2, side: f32, id: &str, fill: Color32, on: bool) -> egui::Response {
+    let cell = Rect::from_center_size(centre, egui::Vec2::splat(side));
+    let response = ui.interact(cell, ui.scope_id().with(id), Sense::click());
+    let painter = ui.painter();
+    if on {
+        painter.circle_filled(centre, side / 2.0, SELECTED);
+        painter.circle_stroke(centre, side / 2.0 - 0.5, Stroke::new(1.0, Color32::from_white_alpha(26)));
+    } else {
+        painter.circle_filled(centre, side / 2.0, if response.hovered() { BUTTON_HOVER } else { fill });
+    }
+    response
 }
 
 /// Sets the whole window's colours, sizes and font.
@@ -174,9 +423,17 @@ pub fn apply_style(ctx: &egui::Context) {
 const SEMIBOLD: &str = "semibold";
 
 /// The fixed-width face at a size.
-#[allow(dead_code)] // Used as each page of the new design lands.
 pub fn fixed(size: f32) -> FontId {
     FontId::new(size, FontFamily::Monospace)
+}
+
+/// The name of the heavier cut of the fixed-width face, for small capital labels.
+const FIXED_SEMIBOLD: &str = "fixed semibold";
+
+/// The heavier cut of the fixed-width face at a size (the plain cut where the computer's
+/// fixed-width font has only one).
+pub fn fixed_semibold(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(FIXED_SEMIBOLD.into()))
 }
 
 /// The heavier cut of the interface font at a size.
@@ -232,10 +489,17 @@ fn load_fonts(ctx: &egui::Context) {
     }
     fonts.families.insert(FontFamily::Proportional, regular_first);
     fonts.families.insert(FontFamily::Name(SEMIBOLD.into()), heavy_first);
+    // The heavier cut of the fixed-width face is the same file asked for at a heavier weight;
+    // a font that cannot be drawn heavier is drawn as it is.
+    let mut fixed_heavy = fonts.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
     if let Some(bytes) = FIXED.iter().find_map(|path| std::fs::read(path).ok()) {
-        fonts.font_data.insert("fixed".to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
+        let heavy = egui::FontTweak { coords: VariationCoords::new([(b"wght", 600.0)]), ..egui::FontTweak::default() };
+        fonts.font_data.insert("fixed".to_owned(), Arc::new(egui::FontData::from_owned(bytes.clone())));
+        fonts.font_data.insert("fixed heavy".to_owned(), Arc::new(egui::FontData::from_owned(bytes).tweak(heavy)));
         fonts.families.entry(FontFamily::Monospace).or_default().insert(0, "fixed".to_owned());
+        fixed_heavy.insert(0, "fixed heavy".to_owned());
     }
+    fonts.families.insert(FontFamily::Name(FIXED_SEMIBOLD.into()), fixed_heavy);
     if let Some(bytes) = WIDE.iter().find_map(|path| std::fs::read(path).ok()) {
         fonts.font_data.insert("wide".to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
         for family in fonts.families.values_mut() {
@@ -292,11 +556,10 @@ pub fn caption(ui: &mut egui::Ui, text: &str) {
 }
 
 /// A button drawn as a rounded block with its words in the middle. `emphasis` picks its
-/// colours: plain, or live (tally red).
+/// colours.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Emphasis {
     Plain,
-    Live,
     /// Nothing to do: drawn faint, and not clickable.
     Idle,
 }
@@ -310,10 +573,6 @@ pub fn block_button(ui: &mut egui::Ui, size: egui::Vec2, text: &str, key: &str, 
         Emphasis::Plain => {
             paint_button(painter, rect, hovered);
             TEXT
-        }
-        Emphasis::Live => {
-            painter.rect_filled(rect, RADIUS, if hovered { TALLY } else { TALLY.gamma_multiply(0.88) });
-            Color32::WHITE
         }
         Emphasis::Idle => {
             painter.rect_filled(rect, RADIUS, CARD.gamma_multiply(0.7));
@@ -334,68 +593,6 @@ pub fn block_button(ui: &mut egui::Ui, size: egui::Vec2, text: &str, key: &str, 
     response
 }
 
-/// Several choices in one rounded bar, the chosen one raised. Returns the one clicked.
-pub fn segmented(
-    ui: &mut egui::Ui,
-    salt: &str,
-    each: egui::Vec2,
-    labels: &[&str],
-    chosen: Option<usize>,
-) -> Option<usize> {
-    let count = labels.len();
-    let total = each.x * count as f32;
-    let (bar, _) = ui.allocate_exact_size(vec2(total + 6.0, each.y + 6.0), Sense::hover());
-    ui.painter().rect_filled(bar, RADIUS + 2.0, BG);
-    // Many choices share the width, so their words are smaller.
-    let mut size: f32 = match count {
-        0..=4 => 13.5,
-        5 => 12.5,
-        _ => 11.5,
-    };
-    // Each word, measured at a size (in the bolder face, the wider of the two).
-    const PAD: f32 = 10.0;
-    let measure = |ui: &egui::Ui, size: f32| -> Vec<f32> {
-        labels
-            .iter()
-            .map(|label| ui.painter().layout_no_wrap((*label).to_owned(), semibold(size), TEXT).size().x)
-            .collect()
-    };
-    let mut widths = measure(ui, size);
-    // In a narrow bar the words shrink a little until they fit side by side.
-    while widths.iter().sum::<f32>() + PAD * count as f32 > total && size > 9.5 {
-        size -= 0.5;
-        widths = measure(ui, size);
-    }
-    // Equal cells while every word fits in one; otherwise each takes room for its word, and the
-    // room left over is shared out evenly.
-    let crowded = widths.iter().any(|width| width + PAD > each.x);
-    let spare = ((total - widths.iter().sum::<f32>()) / count.max(1) as f32).max(0.0);
-    let cells: Vec<f32> =
-        if crowded { widths.iter().map(|width| width + spare).collect() } else { vec![each.x; count] };
-    let mut clicked = None;
-    let mut x = bar.min.x + 3.0;
-    for (index, label) in labels.iter().enumerate() {
-        let cell = Rect::from_min_size(pos2(x, bar.min.y + 3.0), vec2(cells[index], each.y));
-        x += cells[index];
-        let response = ui.interact(cell, ui.scope_id().with((salt, index)), Sense::click());
-        let on = chosen == Some(index);
-        if on {
-            ui.painter().rect_filled(cell, RADIUS, CARD);
-        } else if response.hovered() {
-            ui.painter().rect_filled(cell, RADIUS, PANEL);
-        }
-        let ink = if on { TEXT } else { TEXT_DIM };
-        let font = if on { semibold(size) } else { FontId::proportional(size) };
-        ui.painter().text(cell.center(), Align2::CENTER_CENTER, *label, font, ink);
-        if response.clicked() {
-            clicked = Some(index);
-        }
-    }
-    clicked
-}
-
-/// The bar along the top: the three views, themes and more on the left; the audience output
-/// on the right.
 /// A bar under the toolbar, on every view, while a song or theme changed outside SoftPresenter
 /// waits on a choice: Reload takes the file's version, Keep mine writes SoftPresenter's over it.
 pub fn changed_outside_bar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
@@ -435,140 +632,244 @@ pub fn changed_outside_bar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState
     });
 }
 
-pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
-    let frame = Frame::new().fill(BG).inner_margin(egui::Margin::symmetric(14, 9));
-    egui::Panel::top("toolbar").resizable(false).show_separator_line(false).exact_size(TOP_BAR).frame(frame).show(
-        ui,
-        |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                // The four views. Themes is one of them: it opens the Theme Editor.
-                let editing_theme = state.theme_edit.is_some();
-                let view = if editing_theme {
-                    3
-                } else if state.editing.is_some() {
-                    1
-                } else if state.bible_open {
-                    2
-                } else {
-                    0
-                };
-                let picked = segmented(ui, "views", vec2(74.0, 28.0), &["Show", "Edit", "Bible", "Themes"], Some(view))
-                    .or(state.view_request.take().filter(|asked| *asked != view));
-                match picked {
-                    Some(3) if !editing_theme => {
-                        state.theme_request = Some(crate::home::ThemeRequest::Edit(state.theme_for_songs))
-                    }
-                    Some(3) => {}
-                    // Leaving the Theme Editor goes through the app, which saves the theme.
-                    Some(to) if editing_theme => {
-                        if let Some(edit) = state.theme_edit.as_mut() {
-                            edit.leave = true;
-                        }
-                        state.bible_open = to == 2;
-                        if to == 1 {
-                            state.open_editor_next = true;
-                        }
-                    }
-                    Some(0) => {
-                        state.editing = None;
-                        state.bible_open = false;
-                    }
-                    Some(2) => {
-                        state.editing = None;
-                        state.bible_open = true;
-                    }
-                    Some(1) if state.editing.is_none() => {
-                        state.editing = EditDraft::of(show, slide_to_edit(show, state));
-                    }
-                    _ => {}
-                }
-                // Asked for while the Theme Editor was open: it has closed now, so open the slide editor.
-                if state.open_editor_next && state.theme_edit.is_none() {
-                    state.open_editor_next = false;
-                    state.editing = EditDraft::of(show, slide_to_edit(show, state));
-                }
+/// The find box in the bar along the top: its id, so that Find can hand it the keyboard and a
+/// search that ends can take the keyboard away again.
+pub fn find_box_id() -> egui::Id {
+    egui::Id::unique("find box")
+}
 
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    // Settings, at the far right.
-                    let (gear, response) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::click());
-                    let on = state.preferences_open;
-                    paint_button(ui.painter(), gear, on || response.hovered());
-                    icons::paint(
-                        ui.painter(),
-                        Icon::Gear,
-                        Rect::from_center_size(gear.center(), vec2(15.0, 15.0)),
-                        TEXT_DIM,
-                    );
-                    if response.on_hover_text("Settings (Command-comma)").clicked() {
-                        state.preferences_open = !state.preferences_open;
-                    }
-                    // Laid out from the right: Stage, then Audience to its left, so Audience reads first.
-                    // The stage screens: a light and whether they are on.
-                    let stage_on = state.stage_on;
-                    let (rect, response) = ui.allocate_exact_size(vec2(118.0, 30.0), Sense::click());
-                    let painter = ui.painter();
-                    paint_button(painter, rect, response.hovered());
-                    painter.circle_filled(
-                        rect.left_center() + vec2(15.0, 0.0),
-                        4.5,
-                        if stage_on { READY } else { TEXT_FAINT },
-                    );
-                    painter.text(
-                        rect.left_center() + vec2(28.0, 0.0),
-                        Align2::LEFT_CENTER,
-                        "Stage",
-                        FontId::proportional(13.5),
-                        TEXT,
-                    );
-                    painter.text(
-                        rect.right_center() - vec2(12.0, 0.0),
-                        Align2::RIGHT_CENTER,
-                        if stage_on { "ON" } else { "OFF" },
-                        FontId::proportional(11.0),
-                        if stage_on { READY } else { TEXT_DIM },
-                    );
-                    let hint = if stage_on {
-                        "The stage screens are on. Click to switch them off (Command-2)."
-                    } else {
-                        "The stage screens are off. Click to switch them on (Command-2)."
-                    };
-                    if response.on_hover_text(hint).clicked() {
-                        state.stage_on = !stage_on;
-                    }
-                    // The audience output: a tally light, its name, and whether it is on.
-                    let on = show.output_enabled();
-                    let (rect, response) = ui.allocate_exact_size(vec2(148.0, 30.0), Sense::click());
-                    let painter = ui.painter();
-                    paint_button(painter, rect, response.hovered());
-                    let light = if on { READY } else { TEXT_FAINT };
-                    painter.circle_filled(rect.left_center() + vec2(15.0, 0.0), 4.5, light);
-                    painter.text(
-                        rect.left_center() + vec2(28.0, 0.0),
-                        Align2::LEFT_CENTER,
-                        "Audience",
-                        FontId::proportional(13.5),
-                        TEXT,
-                    );
-                    painter.text(
-                        rect.right_center() - vec2(12.0, 0.0),
-                        Align2::RIGHT_CENTER,
-                        if on { "ON" } else { "OFF" },
-                        FontId::proportional(11.0),
-                        if on { READY } else { TEXT_DIM },
-                    );
-                    let hint = if on {
-                        "The audience output is on. Click to switch it off."
-                    } else {
-                        "The audience output is off. Click to switch it on."
-                    };
-                    if response.on_hover_text(hint).clicked() {
-                        commands.push(Command::SetOutputEnabled(!on));
-                    }
-                });
-            });
-        },
-    );
+/// One of the two keys that switch the screens on and off: a light, the name, and ON or OFF
+/// (which keeps the room of the longer word, so the key is always as wide). Its right edge
+/// goes at `right`. Returns the key's response and its left edge.
+fn screens_key(ui: &egui::Ui, bar: Rect, right: f32, name: &str, on: bool) -> (egui::Response, f32) {
+    const PAD: f32 = 12.0;
+    const BETWEEN: f32 = 8.0;
+    let font = FontId::proportional(13.0);
+    let state_font = fixed_semibold(11.0);
+    let name_wide = ui.painter().layout_no_wrap(name.to_owned(), font.clone(), TEXT).size().x;
+    let state_wide = spaced(ui, "OFF", state_font.clone(), TEXT, 0.6).size().x;
+    let wide = PAD + 7.0 + BETWEEN + name_wide + BETWEEN + state_wide + PAD;
+    let rect = Rect::from_min_size(pos2(right - wide, bar.center().y - 16.0), vec2(wide, 32.0));
+    let response = ui.interact(rect, ui.scope_id().with(("screens key", name)), Sense::click());
+    let fill = match (on, response.hovered()) {
+        (true, false) => SCREENS_ON,
+        (true, true) => SCREENS_ON_HOVER,
+        (false, false) => BUTTON,
+        (false, true) => BUTTON_HOVER,
+    };
+    let painter = ui.painter();
+    painter.rect_filled(rect, RADIUS_CARD, fill);
+    let y = rect.center().y;
+    paint_light(painter, pos2(rect.min.x + PAD + 3.5, y), on.then_some(READY));
+    painter.text(pos2(rect.min.x + PAD + 7.0 + BETWEEN, y), Align2::LEFT_CENTER, name, font, TEXT);
+    let (word, ink) = if on { ("ON", READY) } else { ("OFF", TEXT_FAINT) };
+    paint_spaced(ui, pos2(rect.max.x - PAD - state_wide, y), Align2::LEFT_CENTER, word, state_font, ink, 0.6);
+    (response, rect.min.x)
+}
+
+/// The bar along the top, lying on the window itself: the mark and the name; the switch
+/// between the views; the find box; and at the right the clock, the Audience and Stage keys,
+/// the keys' button and Settings.
+pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
+    let panel = egui::Panel::top("toolbar").resizable(false).show_separator_line(false).exact_size(TOP_BAR);
+    panel.frame(Frame::new().fill(BG)).show(ui, |ui| {
+        let bar = ui.max_rect();
+        ui.allocate_rect(bar, Sense::hover());
+        let middle = bar.center().y;
+
+        // The mark, a light slab with the orange light in its corner, and the name.
+        let mark = Rect::from_min_size(pos2(bar.min.x + 14.0, middle - 7.0), vec2(20.0, 14.0));
+        ui.painter().rect_filled(mark, 4.0, TEXT);
+        ui.painter().circle_filled(pos2(mark.max.x - 5.0, mark.min.y + 5.0), 2.0, TALLY);
+        let name = ui.painter().text(
+            pos2(mark.max.x + 9.0, middle),
+            Align2::LEFT_CENTER,
+            "SoftPresenter",
+            semibold(15.5),
+            TEXT,
+        );
+
+        // The views. Themes is one of them until it is folded into Edit: it opens the Theme
+        // Editor. They are numbered as the View menu and the command line number them (Show,
+        // Edit, Bible, Themes), and stand in the switch as Show, Bible, Edit, Themes.
+        const ORDER: [usize; 4] = [0, 2, 1, 3];
+        let editing_theme = state.theme_edit.is_some();
+        let view = if editing_theme {
+            3
+        } else if state.editing.is_some() {
+            1
+        } else if state.bible_open {
+            2
+        } else {
+            0
+        };
+        let hints: &[&str] = if cfg!(target_os = "macos") {
+            &["Show (Control-S)", "Bible (Control-B)", "Edit (Control-E)", "Themes (Control-T)"]
+        } else {
+            &["Show", "Bible", "Edit", "Themes"]
+        };
+        let (switch, clicked) = pill_switch(
+            ui,
+            "views",
+            pos2(name.max.x + 14.0, middle - 16.45),
+            &["Show", "Bible", "Edit", "Themes"],
+            hints,
+            ORDER.iter().position(|shown| *shown == view),
+            &SwitchLook::views(),
+        );
+        let picked = clicked.map(|place| ORDER[place]).or(state.view_request.take().filter(|asked| *asked != view));
+        match picked {
+            Some(3) if !editing_theme => {
+                state.theme_request = Some(crate::home::ThemeRequest::Edit(state.theme_for_songs))
+            }
+            Some(3) => {}
+            // Leaving the Theme Editor goes through the app, which saves the theme.
+            Some(to) if editing_theme => {
+                if let Some(edit) = state.theme_edit.as_mut() {
+                    edit.leave = true;
+                }
+                state.bible_open = to == 2;
+                if to == 1 {
+                    state.open_editor_next = true;
+                }
+            }
+            Some(0) => {
+                state.editing = None;
+                state.bible_open = false;
+            }
+            Some(2) => {
+                state.editing = None;
+                state.bible_open = true;
+            }
+            Some(1) if state.editing.is_none() => {
+                state.editing = EditDraft::of(show, slide_to_edit(show, state));
+            }
+            _ => {}
+        }
+        // Asked for while the Theme Editor was open: it has closed now, so open the slide editor.
+        if state.open_editor_next && state.theme_edit.is_none() {
+            state.open_editor_next = false;
+            state.editing = EditDraft::of(show, slide_to_edit(show, state));
+        }
+
+        // From the right: Settings, the keys' button, Stage, Audience and the clock.
+        let gear = Rect::from_min_size(pos2(bar.max.x - 14.0 - 30.0, middle - 15.0), vec2(30.0, 30.0));
+        let response = ui.interact(gear, ui.scope_id().with("settings"), Sense::click());
+        if state.preferences_open {
+            ui.painter().rect_filled(gear, RADIUS, SELECTED);
+        } else if response.hovered() {
+            ui.painter().rect_filled(gear, RADIUS, CARD);
+        }
+        icons::paint(ui.painter(), Icon::Gear, Rect::from_center_size(gear.center(), vec2(16.0, 16.0)), TEXT_DIM);
+        let hint = if cfg!(target_os = "macos") { "Settings (Command-comma)" } else { "Settings (Ctrl-comma)" };
+        if response.on_hover_text(hint).clicked() {
+            state.preferences_open = !state.preferences_open;
+        }
+
+        // The keys: for now it opens Settings at Key Mappings, where the keys are listed.
+        let keys = pos2(gear.min.x - 10.0 - 14.0, middle);
+        let response = ui.interact(
+            Rect::from_center_size(keys, egui::Vec2::splat(28.0)),
+            ui.scope_id().with("keys"),
+            Sense::click(),
+        );
+        ui.painter().circle_filled(keys, 14.0, if response.hovered() { HOVER } else { CARD });
+        ui.painter().text(keys, Align2::CENTER_CENTER, "?", fixed_semibold(13.0), TEXT_DIM);
+        if response.on_hover_text("The keys (opens Settings at Key Mappings)").clicked() {
+            state.preferences_open = true;
+            if let Some(pane) = crate::home::PANES.iter().position(|pane| *pane == "Key Mappings") {
+                state.preferences_pane = pane;
+            }
+        }
+
+        let stage_on = state.stage_on;
+        let (response, left) = screens_key(ui, bar, keys.x - 14.0 - 10.0, "Stage", stage_on);
+        let hint =
+            if cfg!(target_os = "macos") { "Stage screens on or off (Command-2)" } else { "Stage screens on or off" };
+        if response.on_hover_text(hint).clicked() {
+            state.stage_on = !stage_on;
+        }
+        let on = show.output_enabled();
+        let (response, left) = screens_key(ui, bar, left - 10.0, "Audience", on);
+        let hint = if cfg!(target_os = "macos") {
+            "Audience screens on or off (Command-1)"
+        } else {
+            "Audience screens on or off"
+        };
+        if response.on_hover_text(hint).clicked() {
+            commands.push(Command::SetOutputEnabled(!on));
+        }
+
+        // The clock: the time of day to the second, in a dark window of its own. The window is
+        // drawn again when the next second starts, and for nothing else on its account.
+        let now = chrono::Local::now();
+        let font = fixed(14.0);
+        let wide = spaced(ui, "00:00:00", font.clone(), TEXT, 0.6).size().x + 24.0;
+        let clock = Rect::from_min_size(pos2(left - 10.0 - wide, middle - 14.5), vec2(wide, 29.0));
+        ui.painter().rect_filled(clock, RADIUS, Color32::BLACK);
+        ui.painter().rect_stroke(clock, RADIUS, Stroke::new(1.0, LINE), StrokeKind::Inside);
+        let time = now.format("%H:%M:%S").to_string();
+        paint_spaced(ui, pos2(clock.min.x + 12.0, middle), Align2::LEFT_CENTER, &time, font, TEXT, 0.6);
+        let into_second = u64::from(chrono::Timelike::nanosecond(&now) % 1_000_000_000);
+        ui.ctx().request_repaint_after(std::time::Duration::from_nanos(1_000_000_000 - into_second));
+
+        // The find box takes the room between the views and the clock, up to its full width.
+        let room = clock.min.x - 14.0 - (switch.max.x + 14.0);
+        if room >= 140.0 {
+            let find = Rect::from_min_size(pos2(switch.max.x + 14.0, middle - 17.0), vec2(room.min(300.0), 34.0));
+            find_box(ui, state, find);
+        } else {
+            state.find_rect = None;
+        }
+    });
+}
+
+/// The find box: typing in it searches the song library (titles first, then the words of the
+/// songs), with what it finds listed under it by `library_search` in `home.rs`. It holds the
+/// search's own words, so Find in the menu, its shortcut and the box are one thing.
+fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
+    let id = find_box_id();
+    let focused = ui.memory(|memory| memory.has_focus(id));
+    ui.painter().rect_filled(find, 17.0, PANEL);
+    let edge = if focused { SELECTED } else { LINE };
+    ui.painter().rect_stroke(find, 17.0, Stroke::new(1.0, edge), StrokeKind::Inside);
+    // While a search is open the box holds its words; otherwise it is empty.
+    let mut none = String::new();
+    let open = state.library_search.is_some();
+    let text = state.library_search.as_mut().map_or(&mut none, |(words, _)| words);
+    let inner =
+        Rect::from_min_max(pos2(find.min.x + 16.0, find.min.y + 2.0), pos2(find.max.x - 44.0, find.max.y - 2.0));
+    let field = egui::TextEdit::singleline(text)
+        .id(id)
+        .hint_text(egui::RichText::new("Find a song or a line").color(TEXT_FAINT))
+        .font(FontId::proportional(13.0))
+        .background_color(Color32::TRANSPARENT)
+        .frame(Frame::new())
+        .align(Align2::LEFT_CENTER)
+        .desired_width(inner.width());
+    let response = ui.put(inner, field);
+    if open {
+        // A search opened from the menu, by its shortcut or by a click types here.
+        response.request_focus();
+    } else if response.has_focus() {
+        state.library_search = Some((none, 0));
+    }
+    // The key that finds, at the right end, until the box has the keyboard.
+    if !focused && !open {
+        let key = if cfg!(target_os = "macos") { "\u{2318}F" } else { "Ctrl F" };
+        let font = fixed(11.0);
+        let wide = (ui.painter().layout_no_wrap(key.to_owned(), font.clone(), TEXT_DIM).size().x + 10.0).max(20.0);
+        let cap = Rect::from_min_size(pos2(find.max.x - 10.0 - wide, find.center().y - 10.0), vec2(wide, 20.0));
+        ui.painter().rect_filled(cap, 5.0, CARD);
+        ui.painter().text(cap.center(), Align2::CENTER_CENTER, key, font, TEXT_DIM);
+    }
+    let hint = if cfg!(target_os = "macos") {
+        "Find a song by its title or by a line of its words (Command-F)"
+    } else {
+        "Find a song by its title or by a line of its words (Ctrl-F)"
+    };
+    response.on_hover_text(hint);
+    state.find_rect = Some(find);
 }
 
 /// One row of a list in the left column. Returns its response; `live` puts a tally light at
@@ -2023,195 +2324,351 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     }
 }
 
-/// The right column: what the audience sees now, the buttons that take it away, stepping
-/// through the slides, and what comes next.
-pub fn program_panel(
+/// The least room kept for what is under Clear All (the tool tabs and the open one's
+/// contents, or the inspector). In a window too short for it the preview's picture gives up
+/// height, down to [`LEAST_PICTURE`], so the keys under it move up; this depends only on the
+/// window's height, never on what is on screen.
+const LEAST_BODY: f32 = 212.0;
+/// The least height of the preview's picture in a short window (it is 180 in a tall one).
+const LEAST_PICTURE: f32 = 112.0;
+
+/// The right column, the same in every view: the preview block (what the screens show, the
+/// slide's number and name, and one row for whatever is playing), the six layer keys, Clear
+/// All, and under them `body`: the tool tabs in the Show and Bible views, the inspector in the
+/// Edit view. Nothing from the top of the column down to Clear All moves, whatever is on
+/// screen.
+pub fn right_column(
     ui: &mut egui::Ui,
     show: &Show,
     state: &mut HomeState,
     preview: crate::home::Preview,
     commands: &mut Vec<Command>,
+    body: impl FnOnce(&mut egui::Ui, &mut HomeState),
 ) {
-    let output_stopped = state.output_stopped;
-    let frame = column_frame(Column::Right).inner_margin(egui::Margin { left: 16, right: 16, top: 14, bottom: 12 });
     let panel = egui::Panel::right("live")
         .resizable(false)
         .show_separator_line(false)
         .exact_size(column_outer(RIGHT_WIDTH))
-        .frame(frame);
+        .frame(column_frame(Column::Right));
     let shown = panel.show(ui, |ui| {
-        ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-        let slide_live = show.live().is_some();
-        let media_live = show.live_media().is_some();
+        let column = ui.max_rect();
+        ui.allocate_rect(column, Sense::hover());
+        const SIDE: f32 = 10.0;
+        let left = column.min.x + SIDE;
+        let width = column.width() - 2.0 * SIDE;
+        // Everything down to Clear All has its own fixed place. In a short window the picture
+        // is less tall, which is the only thing that ever changes these places.
+        let fixed_height = 10.0 + 316.0 + 12.0 + 44.0 + 10.0 + 44.0 + 13.0 + 50.0 + 14.0;
+        let short_by = (LEAST_BODY - (column.height() - SIDE - fixed_height)).clamp(0.0, 180.0 - LEAST_PICTURE);
+        let block = Rect::from_min_size(pos2(left, column.min.y + 10.0), vec2(width, 316.0 - short_by));
+        preview_block(ui, show, state, preview, commands, block);
+
+        // The six layer keys: each is lit while its layer shows, and clears that layer alone.
+        let keys_top = block.max.y + 12.0;
+        let each = (width - 2.0 * 7.0) / 3.0;
+        let layers = [
+            ("SLIDE", Layer::Slides, show.live().is_some(), "Clear the slide: take the words off the screens (F2)"),
+            (
+                "MEDIA",
+                Layer::Media,
+                show.live_media().is_some(),
+                "Clear the media: take the picture or video off the screens (F3)",
+            ),
+            ("PROPS", Layer::Props, !state.props_live.is_empty(), "Clear the props: take them off the screens (F4)"),
+            (
+                "MESSAGES",
+                Layer::Messages,
+                state.message_live.is_some(),
+                "Clear the message: take it off the screens (F6)",
+            ),
+            ("AUDIO", Layer::Audio, state.audio_playing.track.is_some(), "Clear the audio: stop it playing (F5)"),
+            (
+                "ANNOUNCE",
+                Layer::Announcements,
+                state.announcement_live.is_some(),
+                "Clear the announcements: take them off the screens",
+            ),
+        ];
+        for (place, (name, layer, lit, hint)) in layers.into_iter().enumerate() {
+            let corner = pos2(left + (each + 7.0) * (place % 3) as f32, keys_top + 54.0 * (place / 3) as f32);
+            let rect = Rect::from_min_size(corner, vec2(each, 44.0));
+            let (fill, edge) = if lit { (KEY_LIT, KEY_LIT_EDGE) } else { (BUTTON, KEY_EDGE) };
+            let (response, face) = raised_key(ui, rect, ui.scope_id().with(("layer key", place)), fill, edge);
+            paint_light(ui.painter(), pos2(face.min.x + 12.5, face.center().y), lit.then_some(TALLY));
+            let ink = if lit { TEXT } else { TEXT_FAINT };
+            let at = pos2(face.min.x + 23.0, face.center().y);
+            paint_spaced(ui, at, Align2::LEFT_CENTER, name, fixed_semibold(11.0), ink, 0.6);
+            if response.on_hover_text(if lit { hint } else { "Nothing showing" }).clicked() {
+                commands.push(Command::Clear(layer));
+            }
+        }
+
+        // Clear All: orange while anything shows, grey when nothing does, always in its place.
         let any_live = show.anything_live();
-        let on = show.output_enabled();
-        let width = ui.available_width();
-
-        // The heading carries the tally light: red while anything is on screen.
-        ui.horizontal(|ui| {
-            let (dot, _) = ui.allocate_exact_size(vec2(10.0, 12.0), Sense::hover());
-            ui.painter().circle_filled(dot.center(), 4.5, if any_live && on { TALLY } else { TEXT_FAINT });
-            caption(ui, "PROGRAM");
-            // Which screens the preview shows: the audience's, or the stage's.
-            let shown = if state.preview_stage { "STAGE ▾" } else { "AUDIENCE ▾" };
-            let chooser = ui
-                .add(
-                    egui::Label::new(
-                        egui::RichText::new(shown).font(semibold(10.5)).color(TEXT_DIM).extra_letter_spacing(0.8),
-                    )
-                    .sense(Sense::click()),
-                )
-                .on_hover_text("Choose which screens the preview shows");
-            egui::Popup::menu(&chooser).show(|ui| {
-                for (stage, name) in [(false, "Audience"), (true, "Stage")] {
-                    if ui.add(egui::Button::selectable(state.preview_stage == stage, name)).clicked() {
-                        state.preview_stage = stage;
-                        ui.close();
-                    }
-                }
-            });
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let (text, ink) = match (on, any_live) {
-                    (false, _) => ("OUTPUT OFF", TALLY),
-                    (true, true) => ("ON SCREEN", TALLY),
-                    (true, false) => ("CLEAR", TEXT_FAINT),
-                };
-                ui.label(egui::RichText::new(text).font(semibold(10.5)).color(ink).extra_letter_spacing(0.8));
-            });
-        });
-
-        let (picture, _) = ui.allocate_exact_size(vec2(width, (width * 9.0 / 16.0).round()), Sense::hover());
-        ui.painter().rect_filled(picture, RADIUS, Color32::BLACK);
-        // While the output fades from one picture to the next, so does this.
-        let fading = preview.amount < 1.0;
-        if let Some(before) = preview.before.filter(|_| fading) {
-            egui::Image::from_texture((before, picture.size())).corner_radius(RADIUS).paint_at(ui, picture);
-        }
-        if let Some(texture) = preview.now {
-            let veil =
-                if fading { Color32::WHITE.gamma_multiply(preview.amount.clamp(0.0, 1.0)) } else { Color32::WHITE };
-            egui::Image::from_texture((texture, picture.size())).corner_radius(RADIUS).tint(veil).paint_at(ui, picture);
-        }
-        if fading {
-            ui.ctx().request_repaint();
-        }
-        if !on && !state.preview_stage {
-            ui.painter().rect_filled(picture, RADIUS, Color32::from_black_alpha(190));
-            ui.painter().text(
-                picture.center(),
-                Align2::CENTER_CENTER,
-                "Audience output is off",
-                FontId::proportional(13.5),
-                TEXT_DIM,
-            );
-        }
-        let border = if any_live && on { Stroke::new(2.0, TALLY) } else { Stroke::new(1.0, LINE) };
-        ui.painter().rect_stroke(picture, RADIUS, border, StrokeKind::Outside);
-        // A screen that could not draw what is live shows the picture before it, whatever the
-        // preview above shows: the operator must know.
-        if let Some(undrawn) = preview.undrawn.filter(|_| on) {
-            Frame::new().fill(TALLY.gamma_multiply(0.22)).corner_radius(RADIUS).inner_margin(8).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(egui::RichText::new(undrawn.in_words()).size(12.5).color(Color32::WHITE));
-            });
-        }
-        if output_stopped {
-            ui.label(
-                egui::RichText::new("The output has stopped. Restart SoftPresenter to bring it back.").color(TALLY),
-            );
-        }
-        if let Some(video) = state.video_live.clone() {
-            let compact = ui.available_height() < ROOMY_COLUMN;
-            video_controls(ui, state, &video, width, compact);
-        }
-        ui.add_space(2.0);
-
-        // Clear: the big one takes everything off; the two under it take one layer each.
-        let clear_all = if any_live { Emphasis::Live } else { Emphasis::Idle };
-        if block_button(ui, vec2(width, 40.0), "Clear All", "esc", clear_all)
-            .on_hover_text("Clear All (Escape)")
-            .clicked()
-        {
+        let rect = Rect::from_min_size(pos2(left, keys_top + 98.0 + 13.0), vec2(width, 50.0));
+        let (fill, edge, ink) =
+            if any_live { (TALLY, CLEAR_ALL_EDGE, Color32::WHITE) } else { (BUTTON, KEY_EDGE, TEXT_FAINT) };
+        let (response, face) = raised_key(ui, rect, ui.scope_id().with("clear all"), fill, edge);
+        ui.painter().text(face.center(), Align2::CENTER_CENTER, "Clear All", semibold(15.0), ink);
+        if response.on_hover_text("Clear All: take everything off the screens (Escape)").clicked() {
             commands.push(Command::ClearAll);
         }
-        ui.horizontal(|ui| {
-            let half = (width - 8.0) / 2.0;
-            let emphasis = |live: bool| if live { Emphasis::Plain } else { Emphasis::Idle };
-            if block_button(ui, vec2(half, 30.0), "Clear Slide", "", emphasis(slide_live))
-                .on_hover_text("Take the words off the screen")
-                .clicked()
-            {
-                commands.push(Command::Clear(Layer::Slides));
-            }
-            if block_button(ui, vec2(half, 30.0), "Clear Media", "", emphasis(media_live))
-                .on_hover_text("Take the picture or video off the screen")
-                .clicked()
-            {
-                commands.push(Command::Clear(Layer::Media));
-            }
-        });
-        // The other layers, each on its own.
-        ui.horizontal(|ui| {
-            let third = (width - 16.0) / 3.0;
-            let emphasis = |live: bool| if live { Emphasis::Plain } else { Emphasis::Idle };
-            let layers = [
-                ("Props", "Clear Props: take the props off (F4)", !state.props_live.is_empty(), Layer::Props),
-                (
-                    "Messages",
-                    "Clear Messages: take the message off (F6)",
-                    state.message_live.is_some(),
-                    Layer::Messages,
-                ),
-                ("Audio", "Clear Audio: stop the audio (F5)", state.audio_playing.track.is_some(), Layer::Audio),
-            ];
-            for (name, hint, live, layer) in layers {
-                if block_button(ui, vec2(third, 26.0), name, "", emphasis(live)).on_hover_text(hint).clicked() {
-                    commands.push(Command::Clear(layer));
-                }
-            }
-        });
-        // While a song plays on the Announcements layer, a button to take it off.
-        if state.announcement_live.is_some()
-            && block_button(ui, vec2(width, 26.0), "Clear Announcements", "", Emphasis::Plain)
-                .on_hover_text("Take the announcements off the screens")
-                .clicked()
-        {
-            commands.push(Command::Clear(Layer::Announcements));
-        }
-        ui.add_space(6.0);
 
-        // Stepping through the song, with where we are between the buttons.
-        let at = show.live().or(show.cursor());
-        let song = at.and_then(|at| show.presentations().get(at.presentation));
-        ui.horizontal(|ui| {
-            let side = ((width - 16.0 - 64.0) / 2.0).floor();
-            if block_button(ui, vec2(side, 36.0), "Previous", "", Emphasis::Plain)
-                .on_hover_text("Show the slide before (Left arrow)")
-                .clicked()
-            {
-                commands.push(Command::Previous);
-            }
-            let (middle, _) = ui.allocate_exact_size(vec2(64.0, 36.0), Sense::hover());
-            // The place in the song's play order, which an arrangement can make longer.
-            let place = match (show.position(), at, song) {
-                (Some((step, length)), _, _) => format!("{} / {length}", step + 1),
-                (None, Some(at), Some(song)) => format!("{} / {}", at.slide + 1, song.slide_count()),
-                _ => "–".to_owned(),
-            };
-            ui.painter().text(middle.center(), Align2::CENTER_CENTER, place, FontId::monospace(12.5), TEXT_DIM);
-            if block_button(ui, vec2(side, 36.0), "Next", "", Emphasis::Plain)
-                .on_hover_text("Show the next slide (Right arrow or Space)")
-                .clicked()
-            {
-                commands.push(Command::Next);
-            }
-        });
-        ui.add_space(6.0);
-
-        // Timers, messages and the stage, in tabs under the rest.
-        crate::live_tabs::live_tabs(ui, show, state);
+        // Under Clear All: the tabs and the open one's contents, or the inspector.
+        let under = Rect::from_min_max(pos2(left, rect.max.y + 14.0), pos2(left + width, column.max.y - SIDE));
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(under).layout(Layout::top_down(Align::Min)));
+        child.set_clip_rect(under.intersect(ui.clip_rect()));
+        body(&mut child, state);
     });
     round_corners(ui, column_panel(shown.response.rect, Column::Right));
+}
+
+/// The preview block, in `block`: black, with a head (the on-screen light, the switch between
+/// the audience's picture and the stage's, and ON SCREEN or CLEAR), the picture, the readout
+/// (the slide's number large, then its group and song), and one row, always there, for whatever
+/// is playing.
+fn preview_block(
+    ui: &mut egui::Ui,
+    show: &Show,
+    state: &mut HomeState,
+    preview: crate::home::Preview,
+    commands: &mut Vec<Command>,
+    block: Rect,
+) {
+    let on = show.output_enabled();
+    let on_screen = show.anything_live() && on;
+    ui.painter().rect_filled(block, 13.0, Color32::BLACK);
+    let inner = block.shrink(10.0);
+
+    // The head.
+    let head = block.min.y + 24.0;
+    let light = pos2(inner.min.x + 6.5, head);
+    if on_screen {
+        ui.painter().circle_filled(light, 6.5, TALLY.gamma_multiply(0.3));
+        ui.painter().circle_filled(light, 3.5, TALLY);
+    } else {
+        ui.painter().circle_filled(light, 3.5, Color32::from_rgb(0x3a, 0x3a, 0x3a));
+    }
+    let (_, picked) = pill_switch(
+        ui,
+        "preview of",
+        pos2(inner.min.x + 18.0, head - 10.5),
+        &["AUDIENCE", "STAGE"],
+        &["Show what the audience screens show", "Show what the stage screens show"],
+        Some(usize::from(state.preview_stage)),
+        &SwitchLook::small_capitals(),
+    );
+    if let Some(picked) = picked {
+        state.preview_stage = picked == 1;
+    }
+    // Set from the right, so the longer wording takes its room to the left and nothing moves.
+    let (words, ink) = match (on, on_screen) {
+        (false, _) => ("OUTPUT OFF", CARE),
+        (true, true) => ("ON SCREEN", TALLY),
+        (true, false) => ("CLEAR", SCREEN_DIM),
+    };
+    paint_spaced(ui, pos2(inner.max.x - 3.0, head), Align2::RIGHT_CENTER, words, fixed_semibold(11.0), ink, 0.9);
+
+    // The picture: as wide as the block allows, 16 to 9, in the middle of its room.
+    let room = Rect::from_min_max(pos2(inner.min.x, block.min.y + 46.0), pos2(inner.max.x, block.max.y - 90.0));
+    let tall = room.height().min(room.width() * 9.0 / 16.0);
+    let picture = Rect::from_center_size(room.center(), vec2((tall * 16.0 / 9.0).round(), tall));
+    const CORNER: f32 = 6.0;
+    ui.painter().rect_filled(picture, CORNER, Color32::BLACK);
+    // While the output fades from one picture to the next, so does this.
+    let fading = preview.amount < 1.0;
+    if let Some(before) = preview.before.filter(|_| fading) {
+        egui::Image::from_texture((before, picture.size())).corner_radius(CORNER).paint_at(ui, picture);
+    }
+    if let Some(texture) = preview.now {
+        let veil = if fading { Color32::WHITE.gamma_multiply(preview.amount.clamp(0.0, 1.0)) } else { Color32::WHITE };
+        egui::Image::from_texture((texture, picture.size())).corner_radius(CORNER).tint(veil).paint_at(ui, picture);
+    }
+    if fading {
+        ui.ctx().request_repaint();
+    }
+    // What the operator must know is said over the picture, so nothing under it moves.
+    let over_picture = |ui: &egui::Ui, words: &str, ink: Color32| {
+        ui.painter().rect_filled(picture, CORNER, Color32::from_black_alpha(200));
+        let galley = ui.painter().layout(words.to_owned(), FontId::proportional(12.5), ink, picture.width() - 28.0);
+        ui.painter().galley(picture.center() - galley.size() / 2.0, galley, ink);
+    };
+    if state.output_stopped {
+        over_picture(ui, "The output has stopped. Restart SoftPresenter to bring it back.", CARE);
+    } else if let Some(undrawn) = preview.undrawn.filter(|_| on) {
+        // A screen that could not draw what is live shows the picture before it, whatever the
+        // preview shows: the operator must know.
+        over_picture(ui, undrawn.in_words(), CARE);
+    } else if !on && !state.preview_stage {
+        over_picture(ui, "Audience output is off", TEXT_DIM);
+    }
+    let ring = if on_screen { Stroke::new(2.0, TALLY) } else { Stroke::new(1.0, Color32::from_rgb(0x2a, 0x2a, 0x2a)) };
+    ui.painter().rect_stroke(picture, CORNER, ring, StrokeKind::Outside);
+
+    // The readout: where the song is, large, then the slide's group and the song.
+    let readout =
+        Rect::from_min_max(pos2(inner.min.x + 3.0, room.max.y + 10.0), pos2(inner.max.x - 3.0, room.max.y + 44.0));
+    let at = show.live();
+    let song = at.and_then(|at| show.presentations().get(at.presentation));
+    // The place in the song's play order, which an arrangement can make longer.
+    let place = match (show.position(), at, song) {
+        (Some((step, length)), Some(_), _) => Some((step + 1, length)),
+        (_, Some(at), Some(song)) => Some((at.slide + 1, song.slide_count())),
+        _ => None,
+    };
+    let (number, of) = match place {
+        Some((number, of)) => (format!("{number:02}"), format!("/{of:02}")),
+        None => ("--".to_owned(), "/--".to_owned()),
+    };
+    let big = fixed(26.0);
+    let small = fixed(12.0);
+    // Two dashes stand a little apart, so they do not run into one line.
+    let number = spaced(ui, &number, big.clone(), TEXT, if place.is_some() { -1.0 } else { 2.0 });
+    let of = spaced(ui, &of, small.clone(), SCREEN_DIM, 0.0);
+    // Room is kept for two figures each, so the words beside them stay where they are.
+    let kept = spaced(ui, "00", big, TEXT, -1.0).size().x + spaced(ui, "/00", small, SCREEN_DIM, 0.0).size().x;
+    let figures = number.size().x + of.size().x;
+    let base = readout.center().y + number.size().y * 0.36;
+    let (number_wide, of_tall) = (number.size().x, of.size().y);
+    ui.painter().galley(pos2(readout.min.x, readout.center().y - number.size().y / 2.0), number, TEXT);
+    ui.painter().galley(pos2(readout.min.x + number_wide, base - of_tall + 1.0), of, SCREEN_DIM);
+    let words = Rect::from_min_max(pos2(readout.min.x + figures.max(kept) + 10.0, readout.min.y), readout.max);
+    // The second line is there only when there is something to say: the video that is playing.
+    let second = state.video_live.as_ref().map(|video| video.name.as_str());
+    let first_y = if second.is_some() { words.center().y - 8.0 } else { words.center().y };
+    let painter = ui.painter().with_clip_rect(words);
+    let label = fixed(12.0);
+    match (at, song) {
+        (Some(at), Some(song)) => {
+            let group = song.slides().nth(at.slide).map(|(group, _)| group.name.to_uppercase()).unwrap_or_default();
+            let group = spaced(ui, &group, fixed_semibold(12.0), TEXT, 0.7);
+            let after = pos2(words.min.x + group.size().x, first_y);
+            painter.galley(pos2(words.min.x, first_y - group.size().y / 2.0), group, TEXT);
+            let title = format!(" \u{b7} {}", song.title.to_uppercase());
+            let title = spaced(ui, &title, label.clone(), SCREEN_DIM, 0.7);
+            painter.galley(pos2(after.x, first_y - title.size().y / 2.0), title, SCREEN_DIM);
+        }
+        _ => {
+            let words_now = if show.anything_live() { "NO SLIDE ON SCREEN" } else { "NOTHING ON SCREEN" };
+            let line = spaced(ui, words_now, label.clone(), SCREEN_DIM, 0.7);
+            painter.galley(pos2(words.min.x, first_y - line.size().y / 2.0), line, SCREEN_DIM);
+        }
+    }
+    if let Some(second) = second {
+        let line = spaced(ui, second, label, TEXT_FAINT, 0.3);
+        painter.galley(pos2(words.min.x, words.center().y + 9.0 - line.size().y / 2.0), line, TEXT_FAINT);
+    }
+
+    // The row for whatever is playing: always there, so Clear All never moves.
+    let row =
+        Rect::from_min_max(pos2(inner.min.x + 2.0, readout.max.y + 6.0), pos2(inner.max.x - 2.0, readout.max.y + 36.0));
+    if let Some(video) = state.video_live.clone() {
+        video_row(ui, state, &video, row);
+    } else if let Some(song) = state.announcement_live.and_then(|index| show.presentations().get(index)) {
+        if playing_line(ui, row, "Announcements:", &song.title, "Clear", "Take the announcements off the screens") {
+            commands.push(Command::Clear(Layer::Announcements));
+        }
+    } else if let Some(pattern) = state.test_pattern {
+        let name = match pattern {
+            crate::props::TestPattern::ColorBars => "Colour bars",
+            crate::props::TestPattern::Grid => "Grid",
+            crate::props::TestPattern::White => "White",
+        };
+        if playing_line(ui, row, "Test pattern:", name, "Off", "Take the test pattern off the audience screens") {
+            state.test_pattern = None;
+        }
+    }
+}
+
+/// One line in the preview block's row for what is playing: what it is, its name, and a small
+/// key at the right that stops it. Returns true when the key was clicked.
+fn playing_line(ui: &egui::Ui, row: Rect, what: &str, name: &str, key: &str, hint: &str) -> bool {
+    let font = FontId::proportional(12.0);
+    let key_wide = ui.painter().layout_no_wrap(key.to_owned(), font.clone(), TEXT).size().x + 18.0;
+    let button = Rect::from_min_size(pos2(row.max.x - key_wide, row.center().y - 13.0), vec2(key_wide, 26.0));
+    let response = ui.interact(button, ui.scope_id().with(("playing line", what)), Sense::click());
+    let fill = if response.hovered() { BUTTON_HOVER } else { Color32::from_rgb(0x1e, 0x1e, 0x1e) };
+    ui.painter().rect_filled(button, 13.0, fill);
+    ui.painter().text(button.center(), Align2::CENTER_CENTER, key, font.clone(), TEXT);
+    let words = Rect::from_min_max(row.min, pos2(button.min.x - 8.0, row.max.y));
+    let painter = ui.painter().with_clip_rect(words);
+    let said = painter.text(words.left_center(), Align2::LEFT_CENTER, what, font, SCREEN_DIM);
+    painter.text(pos2(said.max.x + 5.0, words.center().y), Align2::LEFT_CENTER, name, semibold(12.0), TEXT);
+    response.on_hover_text(hint).clicked()
+}
+
+/// How far Forward goes in the video on screen, in seconds.
+const VIDEO_STEP: f64 = 10.0;
+
+/// The keys of the video on screen, in the preview block's one row: Play or Pause, Start Over,
+/// Forward ten seconds, a slim bar to click or drag through, the time left, Loop and Sound.
+fn video_row(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::VideoLive, row: Rect) {
+    use crate::home::VideoRequest;
+    let clock = |seconds: f64| crate::audio::clock(std::time::Duration::from_secs_f64(seconds.max(0.0)));
+    let length = video.duration;
+    let y = row.center().y;
+    let dark = Color32::from_rgb(0x1e, 0x1e, 0x1e);
+    // Play or Pause: the one light key.
+    let play_at = pos2(row.min.x + 14.0, y);
+    let big = ui.interact(
+        Rect::from_center_size(play_at, egui::Vec2::splat(28.0)),
+        ui.scope_id().with("video play"),
+        Sense::click(),
+    );
+    ui.painter().circle_filled(play_at, 14.0, if big.hovered() { Color32::WHITE } else { TEXT });
+    let (play, words) = if video.playing { (Icon::Pause, "Pause") } else { (Icon::Play, "Play") };
+    let nudge = if video.playing { 0.0 } else { 1.0 };
+    let glyph = Rect::from_center_size(play_at + vec2(nudge, 0.0), egui::Vec2::splat(12.0));
+    icons::paint(ui.painter(), play, glyph, Color32::from_gray(17));
+    if big.on_hover_text(words).clicked() {
+        state.video_request = Some(VideoRequest::TogglePause);
+    }
+    // Start Over, and Forward ten seconds.
+    let start_at = pos2(row.min.x + 45.0, y);
+    let start = round_key(ui, start_at, 26.0, "video start", dark, false);
+    icons::paint(ui.painter(), Icon::ToStart, Rect::from_center_size(start_at, egui::Vec2::splat(12.0)), TEXT);
+    if start.on_hover_text("Start over, from the beginning").clicked() {
+        state.video_request = Some(VideoRequest::Restart);
+    }
+    let forward_at = pos2(row.min.x + 75.0, y);
+    let forward = round_key(ui, forward_at, 26.0, "video forward", dark, false);
+    // The arrow that turns clockwise (the icon named Back is drawn that way).
+    icons::paint(ui.painter(), Icon::Back, Rect::from_center_size(forward_at, egui::Vec2::splat(15.0)), TEXT);
+    if forward.on_hover_text("Forward 10 seconds").clicked()
+        && let Some(length) = length
+    {
+        state.video_request = Some(VideoRequest::Seek((video.position + VIDEO_STEP).min(length)));
+    }
+    // Sound and Loop, from the right: each the lighter grey while it is on.
+    let sound_at = pos2(row.max.x - 13.0, y);
+    let (sound, sound_hint) = if video.muted {
+        (Icon::Muted, "Muted. Click to play its sound")
+    } else {
+        (Icon::Sound, "Its sound plays. Click to mute")
+    };
+    let response = round_key(ui, sound_at, 26.0, "video sound", dark, !video.muted);
+    let ink = if video.muted { TEXT_FAINT } else { TEXT };
+    icons::paint(ui.painter(), sound, Rect::from_center_size(sound_at, egui::Vec2::splat(14.0)), ink);
+    if response.on_hover_text(sound_hint).clicked() {
+        state.video_request = Some(VideoRequest::Muted(!video.muted));
+    }
+    let loop_at = pos2(row.max.x - 43.0, y);
+    let loop_hint = if video.looping {
+        "Looping: it starts again at the end. Click to stop looping"
+    } else {
+        "Not looping: it stops at the end. Click to loop"
+    };
+    let response = round_key(ui, loop_at, 26.0, "video loop", dark, video.looping);
+    let ink = if video.looping { TEXT } else { TEXT_FAINT };
+    icons::paint(ui.painter(), Icon::Loop, Rect::from_center_size(loop_at, egui::Vec2::splat(14.0)), ink);
+    if response.on_hover_text(loop_hint).clicked() {
+        state.video_request = Some(VideoRequest::Looping(!video.looping));
+    }
+    // The bar between them, and the time left at its right.
+    let bar = Rect::from_x_y_ranges(row.min.x + 98.0..=row.max.x - 112.0, y - 8.0..=y + 8.0);
+    let shown = video_bar(ui, state, video, bar);
+    let left = length.map_or_else(|| "\u{2013}".to_owned(), |length| format!("\u{2212}{}", clock(length - shown)));
+    ui.painter().text(pos2(row.max.x - 64.0, y), Align2::RIGHT_CENTER, left, fixed(12.0), SCREEN_DIM);
 }
 
 /// The strip under the slides that holds pictures to show behind the words. It is slim until
@@ -2760,167 +3217,6 @@ fn transition_settings(ui: &mut egui::Ui, look: &mut sp_model::Transition, id: &
     }
 }
 
-/// The colour of a choice that is on (the video loops).
-const ON: Color32 = Color32::from_rgb(52, 199, 89);
-
-/// How far Forward goes in the video on screen, in seconds.
-const VIDEO_STEP: f64 = 10.0;
-
-/// How tall the right column's room under the preview must be for the video's controls to take
-/// their full size; in less, they take two rows, leaving the tabs under them room.
-const ROOMY_COLUMN: f32 = 650.0;
-
-/// The video on screen, as a media player shows it: its name; a slim bar to click or drag
-/// through, the playhead showing under the pointer; the time gone and the time left; and the
-/// controls in one group about Play or Pause in the middle: Loop, Start Over, Play or Pause,
-/// Forward ten seconds, and Sound. `compact` (a short window) puts the same in two rows: the
-/// name with the times, then Play or Pause and Start Over, the bar, and Forward, Loop and Sound.
-fn video_controls(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::VideoLive, width: f32, compact: bool) {
-    use crate::home::VideoRequest;
-    let clock = |seconds: f64| crate::audio::clock(std::time::Duration::from_secs_f64(seconds.max(0.0)));
-    let length = video.duration;
-    let left = |shown: f64| length.map_or_else(|| "–".to_owned(), |length| format!("−{}", clock(length - shown)));
-    // How big the buttons and their icons are.
-    let scale = if compact { 0.75 } else { 1.0 };
-    // A round button that is only its icon: a patch under the pointer.
-    let round = |ui: &egui::Ui, at: egui::Pos2, id: &str, hint: &str| {
-        let radius = 17.0 * scale;
-        let cell = Rect::from_center_size(at, egui::Vec2::splat(radius * 2.0));
-        let response = ui.interact(cell, ui.scope_id().with(id), Sense::click());
-        if response.hovered() {
-            ui.painter().circle_filled(at, radius, Color32::from_white_alpha(18));
-        }
-        response.on_hover_text(hint)
-    };
-    let margin = if compact {
-        egui::Margin { left: 10, right: 10, top: 8, bottom: 6 }
-    } else {
-        egui::Margin { left: 14, right: 14, top: 10, bottom: 8 }
-    };
-    egui::Frame::new().fill(CARD).corner_radius(10).inner_margin(margin).show(ui, |ui| {
-        ui.set_width(width - f32::from(margin.left + margin.right));
-        ui.spacing_mut().item_spacing = vec2(6.0, 2.0);
-        // The name, with a small mark that it is a video; short, the times at its right.
-        ui.horizontal(|ui| {
-            let (mark, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-            icons::paint(ui.painter(), Icon::Camera, mark, TEXT_DIM);
-            let name =
-                egui::Label::new(egui::RichText::new(video.name.as_str()).font(semibold(12.5)).color(TEXT)).truncate();
-            if compact {
-                let times = format!("{} · {}", clock(video.position), left(video.position));
-                let font = FontId::proportional(11.0);
-                let wide = ui.painter().layout_no_wrap(times.clone(), font.clone(), TEXT_DIM).size().x;
-                let room = (ui.available_width() - wide - 8.0).max(0.0);
-                ui.allocate_ui(vec2(room, 16.0), |ui| ui.add(name));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(egui::RichText::new(times).font(font).color(TEXT_DIM));
-                });
-            } else {
-                ui.add(name);
-            }
-        });
-        // Where the bar, the times and the buttons go.
-        let (bar, times, row) = if compact {
-            let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
-            let bar =
-                Rect::from_x_y_ranges(row.min.x + 64.0..=row.max.x - 88.0, row.center().y - 8.0..=row.center().y + 8.0);
-            (bar, None, row)
-        } else {
-            ui.add_space(6.0);
-            let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
-            let (times, _) = ui.allocate_exact_size(vec2(ui.available_width(), 14.0), Sense::hover());
-            let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 46.0), Sense::hover());
-            (bar, Some(times), row)
-        };
-        let shown = video_bar(ui, state, video, bar);
-        // The time gone, and the time left.
-        if let Some(times) = times {
-            let font = FontId::proportional(11.0);
-            ui.painter().text(times.left_center(), Align2::LEFT_CENTER, clock(shown), font.clone(), TEXT_DIM);
-            ui.painter().text(times.right_center(), Align2::RIGHT_CENTER, left(shown), font, TEXT_DIM);
-        }
-        // Play or Pause, Start Over, Forward, Loop and Sound.
-        let [play_at, start_at, forward_at, loop_at, sound_at] = if compact {
-            let y = row.center().y;
-            [15.0, 45.0, -69.0, -41.0, -13.0].map(|x: f32| pos2(if x > 0.0 { row.min.x + x } else { row.max.x + x }, y))
-        } else {
-            let middle = row.center();
-            [0.0, -1.0, 1.0, -2.0, 2.0].map(|n: f32| middle + vec2(52.0 * n, 0.0))
-        };
-        // Play or Pause: the biggest, a white circle.
-        let radius = 20.0 * scale;
-        let big = ui.interact(
-            Rect::from_center_size(play_at, egui::Vec2::splat(radius * 2.0 + 2.0)),
-            ui.scope_id().with("video play"),
-            Sense::click(),
-        );
-        ui.painter().circle_filled(play_at, if big.hovered() { radius + 1.0 } else { radius }, Color32::WHITE);
-        let (play, words) = if video.playing { (Icon::Pause, "Pause") } else { (Icon::Play, "Play") };
-        let nudge = if video.playing { 0.0 } else { 1.5 * scale };
-        icons::paint(
-            ui.painter(),
-            play,
-            Rect::from_center_size(play_at + vec2(nudge, 0.0), egui::Vec2::splat(16.0 * scale)),
-            Color32::from_gray(28),
-        );
-        if big.on_hover_text(words).clicked() {
-            state.video_request = Some(VideoRequest::TogglePause);
-        }
-        // Start Over, and Forward ten seconds.
-        if round(ui, start_at, "video start", "Start over, from the beginning").clicked() {
-            state.video_request = Some(VideoRequest::Restart);
-        }
-        icons::paint(
-            ui.painter(),
-            Icon::ToStart,
-            Rect::from_center_size(start_at, egui::Vec2::splat(15.0 * scale)),
-            TEXT,
-        );
-        let forward = round(ui, forward_at, "video forward", "Forward 10 seconds");
-        // The arrow that turns clockwise (the icon named Back is drawn that way), with 10 in it.
-        icons::paint(
-            ui.painter(),
-            Icon::Back,
-            Rect::from_center_size(forward_at, egui::Vec2::splat(20.0 * scale)),
-            TEXT,
-        );
-        let ten = FontId::proportional(if compact { 7.5 } else { 8.5 });
-        ui.painter().text(forward_at + vec2(0.0, 1.5 * scale), Align2::CENTER_CENTER, "10", ten, TEXT);
-        if forward.clicked()
-            && let Some(length) = length
-        {
-            state.video_request = Some(VideoRequest::Seek((video.position + VIDEO_STEP).min(length)));
-        }
-        // Loop and Sound: green while it loops; a speaker, struck through while muted.
-        let (loop_ink, loop_hint) = if video.looping {
-            (ON, "Looping: it starts again at the end. Click to stop looping")
-        } else {
-            (TEXT_FAINT, "Not looping: it stops at the end. Click to loop")
-        };
-        if round(ui, loop_at, "video loop", loop_hint).clicked() {
-            state.video_request = Some(VideoRequest::Looping(!video.looping));
-        }
-        icons::paint(
-            ui.painter(),
-            Icon::Loop,
-            Rect::from_center_size(loop_at, egui::Vec2::splat(17.0 * scale)),
-            loop_ink,
-        );
-        if video.looping {
-            ui.painter().circle_filled(loop_at + vec2(0.0, 13.0 * scale), 1.8 * scale, ON);
-        }
-        let (sound, sound_ink, sound_hint) = if video.muted {
-            (Icon::Muted, TEXT_FAINT, "Muted. Click to play its sound")
-        } else {
-            (Icon::Sound, TEXT, "Its sound plays. Click to mute")
-        };
-        if round(ui, sound_at, "video sound", sound_hint).clicked() {
-            state.video_request = Some(VideoRequest::Muted(!video.muted));
-        }
-        icons::paint(ui.painter(), sound, Rect::from_center_size(sound_at, egui::Vec2::splat(17.0 * scale)), sound_ink);
-    });
-}
-
 /// The bar of the video on screen, in `bar`: a slim rounded track, the part played in white, the
 /// playhead under the pointer (and while dragged), and the time a click would go to over it.
 /// Clicking or dragging asks for the video to go there. Returns the time it shows.
@@ -3303,16 +3599,13 @@ mod tests {
         Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE }
     }
 
-    /// Runs the video controls (full size, or in two rows) through frames of input, and returns
-    /// what each frame asked of the video.
-    fn video_frames(
-        video: &crate::home::VideoLive,
-        compact: bool,
-        frames: &[Vec<Event>],
-    ) -> Vec<Option<crate::home::VideoRequest>> {
+    /// Runs the video's row of keys through frames of input, and returns what each frame asked
+    /// of the video. The row is 316 wide from 20 in, so its bar runs from 118 to 224.
+    fn video_frames(video: &crate::home::VideoLive, frames: &[Vec<Event>]) -> Vec<Option<crate::home::VideoRequest>> {
         let ctx = egui::Context::default();
         let mut state = HomeState::default();
         let mut asked = Vec::new();
+        let row = Rect::from_min_size(pos2(20.0, 20.0), vec2(316.0, 30.0));
         for (n, events) in frames.iter().enumerate() {
             let input = RawInput {
                 screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 300.0))),
@@ -3320,7 +3613,7 @@ mod tests {
                 events: events.clone(),
                 ..RawInput::default()
             };
-            let output = ctx.run_ui(input, |ui| video_controls(ui, &mut state, video, 300.0, compact));
+            let output = ctx.run_ui(input, |ui| video_row(ui, &mut state, video, row));
             output.drop_without_applying_deltas();
             asked.push(state.video_request.take());
         }
@@ -3338,31 +3631,47 @@ mod tests {
             looping: false,
             muted: false,
         };
-        // Full size the bar is a row of its own; in two rows it is between the buttons. Find it
-        // by where a drag along it scrubs (from x 100 to 180, inside the bar either way).
-        for compact in [false, true] {
-            let found = (10..100).map(|y| y as f32).find_map(|y| {
-                let frames = vec![
-                    vec![Event::PointerMoved(pos2(100.0, y))],
-                    vec![press(pos2(100.0, y), true)],
-                    vec![Event::PointerMoved(pos2(140.0, y))],
-                    vec![Event::PointerMoved(pos2(180.0, y))],
-                    vec![press(pos2(180.0, y), false)],
-                    vec![],
-                ];
-                let asked = video_frames(&video, compact, &frames);
-                asked.iter().any(|a| matches!(a, Some(VideoRequest::Scrub(_)))).then_some(asked)
-            });
-            let asked = found.unwrap_or_else(|| panic!("a drag along the bar scrubs (compact: {compact})"));
-            let scrubs: Vec<f64> = asked
-                .iter()
-                .filter_map(|a| if let Some(VideoRequest::Scrub(at)) = a { Some(*at) } else { None })
-                .collect();
-            let landed = asked.iter().find_map(|a| if let Some(VideoRequest::Seek(at)) = a { Some(*at) } else { None });
-            let landed = landed.expect("letting go goes there");
-            assert!(scrubs.windows(2).all(|w| w[0] <= w[1]), "dragging right moves on: {scrubs:?}");
-            assert!(landed >= scrubs[0] && landed <= 100.0 && landed > 30.0, "{landed} after {scrubs:?}");
-        }
+        // A drag along the bar, in the middle of the row's height.
+        let frames = vec![
+            vec![Event::PointerMoved(pos2(130.0, 35.0))],
+            vec![press(pos2(130.0, 35.0), true)],
+            vec![Event::PointerMoved(pos2(170.0, 35.0))],
+            vec![Event::PointerMoved(pos2(210.0, 35.0))],
+            vec![press(pos2(210.0, 35.0), false)],
+            vec![],
+        ];
+        let asked = video_frames(&video, &frames);
+        let scrubs: Vec<f64> =
+            asked.iter().filter_map(|a| if let Some(VideoRequest::Scrub(at)) = a { Some(*at) } else { None }).collect();
+        assert!(!scrubs.is_empty(), "a drag along the bar scrubs: {asked:?}");
+        let landed = asked.iter().find_map(|a| if let Some(VideoRequest::Seek(at)) = a { Some(*at) } else { None });
+        let landed = landed.expect("letting go goes there");
+        assert!(scrubs.windows(2).all(|w| w[0] <= w[1]), "dragging right moves on: {scrubs:?}");
+        assert!(landed >= scrubs[0] && landed <= 100.0 && landed > 30.0, "{landed} after {scrubs:?}");
+    }
+
+    #[test]
+    fn the_videos_keys_ask_for_what_they_say() {
+        use crate::home::VideoRequest;
+        let video = crate::home::VideoLive {
+            name: "Walk-in".to_owned(),
+            position: 5.0,
+            duration: Some(100.0),
+            playing: true,
+            looping: false,
+            muted: false,
+        };
+        // From the left: Play or Pause, Start Over, Forward; from the right: Sound, then Loop.
+        let click = |x: f32| {
+            let at = pos2(x, 35.0);
+            let frames = vec![vec![Event::PointerMoved(at)], vec![press(at, true)], vec![press(at, false)], vec![]];
+            video_frames(&video, &frames).into_iter().flatten().next()
+        };
+        assert_eq!(click(34.0), Some(VideoRequest::TogglePause));
+        assert_eq!(click(65.0), Some(VideoRequest::Restart));
+        assert_eq!(click(95.0), Some(VideoRequest::Seek(15.0)));
+        assert_eq!(click(293.0), Some(VideoRequest::Looping(true)));
+        assert_eq!(click(323.0), Some(VideoRequest::Muted(true)));
     }
 
     #[test]

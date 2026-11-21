@@ -153,13 +153,12 @@ feature changes, this page changes in the same commit.
   WMV, FLV, MPEG, TS and others, or an MP4 the Mac's player can't decode) through FFmpeg,
   played as it is, never converted first. FFmpeg comes inside the app (an LGPL build of FFmpeg
   9.0.2, with its licence and source in the app's Resources), so nothing needs installing; AV1
-  plays on Macs whose video hardware decodes it (M3 and later). Under the Program preview, a video on screen is shown as a
-  media player shows it: its name, a slim bar to click or drag through (the time a click goes to
-  shows over it), the time gone and the time left, and one group of controls about a round Play
-  or Pause: Loop (green, with a dot, while on), Start Over, Forward 10 seconds and Sound (a
-  speaker, struck through while muted). In a window too short for all of that, the player takes
-  two rows (the name with the times; then Play or Pause, Start Over, the bar, Forward, Loop and
-  Sound), leaving the tabs under it more room; a tab that goes on below what shows fades out at
+  plays on Macs whose video hardware decodes it (M3 and later). In the preview block, a video on screen has one row of keys
+  under the slide's number and name: a round Play or Pause, Start Over, Forward 10 seconds, a
+  slim bar to click or drag through (the time a click goes to shows over it), the time left,
+  Loop and Sound (each a lighter grey while it is on); its name is the second line of the
+  readout. The row is always there, empty when nothing plays, so nothing under it moves. A tool
+  tab that goes on below what shows fades out at
   its foot. An item's
   right-click menu sets its Scaling (Scale to Fill, Scale to Fit, Stretch to Fill), whether a
   video loops, and the media playlists it is in; the menu beside MEDIA shows All Media or one
@@ -183,9 +182,9 @@ feature changes, this page changes in the same commit.
 - **Announcements layer**: a song's right-click menu has Play on Announcements Layer. Its
   slides go round by themselves (each for its Go to Next time, or 8 seconds) on a layer over
   the slides and media and under props and messages, dissolving from one to the next. Each
-  screen's Look can show or hide it (a lobby screen can show only announcements); Clear
-  Announcements (under the clear buttons while it plays, or the Clear menu) and Clear All take
-  it off.
+  screen's Look can show or hide it (a lobby screen can show only announcements); the
+  Announce key (lit while it plays), Presentation › Clear Announcements and Clear All take it
+  off; while it plays, the preview block's row names the song with a Clear key beside it.
 - **Media slides**: drag a media item onto a slide to have that slide show it when it goes on
   screen, or onto the space under the slides (or Add Slide) to add a slide of its own; also
   Add to Song as Slide on the item's right-click menu, and Media on a slide's. The slide's
@@ -210,13 +209,25 @@ feature changes, this page changes in the same commit.
   songs, show a picture from the media bin, optionally when the app starts), **Audio** (playlists of tracks such as walk-in music: play, pause,
   skip 15 seconds, volume, Play Through to the next track, Shuffle, and a crossfade of up to ten
   seconds from one track into the next; F5 or Clear All stops it), and a **Stage Message** for the people on
-  stage, in tabs under the Program panel. A slide can carry the same actions, done when it goes on screen.
-- The Program preview shows what the audience sees, drawn by the screens' own renderer, so a
-  playing video, a fade or a build moves in it as on the screens; or (from the chooser beside
-  PROGRAM) what the stage screens show, with the time kept up to date. If a screen cannot draw
+  stage, in tabs under Clear All in the right column. A slide can carry the same actions, done when it goes on screen.
+- **The window** is three round panels on a dark window: the left column, the middle, and a
+  right column that is the same in every view. Along the top: the views (Show, Bible, Edit,
+  Themes), a find box (it searches the song library: titles first, then lines of the songs'
+  words; it does not search the Bible, playlists or media), the clock, the Audience and Stage
+  keys, a `?` (it opens Settings at Key Mappings) and Settings.
+- **The right column**: the preview block, six layer keys (Slide, Media, Props, Messages, Audio,
+  Announce: each is lit while its layer shows, and pressing it clears that layer alone), Clear
+  All (orange while anything shows, grey when nothing does), and under it the tool tabs, or in
+  the Edit view and the Theme Editor the inspector. Nothing from the preview down to Clear All
+  moves, whatever is on screen. In a window too short to leave room under Clear All, the
+  preview's picture is less tall.
+- The preview shows what the audience sees, drawn by the screens' own renderer, so a
+  playing video, a fade or a build moves in it as on the screens; or (from the switch at its
+  head) what the stage screens show, with the time kept up to date. Under the picture: the
+  slide's number in the song as it is played, its group and the song. If a screen cannot draw
   what is live because there is far too much on the slide, or because the GPU did not answer
-  in time, it keeps what it last showed, and a warning under the preview says so until it
-  draws again. (The warning covers those two cases. It does not see a picture the GPU dropped
+  in time, it keeps what it last showed, and a warning over the preview's picture says so
+  until it draws again. (The warning covers those two cases. It does not see a picture the GPU dropped
   after it was worked out, or a window macOS is not showing.)
 - **Stage layouts**: each stage screen picks a layout in the Stage tab (Words and Next, Words
   Only, Words and Notes, Clock and Timer, or your own). Screens > Edit Stage Layouts… lays them
