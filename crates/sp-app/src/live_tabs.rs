@@ -196,17 +196,14 @@ fn clock_field(ui: &mut egui::Ui, id: egui::Id, current: Option<u32>, empty: &st
     None
 }
 
-/// How long until a running timer's readout next changes: at its next whole second, counted
-/// from when it started (a countdown to a time of day goes by the clock's seconds).
-fn until_next_second(timer: &Timer, now: Instant) -> Option<Duration> {
-    let started = timer.run.started?;
-    let into_second = match timer.kind {
-        timers::Kind::CountdownTo { .. } => {
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos())
-        }
-        _ => (timer.run.banked + now.saturating_duration_since(started)).subsec_nanos(),
-    };
-    Some(Duration::from_nanos(1_000_000_000 - u64::from(into_second)))
+/// How long until the clock's next whole second, when a running timer's readout is drawn again.
+/// Every timer, and the clock in the top bar, are drawn at the same moment, so the window is
+/// drawn once a second however many run; a timer started part way through a second shows its
+/// new second up to a second late.
+fn until_next_second() -> Duration {
+    let into_second =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos());
+    Duration::from_nanos(1_000_000_000 - u64::from(into_second))
 }
 
 /// Something asked of a timer from its card.
@@ -250,14 +247,11 @@ fn timers_tab(ui: &mut egui::Ui, state: &mut HomeState) {
     let now = Instant::now();
     let day = timers::seconds_into_day();
     let mut asked: Option<(usize, TimerAsk)> = None;
-    let mut next_tick: Option<Duration> = None;
+    let next_tick = state.timers.iter().any(Timer::running).then(until_next_second);
     for index in 0..state.timers.len() {
         let id = state.timers[index].id;
         let open = state.timer_open == Some(id);
         let running = state.timers[index].running();
-        if let Some(wait) = until_next_second(&state.timers[index], now) {
-            next_tick = Some(next_tick.map_or(wait, |sooner| sooner.min(wait)));
-        }
         card(ui, if running { CARD_RUNNING } else { CARD }, |ui| {
             let timer = &state.timers[index];
             let width = ui.available_width();
