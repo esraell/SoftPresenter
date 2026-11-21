@@ -299,33 +299,71 @@ impl Fonts {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use std::sync::mpsc::channel;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use parley::PositionedLayoutItem;
+    use parley::fontique::{FallbackKey, Script};
+    use sp_model::{Object, Role, Slide, Theme};
 
-    use super::Fonts;
-    use crate::scene::lay_out;
+    use super::*;
+    use crate::scene::{build_scene, lay_out};
 
-    /// A font with pair kerning that this computer has, to copy and spoil. `None` on a computer
-    /// with none of them.
-    fn a_font_with_kerning() -> Option<PathBuf> {
+    /// Fonts this computer has, with pair kerning, to copy and spoil. Empty on a computer with
+    /// none of them.
+    fn fonts_to_copy() -> Vec<PathBuf> {
         [
             "/System/Library/Fonts/Supplemental/Arial.ttf",
             "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
             "C:\\Windows\\Fonts\\arial.ttf",
+            "C:\\Windows\\Fonts\\times.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
             "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/DejaVuSerif.ttf",
         ]
         .iter()
         .map(PathBuf::from)
-        .find(|path| path.is_file())
+        .filter(|path| path.is_file())
+        .collect()
     }
 
-    /// Every glyph of a text laid out in the one family these fonts have, with its place.
-    fn glyphs(fonts: &mut Fonts, text: &str) -> Vec<(u32, f32, f32)> {
-        let mut style = sp_model::Theme::builtin().templates[0].boxes[0].clone();
-        style.font_family = fonts.family_names().into_iter().next().expect("a family in the copy");
+    /// A folder of its own for a test, beside the test program, with a copy of `font` in it.
+    fn copy_into(name: &str, font: &Path) -> PathBuf {
+        let program = std::env::current_exe().expect("this test program");
+        let folder = program.parent().expect("its folder").join(format!("font-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).expect("a folder for the copy");
+        std::fs::copy(font, folder.join(font.file_name().expect("a name"))).expect("a copy");
+        folder
+    }
+
+    /// The one font file in a folder.
+    fn the_file_in(folder: &Path) -> PathBuf {
+        std::fs::read_dir(folder).expect("the folder").flatten().next().expect("the copy").path()
+    }
+
+    /// The family of the fonts in a folder (only the folder is looked at; nothing is read).
+    fn family_in(folder: &Path) -> String {
+        Fonts::only_from(&[folder]).family_names().into_iter().next().expect("a family in the copy")
+    }
+
+    /// Whether a file has been read for the shaper, or is being read.
+    fn read_or_reading(path: &Path) -> bool {
+        FILES
+            .get()
+            .and_then(|files| files.lock().ok())
+            .is_some_and(|files| files.read.get(path).is_some_and(Option::is_some) || files.reading.contains(path))
+    }
+
+    /// Every glyph of a text laid out in a family, with its place.
+    fn glyphs(fonts: &mut Fonts, family: &str, text: &str) -> Vec<(u32, f32, f32)> {
+        let mut style = Theme::builtin().templates[0].boxes[0].clone();
+        style.font_family = family.to_owned();
         let layout = lay_out(fonts, text, &style, 60.0, 10_000.0);
         let mut found = Vec::new();
         for line in layout.lines() {
@@ -338,9 +376,44 @@ mod tests {
         found
     }
 
+    /// A slide of a text in a family as the GPU would be handed it: the scene, with every
+    /// letter's outline read from the font, which the renderer does as it draws.
+    fn drawn(fonts: &mut Fonts, family: &str, text: &str) -> Vec<u8> {
+        let mut theme = Theme::builtin();
+        for template in &mut theme.templates {
+            for style in &mut template.boxes {
+                style.font_family = family.to_owned();
+            }
+        }
+        let slide = Slide::new(vec![Object::text(Role::primary(), text)]);
+        let built = build_scene(fonts, Some(&slide), &theme, 640, 360);
+        let mut packed = Vec::new();
+        let _ = vello::low_level::vello_encoding::Resolver::new().resolve(built.scene.encoding(), &mut packed);
+        packed
+    }
+
+    /// What is laid out and drawn before the file changes.
     const BEFORE: &str = "mm";
     /// Letters not laid out before the file changes, in pairs a font kerns.
     const AFTER: &str = "AVATAR Type WAVE To. LTV 0123456789 fjord";
+
+    /// Changes a font file in place, as another program might.
+    fn spoil(file: &Path, how: &str) {
+        match how {
+            "cut" => {
+                let open = std::fs::OpenOptions::new().write(true).open(file).expect("the copy opens");
+                open.set_len(4096).expect("the copy is cut short");
+            }
+            "zeroed" => std::fs::write(file, vec![0u8; 20_000]).expect("the copy is written over"),
+            "replaced" => {
+                let other = std::env::var_os("SP_TEST_FONT_OTHER").expect("another font");
+                let bytes = std::fs::read(other).expect("the other font");
+                std::fs::write(file, bytes).expect("the copy is written over with another font");
+            }
+            "gone" => std::fs::remove_file(file).expect("the copy is taken away"),
+            other => panic!("no such change: {other}"),
+        }
+    }
 
     /// Run by the test below in a process of its own, because where this goes wrong the
     /// process is killed, and that must not be the one running the tests.
@@ -349,54 +422,148 @@ mod tests {
         let Some(folder) = std::env::var_os("SP_TEST_FONT_FOLDER").map(PathBuf::from) else { return };
         let how = std::env::var("SP_TEST_FONT_CHANGE").unwrap_or_default();
         let spoilt = folder.join("spoilt");
-        let file = std::fs::read_dir(&spoilt).expect("the folder").flatten().next().expect("the copy").path();
-        let mut fonts = Fonts::only_from(&[&spoilt]);
-        assert!(!glyphs(&mut fonts, BEFORE).is_empty());
-        match how.as_str() {
-            "cut" => {
-                let open = std::fs::OpenOptions::new().write(true).open(&file).expect("the copy opens");
-                open.set_len(4096).expect("the copy is cut short");
-            }
-            "rewritten" => std::fs::write(&file, vec![0u8; 20_000]).expect("the copy is written over"),
-            "gone" => std::fs::remove_file(&file).expect("the copy is taken away"),
-            other => panic!("no such change: {other}"),
+        let file = the_file_in(&spoilt);
+        let family = family_in(&spoilt);
+        if let Some(how) = how.strip_prefix("before-first-use-") {
+            // Spoilt after the fonts were looked for, before anything was laid out in it:
+            // drawn as a family the computer doesn't have is.
+            let mut fonts = Fonts::new();
+            fonts.font_cx.collection.load_fonts_from_paths([&spoilt]);
+            spoil(&file, how);
+            let missing = "A Family Nobody Has";
+            let laid_out = glyphs(&mut fonts, &family, AFTER);
+            assert_eq!(laid_out, glyphs(&mut fonts, missing, AFTER));
+            assert!(drawn(&mut fonts, &family, AFTER) == drawn(&mut fonts, missing, AFTER));
+            let letters = laid_out.iter().filter(|glyph| glyph.0 != 0).count();
+            println!(
+                "helper: drawn as a missing font ({letters} letters) after the file was {how} before its first use"
+            );
+            return;
         }
-        let after = glyphs(&mut fonts, AFTER);
-        let whole = glyphs(&mut Fonts::only_from(&[&folder.join("whole")]), AFTER);
+        let mut fonts = Fonts::only_from(&[&spoilt]);
+        assert!(!glyphs(&mut fonts, &family, BEFORE).is_empty());
+        let _ = drawn(&mut fonts, &family, BEFORE);
+        spoil(&file, &how);
+        let after = glyphs(&mut fonts, &family, AFTER);
+        let after_drawn = drawn(&mut fonts, &family, AFTER);
+        let mut whole = Fonts::only_from(&[&folder.join("whole")]);
         assert!(after.len() >= AFTER.chars().filter(|c| !c.is_whitespace()).count());
         assert!(after.iter().all(|glyph| glyph.0 != 0), "a letter was laid out as the no-such-letter box");
-        assert_eq!(after, whole, "the text is laid out differently once the file has changed");
+        assert_eq!(after, glyphs(&mut whole, &family, AFTER), "laid out differently once the file changed");
+        assert!(after_drawn == drawn(&mut whole, &family, AFTER), "drawn differently once the file changed");
         println!("helper: the same after the file was {how}");
     }
 
     /// A font file that another program cuts short, writes over or takes away while text is
-    /// being drawn in it changes nothing: the text is laid out as it would have been.
+    /// drawn in it changes nothing: the text is laid out and drawn as it would have been. One
+    /// spoilt before its first use is drawn as a missing font is. (With the published font
+    /// library, which maps font files, cutting the file short or writing over it kills the
+    /// helper process with a bus error.)
     #[test]
-    fn text_is_laid_out_the_same_after_its_font_file_changes() {
-        let Some(font) = a_font_with_kerning() else {
+    fn text_is_laid_out_and_drawn_the_same_after_its_font_file_changes() {
+        let fonts = fonts_to_copy();
+        let Some(font) = fonts.first() else {
             eprintln!("NOTHING LEARNT: no font to copy on this computer");
             return;
         };
+        let other = fonts.get(1).unwrap_or(font);
         let program = std::env::current_exe().expect("this test program");
-        for how in ["cut", "rewritten", "gone"] {
+        let ways = ["cut", "zeroed", "replaced", "gone", "before-first-use-cut", "before-first-use-zeroed"];
+        for how in ways {
             let folder = program.parent().expect("its folder").join(format!("font-test-{}-{how}", std::process::id()));
             for part in ["spoilt", "whole"] {
                 std::fs::create_dir_all(folder.join(part)).expect("a folder for the copies");
-                std::fs::copy(&font, folder.join(part).join(font.file_name().expect("a name"))).expect("a copy");
+                std::fs::copy(font, folder.join(part).join(font.file_name().expect("a name"))).expect("a copy");
             }
             let ran = std::process::Command::new(&program)
                 .args(["fonts::tests::font_file_changes_helper", "--exact", "--nocapture", "--test-threads=1"])
                 .env("SP_TEST_FONT_FOLDER", &folder)
                 .env("SP_TEST_FONT_CHANGE", how)
+                .env("SP_TEST_FONT_OTHER", other)
                 .output()
                 .expect("the helper ran");
             let _ = std::fs::remove_dir_all(&folder);
             let said = format!("{}\n{}", String::from_utf8_lossy(&ran.stdout), String::from_utf8_lossy(&ran.stderr));
             assert!(
-                ran.status.success() && said.contains("helper: the same"),
+                ran.status.success() && said.contains("helper: "),
                 "after the font file was {how}, the helper ended with {:?}:\n{said}",
                 ran.status
             );
         }
+    }
+
+    /// On the screens' thread a font not read yet is refused, never read there: the loader
+    /// thread reads it, says so, and the slide is then drawn as anywhere else, fitted at the
+    /// size its own font needs rather than the one it came to without it.
+    #[test]
+    fn the_screens_thread_never_reads_a_font_file_and_draws_again_once_it_is_read() {
+        let Some(font) = fonts_to_copy().into_iter().next() else { return };
+        let folder = copy_into("screens", &font);
+        let family = family_in(&folder);
+        // Nine lines: shrunk to fit the box.
+        let text = ["A line of plain words"; 9].join("\n");
+        let screens = {
+            let (folder, family, text) = (folder.clone(), family.clone(), text.clone());
+            std::thread::spawn(move || {
+                let (tx, rx) = channel();
+                let tx = Mutex::new(tx);
+                read_fonts_elsewhere(Arc::new(move || {
+                    let _ = tx.lock().map(|tx| tx.send(()));
+                }));
+                let mut fonts = Fonts::only_from(&[&folder]);
+                let first = drawn(&mut fonts, &family, &text);
+                let fitted_then = fonts.fitted.len();
+                rx.recv_timeout(Duration::from_secs(10)).expect("the loader said the font was read");
+                fonts.catch_up();
+                let forgotten = fonts.fitted.is_empty();
+                (first, fitted_then, forgotten, drawn(&mut fonts, &family, &text))
+            })
+        };
+        let (first, fitted_then, forgotten, second) = screens.join().expect("the screens' thread");
+        let expected = drawn(&mut Fonts::only_from(&[&folder]), &family, &text);
+        let _ = std::fs::remove_dir_all(&folder);
+        assert!(first != expected, "the screens drew the font before anything read it");
+        assert!(fitted_then > 0 && forgotten, "the size fitted without the font was kept");
+        assert!(second == expected, "drawn differently on the screens once the font was there");
+    }
+
+    /// A font not read yet asks only for itself: the fonts the shaper falls back on meanwhile
+    /// are refused too but not read, unless they turn out to be needed once it is there.
+    #[test]
+    fn a_font_not_read_yet_asks_for_itself_only_not_every_fallback_too() {
+        let fonts = fonts_to_copy();
+        let [first, second, ..] = fonts.as_slice() else {
+            eprintln!("NOTHING LEARNT: no two fonts to copy on this computer");
+            return;
+        };
+        let (first, second) = (copy_into("cascade-first", first), copy_into("cascade-second", second));
+        let (first_family, second_family) = (family_in(&first), family_in(&second));
+        let (first_file, second_file) = (the_file_in(&first), the_file_in(&second));
+        let (asked_first, asked_second, refused, laid_out) = {
+            let (first, second) = (first.clone(), second.clone());
+            std::thread::spawn(move || {
+                let (tx, rx) = channel();
+                let tx = Mutex::new(tx);
+                read_fonts_elsewhere(Arc::new(move || {
+                    let _ = tx.lock().map(|tx| tx.send(()));
+                }));
+                let mut fonts = Fonts::only_from(&[&first, &second]);
+                let collection = &mut fonts.font_cx.collection;
+                let fallback = collection.family_id(&second_family).expect("the second family");
+                collection.set_fallbacks(FallbackKey::new(Script::from_bytes(*b"Latn"), None), [fallback].into_iter());
+                let before = REFUSED.get();
+                assert!(glyphs(&mut fonts, &first_family, "Words").is_empty(), "drawn before it was read");
+                let refused = REFUSED.get() - before;
+                rx.recv_timeout(Duration::from_secs(10)).expect("the loader said the font was read");
+                let laid_out = !glyphs(&mut fonts, &first_family, "Words").is_empty();
+                (read_or_reading(&the_file_in(&first)), read_or_reading(&the_file_in(&second)), refused, laid_out)
+            })
+            .join()
+            .expect("the screens' thread")
+        };
+        let _ = (std::fs::remove_dir_all(&first), std::fs::remove_dir_all(&second));
+        assert!(refused >= 2, "the fallback wasn't even asked for, so this tested nothing ({refused})");
+        assert!(asked_first && laid_out, "the font itself was never read ({first_file:?})");
+        assert!(!asked_second, "the fallback was read though it wasn't needed ({second_file:?})");
     }
 }
