@@ -104,10 +104,16 @@ impl Timer {
         clock_text(self.value(now, seconds_into_day))
     }
 
-    /// What the timer counts, in words, for its row when it is not running.
+    /// What the timer counts, in words, as the tooltip on its card says it: "Counts down from
+    /// 30:00", "Counts down to 11:00 AM", "Counts up".
     pub fn describe(&self) -> String {
+        // A length under an hour is said in minutes and seconds.
+        let short = |seconds: u32| {
+            let text = clock_text(i64::from(seconds));
+            text.strip_prefix("00:").map_or(text.clone(), str::to_owned)
+        };
         match self.kind {
-            Kind::Countdown { seconds } => clock_text(i64::from(seconds)),
+            Kind::Countdown { seconds } => format!("Counts down from {}", short(seconds)),
             Kind::CountdownTo { hour, minute, .. } => {
                 let (twelve, half) = match hour {
                     0 => (12, "AM"),
@@ -115,9 +121,13 @@ impl Timer {
                     12 => (12, "PM"),
                     _ => (hour - 12, "PM"),
                 };
-                format!("Countdown to {twelve}:{minute:02} {half}")
+                format!("Counts down to {twelve}:{minute:02} {half}")
             }
-            Kind::Elapsed { start, .. } => format!("Elapsed from {}", clock_text(i64::from(start))),
+            Kind::Elapsed { start: 0, end: None } => "Counts up".to_owned(),
+            Kind::Elapsed { start, end } => {
+                let to = end.map(|end| format!(", stopping at {}", short(end))).unwrap_or_default();
+                format!("Counts up from {}{to}", short(start))
+            }
         }
     }
 }
@@ -201,7 +211,12 @@ mod tests {
         assert_eq!(to.text(t0, 11 * 3600 + 5), "00:00:00");
         to.allow_overrun = true;
         assert_eq!(to.text(t0, 11 * 3600 + 5), "-00:00:05");
-        assert_eq!(to.describe(), "Countdown to 11:00 AM");
+        assert_eq!(to.describe(), "Counts down to 11:00 AM");
+        assert_eq!(Timer::new("T".to_owned()).describe(), "Counts down from 05:00");
+        assert_eq!(
+            Timer { kind: Kind::Elapsed { start: 0, end: None }, ..Timer::new("U".to_owned()) }.describe(),
+            "Counts up"
+        );
         let mut up = Timer { kind: Kind::Elapsed { start: 0, end: Some(90) }, ..Timer::new("Up".to_owned()) };
         up.start(t0);
         assert_eq!(up.text(t0 + Duration::from_secs(75), 0), "00:01:15");

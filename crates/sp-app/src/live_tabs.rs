@@ -1,15 +1,24 @@
 //! The tool tabs under Clear All in the right column: Timers, Messages, Props, Macros, Stage,
 //! Audio and VoxLive.
+//!
+//! Each tab is a heading in small capitals and a list of cards. A card whose thing is on screen
+//! is tinted orange, one whose thing runs (a timer) green; its buttons keep their grey, and keep
+//! their width whatever they say, so nothing moves. What a card can do beyond its buttons is in
+//! its ⋯ menu, which a right-click on the card opens too.
 
-use std::time::Instant;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use egui::{Align, Color32, FontId, Layout, Sense, vec2};
+use egui::{Align, Align2, Color32, FontId, Layout, Rect, Sense, pos2, vec2};
 
 use crate::home::HomeState;
+use crate::icons::Icon;
 use crate::messages::Message;
 use crate::screens::Kind;
 use crate::studio::{
-    ACCENT, CARD, PANEL, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, Tabs, caption, tab_switch, tab_switch_height,
+    ACCENT, CARD, CARD_RUNNING, Flat, PANEL, RADIUS_CARD, READY, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, Tabs, caption,
+    fixed, fixed_semibold, flat_button, icon_key, paint_spaced, quiet_icon, semibold, spaced, tab_switch,
+    tab_switch_height,
 };
 use crate::timers::{self, Timer};
 
@@ -39,7 +48,7 @@ pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeStat
         state.live_tab = 0;
     }
     // A small dot on a tab whose thing is active: orange for what is on screen (a message, a
-    // prop, the audio layer playing), plain for a timer that is running.
+    // prop, the audio layer playing), grey for a timer that is running, which is not on screen.
     let dots = [
         state.timers.iter().any(Timer::running).then_some(TEXT_DIM),
         state.message_live.is_some().then_some(TALLY),
@@ -56,7 +65,10 @@ pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeStat
     }
     ui.add_space(4.0);
     let scrolled = egui::ScrollArea::vertical().id_salt("live tab").auto_shrink([false, false]).show(ui, |ui| {
+        // The same width whether the tab scrolls or not (its bar floats over the edge), so
+        // nothing moves when a list grows long enough to scroll.
         ui.set_width(width);
+        ui.spacing_mut().item_spacing.y = GAP;
         match state.live_tab {
             0 => timers_tab(ui, state),
             1 => messages_tab(ui, state),
@@ -66,6 +78,7 @@ pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeStat
             5 => audio_tab(ui, state),
             _ => voxlive_tab(ui, show, state),
         }
+        ui.add_space(4.0);
     });
     // When the tab goes on below what shows, its foot fades out, so it reads as going on (scroll
     // to see the rest) rather than cut off.
@@ -84,16 +97,78 @@ pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeStat
     }
 }
 
-/// A heading with a + at its right. Returns true when the + was clicked.
-fn heading_with_add(ui: &mut egui::Ui, title: &str, hint: &str) -> bool {
-    let mut add = false;
-    ui.horizontal(|ui| {
-        caption(ui, title);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            add = ui.add(egui::Button::new("+").frame(false)).on_hover_text(hint).clicked();
-        });
+/// The room between a tab's heading and its cards, and between one card and the next.
+const GAP: f32 = 7.0;
+/// The room inside a card, round what it holds.
+const CARD_MARGIN: egui::Margin = egui::Margin { left: 13, right: 10, top: 9, bottom: 9 };
+/// A card's square keys (start, reset, ⋯), and the room between the parts of a card.
+const CARD_KEY: f32 = 34.0;
+const CARD_GAP: f32 = 10.0;
+/// The face of a card's name.
+fn name_font() -> FontId {
+    semibold(13.0)
+}
+
+/// A tab's heading: its name in small capitals and, when it adds things, a + at its right with
+/// `add` as its tooltip. Returns the row (for anything else to go in it, left of the +) and
+/// true when the + was clicked.
+fn heading(ui: &mut egui::Ui, title: &str, add: Option<&str>) -> (Rect, bool) {
+    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::hover());
+    let font = fixed_semibold(11.5);
+    paint_spaced(ui, row.left_center(), Align2::LEFT_CENTER, &title.to_uppercase(), font, TEXT_DIM, 0.6);
+    let clicked = add.is_some_and(|hint| {
+        let plus = Rect::from_min_size(pos2(row.max.x - 28.0, row.min.y), vec2(28.0, 28.0));
+        let id = egui::Id::unique(("tab heading +", title));
+        quiet_icon(ui, plus, id, Icon::Plus, 13.0, 0.78, Some(CARD)).on_hover_text(hint).clicked()
     });
-    add
+    (row, clicked)
+}
+
+/// Words said when a tab has nothing in it yet.
+fn empty_note(ui: &mut egui::Ui, words: &str) {
+    ui.label(egui::RichText::new(words).size(12.0).color(TEXT_FAINT));
+}
+
+/// A card: the card grey (or a tint of it), round corners, and room round what it holds.
+fn card<R>(ui: &mut egui::Ui, fill: Color32, contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    egui::Frame::new()
+        .fill(fill)
+        .corner_radius(RADIUS_CARD as u8)
+        .inner_margin(CARD_MARGIN)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            contents(ui)
+        })
+        .inner
+}
+
+/// The part of a card behind its keys, which takes a right-click (for the card's menu), a
+/// double-click and the pointer for a tooltip. `row` is the card's first line; this reaches
+/// out over the card's margins.
+fn card_back(ui: &egui::Ui, row: Rect, id: egui::Id) -> egui::Response {
+    let reach = Rect::from_min_max(
+        row.min - vec2(f32::from(CARD_MARGIN.left), f32::from(CARD_MARGIN.top)),
+        row.max + vec2(f32::from(CARD_MARGIN.right), f32::from(CARD_MARGIN.bottom)),
+    );
+    ui.interact(reach, id, Sense::click())
+}
+
+/// Words set to fit `width`, in at most `rows` lines, cut short with … beyond them.
+fn fitted(ui: &egui::Ui, words: &str, font: FontId, ink: Color32, width: f32, rows: usize) -> Arc<egui::Galley> {
+    let format = egui::TextFormat { font_id: font, color: ink, ..Default::default() };
+    let mut job = egui::text::LayoutJob::single_section(words.to_owned(), format);
+    job.wrap = egui::text::TextWrapping {
+        max_width: width.max(1.0),
+        max_rows: rows,
+        break_anywhere: rows == 1,
+        overflow_character: Some('…'),
+    };
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
+}
+
+/// A card's ⋯: always there, faded until the pointer is over it.
+fn more_key(ui: &egui::Ui, rect: Rect, id: egui::Id) -> egui::Response {
+    quiet_icon(ui, rect, id, Icon::More, 16.0, 0.6, None).on_hover_text("More")
 }
 
 /// A field for a length of time or a time of day as `HH:MM:SS`. What is typed is kept while the
@@ -113,8 +188,43 @@ fn clock_field(ui: &mut egui::Ui, id: egui::Id, current: Option<u32>, empty: &st
     None
 }
 
+/// How long until a running timer's readout next changes: at its next whole second, counted
+/// from when it started (a countdown to a time of day goes by the clock's seconds).
+fn until_next_second(timer: &Timer, now: Instant) -> Option<Duration> {
+    let started = timer.run.started?;
+    let into_second = match timer.kind {
+        timers::Kind::CountdownTo { .. } => {
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos())
+        }
+        _ => (timer.run.banked + now.saturating_duration_since(started)).subsec_nanos(),
+    };
+    Some(Duration::from_nanos(1_000_000_000 - u64::from(into_second)))
+}
+
+/// Something asked of a timer from its card.
+enum TimerAsk {
+    Toggle,
+    Reset,
+    Edit,
+    Delete,
+}
+
+/// A timer's menu, behind its ⋯ and a right-click on its card.
+fn timer_menu(ui: &mut egui::Ui, open: bool) -> Option<TimerAsk> {
+    let mut asked = None;
+    if ui.add(egui::Button::selectable(open, "Edit…")).clicked() {
+        asked = Some(TimerAsk::Edit);
+    }
+    ui.separator();
+    if ui.button("Delete").clicked() {
+        asked = Some(TimerAsk::Delete);
+    }
+    asked
+}
+
 fn timers_tab(ui: &mut egui::Ui, state: &mut HomeState) {
-    if heading_with_add(ui, "TIMERS", "Add a timer") {
+    let (_, add) = heading(ui, "Timers", Some("New timer"));
+    if add {
         let taken = |name: &str| state.timers.iter().any(|timer| timer.name == name);
         let name = std::iter::once("Timer".to_owned())
             .chain((2..).map(|n| format!("Timer {n}")))
@@ -126,144 +236,209 @@ fn timers_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         state.timers_changed = true;
     }
     if state.timers.is_empty() {
-        ui.label(egui::RichText::new("No timers. Press + to add one.").size(12.0).color(TEXT_FAINT));
+        empty_note(ui, "No timers. Press + to add one.");
         return;
     }
     let now = Instant::now();
     let day = timers::seconds_into_day();
-    let mut remove = None;
-    let width = ui.available_width();
+    let mut asked: Option<(usize, TimerAsk)> = None;
+    let mut next_tick: Option<Duration> = None;
     for index in 0..state.timers.len() {
-        let open = state.timer_open == Some(state.timers[index].id);
-        egui::Frame::new().fill(CARD).corner_radius(8).inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
-            ui.set_width(width - 20.0);
-            let timer = &mut state.timers[index];
-            let row = ui.horizontal(|ui| {
-                let arrow = if open { "⌄" } else { "›" };
-                if ui.add(egui::Button::new(arrow).frame(false)).on_hover_text("Settings").clicked() {
-                    state.timer_open = if open { None } else { Some(timer.id) };
+        let id = state.timers[index].id;
+        let open = state.timer_open == Some(id);
+        let running = state.timers[index].running();
+        if let Some(wait) = until_next_second(&state.timers[index], now) {
+            next_tick = Some(next_tick.map_or(wait, |sooner| sooner.min(wait)));
+        }
+        card(ui, if running { CARD_RUNNING } else { CARD }, |ui| {
+            let timer = &state.timers[index];
+            let width = ui.available_width();
+            // The time, in the fixed-width face: room is kept for its longest (with a minus sign
+            // when the timer may run over), so the name beside it never moves.
+            let time_font = fixed(17.0);
+            let longest = if timer.allow_overrun { "-00:00:00" } else { "00:00:00" };
+            let time_wide = spaced(ui, longest, time_font.clone(), TEXT_DIM, -0.5).size().x;
+            let (time, ink) = match (running, timer.kind) {
+                (true, _) => (timer.text(now, day), READY),
+                // A countdown to a time of day says when it ends until it is started, rather
+                // than counting while it is stopped.
+                (false, timers::Kind::CountdownTo { hour, minute, .. }) => {
+                    (format!("to {hour:02}:{minute:02}"), TEXT_DIM)
                 }
-                ui.vertical(|ui| {
-                    ui.label(egui::RichText::new(timer.name.as_str()).size(13.0).color(TEXT));
-                    let (value, ink, size) = if timer.running() {
-                        (timer.text(now, day), TEXT, 18.0)
-                    } else if matches!(timer.kind, timers::Kind::CountdownTo { .. }) {
-                        (timer.describe(), TEXT_DIM, 12.0)
-                    } else {
-                        (timer.text(now, day), TEXT_DIM, 15.0)
-                    };
-                    ui.label(egui::RichText::new(value).size(size).color(ink).monospace());
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let (label, hint) = if timer.running() { ("❚❚", "Pause") } else { ("▶", "Start") };
-                    if ui.add(egui::Button::new(label).min_size(vec2(30.0, 26.0))).on_hover_text(hint).clicked() {
-                        if timer.running() {
-                            timer.stop(now);
-                        } else {
-                            timer.start(now);
-                        }
-                    }
-                    if ui.add(egui::Button::new("↺").min_size(vec2(30.0, 26.0))).on_hover_text("Reset").clicked() {
-                        timer.reset();
-                    }
-                });
-            });
-            row.response.context_menu(|ui| {
-                if ui.button("Delete").clicked() {
-                    remove = Some(index);
-                    ui.close();
-                }
-            });
-            if !open {
-                return;
+                (false, _) => (timer.text(now, day), TEXT_DIM),
+            };
+            let name_wide = width - 3.0 * CARD_KEY - 4.0 * CARD_GAP - time_wide;
+            let name = fitted(ui, &timer.name, name_font(), TEXT, name_wide, 2);
+            let (row, _) = ui.allocate_exact_size(vec2(width, name.size().y.max(CARD_KEY)), Sense::hover());
+            let back = card_back(ui, row, egui::Id::unique(("timer card", id)));
+            let y = row.center().y;
+            ui.painter().galley(pos2(row.min.x, y - name.size().y / 2.0), name, TEXT);
+            let key = |place: f32| {
+                Rect::from_min_size(
+                    pos2(row.max.x - place * (CARD_KEY + CARD_GAP) - CARD_KEY, y - CARD_KEY / 2.0),
+                    vec2(CARD_KEY, CARD_KEY),
+                )
+            };
+            let time_right = key(2.0).min.x - CARD_GAP;
+            paint_spaced(ui, pos2(time_right, y), Align2::RIGHT_CENTER, &time, time_font, ink, -0.5);
+            if icon_key(ui, key(2.0), egui::Id::unique(("timer reset", id)), Icon::Forward, 15.0, true)
+                .on_hover_text("Reset")
+                .clicked()
+            {
+                asked = Some((index, TimerAsk::Reset));
             }
-            ui.add_space(6.0);
-            let mut changed = false;
-            egui::Grid::new(("timer settings", timer.id)).num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
-                ui.label(egui::RichText::new("Name").color(TEXT_DIM));
-                changed |= ui.add(egui::TextEdit::singleline(&mut timer.name).desired_width(160.0)).changed();
-                ui.end_row();
-                ui.label(egui::RichText::new("Type").color(TEXT_DIM));
-                let kind_name = match timer.kind {
-                    timers::Kind::Countdown { .. } => "Countdown Timer",
-                    timers::Kind::CountdownTo { .. } => "Countdown to Time",
-                    timers::Kind::Elapsed { .. } => "Elapsed Time",
-                };
-                egui::ComboBox::from_id_salt(("timer type", timer.id)).selected_text(kind_name).width(160.0).show_ui(
-                    ui,
-                    |ui| {
-                        let choices = [
-                            ("Countdown Timer", timers::Kind::Countdown { seconds: 300 }),
-                            ("Countdown to Time", timers::Kind::CountdownTo { hour: 11, minute: 0, second: 0 }),
-                            ("Elapsed Time", timers::Kind::Elapsed { start: 0, end: None }),
-                        ];
-                        for (name, kind) in choices {
-                            let same = std::mem::discriminant(&kind) == std::mem::discriminant(&timer.kind);
-                            if ui.add(egui::Button::selectable(same, name)).clicked() && !same {
-                                timer.kind = kind;
-                                timer.reset();
-                                changed = true;
-                            }
-                        }
-                    },
-                );
-                ui.end_row();
-                match timer.kind {
-                    timers::Kind::Countdown { seconds } => {
-                        ui.label(egui::RichText::new("Duration").color(TEXT_DIM));
-                        if let Some(Some(seconds)) =
-                            clock_field(ui, ui.scope_id().with(("duration", timer.id)), Some(seconds), "00:05:00")
-                        {
-                            timer.kind = timers::Kind::Countdown { seconds };
-                            changed = true;
-                        }
-                        ui.end_row();
-                    }
-                    timers::Kind::CountdownTo { hour, minute, second } => {
-                        ui.label(egui::RichText::new("Time").color(TEXT_DIM));
-                        let current = u32::from(hour) * 3600 + u32::from(minute) * 60 + u32::from(second);
-                        ui.horizontal(|ui| {
-                            if let Some(Some(at)) =
-                                clock_field(ui, ui.scope_id().with(("time", timer.id)), Some(current), "11:00:00")
-                            {
-                                let at = at % (24 * 3600);
-                                timer.kind = timers::Kind::CountdownTo {
-                                    hour: u8::try_from(at / 3600).unwrap_or(0),
-                                    minute: u8::try_from(at / 60 % 60).unwrap_or(0),
-                                    second: u8::try_from(at % 60).unwrap_or(0),
-                                };
-                                changed = true;
-                            }
-                            ui.label(egui::RichText::new("24-hour").size(11.0).color(TEXT_FAINT));
-                        });
-                        ui.end_row();
-                    }
-                    timers::Kind::Elapsed { start, end } => {
-                        ui.label(egui::RichText::new("Start").color(TEXT_DIM));
-                        if let Some(Some(start)) =
-                            clock_field(ui, ui.scope_id().with(("start", timer.id)), Some(start), "00:00:00")
-                        {
-                            timer.kind = timers::Kind::Elapsed { start, end };
-                            changed = true;
-                        }
-                        ui.end_row();
-                        ui.label(egui::RichText::new("End").color(TEXT_DIM));
-                        if let Some(end) = clock_field(ui, ui.scope_id().with(("end", timer.id)), end, "No Limit") {
-                            timer.kind = timers::Kind::Elapsed { start, end };
-                            changed = true;
-                        }
-                        ui.end_row();
-                    }
+            let (icon, hint) = if running { (Icon::Pause, "Stop") } else { (Icon::Play, "Start") };
+            if icon_key(ui, key(1.0), egui::Id::unique(("timer start", id)), icon, 12.0, true)
+                .on_hover_text(hint)
+                .clicked()
+            {
+                asked = Some((index, TimerAsk::Toggle));
+            }
+            let more = more_key(ui, key(0.0), egui::Id::unique(("timer more", id)));
+            egui::Popup::menu(&more).show(|ui| {
+                if let Some(ask) = timer_menu(ui, open) {
+                    asked = Some((index, ask));
                 }
             });
-            changed |= ui.checkbox(&mut timer.allow_overrun, "Allows Overrun").changed();
-            state.timers_changed |= changed;
+            if back.double_clicked() {
+                asked = Some((index, TimerAsk::Edit));
+            }
+            back.on_hover_text(timer.describe()).context_menu(|ui| {
+                if let Some(ask) = timer_menu(ui, open) {
+                    asked = Some((index, ask));
+                }
+            });
+            if open {
+                state.timers_changed |= timer_settings(ui, &mut state.timers[index]);
+                ui.add_space(6.0);
+                let done = Rect::from_min_size(ui.cursor().min, vec2(64.0, 24.0));
+                ui.allocate_rect(done, Sense::hover());
+                if flat_button(
+                    ui,
+                    done,
+                    egui::Id::unique(("timer done", id)),
+                    "Done",
+                    FontId::proportional(11.5),
+                    Flat::Plain,
+                    true,
+                )
+                .clicked()
+                {
+                    state.timer_open = None;
+                }
+            }
         });
     }
-    if let Some(index) = remove {
-        state.timers.remove(index);
-        state.timers_changed = true;
+    // The readout of a running timer moves on once a second, and only while one runs.
+    if let Some(wait) = next_tick {
+        ui.ctx().request_repaint_after(wait + Duration::from_millis(5));
     }
+    match asked {
+        Some((index, TimerAsk::Toggle)) => {
+            let timer = &mut state.timers[index];
+            if timer.running() {
+                timer.stop(now);
+            } else {
+                timer.start(now);
+            }
+        }
+        Some((index, TimerAsk::Reset)) => state.timers[index].reset(),
+        Some((index, TimerAsk::Edit)) => {
+            let id = state.timers[index].id;
+            state.timer_open = if state.timer_open == Some(id) { None } else { Some(id) };
+        }
+        Some((index, TimerAsk::Delete)) => {
+            state.timers.remove(index);
+            state.timers_changed = true;
+        }
+        None => {}
+    }
+}
+
+/// A timer's settings, under its card while they are open: its name, what it counts, and
+/// whether it runs over. Returns true when one changed.
+fn timer_settings(ui: &mut egui::Ui, timer: &mut Timer) -> bool {
+    ui.add_space(8.0);
+    let mut changed = false;
+    egui::Grid::new(("timer settings", timer.id)).num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
+        ui.label(egui::RichText::new("Name").color(TEXT_DIM));
+        changed |= ui.add(egui::TextEdit::singleline(&mut timer.name).desired_width(160.0)).changed();
+        ui.end_row();
+        ui.label(egui::RichText::new("Counts").color(TEXT_DIM));
+        let kind_name = match timer.kind {
+            timers::Kind::Countdown { .. } => "Down from a length",
+            timers::Kind::CountdownTo { .. } => "Down to a time of day",
+            timers::Kind::Elapsed { .. } => "Up",
+        };
+        egui::ComboBox::from_id_salt(("timer type", timer.id)).selected_text(kind_name).width(160.0).show_ui(
+            ui,
+            |ui| {
+                let choices = [
+                    ("Down from a length", timers::Kind::Countdown { seconds: 300 }),
+                    ("Down to a time of day", timers::Kind::CountdownTo { hour: 11, minute: 0, second: 0 }),
+                    ("Up", timers::Kind::Elapsed { start: 0, end: None }),
+                ];
+                for (name, kind) in choices {
+                    let same = std::mem::discriminant(&kind) == std::mem::discriminant(&timer.kind);
+                    if ui.add(egui::Button::selectable(same, name)).clicked() && !same {
+                        timer.kind = kind;
+                        timer.reset();
+                        changed = true;
+                    }
+                }
+            },
+        );
+        ui.end_row();
+        match timer.kind {
+            timers::Kind::Countdown { seconds } => {
+                ui.label(egui::RichText::new("Length").color(TEXT_DIM));
+                if let Some(Some(seconds)) =
+                    clock_field(ui, ui.scope_id().with(("duration", timer.id)), Some(seconds), "00:05:00")
+                {
+                    timer.kind = timers::Kind::Countdown { seconds };
+                    changed = true;
+                }
+                ui.end_row();
+            }
+            timers::Kind::CountdownTo { hour, minute, second } => {
+                ui.label(egui::RichText::new("Time").color(TEXT_DIM));
+                let current = u32::from(hour) * 3600 + u32::from(minute) * 60 + u32::from(second);
+                ui.horizontal(|ui| {
+                    if let Some(Some(at)) =
+                        clock_field(ui, ui.scope_id().with(("time", timer.id)), Some(current), "11:00:00")
+                    {
+                        let at = at % (24 * 3600);
+                        timer.kind = timers::Kind::CountdownTo {
+                            hour: u8::try_from(at / 3600).unwrap_or(0),
+                            minute: u8::try_from(at / 60 % 60).unwrap_or(0),
+                            second: u8::try_from(at % 60).unwrap_or(0),
+                        };
+                        changed = true;
+                    }
+                    ui.label(egui::RichText::new("24-hour").size(11.0).color(TEXT_FAINT));
+                });
+                ui.end_row();
+            }
+            timers::Kind::Elapsed { start, end } => {
+                ui.label(egui::RichText::new("From").color(TEXT_DIM));
+                if let Some(Some(start)) =
+                    clock_field(ui, ui.scope_id().with(("start", timer.id)), Some(start), "00:00:00")
+                {
+                    timer.kind = timers::Kind::Elapsed { start, end };
+                    changed = true;
+                }
+                ui.end_row();
+                ui.label(egui::RichText::new("Stops at").color(TEXT_DIM));
+                if let Some(end) = clock_field(ui, ui.scope_id().with(("end", timer.id)), end, "Never") {
+                    timer.kind = timers::Kind::Elapsed { start, end };
+                    changed = true;
+                }
+                ui.end_row();
+            }
+        }
+    });
+    changed |= ui.checkbox(&mut timer.allow_overrun, "Runs over (counts on past the end)").changed();
+    changed
 }
 
 fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
@@ -1218,4 +1393,10 @@ fn voxlive_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState)
             .size(11.5)
             .color(TEXT_FAINT),
     );
+}
+
+/// A heading with a + at its right, for the tabs not yet in the new design. Returns true when
+/// the + was clicked.
+fn heading_with_add(ui: &mut egui::Ui, title: &str, hint: &str) -> bool {
+    heading(ui, title, Some(hint)).1
 }

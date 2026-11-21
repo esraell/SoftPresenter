@@ -390,6 +390,84 @@ pub fn round_key(ui: &egui::Ui, centre: egui::Pos2, side: f32, id: &str, fill: C
     response
 }
 
+/// A card whose thing is running or playing (a timer, a track): the green mixed 13% into a
+/// card's grey. A timer is not on screen, so it is never orange.
+pub const CARD_RUNNING: Color32 = Color32::from_rgb(0x25, 0x3a, 0x2c);
+
+/// How a flat button is drawn: plain (the button grey).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Flat {
+    Plain,
+}
+
+/// Paints a flat button's block in `rect` with corners of `corner`, lighter under the pointer.
+pub fn paint_flat(painter: &egui::Painter, rect: Rect, corner: f32, look: Flat, hovered: bool) {
+    match look {
+        Flat::Plain => {
+            painter.rect_filled(rect, corner, if hovered { BUTTON_HOVER } else { BUTTON });
+        }
+    }
+}
+
+/// A flat button with words in the middle of `rect`. One that is not `enabled` is drawn faint
+/// and takes no clicks. One less tall than [`LEAST_CLICK`] takes clicks from that much room.
+pub fn flat_button(
+    ui: &egui::Ui,
+    rect: Rect,
+    id: egui::Id,
+    words: &str,
+    font: FontId,
+    look: Flat,
+    enabled: bool,
+) -> egui::Response {
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let reach = ((LEAST_CLICK - rect.height()) / 2.0).max(0.0);
+    let response = ui.interact(rect.expand2(vec2(0.0, reach)), id, sense);
+    let corner = if rect.height() < 28.0 { RADIUS } else { 9.0 };
+    let painter = ui.painter();
+    if enabled {
+        paint_flat(painter, rect, corner, look, response.hovered());
+    } else {
+        painter.rect_filled(rect, corner, BUTTON.gamma_multiply(0.5));
+    }
+    let ink = if enabled { TEXT } else { TEXT_FAINT };
+    painter.text(rect.center(), Align2::CENTER_CENTER, words, font, ink);
+    response
+}
+
+/// A flat key that is only an icon, as a card's start and reset keys are: the button grey,
+/// lighter under the pointer, with the icon `glyph` wide in the middle.
+pub fn icon_key(ui: &egui::Ui, rect: Rect, id: egui::Id, icon: Icon, glyph: f32, enabled: bool) -> egui::Response {
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let response = ui.interact(rect, id, sense);
+    let corner = if rect.height() > 30.0 { 9.0 } else { RADIUS };
+    paint_flat(ui.painter(), rect, corner, Flat::Plain, enabled && response.hovered());
+    let ink = if enabled { TEXT } else { TEXT_FAINT };
+    icons::paint(ui.painter(), icon, Rect::from_center_size(rect.center(), egui::Vec2::splat(glyph)), ink);
+    response
+}
+
+/// A quiet button that is only an icon, as ⋯ and + are: no block of its own, its icon faded
+/// until the pointer is over it. `hover_fill` is drawn under it then, when given.
+pub fn quiet_icon(
+    ui: &egui::Ui,
+    rect: Rect,
+    id: egui::Id,
+    icon: Icon,
+    glyph: f32,
+    faded: f32,
+    hover_fill: Option<Color32>,
+) -> egui::Response {
+    let response = ui.interact(rect, id, Sense::click());
+    let hovered = response.hovered() || response.is_pointer_button_down_on();
+    if let Some(fill) = hover_fill.filter(|_| hovered) {
+        ui.painter().rect_filled(rect, RADIUS, fill);
+    }
+    let ink = if hovered { TEXT } else { TEXT.gamma_multiply(faded) };
+    icons::paint(ui.painter(), icon, Rect::from_center_size(rect.center(), egui::Vec2::splat(glyph)), ink);
+    response
+}
+
 /// Sets the whole window's colours, sizes and font.
 pub fn apply_style(ctx: &egui::Context) {
     load_fonts(ctx);

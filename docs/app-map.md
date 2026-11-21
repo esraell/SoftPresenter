@@ -76,7 +76,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | The row under the readout | Whatever is playing: a video's keys (play or pause, start over, forward 10 seconds, a bar to drag through, the time left, loop, sound), the song on the Announcements layer with Clear, or a test pattern with Off. Empty, but there, when nothing plays | |
 | Slide, Media, Props, Messages, Audio, Announce | The six layer keys: each is lit while its layer shows, and clears that layer alone (F2 slide, F3 media, F4 props, F5 audio, F6 messages) | `clear slide\|media\|props\|messages\|audio\|announcements` |
 | Clear All | Takes everything off the screens (Escape, F1); orange while anything shows | `clear all` |
-| Tabs: Timers | Count down, count up, to a time of day; start, stop, reset | `timers`, `timer start\|stop\|reset NAME` |
+| Tabs: Timers | A card each: count down, count up, to a time of day; Reset, Start or Stop; ⋯ (or right-click) for Edit… and Delete; + makes one | `timers`, `timer start\|stop\|reset NAME`, `timer new\|set\|delete` |
 | Tabs: Messages | Messages with fill-in tokens (the time, a timer), shown over the slides | `messages`, `message show NAME`, `message hide` |
 | Tabs: Props | Slides of their own laid over the show (logos, lower thirds) | `props`, `prop show\|hide NAME` |
 | Tabs: Macros | Lists of actions done in turn | `macros`, `macro run NAME` |

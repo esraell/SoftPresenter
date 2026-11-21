@@ -241,7 +241,13 @@ feature changes, this page changes in the same commit.
 - A song's menu (its ⋯, or a right-click): Add to the playlist in front, Add to Playlist (any
   playlist, or a new one), Libraries, Rename, Duplicate, Theme (a theme of its own, or
   the songs theme), Reflow, and Delete (a song made in the app goes to the Trash).
-- **Timers** (count down, count down to a time of day, or count up), **Messages** shown over
+- The tool tabs under Clear All in the right column, each a list of cards. A card's ⋯, or a
+  right-click on it, opens what else it can do.
+- **Timers** count down, count down to a time of day, or count up. Each is a card with its
+  name, its time in the fixed-width face (green, on a green-tinted card, while it runs; a
+  countdown to a time of day says when it ends until it is started), Reset, Start or Stop, and
+  ⋯ with Edit… (its name, what it counts, whether it runs over) and Delete.
+- **Messages** shown over
   the slides (with the time or a timer in them, an optional time to leave by themselves, a look
   of their own such as a band, a box in the middle or a lower third, and Rename, Cut, Copy,
   Paste and Duplicate),
