@@ -879,7 +879,8 @@ mod tests {
         assert!(moved.is_empty(), "nothing moves, leftovers included: {moved:?}");
         assert!(outcome.unread && outcome.notice().is_none());
         let log = outcome.log_lines().join("\n");
-        assert!(log.starts_with("nothing moved: Songs/cut-short.sppres does not open as a song"), "{log}");
+        let song = Path::new("Songs").join("cut-short.sppres");
+        assert!(log.starts_with(&format!("nothing moved: {} does not open as a song", song.display())), "{log}");
         // So does a settings file that isn't whole, anywhere in the library.
         std::fs::remove_file(library.join("Songs/cut-short.sppres")).unwrap();
         write(&library.join("Not saved/Song 2026-11-20.sppres"), "{\"title\": ");
@@ -949,11 +950,13 @@ mod tests {
         let outcome = run(&library, &[elsewhere.join("Open.sppres")], month_on(), &mut |_| Err("moved".to_owned()));
         assert!(outcome.moved.is_empty() && outcome.stopped.is_none(), "{outcome:?}");
         // A song in a folder that can't be reached now (a drive not plugged in) stops it.
-        let gone = serde_json::json!({"libraries": [{"name": "Stick", "songs": ["/Volumes/NotHere/Songs/Song"]}]});
+        let gone_song = if cfg!(windows) { r"Q:\NotHere\Songs\Song" } else { "/Volumes/NotHere/Songs/Song" };
+        let gone = serde_json::json!({"libraries": [{"name": "Stick", "songs": [gone_song]}]});
         write(&library.join("libraries.json"), &gone.to_string());
         let (outcome, moved) = tidy(&library, month_on());
         assert!(moved.is_empty() && outcome.unread, "{outcome:?}");
-        assert!(outcome.stopped.unwrap().contains("/Volumes/NotHere/Songs, which can't be read now"));
+        let gone_folder = Path::new(gone_song).parent().unwrap().display().to_string();
+        assert!(outcome.stopped.unwrap().contains(&format!("{gone_folder}, which can't be read now")));
         let _ = std::fs::remove_dir_all(&elsewhere);
     }
 
@@ -1007,8 +1010,14 @@ mod tests {
         assert_eq!(moved, [".a.sppres.saving", ".opening-pack-2", "services.json.part"], "{outcome:?}");
         assert!(library.join(format!("Images/{USED}.png")).is_file(), "named by a kept save cut short");
         let log = outcome.log_lines().join("\n");
-        assert!(log.contains("kept Songs/.b.sppres.saving: a save of Songs/b.sppres was cut short"), "{log}");
-        assert!(log.contains("kept Themes/x.sptheme.part"), "{log}");
+        let (songs, themes) = (Path::new("Songs"), Path::new("Themes"));
+        let kept = format!(
+            "kept {}: a save of {} was cut short",
+            songs.join(".b.sppres.saving").display(),
+            songs.join("b.sppres").display()
+        );
+        assert!(log.contains(&kept), "{log}");
+        assert!(log.contains(&format!("kept {}", themes.join("x.sptheme.part").display())), "{log}");
         assert_eq!(outcome.notice().as_deref(), Some("Tidied the library: 3 leftover files went to the Trash."));
         // A day or less old, they are left alone.
         let library = self::library("leftovers-new");

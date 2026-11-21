@@ -267,6 +267,8 @@ mod tests {
         std::fs::write(old.join("control/note"), "socket folder").unwrap();
     }
 
+    // The move is from where a Mac kept the library before; its paths are written a Mac's way.
+    #[cfg(unix)]
     #[test]
     fn the_library_moves_with_its_paths_and_song_names_and_the_old_folder_is_kept() {
         let home = temp("move");

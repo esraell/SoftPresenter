@@ -30,4 +30,5 @@ jobs:
       - name: Tests
         run: cargo test --workspace --exclude sp-render --no-fail-fast
       - name: Tests (sp-render, without the picture tests)
+        if: success() || failure()
         run: cargo test -p sp-render --lib --no-fail-fast

@@ -75,7 +75,9 @@ mod tests {
 
     #[test]
     fn a_whole_path_is_kept_and_a_name_is_looked_for_in_the_images_folder() {
-        assert_eq!(resolve("/pictures/logo.png"), Some(PathBuf::from("/pictures/logo.png")));
+        // A whole path as each system writes one.
+        let whole = if cfg!(windows) { r"C:\pictures\logo.png" } else { "/pictures/logo.png" };
+        assert_eq!(resolve(whole), Some(PathBuf::from(whole)));
         if let Some(found) = resolve("abc.png") {
             assert!(found.ends_with("Images/abc.png"), "{found:?}");
         }
