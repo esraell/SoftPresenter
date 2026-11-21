@@ -776,6 +776,8 @@ mod tests {
         (outcome, moved)
     }
 
+    // Making a link needs a special right on Windows, so this runs where links are ordinary.
+    #[cfg(unix)]
     #[test]
     fn a_folder_linked_from_elsewhere_stops_the_tidy() {
         // A Songs folder that is a link would go unread, and every picture its songs show would
