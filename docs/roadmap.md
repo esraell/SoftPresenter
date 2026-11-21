@@ -43,7 +43,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Notes for a whole song.** One line of operator notes kept with the song and shown in its header. (started: the notes strip shows the notes of the slide on screen) · S · Low
 - **Timeline.** Record slide timings and play a song's slides, media and audio together, with a loop; it can follow incoming timecode. (started: Go to Next on each slide, and Loop to First Slide) · L · Low
 - **A song that always plays on the Announcements layer.** A setting kept with the song, so it need not be chosen each time. (started: Play on Announcements Layer in the song's menu) · S · Low
-- **Transport for any layer.** Choose whether the transport drives slide media, announcements or audio; a scrub bar; a jump to 10, 30, 60 or 90 seconds before the end. (started: pause, seek, loop and mute under the Program preview, and skip 15 seconds in the Audio tab) · S · Low
+- **Transport for any layer.** Choose whether the transport drives slide media, announcements or audio; a scrub bar; a jump to 10, 30, 60 or 90 seconds before the end. (started: pause, seek, loop and mute under the Program preview; in the Audio tab a line to drag through the track, skip 15 seconds either way, previous, next and mute) · S · Low
 - **More show shortcuts.** F7 to clear announcements, ⌘→ and ⌘← for the next and previous background, ⇧⌘L to show the live announcement, ⌥⌘L to find a song in its library, ⌘4 for the stage editor, holding ~ to peek at Easy view, and Option-click to load a video paused. (started: the menu items for F7 and ⌘→/⌘← are there without their keys) · S · Low
 - **Slide view settings.** Font, size, colour and truncation in Easy view, a notes column in Table view, slides shown by group, and background colours. (started: the three views and the size slider) · S · Low
 - **Audio level meter by the Program preview.** · S · Low
@@ -107,7 +107,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Track inspector.** In and out points, start delay, play rate, and fades in and out for each track. (started: a crossfade between tracks) · S–M · Low
 - **Sound effects.** Short cues that play over the main track. · M · Low
 - **Markers.** Points marked in a track or video; stage screens count down to the next one. · M · Low
-- **Audio bin extras.** Playlist folders, renaming a track, a filter, and a line with the number of items and minutes. · S · Low
+- **Audio bin extras.** Playlist folders, a filter, and how long each track and the whole playlist are. (started: renaming a track, putting the tracks in another order, and how many there are) · S · Low
 - **Audio over NDI and SDI.** A video's sound inside the NDI stream, for churches that stream from it. (started: NDI carries the picture only) · M · Low
 - **Channel routing.** Up to 16 channels, a routing grid, and mute, solo and test for each channel. · L · Low
 - **Live audio inputs.** A mixer or microphone feed, switched on, off or automatically. · L · Low

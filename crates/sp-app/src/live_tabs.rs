@@ -1221,7 +1221,7 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
             let y = row.center().y;
             // From the right: ⋯, the chevron that opens the steps, and Run.
             let more = Rect::from_min_size(pos2(row.max.x - 28.0, y - 14.0), vec2(28.0, 28.0));
-            let chevron = Rect::from_min_size(pos2(more.min.x - 4.0 - 26.0, y - 14.0), vec2(26.0, 28.0));
+            let chevron = Rect::from_min_size(pos2(more.min.x - 2.0 - 28.0, y - 14.0), vec2(28.0, 28.0));
             let run = Rect::from_min_size(pos2(chevron.min.x - 6.0 - run_wide, y - 15.0), vec2(run_wide, 30.0));
             let text_wide = run.min.x - 8.0 - row.min.x;
             // The name with the macro's colour as a dot before it, and under it how many steps.
@@ -1307,12 +1307,12 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
                 empty_note(ui, "No steps yet");
             }
             for (at, words) in steps.iter().enumerate() {
-                let (line, _) = ui.allocate_exact_size(vec2(inner, 26.0), Sense::hover());
+                let (line, _) = ui.allocate_exact_size(vec2(inner, 28.0), Sense::hover());
                 let cy = line.center().y;
                 let number = format!("{}", at + 1);
                 ui.painter().text(pos2(line.min.x, cy), Align2::LEFT_CENTER, number, fixed(12.0), TEXT_FAINT);
-                let remove = Rect::from_min_size(pos2(line.max.x - 26.0, cy - 13.0), vec2(26.0, 26.0));
-                let earlier = remove.translate(vec2(-28.0, 0.0));
+                let remove = Rect::from_min_size(pos2(line.max.x - 28.0, cy - 14.0), vec2(28.0, 28.0));
+                let earlier = remove.translate(vec2(-30.0, 0.0));
                 let text =
                     fitted(ui, words, FontId::proportional(12.5), TEXT, earlier.min.x - 6.0 - line.min.x - 22.0, 1);
                 ui.painter().galley(pos2(line.min.x + 22.0, cy - text.size().y / 2.0), text, TEXT);
@@ -1614,7 +1614,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
     let shown_tracks: Vec<sp_model::Uuid> = state.audio.shown().tracks.iter().map(|track| track.id).collect();
     let ready = ui
         .data(|data| data.get_temp::<sp_model::Uuid>(ready_id))
-        .filter(|id| state.audio.track(*id).is_some())
+        .filter(|id| shown_tracks.contains(id))
         .or(shown_tracks.first().copied());
     let current = playing.track.or(ready);
     let mut ready_now = current;
@@ -2360,6 +2360,89 @@ mod tests {
         for (n, events) in frames.into_iter().enumerate() {
             frame(ctx, show, state, events, start + 0.1 * (n + 1) as f64);
         }
+    }
+
+    /// Where along what was drawn under `id` a share `along` of its width is, at its middle.
+    fn along(ctx: &egui::Context, id: egui::Id, along: f32) -> egui::Pos2 {
+        let rect = ctx.read_response(id).expect("drawn").rect;
+        pos2(rect.min.x + rect.width() * along, rect.center().y)
+    }
+
+    /// Presses at `from`, drags to `to` in a few steps, and lets go there, as the pointer would.
+    fn drag(ctx: &egui::Context, show: &sp_engine::Show, state: &mut HomeState, from: egui::Pos2, to: egui::Pos2) {
+        let start = ctx.input(|input| input.time) + 0.1;
+        let button = |at, pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut frames = vec![vec![Event::PointerMoved(from)], vec![button(from, true)]];
+        frames.extend((1..=4).map(|step| vec![Event::PointerMoved(from + (to - from) * (step as f32 / 4.0))]));
+        frames.extend([vec![button(to, false)], vec![]]);
+        for (n, events) in frames.into_iter().enumerate() {
+            frame(ctx, show, state, events, start + 0.1 * (n + 1) as f64);
+        }
+    }
+
+    /// Tracks of these names (their files never read) in the playlist shown, by their ids.
+    fn tracks(state: &mut HomeState, names: &[&str]) -> Vec<sp_model::Uuid> {
+        let tracks: Vec<crate::audio::Track> =
+            names.iter().map(|name| crate::audio::Track::of(format!("{name}.wav").into())).collect();
+        let ids = tracks.iter().map(|track| track.id).collect();
+        state.audio.shown_mut().tracks = tracks;
+        ids
+    }
+
+    #[test]
+    fn dragging_the_level_sets_the_volume_where_it_is_let_go() {
+        let show = show();
+        let mut state = HomeState { live_tab: 5, audio_volume: 0.5, ..HomeState::default() };
+        let ctx = egui::Context::default();
+        frame(&ctx, &show, &mut state, vec![], 0.0);
+        let level = egui::Id::unique("audio level");
+        // From the handle (a third of the way, as the line goes to 150%) to nine tenths along.
+        drag(&ctx, &show, &mut state, along(&ctx, level, 0.5 / 1.5), along(&ctx, level, 0.9));
+        let Some(AudioRequest::Volume(volume)) = state.audio_request else { panic!("{:?}", state.audio_request) };
+        assert!((volume - 1.35).abs() < 0.02, "{volume}");
+        assert_eq!(state.audio_volume, volume);
+    }
+
+    #[test]
+    fn dragging_the_place_in_a_track_jumps_by_the_difference() {
+        use std::time::Duration;
+        let show = show();
+        let mut state = HomeState { live_tab: 5, ..HomeState::default() };
+        let ids = tracks(&mut state, &["One", "Two"]);
+        state.audio_playing = crate::audio::Playing {
+            track: Some(ids[0]),
+            position: Duration::from_secs(30),
+            length: Some(Duration::from_secs(100)),
+            paused: false,
+        };
+        let ctx = egui::Context::default();
+        frame(&ctx, &show, &mut state, vec![], 0.0);
+        let seek = egui::Id::unique("audio seek");
+        drag(&ctx, &show, &mut state, along(&ctx, seek, 0.3), along(&ctx, seek, 0.6));
+        let Some(AudioRequest::Skip(by)) = state.audio_request else { panic!("{:?}", state.audio_request) };
+        assert!((by - 30.0).abs() < 1.0, "{by}");
+    }
+
+    #[test]
+    fn a_track_dragged_below_another_moves_there() {
+        let show = show();
+        let mut state = HomeState { live_tab: 5, ..HomeState::default() };
+        let ids = tracks(&mut state, &["One", "Two", "Three"]);
+        let ctx = egui::Context::default();
+        frame(&ctx, &show, &mut state, vec![], 0.0);
+        let row = |id| ctx.read_response(egui::Id::unique(("audio track", id))).expect("drawn").rect;
+        // From the first row's name to the lower half of the last.
+        let from = row(ids[0]).left_center() + vec2(60.0, 0.0);
+        let to = row(ids[2]).center() + vec2(-40.0, 10.0);
+        drag(&ctx, &show, &mut state, from, to);
+        let order: Vec<sp_model::Uuid> = state.audio.shown().tracks.iter().map(|track| track.id).collect();
+        assert_eq!(order, vec![ids[1], ids[2], ids[0]]);
+        assert_eq!(state.audio_request, None, "a drag plays nothing");
     }
 
     #[test]
