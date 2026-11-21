@@ -77,7 +77,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | Slide, Media, Props, Messages, Audio, Announce | The six layer keys: each is lit while its layer shows, and clears that layer alone (F2 slide, F3 media, F4 props, F5 audio, F6 messages) | `clear slide\|media\|props\|messages\|audio\|announcements` |
 | Clear All | Takes everything off the screens (Escape, F1); orange while anything shows | `clear all` |
 | Tabs: Timers | A card each: count down, count up, to a time of day; Reset, Start or Stop; ⋯ (or right-click) for Edit… and Delete; + makes one | `timers`, `timer start\|stop\|reset NAME`, `timer new\|set\|delete` |
-| Tabs: Messages | Messages with fill-in tokens (the time, a timer), shown over the slides | `messages`, `message show NAME`, `message hide` |
+| Tabs: Messages | A card each, with fill-in tokens (the time, a timer), shown over the slides: Show or Hide; ⋯ for Edit…, Rename, Duplicate, Cut, Copy, Paste, Delete; Words once… shows typed words at once (kept as Quick message) | `messages`, `message show NAME`, `message hide`, `message show --text WORDS` |
 | Tabs: Props | Slides of their own laid over the show (logos, lower thirds) | `props`, `prop show\|hide NAME` |
 | Tabs: Macros | Lists of actions done in turn | `macros`, `macro run NAME` |
 | Tabs: Stage | Each stage screen's layout, and the stage message | `stage on\|off` |

@@ -394,10 +394,18 @@ pub fn round_key(ui: &egui::Ui, centre: egui::Pos2, side: f32, id: &str, fill: C
 /// card's grey. A timer is not on screen, so it is never orange.
 pub const CARD_RUNNING: Color32 = Color32::from_rgb(0x25, 0x3a, 0x2c);
 
-/// How a flat button is drawn: plain (the button grey).
+/// A card whose thing is on screen (a message, a prop): the on-screen orange mixed 16% into a
+/// card's grey. Its button stays the grey of a choice that is on.
+pub const CARD_SHOWN: Color32 = Color32::from_rgb(0x46, 0x29, 0x22);
+
+/// How a flat button is drawn: plain (the button grey), on (the lighter grey of a choice that
+/// is on, with a faint inner edge), or the one main action of its place (the ink, with dark
+/// words).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Flat {
     Plain,
+    On,
+    Main,
 }
 
 /// Paints a flat button's block in `rect` with corners of `corner`, lighter under the pointer.
@@ -406,7 +414,24 @@ pub fn paint_flat(painter: &egui::Painter, rect: Rect, corner: f32, look: Flat, 
         Flat::Plain => {
             painter.rect_filled(rect, corner, if hovered { BUTTON_HOVER } else { BUTTON });
         }
+        Flat::On => {
+            painter.rect_filled(rect, corner, SELECTED);
+            painter.rect_stroke(rect, corner, Stroke::new(1.0, Color32::from_white_alpha(26)), StrokeKind::Inside);
+        }
+        Flat::Main => {
+            painter.rect_filled(rect, corner, if hovered { Color32::WHITE } else { TEXT });
+        }
     }
+}
+
+/// How wide a flat button with words is: the longest of the wordings it can show, with `pad`
+/// either side, so it keeps one width whatever it says (Show and Hide, Start and Stop).
+pub fn flat_button_width(ui: &egui::Ui, wordings: &[&str], font: &FontId, pad: f32) -> f32 {
+    let widest = wordings
+        .iter()
+        .map(|words| ui.painter().layout_no_wrap((*words).to_owned(), font.clone(), TEXT).size().x)
+        .fold(0.0, f32::max);
+    widest + 2.0 * pad
 }
 
 /// A flat button with words in the middle of `rect`. One that is not `enabled` is drawn faint
@@ -430,7 +455,11 @@ pub fn flat_button(
     } else {
         painter.rect_filled(rect, corner, BUTTON.gamma_multiply(0.5));
     }
-    let ink = if enabled { TEXT } else { TEXT_FAINT };
+    let ink = match (enabled, look) {
+        (false, _) => TEXT_FAINT,
+        (true, Flat::Main) => PANEL,
+        (true, _) => TEXT,
+    };
     painter.text(rect.center(), Align2::CENTER_CENTER, words, font, ink);
     response
 }

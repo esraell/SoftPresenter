@@ -16,9 +16,9 @@ use crate::icons::Icon;
 use crate::messages::Message;
 use crate::screens::Kind;
 use crate::studio::{
-    ACCENT, CARD, CARD_RUNNING, Flat, PANEL, RADIUS_CARD, READY, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, Tabs, caption,
-    fixed, fixed_semibold, flat_button, icon_key, paint_spaced, quiet_icon, semibold, spaced, tab_switch,
-    tab_switch_height,
+    ACCENT, CARD, CARD_RUNNING, CARD_SHOWN, Flat, PANEL, RADIUS_CARD, READY, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, Tabs,
+    caption, fixed, fixed_semibold, flat_button, flat_button_width, icon_key, paint_spaced, quiet_icon, semibold,
+    spaced, tab_switch, tab_switch_height,
 };
 use crate::timers::{self, Timer};
 
@@ -441,8 +441,117 @@ fn timer_settings(ui: &mut egui::Ui, timer: &mut Timer) -> bool {
     changed
 }
 
+/// Something asked of a message from its card.
+enum MessageAsk {
+    Toggle,
+    Edit,
+    Rename,
+    Duplicate,
+    Cut,
+    Copy,
+    Paste,
+    Delete,
+}
+
+/// A message's menu, behind its ⋯ and a right-click on its card.
+fn message_menu(ui: &mut egui::Ui, open: bool, has_clip: bool) -> Option<MessageAsk> {
+    let mut asked = None;
+    if ui.add(egui::Button::selectable(open, "Edit…")).clicked() {
+        asked = Some(MessageAsk::Edit);
+    }
+    if ui.button("Rename").clicked() {
+        asked = Some(MessageAsk::Rename);
+    }
+    if ui.button("Duplicate").clicked() {
+        asked = Some(MessageAsk::Duplicate);
+    }
+    ui.separator();
+    if ui.button("Cut").clicked() {
+        asked = Some(MessageAsk::Cut);
+    }
+    if ui.button("Copy").clicked() {
+        asked = Some(MessageAsk::Copy);
+    }
+    if ui.add_enabled(has_clip, egui::Button::new("Paste")).clicked() {
+        asked = Some(MessageAsk::Paste);
+    }
+    ui.separator();
+    if ui.button("Delete").clicked() {
+        asked = Some(MessageAsk::Delete);
+    }
+    asked
+}
+
+/// What a message's card says under its name: its words on one line, when it leaves by itself,
+/// and its look.
+fn message_summary(message: &Message) -> String {
+    let words = message.text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut parts = vec![if words.is_empty() { "No words yet".to_owned() } else { words }];
+    if let Some(seconds) = message.dismiss_after {
+        parts.push(format!("leaves after {seconds} s"));
+    }
+    parts.push(message.look.name().to_owned());
+    parts.join(" \u{b7} ")
+}
+
+/// The name of the message that words shown once are kept as, as `sp message show --text` keeps
+/// them.
+const QUICK_MESSAGE: &str = "Quick message";
+
+/// "Words once…" in the Messages heading, left of its +: a small box to type words in and show
+/// them over the slides at once. They are kept as the message Quick message, to show again.
+fn words_once(ui: &mut egui::Ui, row: Rect, state: &mut HomeState) {
+    let font = FontId::proportional(11.5);
+    let wide = flat_button_width(ui, &["Words once…"], &font, 9.0);
+    let rect = Rect::from_min_size(pos2(row.max.x - 28.0 - 8.0 - wide, row.center().y - 12.0), vec2(wide, 24.0));
+    let button = flat_button(ui, rect, egui::Id::unique("words once"), "Words once…", font, Flat::Plain, true)
+        .on_hover_text("Type some words and show them over the slides at once");
+    let draft = egui::Id::unique("words once draft");
+    egui::Popup::from_toggle_button_response(&button)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_width(250.0);
+            let mut words = ui.data_mut(|data| data.get_temp::<String>(draft)).unwrap_or_default();
+            let field = ui.add(
+                egui::TextEdit::multiline(&mut words)
+                    .desired_rows(2)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("Words to show over the slides"),
+            );
+            if !field.has_focus() && words.is_empty() {
+                field.request_focus();
+            }
+            ui.data_mut(|data| data.insert_temp(draft, words.clone()));
+            ui.label(
+                egui::RichText::new(format!("Kept as the message {QUICK_MESSAGE}, to show again or change."))
+                    .size(11.0)
+                    .color(TEXT_FAINT),
+            );
+            let (place, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::hover());
+            let show = Rect::from_min_size(pos2(place.max.x - 64.0, place.min.y), vec2(64.0, 28.0));
+            let can = !words.trim().is_empty();
+            let id = egui::Id::unique("words once show");
+            if flat_button(ui, show, id, "Show", FontId::proportional(12.5), Flat::Main, can).clicked() {
+                let at = match state.messages.iter().position(|message| message.name == QUICK_MESSAGE) {
+                    Some(at) => at,
+                    None => {
+                        state.messages.push(Message::new(QUICK_MESSAGE.to_owned()));
+                        state.messages.len() - 1
+                    }
+                };
+                state.messages[at].text = words.trim().to_owned();
+                state.messages_changed = true;
+                state.message_live = Some((state.messages[at].id, Instant::now()));
+                ui.data_mut(|data| data.remove::<String>(draft));
+                ui.close();
+            }
+        });
+}
+
 fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
-    if heading_with_add(ui, "MESSAGES", "Add a message") {
+    let (row, add) = heading(ui, "Messages", Some("New message"));
+    words_once(ui, row, state);
+    if add {
         let taken = |name: &str| state.messages.iter().any(|message| message.name == name);
         let name = (1..).map(|n| format!("New Message {n}")).find(|name| !taken(name)).unwrap_or_default();
         let message = Message::new(name);
@@ -451,89 +560,91 @@ fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         state.messages_changed = true;
     }
     if state.messages.is_empty() {
-        ui.label(
-            egui::RichText::new("No messages. A message shows over the slides, such as a notice for parents.")
-                .size(12.0)
-                .color(TEXT_FAINT),
-        );
+        empty_note(ui, "No messages. A message shows over the slides, such as a notice for parents.");
         return;
     }
     let live = state.message_live.map(|(id, _)| id);
-    let mut action: Option<(usize, &str)> = None;
+    let has_clip = state.message_clip.is_some();
+    let mut asked: Option<(usize, MessageAsk)> = None;
     let mut renamed: Option<Option<(sp_model::Uuid, String)>> = None;
     let mut rename_started = std::mem::take(&mut state.rename_started);
-    let has_clip = state.message_clip.is_some();
-    for (index, message) in state.messages.iter().enumerate() {
-        let selected = state.message_selected == Some(message.id);
-        let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click());
-        if selected {
-            ui.painter().rect_filled(row, 6.0, ACCENT.gamma_multiply(0.35));
-        } else if response.hovered() {
-            ui.painter().rect_filled(row, 6.0, crate::studio::HOVER);
-        }
-        if live == Some(message.id) {
-            ui.painter().circle_filled(row.left_center() + vec2(10.0, 0.0), 4.0, TALLY);
-        }
-        match state.message_rename.as_mut().filter(|(id, _)| *id == message.id) {
-            Some((_, typed)) => {
-                let field = crate::studio::rename_field_at(
-                    ui,
-                    typed,
-                    FontId::proportional(13.0),
-                    TEXT,
-                    ACCENT,
-                    row.left_center() + vec2(22.0, 0.0),
-                    row.max.x - 6.0,
-                );
-                if std::mem::take(&mut rename_started) {
-                    field.request_focus();
+    let timer_names: Vec<String> = state.timers.iter().map(|timer| timer.name.clone()).collect();
+    let button_font = FontId::proportional(12.5);
+    let button_wide = flat_button_width(ui, &["Show", "Hide"], &button_font, 13.0);
+    for index in 0..state.messages.len() {
+        let id = state.messages[index].id;
+        let showing = live == Some(id);
+        let open = state.message_selected == Some(id);
+        card(ui, if showing { CARD_SHOWN } else { CARD }, |ui| {
+            let message = &state.messages[index];
+            let width = ui.available_width();
+            let text_wide = width - CARD_KEY - button_wide - 2.0 * CARD_GAP;
+            let name = fitted(ui, &message.name, name_font(), TEXT, text_wide, 2);
+            let sub = fitted(ui, &message_summary(message), FontId::proportional(12.0), TEXT_FAINT, text_wide, 1);
+            let block = name.size().y + sub.size().y;
+            let (row, _) = ui.allocate_exact_size(vec2(width, block.max(CARD_KEY)), Sense::hover());
+            let back = card_back(ui, row, egui::Id::unique(("message card", id)));
+            let top = row.center().y - block / 2.0;
+            let (name_tall, first_line) = (name.size().y, name.rows.first().map_or(15.0, |row| row.height()));
+            match state.message_rename.as_mut().filter(|(renaming, _)| *renaming == id) {
+                Some((_, typed)) => {
+                    let start = pos2(row.min.x, top + first_line / 2.0);
+                    let right = row.min.x + text_wide;
+                    let field = crate::studio::rename_field_at(ui, typed, name_font(), TEXT, ACCENT, start, right);
+                    if std::mem::take(&mut rename_started) {
+                        field.request_focus();
+                    }
+                    let (enter, escape) =
+                        ui.input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
+                    if escape {
+                        renamed = Some(None);
+                    } else if enter || field.lost_focus() {
+                        renamed = Some(Some((id, typed.clone())));
+                    }
                 }
-                let (enter, escape) =
-                    ui.input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
-                if escape {
-                    renamed = Some(None);
-                } else if enter || field.lost_focus() {
-                    renamed = Some(Some((message.id, typed.clone())));
-                }
-            }
-            None => {
-                ui.painter().text(
-                    row.left_center() + vec2(22.0, 0.0),
-                    egui::Align2::LEFT_CENTER,
-                    message.name.as_str(),
-                    FontId::proportional(13.0),
-                    TEXT,
-                );
-            }
-        }
-        if response.clicked() {
-            state.message_selected = Some(message.id);
-        }
-        if response.double_clicked() {
-            action = Some((index, "Rename"));
-        }
-        response.context_menu(|ui| {
-            for name in ["Rename", "Duplicate"] {
-                if ui.button(name).clicked() {
-                    action = Some((index, name));
-                    ui.close();
+                None => {
+                    ui.painter().galley(pos2(row.min.x, top), name, TEXT);
                 }
             }
-            ui.separator();
-            for name in ["Cut", "Copy"] {
-                if ui.button(name).clicked() {
-                    action = Some((index, name));
-                    ui.close();
+            ui.painter().galley(pos2(row.min.x, top + name_tall), sub, TEXT_FAINT);
+            let y = row.center().y;
+            let more = Rect::from_min_size(pos2(row.max.x - CARD_KEY, y - CARD_KEY / 2.0), vec2(CARD_KEY, CARD_KEY));
+            let button =
+                Rect::from_min_size(pos2(more.min.x - CARD_GAP - button_wide, y - 15.0), vec2(button_wide, 30.0));
+            let (words, look, hint) = if showing {
+                ("Hide", Flat::On, "Take this message off the screens (F6)")
+            } else {
+                ("Show", Flat::Plain, "Show this message over the slides on the audience screens")
+            };
+            let toggle = egui::Id::unique(("message show", id));
+            if flat_button(ui, button, toggle, words, button_font.clone(), look, true).on_hover_text(hint).clicked() {
+                asked = Some((index, MessageAsk::Toggle));
+            }
+            let more = more_key(ui, more, egui::Id::unique(("message more", id)));
+            egui::Popup::menu(&more).show(|ui| {
+                if let Some(ask) = message_menu(ui, open, has_clip) {
+                    asked = Some((index, ask));
                 }
+            });
+            if back.double_clicked() {
+                asked = Some((index, MessageAsk::Edit));
             }
-            if ui.add_enabled(has_clip, egui::Button::new("Paste")).clicked() {
-                action = Some((index, "Paste"));
-                ui.close();
-            }
-            ui.separator();
-            if ui.button("Delete").clicked() {
-                action = Some((index, "Delete"));
-                ui.close();
+            back.context_menu(|ui| {
+                if let Some(ask) = message_menu(ui, open, has_clip) {
+                    asked = Some((index, ask));
+                }
+            });
+            if open {
+                state.messages_changed |= message_settings(ui, &mut state.messages[index], &timer_names);
+                ui.add_space(6.0);
+                let done = Rect::from_min_size(ui.cursor().min, vec2(64.0, 24.0));
+                ui.allocate_rect(done, Sense::hover());
+                let font = FontId::proportional(11.5);
+                if flat_button(ui, done, egui::Id::unique(("message done", id)), "Done", font, Flat::Plain, true)
+                    .clicked()
+                {
+                    state.message_selected = None;
+                }
             }
         });
     }
@@ -559,42 +670,45 @@ fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         state.messages_changed = true;
         gone
     };
-    match action {
-        Some((index, "Rename")) => {
+    let Some((index, ask)) = asked else { return };
+    match ask {
+        MessageAsk::Toggle => {
+            let id = state.messages[index].id;
+            state.message_live = if live == Some(id) { None } else { Some((id, Instant::now())) };
+        }
+        MessageAsk::Edit => {
+            let id = state.messages[index].id;
+            state.message_selected = if state.message_selected == Some(id) { None } else { Some(id) };
+        }
+        MessageAsk::Rename => {
             state.message_rename = Some((state.messages[index].id, state.messages[index].name.clone()));
             state.rename_started = true;
         }
-        Some((index, "Duplicate")) => {
+        MessageAsk::Duplicate => {
             let copy = state.messages[index].duplicate();
-            state.message_selected = Some(copy.id);
             state.messages.insert(index + 1, copy);
             state.messages_changed = true;
         }
-        Some((index, "Copy")) => state.message_clip = Some(state.messages[index].clone()),
-        Some((index, "Cut")) => state.message_clip = Some(remove(state, index)),
-        Some((index, "Paste")) => {
+        MessageAsk::Copy => state.message_clip = Some(state.messages[index].clone()),
+        MessageAsk::Cut => state.message_clip = Some(remove(state, index)),
+        MessageAsk::Paste => {
             if let Some(clip) = &state.message_clip {
                 // A pasted message is a new one: it gets an id of its own, so it can be pasted again.
                 let pasted = Message { id: sp_model::Uuid::new_v4(), ..clip.clone() };
-                state.message_selected = Some(pasted.id);
                 state.messages.insert(index + 1, pasted);
                 state.messages_changed = true;
             }
         }
-        Some((index, _)) => {
+        MessageAsk::Delete => {
             remove(state, index);
         }
-        None => {}
     }
+}
 
-    // The chosen message: its name, words, tokens, how it leaves, and Show.
-    let Some(index) = state.messages.iter().position(|message| Some(message.id) == state.message_selected) else {
-        return;
-    };
+/// A message's settings, under its card while they are open: its name, its words, the fill-in
+/// tokens, its look and when it leaves. Returns true when one changed.
+fn message_settings(ui: &mut egui::Ui, message: &mut Message, timer_names: &[String]) -> bool {
     ui.add_space(8.0);
-    caption(ui, "MESSAGE DETAIL");
-    let timer_names: Vec<String> = state.timers.iter().map(|timer| timer.name.clone()).collect();
-    let message = &mut state.messages[index];
     let mut changed = false;
     changed |= ui.add(egui::TextEdit::singleline(&mut message.name).desired_width(f32::INFINITY)).changed();
     changed |= ui
@@ -606,56 +720,48 @@ fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         )
         .changed();
     ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt("add token").selected_text("Add Token…").width(130.0).show_ui(ui, |ui| {
-            if ui.button("System Clock").clicked() {
-                message.text.push_str(crate::messages::CLOCK_TOKEN);
-                changed = true;
-            }
-            for name in &timer_names {
-                if ui.button(format!("Timer: {name}")).clicked() {
-                    message.text.push_str(&crate::messages::timer_token(name));
-                    changed = true;
-                }
-            }
-        });
-        egui::ComboBox::from_id_salt("message look").selected_text(message.look.name()).width(150.0).show_ui(
+        egui::ComboBox::from_id_salt(("add token", message.id)).selected_text("Add Token…").width(130.0).show_ui(
             ui,
             |ui| {
+                if ui.button("System Clock").clicked() {
+                    message.text.push_str(crate::messages::CLOCK_TOKEN);
+                    changed = true;
+                }
+                for name in timer_names {
+                    if ui.button(format!("Timer: {name}")).clicked() {
+                        message.text.push_str(&crate::messages::timer_token(name));
+                        changed = true;
+                    }
+                }
+            },
+        );
+        egui::ComboBox::from_id_salt(("message look", message.id))
+            .selected_text(message.look.name())
+            .width(150.0)
+            .show_ui(ui, |ui| {
                 for look in crate::messages::Look::ALL {
                     if ui.add(egui::Button::selectable(message.look == look, look.name())).clicked() {
                         message.look = look;
                         changed = true;
                     }
                 }
-            },
-        );
+            });
     });
-    ui.horizontal(|ui| {
-        let dismiss = match message.dismiss_after {
-            None => "Dismiss: Manually".to_owned(),
-            Some(seconds) => format!("Dismiss: After {seconds} s"),
-        };
-        egui::ComboBox::from_id_salt("dismiss").selected_text(dismiss).width(140.0).show_ui(ui, |ui| {
-            for choice in [None, Some(5), Some(10), Some(15), Some(20), Some(30), Some(45), Some(60)] {
-                let label = choice.map_or("Manually".to_owned(), |seconds| format!("After {seconds} seconds"));
-                if ui.add(egui::Button::selectable(message.dismiss_after == choice, label)).clicked() {
-                    message.dismiss_after = choice;
-                    changed = true;
-                }
+    let leaves = match message.dismiss_after {
+        None => "Stays until taken off".to_owned(),
+        Some(seconds) => format!("Leaves after {seconds} seconds"),
+    };
+    egui::ComboBox::from_id_salt(("dismiss", message.id)).selected_text(leaves).width(180.0).show_ui(ui, |ui| {
+        for choice in [None, Some(5), Some(10), Some(15), Some(20), Some(30), Some(45), Some(60)] {
+            let label =
+                choice.map_or("Stays until taken off".to_owned(), |seconds| format!("Leaves after {seconds} seconds"));
+            if ui.add(egui::Button::selectable(message.dismiss_after == choice, label)).clicked() {
+                message.dismiss_after = choice;
+                changed = true;
             }
-        });
+        }
     });
-    let id = message.id;
-    let showing = live == Some(id);
-    state.messages_changed |= changed;
-    ui.add_space(4.0);
-    let label = if showing { "Hide" } else { "Show" };
-    let button = egui::Button::new(egui::RichText::new(label).color(Color32::WHITE))
-        .fill(if showing { TALLY } else { crate::studio::SELECTED })
-        .min_size(vec2(ui.available_width(), 30.0));
-    if ui.add(button).on_hover_text("Show this message over the slides on the audience screens").clicked() {
-        state.message_live = if showing { None } else { Some((id, Instant::now())) };
-    }
+    changed
 }
 
 fn props_tab(ui: &mut egui::Ui, state: &mut HomeState) {

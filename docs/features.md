@@ -247,11 +247,13 @@ feature changes, this page changes in the same commit.
   name, its time in the fixed-width face (green, on a green-tinted card, while it runs; a
   countdown to a time of day says when it ends until it is started), Reset, Start or Stop, and
   ⋯ with Edit… (its name, what it counts, whether it runs over) and Delete.
-- **Messages** shown over
-  the slides (with the time or a timer in them, an optional time to leave by themselves, a look
-  of their own such as a band, a box in the middle or a lower third, and Rename, Cut, Copy,
-  Paste and Duplicate),
-  **Props** (things that stay over the slides until taken off, made in the editor, with an
+- **Messages** shown over the slides, with the time or a timer in them, an optional time to
+  leave by themselves, and a look of their own such as a band, a box in the middle or a lower
+  third. Each is a card with its name, its words on one line, Show or Hide (the card is tinted
+  orange while it shows), and ⋯ with Edit…, Rename, Duplicate, Cut, Copy, Paste and Delete.
+  Words once… in the tab's heading shows words typed there at once, kept as the message Quick
+  message (as `sp message show --text` does).
+- **Props** (things that stay over the slides until taken off, made in the editor, with an
   optional time to clear themselves), **Macros** (coloured buttons that clear layers, show or
   hide messages and props, start, stop or reset timers, switch the audience screens and go to
   songs, show a picture from the media bin, optionally when the app starts), **Audio** (playlists of tracks such as walk-in music: play, pause,
