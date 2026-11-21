@@ -573,7 +573,9 @@ fn keep_in_step(show: &Show, state: &mut HomeState, songs: &[Option<usize>], com
     if (list != now.0 || was_chosen != chosen)
         && let Some(song) = names(chosen)
     {
-        commands.push(Command::Select(song));
+        if !commands.contains(&Command::Select(song)) {
+            commands.push(Command::Select(song));
+        }
         return true;
     }
     if was_selected != selected && !state.hidden_slots().contains(&selected) {
@@ -2514,6 +2516,45 @@ mod tests {
         click(&ctx, &show, &mut state, pos2(left + 20.0, middle), &mut time);
         assert_eq!(state.transition.kind, sp_model::TransitionKind::Cut);
         assert!(show.live().is_none());
+    }
+
+    #[test]
+    fn a_click_on_a_playlist_row_only_opens_the_item() {
+        let (mut show, mut state) = playlist(&[("Alpha", 2), ("Beta", 2)]);
+        let slots = [show.add_presentation(song("", 0)), show.add_presentation(song("", 0))];
+        state.bible.slots = Some(slots);
+        let saved = SavedPassage { lookup: "John 3:16-18".to_owned(), ..state.bible.settings() };
+        state.services.add(Item::Header { name: "The Word".to_owned() });
+        state.services.add(Item::Passage(saved));
+        state.services.chosen = Some(0);
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 1 }));
+        let (ctx, mut time) = (egui::Context::default(), 0.0);
+        run(&ctx, &show, &mut state, Vec::new(), &mut time);
+        // The rows start under the label and the name: 42 high each, a header 34.5.
+        let first = crate::studio::TOP_BAR + 16.0 + 36.0 + 39.6;
+        let row = |top: f32| pos2(110.0, first + top + 15.0);
+        // Beta's row: Beta is opened (chosen, and scrolled to), and the screens keep Alpha.
+        let asked = click(&ctx, &show, &mut state, row(42.0), &mut time);
+        assert!(!asked.is_empty() && asked.iter().all(|command| *command == Command::Select(1)), "{asked:?}");
+        show.apply(Command::Select(1));
+        assert_eq!(state.services.chosen, Some(1));
+        assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 1 }));
+        // The header: nothing is opened; the slides go to it.
+        state.slides_jump_to = None;
+        let before = state.services.chosen;
+        run(&ctx, &show, &mut state, vec![Event::PointerMoved(row(84.0))], &mut time);
+        let asked = click(&ctx, &show, &mut state, row(84.0), &mut time);
+        assert!(asked.is_empty(), "{asked:?}");
+        assert_eq!(state.services.chosen, before);
+        // The passage: opened in the Show view; the Bible page is left as it was.
+        let asked = click(&ctx, &show, &mut state, row(84.0 + 34.5), &mut time);
+        assert!(asked.is_empty(), "{asked:?}");
+        assert_eq!(state.services.chosen, Some(3));
+        assert!(!state.bible_open, "the Show view stays");
+        assert!(state.bible.pending.is_none() && state.bible.go_live.is_none(), "nothing was looked up");
+        // Open on the Bible Page, in its menu, is how it gets there.
+        crate::studio::carry_out_item_ask(&show, &mut state, &mut Vec::new(), ItemAsk::Bible(3));
+        assert!(state.bible_open && state.bible.pending.is_some());
     }
 
     #[test]

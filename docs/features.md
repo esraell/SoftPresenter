@@ -129,7 +129,10 @@ feature changes, this page changes in the same commit.
   for a Bible passage, a picture or video, a media playlist or a placeholder, the orange dot on
   the one on screen (whose row is brought into view when it goes on screen), and ⋯ for its
   menu (for a song, the song's own menu is under Song). Headers are small capital lines. Items
-  can be dragged into a new order. **Add to playlist**, at the foot, adds a song, a header, a
+  can be dragged into a new order. A click on a row only **opens** the item: it becomes the
+  open one and the slides scroll to it; the screens don't change, and a Bible passage no longer
+  takes the window to the Bible page (Open on the Bible Page, in its menu, does). A click on a
+  header scrolls the slides to it. **Add to playlist**, at the foot, adds a song, a header, a
   placeholder, a picture or video, a media playlist or (once VoxLive is connected) the VoxLive
   item after the open item, and opens the Bible page for a passage; under it is the filter.
 - **The dock** under the slides stays put while they scroll: a bar with the transition for all

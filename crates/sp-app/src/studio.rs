@@ -2417,6 +2417,9 @@ pub enum ItemAsk {
     Rename(usize),
     /// A placeholder filled with a song, by its place among the songs.
     Fill(usize, usize),
+    /// A Bible passage opened on the Bible page, with the translations and options it was
+    /// kept with, to change it or to read round it.
+    Bible(usize),
 }
 
 /// A playlist item's menu, from its "more" button or a right-click: for a song, the song's
@@ -2456,6 +2459,17 @@ pub fn item_moves(ui: &mut egui::Ui, show: &Show, state: &HomeState, index: usiz
                 ui.close();
             }
         });
+    }
+    if matches!(item, Some(Item::Passage(_))) {
+        if ui
+            .button("Open on the Bible Page")
+            .on_hover_text("With the translations and options it was kept with")
+            .clicked()
+        {
+            *ask = Some(ItemAsk::Bible(index));
+            ui.close();
+        }
+        ui.separator();
     }
     if matches!(item, Some(Item::Placeholder { .. } | Item::Header { .. })) {
         if ui.button("Rename").clicked() {
@@ -2501,16 +2515,21 @@ pub fn carry_out_item_ask(show: &Show, state: &mut HomeState, commands: &mut Vec
                         state.bible_open = false;
                     }
                 }
-                Item::Passage(saved) => {
-                    state.bible_open = true;
-                    state.bible.open_saved(&saved, show.live().map(|at| at.presentation));
-                }
-                // Shown with the rest of the playlist, as a tile to click to put it on the
-                // screens (a placeholder shows nothing). Opening changes nothing on the screens.
-                Item::Media { .. } | Item::MediaPlaylist { .. } | Item::Placeholder { .. } => {
+                // Shown with the rest of the playlist: a passage as its slides, a picture, a
+                // video or a media playlist as a tile to click to put it on the screens (a
+                // placeholder shows nothing). Opening changes nothing on the screens, and
+                // nothing on the Bible page.
+                Item::Passage(_) | Item::Media { .. } | Item::MediaPlaylist { .. } | Item::Placeholder { .. } => {
                     state.bible_open = false;
                 }
                 Item::Header { .. } => {}
+            }
+        }
+        ItemAsk::Bible(index) => {
+            if let Some(Item::Passage(saved)) = state.services.front().items.get(index).cloned() {
+                state.services.chosen = Some(index);
+                state.bible_open = true;
+                state.bible.open_saved(&saved, show.live().map(|at| at.presentation));
             }
         }
         ItemAsk::Fill(index, song) => {
@@ -2665,6 +2684,9 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 }
                 if response.double_clicked() {
                     ask = Some(ItemAsk::Rename(index));
+                } else if response.clicked() {
+                    // A header opens nothing: the slides go to it.
+                    state.slides_jump_to = Some(index);
                 }
                 response.context_menu(|ui| menu(ui, state, &mut ask, &mut asks));
                 continue;
