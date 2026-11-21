@@ -39,6 +39,10 @@ Choose **SoftPresenter › Install Command Line Tool…** (or run the app's prog
 `softpresenter COMMAND` and `sp ctl COMMAND` do the same as `sp COMMAND`. From the source,
 `cargo run --release -- COMMAND`.
 
+On Windows (which has no tested build yet) there is no installer for `sp`: the commands are
+typed after the program itself, `softpresenter.exe COMMAND`, and `sp` alone does not start the
+app.
+
 ## The basics
 
 - **Names** can be typed in full or in part, in any case and any script: `sp go bless` finds
@@ -981,6 +985,14 @@ These need the window for now; some can be reached with `sp menu`.
   `control/ctl.sock` in that folder; `SOFTPRESENTER_CONTROL_SOCKET` names another (keep it
   short: about 100 bytes at most). The folder can be entered, and the socket opened, only by
   the user the app runs as.
+- On Windows the socket is the same kind of file, `SoftPresenter\control\ctl.sock` in the
+  user's local app data folder (`%LOCALAPPDATA%`, which stays on that computer). At each start
+  the app makes the user the folder's owner and gives the folder an access list that names
+  only that user and takes nothing from the folder above, then reads the list back, and reads
+  the socket file's own list once it is made. If either can't be set or read, or names anyone
+  but that user, the system and the administrators, the app does not listen and its log says
+  why. It does this with Windows' own `icacls` and `whoami`. A folder that is a link or a
+  junction is refused, as a linked folder is on a Mac.
 - Nothing listens on the network: no other computer, and no web page in a browser, can reach
   it. A program running as the same user can, which is no more than that program could do by
   changing the app's files.

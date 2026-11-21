@@ -29,6 +29,7 @@ mod messages;
 mod output;
 mod outside;
 mod pack;
+mod private_folder;
 mod props;
 mod renamed;
 mod screen_cli;

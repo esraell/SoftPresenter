@@ -1,22 +1,30 @@
 //! Controlling a running SoftPresenter from outside its window: `softpresenter ctl …`.
 //!
 //! While it runs, the app listens on a socket file that only the user it runs as can reach (it
-//! sits in a folder only that user may enter). The command line sends one request, a line of
+//! sits in a folder only that user may use: `private_folder` says how that is kept on each
+//! system). The command line sends one request, a line of
 //! JSON with the words typed, and gets one reply. Each command is carried out on the app's
 //! main thread by the same code the window's buttons use, so the two can never disagree.
 //!
 //! Who can use it: programs running as the same user, who could change the app's files anyway.
 //! Nothing listens on the network, so no web page or other computer can reach it.
 
-#[cfg(unix)]
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use sp_engine::{Command, Layer, SlideRef};
+// Windows has the same kind of socket (a file, reached only from this computer); the standard
+// library doesn't offer it there yet.
+#[cfg(windows)]
+use uds_windows::{UnixListener, UnixStream};
 use winit::event_loop::ActiveEventLoop;
+
+use crate::private_folder;
 
 /// Changes when requests or replies change shape, so an older command line is told so.
 pub const PROTOCOL: u32 = 1;
@@ -63,20 +71,37 @@ pub struct Incoming {
 /// Where the socket is: `SOFTPRESENTER_CONTROL_SOCKET` if set (for tests, whose folders have
 /// paths too long for a socket); else, on a Mac, in ~/Library/Caches/SoftPresenter/control,
 /// outside the library in Documents (which macOS guards, and may sync), so `sp` reaches the app
-/// from any terminal or over ssh; else the `control` folder in the app's data folder (as for a
-/// test copy with a data folder of its own).
+/// from any terminal or over ssh; on Windows, in SoftPresenter\control in the user's local app
+/// data folder (the one that stays on this computer, not the one a network account carries from
+/// computer to computer); else the `control` folder in the app's data folder (as for a test copy
+/// with a data folder of its own).
 pub fn socket_path() -> Option<PathBuf> {
     let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
+    socket_path_on(std::env::consts::OS, var, crate::bible_store::data_dir)
+}
+
+/// Where the socket is on a system (`macos`, `windows`, or another), given the environment's
+/// variables and the app's data folder.
+fn socket_path_on(
+    system: &str,
+    var: impl Fn(&str) -> Option<PathBuf>,
+    data_dir: impl FnOnce() -> Option<PathBuf>,
+) -> Option<PathBuf> {
     if let Some(path) = var("SOFTPRESENTER_CONTROL_SOCKET") {
         return Some(path);
     }
-    if cfg!(target_os = "macos")
+    if system == "macos"
         && var("SOFTPRESENTER_DATA").is_none()
         && let Some(home) = var("HOME")
     {
         return Some(home.join("Library/Caches/SoftPresenter/control/ctl.sock"));
     }
-    crate::bible_store::data_dir().map(|dir| dir.join("control").join("ctl.sock"))
+    // Never the app data folder a network account carries about: without the local one there
+    // is no socket.
+    if system == "windows" && var("SOFTPRESENTER_DATA").is_none() {
+        return Some(var("LOCALAPPDATA")?.join("SoftPresenter").join("control").join("ctl.sock"));
+    }
+    data_dir().map(|dir| dir.join("control").join("ctl.sock"))
 }
 
 /// The socket file while the app listens; dropping it removes the file.
@@ -92,36 +117,24 @@ impl Drop for Listening {
 
 /// Starts listening, on a thread of its own. Each request is handed to `deliver`, which wakes
 /// the app's main thread with it; the reply is written back when the main thread sends it.
-#[cfg(unix)]
 pub fn listen(deliver: impl Fn(Incoming) + Send + Sync + 'static) -> Result<Listening, String> {
-    use std::os::unix::fs::{DirBuilderExt, FileTypeExt, PermissionsExt};
-    use std::os::unix::net::{UnixListener, UnixStream};
-
     let path = socket_path().ok_or("Could not find where to keep the control socket.")?;
+    listen_at(path, deliver)
+}
+
+/// Starts listening at a socket file of that path, in a folder kept to this user. If the folder
+/// can't be kept private, nothing listens.
+fn listen_at(path: PathBuf, deliver: impl Fn(Incoming) + Send + Sync + 'static) -> Result<Listening, String> {
     // A socket path must be short (about 104 bytes on macOS).
     if path.as_os_str().len() > 100 {
         return Err(format!("The control socket's path is too long: {}", path.display()));
     }
     let folder = path.parent().ok_or("The control socket has no folder.")?;
-    if !folder.exists() {
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(folder)
-            .map_err(|e| format!("Could not make {}: {e}", folder.display()))?;
-    }
-    // Only this user may enter the folder. It must be a real folder, not a link to somewhere
-    // else; and setting its permissions fails unless this user owns it.
-    let meta = std::fs::symlink_metadata(folder).map_err(|e| e.to_string())?;
-    if !meta.is_dir() {
-        return Err(format!("{} is not a folder.", folder.display()));
-    }
-    std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o700))
-        .map_err(|e| format!("Could not keep {} private: {e}", folder.display()))?;
+    let private = private_folder::keep_private(folder)?;
     // A socket left by an app that stopped is removed; one another running copy is listening on
     // is left alone.
     if let Ok(meta) = std::fs::symlink_metadata(&path) {
-        if !meta.file_type().is_socket() {
+        if !private_folder::is_socket(&meta) {
             return Err(format!("{} is in the way of the control socket.", path.display()));
         }
         if UnixStream::connect(&path).is_ok() {
@@ -130,7 +143,11 @@ pub fn listen(deliver: impl Fn(Incoming) + Send + Sync + 'static) -> Result<List
         let _ = std::fs::remove_file(&path);
     }
     let listener = UnixListener::bind(&path).map_err(|e| format!("Could not listen at {}: {e}", path.display()))?;
-    let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    if let Err(problem) = private.check_socket(&path) {
+        drop(listener);
+        let _ = std::fs::remove_file(&path);
+        return Err(problem);
+    }
     let deliver: Deliver = std::sync::Arc::new(deliver);
     std::thread::Builder::new()
         .name("control".to_owned())
@@ -142,11 +159,6 @@ pub fn listen(deliver: impl Fn(Incoming) + Send + Sync + 'static) -> Result<List
         })
         .map_err(|e| format!("Could not start listening for commands: {e}"))?;
     Ok(Listening { path })
-}
-
-#[cfg(not(unix))]
-pub fn listen(_deliver: impl Fn(Incoming) + Send + Sync + 'static) -> Result<Listening, String> {
-    Err("Controlling SoftPresenter from the command line works on macOS and Linux so far.".to_owned())
 }
 
 /// What hands a request to the app's main thread; shared with the threads that wait for a
@@ -202,8 +214,7 @@ pub fn wait_for(args: &[String]) -> Option<Result<(Duration, Option<String>), St
 /// Reads one request from a connection, hands it to the app and writes back its reply. A wait
 /// for a change is answered on a thread of its own, so the commands after it are answered
 /// meanwhile.
-#[cfg(unix)]
-fn answer(stream: std::os::unix::net::UnixStream, deliver: &Deliver) {
+fn answer(stream: UnixStream, deliver: &Deliver) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
     let mut line = String::new();
@@ -304,15 +315,13 @@ fn hash_of(text: &str) -> u64 {
 }
 
 /// Hands a request to the app and waits that long for its reply.
-#[cfg(unix)]
 fn ask(deliver: &Deliver, request: Request, within: Duration) -> Reply {
     let (tx, rx) = std::sync::mpsc::channel();
     deliver(Incoming { request, reply: tx });
     rx.recv_timeout(within).unwrap_or_else(|_| Reply::failed("SoftPresenter did not answer in time."))
 }
 
-#[cfg(unix)]
-fn write_reply(stream: &std::os::unix::net::UnixStream, reply: Reply) {
+fn write_reply(stream: &UnixStream, reply: Reply) {
     let mut text = serde_json::to_string(&reply).unwrap_or_default();
     text.push('\n');
     let mut stream = stream;
@@ -605,8 +614,12 @@ fn with_full_paths(args: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-#[cfg(unix)]
 fn send(args: &[String]) -> Result<Reply, String> {
+    send_to(socket_path, args)
+}
+
+/// Sends one request to the app listening at the socket file `at` finds, and reads its reply.
+fn send_to(at: impl FnOnce() -> Option<PathBuf>, args: &[String]) -> Result<Reply, String> {
     let probe = serde_json::to_string(&Request { v: PROTOCOL, args: args.to_vec() }).map_err(|e| e.to_string())?;
     if probe.len() as u64 >= MAX_REQUEST {
         return Err(format!(
@@ -615,8 +628,8 @@ fn send(args: &[String]) -> Result<Reply, String> {
             MAX_REQUEST / 1024
         ));
     }
-    let path = socket_path().ok_or("Could not find where the control socket is.")?;
-    let mut stream = std::os::unix::net::UnixStream::connect(&path).map_err(|_| {
+    let path = at().ok_or("Could not find where the control socket is.")?;
+    let mut stream = UnixStream::connect(&path).map_err(|_| {
         "SoftPresenter isn't running (or isn't listening for commands). Open it, then try again.".to_owned()
     })?;
     // A wait for a change is answered when it is up at the latest.
@@ -629,11 +642,6 @@ fn send(args: &[String]) -> Result<Reply, String> {
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line).map_err(|e| e.to_string())?;
     serde_json::from_str(line.trim()).map_err(|e| format!("Could not read SoftPresenter's answer: {e}"))
-}
-
-#[cfg(not(unix))]
-fn send(_args: &[String]) -> Result<Reply, String> {
-    Err("Controlling SoftPresenter from the command line works on macOS and Linux so far.".to_owned())
 }
 
 /// The first words of the commands, so `softpresenter next` can be typed without `ctl`.
@@ -2977,5 +2985,285 @@ mod tests {
         let on = serde_json::json!({"type": "boolean"});
         assert_eq!(setting_value(&on, "transparent", "on"), Ok(serde_json::json!(true)));
         assert!(setting_value(&serde_json::json!({"type": "list"}), "x", "1").is_err());
+    }
+
+    /// A folder for one test's socket. Its path is short, as a socket's must be.
+    fn socket_folder(name: &str) -> PathBuf {
+        let folder = std::env::temp_dir().join(format!("sp-ctl-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        folder
+    }
+
+    /// Listens at a socket as the app does, answering each request with the words it was sent.
+    fn echo_at(path: &Path) -> Result<Listening, String> {
+        listen_at(path.to_owned(), |incoming: Incoming| {
+            let heard = format!("heard {}", incoming.request.args.join(" "));
+            let _ = incoming.reply.send(Reply::with(heard, serde_json::json!(incoming.request.args)));
+        })
+    }
+
+    /// Sends words to that socket with the code `sp` sends them with.
+    fn say_to(path: &Path, words: &[&str]) -> Result<Reply, String> {
+        let words: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
+        send_to(|| Some(path.to_owned()), &words)
+    }
+
+    const NOT_RUNNING: &str = "SoftPresenter isn't running";
+
+    /// Where the socket is on a system with these variables set, the data folder being `data`.
+    fn socket_on(system: &str, set: &[(&str, &str)]) -> Option<PathBuf> {
+        let var = |name: &str| set.iter().find(|(set, _)| *set == name).map(|(_, value)| PathBuf::from(value));
+        socket_path_on(system, var, || Some(PathBuf::from("data")))
+    }
+
+    #[test]
+    fn the_socket_is_kept_where_each_system_keeps_what_stays_on_the_computer() {
+        let roaming = ("APPDATA", "roaming");
+        let local = ("LOCALAPPDATA", "local");
+        let home = ("HOME", "home");
+        let ends = |path: Option<PathBuf>, with: &[&str]| {
+            let path = path.expect("a place for the socket");
+            let wanted: PathBuf = with.iter().collect();
+            assert!(path.ends_with(&wanted), "{} ends with {}", path.display(), wanted.display());
+        };
+        // Windows: the local app data folder, never the one that travels with the account.
+        ends(socket_on("windows", &[roaming, local, home]), &["local", "SoftPresenter", "control", "ctl.sock"]);
+        assert_eq!(socket_on("windows", &[roaming, home]), None, "no local folder, no socket");
+        // A Mac: the caches folder, outside the library.
+        ends(socket_on("macos", &[home]), &["home", "Library", "Caches", "SoftPresenter", "control", "ctl.sock"]);
+        // A data folder of its own (a test copy) keeps its socket with it, on every system.
+        for system in ["windows", "macos", "linux"] {
+            let own = ("SOFTPRESENTER_DATA", "data");
+            ends(socket_on(system, &[own, roaming, local, home]), &["data", "control", "ctl.sock"]);
+            // The path named outright is used as it is.
+            let named = ("SOFTPRESENTER_CONTROL_SOCKET", "named.sock");
+            assert_eq!(socket_on(system, &[named, own, local, home]), Some(PathBuf::from("named.sock")));
+        }
+        ends(socket_on("linux", &[home]), &["data", "control", "ctl.sock"]);
+    }
+
+    #[test]
+    fn a_command_reaches_the_listening_app_and_its_reply_comes_back() {
+        let folder = socket_folder("round");
+        let path = folder.join("c.sock");
+        let listening = echo_at(&path).expect("listening");
+        for words in [&["go", "River Song", "2"][..], &["status"][..]] {
+            let reply = say_to(&path, words).expect("a reply");
+            assert!(reply.ok);
+            assert_eq!(reply.text, format!("heard {}", words.join(" ")));
+            assert_eq!(reply.data, serde_json::json!(words));
+        }
+        // When the app stops listening the socket file goes, and the command line says so.
+        drop(listening);
+        assert!(std::fs::symlink_metadata(&path).is_err(), "the socket file is removed");
+        let said = say_to(&path, &["status"]).expect_err("nothing listens");
+        assert!(said.starts_with(NOT_RUNNING), "{said}");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_command_with_nothing_listening_says_the_app_is_not_running() {
+        let folder = socket_folder("nobody");
+        let said = say_to(&folder.join("c.sock"), &["status"]).expect_err("nothing listens");
+        assert!(said.starts_with(NOT_RUNNING), "{said}");
+        assert!(!folder.exists(), "asking makes nothing");
+    }
+
+    #[test]
+    fn a_request_the_app_does_not_understand_is_told_so() {
+        let folder = socket_folder("odd");
+        let path = folder.join("c.sock");
+        let _listening = echo_at(&path).expect("listening");
+        for (request, wanted) in [
+            ("{\"v\": 99, \"args\": [\"status\"]}\n", "speaks version 99 of the protocol"),
+            ("not a request\n", "Not a request SoftPresenter understands"),
+        ] {
+            let mut stream = UnixStream::connect(&path).expect("connected");
+            stream.write_all(request.as_bytes()).expect("sent");
+            let mut line = String::new();
+            BufReader::new(stream).read_line(&mut line).expect("answered");
+            let reply: Reply = serde_json::from_str(line.trim()).expect("a reply");
+            assert!(!reply.ok);
+            assert!(reply.text.contains(wanted), "{}", reply.text);
+        }
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_second_copy_leaves_the_first_ones_socket_alone() {
+        let folder = socket_folder("second");
+        let path = folder.join("c.sock");
+        let _first = echo_at(&path).expect("listening");
+        let said = echo_at(&path).err().expect("the second is refused");
+        assert_eq!(said, "Another SoftPresenter is already listening for commands.");
+        assert!(say_to(&path, &["status"]).expect("the first still answers").ok);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_socket_left_by_an_app_that_stopped_is_replaced() {
+        let folder = socket_folder("stale");
+        let path = folder.join("c.sock");
+        std::fs::create_dir_all(&folder).expect("the folder");
+        drop(UnixListener::bind(&path).expect("a socket nobody listens on any more"));
+        assert!(std::fs::symlink_metadata(&path).is_ok(), "its file is left behind");
+        let _listening = echo_at(&path).expect("listening in its place");
+        assert!(say_to(&path, &["status"]).expect("a reply").ok);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_file_in_the_sockets_place_is_left_alone() {
+        let folder = socket_folder("file");
+        let path = folder.join("c.sock");
+        std::fs::create_dir_all(&folder).expect("the folder");
+        std::fs::write(&path, "kept").expect("a file");
+        let said = echo_at(&path).err().expect("refused");
+        assert!(said.ends_with("is in the way of the control socket."), "{said}");
+        assert_eq!(std::fs::read_to_string(&path).expect("still there"), "kept");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_socket_path_too_long_is_refused_and_nothing_is_made() {
+        let folder = socket_folder("long").join("a".repeat(100));
+        let said = echo_at(&folder.join("c.sock")).err().expect("refused");
+        assert!(said.starts_with("The control socket's path is too long"), "{said}");
+        assert!(!folder.exists());
+    }
+
+    /// A folder that is really a link to another: on Unix a symbolic link, on Windows a
+    /// junction (which needs no special right to make).
+    fn link_to_folder(link: &Path, to: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(to, link).expect("a link");
+        #[cfg(windows)]
+        {
+            let made = private_folder::run(
+                private_folder::tool("cmd.exe").expect("cmd").arg("/C").arg("mklink").arg("/J").arg(link).arg(to),
+            );
+            made.expect("a junction");
+        }
+    }
+
+    #[test]
+    fn a_folder_that_is_a_link_is_refused() {
+        let base = socket_folder("link");
+        let real = base.join("real");
+        let link = base.join("link");
+        std::fs::create_dir_all(&real).expect("the folder");
+        link_to_folder(&link, &real);
+        let said = echo_at(&link.join("c.sock")).err().expect("refused");
+        assert!(said.ends_with("is not a folder."), "{said}");
+        assert!(std::fs::symlink_metadata(real.join("c.sock")).is_err(), "no socket was made through the link");
+        // The link first, so that removing the rest never goes through it.
+        let _ = std::fs::remove_dir(&link);
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_sockets_folder_and_the_socket_are_for_this_user_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &Path| std::fs::symlink_metadata(path).expect("there").permissions().mode() & 0o777;
+        // A folder made for the socket, and one that was there already and open to others.
+        let made = socket_folder("made");
+        let open = socket_folder("open");
+        std::fs::create_dir_all(&open).expect("the folder");
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).expect("opened");
+        for folder in [&made, &open] {
+            let path = folder.join("c.sock");
+            let _listening = echo_at(&path).expect("listening");
+            assert_eq!(mode(folder), 0o700);
+            assert_eq!(mode(&path), 0o600);
+            let _ = std::fs::remove_dir_all(folder);
+        }
+    }
+
+    /// Changes an access list with Windows' own tool, as somebody at the computer could.
+    #[cfg(windows)]
+    fn icacls(path: &Path, change: &[&str]) {
+        let changed = private_folder::run(private_folder::tool("icacls.exe").expect("icacls").arg(path).args(change));
+        changed.expect("the access list changed");
+    }
+
+    /// The socket kind itself works on this Windows, before anything is kept private: when the
+    /// tests below fail, this says whether the socket or the privacy is at fault.
+    #[cfg(windows)]
+    #[test]
+    fn windows_has_the_socket_kind() {
+        let folder = socket_folder("kind");
+        let path = folder.join("c.sock");
+        std::fs::create_dir_all(&folder).expect("the folder");
+        let listener = UnixListener::bind(&path).expect("bound");
+        let meta = std::fs::symlink_metadata(&path).expect("the socket file can be looked at");
+        assert!(private_folder::is_socket(&meta), "the socket file is known as a socket");
+        let client = std::thread::spawn({
+            let path = path.clone();
+            move || {
+                let mut stream = UnixStream::connect(&path).expect("connected");
+                stream.write_all(b"hello\n").expect("sent");
+            }
+        });
+        let (stream, _) = listener.accept().expect("accepted");
+        let mut line = String::new();
+        BufReader::new(stream).read_line(&mut line).expect("read");
+        assert_eq!(line, "hello\n");
+        client.join().expect("the client");
+        drop(listener);
+        std::fs::remove_file(&path).expect("the socket file can be removed");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// Each step of keeping a folder private, one at a time, so a failure names the step.
+    #[cfg(windows)]
+    #[test]
+    fn windows_keeps_the_sockets_folder_to_this_user() {
+        let user = private_folder::user().expect("which user this is");
+        assert!(user.starts_with("S-1-"), "{user}");
+        let folder = socket_folder("kept");
+        private_folder::keep_private(&folder).expect("kept private");
+        let list = private_folder::access_list(&folder).expect("its access list");
+        assert!(list.contains("D:P"), "closed to the folder above: {list}");
+        assert!(!list.contains(";WD)") && !list.contains(";BU)") && !list.contains(";AU)"), "{list}");
+        // A file made in it takes the same list.
+        let inside = folder.join("inside.txt");
+        std::fs::write(&inside, "x").expect("a file inside");
+        let list = private_folder::access_list(&inside).expect("the file's access list");
+        assert!(!list.contains(";WD)") && !list.contains(";BU)") && !list.contains(";AU)"), "{list}");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_does_not_listen_in_a_folder_others_may_open() {
+        let folder = socket_folder("shared");
+        let path = folder.join("c.sock");
+        std::fs::create_dir_all(&folder).expect("the folder");
+        // Everyone (S-1-1-0) is let in by an entry of the folder's own, which stays when what
+        // comes from the folder above is taken off.
+        icacls(&folder, &["/grant", "*S-1-1-0:(OI)(CI)F"]);
+        let said = echo_at(&path).err().expect("refused");
+        assert!(said.contains("is not private"), "{said}");
+        assert!(std::fs::symlink_metadata(&path).is_err(), "no socket was made");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// The whole of the privacy rests on this: Windows lets a program connect only if the
+    /// socket file's access list lets its user open the file.
+    #[cfg(windows)]
+    #[test]
+    fn windows_refuses_a_user_the_socket_file_does_not_let_in() {
+        let folder = socket_folder("deny");
+        let path = folder.join("c.sock");
+        let _listening = echo_at(&path).expect("listening");
+        assert!(say_to(&path, &["status"]).expect("let in at first").ok);
+        let user = private_folder::user().expect("which user this is");
+        icacls(&path, &["/deny", &format!("*{user}:F"), "/L"]);
+        let said = say_to(&path, &["status"]).expect_err("refused once the file's list refuses this user");
+        assert!(said.starts_with(NOT_RUNNING), "{said}");
+        icacls(&path, &["/remove:d", &format!("*{user}"), "/L"]);
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }

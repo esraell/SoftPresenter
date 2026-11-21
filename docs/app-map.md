@@ -183,7 +183,8 @@ of this one copies it to Documents, checks the copy, and keeps the old folder as
 
 The command line's socket, while the app runs, is `~/Library/Caches/SoftPresenter/control/ctl.sock`
 (outside Documents, so `sp` reaches the app from any terminal or over ssh), or
-`control/ctl.sock` in a folder `SOFTPRESENTER_DATA` names.
+`control/ctl.sock` in a folder `SOFTPRESENTER_DATA` names. On Windows it is
+`%LOCALAPPDATA%\SoftPresenter\control\ctl.sock`.
 
 The log is `~/Library/Logs/SoftPresenter/SoftPresenter.log`: what went on screen, commands that
 change something (not those that only read, such as `sp status`), problems, and once a minute
