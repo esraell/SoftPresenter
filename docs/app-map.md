@@ -80,7 +80,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | Tabs: Messages | A card each, with fill-in tokens (the time, a timer), shown over the slides: Show or Hide; ⋯ for Edit…, Rename, Duplicate, Cut, Copy, Paste, Delete; Words once… shows typed words at once (kept as Quick message) | `messages`, `message show NAME`, `message hide`, `message show --text WORDS` |
 | Tabs: Props | Slides of their own laid over the show (logos, lower thirds), a card each with its picture: Show or Hide; ⋯ for Edit in the Editor, Clears Itself, Rename, Duplicate, Delete | `props`, `prop show\|hide NAME`, `prop new\|delete` |
 | Tabs: Macros | Steps done in turn, a card each: Run (the name alone does nothing); the chevron opens its steps (Earlier, Remove, Add a step…); ⋯ for Colour, Run When SoftPresenter Opens, Rename, Duplicate, Delete | `macros`, `macro run NAME`, `macro new\|add\|remove\|delete` |
-| Tabs: Stage | Each stage screen's layout, and the stage message | `stage on\|off` |
+| Tabs: Stage | Which stage screen (with more than one; all by default); every layout as a tile with a picture of the stage in it, the one in use ticked, a click switches; Edit layouts…; the stage message (Show on stage, Change it, Clear) | `stage on\|off`, `stage layout SCREEN LAYOUT`, `stage message TEXT\|clear` |
 | Tabs: Audio | Audio playlists: play, pause, skip, volume, shuffle, crossfade | `audio`, `audio play\|pause\|stop`, `audio volume N` |
 | Tabs: VoxLive (once VoxLive is connected) | The church's VoxLive screens as buttons: a click puts that screen's captions on the screens in place of a verse | `voxlive show N\|NAME` |
 
@@ -235,7 +235,8 @@ how long drawing took.
   `SOFTPRESENTER_GO_LIVE=1` (a slide on screen), `_GO_LIVE_MEDIA=1` (the first media item),
   `_CAPTURE_EDITOR`, `_CAPTURE_BIBLE`, `_CAPTURE_THEMES`, `_CAPTURE_SETTINGS`,
   `_PLAYLIST`, `_OPEN_ITEM=N`, `_MENU=ItemId,ItemId`, `_DROP=FILE`, `_PICK=songs:0,2`,
-  `_WINDOW_SIZE=WxH`, `_NDI=NAME`, `_HIDE_NDI=1`, `_TRACE_PREVIEW=1`.
+  `_WINDOW_SIZE=WxH`, `_NDI=NAME`, `_HIDE_NDI=1`, `_TRACE_PREVIEW=1`, `_LIVE_TAB=NAME` (open a
+  tool tab), `_TAB_SCROLL=POINTS` (scroll the open tab down, for a picture of its foot).
 - A quiet copy never tidies the library (moves unused pictures to the Trash) unless
   `SOFTPRESENTER_SWEEP=DAYS` is set with a data folder of its own; it then tidies as if every file
   were that many days older. `touch -t` can't make a file look old to it: it goes by the newest of

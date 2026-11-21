@@ -266,8 +266,16 @@ feature changes, this page changes in the same commit.
   SoftPresenter Opens, Rename, Duplicate and Delete.
 - **Audio** (playlists of tracks such as walk-in music: play, pause,
   skip 15 seconds, volume, Play Through to the next track, Shuffle, and a crossfade of up to ten
-  seconds from one track into the next; F5 or Clear All stops it), and a **Stage Message** for the people on
-  stage, in tabs under Clear All in the right column. A slide can carry the same actions, done when it goes on screen.
+  seconds from one track into the next; F5 or Clear All stops it).
+- **Stage**: with more than one stage screen, a chooser of which (All stage screens to begin
+  with); then every stage layout as a tile with a picture of what the stage would show in it
+  now (drawn by the screens' renderer, again when the slide, the stage message or the clock's
+  minute changes; a running timer is named without its time), the one in use outlined with a
+  tick, and one click switches the screens chosen to it. A note says so when those screens are
+  off. Under them the **Stage Message** for the people on stage: what is typed waits until Show
+  on stage (or Return) sends it, Change it sends a change while one shows, and Clear takes it
+  off.
+- A slide can carry the same actions as a macro, done when it goes on screen.
 - **The window** is three round panels on a dark window: the left column, the middle, and a
   right column that is the same in every view. Along the top: the views (Show, Bible, Edit), a
   find box (press `/`, or Command-F: it finds songs by title and then by a line of their
@@ -296,8 +304,8 @@ feature changes, this page changes in the same commit.
   in time, it keeps what it last showed, and a warning over the preview's picture says so
   until it draws again. (The warning covers those two cases. It does not see a picture the GPU dropped
   after it was worked out, or a window macOS is not showing.)
-- **Stage layouts**: each stage screen picks a layout in the Stage tab (Words and Next, Words
-  Only, Words and Notes, Clock and Timer, or your own). Edit › Stage (also Screens > Edit Stage
+- **Stage layouts**: each stage screen shows a layout picked in the Stage tab (Words and Next,
+  Words Only, Words and Notes, Clock and Timer, or your own). Edit › Stage (also Screens > Edit Stage
   Layouts…) lays them out: the current and next slide, the next label, the clock, a timer, the slide's notes, the
   song's title and group, and the stage message, each dragged into place and resized, with its
   size, colour and alignment.

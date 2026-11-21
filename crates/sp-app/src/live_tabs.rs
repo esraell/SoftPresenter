@@ -65,7 +65,14 @@ pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeStat
         state.live_tab = tab;
     }
     ui.add_space(4.0);
-    let scrolled = egui::ScrollArea::vertical().id_salt("live tab").auto_shrink([false, false]).show(ui, |ui| {
+    let mut area = egui::ScrollArea::vertical().id_salt("live tab").auto_shrink([false, false]);
+    // Testing aid: scroll the open tab this far down, to take a picture of its foot in a window
+    // too short to show all of it.
+    static SCROLLED: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    if let Some(down) = *SCROLLED.get_or_init(|| std::env::var("SOFTPRESENTER_TAB_SCROLL").ok()?.parse().ok()) {
+        area = area.vertical_scroll_offset(down);
+    }
+    let scrolled = area.show(ui, |ui| {
         // The same width whether the tab scrolls or not (its bar floats over the edge), so
         // nothing moves when a list grows long enough to scroll.
         ui.set_width(width);
@@ -75,7 +82,7 @@ pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeStat
             1 => messages_tab(ui, state),
             2 => props_tab(ui, state, thumb),
             3 => macros_tab(ui, show, state),
-            4 => stage_tab(ui, state),
+            4 => stage_tab(ui, show, state, thumb),
             5 => audio_tab(ui, state),
             _ => voxlive_tab(ui, show, state),
         }
@@ -768,10 +775,19 @@ fn message_settings(ui: &mut egui::Ui, message: &mut Message, timer_names: &[Str
 /// Asks for a picture of a slide; see [`ThumbOf`].
 type Thumb<'t> = dyn FnMut(ThumbOf) -> Option<(egui::TextureId, bool)> + 't;
 
+/// A number that changes when any of `parts` does, to tell when a picture must be drawn again.
+fn signature(parts: &[&str]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    parts.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// A small picture of a slide drawn with a theme of its own, in `rect` with round corners: a
 /// prop's, or a stage layout's. `key` keeps it apart from other pictures of the same slide;
-/// it is drawn again when `slide` says something else than when it was last drawn, and black
-/// until it is ready.
+/// it is drawn again only when `said` (a [`signature`] of what it shows) is not what it was
+/// when it was last drawn, and is black until it is ready.
+#[allow(clippy::too_many_arguments)]
 fn own_picture(
     ui: &egui::Ui,
     thumb: &mut Thumb,
@@ -780,12 +796,8 @@ fn own_picture(
     key: sp_model::Uuid,
     slide: &sp_model::Slide,
     theme: &sp_model::Theme,
+    said: u64,
 ) {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    serde_json::to_string(slide).unwrap_or_default().hash(&mut hasher);
-    theme.templates.first().map(|template| serde_json::to_string(template).unwrap_or_default()).hash(&mut hasher);
-    let said = hasher.finish();
     let drawn = egui::Id::unique(("own picture drawn", key));
     let again = ui.data(|data| data.get_temp::<u64>(drawn)) != Some(said);
     let kept = sp_model::Slide { id: key, ..slide.clone() };
@@ -896,7 +908,8 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut Thumb) {
             let y = row.center().y;
             let place = Rect::from_min_size(pos2(row.min.x, y - picture.y / 2.0), picture);
             let key = sp_model::Uuid::from_u128(prop.id.as_u128() ^ 0x7072_6f70_7069_6374_7572_6500_0000_0000);
-            own_picture(ui, thumb, place, 4.0, key, &prop.slide, prop_theme());
+            let said = signature(&[&serde_json::to_string(&prop.slide).unwrap_or_default()]);
+            own_picture(ui, thumb, place, 4.0, key, &prop.slide, prop_theme(), said);
             let left = place.max.x + CARD_GAP;
             let top = y - block / 2.0;
             let (name_tall, first_line) = (name.size().y, name.rows.first().map_or(15.0, |row| row.height()));
@@ -1573,69 +1586,230 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
     }
 }
 
-fn stage_tab(ui: &mut egui::Ui, state: &mut HomeState) {
-    caption(ui, "STAGE");
-    let mut any = false;
-    let mut chosen: Option<(usize, sp_model::Uuid)> = None;
-    for (index, screen) in state.screens.iter().enumerate().filter(|(_, screen)| screen.kind == Kind::Stage) {
-        any = true;
-        let status = state.screen_status.get(index).map_or("", |(status, _)| status.as_str());
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(screen.name.as_str()).size(13.0).color(TEXT));
-            ui.label(egui::RichText::new(status).size(11.5).color(TEXT_DIM));
-        });
-        // The layout the screen is drawn with.
-        let layout = crate::stage::layout_for(&state.stage_layouts, screen.stage_layout);
-        egui::ComboBox::from_id_salt(("stage layout", screen.id))
-            .selected_text(layout.name.as_str())
-            .width(ui.available_width() - 8.0)
-            .show_ui(ui, |ui| {
-                for option in &state.stage_layouts {
-                    if ui.add(egui::Button::selectable(option.id == layout.id, option.name.as_str())).clicked() {
-                        chosen = Some((index, option.id));
-                    }
-                }
-            });
-    }
-    if let Some((index, layout)) = chosen
-        && let Some(screen) = state.screens.get_mut(index)
-    {
-        screen.stage_layout = Some(layout);
-        state.screens_changed = true;
-    }
-    if !any {
-        ui.label(egui::RichText::new("No stage screens yet.").size(12.0).color(TEXT_FAINT));
-    }
-    ui.horizontal(|ui| {
-        if ui.button("Configure Screens…").clicked() {
+/// A small drop-down, as the design draws one: its words and a chevron on the card grey, lighter
+/// under the pointer. Open its choices with `egui::Popup::menu` on what it returns.
+fn small_select(ui: &egui::Ui, rect: Rect, id: egui::Id, words: &str) -> egui::Response {
+    let reach = ((crate::studio::LEAST_CLICK - rect.height()) / 2.0).max(0.0);
+    let response = ui.interact(rect.expand2(vec2(0.0, reach)), id, Sense::click());
+    let fill = if response.hovered() { crate::studio::BUTTON } else { CARD };
+    ui.painter().rect_filled(rect, crate::studio::RADIUS, fill);
+    let text = fitted(ui, words, FontId::proportional(11.5), TEXT, rect.width() - 30.0, 1);
+    ui.painter().galley(pos2(rect.min.x + 8.0, rect.center().y - text.size().y / 2.0), text, TEXT);
+    let mark = Rect::from_center_size(pos2(rect.max.x - 12.0, rect.center().y), vec2(10.0, 10.0));
+    crate::icons::paint(ui.painter(), Icon::ChevronDown, mark, TEXT_DIM);
+    response
+}
+
+/// A tick, as the layout in use has before its name.
+fn paint_tick(painter: &egui::Painter, rect: Rect, ink: Color32) {
+    let at = |x: f32, y: f32| pos2(rect.min.x + x * rect.width(), rect.min.y + y * rect.height());
+    let points = vec![at(0.12, 0.55), at(0.4, 0.8), at(0.9, 0.22)];
+    painter.add(egui::Shape::line(points, egui::Stroke::new(1.8, ink)));
+}
+
+/// The role of the timer's box in a stage layout.
+const STAGE_TIMER: &str = "timer";
+
+fn stage_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, thumb: &mut Thumb) {
+    let stages: Vec<usize> =
+        state.screens.iter().enumerate().filter(|(_, screen)| screen.kind == Kind::Stage).map(|(at, _)| at).collect();
+    if stages.is_empty() {
+        heading(ui, "Stage", None);
+        empty_note(ui, "No stage screens. Add one in Settings, under Screens.");
+        let (place, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::hover());
+        let font = FontId::proportional(11.5);
+        let wide = flat_button_width(ui, &["Set Up Screens…"], &font, 9.0);
+        let rect = Rect::from_min_size(place.min, vec2(wide, 24.0));
+        if flat_button(ui, rect, egui::Id::unique("stage set up screens"), "Set Up Screens…", font, Flat::Plain, true)
+            .clicked()
+        {
             state.settings_open = true;
         }
-        if ui.button("Edit Layouts…").on_hover_text("Lay out what the stage screens show").clicked() {
-            state.edit_kind_request = Some(crate::home::EditKind::Stage);
-        }
+        return;
+    }
+    // Which stage screens the layouts are for: all of them, or the one chosen (kept by the
+    // window). With one stage screen there is nothing to choose.
+    let chosen_id = egui::Id::unique("stage screen chosen");
+    let chosen = ui
+        .data(|data| data.get_temp::<sp_model::Uuid>(chosen_id))
+        .filter(|id| stages.iter().any(|&at| state.screens[at].id == *id));
+    if stages.len() > 1 {
+        let (row, _) = heading(ui, "Which stage screen", None);
+        let words = chosen
+            .and_then(|id| state.screens.iter().find(|screen| screen.id == id))
+            .map_or("All stage screens", |screen| screen.name.as_str());
+        let rect = Rect::from_min_size(pos2(row.max.x - 150.0, row.center().y - 12.0), vec2(150.0, 24.0));
+        let picker = small_select(ui, rect, egui::Id::unique("stage screen picker"), words);
+        egui::Popup::menu(&picker).show(|ui| {
+            if ui.add(egui::Button::selectable(chosen.is_none(), "All stage screens")).clicked() {
+                ui.data_mut(|data| data.remove::<sp_model::Uuid>(chosen_id));
+            }
+            for &at in &stages {
+                let screen = &state.screens[at];
+                if ui.add(egui::Button::selectable(chosen == Some(screen.id), screen.name.as_str())).clicked() {
+                    let id = screen.id;
+                    ui.data_mut(|data| data.insert_temp(chosen_id, id));
+                }
+            }
+        });
+    }
+    let targets: Vec<usize> =
+        stages.iter().copied().filter(|&at| chosen.is_none_or(|id| state.screens[at].id == id)).collect();
+    let layout_of = |at: usize| crate::stage::layout_for(&state.stage_layouts, state.screens[at].stage_layout).id;
+    let shown = layout_of(targets[0]);
+    let same = targets.iter().all(|&at| layout_of(at) == shown);
+    // Said when what is chosen does not show now, so a change is not expected on the stage.
+    let off = !state.stage_on || targets.iter().all(|&at| state.screens[at].output == crate::screens::Output::Off);
+    if off {
+        let says = if state.stage_on { "This stage screen is switched off" } else { "The stage screens are off" };
+        let words = format!("{says}. The layout still changes, ready for when it is on.");
+        egui::Frame::new()
+            .corner_radius(RADIUS_CARD as u8)
+            .stroke(egui::Stroke::new(1.0, crate::studio::LINE))
+            .inner_margin(egui::Margin::symmetric(11, 8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(egui::RichText::new(words).size(12.5).color(crate::studio::CARE));
+            });
+    }
+    let title =
+        if stages.len() > 1 { "Layout".to_owned() } else { format!("{} \u{b7} Layout", state.screens[stages[0]].name) };
+    let (row, _) = heading(ui, &title, None);
+    let font = FontId::proportional(11.5);
+    let wide = flat_button_width(ui, &["Edit layouts…"], &font, 9.0);
+    let rect = Rect::from_min_size(pos2(row.max.x - wide, row.center().y - 12.0), vec2(wide, 24.0));
+    if flat_button(ui, rect, egui::Id::unique("stage edit layouts"), "Edit layouts…", font, Flat::Plain, true)
+        .on_hover_text("Lay out what the stage screens show")
+        .clicked()
+    {
+        state.edit_kind_request = Some(crate::home::EditKind::Stage);
+    }
+
+    // Every layout as a tile with a picture of what the stage would show in it now; the one in
+    // use is outlined, with a tick. One click switches.
+    if state.stage_layouts.is_empty() {
+        state.stage_layouts = crate::stage::builtin_layouts();
+    }
+    let now = show.live_slide().map(|(_, slide)| slide);
+    let next = show.live().and(show.upcoming()).and_then(|at| {
+        let song = show.presentations().get(at.presentation)?;
+        song.slide(at.slide).map(|(_, slide)| slide)
     });
-    ui.add_space(10.0);
-    caption(ui, "STAGE MESSAGE");
+    let about = match show.live_slide() {
+        Some((song, _)) => crate::stage::About {
+            title: Some(song.title.clone()),
+            group: show.live().and_then(|at| song.slide(at.slide)).map(|(group, _)| group.name.clone()),
+        },
+        None => crate::stage::About::default(),
+    };
+    let overlay = crate::output::Overlay {
+        stage_message: state.stage_message_live.then(|| state.stage_message.clone()),
+        timers: state.timers.iter().filter(|timer| timer.running()).take(1).cloned().collect(),
+        ..Default::default()
+    };
+    let width = ui.available_width();
+    let tile_wide = (width - 8.0) / 2.0;
+    let picture = vec2(tile_wide - 12.0, (tile_wide - 12.0) * 9.0 / 16.0);
+    let tile_tall = 6.0 + picture.y + 6.0 + 17.0 + 8.0;
+    let mut switch_to = None;
+    let mut row = Rect::NOTHING;
+    for (place, layout) in state.stage_layouts.iter().enumerate() {
+        if place % 2 == 0 {
+            if place > 0 {
+                ui.add_space(1.0);
+            }
+            row = ui.allocate_exact_size(vec2(width, tile_tall), Sense::hover()).0;
+        }
+        let tile = Rect::from_min_size(
+            pos2(row.min.x + (tile_wide + 8.0) * (place % 2) as f32, row.min.y),
+            vec2(tile_wide, tile_tall),
+        );
+        let response = ui.interact(tile, egui::Id::unique(("stage layout tile", layout.id)), Sense::click());
+        let on = same && layout.id == shown;
+        let fill = if on || response.hovered() { crate::studio::BUTTON } else { CARD };
+        ui.painter().rect_filled(tile, 10.0, fill);
+        if on {
+            let edge = egui::Stroke::new(2.0, crate::studio::SELECTED);
+            ui.painter().rect_stroke(tile, 10.0, edge, egui::StrokeKind::Inside);
+        }
+        // The stage's picture in this layout, drawn again when what it shows changes: a new
+        // slide, the stage message, the clock's minute. A running timer is named but its time
+        // is left out, so the pictures are not drawn again every second.
+        let mut stage = crate::stage::slide(now, next, &overlay, &about, layout);
+        let timer_name = overlay.timers.first().map(|timer| timer.name.clone());
+        for object in &mut stage.objects {
+            if object.role.as_ref().is_some_and(|role| role.0 == STAGE_TIMER)
+                && let Some(name) = &timer_name
+            {
+                *object = sp_model::Object::text(sp_model::Role(STAGE_TIMER.to_owned()), name.clone());
+            }
+        }
+        let texts = format!("{:?}", stage.texts());
+        let said = signature(&[&texts, &serde_json::to_string(layout).unwrap_or_default()]);
+        let key = sp_model::Uuid::from_u128(layout.id.as_u128() ^ 0x7374_6167_6570_6963_7475_7265_0000_0000);
+        let shot = Rect::from_min_size(tile.min + vec2(6.0, 6.0), picture);
+        own_picture(ui, thumb, shot, 5.0, key, &stage, &crate::stage::theme_for(layout), said);
+        let name_y = shot.max.y + 6.0 + 8.5;
+        let mut left = tile.min.x + 9.0;
+        if on {
+            paint_tick(ui.painter(), Rect::from_center_size(pos2(left + 6.0, name_y), vec2(12.0, 12.0)), READY);
+            left += 17.0;
+        }
+        let (font, ink) = if on { (semibold(12.5), TEXT) } else { (FontId::proportional(12.5), TEXT_DIM) };
+        let name = fitted(ui, &layout.name, font, ink, tile.max.x - 9.0 - left, 1);
+        ui.painter().galley(pos2(left, name_y - name.size().y / 2.0), name, ink);
+        if response.on_hover_text(format!("Switch the stage to {}", layout.name)).clicked() {
+            switch_to = Some(layout.id);
+        }
+    }
+    if let Some(layout) = switch_to {
+        for &at in &targets {
+            state.screens[at].stage_layout = Some(layout);
+        }
+        state.screens_changed = true;
+    }
+
+    // The note for the people on stage: typed here, sent with Show on stage (or Change it while
+    // one shows), taken off with Clear. What is typed waits until it is sent.
+    ui.add_space(6.0);
+    let live = state.stage_message_live;
+    heading(ui, if live { "Stage message \u{b7} showing" } else { "Stage message" }, None);
+    let draft_id = egui::Id::unique("stage message draft");
+    let mut words = ui.data(|data| data.get_temp::<String>(draft_id)).unwrap_or_else(|| state.stage_message.clone());
     let field = ui.add(
-        egui::TextEdit::multiline(&mut state.stage_message)
-            .desired_rows(2)
+        egui::TextEdit::singleline(&mut words)
             .desired_width(f32::INFINITY)
+            .min_size(vec2(0.0, 32.0))
+            .margin(egui::Margin::symmetric(10, 8))
+            .background_color(CARD)
             .hint_text("A note for the people on stage"),
     );
-    if field.changed() && state.stage_message.trim().is_empty() {
-        state.stage_message_live = false;
+    if field.changed() {
+        ui.data_mut(|data| data.insert_temp(draft_id, words.clone()));
     }
-    ui.label(
-        egui::RichText::new("Appears in a red band at the top of the stage screens.").size(11.0).color(TEXT_FAINT),
-    );
-    let showing = state.stage_message_live;
-    let label = if showing { "Hide" } else { "Show" };
-    let has_words = !state.stage_message.trim().is_empty();
-    let button = egui::Button::new(egui::RichText::new(label).color(Color32::WHITE))
-        .fill(if showing { TALLY } else { crate::studio::SELECTED })
-        .min_size(vec2(ui.available_width(), 30.0));
-    if ui.add_enabled(has_words || showing, button).clicked() {
-        state.stage_message_live = !showing;
+    let changed = words != state.stage_message;
+    let can_send = !words.trim().is_empty() && (!live || changed);
+    let entered = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    let (place, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
+    let font = FontId::proportional(12.5);
+    let send_wide = flat_button_width(ui, &["Show on stage", "Change it"], &font, 13.0);
+    let send = Rect::from_min_size(place.min, vec2(send_wide, 30.0));
+    let (send_words, send_look) = if live { ("Change it", Flat::Plain) } else { ("Show on stage", Flat::Main) };
+    let send_response =
+        flat_button(ui, send, egui::Id::unique("stage message show"), send_words, font.clone(), send_look, can_send)
+            .on_hover_text("Show these words at the top of the stage screens (Return)");
+    if (send_response.clicked() || entered) && can_send {
+        state.stage_message = words.trim().to_owned();
+        state.stage_message_live = true;
+        ui.data_mut(|data| data.remove::<String>(draft_id));
+    }
+    let clear_wide = flat_button_width(ui, &["Clear"], &font, 13.0);
+    let clear = Rect::from_min_size(pos2(send.max.x + 6.0, place.min.y), vec2(clear_wide, 30.0));
+    if flat_button(ui, clear, egui::Id::unique("stage message clear"), "Clear", font, Flat::Plain, live)
+        .on_hover_text("Take the message off the stage screens")
+        .clicked()
+    {
+        state.stage_message_live = false;
     }
 }
 
