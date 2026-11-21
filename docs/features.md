@@ -264,9 +264,15 @@ feature changes, this page changes in the same commit.
   how many steps, a Run key (the only thing that runs it), a chevron that opens its steps (each
   with Earlier and Remove, then Add a step…), and ⋯ with Edit Steps…, Colour, Run When
   SoftPresenter Opens, Rename, Duplicate and Delete.
-- **Audio** (playlists of tracks such as walk-in music: play, pause,
-  skip 15 seconds, volume, Play Through to the next track, Shuffle, and a crossfade of up to ten
-  seconds from one track into the next; F5 or Clear All stops it).
+- **Audio**: playlists of tracks such as walk-in music, chosen at the tab's head (its ⋯
+  renames, makes or deletes one; + makes one). First the player: whether it plays and the
+  track's name, a line to drag through the track with the time gone and left, Previous (the
+  start of the track first, then the one before), back 15 seconds, Play or Pause, forward 15
+  seconds and Next, the volume (up to 150%) with Mute and the level in numbers, then Play
+  through to the next track, Shuffle, and a crossfade of up to ten seconds from one track into
+  the next. Then the tracks, with how many and Add tracks…: a click plays one, a drag moves it
+  to another place, and its ⋯ has Play, Move Up, Move Down, Rename and Remove. F5, the Audio
+  key or Clear All stops it.
 - **Stage**: with more than one stage screen, a chooser of which (All stage screens to begin
   with); then every stage layout as a tile with a picture of what the stage would show in it
   now (drawn by the screens' renderer, again when the slide, the stage message or the clock's

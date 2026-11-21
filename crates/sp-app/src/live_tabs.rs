@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use egui::{Align, Align2, Color32, FontId, Layout, Rect, Sense, pos2, vec2};
+use egui::{Align2, Color32, FontId, Rect, Sense, pos2, vec2};
 
 use crate::home::{HomeState, ThumbOf};
 use crate::icons::Icon;
@@ -1421,168 +1421,612 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
     });
 }
 
-/// The audio playlists: the one shown, with a menu to choose another, make one, rename it or
-/// delete it.
-fn audio_playlists(ui: &mut egui::Ui, state: &mut HomeState) {
+/// A line to drag along, as the Audio tab's place in the track and its level are: a slim track,
+/// filled up to `fraction` in `fill`, with a round handle there. Returns where along it the
+/// pointer is while it is pressed or dragged (`None` otherwise), and the response, whose
+/// `drag_stopped` or `clicked` says when to act.
+fn drag_line(
+    ui: &egui::Ui,
+    rect: Rect,
+    id: egui::Id,
+    fraction: f32,
+    fill: Color32,
+    enabled: bool,
+) -> (Option<f32>, egui::Response) {
+    let sense = if enabled { Sense::click_and_drag() } else { Sense::hover() };
+    let response = ui.interact(rect, id, sense);
+    let held = response.is_pointer_button_down_on() || response.dragged();
+    let at = (held || response.clicked() || response.drag_stopped())
+        .then(|| response.interact_pointer_pos())
+        .flatten()
+        .map(|pointer| ((pointer.x - rect.min.x) / rect.width()).clamp(0.0, 1.0));
+    let shown = at.unwrap_or(fraction).clamp(0.0, 1.0);
+    let painter = ui.painter();
+    let fade = if enabled { 1.0 } else { 0.4 };
+    let track = Rect::from_center_size(rect.center(), vec2(rect.width(), 5.0));
+    painter.rect_filled(track, 2.5, crate::studio::BUTTON_HOVER.gamma_multiply(fade));
+    let filled = Rect::from_min_max(track.min, pos2(track.min.x + track.width() * shown, track.max.y));
+    painter.rect_filled(filled, 2.5, fill.gamma_multiply(fade));
+    let knob = pos2(track.min.x + track.width() * shown, track.center().y);
+    painter.circle_filled(knob + vec2(0.0, 1.0), 7.5, Color32::from_black_alpha(90));
+    painter.circle_filled(knob, 7.0, TEXT.gamma_multiply(fade));
+    (at, response)
+}
+
+/// A round key of the audio player, `rect` wide (round, or a capsule when wider than tall):
+/// the button grey, lighter under the pointer, or the ink for the big play key.
+fn player_key(ui: &egui::Ui, rect: Rect, id: egui::Id, main: bool, enabled: bool) -> egui::Response {
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let response = ui.interact(rect, id, sense);
+    let hovered = enabled && response.hovered();
+    let fill = match (main, hovered) {
+        (true, true) => Color32::WHITE,
+        (true, false) => TEXT,
+        (false, true) => crate::studio::BUTTON_HOVER,
+        (false, false) => crate::studio::BUTTON,
+    };
+    ui.painter().rect_filled(rect, rect.height() / 2.0, if enabled { fill } else { fill.gamma_multiply(0.5) });
+    response
+}
+
+/// Something asked of a track from its row.
+enum TrackAsk {
+    Play,
+    Up,
+    Down,
+    Rename,
+    Remove,
+}
+
+/// A track's menu, behind its ⋯ and a right-click on its row.
+fn track_menu(ui: &mut egui::Ui, first: bool, last: bool) -> Option<TrackAsk> {
+    let mut asked = None;
+    if ui.button("Play").clicked() {
+        asked = Some(TrackAsk::Play);
+    }
+    ui.separator();
+    if ui.add_enabled(!first, egui::Button::new("Move Up")).clicked() {
+        asked = Some(TrackAsk::Up);
+    }
+    if ui.add_enabled(!last, egui::Button::new("Move Down")).clicked() {
+        asked = Some(TrackAsk::Down);
+    }
+    if ui.button("Rename").clicked() {
+        asked = Some(TrackAsk::Rename);
+    }
+    ui.separator();
+    if ui.button("Remove").clicked() {
+        asked = Some(TrackAsk::Remove);
+    }
+    asked
+}
+
+/// The Audio tab's heading: the playlist shown, chosen from a drop-down, its ⋯ (Rename, New
+/// Playlist, Delete) and + for a new playlist.
+fn audio_heading(ui: &mut egui::Ui, state: &mut HomeState) {
+    let (row, add) = heading(ui, "Audio", Some("New audio playlist"));
+    if add {
+        let made = crate::audio::Playlist::new(state.audio.new_name());
+        state.audio.playlists.push(made);
+        state.audio.current = state.audio.playlists.len() - 1;
+        state.audio_changed = true;
+    }
+    let more = Rect::from_min_size(pos2(row.max.x - 28.0 - 8.0 - 28.0, row.min.y), vec2(28.0, 28.0));
+    let select = Rect::from_min_size(pos2(more.min.x - 8.0 - 140.0, row.center().y - 12.0), vec2(140.0, 24.0));
+    let renaming_id = egui::Id::unique("audio playlist renaming");
+    let renaming = ui.data(|data| data.get_temp::<String>(renaming_id));
     let name = state.audio.shown().name.clone();
-    let picker = ui
-        .add(egui::Label::new(egui::RichText::new(format!("{name} ▾")).size(12.5).color(TEXT)).sense(Sense::click()))
-        .on_hover_text("Choose an audio playlist");
-    egui::Popup::from_toggle_button_response(&picker)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .show(|ui| {
-            ui.set_min_width(200.0);
-            let names: Vec<String> = state.audio.playlists.iter().map(|playlist| playlist.name.clone()).collect();
-            for (at, other) in names.iter().enumerate() {
-                if ui.add(egui::Button::selectable(at == state.audio.current, other.as_str())).clicked() {
-                    state.audio.current = at;
+    match renaming {
+        Some(mut typed) => {
+            let start = pos2(select.min.x + 8.0, select.center().y);
+            let field = crate::studio::rename_field_at(
+                ui,
+                &mut typed,
+                FontId::proportional(11.5),
+                TEXT,
+                ACCENT,
+                start,
+                select.max.x,
+            );
+            let (enter, escape) =
+                ui.input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
+            if !field.has_focus() && !field.lost_focus() {
+                field.request_focus();
+            }
+            if escape {
+                ui.data_mut(|data| data.remove::<String>(renaming_id));
+            } else if enter || field.lost_focus() {
+                if !typed.trim().is_empty() {
+                    state.audio.shown_mut().name = typed.trim().to_owned();
                     state.audio_changed = true;
-                    ui.close();
                 }
+                ui.data_mut(|data| data.remove::<String>(renaming_id));
+            } else {
+                ui.data_mut(|data| data.insert_temp(renaming_id, typed));
             }
-            ui.separator();
-            if ui.button("New Playlist").clicked() {
-                let made = crate::audio::Playlist::new(state.audio.new_name());
-                state.audio.playlists.push(made);
-                state.audio.current = state.audio.playlists.len() - 1;
-                state.audio_changed = true;
-            }
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Name").color(TEXT_DIM));
-                let field = ui.add(egui::TextEdit::singleline(&mut state.audio.shown_mut().name).desired_width(140.0));
-                state.audio_changed |= field.changed();
+        }
+        None => {
+            let picker = small_select(ui, select, egui::Id::unique("audio playlist picker"), &name)
+                .on_hover_text("Choose an audio playlist");
+            egui::Popup::menu(&picker).show(|ui| {
+                let names: Vec<String> = state.audio.playlists.iter().map(|playlist| playlist.name.clone()).collect();
+                for (at, other) in names.iter().enumerate() {
+                    if ui.add(egui::Button::selectable(at == state.audio.current, other.as_str())).clicked() {
+                        state.audio.current = at;
+                        state.audio_changed = true;
+                    }
+                }
             });
-            if ui.add_enabled(names.len() > 1, egui::Button::new("Delete Playlist")).clicked() {
-                let at = state.audio.current.min(state.audio.playlists.len() - 1);
-                state.audio.playlists.remove(at);
-                state.audio.current = at.saturating_sub(1);
-                state.audio_changed = true;
-                ui.close();
+        }
+    }
+    let more = quiet_icon(ui, more, egui::Id::unique("audio playlist more"), Icon::More, 16.0, 0.6, Some(CARD))
+        .on_hover_text("More");
+    let deleting_id = egui::Id::unique("audio playlist deleting");
+    let many = state.audio.playlists.len() > 1;
+    egui::Popup::menu(&more).show(|ui| {
+        if ui.button("Rename").clicked() {
+            ui.data_mut(|data| data.insert_temp(renaming_id, name.clone()));
+        }
+        if ui.button("New Playlist").clicked() {
+            let made = crate::audio::Playlist::new(state.audio.new_name());
+            state.audio.playlists.push(made);
+            state.audio.current = state.audio.playlists.len() - 1;
+            state.audio_changed = true;
+        }
+        ui.separator();
+        if ui.add_enabled(many, egui::Button::new("Delete…")).clicked() {
+            ui.data_mut(|data| data.insert_temp(deleting_id, true));
+        }
+    });
+    if ui.data(|data| data.get_temp::<bool>(deleting_id)).unwrap_or(false) {
+        let title = format!("Delete the audio playlist \u{201c}{name}\u{201d}?");
+        match crate::studio::alert(
+            ui.ctx(),
+            "delete audio playlist",
+            Icon::Trash,
+            &title,
+            "Its tracks leave the list; the files stay on this computer.",
+            "Delete",
+        ) {
+            Some(true) => {
+                if state.audio.playlists.len() > 1 {
+                    let at = state.audio.current.min(state.audio.playlists.len() - 1);
+                    state.audio.playlists.remove(at);
+                    state.audio.current = at.saturating_sub(1);
+                    state.audio_changed = true;
+                }
+                ui.data_mut(|data| data.remove::<bool>(deleting_id));
             }
-        });
-    ui.add_space(4.0);
+            Some(false) => ui.data_mut(|data| data.remove::<bool>(deleting_id)),
+            None => {}
+        }
+    }
 }
 
 fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
     use crate::audio::clock;
     use crate::home::AudioRequest;
-    if heading_with_add(ui, "AUDIO", "Add audio files to this playlist") {
-        state.audio_request = Some(AudioRequest::Add);
-    }
-    audio_playlists(ui, state);
+    audio_heading(ui, state);
     let playing = state.audio_playing;
-    // What is playing: its name, how far in, and the controls.
-    if let Some(id) = playing.track {
-        let name = state.audio.track(id).map_or("", |track| track.name.as_str());
-        egui::Frame::new().fill(CARD).corner_radius(8).inner_margin(egui::Margin::symmetric(10, 8)).show(ui, |ui| {
+    // The track the player shows: the one playing, or the one ready to play next (the first of
+    // the playlist to begin with), kept by the window.
+    let ready_id = egui::Id::unique("audio ready");
+    let shown_tracks: Vec<sp_model::Uuid> = state.audio.shown().tracks.iter().map(|track| track.id).collect();
+    let ready = ui
+        .data(|data| data.get_temp::<sp_model::Uuid>(ready_id))
+        .filter(|id| state.audio.track(*id).is_some())
+        .or(shown_tracks.first().copied());
+    let current = playing.track.or(ready);
+    let mut ready_now = current;
+    // The playlist the current track is in, for Previous and Next.
+    let list: Vec<sp_model::Uuid> = current
+        .and_then(|id| state.audio.playlists.iter().find(|playlist| playlist.tracks.iter().any(|t| t.id == id)))
+        .map_or(shown_tracks.clone(), |playlist| playlist.tracks.iter().map(|track| track.id).collect());
+    let place = current.and_then(|id| list.iter().position(|have| *have == id));
+    let muted_id = egui::Id::unique("audio muted from");
+    let muted_from = ui.data(|data| data.get_temp::<f32>(muted_id)).filter(|_| state.audio_volume == 0.0);
+
+    // The player: what plays and how far in, its keys, its level, and how tracks follow on.
+    let mut request: Option<AudioRequest> = None;
+    egui::Frame::new()
+        .fill(CARD)
+        .corner_radius(RADIUS_CARD as u8)
+        .inner_margin(egui::Margin { left: 14, right: 14, top: 14, bottom: 12 })
+        .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(egui::RichText::new(name).size(13.0).color(TEXT));
-            let fraction = playing.length.map_or(0.0, |length| {
+            ui.spacing_mut().item_spacing.y = 12.0;
+            let width = ui.available_width();
+            // What plays.
+            let (now, _) = ui.allocate_exact_size(vec2(width, 39.0), Sense::hover());
+            let (said, said_ink) = match (playing.track, playing.paused, current) {
+                (Some(_), false, _) => ("PLAYING", READY),
+                (Some(_), true, _) => ("PAUSED", TEXT_FAINT),
+                (None, _, Some(_)) => ("READY", TEXT_FAINT),
+                (None, _, None) => ("NOTHING TO PLAY", TEXT_FAINT),
+            };
+            paint_spaced(ui, now.min, Align2::LEFT_TOP, said, fixed_semibold(11.5), said_ink, 0.6);
+            let (title, ink) = match current.and_then(|id| state.audio.track(id)) {
+                Some(track) => (track.name.as_str(), TEXT),
+                None => ("Add a track to this playlist", TEXT_DIM),
+            };
+            let title = fitted(ui, title, semibold(16.0), ink, width, 1);
+            ui.painter().galley(pos2(now.min.x, now.max.y - title.size().y), title, ink);
+
+            // How far in: the time gone, a line to drag, the time left.
+            let (seek, _) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
+            let length = playing.length.filter(|_| playing.track.is_some());
+            let fraction = length.map_or(0.0, |length| {
                 (playing.position.as_secs_f32() / length.as_secs_f32().max(0.001)).clamp(0.0, 1.0)
             });
-            ui.add(egui::ProgressBar::new(fraction).desired_height(6.0));
-            let total = playing.length.map_or_else(|| "–".to_owned(), clock);
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(format!("{} / {total}", clock(playing.position)))
-                        .size(11.5)
-                        .color(TEXT_DIM)
-                        .monospace(),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("■").on_hover_text("Stop").clicked() {
-                        state.audio_request = Some(AudioRequest::Stop);
+            let line = Rect::from_min_max(pos2(seek.min.x + 52.0, seek.min.y), pos2(seek.max.x - 52.0, seek.max.y));
+            let fill = if playing.track.is_some() && !playing.paused { READY } else { TEXT };
+            let (dragged, response) =
+                drag_line(ui, line, egui::Id::unique("audio seek"), fraction, fill, length.is_some());
+            let shown = match (dragged, length) {
+                (Some(at), Some(length)) => length.mul_f32(at),
+                _ => playing.position,
+            };
+            if (response.drag_stopped() || response.clicked())
+                && let (Some(at), Some(length)) = (dragged, length)
+            {
+                let to = length.as_secs_f32() * at;
+                request = Some(AudioRequest::Skip(to - playing.position.as_secs_f32()));
+            }
+            response.on_hover_text("Where in the track: drag to move through it");
+            let gone = if length.is_some() { clock(shown) } else { "0:00".to_owned() };
+            let left =
+                length.map_or("0:00".to_owned(), |length| format!("\u{2212}{}", clock(length.saturating_sub(shown))));
+            let time = fixed(12.0);
+            ui.painter().text(seek.left_center(), Align2::LEFT_CENTER, gone, time.clone(), TEXT_DIM);
+            ui.painter().text(seek.right_center(), Align2::RIGHT_CENTER, left, time, TEXT_DIM);
+
+            // The keys: previous, back 15 seconds, play or pause, forward 15, next.
+            let (keys, _) = ui.allocate_exact_size(vec2(width, 48.0), Sense::hover());
+            let y = keys.center().y;
+            let mut x = keys.center().x - 120.0;
+            let mut next_rect = |wide: f32, tall: f32| {
+                let rect = Rect::from_min_size(pos2(x, y - tall / 2.0), vec2(wide, tall));
+                x += wide + 10.0;
+                rect
+            };
+            let (previous, back, play, forward, next) = (
+                next_rect(36.0, 36.0),
+                next_rect(40.0, 36.0),
+                next_rect(48.0, 48.0),
+                next_rect(40.0, 36.0),
+                next_rect(36.0, 36.0),
+            );
+            let loaded = playing.track.is_some();
+            let steps = list.len() > 1 || loaded;
+            let glyph = |rect: Rect, icon: Icon, side: f32, ink: Color32| {
+                crate::icons::paint(ui.painter(), icon, Rect::from_center_size(rect.center(), vec2(side, side)), ink);
+            };
+            let ink = |enabled: bool| if enabled { TEXT } else { TEXT_FAINT };
+            if player_key(ui, previous, egui::Id::unique("audio previous"), false, steps)
+                .on_hover_text("Previous track (the start of this one first)")
+                .clicked()
+            {
+                if loaded && playing.position.as_secs_f32() > 3.0 {
+                    request = Some(AudioRequest::Skip(-(playing.position.as_secs_f32() + 1.0)));
+                } else if let Some(at) = place.filter(|_| !list.is_empty()) {
+                    let before = list[(at + list.len() - 1) % list.len()];
+                    if loaded {
+                        request = Some(AudioRequest::Play(before));
                     }
-                    if ui.button("15 ⟳").on_hover_text("Skip Forward 15 Seconds").clicked() {
-                        state.audio_request = Some(AudioRequest::Skip(15.0));
-                    }
-                    let (label, hint) = if playing.paused { ("▶", "Play") } else { ("❚❚", "Pause") };
-                    if ui.button(label).on_hover_text(hint).clicked() {
-                        state.audio_request = Some(AudioRequest::TogglePause);
-                    }
-                    if ui.button("⟲ 15").on_hover_text("Skip Backward 15 Seconds").clicked() {
-                        state.audio_request = Some(AudioRequest::Skip(-15.0));
-                    }
+                    ready_now = Some(before);
+                }
+            }
+            glyph(previous, Icon::ChevronLeft, 14.0, ink(steps));
+            let font = fixed_semibold(11.5);
+            if player_key(ui, back, egui::Id::unique("audio back"), false, loaded)
+                .on_hover_text("Back 15 seconds")
+                .clicked()
+            {
+                request = Some(AudioRequest::Skip(-15.0));
+            }
+            ui.painter().text(back.center(), Align2::CENTER_CENTER, "\u{2212}15", font.clone(), ink(loaded));
+            let can_play = loaded || current.is_some();
+            let pausing = loaded && !playing.paused;
+            let hint = if pausing { "Pause" } else { "Play" };
+            if player_key(ui, play, egui::Id::unique("audio play"), true, can_play).on_hover_text(hint).clicked() {
+                request = Some(match (loaded, current) {
+                    (true, _) => AudioRequest::TogglePause,
+                    (false, Some(id)) => AudioRequest::Play(id),
+                    (false, None) => AudioRequest::TogglePause,
                 });
+            }
+            let (icon, nudge) = if pausing { (Icon::Pause, 0.0) } else { (Icon::Play, 1.5) };
+            glyph(play.translate(vec2(nudge, 0.0)), icon, 16.0, Color32::from_gray(17));
+            if player_key(ui, forward, egui::Id::unique("audio forward"), false, loaded)
+                .on_hover_text("Forward 15 seconds")
+                .clicked()
+            {
+                request = Some(AudioRequest::Skip(15.0));
+            }
+            ui.painter().text(forward.center(), Align2::CENTER_CENTER, "+15", font, ink(loaded));
+            let can_next = list.len() > 1;
+            if player_key(ui, next, egui::Id::unique("audio next"), false, can_next)
+                .on_hover_text("Next track")
+                .clicked()
+                && let Some(at) = place
+            {
+                let pick = |count: usize| (sp_model::Uuid::new_v4().as_u128() % count as u128) as usize;
+                let after = match current {
+                    Some(id) if loaded => state.audio.after(id, pick).map(|track| track.id),
+                    _ => Some(list[(at + 1) % list.len()]),
+                };
+                if let Some(after) = after {
+                    if loaded {
+                        request = Some(AudioRequest::Play(after));
+                    }
+                    ready_now = Some(after);
+                }
+            }
+            glyph(next, Icon::ChevronRight, 14.0, ink(can_next));
+
+            // The level: mute, a line to drag, and the level in numbers.
+            let (level_row, _) = ui.allocate_exact_size(vec2(width, 30.0), Sense::hover());
+            let mute = Rect::from_min_size(pos2(level_row.min.x, level_row.center().y - 14.0), vec2(28.0, 28.0));
+            let mute_response = ui.interact(mute, egui::Id::unique("audio mute"), Sense::click());
+            if mute_response.hovered() {
+                ui.painter().rect_filled(mute, crate::studio::RADIUS, crate::studio::BUTTON);
+            }
+            let (icon, ink, hint) = match muted_from {
+                Some(_) => (Icon::Muted, crate::studio::CARE, "Muted. Click to bring the sound back"),
+                None => (Icon::Sound, TEXT_DIM, "Mute"),
+            };
+            crate::icons::paint(ui.painter(), icon, Rect::from_center_size(mute.center(), vec2(15.0, 15.0)), ink);
+            if mute_response.on_hover_text(hint).clicked() {
+                match muted_from {
+                    Some(level) => {
+                        state.audio_volume = level;
+                        request = Some(AudioRequest::Volume(level));
+                        ui.data_mut(|data| data.remove::<f32>(muted_id));
+                    }
+                    None => {
+                        ui.data_mut(|data| data.insert_temp(muted_id, state.audio_volume));
+                        state.audio_volume = 0.0;
+                        request = Some(AudioRequest::Volume(0.0));
+                    }
+                }
+            }
+            // The level goes up to half as loud again as the track itself.
+            const LOUDEST: f32 = 1.5;
+            let level = muted_from.unwrap_or(state.audio_volume);
+            let line = Rect::from_min_max(
+                pos2(level_row.min.x + 36.0, level_row.center().y - 11.0),
+                pos2(level_row.max.x - 52.0, level_row.center().y + 11.0),
+            );
+            let (moved, response) = drag_line(ui, line, egui::Id::unique("audio level"), level / LOUDEST, TEXT, true);
+            if let Some(at) = moved {
+                let level = (at * LOUDEST * 100.0).round() / 100.0;
+                if level != state.audio_volume || muted_from.is_some() {
+                    // Moving the level brings the sound back.
+                    ui.data_mut(|data| data.remove::<f32>(muted_id));
+                    state.audio_volume = level;
+                    request = Some(AudioRequest::Volume(level));
+                }
+            }
+            response.on_hover_text("Volume");
+            let words = match muted_from {
+                Some(_) => "Muted".to_owned(),
+                None => format!("{:.0}%", state.audio_volume * 100.0),
+            };
+            ui.painter().text(level_row.right_center(), Align2::RIGHT_CENTER, words, fixed(12.0), TEXT_DIM);
+
+            // How tracks follow one another, under a line.
+            let (options, _) = ui.allocate_exact_size(vec2(width, 35.0), Sense::hover());
+            ui.painter().hline(options.x_range(), options.min.y, egui::Stroke::new(1.0, crate::studio::LINE));
+            let y = options.min.y + 10.0 + 12.0;
+            let small = FontId::proportional(11.5);
+            let through_wide = flat_button_width(ui, &["Play through"], &small, 9.0);
+            let through = Rect::from_min_size(pos2(options.min.x, y - 12.0), vec2(through_wide, 24.0));
+            let look = if state.audio.through { Flat::On } else { Flat::Plain };
+            if flat_button(ui, through, egui::Id::unique("audio through"), "Play through", small.clone(), look, true)
+                .on_hover_text("When a track ends, go on to the next")
+                .clicked()
+            {
+                state.audio.through = !state.audio.through;
+                state.audio_changed = true;
+            }
+            let shuffle_wide = flat_button_width(ui, &["Shuffle"], &small, 9.0);
+            let shuffle = Rect::from_min_size(pos2(through.max.x + 6.0, y - 12.0), vec2(shuffle_wide, 24.0));
+            let look = if state.audio.shuffle { Flat::On } else { Flat::Plain };
+            if flat_button(ui, shuffle, egui::Id::unique("audio shuffle"), "Shuffle", small, look, true)
+                .on_hover_text("Play the tracks in a random order")
+                .clicked()
+            {
+                state.audio.shuffle = !state.audio.shuffle;
+                state.audio_changed = true;
+            }
+            let fade = state.audio.crossfade;
+            let fade_words = |seconds: f32| if seconds <= 0.0 { "Off".to_owned() } else { format!("{seconds} s") };
+            let select = Rect::from_min_size(pos2(options.max.x - 70.0, y - 12.0), vec2(70.0, 24.0));
+            paint_spaced(
+                ui,
+                pos2(select.min.x - 8.0, y),
+                Align2::RIGHT_CENTER,
+                "CROSSFADE",
+                fixed_semibold(11.5),
+                TEXT_FAINT,
+                0.6,
+            );
+            let picker = small_select(ui, select, egui::Id::unique("audio crossfade"), &fade_words(fade))
+                .on_hover_text("How long one track fades into the next");
+            egui::Popup::menu(&picker).show(|ui| {
+                let mut choices = vec![0.0, 1.0, 2.0, 3.0, 5.0, 8.0, 10.0];
+                if !choices.contains(&fade) {
+                    choices.push(fade);
+                    choices.sort_by(f32::total_cmp);
+                }
+                for seconds in choices {
+                    if ui.add(egui::Button::selectable(fade == seconds, fade_words(seconds))).clicked() {
+                        state.audio.crossfade = seconds;
+                        state.audio_changed = true;
+                    }
+                }
             });
         });
+    if playing.track.is_some() {
+        ready_now = playing.track;
     }
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Volume").size(12.0).color(TEXT_DIM));
-        let mut volume = state.audio_volume;
-        if ui.add(egui::Slider::new(&mut volume, 0.0..=1.5).show_value(false)).changed() {
-            state.audio_volume = volume;
-            state.audio_request = Some(AudioRequest::Volume(volume));
+    ui.data_mut(|data| match ready_now {
+        Some(id) => {
+            data.insert_temp(ready_id, id);
         }
+        None => data.remove::<sp_model::Uuid>(ready_id),
     });
-    // How tracks follow one another.
-    ui.horizontal(|ui| {
-        if ui
-            .selectable_label(state.audio.through, "Play Through")
-            .on_hover_text("When a track ends, play the next")
-            .clicked()
-        {
-            state.audio.through = !state.audio.through;
-            state.audio_changed = true;
-        }
-        if ui
-            .selectable_label(state.audio.shuffle, "Shuffle")
-            .on_hover_text("Play the tracks in a random order")
-            .clicked()
-        {
-            state.audio.shuffle = !state.audio.shuffle;
-            state.audio_changed = true;
-        }
-    });
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Crossfade").size(12.0).color(TEXT_DIM));
-        let mut seconds = state.audio.crossfade;
-        let slider = egui::Slider::new(&mut seconds, 0.0..=10.0).suffix(" s").max_decimals(1);
-        if ui.add(slider).on_hover_text("How long one track fades into the next").changed() {
-            state.audio.crossfade = seconds;
-            state.audio_changed = true;
-        }
-    });
-    if state.audio.shown().tracks.is_empty() {
-        ui.label(
-            egui::RichText::new("No audio. Press + to add music to play, such as walk-in music.")
-                .size(12.0)
-                .color(TEXT_FAINT),
-        );
-        return;
+
+    // The tracks: how many, Add tracks, and a row each to play it, drag it to another place or
+    // open its menu.
+    let count = shown_tracks.len();
+    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::hover());
+    let says = if count == 1 { "1 track".to_owned() } else { format!("{count} tracks") };
+    paint_spaced(ui, row.left_center(), Align2::LEFT_CENTER, &says.to_uppercase(), fixed_semibold(11.5), TEXT_DIM, 0.6);
+    let small = FontId::proportional(11.5);
+    let add_wide = flat_button_width(ui, &["+ Add tracks…"], &small, 9.0);
+    let add = Rect::from_min_size(pos2(row.max.x - add_wide, row.min.y), vec2(add_wide, 24.0));
+    if flat_button(ui, add, egui::Id::unique("audio add tracks"), "+ Add tracks…", small, Flat::Plain, true)
+        .on_hover_text("Add music files from this computer to this playlist")
+        .clicked()
+    {
+        request = Some(AudioRequest::Add);
     }
-    for track in &state.audio.shown().tracks {
-        let on = playing.track == Some(track.id);
-        let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click());
-        if on {
-            ui.painter().rect_filled(row, 6.0, ACCENT.gamma_multiply(0.35));
-        } else if response.hovered() {
-            ui.painter().rect_filled(row, 6.0, crate::studio::HOVER);
+    if count == 0 {
+        empty_note(ui, "No tracks yet. Add music files from this computer.");
+    }
+    let renaming_id = egui::Id::unique("audio track renaming");
+    let mut renaming = ui.data(|data| data.get_temp::<(sp_model::Uuid, String)>(renaming_id));
+    let mut renamed: Option<(sp_model::Uuid, String)> = None;
+    let mut asked: Option<(usize, TrackAsk)> = None;
+    let mut rows: Vec<Rect> = Vec::with_capacity(count);
+    let mut dragging: Option<usize> = None;
+    let width = ui.available_width();
+    for (at, track) in state.audio.shown().tracks.iter().enumerate() {
+        let (line, _) = ui.allocate_exact_size(vec2(width, 34.0), Sense::hover());
+        rows.push(line);
+        let id = track.id;
+        let response = ui.interact(line, egui::Id::unique(("audio track", id)), Sense::click_and_drag());
+        if response.dragged() || response.drag_stopped() {
+            dragging = Some(at);
         }
-        ui.painter().text(
-            row.left_center() + vec2(10.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            format!("♫  {}", track.name),
-            FontId::proportional(13.0),
-            TEXT,
-        );
+        let on = playing.track == Some(id);
+        let chosen = current == Some(id);
+        let fill = if on {
+            Some(CARD_RUNNING)
+        } else if chosen || response.hovered() {
+            Some(CARD)
+        } else {
+            None
+        };
+        if let Some(fill) = fill {
+            ui.painter().rect_filled(line, crate::studio::RADIUS, fill);
+        }
+        let y = line.center().y;
+        if on && !playing.paused {
+            let mark = Rect::from_center_size(pos2(line.min.x + 10.0 + 8.0, y), vec2(10.0, 10.0));
+            crate::icons::paint(ui.painter(), Icon::Play, mark, READY);
+        } else {
+            let number = format!("{:02}", at + 1);
+            ui.painter().text(pos2(line.min.x + 10.0, y), Align2::LEFT_CENTER, number, fixed(12.0), TEXT_FAINT);
+        }
+        let more = Rect::from_min_size(pos2(line.max.x - 28.0 - 3.0, y - 14.0), vec2(28.0, 28.0));
+        let name_left = line.min.x + 10.0 + 24.0 + 8.0;
+        let name_right = more.min.x - 8.0;
+        match renaming.as_mut().filter(|(renamed, _)| *renamed == id) {
+            Some((_, typed)) => {
+                let font = name_font();
+                let field =
+                    crate::studio::rename_field_at(ui, typed, font, TEXT, ACCENT, pos2(name_left, y), name_right);
+                if !field.has_focus() && !field.lost_focus() {
+                    field.request_focus();
+                }
+                let (enter, escape) =
+                    ui.input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
+                if escape {
+                    renaming = None;
+                } else if enter || field.lost_focus() {
+                    if !typed.trim().is_empty() {
+                        renamed = Some((id, typed.trim().to_owned()));
+                    }
+                    renaming = None;
+                }
+            }
+            None => {
+                let font = if chosen { semibold(13.0) } else { FontId::proportional(13.0) };
+                let name = fitted(ui, &track.name, font, TEXT, name_right - name_left, 1);
+                ui.painter().galley(pos2(name_left, y - name.size().y / 2.0), name, TEXT);
+            }
+        }
+        let first = at == 0;
+        let last = at + 1 == count;
+        let more = quiet_icon(ui, more, egui::Id::unique(("audio track more", id)), Icon::More, 16.0, 0.55, None)
+            .on_hover_text("More");
+        egui::Popup::menu(&more).show(|ui| {
+            if let Some(ask) = track_menu(ui, first, last) {
+                asked = Some((at, ask));
+            }
+        });
         if response.clicked() {
-            state.audio_request = Some(AudioRequest::Play(track.id));
+            asked = Some((at, TrackAsk::Play));
         }
-        response.on_hover_text("Click to play from the start").context_menu(|ui| {
-            if ui.button("Remove").clicked() {
-                state.audio_request = Some(AudioRequest::Remove(track.id));
-                ui.close();
+        response.on_hover_text("Click to play this track; drag it to another place").context_menu(|ui| {
+            if let Some(ask) = track_menu(ui, first, last) {
+                asked = Some((at, ask));
             }
         });
     }
-    ui.add_space(6.0);
-    if ui
-        .add_enabled(playing.track.is_some(), egui::Button::new("Clear Audio"))
-        .on_hover_text("Stop the audio (F5)")
-        .clicked()
+    // A track being dragged: an ink line shows where it would go, by which half of a row the
+    // pointer is over; letting go moves it there.
+    if let (Some(from), Some(pointer)) = (dragging, ui.ctx().pointer_latest_pos()) {
+        let gap = rows.iter().position(|row| pointer.y < row.center().y).unwrap_or(rows.len());
+        let y = match rows.get(gap) {
+            Some(row) => row.min.y - GAP / 2.0,
+            None => rows.last().map_or(0.0, |row| row.max.y + GAP / 2.0),
+        };
+        if gap != from && gap != from + 1 {
+            ui.painter().hline(rows[0].x_range(), y, egui::Stroke::new(2.0, TEXT));
+        }
+        if ui.input(|input| input.pointer.any_released()) && gap != from && gap != from + 1 {
+            let tracks = &mut state.audio.shown_mut().tracks;
+            let moved = tracks.remove(from);
+            tracks.insert(if gap > from { gap - 1 } else { gap }, moved);
+            state.audio_changed = true;
+        }
+    }
+    if let Some((id, name)) = renamed
+        && let Some(track) = state.audio.playlists.iter_mut().flat_map(|p| p.tracks.iter_mut()).find(|t| t.id == id)
     {
-        state.audio_request = Some(AudioRequest::Stop);
+        track.name = name;
+        state.audio_changed = true;
+    }
+    ui.data_mut(|data| match renaming {
+        Some(renaming) => {
+            data.insert_temp(renaming_id, renaming);
+        }
+        None => data.remove::<(sp_model::Uuid, String)>(renaming_id),
+    });
+    if let Some((at, ask)) = asked {
+        let id = state.audio.shown().tracks[at].id;
+        match ask {
+            TrackAsk::Play => {
+                request = Some(AudioRequest::Play(id));
+                ui.data_mut(|data| data.insert_temp(ready_id, id));
+            }
+            TrackAsk::Up | TrackAsk::Down => {
+                let to = if matches!(ask, TrackAsk::Up) { at.saturating_sub(1) } else { (at + 1).min(count - 1) };
+                state.audio.shown_mut().tracks.swap(at, to);
+                state.audio_changed = true;
+            }
+            TrackAsk::Rename => {
+                let name = state.audio.shown().tracks[at].name.clone();
+                ui.data_mut(|data| data.insert_temp(renaming_id, (id, name)));
+            }
+            TrackAsk::Remove => request = Some(AudioRequest::Remove(id)),
+        }
+    }
+    if let Some(request) = request {
+        state.audio_request = Some(request);
     }
 }
 
@@ -1860,10 +2304,4 @@ fn voxlive_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState)
             .size(11.5)
             .color(TEXT_FAINT),
     );
-}
-
-/// A heading with a + at its right, for the tabs not yet in the new design. Returns true when
-/// the + was clicked.
-fn heading_with_add(ui: &mut egui::Ui, title: &str, hint: &str) -> bool {
-    heading(ui, title, Some(hint)).1
 }
