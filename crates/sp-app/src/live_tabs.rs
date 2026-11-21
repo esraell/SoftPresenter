@@ -185,7 +185,8 @@ fn more_key(ui: &egui::Ui, rect: Rect, id: egui::Id) -> egui::Response {
 fn clock_field(ui: &mut egui::Ui, id: egui::Id, current: Option<u32>, empty: &str) -> Option<Option<u32>> {
     let shown = current.map(|seconds| timers::clock_text(i64::from(seconds))).unwrap_or_default();
     let mut text = ui.data_mut(|data| data.get_temp::<String>(id)).unwrap_or(shown);
-    let response = ui.add(egui::TextEdit::singleline(&mut text).id(id).desired_width(96.0).hint_text(empty));
+    let response = ui
+        .add(egui::TextEdit::singleline(&mut text).id(id).background_color(PANEL).desired_width(96.0).hint_text(empty));
     if response.has_focus() {
         ui.data_mut(|data| data.insert_temp(id, text.clone()));
     }
@@ -364,7 +365,8 @@ fn timer_settings(ui: &mut egui::Ui, timer: &mut Timer) -> bool {
     let mut changed = false;
     egui::Grid::new(("timer settings", timer.id)).num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
         ui.label(egui::RichText::new("Name").color(TEXT_DIM));
-        changed |= ui.add(egui::TextEdit::singleline(&mut timer.name).desired_width(160.0)).changed();
+        changed |=
+            ui.add(egui::TextEdit::singleline(&mut timer.name).background_color(PANEL).desired_width(160.0)).changed();
         ui.end_row();
         ui.label(egui::RichText::new("Counts").color(TEXT_DIM));
         let kind_name = match timer.kind {
@@ -516,6 +518,7 @@ fn words_once(ui: &mut egui::Ui, row: Rect, state: &mut HomeState) {
             let mut words = ui.data_mut(|data| data.get_temp::<String>(draft)).unwrap_or_default();
             let field = ui.add(
                 egui::TextEdit::multiline(&mut words)
+                    .background_color(CARD)
                     .desired_rows(2)
                     .desired_width(f32::INFINITY)
                     .hint_text("Words to show over the slides"),
@@ -712,10 +715,13 @@ fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
 fn message_settings(ui: &mut egui::Ui, message: &mut Message, timer_names: &[String]) -> bool {
     ui.add_space(8.0);
     let mut changed = false;
-    changed |= ui.add(egui::TextEdit::singleline(&mut message.name).desired_width(f32::INFINITY)).changed();
+    changed |= ui
+        .add(egui::TextEdit::singleline(&mut message.name).background_color(PANEL).desired_width(f32::INFINITY))
+        .changed();
     changed |= ui
         .add(
             egui::TextEdit::multiline(&mut message.text)
+                .background_color(PANEL)
                 .desired_rows(3)
                 .desired_width(f32::INFINITY)
                 .hint_text("Words to show"),
