@@ -2317,3 +2317,138 @@ fn voxlive_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState)
             .color(TEXT_DIM),
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use egui::{Event, Modifiers, RawInput, pos2, vec2};
+    use sp_model::{ShowAction, parse_song_text};
+
+    use super::*;
+    use crate::home::AudioRequest;
+
+    fn show() -> sp_engine::Show {
+        sp_engine::Show::new(vec![Arc::new(parse_song_text("One", "Words\n"))])
+    }
+
+    /// Runs one frame of the tabs in a column as wide as the window's, with these events.
+    fn frame(ctx: &egui::Context, show: &sp_engine::Show, state: &mut HomeState, events: Vec<Event>, time: f64) {
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(340.0, 1400.0))),
+            time: Some(time),
+            events,
+            ..RawInput::default()
+        };
+        let output = ctx.run_ui(raw, |ui| live_tabs(ui, show, state, &mut |_| None));
+        output.drop_without_applying_deltas();
+    }
+
+    /// Clicks the middle of what was drawn under `id` (or a point `nudge` from it), as the
+    /// pointer would.
+    fn click(ctx: &egui::Context, show: &sp_engine::Show, state: &mut HomeState, id: egui::Id, nudge: egui::Vec2) {
+        let start = ctx.input(|input| input.time) + 0.1;
+        frame(ctx, show, state, vec![], start);
+        let at = ctx.read_response(id).expect("drawn").rect.center() + nudge;
+        let press = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let frames = [vec![Event::PointerMoved(at)], vec![press(true)], vec![press(false)], vec![]];
+        for (n, events) in frames.into_iter().enumerate() {
+            frame(ctx, show, state, events, start + 0.1 * (n + 1) as f64);
+        }
+    }
+
+    #[test]
+    fn a_macro_runs_from_its_run_key_and_not_from_its_name() {
+        let show = show();
+        let mut state = HomeState { live_tab: 3, ..HomeState::default() };
+        let mut made = crate::macros::Macro::new("Opening".to_owned());
+        made.actions = vec![ShowAction::Clear { what: sp_model::ClearWhat::All }];
+        let id = made.id;
+        state.macros.push(made);
+        let ctx = egui::Context::default();
+        // The card's name, at its left.
+        click(&ctx, &show, &mut state, egui::Id::unique(("macro card", id)), vec2(-100.0, 0.0));
+        assert!(state.actions_to_run.is_empty(), "the name alone does nothing");
+        click(&ctx, &show, &mut state, egui::Id::unique(("macro run", id)), vec2(0.0, 0.0));
+        assert_eq!(state.actions_to_run.len(), 1);
+    }
+
+    #[test]
+    fn show_and_hide_put_a_message_on_and_take_it_off() {
+        let show = show();
+        let mut state = HomeState { live_tab: 1, ..HomeState::default() };
+        let message = Message::new("Phones".to_owned());
+        let id = message.id;
+        state.messages.push(message);
+        let ctx = egui::Context::default();
+        let key = egui::Id::unique(("message show", id));
+        click(&ctx, &show, &mut state, key, vec2(0.0, 0.0));
+        assert_eq!(state.message_live.map(|(live, _)| live), Some(id));
+        let wide = ctx.read_response(key).expect("drawn").rect.width();
+        click(&ctx, &show, &mut state, key, vec2(0.0, 0.0));
+        assert_eq!(state.message_live, None);
+        assert_eq!(ctx.read_response(key).expect("drawn").rect.width(), wide, "Show and Hide are as wide");
+    }
+
+    #[test]
+    fn a_timer_starts_from_its_key_and_resets() {
+        let show = show();
+        let mut state = HomeState::default();
+        let timer = Timer::new("Sermon".to_owned());
+        let id = timer.id;
+        state.timers.push(timer);
+        let ctx = egui::Context::default();
+        click(&ctx, &show, &mut state, egui::Id::unique(("timer start", id)), vec2(0.0, 0.0));
+        assert!(state.timers[0].running());
+        click(&ctx, &show, &mut state, egui::Id::unique(("timer reset", id)), vec2(0.0, 0.0));
+        assert!(!state.timers[0].running());
+    }
+
+    #[test]
+    fn a_layout_tile_switches_every_stage_screen() {
+        use crate::screens::{Output, Screen};
+        let show = show();
+        let mut state = HomeState { live_tab: 4, ..HomeState::default() };
+        state.screens = vec![
+            Screen::new("Room".to_owned(), Output::Window),
+            Screen::stage("Band".to_owned(), Output::Window),
+            Screen::stage("Pulpit".to_owned(), Output::Window),
+        ];
+        let layouts = crate::stage::builtin_layouts();
+        let ctx = egui::Context::default();
+        click(&ctx, &show, &mut state, egui::Id::unique(("stage layout tile", layouts[1].id)), vec2(0.0, 0.0));
+        assert_eq!(state.screens[1].stage_layout, Some(layouts[1].id));
+        assert_eq!(state.screens[2].stage_layout, Some(layouts[1].id));
+        assert_eq!(state.screens[0].stage_layout, None, "an audience screen has no layout");
+        assert!(state.screens_changed);
+    }
+
+    #[test]
+    fn the_audio_keys_ask_the_player_for_what_it_can_do() {
+        let show = show();
+        let mut state = HomeState { live_tab: 5, audio_volume: 0.8, ..HomeState::default() };
+        let tracks: Vec<crate::audio::Track> =
+            ["One", "Two"].iter().map(|name| crate::audio::Track::of(format!("{name}.wav").into())).collect();
+        let (first, second) = (tracks[0].id, tracks[1].id);
+        state.audio.shown_mut().tracks = tracks;
+        let ctx = egui::Context::default();
+        // With nothing playing, Next chooses the track Play starts, and plays nothing.
+        click(&ctx, &show, &mut state, egui::Id::unique("audio next"), vec2(0.0, 0.0));
+        assert_eq!(state.audio_request, None);
+        click(&ctx, &show, &mut state, egui::Id::unique("audio play"), vec2(0.0, 0.0));
+        assert_eq!(state.audio_request.take(), Some(AudioRequest::Play(second)));
+        // A track's row plays it.
+        click(&ctx, &show, &mut state, egui::Id::unique(("audio track", first)), vec2(0.0, 0.0));
+        assert_eq!(state.audio_request.take(), Some(AudioRequest::Play(first)));
+        // Mute turns the level down to nothing, and back to where it was.
+        click(&ctx, &show, &mut state, egui::Id::unique("audio mute"), vec2(0.0, 0.0));
+        assert_eq!(state.audio_request.take(), Some(AudioRequest::Volume(0.0)));
+        click(&ctx, &show, &mut state, egui::Id::unique("audio mute"), vec2(0.0, 0.0));
+        assert_eq!(state.audio_request.take(), Some(AudioRequest::Volume(0.8)));
+    }
+}
