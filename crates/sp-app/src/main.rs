@@ -6409,16 +6409,18 @@ impl App {
                     }
                 }
             };
-            let attrs = if quiet {
-                attrs.with_active(false).with_window_level(winit::window::WindowLevel::AlwaysOnBottom)
-            } else if std::env::var_os("SOFTPRESENTER_SCREENS_ON_TOP").is_some() {
+            let attrs = if std::env::var_os("SOFTPRESENTER_SCREENS_ON_TOP").is_some() {
                 // Testing aid: SOFTPRESENTER_SCREENS_ON_TOP keeps the screens' windows above
                 // every other window, so a timing run on one display draws them for real (a
-                // window covered by the operator's is not drawn, and is paced differently).
+                // window covered by the operator's is not drawn, and is paced differently). In a
+                // quiet run too, where they still never take the keyboard.
                 attrs.with_window_level(winit::window::WindowLevel::AlwaysOnTop)
+            } else if quiet {
+                attrs.with_window_level(winit::window::WindowLevel::AlwaysOnBottom)
             } else {
                 attrs
             };
+            let attrs = if quiet { attrs.with_active(false) } else { attrs };
             let window = match el.create_window(attrs) {
                 Ok(window) => Arc::new(window),
                 Err(e) => {
