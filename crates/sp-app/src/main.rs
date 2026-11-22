@@ -1782,6 +1782,11 @@ impl App {
                 videos_in(&behind.objects, &mut wanted);
             }
         }
+        // A video on a stage screen's layout plays too, without its sound (the room hears the
+        // slide's).
+        let for_the_room = wanted.clone();
+        let on_stage = self.running.as_ref().map(|running| stage::shown_objects(&running.home_state));
+        videos_in(&on_stage.unwrap_or_default(), &mut wanted);
         let playing: Vec<&String> = self.slide_videos.iter().map(|(file, _)| file).collect();
         if playing.len() == wanted.len() && playing.iter().zip(&wanted).all(|(have, want)| *have == want) {
             return;
@@ -1804,7 +1809,7 @@ impl App {
                 Ok(mut player) => {
                     applog::event("video", &format!("playing {} in a box on the slide", path.display()));
                     player.set_looping(true);
-                    if quiet {
+                    if quiet || !for_the_room.contains(&file) {
                         player.set_volume(0.0);
                     }
                     player.play();
@@ -1855,6 +1860,10 @@ impl App {
             if let Some(behind) = sp_render::layout_objects(slide, self.theme_of(at.presentation)) {
                 boxes_in(&behind.objects, true, &mut wanted);
             }
+        }
+        // The stage screens' layouts are on screen too.
+        if let Some(running) = self.running.as_ref() {
+            boxes_in(&stage::shown_objects(&running.home_state), true, &mut wanted);
         }
         if let Some(song) = self.show.presentations().get(self.show.selected()) {
             for (_, slide) in song.slides() {
@@ -5624,7 +5633,8 @@ impl App {
                 .collect::<Vec<_>>(),
             home_state.stage_on,
         );
-        if running.stage_sent.as_ref() != Some(&stage) {
+        let stage_changed = running.stage_sent.as_ref() != Some(&stage);
+        if stage_changed {
             let screens = stage.0.iter().map(|(id, layout)| (*id, Arc::new(stage::theme_for(layout)))).collect();
             output.send(OutputMsg::Stage { screens, on: stage.1 });
             running.stage_sent = Some(stage);
@@ -5674,6 +5684,14 @@ impl App {
         // Starting NDI takes a moment on the output thread; look again shortly.
         if starting || ndi_moved {
             running.next_repaint = Some(Instant::now() + Duration::from_millis(400));
+        }
+        // A video put on (or taken off) a stage layout starts (or stops) at once.
+        if stage_changed {
+            let before: Vec<String> = self.slide_videos.iter().map(|(file, _)| file.clone()).collect();
+            self.sync_slide_video();
+            if !self.slide_videos.iter().map(|(file, _)| file).eq(before.iter()) {
+                self.refresh_output();
+            }
         }
     }
 
@@ -6024,10 +6042,15 @@ impl App {
             if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_CAPTURE_CHOOSER").is_some() {
                 running.home_state.chooser_open = true;
             }
-            // Testing aid: open the Edit view on the stage layouts, with a box chosen.
-            if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_CAPTURE_STAGE_LAYOUTS").is_some() {
+            // Testing aid: open the Edit view on the stage layouts, with the front object picked;
+            // SOFTPRESENTER_CAPTURE_STAGE_LAYOUTS=N picks the Nth from the front (from 0), and
+            // =none nothing.
+            if running.frames == GO_LIVE_AT + 2
+                && let Ok(pick) = std::env::var("SOFTPRESENTER_CAPTURE_STAGE_LAYOUTS")
+            {
                 running.home_state.edit_kind_request = Some(home::EditKind::Stage);
-                running.home_state.stage_edit = (0, Some(0));
+                running.home_state.stage_edit =
+                    (0, if pick == "none" { None } else { Some(pick.parse().unwrap_or(0)) });
             }
             // Testing aid: show the stage picture in the Program preview.
             if running.frames == GO_LIVE_AT + 2 && std::env::var("SOFTPRESENTER_PREVIEW").as_deref() == Ok("stage") {

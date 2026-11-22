@@ -386,6 +386,28 @@ pub fn describe(object: &Object, screens: &[crate::screens::Screen]) -> String {
     }
 }
 
+/// The objects of the layouts the stage screens show while they are on, each layout once: the
+/// app opens their web pages and plays their videos, as it does a slide's on screen.
+pub fn shown_objects(state: &crate::home::HomeState) -> Vec<Object> {
+    if !state.stage_on {
+        return Vec::new();
+    }
+    let mut seen = Vec::new();
+    let mut shown = Vec::new();
+    let stages = state
+        .screens
+        .iter()
+        .filter(|screen| screen.kind == crate::screens::Kind::Stage && screen.output != crate::screens::Output::Off);
+    for screen in stages {
+        let layout = layout_for(&state.stage_layouts, screen.stage_layout);
+        if !seen.contains(&layout.id) {
+            seen.push(layout.id);
+            shown.extend(objects(&layout).iter().filter(|object| !object.hidden).cloned());
+        }
+    }
+    shown
+}
+
 /// The screens a layout's screen pictures show, each once, as [`with_sources`] left them.
 pub fn sources(layout: &ThemeTemplate) -> Vec<Uuid> {
     let mut found = Vec::new();

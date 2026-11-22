@@ -368,7 +368,8 @@ feature changes, this page changes in the same commit.
   a layout shows live is an object on the canvas (the current and next slide, the next label,
   the clock, a timer, the slide's notes, the song's title and group, the stage message), beside
   words of its own, shapes, pictures, videos, web pages and screen pictures, all from one Add
-  menu. Objects are picked (Shift or Command for several, or a box dragged round them), moved,
+  menu. A video on a stage layout plays there, looping and without its sound (the room hears the
+  slide's), and a web page shows live, while a stage screen shows the layout. Objects are picked (Shift or Command for several, or a box dragged round them), moved,
   resized, nudged with the arrows (10 at a time, Shift for one pixel), lined up, spread out,
   brought forward or sent back, duplicated, copied, deleted, hidden and locked, with undo, and
   listed under Objects, front first. The inspector has their place, fill, outline, shadow and

@@ -334,9 +334,15 @@ pub fn layout_panel(ui: &mut egui::Ui, state: &mut HomeState) {
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Name").size(12.5).strong().color(TEXT));
+        // A layout always has a name: emptied, it keeps the one it had, as a theme's does.
+        let before = layout.name.clone();
         let field = ui.add(egui::TextEdit::singleline(&mut layout.name).desired_width(f32::INFINITY));
-        if field.changed() && !layout.name.trim().is_empty() {
-            state.stage_layouts_changed = true;
+        if field.changed() {
+            if layout.name.trim().is_empty() {
+                layout.name = before;
+            } else {
+                state.stage_layouts_changed = true;
+            }
         }
     });
     ui.add_space(8.0);
