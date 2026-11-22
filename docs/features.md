@@ -871,8 +871,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     with the theme, the version and the template.
   - A song or a passage in a playlist can be set to show in a version, from the **version
     button** among its title-bar tools (the theme icon, in the lighter grey while one is set,
-    orange while the item is on screen in it) or Show With ▸ in its ⋯ and right-click menus:
-    the usual look or a version, and Keep It After This Item. When it goes on screen it brings
+    orange while the item is on screen in it), or the **Version** section of its ⋯ and
+    right-click menus (in the playlist and on its title bar): the usual look or a version, picked
+    with one click, and Keep It After This Item. When it goes on screen it brings
     the version, and its tiles are drawn in it. Its row in the playlist has the version's name
     in a small pill under its title, lit orange while it is on screen in it. This is the
     playlist's; the song itself doesn't change.

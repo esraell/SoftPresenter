@@ -3451,11 +3451,18 @@ pub fn item_menu(
         announce_button(ui, state, what, "It goes round by itself over the slides until it is cleared");
         ui.separator();
     }
+    version_section(ui, state, index);
+    item_moves(ui, show, state, index, ask);
+}
+
+/// A Version section in a playlist item's menu, once some theme has a version: every version,
+/// the one it shows in marked, picked with one click, then a separator. Nothing otherwise.
+pub fn version_section(ui: &mut egui::Ui, state: &mut HomeState, index: usize) {
     if can_show_with(state, index) {
-        ui.menu_button("Show With", |ui| show_with_menu(ui, state, index, false));
+        crate::live_tabs::menu_heading(ui, "Version");
+        show_with_menu(ui, state, index, false);
         ui.separator();
     }
-    item_moves(ui, show, state, index, ask);
 }
 
 /// Whether a playlist item (by its place in the playlist in front) can be shown in a theme
@@ -3467,7 +3474,8 @@ pub fn can_show_with(state: &HomeState, index: usize) -> bool {
 
 /// What a playlist item shows in when it goes on screen: the usual look or one of the themes'
 /// versions, and whether that version stays on after it. It is the playlist's own; the song
-/// itself doesn't change. The menu of the item's version button (`heading`), and its Show With.
+/// itself doesn't change. The menu of the item's version button (`heading`, with a line saying
+/// it applies in this playlist only), and the Version section of its menus.
 pub fn show_with_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, heading: bool) {
     use crate::service::ShowWith;
     let Some(item) = state.services.front().items.get(index) else { return };
@@ -3493,7 +3501,12 @@ pub fn show_with_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, he
     if kept.clicked() {
         chosen = Some(now.map(|wanted| ShowWith { keep: !keep, ..wanted }));
     }
-    ui.add_enabled(false, egui::Button::new("It applies in this playlist only; the song itself doesn\u{2019}t change"));
+    if heading {
+        ui.add_enabled(
+            false,
+            egui::Button::new("It applies in this playlist only; the song itself doesn\u{2019}t change"),
+        );
+    }
     if let Some(chosen) = chosen {
         state.services.set_show_with(index, chosen);
         ui.close();

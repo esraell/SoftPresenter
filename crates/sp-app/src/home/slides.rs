@@ -1908,6 +1908,7 @@ fn item_bar(
             if song.is_some() {
                 ui.separator();
             }
+            crate::studio::version_section(ui, state, item);
             crate::studio::item_moves(ui, show, state, item, ask);
         }
     };

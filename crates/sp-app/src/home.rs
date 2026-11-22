@@ -8964,6 +8964,36 @@ mod tests {
     }
 
     #[test]
+    fn a_playlist_items_menu_has_a_version_section_with_every_version() {
+        let ctx = egui::Context::default();
+        let (_, offering) = offering_theme();
+        let mut state = HomeState::default();
+        state.services.add(crate::service::Item::song("title:Harbour", "Harbour"));
+        let words_drawn = |state: &mut HomeState| {
+            let output = ctx.run_ui(input(None), |ui| crate::studio::version_section(ui, state, 0));
+            let mut words = Vec::new();
+            fn walk(shape: &egui::Shape, words: &mut Vec<String>) {
+                match shape {
+                    egui::Shape::Text(text) => words.push(text.galley.text().to_owned()),
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, words)),
+                    _ => {}
+                }
+            }
+            output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut words));
+            output.drop_without_applying_deltas();
+            words
+        };
+        // No version in any theme: no section.
+        assert!(words_drawn(&mut state).is_empty());
+        state.versions = vec![offering];
+        let words = words_drawn(&mut state);
+        for wanted in ["VERSION", "The usual look", "The Offering version", "Keep It After This Item"] {
+            assert!(words.iter().any(|w| w == wanted), "{wanted} in {words:?}");
+        }
+        assert!(!words.iter().any(|w| w.contains("applies in this playlist only")), "the note is the button's only");
+    }
+
+    #[test]
     fn a_playlist_item_shown_in_a_version_has_its_name_under_its_title() {
         let ctx = egui::Context::default();
         let show = Show::new(vec![Arc::new(parse_song_text("Harbour", "Words\n"))]);
