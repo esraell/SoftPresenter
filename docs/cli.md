@@ -361,7 +361,9 @@ Macro steps: `clear all|slide|media|props|messages`, `show|hide message NAME`,
 `show|hide prop NAME`, `start|stop|reset timer NAME`, `audience on|off`, `song SONG`,
 `media ITEM`, `announce SONG|media ITEM|media-playlist NAME` (on the Announcements layer).
 Steps are parted by `then`, or by `;` inside one quoted argument. `sp macros` marks a macro
-that runs when SoftPresenter opens.
+that runs when SoftPresenter opens, and says what a step names that has gone, such as "Play on
+the Announcements Layer: (a song no longer in the library)" or "Show Prop: (a prop that has been
+deleted)".
 
     $ sp macro new "Before service"
     Made the macro Before service; give it steps with macro add Before service STEP.

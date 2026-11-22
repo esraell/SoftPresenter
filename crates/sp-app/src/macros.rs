@@ -37,7 +37,9 @@ impl Macro {
     }
 }
 
-/// What an action does, in words, given the names of what it names.
+/// What an action does, in words, given the names of what it names. Something it names that is
+/// gone is said plainly ("a song no longer in the library"), so the step can be seen to need
+/// changing.
 #[allow(clippy::too_many_arguments)]
 pub fn describe(
     action: &ShowAction,
@@ -48,26 +50,34 @@ pub fn describe(
     media_name: impl Fn(Uuid) -> Option<String>,
     media_playlist_name: impl Fn(Uuid) -> Option<String>,
 ) -> String {
-    let gone = || "(gone)".to_owned();
+    let gone = |what: &'static str| move || format!("({what})");
+    let (song_gone, media_gone) =
+        (gone("a song no longer in the library"), gone("a picture or video no longer in the media bin"));
     match action {
         ShowAction::Clear { what } => what.name().to_owned(),
         ShowAction::Message { id, show } => {
-            format!("{} Message: {}", if *show { "Show" } else { "Hide" }, message_name(*id).unwrap_or_else(gone))
+            let name = message_name(*id).unwrap_or_else(gone("a message that has been deleted"));
+            format!("{} Message: {name}", if *show { "Show" } else { "Hide" })
         }
         ShowAction::Prop { id, show } => {
-            format!("{} Prop: {}", if *show { "Show" } else { "Hide" }, prop_name(*id).unwrap_or_else(gone))
+            let name = prop_name(*id).unwrap_or_else(gone("a prop that has been deleted"));
+            format!("{} Prop: {name}", if *show { "Show" } else { "Hide" })
         }
-        ShowAction::Timer { id, act } => format!("{} Timer: {}", act.name(), timer_name(*id).unwrap_or_else(gone)),
+        ShowAction::Timer { id, act } => {
+            format!("{} Timer: {}", act.name(), timer_name(*id).unwrap_or_else(gone("a timer that has been deleted")))
+        }
         ShowAction::Audience { on } => format!("Audience Screens {}", if *on { "On" } else { "Off" }),
-        ShowAction::Song { key } => format!("Go to Song: {}", song_name(key).unwrap_or_else(gone)),
-        ShowAction::Media { id } => format!("Show Media: {}", media_name(*id).unwrap_or_else(gone)),
+        ShowAction::Song { key } => format!("Go to Song: {}", song_name(key).unwrap_or_else(song_gone)),
+        ShowAction::Media { id } => format!("Show Media: {}", media_name(*id).unwrap_or_else(media_gone)),
         ShowAction::Announce { what } => {
             let name = match what {
-                Announced::Song { key } => song_name(key),
-                Announced::Media { id } => media_name(*id),
-                Announced::MediaPlaylist { id } => media_playlist_name(*id),
+                Announced::Song { key } => song_name(key).unwrap_or_else(song_gone),
+                Announced::Media { id } => media_name(*id).unwrap_or_else(media_gone),
+                Announced::MediaPlaylist { id } => {
+                    media_playlist_name(*id).unwrap_or_else(gone("a media playlist that has been deleted"))
+                }
             };
-            format!("Play on the Announcements Layer: {}", name.unwrap_or_else(gone))
+            format!("Play on the Announcements Layer: {name}")
         }
         ShowAction::CanvaSync => "Sync from Canva".to_owned(),
     }
@@ -175,6 +185,16 @@ mod tests {
         assert_eq!(
             describe(&announce, |_| None, |_| None, |_| None, |_| None, |_| None, playlist),
             "Play on the Announcements Layer: Announcements"
+        );
+        // Something a step names that has gone is said plainly.
+        let song = ShowAction::Announce { what: Announced::Song { key: "41".to_owned() } };
+        assert_eq!(
+            describe(&song, |_| None, |_| None, |_| None, |_| None, |_| None, |_| None),
+            "Play on the Announcements Layer: (a song no longer in the library)"
+        );
+        assert_eq!(
+            describe(&start.actions[1], |_| None, |_| None, |_| None, |_| None, |_| None, |_| None),
+            "Start Timer: (a timer that has been deleted)"
         );
         let copy = start.duplicate();
         assert_ne!(copy.id, start.id);

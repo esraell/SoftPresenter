@@ -393,7 +393,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Canva). Each is a card with its colour as a dot, its
   name, how many steps, a Run key (the only thing that runs it), a chevron that opens its steps
   (each with Earlier and Remove, then Add a step…), and ⋯ with Edit Steps…, Colour, Run When
-  SoftPresenter Opens, Rename, Duplicate and Delete.
+  SoftPresenter Opens, Rename, Duplicate and Delete. A step whose song, message, prop, timer,
+  picture or media playlist has gone says so, as "Play on the Announcements Layer: (a song no
+  longer in the library)".
 - **Start-up is a macro**: a macro with Run When SoftPresenter Opens switched on (a switch at
   the top of the opened macro, and in its menu) runs when the app opens, such as one that plays
   the announcement loop before the service. Its step Audience Screens Off takes effect before

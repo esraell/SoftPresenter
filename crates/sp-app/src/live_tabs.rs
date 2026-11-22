@@ -1048,10 +1048,10 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut Thumb) {
     }
 }
 
-/// The title of the song an action names by its key, among the songs in the library.
+/// The title of the song an action names by its key, found as running the action finds it (and
+/// as `sp macros` says it), so a step reads as gone exactly when its song can't be found.
 fn song_title(show: &sp_engine::Show, state: &HomeState, key: &str) -> Option<String> {
-    let hidden = state.bible.slots.unwrap_or([usize::MAX; 2]);
-    listed_songs(show, state, hidden).find(|(have, _)| *have == key).map(|(_, song)| song.title.clone())
+    crate::studio::playlist_song(show, state, key).map(|at| show.presentations()[at].title.clone())
 }
 
 /// The songs an action can name, each with its key: those in the library, in order.
