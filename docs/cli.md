@@ -65,7 +65,11 @@ app.
   that contains one ("O Come to the Altar"). Quote names in `slide` commands, and `key=value`
   settings whose value has spaces (`"layout=Words Only"`).
 - **`--json`**, anywhere on the line, prints the whole reply as JSON ([below](#replies-as-json)).
-- **`--yes`** is needed by every command that deletes something.
+- **`--yes`** is needed by every command that deletes something Undo can't bring back (a song,
+  a media bin item, a theme, a screen, a Bible, a connection), as the window asks about those.
+  What Undo brings back goes at once, as in the window, and `sp undo` puts it back: playlists,
+  items taken out of a playlist, libraries, audio playlists, timers, messages, props and
+  macros. An old `--yes` on those is let by.
 - **`--wait`** makes a command that runs in the background (a pack with videos, a large pack
   import, a Bible download) wait until it is done; see [jobs](#undo-jobs-and-the-menu-bar).
   `status --wait SECONDS` is something else: it waits for a change
@@ -85,10 +89,10 @@ app.
 - **Help:** `sp help` lists every command, and `sp help song` the ones starting with that word.
   Both work with the app closed.
 - **Saving and undo:** changes are saved at once. A change to a song or a slide can be undone
-  with `sp undo`, and so can items taken out of a playlist in the window (with Delete, or Remove
-  from Playlist in an item's menu); other changes to playlists, and changes to libraries, themes
-  and settings, can't, as in the window. `sp undo` takes back the last of those even when a
-  theme or playlist change came after it, and says what it changed.
+  with `sp undo`, and so can what was deleted that Undo brings back (above), in the window or
+  from here; other changes to playlists, and changes to libraries, themes and settings, can't,
+  as in the window. `sp undo` takes back the last of those even when a theme or playlist change
+  came after it, and says what it changed.
 - Each command that changes something is written to the app's log with its result (`done` or
   `refused`). Commands that only read are not, so a script or page asking every second or two
   doesn't fill it: `status`, `songs`, `slides`, `slide SONG N` and `slide item …`, `playlists`,
@@ -346,14 +350,14 @@ with Continuous on; open it with `playlist go` to run through the playlist.
 |---|---|
 | `message show NAME`, `message hide` | Shows a message over the slides, or takes it off |
 | `message show --text WORDS` | Shows words at once, kept as the message "Quick message" |
-| `message new NAME [WORDS]`, `message set NAME text=… leaves=SECONDS\|never name=…`, `message delete NAME --yes` | Makes and changes messages |
+| `message new NAME [WORDS]`, `message set NAME text=… leaves=SECONDS\|never name=…`, `message delete NAME` | Makes and changes messages (a message deleted goes at once; `sp undo` puts it back) |
 | `prop show NAME`, `prop hide NAME` | A prop (a logo, a lower third) over the show |
-| `prop new NAME [PICTURE]`, `prop delete NAME --yes` | A prop showing a picture, or its name in words |
+| `prop new NAME [PICTURE]`, `prop delete NAME` | A prop showing a picture, or its name in words (deleted at once; `sp undo` puts it back) |
 | `timer start\|stop\|reset NAME` | A timer |
 | `timer new NAME countdown M:SS \| to HH:MM \| up [to M:SS]` | A timer counting down from a length (`30` alone is 30 minutes), down to a time of day (`10:30am`), or up |
-| `timer set NAME countdown …\|to …\|up …\|overrun on\|off\|name NEW`, `timer rename OLD to NEW`, `timer delete NAME --yes` | Changes a timer, or deletes it. A new name goes into every message that shows the timer, in the same change; a name another timer has is refused |
+| `timer set NAME countdown …\|to …\|up …\|overrun on\|off\|name NEW`, `timer rename OLD to NEW`, `timer delete NAME` | Changes a timer, or deletes it (at once; `sp undo` puts it back). A new name goes into every message that shows the timer, in the same change; a name another timer has is refused |
 | `macro run NAME` | Runs a macro's steps in turn |
-| `macro new NAME`, `macro add NAME STEP [then STEP…]`, `macro remove NAME N`, `macro delete NAME --yes` | Makes a macro and gives it steps |
+| `macro new NAME`, `macro add NAME STEP [then STEP…]`, `macro remove NAME N`, `macro delete NAME` | Makes a macro and gives it steps (deleted at once; `sp undo` puts it back) |
 | `macro step NAME N STEP` | Step N does STEP instead, at the same point among the steps (STEP in the words `macro add` takes; one step) |
 | `macro move NAME N to M` | Step N becomes step M; the steps between close up |
 | `macro startup NAME on\|off` | Runs the macro when SoftPresenter opens, or not (start-up is a macro: Settings has no start-up choice of its own) |
@@ -411,7 +415,7 @@ deleted)".
 | `audio play TRACK`, `audio pause`, `audio stop`, `audio next`, `audio previous` | The audio player (next and previous stay in the playing track's playlist) |
 | `audio volume 0-100`, `audio shuffle on\|off`, `audio through on\|off`, `audio crossfade SECONDS` | Volume; a random or the next track after one ends; a crossfade of 0 to 12 seconds |
 | `audio add FILE… [to PLAYLIST]` | Adds sound files |
-| `audio playlists`, `audio playlist new NAME`, `audio playlist delete NAME --yes` | Audio playlists (deleting one leaves the files; the last one stays; a track of it that is playing plays on to its end) |
+| `audio playlists`, `audio playlist new NAME`, `audio playlist delete NAME` | Audio playlists (deleting one, at once, leaves the files and `sp undo` puts it back; the last one stays; a track of it that is playing plays on to its end) |
 
     $ sp audio playlist new Walk-in
     Made the audio playlist Walk-in.
@@ -652,7 +656,7 @@ it and `slide frame` moves it, while `slide text` and `slide style` say "The sli
 |---|---|
 | `playlist open NAME` | Puts a playlist in front |
 | `playlist add SONG [to PLAYLIST]` | Adds a song at the end (of the playlist in front if none is named); `VoxLive` adds the VoxLive item, once VoxLive is connected |
-| `playlist new NAME`, `playlist rename OLD to NEW`, `playlist delete NAME --yes` | Makes, renames or deletes a playlist (the last one stays). The playlist in front stays in front with its open item; deleting the one in front brings the one before it (or the next) to the front |
+| `playlist new NAME`, `playlist rename OLD to NEW`, `playlist delete NAME` | Makes, renames or deletes a playlist (the last one stays; deleted at once, `sp undo` puts it back). The playlist in front stays in front with its open item; deleting the one in front brings the one before it (or the next) to the front |
 | `playlist remove ITEM [from PLAYLIST]`, `playlist move ITEM to N [in PLAYLIST]` | Takes out or moves an item, by number or title; the open item of the playlist in front stays open (unless it is the one taken out) |
 | `playlist header TEXT [at N] [in PLAYLIST]` | A header that groups the items after it |
 | `playlist media ITEM [at N] [in PLAYLIST]` | A picture or video from the media bin (the countdown video) |
@@ -666,7 +670,7 @@ there is one called that, and a last `at` a place only when a number follows, so
 can be part of the name: `playlist media Live at Church.mp4`, `playlist placeholder Sermon in
 Romans`.
 | `library open NAME\|all` | Shows a library's songs, or every song, in the song list |
-| `library new NAME`, `library rename OLD to NEW`, `library delete NAME --yes` | Makes, renames or deletes a library (its songs stay) |
+| `library new NAME`, `library rename OLD to NEW`, `library delete NAME` | Makes, renames or deletes a library (its songs stay; deleted at once, `sp undo` puts it back) |
 | `library add SONG… to LIBRARY`, `library remove SONG… from LIBRARY` | Puts songs in a library or takes them out (quote each name with spaces) |
 
     $ sp playlist new Sunday Evening
@@ -1047,7 +1051,7 @@ instead of opening the browser.
 
 | Command | Does |
 |---|---|
-| `undo`, `redo` | Undoes or redoes the last change to a song or slide, or puts back the items last taken out of a playlist in the window (redo takes them out again), whatever the window shows, and says what it was |
+| `undo`, `redo` | Undoes or redoes the last change to a song or slide, or puts back what was last deleted that Undo brings back (items taken out of a playlist, a playlist, a library, an audio playlist, a timer, message, prop or macro; redo deletes it again), whatever the window shows, and says what it was ("Put the timer Countdown back.") |
 | `job N` | How a background job (a pack with videos, a large pack import, a Bible download) went, or "still going" |
 | `menu`, `menu ITEM` | Lists the menu bar items; chooses one by id (`ClearAll`, `NewSong`) or words ("Clear All"), as a click does |
 

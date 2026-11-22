@@ -205,18 +205,14 @@ impl crate::App {
                 (old, Some(new)) if !old.is_empty() => self.timer_rename(&old.join(" "), &new),
                 _ => Err("timer rename OLD to NEW".to_owned()),
             },
+            // At once, as in the window: `sp undo` puts it back (an old --yes is let by).
             "delete" => {
-                let (yes, name) = wants_yes(words);
+                let (_, name) = wants_yes(words);
                 self.with_named("timer", &name.join(" "), |state| state.timers.iter().map(|t| t.name.clone()).collect())
                     .and_then(|at| {
                         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
-                        let name = state.timers[at].name.clone();
-                        if !yes {
-                            return Err(format!("This deletes the timer {name}. Add --yes to do it."));
-                        }
-                        state.timers.remove(at);
-                        state.timers_changed = true;
-                        Ok(Reply::done(format!("Deleted the timer {name}.")))
+                        let gone = state.delete_timer(at).ok_or("That timer is gone.")?;
+                        Ok(Reply::done(format!("Deleted the timer {}.", gone.name)))
                     })
             }
             _ => return None,
@@ -310,20 +306,16 @@ impl crate::App {
                 [] => Err("message new NAME [WORDS]   (put a name with spaces in quotes)".to_owned()),
             },
             "set" => self.message_set(words),
+            // At once, as in the window: `sp undo` puts it back (an old --yes is let by).
             "delete" => {
-                let (yes, name) = wants_yes(words);
+                let (_, name) = wants_yes(words);
                 self.with_named("message", &name.join(" "), |state| {
                     state.messages.iter().map(|m| m.name.clone()).collect()
                 })
                 .and_then(|at| {
                     let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
-                    let name = state.messages[at].name.clone();
-                    if !yes {
-                        return Err(format!("This deletes the message {name}. Add --yes to do it."));
-                    }
-                    state.messages.remove(at);
-                    state.messages_changed = true;
-                    Ok(Reply::done(format!("Deleted the message {name}.")))
+                    let gone = state.delete_message(at).ok_or("That message is gone.")?;
+                    Ok(Reply::done(format!("Deleted the message {}.", gone.name)))
                 })
             }
             // `message show --text WORDS`: words shown once, kept as the message "Quick message".
@@ -412,25 +404,20 @@ impl crate::App {
         Ok(Reply::done(format!("Showing \u{201c}{}\u{201d} (kept as the message {QUICK}).", text.trim())))
     }
 
-    /// `prop new NAME [PICTURE]`, `prop delete NAME --yes`; `None` for another word.
+    /// `prop new NAME [PICTURE]`, `prop delete NAME`; `None` for another word.
     pub(crate) fn ctl_prop_make(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
         let words = &args[2..];
         let result = match word.as_str() {
             "new" => self.prop_new(words),
+            // At once, as in the window: `sp undo` puts it back (an old --yes is let by).
             "delete" => {
-                let (yes, name) = wants_yes(words);
+                let (_, name) = wants_yes(words);
                 self.with_named("prop", &name.join(" "), |state| state.props.iter().map(|p| p.name.clone()).collect())
                     .and_then(|at| {
                         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
-                        let name = state.props[at].name.clone();
-                        if !yes {
-                            return Err(format!("This deletes the prop {name}. Add --yes to do it."));
-                        }
-                        let gone = state.props.remove(at);
-                        state.props_live.retain(|(id, _)| *id != gone.id);
-                        state.props_changed = true;
-                        Ok(Reply::done(format!("Deleted the prop {name}.")))
+                        let gone = state.delete_prop(at).ok_or("That prop is gone.")?;
+                        Ok(Reply::done(format!("Deleted the prop {}.", gone.name)))
                     })
             }
             _ => return None,
@@ -548,18 +535,14 @@ impl crate::App {
                 }
                 _ => Err("macro remove NAME N".to_owned()),
             },
+            // At once, as in the window: `sp undo` puts it back (an old --yes is let by).
             "delete" => {
-                let (yes, name) = wants_yes(words);
+                let (_, name) = wants_yes(words);
                 self.with_named("macro", &name.join(" "), |state| state.macros.iter().map(|m| m.name.clone()).collect())
                     .and_then(|at| {
                         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
-                        let name = state.macros[at].name.clone();
-                        if !yes {
-                            return Err(format!("This deletes the macro {name}. Add --yes to do it."));
-                        }
-                        state.macros.remove(at);
-                        state.macros_changed = true;
-                        Ok(Reply::done(format!("Deleted the macro {name}.")))
+                        let gone = state.delete_macro(at).ok_or("That macro is gone.")?;
+                        Ok(Reply::done(format!("Deleted the macro {}.", gone.name)))
                     })
             }
             _ => return None,
@@ -832,7 +815,7 @@ impl crate::App {
     }
 
     fn audio_playlist(&mut self, words: &[String]) -> Result<Reply, String> {
-        let usage = "audio playlist new NAME | audio playlist delete NAME --yes";
+        let usage = "audio playlist new NAME | audio playlist delete NAME";
         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
         match words.first().map(|w| w.to_lowercase()).as_deref() {
             Some("new") => {
@@ -847,22 +830,15 @@ impl crate::App {
                 state.audio_changed = true;
                 Ok(Reply::done(format!("Made the audio playlist {}.", name.trim())))
             }
+            // At once, as in the window: `sp undo` puts it back (an old --yes is let by).
             Some("delete") => {
-                let (yes, name) = wants_yes(&words[1..]);
+                let (_, name) = wants_yes(&words[1..]);
                 let names: Vec<String> = state.audio.playlists.iter().map(|p| p.name.clone()).collect();
                 let at = find("audio playlist", &names, &name.join(" "))?;
-                if !yes {
-                    return Err(format!(
-                        "This deletes the audio playlist {} (the sound files stay). Add --yes to do it.",
-                        names[at]
-                    ));
-                }
-                if !state.audio.remove_playlist(at, state.audio_playing.track) {
+                if !state.delete_audio_playlist(at) {
                     return Err(format!("{} is the only audio playlist; there is always one.", names[at]));
                 }
-                state.audio.current = state.audio.current.min(state.audio.playlists.len().saturating_sub(1));
-                state.audio_changed = true;
-                Ok(Reply::done(format!("Deleted the audio playlist {}.", names[at])))
+                Ok(Reply::done(format!("Deleted the audio playlist {}; the sound files stay.", names[at])))
             }
             _ => Err(usage.to_owned()),
         }

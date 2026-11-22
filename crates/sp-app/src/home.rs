@@ -72,33 +72,6 @@ impl ItemPicks {
     }
 }
 
-/// Items taken out of a playlist, kept in the Show view's undo order to be put back: the
-/// playlist (by its place, and its name, so that a playlist since renamed or deleted is left
-/// alone), and each item with the place it had.
-#[derive(Clone, Debug, PartialEq)]
-pub struct RemovedItems {
-    pub playlist: usize,
-    pub name: String,
-    pub items: Vec<(usize, crate::service::Item)>,
-}
-
-impl RemovedItems {
-    /// What the notice says once they are taken out (with the key that puts them back), or
-    /// put back.
-    pub fn said(&self, back: bool) -> String {
-        let (what, them) = match self.items.as_slice() {
-            [(_, one)] => (one.title().to_owned(), "it"),
-            many => (format!("{} items", many.len()), "them"),
-        };
-        let name = &self.name;
-        if back {
-            format!("Put {what} back in {name}.")
-        } else {
-            format!("Removed {what} from {name}. {} puts {them} back.", crate::keys::with_modifier("Z"))
-        }
-    }
-}
-
 /// A slide picked to go on screen next by Enter (see [`HomeState::pick`]): where it is; in the
 /// Bible view, the passage it is in, as the page names what it shows; and the slide on screen
 /// when it was picked.
@@ -326,8 +299,9 @@ pub struct HomeState {
     pub media_anchor: Option<usize>,
     /// The items of the playlist in front picked out (several with Command or Shift).
     pub item_picks: ItemPicks,
-    /// Items just taken out of a playlist, for the app to keep in the Show view's undo order.
-    pub removed_items: Vec<RemovedItems>,
+    /// What was just deleted that Undo can put back, for the app to keep in its one history
+    /// (see `removed`).
+    pub removed: Vec<crate::removed::Removed>,
     pub picking: Picking,
     /// A drag across a list picking things out, while it lasts.
     pub sweep: Option<Sweep>,
@@ -1782,7 +1756,7 @@ impl Default for HomeState {
             picked_media: Vec::new(),
             media_anchor: None,
             item_picks: ItemPicks::default(),
-            removed_items: Vec::new(),
+            removed: Vec::new(),
             picking: Picking::Nothing,
             sweep: None,
             slides_jump_to: None,
@@ -2337,7 +2311,7 @@ pub fn home_ui(
                 if state.playlist_open && !state.chooser_open && crate::studio::list_keys_work(ui, state) =>
             {
                 let places = crate::studio::items_to_take_out(state);
-                crate::studio::take_out_items(state, &places);
+                state.take_out_items(state.services.current, &places);
             }
             // Themes are deleted in the Theme Editor, where the list is.
             Picking::Themes | Picking::Items => {}
@@ -12741,25 +12715,20 @@ mod tests {
             assert_eq!(titles(&state), ["Alpha", "Gamma", "Epsilon"], "{key:?}");
             assert!(state.confirm_delete_songs.is_empty() && !state.alert_open(), "nothing is asked");
             assert!(state.songs_to_delete.is_empty(), "no song is deleted");
-            let said = state.toast.as_ref().map(|(words, _)| words.clone()).unwrap_or_default();
+            assert!(state.toast.is_none(), "and nothing is said: Undo is the way back");
+            // The app keeps what went in its one history; Undo puts it back in place, picked out
+            // again, and Redo takes it out again.
+            let removed = state.removed.pop().expect("kept for Undo");
+            let crate::removed::Removed::Items(items) = &removed else { panic!("items: {removed:?}") };
             assert_eq!(
-                said,
-                format!("Removed 2 items from Service. {} puts them back.", crate::keys::with_modifier("Z"))
-            );
-            // The app keeps what went in the Show view's undo order; Undo puts it back in place,
-            // picked out again, and Redo takes it out again.
-            let removed = state.removed_items.pop().expect("kept for Undo");
-            assert_eq!(
-                removed.items.iter().map(|(at, item)| (*at, item.title())).collect::<Vec<_>>(),
+                items.items.iter().map(|(at, item)| (*at, item.title())).collect::<Vec<_>>(),
                 [(1, "Beta"), (3, "Delta")]
             );
-            assert_eq!(
-                crate::studio::redo_removed(&mut state, &removed, true).as_deref(),
-                Some("Put 2 items back in Service.")
-            );
+            assert!(removed.redo(&mut state, true));
+            assert_eq!(removed.said(true), "Put 2 items back in Service.");
             assert_eq!(titles(&state), ["Alpha", "Beta", "Gamma", "Delta", "Epsilon"]);
             assert_eq!(state.item_picks.places, [1, 3]);
-            assert!(crate::studio::redo_removed(&mut state, &removed, false).is_some());
+            assert!(removed.redo(&mut state, false));
             assert_eq!(titles(&state), ["Alpha", "Gamma", "Epsilon"]);
             nothing_went_live(&show, &commands);
         }
@@ -12802,7 +12771,7 @@ mod tests {
             }
             place(&mut state, false);
         }
-        assert!(state.removed_items.is_empty());
+        assert!(state.removed.is_empty());
         // Back in the Show view with the playlist listed, Delete takes Beta out.
         found_step(&ctx, &mut show, &mut state, pressed(Key::Delete, Modifiers::NONE), time + 0.1, &mut commands);
         assert_eq!(state.services.front().items.len(), 4);
@@ -13454,7 +13423,7 @@ mod tests {
         // layer; and Delete as it is.
         assert_eq!(drawn.iter().any(|words| words.contains("F5")), crate::keys::f_keys());
         assert_eq!(drawn.iter().any(|words| words.contains(crate::keys::BUTTON_ONLY)), !crate::keys::f_keys());
-        assert!(drawn.iter().any(|words| words.contains("playlist items go at once")));
+        assert!(drawn.iter().any(|words| words.contains("what Undo brings back goes at once")));
     }
 
     #[test]

@@ -448,12 +448,9 @@ fn every_key_on(f_keys: bool) -> Vec<(&'static str, Vec<Row>)> {
             vec![
                 row(vec![m("Z"), with_shift("Z")], "Undo, redo"),
                 row(vec![m("C"), m("X"), m("V")], "Copy, cut, paste the picked slides (objects in Edit)"),
-                (
+                row(
                     one("Delete"),
-                    format!(
-                        "Delete what is picked: playlist items go at once ({} puts them back), and so do items in a media playlist's view; songs in a library, slides and media ask first",
-                        m("Z")
-                    ),
+                    "Delete what is picked: what Undo brings back goes at once, and so do items in a media playlist's view; songs in a library, slides and media ask first",
                 ),
                 row(one(&m("N")), "A new song"),
                 row(vec!["T".to_owned(), m("D"), m("A")], "In Edit: a new text box, duplicate, pick everything"),

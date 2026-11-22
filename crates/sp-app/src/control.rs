@@ -922,11 +922,11 @@ Layers and controls
   timer new NAME countdown M:SS | to HH:MM | up [to M:SS]     (30 alone is 30 minutes)
   timer set NAME countdown …|to …|up … | overrun on|off | name NEW
   timer rename OLD to NEW
-  timer delete NAME --yes
+  timer delete NAME
   message new NAME [WORDS] | message set NAME text=… leaves=SECONDS|never name=…
-  message delete NAME --yes | message show --text WORDS   (words once, as Quick message)
-  prop new NAME [PICTURE] | prop delete NAME --yes
-  macro new NAME | macro add NAME STEP [then STEP…] | macro remove NAME N | macro delete NAME --yes
+  message delete NAME | message show --text WORDS   (words once, as Quick message)
+  prop new NAME [PICTURE] | prop delete NAME
+  macro new NAME | macro add NAME STEP [then STEP…] | macro remove NAME N | macro delete NAME
                                steps: clear all|slide|media|props|messages, show|hide message
                                NAME, show|hide prop NAME, start|stop|reset timer NAME,
                                audience on|off, song SONG, media ITEM, announce SONG|media
@@ -938,7 +938,7 @@ Layers and controls
   announce SONG | announce media ITEM | announce media-playlist NAME | announce stop
   audio play TRACK | audio pause | audio stop | audio volume 0-100
   audio next|previous | audio shuffle on|off | audio through on|off | audio crossfade SECONDS
-  audio add FILE… [to PLAYLIST] | audio playlists | audio playlist new NAME | delete NAME --yes
+  audio add FILE… [to PLAYLIST] | audio playlists | audio playlist new NAME | delete NAME
   media-playlist new NAME | media-playlist add ITEM… to NAME | remove ITEM… from NAME
   media-playlist follow NAME FOLDER|off | media-playlist delete NAME --yes
   voxlive                      whether VoxLive is connected, and how many screens it has
@@ -981,7 +981,7 @@ Songs, libraries and playlists
   song delete SONG --yes
   playlist open NAME
   playlist add SONG [to PLAYLIST]               (VoxLive names the VoxLive item)
-  playlist new NAME | playlist rename OLD to NEW | playlist delete NAME --yes
+  playlist new NAME | playlist rename OLD to NEW | playlist delete NAME
   playlist remove ITEM [from PLAYLIST]          (ITEM by number or title)
   playlist move ITEM to N [in PLAYLIST]
   playlist header TEXT [at N] [in PLAYLIST]
@@ -989,7 +989,7 @@ Songs, libraries and playlists
   playlist media-playlist NAME [at N] [in PLAYLIST]   a media playlist, to play round
   playlist placeholder NAME [at N] [in PLAYLIST]      a place kept for something to come
   playlist fill PLACEHOLDER with SONG | with media ITEM [in PLAYLIST]
-  library new NAME | library rename OLD to NEW | library delete NAME --yes (songs stay)
+  library new NAME | library rename OLD to NEW | library delete NAME (songs stay)
   library add SONG… to LIBRARY | library remove SONG… from LIBRARY
   song rename SONG to TITLE | song duplicate SONG [as TITLE]
   song theme SONG THEME|main | song transition SONG KIND [SECONDS] | none
@@ -3089,10 +3089,14 @@ impl crate::App {
             self.menu_action(el, if redo { crate::menubar::Action::Redo } else { crate::menubar::Action::Undo });
             return Ok(Reply::done(format!("Took the Edit view's {word} step (as Cmd-Z does there).")));
         }
-        // Items taken out of a playlist, when they were the last change.
-        if self.history.items_next(redo) {
-            let said = self.undo_items(redo).ok_or_else(|| format!("There is nothing to {word}."))?;
-            return Ok(Reply::done(said));
+        // Something deleted, when it was the last change: put back, or deleted again.
+        self.keep_removed();
+        if self.history.removed_next(redo) {
+            let done = self.undo_removed(redo).ok_or_else(|| format!("There is nothing to {word}."))?;
+            if let Some(running) = self.running.as_ref() {
+                running.home_window.request_redraw();
+            }
+            return done.map(Reply::done);
         }
         let index = self.history.peek(redo).ok_or_else(|| format!("There is nothing to {word}."))?;
         let before = self.show.presentations().get(index).cloned().ok_or("That song is gone.")?;

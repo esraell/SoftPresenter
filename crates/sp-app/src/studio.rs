@@ -2600,10 +2600,10 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
         }
         response.context_menu(&mut menu);
     }
-    // Deleted where it is: the playlist in front stays in front, unless it is the one deleted.
+    // Deleted where it is, at once (Undo puts it back): the playlist in front stays in front,
+    // unless it is the one deleted.
     if let Some(index) = delete {
-        state.services.remove_at(index);
-        state.renaming_service = None;
+        state.delete_playlist(index);
     }
     if chooser_head(ui, "Song libraries", "New library", true) {
         let made = crate::libraries::Library::new(crate::libraries::new_name(&state.libraries));
@@ -2715,12 +2715,9 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
         }
         response.context_menu(&mut menu);
     }
+    // At once: Undo puts it back.
     if let Some(id) = delete {
-        state.libraries.retain(|library| library.id != id);
-        if state.library_shown == Some(id) {
-            state.library_shown = None;
-        }
-        state.libraries_changed = true;
+        state.delete_library(id);
     }
     ui.add_space(8.0);
 }
@@ -3652,8 +3649,7 @@ pub fn item_moves(ui: &mut egui::Ui, show: &Show, state: &HomeState, index: usiz
     } else {
         "Remove from Playlist".to_owned()
     };
-    let hint = format!("Takes it out of this playlist only; {} puts it back", crate::keys::with_modifier("Z"));
-    if ui.button(label).on_hover_text(hint).clicked() {
+    if ui.button(label).on_hover_text("Takes it out of this playlist only").clicked() {
         *ask = Some(ItemAsk::Remove(index));
         ui.close();
     }
@@ -3667,49 +3663,6 @@ pub fn items_to_take_out(state: &mut HomeState) -> Vec<usize> {
     } else {
         state.item_picks.places.clone()
     }
-}
-
-/// Takes items out of the playlist in front at once: no song is deleted, so nothing is asked.
-/// What went is kept for the app to put in the Show view's undo order, so Undo puts it back,
-/// and a notice says what went and which key puts it back. Nothing on the screens changes,
-/// even when the item taken out is the one on screen.
-pub fn take_out_items(state: &mut HomeState, places: &[usize]) {
-    let playlist = state.services.current;
-    let items = state.services.remove_items(playlist, places);
-    if items.is_empty() {
-        return;
-    }
-    let removed = crate::home::RemovedItems { playlist, name: state.services.front().name.clone(), items };
-    state.say(removed.said(false));
-    state.removed_items.push(removed);
-    state.item_picks = crate::home::ItemPicks::default();
-}
-
-/// Puts items taken out of a playlist back where they were (`back`), or takes them out again
-/// (a redo), as the Show view's undo order asks. Back in the playlist in front, they are picked
-/// out again. Returns what the notice says, or `None` when the playlist has changed so much
-/// that they can't be (it is gone, renamed, or the items aren't where they were).
-pub fn redo_removed(state: &mut HomeState, removed: &crate::home::RemovedItems, back: bool) -> Option<String> {
-    let playlist = state.services.list.get(removed.playlist).filter(|list| list.name == removed.name)?;
-    if back {
-        if !state.services.put_back(removed.playlist, &removed.items) {
-            return None;
-        }
-        if removed.playlist == state.services.current {
-            state.item_picks.places = removed.items.iter().map(|(at, _)| *at).collect();
-            state.item_picks.anchor = state.item_picks.places.first().copied();
-            state.item_picks.made_in(&state.services);
-        }
-    } else {
-        let there = removed.items.iter().all(|(at, item)| playlist.items.get(*at) == Some(item));
-        if !there {
-            return None;
-        }
-        let places: Vec<usize> = removed.items.iter().map(|(at, _)| *at).collect();
-        state.services.remove_items(removed.playlist, &places);
-        state.item_picks = crate::home::ItemPicks::default();
-    }
-    Some(removed.said(back))
 }
 
 /// Carries out what a playlist item's row, bar or menu asked for.
@@ -3772,7 +3725,7 @@ pub fn carry_out_item_ask(show: &Show, state: &mut HomeState, commands: &mut Vec
             let picks = &state.item_picks;
             let places =
                 if picks.several() && picks.places.contains(&index) { picks.places.clone() } else { vec![index] };
-            take_out_items(state, &places);
+            state.take_out_items(state.services.current, &places);
         }
     }
 }

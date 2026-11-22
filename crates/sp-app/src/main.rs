@@ -41,6 +41,7 @@ mod outside;
 mod pack;
 mod private_folder;
 mod props;
+mod removed;
 mod renamed;
 mod running;
 mod screen_cli;
@@ -412,9 +413,10 @@ fn do_state_action(state: &mut home::HomeState, action: &sp_model::ShowAction, n
     }
 }
 
-/// The changes made in the Show view, in the order Undo takes them back: songs changed (each
-/// step a song's place and the song as it was: Undo puts the song back and keeps how it is now,
-/// to redo), and items taken out of a playlist (Undo puts them back; Redo takes them out again).
+/// The app's one history, in the order Undo takes it back: songs changed (each step a song's
+/// place and the song as it was: Undo puts the song back and keeps how it is now, to redo), and
+/// things deleted that Undo can bring back (items taken out of a playlist, playlists, libraries,
+/// audio playlists, cards; see `removed`): Undo puts them back, Redo deletes them again.
 #[derive(Default)]
 struct ShowHistory {
     /// Each step, and when it was taken (a count).
@@ -423,12 +425,12 @@ struct ShowHistory {
     next: u64,
 }
 
-/// One step of the Show view's undo order.
+/// One step of the app's history.
 enum ShowStep {
     /// A song's place, and the song as it was (or, to redo, as it was before the undo).
     Song(usize, Arc<sp_model::Presentation>),
-    /// Items taken out of a playlist.
-    Items(home::RemovedItems),
+    /// Something deleted.
+    Removed(removed::Removed),
 }
 
 impl ShowHistory {
@@ -437,9 +439,9 @@ impl ShowHistory {
         self.keep(ShowStep::Song(index, song));
     }
 
-    /// Keeps items just taken out of a playlist, to put back, and drops what could be redone.
-    fn remember_items(&mut self, removed: home::RemovedItems) {
-        self.keep(ShowStep::Items(removed));
+    /// Keeps something just deleted, to put back, and drops what could be redone.
+    fn remember_removed(&mut self, removed: removed::Removed) {
+        self.keep(ShowStep::Removed(removed));
     }
 
     fn keep(&mut self, step: ShowStep) {
@@ -482,10 +484,9 @@ impl ShowHistory {
         }
     }
 
-    /// Whether the next undo (or redo) puts back items taken out of a playlist (or takes them
-    /// out again).
-    fn items_next(&self, redo: bool) -> bool {
-        matches!(if redo { self.redo.last() } else { self.undo.last() }, Some((ShowStep::Items(_), _)))
+    /// Whether the next undo (or redo) puts back something deleted (or deletes it again).
+    fn removed_next(&self, redo: bool) -> bool {
+        matches!(if redo { self.redo.last() } else { self.undo.last() }, Some((ShowStep::Removed(_), _)))
     }
 
     /// Takes the next undo (or redo) step when it changes a song, keeping the song as it is now
@@ -508,13 +509,13 @@ impl ShowHistory {
         }
     }
 
-    /// Takes the next undo (or redo) step when it is items taken out of a playlist: they are to
-    /// be put back (or taken out again).
-    fn step_items(&mut self, redo: bool) -> Option<home::RemovedItems> {
+    /// Takes the next undo (or redo) step when it is something deleted: it is to be put back
+    /// (or deleted again).
+    fn step_removed(&mut self, redo: bool) -> Option<removed::Removed> {
         let (from, to) = if redo { (&mut self.redo, &mut self.undo) } else { (&mut self.undo, &mut self.redo) };
         match from.pop()? {
-            (ShowStep::Items(removed), when) => {
-                to.push((ShowStep::Items(removed.clone()), when));
+            (ShowStep::Removed(removed), when) => {
+                to.push((ShowStep::Removed(removed.clone()), when));
                 Some(removed)
             }
             other => {
@@ -3823,10 +3824,9 @@ impl App {
         if std::mem::take(&mut state.clear_song_redo) {
             self.history.clear_redo();
         }
-        // Items taken out of a playlist take their place in the Show view's undo order.
-        for removed in std::mem::take(&mut state.removed_items) {
-            self.history.remember_items(removed);
-        }
+        self.keep_removed();
+        let Some(running) = self.running.as_mut() else { return };
+        let state = &mut running.home_state;
         let editing = state
             .editing
             .as_ref()
@@ -3849,9 +3849,24 @@ impl App {
         }
         let Some(redo) = state.song_undo.take() else { return };
         let followed = state.editing.as_ref().map(|draft| (draft.at, draft.slide.id));
+        // Something deleted from one of the Edit view's lists: put back (or deleted again),
+        // opened where its list opens it, not a slide to follow.
+        if self.history.removed_next(redo) {
+            self.undo_show(redo);
+            return;
+        }
         self.undo_show(redo);
         // The slide being edited is found again where the change left it.
         self.follow_edited_slide(followed, followed.map_or(0, |(at, _)| at.slide));
+    }
+
+    /// Moves what the window and the command line have just deleted (and Undo can bring back)
+    /// into the app's one history, in the order it went.
+    fn keep_removed(&mut self) {
+        let Some(running) = self.running.as_mut() else { return };
+        for removed in std::mem::take(&mut running.home_state.removed) {
+            self.history.remember_removed(removed);
+        }
     }
 
     /// A change of a song's slides made from the Edit view goes in its undo order.
@@ -3865,13 +3880,15 @@ impl App {
     }
 
     fn undo_show(&mut self, redo: bool) {
-        // Items taken out of a playlist, when they were the last change: put back (or taken
-        // out again).
-        if self.history.items_next(redo) {
-            if let Some(said) = self.undo_items(redo)
-                && let Some(running) = self.running.as_mut()
-            {
-                running.home_state.say(said);
+        self.keep_removed();
+        // Something deleted, when it was the last change: put back (or deleted again), with no
+        // notice, as it is there to see; a notice only says why it couldn't be.
+        if self.history.removed_next(redo) {
+            let done = self.undo_removed(redo);
+            if let Some(running) = self.running.as_mut() {
+                if let Some(Err(why)) = done {
+                    running.home_state.say(why);
+                }
                 running.home_window.request_redraw();
             }
             return;
@@ -3895,15 +3912,12 @@ impl App {
         }
     }
 
-    /// Puts back the items last taken out of a playlist (or, to redo, takes them out again).
-    /// Returns what to tell the operator: what was done, or why it couldn't be.
-    fn undo_items(&mut self, redo: bool) -> Option<String> {
-        let removed = self.history.step_items(redo)?;
+    /// Puts back what was last deleted (or, to redo, deletes it again). Returns what was done,
+    /// as `sp undo` says it, or why it couldn't be; `None` when the next step isn't a delete.
+    fn undo_removed(&mut self, redo: bool) -> Option<Result<String, String>> {
+        let removed = self.history.step_removed(redo)?;
         let state = &mut self.running.as_mut()?.home_state;
-        Some(
-            studio::redo_removed(state, &removed, !redo)
-                .unwrap_or_else(|| format!("{} has changed since, so that can't be undone.", removed.name)),
-        )
+        Some(if removed.redo(state, !redo) { Ok(removed.said(!redo)) } else { Err(removed.changed_since()) })
     }
 
     /// Turns a song's looping on or off, from its menu.
@@ -8450,6 +8464,8 @@ impl ApplicationHandler<AppEvent> for App {
                 // (`answer_waiting`, from `about_to_wait`).
                 let Some(incoming) = self.hold_wait(incoming) else { return };
                 let reply = self.control(el, &incoming.request.args);
+                // What it deleted goes in the history now, before any later change.
+                self.keep_removed();
                 // A command that only reads (status, a list) changes nothing worth a line: a
                 // page asking every second or two would fill the log with them.
                 if !control::only_reads(&incoming.request.args) {
@@ -9594,30 +9610,35 @@ mod tests {
     }
 
     #[test]
-    fn items_taken_out_of_a_playlist_take_their_turn_in_the_show_views_undo() {
+    fn what_was_deleted_takes_its_turn_in_the_one_history() {
         let a = Arc::new(sp_model::parse_song_text("A", "One\n"));
-        let removed = home::RemovedItems {
+        let removed = removed::Removed::Items(removed::RemovedItems {
             playlist: 0,
             name: "Sunday".to_owned(),
             items: vec![(1, service::Item::Header { name: "Word".to_owned() })],
-        };
+        });
+        let timer = removed::Removed::Timer { at: 0, timer: timers::Timer::new("Countdown".to_owned()) };
         let mut history = ShowHistory::default();
         history.remember(0, a.clone());
-        history.remember_items(removed.clone());
-        // The items, taken out last, are put back first; then the song's change is undone.
-        assert!(history.items_next(false));
+        history.remember_removed(removed.clone());
+        history.remember_removed(timer.clone());
+        // The timer, deleted last, is put back first; then the items; then the song's change
+        // is undone.
+        assert!(history.removed_next(false));
         assert_eq!((history.peek(false), history.step(false, a.clone())), (None, None), "not a song's step");
-        assert_eq!(history.step_items(false), Some(removed.clone()));
+        assert_eq!(history.step_removed(false), Some(timer.clone()));
+        assert_eq!(history.step_removed(false), Some(removed.clone()));
         assert_eq!(history.peek(false), Some(0));
         history.step(false, a.clone());
-        // Redone in the order they were made: the song, then the items.
+        // Redone in the order they were made: the song, then the items, then the timer.
         assert_eq!(history.peek(true), Some(0));
         history.step(true, a.clone());
-        assert!(history.items_next(true));
-        assert_eq!(history.step_items(true), Some(removed));
-        // Forgetting a song's steps leaves the items' step.
+        assert!(history.removed_next(true));
+        assert_eq!(history.step_removed(true), Some(removed));
+        assert_eq!(history.step_removed(true), Some(timer));
+        // Forgetting a song's steps leaves the deletes' steps.
         history.forget(0);
-        assert!(history.items_next(false));
+        assert!(history.removed_next(false));
     }
 
     #[test]

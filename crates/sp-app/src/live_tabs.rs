@@ -383,9 +383,9 @@ fn timers_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             let id = state.timers[index].id;
             state.timer_open = if state.timer_open == Some(id) { None } else { Some(id) };
         }
+        // At once: Undo puts it back.
         Some((index, TimerAsk::Delete)) => {
-            state.timers.remove(index);
-            state.timers_changed = true;
+            state.delete_timer(index);
         }
         None => {}
     }
@@ -722,14 +722,6 @@ fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         Some(None) => state.message_rename = None,
         None => {}
     }
-    let remove = |state: &mut HomeState, index: usize| {
-        let gone = state.messages.remove(index);
-        if live == Some(gone.id) {
-            state.message_live = None;
-        }
-        state.messages_changed = true;
-        gone
-    };
     let Some((index, ask)) = asked else { return };
     match ask {
         MessageAsk::Toggle => {
@@ -750,7 +742,8 @@ fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             state.messages_changed = true;
         }
         MessageAsk::Copy => state.message_clip = Some(state.messages[index].clone()),
-        MessageAsk::Cut => state.message_clip = Some(remove(state, index)),
+        // Cut and Delete take it out at once: Undo puts it back.
+        MessageAsk::Cut => state.message_clip = state.delete_message(index),
         MessageAsk::Paste => {
             if let Some(clip) = &state.message_clip {
                 // A pasted message is a new one: it gets an id of its own, so it can be pasted again.
@@ -760,7 +753,7 @@ fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             }
         }
         MessageAsk::Delete => {
-            remove(state, index);
+            state.delete_message(index);
         }
     }
 }
@@ -936,10 +929,9 @@ pub fn carry_out_prop_ask(state: &mut HomeState, index: usize, ask: PropAsk) -> 
             state.props[index].auto_clear = choice;
             state.props_changed = true;
         }
+        // At once: Undo puts it back.
         PropAsk::Delete => {
-            state.props.remove(index);
-            state.props_live.retain(|(live, _)| *live != id);
-            state.props_changed = true;
+            state.delete_prop(index);
         }
         PropAsk::Move(up) => {
             let to = if up { index.checked_sub(1)? } else { index + 1 };
@@ -1798,8 +1790,9 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
                 let copy = state.macros[index].duplicate();
                 state.macros.insert(index + 1, copy);
             }
+            // At once: Undo puts it back.
             MacroAsk::Delete => {
-                state.macros.remove(index);
+                state.delete_macro(index);
             }
         }
     }
@@ -1951,7 +1944,6 @@ fn audio_heading(ui: &mut egui::Ui, state: &mut HomeState) {
     }
     let more = quiet_icon(ui, more, egui::Id::unique("audio playlist more"), Icon::More, 16.0, 0.6, Some(CARD))
         .on_hover_text("More");
-    let deleting_id = egui::Id::unique("audio playlist deleting");
     let many = state.audio.playlists.len() > 1;
     egui::Popup::menu(&more).show(|ui| {
         if ui.button("Rename").clicked() {
@@ -1961,32 +1953,11 @@ fn audio_heading(ui: &mut egui::Ui, state: &mut HomeState) {
             new_playlist(ui, state);
         }
         ui.separator();
-        if ui.add_enabled(many, egui::Button::new("Delete…")).clicked() {
-            ui.data_mut(|data| data.insert_temp(deleting_id, true));
+        // At once, asking nothing: Undo puts it back (the files stay on this computer).
+        if ui.add_enabled(many, egui::Button::new("Delete")).clicked() {
+            state.delete_audio_playlist(state.audio.current.min(state.audio.playlists.len() - 1));
         }
     });
-    if ui.data(|data| data.get_temp::<bool>(deleting_id)).unwrap_or(false) {
-        let title = format!("Delete the audio playlist \u{201c}{name}\u{201d}?");
-        match crate::studio::alert(
-            ui.ctx(),
-            "delete audio playlist",
-            Icon::Trash,
-            &title,
-            "Its tracks leave the list; the files stay on this computer.",
-            "Delete",
-        ) {
-            Some(true) => {
-                let at = state.audio.current.min(state.audio.playlists.len() - 1);
-                if state.audio.remove_playlist(at, state.audio_playing.track) {
-                    state.audio.current = at.saturating_sub(1);
-                    state.audio_changed = true;
-                }
-                ui.data_mut(|data| data.remove::<bool>(deleting_id));
-            }
-            Some(false) => ui.data_mut(|data| data.remove::<bool>(deleting_id)),
-            None => {}
-        }
-    }
 }
 
 fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {

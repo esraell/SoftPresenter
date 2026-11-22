@@ -266,31 +266,26 @@ impl crate::App {
         Ok(Reply::done(format!("Renamed the playlist {was} to {new}.")))
     }
 
+    /// At once, as in the window: `sp undo` puts it back (an old --yes is let by).
     fn playlist_delete(&mut self, words: &[String]) -> Result<Reply, String> {
-        let yes = words.iter().any(|w| w == "--yes");
         let name: Vec<String> = words.iter().filter(|w| *w != "--yes").cloned().collect();
         let at = self.playlist_at(Some(&name.join(" ")))?;
         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
         let title = state.services.list[at].name.clone();
-        if state.services.list.len() < 2 {
+        // Deleted where it is: the playlist in front stays in front, unless it is this one.
+        if !state.delete_playlist(at) {
             return Err(format!("{title} is the only playlist; there is always one."));
         }
-        if !yes {
-            return Err(format!(
-                "This deletes the playlist {title} (its songs stay in the library). Add --yes to do it."
-            ));
-        }
-        // Deleted where it is: the playlist in front stays in front, unless it is this one.
-        state.services.remove_at(at);
-        Ok(Reply::done(format!("Deleted the playlist {title}.")))
+        Ok(Reply::done(format!("Deleted the playlist {title}; its songs stay in the library.")))
     }
 
     fn playlist_remove(&mut self, item: &str, list: Option<&str>) -> Result<Reply, String> {
         let at = self.playlist_at(list)?;
         let which = self.playlist_item(at, item)?;
         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
-        // The open item of the playlist in front stays open, unless it is the one taken out.
-        let gone = state.services.remove_items(at, &[which]);
+        // The open item of the playlist in front stays open, unless it is the one taken out;
+        // `sp undo` puts it back.
+        let gone = state.take_out_items(at, &[which]);
         let name = state.services.list[at].name.clone();
         let title = gone.first().map(|(_, item)| item.title().to_owned()).unwrap_or_default();
         Ok(Reply::done(format!("Took {title} out of {name}.")))
@@ -459,20 +454,13 @@ impl crate::App {
         Ok(Reply::done(format!("Renamed the library {was} to {new}.")))
     }
 
+    /// At once, as in the window: `sp undo` puts it back (an old --yes is let by).
     fn library_delete(&mut self, words: &[String]) -> Result<Reply, String> {
-        let yes = words.iter().any(|w| w == "--yes");
         let name: Vec<String> = words.iter().filter(|w| *w != "--yes").cloned().collect();
         let at = self.library_index(&name.join(" "))?;
         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
-        let title = state.libraries[at].name.clone();
-        if !yes {
-            return Err(format!("This deletes the library {title} (its songs stay in All Songs). Add --yes to do it."));
-        }
-        let gone = state.libraries.remove(at);
-        if state.library_shown == Some(gone.id) {
-            state.library_shown = None;
-        }
-        state.libraries_changed = true;
+        let (id, title) = (state.libraries[at].id, state.libraries[at].name.clone());
+        state.delete_library(id);
         Ok(Reply::done(format!("Deleted the library {title}; its songs stay in All Songs.")))
     }
 

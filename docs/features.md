@@ -292,10 +292,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   stay picked. Delete (or Backspace) acts on the list last clicked: in a playlist it takes the
   items picked (or the one open) out of it at once, asking nothing, as no song is deleted; any
   kind of item, the one on screen too, which stays on screen; only while the keyboard is the left
-  column's (in the Show view, not on the Bible page, with the chooser put away). A notice says what went
-  ("Removed Harbour Lights from Sunday. ⌘Z puts it back.") and Undo (Command-Z) puts them back
-  where they were, picked out again; Remove from Playlist in an item's menu does the same, for all
-  the items picked when it is one of them. In a song list, a media strip or the slides, Delete
+  column's (in the Show view, not on the Bible page, with the chooser put away). Nothing is said,
+  as what went is there to see; Undo (Command-Z) puts them back where they were, picked out
+  again; Remove from Playlist in an item's menu does the same, for all the items picked when it
+  is one of them. In a song list, a media strip or the slides, Delete
   asks first, then deletes what is picked; picked slides go in one step that Undo brings back.
 - Pictures and videos dropped on the window, or added with the media bin's +, go into the media
   bin, are kept between runs, and can be shown behind the words; Delete, or Delete… on an item's
@@ -390,7 +390,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the theme's, or "Usual (the theme picks)").
   A song's menu has Loop to First Slide, for a loop of announcements. Undo and Redo (Command-Z, Shift-Command-Z) step back through
   these changes in the Show view and on the Bible page, and the audience stays on the same slide;
-  items taken out of a playlist take their turn in the same order.
+  what was deleted takes its turn in the same order.
+- **Deleting, one rule:** what Undo can bring back goes at once, with no question and no
+  notice: items taken out of a playlist, playlists, libraries, audio playlists, and timer,
+  message, prop and macro cards (Cut on a message too). Undo puts it back where it was (a
+  playlist in front again, a library shown again, items picked again) and Redo deletes it again;
+  if what it was in has changed too much since, a notice says it can't be undone. What Undo
+  can't bring back asks first, and the question always ends "This can't be undone.": songs
+  deleted from the library, media bin items, a theme, a screen, and Disconnect for VoxLive and
+  Canva Sync.
   `sp undo` and `sp redo` do the same from the command line whatever the window shows, and say
   which song and slides changed.
 - A song's menu (its ⋯, or a right-click): Add to the playlist in front, Add to Playlist (any
@@ -446,7 +454,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   stops the drag. A step whose song, message, prop, timer, picture or media playlist has gone
   says so in amber, as "Play on the Announcements Layer: (a song no longer in the library)", and
   a click on it offers the others; a step's words wrap to a second line before they are cut
-  short. Macros save as they change, and have no undo.
+  short. Macros save as they change; changes to a macro's steps have no undo, but a macro deleted
+  is put back by Undo.
 - **Start-up is a macro**: a macro with Run When SoftPresenter Opens switched on (a switch at
   the top of the opened macro, and in its menu) runs when the app opens, such as one that plays
   the announcement loop before the service. Its step Audience Screens Off takes effect before
