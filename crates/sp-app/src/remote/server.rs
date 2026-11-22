@@ -903,6 +903,7 @@ async fn login(State(shared): State<Arc<Shared>>, request: Request) -> Response<
         return refuse_wait(wait);
     }
     let verified = hash.clone();
+    let typed_chars = password.chars().count();
     let right = tokio::task::spawn_blocking(move || auth::password_is(&hash, &password)).await.unwrap_or(false);
     if !right {
         // Counted before the next sign-in may be checked, whatever runs the server's tasks.
@@ -932,7 +933,10 @@ async fn login(State(shared): State<Arc<Shared>>, request: Request) -> Response<
     let store = shared.store.clone();
     let (ip, named) = (gate.ip, name.clone());
     let remembered = tokio::task::spawn_blocking(move || {
-        store.lock().map_err(|_| "busy".to_owned())?.remember(&named, ip, &verified)
+        let mut store = store.lock().map_err(|_| "busy".to_owned())?;
+        // Now the password is known, so is whether it is long enough (Settings says if not).
+        store.note_password_length(&verified, typed_chars);
+        store.remember(&named, ip, &verified)
     })
     .await
     .unwrap_or_else(|_| Err("Could not remember the device.".to_owned()));

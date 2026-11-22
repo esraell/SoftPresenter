@@ -106,6 +106,15 @@ pub fn pane(ui: &mut egui::Ui, view: &mut View) {
     if view.hashing {
         ui.label(RichText::new("Setting the password…").color(TEXT_DIM));
     } else {
+        if view.has_password && view.password_short {
+            ui.label(
+                RichText::new(format!(
+                    "The saved password is shorter than {} characters, which is too easy to guess. Set a new one.",
+                    super::auth::SHORTEST_PASSWORD
+                ))
+                .color(crate::studio::TALLY),
+            );
+        }
         ui.label(
             RichText::new(if view.has_password {
                 "A new password forgets every device: each signs in again with it."

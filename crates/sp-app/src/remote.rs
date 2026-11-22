@@ -395,6 +395,11 @@ impl Remote {
         self.saved().is_some_and(|saved| saved.password.is_some())
     }
 
+    /// The saved password is known to be shorter than Settings asks for.
+    pub fn password_short(&self) -> bool {
+        self.saved().is_some_and(|saved| saved.password.is_some() && saved.password_short)
+    }
+
     pub fn devices(&self) -> Vec<auth::Device> {
         self.saved().map(|saved| saved.devices).unwrap_or_default()
     }
@@ -683,6 +688,12 @@ impl crate::App {
         if let Some(fingerprint) = self.remote.fingerprint().filter(|_| self.remote.is_on()) {
             lines.push(format!("Key fingerprint (SHA-256): {fingerprint}"));
         }
+        if self.remote.password_short() {
+            lines.push(format!(
+                "The password is shorter than {} characters: set a new one (echo \"$PASSWORD\" | sp remote password).",
+                auth::SHORTEST_PASSWORD
+            ));
+        }
         if !self.remote.has_password() {
             lines.push("No password is set: echo \"$PASSWORD\" | sp remote password".to_owned());
         }
@@ -696,6 +707,7 @@ impl crate::App {
                 "address_by_ip": address_ip,
                 "fingerprint": self.remote.fingerprint().filter(|_| self.remote.is_on()),
                 "password_set": self.remote.has_password(),
+                "password_short": self.remote.password_short(),
                 "pages": pages,
                 "devices": devices,
             }),
@@ -886,6 +898,7 @@ impl crate::App {
             );
             let (has_password, hashing, devices, pages) =
                 (self.remote.has_password(), self.remote.hashing(), self.remote.devices(), self.remote.pages());
+            let password_short = self.remote.password_short();
             if let Some(running) = self.running.as_mut() {
                 let view = &mut running.home_state.remote;
                 let changed = view.on != on || view.pages != pages || view.devices != devices || view.wrong != wrong;
@@ -898,6 +911,7 @@ impl crate::App {
                 view.address = address;
                 view.fingerprint = fingerprint;
                 view.has_password = has_password;
+                view.password_short = password_short;
                 view.hashing = hashing;
                 view.devices = devices;
                 view.pages = pages;
@@ -953,6 +967,8 @@ pub struct View {
     pub address_ip: Option<String>,
     pub fingerprint: Option<String>,
     pub has_password: bool,
+    /// The saved password is shorter than 10 characters (seen when a device signed in).
+    pub password_short: bool,
     pub hashing: bool,
     pub password: String,
     pub password_again: String,

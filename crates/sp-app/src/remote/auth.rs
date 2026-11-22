@@ -37,6 +37,10 @@ pub struct Saved {
     /// The password's argon2id hash (a PHC string), once one is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
+    /// The saved password was seen, when someone signed in with it, to be shorter than
+    /// [`SHORTEST_PASSWORD`] (one saved before that was asked for): Settings asks for a new one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub password_short: bool,
     #[serde(default)]
     pub devices: Vec<Device>,
 }
@@ -193,9 +197,21 @@ impl Store {
         let _ = self.save();
     }
 
-    /// Sets a new password (already hashed): every device is forgotten with the old one.
+    /// Notes, when someone has just signed in with the password kept as `verified`, whether it
+    /// is shorter than [`SHORTEST_PASSWORD`]: the hash can't say, so this is when it can be told.
+    pub fn note_password_length(&mut self, verified: &str, typed_chars: usize) {
+        let short = typed_chars < SHORTEST_PASSWORD;
+        if self.saved.password.as_deref() == Some(verified) && self.saved.password_short != short {
+            self.saved.password_short = short;
+            let _ = self.save();
+        }
+    }
+
+    /// Sets a new password (already hashed, and so at least [`SHORTEST_PASSWORD`] long): every
+    /// device is forgotten with the old one.
     pub fn set_password(&mut self, hash: String) -> Result<(), String> {
         self.saved.password = Some(hash);
+        self.saved.password_short = false;
         self.saved.devices.clear();
         self.save()
     }
@@ -595,6 +611,24 @@ mod tests {
         assert_eq!(guard.wrong_lately(now), 21);
         assert_eq!(guard.wrong_lately(now + Duration::from_secs(3601)), 0);
         assert_eq!(everyone_wait(1000.0), EVERYONE_LONGEST);
+    }
+
+    #[test]
+    fn a_saved_password_that_is_too_short_is_noted_when_it_is_typed() {
+        let folder = folder("short");
+        let mut store = Store::open(&folder);
+        let hash = hash_password("a long password").expect("hashed");
+        store.set_password(hash.clone()).expect("set");
+        assert!(!store.saved.password_short, "a password set now is long enough");
+        // One saved before a shortest length was asked for can only be told when it is typed.
+        store.note_password_length(&hash, 6);
+        assert!(store.saved.password_short);
+        assert!(Store::open(&folder).saved.password_short, "kept");
+        store.note_password_length("another hash", 20);
+        assert!(store.saved.password_short, "only the password kept is noted");
+        store.set_password(hash_password("a better password").expect("hashed")).expect("set");
+        assert!(!store.saved.password_short, "a new password clears it");
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]
