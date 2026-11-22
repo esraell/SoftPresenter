@@ -142,7 +142,7 @@ impl crate::App {
         if let Some(said) = said
             && let Some(running) = self.running.as_mut()
         {
-            running.home_state.notice = Some(said);
+            running.home_state.notices.refuse(said);
             running.home_window.request_redraw();
         }
     }
@@ -212,7 +212,7 @@ impl crate::App {
                     if !self.gone_from_followed_folder(&item.path)
                         && let Some(running) = self.running.as_mut()
                     {
-                        running.home_state.notice = Some(problem);
+                        running.home_state.notices.trouble(problem);
                     }
                 }
             }
@@ -274,8 +274,10 @@ impl crate::App {
         if !OFF_SAID.swap(true, std::sync::atomic::Ordering::Relaxed)
             && let Some(running) = self.running.as_mut()
         {
-            running.home_state.notice =
-                Some("Announcements are off while a slide is on screen. Announce starts them again.".to_owned());
+            running
+                .home_state
+                .notices
+                .info("Announcements are off while a slide is on screen. Announce starts them again.");
         }
         if let Some(running) = self.running.as_ref() {
             running.home_window.request_redraw();
@@ -497,7 +499,7 @@ impl crate::App {
             Err(problem) => {
                 on.video = None;
                 if let Some(running) = self.running.as_mut() {
-                    running.home_state.notice = Some(problem);
+                    running.home_state.notices.trouble(problem);
                 }
                 None
             }

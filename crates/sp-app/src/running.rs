@@ -6,7 +6,7 @@
 //! At the end of a song Next goes on into the next song or Bible passage when Continuous is on,
 //! passing over headers, placeholders, pictures and videos; Previous goes back the same way,
 //! into the last slide of the item before. At either end of the playlist, or with Continuous
-//! off, nothing changes and a notice says why.
+//! off, nothing changes and a refusal's cue says why.
 //!
 //! A slide can be picked to go on screen next: what the find box opens (a passage's first verse,
 //! or a song's first slide or the slide found), the passage Scripture Lookup looks up, and in the

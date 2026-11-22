@@ -43,11 +43,12 @@ pub fn folder_in(home: &Path) -> PathBuf {
     if new.join(MARKER).is_file() || !old.is_dir() { new } else { old }
 }
 
-/// What the window says once it opens, about the move made at this start.
-static NOTICE: Mutex<Option<String>> = Mutex::new(None);
+/// What the window says once it opens, about the move made at this start: information when
+/// the library moved, trouble when it couldn't be, or can't be opened.
+static NOTICE: Mutex<Option<Result<String, String>>> = Mutex::new(None);
 
 /// What the window should say about the library's folder, once.
-pub fn take_notice() -> Option<String> {
+pub fn take_notice() -> Option<Result<String, String>> {
     NOTICE.lock().ok()?.take()
 }
 
@@ -64,12 +65,12 @@ pub fn move_to_documents() -> Vec<String> {
         Ok(Moved::Nothing) => {}
         Ok(Moved::Done(lines)) => {
             done.extend(lines);
-            // Short, to fit where notices show; the log says where the old folder is kept.
-            set_notice("Your library moved to Documents \u{203a} SoftPresenter; the old one is kept.".to_owned());
+            // The log says where the old folder is kept.
+            set_notice(Ok("Your library moved to Documents \u{203a} SoftPresenter; the old one is kept.".to_owned()));
         }
         Ok(Moved::Blocked(why)) | Err(why) => {
             done.push(why.clone());
-            set_notice(why);
+            set_notice(Err(why));
         }
     }
     // A library made in Documents from the start is marked as SoftPresenter's too.
@@ -87,16 +88,16 @@ pub fn move_to_documents() -> Vec<String> {
     {
         let why = "SoftPresenter isn't allowed into your Documents folder, where its library is. Allow it in System Settings \u{203a} Privacy & Security \u{203a} Files and Folders, then open SoftPresenter again.";
         done.push(why.to_owned());
-        set_notice(why.to_owned());
+        set_notice(Err(why.to_owned()));
     }
     done
 }
 
 const MARKER_TEXT: &str = "This folder is SoftPresenter's library: songs, themes, pictures, playlists and settings.\n";
 
-fn set_notice(text: String) {
+fn set_notice(said: Result<String, String>) {
     if let Ok(mut notice) = NOTICE.lock() {
-        *notice = Some(text);
+        *notice = Some(said);
     }
 }
 

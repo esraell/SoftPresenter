@@ -2085,18 +2085,12 @@ impl Client {
         clear_staging(&self.places.staging);
     }
 
-    /// One line for the window's top bar, while it says something: what a sync is doing, a
-    /// video just put in place, or one that failed. With whether it went wrong.
-    pub fn quiet_line(&self) -> Option<(String, bool)> {
-        if self.phase.busy() && self.phase != Phase::SigningIn && self.phase != Phase::Importing {
-            return Some((format!("Canva: {}", self.phase.words().trim_end_matches('…').replace("… ", " ")), false));
-        }
-        let (words, good, at) = self.said.as_ref()?;
-        let age = chrono::Local::now().signed_duration_since(*at);
-        if *good && words.starts_with("Updated") && age < chrono::Duration::minutes(10) {
-            return Some((format!("Canva: updated {}", at.format("%-I:%M %p")), false));
-        }
-        (!*good && age < chrono::Duration::hours(12)).then(|| ("Canva: failed".to_owned(), true))
+    /// One line for the window's top bar while a sync is under way: what it is doing (an
+    /// export, with the time so far; a download, with how far). How it ended goes in the
+    /// notices: the video put in place, or why it failed.
+    pub fn quiet_line(&self) -> Option<String> {
+        (self.phase.busy() && self.phase != Phase::SigningIn && self.phase != Phase::Importing)
+            .then(|| format!("Canva: {}", self.phase.words().trim_end_matches('…').replace("… ", " ")))
     }
 }
 
@@ -2174,8 +2168,8 @@ pub struct View {
     pub old_here: bool,
     pub old_steps: Vec<String>,
     pub said: Option<(String, bool)>,
-    /// What the top bar says, and whether it went wrong.
-    pub quiet: Option<(String, bool)>,
+    /// What the top bar says while a sync is under way.
+    pub quiet: Option<String>,
     pub redirect: String,
 }
 
@@ -2267,12 +2261,16 @@ impl crate::App {
         {
             *outcome = Some(finished.clone().map(|_| said.clone()));
         }
+        // How it went goes in the notices: the new video put in place out of sight, or why not.
         let Ok(synced) = finished else {
             if let Some(running) = self.running.as_mut() {
-                running.home_state.notice = Some(format!("Canva Sync: {said}"));
+                running.home_state.notices.trouble(format!("Canva Sync: {said}"));
             }
             return;
         };
+        if let Some(running) = self.running.as_mut() {
+            running.home_state.notices.info(said);
+        }
         self.follow_canva_folder();
         let name = crate::file_name(&synced.path);
         let old = self.show.media().iter().position(|item| synced.others.contains(&item.path));

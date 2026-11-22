@@ -1126,14 +1126,14 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
                 ui.painter().with_clip_rect(room).galley(at, galley, READY);
                 shown.on_hover_text(format!("{words} (the Timers tab: {})", crate::keys::with_modifier("1")));
             }
-        } else if let Some((words, failed)) = state.canva.quiet.clone() {
-            // Otherwise, in the same room, what Canva Sync is doing (an export, a download), a
-            // video just put in place, or one that failed. A click opens its page.
+        } else if let Some(words) = state.canva.quiet.clone() {
+            // Otherwise, in the same room, what Canva Sync is doing (an export, a download); how
+            // it ended goes in the notices. A click opens its page.
             let right = clock.min.x - 10.0;
             let wide = (right - free_from).min(220.0);
             if wide >= 60.0 {
                 let room = Rect::from_min_max(pos2(right - wide, bar.min.y), pos2(right, bar.max.y));
-                let colour = if failed { TALLY } else { TEXT_DIM };
+                let colour = TEXT_DIM;
                 let galley = spaced(ui, &words.to_uppercase(), fixed(11.0), colour, 0.5);
                 let at = pos2((right - galley.size().x).max(room.min.x), middle - galley.size().y / 2.0);
                 let shown = ui.interact(room, ui.scope_id().with("canva sync line"), Sense::click());
@@ -1942,7 +1942,7 @@ fn add_to_library(state: &mut HomeState, id: sp_model::Uuid, keys: &[String]) ->
 /// A result of the find box has been dropped on a playlist (`index` among the playlists) and
 /// `item` added at its end (`added`), or found there already. The search ends. In the playlist
 /// listed in the left column the item is opened, as a click on its row opens it (nothing goes
-/// on the screens); in another playlist, a notice says where it went.
+/// on the screens); in another playlist, an entry in the notices says where it went.
 #[allow(clippy::too_many_arguments)]
 fn found_added_to_playlist(
     ctx: &egui::Context,
@@ -2358,7 +2358,7 @@ fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, c
     let Some((item, rename)) = made else { return };
     let name = item.title().to_owned();
     // As every add: after the open item, which it becomes (a song already in the playlist is
-    // not added twice, and the notice says so).
+    // not added twice, and a refusal's cue says so).
     let added = add_items(state, state.services.front_at(), vec![item]) > 0;
     if added
         && rename
@@ -3799,7 +3799,7 @@ pub fn carry_out_item_ask(show: &Show, state: &mut HomeState, commands: &mut Vec
 
 /// Fills a placeholder of the playlist in front (by its place) with an item, as its menu's Fill
 /// with Song, its tile and a drop onto it do; it becomes the open item. A song (or passage) the
-/// playlist has already, elsewhere, isn't moved into it: it stays where it is, and the notice
+/// playlist has already, elsewhere, isn't moved into it: it stays where it is, and a refusal's cue
 /// says so ("Harbour Lights is already in Sunday."). True when it was filled.
 pub fn fill_placeholder(state: &mut HomeState, index: usize, item: crate::service::Item) -> bool {
     let front = state.services.front_at();
@@ -5008,8 +5008,8 @@ pub fn media_strip(
     commands: &mut Vec<Command>,
 ) {
     // Folded down (with its chevron, or from the View menu) to a slim bar that opens it again;
-    // opened by itself while there is something to say or a file is being dropped.
-    let folded = state.media_hidden && state.notice.is_none() && !crate::file_drop::media_coming(state);
+    // opened by itself while a file is being dropped.
+    let folded = state.media_hidden && !crate::file_drop::media_coming(state);
     let empty = show.media().is_empty();
     let height = if folded { 30.0 } else { MEDIA_STRIP_HEIGHT } + GAP;
     let margin =
@@ -5077,24 +5077,8 @@ pub fn media_strip(
         egui::Popup::from_toggle_button_response(&transition)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .show(|ui| transition_picker(ui, &mut state.media_transition, "media"));
-        // From the left: the menu of media playlists, then anything there is to say (a file
-        // that could not be added, a song that could not be saved).
-        let source = media_playlist_picker(ui, state, label.max.x + 12.0, middle);
-        if let Some(notice) = &state.notice {
-            let room = Rect::from_min_max(
-                pos2(source.max.x + 12.0, head.min.y),
-                pos2(transition.rect.min.x - 12.0, head.max.y),
-            );
-            let said = ui.interact(room, ui.scope_id().with("notice"), Sense::hover());
-            ui.painter().with_clip_rect(room).text(
-                room.left_center(),
-                Align2::LEFT_CENTER,
-                notice,
-                FontId::proportional(12.0),
-                CARE,
-            );
-            said.on_hover_text(notice.as_str());
-        }
+        // From the left: the menu of media playlists.
+        media_playlist_picker(ui, state, label.max.x + 12.0, middle);
         ui.add_space(6.0);
         // Nothing in it yet: a big place to click, or to drop files on.
         if empty && !crate::file_drop::media_coming(state) {
@@ -6167,7 +6151,7 @@ pub mod tests {
         assert_eq!(said.iter().filter(|words| *words == "In this playlist").count(), 1, "{said:?}");
         let two = said.iter().position(|words| words == "Two").expect("Two is offered");
         assert_eq!(said[two + 1], "In this playlist", "beside Two: {said:?}");
-        // Fill with Song: Two isn't moved into the placeholder; it stays, and the notice says so.
+        // Fill with Song: Two isn't moved into the placeholder; it stays, and a refusal's cue says so.
         carry_out_item_ask(&show, &mut state, &mut Vec::new(), ItemAsk::Fill(1, 1));
         assert_eq!(state.services.front().items[0], Item::song("two", "Two"));
         assert!(matches!(state.services.front().items[1], Item::Placeholder { .. }));

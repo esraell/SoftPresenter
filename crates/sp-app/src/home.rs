@@ -212,9 +212,6 @@ pub struct HomeState {
     /// The files being dragged over the window, where the pointer is, and the places they could
     /// land (`file_drop.rs`).
     pub file_drag: crate::file_drop::FileDrag,
-    /// A short message for the operator, shown in the media bin (a file that could not be
-    /// added, a song that could not be saved).
-    pub notice: Option<String>,
     /// Everything the window tells the operator: the list behind the status button in the top
     /// bar, with the questions waiting for an answer (a song or theme changed outside
     /// SoftPresenter), and the cue of the last refusal (see `notices`).
@@ -1684,7 +1681,6 @@ impl Default for HomeState {
             output_stopped: false,
             drop_hover: false,
             file_drag: crate::file_drop::FileDrag::default(),
-            notice: None,
             notices: crate::notices::Notices::default(),
             waiting_choice: None,
             export_request: None,
@@ -1946,7 +1942,7 @@ impl HomeState {
         (in_view && there.is_some_and(|(_, slide)| slide.enabled) && !moved_on && show.live() != Some(at)).then_some(at)
     }
 
-    /// What the slide picked is, for the notice that says Enter puts it on screen.
+    /// What the slide picked is, for the refusal's cue that says Enter puts it on screen.
     pub fn picked_word(&self, show: &Show) -> Option<&'static str> {
         self.pick(show)?;
         Some(if self.picked.as_ref().is_some_and(|picked| picked.passage.is_some()) { "verse" } else { "slide" })
@@ -2015,6 +2011,15 @@ impl HomeState {
         self.timers[index].name = name.to_owned();
         self.timers_changed = true;
         Ok(was)
+    }
+
+    /// The screens' output has stopped: said over the preview from now on, and once in the
+    /// notices, as trouble.
+    pub fn output_has_stopped(&mut self) {
+        if !self.output_stopped {
+            self.notices.trouble("The output has stopped. Restart SoftPresenter to bring it back.");
+        }
+        self.output_stopped = true;
     }
 
     /// True while a question asking whether to delete something is open: then no key reaches
@@ -7166,8 +7171,8 @@ fn bible_add(ui: &mut egui::Ui, state: &mut HomeState, add: Rect, arrow: Rect) {
 
 /// Keeps the passage on the Bible page (`saved`, named `reading`) in a playlist, by its place,
 /// as every add does (see `studio::add_items`): in the playlist in front after the open item,
-/// which it becomes; and as the Bible page shows no playlist, the notice says where it went.
-/// The same passage in the same translations goes in once: then the notice says it is there
+/// which it becomes; and as the Bible page shows no playlist, an entry in the notices says where it went.
+/// The same passage in the same translations goes in once: then a refusal's cue says it is there
 /// already. With no playlist given, a new one is made with the passage in it and comes to the
 /// front, its name ready to type in the chooser of the Show view, as a song's New Playlist…
 /// does (there to see, so nothing is said).
@@ -9109,11 +9114,8 @@ mod tests {
     #[test]
     fn the_show_view_draws_the_media_bin_with_a_notice_and_a_drag() {
         let show = show_with_media();
-        let mut state = HomeState {
-            drop_hover: true,
-            notice: Some("x.mp4: videos are not supported yet, only pictures.".into()),
-            ..HomeState::default()
-        };
+        let mut state = HomeState { drop_hover: true, ..HomeState::default() };
+        state.notices.trouble("x.mp4: videos are not supported yet, only pictures.");
         let (slides, media) = count_thumbs(&egui::Context::default(), &show, &mut state);
         assert_eq!(media, 2, "both media thumbnails should be asked for");
         assert_eq!(slides, 3);
@@ -13631,6 +13633,20 @@ mod tests {
         state.notices.refuse("Two is already in Service.");
         frame_events(&ctx, &show, &mut state, Vec::new(), time + 0.05);
         assert_eq!(state.notices.cue.as_ref().and_then(|cue| cue.under), Some(button));
+    }
+
+    #[test]
+    fn an_output_that_stops_is_trouble_said_once() {
+        let mut state = HomeState::default();
+        for _ in 0..30 {
+            state.output_has_stopped();
+        }
+        assert!(state.output_stopped, "said over the preview");
+        assert_eq!(state.notices.entries().count(), 1);
+        assert_eq!(state.notices.look(), crate::notices::Look::Trouble(1));
+        state.notices.mark_seen();
+        state.output_has_stopped();
+        assert_eq!(state.notices.look(), crate::notices::Look::Quiet, "seen, it doesn't come back every frame");
     }
 
     #[test]

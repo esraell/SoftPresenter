@@ -2707,10 +2707,12 @@ impl crate::App {
                 (Announce::Song(at), title)
             }
         };
+        let mark = self.running.as_ref().map_or(0, |r| r.home_state.notices.mark());
         self.with_state(|state| state.announcement_request = Some(Some(what)));
         self.handle_announcement();
         if self.announcing.as_ref().is_none_or(|on| on.what != what) {
-            let why = self.running.as_ref().and_then(|r| r.home_state.notice.clone());
+            // What the window said why, if it did.
+            let why = self.running.as_ref().and_then(|r| r.home_state.notices.said_since(mark).map(str::to_owned));
             return Err(why.unwrap_or_else(|| format!("{name} could not be played on the Announcements layer.")));
         }
         Ok(Reply::done(format!("Playing {name} on the Announcements layer.")))

@@ -491,12 +491,6 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
                             draft.share_change(theme, &before);
                         }
                     }
-                    if let Some(notice) = &state.notice {
-                        rule(ui);
-                        ui.label(
-                            egui::RichText::new(notice.as_str()).size(12.0).color(Color32::from_rgb(255, 150, 120)),
-                        );
-                    }
                 },
             );
         });

@@ -396,7 +396,7 @@ fn do_state_action(state: &mut home::HomeState, action: &sp_model::ShowAction, n
                         .find(|made| made.actions.contains(action))
                         .map(|made| format!(" in the macro \u{201c}{}\u{201d}", made.name))
                         .unwrap_or_default();
-                    state.notice = Some(format!(
+                    state.notices.trouble(format!(
                         "Nothing plays on the Announcements layer: the song a step{holder} plays is no longer in the \
                          library. Open the macro in the Macros tab and choose what it plays."
                     ));
@@ -1426,9 +1426,8 @@ struct App {
     failed: bool,
     /// Set when a test capture has been saved and the program should end.
     capture_done: bool,
-    /// How often and how long the operator window is drawn, and the last notice, for the log.
+    /// How often and how long the operator window is drawn, for the log.
     home_timing: applog::Timing,
-    notice_logged: Option<String>,
     /// When quitting began, while it waits for Canva Sync to keep a sign-in it is refreshing.
     quitting: Option<Instant>,
 }
@@ -1773,7 +1772,7 @@ impl App {
         self.check_folders(true);
         let Some(first) = self.playlist_media(id).first().copied() else {
             if let Some(running) = self.running.as_mut() {
-                running.home_state.notice = Some("That media playlist has nothing in it to play.".to_owned());
+                running.home_state.notices.refuse("That media playlist has nothing in it to play.");
             }
             return;
         };
@@ -2119,7 +2118,7 @@ impl App {
                 if !self.gone_from_followed_folder(&item.path)
                     && let Some(running) = self.running.as_mut()
                 {
-                    running.home_state.notice = Some(problem);
+                    running.home_state.notices.trouble(problem);
                 }
             }
         }
@@ -2192,7 +2191,7 @@ impl App {
                 }
                 Err(problem) => {
                     if let Some(running) = self.running.as_mut() {
-                        running.home_state.notice = Some(problem);
+                        running.home_state.notices.trouble(problem);
                     }
                 }
             }
@@ -2686,13 +2685,13 @@ impl App {
                         self.refresh_output();
                     }
                     Err(problem) => {
-                        running.home_state.notice = Some(problem);
+                        running.home_state.notices.trouble(problem);
                         running.home_state.video_live = None;
                     }
                 }
                 return Some(Instant::now() + Duration::from_millis(100));
             }
-            running.home_state.notice = Some(problem);
+            running.home_state.notices.trouble(problem);
             running.home_state.video_live = None;
             self.video = None;
             running.home_window.request_redraw();
@@ -2772,7 +2771,7 @@ impl App {
                 if let Some(track) = state.audio.track(id)
                     && let Err(problem) = self.player.play_fading(track, fade)
                 {
-                    state.notice = Some(problem);
+                    state.notices.trouble(problem);
                 }
             }
             Some(AudioRequest::TogglePause) => self.player.toggle_pause(),
@@ -2789,7 +2788,7 @@ impl App {
         if std::mem::take(&mut state.audio_changed)
             && let Err(problem) = audio::save(&state.audio)
         {
-            state.notice = Some(problem);
+            state.notices.trouble(problem);
         }
         self.tick_audio();
     }
@@ -2810,7 +2809,7 @@ impl App {
                 && let Some(next) = state.audio.after(ended, pick)
                 && let Err(problem) = self.player.play(next)
             {
-                state.notice = Some(problem);
+                state.notices.trouble(problem);
             }
         } else if let playing = self.player.playing()
             && state.audio.through
@@ -2823,7 +2822,7 @@ impl App {
             && let Some(next) = state.audio.after(id, pick)
             && let Err(problem) = self.player.play_fading(next, fade)
         {
-            state.notice = Some(problem);
+            state.notices.trouble(problem);
         }
         let playing = self.player.playing();
         // A track taken out while it played is let go once something else plays, or nothing.
@@ -3217,7 +3216,7 @@ impl App {
                 build_step: self.show.build_step(),
             };
             if !output.send(OutputMsg::Show(frame)) {
-                running.home_state.output_stopped = true;
+                running.home_state.output_has_stopped();
             }
         }
         self.refresh_preview(true);
@@ -3448,7 +3447,7 @@ impl App {
                     applog::event("editor", &format!("dropped {} on the slide", path.display()));
                     state.picture_to_add.push(imported);
                 }
-                Err(problem) => state.notice = Some(problem),
+                Err(problem) => state.notices.trouble(problem),
             }
             running.home_window.request_redraw();
             return;
@@ -3470,8 +3469,12 @@ impl App {
                 services.add_to(index, media);
             }
         }
-        if let Some(playlist) = services.list.get(index) {
-            running.home_state.notice = Some(format!("Added {} to the playlist {}.", item.name, playlist.name));
+        // Said only when it went out of sight (dropped on a playlist that isn't listed).
+        let name = services.list.get(index).map(|playlist| playlist.name.clone());
+        if let Some(name) = name
+            && !studio::playlist_in_sight(&running.home_state, index)
+        {
+            running.home_state.notices.info(format!("Added {} to the playlist {name}.", item.name));
         }
     }
 
@@ -3525,7 +3528,7 @@ impl App {
             return problem;
         }
         if let Some(running) = self.running.as_mut() {
-            running.home_state.notice = Some(said.clone());
+            running.home_state.notices.info(said.clone());
             running.home_window.request_redraw();
         }
         said
@@ -3533,9 +3536,11 @@ impl App {
 
     /// Takes in the Bible files read on threads of their own since the last look: an installed
     /// Bible goes on the shelf (in place of its earlier copy), one that doesn't say what it is
-    /// waits for the sheet to ask, and the notice (and the command line's job) says how it went.
+    /// waits for the sheet to ask, and the notices (and the command line's job) say how it went:
+    /// installed, or why not. The sheet asking is there to see, so the list says nothing of it.
     fn finish_bible_work(&mut self) {
         while let Ok(BibleWork { job, result }) = self.bible_rx.try_recv() {
+            let mut sheet = false;
             let said = match result {
                 Ok(bible_store::Opened::Installed(kept, info, said)) => {
                     if let Some(running) = self.running.as_mut() {
@@ -3544,6 +3549,7 @@ impl App {
                     Ok(said)
                 }
                 Ok(bible_store::Opened::NeedsDetails(imported)) => {
+                    sheet = true;
                     let asked = format!("{} doesn't say all of what it is: the sheet asks.", imported.file_name);
                     if let Some(running) = self.running.as_mut() {
                         running.home_state.bible.options.details.push_back(crate::bible::DetailsSheet::new(imported));
@@ -3554,7 +3560,9 @@ impl App {
             };
             applog::event("bible", said.as_ref().unwrap_or_else(|problem| problem));
             if let Some(running) = self.running.as_mut() {
-                running.home_state.notice = Some(said.clone().unwrap_or_else(|problem| problem));
+                if !sheet {
+                    running.home_state.notices.outcome(said.clone());
+                }
                 running.home_window.request_redraw();
             }
             self.finish_job(job, said);
@@ -3620,10 +3628,9 @@ impl App {
                     let item = MediaItem::new(name, path.to_owned());
                     self.bin_pictures.set_small(item.id, picture, whole);
                     self.show.add_media(item);
-                    running.home_state.notice = None;
                     applog::event("media", &format!("added {} in {:?}", path.display(), started.elapsed()));
                 } else {
-                    running.home_state.notice = Some("That file is already in the media bin.".to_owned());
+                    running.home_state.notices.refuse("That file is already in the media bin.");
                 }
                 // Added while a media playlist is shown, it goes into that playlist, so it shows.
                 let state = &mut running.home_state;
@@ -3637,7 +3644,7 @@ impl App {
             }
             Err(message) => {
                 applog::event("media", &format!("could not add {}: {message}", path.display()));
-                running.home_state.notice = Some(message);
+                running.home_state.notices.trouble(message);
             }
         }
         if let Some(running) = self.running.as_mut() {
@@ -3783,7 +3790,7 @@ impl App {
         if let Err(problem) = media::save_list(&media::List { entries, playlists })
             && let Some(running) = self.running.as_mut()
         {
-            running.home_state.notice = Some(problem);
+            running.home_state.notices.trouble(problem);
         }
     }
 
@@ -4123,7 +4130,7 @@ impl App {
                         edit.changed = true;
                     }
                 }
-                Some(Err(problem)) => state.notice = Some(problem),
+                Some(Err(problem)) => state.notices.trouble(problem),
                 None => {}
             }
             running.home_window.request_redraw();
@@ -4139,7 +4146,7 @@ impl App {
         let state = &mut running.home_state;
         match chosen.map(|path| images::import(&path)) {
             Some(Ok(picture)) => state.picture_to_add.push(picture),
-            Some(Err(problem)) => state.notice = Some(problem),
+            Some(Err(problem)) => state.notices.trouble(problem),
             None => {}
         }
         running.home_window.request_redraw();
@@ -4336,7 +4343,9 @@ impl App {
         }
         self.unsaved_since = None;
         if let Some(running) = self.running.as_mut() {
-            running.home_state.notice = problem;
+            if let Some(problem) = problem {
+                running.home_state.notices.trouble(problem);
+            }
             running.home_window.request_redraw();
         }
     }
@@ -4421,7 +4430,7 @@ impl App {
             Err(problem) => {
                 self.wait_on(waiting);
                 if let Some(running) = self.running.as_mut() {
-                    running.home_state.notice = Some(problem);
+                    running.home_state.notices.trouble(problem);
                 }
                 false
             }
@@ -4783,7 +4792,7 @@ impl App {
     /// and where to save it.
     fn export_from_window(&mut self, indices: &[usize], playlist: Option<usize>) {
         let said = match self.plan_pack(indices, playlist) {
-            Err(problem) => problem,
+            Err(problem) => Err(problem),
             Ok(mut export) => {
                 if !export.videos.is_empty() {
                     let size = pack::size_words(export.video_bytes());
@@ -4827,11 +4836,11 @@ impl App {
                 else {
                     return;
                 };
-                self.write_pack(export, to).unwrap_or_else(|problem| problem)
+                self.write_pack(export, to)
             }
         };
         if let Some(running) = self.running.as_mut() {
-            running.home_state.notice = Some(said);
+            running.home_state.notices.outcome(said);
             running.home_window.request_redraw();
         }
     }
@@ -4923,6 +4932,8 @@ impl App {
     /// Finishes the song packs written or read on threads of their own since the last look.
     fn finish_packs(&mut self) {
         while let Ok(done) = self.pack_rx.try_recv() {
+            // A bundle's songs are said as any import's are (`say_imported`), once.
+            let mut said_already = false;
             let (job, result) = match done {
                 PackJob::Wrote { job, result } => (job, result),
                 PackJob::Opened { job, result, same, library } => match *result {
@@ -4934,18 +4945,20 @@ impl App {
                         let mut done = Imported::default();
                         self.take_songs(vec![SongRead::Bundle { opened, path, library }], &to, &mut done);
                         let said = self.say_imported(&done);
+                        said_already = true;
                         (job, if done.landed.is_empty() { Err(said) } else { Ok(said) })
                     }
                     Err(problem) => (job, Err(problem)),
                 },
             };
-            let said = result.clone().unwrap_or_else(|problem| problem);
+            applog::event("pack", result.as_ref().unwrap_or_else(|problem| problem));
             if let Some((_, kept)) = self.jobs.iter_mut().find(|(have, _)| *have == job) {
-                *kept = Some(result);
+                *kept = Some(result.clone());
             }
-            applog::event("pack", &said);
             if let Some(running) = self.running.as_mut() {
-                running.home_state.notice = Some(said);
+                if !said_already {
+                    running.home_state.notices.outcome(result);
+                }
                 running.home_window.request_redraw();
             }
         }
@@ -5807,7 +5820,8 @@ impl App {
         done.playlist = Some(services.list[at].name.clone());
     }
 
-    /// Says in the window's notice what an import did, and returns the words.
+    /// Says in the notices what an import did (trouble when a file couldn't be read, else information:
+    /// files read are out of sight), and returns the words.
     fn say_imported(&mut self, done: &Imported) -> String {
         for problem in &done.problems {
             applog::event("songs", &format!("not imported: {problem}"));
@@ -5876,7 +5890,11 @@ impl App {
         }
         let text = words.join(" ");
         if let Some(running) = self.running.as_mut() {
-            running.home_state.notice = Some(text.clone()).filter(|text| !text.is_empty());
+            if done.problems.iter().any(|problem| !problem.ends_with(ALREADY)) {
+                running.home_state.notices.trouble(text.clone());
+            } else {
+                running.home_state.notices.info(text.clone());
+            }
             running.home_window.request_redraw();
         }
         text
@@ -5909,6 +5927,7 @@ impl App {
     /// Carries out what the setup asked: importing songs, which needs more than the window.
     fn handle_setup(&mut self) {
         let Some(request) = self.running.as_mut().and_then(|r| r.home_state.setup_request.take()) else { return };
+        let mark = self.running.as_ref().map_or(0, |r| r.home_state.notices.mark());
         match request {
             setup::SetupRequest::ImportLibrary(folder) => {
                 self.import_songs(&[folder]);
@@ -5916,7 +5935,8 @@ impl App {
             setup::SetupRequest::ChooseSongFiles => self.choose_songs_to_import(),
         }
         if let Some(running) = self.running.as_mut() {
-            let said = running.home_state.notice.clone();
+            // The setup's own page says how bringing songs in went, as the notices do.
+            let said = running.home_state.notices.said_since(mark).map(str::to_owned);
             if let Some(setup) = running.home_state.setup.as_mut() {
                 setup.songs_said = said;
             }
@@ -5933,15 +5953,15 @@ impl App {
                     let count = made.slide_count();
                     applog::event("slides", &format!("made {count} slides from {name}"));
                     self.add_song(made, false);
-                    format!("Made {count} slide{} from {name}.", if count == 1 { "" } else { "s" })
+                    Ok(format!("Made {count} slide{} from {name}.", if count == 1 { "" } else { "s" }))
                 }
                 Err(problem) => {
                     applog::event("slides", &format!("could not make slides: {problem}"));
-                    problem
+                    Err(problem)
                 }
             };
             if let Some(running) = self.running.as_mut() {
-                running.home_state.notice = Some(said);
+                running.home_state.notices.outcome(said);
                 running.home_window.request_redraw();
             }
         }
@@ -6257,7 +6277,7 @@ impl App {
                     self.refresh_output();
                 }
                 if let (Some(problem), Some(running)) = (problem, self.running.as_mut()) {
-                    running.home_state.notice = Some(problem);
+                    running.home_state.notices.trouble(problem);
                 }
             }
             _ => {}
@@ -6416,7 +6436,7 @@ impl App {
             && !quiet
             && let Err(problem) = screens::save(&running.home_state.screens)
         {
-            running.home_state.notice = Some(problem);
+            running.home_state.notices.trouble(problem);
         }
         let list = running.home_state.screens.clone();
         let mut placed = screens::place_all(&list, &displays, &operator);
@@ -6554,7 +6574,7 @@ impl App {
             let window = match el.create_window(attrs) {
                 Ok(window) => Arc::new(window),
                 Err(e) => {
-                    home_state.notice = Some(format!("Could not open a window for \"{}\": {e}", screen.name));
+                    home_state.notices.trouble(format!("Could not open a window for \"{}\": {e}", screen.name));
                     continue;
                 }
             };
@@ -6569,14 +6589,14 @@ impl App {
             let surface = match context.instance.create_surface(window.clone()) {
                 Ok(surface) => surface,
                 Err(e) => {
-                    home_state.notice = Some(format!("Could not draw to \"{}\": {e}", screen.name));
+                    home_state.notices.trouble(format!("Could not draw to \"{}\": {e}", screen.name));
                     continue;
                 }
             };
             let format = match surface_format(&surface, context.devices[*device_id].adapter()) {
                 Ok(format) => format,
                 Err(e) => {
-                    home_state.notice = Some(e);
+                    home_state.notices.trouble(e);
                     continue;
                 }
             };
@@ -6777,7 +6797,7 @@ impl App {
                 && decklink_playing.contains(&screen.id)
                 && !playing.contains(&screen.id)
             {
-                home_state.notice = Some(format!("{}: {doing} Trying again.", screen.name));
+                home_state.notices.trouble(format!("{}: {doing} Trying again.", screen.name));
             }
         }
         *decklink_playing = playing;
@@ -6882,8 +6902,9 @@ impl App {
             }
         }
         thumbs.begin_frame();
-        if running.output.as_ref().is_none_or(OutputHandle::is_finished) {
-            running.home_state.output_stopped = true;
+        // The output gone (not taken away for quitting) is trouble, said once.
+        if running.output.as_ref().is_some_and(OutputHandle::is_finished) {
+            running.home_state.output_has_stopped();
         }
         let mut commands = Vec::new();
         // How far the preview's fade has got: the same time and easing as the output's.
@@ -7487,7 +7508,7 @@ impl App {
                 }
                 Err(problem) => {
                     kind.close(&mut running.home_state);
-                    running.home_state.notice = Some(problem);
+                    running.home_state.notices.trouble(problem);
                 }
             }
         }
@@ -7797,8 +7818,8 @@ impl App {
                         self.apply(vec![Command::Select(next)]);
                     }
                 }
-                if let Some(running) = self.running.as_mut() {
-                    running.home_state.notice = problem;
+                if let (Some(problem), Some(running)) = (problem, self.running.as_mut()) {
+                    running.home_state.notices.trouble(problem);
                 }
             }
         }
@@ -7830,32 +7851,32 @@ impl App {
         if std::mem::take(&mut state.timers_changed)
             && let Err(problem) = timers::save(&state.timers)
         {
-            state.notice = Some(problem);
+            state.notices.trouble(problem);
         }
         if std::mem::take(&mut state.messages_changed)
             && let Err(problem) = messages::save(&state.messages)
         {
-            state.notice = Some(problem);
+            state.notices.trouble(problem);
         }
         if std::mem::take(&mut state.props_changed)
             && let Err(problem) = props::save(&state.props)
         {
-            state.notice = Some(problem);
+            state.notices.trouble(problem);
         }
         if std::mem::take(&mut state.macros_changed)
             && let Err(problem) = macros::save(&state.macros)
         {
-            state.notice = Some(problem);
+            state.notices.trouble(problem);
         }
         if std::mem::take(&mut state.stage_layouts_changed)
             && let Err(problem) = stage::save_layouts(&state.stage_layouts)
         {
-            state.notice = Some(problem);
+            state.notices.trouble(problem);
         }
         if std::mem::take(&mut state.libraries_changed)
             && let Err(problem) = libraries::save(&state.libraries)
         {
-            state.notice = Some(problem);
+            state.notices.trouble(problem);
         }
         // Props that clear themselves, once their time is up.
         let props = &state.props;
@@ -7981,7 +8002,7 @@ impl App {
         if action == A::ReloadSongs {
             let said = self.reload_all().summary();
             if let Some(running) = self.running.as_mut() {
-                running.home_state.notice = Some(said);
+                running.home_state.notices.info(said);
             }
             return;
         }
@@ -8109,13 +8130,13 @@ impl App {
             A::Quit => {}
             A::Settings => state.preferences_open = true,
             A::InstallCommandLine => {
-                state.notice = Some(match control::install_command() {
-                    Ok(link) => format!(
+                // Written files, out of sight: said in the list.
+                state.notices.outcome(control::install_command().map(|link| {
+                    format!(
                         "Installed the sp command at {} (and softpresenter beside it). In Terminal, try: sp status",
                         link.display()
-                    ),
-                    Err(problem) => problem,
-                });
+                    )
+                }));
             }
             A::ConfigureScreens => state.settings_open = true,
             A::SetUp => state.setup = Some(setup::Setup::new()),
@@ -8240,7 +8261,7 @@ impl App {
                     _ => "https://github.com/esraell/SoftPresenter#readme",
                 };
                 if let Err(e) = std::process::Command::new("open").arg(page).spawn() {
-                    state.notice = Some(format!("Could not open the web page: {e}"));
+                    state.notices.trouble(format!("Could not open the web page: {e}"));
                 }
             }
         }
@@ -8329,11 +8350,13 @@ impl App {
         // here in the event loop, so the window still answers (and isn't taken for hung).
         if !self.canva.may_close(self.quitting.unwrap_or_else(Instant::now)) {
             const KEEPING: &str = "Keeping the Canva sign-in… SoftPresenter closes as soon as it is kept.";
+            // Said once, though the loop comes back here until the sign-in is kept.
+            static KEEPING_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
             if let Some(running) = self.running.as_mut()
                 && self.canva.refreshing()
-                && running.home_state.notice.as_deref() != Some(KEEPING)
+                && !KEEPING_SAID.swap(true, std::sync::atomic::Ordering::Relaxed)
             {
-                running.home_state.notice = Some(KEEPING.to_owned());
+                running.home_state.notices.info(KEEPING);
                 running.home_window.request_redraw();
             }
             return;
@@ -8411,7 +8434,7 @@ impl ApplicationHandler<AppEvent> for App {
                         said.push_str(&format!(" {problem}"));
                     }
                     applog::event("macros", &said);
-                    running.home_state.notice = Some(said);
+                    running.home_state.notices.info(said);
                 }
                 if macros::from_audience_off(&mut running.home_state.macros, audience_off_before) {
                     let mut said = format!(
@@ -8423,10 +8446,7 @@ impl ApplicationHandler<AppEvent> for App {
                         said.push_str(&format!(" {problem}"));
                     }
                     applog::event("macros", &said);
-                    running.home_state.notice = Some(match running.home_state.notice.take() {
-                        Some(before) => format!("{before} {said}"),
-                        None => said,
-                    });
+                    running.home_state.notices.info(said);
                 }
                 // A start-up macro that switches the audience screens off does that before any
                 // screen draws (below), so they never show anything first.
@@ -8457,7 +8477,7 @@ impl ApplicationHandler<AppEvent> for App {
                 }
                 // What became of the library's folder at this start (moved to Documents, or why not).
                 if let Some(said) = library_folder::take_notice() {
-                    running.home_state.notice = Some(said);
+                    running.home_state.notices.outcome(said);
                 }
                 // Pictures, videos and leftovers nothing in the library uses go to the Trash, at
                 // most once a day, on a thread of their own; the window says so if any went.
@@ -8557,7 +8577,7 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::Canva => return,
             AppEvent::Tidied(said) => {
                 if let Some(running) = self.running.as_mut() {
-                    running.home_state.notice = Some(said);
+                    running.home_state.notices.info(said);
                     running.home_window.request_redraw();
                 }
                 return;
@@ -8808,14 +8828,6 @@ impl ApplicationHandler<AppEvent> for App {
                 self.home_timing.report_each_minute("window", || {
                     applog::memory_mb().map_or_else(String::new, |mb| format!("{mb} MB resident"))
                 });
-                // Every notice shown to the operator goes in the log too.
-                let notice = self.running.as_ref().and_then(|r| r.home_state.notice.clone());
-                if notice != self.notice_logged {
-                    if let Some(notice) = &notice {
-                        applog::event("notice", notice);
-                    }
-                    self.notice_logged = notice;
-                }
                 self.apply(commands);
                 // Testing aid: drag files over the window (SOFTPRESENTER_HOVER, kept there, for a
                 // picture of where they would land) or drop them on it a few frames after they
@@ -8913,7 +8925,7 @@ impl ApplicationHandler<AppEvent> for App {
                         let page =
                             service::SavedPassage { lookup: String::new(), ..running.home_state.bible.settings() };
                         if let Err(problem) = service::save_bible_page(&page) {
-                            running.home_state.notice = Some(problem);
+                            running.home_state.notices.trouble(problem);
                         }
                         self.bible_page_saved = now;
                     }
@@ -8923,14 +8935,14 @@ impl ApplicationHandler<AppEvent> for App {
                     && std::mem::take(&mut running.home_state.bible.history_changed)
                     && let Err(problem) = service::save_bible_history(&running.home_state.bible.history)
                 {
-                    running.home_state.notice = Some(problem);
+                    running.home_state.notices.trouble(problem);
                 }
                 // So are the small choices: transition, view, slide size.
                 if let Some(running) = self.running.as_mut() {
                     let now = running.home_state.prefs();
                     if self.prefs_saved.as_ref() != Some(&now) && self.frames_since_start > 10 {
                         if let Err(problem) = service::save_prefs(&now) {
-                            running.home_state.notice = Some(problem);
+                            running.home_state.notices.trouble(problem);
                         }
                         self.prefs_saved = Some(now);
                     }
@@ -8941,7 +8953,7 @@ impl ApplicationHandler<AppEvent> for App {
                     && std::mem::take(&mut running.home_state.services.changed)
                     && let Err(problem) = service::save(&running.home_state.services)
                 {
-                    running.home_state.notice = Some(problem);
+                    running.home_state.notices.trouble(problem);
                 }
                 // Export…, from a song's or a playlist's right-click menu.
                 if let Some(request) = self.running.as_mut().and_then(|r| r.home_state.export_request.take()) {
@@ -9413,7 +9425,6 @@ fn main() -> ExitCode {
         failed: false,
         capture_done: false,
         home_timing: applog::Timing::new("operator window drawings"),
-        notice_logged: None,
         quitting: None,
     };
     // The pictures that were in the media bin last time, then any named on the command line.

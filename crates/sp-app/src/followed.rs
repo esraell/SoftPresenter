@@ -412,7 +412,7 @@ impl crate::App {
             OnLayer::Announcements => self.apply(vec![Command::Clear(sp_engine::Layer::Announcements)]),
         }
         if let Some(running) = self.running.as_mut() {
-            running.home_state.notice = Some(said);
+            running.home_state.notices.trouble(said);
             running.home_window.request_redraw();
         }
     }

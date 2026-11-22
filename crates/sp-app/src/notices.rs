@@ -114,6 +114,10 @@ pub struct Notices {
     /// the preview's readout is this frame: where a refusal's cue goes.
     pub clicked: Option<(Rect, f64)>,
     pub readout: Option<Rect>,
+    /// How many things have been said (entries and refusals alike), and the last of them, so the
+    /// command line (and the setup's page) can say what came of something it asked for.
+    said: u64,
+    last_said: Option<String>,
 }
 
 impl Notices {
@@ -175,6 +179,8 @@ impl Notices {
     pub fn refuse(&mut self, text: impl Into<String>) {
         let text = text.into();
         crate::applog::event("refused", &text);
+        self.said += 1;
+        self.last_said = Some(text.clone());
         self.cue = Some(Cue { text, since: None, under: None });
     }
 
@@ -201,6 +207,16 @@ impl Notices {
     pub fn take_newest(&mut self) -> Option<String> {
         let at = self.list.iter().position(|notice| notice.kind != Kind::Question)?;
         Some(self.list.remove(at).text)
+    }
+
+    /// A mark to ask [`Notices::said_since`] about later.
+    pub fn mark(&self) -> u64 {
+        self.said
+    }
+
+    /// The last thing said (an entry or a refusal) since `mark`, if anything was.
+    pub fn said_since(&self, mark: u64) -> Option<&str> {
+        (self.said > mark).then_some(self.last_said.as_deref()).flatten()
     }
 
     /// Clear All: the list empties, except for questions, which stay until answered.
@@ -245,25 +261,25 @@ impl Notices {
         }
     }
 
-    /// Puts an entry at the head of the list. The same words as the newest entry, not yet seen,
-    /// add nothing; seen, they come back as new. Past [`KEPT`], the oldest go (never a question).
+    /// Puts an entry at the head of the list. The same words as an entry not yet seen add
+    /// nothing (so something said again and again, as a file that can't be opened may be, is one
+    /// entry and one line in the log); seen, they come back as new, at the head. Past [`KEPT`],
+    /// the oldest go (never a question).
     fn push(&mut self, kind: Kind, text: String, about: Option<Waiting>, actions: Vec<Action>) {
         let text = text.trim().to_owned();
         if text.is_empty() {
             return;
         }
         let time = chrono::Utc::now().timestamp();
-        if let Some(newest) = self.list.iter_mut().find(|notice| notice.kind != Kind::Question)
-            && kind != Kind::Question
-            && newest.kind == kind
-            && newest.text == text
+        self.said += 1;
+        self.last_said = Some(text.clone());
+        if kind != Kind::Question
+            && let Some(at) = self.list.iter().position(|notice| notice.kind == kind && notice.text == text)
         {
-            if newest.seen {
-                newest.seen = false;
-                newest.time = time;
-                crate::applog::event("notice", &text);
+            if !self.list[at].seen {
+                return;
             }
-            return;
+            self.list.remove(at);
         }
         crate::applog::event(if kind == Kind::Question { "question" } else { "notice" }, &text);
         self.next += 1;
@@ -666,12 +682,34 @@ mod tests {
     }
 
     #[test]
-    fn a_refusal_makes_no_entry() {
+    fn a_refusal_makes_no_entry_but_the_command_line_can_say_it() {
         let mut notices = Notices::default();
+        let mark = notices.mark();
         notices.refuse("That is the last slide.");
         assert_eq!(notices.entries().count(), 0, "a refusal is a cue, never an entry");
         assert_eq!(notices.look(), Look::Quiet);
         assert_eq!(notices.refused(), Some("That is the last slide."));
+        assert_eq!(notices.said_since(mark), Some("That is the last slide."));
+        let mark = notices.mark();
+        assert_eq!(notices.said_since(mark), None, "nothing since");
+        notices.trouble("That media playlist has nothing in it.");
+        assert_eq!(notices.said_since(mark), Some("That media playlist has nothing in it."));
+    }
+
+    #[test]
+    fn something_said_again_and_again_is_one_entry_until_seen() {
+        let mut notices = Notices::default();
+        for _ in 0..100 {
+            notices.trouble("Could not open a window for \u{201c}Left\u{201d}.");
+            notices.trouble("Could not draw to \u{201c}Right\u{201d}.");
+        }
+        assert_eq!(notices.entries().count(), 2, "said every frame, still two entries");
+        notices.mark_seen();
+        notices.trouble("Could not open a window for \u{201c}Left\u{201d}.");
+        let texts: Vec<&str> = notices.entries().map(|notice| notice.text.as_str()).collect();
+        assert_eq!(texts.len(), 2, "seen and said again: back at the head, not twice");
+        assert!(texts[0].starts_with("Could not open"));
+        assert_eq!(notices.look(), Look::Trouble(1));
     }
 
     #[test]

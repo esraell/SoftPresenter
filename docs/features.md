@@ -1227,7 +1227,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   file is deleted once no player has it open (or lined up). Only videos Canva Sync made are ever
   deleted (it keeps their names): one the church put in the folder stays, and so does one a
   media bin item, a media playlist, a slide, a theme or a prop still names. Anything that goes wrong leaves the video as it was and
-  says why on the page, in the top bar (Canva: failed, with why when pointed at) and in the log.
+  says why on the page, as trouble in the notices and in the log; a video put in place is noted
+  in the notices too.
   One sync runs at a time, a sync goes on while the window is used, and quitting stops it
   cleanly (a refresh of the sign-in under way is waited out, so its new token is kept). Nothing
   runs while the app is closed; a macro with Sync from Canva and Run When SoftPresenter Opens

@@ -156,14 +156,14 @@ fn split_at<'a>(words: &'a [String], keyword: &str) -> (&'a [String], Option<&'a
 
 impl crate::App {
     /// Carries out what the window or a macro asked about versions this frame; a problem is
-    /// said in a notice.
+    /// said as a refusal's cue (nothing was done).
     pub(crate) fn handle_versions(&mut self) {
         let Some(running) = self.running.as_mut() else { return };
         for ask in std::mem::take(&mut running.home_state.version_asks) {
             if let Err(problem) = self.version_ask(ask)
                 && let Some(running) = self.running.as_mut()
             {
-                running.home_state.notice = Some(problem);
+                running.home_state.notices.refuse(problem);
             }
         }
     }
