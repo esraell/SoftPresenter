@@ -158,8 +158,19 @@ feature changes, this page changes in the same commit.
   stays where it was scrolled otherwise. Only what is in view is drawn, so a playlist of
   thousands of slides scrolls like a short one, and each song's slides are drawn with that
   song's own theme. A song chosen that the playlist doesn't have (a new song, one found with
-  the find box) is shown by itself, with the left column back on a library. With View,
-  Continuous Playlist on, Next at the end of a song goes on to the next song in the playlist.
+  the find box) is shown by itself, with the left column back on a library.
+- **The keys act on the open item.** While the open item is the one on screen, Next (Space,
+  the right arrow) and Previous (the left arrow) step through it. Once ↑, ↓ or a click on a
+  row has opened another item, the next Next or Previous starts that item at its first slide:
+  a song or Bible passage goes on screen, a picture or video is shown, a media playlist plays.
+  ↑ and ↓ open the item above or below (passing over headers), and say so at either end;
+  Enter puts the open item on screen from its first slide. With Continuous on (in the bar
+  under the slides), Next at the end of a song goes on into the next song or **Bible
+  passage**, passing over headers, placeholders, pictures and videos, and Previous at a song's
+  first slide goes back into the last slide of the one before; at either end of the playlist,
+  or with Continuous off, nothing changes and a notice under the top bar says why. The menu
+  bar's Next Slide and Previous Slide, and `sp next` and `sp previous`, do the same; a slide
+  that goes on by itself goes on into the next song or passage only with Continuous on.
 - A playlist also holds **pictures and videos** from the media bin (the countdown video),
   **media playlists** (the announcement loop) and **placeholders** (a place kept for the sermon
   slides). A picture or video goes in from its right-click menu (Add to Playlist "Sunday"), by
@@ -167,8 +178,8 @@ feature changes, this page changes in the same commit.
   playlist's name in the chooser; a media playlist from the menu beside MEDIA, or either from Add
   to playlist; a placeholder from Add to playlist, named as it is made. In the slide area each is a bar with one tile: clicking a picture
   or video's tile shows it, a media playlist's plays it round and round; opening one from the
-  list only scrolls to it, changing nothing on the screens, and Continuous Playlist passes over
-  them, as it does passages. A placeholder is filled with a song chosen from a list (its tile's
+  list only scrolls to it, changing nothing on the screens (Next, Space or Enter then shows
+  it), and Continuous passes over them. A placeholder is filled with a song chosen from a list (its tile's
   Choose a Song…, or Fill with Song in its right-click menu), or with a picture or video dropped
   on it. One whose picture, video or media playlist has gone is kept and shown faint. A playlist
   holding any of these is saved as version 3 of the services file; one without is still written

@@ -190,8 +190,10 @@ status` instead of `sp status`.
 
 | Key | Does |
 |---|---|
-| Right arrow, Space | next slide |
-| Left arrow | previous slide |
+| Right arrow, Space | next slide; with another playlist item opened, start that item |
+| Left arrow | previous slide; with another playlist item opened, start that item |
+| Up / Down arrow | open the playlist item above / below |
+| Enter | put the open item on screen from its first slide |
 | Home / End | first / last slide of the song |
 | Escape (or F1) | clear everything, audio and announcements included |
 | F2 / F3 / F4 / F5 / F6 | clear the slide / the media / the props / the audio / the message |

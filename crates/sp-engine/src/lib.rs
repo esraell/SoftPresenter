@@ -161,6 +161,14 @@ impl Show {
         (at != cursor || step != self.step).then_some(at)
     }
 
+    /// The slide `Previous` would put on screen before the cursor, in the play order; `None`
+    /// at the start of the song. A click build to take back doesn't count: see `build_step`.
+    pub fn preceding(&self) -> Option<SlideRef> {
+        let cursor = self.cursor?;
+        let (at, step) = self.previous_target()?;
+        (at != cursor || step != self.step).then_some(at)
+    }
+
     /// A presentation's slides, by their places, in the order they are played.
     fn order(&self, presentation: usize) -> Vec<usize> {
         self.presentations.get(presentation).map_or_else(Vec::new, |song| song.order())

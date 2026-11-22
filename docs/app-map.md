@@ -88,8 +88,10 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 
 | Key | Does |
 |---|---|
-| Space, → | Next slide |
-| ← | Previous slide |
+| Space, → | Next slide. With another item opened (↑, ↓ or a click on its row), starts that item at its first slide; at the end of a song, with Continuous on, goes on into the next song or Bible passage |
+| ← | Previous slide; starts another item opened, as Space does; at a song's first slide, with Continuous on, goes back into the item before |
+| ↑, ↓ | Opens the playlist item above or below (a notice says so at either end) |
+| Enter | The open item goes on screen from its first slide |
 | Home, End | First, last slide of the song |
 | Escape (F1) | Clear all |
 | F2, F3, F4, F5, F6 | Clear slide, media, props, audio, messages |

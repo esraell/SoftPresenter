@@ -760,6 +760,34 @@ pub fn changed_outside_bar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState
 
 /// The find box in the bar along the top: its id, so that Find can hand it the keyboard and a
 /// search that ends can take the keyboard away again.
+/// How long a notice said with `HomeState::say` stays, in seconds.
+const TOAST_FOR: f64 = 2.4;
+
+/// A notice that comes and goes: a dark grey pill with a thin edge, under the top bar in the
+/// middle, never over the media strip. The window is drawn once more when it is to go, and
+/// for nothing else on its account.
+pub fn toast(ctx: &egui::Context, state: &mut HomeState) {
+    let Some((words, since)) = state.toast.as_mut() else { return };
+    let now = ctx.input(|input| input.time);
+    let since = *since.get_or_insert(now);
+    let left = TOAST_FOR - (now - since);
+    if left <= 0.0 {
+        state.toast = None;
+        return;
+    }
+    ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("toast")));
+    let screen = ctx.content_rect();
+    let galley = painter.layout(words.clone(), semibold(13.0), TEXT, (screen.width() - 80.0).max(200.0));
+    let size = galley.size() + vec2(32.0, 18.0);
+    let rect = Rect::from_min_size(pos2(screen.center().x - size.x / 2.0, TOP_BAR + 10.0), size);
+    let corner = (size.y / 2.0).min(18.0);
+    painter.rect_filled(rect.expand(8.0).translate(vec2(0.0, 6.0)), corner + 8.0, Color32::from_black_alpha(70));
+    painter.rect_filled(rect, corner, Color32::from_rgb(0x2e, 0x2e, 0x2e));
+    painter.rect_stroke(rect, corner, Stroke::new(1.0, Color32::from_rgb(0x4a, 0x4a, 0x4a)), StrokeKind::Inside);
+    painter.galley(rect.min + vec2(16.0, 9.0), galley, TEXT);
+}
+
 pub fn find_box_id() -> egui::Id {
     egui::Id::unique("find box")
 }
@@ -1974,6 +2002,9 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
             None if down => Some(0),
             _ => None,
         };
+        if next.is_none() && (up || down) {
+            state.say(if down { "That is the last song in the list." } else { "That is the first song in the list." });
+        }
         if let Some(next) = next {
             let song = shown[next];
             if shift {
@@ -2977,9 +3008,12 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 None if down => Some(0),
                 _ => None,
             };
-            if let Some(next) = next {
-                ask = Some(ItemAsk::Open(openable[next]));
-                state.playlist_scroll_to = Some(openable[next]);
+            match next {
+                Some(next) => {
+                    ask = Some(ItemAsk::Open(openable[next]));
+                    state.playlist_scroll_to = Some(openable[next]);
+                }
+                None => state.say(crate::running::no_item_beyond(down)),
             }
         }
     }

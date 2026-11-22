@@ -450,3 +450,15 @@ fn the_slide_on_screen_follows_its_slide_when_slides_are_moved() {
     show.slides_reordered(1, &[1, 0]);
     assert_eq!(show.live(), at(0, 2));
 }
+
+#[test]
+fn preceding_is_the_slide_previous_would_show_and_none_at_the_start() {
+    let mut s = show();
+    assert_eq!(s.preceding(), None, "nothing shown yet");
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 2 }));
+    assert_eq!(s.preceding(), at(0, 1));
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+    assert_eq!(s.preceding(), None, "the start of the song");
+    s.apply(Command::ClearAll);
+    assert_eq!(s.preceding(), None, "still the start after a clear");
+}

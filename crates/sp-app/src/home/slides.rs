@@ -436,6 +436,7 @@ impl SlideDeck {
         }
         if self.item.is_some() {
             state.services.chosen = self.item;
+            state.live_item = self.item;
         }
     }
 }
@@ -767,23 +768,26 @@ pub fn slide_scroll(
         let live_now = show.live().map(|live| (live, show.position().map(|(step, _)| step)));
         if live_now != state.live_seen {
             state.live_seen = live_now;
-            let open = state.services.chosen;
-            // The open item's slide first, when a song is in the playlist twice.
+            let (open, started) = (state.services.chosen, state.live_item);
+            // When a song is in the playlist twice: the item it was put on screen from (a
+            // click, a key), then the open item, then the first.
             let found = decks
                 .iter()
                 .enumerate()
                 .filter_map(|(at, deck)| match deck {
-                    Deck::Slides(slides) => {
-                        slides.live_slide(show, state).map(|slide| (at, slides.item == open, slide))
-                    }
+                    Deck::Slides(slides) => slides.live_slide(show, state).map(|slide| {
+                        (at, (slides.item.is_some() && slides.item == started, slides.item == open), slide)
+                    }),
                     _ => None,
                 })
-                .max_by_key(|(_, is_open, _)| *is_open);
+                .rev()
+                .max_by_key(|(_, rank, _)| *rank);
             if let Some((at, _, slide)) = found {
                 // The item whose slide has just gone on screen is the open one: Next going on
                 // into the next song takes the open item with it.
                 if let Some(item) = decks[at].item() {
                     state.services.chosen = Some(item);
+                    state.live_item = Some(item);
                 }
                 let rect = sheet.slide(&places[at], &shapes[at].body, slide);
                 let range = egui::Rangef::new(rect.min.y - origin.y, rect.max.y - origin.y);

@@ -1076,14 +1076,24 @@ impl crate::App {
             "macros" => Ok(self.ctl_macros()),
             "audio" => self.ctl_audio(args),
             "next" | "previous" | "prev" | "back" | "first" | "last" => {
-                let command = match word.as_str() {
-                    "next" => self.continue_playlist(Command::Next),
-                    "first" => Command::First,
-                    "last" => Command::Last,
-                    _ => Command::Previous,
+                // Next and Previous as the keys do them: on the open item, on into the next
+                // song or passage, or staying put with a word why.
+                let said = match word.as_str() {
+                    "next" => self.step_keys(true),
+                    "first" => {
+                        self.apply(vec![Command::First]);
+                        None
+                    }
+                    "last" => {
+                        self.apply(vec![Command::Last]);
+                        None
+                    }
+                    _ => self.step_keys(false),
                 };
-                self.apply(vec![command]);
-                Ok(Reply::done(self.live_words()))
+                Ok(Reply::done(match said {
+                    Some(said) => format!("{said} {}", self.live_words()),
+                    None => self.live_words(),
+                }))
             }
             "go" => self.ctl_go(args),
             "select" => self.ctl_select(&rest(args, 1)),

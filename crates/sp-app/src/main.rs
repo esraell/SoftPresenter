@@ -35,6 +35,7 @@ mod pack;
 mod private_folder;
 mod props;
 mod renamed;
+mod running;
 mod screen_cli;
 mod screens;
 mod service;
@@ -1305,7 +1306,7 @@ impl App {
                 self.freshen(*index, false);
             }
         }
-        let commands: Vec<Command> = commands.into_iter().map(|command| self.continue_playlist(command)).collect();
+        let commands: Vec<Command> = commands.into_iter().flat_map(|command| self.continue_playlist(command)).collect();
         let live_before = self.show.live();
         let Some(running) = self.running.as_mut() else {
             return;
@@ -2433,37 +2434,195 @@ impl App {
         }
     }
 
-    /// With Continuous Playlist on, Next on a song's last slide goes to the first slide of the
-    /// next song in the service instead of staying put.
-    fn continue_playlist(&self, command: Command) -> Command {
-        let Some(running) = self.running.as_ref() else { return command };
-        let state = &running.home_state;
-        if command != Command::Next || !state.continuous {
-            return command;
-        }
+    /// With Continuous Playlist on, Next on the last slide of a song or Bible passage of the
+    /// playlist in front goes on into the next song or passage instead of staying put (a slide
+    /// that goes on by itself, the command line). Anything else is left as it is.
+    fn continue_playlist(&mut self, command: Command) -> Vec<Command> {
+        let continuous = self.running.as_ref().is_some_and(|running| running.home_state.continuous);
         // Only at the end of the song's play order, with the last slide's builds all done.
-        let Some(live) = self.show.live() else { return command };
-        if self.show.upcoming().is_some() || self.show.builds_left() {
-            return command;
+        if command != Command::Next
+            || !continuous
+            || self.show.live().is_none()
+            || self.show.upcoming().is_some()
+            || self.show.builds_left()
+        {
+            return vec![command];
         }
-        let Some(key) = state.song_keys.get(live.presentation) else { return command };
+        let (stops, _) = self.playlist_stops();
+        let here = self.cursor_item(&stops);
+        match running::go_on(&stops, here, true) {
+            Some(item) => self.start_commands(item, false, &stops).unwrap_or_else(|| vec![command]),
+            None => vec![command],
+        }
+    }
+
+    /// The playlist in front as the keys that run the show see it, with each item's title.
+    fn playlist_stops(&self) -> (Vec<running::Stop>, Vec<String>) {
+        use running::Stop;
+        let Some(running) = self.running.as_ref() else { return (Vec::new(), Vec::new()) };
+        let state = &running.home_state;
         let items = &state.services.front().items;
-        let Some(here) = items.iter().position(|item| matches!(item, service::Item::Song { key: k, .. } if k == key))
-        else {
-            return command;
+        let has_slides = |at: usize| {
+            self.show.presentations().get(at).is_some_and(|song| {
+                song.order().into_iter().any(|slide| song.slide(slide).is_some_and(|(_, one)| one.enabled))
+            })
         };
-        let next = items[here + 1..].iter().find_map(|item| match item {
-            service::Item::Song { key, .. } => state.song_keys.iter().position(|have| have == key),
-            _ => None,
-        });
-        match next.and_then(|at| {
-            let song = self.show.presentations().get(at)?;
-            let first = song.order().into_iter().find(|slide| song.slide(*slide).is_some_and(|(_, s)| s.enabled))?;
-            Some(sp_engine::SlideRef { presentation: at, slide: first })
-        }) {
-            Some(target) => Command::GoTo(target),
-            None => command,
+        let stops = items
+            .iter()
+            .map(|item| match item {
+                service::Item::Song { key, .. } => match studio::playlist_song(&self.show, state, key) {
+                    Some(at) => Stop::Song { at, slides: has_slides(at) },
+                    None => Stop::Nothing,
+                },
+                service::Item::Passage(_) => Stop::Passage,
+                service::Item::Media { id, .. } => Stop::Media(self.show.media().iter().position(|m| m.id == *id)),
+                service::Item::MediaPlaylist { id, .. } => Stop::MediaPlaylist(!self.playlist_media(*id).is_empty()),
+                service::Item::Header { .. } | service::Item::Placeholder { .. } => Stop::Nothing,
+            })
+            .collect();
+        (stops, items.iter().map(|item| item.title().to_owned()).collect())
+    }
+
+    /// Which item of the playlist in front the slide on screen (or last on screen) is from. A
+    /// song the playlist holds twice: the item it was put on screen from, then the open one,
+    /// then the first.
+    fn cursor_item(&self, stops: &[running::Stop]) -> running::Here {
+        use running::Here;
+        let Some(cursor) = self.show.cursor() else { return Here::Nothing };
+        let Some(running) = self.running.as_ref() else { return Here::Nothing };
+        let state = &running.home_state;
+        let holds: Vec<usize> = if self.bible_slots.contains(&cursor.presentation) {
+            let title = self.show.presentations().get(cursor.presentation).map(|p| p.title.as_str());
+            let items = &state.services.front().items;
+            (0..items.len())
+                .filter(
+                    |at| matches!(&items[*at], service::Item::Passage(saved) if Some(saved.lookup.as_str()) == title),
+                )
+                .collect()
+        } else {
+            (0..stops.len())
+                .filter(|at| matches!(stops[*at], running::Stop::Song { at, .. } if at == cursor.presentation))
+                .collect()
+        };
+        [state.live_item, state.services.chosen]
+            .into_iter()
+            .flatten()
+            .find(|item| holds.contains(item))
+            .or_else(|| holds.first().copied())
+            .map_or(Here::Elsewhere, Here::Item)
+    }
+
+    /// Next (`forward`) or Previous, from a key, the menu or the command line: the keys act on
+    /// the open item (see `running`). Returns what was said instead, if anything was.
+    fn step_keys(&mut self, forward: bool) -> Option<String> {
+        let command = if forward { Command::Next } else { Command::Previous };
+        let running = self.running.as_ref()?;
+        let state = &running.home_state;
+        // On the Bible page and in the editors the show steps as it always has.
+        if state.bible_open || state.edit_kind().is_some() {
+            self.apply(vec![command]);
+            return None;
         }
+        let open = if state.playlist_open { state.services.chosen } else { None };
+        let continuous = state.continuous;
+        let (stops, titles) = self.playlist_stops();
+        let here = self.cursor_item(&stops);
+        let builds_back = self.show.live().is_some() && self.show.build_step() > 0;
+        let situation = running::Situation {
+            stops: &stops,
+            titles: &titles,
+            open,
+            here,
+            at_end: self.show.cursor().is_some() && self.show.upcoming().is_none() && !self.show.builds_left(),
+            at_start: self.show.cursor().is_some() && self.show.preceding().is_none() && !builds_back,
+            continuous,
+        };
+        match running::step(&situation, forward) {
+            running::Do::Show(command) => self.apply(vec![command]),
+            running::Do::Start { item, last } => self.start_item(item, last),
+            running::Do::Say(words) => {
+                if let Some(running) = self.running.as_mut() {
+                    running.home_state.say(words.clone());
+                    running.home_window.request_redraw();
+                }
+                return Some(words);
+            }
+        }
+        None
+    }
+
+    /// Enter: the open item of the playlist goes on screen from its first slide.
+    fn enter_key(&mut self) {
+        let Some(open) = self.running.as_ref().and_then(|r| r.home_state.services.chosen) else { return };
+        let (stops, _) = self.playlist_stops();
+        if let Some(running::Do::Start { item, last }) = running::enter(&stops, Some(open)) {
+            self.start_item(item, last);
+        }
+    }
+
+    /// Puts an item of the playlist in front on screen: a song or a Bible passage at its first
+    /// slide (its last when `last`), a picture or video shown, a media playlist played. It
+    /// becomes the open item.
+    fn start_item(&mut self, item: usize, last: bool) {
+        let (stops, _) = self.playlist_stops();
+        if let Some(running::Stop::MediaPlaylist(true)) = stops.get(item) {
+            let id = self.running.as_ref().and_then(|r| match r.home_state.services.front().items.get(item) {
+                Some(service::Item::MediaPlaylist { id, .. }) => Some(*id),
+                _ => None,
+            });
+            if let Some(running) = self.running.as_mut() {
+                running.home_state.services.chosen = Some(item);
+            }
+            if let Some(id) = id {
+                self.play_media_playlist(id);
+            }
+            return;
+        }
+        if let Some(commands) = self.start_commands(item, last, &stops) {
+            self.apply(commands);
+        }
+    }
+
+    /// What puts a song, a passage or a picture of the playlist in front on screen; a passage is
+    /// made into slides first. The item becomes the open one, and the one on screen.
+    fn start_commands(&mut self, item: usize, last: bool, stops: &[running::Stop]) -> Option<Vec<Command>> {
+        let commands = match stops.get(item)? {
+            running::Stop::Song { at, .. } => {
+                let song = self.show.presentations().get(*at)?;
+                let order = song.order();
+                let enabled = |step: &usize| song.slide(order[*step]).is_some_and(|(_, slide)| slide.enabled);
+                let step = if last { (0..order.len()).rev().find(enabled) } else { (0..order.len()).find(enabled) }?;
+                vec![Command::GoToStep { presentation: *at, step }]
+            }
+            running::Stop::Passage => vec![Command::GoTo(self.open_passage_now(item, last)?)],
+            running::Stop::Media(Some(at)) => vec![Command::ShowMedia(*at)],
+            _ => return None,
+        };
+        let running = self.running.as_mut()?;
+        running.home_state.services.chosen = Some(item);
+        if !matches!(stops.get(item), Some(running::Stop::Media(_))) {
+            running.home_state.live_item = Some(item);
+        }
+        Some(commands)
+    }
+
+    /// Makes a Bible passage the playlist in front keeps into slides now, as a click on one of
+    /// its tiles does (with the translations and choices it was kept with), and puts it on the
+    /// Bible page's place that is not on screen. Returns its first slide (its last when `last`).
+    fn open_passage_now(&mut self, item: usize, last: bool) -> Option<sp_engine::SlideRef> {
+        let live = self.show.live().map(|at| at.presentation);
+        let running = self.running.as_mut()?;
+        let state = &mut running.home_state;
+        let service::Item::Passage(saved) = state.services.front().items.get(item)?.clone() else { return None };
+        state.bible.open_saved(&saved, live);
+        state.bible.go_live = None;
+        let (slot, passage) = state.bible.pending.take()?;
+        let count = passage.slide_count();
+        if count == 0 {
+            return None;
+        }
+        self.show.replace_presentation(slot, Arc::new(passage));
+        Some(sp_engine::SlideRef { presentation: slot, slide: if last { count - 1 } else { 0 } })
     }
 
     /// Tells the output what is on each layer now, then redraws the operator's preview.
@@ -6505,6 +6664,8 @@ impl App {
         };
         let state = &mut running.home_state;
         let mut commands = Vec::new();
+        // Next Slide or Previous Slide: the keys' own rule, once the rest is done.
+        let mut step = None;
         // Shortcuts the views act on are handed to them as the key press they stand for.
         let mut press = |key: egui::Key, modifiers: egui::Modifiers| {
             let events = &mut running.egui_state.egui_input_mut().events;
@@ -6694,8 +6855,7 @@ impl App {
             A::GridView => state.slide_view = home::SlideView::Grid,
             A::EasyView => state.slide_view = home::SlideView::Easy,
             A::TableView => state.slide_view = home::SlideView::Table,
-            A::NextSlide => commands.push(Command::Next),
-            A::PreviousSlide => commands.push(Command::Previous),
+            A::NextSlide | A::PreviousSlide => step = Some(action == A::NextSlide),
             A::ClearAll => commands.push(Command::ClearAll),
             A::ClearSlide => commands.push(Command::Clear(sp_engine::Layer::Slides)),
             A::ClearMedia => commands.push(Command::Clear(sp_engine::Layer::Media)),
@@ -6725,6 +6885,23 @@ impl App {
         running.home_window.request_redraw();
         if !commands.is_empty() {
             self.apply(commands);
+        }
+        if let Some(forward) = step {
+            self.step_keys(forward);
+        }
+    }
+
+    /// A key that runs the show: Next and Previous act on the open item (see `step_keys`); the
+    /// rest go to the show as they are.
+    fn show_key(&mut self, command: Command) {
+        match command {
+            Command::Next => {
+                self.step_keys(true);
+            }
+            Command::Previous => {
+                self.step_keys(false);
+            }
+            other => self.apply(vec![other]),
         }
     }
 
@@ -7063,7 +7240,7 @@ impl ApplicationHandler<AppEvent> for App {
                         && !self.held.control_key()
                         && let Some(command) = show_key_command(&event.logical_key, &self.show)
                     {
-                        self.apply(vec![command]);
+                        self.show_key(command);
                     }
                 }
                 _ => {}
@@ -7104,9 +7281,30 @@ impl ApplicationHandler<AppEvent> for App {
             let something_open = escape_closes_something(&running.home_state, &running.egui_ctx);
             let escape = matches!(key.logical_key, Key::Named(NamedKey::Escape));
             if !(escape && something_open) {
-                self.apply(vec![command]);
+                self.show_key(command);
                 return;
             }
+        }
+        // Enter puts the open item of the playlist on screen from its first slide, when no
+        // control has the keyboard and nothing is open over the window.
+        if let WindowEvent::KeyboardInput { event: key, .. } = &event
+            && key.state == ElementState::Pressed
+            && matches!(key.logical_key, Key::Named(NamedKey::Enter))
+            && !key.repeat
+            && !running.egui_ctx.text_edit_focused()
+            && running.egui_ctx.memory(|memory| memory.focused().is_none())
+            && running.home_state.edit_kind().is_none()
+            && !running.home_state.bible_open
+            && running.home_state.playlist_open
+            && !escape_closes_something(&running.home_state, &running.egui_ctx)
+            && running.home_state.new_song_sheet.is_none()
+            && !running.home_state.alert_open()
+            && !self.held.super_key()
+            && !self.held.control_key()
+            && !self.held.alt_key()
+        {
+            self.enter_key();
+            return;
         }
         // The interface toolkit answers "repaint" to a redraw request itself. Asking for a redraw
         // in reply to a redraw never ends: the window then redraws as fast as it can for ever,

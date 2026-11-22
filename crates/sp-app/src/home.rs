@@ -264,6 +264,11 @@ pub struct HomeState {
     /// The playlist in front, its open item and the song chosen when the slides last looked,
     /// so that whichever of them changes next brings the others into step.
     pub open_seen: Option<(usize, Option<usize>, usize)>,
+    /// The playlist item whose slide went on screen last (a click on it, or a key starting
+    /// it), so a song the playlist holds twice is known to be on screen from the right place.
+    pub live_item: Option<usize>,
+    /// A notice that comes and goes under the top bar (see `say`), and when it was first shown.
+    pub toast: Option<(String, Option<f64>)>,
     /// The Bible passages kept in playlists, as slides.
     pub passages: slides::PassageDecks,
     /// How tall each slide's row is in the words-only and table views.
@@ -1293,6 +1298,8 @@ impl Default for HomeState {
             chooser_open: false,
             song_order: crate::kept::SongOrder::Listed,
             live_row_seen: None,
+            live_item: None,
+            toast: None,
 
             media_playlists: Vec::new(),
             media_playlist_shown: None,
@@ -1389,6 +1396,12 @@ impl HomeState {
     pub fn hidden_slots(&self) -> [usize; 3] {
         let [first, second] = self.bible.slots.unwrap_or([usize::MAX; 2]);
         [first, second, self.voxlive_slot.unwrap_or(usize::MAX)]
+    }
+
+    /// Says something for a moment, under the top bar (that the playlist has ended, say). It
+    /// changes nothing.
+    pub fn say(&mut self, words: impl Into<String>) {
+        self.toast = Some((words.into(), None));
     }
 
     /// True while a question asking whether to delete something is open: then no key reaches
@@ -1618,6 +1631,7 @@ pub fn home_ui(
         slide_area(ui, show, state, theme, thumb, &mut commands);
     }
     crate::studio::round_corners(ui, middle);
+    crate::studio::toast(ui.ctx(), state);
     commands
 }
 
