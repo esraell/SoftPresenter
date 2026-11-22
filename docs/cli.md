@@ -776,8 +776,26 @@ pairs its connectors), the card itself can send a see-through screen's fill and 
 
 Without the driver, `sp decklink` says Desktop Video isn't installed (or is too old) and there
 are no DeckLink outputs to choose; a screen saved with one says the same in `sp screens`.
-`softpresenter decklink-check` (the app's own program, run from a terminal, with no app needed)
-lists the devices the same way.
+### Checking a DeckLink card
+
+`softpresenter decklink-check` is the app's own program run from a terminal, with no app
+needed (on a Mac, `/Applications/SoftPresenter.app/Contents/MacOS/softpresenter decklink-check`,
+or wherever the app is). It lists the devices, the formats each plays in (B: 8-bit BGRA, Y: 8-bit
+YUV, K: can key) and whether each can key, and with `play` sends a test picture to one device:
+
+    softpresenter decklink-check
+    softpresenter decklink-check play 1 --seconds 10
+    softpresenter decklink-check play "DeckLink Duo (2)" --format 1080p29.97
+    softpresenter decklink-check play 1 --key external --seconds 20
+
+The picture is colour bars with a white bar moving across them, so a freeze or a stutter shows;
+with `--key`, the card's keyer is on and the bottom half is clear but for a white ramp from clear
+to solid and a soft-edged moving bar, to check the key (`--alpha premultiplied` sends it
+premultiplied). Nothing is sent unless a device is named; the check says what it will send
+where, and waits for `yes` (or `--yes`), before it does. It plays through the same output the
+app uses, stops after the seconds asked for (10 unless told), and says how many frames played,
+late and dropped. From the source, `cargo run -p sp-decklink --example decklink_check -- …` is
+the same.
 
 A see-through screen is clear wherever nothing is drawn, for a video switcher or streaming
 software to lay the words over its camera picture: the media, the themes' backgrounds and the

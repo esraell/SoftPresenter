@@ -637,6 +637,11 @@ feature changes, this page changes in the same commit.
   from the same picture, read back once, though each output keeps its own clock, so the card's
   own keyer keeps them closer in step. Changing the profile is left to Desktop Video Setup:
   SoftPresenter never changes it, and lists the devices again when asked (`sp decklink`).
+- **A DeckLink check from the terminal.** `softpresenter decklink-check` lists the devices,
+  their formats and keying without the app, and `decklink-check play DEVICE` sends colour bars
+  with a moving bar (and with `--key`, a picture with clear parts and soft edges, through the
+  card's keyer) to one named device for a few seconds, through the same output the app uses,
+  after saying what it will send where and waiting for yes ([cli.md](cli.md#checking-a-decklink-card)).
 - Stage screens for the people on stage: the words on screen now, the next slide's words, the
   time, a running timer and the stage message.
 - A screen sent over NDI is drawn and sent only while someone is watching it. With no receiver

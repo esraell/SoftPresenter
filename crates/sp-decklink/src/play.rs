@@ -156,6 +156,15 @@ impl DeckLinkOutput {
     pub fn watch(&self) -> Watch {
         Watch(self.shared.clone())
     }
+
+    /// Stops the output and waits for its thread to have let the device go. For a program that
+    /// ends straight after (the check); the app drops outputs instead, never waiting.
+    pub fn stop(mut self) {
+        self.tx = None;
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 impl Drop for DeckLinkOutput {
