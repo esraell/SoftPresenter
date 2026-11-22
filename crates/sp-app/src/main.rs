@@ -808,9 +808,15 @@ fn template_names(theme: &Theme) -> Vec<String> {
 }
 
 /// Whether Escape has something in the window to close (a pop-up, the Settings window, the
-/// Bible page's Options or Bibles window, the sheet asking what a Bible file is, the setup),
-/// which it closes instead of clearing the screens.
+/// Bible page's Options or Bibles window, the sheet asking what a Bible file is, the setup, the
+/// playlist chooser, the Reflow editor), which it closes instead of clearing the screens.
 fn escape_closes_something(state: &home::HomeState, ctx: &egui::Context) -> bool {
+    something_over_the_window(state, ctx) || state.show_view_overlay_open()
+}
+
+/// Whether something is open over the window: a pop-up, the Settings window, the Bible page's
+/// Options or Bibles window, the sheet asking what a Bible file is, the setup.
+fn something_over_the_window(state: &home::HomeState, ctx: &egui::Context) -> bool {
     state.settings_open
         || state.key_sheet
         || state.bible.options.open
@@ -888,7 +894,7 @@ fn enter_key_is_free(state: &home::HomeState, ctx: &egui::Context) -> bool {
     !ctx.text_edit_focused()
         && ctx.memory(|memory| memory.focused().is_none())
         && state.edit_kind().is_none()
-        && !escape_closes_something(state, ctx)
+        && !something_over_the_window(state, ctx)
         && state.new_song_sheet.is_none()
         && !state.alert_open()
 }
@@ -9597,6 +9603,19 @@ mod tests {
         state.bible.options.manage_open = false;
         state.setup = Some(setup::Setup::new());
         assert!(escape_closes_something(&state, &ctx));
+        state.setup = None;
+        // The playlist chooser and the Reflow editor too, in the Show view where they are; Enter
+        // still runs the show under them.
+        let opens: [fn(&mut home::HomeState); 2] =
+            [|state| state.chooser_open = true, |state| state.reflow = Some((0, "Words".to_owned()))];
+        for open in opens {
+            let mut state = home::HomeState::default();
+            open(&mut state);
+            assert!(escape_closes_something(&state, &ctx) && enter_key_is_free(&state, &ctx));
+            // Not drawn on the Bible page: there Escape clears.
+            state.bible_open = true;
+            assert!(!escape_closes_something(&state, &ctx));
+        }
         assert_eq!(key(Key::Named(NamedKey::Tab)), None);
         // Letters jump to the group they stand for, in either case.
         assert_eq!(key(Key::Character("a".into())), jump(0));

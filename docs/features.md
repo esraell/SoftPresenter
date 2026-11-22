@@ -182,7 +182,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   song libraries under a line (All Songs, then libraries of your own such as Christmas or
   Youth). The one that is open has a lighter row, a heavier name and a tick. + beside each
   heading makes a new one; a row's ⋯ (or a right-click, or a double click for Rename) renames,
-  exports or deletes it. Choosing puts the list back. A library lists its songs, each with how
+  exports or deletes it. Choosing puts the list back, and so does Escape, which then clears
+  nothing on the screens. A library lists its songs, each with how
   many slides it has (and, in All Songs, the library it is in); at the foot are the order they
   are listed in (**As listed, A–Z, Longest**, kept between runs), **New song** and a filter. A
   song's ⋯, or a right-click, opens its menu. While songs are dragged the chooser shows above
@@ -816,7 +817,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   extent; Zoom (Fit, 25% to 200%, or pinch) with two-finger scrolling around a zoomed slide; and
   Grid, which shows a grid that boxes snap to.
 - **Reflow** (Control-R, or Reflow beside a song's title): the song's words as text, to type
-  into; the slides are rebuilt from them and keep their looks, labels and notes.
+  into; the slides are rebuilt from them and keep their looks, labels and notes. Cancel, or
+  Escape, closes it without keeping what was typed, and clears nothing on the screens.
 - **Cmd+N** makes a new song.
 
 ![The editor](images/editor.png)

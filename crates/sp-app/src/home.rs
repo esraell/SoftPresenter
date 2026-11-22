@@ -2013,6 +2013,26 @@ impl HomeState {
             || self.confirm_delete_layout.is_some()
     }
 
+    /// Whether an Escape pressed now belongs to something over the window (a menu, a question,
+    /// a sheet, the find box, the list of keys, the setup), which takes it before the chooser or
+    /// the Reflow editor under it.
+    pub fn escape_taken_above(&self, ctx: &egui::Context) -> bool {
+        egui::Popup::is_any_open(ctx)
+            || self.key_sheet
+            || self.alert_open()
+            || self.new_song_sheet.is_some()
+            || self.library_search.is_some()
+            || self.setup.is_some()
+            || !self.bible.options.details.is_empty()
+    }
+
+    /// Whether the playlist chooser or the Reflow editor is open in the Show view, where
+    /// Escape closes it instead of clearing the screens.
+    pub fn show_view_overlay_open(&self) -> bool {
+        let show_view = !self.bible_open && self.editing.is_none();
+        show_view && (self.chooser_open || self.reflow.is_some())
+    }
+
     /// The small choices kept between runs, as they are now.
     pub fn prefs(&self) -> crate::service::Prefs {
         crate::service::Prefs {
@@ -4456,9 +4476,12 @@ fn listed_name(object: &sp_model::Object) -> String {
 /// The Reflow editor: a song's words as text, to type into. `[Group]` starts a group, a blank
 /// line starts a slide, and `--` comes before a translation. Done rebuilds the slides.
 fn reflow_editor(ui: &mut egui::Ui, title: &str, state: &mut HomeState) {
+    // Escape cancels, as Cancel does (the words typed are not kept), unless it is for a menu or
+    // something else over the window; it clears nothing.
+    let escape = !state.escape_taken_above(ui.ctx()) && ui.input(|input| input.key_pressed(egui::Key::Escape));
     let Some((index, text)) = state.reflow.as_mut() else { return };
     let index = *index;
-    let mut done = None;
+    let mut done = escape.then_some(false);
     let field_id = ui.scope_id().with("reflow text");
     let heading = Frame::new().inner_margin(egui::Margin { left: 20, right: 16, top: 12, bottom: 8 });
     egui::Panel::top("reflow header").resizable(false).frame(heading).show(ui, |ui| {
@@ -12594,6 +12617,52 @@ mod tests {
             assert_eq!(state.screens, screens);
         }
         assert_eq!(output_label(&screens[2].output, &[]), "Gone   (disconnected)");
+    }
+
+    #[test]
+    fn escape_puts_the_chooser_away_and_cancels_the_reflow_editor() {
+        use crate::studio::tests::key;
+        let ctx = egui::Context::default();
+        let show = three_songs();
+        // The chooser: Escape puts it away, and nothing is cleared.
+        let mut state = HomeState { playlist_open: true, chooser_open: true, ..HomeState::default() };
+        frame_events(&ctx, &show, &mut state, vec![], 0.0);
+        let commands = frame_commands(&ctx, &show, &mut state, vec![key(Key::Escape)], 0.1);
+        assert!(!state.chooser_open, "Escape puts the chooser away");
+        assert!(commands.is_empty(), "and clears nothing: {commands:?}");
+        // Retyping a playlist's name in it, Escape ends the retyping and the chooser stays.
+        state.chooser_open = true;
+        state.renaming_service = Some("Sunday".to_owned());
+        state.rename_started = true;
+        frame_events(&ctx, &show, &mut state, vec![], 0.2);
+        frame_events(&ctx, &show, &mut state, vec![key(Key::Escape)], 0.3);
+        assert!(state.renaming_service.is_none() && state.chooser_open, "the retyping ends, the chooser stays");
+        assert_eq!(state.services.front().name, "Service", "and the name is as it was");
+        // The Reflow editor: Escape cancels, keeping nothing typed, whether or not its words
+        // have the keyboard.
+        state.chooser_open = false;
+        let middle = pos2(700.0, 420.0);
+        let click = |pressed: bool| Event::PointerButton {
+            pos: middle,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        for typing in [false, true] {
+            state.reflow = Some((0, "Words".to_owned()));
+            frame_events(&ctx, &show, &mut state, vec![], 0.4);
+            if typing {
+                frame_events(&ctx, &show, &mut state, vec![Event::PointerMoved(middle), click(true)], 0.45);
+                frame_events(&ctx, &show, &mut state, vec![click(false)], 0.5);
+                frame_events(&ctx, &show, &mut state, vec![Event::Text(" more".to_owned())], 0.55);
+                assert!(state.reflow.as_ref().is_some_and(|(_, words)| words.contains("more")), "typed in");
+            }
+            assert_eq!(ctx.text_edit_focused(), typing);
+            let commands = frame_commands(&ctx, &show, &mut state, vec![key(Key::Escape)], 0.6);
+            assert!(state.reflow.is_none(), "typing {typing}: Escape closes the Reflow editor");
+            assert!(state.reflow_done.is_none(), "typing {typing}: without rebuilding the slides");
+            assert!(commands.is_empty(), "typing {typing}: and clears nothing: {commands:?}");
+        }
     }
 
     #[test]

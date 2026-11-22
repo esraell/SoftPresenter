@@ -95,7 +95,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | ↑, ↓ | Opens the playlist item above or below (a notice says so at either end); in the Bible view under Slides, picks the verse before or after without putting it on screen; on the Bible page, as ← and → (with a verse picked and nothing on screen, moves the pick to the verse above or below; with something on screen, goes on with it) |
 | Enter | The slide picked goes on screen (the first slide or verse of what the find box or the reference field just opened, or the verse ↑ or ↓ picked in the Bible view); with none, the open item from its first slide (with a library listed, the song chosen) |
 | Home, End | First, last slide of the song |
-| Escape (F1) | Clear all |
+| Escape (F1) | Clear all; with the chooser of playlists and libraries or the Reflow editor open, Escape closes it instead (the Reflow editor without keeping what was typed) and clears nothing |
 | F2, F3, F4, F5, F6 | Clear slide, media, props, audio, messages |
 | A letter | The slide with that hot key, or the group it stands for (A for the first verse, S for the second, C for the chorus, E for the ending…; the letter shows at the right of a group's bar). In the Bible view a letter or number starts the next reference in the reference field instead |
 | Delete | Delete what is picked out, after asking |

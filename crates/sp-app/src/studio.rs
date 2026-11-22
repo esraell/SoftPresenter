@@ -2173,6 +2173,16 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         if name.on_hover_text(hint).clicked() {
             state.chooser_open = !state.chooser_open;
         }
+        // Escape puts it away, unless it ends retyping a name in it, or is for a menu or
+        // something else over the window; it clears nothing.
+        let retyping = state.renaming_service.is_some() || state.renaming_library.is_some();
+        if state.chooser_open
+            && !retyping
+            && !state.escape_taken_above(ui.ctx())
+            && ui.input(|input| input.key_pressed(egui::Key::Escape))
+        {
+            state.chooser_open = false;
+        }
         if state.chooser_open {
             // Only things to open: the list and the foot are put away.
             egui::ScrollArea::vertical().id_salt("chooser").auto_shrink([false, false]).show(ui, |ui| {
