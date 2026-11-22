@@ -73,9 +73,15 @@ pub fn with_shift(key: &str) -> String {
     format!("{}{key}", shift_modifier())
 }
 
-/// The key that opens tool tab `tab` (from 0) and numbers what is in it.
+/// The modifier the tool tabs' keys use: Option on a Mac, Alt elsewhere.
+pub fn tab_modifier() -> &'static str {
+    if cfg!(target_os = "macos") { "\u{2325}" } else { "Alt+" }
+}
+
+/// The key that opens tool tab `tab` (from 0) and numbers what is in it: `⌥1` on a Mac,
+/// `Alt+1` elsewhere. (Command-1, 2 and 3 are Show, Bible and Edit.)
 pub fn tab_key(tab: usize) -> String {
-    with_modifier(&(tab + 1).to_string())
+    format!("{}{}", tab_modifier(), tab + 1)
 }
 
 /// The keys that switch the audience and the stage screens on and off: Shift as well as the
@@ -154,6 +160,16 @@ fn pressed(input: &egui::InputState, key: Key, shift: bool) -> bool {
     })
 }
 
+/// Whether a key was pressed this frame with Option (Alt elsewhere) alone. A Mac's Option and a
+/// number types a sign (¡, ™, £…), so the key is matched by where it is on the keyboard too.
+fn pressed_tab(input: &egui::InputState, key: Key) -> bool {
+    input.events.iter().any(|event| {
+        matches!(event, egui::Event::Key { key: pressed, physical_key, pressed: true, modifiers, .. }
+            if (*pressed == key || *physical_key == Some(key))
+                && modifiers.alt && !modifiers.command && !modifiers.ctrl && !modifiers.shift)
+    })
+}
+
 /// Whether a key was pressed this frame with no modifier.
 fn plain(input: &egui::InputState, key: Key) -> bool {
     input.events.iter().any(|event| {
@@ -191,13 +207,15 @@ pub fn frame(ctx: &egui::Context, state: &mut HomeState, voxlive: bool) -> Optio
         let keyed = input.events.iter().any(|event| matches!(event, egui::Event::Key { pressed: true, .. }));
         (input.modifiers.command, input.modifiers.shift, input.modifiers.alt, input.pointer.any_down(), keyed)
     });
-    if command && !shift && !alt && !down && !keyed {
+    // Option held alone shows them too: it is the tool tabs' modifier.
+    let tab_held = alt && !command && !shift && !ctx.text_edit_focused();
+    if (command && !shift && !alt || tab_held) && !down && !keyed {
         let since = *state.modifier_since.get_or_insert(now);
         state.key_tags = now - since >= HELD_FOR;
         if !state.key_tags {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(HELD_FOR - (now - since) + 0.01));
         }
-    } else if !command || down {
+    } else if !command && !tab_held || down {
         state.modifier_since = None;
         state.key_tags = false;
     }
@@ -269,14 +287,19 @@ pub fn frame(ctx: &egui::Context, state: &mut HomeState, voxlive: bool) -> Optio
         if question_mark(input) {
             state.key_sheet = true;
         }
-        // The views.
-        if pressed(input, Key::S, false) {
+        // The views: Command-1, 2 and 3 are Show, Bible (ready for a reference) and Edit, from
+        // anywhere (on a Mac the menu bar's View menu takes them first, to the same effect).
+        if pressed(input, Key::Num1, false) {
             state.view_request = Some(0);
         }
-        if pressed(input, Key::E, false) {
+        if pressed(input, Key::Num2, false) {
+            state.view_request = Some(2);
+            state.bible.focus_lookup = true;
+        }
+        if pressed(input, Key::Num3, false) {
             state.view_request = Some(1);
         }
-        // Command-B is Bold in the editor; elsewhere it is the Bible page, ready for a reference.
+        // Command-B is the Bible page too, for those used to it; in the editor it is Bold.
         if !editing && pressed(input, Key::B, false) {
             state.view_request = Some(2);
             state.bible.focus_lookup = true;
@@ -296,11 +319,11 @@ pub fn frame(ctx: &egui::Context, state: &mut HomeState, voxlive: bool) -> Optio
             state.view_request = Some(0);
             state.chooser_open = true;
         }
-        // A tool tab, numbered.
+        // A tool tab, numbered: Option-1 to 7 (Alt elsewhere).
         let tabs = if voxlive { 7 } else { 6 };
         let numbered = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7]
             .iter()
-            .position(|key| pressed(input, *key, false));
+            .position(|key| pressed_tab(input, *key));
         if let Some(tab) = numbered.filter(|tab| *tab < tabs) {
             state.live_tab = tab;
             state.numbers = Some(Numbers { of: NumbersOf::Tab, since: now, picked: None });
@@ -352,7 +375,8 @@ pub fn every_key() -> Vec<(&'static str, Vec<Row>)> {
         (
             "Going places",
             vec![
-                (vec![m("S"), m("B"), m("E")], "Show, Bible (ready for a reference), Edit"),
+                (vec![m("1"), m("2"), m("3")], "Show, Bible (ready for a reference), Edit"),
+                (one(&m("B")), "Bible, too (Bold while editing a slide)"),
                 (one(&m(",")), "Settings"),
                 (one(&m("P")), "Playlists and libraries"),
                 (vec!["/".to_owned(), m("F")], "Find a song, a line or a verse"),
@@ -363,7 +387,7 @@ pub fn every_key() -> Vec<(&'static str, Vec<Row>)> {
             "The live tools",
             vec![
                 (
-                    vec![format!("{} \u{2026} {}", m("1"), m("7"))],
+                    vec![format!("{} \u{2026} {}", tab_key(0), tab_key(6))],
                     "Open Timers, Messages, Props, Macros, Stage, Audio, VoxLive",
                 ),
                 (
@@ -558,7 +582,7 @@ mod tests {
     fn modifier_and_a_number_opens_that_tab_and_numbers_what_is_in_it() {
         let ctx = egui::Context::default();
         let mut state = HomeState::default();
-        press(&ctx, &mut state, 1.0, Key::Num4, egui::Modifiers::COMMAND);
+        press(&ctx, &mut state, 1.0, Key::Num4, egui::Modifiers::ALT);
         assert_eq!(state.live_tab, 3, "Macros");
         assert!(Numbers::showing(&state.numbers, NumbersOf::Tab));
         // Then 2 picks the second macro, for that frame only, and the numbers stay.
@@ -573,7 +597,7 @@ mod tests {
     fn the_numbers_go_after_four_seconds_and_a_pick_keeps_them_four_more() {
         let ctx = egui::Context::default();
         let mut state = HomeState::default();
-        press(&ctx, &mut state, 10.0, Key::Num1, egui::Modifiers::COMMAND);
+        press(&ctx, &mut state, 10.0, Key::Num1, egui::Modifiers::ALT);
         idle(&ctx, &mut state, 13.9);
         assert!(state.numbers.is_some(), "still there just before four seconds");
         press(&ctx, &mut state, 13.95, Key::Num1, egui::Modifiers::NONE);
@@ -609,6 +633,39 @@ mod tests {
         let asked = press(&ctx, &mut state, 4.0, Key::Num1, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT);
         assert_eq!(asked, Some(Ask::Audience));
         assert_eq!(state.live_tab, 0, "Shift-modifier-1 is the audience screens, not a tab");
+    }
+
+    #[test]
+    fn command_one_two_three_are_show_bible_and_edit_and_option_numbers_the_tabs() {
+        let ctx = egui::Context::default();
+        let mut state = HomeState::default();
+        press(&ctx, &mut state, 1.0, Key::Num3, egui::Modifiers::COMMAND);
+        assert_eq!(state.view_request, Some(1), "Edit");
+        press(&ctx, &mut state, 2.0, Key::Num2, egui::Modifiers::COMMAND);
+        assert_eq!(state.view_request, Some(2), "Bible");
+        assert!(state.bible.focus_lookup, "ready for a reference");
+        press(&ctx, &mut state, 3.0, Key::Num1, egui::Modifiers::COMMAND);
+        assert_eq!(state.view_request, Some(0), "Show");
+        assert!(state.numbers.is_none(), "Command and a number opens no tab");
+        // Option-5 (Alt-5 elsewhere) opens the fifth tab and numbers it, even when the key
+        // reports the sign a Mac types with Option, as long as it is that place on the keyboard.
+        let input = egui::RawInput {
+            time: Some(4.0),
+            events: vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::ALT),
+                egui::Event::Key {
+                    key: Key::Num5,
+                    physical_key: Some(Key::Num5),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::ALT,
+                },
+            ],
+            ..egui::RawInput::default()
+        };
+        ctx.run_ui(input, |ui| _ = frame(ui.ctx(), &mut state, false)).drop_without_applying_deltas();
+        assert_eq!(state.live_tab, 4);
+        assert!(state.numbers.is_some());
     }
 
     #[test]

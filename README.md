@@ -134,7 +134,7 @@ The full list, area by area, is in [docs/features.md](docs/features.md).
    time the app opens, set it under Settings, Screens, When SoftPresenter Opens.
 6. **Choose what the stage sees.** In the Stage tab, give each stage screen a layout: Words and
    Next, Words Only, Words and Notes, Clock and Timer, or one you design.
-7. **Run it.** In the Show view (Control-S), open the playlist and click the first slide, or press
+7. **Run it.** In the Show view (Command-1), open the playlist and click the first slide, or press
    Space. The right arrow and Space go forward, the left arrow goes back, and letters jump to a
    group (A for Verse 1, C for the chorus). With View, Continuous Playlist on, the last slide of
    a song leads into the next song. Escape clears everything, walk-in music and announcements

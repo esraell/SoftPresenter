@@ -281,9 +281,9 @@ pub const MENUS: &[(&str, &[Entry])] = &[
     (
         "View",
         &[
-            Check(Action::ShowView, "Show", ctrl('S')),
-            Check(Action::EditView, "Edit", ctrl('E')),
-            Check(Action::BibleView, "Bible", ctrl('B')),
+            Check(Action::ShowView, "Show", cmd('1')),
+            Check(Action::BibleView, "Bible", cmd('2')),
+            Check(Action::EditView, "Edit", cmd('3')),
             Check(Action::ThemesView, "Themes", ctrl('T')),
             Do(Action::ReflowView, "Reflow Editor", ctrl('R')),
             Line,
@@ -714,7 +714,8 @@ mod tests {
         assert!(claims(KeyCode::KeyZ, command | ModifiersState::SHIFT));
         assert!(claims(KeyCode::Comma, command));
         assert!(claims(KeyCode::Digit1, command | ModifiersState::ALT));
-        assert!(claims(KeyCode::KeyS, ModifiersState::CONTROL));
+        assert!(claims(KeyCode::KeyT, ModifiersState::CONTROL));
+        assert!(!claims(KeyCode::KeyS, ModifiersState::CONTROL), "Show is Command-1 now");
         assert!(claims(KeyCode::BracketLeft, command | ModifiersState::SHIFT));
         assert!(claims(KeyCode::KeyF, command | ModifiersState::SHIFT | ModifiersState::ALT));
         // Plain keys belong to typing and the show.
@@ -723,8 +724,11 @@ mod tests {
         assert!(!claims(KeyCode::ArrowRight, ModifiersState::empty()));
         // Command-S is not a menu shortcut.
         assert!(!claims(KeyCode::KeyS, command));
-        // Command-1 to 7 are the tool tabs' keys; Shift-Command-1 and 2 the screens.
-        assert!(!claims(KeyCode::Digit1, command));
+        // Command-1, 2 and 3 are Show, Bible and Edit; 4 to 7 nothing; Option-1 to 7 (no
+        // Command) the tool tabs', which the window reads; Shift-Command-1 and 2 the screens.
+        assert!(claims(KeyCode::Digit1, command) && claims(KeyCode::Digit3, command));
+        assert!(!claims(KeyCode::Digit4, command));
+        assert!(!claims(KeyCode::Digit1, ModifiersState::ALT));
         assert!(claims(KeyCode::Digit1, command | ModifiersState::SHIFT));
         assert!(claims(KeyCode::Digit2, command | ModifiersState::SHIFT));
     }

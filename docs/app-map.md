@@ -99,9 +99,10 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | A letter | The slide with that hot key, or the group it stands for (A for the first verse, S for the second, C for the chorus, E for the ending…; the letter shows at the right of a group's bar) |
 | Delete | Delete what is picked out, after asking |
 | Command-N | New song |
-| Command-S, -B, -E | Show, Bible (cursor in the reference; Bold while editing a slide), Edit (Ctrl on other computers, for all of these) |
+| Command-1, -2, -3 | Show, Bible (cursor in the reference), Edit (Ctrl on other computers, for all of these) |
+| Command-B | Bible as well (Bold while editing a slide) |
 | Command-P | The chooser of playlists and libraries |
-| Command-1 … 7, then 1 … 9 | Opens that tool tab and numbers what is in it; a number then starts that timer, shows that message or prop, runs that macro, switches that stage layout or plays that track. The numbers go after four seconds; Escape puts them away and clears nothing |
+| Option-1 … 7 (Alt elsewhere), then 1 … 9 | Opens that tool tab and numbers what is in it; a number then starts that timer, shows that message or prop, runs that macro, switches that stage layout or plays that track. The numbers go after four seconds; Escape puts them away and clears nothing |
 | Shift-Command-M, then 1 … 9 | Shows that picture or video from the media strip |
 | Shift-Command-1, -2 | Audience screens, stage screens, on or off |
 | Command-O | The menu of the slide on screen |

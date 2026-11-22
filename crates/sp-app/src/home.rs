@@ -7035,7 +7035,7 @@ mod tests {
     }
 
     #[test]
-    fn modifier_one_then_one_starts_the_first_timer_and_shift_modifier_m_then_one_shows_a_picture() {
+    fn option_one_then_one_starts_the_first_timer_and_shift_modifier_m_then_one_shows_a_picture() {
         let (ctx, show) = (egui::Context::default(), {
             let mut show = Show::new(vec![Arc::new(parse_song_text("Alpha", "Words\n"))]);
             show.add_media(sp_model::MediaItem::new("Welcome.png".into(), "Welcome.png".into()));
@@ -7045,7 +7045,7 @@ mod tests {
         state.timers.push(crate::timers::Timer::new("Sermon".to_owned()));
         state.live_tab = 2;
         frame_commands(&ctx, &show, &mut state, vec![], 1.0);
-        frame_commands(&ctx, &show, &mut state, pressed(Key::Num1, Modifiers::COMMAND), 1.1);
+        frame_commands(&ctx, &show, &mut state, pressed(Key::Num1, Modifiers::ALT), 1.1);
         assert_eq!(state.live_tab, 0, "the Timers tab");
         frame_commands(&ctx, &show, &mut state, pressed(Key::Num1, Modifiers::NONE), 1.2);
         assert!(state.timers[0].running(), "1 started the first timer, as its Start key does");
