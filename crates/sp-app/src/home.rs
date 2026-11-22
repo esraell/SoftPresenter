@@ -411,6 +411,8 @@ pub struct HomeState {
     pub preferences_pane: usize,
     /// Settings › Integrations: VoxLive's state, and what is asked of it.
     pub voxlive: crate::voxlive::View,
+    /// Canva Sync's page in Settings › Integrations, and what the top bar says of a sync.
+    pub canva: crate::canva::View,
     /// Where the VoxLive item is among the presentations.
     pub voxlive_slot: Option<usize>,
     /// A VoxLive screen chosen in the VoxLive tab, by its slide in the VoxLive item, to put on
@@ -1407,6 +1409,7 @@ impl Default for HomeState {
             preferences_open: false,
             preferences_pane: 0,
             voxlive: Default::default(),
+            canva: Default::default(),
             voxlive_slot: None,
             voxlive_go: None,
             copyright_show: crate::service::CopyrightShow::Never,
@@ -4544,7 +4547,7 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
         ui.label(egui::RichText::new(pane).font(crate::studio::semibold(18.0)).color(TEXT));
         ui.add_space(12.0);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match pane {
-            "Integrations" => crate::integrations::pane(ui, &mut state.voxlive),
+            "Integrations" => crate::integrations::pane(ui, &mut state.voxlive, &mut state.canva),
             "General" => {
                 crate::studio::caption(ui, "COPYRIGHT");
                 ui.label("Show a song's copyright line on the audience screens:");

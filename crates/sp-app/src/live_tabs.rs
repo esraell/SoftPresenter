@@ -1159,6 +1159,13 @@ pub fn add_action_menu(ui: &mut egui::Ui, show: &sp_engine::Show, state: &HomeSt
             }
         });
     });
+    if ui
+        .button("Sync from Canva")
+        .on_hover_text("Fetch a fresh announcements video (Settings › Integrations › Canva Sync)")
+        .clicked()
+    {
+        chosen = Some(ShowAction::CanvaSync);
+    }
     // Something that goes round on the Announcements layer: a media playlist, a picture or a
     // video, or a song.
     ui.menu_button("Play on the Announcements Layer", |ui| {

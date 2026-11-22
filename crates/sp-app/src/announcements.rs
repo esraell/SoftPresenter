@@ -194,15 +194,7 @@ impl crate::App {
             theme: media_theme(),
             video: video.as_ref().map(|player: &sp_video::Player| (name.clone(), player.frames())),
         };
-        let title = match what {
-            Announce::MediaPlaylist(id) => {
-                let playlist = self.running.as_ref().and_then(|running| {
-                    running.home_state.media_playlists.iter().find(|p| p.id == id).map(|p| p.name.clone())
-                });
-                format!("{} ({})", playlist.unwrap_or_default(), item.name)
-            }
-            Announce::Song(_) | Announce::Media(_) => item.name.clone(),
-        };
+        let title = self.media_announcement_title(what, &item.name);
         if self.announcing.as_ref().is_none_or(|was| was.what != what) {
             crate::applog::event("announcements", &format!("playing {title}"));
         }
@@ -210,6 +202,20 @@ impl crate::App {
         self.announcing = Some(Announcing { what, at, item: Some(item.id), since: Instant::now(), shown, video });
         self.refresh_preview(false);
         self.read_ahead_on_layer();
+    }
+
+    /// What the window calls a picture or video on the layer: its name, after its media
+    /// playlist's when it plays from one.
+    fn media_announcement_title(&self, what: Announce, name: &str) -> String {
+        match what {
+            Announce::MediaPlaylist(id) => {
+                let playlist = self.running.as_ref().and_then(|running| {
+                    running.home_state.media_playlists.iter().find(|p| p.id == id).map(|p| p.name.clone())
+                });
+                format!("{} ({name})", playlist.unwrap_or_default())
+            }
+            Announce::Song(_) | Announce::Media(_) => name.to_owned(),
+        }
     }
 
     /// Opens a video for the layer: playing, looping or not, silent on a quiet run (a test).
@@ -340,19 +346,36 @@ impl crate::App {
         let what = on.what;
         let player = on.video.as_mut()?;
         let wait = player.tick();
-        match player.take_handed_over() {
-            Some(Ok(path)) => crate::applog::event(
-                "announcements",
-                &format!("{} took over at the end of the pass", crate::file_name(&path)),
-            ),
+        let handed = player.take_handed_over();
+        let problem = player.problem();
+        match handed {
+            Some(Ok(path)) => {
+                crate::applog::event(
+                    "announcements",
+                    &format!("{} took over at the end of the pass", crate::file_name(&path)),
+                );
+                // The window names the new file (its media bin item has its name now).
+                let item = self.announcing.as_ref().and_then(|on| on.item);
+                if let Some(name) =
+                    item.and_then(|id| self.show.media().iter().find(|i| i.id == id)).map(|i| i.name.clone())
+                {
+                    let title = self.media_announcement_title(what, &name);
+                    if let Some(running) = self.running.as_mut() {
+                        running.home_state.announcement_live = Some((what, title));
+                        running.home_window.request_redraw();
+                    }
+                }
+            }
             Some(Err(problem)) => {
                 crate::applog::problem("announcements", &format!("the new file couldn't take over: {problem}"))
             }
             None => {}
         }
-        let Some(problem) = player.problem() else {
+        let Some(problem) = problem else {
             return Some(Instant::now() + wait);
         };
+        let on = self.announcing.as_mut()?;
+        let player = on.video.as_mut()?;
         crate::applog::problem("announcements", &problem);
         let uses_ffmpeg = player.uses_ffmpeg();
         let looping = !matches!(what, Announce::MediaPlaylist(_)) || self.announcing_items() <= 1;

@@ -69,6 +69,7 @@ pub fn describe(
             };
             format!("Play on the Announcements Layer: {}", name.unwrap_or_else(gone))
         }
+        ShowAction::CanvaSync => "Sync from Canva".to_owned(),
     }
 }
 

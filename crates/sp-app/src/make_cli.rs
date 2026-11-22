@@ -483,7 +483,7 @@ impl crate::App {
     fn macro_add(&mut self, words: &[String]) -> Result<Reply, String> {
         let usage = "macro add NAME STEP [then STEP…]   steps: clear all|slide|media|props|messages, show|hide message NAME, \
                      show|hide prop NAME, start|stop|reset timer NAME, audience on|off, song SONG, media ITEM, \
-                     announce SONG|media ITEM|media-playlist NAME";
+                     announce SONG|media ITEM|media-playlist NAME, canva sync";
         // The macro's name is the words up to the first step's first word.
         let starts = ["clear", "show", "hide", "start", "stop", "reset", "audience", "song", "media"];
         let first_word = |w: &String| w.split_whitespace().next().unwrap_or_default().to_lowercase();
@@ -573,6 +573,7 @@ impl crate::App {
                     what: sp_model::Announced::MediaPlaylist { id: state.media_playlists[at].id },
                 })
             }
+            ("canva", "sync") => Ok(ShowAction::CanvaSync),
             ("announce", _) => {
                 let at = self.find_song_as_is(&rest(1))?;
                 let key = state.song_keys.get(at).cloned().ok_or("That song can't be played as announcements.")?;

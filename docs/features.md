@@ -377,8 +377,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   takes them all off.
 - **Macros**: steps done in turn, which clear layers, show or hide messages and props, start,
   stop or reset timers, switch the audience screens, go to songs, show a picture from the
-  media bin, and play a media playlist, a picture, a video or a song on the Announcements layer
-  (Add a step… › Play on the Announcements Layer). Each is a card with its colour as a dot, its
+  media bin, play a media playlist, a picture, a video or a song on the Announcements layer
+  (Add a step… › Play on the Announcements Layer), and fetch a fresh video from Canva (Sync from
+  Canva). Each is a card with its colour as a dot, its
   name, how many steps, a Run key (the only thing that runs it), a chevron that opens its steps
   (each with Earlier and Remove, then Add a step…), and ⋯ with Edit Steps…, Colour, Run When
   SoftPresenter Opens, Rename, Duplicate and Delete.
@@ -879,6 +880,40 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   key VoxLive refuses stops the asking until another is given, so the church's other devices
   aren't locked out, and a "wait" answer is waited out. Disconnect forgets the key on this
   computer.
+- **Canva Sync** (Settings › Integrations): keeps the announcements video fresh from the
+  church's Canva presentation. It connects with an integration of the church's own, made in
+  Canva's developer portal (an open-source app can't carry a secret of its own): the client ID
+  and secret are typed on its page, and the sign-in happens once in the computer's browser (OAuth
+  with PKCE, its answer taken on 127.0.0.1 only, at a fixed redirect URL the page shows to add
+  to the integration). Or, on a computer where the old Canva sync script ran, **Use the Sign-in
+  from the Old Sync Script** takes over its sign-in: read from its folder by the app itself,
+  kept in the Keychain, and its token file taken away so it can't refresh it; the page then says
+  to switch the old script off, with the Terminal lines for the background jobs and menu bar
+  plugin it finds that run it (it never removes them itself), until It's Switched Off is
+  clicked. The secret and tokens are one item in the Mac's Keychain, sent only to Canva, never
+  in a file, the log, a notice or a command's reply. Canva's refresh tokens work once: each new
+  one is stored and read back before anything else is asked of Canva, under a lock so two copies
+  of the app never refresh the same one, and the access token is kept with its expiry and
+  refreshed only when due; a sign-in Canva no longer takes stops the asking until the operator
+  signs in again. Disconnect forgets it on this computer.
+  The presentation is chosen by pasting its link; its pages show with their pictures, and a click
+  makes one the **divider page**: only the pages above it go in the video (Canva can't tell an
+  app which slides are hidden, so volunteers drag old slides below it). If the divider is gone
+  from the design, nothing is made and the page says so. **Sync Now** (or a macro's Sync from
+  Canva step, or `sp canva sync`) exports those pages as a 1080p video, waits for Canva to render
+  it (a few minutes; the page and the top bar show Exporting with the time so far, then
+  Downloading with how far), downloads it outside the library, checks it (its size and an MP4
+  header), and only then puts it in the library's `Media/Canva Sync` folder, named with its day
+  and time ("Friday 6.00 AM - Announcements 11-20-26.mp4"). The media playlist Announcements,
+  made to follow that folder when the divider is chosen, brings it into the media bin. The new
+  video takes the old one's place in the bin (the same item, so playlists, macros and the
+  screens keep finding it), a video playing takes it over at the end of its pass, and the old
+  file is deleted once nothing plays it. Anything that goes wrong leaves the video as it was and
+  says why on the page, in the top bar (Canva: failed, with why when pointed at) and in the log.
+  One sync runs at a time, a sync goes on while the window is used, and quitting stops it
+  cleanly (a refresh of the sign-in under way is waited out, so its new token is kept). Nothing
+  runs while the app is closed; a macro with Sync from Canva and Run When SoftPresenter Opens
+  fetches a fresh video at each start.
 - **A VoxLive screen's look**, changed from Settings › Integrations › VoxLive: clicking a screen
   opens its look, with a control for each setting VoxLive describes (a menu, a colour, a tick or
   a slider within VoxLive's range; only those that apply to the screen's mode) and a preview drawn

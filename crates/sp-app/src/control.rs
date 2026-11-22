@@ -365,10 +365,25 @@ pub fn run_client(args: Vec<String>) -> std::process::ExitCode {
         say_err!("Give the key on the standard input, not as an argument: echo \"$KEY\" | sp voxlive connect");
         return std::process::ExitCode::FAILURE;
     }
-    let args = if connect {
+    // `canva connect` the same way: the client ID and secret on one line of the standard input.
+    let canva = args.len() >= 2 && args[0].eq_ignore_ascii_case("canva") && args[1].eq_ignore_ascii_case("connect");
+    if canva && args.len() > 2 {
+        say_err!(
+            "Give the client ID and secret on the standard input, not as arguments: echo \"$ID $SECRET\" | sp canva connect"
+        );
+        return std::process::ExitCode::FAILURE;
+    }
+    let args = if connect || canva {
         use std::io::{BufRead, IsTerminal};
         if std::io::stdin().is_terminal() {
-            eprint!("Paste the VoxLive API key, then press Return: ");
+            eprint!(
+                "{}",
+                if canva {
+                    "Paste the client ID, a space and the client secret, then press Return: "
+                } else {
+                    "Paste the VoxLive API key, then press Return: "
+                }
+            );
         }
         let mut line = String::new();
         let _ = std::io::stdin().lock().read_line(&mut line);
@@ -562,6 +577,7 @@ pub fn only_reads(args: &[String]) -> bool {
         "media" | "media-playlist" | "settings" | "menu" => alone,
         "audio" => alone || (args.len() == 2 && word(1) == "playlists"),
         "voxlive" => alone || (args.len() == 2 && word(1) == "screens"),
+        "canva" => alone || (args.len() == 2 && word(1) == "status"),
         // `playlist [NAME]`, not `playlist add …`.
         "playlist" => alone || !PLAYLIST_CHANGES.contains(&word(1).as_str()),
         // `slide SONG N` and `slide item N SLIDE …`, not `slide text …`.
@@ -573,9 +589,12 @@ pub fn only_reads(args: &[String]) -> bool {
     }
 }
 
-/// A command's words as the log shows them: the key given to `voxlive connect` is left out.
+/// A command's words as the log shows them: the key given to `voxlive connect`, and the client
+/// ID and secret given to `canva connect`, are left out.
 pub fn shown_args(args: &[String]) -> Vec<String> {
-    let secret = args.len() > 2 && args[0].eq_ignore_ascii_case("voxlive") && args[1].eq_ignore_ascii_case("connect");
+    let secret = args.len() > 2
+        && (args[0].eq_ignore_ascii_case("voxlive") || args[0].eq_ignore_ascii_case("canva"))
+        && args[1].eq_ignore_ascii_case("connect");
     if secret { vec![args[0].clone(), args[1].clone(), "…".to_owned()] } else { args.to_vec() }
 }
 
@@ -661,6 +680,7 @@ const COMMANDS: &[&str] = &[
     "media",
     "media-playlist",
     "voxlive",
+    "canva",
     "themes",
     "screens",
     "timers",
@@ -863,6 +883,16 @@ Layers and controls
   voxlive show N|NAME          that VoxLive screen's captions on screen, in place of a verse
   voxlive look N|NAME [setting=value …]   a screen's look, or settings of it saved to VoxLive
   voxlive refresh | voxlive disconnect --yes      find the screens again | forget the key
+  canva | canva status         Canva Sync: signed in or not, the presentation and its divider
+                               page, a sync under way, the last video made
+  canva sync [--wait]          fetch a fresh announcements video from Canva now (a background
+                               job: add --wait to wait for it, which takes minutes)
+  canva connect                sign in, with the integration's client ID and secret read from
+                               the standard input on one line (Canva's page opens in the browser)
+  canva import                 take over the old sync script's sign-in on this computer
+  canva presentation LINK | canva pages | canva divider N      the presentation, its pages, and
+                               the divider page (the pages above it go in the video)
+  canva disconnect --yes       forget the sign-in on this computer
   bible REFERENCE [--show]     look a passage up (and put its first verse on screen)
   bible REFERENCE --add [to PLAYLIST]
                                look it up and put it in a playlist, with the page's rows
@@ -1080,6 +1110,7 @@ impl crate::App {
             "media" => self.ctl_media(args),
             "media-playlist" => self.ctl_media_playlist(args),
             "voxlive" => self.ctl_voxlive(args),
+            "canva" => self.ctl_canva(args),
             "themes" => Ok(self.ctl_named_list("themes", |s| s.theme_names.clone())),
             "screens" => Ok(self.ctl_screens()),
             "timers" => Ok(self.ctl_timers()),
@@ -2033,6 +2064,149 @@ impl crate::App {
                 Ok(Reply::with(format!("{name}\n{}", numbered(&lines)), serde_json::json!(data)))
             }
         }
+    }
+
+    /// `canva [status]`, `canva sync`: Canva Sync. A sync takes minutes, so `canva sync` answers
+    /// at once with a job (`sp job N`, or `--wait`). No reply has a secret or token in it.
+    fn ctl_canva(&mut self, args: &[String]) -> Result<Reply, String> {
+        use crate::canva::Status;
+        match args.get(1).map(|w| w.to_lowercase()).as_deref() {
+            None | Some("status") => {}
+            Some("sync") => {
+                self.canva.sync_now()?;
+                let job = self.start_job();
+                self.canva.job = Some(job);
+                return Ok(Reply::done("Syncing from Canva: the export takes a few minutes."));
+            }
+            // The client ID and secret come on the standard input, never as arguments.
+            Some("connect") => {
+                let given = args.get(2).cloned().unwrap_or_default();
+                let mut words = given.split_whitespace();
+                let (Some(id), Some(secret), None) = (words.next(), words.next(), words.next()) else {
+                    return Err("Give the integration's client ID and secret on the standard input, on one line: \
+                                echo \"$CLIENT_ID $CLIENT_SECRET\" | sp canva connect"
+                        .to_owned());
+                };
+                self.canva.sign_in(id, secret)?;
+                return Ok(Reply::done(
+                    "Canva's sign-in is open in the browser: agree there, then sp canva says how it went.",
+                ));
+            }
+            Some("import") => {
+                if !self.canva.old_here {
+                    return Err("The old sync script's sign-in isn't on this computer.".to_owned());
+                }
+                self.canva.import_old()?;
+                return Ok(Reply::done(
+                    "Bringing in the old sync script's sign-in; then switch the old script off (sp canva says how).",
+                ));
+            }
+            Some("presentation") if args.len() > 2 => {
+                self.canva.set_design(&rest(args, 2))?;
+                return Ok(Reply::done("Reading the presentation's pages; sp canva pages lists them."));
+            }
+            Some("pages") => {
+                let divider = self.canva.settings.divider.clone();
+                let lines: Vec<String> = self
+                    .canva
+                    .pages
+                    .iter()
+                    .map(|page| {
+                        let mark = if page.id.is_some() && page.id == divider { " (divider)" } else { "" };
+                        format!("page {}{mark}", page.number)
+                    })
+                    .collect();
+                if lines.is_empty() {
+                    return Err("No pages read yet: sp canva presentation LINK.".to_owned());
+                }
+                return Ok(Reply::with(lines.join("\n"), serde_json::json!(lines)));
+            }
+            Some("divider") => {
+                let number: u32 = args.get(2).and_then(|n| n.parse().ok()).ok_or("canva divider N (a page number)")?;
+                let id = self
+                    .canva
+                    .pages
+                    .iter()
+                    .find(|page| page.number == number)
+                    .and_then(|page| page.id.clone())
+                    .ok_or_else(|| format!("There is no page {number} read: sp canva pages lists them."))?;
+                self.with_state(|state| state.canva.request = Some(crate::canva::Request::Divider(id)));
+                self.tick_canva();
+                return Ok(Reply::done(format!(
+                    "Page {number} is the divider: pages 1 to {} go in the video.",
+                    number.saturating_sub(1)
+                )));
+            }
+            Some("disconnect") => {
+                if !args.iter().any(|w| w == "--yes") {
+                    return Err("This forgets Canva Sync's sign-in on this computer. Add --yes to do it.".to_owned());
+                }
+                self.canva.disconnect()?;
+                return Ok(Reply::done("Forgot Canva Sync's sign-in on this computer."));
+            }
+            _ => {
+                return Err("canva | canva sync [--wait] | canva connect (ID and secret on the standard input) | \
+                            canva import | canva presentation LINK | canva pages | canva divider N | canva \
+                            disconnect --yes"
+                    .to_owned());
+            }
+        }
+        let canva = &self.canva;
+        let settings = &canva.settings;
+        let mut lines = vec![match &canva.status {
+            Status::Reading => "Canva Sync: reading its sign-in…".to_owned(),
+            Status::NotConnected => "Canva Sync: not signed in (Settings › Integrations › Canva Sync).".to_owned(),
+            Status::Connected => {
+                format!("Canva Sync: signed in (integration {}).", canva.client_hint().unwrap_or_default())
+            }
+            Status::Refused(why) => format!("Canva Sync: {why}"),
+        }];
+        lines.push(match (&settings.design, settings.divider_number) {
+            (Some(design), Some(number)) if settings.divider.is_some() => {
+                format!(
+                    "Presentation {design}; divider page {number}, so pages 1 to {} are exported.",
+                    number.saturating_sub(1)
+                )
+            }
+            (Some(design), _) => format!("Presentation {design}; no divider page chosen yet."),
+            (None, _) => "No presentation chosen yet.".to_owned(),
+        });
+        lines.push(format!("The video goes in Media › {} in the library.", crate::canva::FOLDER));
+        if canva.phase.busy() {
+            lines.push(format!("Now: {}", canva.phase.words()));
+        }
+        if let (Some(at), Some(file)) = (&settings.updated_at, &settings.updated_file) {
+            lines.push(format!("Last video: {file} ({at})."));
+        }
+        let problem = canva.said.as_ref().filter(|(_, good, _)| !good).map(|(words, _, _)| words.clone());
+        if let Some(problem) = &problem {
+            lines.push(format!("Last problem: {problem}"));
+        }
+        if canva.old_here && canva.status != Status::Connected {
+            lines.push("The old sync script's sign-in is on this computer: sp canva import takes it over.".to_owned());
+        }
+        if settings.old_script_warning {
+            lines.push(
+                "Switch the old sync script off now (whichever refreshes the sign-in next breaks the other's):"
+                    .to_owned(),
+            );
+            lines.extend(
+                crate::canva::switch_off_steps(&canva.places, &canva.old_jobs)
+                    .into_iter()
+                    .map(|step| format!("  {step}")),
+            );
+        }
+        let data = serde_json::json!({
+            "signed_in": canva.status == Status::Connected,
+            "presentation": settings.design,
+            "divider_page": settings.divider_number,
+            "busy": canva.phase.busy(),
+            "now": canva.phase.words(),
+            "last_video": settings.updated_file,
+            "updated_at": settings.updated_at,
+            "problem": problem,
+        });
+        Ok(Reply::with(lines.join("\n"), data))
     }
 
     /// `voxlive [screens | connect KEY | refresh | disconnect --yes]`: the connection to the

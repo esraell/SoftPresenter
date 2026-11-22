@@ -9,6 +9,7 @@ mod bible_page;
 mod bible_store;
 mod bin_pictures;
 mod bundle;
+mod canva;
 mod clock;
 mod control;
 mod convert;
@@ -316,7 +317,8 @@ fn action_commands(show: &Show, state: &home::HomeState, action: &sp_model::Show
         ShowAction::Message { .. }
         | ShowAction::Prop { .. }
         | ShowAction::Timer { .. }
-        | ShowAction::Announce { .. } => None,
+        | ShowAction::Announce { .. }
+        | ShowAction::CanvaSync => None,
     }
 }
 
@@ -376,6 +378,8 @@ fn do_state_action(state: &mut home::HomeState, action: &sp_model::ShowAction, n
                 None => state.notice = Some("A step's song for the Announcements layer can't be found.".to_owned()),
             }
         }
+        // A sync from Canva, taken up by `tick_canva`.
+        ShowAction::CanvaSync => state.canva.sync_request = true,
         ShowAction::Clear { .. } | ShowAction::Audience { .. } | ShowAction::Song { .. } | ShowAction::Media { .. } => {
         }
     }
@@ -512,6 +516,8 @@ enum AppEvent {
     Tidied(String),
     /// The DeckLink devices found changed (one plugged in or taken away, the driver found).
     DeckLink,
+    /// Canva Sync's thread has something to tell (see `canva`).
+    Canva,
 }
 
 /// The most web pages kept running at once: those on screen, then those loaded ahead. Each is a
@@ -1302,6 +1308,8 @@ struct App {
     web_traced: Option<Instant>,
     /// The connection to the church's VoxLive account.
     voxlive: voxlive::Client,
+    /// Canva Sync: the church's Canva sign-in, its design, and a sync under way.
+    canva: canva::Client,
     /// The preview of a VoxLive screen's look being changed, while its page is open.
     voxlive_preview: Option<LookPreview>,
     /// How the last save of a VoxLive look went, for `sp voxlive`.
@@ -1824,9 +1832,16 @@ impl App {
         let Some(running) = self.running.as_ref() else { return };
         // A playlist that stopped following that folder while it was looked at is left alone.
         let playlists = &running.home_state.media_playlists;
+        // A Canva video a new one replaced, waiting to be deleted once nothing plays it, is not
+        // brought back into the bin meanwhile.
+        let replaced = &self.canva.old_files;
         let listings: Vec<media::Listing> = listings
             .into_iter()
             .filter(|(id, folder, _)| playlists.iter().any(|p| p.id == *id && p.folder.as_ref() == Some(folder)))
+            .map(|(id, folder, files)| {
+                let files = files.map(|files| files.into_iter().filter(|(path, _)| !replaced.contains(path)).collect());
+                (id, folder, files)
+            })
             .collect();
         let bin: Vec<(Uuid, std::path::PathBuf)> = self.show.media().iter().map(|i| (i.id, i.path.clone())).collect();
         let in_use = self.media_in_use();
@@ -2533,13 +2548,25 @@ impl App {
     /// Keeps the video on screen going (a looping one starts again at its end) and the
     /// operator's view of it up to date. Says when to look again.
     fn tick_video(&mut self) -> Option<Instant> {
-        let (_, player) = self.video.as_mut()?;
+        let (id, player) = self.video.as_mut()?;
         let wait = player.tick();
-        match player.take_handed_over() {
-            Some(Ok(path)) => applog::event("video", &format!("{} took over at the end of the pass", file_name(&path))),
+        let handed = player.take_handed_over();
+        let id = *id;
+        match handed {
+            Some(Ok(path)) => {
+                applog::event("video", &format!("{} took over at the end of the pass", file_name(&path)));
+                // The row under the preview names the new file (its media bin item has its name now).
+                let name = self.show.media().iter().find(|item| item.id == id).map(|item| item.name.clone());
+                if let (Some(name), Some(live)) =
+                    (name, self.running.as_mut().and_then(|running| running.home_state.video_live.as_mut()))
+                {
+                    live.name = name;
+                }
+            }
             Some(Err(problem)) => applog::problem("video", &format!("the new file couldn't take over: {problem}")),
             None => {}
         }
+        let (_, player) = self.video.as_mut()?;
         let running = self.running.as_mut()?;
         if let Some(problem) = player.problem() {
             applog::event("video", &problem);
@@ -6627,6 +6654,10 @@ impl App {
                         running.home_state.preferences_pane = 4;
                         running.home_state.voxlive.open = true;
                     }
+                    "canva" => {
+                        running.home_state.preferences_pane = 4;
+                        running.home_state.canva.open = true;
+                    }
                     _ => {}
                 }
             }
@@ -7836,9 +7867,15 @@ impl App {
     fn quit(&mut self, el: &ActiveEventLoop) {
         self.save_unsaved();
         self.keep_held_aside();
+        // A sync under way stops (a sign-in being refreshed is waited out, so it is kept).
+        self.canva.shut_down();
         if let Some(output) = self.running.as_mut().and_then(|r| r.output.take()) {
             output.shutdown();
         }
+        // Canva videos replaced while they played go now that nothing plays them.
+        self.video = None;
+        self.announcing = None;
+        self.remove_replaced_canva_videos();
         el.exit();
     }
 }
@@ -8025,6 +8062,8 @@ impl ApplicationHandler<AppEvent> for App {
                 self.finish_folder_look();
                 return;
             }
+            // Taken in when the loop next waits (`tick_canva`).
+            AppEvent::Canva => return,
             AppEvent::Tidied(said) => {
                 if let Some(running) = self.running.as_mut() {
                     running.home_state.notice = Some(said);
@@ -8434,6 +8473,7 @@ impl ApplicationHandler<AppEvent> for App {
         let box_video_at = self.tick_slide_video();
         let web_at = self.tick_web();
         let voxlive_at = self.tick_voxlive();
+        let canva_at = self.tick_canva();
         let audio_at = self.tick_audio();
         let announce_at = self.tick_announcements();
         let cycle_at = self.tick_media_cycle();
@@ -8481,6 +8521,7 @@ impl ApplicationHandler<AppEvent> for App {
             box_video_at,
             web_at,
             voxlive_at,
+            canva_at,
             audio_at,
             announce_at,
             cycle_at,
@@ -8796,6 +8837,15 @@ fn main() -> ExitCode {
         web_refused: Vec::new(),
         web_traced: None,
         voxlive: voxlive::Client::new(),
+        canva: {
+            let proxy = std::sync::Mutex::new(event_loop.create_proxy());
+            let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+                if let Ok(proxy) = proxy.lock() {
+                    let _ = proxy.send_event(AppEvent::Canva);
+                }
+            });
+            canva::Client::new(canva::Places::for_app(), Some(wake))
+        },
         voxlive_preview: None,
         voxlive_said: None,
         media_playlists: Vec::new(),

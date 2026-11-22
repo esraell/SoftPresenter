@@ -939,6 +939,45 @@ with `SOFTPRESENTER_DATA`) keeps its own key in its own folder and never touches
 `SOFTPRESENTER_VOXLIVE_API` can point it at a stand-in for VoxLive on this computer (plain http
 to 127.0.0.1 or localhost only).
 
+## Canva Sync
+
+Canva Sync keeps the announcements video fresh from the church's Canva presentation: the pages
+above a divider page, exported as a 1080p video into `Media/Canva Sync` in the library, which the
+media playlist Announcements follows. It uses an integration of the church's own, made in Canva's
+developer portal with the scope `design:content:read` and the redirect URL
+`http://127.0.0.1:51793/canva-sync`.
+
+| Command | Does |
+|---|---|
+| `canva`, `canva status` | Whether Canva Sync is signed in (the integration's first characters), the presentation and its divider page, a sync under way, the last video made and the last problem; after the old script's sign-in was taken over, how to switch the old script off |
+| `canva sync` | Fetches a fresh video now, in the background (a job: `sp job N`, or add `--wait`, which takes minutes while Canva renders). Only one sync runs at a time; anything that goes wrong leaves the video in the media bin as it was |
+| `canva connect` | Signs in with the integration's client ID and secret, read on one line from the standard input (never as arguments): Canva's sign-in page opens in the browser, and `canva` says how it went |
+| `canva import` | Takes over the old sync script's sign-in, when it is on this computer: kept in the Keychain, and its token file taken away so the old script can't refresh it |
+| `canva presentation LINK` | The presentation, by its link or id; its pages are read |
+| `canva pages`, `canva divider N` | The pages read, and which one is the divider (the pages above it go in the video) |
+| `canva disconnect --yes` | Forgets the sign-in on this computer |
+
+    $ echo "$CLIENT_ID $CLIENT_SECRET" | sp canva connect
+    Canva's sign-in is open in the browser: agree there, then sp canva says how it went.
+    $ sp canva presentation https://www.canva.com/design/DAF…/edit
+    Reading the presentation's pages; sp canva pages lists them.
+    $ sp canva divider 12
+    Page 12 is the divider: pages 1 to 11 go in the video.
+    $ sp canva sync --wait
+    Canva Sync put Friday 6.02 AM - Announcements 11-20-26.mp4 in place.
+
+A macro step, `canva sync` in `macro add` (Sync from Canva in the window), fetches one too: a
+"Before service" macro run when SoftPresenter opens has a fresh video ready. Nothing runs while
+the app is closed. A video playing when the new one comes takes it over at the end of its pass.
+
+The client secret and the tokens are kept in the Mac's Keychain, never in a file, the log or a
+reply. Canva's refresh tokens work once, so each new one is stored before anything else is
+asked, and two copies of the app never refresh at once. A test copy keeps its sign-in in its own
+folder, reads the old script's from `old-canva-sync` there, and never touches the owner's;
+`SOFTPRESENTER_CANVA_API` points it at a stand-in for Canva on this computer (plain http to
+127.0.0.1 only), and with it `SOFTPRESENTER_CANVA_BROWSER=fetch` has the app follow the
+stand-in's sign-in page itself instead of opening the browser.
+
 ## Undo, jobs and the menu bar
 
 | Command | Does |

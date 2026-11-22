@@ -65,8 +65,9 @@ SoftPresenter is built to be:
   typed or one chosen. Four Bibles come with the app and sixteen more install from
   its Bibles window.
 - **Media.** Pictures and videos behind the words or on their own, media playlists, folders the
-  app watches, and an announcements layer that loops by itself. Videos play as they are, never
-  converted.
+  app watches, and an announcements layer that loops a song, a picture, a video or a media
+  playlist by itself. Canva Sync fetches the announcements video fresh from a Canva
+  presentation. Videos play as they are, never converted.
 - **Screens.** Any number of audience screens on displays (never the one the operator works
   on), in windows, over NDI or out of a Blackmagic Design DeckLink card (SDI or HDMI, with the
   card's keyer), each with its own look and theme if you like (a lobby can show

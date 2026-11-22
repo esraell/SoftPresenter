@@ -234,7 +234,6 @@ rather than a feature, but no church on Windows can use the app without them.
 
 Ideas of our own, beyond the lists above:
 
-- A Canva announcement loop downloaded by itself.
 - TimelyChurch songs and schedules.
 - VoxLive live translation shown on a screen.
 - An API over the network with a stream of changes, and MCP for AI agents. The command line

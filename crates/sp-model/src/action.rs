@@ -84,6 +84,8 @@ pub enum ShowAction {
     Announce {
         what: Announced,
     },
+    /// Fetches a fresh announcements video from Canva (Settings › Integrations › Canva Sync).
+    CanvaSync,
 }
 
 /// What an Announce action plays on the Announcements layer: a song (by its library key), a
@@ -110,5 +112,6 @@ mod tests {
             assert!(text.starts_with(r#"{"do":"announce","what":{"kind":"#), "{text}");
             assert_eq!(serde_json::from_str::<ShowAction>(&text).unwrap(), step);
         }
+        assert_eq!(serde_json::to_string(&ShowAction::CanvaSync).unwrap(), r#"{"do":"canva_sync"}"#);
     }
 }

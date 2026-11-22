@@ -1188,6 +1188,26 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
                 ui.painter().with_clip_rect(room).galley(at, galley, READY);
                 shown.on_hover_text(format!("{words} (the Timers tab: {})", crate::keys::with_modifier("1")));
             }
+        } else if let Some((words, failed)) = state.canva.quiet.clone() {
+            // Otherwise, in the same room, what Canva Sync is doing (an export, a download), a
+            // video just put in place, or one that failed. A click opens its page.
+            let right = clock.min.x - 10.0;
+            let wide = (right - free_from).min(220.0);
+            if wide >= 60.0 {
+                let room = Rect::from_min_max(pos2(right - wide, bar.min.y), pos2(right, bar.max.y));
+                let colour = if failed { TALLY } else { TEXT_DIM };
+                let galley = spaced(ui, &words.to_uppercase(), fixed(11.0), colour, 0.5);
+                let at = pos2((right - galley.size().x).max(room.min.x), middle - galley.size().y / 2.0);
+                let shown = ui.interact(room, ui.scope_id().with("canva sync line"), Sense::click());
+                ui.painter().with_clip_rect(room).galley(at, galley, colour);
+                let detail = state.canva.said.as_ref().map_or_else(|| words.clone(), |(said, _)| said.clone());
+                if shown.on_hover_text(format!("{detail} (Settings › Integrations › Canva Sync)")).clicked() {
+                    state.preferences_open = true;
+                    state.preferences_pane =
+                        crate::home::PANES.iter().position(|pane| *pane == "Integrations").unwrap_or(0);
+                    state.canva.open = true;
+                }
+            }
         }
     });
 }

@@ -232,6 +232,16 @@ impl Show {
         Changes { media: self.live_media == Some(index), ..Changes::default() }
     }
 
+    /// Gives a media item a new file (a new version of it, put in its place), keeping its id and
+    /// how it is shown. Nothing on screen changes here: a video playing goes on as it is (the
+    /// player is told of the new file, and takes it over at the end of its pass).
+    pub fn set_media_file(&mut self, index: usize, name: String, path: std::path::PathBuf) {
+        if let Some(item) = self.media.get_mut(index) {
+            item.name = name;
+            item.path = path;
+        }
+    }
+
     /// Takes a picture out of the media bin. If it was on screen it is taken off.
     pub fn remove_media(&mut self, index: usize) -> Changes {
         if index >= self.media.len() {

@@ -1,7 +1,7 @@
 //! Settings › Integrations: the services SoftPresenter works with, each a row with its state,
-//! opening a page of its own to connect it. VoxLive is the first.
+//! opening a page of its own to connect it: VoxLive, and Canva Sync.
 
-use egui::{Align, Align2, Color32, FontId, Layout, Rect, Sense, Stroke, vec2};
+use egui::{Align, Align2, Color32, FontId, Layout, Rect, Sense, Stroke, pos2, vec2};
 
 use crate::studio::{CARD, HOVER, LINE, TEXT, TEXT_DIM, TEXT_FAINT};
 use crate::voxlive::{Status, View};
@@ -31,13 +31,15 @@ pub enum Request {
 }
 
 /// The pane: the list of services, or the page of the one open, or a screen's look.
-pub fn pane(ui: &mut egui::Ui, view: &mut View) {
+pub fn pane(ui: &mut egui::Ui, view: &mut View, canva: &mut crate::canva::View) {
     if view.look.is_some() {
         look_page(ui, view);
     } else if view.open {
         voxlive_page(ui, view);
+    } else if canva.open {
+        canva_page(ui, canva);
     } else {
-        list(ui, view);
+        list(ui, view, canva);
     }
 }
 
@@ -65,27 +67,41 @@ fn state_words(status: &Status) -> (Color32, String) {
     }
 }
 
-fn list(ui: &mut egui::Ui, view: &mut View) {
+fn list(ui: &mut egui::Ui, view: &mut View, canva: &mut crate::canva::View) {
     ui.label(egui::RichText::new("Services SoftPresenter works with. Click one to connect it.").color(TEXT_DIM));
     ui.add_space(12.0);
+    let voxlive = (VOXLIVE, "V", "VoxLive", "Live translation of the sermon, as captions on your screens");
+    if service_row(ui, voxlive, state_words(&view.status), "Connect VoxLive, or see its screens") {
+        view.open = true;
+    }
+    ui.add_space(8.0);
+    let about = (CANVA, "C", "Canva Sync", "The announcements video, fresh from your Canva presentation");
+    if service_row(ui, about, canva_state(canva), "Connect Canva Sync, choose the presentation, or sync now") {
+        canva.open = true;
+    }
+}
+
+/// A service's row in the list: its mark, name and what it does, and how it stands. True when
+/// clicked.
+fn service_row(
+    ui: &mut egui::Ui,
+    (colour, letter, name, about): (Color32, &str, &str, &str),
+    (dot, words): (Color32, String),
+    hint: &str,
+) -> bool {
     let width = ui.available_width().min(560.0);
     let (row, response) = ui.allocate_exact_size(vec2(width, 60.0), Sense::click());
     ui.painter().rect_filled(row, 10.0, if response.hovered() { HOVER } else { CARD });
     let mut inside = ui.new_child(
         egui::UiBuilder::new().max_rect(row.shrink2(vec2(14.0, 10.0))).layout(Layout::left_to_right(Align::Center)),
     );
-    mark(&mut inside, 36.0, VOXLIVE, "V");
+    mark(&mut inside, 36.0, colour, letter);
     inside.add_space(10.0);
     inside.vertical(|ui| {
         ui.add_space(2.0);
-        ui.label(egui::RichText::new("VoxLive").font(crate::studio::semibold(14.0)).color(TEXT));
-        ui.label(
-            egui::RichText::new("Live translation of the sermon, as captions on your screens")
-                .size(11.5)
-                .color(TEXT_DIM),
-        );
+        ui.label(egui::RichText::new(name).font(crate::studio::semibold(14.0)).color(TEXT));
+        ui.label(egui::RichText::new(about).size(11.5).color(TEXT_DIM));
     });
-    let (dot, words) = state_words(&view.status);
     let right = Rect::from_min_max(row.right_top() - vec2(170.0, 0.0), row.max - vec2(14.0, 0.0));
     ui.painter().text(
         right.right_center() - vec2(0.0, 0.0),
@@ -102,9 +118,7 @@ fn list(ui: &mut egui::Ui, view: &mut View) {
         TEXT_DIM,
     );
     ui.painter().circle_filled(text.left_center() - vec2(9.0, 0.0), 3.5, dot);
-    if response.on_hover_text("Connect VoxLive, or see its screens").clicked() {
-        view.open = true;
-    }
+    response.on_hover_text(hint).clicked()
 }
 
 fn voxlive_page(ui: &mut egui::Ui, view: &mut View) {
@@ -173,6 +187,355 @@ fn voxlive_page(ui: &mut egui::Ui, view: &mut View) {
             screens(ui, view);
         }
     }
+}
+
+/// Canva's colour, for Canva Sync's mark, and a lighter shade for words on a dark ground.
+pub const CANVA: Color32 = Color32::from_rgb(0, 160, 170);
+pub const CANVA_LIGHT: Color32 = Color32::from_rgb(110, 214, 220);
+
+/// A dot and a word or two for how Canva Sync stands.
+fn canva_state(view: &crate::canva::View) -> (Color32, String) {
+    use crate::canva::Status as S;
+    match &view.status {
+        S::Reading => (TEXT_FAINT, "…".to_owned()),
+        S::NotConnected => (TEXT_FAINT, "Not connected".to_owned()),
+        S::Refused(_) => (crate::studio::TALLY, "Sign-in refused".to_owned()),
+        S::Connected if view.phase.busy() => (Color32::from_rgb(230, 170, 60), "Syncing".to_owned()),
+        S::Connected if view.settings.design.is_none() || view.settings.divider.is_none() => {
+            (GOOD, "Connected: choose the design".to_owned())
+        }
+        S::Connected => (GOOD, "Connected".to_owned()),
+    }
+}
+
+/// Canva Sync's page: connect, choose the design and its divider page, where the video goes,
+/// and Sync Now.
+fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
+    use crate::canva::{Request as R, Status as S};
+    if ui.add(egui::Button::new(egui::RichText::new("‹ Integrations").color(TEXT_DIM)).frame(false)).clicked() {
+        view.open = false;
+        view.typed_secret.clear();
+    }
+    ui.add_space(6.0);
+    let (dot, words) = canva_state(view);
+    ui.horizontal(|ui| {
+        mark(ui, 44.0, CANVA, "C");
+        ui.add_space(6.0);
+        ui.vertical(|ui| {
+            ui.label(egui::RichText::new("Canva Sync").font(crate::studio::semibold(18.0)).color(TEXT));
+            ui.horizontal(|ui| {
+                let (place, _) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
+                ui.painter().circle_filled(place.center(), 3.5, dot);
+                ui.label(egui::RichText::new(words).size(12.0).color(TEXT_DIM));
+            });
+        });
+    });
+    ui.add_space(10.0);
+    let width = ui.available_width().min(560.0);
+    ui.set_max_width(width);
+    ui.label(
+        egui::RichText::new(
+            "Keeps the announcements video fresh from your church's Canva presentation. The pages above a divider \
+             page are exported as a 1080p video into the library's Media › Canva Sync folder, which the media \
+             playlist Announcements follows, so the video joins the media bin by itself. Nothing happens while \
+             SoftPresenter is closed.",
+        )
+        .color(TEXT_DIM),
+    );
+    ui.add_space(8.0);
+    if let Some((said, good)) = &view.said {
+        let colour = if *good { CANVA_LIGHT } else { crate::studio::TALLY };
+        ui.label(egui::RichText::new(said.as_str()).size(12.0).color(colour));
+        ui.add_space(6.0);
+    }
+    let mut request = None;
+    match &view.status {
+        S::Reading => {
+            ui.label(egui::RichText::new("Reading the sign-in kept on this computer…").color(TEXT_FAINT));
+        }
+        S::NotConnected | S::Refused(_) => canva_connect(ui, view, &mut request),
+        S::Connected => {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Signed in").color(TEXT_DIM));
+                if let Some(hint) = &view.client_hint {
+                    ui.label(egui::RichText::new(format!("integration {hint}")).monospace().color(TEXT_FAINT));
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui
+                        .button("Disconnect")
+                        .on_hover_text(
+                            "Forget the sign-in on this computer (it stays in Canva until you take it back there)",
+                        )
+                        .clicked()
+                    {
+                        request = Some(R::Disconnect);
+                    }
+                });
+            });
+            if view.settings.old_script_warning {
+                ui.add_space(8.0);
+                old_script_warning(ui, view, &mut request);
+            }
+            ui.add_space(12.0);
+            canva_design(ui, view, &mut request);
+            ui.add_space(12.0);
+            crate::studio::caption(ui, "SYNC");
+            ui.horizontal(|ui| {
+                let ready = view.settings.design.is_some() && view.settings.divider.is_some();
+                if ui.add_enabled(ready && !view.phase.busy(), egui::Button::new("Sync Now")).clicked() {
+                    request = Some(R::SyncNow);
+                }
+                if view.phase.busy() {
+                    ui.label(egui::RichText::new(view.phase.words()).color(CANVA_LIGHT));
+                    if ui.button("Stop").on_hover_text("The video in the media bin stays as it was").clicked() {
+                        request = Some(R::Stop);
+                    }
+                }
+            });
+            if let (Some(at), Some(file)) = (&view.settings.updated_at, &view.settings.updated_file) {
+                let when = chrono::DateTime::parse_from_rfc3339(at)
+                    .map(|at| at.with_timezone(&chrono::Local).format("%A %-d %B, %-I:%M %p").to_string())
+                    .unwrap_or_default();
+                ui.label(egui::RichText::new(format!("Last updated {when}: {file}")).size(12.0).color(TEXT_DIM));
+            }
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(
+                    "To fetch a fresh video each time SoftPresenter opens, make a macro with the step Sync from Canva \
+                     and tick Run When SoftPresenter Opens. A new video replaces the old one; one playing takes the \
+                     new one over at the end of its pass, so the loop carries on.",
+                )
+                .size(11.5)
+                .color(TEXT_FAINT),
+            );
+        }
+    }
+    if request.is_some() {
+        view.request = request;
+    }
+}
+
+/// How to connect: the integration's ID and secret and Sign In, or the old script's sign-in.
+fn canva_connect(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut Option<crate::canva::Request>) {
+    use crate::canva::{Phase, Request as R};
+    if let crate::canva::Status::Refused(why) = &view.status {
+        ui.label(egui::RichText::new(why.as_str()).color(crate::studio::TALLY));
+        ui.add_space(6.0);
+    }
+    crate::studio::caption(ui, "CONNECT");
+    ui.label(
+        egui::RichText::new(
+            "Make an integration of your church's own in Canva's developer portal (canva.com/developers, Your \
+             integrations). Under Scopes tick design:content:read; under Authentication add the redirect URL below; \
+             then copy its client ID and make a secret. The secret and the sign-in are kept in this Mac's Keychain \
+             and sent only to Canva.",
+        )
+        .size(12.0)
+        .color(TEXT_DIM),
+    );
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(view.redirect.as_str()).monospace().color(TEXT));
+        if ui.small_button("Copy").clicked() {
+            ui.ctx().copy_text(view.redirect.clone());
+        }
+    });
+    ui.add_space(6.0);
+    egui::Grid::new("canva connect").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+        ui.label(egui::RichText::new("Client ID").color(TEXT_DIM));
+        ui.add(egui::TextEdit::singleline(&mut view.typed_id).desired_width(300.0));
+        ui.end_row();
+        ui.label(egui::RichText::new("Client secret").color(TEXT_DIM));
+        ui.add(egui::TextEdit::singleline(&mut view.typed_secret).password(true).desired_width(300.0));
+        ui.end_row();
+    });
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        if view.phase == Phase::SigningIn {
+            ui.label(egui::RichText::new(view.phase.words()).color(CANVA_LIGHT));
+            if ui.button("Stop").clicked() {
+                *request = Some(R::Stop);
+            }
+        } else {
+            let filled = !view.typed_id.trim().is_empty() && !view.typed_secret.trim().is_empty();
+            if ui
+                .add_enabled(filled && !view.phase.busy(), egui::Button::new("Sign In with Canva"))
+                .on_hover_text("Opens Canva's sign-in in your browser")
+                .clicked()
+            {
+                *request = Some(R::SignIn(view.typed_id.trim().to_owned(), std::mem::take(&mut view.typed_secret)));
+            }
+        }
+    });
+    if view.old_here {
+        ui.add_space(12.0);
+        crate::studio::caption(ui, "THE OLD SYNC SCRIPT");
+        ui.label(
+            egui::RichText::new(
+                "This Mac has the sign-in of the old Canva sync script. SoftPresenter can take it over: it reads it \
+                 from there itself, keeps it in the Keychain, and takes the script's token file away. Then switch \
+                 the old script off.",
+            )
+            .size(12.0)
+            .color(TEXT_DIM),
+        );
+        if ui.add_enabled(!view.phase.busy(), egui::Button::new("Use the Sign-in from the Old Sync Script")).clicked() {
+            *request = Some(R::Import);
+        }
+    }
+}
+
+/// The old script must go now that its sign-in is here: what to type to switch it off.
+fn old_script_warning(ui: &mut egui::Ui, view: &crate::canva::View, request: &mut Option<crate::canva::Request>) {
+    egui::Frame::new().fill(Color32::from_rgb(60, 32, 30)).corner_radius(8.0).inner_margin(10.0).show(ui, |ui| {
+        ui.label(
+            egui::RichText::new(
+                "Switch the old sync script off now. It and SoftPresenter can't both use the sign-in: whichever \
+                 refreshes it next breaks the other's. Its token file is gone, so it can't refresh any more, but it \
+                 should not be left running. In Terminal on this Mac:",
+            )
+            .color(TEXT),
+        );
+        ui.add_space(4.0);
+        for step in &view.old_steps {
+            ui.label(egui::RichText::new(step.as_str()).monospace().size(12.0).color(TEXT));
+        }
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui.button("Copy the Steps").clicked() {
+                ui.ctx().copy_text(view.old_steps.join("\n"));
+            }
+            if ui.button("It's Switched Off").clicked() {
+                *request = Some(crate::canva::Request::OldScriptOff);
+            }
+        });
+    });
+}
+
+/// The design: its link, its pages to choose the divider from, and where the video goes.
+fn canva_design(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut Option<crate::canva::Request>) {
+    use crate::canva::{Phase, Request as R};
+    crate::studio::caption(ui, "THE PRESENTATION");
+    ui.label(
+        egui::RichText::new(
+            "Paste the presentation's link (in Canva, Share › Copy link), then choose its divider page.",
+        )
+        .size(12.0)
+        .color(TEXT_DIM),
+    );
+    ui.horizontal(|ui| {
+        let hint = view.settings.design.clone().unwrap_or_else(|| "https://www.canva.com/design/…".to_owned());
+        let field = ui.add(egui::TextEdit::singleline(&mut view.typed_link).hint_text(hint).desired_width(300.0));
+        let entered = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        let busy = view.phase.busy();
+        if !view.typed_link.trim().is_empty()
+            && (entered || ui.add_enabled(!busy, egui::Button::new("Read Pages")).clicked())
+        {
+            *request = Some(R::Design(std::mem::take(&mut view.typed_link)));
+        } else if view.typed_link.trim().is_empty()
+            && view.settings.design.is_some()
+            && ui.add_enabled(!busy, egui::Button::new("Read Pages Again")).clicked()
+        {
+            *request = Some(R::ReadPages);
+        }
+    });
+    if view.phase == Phase::ReadingPages {
+        ui.label(egui::RichText::new(view.phase.words()).size(12.0).color(CANVA_LIGHT));
+    }
+    match (view.settings.divider_number, view.settings.divider.is_some()) {
+        (Some(number), true) if number > 1 => {
+            let above = if number == 2 { "Page 1 goes".to_owned() } else { format!("Pages 1–{} go", number - 1) };
+            ui.label(
+                egui::RichText::new(format!(
+                    "Divider: page {number}. {above} in the video; drag old slides below it in Canva."
+                ))
+                .color(TEXT),
+            );
+        }
+        _ if view.settings.design.is_some() => {
+            ui.label(egui::RichText::new("No divider page chosen yet: read the pages and click it.").color(TEXT_FAINT));
+        }
+        _ => {}
+    }
+    if !view.pages.is_empty() {
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new("Click the divider page. Canva can't tell SoftPresenter which slides are hidden, so the divider says where the video stops.")
+                .size(11.5)
+                .color(TEXT_FAINT),
+        );
+        ui.add_space(4.0);
+        let mut chosen = None;
+        ui.horizontal_wrapped(|ui| {
+            for page in &view.pages {
+                let Some(id) = page.id.clone() else { continue };
+                let size = vec2(128.0, 72.0);
+                let (place, response) = ui.allocate_exact_size(size + vec2(0.0, 16.0), Sense::click());
+                let picture = Rect::from_min_size(place.min, size);
+                ui.painter().rect_filled(picture, 4.0, Color32::from_rgb(20, 22, 26));
+                if let Some(frame) = &page.picture {
+                    let texture = match view.textures.iter().find(|(have, _)| *have == id) {
+                        Some((_, texture)) => texture.clone(),
+                        None => {
+                            let image = egui::ColorImage::from_rgba_unmultiplied(
+                                [frame.width as usize, frame.height as usize],
+                                &frame.rgba,
+                            );
+                            let texture =
+                                ui.ctx().load_texture(format!("canva page {id}"), image, egui::TextureOptions::LINEAR);
+                            view.textures.push((id.clone(), texture.clone()));
+                            texture
+                        }
+                    };
+                    let aspect = frame.width as f32 / frame.height.max(1) as f32;
+                    let fitted = if aspect > size.x / size.y {
+                        vec2(size.x, size.x / aspect)
+                    } else {
+                        vec2(size.y * aspect, size.y)
+                    };
+                    egui::Image::new((texture.id(), fitted))
+                        .corner_radius(4.0)
+                        .paint_at(ui, Rect::from_center_size(picture.center(), fitted));
+                }
+                let divider = view.settings.divider.as_deref() == Some(id.as_str());
+                let below = view.settings.divider_number.is_some_and(|number| page.number > number);
+                let outline = if divider {
+                    Stroke::new(2.5, crate::studio::TALLY)
+                } else if response.hovered() {
+                    Stroke::new(1.5, TEXT_DIM)
+                } else {
+                    Stroke::new(1.0, LINE)
+                };
+                ui.painter().rect_stroke(picture, 4.0, outline, egui::StrokeKind::Outside);
+                if below {
+                    ui.painter().rect_filled(picture, 4.0, Color32::from_black_alpha(140));
+                }
+                let label = if divider { format!("{} · divider", page.number) } else { page.number.to_string() };
+                ui.painter().text(
+                    pos2(picture.center().x, picture.max.y + 8.0),
+                    Align2::CENTER_CENTER,
+                    label,
+                    FontId::proportional(11.0),
+                    if divider { crate::studio::TALLY } else { TEXT_DIM },
+                );
+                if response.on_hover_text(format!("Make page {} the divider", page.number)).clicked() {
+                    chosen = Some(id);
+                }
+            }
+        });
+        if let Some(id) = chosen {
+            *request = Some(R::Divider(id));
+        }
+    }
+    ui.add_space(12.0);
+    crate::studio::caption(ui, "WHERE IT GOES");
+    ui.label(
+        egui::RichText::new(
+            "Media › Canva Sync in the library, followed by the media playlist Announcements (made when the divider \
+             is chosen). One video is kept there, named with its day and time so volunteers can read it.",
+        )
+        .size(12.0)
+        .color(TEXT_DIM),
+    );
 }
 
 /// Where the key is pasted, and how to get one.
