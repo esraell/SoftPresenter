@@ -425,10 +425,10 @@ fn key(ui: &egui::Ui, id: egui::Id, rect: Rect, text: &str, has: bool, chosen: b
     response
 }
 
-/// A block of keys, six to a row, `count` of them from the top left of `area`'s next free
-/// place; `each(index, rect)` draws the one at `index` when it is in view. Returns the height
-/// it took.
-fn key_grid(ui: &mut egui::Ui, count: usize, mut each: impl FnMut(&mut egui::Ui, usize, Rect)) {
+/// A block of keys, six to a row, `count` of them at the next free place; `each(index, rect)`
+/// draws the one at `index` when it is in view. The key at `bring` is scrolled into view, in
+/// view or not.
+fn key_grid(ui: &mut egui::Ui, count: usize, bring: Option<usize>, mut each: impl FnMut(&mut egui::Ui, usize, Rect)) {
     let width = ui.available_width();
     let wide = (width - KEY_GAP * (KEYS_ACROSS - 1) as f32) / KEYS_ACROSS as f32;
     let rows = count.div_ceil(KEYS_ACROSS);
@@ -438,6 +438,9 @@ fn key_grid(ui: &mut egui::Ui, count: usize, mut each: impl FnMut(&mut egui::Ui,
         let (row, column) = (index / KEYS_ACROSS, index % KEYS_ACROSS);
         let corner = block.min + vec2(column as f32 * (wide + KEY_GAP), row as f32 * (KEY_HEIGHT + KEY_GAP));
         let rect = Rect::from_min_size(corner, vec2(wide, KEY_HEIGHT));
+        if bring == Some(index) {
+            ui.scroll_to_rect_animation(rect, None, egui::style::ScrollAnimation::none());
+        }
         if ui.is_rect_visible(rect) {
             each(ui, index, rect);
         }
@@ -466,7 +469,7 @@ fn keypad(ui: &mut egui::Ui, page: &mut BiblePage, bible: &Bible) -> Option<Choi
                     ui.add_space(KEY_GAP + 5.0 + KEY_GAP);
                 }
                 let first = books.start;
-                key_grid(ui, books.len(), |ui, at, rect| {
+                key_grid(ui, books.len(), None, |ui, at, rect| {
                     let book = first + at;
                     let name = sp_bible::book_name(book, &names);
                     let response = key(
@@ -485,12 +488,11 @@ fn keypad(ui: &mut egui::Ui, page: &mut BiblePage, bible: &Bible) -> Option<Choi
             // The chapters of the book open.
             let chapters = bible.chapter_count(open_book);
             section_heading(ui, &format!("{} \u{b7} chapter", sp_bible::book_name(open_book, &names)), None);
-            key_grid(ui, usize::from(chapters), |ui, at, rect| {
+            // Opened on the chapter chosen.
+            let bring = (scroll && open_chapter > 0).then(|| usize::from(open_chapter) - 1);
+            key_grid(ui, usize::from(chapters), bring, |ui, at, rect| {
                 let chapter = at as u16 + 1;
                 let chosen = chapter == open_chapter;
-                if chosen && scroll {
-                    ui.scroll_to_rect_animation(rect, None, egui::style::ScrollAnimation::none());
-                }
                 if key(ui, list_row_id(("chapter", chapter)), rect, &chapter.to_string(), true, chosen).clicked() {
                     clicked = Some(Choice::Chapter(chapter));
                 }
@@ -503,7 +505,7 @@ fn keypad(ui: &mut egui::Ui, page: &mut BiblePage, bible: &Bible) -> Option<Choi
                 bible.last_verse(open_book, open_chapter)
             };
             section_heading(ui, "Verse", Some(" \u{b7} \u{21e7} for a passage"));
-            key_grid(ui, usize::from(verses), |ui, at, rect| {
+            key_grid(ui, usize::from(verses), None, |ui, at, rect| {
                 let verse = at as u16 + 1;
                 let here = (open_book, open_chapter, verse);
                 let chosen = shown.is_some_and(|range| {
@@ -658,13 +660,16 @@ fn history(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) {
     }
 }
 
-/// One verse of the chapter on the page, laid out.
+/// One verse of the chapter on the page: its words, where it stands and how tall it is. Its
+/// text is laid out again when it is drawn, through the toolkit's own cache: a laid-out text
+/// points into the font atlas, which the toolkit may clear between frames.
 struct Line {
     verse: VerseRef,
-    number: Arc<Galley>,
-    words: Arc<Galley>,
-    /// The same verse in the second Bible read, under it.
-    under: Option<Arc<Galley>>,
+    words: String,
+    /// The same verse in the second Bible read, under it, and how tall the first Bible's words
+    /// are, so the second's can be put under them.
+    under: Option<String>,
+    words_height: f32,
     top: f32,
     height: f32,
     /// Its slide, when it is part of the passage shown: the place of its verse among those the
@@ -679,6 +684,8 @@ struct Made {
     choices: String,
     bibles: (usize, Option<usize>),
     width: i32,
+    /// The display's scale: the text is measured again on a display of another density.
+    pixels_per_point: i32,
 }
 
 /// The page's chapter laid out once for the passage, the Bibles read and the width, so a long
@@ -690,6 +697,9 @@ pub struct PageCache {
     height: f32,
     /// The chapter, as the first translation numbers it.
     chapter: Option<(usize, u16)>,
+    /// How many slides the passage was made into, as the page worked them out: a slide index is
+    /// put on screen only while the passage held has that many.
+    slides: usize,
 }
 
 impl std::fmt::Debug for PageCache {
@@ -722,13 +732,21 @@ fn lay_out(ui: &egui::Ui, page: &mut BiblePage, width: f32) {
         page.page.lines.clear();
         return;
     };
-    let made = Made { shown: page.shown.clone(), choices: page.choices(), bibles, width: width.round() as i32 };
+    let pixels_per_point = (ui.ctx().pixels_per_point() * 100.0).round() as i32;
+    let made = Made {
+        shown: page.shown.clone(),
+        choices: page.choices(),
+        bibles,
+        width: width.round() as i32,
+        pixels_per_point,
+    };
     if page.page.made.as_ref() == Some(&made) {
         return;
     }
     let break_on = page.options.break_on_new_verse;
     let mut lines = Vec::new();
     let mut chapter = None;
+    let mut slides = 0;
     let mut top = 0.0;
     if let (Some((lead, range)), Ok(reader)) = (shown_range(page), page.shelf.get(bibles.0)) {
         let second = bibles.1.and_then(|at| page.shelf.get(at).ok());
@@ -740,42 +758,52 @@ fn lay_out(ui: &egui::Ui, page: &mut BiblePage, width: f32) {
         };
         // The verses the passage's slides were made from, as `build_passage` makes them.
         let places: Vec<VerseRef> = lead.verses(range).into_iter().map(|(place, _)| place).collect();
-        let text_width = (width - 2.0 * PAD_X - NUMBER_COLUMN - NUMBER_GAP).max(80.0);
-        let layout = |text: &str, size: f32, line: f32| {
-            let mut job = LayoutJob::single_section(
-                text.to_owned(),
-                TextFormat {
-                    font_id: crate::studio::reading(size),
-                    color: Color32::PLACEHOLDER,
-                    line_height: Some(line),
-                    ..TextFormat::default()
-                },
-            );
-            job.wrap.max_width = text_width;
-            ui.fonts_mut(|fonts| fonts.layout_job(job))
-        };
+        slides = if break_on { places.len() } else { usize::from(!places.is_empty()) };
+        let text_width = page_text_width(width);
+        let number = ui.fonts_mut(|fonts| fonts.layout_no_wrap("0".to_owned(), fixed_semibold(12.0), TEXT)).size().y;
         for (verse, lead_words) in lead.verses(whole) {
             let in_reader = sp_bible::convert(verse, lead.info.numbering, reader.info.numbering);
-            let words = layout(reader.verse(in_reader).unwrap_or(lead_words), 19.0, 28.5);
+            let words = reader.verse(in_reader).unwrap_or(lead_words).to_owned();
             let under = second.as_ref().and_then(|second| {
                 let there = sp_bible::convert(verse, lead.info.numbering, second.info.numbering);
-                second.verse(there).map(|text| layout(text, 15.0, 22.5))
+                second.verse(there).map(str::to_owned)
             });
-            let number = ui.fonts_mut(|fonts| {
-                fonts.layout_no_wrap(verse.verse.to_string(), fixed_semibold(12.0), Color32::PLACEHOLDER)
-            });
-            let body = words.size().y + under.as_ref().map_or(0.0, |under| 3.0 + under.size().y);
-            let height = 2.0 * PAD_Y + body.max(number.size().y + 7.0);
+            let words_height = page_text(ui, &words, false, text_width).size().y;
+            let under_height =
+                under.as_ref().map_or(0.0, |under| 3.0 + page_text(ui, under, true, text_width).size().y);
+            let height = 2.0 * PAD_Y + (words_height + under_height).max(number + 7.0);
             let slide = if break_on {
                 places.iter().position(|place| *place == verse)
             } else {
                 places.contains(&verse).then_some(0)
             };
-            lines.push(Line { verse, number, words, under, top, height, slide });
+            lines.push(Line { verse, words, under, words_height, top, height, slide });
             top += height;
         }
     }
-    page.page = PageCache { made: Some(made), lines, height: top, chapter };
+    page.page = PageCache { made: Some(made), lines, height: top, chapter, slides };
+}
+
+/// How wide a verse's words are on a page `width` wide.
+fn page_text_width(width: f32) -> f32 {
+    (width - 2.0 * PAD_X - NUMBER_COLUMN - NUMBER_GAP).max(80.0)
+}
+
+/// A verse's words laid out in the book face, wrapped to `width`: the first Bible's large, the
+/// second's (`under`) smaller. Through the toolkit's cache, so a verse in view costs a lookup.
+fn page_text(ui: &egui::Ui, text: &str, under: bool, width: f32) -> Arc<Galley> {
+    let (size, line) = if under { (15.0, 22.5) } else { (19.0, 28.5) };
+    let mut job = LayoutJob::single_section(
+        text.to_owned(),
+        TextFormat {
+            font_id: crate::studio::reading(size),
+            color: Color32::PLACEHOLDER,
+            line_height: Some(line),
+            ..TextFormat::default()
+        },
+    );
+    job.wrap.max_width = width;
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
 /// The words at the foot of the page.
@@ -793,11 +821,13 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
     let width = ui.available_width();
     lay_out(ui, &mut state.bible, width);
     let slot = state.bible.slots.map(|slots| slots[state.bible.showing]);
-    // The slides are there to put on screen only once the show holds the passage.
+    // The slides are there to put on screen only once the show holds the passage, made as the
+    // page worked it out (so an index can never put up another verse).
+    let slides = state.bible.page.slides;
     let held = slot.filter(|slot| {
-        show.presentations()
-            .get(*slot)
-            .is_some_and(|passage| passage.title == state.bible.shown && passage.slide_count() > 0)
+        show.presentations().get(*slot).is_some_and(|passage| {
+            passage.title == state.bible.shown && passage.slide_count() > 0 && passage.slide_count() == slides
+        })
     });
     let picked = state.pick(show).filter(|at| Some(at.presentation) == held).map(|at| at.slide);
     let on_screen = live_range(show, &mut state.bible);
@@ -842,12 +872,23 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
                 (false, false) => (TEXT_FAINT, TEXT_DIM, TEXT_FAINT),
             };
             let left = rect.min.x + PAD_X;
-            painter.galley(pos2(left, rect.min.y + PAD_Y + 7.0), line.number.clone(), number_ink);
+            painter.text(
+                pos2(left, rect.min.y + PAD_Y + 7.0),
+                Align2::LEFT_TOP,
+                line.verse.verse,
+                fixed_semibold(12.0),
+                number_ink,
+            );
             let text_left = left + NUMBER_COLUMN + NUMBER_GAP;
-            painter.galley(pos2(text_left, rect.min.y + PAD_Y), line.words.clone(), words_ink);
+            let text_width = page_text_width(width);
+            painter.galley(
+                pos2(text_left, rect.min.y + PAD_Y),
+                page_text(ui, &line.words, false, text_width),
+                words_ink,
+            );
             if let Some(under) = &line.under {
-                let y = rect.min.y + PAD_Y + line.words.size().y + 3.0;
-                painter.galley(pos2(text_left, y), under.clone(), under_ink);
+                let y = rect.min.y + PAD_Y + line.words_height + 3.0;
+                painter.galley(pos2(text_left, y), page_text(ui, under, true, text_width), under_ink);
             }
             if response.clicked() {
                 clicked = Some((line.verse, line.slide));
@@ -903,13 +944,22 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
 }
 
 /// The verses on screen, as the first translation numbers them, when what is on screen is a
-/// Bible passage: read from the name of its slide (each Bible slide is named by its verses).
+/// Bible passage: read from the name of its slide (each Bible slide is named by its verses,
+/// with the Bible's short name after them in brackets when Options asks for it).
 fn live_range(show: &Show, page: &mut BiblePage) -> Option<Range> {
     let live = show.live()?;
     page.slots.filter(|slots| slots.contains(&live.presentation))?;
     let (group, _) = show.presentations().get(live.presentation)?.slide(live.slide)?;
     let lead = page.lead().and_then(|lead| page.shelf.get(lead).ok())?;
-    sp_bible::parse_reference_in(&group.name, &lead.info.language).ok()
+    sp_bible::parse_reference_in(verses_named(&group.name), &lead.info.language).ok()
+}
+
+/// The verses a Bible slide's name gives: "John 3:16 (KJV)" is John 3:16.
+fn verses_named(name: &str) -> &str {
+    match name.strip_suffix(')').and_then(|name| name.rsplit_once(" (")) {
+        Some((verses, _)) => verses,
+        None => name,
+    }
 }
 
 /// The title over the page or the slides: the chapter (on the page) or the passage (over its
@@ -994,13 +1044,9 @@ pub fn found_list(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
                 TEXT,
             );
             let clip = Rect::from_min_max(pos2(left, row.min.y), pos2(chapter_button.min.x - 10.0, row.max.y));
-            ui.painter().with_clip_rect(clip).text(
-                pos2(left, row.min.y + 34.0),
-                Align2::LEFT_CENTER,
-                &found.words,
-                crate::studio::reading(15.0),
-                if response.hovered() { TEXT } else { TEXT_DIM },
-            );
+            let ink = if response.hovered() { TEXT } else { TEXT_DIM };
+            let words = one_line(ui, &found.words, crate::studio::reading(15.0), ink, clip.width());
+            ui.painter().galley(pos2(left, row.min.y + 34.0 - words.size().y / 2.0), words, ink);
             let chapter = flat_button(
                 ui,
                 chapter_button,
@@ -1034,5 +1080,31 @@ pub fn found_list(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
             }
         }
         None => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bible_slides_name_gives_its_verses_with_or_without_the_bibles_name() {
+        assert_eq!(verses_named("John 3:16 (KJV)"), "John 3:16");
+        assert_eq!(verses_named("От Иоанна 3:16-18 (SYN)"), "От Иоанна 3:16-18");
+        assert_eq!(verses_named("John 3:16"), "John 3:16");
+        // With the translation's name on the slides, the slide on screen still reads as its verse.
+        let mut shelf = crate::bible::Shelf::shipped();
+        let kjv = shelf.get(shelf.position("kjv").unwrap()).unwrap();
+        let rows = [crate::bible::RowChoice {
+            bible: kjv,
+            verse: Some(sp_model::Role::primary()),
+            reference: Some(sp_model::Role::reference()),
+        }];
+        let options = crate::bible::BibleOptions { display_translation: true, ..Default::default() };
+        let passage = crate::bible::build_passage("John 3:16-17", &rows, &options, None).unwrap();
+        let (group, _) = passage.slide(1).unwrap();
+        assert_eq!(group.name, "John 3:17 (KJV)");
+        let range = sp_bible::parse_reference_in(verses_named(&group.name), "en").unwrap();
+        assert_eq!((range.start.chapter, range.start.verse, range.end.verse), (3, 17, 17));
     }
 }

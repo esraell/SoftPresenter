@@ -589,7 +589,7 @@ pub struct HomeState {
     /// A kind of the Edit view asked for (by its switch, the View menu, the command line, the
     /// Stage tab), until the top bar carries it out.
     pub edit_kind_request: Option<EditKind>,
-    /// What is typed in the Bible page's two fields, and its rows of translations.
+    /// The Bible page: what is typed in its reference field, its translations and the passage.
     pub bible: BiblePage,
 }
 
@@ -708,9 +708,7 @@ pub struct BiblePage {
     pub message: Option<String>,
     /// Verses found by the last search.
     pub found: Vec<crate::bible::FoundVerse>,
-    /// Search was typed in more lately than Scripture Lookup (its words are the ones searched
-    /// as they are typed), and the words whose verses are listed now from typing, if any.
-    pub search_last: bool,
+    /// The words typed in the reference field whose verses are listed now, if any.
     pub live_words: Option<String>,
     /// When Scripture Lookup was last typed in: its passage is made a moment after typing
     /// stops, without waiting for Return.
@@ -791,7 +789,6 @@ impl Default for BiblePage {
             pending: None,
             message: None,
             found: Vec::new(),
-            search_last: false,
             live_words: None,
             typed_at: None,
             focus_lookup: false,
@@ -1094,6 +1091,8 @@ impl BiblePage {
     /// slides are not made again, so nothing on the screens changes.
     pub fn set_read_in(&mut self, chosen: Option<String>) {
         self.read_in = chosen;
+        // Verses listed for words typed are asked for again, named in the new language.
+        self.live_words = None;
         if self.shown.is_empty() {
             return;
         }
@@ -5996,7 +5995,6 @@ fn bible_field(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, rect: Rect
     if let Some(typed) = &started {
         state.bible.lookup = typed.clone();
         state.bible.typed_at = Some(ui.input(|input| input.time));
-        state.bible.search_last = false;
     }
     let language = state
         .bible
@@ -6030,7 +6028,6 @@ fn bible_field(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, rect: Rect
     let now = ui.input(|input| input.time);
     if lookup.changed() && completion.accepted.is_none() {
         state.bible.typed_at = Some(now);
-        state.bible.search_last = false;
     }
     if entered(&lookup, ui) && lookup_words(&state.bible.lookup, &language).is_some() {
         // Words, not a reference: their verses are listed already (see `bible_live_search`);
@@ -6534,11 +6531,10 @@ fn lookup_words<'a>(typed: &'a str, language: &str) -> Option<&'a str> {
     (trimmed.chars().count() >= 3 && !has_chapter(trimmed) && !trimmed.contains(':') && !book).then_some(trimmed)
 }
 
-/// The Bible view's search as it is typed: the verses holding the words typed in Search (when
-/// it was typed in last), or in Scripture Lookup when they are words, not a reference, are
-/// listed in place of the slides as soon as they are found, on a thread of their own (only the
-/// newest words are answered). When the words go (cleared, or become a reference), so does the
-/// list they gave.
+/// The Bible view's search as it is typed: the verses holding the words typed in the reference
+/// field, when they are words, not a reference, are listed in place of the page as soon as they
+/// are found, on a thread of their own (only the newest words are answered). When the words go
+/// (cleared, or become a reference), so does the list they gave.
 fn bible_live_search(ctx: &egui::Context, state: &mut HomeState) {
     for (id, bible) in state.page_finder.take_read() {
         state.bible.shelf.keep(&id, bible);
@@ -6546,12 +6542,7 @@ fn bible_live_search(ctx: &egui::Context, state: &mut HomeState) {
     let page = &state.bible;
     let language =
         page.lead().and_then(|at| page.shelf.bibles.get(at)).map_or_else(String::new, |b| b.language.clone());
-    let words = if page.search_last {
-        Some(page.search.trim()).filter(|words| words.chars().count() >= 3)
-    } else {
-        lookup_words(&page.lookup, &language)
-    };
-    let Some(words) = words.map(str::to_owned) else {
+    let Some(words) = lookup_words(&page.lookup, &language).map(str::to_owned) else {
         if state.bible.live_words.take().is_some() {
             state.bible.found.clear();
             state.bible.message = None;
@@ -8857,6 +8848,37 @@ mod tests {
         let verses = state.finder.rows("valley of the shadow", &in_use, &reading, Vec::new, &ctx).expect("answered");
         assert!(!verses.is_empty() && verses.iter().all(|row| row.tag == "BIBLE \u{b7} SYN"), "{verses:?}");
         assert!(verses.iter().any(|row| row.title == "Псалтирь 22:4"), "{verses:?}");
+    }
+
+    #[test]
+    fn the_keys_and_the_verses_listed_follow_the_language_chosen() {
+        // The keypad's keys, as drawn: English on Auto (nothing typed, no computer's language in
+        // a test), Russian once Russian is chosen.
+        let mut state = HomeState { bible_open: true, ..HomeState::default() };
+        state.bible.slots = Some([0, 1]);
+        let drawn = bible_frames(&mut state, 3);
+        assert!(drawn.iter().any(|words| words == "Gen") && !drawn.iter().any(|words| words == "Быт"));
+        state.bible.set_read_in(Some("ru".to_owned()));
+        let drawn = bible_frames(&mut state, 3);
+        assert!(drawn.iter().any(|words| words == "Быт") && !drawn.iter().any(|words| words == "Gen"), "{drawn:?}");
+        // Verses listed for English words typed in the field are asked for again when the
+        // language changes, and come back named and quoted in it.
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { bible_open: true, ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        state.bible.focus_lookup = true;
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        frame_then_app(&ctx, &mut show, &mut state, vec![Event::Text("valley of the shadow".to_owned())], 0.1);
+        let psalm = |state: &HomeState| state.bible.found.iter().find(|found| found.kept == "Псалтирь 22:4").cloned();
+        let english = psalm(&state).expect("found in the King James Version");
+        assert_eq!((english.reference.as_str(), english.bible.as_str()), ("Psalms 22:4", "KJV"));
+        state.bible.set_read_in(Some("ru".to_owned()));
+        let commands = frame_then_app(&ctx, &mut show, &mut state, vec![], 0.2);
+        let russian = psalm(&state).expect("still listed");
+        assert_eq!((russian.reference.as_str(), russian.bible.as_str()), ("Псалтирь 22:4", "SYN"));
+        assert!(russian.words.contains("долиною смертной тени"), "{}", russian.words);
+        assert!(!goes_on_screen(&commands) && state.bible.pending.is_none());
     }
 
     #[test]

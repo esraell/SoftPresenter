@@ -598,7 +598,7 @@ feature changes, this page changes in the same commit.
 - One click keeps a passage: + Add puts it in the playlist in front (its tooltip names the
   playlist; the ▾ beside it picks another), to be brought back with the same settings.
 
-![The Bible page: John 3:16-18 in the Russian Synodal and the King James Version, beside the book, chapter and verse lists](images/bible.png)
+![The Bible page: John 3 to read, verses 16 to 18 in the King James Version with the Russian Synodal under them, verse 16 picked, beside the keypad of the books](images/bible.png)
 
 ## Editing
 - **Edit always opens something.** Command-3, the Edit key in the top bar and View › Edit open

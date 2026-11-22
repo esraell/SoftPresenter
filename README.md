@@ -58,10 +58,11 @@ SoftPresenter is built to be:
   files, in any common encoding, and whole song libraries come across from other presentation
   software. PowerPoint, Keynote and PDF files, and folders of pictures, come in as slides. Undo
   and redo.
-- **Bible.** Type `John 3:16-18`, `Пс 22:1-3` or `Ів 3:16` and the slides fill as you type, with
-  no need to press Return; or click through book, chapter and verse lists, or search by word.
-  Up to four translations on one slide, a history of the passages shown, and book names in
-  English, Russian and Ukrainian. Four Bibles come with the app and sixteen more install from
+- **Bible.** Type `John 3:16-18`, `Пс 22:1-3` or `Ів 3:16` and the chapter fills as you type,
+  with no need to press Return, as a page to read or as slides; or click a book on a keypad of
+  all 66 (or in lists), or search by word. Up to four translations on one slide, a history of
+  the passages shown, and book names in English, Russian and Ukrainian, read in the language
+  typed or one chosen. Four Bibles come with the app and sixteen more install from
   its Bibles window.
 - **Media.** Pictures and videos behind the words or on their own, media playlists, folders the
   app watches, and an announcements layer that loops by itself. Videos play as they are, never
@@ -84,7 +85,7 @@ The full list, area by area, is in [docs/features.md](docs/features.md).
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/bible.png" alt="The Bible page: John 3:16-18 in the Russian Synodal and the King James Version, one slide per verse, beside the book, chapter and verse lists"></td>
+    <td width="50%"><img src="docs/images/bible.png" alt="The Bible page: John 3 to read, verses 16 to 18 in the King James Version with the Russian Synodal under them, beside the keypad of the books"></td>
     <td width="50%"><img src="docs/images/stage.png" alt="A stage screen: the slide on screen in English and Russian, the next slide below it, a sermon timer and the clock"></td>
   </tr>
   <tr>
@@ -124,9 +125,9 @@ The full list, area by area, is in [docs/features.md](docs/features.md).
    or by dropping them on the window: each page becomes a slide, ready to drag into the
    playlist.
 4. **Add the readings.** Control-B goes to the Bible page from anywhere. Type a reference such
-   as `John 3:16-18` and the slides fill as you type (book names are offered as you go), or
-   click through the book, chapter and verse lists; nothing goes on screen until you click a
-   slide. Pick a second translation for the next row, set what each slide shows under Options
+   as `John 3:16-18` and the chapter fills as you type (book names are offered as you go), or
+   click a book, a chapter and a verse; nothing goes on screen until you click a verse of the
+   passage, or press Enter on the one picked. Pick a second translation for the next row, set what each slide shows under Options
    (with a live preview), and add the passage to the playlist with one click. History brings
    back any passage that was on screen.
 5. **Add pictures and videos.** Drop them on the window to put them in the media bin, and group
