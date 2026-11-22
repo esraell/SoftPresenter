@@ -1082,128 +1082,247 @@ pub fn describe_action(show: &sp_engine::Show, state: &HomeState, action: &sp_mo
     )
 }
 
-/// The menu of actions to add: clearing, messages, props, timers, the audience screens, songs.
-/// Returns the one chosen.
-pub fn add_action_menu(ui: &mut egui::Ui, show: &sp_engine::Show, state: &HomeState) -> Option<sp_model::ShowAction> {
-    use sp_model::{ClearWhat, ShowAction, TimerDo};
-    let mut chosen = None;
-    ui.menu_button("Clear", |ui| {
-        for what in ClearWhat::ALL {
-            if ui.button(what.name()).clicked() {
-                chosen = Some(ShowAction::Clear { what });
-            }
+/// The groups of steps a macro or a slide can do, in the order their menus list them.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StepGroup {
+    Clear,
+    Messages,
+    Props,
+    Timers,
+    Audience,
+    Song,
+    Media,
+    Announcements,
+    CanvaSync,
+}
+
+impl StepGroup {
+    const ALL: [StepGroup; 9] = [
+        StepGroup::Clear,
+        StepGroup::Messages,
+        StepGroup::Props,
+        StepGroup::Timers,
+        StepGroup::Audience,
+        StepGroup::Song,
+        StepGroup::Media,
+        StepGroup::Announcements,
+        StepGroup::CanvaSync,
+    ];
+
+    /// The group a step is in.
+    fn of(step: &sp_model::ShowAction) -> StepGroup {
+        use sp_model::ShowAction;
+        match step {
+            ShowAction::Clear { .. } => StepGroup::Clear,
+            ShowAction::Message { .. } => StepGroup::Messages,
+            ShowAction::Prop { .. } => StepGroup::Props,
+            ShowAction::Timer { .. } => StepGroup::Timers,
+            ShowAction::Audience { .. } => StepGroup::Audience,
+            ShowAction::Song { .. } => StepGroup::Song,
+            ShowAction::Media { .. } => StepGroup::Media,
+            ShowAction::Announce { .. } => StepGroup::Announcements,
+            ShowAction::CanvaSync => StepGroup::CanvaSync,
         }
-    });
-    ui.menu_button("Message", |ui| {
-        if state.messages.is_empty() {
-            ui.label("No messages yet");
-        }
-        for message in &state.messages {
-            for show in [true, false] {
-                let label = format!("{} {}", if show { "Show" } else { "Hide" }, message.name);
-                if ui.button(label).clicked() {
-                    chosen = Some(ShowAction::Message { id: message.id, show });
-                }
-            }
-        }
-    });
-    ui.menu_button("Prop", |ui| {
-        if state.props.is_empty() {
-            ui.label("No props yet");
-        }
-        for prop in &state.props {
-            for show in [true, false] {
-                let label = format!("{} {}", if show { "Show" } else { "Hide" }, prop.name);
-                if ui.button(label).clicked() {
-                    chosen = Some(ShowAction::Prop { id: prop.id, show });
-                }
-            }
-        }
-    });
-    ui.menu_button("Timer", |ui| {
-        if state.timers.is_empty() {
-            ui.label("No timers yet");
-        }
-        for timer in &state.timers {
-            for act in TimerDo::ALL {
-                if ui.button(format!("{} {}", act.name(), timer.name)).clicked() {
-                    chosen = Some(ShowAction::Timer { id: timer.id, act });
-                }
-            }
-        }
-    });
-    ui.menu_button("Audience Screens", |ui| {
-        for on in [true, false] {
-            if ui.button(if on { "On" } else { "Off" }).clicked() {
-                chosen = Some(ShowAction::Audience { on });
-            }
-        }
-    });
-    ui.menu_button("Media", |ui| {
-        if show.media().is_empty() {
-            ui.label("No pictures in the media bin yet");
-        }
-        for item in show.media() {
-            if ui.button(format!("Show {}", item.name)).clicked() {
-                chosen = Some(ShowAction::Media { id: item.id });
-            }
-        }
-    });
-    ui.menu_button("Go to Song", |ui| {
-        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-            let hidden = state.bible.slots.unwrap_or([usize::MAX; 2]);
-            for (key, song) in listed_songs(show, state, hidden) {
-                if ui.button(song.title.as_str()).clicked() {
-                    chosen = Some(ShowAction::Song { key: key.to_owned() });
-                }
-            }
-        });
-    });
-    if ui
-        .button("Sync from Canva")
-        .on_hover_text("Fetch a fresh announcements video (Settings › Integrations › Canva Sync)")
-        .clicked()
-    {
-        chosen = Some(ShowAction::CanvaSync);
     }
-    // Something that goes round on the Announcements layer: a media playlist, a picture or a
-    // video, or a song.
-    ui.menu_button("Play on the Announcements Layer", |ui| {
-        let announce = |what| Some(ShowAction::Announce { what });
-        ui.menu_button("Media Playlist", |ui| {
-            if state.media_playlists.is_empty() {
-                ui.label("No media playlists yet");
+
+    fn title(self) -> &'static str {
+        match self {
+            StepGroup::Clear => "Clear",
+            StepGroup::Messages => "Messages",
+            StepGroup::Props => "Props",
+            StepGroup::Timers => "Timers",
+            StepGroup::Audience => "Audience Screens",
+            StepGroup::Song => "Go to a Song",
+            StepGroup::Media => "Show a Picture or Video",
+            StepGroup::Announcements => "Announcements",
+            StepGroup::CanvaSync => "Sync from Canva",
+        }
+    }
+}
+
+/// A button in a menu that opens `contents` beside it, marked as chosen when `marked`. Returns
+/// what `contents` returned, while it is open.
+fn submenu<R>(ui: &mut egui::Ui, marked: bool, title: &str, contents: impl FnOnce(&mut egui::Ui) -> R) -> Option<R> {
+    use egui::containers::menu::SubMenuButton;
+    let button = egui::Button::selectable(marked, title).right_text(SubMenuButton::arrow_atom(None));
+    SubMenuButton::from_button(button).ui(ui, contents).1.map(|shown| shown.inner)
+}
+
+/// A small heading at the top of a menu, in faint capitals.
+fn menu_heading(ui: &mut egui::Ui, words: &str) {
+    let indent = ui.spacing().button_padding.x;
+    ui.horizontal(|ui| {
+        ui.add_space(indent);
+        let words = egui::RichText::new(words.to_uppercase()).font(fixed_semibold(9.5)).extra_letter_spacing(0.7);
+        ui.label(words.color(TEXT_FAINT));
+    });
+}
+
+/// The steps of one group, each a button, the one `current` is marked; Announcements has a
+/// menu for each kind of thing it plays. Returns the one chosen.
+fn group_steps(
+    ui: &mut egui::Ui,
+    show: &sp_engine::Show,
+    state: &HomeState,
+    group: StepGroup,
+    current: Option<&sp_model::ShowAction>,
+) -> Option<sp_model::ShowAction> {
+    use sp_model::{Announced, ClearWhat, ShowAction, TimerDo};
+    let mut chosen = None;
+    let mut offer = |ui: &mut egui::Ui, words: &str, step: ShowAction| {
+        if ui.add(egui::Button::selectable(current == Some(&step), words)).clicked() {
+            chosen = Some(step);
+        }
+    };
+    let hidden = state.bible.slots.unwrap_or([usize::MAX; 2]);
+    match group {
+        StepGroup::Clear => {
+            for what in ClearWhat::ALL {
+                offer(ui, what.name(), ShowAction::Clear { what });
             }
-            for playlist in &state.media_playlists {
-                if ui.button(playlist.name.as_str()).clicked() {
-                    chosen = announce(sp_model::Announced::MediaPlaylist { id: playlist.id });
+        }
+        StepGroup::Messages => {
+            if state.messages.is_empty() {
+                ui.label("No messages yet");
+            }
+            for message in &state.messages {
+                for show in [true, false] {
+                    let words = format!("{} {}", if show { "Show" } else { "Hide" }, message.name);
+                    offer(ui, &words, ShowAction::Message { id: message.id, show });
                 }
             }
-        });
-        ui.menu_button("Picture or Video", |ui| {
+        }
+        StepGroup::Props => {
+            if state.props.is_empty() {
+                ui.label("No props yet");
+            }
+            for prop in &state.props {
+                for show in [true, false] {
+                    let words = format!("{} {}", if show { "Show" } else { "Hide" }, prop.name);
+                    offer(ui, &words, ShowAction::Prop { id: prop.id, show });
+                }
+            }
+        }
+        StepGroup::Timers => {
+            if state.timers.is_empty() {
+                ui.label("No timers yet");
+            }
+            for timer in &state.timers {
+                for act in TimerDo::ALL {
+                    offer(ui, &format!("{} {}", act.name(), timer.name), ShowAction::Timer { id: timer.id, act });
+                }
+            }
+        }
+        StepGroup::Audience => {
+            for on in [true, false] {
+                offer(ui, if on { "On" } else { "Off" }, ShowAction::Audience { on });
+            }
+        }
+        StepGroup::Song => {
+            egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                for (key, song) in listed_songs(show, state, hidden) {
+                    offer(ui, song.title.as_str(), ShowAction::Song { key: key.to_owned() });
+                }
+            });
+        }
+        StepGroup::Media => {
             if show.media().is_empty() {
                 ui.label("No pictures or videos in the media bin yet");
             }
             egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
                 for item in show.media() {
-                    if ui.button(item.name.as_str()).clicked() {
-                        chosen = announce(sp_model::Announced::Media { id: item.id });
-                    }
+                    offer(ui, item.name.as_str(), ShowAction::Media { id: item.id });
                 }
             });
-        });
-        ui.menu_button("Song", |ui| {
-            egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-                let hidden = state.bible.slots.unwrap_or([usize::MAX; 2]);
-                for (key, song) in listed_songs(show, state, hidden) {
-                    if ui.button(song.title.as_str()).clicked() {
-                        chosen = announce(sp_model::Announced::Song { key: key.to_owned() });
-                    }
+        }
+        // Something that goes round on the Announcements layer: a media playlist, a picture or
+        // a video, or a song.
+        StepGroup::Announcements => {
+            let playing = match current {
+                Some(ShowAction::Announce { what }) => Some(what),
+                _ => None,
+            };
+            let announce = |what| ShowAction::Announce { what };
+            let marked = matches!(playing, Some(Announced::MediaPlaylist { .. }));
+            submenu(ui, marked, "Media Playlist", |ui| {
+                if state.media_playlists.is_empty() {
+                    ui.label("No media playlists yet");
+                }
+                for playlist in &state.media_playlists {
+                    offer(ui, playlist.name.as_str(), announce(Announced::MediaPlaylist { id: playlist.id }));
                 }
             });
-        });
-    });
+            let marked = matches!(playing, Some(Announced::Media { .. }));
+            submenu(ui, marked, "Picture or Video", |ui| {
+                if show.media().is_empty() {
+                    ui.label("No pictures or videos in the media bin yet");
+                }
+                egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                    for item in show.media() {
+                        offer(ui, item.name.as_str(), announce(Announced::Media { id: item.id }));
+                    }
+                });
+            });
+            let marked = matches!(playing, Some(Announced::Song { .. }));
+            submenu(ui, marked, "Song", |ui| {
+                egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                    for (key, song) in listed_songs(show, state, hidden) {
+                        offer(ui, song.title.as_str(), announce(Announced::Song { key: key.to_owned() }));
+                    }
+                });
+            });
+        }
+        StepGroup::CanvaSync => {
+            let hint = "Fetch a fresh announcements video (Settings \u{203a} Integrations \u{203a} Canva Sync)";
+            let marked = current == Some(&ShowAction::CanvaSync);
+            if ui.add(egui::Button::selectable(marked, group.title())).on_hover_text(hint).clicked() {
+                chosen = Some(ShowAction::CanvaSync);
+            }
+        }
+    }
     chosen
+}
+
+/// Every step a macro or a slide can do, in groups (Clear, Messages, Props, Timers, Audience
+/// Screens, Go to a Song, Show a Picture or Video, Announcements), each opening its steps, and
+/// Sync from Canva on its own. The one menu that adds a step, changes one, and adds a slide's
+/// action, so they never drift apart. `current` is the step being changed: its group and its
+/// step are marked. Returns the one chosen.
+fn step_groups(
+    ui: &mut egui::Ui,
+    show: &sp_engine::Show,
+    state: &HomeState,
+    current: Option<&sp_model::ShowAction>,
+) -> Option<sp_model::ShowAction> {
+    let own = current.map(StepGroup::of);
+    let mut chosen = None;
+    for group in StepGroup::ALL {
+        let step = if group == StepGroup::CanvaSync {
+            group_steps(ui, show, state, group, current)
+        } else {
+            submenu(ui, own == Some(group), group.title(), |ui| group_steps(ui, show, state, group, current)).flatten()
+        };
+        chosen = chosen.or(step);
+    }
+    chosen
+}
+
+/// A macro's menu of steps under a heading: "Add a step" from + Add a step, "Change this step
+/// to" from a step, with `current` that step. Returns the step chosen.
+fn step_menu(
+    ui: &mut egui::Ui,
+    show: &sp_engine::Show,
+    state: &HomeState,
+    heading: &str,
+    current: Option<&sp_model::ShowAction>,
+) -> Option<sp_model::ShowAction> {
+    menu_heading(ui, heading);
+    step_groups(ui, show, state, current)
+}
+
+/// A slide's Add Action menu: every step it can do, in their groups. Returns the one chosen.
+pub fn add_action_menu(ui: &mut egui::Ui, show: &sp_engine::Show, state: &HomeState) -> Option<sp_model::ShowAction> {
+    step_groups(ui, show, state, None)
 }
 
 /// Something asked of a macro from its card.
@@ -1449,25 +1568,17 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
                     asked = Some((index, MacroAsk::Remove(at)));
                 }
             }
-            ui.add_space(4.0);
-            let (place, _) = ui.allocate_exact_size(vec2(inner, 28.0), Sense::hover());
-            let adding = ui.interact(place, egui::Id::unique(("macro add step", id)), Sense::click());
-            ui.painter().rect_filled(
-                place,
-                crate::studio::RADIUS,
-                if adding.hovered() { crate::studio::BUTTON } else { PANEL },
-            );
-            ui.painter().text(
-                place.left_center() + vec2(10.0, 0.0),
-                Align2::LEFT_CENTER,
-                "Add a step…",
-                FontId::proportional(12.5),
-                TEXT_DIM,
-            );
-            let mark = Rect::from_center_size(place.right_center() - vec2(14.0, 0.0), vec2(11.0, 11.0));
-            crate::icons::paint(ui.painter(), Icon::ChevronDown, mark, TEXT_DIM);
+            // + Add a step: a small button opening every step, in their groups.
+            ui.add_space(6.0);
+            let small = FontId::proportional(11.5);
+            let words = "+ Add a step";
+            let (place, _) = ui.allocate_exact_size(vec2(inner, 24.0), Sense::hover());
+            let button = Rect::from_min_size(place.min, vec2(flat_button_width(ui, &[words], &small, 9.0), 24.0));
+            let adding =
+                flat_button(ui, button, egui::Id::unique(("macro add step", id)), words, small, Flat::Plain, true)
+                    .on_hover_text("Add a step at the end");
             egui::Popup::menu(&adding).show(|ui| {
-                if let Some(action) = add_action_menu(ui, show, state) {
+                if let Some(action) = step_menu(ui, show, state, "Add a step", None) {
                     asked = Some((index, MacroAsk::Add(action)));
                     ui.close();
                 }
@@ -2435,7 +2546,21 @@ mod tests {
     }
 
     /// Runs one frame of the tabs in a column as wide as the window's, with these events.
-    fn frame(ctx: &egui::Context, show: &sp_engine::Show, state: &mut HomeState, events: Vec<Event>, time: f64) {
+    /// Returns each piece of text it drew, with where, in the order drawn (menus last).
+    fn frame(
+        ctx: &egui::Context,
+        show: &sp_engine::Show,
+        state: &mut HomeState,
+        events: Vec<Event>,
+        time: f64,
+    ) -> Vec<(String, Rect)> {
+        fn walk(shape: &egui::Shape, into: &mut Vec<(String, Rect)>) {
+            match shape {
+                egui::Shape::Text(text) => into.push((text.galley.text().to_owned(), text.visual_bounding_rect())),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
         let raw = RawInput {
             screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(340.0, 1400.0))),
             time: Some(time),
@@ -2443,7 +2568,65 @@ mod tests {
             ..RawInput::default()
         };
         let output = ctx.run_ui(raw, |ui| live_tabs(ui, show, state, &mut |_| None));
+        let mut texts = Vec::new();
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut texts));
         output.drop_without_applying_deltas();
+        texts
+    }
+
+    /// A moment after the last frame.
+    fn next(ctx: &egui::Context) -> f64 {
+        ctx.input(|input| input.time) + 0.1
+    }
+
+    /// The middle of where `words` were drawn last (in a menu, when it is open).
+    fn place_of(texts: &[(String, Rect)], words: &str) -> egui::Pos2 {
+        texts
+            .iter()
+            .rfind(|(text, _)| text == words)
+            .map(|(_, rect)| rect.center())
+            .unwrap_or_else(|| panic!("{words} is drawn: {:?}", texts.iter().map(|(text, _)| text).collect::<Vec<_>>()))
+    }
+
+    /// Moves the pointer to `at`, and with `press` presses and lets go there, as the pointer
+    /// would. Returns what the last frame drew.
+    fn point(
+        ctx: &egui::Context,
+        show: &sp_engine::Show,
+        state: &mut HomeState,
+        at: egui::Pos2,
+        press: bool,
+    ) -> Vec<(String, Rect)> {
+        let button = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut frames = vec![vec![Event::PointerMoved(at)], vec![]];
+        if press {
+            frames.extend([vec![button(true)], vec![button(false)], vec![]]);
+        }
+        let mut texts = Vec::new();
+        for events in frames {
+            texts = frame(ctx, show, state, events, next(ctx));
+        }
+        texts
+    }
+
+    /// The Macros tab with one macro, Opening, doing these steps, its steps open; and a prop
+    /// (Logo) and a message (Phones) for steps to name.
+    fn opened(steps: Vec<ShowAction>) -> (egui::Context, HomeState, sp_model::Uuid) {
+        let mut state = HomeState { live_tab: 3, ..HomeState::default() };
+        state.props.push(crate::props::Prop::new("Logo".to_owned()));
+        state.messages.push(Message::new("Phones".to_owned()));
+        let mut made = crate::macros::Macro::new("Opening".to_owned());
+        made.actions = steps;
+        let id = made.id;
+        state.macros.push(made);
+        let ctx = egui::Context::default();
+        ctx.data_mut(|data| data.insert_temp(egui::Id::unique("macro steps open"), id));
+        (ctx, state, id)
     }
 
     /// Clicks the middle of what was drawn under `id` (or a point `nudge` from it), as the
@@ -2561,6 +2744,36 @@ mod tests {
         assert!(state.actions_to_run.is_empty(), "the name alone does nothing");
         click(&ctx, &show, &mut state, egui::Id::unique(("macro run", id)), vec2(0.0, 0.0));
         assert_eq!(state.actions_to_run.len(), 1);
+    }
+
+    #[test]
+    fn add_a_step_offers_every_step_in_groups_and_adds_the_one_chosen() {
+        use sp_model::ClearWhat;
+        let show = show();
+        let (ctx, mut state, id) = opened(vec![ShowAction::Clear { what: ClearWhat::All }]);
+        let logo = state.props[0].id;
+        click(&ctx, &show, &mut state, egui::Id::unique(("macro add step", id)), vec2(0.0, 0.0));
+        let texts = frame(&ctx, &show, &mut state, vec![], next(&ctx));
+        place_of(&texts, "ADD A STEP");
+        let groups = [
+            "Clear",
+            "Messages",
+            "Props",
+            "Timers",
+            "Audience Screens",
+            "Go to a Song",
+            "Show a Picture or Video",
+            "Announcements",
+            "Sync from Canva",
+        ];
+        let heights: Vec<f32> = groups.iter().map(|group| place_of(&texts, group).y).collect();
+        assert!(heights.windows(2).all(|pair| pair[0] < pair[1]), "in this order: {groups:?}");
+        // Props opens its steps; Show Logo adds one, at the end.
+        let texts = point(&ctx, &show, &mut state, place_of(&texts, "Props"), false);
+        point(&ctx, &show, &mut state, place_of(&texts, "Show Logo"), true);
+        let added = vec![ShowAction::Clear { what: ClearWhat::All }, ShowAction::Prop { id: logo, show: true }];
+        assert_eq!(state.macros[0].actions, added);
+        assert!(state.macros_changed);
     }
 
     #[test]

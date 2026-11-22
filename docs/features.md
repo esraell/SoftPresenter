@@ -389,12 +389,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   takes them all off.
 - **Macros**: steps done in turn, which clear layers, show or hide messages and props, start,
   stop or reset timers, switch the audience screens, go to songs, show a picture from the
-  media bin, play a media playlist, a picture, a video or a song on the Announcements layer
-  (Add a step… › Play on the Announcements Layer), and fetch a fresh video from Canva (Sync from
-  Canva). Each is a card with its colour as a dot, its
-  name, how many steps, a Run key (the only thing that runs it), a chevron that opens its steps
-  (each with Earlier and Remove, then Add a step…), and ⋯ with Edit Steps…, Colour, Run When
-  SoftPresenter Opens, Rename, Duplicate and Delete. A step whose song, message, prop, timer,
+  media bin, play a media playlist, a picture, a video or a song on the Announcements layer, and
+  fetch a fresh video from Canva. Each is a card with its colour as a dot, its name, how many
+  steps, a Run key (the only thing that runs it), a chevron that opens its steps (each with
+  Earlier and Remove, then **+ Add a step**), and ⋯ with Edit Steps…, Colour, Run When
+  SoftPresenter Opens, Rename, Duplicate and Delete. + Add a step opens every step in groups,
+  under the heading ADD A STEP: Clear, Messages, Props, Timers, Audience Screens, Go to a Song,
+  Show a Picture or Video, Announcements (a media playlist, a picture or video, or a song), and
+  Sync from Canva on its own; a slide's Add Action is the same menu. A step whose song, message, prop, timer,
   picture or media playlist has gone says so, as "Play on the Announcements Layer: (a song no
   longer in the library)".
 - **Start-up is a macro**: a macro with Run When SoftPresenter Opens switched on (a switch at
@@ -423,7 +425,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   off. Under them the **Stage Message** for the people on stage: what is typed waits until Show
   on stage (or Return) sends it, Change it sends a change while one shows, and Clear takes it
   off.
-- A slide can carry the same actions as a macro, done when it goes on screen.
+- A slide can carry the same actions as a macro, done when it goes on screen (its menu's
+  Actions › Add Action offers them in the same groups as a macro's + Add a step).
 - **The window** is three round panels on a dark window: the left column, the middle, and a
   right column that is the same in every view. Along the top: the views (Show, Bible, Edit), a
   find box (press `/`, or Command-F: it finds songs by title and then each slide whose words
