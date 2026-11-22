@@ -80,4 +80,35 @@ pub enum ShowAction {
     Media {
         id: Uuid,
     },
+    /// Plays something on the Announcements layer, going round until it is cleared.
+    Announce {
+        what: Announced,
+    },
+}
+
+/// What an Announce action plays on the Announcements layer: a song (by its library key), a
+/// picture or video from the media bin, or a media playlist (by their ids).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Announced {
+    Song { key: String },
+    Media { id: Uuid },
+    MediaPlaylist { id: Uuid },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_announce_step_keeps_what_it_plays_in_its_file() {
+        let id = Uuid::from_u128(7);
+        for what in [Announced::Song { key: "12".to_owned() }, Announced::Media { id }, Announced::MediaPlaylist { id }]
+        {
+            let step = ShowAction::Announce { what };
+            let text = serde_json::to_string(&step).unwrap();
+            assert!(text.starts_with(r#"{"do":"announce","what":{"kind":"#), "{text}");
+            assert_eq!(serde_json::from_str::<ShowAction>(&text).unwrap(), step);
+        }
+    }
 }

@@ -491,24 +491,10 @@ impl crate::App {
     /// `settings`, and `settings set key=value…`: the choices kept between runs.
     pub(crate) fn ctl_settings(&mut self, args: &[String]) -> Result<Reply, String> {
         let usage = "settings | settings set transition=KIND[:SECONDS] media_transition=… copyright=never|first|last|every \
-                     ccli_licence=NUMBER start_audience=on|off start_with=nothing|media-playlist:NAME|announcements:SONG \
-                     continuous=on|off view=grid|easy|table columns=1-12";
+                     ccli_licence=NUMBER start_audience=on|off continuous=on|off view=grid|easy|table columns=1-12";
         let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
         if args.get(1).is_none() {
             let prefs = state.prefs();
-            let start_with = match &prefs.start_with {
-                crate::service::StartWith::Nothing => "nothing".to_owned(),
-                crate::service::StartWith::MediaPlaylist { id } => state
-                    .media_playlists
-                    .iter()
-                    .find(|p| p.id == *id)
-                    .map_or("a media playlist (gone)".to_owned(), |p| format!("the media playlist {}", p.name)),
-                crate::service::StartWith::Announcements { song } => {
-                    crate::studio::playlist_song(&self.show, state, song).map_or("a song (gone)".to_owned(), |at| {
-                        format!("the announcements song {}", self.show.presentations()[at].title)
-                    })
-                }
-            };
             let transition = |t: Option<sp_model::Transition>| {
                 t.map_or("Dissolve".to_owned(), |t| format!("{} {:.1}s", t.kind.name(), t.seconds))
             };
@@ -518,7 +504,6 @@ impl crate::App {
                 format!("copyright line: {}", prefs.copyright_show.name()),
                 format!("CCLI licence: {}", if prefs.ccli_licence.is_empty() { "(none)" } else { &prefs.ccli_licence }),
                 format!("audience screens at start: {}", if prefs.start_audience_off { "off" } else { "on" }),
-                format!("starts with: {start_with}"),
                 format!("continuous playlist: {}", if prefs.continuous { "on" } else { "off" }),
                 format!("slides: {} view, {} across", prefs.slide_view, prefs.columns),
             ];
@@ -528,8 +513,6 @@ impl crate::App {
         if !args[1].eq_ignore_ascii_case("set") || args.len() < 3 {
             return Err(usage.to_owned());
         }
-        let media_playlists: Vec<(sp_model::Uuid, String)> =
-            state.media_playlists.iter().map(|p| (p.id, p.name.clone())).collect();
         let mut said = Vec::new();
         let mut changes: Vec<Change> = Vec::new();
         for setting in &args[2..] {
@@ -584,23 +567,10 @@ impl crate::App {
                     changes.push(Box::new(move |state| state.continuous = on));
                 }
                 "start_with" => {
-                    let start = match value.split_once(':') {
-                        None if value.eq_ignore_ascii_case("nothing") => crate::service::StartWith::Nothing,
-                        Some((kind, name)) if kind.eq_ignore_ascii_case("media-playlist") => {
-                            let names: Vec<String> = media_playlists.iter().map(|(_, n)| n.clone()).collect();
-                            crate::service::StartWith::MediaPlaylist {
-                                id: media_playlists[find("media playlist", &names, name)?].0,
-                            }
-                        }
-                        Some((kind, name)) if kind.eq_ignore_ascii_case("announcements") => {
-                            let at = self.find_song_as_is(name)?;
-                            let key = state.song_keys.get(at).cloned().ok_or("That song can't start with the app.")?;
-                            crate::service::StartWith::Announcements { song: key }
-                        }
-                        _ => return Err("start_with is nothing, media-playlist:NAME or announcements:SONG.".to_owned()),
-                    };
-                    said.push(format!("starts with {value}"));
-                    changes.push(Box::new(move |state| state.start_with = start));
+                    return Err("What plays when SoftPresenter opens is a macro now: macro new NAME, macro add NAME \
+                                announce SONG (or announce media ITEM, announce media-playlist NAME), then macro \
+                                startup NAME on."
+                        .to_owned());
                 }
                 "view" => {
                     let view = match value.to_lowercase().as_str() {

@@ -414,6 +414,29 @@ impl crate::App {
             }
             // `macro add NAME STEP [; STEP…]`
             "add" => self.macro_add(words),
+            // `macro startup NAME on|off`: run it when SoftPresenter opens, or not.
+            "startup" => match words {
+                [name @ .., on]
+                    if !name.is_empty() && (on.eq_ignore_ascii_case("on") || on.eq_ignore_ascii_case("off")) =>
+                {
+                    let on = on.eq_ignore_ascii_case("on");
+                    self.with_named("macro", &name.join(" "), |state| {
+                        state.macros.iter().map(|m| m.name.clone()).collect()
+                    })
+                    .and_then(|at| {
+                        let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
+                        state.macros[at].on_startup = on;
+                        state.macros_changed = true;
+                        let name = &state.macros[at].name;
+                        Ok(Reply::done(if on {
+                            format!("{name} runs when SoftPresenter opens.")
+                        } else {
+                            format!("{name} no longer runs when SoftPresenter opens.")
+                        }))
+                    })
+                }
+                _ => Err("macro startup NAME on|off".to_owned()),
+            },
             // `macro remove NAME N`
             "remove" => match words {
                 [name @ .., number] if !name.is_empty() => {
@@ -459,7 +482,8 @@ impl crate::App {
 
     fn macro_add(&mut self, words: &[String]) -> Result<Reply, String> {
         let usage = "macro add NAME STEP [then STEP…]   steps: clear all|slide|media|props|messages, show|hide message NAME, \
-                     show|hide prop NAME, start|stop|reset timer NAME, audience on|off, song SONG, media ITEM";
+                     show|hide prop NAME, start|stop|reset timer NAME, audience on|off, song SONG, media ITEM, \
+                     announce SONG|media ITEM|media-playlist NAME";
         // The macro's name is the words up to the first step's first word.
         let starts = ["clear", "show", "hide", "start", "stop", "reset", "audience", "song", "media"];
         let first_word = |w: &String| w.split_whitespace().next().unwrap_or_default().to_lowercase();
@@ -535,6 +559,24 @@ impl crate::App {
                 let names: Vec<String> = self.show.media().iter().map(|m| m.name.clone()).collect();
                 let at = named("media item", names, rest(1))?;
                 Ok(ShowAction::Media { id: self.show.media()[at].id })
+            }
+            // `announce media ITEM`, `announce media-playlist NAME`, `announce SONG`.
+            ("announce", "media") if words.len() > 2 => {
+                let names: Vec<String> = self.show.media().iter().map(|m| m.name.clone()).collect();
+                let at = named("media item", names, rest(2))?;
+                Ok(ShowAction::Announce { what: sp_model::Announced::Media { id: self.show.media()[at].id } })
+            }
+            ("announce", "media-playlist") => {
+                let at =
+                    named("media playlist", state.media_playlists.iter().map(|p| p.name.clone()).collect(), rest(2))?;
+                Ok(ShowAction::Announce {
+                    what: sp_model::Announced::MediaPlaylist { id: state.media_playlists[at].id },
+                })
+            }
+            ("announce", _) => {
+                let at = self.find_song_as_is(&rest(1))?;
+                let key = state.song_keys.get(at).cloned().ok_or("That song can't be played as announcements.")?;
+                Ok(ShowAction::Announce { what: sp_model::Announced::Song { key } })
             }
             _ => Err(format!("{step}: not a step SoftPresenter knows.")),
         }

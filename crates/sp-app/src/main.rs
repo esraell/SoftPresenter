@@ -313,14 +313,33 @@ fn action_commands(show: &Show, state: &home::HomeState, action: &sp_model::Show
                 _ => Vec::new(),
             })
         }
-        ShowAction::Message { .. } | ShowAction::Prop { .. } | ShowAction::Timer { .. } => None,
+        ShowAction::Message { .. }
+        | ShowAction::Prop { .. }
+        | ShowAction::Timer { .. }
+        | ShowAction::Announce { .. } => None,
+    }
+}
+
+/// What a macro made from the start-up choice plays, in words: "the song …" or "the media
+/// playlist …".
+fn describe_opening(show: &Show, state: &home::HomeState, step: &sp_model::ShowAction) -> String {
+    match step {
+        sp_model::ShowAction::Announce { what: sp_model::Announced::Song { key } } => {
+            let title = studio::playlist_song(show, state, key).map(|at| show.presentations()[at].title.clone());
+            format!("the song {}", title.unwrap_or_else(|| "it named (gone)".to_owned()))
+        }
+        sp_model::ShowAction::Announce { what: sp_model::Announced::MediaPlaylist { id } } => {
+            let name = state.media_playlists.iter().find(|p| p.id == *id).map(|p| p.name.clone());
+            format!("the media playlist {}", name.unwrap_or_else(|| "it named (gone)".to_owned()))
+        }
+        _ => "what it was set to".to_owned(),
     }
 }
 
 /// Does an action that changes the window's own state: shows or hides a message or a prop,
 /// starts, stops or resets a timer.
 fn do_state_action(state: &mut home::HomeState, action: &sp_model::ShowAction, now: Instant) {
-    use sp_model::{ShowAction, TimerDo};
+    use sp_model::{Announced, ShowAction, TimerDo};
     match action {
         ShowAction::Message { id, show } => {
             if *show && state.messages.iter().any(|m| m.id == *id) {
@@ -342,6 +361,19 @@ fn do_state_action(state: &mut home::HomeState, action: &sp_model::ShowAction, n
                     TimerDo::Stop => timer.stop(now),
                     TimerDo::Reset => timer.reset(),
                 }
+            }
+        }
+        ShowAction::Announce { what } => {
+            let asked = match what {
+                Announced::Song { key } => {
+                    state.song_keys.iter().position(|have| have == key).map(announcements::Announce::Song)
+                }
+                Announced::Media { id } => Some(announcements::Announce::Media(*id)),
+                Announced::MediaPlaylist { id } => Some(announcements::Announce::MediaPlaylist(*id)),
+            };
+            match asked {
+                Some(asked) => state.announcement_request = Some(Some(asked)),
+                None => state.notice = Some("A step's song for the Announcements layer can't be found.".to_owned()),
             }
         }
         ShowAction::Clear { .. } | ShowAction::Audience { .. } | ShowAction::Song { .. } | ShowAction::Media { .. } => {
@@ -1874,7 +1906,8 @@ impl App {
             actions
                 .iter()
                 .filter_map(|action| match action {
-                    sp_model::ShowAction::Media { id } => Some(*id),
+                    sp_model::ShowAction::Media { id }
+                    | sp_model::ShowAction::Announce { what: sp_model::Announced::Media { id } } => Some(*id),
                     _ => None,
                 })
                 .collect::<Vec<Uuid>>()
@@ -1899,23 +1932,6 @@ impl App {
             used.extend(state.props.iter().flat_map(|prop| shown(&prop.slide.actions)));
         }
         used
-    }
-
-    /// Starts what Settings says to play when the app opens.
-    fn start_playing(&mut self) {
-        use service::StartWith;
-        let Some(start) = self.running.as_ref().map(|r| r.home_state.start_with.clone()) else { return };
-        match start {
-            StartWith::Nothing => {}
-            StartWith::MediaPlaylist { id } => self.play_media_playlist(id),
-            StartWith::Announcements { song } => {
-                if let Some(running) = self.running.as_mut()
-                    && let Some(index) = running.home_state.song_keys.iter().position(|key| *key == song)
-                {
-                    running.home_state.announcement_request = Some(Some(announcements::Announce::Song(index)));
-                }
-            }
-        }
     }
 
     /// Whether a video loops now: as it is set, unless a media playlist of several items is
@@ -4703,14 +4719,16 @@ impl App {
                 for slide in &mut group.slides {
                     for action in &mut slide.actions {
                         let found = match action {
-                            ShowAction::Song { key } => {
+                            ShowAction::Song { key }
+                            | ShowAction::Announce { what: sp_model::Announced::Song { key } } => {
                                 remap(key);
                                 true
                             }
                             ShowAction::Timer { id, .. } => timers.contains(id),
                             ShowAction::Message { id, .. } => messages.contains(id),
                             ShowAction::Prop { id, .. } => props.contains(id),
-                            ShowAction::Media { id } => {
+                            ShowAction::Media { id }
+                            | ShowAction::Announce { what: sp_model::Announced::Media { id } } => {
                                 match self.pack_media_here(*id, &opened, &dir, &mut brought, &mut media_seen) {
                                     Some(here) => {
                                         *id = here;
@@ -7011,22 +7029,6 @@ impl App {
         let Some(running) = self.running.as_mut() else {
             return Vec::new();
         };
-        // Every song by its key and title, for choosing one in Settings › General: made only
-        // while Settings is drawn, not on every frame of the main window.
-        if running.panels.iter().any(|panel| panel.window.id() == id && panel.kind == Panel::Settings) {
-            let state = &mut running.home_state;
-            let removed = &state.removed_songs;
-            state.song_choices = self
-                .show
-                .presentations()
-                .iter()
-                .enumerate()
-                .filter(|(index, _)| {
-                    !self.bible_slots.contains(index) && *index != self.voxlive_slot && !removed.contains(index)
-                })
-                .filter_map(|(index, song)| Some((state.song_keys.get(index)?.clone(), song.title.clone())))
-                .collect();
-        }
         let Running { panels, gpu, home_state, .. } = running;
         let Some(panel) = panels.iter_mut().find(|panel| panel.window.id() == id) else {
             return Vec::new();
@@ -7849,6 +7851,7 @@ impl ApplicationHandler<AppEvent> for App {
                     }
                     made
                 });
+                let opening = prefs.start_with.clone();
                 self.prefs_saved = Some(prefs);
                 running.home_state.timers = timers::load();
                 running.home_state.messages = messages::load();
@@ -7858,6 +7861,25 @@ impl ApplicationHandler<AppEvent> for App {
                 running.home_state.media_playlists = std::mem::take(&mut self.media_playlists);
                 running.home_state.stage_layouts = stage::load_layouts();
                 running.home_state.audio = audio::load();
+                // Start-up belongs in macros: what Settings once said to play when the app opened
+                // becomes a macro that plays it (and runs below, as it did), said once.
+                if let Some(step) = macros::from_opening_choice(&mut running.home_state.macros, &opening) {
+                    let saved = macros::save(&running.home_state.macros);
+                    let what = describe_opening(&self.show, &running.home_state, &step);
+                    let mut said = format!(
+                        "What played when SoftPresenter opened is now the macro \u{201c}{}\u{201d} in the Macros tab, \
+                         with Run When SoftPresenter Opens ticked. It plays {what} on the Announcements layer.",
+                        macros::OPENING_MACRO
+                    );
+                    if matches!(opening, service::StartWith::MediaPlaylist { .. }) {
+                        said.push_str(" That layer is over the slides, where the media playlist played behind them.");
+                    }
+                    if let Err(problem) = saved {
+                        said.push_str(&format!(" {problem}"));
+                    }
+                    applog::event("macros", &said);
+                    running.home_state.notice = Some(said);
+                }
                 // Macros set to run when SoftPresenter starts.
                 let startup: Vec<sp_model::ShowAction> = running
                     .home_state
@@ -7917,9 +7939,8 @@ impl ApplicationHandler<AppEvent> for App {
                 if std::env::var_os("SOFTPRESENTER_GO_LIVE_MEDIA").is_some() {
                     self.apply(vec![Command::ShowMedia(0)]);
                 }
-                // Followed folders are read, and what Settings says to play at the start plays.
+                // Followed folders are read (a macro run at the start may play one's media).
                 self.check_folders(true);
-                self.start_playing();
             }
             Ok(None) => el.exit(),
             Err(message) => {

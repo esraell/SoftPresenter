@@ -324,8 +324,6 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   thread of its own. **Play This Playlist** shows its items in turn on the
   media layer (pictures for 8 seconds, videos to their end), round and round, until other
   media is put on or cleared.
-- Settings, Screens, **When SoftPresenter Opens**: play nothing, a media playlist, or a song on
-  the Announcements layer, for a loop before and after the service.
 - **Announcements layer**: anything that loops can play on it, over the slides and media and
   under props and messages, until it is cleared. **Play on Announcements Layer** is in the
   right-click (and ⋯) menu of a song, a picture or video in the media bin, a picture, video or
@@ -374,11 +372,18 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   double-click does the same), Clears Itself, Rename, Duplicate and Delete. F4 or the Props key
   takes them all off.
 - **Macros**: steps done in turn, which clear layers, show or hide messages and props, start,
-  stop or reset timers, switch the audience screens, go to songs and show a picture from the
-  media bin, optionally when the app opens. Each is a card with its colour as a dot, its name,
-  how many steps, a Run key (the only thing that runs it), a chevron that opens its steps (each
-  with Earlier and Remove, then Add a step…), and ⋯ with Edit Steps…, Colour, Run When
+  stop or reset timers, switch the audience screens, go to songs, show a picture from the
+  media bin, and play a media playlist, a picture, a video or a song on the Announcements layer
+  (Add a step… › Play on the Announcements Layer). Each is a card with its colour as a dot, its
+  name, how many steps, a Run key (the only thing that runs it), a chevron that opens its steps
+  (each with Earlier and Remove, then Add a step…), and ⋯ with Edit Steps…, Colour, Run When
   SoftPresenter Opens, Rename, Duplicate and Delete.
+- **Start-up is a macro**: a macro with Run When SoftPresenter Opens ticked runs when the app
+  opens, such as one that plays the announcement loop before the service. Settings no longer
+  has a start-up choice of its own: the first start of this version turns what an earlier
+  version's Settings › Screens › When SoftPresenter Opens played into a macro "When
+  SoftPresenter opens" that plays it on the Announcements layer (a media playlist chosen there
+  played on the media layer, behind the slides; the layer is over them), and says so once.
 - **Audio**: playlists of tracks such as walk-in music, chosen at the tab's head (its ⋯
   renames, makes or deletes one; + makes one). First the player: whether it plays and the
   track's name, a line to drag through the track with the time gone and left, Previous (the

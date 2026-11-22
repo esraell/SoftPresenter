@@ -846,7 +846,9 @@ Layers and controls
   macro new NAME | macro add NAME STEP [then STEP…] | macro remove NAME N | macro delete NAME --yes
                                steps: clear all|slide|media|props|messages, show|hide message
                                NAME, show|hide prop NAME, start|stop|reset timer NAME,
-                               audience on|off, song SONG, media ITEM
+                               audience on|off, song SONG, media ITEM, announce SONG|media
+                               ITEM|media-playlist NAME
+  macro startup NAME on|off    run it when SoftPresenter opens, or not
   macro run NAME
   announce SONG | announce media ITEM | announce media-playlist NAME | announce stop
   audio play TRACK | audio pause | audio stop | audio volume 0-100
@@ -1581,6 +1583,7 @@ impl crate::App {
                     .map(|at| self.show.presentations()[at].title.clone())
             },
             |id| self.show.media().iter().find(|x| x.id == id).map(|x| x.name.clone()),
+            |id| state.media_playlists.iter().find(|p| p.id == id).map(|p| p.name.clone()),
         )
     }
 
@@ -1700,6 +1703,7 @@ impl crate::App {
                                 .map(|at| self.show.presentations()[at].title.clone())
                         },
                         |id| self.show.media().iter().find(|x| x.id == id).map(|x| x.name.clone()),
+                        |id| state.media_playlists.iter().find(|p| p.id == id).map(|p| p.name.clone()),
                     )
                 })
                 .collect()
@@ -1707,13 +1711,19 @@ impl crate::App {
         let lines: Vec<String> = state
             .macros
             .iter()
-            .map(|m| match steps(m) {
-                steps if steps.is_empty() => format!("{}: no steps", m.name),
-                steps => format!("{}: {}", m.name, steps.join("; ")),
+            .map(|m| {
+                let when = if m.on_startup { " (runs when SoftPresenter opens)" } else { "" };
+                match steps(m) {
+                    steps if steps.is_empty() => format!("{}{when}: no steps", m.name),
+                    steps => format!("{}{when}: {}", m.name, steps.join("; ")),
+                }
             })
             .collect();
-        let data: Vec<serde_json::Value> =
-            state.macros.iter().map(|m| serde_json::json!({"name": m.name, "steps": steps(m)})).collect();
+        let data: Vec<serde_json::Value> = state
+            .macros
+            .iter()
+            .map(|m| serde_json::json!({"name": m.name, "steps": steps(m), "runs_when_opening": m.on_startup}))
+            .collect();
         Reply::with(numbered(&lines), serde_json::json!(data))
     }
 
@@ -2376,7 +2386,10 @@ impl crate::App {
         let lost = actions
             .iter()
             .filter(|action| match action {
-                sp_model::ShowAction::Song { key } => crate::studio::playlist_song(&self.show, state, key).is_none(),
+                sp_model::ShowAction::Song { key }
+                | sp_model::ShowAction::Announce { what: sp_model::Announced::Song { key } } => {
+                    crate::studio::playlist_song(&self.show, state, key).is_none()
+                }
                 _ => false,
             })
             .count();

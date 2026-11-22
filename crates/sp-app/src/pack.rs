@@ -148,9 +148,12 @@ impl Export {
                     }
                     for action in &mut slide.actions {
                         match action {
-                            ShowAction::Song { key } => *key = key_out(key),
-                            // The media bin item a slide shows behind it goes in the pack too.
-                            ShowAction::Media { id } => {
+                            ShowAction::Song { key }
+                            | ShowAction::Announce { what: sp_model::Announced::Song { key } } => *key = key_out(key),
+                            // The media bin item a slide shows behind it (or on the Announcements
+                            // layer) goes in the pack too.
+                            ShowAction::Media { id }
+                            | ShowAction::Announce { what: sp_model::Announced::Media { id } } => {
                                 export.carry_media(*id, media_of);
                             }
                             _ => {}

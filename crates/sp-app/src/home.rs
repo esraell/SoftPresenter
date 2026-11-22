@@ -421,11 +421,6 @@ pub struct HomeState {
     pub ccli_licence: String,
     /// True to start with the audience screens off.
     pub start_audience_off: bool,
-    /// What starts playing by itself when the app opens.
-    pub start_with: crate::service::StartWith,
-    /// Every song by its key and title, for choosing one in Settings › General; made while
-    /// Settings is drawn.
-    pub song_choices: Vec<(String, String)>,
     /// Lists worked out from the songs, kept from one frame to the next.
     pub lists: crate::kept::Lists,
     /// The media playlist playing item after item on the media layer, if one is.
@@ -1417,8 +1412,6 @@ impl Default for HomeState {
             copyright_show: crate::service::CopyrightShow::Never,
             ccli_licence: String::new(),
             start_audience_off: false,
-            start_with: crate::service::StartWith::Nothing,
-            song_choices: Vec::new(),
             lists: crate::kept::Lists::default(),
             media_playing: None,
             copyright_request: None,
@@ -1711,7 +1704,6 @@ impl HomeState {
             copyright_show: self.copyright_show,
             ccli_licence: self.ccli_licence.clone(),
             start_audience_off: self.start_audience_off,
-            start_with: self.start_with.clone(),
             stage_off: !self.stage_on,
             setup_done: self.setup_done,
             bible_lists_hidden: !self.bible.lists_open,
@@ -1755,7 +1747,6 @@ impl HomeState {
         self.copyright_show = prefs.copyright_show;
         self.ccli_licence = prefs.ccli_licence.clone();
         self.start_audience_off = prefs.start_audience_off;
-        self.start_with = prefs.start_with.clone();
         self.stage_on = !prefs.stage_off;
         self.setup_done = prefs.setup_done;
         self.bible.lists_open = !prefs.bible_lists_hidden;
@@ -4584,9 +4575,6 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
                 if ui.button("Configure Screens…").on_hover_text(hint).clicked() {
                     state.settings_open = true;
                 }
-                ui.add_space(10.0);
-                ui.add_space(14.0);
-                start_with_ui(ui, state);
                 ui.add_space(14.0);
                 ui.checkbox(&mut state.start_audience_off, "Start with the audience screens off")
                     .on_hover_text("When SoftPresenter opens, nothing is shown until Audience is switched on");
@@ -4657,59 +4645,6 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
             }
         });
     });
-}
-
-/// What starts playing by itself when the app opens: nothing, a media playlist, or a song on
-/// the Announcements layer.
-fn start_with_ui(ui: &mut egui::Ui, state: &mut HomeState) {
-    use crate::service::StartWith;
-    crate::studio::caption(ui, "WHEN SOFTPRESENTER OPENS");
-    if ui.radio(state.start_with == StartWith::Nothing, "Play nothing").clicked() {
-        state.start_with = StartWith::Nothing;
-    }
-    let first_playlist = state.media_playlists.first().map(|playlist| playlist.id);
-    ui.horizontal(|ui| {
-        let on = matches!(state.start_with, StartWith::MediaPlaylist { .. });
-        if ui.add_enabled(first_playlist.is_some(), egui::RadioButton::new(on, "Play the media playlist")).clicked()
-            && !on
-            && let Some(id) = first_playlist
-        {
-            state.start_with = StartWith::MediaPlaylist { id };
-        }
-        if let StartWith::MediaPlaylist { id } = &mut state.start_with {
-            let shown = state.media_playlists.iter().find(|p| p.id == *id).map_or("", |p| p.name.as_str()).to_owned();
-            egui::ComboBox::from_id_salt("start playlist").selected_text(shown).show_ui(ui, |ui| {
-                for playlist in &state.media_playlists {
-                    ui.selectable_value(id, playlist.id, playlist.name.as_str());
-                }
-            });
-        }
-    });
-    let first_song = state.song_choices.first().map(|(key, _)| key.clone());
-    ui.horizontal(|ui| {
-        let on = matches!(state.start_with, StartWith::Announcements { .. });
-        if ui.add_enabled(first_song.is_some(), egui::RadioButton::new(on, "Play on the Announcements layer")).clicked()
-            && !on
-            && let Some(song) = first_song.clone()
-        {
-            state.start_with = StartWith::Announcements { song };
-        }
-        if let StartWith::Announcements { song } = &mut state.start_with {
-            let shown = state.song_choices.iter().find(|(key, _)| key == song).map_or("", |(_, title)| title.as_str());
-            egui::ComboBox::from_id_salt("start song").selected_text(shown.to_owned()).show_ui(ui, |ui| {
-                for (key, title) in &state.song_choices {
-                    ui.selectable_value(song, key.clone(), title.as_str());
-                }
-            });
-        }
-    });
-    ui.label(
-        egui::RichText::new(
-            "For a loop before and after the service. A media playlist can follow a folder (its menu beside MEDIA).",
-        )
-        .size(11.5)
-        .color(crate::studio::TEXT_DIM),
-    );
 }
 
 fn switch(ui: &mut egui::Ui, on: bool, hint: &str) -> bool {

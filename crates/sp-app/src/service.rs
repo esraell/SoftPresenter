@@ -397,8 +397,9 @@ impl Services {
 }
 
 /// The small choices that are not part of any song, theme or service, kept between runs.
-/// What starts playing by itself when the app opens: nothing, a media playlist (on the media
-/// layer, item after item), or a song on the Announcements layer (by its key).
+/// What an earlier version's Settings › Screens › When SoftPresenter Opens said to play: nothing,
+/// a media playlist (on the media layer, item after item), or a song on the Announcements layer
+/// (by its key). Start-up is a macro now; this is read once, to make that macro.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "play", rename_all = "snake_case")]
 pub enum StartWith {
@@ -445,7 +446,9 @@ pub struct Prefs {
     pub start_audience_off: bool,
     /// Next at the end of a song goes on to the next song in the service.
     pub continuous: bool,
-    /// What starts playing by itself when the app opens.
+    /// From before start-up was a macro: what played by itself when the app opened. Read once,
+    /// to make a macro that does it (`macros::from_opening_choice`); no longer written.
+    #[serde(skip_serializing)]
     pub start_with: StartWith,
     /// True once the setup a fresh install starts with has been seen.
     #[serde(default)]

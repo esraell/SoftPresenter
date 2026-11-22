@@ -1078,6 +1078,7 @@ pub fn describe_action(show: &sp_engine::Show, state: &HomeState, action: &sp_mo
         |id| state.timers.iter().find(|t| t.id == id).map(|t| t.name.clone()),
         |key| song_title(show, state, key),
         |id| show.media().iter().find(|item| item.id == id).map(|item| item.name.clone()),
+        |id| state.media_playlists.iter().find(|p| p.id == id).map(|p| p.name.clone()),
     )
 }
 
@@ -1156,6 +1157,43 @@ pub fn add_action_menu(ui: &mut egui::Ui, show: &sp_engine::Show, state: &HomeSt
                     chosen = Some(ShowAction::Song { key: key.to_owned() });
                 }
             }
+        });
+    });
+    // Something that goes round on the Announcements layer: a media playlist, a picture or a
+    // video, or a song.
+    ui.menu_button("Play on the Announcements Layer", |ui| {
+        let announce = |what| Some(ShowAction::Announce { what });
+        ui.menu_button("Media Playlist", |ui| {
+            if state.media_playlists.is_empty() {
+                ui.label("No media playlists yet");
+            }
+            for playlist in &state.media_playlists {
+                if ui.button(playlist.name.as_str()).clicked() {
+                    chosen = announce(sp_model::Announced::MediaPlaylist { id: playlist.id });
+                }
+            }
+        });
+        ui.menu_button("Picture or Video", |ui| {
+            if show.media().is_empty() {
+                ui.label("No pictures or videos in the media bin yet");
+            }
+            egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                for item in show.media() {
+                    if ui.button(item.name.as_str()).clicked() {
+                        chosen = announce(sp_model::Announced::Media { id: item.id });
+                    }
+                }
+            });
+        });
+        ui.menu_button("Song", |ui| {
+            egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                let hidden = state.bible.slots.unwrap_or([usize::MAX; 2]);
+                for (key, song) in listed_songs(show, state, hidden) {
+                    if ui.button(song.title.as_str()).clicked() {
+                        chosen = announce(sp_model::Announced::Song { key: key.to_owned() });
+                    }
+                }
+            });
         });
     });
     chosen

@@ -354,11 +354,21 @@ with Continuous Playlist on; open it with `playlist go` to run through the playl
 | `timer set NAME countdown …\|to …\|up …\|overrun on\|off\|name NEW`, `timer delete NAME --yes` | Changes a timer, or deletes it |
 | `macro run NAME` | Runs a macro's steps in turn |
 | `macro new NAME`, `macro add NAME STEP [then STEP…]`, `macro remove NAME N`, `macro delete NAME --yes` | Makes a macro and gives it steps |
+| `macro startup NAME on\|off` | Runs the macro when SoftPresenter opens, or not (start-up is a macro: Settings has no start-up choice of its own) |
 | `announce SONG`, `announce media ITEM`, `announce media-playlist NAME`, `announce stop` | Plays something on the Announcements layer, going round until it is cleared: a song's slides in turn, a picture, a video (looping), or a media playlist's pictures and videos in turn; `stop` clears the layer |
 
 Macro steps: `clear all|slide|media|props|messages`, `show|hide message NAME`,
 `show|hide prop NAME`, `start|stop|reset timer NAME`, `audience on|off`, `song SONG`,
-`media ITEM`. Steps are parted by `then`, or by `;` inside one quoted argument.
+`media ITEM`, `announce SONG|media ITEM|media-playlist NAME` (on the Announcements layer).
+Steps are parted by `then`, or by `;` inside one quoted argument. `sp macros` marks a macro
+that runs when SoftPresenter opens.
+
+    $ sp macro new "Before service"
+    Made the macro Before service; give it steps with macro add Before service STEP.
+    $ sp macro add Before service announce media-playlist Announcements
+    Before service: added Play on the Announcements Layer: Announcements.
+    $ sp macro startup Before service on
+    Before service runs when SoftPresenter opens.
 
     $ sp message new Parking "Car with lights on: ABC 123"
     Made the message Parking: “Car with lights on: ABC 123”.
@@ -737,7 +747,7 @@ kept with:
 | `screen add audience\|stage NAME [on display NAME\|window\|ndi NAME\|decklink NAME\|automatic]` | A new screen (in a window unless told); a DeckLink output by its name or its number in `sp decklink` |
 | `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|decklink:NAME\|automatic\|off`, `mode=FORMAT` (a DeckLink screen's format: `1080i59.94`, `720p50`…), `keyer=off\|external\|internal` (a DeckLink card's keyer: fill and key on two connectors, or over the card's input), `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT`; for an audience screen `background=solid\|see-through`, `alpha=straight\|premultiplied` (how a see-through screen sends its soft edges; straight unless told), `key=SCREEN\|none` (shows that screen's key) |
 | `screen delete SCREEN --yes` | Deletes a screen (there is always one) |
-| `settings set key=value…` | `transition=KIND[:SECONDS]`, `media_transition=…`, `copyright=never\|first\|last\|every`, `ccli_licence=DIGITS`, `start_audience=on\|off`, `start_with=nothing\|media-playlist:NAME\|announcements:SONG`, `continuous=on\|off`, `view=grid\|easy\|table`, `columns=1-12` |
+| `settings set key=value…` | `transition=KIND[:SECONDS]`, `media_transition=…`, `copyright=never\|first\|last\|every`, `ccli_licence=DIGITS`, `start_audience=on\|off`, `continuous=on\|off`, `view=grid\|easy\|table`, `columns=1-12` |
 
     $ sp screen add stage Band
     Added the stage screen Band, on a window.
