@@ -538,6 +538,27 @@ impl Slide {
         }
     }
 
+    /// A new slide laid out like this one (the same boxes, in the same places, with the same
+    /// look) with no words in them, drawn with the same template. Shapes, pictures and web
+    /// pages come as they are.
+    pub fn empty_copy(&self) -> Slide {
+        let objects = self
+            .objects
+            .iter()
+            .map(|object| {
+                let kind = match &object.kind {
+                    ObjectKind::Text { style, .. } => ObjectKind::Text { text: String::new(), style: style.clone() },
+                    other @ (ObjectKind::Shape { .. }
+                    | ObjectKind::Image { .. }
+                    | ObjectKind::Web { .. }
+                    | ObjectKind::Screen { .. }) => other.clone(),
+                };
+                Object { id: Uuid::new_v4(), kind, ..object.clone() }
+            })
+            .collect();
+        Slide { template: self.template, ..Slide::new(objects) }
+    }
+
     /// The text of the first text object with this role.
     pub fn text_for(&self, role: &Role) -> Option<&str> {
         self.objects.iter().find(|o| o.role.as_ref() == Some(role)).and_then(Object::as_text)
@@ -1023,27 +1044,7 @@ impl Presentation {
     pub fn with_slide_added(&self) -> (Presentation, usize) {
         let mut copy = self.clone();
         let slide = match copy.groups.iter().rev().find_map(|group| group.slides.last()) {
-            Some(last) => {
-                let objects = last
-                    .objects
-                    .iter()
-                    .map(|object| {
-                        // Text boxes come empty; shapes, pictures and web pages come as they are.
-                        let kind = match &object.kind {
-                            ObjectKind::Text { style, .. } => {
-                                ObjectKind::Text { text: String::new(), style: style.clone() }
-                            }
-                            other @ (ObjectKind::Shape { .. }
-                            | ObjectKind::Image { .. }
-                            | ObjectKind::Web { .. }
-                            | ObjectKind::Screen { .. }) => other.clone(),
-                        };
-                        Object { id: Uuid::new_v4(), kind, ..object.clone() }
-                    })
-                    .collect();
-                // It uses the template the one before it uses.
-                Slide { template: last.template, ..Slide::new(objects) }
-            }
+            Some(last) => last.empty_copy(),
             None => Slide::new(vec![Object::text(Role::primary(), "")]),
         };
         if copy.groups.is_empty() {
