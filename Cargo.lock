@@ -3443,6 +3443,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sp-decklink"
+version = "0.1.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "sp-engine"
 version = "0.1.0"
 dependencies = [

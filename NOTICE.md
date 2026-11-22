@@ -63,9 +63,53 @@ carry this licence:
 
 ### Blackmagic Design DeckLink
 
-SoftPresenter does not use DeckLink yet. When it does, the Desktop Video drivers and DeckLink
-SDK will be installed by the person using it, never shipped with SoftPresenter, in the same way
-as NDI, and their notices will be added here from the DeckLink SDK's licence.
+SoftPresenter can play its screens out of Blackmagic Design DeckLink cards (SoftPresenter for
+Blackmagic Design DeckLink). The DeckLink driver, Desktop Video, is not part of SoftPresenter
+and is not covered by the GNU GPL: the person using SoftPresenter installs it from Blackmagic
+Design, and SoftPresenter opens it while running; it is never shipped with SoftPresenter or
+linked with it. DeckLink is a trademark of Blackmagic Design Pty. Ltd., which has nothing to do
+with SoftPresenter.
+
+SoftPresenter is compiled with header files from Blackmagic Design's DeckLink SDK, version
+16.0, copied unchanged into `third_party/decklink-sdk` (`PROVENANCE.md` there lists them). No
+other file of the SDK, and none of its sample code, is in SoftPresenter. The headers carry this
+notice, which stays in every copy of them:
+
+> Copyright (c) 2026 Blackmagic Design
+>
+> Permission is hereby granted, free of charge, to any person or organization obtaining a copy
+> of the software and accompanying documentation (the "Software") to use, reproduce, display,
+> distribute, sub-license, execute, and transmit the Software, and to prepare derivative works
+> of the Software, and to permit third-parties to whom the Software is furnished to do so, in
+> accordance with:
+>
+> (1) if the Software is obtained from Blackmagic Design, the End User License Agreement for
+> the Software Development Kit ("EULA") available at
+> https://www.blackmagicdesign.com/EULA/DeckLinkSDK; or
+>
+> (2) if the Software is obtained from any third party, such licensing terms as notified by
+> that third party,
+>
+> and all subject to the following:
+>
+> (3) the copyright notices in the Software and this entire statement, including the above
+> license grant, this restriction and the following disclaimer, must be included in all copies
+> of the Software, in whole or in part, and all derivative works of the Software, unless such
+> copies or derivative works are solely in the form of machine-executable object code generated
+> by a source language processor.
+>
+> (4) THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+> INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+> PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR ANYONE
+> DISTRIBUTING THE SOFTWARE BE LIABLE FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT,
+> TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+> OTHER DEALINGS IN THE SOFTWARE.
+>
+> A copy of the Software is available free of charge at
+> https://www.blackmagicdesign.com/desktopvideo_sdk under the EULA.
+
+The SDK's End User License Agreement leaves these header files out of its limits on copying and
+passing on (its clause 0.1). [`docs/licences/decklink.md`](docs/licences/decklink.md) explains.
 
 ### Fonts built into the app
 

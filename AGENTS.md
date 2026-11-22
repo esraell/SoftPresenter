@@ -22,7 +22,7 @@ careless test run puts a slide in front of whoever is using the computer.
 
 - **Every test run sets `SOFTPRESENTER_QUIET=1`** (or uses `--capture-home FILE`). Its windows
   then open behind everything else and don't take the keyboard, its screens never go full screen,
-  and it sends nothing over NDI.
+  and it sends nothing over NDI and opens no DeckLink card.
 - **Use a data folder of your own:** `SOFTPRESENTER_DATA=/some/empty/folder`. Without it, the
   app reads and writes the owner's real library, Bibles and settings in
   `~/Documents/SoftPresenter/` (on a Mac whose library hasn't moved there yet, in
@@ -53,7 +53,7 @@ person:
 
 | Switch | What it does |
 |---|---|
-| `SOFTPRESENTER_QUIET=1` | Windows open behind everything, no full screen, no NDI |
+| `SOFTPRESENTER_QUIET=1` | Windows open behind everything, no full screen, no NDI, no DeckLink card |
 | `SOFTPRESENTER_DATA=<folder>` | Keep the library, Bibles, settings and log in that folder instead of the owner's |
 | `SOFTPRESENTER_CONTROL_SOCKET=<path>` | Where `sp` and the app meet; a short path for a test copy (a socket file on Windows too) |
 | `--capture-home FILE` | Go to the third slide, save a PNG of the home window, quit |
@@ -76,6 +76,8 @@ person:
 | `SOFTPRESENTER_HIDE_NDI=1` | Behave as on a computer without NDI installed |
 | `SOFTPRESENTER_NDI_LOSE=<n>` or `<n>@<place>` | The next n NDI pictures somebody is watching for count as lost on their way back from the GPU (with a place, only that picture of each drawing: 1 is the first) |
 | `SOFTPRESENTER_NDI=<name>` | Also send over NDI under this name, this run only |
+| `SOFTPRESENTER_HIDE_DECKLINK=1` | Behave as on a computer without Desktop Video (the DeckLink driver) |
+| `SOFTPRESENTER_PRETEND_DECKLINK=1` | List made-up DeckLink devices ("Pretend DeckLink (1)"…) in place of real ones; what they are sent goes nowhere |
 
 There are more, each beside the code that reads it with a `// Testing aid:` comment. List them
 all with:
@@ -99,7 +101,11 @@ message.
   font files while it looks for fonts); changes made to it here removed two of its maps and
   added one, which maps only a font file nothing else can change (a Mac's read-only system
   volume, or a private copy left with no name) and says why it is sound. The owner agreed to
-  carrying it, with `unsafe` code of its own, on 2026-11-21.
+  carrying it, with `unsafe` code of its own, on 2026-11-21. `sp-decklink`'s `ffi` module calls
+  the DeckLink driver through SoftPresenter's own C++ bridge (`bridge/bridge.cpp`, compiled
+  with the DeckLink SDK's headers in `third_party/decklink-sdk`), the same arrangement as NDI's;
+  the owner agreed to that on 2026-11-21. The bridge never calls back into Rust, and its
+  functions take only plain values and buffers with their lengths.
 - **Live safety.** Nothing slow (reading files, decoding, network, waiting on NDI) runs on the
   thread that draws the screens. The audience must never see a freeze or the wrong slide because
   the operator's window was busy.

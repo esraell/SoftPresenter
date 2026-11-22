@@ -251,6 +251,7 @@ how long drawing took.
 | `third_party/fontique` | Not a workspace crate: fontique 0.13.0, which finds the computer's fonts for the text layout, with SoftPresenter's change: a font file is mapped only where nothing else can change it (a Mac's read-only system volume, or a private copy left with no name, `mapped.rs`), and SoftPresenter has the rest read into memory itself (once for every thread, never on the screens' thread), so a font file rewritten while the app runs cannot crash it (`PROVENANCE.md` there, and `docs/licences/fontique.md`) |
 | `sp-video` | Playing videos: macOS's own player, FFmpeg for other formats; web pages drawn off-screen by macOS's web view (`web`, `web_mac`), copied into frames as a video's are |
 | `sp-ndi` | Sending screens over NDI (the runtime is opened when an NDI screen starts) |
+| `sp-decklink` | Playing screens out of Blackmagic DeckLink cards: finding the devices and their modes on a thread of its own, and SoftPresenter's C++ bridge to the driver (`bridge/bridge.cpp`, the only place it is called, through `src/ffi.rs`); the SDK's headers are in `third_party/decklink-sdk` |
 | `sp-bible` | Bibles: references, verse numbering, search |
 | `sp-app` | The app: the window (egui), the screens' thread (`output.rs`), the views (`home.rs`, `studio.rs`, `editor.rs`, `inspector.rs`), the stage layouts (`stage.rs` for what they hold and show, `stage_editor.rs` for their parts of the Edit view), the command line (`control.rs`, and `slide_cli.rs` for changing slides), the menu bar (`menubar.rs`) |
 

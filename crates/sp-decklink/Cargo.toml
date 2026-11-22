@@ -1,0 +1,22 @@
+[package]
+name = "sp-decklink"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[build-dependencies]
+# Compiles the small C++ bridge (bridge/bridge.cpp) around the DeckLink SDK's headers, on a Mac
+# and on Linux. Nothing from Blackmagic has to be installed to build: the headers needed are in
+# third_party/decklink-sdk, and the driver is opened while the app runs.
+cc = "1"
+
+# Calling into the DeckLink driver needs `unsafe`; this crate allows it only in its `ffi`
+# module, as sp-ndi does in its `runtime`. Every unsafe block says why it is sound.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

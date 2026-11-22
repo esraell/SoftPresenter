@@ -274,6 +274,7 @@ The code is a Rust workspace:
     crates/sp-render   draws slides on the GPU: screens, thumbnails, preview
     crates/sp-bible    Bible files, references, search, verse numbering
     crates/sp-ndi      NDI output
+    crates/sp-decklink DeckLink output (a small C++ bridge to Blackmagic's driver)
     crates/sp-video    videos (macOS's AVFoundation, then FFmpeg), system picture formats, and
                        web pages drawn off-screen (macOS's web view)
     crates/sp-app      the app and its windows
@@ -282,6 +283,8 @@ The code is a Rust workspace:
     third_party/fontique  the font finder Parley uses, changed to map only font files nothing
                        else can change and read the rest (outside the workspace; its
                        PROVENANCE.md explains)
+    third_party/decklink-sdk  the DeckLink SDK's header files, unchanged (its PROVENANCE.md
+                       lists them)
 
 [AGENTS.md](AGENTS.md#rules) says where `unsafe` code is allowed. Before sending a change:
 
