@@ -168,25 +168,28 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 ## The Bible view
 
 ```
-╭──────────────────────────╮ ╭─────────────────────────────────────────────────────────────╮
-│ [Books|History][Hide]    │ │ (John 3:16    ) [‹][›]  [+ Add|▾] │ [Page|Slides] [Options] │
-│ BOOK                     │ │ TRANSLATIONS [SYN] [KJV] [Change]                           │
-│ OLD TESTAMENT  CH  VERSE │ │ John 3  [KJV + SYN]                                         │
-│ Genesis         1    1   │ │  14  And as Moses lifted up the serpent…                    │
-│ Exodus          2    2   │ │      И как Моисей вознес змию…                              │
-│ …               3    3   │ │ [16  For God so loved the world…   (picked: well, ring)]    │
-│                          │ │       Ибо так возлюбил Бог мир…                             │
-│                          │ │ MEDIA (All Media ▾)                       (Dissolve ▾) +    │
-╰──────────────────────────╯ ╰─────────────────────────────────────────────────────────────╯
+╭─────────────────────────╮ ╭─────────────────────────────────────────────────────────────╮
+│ [Books|History]  [Hide] │ │ (John 3:16    ) [‹][›]  [+ Add|▾] │ [Page|Slides] [Options] │
+│ BOOK              [⊞|≡] │ │ TRANSLATIONS [SYN] [KJV] [Change]                           │
+│ [Gen][Exo][Lev][Num]…   │ │ John 3  [KJV + SYN]                                         │
+│ [Mat][Mar][Luk][Joh]…   │ │  14  And as Moses lifted up the serpent…                    │
+│ JOHN · CHAPTER          │ │      И как Моисей вознес змию…                              │
+│ [1][2][3][4][5][6]…     │ │ [16  For God so loved the world…   (picked: well, ring)]    │
+│ VERSE · ⇧ FOR A PASSAGE │ │       Ибо так возлюбил Бог мир…                             │
+│ [1][2][3][4][5][6]…     │ │ MEDIA (All Media ▾)                       (Dissolve ▾) +    │
+╰─────────────────────────╯ ╰─────────────────────────────────────────────────────────────╯
 ```
 
 - The left column, in place of the playlist (`bible_page.rs`, `left_column`): Books | History
-  and Hide. Books: the book, chapter and verse lists side by side, each scrolling on its own,
-  opened on what is chosen (the books in full in the operator's language under the testaments,
-  those the first translation lacks dimmed; chapters and verses as the first translation numbers
-  them). History: the passages that were on screen, newest first, a click brings one back, and
-  Clear history. Hide puts the column away and the middle takes its room; Books, beside the
-  reference field, brings it back (kept with the preferences).
+  and Hide. Books: the Book heading with a switch at its right, Keypad (a grid icon, the first
+  look) or Lists (lines), kept with the preferences (`bible_books`). The keypad: all 66 books as
+  keys named short in the operator's language (`book_key`), then the book's chapters, then the
+  chapter's verses, in one column that scrolls. The lists: book, chapter and verse side by side,
+  each scrolling on its own, opened on what is chosen (the books in full under the testaments).
+  Both dim what the first translation lacks and number chapters and verses as it does; both hand
+  a click to the one `choose`. History: the passages that were on screen, newest first, a click
+  brings one back, and Clear history. Hide puts the column away and the middle takes its room;
+  Books, beside the reference field, brings it back (kept with the preferences).
 - The bar along the top (`home.rs`, `bible_bar`): the reference field (236 wide when there is
   room; a reference in English, Russian or Ukrainian, or words to find), ‹ and › (a verse longer
   at the start or end), + Add (the playlist in front; ▾ for another), Page | Slides, Options. In

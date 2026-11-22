@@ -14,10 +14,12 @@ use sp_bible::{Bible, Range, VerseRef};
 use sp_engine::{Command, Show, SlideRef};
 
 use crate::bible::list_row_id;
-use crate::home::{BiblePage, BibleSide, HomeState};
+use crate::home::{BiblePage, BibleSide, BookPicker, HomeState};
+use crate::icons::Icon;
 use crate::studio::{
-    CARD, Column, Flat, HOVER, LEFT_WIDTH, ROW_HOVER, SELECTED, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, cap, column_frame,
-    column_outer, column_panel, even_switch, fixed, fixed_semibold, flat_button, round_corners, semibold,
+    BUTTON, BUTTON_HOVER, CARD, Column, Flat, HOVER, LEFT_WIDTH, ROW_HOVER, SELECTED, TALLY, TEXT, TEXT_DIM,
+    TEXT_FAINT, cap, column_frame, column_outer, column_panel, even_switch, fixed, fixed_semibold, flat_button,
+    round_corners, semibold,
 };
 
 /// What a click among the books, chapters and verses asks for.
@@ -142,14 +144,33 @@ pub fn left_column(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
 fn books(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) -> Option<usize> {
     let width = ui.available_width();
     let (head, _) = ui.allocate_exact_size(vec2(width, 35.0), Sense::hover());
-    cap(ui, pos2(head.min.x, head.min.y + 16.4), Align2::LEFT_CENTER, "Book", TEXT_DIM);
+    cap(ui, pos2(head.min.x + 8.0, head.min.y + 16.4), Align2::LEFT_CENTER, "Book", TEXT_DIM);
+    // Keypad | Lists, at the right of the heading, where it stays whichever is chosen.
+    let at = pos2(head.max.x - 60.0, head.min.y + 16.4 - 12.0);
+    let chosen = match page.books {
+        BookPicker::Keypad => 0,
+        BookPicker::Lists => 1,
+    };
+    let hints = ["Every book as a key, then the chapters and verses", "Books, chapters and verses as lists"];
+    match crate::studio::icon_switch(ui, "bible books as", at, &[Icon::Grid, Icon::Rows], &hints, Some(chosen)).1 {
+        Some(0) => page.books = BookPicker::Keypad,
+        Some(_) => page.books = BookPicker::Lists,
+        None => {}
+    }
+    if chosen != usize::from(page.books == BookPicker::Lists) {
+        // Opened on what is chosen.
+        page.list_scroll = true;
+    }
     let Some(bible) = page.lead().and_then(|lead| page.shelf.get(lead).ok()) else {
         ui.add(
             egui::Label::new(egui::RichText::new("Choose a Bible for the first translation.").color(TEXT_DIM)).wrap(),
         );
         return None;
     };
-    let choice = lists(ui, page, &bible);
+    let choice = match page.books {
+        BookPicker::Keypad => keypad(ui, page, &bible),
+        BookPicker::Lists => lists(ui, page, &bible),
+    };
     choice.and_then(|choice| choose(page, choice, live))
 }
 
@@ -202,14 +223,17 @@ fn list_row(ui: &egui::Ui, id: egui::Id, rect: Rect, row: Row) -> egui::Response
         let font = if row.chosen { fixed_semibold(13.0) } else { fixed(13.0) };
         painter.text(rect.center(), Align2::CENTER_CENTER, row.text, font, ink);
     } else {
+        // A name too long for the row ends in an ellipsis (its tooltip has it whole).
         let font = if row.chosen { semibold(13.0) } else { FontId::proportional(13.0) };
-        painter.with_clip_rect(rect.shrink2(vec2(8.0, 0.0))).text(
-            pos2(rect.min.x + 8.0, rect.center().y),
-            Align2::LEFT_CENTER,
-            row.text,
-            font,
-            ink,
-        );
+        let mut job = LayoutJob::single_section(row.text.to_owned(), TextFormat::simple(font, ink));
+        job.wrap = egui::text::TextWrapping {
+            max_width: rect.width() - 16.0,
+            max_rows: 1,
+            break_anywhere: true,
+            overflow_character: Some('\u{2026}'),
+        };
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        painter.galley(pos2(rect.min.x + 8.0, rect.center().y - galley.size().y / 2.0), galley, ink);
     }
     response
 }
@@ -313,6 +337,216 @@ fn lists(ui: &mut egui::Ui, page: &mut BiblePage, bible: &Bible) -> Option<Choic
     });
     ui.allocate_rect(area, Sense::hover());
     clicked
+}
+
+/// A book's key on the keypad, in the operator's language: in English its code with the first
+/// letter capital (`Gen`, `1sa`, `Joh`); in Russian or Ukrainian the first short form the
+/// reference reader knows that has two letters or more, fits four places and begins like a
+/// word of the book's name (`Быт`, `1Цар`, `Мф`, `Нав`), else the first that fits, else the
+/// first short form cut to four places, else the name's start.
+pub fn book_key(book: usize, language: &str) -> String {
+    let entry = &sp_bible::BOOKS[book.min(sp_bible::BOOKS.len() - 1)];
+    let (name, shorts) = match language {
+        "ru" => (entry.russian, entry.russian_short),
+        "uk" => (entry.ukrainian, entry.ukrainian_short),
+        _ => {
+            let mut code = entry.code.chars();
+            return code.next().into_iter().chain(code.flat_map(char::to_lowercase)).collect();
+        }
+    };
+    let capital = |short: &str| -> String {
+        let mut seen = false;
+        short
+            .chars()
+            .flat_map(|c| {
+                let first = !seen && c.is_alphabetic();
+                seen |= first;
+                if first { c.to_uppercase().collect::<Vec<_>>() } else { vec![c] }
+            })
+            .collect()
+    };
+    let letters = |short: &str| short.chars().filter(|c| c.is_alphabetic()).count();
+    let fits = |short: &str| letters(short) >= 2 && short.chars().count() <= 4;
+    // The words of the name that say which book it is: not "От", "К", "Від" or "До".
+    let joins = ["от", "к", "від", "до"];
+    let initials: Vec<char> = name
+        .split_whitespace()
+        .filter(|word| !joins.contains(&word.to_lowercase().as_str()))
+        .filter_map(|word| word.chars().find(|c| c.is_alphabetic()))
+        .flat_map(char::to_lowercase)
+        .collect();
+    let begins_a_word = |short: &str| short.chars().find(|c| c.is_alphabetic()).is_some_and(|c| initials.contains(&c));
+    let fitting = || shorts.iter().copied().filter(|short| fits(short));
+    if let Some(short) = fitting().find(|short| begins_a_word(short)).or_else(|| fitting().next()) {
+        return capital(short);
+    }
+    if let Some(short) = shorts.first() {
+        return capital(&short.chars().take(4).collect::<String>());
+    }
+    if name.chars().count() <= 4 && !name.contains(' ') {
+        return name.to_owned();
+    }
+    let digits: String = name.chars().take_while(char::is_ascii_digit).collect();
+    let word = name.split_whitespace().rfind(|word| !joins.contains(&word.to_lowercase().as_str())).unwrap_or(name);
+    format!("{digits}{}", word.chars().take(4 - digits.chars().count().min(3)).collect::<String>())
+}
+
+/// How many keys stand in a row of the keypad, how tall a key is, and the room between keys.
+const KEYS_ACROSS: usize = 6;
+const KEY_HEIGHT: f32 = 30.0;
+const KEY_GAP: f32 = 4.0;
+
+/// How a key of the keypad is drawn: the button grey with its words in ink when the Bible has
+/// what it stands for, darker with faint words when not; the one chosen keeps the grey and gets
+/// a faint inner edge.
+fn key(ui: &egui::Ui, id: egui::Id, rect: Rect, text: &str, has: bool, chosen: bool) -> egui::Response {
+    let response = ui.interact(rect, id, Sense::click());
+    let painter = ui.painter();
+    let down = response.is_pointer_button_down_on();
+    // Pressed, it gives a little, as a flat key does.
+    let face = if down { rect.shrink(0.6) } else { rect };
+    let fill = match (has, response.hovered()) {
+        (true, true) => BUTTON_HOVER,
+        (true, false) => BUTTON,
+        (false, true) => BUTTON,
+        (false, false) => ROW_HOVER,
+    };
+    painter.rect_filled(face, 6.0, fill);
+    if chosen {
+        painter.rect_stroke(face, 6.0, Stroke::new(1.0, Color32::from_white_alpha(36)), StrokeKind::Inside);
+    }
+    let ink = if has || response.hovered() { TEXT } else { TEXT_FAINT };
+    painter.text(face.center(), Align2::CENTER_CENTER, text, fixed_semibold(11.0), ink);
+    response
+}
+
+/// A block of keys, six to a row, `count` of them from the top left of `area`'s next free
+/// place; `each(index, rect)` draws the one at `index` when it is in view. Returns the height
+/// it took.
+fn key_grid(ui: &mut egui::Ui, count: usize, mut each: impl FnMut(&mut egui::Ui, usize, Rect)) {
+    let width = ui.available_width();
+    let wide = (width - KEY_GAP * (KEYS_ACROSS - 1) as f32) / KEYS_ACROSS as f32;
+    let rows = count.div_ceil(KEYS_ACROSS);
+    let height = rows as f32 * KEY_HEIGHT + rows.saturating_sub(1) as f32 * KEY_GAP;
+    let block = ui.allocate_space(vec2(width, height)).1;
+    for index in 0..count {
+        let (row, column) = (index / KEYS_ACROSS, index % KEYS_ACROSS);
+        let corner = block.min + vec2(column as f32 * (wide + KEY_GAP), row as f32 * (KEY_HEIGHT + KEY_GAP));
+        let rect = Rect::from_min_size(corner, vec2(wide, KEY_HEIGHT));
+        if ui.is_rect_visible(rect) {
+            each(ui, index, rect);
+        }
+    }
+}
+
+/// The keypad: every book as a key (the Old Testament, a little room, the New), then the
+/// chapters of the book open, then the verses of the chapter open, all one click away. Books
+/// are named in the operator's language; chapters and verses are the first translation's.
+/// Returns what was clicked.
+fn keypad(ui: &mut egui::Ui, page: &mut BiblePage, bible: &Bible) -> Option<Choice> {
+    let names = page.names_language();
+    let shown = sp_bible::parse_reference_in(&page.shown, &bible.info.language).ok();
+    let scroll = std::mem::take(&mut page.list_scroll);
+    let shift = ui.input(|input| input.modifiers.shift);
+    let (open_book, open_chapter) = (page.list_book, page.list_chapter);
+    let new_testament = sp_bible::BOOKS.iter().position(|book| book.code == "MAT").unwrap_or(39);
+    let mut clicked = None;
+    egui::ScrollArea::vertical().id_salt("bible keypad").auto_shrink([false, false]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 14 }).show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            let keys = book_keys(&names);
+            for (testament, books) in [(0, 0..new_testament), (1, new_testament..sp_bible::BOOKS.len())] {
+                if testament == 1 {
+                    ui.add_space(KEY_GAP + 5.0 + KEY_GAP);
+                }
+                let first = books.start;
+                key_grid(ui, books.len(), |ui, at, rect| {
+                    let book = first + at;
+                    let name = sp_bible::book_name(book, &names);
+                    let response = key(
+                        ui,
+                        list_row_id(("book", book)),
+                        rect,
+                        &keys[book],
+                        bible.chapter_count(book) > 0,
+                        book == open_book,
+                    );
+                    if response.on_hover_text(name).clicked() {
+                        clicked = Some(Choice::Book(book));
+                    }
+                });
+            }
+            // The chapters of the book open.
+            let chapters = bible.chapter_count(open_book);
+            section_heading(ui, &format!("{} \u{b7} chapter", sp_bible::book_name(open_book, &names)), None);
+            key_grid(ui, usize::from(chapters), |ui, at, rect| {
+                let chapter = at as u16 + 1;
+                let chosen = chapter == open_chapter;
+                if chosen && scroll {
+                    ui.scroll_to_rect_animation(rect, None, egui::style::ScrollAnimation::none());
+                }
+                if key(ui, list_row_id(("chapter", chapter)), rect, &chapter.to_string(), true, chosen).clicked() {
+                    clicked = Some(Choice::Chapter(chapter));
+                }
+            });
+            // The verses of the chapter open: Shift takes the passage from the verse clicked
+            // before; a double-click the whole chapter with the verse picked.
+            let verses = if open_chapter == 0 || open_chapter > chapters {
+                0
+            } else {
+                bible.last_verse(open_book, open_chapter)
+            };
+            section_heading(ui, "Verse", Some(" \u{b7} \u{21e7} for a passage"));
+            key_grid(ui, usize::from(verses), |ui, at, rect| {
+                let verse = at as u16 + 1;
+                let here = (open_book, open_chapter, verse);
+                let chosen = shown.is_some_and(|range| {
+                    (range.start.book, range.start.chapter, range.start.verse) <= here
+                        && here <= (range.end.book, range.end.chapter, range.end.verse)
+                });
+                let response = key(ui, list_row_id(("verse", verse)), rect, &verse.to_string(), true, chosen)
+                    .on_hover_text("Click a verse; Shift-click another to take the passage between them");
+                if response.double_clicked() {
+                    clicked = Some(Choice::Verse { verse, shift: false, double: true });
+                } else if response.clicked() {
+                    clicked = Some(Choice::Verse { verse, shift, double: false });
+                }
+            });
+        });
+    });
+    clicked
+}
+
+/// A section's heading in the keypad, in small capitals with room above it: "Psalms ·
+/// chapter", and a fainter note after it.
+fn section_heading(ui: &mut egui::Ui, text: &str, note: Option<&str>) {
+    let width = ui.available_width();
+    ui.add_space(14.0);
+    let (row, _) = ui.allocate_exact_size(vec2(width, 23.5), Sense::hover());
+    let said = cap(ui, pos2(row.min.x, row.min.y + 7.75), Align2::LEFT_CENTER, text, TEXT_DIM);
+    if let Some(note) = note {
+        let clip = Rect::from_min_max(pos2(said.max.x, row.min.y), row.max);
+        let galley = crate::studio::spaced(ui, &note.to_uppercase(), fixed_semibold(11.5), TEXT_FAINT, 0.2);
+        ui.painter().with_clip_rect(clip).galley(
+            pos2(said.max.x, said.center().y - galley.size().y / 2.0),
+            galley,
+            TEXT_FAINT,
+        );
+    }
+}
+
+/// Every book's key in a language, worked out once for each language.
+fn book_keys(language: &str) -> &'static [String] {
+    static KEYS: std::sync::OnceLock<[Vec<String>; 3]> = std::sync::OnceLock::new();
+    let all = KEYS.get_or_init(|| {
+        ["en", "ru", "uk"].map(|language| (0..sp_bible::BOOKS.len()).map(|book| book_key(book, language)).collect())
+    });
+    match language {
+        "ru" => &all[1],
+        "uk" => &all[2],
+        _ => &all[0],
+    }
 }
 
 /// One of the lists: a column of its own that scrolls.

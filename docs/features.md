@@ -561,16 +561,21 @@ feature changes, this page changes in the same commit.
   slide or the last, or none) and the theme, beside a preview of the first and last slides that
   changes as they are clicked (the passage showing, or two sample verses). Manage Bibles… opens
   the Bibles window. ‹ and › make the passage a verse longer at either end.
-- Book, chapter and verse lists, side by side in the left column and each scrolling on its own,
-  opened on what is chosen: the books named in full in the operator's language under Old
-  Testament and New Testament (those the first translation lacks dimmed), the chapters and
-  verses as the first translation numbers them; the rows in the design's look (the chosen one a
-  well with a faint ring). A click on a book loads its first chapter; a click on a chapter
-  loads that chapter; a click on a verse then narrows the passage to that verse, Shift-click
-  makes a passage from the verse clicked before, and a double-click opens the chapter with that
-  verse. What a click loads has its first verse (or the verse double-clicked) picked, so Enter
-  puts it on screen and Next goes on through it; nothing goes on screen from the lists. The
-  passage showing is lit in them, however it was looked up.
+- The books, two ways, chosen with a small switch at the right of the Book heading (a grid of
+  keys, or lines), kept between starts. The **keypad**, the first look: all 66 books as small
+  keys, every one a click away, named short in the operator's language (`Gen`, `Exo`…; `Быт`,
+  `Исх`…; `Бут`, `Вих`…; the whole name on hover), a little room between the Testaments, those
+  the first translation lacks darker; under them the chapters of the book open, then the verses
+  of the chapter open ("⇧ for a passage"); the column scrolls. The **lists**: book, chapter and
+  verse side by side, each scrolling on its own and opened on what is chosen, the books named in
+  full under Old Testament and New Testament (a long name ends in an ellipsis), the chosen row a
+  well with a faint ring. Both do the same: a click on a book loads its first chapter; a click on
+  a chapter loads that chapter; a click on a verse then narrows the passage to that verse,
+  Shift-click makes a passage from the verse clicked before, and a double-click opens the chapter
+  with that verse. What a click loads has its first verse (or the verse double-clicked) picked,
+  so Enter puts it on screen and Next goes on through it; nothing goes on screen from them. The
+  passage showing is lit, however it was looked up. Chapters and verses are numbered as the first
+  translation numbers them.
 - Four Bibles ship with the app (King James, World English, Berean Standard, Russian Synodal)
   and sixteen more can be downloaded. Options › Bibles opens the Bibles window: a search box,
   the Bibles installed (each with Remove, but for the four built in), and every Bible that can

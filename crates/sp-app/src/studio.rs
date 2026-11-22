@@ -269,6 +269,49 @@ pub fn pill_switch(
     (track, clicked)
 }
 
+/// A small segmented switch of icons, as the Bible page's Keypad | Lists: a dark, fully round
+/// track with a pill 26 × 18 for each icon, the chosen one the lighter grey. Its top left
+/// corner goes at `min`. Returns the room it took and the choice clicked.
+pub fn icon_switch(
+    ui: &egui::Ui,
+    salt: &str,
+    min: egui::Pos2,
+    icons: &[Icon],
+    hints: &[&str],
+    chosen: Option<usize>,
+) -> (Rect, Option<usize>) {
+    const CELL: egui::Vec2 = vec2(26.0, 18.0);
+    const INSET: f32 = 3.0;
+    const BETWEEN: f32 = 2.0;
+    let count = icons.len() as f32;
+    let track = Rect::from_min_size(
+        min,
+        vec2(2.0 * INSET + CELL.x * count + BETWEEN * (count - 1.0).max(0.0), CELL.y + 2.0 * INSET),
+    );
+    ui.painter().rect_filled(track, track.height() / 2.0, CARD);
+    let reach = ((LEAST_CLICK - CELL.y) / 2.0).max(0.0);
+    let mut clicked = None;
+    for (index, icon) in icons.iter().enumerate() {
+        let cell = Rect::from_min_size(
+            pos2(track.min.x + INSET + (CELL.x + BETWEEN) * index as f32, track.min.y + INSET),
+            CELL,
+        );
+        let mut response =
+            ui.interact(cell.expand2(vec2(0.0, reach)), ui.scope_id().with((salt, index)), Sense::click());
+        let on = chosen == Some(index);
+        paint_pill(ui.painter(), cell, on);
+        let ink = if on || response.hovered() { TEXT } else { TEXT_DIM };
+        icons::paint(ui.painter(), *icon, Rect::from_center_size(cell.center(), egui::Vec2::splat(12.0)), ink);
+        if let Some(hint) = hints.get(index) {
+            response = response.on_hover_text(*hint);
+        }
+        if response.clicked() {
+            clicked = Some(index);
+        }
+    }
+    (track, clicked)
+}
+
 /// Where each pill of a [`pill_switch`] with its top left corner at `min` stands.
 pub fn pill_cells(ui: &egui::Ui, min: egui::Pos2, labels: &[&str], look: &SwitchLook) -> Vec<Rect> {
     let mut x = min.x + look.inset;

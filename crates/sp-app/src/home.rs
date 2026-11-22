@@ -648,6 +648,15 @@ pub enum BibleSide {
     History,
 }
 
+/// How the Bible view's left column offers the books: a key for every book (the design's
+/// keypad), or the scrolling book, chapter and verse lists.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BookPicker {
+    #[default]
+    Keypad,
+    Lists,
+}
+
 /// How the Bible page shows a passage: its chapter as a page to read, or its slides.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BibleView {
@@ -732,6 +741,8 @@ pub struct BiblePage {
     /// The left column's side, and how the passage is shown (kept between starts).
     pub side: BibleSide,
     pub view: BibleView,
+    /// Keypad or lists for the books (kept between starts).
+    pub books: BookPicker,
     /// The page's chapter as laid out, and what was on screen when it was last drawn (to keep
     /// the verse on screen in sight as it changes).
     pub page: crate::bible_page::PageCache,
@@ -791,6 +802,7 @@ impl Default for BiblePage {
             sample: None,
             side: BibleSide::Books,
             view: BibleView::Page,
+            books: BookPicker::Keypad,
             page: crate::bible_page::PageCache::default(),
             page_live_seen: None,
         }
@@ -1659,6 +1671,11 @@ impl HomeState {
                 BibleView::Slides => "slides",
             }
             .to_owned(),
+            bible_books: match self.bible.books {
+                BookPicker::Keypad => "keypad",
+                BookPicker::Lists => "lists",
+            }
+            .to_owned(),
             playlist_in_front: self.playlist_open,
             song_order: self.song_order.name().to_owned(),
             keys_on_buttons: self.keys_on_buttons,
@@ -1693,6 +1710,7 @@ impl HomeState {
         self.bible.lists_open = !prefs.bible_lists_hidden;
         self.bible.rows_open = prefs.bible_rows_open;
         self.bible.view = if prefs.bible_view == "slides" { BibleView::Slides } else { BibleView::Page };
+        self.bible.books = if prefs.bible_books == "lists" { BookPicker::Lists } else { BookPicker::Keypad };
         self.playlist_open = prefs.playlist_in_front;
         self.song_order = crate::kept::SongOrder::named(&prefs.song_order);
         self.keys_on_buttons = prefs.keys_on_buttons;
@@ -7136,7 +7154,34 @@ mod tests {
         row: impl std::hash::Hash + std::fmt::Debug,
         time: f64,
     ) -> Vec<Command> {
-        let at = ctx.read_response(crate::bible::list_row_id(row)).expect("the row is drawn").rect.center();
+        let id = crate::bible::list_row_id(row);
+        // Out of view (the keypad's verses under a long book's chapters): the column is
+        // scrolled down to it, as the operator would, until the scrolling has settled.
+        let mut clock = time - 0.049;
+        let mut tick = || {
+            clock += 0.0001;
+            clock
+        };
+        for _ in 0..40 {
+            let whole = |row: egui::Response| row.interact_rect.height() >= row.rect.height() - 0.5;
+            if ctx.read_response(id).is_some_and(whole) {
+                break;
+            }
+            let column = ctx.read_response(crate::bible::list_row_id("hide")).expect("the column is drawn").rect;
+            let over = pos2(column.max.x - 100.0, column.max.y + 300.0);
+            let wheel = Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, -120.0),
+                modifiers: Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+                source: egui::MouseWheelSource::Wheel,
+            };
+            frame_then_app(ctx, show, state, vec![Event::PointerMoved(over), wheel], tick());
+            for _ in 0..5 {
+                frame_then_app(ctx, show, state, vec![], tick());
+            }
+        }
+        let at = ctx.read_response(id).expect("the row is drawn").rect.center();
         let press = |pressed| Event::PointerButton {
             pos: at,
             button: egui::PointerButton::Primary,
@@ -7153,14 +7198,18 @@ mod tests {
     #[test]
     fn a_book_click_loads_its_first_chapter_a_chapter_click_that_chapter_and_a_verse_click_that_verse() {
         // The Russian Synodal first, the King James Version second, as the app starts.
-        for (computer, genesis_1, genesis_2, verse) in [
-            (None, "Genesis 1:1-31", "Genesis 2:1-25", "Genesis 2:3"),
-            (Some("ru-RU"), "Бытие 1:1-31", "Бытие 2:1-25", "Бытие 2:3"),
+        // On the keypad and in the lists alike.
+        for (computer, genesis_1, genesis_2, verse, books) in [
+            (None, "Genesis 1:1-31", "Genesis 2:1-25", "Genesis 2:3", BookPicker::Keypad),
+            (Some("ru-RU"), "Бытие 1:1-31", "Бытие 2:1-25", "Бытие 2:3", BookPicker::Keypad),
+            (None, "Genesis 1:1-31", "Genesis 2:1-25", "Genesis 2:3", BookPicker::Lists),
+            (Some("ru-RU"), "Бытие 1:1-31", "Бытие 2:1-25", "Бытие 2:3", BookPicker::Lists),
         ] {
             let ctx = egui::Context::default();
             let mut show = service_with_bible_places();
             let mut state = HomeState { bible_open: true, ..HomeState::default() };
             state.bible.slots = Some([2, 3]);
+            state.bible.books = books;
             if let Some(computer) = computer {
                 state.bible.system_language = crate::system_language::SystemLanguage::answered(computer);
             }
@@ -8494,6 +8543,107 @@ mod tests {
         let made = format!("{:?}", state.bible.page);
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.5);
         assert_eq!(format!("{:?}", state.bible.page), made);
+    }
+
+    #[test]
+    fn the_keypad_has_every_book_in_order_and_a_click_on_one_opens_its_first_chapter() {
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { bible_open: true, ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        assert_eq!(state.bible.books, BookPicker::Keypad, "the keypad is the first look");
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.05);
+        // All 66 books, each a key, in the order of the books: row by row, left to right.
+        let key = |book: usize| ctx.read_response(crate::bible::list_row_id(("book", book))).map(|r| r.rect);
+        let keys: Vec<Rect> =
+            (0..66).map(|book| key(book).unwrap_or_else(|| panic!("book {book} has a key"))).collect();
+        for pair in keys.windows(2) {
+            let (before, after) = (pair[0], pair[1]);
+            let later = after.min.y > before.min.y + 1.0 || (after.min.y == before.min.y && after.min.x > before.min.x);
+            assert!(later, "{before:?} then {after:?}");
+            assert!(before.width() < 40.0, "a small key: {before:?}");
+        }
+        // A click on a book opens its first chapter, its first verse picked; nothing on screen.
+        let mut commands = Vec::new();
+        for (at, (book, first)) in
+            [(0, "Бытие 1:1-31"), (18, "Псалтирь 1:1-6"), (42, "От Иоанна 1:1-51"), (65, "Откровение 1:1-20")]
+                .into_iter()
+                .enumerate()
+        {
+            let id = crate::bible::list_row_id(("book", book));
+            commands.extend(click_id(&ctx, &mut show, &mut state, id, 0.2 + at as f64));
+            assert_eq!(state.bible.shown, first, "book {book}");
+            let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+            assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 0 }), "book {book}");
+        }
+        assert!(!goes_on_screen(&commands), "{commands:?}");
+        assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "the song stays on screen");
+    }
+
+    #[test]
+    fn the_books_switch_between_keypad_and_lists_and_the_choice_is_kept() {
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { bible_open: true, ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.05);
+        // The switch is at the right of the Book heading, under Hide: its two pills, 26 wide
+        // with 2 between, 3 in from the end of a track 24 high whose middle is 16.4 below the
+        // top of the heading, which starts where the bar with Hide ends.
+        let hide = ctx.read_response(crate::bible::list_row_id("hide")).expect("Hide is drawn").rect;
+        let middle = hide.center().y + 15.1 + 16.4;
+        let pill = |index: f32| pos2(hide.max.x - 3.0 - 13.0 - (1.0 - index) * 28.0, middle);
+        let press = |at: egui::Pos2, pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let click = |state: &mut HomeState, show: &mut Show, at: egui::Pos2, time: f64| {
+            frame_then_app(&ctx, show, state, vec![Event::PointerMoved(at)], time);
+            frame_then_app(&ctx, show, state, vec![press(at, true)], time + 0.05);
+            frame_then_app(&ctx, show, state, vec![press(at, false)], time + 0.1);
+            frame_then_app(&ctx, show, state, vec![], time + 0.15)
+        };
+        let genesis = || ctx.read_response(crate::bible::list_row_id(("book", 0usize))).expect("Genesis").rect;
+        assert!(genesis().width() < 40.0, "a key");
+        let commands = click(&mut state, &mut show, pill(1.0), 0.2);
+        assert_eq!(state.bible.books, BookPicker::Lists);
+        assert!(genesis().width() > 100.0, "a row of the book list");
+        assert!(!goes_on_screen(&commands) && state.bible.pending.is_none(), "it looks nothing up");
+        // Kept between starts, and back to the keypad.
+        let prefs = state.prefs();
+        assert_eq!(prefs.bible_books, "lists");
+        let mut fresh = HomeState::default();
+        fresh.apply_prefs(&prefs);
+        assert_eq!(fresh.bible.books, BookPicker::Lists);
+        fresh.apply_prefs(&crate::service::Prefs::default());
+        assert_eq!(fresh.bible.books, BookPicker::Keypad, "a file from before: the keypad");
+        click(&mut state, &mut show, pill(0.0), 0.6);
+        assert_eq!(state.bible.books, BookPicker::Keypad);
+        assert_eq!(state.prefs().bible_books, "keypad");
+    }
+
+    #[test]
+    fn every_books_key_is_short_and_its_own_in_each_language() {
+        for language in ["en", "ru", "uk"] {
+            let keys: Vec<String> = (0..66).map(|book| crate::bible_page::book_key(book, language)).collect();
+            for (book, key) in keys.iter().enumerate() {
+                let places = key.chars().count();
+                assert!((2..=4).contains(&places), "{language} {book}: {key:?}");
+                assert_eq!(keys.iter().filter(|other| *other == key).count(), 1, "{language}: {key} twice");
+            }
+        }
+        let key = crate::bible_page::book_key;
+        let joh = sp_bible::BOOKS.iter().position(|book| book.code == "JOH").unwrap();
+        assert_eq!([key(0, "en"), key(8, "en"), key(joh, "en")], ["Gen", "1sa", "Joh"]);
+        assert_eq!(
+            [key(0, "ru"), key(10, "ru"), key(5, "ru"), key(18, "ru"), key(39, "ru"), key(joh, "ru")],
+            ["Быт", "3Цар", "Нав", "Пс", "Мф", "Ин"]
+        );
+        assert_eq!([key(0, "uk"), key(5, "uk"), key(joh, "uk"), key(65, "uk")], ["Бут", "Нав", "Ів", "Об"]);
     }
 
     #[test]

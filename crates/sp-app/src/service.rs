@@ -460,6 +460,10 @@ pub struct Prefs {
     /// `slides`.
     #[serde(default)]
     pub bible_view: String,
+    /// How the Bible view's left column offers the books: `keypad` (a key for every book, the
+    /// default) or `lists`.
+    #[serde(default)]
+    pub bible_books: String,
     /// True when the left column was left listing a playlist, not a library's songs.
     #[serde(default)]
     pub playlist_in_front: bool,
@@ -528,6 +532,7 @@ impl Default for Prefs {
             bible_lists_hidden: false,
             bible_rows_open: false,
             bible_view: String::new(),
+            bible_books: String::new(),
             playlist_in_front: false,
             song_order: "listed".to_owned(),
             keys_on_buttons: false,
