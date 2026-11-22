@@ -67,7 +67,8 @@ SoftPresenter is built to be:
   app watches, and an announcements layer that loops by itself. Videos play as they are, never
   converted.
 - **Screens.** Any number of audience screens on displays (never the one the operator works
-  on), in windows or over NDI, each with its own look and theme if you like (a lobby can show
+  on), in windows, over NDI or out of a Blackmagic DeckLink card (SDI or HDMI, with the card's
+  keyer), each with its own look and theme if you like (a lobby can show
   only the media, a stream a lower third); stage screens with layouts you design; test patterns
   and Identify Screens.
 - **Live tools.** Timers, messages over the slides, props such as a logo, macros that do several
@@ -176,6 +177,8 @@ Two things are optional:
 
 - **NDI Tools** (free, from [ndi.video](https://ndi.video)) to send a screen over NDI. Without
   it, NDI screens say NDI isn't installed and everything else works.
+- **Desktop Video** 16.0 or later (free, from Blackmagic Design) to play a screen out of a
+  DeckLink card. Without it there are no DeckLink outputs to choose.
 - **Keynote** (free from Apple), PowerPoint or LibreOffice, to bring presentation files in as
   slides; a Keynote file needs Keynote. PDFs and pictures need none of them.
 

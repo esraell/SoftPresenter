@@ -258,7 +258,7 @@ how long drawing took.
 ## Trying the app safely (for agents and tests)
 
 - Every test run sets `SOFTPRESENTER_QUIET=1`: its windows open behind everything, its screens
-  never go full screen, and it sends no NDI. Point it at a copy of the data with
+  never go full screen, it sends no NDI and it opens no DeckLink card. Point it at a copy of the data with
   `SOFTPRESENTER_DATA`, and for the command line set `SOFTPRESENTER_CONTROL_SOCKET` to a short
   path, so nothing reaches the copy someone is using.
 - `softpresenter --capture-home FILE.png` saves a picture of the window and quits;
@@ -271,7 +271,8 @@ how long drawing took.
   window, separated as in PATH), `_HOVER=FILES` (files kept over the window, for a picture of
   where they would land), `_DROP_AT=X,Y` (where the pointer is for those, in the window's
   points), `_PICK=songs:0,2`,
-  `_WINDOW_SIZE=WxH`, `_NDI=NAME`, `_HIDE_NDI=1`, `_TRACE_PREVIEW=1`, `_LIVE_TAB=NAME` (open a
+  `_WINDOW_SIZE=WxH`, `_NDI=NAME`, `_HIDE_NDI=1`, `_HIDE_DECKLINK=1`, `_PRETEND_DECKLINK=1` (made-up
+  DeckLink devices that play into nothing), `_TRACE_PREVIEW=1`, `_LIVE_TAB=NAME` (open a
   tool tab), `_TAB_SCROLL=POINTS` (scroll the open tab down, for a picture of its foot),
   `_LANGUAGE=ru|uk|en` (as if the computer were set to that language, for the Bible view's start).
 - A quiet copy never tidies the library (moves unused pictures to the Trash) unless
