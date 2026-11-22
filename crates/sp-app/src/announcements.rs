@@ -340,6 +340,16 @@ impl crate::App {
         let what = on.what;
         let player = on.video.as_mut()?;
         let wait = player.tick();
+        match player.take_handed_over() {
+            Some(Ok(path)) => crate::applog::event(
+                "announcements",
+                &format!("{} took over at the end of the pass", crate::file_name(&path)),
+            ),
+            Some(Err(problem)) => {
+                crate::applog::problem("announcements", &format!("the new file couldn't take over: {problem}"))
+            }
+            None => {}
+        }
         let Some(problem) = player.problem() else {
             return Some(Instant::now() + wait);
         };
@@ -378,6 +388,20 @@ impl crate::App {
                 None
             }
         }
+    }
+
+    /// The video of a media bin item playing on the layer has a new file: it is opened now and
+    /// takes over at the end of the pass under way (see `play_new_file_next`). Nothing for an
+    /// item not playing there, or one of several in a media playlist going round (the playlist
+    /// opens the new file next time round).
+    pub(crate) fn play_next_on_layer(&mut self, id: Uuid, path: &std::path::Path) -> Result<(), String> {
+        let one_of_many = matches!(self.announcing.as_ref().map(|on| on.what), Some(Announce::MediaPlaylist(_)))
+            && self.announcing_items() > 1;
+        let Some(on) = self.announcing.as_mut().filter(|on| on.item == Some(id)) else { return Ok(()) };
+        let Some(player) = on.video.as_mut().filter(|_| !one_of_many) else { return Ok(()) };
+        player.play_next(path)?;
+        crate::applog::event("announcements", &format!("{} takes over at the end of the pass", crate::file_name(path)));
+        Ok(())
     }
 
     /// How many items the media playlist on the layer has (none for anything else).

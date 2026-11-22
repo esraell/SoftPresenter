@@ -242,11 +242,6 @@ pub struct Frames {
 }
 
 impl Frames {
-    /// True when both take pictures from the same video.
-    pub fn same(&self, other: &Frames) -> bool {
-        Retained::as_ptr(&self.output) == Retained::as_ptr(&other.output)
-    }
-
     /// The picture to show now, if there is a new one since the last was taken.
     pub fn next(&self) -> Option<Frame> {
         let buffer = self.newest()?;

@@ -297,10 +297,6 @@ impl Slot {
 }
 
 impl Frames {
-    pub fn same(&self, other: &Frames) -> bool {
-        Arc::ptr_eq(&self.slot, &other.slot)
-    }
-
     /// The newest picture, if one has come since the last was taken.
     pub fn next(&self) -> Option<Frame> {
         self.slot.lock().ok()?.frame.take()
@@ -495,7 +491,9 @@ impl Player {
                 if !sound_drives {
                     clock_v.start();
                 }
-                // Each picture waits for its time on the clock.
+                // Each picture waits for its time on the clock. The first is put out at once, before
+                // the clock starts (with the sound, once it is played): a paused video shows it,
+                // and one lined up to follow another has it ready when it takes over.
                 let due = shown as f64 / fps;
                 shown += 1;
                 loop {
@@ -503,6 +501,7 @@ impl Player {
                         return;
                     }
                     match clock_v.elapsed() {
+                        _ if due <= 0.0 => break,
                         Some(now) if now + 0.002 >= due => break,
                         // Paused: nothing is due; look again a little later.
                         Some(_) if clock_v.paused() => std::thread::sleep(Duration::from_millis(30)),

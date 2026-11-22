@@ -36,7 +36,8 @@ mod other;
 #[cfg(not(target_os = "macos"))]
 pub use other::{display_names, pdf_pages, picture};
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Videos the system's player is asked to play first; anything else goes to FFmpeg.
@@ -91,32 +92,34 @@ fn dark(frame: &Frame) -> bool {
     count == 0 || sum / count < 20
 }
 
-/// A video playing, with its sound: through the system's player, or through FFmpeg.
-pub enum Player {
-    #[cfg(target_os = "macos")]
-    System(mac::Player),
-    Ffmpeg(Box<ffmpeg::Player>),
-}
-
 /// Where a playing video's (or a web page's) pictures are taken from. It can be sent to
 /// another thread.
 #[derive(Clone)]
 pub enum Frames {
-    #[cfg(target_os = "macos")]
-    System(mac::Frames),
-    Ffmpeg(ffmpeg::Frames),
+    Video(VideoFrames),
     Web(web::WebFrames),
 }
 
+/// Where a playing video's pictures are taken from: whichever engine plays it now, the same
+/// handle after a file lined up to follow has taken over.
+#[derive(Clone)]
+pub struct VideoFrames(Arc<Mutex<Source>>);
+
+impl VideoFrames {
+    /// The engine's pictures now. Only a hand-over holds the lock, for as long as it takes to
+    /// put the new engine's in.
+    fn now(&self) -> Source {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+}
+
 impl Frames {
-    /// True when both take pictures from the same video.
+    /// True when both take pictures from the same video (the same player, whichever file it
+    /// plays now).
     pub fn same(&self, other: &Frames) -> bool {
         match (self, other) {
-            #[cfg(target_os = "macos")]
-            (Frames::System(a), Frames::System(b)) => a.same(b),
-            (Frames::Ffmpeg(a), Frames::Ffmpeg(b)) => a.same(b),
+            (Frames::Video(a), Frames::Video(b)) => Arc::ptr_eq(&a.0, &b.0),
             (Frames::Web(a), Frames::Web(b)) => a.same(b),
-            #[allow(unreachable_patterns)]
             _ => false,
         }
     }
@@ -124,9 +127,11 @@ impl Frames {
     /// The picture to show now, if there is a new one since the last was taken.
     pub fn next(&self) -> Option<Frame> {
         match self {
-            #[cfg(target_os = "macos")]
-            Frames::System(frames) => frames.next(),
-            Frames::Ffmpeg(frames) => frames.next(),
+            Frames::Video(video) => match video.now() {
+                #[cfg(target_os = "macos")]
+                Source::System(frames) => frames.next(),
+                Source::Ffmpeg(frames) => frames.next(),
+            },
             Frames::Web(frames) => frames.next(),
         }
     }
@@ -138,9 +143,11 @@ impl Frames {
     /// GPU.
     pub fn next_with<R>(&self, show: impl FnOnce(&Lent<'_>) -> R) -> Option<R> {
         match self {
-            #[cfg(target_os = "macos")]
-            Frames::System(frames) => frames.next_with(show),
-            Frames::Ffmpeg(frames) => frames.next_with(show),
+            Frames::Video(video) => match video.now() {
+                #[cfg(target_os = "macos")]
+                Source::System(frames) => frames.next_with(show),
+                Source::Ffmpeg(frames) => frames.next_with(show),
+            },
             Frames::Web(frames) => frames.next().map(|frame| show(&Lent::rgba(&frame))),
         }
     }
@@ -202,95 +209,307 @@ impl<'a> Lent<'a> {
     }
 }
 
-/// Runs the same call on whichever player it is.
+/// A video engine: the system's player, or FFmpeg.
+enum Engine {
+    #[cfg(target_os = "macos")]
+    System(mac::Player),
+    Ffmpeg(Box<ffmpeg::Player>),
+}
+
+/// Runs the same call on whichever engine it is.
 macro_rules! either {
-    ($self:expr, $player:ident => $call:expr) => {
+    ($self:expr, $engine:ident => $call:expr) => {
         match $self {
             #[cfg(target_os = "macos")]
-            Player::System($player) => $call,
-            Player::Ffmpeg($player) => $call,
+            Engine::System($engine) => $call,
+            Engine::Ffmpeg($engine) => $call,
         }
     };
+}
+
+impl Engine {
+    /// Opens a video, paused at its start: with the system's player for an MP4 or MOV (on the
+    /// main thread), otherwise with FFmpeg.
+    fn open(path: &Path) -> Result<Engine, String> {
+        #[cfg(target_os = "macos")]
+        if system_first(path) {
+            return mac::Player::open(path).map(Engine::System);
+        }
+        Engine::open_with_ffmpeg(path)
+    }
+
+    fn open_with_ffmpeg(path: &Path) -> Result<Engine, String> {
+        ffmpeg::Player::open(path).map(|player| Engine::Ffmpeg(Box::new(player)))
+    }
+
+    fn source(&self) -> Source {
+        match self {
+            #[cfg(target_os = "macos")]
+            Engine::System(player) => Source::System(player.frames()),
+            Engine::Ffmpeg(player) => Source::Ffmpeg(player.frames()),
+        }
+    }
+
+    fn play(&mut self) {
+        either!(self, engine => engine.play())
+    }
+
+    fn pause(&mut self) {
+        either!(self, engine => engine.pause())
+    }
+
+    fn playing(&self) -> bool {
+        either!(self, engine => engine.playing())
+    }
+
+    fn seek(&mut self, to: f64) {
+        either!(self, engine => engine.seek(to))
+    }
+
+    fn position(&self) -> f64 {
+        either!(self, engine => engine.position())
+    }
+
+    fn duration(&self) -> Option<f64> {
+        either!(self, engine => engine.duration())
+    }
+
+    fn set_looping(&mut self, looping: bool) {
+        either!(self, engine => engine.set_looping(looping))
+    }
+
+    fn set_volume(&mut self, volume: f32) {
+        either!(self, engine => engine.set_volume(volume))
+    }
+
+    fn ended(&self) -> bool {
+        either!(self, engine => engine.ended())
+    }
+
+    fn problem(&self) -> Option<String> {
+        either!(self, engine => engine.problem())
+    }
+
+    fn tick(&mut self) -> Duration {
+        either!(self, engine => engine.tick())
+    }
+}
+
+/// Where one engine's pictures are taken from.
+#[derive(Clone)]
+enum Source {
+    #[cfg(target_os = "macos")]
+    System(mac::Frames),
+    Ffmpeg(ffmpeg::Frames),
+}
+
+/// How close to the end of a pass a file lined up to follow takes over: the system's player
+/// starts a looping video again this close to its end too.
+const END_OF_PASS: f64 = 0.02;
+
+/// A video playing, with its sound: through the system's player, or through FFmpeg.
+///
+/// Another file can be lined up to follow it ([`Player::play_next`]): it is opened at once, so
+/// it is ready, and takes over exactly at the end of the pass under way, where this one would
+/// start again or end. The screens take the pictures through the same [`Frames`] before and
+/// after, so they hold the last picture of the one until the first of the other comes, never
+/// starting afresh (and never black).
+pub struct Player {
+    engine: Engine,
+    path: PathBuf,
+    /// Where the screens take the pictures from: the engine playing now, swapped for the next
+    /// file's when it takes over, so frames handed out before go on working.
+    source: Arc<Mutex<Source>>,
+    /// The file lined up to follow, opened and waiting at its start.
+    next: Option<(Engine, PathBuf)>,
+    looping: bool,
+    volume: f32,
+    /// How far in it was when last looked at, to see a looping video go round between two looks.
+    last_position: f64,
+    /// A file that took over since this was last asked, or why one lined up couldn't.
+    handed_over: Option<Result<PathBuf, String>>,
 }
 
 impl Player {
     /// Opens a video, paused at its start: with the system's player for an MP4 or MOV (on the
     /// main thread), otherwise with FFmpeg. The error is a sentence for the operator.
     pub fn open(path: &Path) -> Result<Player, String> {
-        #[cfg(target_os = "macos")]
-        if system_first(path) {
-            return mac::Player::open(path).map(Player::System);
-        }
-        ffmpeg::Player::open(path).map(|player| Player::Ffmpeg(Box::new(player)))
+        Engine::open(path).map(|engine| Player::with(engine, path))
     }
 
     /// Opens a video with FFmpeg, for when the system's player has failed on it (an AV1 video
     /// on a Mac without AV1 hardware, say).
     pub fn open_with_ffmpeg(path: &Path) -> Result<Player, String> {
-        ffmpeg::Player::open(path).map(|player| Player::Ffmpeg(Box::new(player)))
+        Engine::open_with_ffmpeg(path).map(|engine| Player::with(engine, path))
     }
 
-    pub fn uses_ffmpeg(&self) -> bool {
-        matches!(self, Player::Ffmpeg(_))
-    }
-
-    pub fn frames(&self) -> Frames {
-        match self {
-            #[cfg(target_os = "macos")]
-            Player::System(player) => Frames::System(player.frames()),
-            Player::Ffmpeg(player) => Frames::Ffmpeg(player.frames()),
+    fn with(engine: Engine, path: &Path) -> Player {
+        Player {
+            source: Arc::new(Mutex::new(engine.source())),
+            engine,
+            path: path.to_owned(),
+            next: None,
+            looping: false,
+            volume: 1.0,
+            last_position: 0.0,
+            handed_over: None,
         }
     }
 
+    pub fn uses_ffmpeg(&self) -> bool {
+        matches!(self.engine, Engine::Ffmpeg(_))
+    }
+
+    /// The file playing now.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Where its pictures are taken from, on any thread: the same before and after a file lined
+    /// up takes over.
+    pub fn frames(&self) -> Frames {
+        Frames::Video(VideoFrames(self.source.clone()))
+    }
+
     pub fn play(&mut self) {
-        either!(self, player => player.play())
+        self.engine.play();
     }
 
     pub fn pause(&mut self) {
-        either!(self, player => player.pause())
+        self.engine.pause();
     }
 
     pub fn playing(&self) -> bool {
-        either!(self, player => player.playing())
+        self.engine.playing()
     }
 
     /// Goes to a time, in seconds from the start.
     pub fn seek(&mut self, to: f64) {
-        either!(self, player => player.seek(to))
+        self.engine.seek(to);
+        self.last_position = to.max(0.0);
     }
 
     /// How far in it is, in seconds.
     pub fn position(&self) -> f64 {
-        either!(self, player => player.position())
+        self.engine.position()
     }
 
     /// How long it is, once that is known.
     pub fn duration(&self) -> Option<f64> {
-        either!(self, player => player.duration())
+        self.engine.duration()
     }
 
     pub fn set_looping(&mut self, looping: bool) {
-        either!(self, player => player.set_looping(looping))
+        self.looping = looping;
+        self.engine.set_looping(looping);
+        if let Some((next, _)) = self.next.as_mut() {
+            next.set_looping(looping);
+        }
     }
 
     /// From 0 (silent) to 1.
     pub fn set_volume(&mut self, volume: f32) {
-        either!(self, player => player.set_volume(volume))
+        self.volume = volume;
+        self.engine.set_volume(volume);
+        if let Some((next, _)) = self.next.as_mut() {
+            next.set_volume(volume);
+        }
     }
 
-    /// True once a video that doesn't loop has played to its end.
+    /// True once a video that doesn't loop has played to its end (and no file lined up is about
+    /// to take over).
     pub fn ended(&self) -> bool {
-        either!(self, player => player.ended())
+        self.next.is_none() && self.engine.ended()
     }
 
     /// Why the video can't play, once the player has tried and failed.
     pub fn problem(&self) -> Option<String> {
-        either!(self, player => player.problem())
+        self.engine.problem()
     }
 
-    /// Keeps it going (a looping video starts again at its end). Says how soon to call again.
+    /// Lines up another file to follow this one: it is opened now, waiting at its start, and
+    /// takes over at the end of the pass under way (where this one would start again or end),
+    /// looping as this one does, at its volume. One lined up before is let go. The error is a
+    /// sentence for the operator; this one plays on as it was.
+    pub fn play_next(&mut self, path: &Path) -> Result<(), String> {
+        let mut next = Engine::open(path)?;
+        next.set_looping(self.looping);
+        next.set_volume(self.volume);
+        // The system's player decodes the first picture once asked for a time: it is ready
+        // when the file takes over.
+        next.seek(0.0);
+        self.next = Some((next, path.to_owned()));
+        self.last_position = self.engine.position();
+        Ok(())
+    }
+
+    /// The file lined up to follow, if one is.
+    pub fn next_file(&self) -> Option<&Path> {
+        self.next.as_ref().map(|(_, path)| path.as_path())
+    }
+
+    /// A file lined up that has taken over since this was last asked (its path), or why it
+    /// couldn't (this one then plays on).
+    pub fn take_handed_over(&mut self) -> Option<Result<PathBuf, String>> {
+        self.handed_over.take()
+    }
+
+    /// Keeps it going (a looping video starts again at its end), and hands over to a file lined
+    /// up at the end of the pass. Says how soon to call again.
     pub fn tick(&mut self) -> Duration {
-        either!(self, player => player.tick())
+        if self.next.is_some()
+            && let Some(wait) = self.hand_over_when_due()
+        {
+            return wait;
+        }
+        self.engine.tick()
+    }
+
+    /// With a file lined up: hands over to it at the end of the pass, or says how soon to look
+    /// again, just before then. `None` while paused (nothing is due).
+    fn hand_over_when_due(&mut self) -> Option<Duration> {
+        let position = self.engine.position();
+        // A looping video FFmpeg plays goes round by itself: one that went round since the last
+        // look is handed over at once.
+        let went_round = position + 0.25 < self.last_position;
+        self.last_position = position;
+        let left = self.engine.duration().map(|length| length - position);
+        let playing = self.engine.playing();
+        if self.engine.ended() || (playing && (went_round || left.is_some_and(|left| left <= END_OF_PASS))) {
+            self.hand_over();
+            return Some(Duration::from_millis(10));
+        }
+        if !playing {
+            return None;
+        }
+        left.map(|left| Duration::from_secs_f64((left - END_OF_PASS).clamp(0.002, 0.25)))
+    }
+
+    /// The file lined up takes over: it plays, the screens take its pictures, and this one is
+    /// let go. One the system's player can't play is tried with FFmpeg; if that can't either,
+    /// this one plays on.
+    fn hand_over(&mut self) {
+        let Some((mut next, path)) = self.next.take() else { return };
+        if let Some(problem) = next.problem() {
+            match Engine::open_with_ffmpeg(&path) {
+                Ok(mut ffmpeg) if !matches!(next, Engine::Ffmpeg(_)) => {
+                    ffmpeg.set_looping(self.looping);
+                    ffmpeg.set_volume(self.volume);
+                    next = ffmpeg;
+                }
+                _ => {
+                    self.handed_over = Some(Err(problem));
+                    return;
+                }
+            }
+        }
+        next.play();
+        let old = std::mem::replace(&mut self.engine, next);
+        *self.source.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = self.engine.source();
+        self.path = path.clone();
+        self.last_position = 0.0;
+        self.handed_over = Some(Ok(path));
+        drop(old);
     }
 }
 
@@ -372,6 +591,115 @@ fn smaller_than_wide(width: f64, height: f64, most: f64) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A video for the hand-over check: a second long at 30 pictures a second, every picture
+    /// one colour (red, or blue) as bright as its number, so a picture says which video it is
+    /// from and how far in.
+    fn marker_video(ffmpeg: &Path, path: &Path, red: bool) {
+        let colour = if red { "r='40+N*6':g='0':b='0'" } else { "r='0':g='0':b='40+N*6'" };
+        let made = std::process::Command::new(ffmpeg)
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i"])
+            .arg(format!("color=c=black:s=64x36:r=30:d=1,format=rgb24,geq={colour}"))
+            .args(["-c:v", "ffv1"])
+            .arg(path)
+            .status()
+            .expect("FFmpeg runs");
+        assert!(made.success(), "the marker video is made");
+    }
+
+    /// The red, green and blue of a lent picture's middle pixel.
+    fn middle(lent: &Lent<'_>) -> [u8; 3] {
+        let at = (lent.height as usize / 2) * lent.bytes_per_row + (lent.width as usize / 2) * 4;
+        let pixel = &lent.bytes[at..at + 4];
+        match lent.order {
+            PixelOrder::Rgba => [pixel[0], pixel[1], pixel[2]],
+            PixelOrder::Bgra => [pixel[2], pixel[1], pixel[0]],
+        }
+    }
+
+    /// A file lined up takes over where the video playing would go round: the screens' pictures
+    /// go from the end of the one to the start of the other, through the same frames, with no
+    /// black picture, no gap past a picture or two, and the first not started again. (FFmpeg
+    /// plays both here; `examples/handover.rs` checks the system's player, which must be on the
+    /// main thread.)
+    #[test]
+    fn a_file_lined_up_takes_over_at_the_end_of_the_pass_with_no_black_picture() {
+        let Some(ffmpeg) = ffmpeg::tool("ffmpeg") else {
+            eprintln!("FFmpeg isn't on this computer: the hand-over wasn't checked");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("softpresenter-handover-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (red, blue) = (dir.join("red.mkv"), dir.join("blue.mkv"));
+        marker_video(&ffmpeg, &red, true);
+        marker_video(&ffmpeg, &blue, false);
+        let mut player = Player::open(&red).expect("FFmpeg opens the red video");
+        player.set_looping(true);
+        player.set_volume(0.0);
+        let frames = player.frames();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reader = {
+            let (frames, stop) = (frames.clone(), stop.clone());
+            std::thread::spawn(move || {
+                let (started, mut seen) = (std::time::Instant::now(), Vec::new());
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    if let Some(pixel) = frames.next_with(middle) {
+                        seen.push((started.elapsed(), pixel));
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                seen
+            })
+        };
+        player.play();
+        let started = std::time::Instant::now();
+        let (mut lined_up, mut took_over) = (false, None);
+        while started.elapsed() < Duration::from_millis(2300) {
+            if !lined_up && started.elapsed() > Duration::from_millis(300) {
+                player.play_next(&blue).expect("the blue video opens");
+                assert_eq!(player.next_file(), Some(blue.as_path()));
+                lined_up = true;
+            }
+            let wait = player.tick();
+            if let Some(handed) = player.take_handed_over() {
+                took_over = Some((started.elapsed(), handed));
+            }
+            std::thread::sleep(wait.min(Duration::from_millis(5)));
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let seen = reader.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let (when, handed) = took_over.expect("the blue video took over");
+        assert_eq!(handed, Ok(blue.clone()));
+        assert_eq!(player.path(), blue.as_path());
+        assert!(
+            when > Duration::from_millis(850) && when < Duration::from_millis(1300),
+            "at the end of the red video's first pass, not when it was lined up: {when:?}"
+        );
+        assert!(frames.same(&player.frames()), "the screens' frames are the same handle after the hand-over");
+        assert!(seen.len() > 40, "pictures came all the way through: {}", seen.len());
+        for (at, [r, g, b]) in &seen {
+            assert!((*r).max(*g).max(*b) >= 30, "no black picture: {r},{g},{b} at {at:?}");
+        }
+        let is_red = |[r, _, b]: &[u8; 3]| r > b;
+        let first_blue = seen.iter().position(|(_, pixel)| !is_red(pixel)).expect("blue pictures came");
+        assert!(first_blue > 0, "red pictures came first");
+        assert!(seen[first_blue..].iter().all(|(_, pixel)| !is_red(pixel)), "no red picture after the first blue");
+        let reds: Vec<u8> = seen[..first_blue].iter().map(|(_, [r, _, _])| *r).collect();
+        assert!(reds.windows(2).all(|two| two[1] + 8 >= two[0]), "the red video wasn't started again: {reds:?}");
+        let (last_red_at, [last_red, _, _]) = seen[first_blue - 1];
+        let (first_blue_at, [_, _, first_blue_value]) = seen[first_blue];
+        assert!(last_red >= 180, "the red video played to the end of its pass: its last picture {last_red}");
+        assert!(first_blue_value <= 76, "the blue video started at its start: {first_blue_value}");
+        let gap = first_blue_at - last_red_at;
+        eprintln!(
+            "hand-over at {when:?}: last red picture {last_red}, first blue {first_blue_value}, {gap:?} between them, \
+             {} pictures, none black",
+            seen.len()
+        );
+        assert!(gap < Duration::from_millis(120), "the last red picture held only a moment: {gap:?}");
+    }
 
     #[test]
     fn a_wide_video_is_asked_for_smaller_in_the_same_shape() {

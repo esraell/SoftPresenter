@@ -4,6 +4,16 @@
 //! come opaque. For checking by hand:
 //!
 //!     cargo run -p sp-video --example check -- clip.mp4 photo.heic
+//!
+//! With `--handover FIRST NEXT`, plays FIRST looping, lines NEXT up to follow it after 0.3 s, and
+//! says what the screens' pictures did around the hand-over: each picture's middle colour, the
+//! time between the last of FIRST and the first of NEXT, and whether any was black. With MP4
+//! files on a Mac this checks the system's player (the unit test checks FFmpeg's). Videos whose
+//! pictures are red (FIRST) and blue (NEXT), brighter picture by picture, show the most:
+//!
+//!     ffmpeg -f lavfi -i "color=c=black:s=320x180:r=30:d=2,format=rgb24,geq=r='40+N*3':g=0:b=0" red.mp4
+//!     ffmpeg -f lavfi -i "color=c=black:s=320x180:r=30:d=2,format=rgb24,geq=r=0:g=0:b='40+N*3'" blue.mp4
+//!     cargo run -p sp-video --example check -- --handover red.mp4 blue.mp4
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -14,6 +24,12 @@ static RUN_MS: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
 });
 
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [flag, first, next] = args.as_slice()
+        && flag == "--handover"
+    {
+        return handover(Path::new(first), Path::new(next));
+    }
     for arg in std::env::args().skip(1) {
         let path = Path::new(&arg);
         let video = ["mp4", "mov", "m4v", "mkv", "webm", "avi"].iter().any(|ext| arg.to_lowercase().ends_with(ext));
@@ -93,6 +109,77 @@ fn main() {
             player.duration(),
             player.playing(),
             player.problem()
+        );
+    }
+}
+
+/// Plays `first` looping, lines `next` up after 0.3 s, and says what the screens' pictures did
+/// around the hand-over.
+fn handover(first: &Path, next: &Path) {
+    let mut player = match sp_video::Player::open(first) {
+        Ok(player) => player,
+        Err(e) => return println!("{}: {e}", first.display()),
+    };
+    let engine = if player.uses_ffmpeg() { "FFmpeg" } else { "the system's player" };
+    player.set_looping(true);
+    player.set_volume(0.0);
+    let frames = player.frames();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reader = {
+        let (frames, stop) = (frames.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let (started, mut seen) = (Instant::now(), Vec::new());
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let middle = frames.next_with(|lent| {
+                    let at = (lent.height as usize / 2) * lent.bytes_per_row + (lent.width as usize / 2) * 4;
+                    let pixel = &lent.bytes[at..at + 4];
+                    match lent.order {
+                        sp_video::PixelOrder::Rgba => [pixel[0], pixel[1], pixel[2]],
+                        sp_video::PixelOrder::Bgra => [pixel[2], pixel[1], pixel[0]],
+                    }
+                });
+                if let Some(middle) = middle {
+                    seen.push((started.elapsed(), middle));
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            seen
+        })
+    };
+    player.play();
+    let started = Instant::now();
+    let length = player.duration();
+    let (mut lined_up, mut took_over) = (false, None);
+    let until = Duration::from_secs_f64(length.unwrap_or(2.0) * 1.0 + 2.5);
+    while started.elapsed() < until {
+        if !lined_up && started.elapsed() > Duration::from_millis(300) {
+            if let Err(e) = player.play_next(next) {
+                return println!("{}: {e}", next.display());
+            }
+            lined_up = true;
+        }
+        let wait = player.tick();
+        if let Some(handed) = player.take_handed_over() {
+            took_over = Some((started.elapsed(), handed));
+        }
+        spin(wait.min(Duration::from_millis(5)));
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    let seen = reader.join().unwrap_or_default();
+    let black = seen.iter().filter(|(_, [r, g, b])| (*r).max(*g).max(*b) < 30).count();
+    let first_blue = seen.iter().position(|(_, [r, _, b])| b > r);
+    println!("{} with {engine}: {} pictures, {black} black; hand-over {took_over:?}", first.display(), seen.len());
+    if let Some(at) = first_blue.filter(|at| *at > 0) {
+        let from = at.saturating_sub(4);
+        for (when, colour) in &seen[from..(at + 4).min(seen.len())] {
+            println!("  {when:?}  {colour:?}");
+        }
+        let gap = seen[at].0 - seen[at - 1].0;
+        let red_after = seen[at..].iter().any(|(_, [r, _, b])| r > b);
+        println!(
+            "last picture of the first {:?}, first of the next {:?}, {gap:?} between them; first's pictures after: {red_after}",
+            seen[at - 1].1,
+            seen[at].1
         );
     }
 }

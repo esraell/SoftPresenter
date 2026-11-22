@@ -1813,8 +1813,9 @@ impl App {
     }
 
     /// Takes in a look at the followed folders: files new to the bin are read (on the readers'
-    /// threads) and go in once they have been; one written over is read again (a video on
-    /// screen starts again from the new file); the playlists list what their folders hold; and
+    /// threads) and go in once they have been; one written over is read again (a video playing
+    /// goes on to the end of its pass, then the new file takes over); the playlists list what
+    /// their folders hold; and
     /// an item a folder brought in whose file has gone leaves the bin, unless something else
     /// uses it.
     fn finish_folder_look(&mut self) {
@@ -1846,9 +1847,17 @@ impl App {
             applog::event("media", &format!("{} changed in a followed folder", path.display()));
             // The old picture shows until the new one has been read.
             self.bin_pictures.read(id, &path);
-            if live == Some(id) && media::is_video(&path) {
-                self.video = None;
-                media_changed = true;
+            // A video playing goes on to the end of its pass, and the new file takes over there:
+            // nothing is cut or started again. One that can't be lined up starts again from
+            // the new file at once, as before.
+            if media::is_video(&path)
+                && let Err(problem) = self.play_new_file_next(id, &path)
+            {
+                applog::problem("video", &problem);
+                if live == Some(id) {
+                    self.video = None;
+                    media_changed = true;
+                }
             }
         }
         if let Some(running) = self.running.as_mut() {
@@ -1947,6 +1956,21 @@ impl App {
             .live_media()
             .and_then(|index| self.show.media().get(index))
             .map_or(sp_model::ImageFit::Fill, |m| m.fit)
+    }
+
+    /// A media bin item's file has a new version (written over, or put in its place): wherever
+    /// that item's video plays (on the media layer, or the Announcements layer), the new file is
+    /// opened now and takes over at the end of the pass under way, where the video would go
+    /// round or end, so the loop carries on with the new pictures. A video one of several in a
+    /// media playlist going round is left alone: the playlist opens the new file next time round.
+    /// The error is a sentence; the old file then plays on.
+    fn play_new_file_next(&mut self, id: Uuid, path: &std::path::Path) -> Result<(), String> {
+        let one_of_many = self.media_cycle.as_ref().is_some_and(|cycle| self.playlist_media(cycle.playlist).len() > 1);
+        if !one_of_many && let Some((_, player)) = self.video.as_mut().filter(|(playing, _)| *playing == id) {
+            player.play_next(path)?;
+            applog::event("video", &format!("{} takes over at the end of the pass", file_name(path)));
+        }
+        self.play_next_on_layer(id, path)
     }
 
     /// Plays the video on screen, if the media on screen is one, and stops the one that was.
@@ -2511,6 +2535,11 @@ impl App {
     fn tick_video(&mut self) -> Option<Instant> {
         let (_, player) = self.video.as_mut()?;
         let wait = player.tick();
+        match player.take_handed_over() {
+            Some(Ok(path)) => applog::event("video", &format!("{} took over at the end of the pass", file_name(&path))),
+            Some(Err(problem)) => applog::problem("video", &format!("the new file couldn't take over: {problem}")),
+            None => {}
+        }
         let running = self.running.as_mut()?;
         if let Some(problem) = player.problem() {
             applog::event("video", &problem);

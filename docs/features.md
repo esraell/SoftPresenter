@@ -315,7 +315,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 
 - A media playlist can **Follow a Folder**: the pictures and videos in it join the playlist (and
   the bin) as they appear, once each has been read, and one written over (such as a fresh
-  announcements export from Canva) is read again and, if on screen, played again. One that
+  announcements export) is read again. A video playing (on the media layer or the
+  Announcements layer, looping or not) is not cut or started again: the new file is opened at
+  once and takes over at the end of the pass under way, where the video would go round or
+  end, so the loop carries on with the new pictures and no black picture between (a video
+  one of several in a media playlist going round plays the new file next time round). One that
   leaves the folder leaves the playlist, and the bin too if the folder brought it in and nothing
   else uses it (another media playlist, a slide, a playlist of the service, a macro, or the
   screens, until it is taken off them); one added to the bin by hand stays. A file that can't be
