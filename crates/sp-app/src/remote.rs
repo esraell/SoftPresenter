@@ -423,38 +423,67 @@ impl Remote {
     }
 }
 
-/// Where a path written in words starts: an absolute path (`/…`, or `C:\…` on Windows) at the
-/// start of the words or after a space, a bracket or a quote.
-fn path_starts(bytes: &[u8], at: usize) -> bool {
+/// The folders a path written in words starts in. Only these are recognised inside words, so a
+/// song's own words ("C /E /G", "Medley /Part 1/ Part 2") are never cut.
+const PATH_ROOTS: [&str; 14] = [
+    "/Users/",
+    "/home/",
+    "/Volumes/",
+    "/private/",
+    "/var/",
+    "/tmp/",
+    "/Library/",
+    "/Applications/",
+    "/opt/",
+    "/mnt/",
+    "/media/",
+    "/root/",
+    "file://",
+    "\\\\",
+];
+
+/// Whether a path written in words starts at `at`: a home, volume or system folder (`/Users/`,
+/// `file://`, a network share), or a drive letter (`C:\`), at the start of the words or after a
+/// space, a bracket or a quote.
+fn path_starts(text: &str, at: usize) -> bool {
+    let bytes = text.as_bytes();
     let before = at.checked_sub(1).map(|b| bytes[b]);
     let starts = before.is_none_or(|b| matches!(b, b' ' | b'\t' | b'\n' | b'(' | b'[' | b'"' | b'\'' | b'='));
-    let unix =
-        bytes[at] == b'/' && bytes.get(at + 1).is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'.' || *b == b'~');
+    let rest = &text[at..];
     let windows =
         bytes[at].is_ascii_alphabetic() && bytes.get(at + 1) == Some(&b':') && bytes.get(at + 2) == Some(&b'\\');
-    starts && (unix || windows)
+    // The stage's own description of a picture names its file whatever folder it is in.
+    let picture = text[..at].ends_with("a picture (") && (bytes[at] == b'/' || windows);
+    starts && (windows || picture || PATH_ROOTS.iter().any(|root| rest.starts_with(root)))
 }
 
-/// Words with every absolute path in them cut to its file name, for what a remote page is
-/// sent: the computer's folders (and the user's name in them) stay on the computer. A path ends
-/// at a closing bracket, a quote or the end of the line.
-pub fn without_paths(text: &str) -> String {
+/// The file name a whole path ends in.
+fn file_name(path: &str) -> &str {
+    path.rsplit(['/', '\\']).find(|part| !part.is_empty()).unwrap_or("")
+}
+
+/// Whether a whole string is an absolute path (`/…` or `C:\…` with a folder and a name in it).
+fn is_whole_path(text: &str) -> bool {
     let bytes = text.as_bytes();
+    let absolute = bytes.first() == Some(&b'/')
+        || text.starts_with("file://")
+        || (bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\');
+    absolute && !text.contains('\n') && text.matches(['/', '\\']).count() >= 2 && !text.starts_with("/thumb/")
+}
+
+/// Words with every absolute path that starts in a known folder cut to its file name, for what
+/// a remote page is sent: the computer's folders (and the user's name in them) stay on the
+/// computer. A path ends at a closing bracket, a quote or the end of the line. Anything else
+/// that has slashes in it (a song's own words) is left alone.
+pub fn without_paths(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut at = 0;
-    while at < bytes.len() {
-        if path_starts(bytes, at) {
+    while at < text.len() {
+        if path_starts(text, at) {
             let end = text[at..].find([')', ']', '"', '\'', '\n']).map_or(text.len(), |len| at + len);
-            let path = &text[at..end];
-            // A folder and a name in it at least (`/Users/pat`, `C:\Users\pat`): a word that
-            // only starts with a slash ("Psalm 23 /Gospel version") is left alone, and so is an
-            // address of this server's own (a slide picture's, `/thumb/…`).
-            if path.matches(['/', '\\']).count() >= 2 && !path.starts_with("/thumb/") {
-                let name = path.rsplit(['/', '\\']).find(|part| !part.is_empty()).unwrap_or("");
-                out.push_str(name);
-                at = end;
-                continue;
-            }
+            out.push_str(file_name(&text[at..end]));
+            at = end;
+            continue;
         }
         let next = text[at..].chars().next().map_or(1, char::len_utf8);
         out.push_str(&text[at..at + next]);
@@ -463,12 +492,39 @@ pub fn without_paths(text: &str) -> String {
     out
 }
 
-/// The same for every string in a piece of JSON.
+/// The same for every string in a piece of JSON, except in what is a slide's own (`raw`): its
+/// words are never touched, only the file a picture in it names.
 pub fn json_without_paths(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::String(text) if text.contains(['/', '\\']) => *text = without_paths(text),
         serde_json::Value::Array(items) => items.iter_mut().for_each(json_without_paths),
-        serde_json::Value::Object(map) => map.values_mut().for_each(json_without_paths),
+        serde_json::Value::Object(map) => {
+            for (key, item) in map.iter_mut() {
+                if key == "raw" {
+                    raw_without_paths(item);
+                } else {
+                    json_without_paths(item);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A slide's raw document: only a picture's `file` is cut to its name, when it is a path.
+fn raw_without_paths(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Array(items) => items.iter_mut().for_each(raw_without_paths),
+        serde_json::Value::Object(map) => {
+            for (key, item) in map.iter_mut() {
+                match item {
+                    serde_json::Value::String(file) if key == "file" && is_whole_path(file) => {
+                        *file = file_name(file).to_owned();
+                    }
+                    _ => raw_without_paths(item),
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -882,6 +938,10 @@ mod tests {
             "and/or",
             "/",
             "Psalm 23 /Gospel version",
+            "C /E /G",
+            "Medley /Part 1/ Part 2",
+            "Verse 1 /Chorus/ Verse 2 /Bridge/ end",
+            "(/a/b/c)",
             "/thumb/7f6a1c2e-0000-4000-8000-000000000001/usual/00ff00ff00ff00ff.jpg",
         ] {
             assert_eq!(without_paths(text), text);
@@ -893,6 +953,21 @@ mod tests {
         let mut value = serde_json::json!({"raw": {"objects": [{"file": "/Users/pat/x.png", "words": "a/b"}]}, "n": 1});
         json_without_paths(&mut value);
         assert_eq!(value, serde_json::json!({"raw": {"objects": [{"file": "x.png", "words": "a/b"}]}, "n": 1}));
+        // A slide's words with slashes read back whole, in its raw document and beside it.
+        let words = serde_json::json!({
+            "words": "C /E /G\nMedley /Part 1/ Part 2",
+            "title": "Medley /Part 1/ Part 2",
+            "raw": {"objects": [{"file": "", "text": "C /E /G /Users/ ok"}, {"file": "/Volumes/Church/Sky.png"}]},
+        });
+        let mut cut = words.clone();
+        json_without_paths(&mut cut);
+        assert_eq!(cut["words"], words["words"]);
+        assert_eq!(cut["title"], words["title"]);
+        assert_eq!(cut["raw"]["objects"][0], words["raw"]["objects"][0]);
+        assert_eq!(cut["raw"]["objects"][1]["file"], "Sky.png");
+        assert_eq!(without_paths("a picture (/Library/Pictures/Sky 1.png)"), "a picture (Sky 1.png)");
+        assert_eq!(without_paths("Cannot open file:///Volumes/Church/a.mp4"), "Cannot open a.mp4");
+        assert_eq!(without_paths("Cannot read \\\\server\\share\\a.png"), "Cannot read a.png");
         let reply = reply_for_page(Reply::with("Made /Users/pat/a.txt", serde_json::json!(["/private/tmp/b.png"])));
         assert_eq!(reply.text, "Made a.txt");
         assert_eq!(reply.data, serde_json::json!(["b.png"]));
