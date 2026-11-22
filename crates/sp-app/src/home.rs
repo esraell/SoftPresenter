@@ -4305,7 +4305,9 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                     let left = mark.max.x + 12.0;
                     let tag_at = pos2(rect.max.x - 10.0, first);
                     let font = crate::studio::fixed(11.0);
-                    let tagged = crate::studio::paint_spaced(ui, tag_at, Align2::RIGHT_CENTER, tag, font, tint, 0.6);
+                    // The Bible's tag is dim, so its title reads first; a song's is in its tint.
+                    let tag_ink = if bible { DIM } else { tint };
+                    let tagged = crate::studio::paint_spaced(ui, tag_at, Align2::RIGHT_CENTER, tag, font, tag_ink, 0.6);
                     let words = Rect::from_min_max(pos2(left, rect.min.y), pos2(tagged.min.x - 10.0, rect.max.y));
                     ui.painter().with_clip_rect(words).text(
                         pos2(words.min.x, first),
@@ -9800,9 +9802,9 @@ mod tests {
 
     #[test]
     fn songs_and_the_bible_in_the_find_box_each_have_their_mark_and_tint() {
-        use crate::studio::{SCRIPTURE_TINT, SONG_TINT};
+        use crate::studio::{SONG_TINT, TEXT, TEXT_DIM};
         assert_eq!(crate::studio::found_look(false), (crate::icons::Icon::Note, SONG_TINT));
-        assert_eq!(crate::studio::found_look(true), (crate::icons::Icon::Book, SCRIPTURE_TINT));
+        assert_eq!(crate::studio::found_look(true), (crate::icons::Icon::Book, TEXT));
         // Drawn: each tag in its kind's tint, and the marks (drawn in lines) in the same tints.
         let ctx = egui::Context::default();
         let show = Show::new(vec![
@@ -9840,8 +9842,8 @@ mod tests {
         assert_eq!(tint_of("SONG"), Some(SONG_TINT), "a song found by its title");
         assert_eq!(tint_of("SONG \u{b7} CHORUS"), Some(SONG_TINT), "a slide found by its words, as its song");
         let verse = tags.iter().find(|(text, _)| text.starts_with("BIBLE \u{b7} ")).expect("a verse is found");
-        assert_eq!(verse.1, SCRIPTURE_TINT);
-        assert!(marks.contains(&SONG_TINT) && marks.contains(&SCRIPTURE_TINT), "each kind has its mark");
+        assert_eq!(verse.1, TEXT_DIM, "the Bible's tag is dim, its title first");
+        assert!(marks.contains(&SONG_TINT) && marks.contains(&TEXT), "each kind has its mark");
         // The titles stay in ink.
         assert_eq!(tint_of("Shepherd Song"), Some(crate::studio::TEXT));
     }

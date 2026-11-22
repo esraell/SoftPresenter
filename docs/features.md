@@ -396,7 +396,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   have what is typed, tagged with its group ("Song · Chorus"), a slide picked being brought into view and
   ringed in ink for a moment, a Bible passage when a reference is typed (named and quoted in the language it was
   typed in), and verses that hold the words, from the Bibles in use written in the words'
-  alphabet, each saying which Bible it is from ("Bible · KJV"); each result has a small mark at its left and its tag in the same tint, so songs and the Bible read apart at a glance: a note in the libraries' lilac for songs, an open book in sea green for the Bible, whose slides have a sea-green dot too; Return opens what is picked without putting anything on the screens,
+  alphabet, each saying which Bible it is from ("Bible · KJV"); each result has a small mark at its left, so songs and the Bible read apart at a glance: a note in the libraries' lilac for songs, with its tag in lilac too, and an open book in ink for the Bible, with its tag dim so its title reads first (slides the app makes, Bible passages and live captions, have an ink dot too; only the playlist's blue and the libraries' lilac mark a kind by colour); Return opens what is picked without putting anything on the screens,
   with its first slide or verse picked for Enter (see "A slide picked waits for Enter"), and
   Command-Return adds it to the playlist in front. Any result can also be **dragged** (a press
   that barely moves is still a click): its name follows the pointer, its row goes faint and

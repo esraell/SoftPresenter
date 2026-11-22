@@ -1292,11 +1292,12 @@ fn draw_slides(
             Some(label) => format!("{} \u{b7} {label}", group.name),
             None => group.name.clone(),
         };
-        // Bible slides have the scripture tint, as the Bible has in the find box.
+        // Slides the app makes (Bible passages, live captions) have an ink dot, as the Bible's
+        // mark in the find box is ink; a group's colour is the church's own.
         let dot = if is_live {
             TALLY
-        } else if deck.bible {
-            crate::studio::SCRIPTURE_TINT
+        } else if deck.made {
+            crate::studio::TEXT
         } else {
             dot_colour(group.color)
         };
