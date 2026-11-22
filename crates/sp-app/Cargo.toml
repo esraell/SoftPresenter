@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 sp-ndi.workspace = true
+sp-decklink.workspace = true
 sp-bible.workspace = true
 # Videos, and pictures in the system's own formats (HEIC, TIFF...).
 sp-video.workspace = true

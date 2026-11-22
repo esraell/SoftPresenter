@@ -7,7 +7,9 @@ use sp_model::{Rgba, Uuid};
 use crate::displays::{DisplayInfo, Placement, choose_output};
 
 mod background_ui;
+mod decklink_ui;
 pub use background_ui::{background_rows, paint_background};
+pub use decklink_ui::decklink_rows;
 
 /// Where a screen's picture goes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,8 +23,96 @@ pub enum Output {
     Window,
     /// The network, over NDI, under this name.
     Ndi(String),
+    /// A Blackmagic DeckLink card's output (SDI or HDMI).
+    #[serde(rename = "decklink")]
+    DeckLink(DeckLinkOut),
     /// Nowhere. The screen is kept in the list for later.
     Off,
+}
+
+/// A DeckLink output a screen plays out of: the device as the driver names it ("DeckLink Duo
+/// (1)"), the driver's persistent id for it (the device is found by that when it has one,
+/// never by its name alone, so a screen never moves to another card of the same name), the
+/// mode ("1080i59.94"), and how the card's keyer is used.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeckLinkOut {
+    pub device: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<i64>,
+    pub mode: String,
+    #[serde(default, skip_serializing_if = "Keyer::is_off")]
+    pub keyer: Keyer,
+}
+
+impl DeckLinkOut {
+    /// True when both name the same device.
+    pub fn same_device(&self, other: &DeckLinkOut) -> bool {
+        match (self.id, other.id) {
+            (Some(one), Some(two)) => one == two,
+            _ => self.device == other.device,
+        }
+    }
+
+    /// What the output thread is to play.
+    pub fn wanted(&self) -> sp_decklink::Wanted {
+        sp_decklink::Wanted {
+            device: self.device.clone(),
+            id: self.id,
+            mode: self.mode.clone(),
+            keying: self.keyer.keying(),
+        }
+    }
+}
+
+/// How a DeckLink output uses its card's keyer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Keyer {
+    /// Not at all: the picture goes solid.
+    #[default]
+    Off,
+    /// The card sends the colours (fill) and the alpha (key) on two connectors.
+    External,
+    /// The card lays the picture over the video coming into it.
+    Internal,
+}
+
+impl Keyer {
+    pub fn is_off(&self) -> bool {
+        *self == Keyer::Off
+    }
+
+    pub fn keying(self) -> sp_decklink::Keying {
+        match self {
+            Keyer::Off => sp_decklink::Keying::Off,
+            Keyer::External => sp_decklink::Keying::External,
+            Keyer::Internal => sp_decklink::Keying::Internal,
+        }
+    }
+}
+
+/// The DeckLink outputs a screen can be given: each device that can play now, in the format a
+/// new output starts in; and the one the screen has, kept as it is (its format and keyer), even
+/// while it isn't connected. None without Desktop Video.
+pub fn decklink_choices(current: &Output, found: &sp_decklink::Found) -> Vec<Output> {
+    let mut choices = Vec::new();
+    let mut kept = false;
+    for device in found.outputs() {
+        let Some(mode) = device.default_mode() else { continue };
+        let out =
+            DeckLinkOut { device: device.name.clone(), id: device.id, mode: mode.name.clone(), keyer: Keyer::Off };
+        match current {
+            Output::DeckLink(have) if have.same_device(&out) => {
+                kept = true;
+                choices.push(current.clone());
+            }
+            _ => choices.push(Output::DeckLink(out)),
+        }
+    }
+    if matches!(current, Output::DeckLink(_)) && !kept {
+        choices.push(current.clone());
+    }
+    choices
 }
 
 /// What a screen is for.
@@ -210,6 +300,7 @@ pub enum Placed {
     Fullscreen(usize),
     Window,
     Ndi(String),
+    DeckLink(DeckLinkOut),
     /// Not shown anywhere, and why, in plain words. Empty when the screen is simply off.
     Nothing(String),
 }
@@ -275,8 +366,9 @@ pub fn next_name(screens: &[Screen], kind: Kind) -> String {
 }
 
 /// Where each screen goes, in the list's order. `operator` are the displays the operator works
-/// on (the home window's and the one with the menu bar), which Automatic never takes. A display is filled by one screen only and an NDI name is used
-/// once: the first screen in the list that asks gets it. A display that is not connected is
+/// on (the home window's and the one with the menu bar), which Automatic never takes. A display
+/// is filled by one screen only, an NDI name is used once, and a DeckLink output plays one
+/// screen: the first screen in the list that asks gets it. A display that is not connected is
 /// never replaced by another, so a screen can never land on the operator's display by surprise.
 pub fn place_all(screens: &[Screen], displays: &[DisplayInfo], operator: &[usize]) -> Vec<Placed> {
     let mut placed: Vec<Placed> = Vec::with_capacity(screens.len());
@@ -298,14 +390,20 @@ pub fn place_all(screens: &[Screen], displays: &[DisplayInfo], operator: &[usize
             Output::Window => Placed::Window,
             Output::Ndi(name) if name.trim().is_empty() => Placed::Nothing("Give the NDI output a name.".to_owned()),
             Output::Ndi(name) => Placed::Ndi(name.trim().to_owned()),
+            Output::DeckLink(out) => Placed::DeckLink(out.clone()),
             Output::Off => Placed::Nothing(String::new()),
         };
-        let taken = placed
-            .iter()
-            .position(|earlier| matches!(earlier, Placed::Fullscreen(_) | Placed::Ndi(_)) && *earlier == wanted);
+        let taken = placed.iter().position(|earlier| match (earlier, &wanted) {
+            (Placed::DeckLink(one), Placed::DeckLink(two)) => one.same_device(two),
+            (Placed::Fullscreen(_) | Placed::Ndi(_), _) => *earlier == wanted,
+            _ => false,
+        });
         placed.push(match (taken, &wanted) {
             (Some(by), Placed::Fullscreen(_)) => {
                 Placed::Nothing(format!("\"{}\" is already on that display.", screens[by].name))
+            }
+            (Some(by), Placed::DeckLink(_)) => {
+                Placed::Nothing(format!("\"{}\" already plays out of that DeckLink output.", screens[by].name))
             }
             (Some(by), _) => Placed::Nothing(format!("\"{}\" already uses that NDI name.", screens[by].name)),
             (None, _) => wanted,
@@ -323,6 +421,7 @@ pub fn describe(placed: &Placed, displays: &[DisplayInfo]) -> String {
         },
         Placed::Window => "In a window".to_owned(),
         Placed::Ndi(name) => format!("Starting NDI as \"{name}\""),
+        Placed::DeckLink(out) => format!("Starting {} at {}", out.device, out.mode),
         Placed::Nothing(why) if why.is_empty() => "Off".to_owned(),
         Placed::Nothing(why) => why.clone(),
     }
@@ -544,6 +643,110 @@ mod tests {
         assert!(matches!(&placed[0], Placed::Nothing(why) if why.contains("Disconnected")), "{placed:?}");
         // Plugged in again, it is found by name wherever it now sits in the list.
         assert_eq!(place_all(&screens, &displays(&["Projector", "Built-in"]), &[1]), [Placed::Fullscreen(0)]);
+    }
+
+    fn decklink(device: &str, id: Option<i64>) -> Output {
+        Output::DeckLink(DeckLinkOut {
+            device: device.to_owned(),
+            id,
+            mode: "1080i59.94".to_owned(),
+            keyer: Keyer::Off,
+        })
+    }
+
+    #[test]
+    fn a_decklink_output_survives_its_file_and_saves_only_what_it_needs() {
+        let screen = Screen::new("Switcher".to_owned(), decklink("DeckLink Duo (1)", Some(42)));
+        let text = to_json(std::slice::from_ref(&screen));
+        assert!(text.contains("\"decklink\"") && text.contains("\"mode\": \"1080i59.94\""), "{text}");
+        assert!(!text.contains("keyer"), "a keyer that is off is not written");
+        assert_eq!(from_json(&text), Some(vec![screen.clone()]));
+        let keyed = Screen {
+            output: Output::DeckLink(DeckLinkOut {
+                keyer: Keyer::External,
+                id: None,
+                ..match screen.output {
+                    Output::DeckLink(out) => out,
+                    _ => unreachable!(),
+                }
+            }),
+            ..screen
+        };
+        let text = to_json(std::slice::from_ref(&keyed));
+        let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let out = &saved["screens"][0]["output"]["decklink"];
+        assert_eq!(out["keyer"], "external");
+        assert!(out.get("id").is_none(), "a device without an id is saved without one: {text}");
+        assert_eq!(from_json(&text), Some(vec![keyed]));
+    }
+
+    #[test]
+    fn one_decklink_output_plays_one_screen_and_another_card_of_the_same_name_is_another_output() {
+        let screens = [
+            screen("A", decklink("DeckLink Duo (1)", Some(1))),
+            screen("B", decklink("DeckLink Duo (1)", Some(1))),
+            screen("C", decklink("DeckLink Duo (1)", Some(2))),
+            screen("D", decklink("DeckLink Duo (2)", None)),
+            screen("E", decklink("DeckLink Duo (2)", None)),
+        ];
+        let placed = place_all(&screens, &displays(&["Built-in"]), &[0]);
+        assert!(matches!(&placed[0], Placed::DeckLink(out) if out.id == Some(1)));
+        assert!(
+            matches!(&placed[1], Placed::Nothing(why) if why.contains("\"A\" already plays out of that DeckLink")),
+            "{placed:?}"
+        );
+        assert!(matches!(&placed[2], Placed::DeckLink(_)), "the same name with another id is another card");
+        assert!(matches!(&placed[3], Placed::DeckLink(_)));
+        assert!(matches!(&placed[4], Placed::Nothing(_)));
+        assert_eq!(describe(&placed[0], &[]), "Starting DeckLink Duo (1) at 1080i59.94");
+    }
+
+    #[test]
+    fn decklink_choices_are_the_devices_that_can_play_and_the_one_in_use_is_kept() {
+        let none = sp_decklink::Found { driver: sp_decklink::Driver::NotInstalled, devices: Vec::new() };
+        assert!(decklink_choices(&Output::Window, &none).is_empty(), "no DeckLink choices without the driver");
+        let devices = vec![sp_decklink::Device {
+            name: "DeckLink Duo (1)".to_owned(),
+            model: "DeckLink Duo 2".to_owned(),
+            id: Some(7),
+            sub_device: Some(0),
+            sub_devices: Some(4),
+            profile: 0,
+            duplex: 0,
+            connections: 1,
+            can_play: true,
+            internal_keying: false,
+            external_keying: false,
+            modes: vec![sp_decklink::Mode::new(
+                0,
+                String::new(),
+                (1920, 1080),
+                (1000, 25000),
+                u32::from_be_bytes(*b"uppr"),
+                (true, true, false),
+            )],
+        }];
+        let found = sp_decklink::Found { driver: sp_decklink::Driver::Ready("16.3".to_owned()), devices };
+        let choices = decklink_choices(&Output::Window, &found);
+        assert_eq!(
+            choices,
+            vec![Output::DeckLink(DeckLinkOut {
+                device: "DeckLink Duo (1)".to_owned(),
+                id: Some(7),
+                mode: "1080i50".to_owned(),
+                keyer: Keyer::Off
+            })]
+        );
+        let mine = Output::DeckLink(DeckLinkOut {
+            mode: "720p50".to_owned(),
+            ..match &choices[0] {
+                Output::DeckLink(out) => out.clone(),
+                _ => unreachable!(),
+            }
+        });
+        assert_eq!(decklink_choices(&mine, &found), vec![mine.clone()], "kept with its own format");
+        let gone = decklink("DeckLink 8K Pro (1)", Some(99));
+        assert_eq!(decklink_choices(&gone, &found).last(), Some(&gone), "kept while it isn't connected");
     }
 
     #[test]

@@ -28,7 +28,7 @@ pub struct Wanted {
 pub enum State {
     /// Opening the device.
     Starting,
-    /// Playing out: the mode, the format and the keyer, in words.
+    /// Playing out: the mode and the keyer, in words ("1080i59.94", "1080i50, fill and key").
     Playing(String),
     /// Not playing, and trying again every couple of seconds: the device isn't connected, is
     /// in use, or stopped. Why, in plain words.
@@ -219,7 +219,7 @@ fn run<O: Opener>(mut opener: O, mut wanted: Wanted, rx: &Receiver<Told>, shared
         let trouble = match opener.open(&wanted) {
             Ok(mut opened) => {
                 let what = playing_in_words(&opened);
-                log(&format!("{} plays out at {what}", opened.device), false);
+                log(&format!("{} plays out at {what}, in {}", opened.device, opened.layout.format.in_words()), false);
                 said = None;
                 shared.set_state(State::Playing(what));
                 match play(&mut opened, &mut wanted, rx, &mut picture, shared, log) {
@@ -260,7 +260,7 @@ fn playing_in_words<C>(opened: &Opened<C>) -> String {
         Keying::External => ", fill and key".to_owned(),
         Keying::Internal => ", keyed over its input".to_owned(),
     };
-    format!("{}, {}{keyer}", opened.mode.name, opened.layout.format.in_words())
+    format!("{}{keyer}", opened.mode.name)
 }
 
 /// How long the card may go without giving a frame back before it counts as stopped: ten
@@ -528,7 +528,7 @@ mod tests {
         let stand = Stand::default();
         let output = spawn(wanted("Pretend DeckLink (1)", "720p59.94"), stand.clone(), quiet()).unwrap();
         assert!(soon(|| matches!(output.state(), State::Playing(_))), "{:?}", output.state());
-        assert_eq!(output.state(), State::Playing("720p59.94, 8-bit BGRA".to_owned()));
+        assert_eq!(output.state(), State::Playing("720p59.94".to_owned()));
         let red = Arc::new([255u8, 0, 0, 255].repeat(1920 * 1080));
         output.show_shared(1920, 1080, red, Alpha::Opaque);
         let card = stand.cards.lock().unwrap()[0].clone();
@@ -558,7 +558,7 @@ mod tests {
         let output = spawn(wanted("Pretend DeckLink (1)", "1080i59.94"), stand.clone(), quiet()).unwrap();
         assert!(soon(|| matches!(output.state(), State::Playing(_))));
         output.change(wanted("Pretend DeckLink (1)", "1080p25"));
-        assert!(soon(|| output.state() == State::Playing("1080p25, 8-bit BGRA".to_owned())), "{:?}", output.state());
+        assert!(soon(|| output.state() == State::Playing("1080p25".to_owned())), "{:?}", output.state());
         let opened = stand.opened.lock().unwrap().clone();
         assert_eq!(opened.iter().map(|(_, mode)| mode.as_str()).collect::<Vec<_>>(), ["1080i59.94", "1080p25"]);
         assert!(stand.cards.lock().unwrap()[0].closed(), "the first card was let go before the second was opened");

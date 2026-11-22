@@ -366,6 +366,12 @@ pub fn driver_path() -> Option<PathBuf> {
     driver_places().into_iter().find(|path| path.exists())
 }
 
+/// True when the testing switch SOFTPRESENTER_PRETEND_DECKLINK has made-up devices listed in
+/// place of the real ones: what is played out of them goes nowhere.
+pub fn pretending() -> bool {
+    pretend::active()
+}
+
 /// Whether the driver is on this computer (a quick look for its file), or pretend devices are
 /// asked for.
 pub fn installed() -> bool {

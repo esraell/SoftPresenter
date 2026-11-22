@@ -601,8 +601,29 @@ feature changes, this page changes in the same commit.
   SoftPresenter… opens it again.
 
 ## Screens
-- Any number of audience screens, each sent to a display, a window, or the network over NDI,
-  all showing the same picture, set up in the Screens window (**Option-Command-1**).
+- Any number of audience screens, each sent to a display, a window, the network over NDI, or
+  a Blackmagic DeckLink card's output (SDI or HDMI), all showing the same picture, set up in the
+  Screens window (**Option-Command-1**).
+- **DeckLink outputs** (SoftPresenter for Blackmagic Design DeckLink). With Blackmagic's driver,
+  Desktop Video 16.0 or later, installed, each output the card offers is a choice for any
+  audience or stage screen, named as the driver names it ("DeckLink Duo (1)": a DeckLink Duo 2
+  shows its four SDI connectors as four), with the format it plays in: 720p, 1080i or 1080p at
+  every rate the device has. A new DeckLink screen starts in 1080i59.94, the usual HD format for
+  SDI where power is 60 Hz (else 1080i50, else the device's first 1080-line format); set it to
+  what the switcher or projector expects. The devices are found on a thread of their own when
+  the app starts (the driver can be slow), and found again when one is plugged in or taken
+  away. Without the driver there are no DeckLink choices and nothing else changes; a driver
+  older than 16.0 is said to be too old. The screen is drawn at 1920 x 1080 with the NDI
+  pictures and read back from the GPU once, and handed to the output's own thread, so the card
+  never holds up the screens. That thread plays it on the card's own clock, a few frames
+  ahead, as 8-bit BGRA (or 8-bit YUV 4:2:2 where a format can't take BGRA), scaled down for
+  720p, and gives the card the last picture again whenever no new one has come, so the picture
+  never freezes or drops to black because the computer was busy. A new slide goes at once,
+  with no dissolve, as it does over NDI. A device that stops, is taken away or has its profile
+  changed in Desktop Video Setup is opened again every two seconds until it plays; the operator
+  is told when one stops, the Screens window and `sp screens` say what each is doing, and the
+  log has a line each minute for each output: frames played, late and dropped. A quiet run (a
+  test) never opens a card. Windows has no DeckLink outputs yet.
 - Stage screens for the people on stage: the words on screen now, the next slide's words, the
   time, a running timer and the stage message.
 - A screen sent over NDI is drawn and sent only while someone is watching it. With no receiver

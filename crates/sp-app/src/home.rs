@@ -476,6 +476,8 @@ pub struct HomeState {
     pub ndi_draft: Option<(sp_model::Uuid, String)>,
     /// True when this build includes NDI.
     pub ndi_available: bool,
+    /// The DeckLink devices found, and how the driver stands (no devices without it).
+    pub decklink: sp_decklink::Found,
     /// The Edit view's right-hand panel.
     pub inspector: crate::inspector::InspectorState,
     /// The Theme Editor, while it is open. The layout being worked on is the draft in `editing`.
@@ -1393,6 +1395,7 @@ impl Default for HomeState {
             ndi_draft: None,
             // Assumed until it has been looked for.
             ndi_available: true,
+            decklink: sp_decklink::Found { driver: sp_decklink::Driver::Looking, devices: Vec::new() },
             inspector: crate::inspector::InspectorState::default(),
             theme_edit: None,
             theme_names: Vec::new(),
@@ -3402,13 +3405,20 @@ fn output_label(output: &Output, displays: &[DisplayInfo]) -> String {
         },
         Output::Window => "A window".to_owned(),
         Output::Ndi(_) => "NDI".to_owned(),
+        Output::DeckLink(out) => format!("{}   (DeckLink)", out.device),
         Output::Off => "Off".to_owned(),
     }
 }
 
 /// The outputs a screen can be given: each connected display but the main one (where the
-/// operator works), a window, NDI, off.
-fn output_choices(current: &Output, screen_name: &str, displays: &[DisplayInfo]) -> Vec<Output> {
+/// operator works), a window, NDI, each DeckLink output that can play (none without Desktop
+/// Video), off.
+fn output_choices(
+    current: &Output,
+    screen_name: &str,
+    displays: &[DisplayInfo],
+    decklink: &sp_decklink::Found,
+) -> Vec<Output> {
     let mut choices: Vec<Output> =
         displays.iter().filter(|display| !display.main).map(|display| Output::Display(display.name.clone())).collect();
     choices.push(Output::Window);
@@ -3417,6 +3427,7 @@ fn output_choices(current: &Output, screen_name: &str, displays: &[DisplayInfo])
         Output::Ndi(name) => Output::Ndi(name.clone()),
         _ => Output::Ndi(format!("SoftPresenter {screen_name}")),
     });
+    choices.extend(crate::screens::decklink_choices(current, decklink));
     choices.push(Output::Off);
     choices
 }
@@ -4361,6 +4372,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
             Output::Display(name) => name.clone(),
             Output::Window => "Window".to_owned(),
             Output::Ndi(name) => format!("NDI  ·  {name}"),
+            Output::DeckLink(out) => format!("DeckLink  ·  {}", out.device),
             Output::Off => "Off".to_owned(),
         };
         let repeats = status.trim() == target.trim();
@@ -4400,16 +4412,21 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                     .selected_text(output_label(&screen.output, &state.displays))
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
-                        for choice in output_choices(&screen.output, &screen.name, &state.displays) {
+                        for choice in output_choices(&screen.output, &screen.name, &state.displays, &state.decklink) {
                             let is_ndi = matches!(choice, Output::Ndi(_));
                             let label = output_label(&choice, &state.displays);
-                            let on = std::mem::discriminant(&choice) == std::mem::discriminant(&screen.output)
-                                && (is_ndi || choice == screen.output);
+                            let on = match (&choice, &screen.output) {
+                                (Output::DeckLink(one), Output::DeckLink(two)) => one.same_device(two),
+                                _ => {
+                                    std::mem::discriminant(&choice) == std::mem::discriminant(&screen.output)
+                                        && (is_ndi || choice == screen.output)
+                                }
+                            };
                             let mut entry = ui.add(egui::Button::selectable(on, label));
                             if is_ndi && !state.ndi_available {
                                 entry = entry.on_hover_text(sp_ndi::NOT_INSTALLED);
                             }
-                            if entry.clicked() && choice != screen.output {
+                            if entry.clicked() && !on {
                                 state.screens[index].output = choice;
                                 state.ndi_draft = None;
                                 changed = true;
@@ -4448,8 +4465,16 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
             Output::Ndi(_) => {
                 "Other computers on the network can show this screen, at 1920 × 1080. NDI® is a registered trademark of Vizrt NDI AB."
             }
+            Output::DeckLink(_) => {
+                "Played out of a Blackmagic DeckLink card, on its connector, in the format chosen here. A new slide goes at once, without a dissolve."
+            }
             Output::Off => "This screen is kept in the list and shows nowhere.",
         };
+        // A DeckLink output's format, under its output.
+        if matches!(screen.output, Output::DeckLink(_)) {
+            changed |= crate::screens::decklink_rows(ui, &mut state.screens[index], &state.decklink);
+            ui.add_space(6.0);
+        }
         ui.label(egui::RichText::new(about).size(11.5).color(TEXT_DIM));
         // Where NDI comes from, wherever it is chosen; and, without it, that it isn't installed.
         if matches!(screen.output, Output::Ndi(_)) {

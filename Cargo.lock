@@ -3423,6 +3423,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sp-bible",
+ "sp-decklink",
  "sp-engine",
  "sp-model",
  "sp-ndi",

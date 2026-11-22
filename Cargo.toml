@@ -14,6 +14,7 @@ sp-model = { path = "crates/sp-model" }
 sp-engine = { path = "crates/sp-engine" }
 sp-render = { path = "crates/sp-render" }
 sp-ndi = { path = "crates/sp-ndi" }
+sp-decklink = { path = "crates/sp-decklink" }
 sp-bible = { path = "crates/sp-bible" }
 sp-video = { path = "crates/sp-video" }
 # Fetching Bibles: a small blocking HTTPS client, and the checksum each download is checked against.

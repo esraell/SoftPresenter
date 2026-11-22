@@ -8,6 +8,9 @@ use std::time::{Duration, Instant};
 
 use sp_model::{Slide, Theme, Uuid};
 use sp_ndi::NdiOutput;
+
+mod decklink;
+pub use decklink::DeckLinkStatus;
 use sp_render::{
     Fonts, Layers, MovingPicture, Painter, Picture, Solid, SolidPass, build_layers, read_pixels,
     see_through_transition, target_texture, vello, wgpu,
@@ -99,6 +102,12 @@ pub enum OutputMsg {
     /// picture drawn for them, and a source the last one left is drawn for no longer. Sent by
     /// the sources' own threads.
     NdiReceivers,
+    /// Play a screen out of a DeckLink card, or stop with `None`. Sent again with other
+    /// settings, the output changes (see `output/decklink.rs`).
+    SetDeckLink {
+        id: Uuid,
+        wanted: Option<sp_decklink::Wanted>,
+    },
     /// Stop drawing in a screen's window.
     RemoveSurface(Uuid),
     /// What the Announcements layer shows now, or nothing.
@@ -666,6 +675,7 @@ pub struct OutputHandle {
     tx: Sender<OutputMsg>,
     thread: Option<JoinHandle<()>>,
     ndi_status: NdiStatuses,
+    decklink_status: decklink::Statuses,
     live_preview: Arc<LivePreview>,
 }
 
@@ -679,7 +689,8 @@ impl OutputHandle {
     ) -> Result<OutputHandle, String> {
         let (tx, rx) = channel();
         let ndi_status: NdiStatuses = Arc::default();
-        let status = ndi_status.clone();
+        let decklink_status: decklink::Statuses = Arc::default();
+        let status = (ndi_status.clone(), decklink_status.clone());
         let live_preview: Arc<LivePreview> = Arc::default();
         let shared = live_preview.clone();
         // A picture read for the screens meanwhile has them drawn again once it is there.
@@ -695,7 +706,7 @@ impl OutputHandle {
                 run(device, queue, theme, (from_ndi, rx), status, shared, waker)
             })
             .map_err(|e| format!("could not start the output thread: {e}"))?;
-        Ok(OutputHandle { tx, thread: Some(thread), ndi_status, live_preview })
+        Ok(OutputHandle { tx, thread: Some(thread), ndi_status, decklink_status, live_preview })
     }
 
     /// Which live preview texture holds the newest picture, and how many have been drawn.
@@ -857,6 +868,10 @@ struct Output {
     /// Testing aid: SOFTPRESENTER_NDI_LOSE (see `PretendLost`).
     pretend_lost: Option<PretendLost>,
     ndi_status: NdiStatuses,
+    /// The screens played out of DeckLink cards, which are given the NDI pictures as if always
+    /// watched (see `output/decklink.rs`), and what each is doing, for the window.
+    decklink: Vec<(Uuid, sp_decklink::DeckLinkOutput)>,
+    decklink_status: decklink::Statuses,
     /// While screens are being identified: the name each one shows instead of the show.
     /// While screens are identified: each screen's name (as a slide), its colour, and when it
     /// started, for the wash of colour that breathes over it.
@@ -927,7 +942,7 @@ fn run(
     queue: wgpu::Queue,
     theme: Arc<Theme>,
     (from_ndi, rx): (Sender<OutputMsg>, Receiver<OutputMsg>),
-    ndi_status: NdiStatuses,
+    (ndi_status, decklink_status): (NdiStatuses, decklink::Statuses),
     live_preview: Arc<LivePreview>,
     waker: Option<Waker>,
 ) {
@@ -970,6 +985,8 @@ fn run(
         // Testing aid: SOFTPRESENTER_NDI_LOSE (see `PretendLost`).
         pretend_lost: std::env::var("SOFTPRESENTER_NDI_LOSE").ok().as_deref().and_then(PretendLost::parse),
         ndi_status,
+        decklink: Vec::new(),
+        decklink_status,
         identify: Vec::new(),
         identify_since: Instant::now(),
         identify_theme: Arc::new(Theme::builtin()),
@@ -1224,6 +1241,7 @@ fn run(
                 OutputMsg::Redraw => {}
                 OutputMsg::SetNdi { id, name } => output.set_ndi(id, name),
                 OutputMsg::NdiReceivers => receivers_changed = true,
+                OutputMsg::SetDeckLink { id, wanted } => output.set_decklink(id, wanted),
                 OutputMsg::RemoveSurface(id) => output.targets.retain(|target| target.id != id),
                 OutputMsg::Announcement(announcement) => {
                     // A new announcement dissolves in over what is there, and gets all its tries.
@@ -1361,16 +1379,8 @@ impl Output {
                 Err(reason) => NdiEntry::Refused(reason),
             }
         });
-        if self.ndi.is_empty() {
-            // Nothing is sent: whatever NDI picture could not be drawn is no longer owed.
-            self.ndi_state = Shown::default();
-            self.ndi_trouble = crate::applog::Lasting::default();
-            self.ndi_target = None;
-            self.ndi_pending.clear();
-            self.ndi_buffers.clear();
-            self.ndi_dirty = None;
-            self.ndi_lost = Lost::default();
-            self.ndi_lost_trouble = crate::applog::Lasting::default();
+        if self.ndi.is_empty() && self.decklink.is_empty() {
+            self.forget_readbacks();
         }
         self.ndi_drawn_for.retain(|(have, _)| *have != id);
         // A new source gets the picture on screen now.
@@ -1382,6 +1392,19 @@ impl Output {
             shared.retain(|(have, _)| *have != id);
             shared.extend(status.map(|status| (id, status)));
         }
+    }
+
+    /// Nothing is read back for NDI or DeckLink any more: whatever such picture could not be
+    /// drawn is no longer owed.
+    fn forget_readbacks(&mut self) {
+        self.ndi_state = Shown::default();
+        self.ndi_trouble = crate::applog::Lasting::default();
+        self.ndi_target = None;
+        self.ndi_pending.clear();
+        self.ndi_buffers.clear();
+        self.ndi_dirty = None;
+        self.ndi_lost = Lost::default();
+        self.ndi_lost_trouble = crate::applog::Lasting::default();
     }
 
     /// What a screen shows now. Cheap copies: the picture, the slide and the theme are shared.
@@ -1578,7 +1601,7 @@ impl Output {
     /// the screens.
     fn send_ndi(&mut self, frame: &Frame, changed: NdiChange) {
         self.finish_ndi();
-        if self.ndi.is_empty() {
+        if self.ndi.is_empty() && self.decklink.is_empty() {
             return;
         }
         let seen = self.ndi_seen();
@@ -1698,24 +1721,36 @@ impl Output {
         // The NDI sources that send another's key, and whose.
         let keys: Vec<(Uuid, Uuid)> =
             self.ndi.iter().filter_map(|(id, _)| self.ndi_fill(*id).map(|fill| (*id, fill))).collect();
-        self.ndi
-            .iter()
-            .map(|(id, ndi)| NdiSeen {
-                id: *id,
-                // Read before the count: receivers that come in between are drawn for twice,
-                // not missed.
-                arrivals: ndi.arrivals(),
-                wanted: ndi_wanted(&ndi.state(), ndi.receivers()),
-                alone: self.identify.iter().any(|(have, ..)| have == id)
-                    || self.is_stage(*id)
-                    || self.looks.iter().any(|(have, _)| have == id)
-                    || self.themes.iter().any(|(have, _)| have == id)
-                    || keys.iter().any(|(_, fill)| fill == id),
-                key_of: keys.iter().find(|(key, _)| key == id).map(|(_, fill)| *fill),
-                unwatched: ndi.receivers() == Some(0),
-                stage: self.is_stage(*id),
-            })
-            .collect()
+        let alone = |id: &Uuid| {
+            self.identify.iter().any(|(have, ..)| have == id)
+                || self.is_stage(*id)
+                || self.looks.iter().any(|(have, _)| have == id)
+                || self.themes.iter().any(|(have, _)| have == id)
+                || keys.iter().any(|(_, fill)| fill == id)
+        };
+        let ndi = self.ndi.iter().map(|(id, ndi)| NdiSeen {
+            id: *id,
+            // Read before the count: receivers that come in between are drawn for twice,
+            // not missed.
+            arrivals: ndi.arrivals(),
+            wanted: ndi_wanted(&ndi.state(), ndi.receivers()),
+            alone: alone(id),
+            key_of: keys.iter().find(|(key, _)| key == id).map(|(_, fill)| *fill),
+            unwatched: ndi.receivers() == Some(0),
+            stage: self.is_stage(*id),
+        });
+        // A DeckLink output is always watched: the card plays all the time, and keeps the
+        // picture to play when its device comes back.
+        let decklink = self.decklink.iter().map(|(id, _)| NdiSeen {
+            id: *id,
+            arrivals: 0,
+            wanted: true,
+            alone: alone(id),
+            key_of: None,
+            unwatched: false,
+            stage: self.is_stage(*id),
+        });
+        ndi.chain(decklink).collect()
     }
 
     /// A picture for these sources was lost on its way back from the GPU. The sources are told
@@ -1793,7 +1828,8 @@ impl Output {
                             ndi.forget_as(self.see_through(*id).is_some());
                         }
                     }
-                    if !sources.is_empty() {
+                    let cards = self.decklink_for(&readback.ids);
+                    if !sources.is_empty() || !cards.is_empty() {
                         // The rows are copied out of the buffer once, without the padding, and
                         // every source sends those same pixels.
                         let pixels = {
@@ -1810,6 +1846,9 @@ impl Output {
                         };
                         for (ndi, sent) in sources {
                             ndi.show_shared(w, h, pixels.clone(), sent);
+                        }
+                        for card in cards {
+                            card.show_shared(w, h, pixels.clone(), decklink::alpha_of(readback.sent));
                         }
                     }
                     readback.buffer.unmap();
@@ -2259,7 +2298,8 @@ impl Output {
     fn has_stage(&self) -> bool {
         self.stage_on
             && (self.targets.iter().any(|target| self.is_stage(target.id))
-                || self.ndi.iter().any(|(id, _)| self.is_stage(*id)))
+                || self.ndi.iter().any(|(id, _)| self.is_stage(*id))
+                || self.decklink.iter().any(|(id, _)| self.is_stage(*id)))
     }
 
     /// Draws the stage screens again, for the time, leaving the others as they are.
@@ -2281,7 +2321,7 @@ impl Output {
         }
         // A stage screen sent over NDI gets the new time too, the same way as every NDI picture
         // (never waited on).
-        if self.ndi.iter().any(|(id, _)| self.is_stage(*id)) {
+        if self.ndi.iter().any(|(id, _)| self.is_stage(*id)) || self.decklink.iter().any(|(id, _)| self.is_stage(*id)) {
             self.send_ndi(&frame, NdiChange::Stage);
         }
         self.end_round();

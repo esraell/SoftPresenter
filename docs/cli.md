@@ -140,7 +140,7 @@ mistake impossible:
 | `playlists`, `playlist [NAME]` | The playlists; one playlist's items (the one in front if none is named) |
 | `media` | The media bin's pictures and videos |
 | `themes`, `timers`, `messages`, `props`, `macros`, `audio` | Each list, with its state: a timer's kind, time and whether it runs; a message's words and whether it shows; a prop on screen; a macro's steps |
-| `screens`, `displays`, `stage layouts` | Each screen and what it is doing (for a screen on NDI, how many receivers are watching it, or that nobody is), and whether it is see-through (with its alpha) or the key of another (and why it shows black, if it does); the connected displays; the stage layouts and the screens that use them |
+| `screens`, `displays`, `decklink`, `stage layouts` | Each screen and what it is doing (for a screen on NDI, how many receivers are watching it, or that nobody is; for one on DeckLink, the format it plays in, or why it isn't playing), and whether it is see-through (with its alpha) or the key of another (and why it shows black, if it does); the connected displays; the DeckLink outputs, numbered, with their formats and keying (or why there are none); the stage layouts and the screens that use them |
 | `groups` | The group names that have a jump key, with their colours |
 | `settings` | The app's settings |
 | `menu` | Every menu bar item: its id and its words |
@@ -721,8 +721,8 @@ kept with:
 
 | Command | Does |
 |---|---|
-| `screen add audience\|stage NAME [on display NAME\|window\|ndi NAME\|automatic]` | A new screen (in a window unless told) |
-| `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|automatic\|off`, `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT`; for an audience screen `background=solid\|see-through`, `alpha=straight\|premultiplied` (how a see-through screen sends its soft edges; straight unless told), `key=SCREEN\|none` (shows that screen's key) |
+| `screen add audience\|stage NAME [on display NAME\|window\|ndi NAME\|decklink NAME\|automatic]` | A new screen (in a window unless told); a DeckLink output by its name or its number in `sp decklink` |
+| `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|decklink:NAME\|automatic\|off`, `mode=FORMAT` (a DeckLink screen's format: `1080i59.94`, `720p50`…), `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT`; for an audience screen `background=solid\|see-through`, `alpha=straight\|premultiplied` (how a see-through screen sends its soft edges; straight unless told), `key=SCREEN\|none` (shows that screen's key) |
 | `screen delete SCREEN --yes` | Deletes a screen (there is always one) |
 | `settings set key=value…` | `transition=KIND[:SECONDS]`, `media_transition=…`, `copyright=never\|first\|last\|every`, `ccli_licence=DIGITS`, `start_audience=on\|off`, `start_with=nothing\|media-playlist:NAME\|announcements:SONG`, `continuous=on\|off`, `view=grid\|easy\|table`, `columns=1-12` |
 
@@ -743,6 +743,33 @@ kept with:
 
 A screen set to a display that isn't plugged in keeps it by name and waits for it. Displays are
 named as macOS names them (`sp displays`); the main display, with the menu bar, is never filled.
+
+A screen can play out of a Blackmagic DeckLink card, where Blackmagic's Desktop Video (16.0 or
+later) is installed. `sp decklink` lists the outputs as the driver names them (a DeckLink Duo 2
+shows four, one for each SDI connector), with the formats each plays in and whether it can key;
+a new DeckLink screen starts in 1080i59.94 (or the nearest the device has), and `mode=` sets
+the format the switcher or projector expects. Each output plays one screen. A screen keeps its
+output while the card is away and plays out of it again when it is back, never out of another
+card. A quiet test copy (`SOFTPRESENTER_QUIET`) never plays out of a card; with
+`SOFTPRESENTER_PRETEND_DECKLINK=1` it lists made-up devices that play into nothing, to try this:
+
+    $ sp decklink
+      1. DeckLink Duo (1): SDI, no keying; formats 720p50, 720p59.94, 720p60, 1080i50, 1080i59.94, 1080i60, 1080p23.98, 1080p24, 1080p25, 1080p29.97, 1080p30, 1080p50, 1080p59.94, 1080p60; a new output starts in 1080i59.94
+      …
+    $ sp screen add audience Switcher on decklink 1
+    Added the audience screen Switcher, on DeckLink Duo (1) at 1080i59.94.
+    $ sp screen set Switcher mode=1080p29.97
+    The screen Switcher: in 1080p29.97.
+    $ sp screens
+      1. Screen 1: Filling "3DTV", 1920 x 1080
+      2. Switcher: Playing out of DeckLink Duo (1) at 1080p29.97
+    $ sp screen set Switcher mode=1080i47
+    DeckLink Duo (1) has no format 1080i47. Its formats: 720p50, 720p59.94, …
+
+Without the driver, `sp decklink` says Desktop Video isn't installed (or is too old) and there
+are no DeckLink outputs to choose; a screen saved with one says the same in `sp screens`.
+`softpresenter decklink-check` (the app's own program, run from a terminal, with no app needed)
+lists the devices the same way.
 
 A see-through screen is clear wherever nothing is drawn, for a video switcher or streaming
 software to lay the words over its camera picture: the media, the themes' backgrounds and the

@@ -558,7 +558,7 @@ pub fn only_reads(args: &[String]) -> bool {
     let alone = args.len() == 1;
     match word(0).as_str() {
         "" | "help" | "status" | "songs" | "slides" | "playlists" | "libraries" | "themes" | "screens" | "timers"
-        | "messages" | "props" | "macros" | "groups" | "displays" | "bibles" | "search" | "job" => true,
+        | "messages" | "props" | "macros" | "groups" | "displays" | "decklink" | "bibles" | "search" | "job" => true,
         "media" | "media-playlist" | "settings" | "menu" => alone,
         "audio" => alone || (args.len() == 2 && word(1) == "playlists"),
         "voxlive" => alone || (args.len() == 2 && word(1) == "screens"),
@@ -702,6 +702,7 @@ const COMMANDS: &[&str] = &[
     "settings",
     "groups",
     "displays",
+    "decklink",
     "theme",
     "menu",
 ];
@@ -944,8 +945,10 @@ Changing a slide (each change is saved, can be undone, and shows on screen at on
 Screens and settings
   screens                      each screen and what it is doing
   displays                     the displays connected now (names for screen add … on display)
-  screen add audience|stage NAME [on display NAME|window|ndi NAME|automatic]
-  screen set SCREEN key=value… name= output=display:NAME|window|ndi:NAME|automatic|off
+  decklink                     the DeckLink outputs, their formats and keying (numbered)
+  screen add audience|stage NAME [on display NAME|window|ndi NAME|decklink NAME|automatic]
+  screen set SCREEN key=value… name= output=display:NAME|window|ndi:NAME|decklink:NAME|
+                               automatic|off mode=FORMAT (a DeckLink output's: 1080i59.94…)
                                kind=audience|stage layers=slides,media,… color=#RRGGBB
                                edges=L,T,R,B theme=THEME|main layout=STAGE-LAYOUT
                                background=solid|see-through alpha=straight|premultiplied
@@ -1139,6 +1142,7 @@ impl crate::App {
             "settings" => self.ctl_settings(args),
             "groups" => Ok(ctl_groups()),
             "displays" => self.ctl_displays(),
+            "decklink" => self.ctl_decklink(),
             "theme" => self.ctl_theme(args),
             "undo" => self.ctl_undo(el, false),
             "redo" => self.ctl_undo(el, true),

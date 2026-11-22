@@ -3,7 +3,7 @@
 //! window saves it, and says what it did.
 
 use crate::control::{Reply, find};
-use crate::screens::{Kind, Output, Screen};
+use crate::screens::{DeckLinkOut, Keyer, Kind, Output, Screen};
 
 /// A change to the window's state, made once every setting asked for has been read.
 type Change = Box<dyn FnOnce(&mut crate::home::HomeState)>;
@@ -16,14 +16,18 @@ fn on_off(key: &str, value: &str) -> Result<bool, String> {
     }
 }
 
-/// Where a screen goes, as typed: `display NAME`, `window`, `ndi NAME`, `automatic` or `off`.
-fn parse_output(words: &[String]) -> Result<Output, String> {
-    let usage = "display NAME | window | ndi NAME | automatic | off";
+/// Where a screen goes, as typed: `display NAME`, `window`, `ndi NAME`, `decklink NAME|NUMBER`,
+/// `automatic` or `off`. A DeckLink output is one of `found`'s, by its name or its number in
+/// `sp decklink`; `current` is the output the screen has, whose format is kept when it names
+/// the same device.
+fn parse_output(words: &[String], found: &sp_decklink::Found, current: Option<&Output>) -> Result<Output, String> {
+    let usage = "display NAME | window | ndi NAME | decklink NAME|NUMBER | automatic | off";
     let rest = words.get(1..).map(|w| w.join(" ")).unwrap_or_default();
     match words.first().map(|w| w.to_lowercase()).as_deref() {
         Some("display") if !rest.trim().is_empty() => Ok(Output::Display(rest.trim().to_owned())),
         Some("window") => Ok(Output::Window),
         Some("ndi") if !rest.trim().is_empty() => Ok(Output::Ndi(rest.trim().to_owned())),
+        Some("decklink") if !rest.trim().is_empty() => decklink_output(rest.trim(), found, current),
         Some("automatic" | "auto") => Ok(Output::Automatic),
         Some("off") => Ok(Output::Off),
         _ => Err(usage.to_owned()),
@@ -36,14 +40,39 @@ fn output_words(output: &Output) -> String {
         Output::Display(name) => format!("the display {name}"),
         Output::Window => "a window".to_owned(),
         Output::Ndi(name) => format!("NDI as {name}"),
+        Output::DeckLink(out) => format!("{} at {}", out.device, out.mode),
         Output::Off => "nowhere (off)".to_owned(),
     }
+}
+
+/// The DeckLink output typed: a device that can play now, by its number in `sp decklink` or its
+/// name, in the format a new output starts in, or the screen's own format when it is already on
+/// that device.
+fn decklink_output(typed: &str, found: &sp_decklink::Found, current: Option<&Output>) -> Result<Output, String> {
+    if !matches!(found.driver, sp_decklink::Driver::Ready(_)) {
+        return Err(found.driver.in_words());
+    }
+    let names: Vec<String> = found.devices.iter().map(|device| device.name.clone()).collect();
+    if names.is_empty() {
+        return Err("There are no DeckLink devices: Desktop Video sees no card.".to_owned());
+    }
+    let at = find("DeckLink output", &names, typed)?;
+    let device = &found.devices[at];
+    if !device.usable() {
+        return Err(format!("{} can't play out in its card's present profile.", device.name));
+    }
+    let mode = device.default_mode().map(|mode| mode.name.clone()).unwrap_or_default();
+    let new = DeckLinkOut { device: device.name.clone(), id: device.id, mode, keyer: Keyer::Off };
+    Ok(Output::DeckLink(match current {
+        Some(Output::DeckLink(have)) if have.same_device(&new) && device.mode(&have.mode).is_some() => have.clone(),
+        _ => new,
+    }))
 }
 
 impl crate::App {
     /// `screen add|set|delete …`.
     pub(crate) fn ctl_screen(&mut self, args: &[String]) -> Result<Reply, String> {
-        let usage = "screen add audience|stage NAME [on display NAME|window|ndi NAME|automatic] | screen set SCREEN key=value… | screen delete SCREEN --yes";
+        let usage = "screen add audience|stage NAME [on display NAME|window|ndi NAME|decklink NAME|automatic] | screen set SCREEN key=value… | screen delete SCREEN --yes";
         let words = &args[2.min(args.len())..];
         match args.get(1).map(|w| w.to_lowercase()).as_deref() {
             Some("add") => self.screen_add(words),
@@ -70,15 +99,16 @@ impl crate::App {
     }
 
     fn screen_add(&mut self, words: &[String]) -> Result<Reply, String> {
-        let usage = "screen add audience|stage NAME [on display NAME|window|ndi NAME|automatic]";
+        let usage = "screen add audience|stage NAME [on display NAME|window|ndi NAME|decklink NAME|automatic]";
         let [kind, rest @ ..] = words else { return Err(usage.to_owned()) };
         let stage = match kind.to_lowercase().as_str() {
             "audience" => false,
             "stage" => true,
             _ => return Err(usage.to_owned()),
         };
+        let found = self.decklink_found();
         let (name, output) = match rest.iter().position(|w| w.eq_ignore_ascii_case("on")) {
-            Some(at) => (rest[..at].join(" "), parse_output(&rest[at + 1..])?),
+            Some(at) => (rest[..at].join(" "), parse_output(&rest[at + 1..], &found, None)?),
             None => (rest.join(" "), Output::Window),
         };
         let name = name.trim().to_owned();
@@ -109,12 +139,13 @@ impl crate::App {
     /// `screen set SCREEN key=value…`: name, output, kind, layers, color, edges, theme, layout,
     /// background, alpha, key.
     fn screen_set(&mut self, words: &[String]) -> Result<Reply, String> {
-        let usage = "screen set SCREEN name=… output=display:NAME|window|ndi:NAME|automatic|off kind=audience|stage \
+        let usage = "screen set SCREEN name=… output=display:NAME|window|ndi:NAME|decklink:NAME|automatic|off mode=FORMAT kind=audience|stage \
                      layers=slides,media,props,messages,announcements color=#RRGGBB edges=LEFT,TOP,RIGHT,BOTTOM theme=THEME|main layout=STAGE-LAYOUT \
                      background=solid|see-through alpha=straight|premultiplied key=SCREEN|none";
         let at = words.iter().position(|w| w.contains('=')).filter(|at| *at > 0).ok_or(usage)?;
         let theme_names: Vec<(sp_model::Uuid, String)> = self.themes.iter().map(|t| (t.id, t.name.clone())).collect();
         let connected = self.connected_displays();
+        let found = self.decklink_found();
         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
         let names: Vec<String> = state.screens.iter().map(|s| s.name.clone()).collect();
         let index = find("screen", &names, &words[..at].join(" "))?;
@@ -172,7 +203,7 @@ impl crate::App {
                         Some((kind, name)) => vec![kind.to_owned(), name.to_owned()],
                         None => vec![value.to_owned()],
                     };
-                    screen.output = parse_output(&words)?;
+                    screen.output = parse_output(&words, &found, Some(&screen.output))?;
                     said.push(format!("on {}", output_words(&screen.output)));
                     // A display not connected now is kept (the screen waits for it), and said.
                     if let Output::Display(name) = &screen.output
@@ -184,6 +215,20 @@ impl crate::App {
                             if connected.is_empty() { "none".to_owned() } else { connected.join(", ") }
                         ));
                     }
+                }
+                "mode" | "format" => {
+                    let Output::DeckLink(out) = &mut screen.output else {
+                        return Err("mode is for a screen on a DeckLink output (output=decklink:NAME).".to_owned());
+                    };
+                    let device = found
+                        .find(out.id, &out.device)
+                        .ok_or_else(|| format!("{} isn't connected now, so its formats aren't known.", out.device))?;
+                    let mode = device.mode(value).ok_or_else(|| {
+                        let modes: Vec<&str> = device.offered().map(|mode| mode.name.as_str()).collect();
+                        format!("{} has no format {value}. Its formats: {}.", device.name, modes.join(", "))
+                    })?;
+                    out.mode = mode.name.clone();
+                    said.push(format!("in {}", out.mode));
                 }
                 "kind" => {
                     screen.kind = match value.to_lowercase().as_str() {
@@ -306,6 +351,75 @@ impl crate::App {
             .current_monitor()
             .map(|monitor| crate::display_list(std::iter::once(monitor), running.home_window.primary_monitor()))
             .unwrap_or_default()
+    }
+
+    /// The DeckLink devices as last found, and how the driver stands.
+    fn decklink_found(&self) -> sp_decklink::Found {
+        self.running
+            .as_ref()
+            .map_or(sp_decklink::Found { driver: sp_decklink::Driver::Looking, devices: Vec::new() }, |running| {
+                running.home_state.decklink.clone()
+            })
+    }
+
+    /// `decklink`: the DeckLink devices, the formats each plays out in and whether each can key,
+    /// numbered for `screen set SCREEN output=decklink:NUMBER`. Asks for them to be listed again
+    /// too (a card's profile may have changed, which the driver doesn't tell of).
+    pub(crate) fn ctl_decklink(&self) -> Result<Reply, String> {
+        if let Some(discovery) = self.running.as_ref().and_then(|running| running.decklink.as_ref()) {
+            discovery.refresh();
+        }
+        let found = self.decklink_found();
+        if !matches!(found.driver, sp_decklink::Driver::Ready(_)) {
+            let words = found.driver.in_words();
+            return Ok(Reply::with(words.clone(), serde_json::json!({"driver": words, "devices": []})));
+        }
+        if found.devices.is_empty() {
+            let words = "No DeckLink devices: Desktop Video sees no card.".to_owned();
+            return Ok(Reply::with(words, serde_json::json!({"driver": found.driver.in_words(), "devices": []})));
+        }
+        let lines: Vec<String> = found
+            .devices
+            .iter()
+            .map(|device| {
+                if !device.usable() {
+                    return format!("{} (can't play out in its card's present profile)", device.name);
+                }
+                let modes: Vec<&str> = device.offered().map(|mode| mode.name.as_str()).collect();
+                let start = device
+                    .default_mode()
+                    .map_or(String::new(), |mode| format!("; a new output starts in {}", mode.name));
+                format!(
+                    "{}: {}, {}; formats {}{start}",
+                    device.name,
+                    device.connections_in_words(),
+                    device.keying_in_words(),
+                    modes.join(", ")
+                )
+            })
+            .collect();
+        let data: Vec<serde_json::Value> = found
+            .devices
+            .iter()
+            .map(|device| {
+                serde_json::json!({
+                    "name": device.name,
+                    "model": device.model,
+                    "id": device.id,
+                    "usable": device.usable(),
+                    "connections": device.connections_in_words(),
+                    "external_keying": device.external_keying,
+                    "internal_keying": device.internal_keying,
+                    "formats": device.offered().map(|mode| mode.name.clone()).collect::<Vec<_>>(),
+                    "keyed_formats": device.offered().filter(|mode| mode.keying).map(|mode| mode.name.clone()).collect::<Vec<_>>(),
+                    "default_format": device.default_mode().map(|mode| mode.name.clone()),
+                })
+            })
+            .collect();
+        Ok(Reply::with(
+            crate::control::numbered(&lines),
+            serde_json::json!({"driver": found.driver.in_words(), "devices": data}),
+        ))
     }
 
     /// `displays`: the displays connected now, by name, with their size and which is the main one.

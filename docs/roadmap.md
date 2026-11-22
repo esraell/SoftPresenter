@@ -148,7 +148,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Test pattern window.** About ten patterns with options, a logo, and a choice of screen. (started: colour bars, a grid and white in the Screens menu) · S–M · Low
 - **Screens settings.** A performance overlay, the timing source, 10-bit colour and HDR, and Keynote screens. · S–L · Low
 - **Recording or streaming a screen.** Capture to disk, or stream over RTMP or to Resi, with a Live menu in the toolbar and capture actions. · L · Low
-- **Blackmagic SDI and HDMI outputs.** Including a see-through screen's fill and key on a card's two outputs, in step. (started: see-through screens, and a key screen on a display, a window or NDI) · L · Low
+- **Blackmagic SDI and HDMI outputs.** A see-through screen's fill and key from the card's keyer, in step; dissolves on a DeckLink output; DeckLink on Windows. (started: any screen played out of a DeckLink output on the card's own clock, in the format chosen; see-through screens, and a key screen on a display, a window or NDI) · L · Low
 
 ## Stage
 
@@ -239,6 +239,5 @@ Ideas of our own, beyond the lists above:
 - VoxLive live translation shown on a screen.
 - An API over the network with a stream of changes, and MCP for AI agents. The command line
   `sp` already controls the running app; see [cli.md](cli.md).
-- DeckLink output.
 - Fully customisable NDI.
 - Audio routing in one place.

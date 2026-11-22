@@ -434,6 +434,8 @@ enum AppEvent {
     FoldersRead,
     /// The library was tidied on its own thread: what to tell the operator.
     Tidied(String),
+    /// The DeckLink devices found changed (one plugged in or taken away, the driver found).
+    DeckLink,
 }
 
 /// The most web pages kept running at once: those on screen, then those loaded ahead. Each is a
@@ -1008,6 +1010,12 @@ struct Running {
     retired: Vec<(Arc<Window>, Instant)>,
     /// The NDI names the output thread was last told to send under, by screen.
     ndi_sent: Vec<(Uuid, String)>,
+    /// The DeckLink devices, found on a thread of their own (none on a quiet run's own data,
+    /// see `sync_screens`); the outputs the output thread was last told to play out of, by
+    /// screen; and the screens whose output was playing when last looked at.
+    decklink: Option<sp_decklink::Discovery>,
+    decklink_sent: Vec<(Uuid, screens::DeckLinkOut)>,
+    decklink_playing: Vec<Uuid>,
     /// The names the screens were last told to show while being identified.
     identify_sent: Option<Vec<(Uuid, String, sp_model::Rgba)>>,
     /// The screen looks last sent to the output.
@@ -1339,6 +1347,20 @@ impl App {
             screen_windows: Vec::new(),
             retired: Vec::new(),
             ndi_sent: Vec::new(),
+            // Looking for DeckLink devices may take a moment: on a thread of its own, which
+            // wakes the window with what it found.
+            decklink: Some(sp_decklink::Discovery::start({
+                let proxy = self.waker.clone().map(std::sync::Mutex::new);
+                move || {
+                    if let Some(proxy) = &proxy
+                        && let Ok(proxy) = proxy.lock()
+                    {
+                        let _ = proxy.send_event(AppEvent::DeckLink);
+                    }
+                }
+            })),
+            decklink_sent: Vec::new(),
+            decklink_playing: Vec::new(),
             identify_sent: None,
             looks_sent: Vec::new(),
             stage_sent: None,
@@ -5745,6 +5767,12 @@ impl App {
             running.home_state.ndi_available = sp_ndi::installed();
             running.ndi_checked = Some(Instant::now());
         }
+        // The DeckLink devices as last found (never waits on the driver).
+        if let Some(found) = running.decklink.as_ref().map(sp_decklink::Discovery::found)
+            && found != running.home_state.decklink
+        {
+            running.home_state.decklink = found;
+        }
         // The displays connected, their names and places, and which the operator works on. The
         // list of displays is cheap to ask for and is looked at every time, so one plugged in or
         // out is seen at once; the rest (each display's name and size, which display the window
@@ -5824,6 +5852,11 @@ impl App {
                     Placed::Ndi(_) if !ndi_aid => {
                         *place = Placed::Nothing("Not sent in a quiet run (a test or a capture).".to_owned());
                     }
+                    // Never a real card: it may be on a video chain in front of people.
+                    // Pretend devices (a testing switch) play into nothing, so they go on.
+                    Placed::DeckLink(_) if !sp_decklink::pretending() => {
+                        *place = Placed::Nothing("Not played out in a quiet run (a test or a capture).".to_owned());
+                    }
                     _ => {}
                 }
             }
@@ -5837,6 +5870,15 @@ impl App {
             };
             if !on && matches!(place, Placed::Fullscreen(_) | Placed::Window) {
                 *place = Placed::Nothing("Switched off".to_owned());
+            }
+        }
+        // Without the driver, or while it is still looked for, a DeckLink screen plays nowhere.
+        let driver = &running.home_state.decklink.driver;
+        if !matches!(driver, sp_decklink::Driver::Ready(_)) {
+            for place in &mut placed {
+                if matches!(place, Placed::DeckLink(_)) {
+                    *place = Placed::Nothing(driver.in_words());
+                }
             }
         }
         running.retired.retain(|(_, since)| since.elapsed() < Duration::from_secs(2));
@@ -5981,7 +6023,17 @@ impl App {
             running.home_window.focus_window();
         }
         let Some(running) = self.running.as_mut() else { return };
-        let Running { output, ndi_sent, identify_sent, home_state, looks_sent, themes_sent, .. } = running;
+        let Running {
+            output,
+            ndi_sent,
+            identify_sent,
+            home_state,
+            looks_sent,
+            themes_sent,
+            decklink_sent,
+            decklink_playing,
+            ..
+        } = running;
         let Some(output) = output.as_ref() else { return };
 
         // Themes: the audience screens drawn with a theme of their own (one that still exists).
@@ -6036,6 +6088,27 @@ impl App {
             }
         }
         *ndi_sent = wanted;
+        // DeckLink: start, change and stop outputs.
+        let wanted: Vec<(Uuid, screens::DeckLinkOut)> = list
+            .iter()
+            .zip(&placed)
+            .filter_map(|(screen, place)| match place {
+                Placed::DeckLink(out) => Some((screen.id, out.clone())),
+                _ => None,
+            })
+            .collect();
+        for (id, out) in &wanted {
+            if !decklink_sent.contains(&(*id, out.clone())) {
+                output.send(OutputMsg::SetDeckLink { id: *id, wanted: Some(out.wanted()) });
+                ndi_moved = true;
+            }
+        }
+        for (id, _) in decklink_sent.iter() {
+            if !wanted.iter().any(|(still, _)| still == id) {
+                output.send(OutputMsg::SetDeckLink { id: *id, wanted: None });
+            }
+        }
+        *decklink_sent = wanted;
         if ndi_moved {
             // A new source needs the current picture at once.
             output.send(OutputMsg::Redraw);
@@ -6092,10 +6165,36 @@ impl App {
                         ("Starting NDI…".to_owned(), false)
                     }
                 },
+                Placed::DeckLink(out) => match output.decklink_status(screen.id) {
+                    output::DeckLinkStatus::Playing(what) => (format!("Playing out of {} at {what}", out.device), true),
+                    output::DeckLinkStatus::Waiting(why) => (why, false),
+                    output::DeckLinkStatus::Off | output::DeckLinkStatus::Starting => {
+                        starting = true;
+                        (screens::describe(place, &displays), false)
+                    }
+                },
                 Placed::Fullscreen(_) | Placed::Window => (screens::describe(place, &displays), true),
                 Placed::Nothing(_) => (screens::describe(place, &displays), false),
             })
             .collect();
+        // A DeckLink output that was playing and has stopped (its device taken away, say) is
+        // told to the operator, once, beside the Screens window's own line.
+        let playing: Vec<Uuid> = list
+            .iter()
+            .zip(&placed)
+            .zip(&home_state.screen_status)
+            .filter(|((_, place), (_, shown))| matches!(place, Placed::DeckLink(_)) && *shown)
+            .map(|((screen, _), _)| screen.id)
+            .collect();
+        for ((screen, place), (doing, _)) in list.iter().zip(&placed).zip(&home_state.screen_status) {
+            if matches!(place, Placed::DeckLink(_))
+                && decklink_playing.contains(&screen.id)
+                && !playing.contains(&screen.id)
+            {
+                home_state.notice = Some(format!("{}: {doing}", screen.name));
+            }
+        }
+        *decklink_playing = playing;
         if home_state.screen_status != status_before {
             for panel in running.panels.iter().filter(|panel| panel.kind == Panel::Screens) {
                 panel.window.request_redraw();
@@ -7656,6 +7755,13 @@ impl ApplicationHandler<AppEvent> for App {
                 }
                 return;
             }
+            AppEvent::DeckLink => {
+                self.sync_screens(el);
+                for panel in self.running.iter().flat_map(|r| r.panels.iter()) {
+                    panel.window.request_redraw();
+                }
+                return;
+            }
         };
         // The output thread drew a new live preview: the window shows it.
         if id.is_empty() {
@@ -8130,6 +8236,9 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("ctl") => return control::run_client(args[1..].to_vec()),
+        // `softpresenter decklink-check …`: lists the DeckLink devices, and with `play` sends a
+        // test picture to one, from a terminal, without the app.
+        Some("decklink-check") => return sp_decklink::check::run(&args[1..], "softpresenter decklink-check"),
         Some("install-cli") => {
             return match control::install_command() {
                 Ok(link) => {
