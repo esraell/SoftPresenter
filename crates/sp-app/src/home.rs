@@ -4395,20 +4395,10 @@ fn find_drag_step(
     to: egui::Pos2,
     drop: bool,
 ) -> (Vec<egui::Event>, u32) {
-    /// Frames the list is left to settle (the Bibles answer on a thread of their own), and the
-    /// frames the pointer takes to get there.
+    /// Frames the list is left to settle (the Bibles answer on a thread of their own).
     const SETTLE: u32 = 40;
-    const MOVES: u32 = 10;
-    let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
-        pos: at,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: egui::Modifiers::NONE,
-    };
-    // The first result, and a little way below it: far enough for the press to be a drag.
+    // The first result.
     let from = state.find_rows.first().map(|row| row.center());
-    let start = from.map(|from| from + vec2(0.0, 12.0));
-    let (moved, held) = (SETTLE + 1 + MOVES, SETTLE + 1 + MOVES + 20);
     let events = match step {
         0 => {
             state.library_search = Some((words.to_owned(), 0));
@@ -4419,18 +4409,43 @@ fn find_drag_step(
             ctx.request_repaint();
             return (Vec::new(), step);
         }
-        _ if step == SETTLE => from.map(egui::Event::PointerMoved).into_iter().collect(),
-        _ if step == SETTLE + 1 => from.map(|from| press(from, true)).into_iter().collect(),
-        _ if step > SETTLE + 1 && step <= moved => {
-            let along = (step - SETTLE - 1) as f32 / MOVES as f32;
-            start.map(|start| egui::Event::PointerMoved(start + (to - start) * along)).into_iter().collect()
-        }
-        _ if step == held && drop => vec![press(to, false)],
-        _ if step > held => return (Vec::new(), step),
-        _ => Vec::new(),
+        _ if step < SETTLE => Vec::new(),
+        _ => match from.map(|from| pointer_drag(step - SETTLE, from, to, drop)) {
+            Some(None) => return (Vec::new(), step),
+            Some(Some(events)) => events,
+            None => Vec::new(),
+        },
     };
     ctx.request_repaint();
     (events, step + 1)
+}
+
+/// Testing aid: the pointer's events for one frame of a drag, `step` frames after it starts: it
+/// goes to `from` and presses there, goes a little way down (far enough for the press to be a
+/// drag) and on to `to` over a few frames, and holds there, letting go after a while when
+/// `drop`. `None` once it is over.
+pub fn pointer_drag(step: u32, from: egui::Pos2, to: egui::Pos2, drop: bool) -> Option<Vec<egui::Event>> {
+    /// The frames the pointer takes to get there, and how long it holds before letting go.
+    const MOVES: u32 = 10;
+    const HOLD: u32 = 20;
+    let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let start = from + vec2(0.0, 12.0);
+    Some(match step {
+        0 => vec![egui::Event::PointerMoved(from)],
+        1 => vec![press(from, true)],
+        _ if step <= 1 + MOVES => {
+            let along = (step - 1) as f32 / MOVES as f32;
+            vec![egui::Event::PointerMoved(start + (to - start) * along)]
+        }
+        _ if step == 1 + MOVES + HOLD && drop => vec![press(to, false)],
+        _ if step > 1 + MOVES + HOLD => return None,
+        _ => Vec::new(),
+    })
 }
 
 /// What the find box in the top bar finds for the words typed in it, listed under it: a Bible

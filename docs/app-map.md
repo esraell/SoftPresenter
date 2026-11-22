@@ -344,7 +344,9 @@ how long drawing took.
   doesn't draw a quiet copy's window kept behind the others), `_RENAME=WHAT` (starts
   retyping a name where it is shown, as a double click does: `playlist`, `library`, `song`,
   `header`, `theme`, `template`, `stage-layout`, `group`, `object`, `message`, `prop` or
-  `macro`, for a picture beside one taken without it).
+  `macro`, for a picture beside one taken without it), `_MACRO_STEPS=open` (the first macro's
+  steps open; `menu=N` with its step N's menu open, `drag=N>M` with its step N carried over the
+  lower half of step M and held there, for a capture run; steps count from 1).
 - A quiet copy never tidies the library (moves unused pictures to the Trash) unless
   `SOFTPRESENTER_SWEEP=DAYS` is set with a data folder of its own; it then tidies as if every file
   were that many days older. `touch -t` can't make a file look old to it: it goes by the newest of

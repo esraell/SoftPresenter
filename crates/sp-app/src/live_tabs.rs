@@ -1384,6 +1384,64 @@ fn macro_menu(ui: &mut egui::Ui, made: &crate::macros::Macro, open: bool) -> Opt
     asked
 }
 
+/// Testing aid: SOFTPRESENTER_MACRO_STEPS opens the first macro's steps (`open`), and with them
+/// the menu of its step N (`menu=N`), or presses on its step N and holds it over the lower half
+/// of step M (`drag=N>M`, see `steps_aid_events`), for pictures of each. Steps count from 1.
+#[derive(Clone, Copy)]
+enum StepsAid {
+    Open,
+    Menu(usize),
+    Drag(usize, usize),
+}
+
+fn steps_aid() -> Option<StepsAid> {
+    static ASKED: std::sync::OnceLock<Option<StepsAid>> = std::sync::OnceLock::new();
+    *ASKED.get_or_init(|| {
+        let asked = std::env::var("SOFTPRESENTER_MACRO_STEPS").ok()?;
+        match asked.split_once('=') {
+            None if asked == "open" => Some(StepsAid::Open),
+            Some(("menu", step)) => Some(StepsAid::Menu(step.parse().ok()?)),
+            Some(("drag", steps)) => {
+                let (from, to) = steps.split_once('>')?;
+                Some(StepsAid::Drag(from.parse().ok()?, to.parse().ok()?))
+            }
+            _ => {
+                eprintln!("SOFTPRESENTER_MACRO_STEPS: say open, menu=N or drag=N>M");
+                None
+            }
+        }
+    })
+}
+
+/// Where the first macro's steps were drawn last, for `steps_aid_events`.
+fn steps_aid_rows() -> egui::Id {
+    egui::Id::unique("macro steps aid rows")
+}
+
+/// Testing aid: the pointer's events for this frame of SOFTPRESENTER_MACRO_STEPS=drag=N>M, once
+/// the steps have been drawn for a moment: a press on step N carried to the lower half of step
+/// M and held there. The window's own pointer is moved, not the mouse. It goes a step a frame,
+/// so it is for a capture run (`--capture-home`).
+pub fn steps_aid_events(ctx: &egui::Context) -> Vec<egui::Event> {
+    /// Frames the steps are left to settle after they are first drawn.
+    const SETTLE: u32 = 10;
+    static STEP: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let Some(StepsAid::Drag(from, to)) = steps_aid() else { return Vec::new() };
+    let rows: Option<Vec<Rect>> = ctx.data(|data| data.get_temp(steps_aid_rows()));
+    let place = |rows: &[Rect], step: usize| rows.get(step.checked_sub(1)?).copied();
+    let Some((from, to)) = rows.and_then(|rows| Some((place(&rows, from)?, place(&rows, to)?))) else {
+        ctx.request_repaint();
+        return Vec::new();
+    };
+    let step = STEP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    ctx.request_repaint();
+    if step < SETTLE {
+        return Vec::new();
+    }
+    let to = to.center() + vec2(0.0, to.height() / 4.0);
+    crate::home::pointer_drag(step - SETTLE, from.center(), to, false).unwrap_or_default()
+}
+
 /// The room inside a macro's card, round its first line.
 const MACRO_MARGIN: egui::Margin = egui::Margin { left: 12, right: 4, top: 6, bottom: 6 };
 
@@ -1392,6 +1450,12 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
     // The macro whose steps are open under it, kept by the window.
     let open_id = egui::Id::unique("macro steps open");
     let mut open_macro = ui.data(|data| data.get_temp::<sp_model::Uuid>(open_id));
+    // Testing aid: SOFTPRESENTER_MACRO_STEPS opens the first macro's steps, once.
+    static AID_OPENED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if steps_aid().is_some() && !state.macros.is_empty() && !AID_OPENED.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        open_macro = state.macros.first().map(|made| made.id);
+    }
     let (_, add) = heading(ui, "Macros", Some("New macro"));
     if add {
         let taken = |name: &str| state.macros.iter().any(|m| m.name == name);
@@ -1566,6 +1630,14 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
                     Rect::from_min_size(pos2(line.min.x + number_wide, line.min.y), vec2(button_wide, line.height()));
                 // The whole row takes the press, ahead of ×, which is laid over it.
                 let response = ui.interact(line, egui::Id::unique(("macro step", id, at)), Sense::click_and_drag());
+                // Testing aid: SOFTPRESENTER_MACRO_STEPS=menu=N opens step N's menu, once.
+                static AID_MENU: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+                if index == 0
+                    && matches!(steps_aid(), Some(StepsAid::Menu(step)) if step == at + 1)
+                    && !AID_MENU.swap(true, std::sync::atomic::Ordering::Relaxed)
+                {
+                    egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&response));
+                }
                 let menu_open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&response));
                 if response.hovered() || menu_open {
                     ui.painter().rect_filled(button, 6.0, crate::studio::BUTTON);
@@ -1617,6 +1689,9 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
                 {
                     asked = Some((index, MacroAsk::Remove(at)));
                 }
+            }
+            if index == 0 && steps_aid().is_some() {
+                ui.data_mut(|data| data.insert_temp(steps_aid_rows(), rows.clone()));
             }
             // A step being dragged goes faint, its words follow the pointer, and an ink line shows
             // where it will go, by which half of a step the pointer is over; letting go moves it

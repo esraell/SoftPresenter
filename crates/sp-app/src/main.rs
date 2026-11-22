@@ -6526,6 +6526,9 @@ impl App {
         // Testing aid: SOFTPRESENTER_FIND_DRAG drags a result of the find box (see
         // `home::find_drag_events`).
         raw_input.events.extend(home::find_drag_events(egui_ctx, &mut running.home_state));
+        // Testing aid: SOFTPRESENTER_MACRO_STEPS=drag=N>M drags a macro's step (see
+        // `live_tabs::steps_aid_events`).
+        raw_input.events.extend(live_tabs::steps_aid_events(egui_ctx));
         // Where the pointer is while files are dragged over the window: asked of the system, as
         // the window library doesn't say (see file_drop.rs).
         if running.home_state.drop_hover {
