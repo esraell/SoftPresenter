@@ -134,8 +134,8 @@ fn read_font_file(path: &Path) -> Option<Blob<u8>> {
 /// read, or read now. On a thread that never reads (the screens'), one not read yet is asked of
 /// the loader thread and refused for now.
 fn font_file(path: &Path) -> Option<Blob<u8>> {
-    let files = FILES.get_or_init(Mutex::default);
-    if let Ok(mut files) = files.lock() {
+    {
+        let mut files = files();
         if let Some(read) = files.read.get(path) {
             return read.clone();
         }
@@ -152,11 +152,16 @@ fn font_file(path: &Path) -> Option<Blob<u8>> {
     }
     // Read without holding the lock, so a screen's thread isn't kept waiting.
     let read = read_font_file(path);
-    let Ok(mut files) = files.lock() else { return read };
     // Another thread may have read it meanwhile: its copy is kept, so all draw from one.
-    let kept = files.read.entry(path.to_owned()).or_insert(read).clone();
+    let kept = files().read.entry(path.to_owned()).or_insert(read).clone();
     READ_SO_FAR.fetch_add(1, Ordering::AcqRel);
     kept
+}
+
+/// The font files read so far. A thread that panicked while it held them left them whole (each
+/// change is a single insert or remove), so they are used as they are.
+fn files() -> std::sync::MutexGuard<'static, Files> {
+    FILES.get_or_init(Mutex::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Hands the loader thread a job, starting it the first time. False if it couldn't be.
@@ -172,10 +177,10 @@ fn send(job: Job) -> bool {
                     }
                     Job::Read(path, loaded) => {
                         let read = read_font_file(&path);
-                        if let Ok(mut files) = FILES.get_or_init(Mutex::default).lock() {
-                            files.reading.remove(&path);
-                            files.read.entry(path).or_insert(read);
-                        }
+                        let mut files = files();
+                        files.reading.remove(&path);
+                        files.read.entry(path).or_insert(read);
+                        drop(files);
                         READ_SO_FAR.fetch_add(1, Ordering::AcqRel);
                         loaded();
                     }
@@ -354,10 +359,8 @@ mod tests {
 
     /// Whether a file has been read for the shaper, or is being read.
     fn read_or_reading(path: &Path) -> bool {
-        FILES
-            .get()
-            .and_then(|files| files.lock().ok())
-            .is_some_and(|files| files.read.get(path).is_some_and(Option::is_some) || files.reading.contains(path))
+        let files = files();
+        files.read.get(path).is_some_and(Option::is_some) || files.reading.contains(path)
     }
 
     /// Every glyph of a text laid out in a family, with its place.

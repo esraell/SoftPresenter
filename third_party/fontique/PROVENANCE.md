@@ -43,7 +43,11 @@ Everything is marked `SoftPresenter:` in the source. Removed from the published 
 - **`src/source_cache.rs`:**
   - `load_blob` reads the file into memory of its own (`std::fs::read`) where it was mapped.
     Only the fonts the shaper asks for are loaded, as before; each now costs its file's size
-    in memory, where mapped pages could be dropped by the system.
+    in memory, where mapped pages could be dropped by the system. Measured on a Mac
+    (2026-11-21): a song in three families and the Bible template's came to about 7 MB, read
+    once for every thread. But a slide with one emoji reads Apple Color Emoji whole (188 MB),
+    and a sign the theme's font lacks (a cross, ✝) can lead the shaper on to a large fallback
+    font (STHeiti Medium, 54 MB); SoftPresenter keeps each until it quits.
   - New: the type `SourceLoader` and `SourceCache::set_loader`. A cache given a loader has it
     read font files in place of reading them itself, and a loader may say no (`None`), which the
     cache remembers as a failure until `prune` is asked to forget failures, as before.
