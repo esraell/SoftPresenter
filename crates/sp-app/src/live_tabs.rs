@@ -672,9 +672,9 @@ fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             let button =
                 Rect::from_min_size(pos2(more.min.x - CARD_GAP - button_wide, y - 15.0), vec2(button_wide, 30.0));
             let (words, look, hint) = if showing {
-                ("Hide", Flat::On, "Take this message off the screens (F6)")
+                ("Hide", Flat::On, crate::keys::clear_hint("Take this message off the screens", "F6"))
             } else {
-                ("Show", Flat::Plain, "Show this message over the slides on the audience screens")
+                ("Show", Flat::Plain, "Show this message over the slides on the audience screens".to_owned())
             };
             let toggle = egui::Id::unique(("message show", id));
             if flat_button(ui, button, toggle, words, button_font.clone(), look, true).on_hover_text(hint).clicked() {

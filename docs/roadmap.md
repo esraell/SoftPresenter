@@ -35,7 +35,7 @@ rather than a feature, but no church on Windows can use the app without them.
 
 ## Running a service
 
-- **Clear buttons of your own.** Each clears a chosen set of layers (for example words and props, keeping the background), and can be used from keys, macros and remotes. (started: a clear button for each layer, Clear All, and F1–F6) · M · Medium
+- **Clear buttons of your own.** Each clears a chosen set of layers (for example words and props, keeping the background), and can be used from keys, macros and remotes. (started: a clear button for each layer, Clear All, a macro's Clear steps for every layer, and F1–F6 off a Mac) · M · Medium
 - **Slides shown on the stage screens only.** A key or a slide action sends the slides that follow to the stage screens only, while the audience keeps its picture (band notes, sermon notes). · M · Medium
 - **Fixing a slide's words from the Show view.** A small pop-up for a typo spotted mid-service, without opening the editor. (started: the editor, Reflow and Live Edit) · S–M · Medium
 - **A whole song that moves on by itself.** One setting in the song's header moves every slide on after 5, 10, 15 or 20 seconds or a time of your own, for announcement loops. (started: Go to Next on each slide, set one by one from fixed times of 3 to 60 seconds, and Loop to First Slide) · S · Medium

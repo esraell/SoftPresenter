@@ -144,7 +144,8 @@ The full list, area by area, is in [docs/features.md](docs/features.md).
    Space. The right arrow and Space go forward, the left arrow goes back, and letters jump to a
    group (A for Verse 1, C for the chorus). With View, Continuous Playlist on, the last slide of
    a song leads into the next song. Escape clears everything, walk-in music and announcements
-   included; F2 to F6 clear one layer at a time. Timers, messages and macros sit in the tabs
+   included; the layer keys under the preview clear one layer at a time (on Windows and Linux,
+   F2 to F6 do too). Timers, messages and macros sit in the tabs
    under Clear All.
 8. **Afterwards.** There is nothing to save: every change is written as you make it, and the
    playlist is ready for next week.
@@ -203,8 +204,8 @@ status` instead of `sp status`.
 | Up / Down arrow | open the playlist item above / below; in the Bible view, pick the verse before / after |
 | Enter | put the picked slide on screen (the first verse or slide of what the find box or the reference field just opened, or the verse picked); otherwise the open item from its first slide |
 | Home / End | first / last slide of the song |
-| Escape (or F1) | clear everything, audio and announcements included |
-| F2 / F3 / F4 / F5 / F6 | clear the slide / the media / the props / the audio / the message |
+| Escape (off a Mac, F1 too) | clear everything, audio and announcements included |
+| F2 / F3 / F4 / F5 / F6 (off a Mac) | clear the slide / the media / the props / the audio / the message; a Mac's F keys are the system's, so there the layer keys under the preview do it |
 | A, S, D, F… | jump to Verse 1, 2, 3, 4… |
 | C, X, Z | jump to Chorus 1, 2, 3 |
 | B, N, M | jump to Bridge 1, 2, 3 |

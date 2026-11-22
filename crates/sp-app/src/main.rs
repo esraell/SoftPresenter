@@ -108,8 +108,8 @@ Options:
                          home window to FILE (PNG) and quit
   -h, --help             Show this help
 
-Keys: Right or Space next, Left previous, Home first, End last, C clear slide,
-      F1 clear all.
+Keys: Right or Space next, Left previous, Home first, End last, Escape clear all
+      (off a Mac, F1 too, and F2 to F6 clear one layer each).
 ";
 
 #[derive(Debug)]
@@ -834,18 +834,26 @@ fn something_over_the_window(state: &home::HomeState, ctx: &egui::Context) -> bo
 /// hot key puts it on screen; otherwise a letter jumps to the group it stands for (A for the
 /// first verse, C for the chorus, and so on).
 fn show_key_command(key: &Key, show: &Show) -> Option<Command> {
+    show_key_command_on(key, show, keys::f_keys())
+}
+
+/// The keys that run the show, with the F keys clearing (off a Mac) or not (on a Mac, where
+/// they are the system's: brightness, volume, Mission Control).
+fn show_key_command_on(key: &Key, show: &Show, f_keys: bool) -> Option<Command> {
     match key {
         Key::Named(NamedKey::ArrowRight | NamedKey::Space) => Some(Command::Next),
         Key::Named(NamedKey::ArrowLeft) => Some(Command::Previous),
         Key::Named(NamedKey::Home) => Some(Command::First),
         Key::Named(NamedKey::End) => Some(Command::Last),
-        // Escape clears everything; F1 does too, for keyboards that have it to hand.
-        Key::Named(NamedKey::Escape | NamedKey::F1) => Some(Command::ClearAll),
-        Key::Named(NamedKey::F2) => Some(Command::Clear(sp_engine::Layer::Slides)),
-        Key::Named(NamedKey::F3) => Some(Command::Clear(sp_engine::Layer::Media)),
-        Key::Named(NamedKey::F4) => Some(Command::Clear(sp_engine::Layer::Props)),
-        Key::Named(NamedKey::F5) => Some(Command::Clear(sp_engine::Layer::Audio)),
-        Key::Named(NamedKey::F6) => Some(Command::Clear(sp_engine::Layer::Messages)),
+        // Escape clears everything; off a Mac F1 does too, for keyboards that have it to hand,
+        // and F2 to F6 clear one layer each.
+        Key::Named(NamedKey::Escape) => Some(Command::ClearAll),
+        Key::Named(NamedKey::F1) if f_keys => Some(Command::ClearAll),
+        Key::Named(NamedKey::F2) if f_keys => Some(Command::Clear(sp_engine::Layer::Slides)),
+        Key::Named(NamedKey::F3) if f_keys => Some(Command::Clear(sp_engine::Layer::Media)),
+        Key::Named(NamedKey::F4) if f_keys => Some(Command::Clear(sp_engine::Layer::Props)),
+        Key::Named(NamedKey::F5) if f_keys => Some(Command::Clear(sp_engine::Layer::Audio)),
+        Key::Named(NamedKey::F6) if f_keys => Some(Command::Clear(sp_engine::Layer::Messages)),
         // The key that opens find is never a slide's hot key or a group's letter.
         key if opens_find(key) => None,
         Key::Character(typed) => {
@@ -9632,8 +9640,22 @@ mod tests {
         assert_eq!(key(Key::Named(NamedKey::ArrowLeft)), Some(Command::Previous));
         assert_eq!(key(Key::Named(NamedKey::Home)), Some(Command::First));
         assert_eq!(key(Key::Named(NamedKey::End)), Some(Command::Last));
-        assert_eq!(key(Key::Named(NamedKey::F1)), Some(Command::ClearAll));
         assert_eq!(key(Key::Named(NamedKey::Escape)), Some(Command::ClearAll));
+        // The F keys: off a Mac F1 clears everything and F2 to F6 a layer each; on a Mac they
+        // are the system's and do nothing here.
+        let f = |key: NamedKey, f_keys: bool| show_key_command_on(&Key::Named(key), &show, f_keys);
+        let layer = |layer| Some(Command::Clear(layer));
+        assert_eq!(f(NamedKey::F1, true), Some(Command::ClearAll));
+        assert_eq!(f(NamedKey::F2, true), layer(sp_engine::Layer::Slides));
+        assert_eq!(f(NamedKey::F3, true), layer(sp_engine::Layer::Media));
+        assert_eq!(f(NamedKey::F4, true), layer(sp_engine::Layer::Props));
+        assert_eq!(f(NamedKey::F5, true), layer(sp_engine::Layer::Audio));
+        assert_eq!(f(NamedKey::F6, true), layer(sp_engine::Layer::Messages));
+        for key in [NamedKey::F1, NamedKey::F2, NamedKey::F3, NamedKey::F4, NamedKey::F5, NamedKey::F6] {
+            assert_eq!(f(key, false), None, "{key:?} on a Mac");
+        }
+        assert_eq!(f(NamedKey::Escape, false), Some(Command::ClearAll), "Escape still clears on a Mac");
+        assert_eq!(key(Key::Named(NamedKey::F1)).is_some(), keys::f_keys(), "this computer's way");
         // Unless the Bibles window or the setup is open: then Escape closes it.
         let ctx = egui::Context::default();
         let mut state = home::HomeState::default();

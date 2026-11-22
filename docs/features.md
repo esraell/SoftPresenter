@@ -397,8 +397,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **Props**: things that stay over the slides until taken off, made in the editor, with an
   optional time to clear themselves. Each is a card with a small picture of it, its name, Show
   or Hide (the card is tinted orange while it shows), and ⋯ with Edit in the Editor (a
-  double-click does the same), Clears Itself, Rename, Duplicate and Delete. F4 or the Props key
-  takes them all off. In the Edit view, under Props, they are also made (Add), copied, moved up
+  double-click does the same), Clears Itself, Rename, Duplicate and Delete. The Props key (off
+  a Mac, F4 too) takes them all off. In the Edit view, under Props, they are also made (Add), copied, moved up
   and down and deleted; a prop's right-click menu there has Clears Itself, Rename, Duplicate
   and Delete…, and the strip under the picture of one that shows is orange. With the last prop
   deleted there, the Edit view goes on to the slides.
@@ -440,8 +440,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the next. Then the tracks, with how many and Add tracks…: a click plays one, a drag moves it
   to another place, and its ⋯ has Play, Move Up, Move Down, Rename and Remove. Removing the track
   that is playing (or deleting its playlist) lets it play to its end, its name still shown; then,
-  with Play through on, the playlist goes on as it now stands, from the place it had. F5, the
-  Audio key or Clear All stops it.
+  with Play through on, the playlist goes on as it now stands, from the place it had. The Audio
+  key (off a Mac, F5 too) or Clear All stops it.
 - **Stage**: with more than one stage screen, a chooser of which (All stage screens to begin
   with); then every stage layout as a tile with a picture of what the stage would show in it
   now (drawn by the screens' renderer, again when the slide, the stage message or the clock's
@@ -497,6 +497,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   between its choices, Right opens a group of them, Left goes back, Enter chooses and Escape
   closes; Space and the arrows don't run the show while a menu is open. After a slider or a
   menu is used, the keyboard goes back to running the show.
+- **Clearing from the keyboard**: Escape clears everything. On a Mac no F key is used (they
+  are the system's: brightness, volume, Mission Control), so clearing one layer is its key
+  under the preview, and the list of keys and Settings › Key Mappings say "Button only" for
+  it. On Windows and Linux F1 clears everything too, and F2, F3, F4, F5 and F6 clear the slide,
+  the media, the props, the audio and the message; the layer keys' tooltips name them there.
 - **The Edit view** edits four kinds of thing, chosen by a switch at the top of its left
   column: a song's Slides, the Themes and their templates, the Props, and the Stage screens'
   layouts. View › Themes, Control-T and `sp view themes` open

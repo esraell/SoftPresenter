@@ -10,8 +10,8 @@
 //!   four seconds, or until Escape, which then only puts them away.
 //! - `?` (and the round button in the top bar) opens the list of every key.
 //!
-//! The keys that run the show (Space, the arrows, Escape, the F keys, the letters) are read in
-//! `main.rs` before the window draws; these are read here, in the window's frame.
+//! The keys that run the show (Space, the arrows, Escape, the F keys off a Mac, the letters) are
+//! read in `main.rs` before the window draws; these are read here, in the window's frame.
 
 use egui::{Align2, Color32, FontId, Key, Rect, Stroke, StrokeKind, pos2, vec2};
 
@@ -71,6 +71,25 @@ pub fn with_modifier(key: &str) -> String {
 pub fn with_shift(key: &str) -> String {
     format!("{}{key}", shift_modifier())
 }
+
+/// Whether the F keys clear the screens (F1 everything, F2 to F6 one layer each): off a Mac
+/// only. A Mac's F keys are the system's (brightness, volume, Mission Control), so there Escape
+/// clears everything and the layer keys in the right column clear one layer each.
+pub fn f_keys() -> bool {
+    !cfg!(target_os = "macos")
+}
+
+/// A layer key's tooltip, with its F key after it off a Mac: "… (F2)".
+pub fn clear_hint(what: &str, f_key: &str) -> String {
+    clear_hint_on(what, f_key, f_keys())
+}
+
+fn clear_hint_on(what: &str, f_key: &str, f_keys: bool) -> String {
+    if f_keys { format!("{what} ({f_key})") } else { what.to_owned() }
+}
+
+/// What the list of keys says in place of a key for something only a button does.
+pub const BUTTON_ONLY: &str = "Button only";
 
 /// The modifier the tool tabs' keys use: Option on a Mac, Alt elsewhere.
 pub fn tab_modifier() -> &'static str {
@@ -340,6 +359,12 @@ type Row = (Vec<String>, String);
 /// The list of every key, in groups, as the window shows it: the list of keys (`?`) and
 /// Settings › Key Mappings are both made from it.
 pub fn every_key() -> Vec<(&'static str, Vec<Row>)> {
+    every_key_on(f_keys())
+}
+
+/// The list of every key, with the F keys (off a Mac) or without them (on a Mac, where clearing
+/// one layer is the layer keys' alone).
+fn every_key_on(f_keys: bool) -> Vec<(&'static str, Vec<Row>)> {
     let m = with_modifier;
     let one = |key: &str| vec![key.to_owned()];
     let keys = |keys: &[&str]| keys.iter().map(|key| (*key).to_owned()).collect::<Vec<_>>();
@@ -367,10 +392,20 @@ pub fn every_key() -> Vec<(&'static str, Vec<Row>)> {
         ),
         (
             "Clearing",
-            vec![
-                row(keys(&["Esc", "F1"]), "Clear everything"),
-                row(keys(&["F2", "F3", "F4", "F5", "F6"]), "Clear the slide, media, props, audio, message"),
-            ],
+            if f_keys {
+                vec![
+                    row(keys(&["Esc", "F1"]), "Clear everything"),
+                    row(keys(&["F2", "F3", "F4", "F5", "F6"]), "Clear the slide, media, props, audio, message"),
+                ]
+            } else {
+                vec![
+                    row(one("Esc"), "Clear everything"),
+                    row(
+                        one(BUTTON_ONLY),
+                        "Clear the slide, media, props, messages, audio or announcements: the layer keys under the preview",
+                    ),
+                ]
+            },
         ),
         (
             "Going places",
@@ -609,6 +644,27 @@ mod tests {
             frame(ui.ctx(), state, false);
         })
         .drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn the_f_keys_clear_off_a_mac_and_on_a_mac_one_layer_is_cleared_by_its_button_only() {
+        let clearing =
+            |f_keys: bool| every_key_on(f_keys).into_iter().find(|(group, _)| *group == "Clearing").expect("listed").1;
+        let keys = |rows: &[Row]| rows.iter().flat_map(|(keys, _)| keys.clone()).collect::<Vec<_>>();
+        // Windows and Linux: Escape and F1 clear everything; F2 to F6 a layer each.
+        assert_eq!(keys(&clearing(true)), ["Esc", "F1", "F2", "F3", "F4", "F5", "F6"]);
+        // A Mac: Escape alone, and the layers by their keys in the right column.
+        assert_eq!(keys(&clearing(false)), ["Esc", BUTTON_ONLY]);
+        let no_f_key = |key: &String| !(key.len() >= 2 && key.starts_with('F') && key[1..].parse::<u8>().is_ok());
+        for (group, rows) in every_key_on(false) {
+            for (keys, _) in rows {
+                assert!(keys.iter().all(no_f_key), "{group}: {keys:?}");
+            }
+        }
+        // The layer keys' tooltips name their F key off a Mac only.
+        assert_eq!(clear_hint_on("Clear the props", "F4", true), "Clear the props (F4)");
+        assert_eq!(clear_hint_on("Clear the props", "F4", false), "Clear the props");
+        assert_eq!(f_keys(), !cfg!(target_os = "macos"));
     }
 
     #[test]

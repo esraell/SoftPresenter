@@ -12978,8 +12978,10 @@ mod tests {
                 assert!(drawn.contains(&keys.join("  ")), "{group}: {keys:?}");
             }
         }
-        // Among them the audio's F5, and Delete as it is.
-        assert!(drawn.iter().any(|words| words.contains("F5")));
+        // Among them the audio's F5 off a Mac, and on a Mac "Button only" for clearing one
+        // layer; and Delete as it is.
+        assert_eq!(drawn.iter().any(|words| words.contains("F5")), crate::keys::f_keys());
+        assert_eq!(drawn.iter().any(|words| words.contains(crate::keys::BUTTON_ONLY)), !crate::keys::f_keys());
         assert!(drawn.iter().any(|words| words.contains("playlist items go at once")));
     }
 

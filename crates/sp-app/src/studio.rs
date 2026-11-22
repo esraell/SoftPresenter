@@ -4220,13 +4220,19 @@ pub fn right_column(
         // The six layer keys: each is lit while its layer shows, and clears that layer alone.
         let keys_top = block.max.y + 12.0;
         let each = (width - 2.0 * 7.0) / 3.0;
+        let hint = crate::keys::clear_hint;
         let layers = [
-            ("SLIDE", Layer::Slides, slide, "Clear the slide: take the words off the screens (F2)"),
-            ("MEDIA", Layer::Media, media, "Clear the media: take the picture or video off the screens (F3)"),
-            ("PROPS", Layer::Props, props, "Clear the props: take them off the screens (F4)"),
-            ("MESSAGES", Layer::Messages, message, "Clear the message: take it off the screens (F6)"),
-            ("AUDIO", Layer::Audio, audio, "Clear the audio: stop it playing (F5)"),
-            ("ANNOUNCE", Layer::Announcements, announcing, "Clear the announcements: take them off the screens"),
+            ("SLIDE", Layer::Slides, slide, hint("Clear the slide: take the words off the screens", "F2")),
+            ("MEDIA", Layer::Media, media, hint("Clear the media: take the picture or video off the screens", "F3")),
+            ("PROPS", Layer::Props, props, hint("Clear the props: take them off the screens", "F4")),
+            ("MESSAGES", Layer::Messages, message, hint("Clear the message: take it off the screens", "F6")),
+            ("AUDIO", Layer::Audio, audio, hint("Clear the audio: stop it playing", "F5")),
+            (
+                "ANNOUNCE",
+                Layer::Announcements,
+                announcing,
+                "Clear the announcements: take them off the screens".to_owned(),
+            ),
         ];
         for (place, (name, layer, lit, hint)) in layers.into_iter().enumerate() {
             let corner = pos2(left + (each + 7.0) * (place % 3) as f32, keys_top + 54.0 * (place / 3) as f32);
@@ -4237,7 +4243,7 @@ pub fn right_column(
             let ink = if lit { TEXT } else { TEXT_FAINT };
             let at = pos2(face.min.x + 23.0, face.center().y);
             paint_spaced(ui, at, Align2::LEFT_CENTER, name, fixed_semibold(11.0), ink, 0.6);
-            if response.on_hover_text(if lit { hint } else { "Nothing showing" }).clicked() {
+            if response.on_hover_text(if lit { hint.as_str() } else { "Nothing showing" }).clicked() {
                 commands.push(Command::Clear(layer));
             }
         }
