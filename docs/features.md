@@ -252,7 +252,7 @@ feature changes, this page changes in the same commit.
   a song shown by itself, to add a slide of its own; also
   Add to Song as Slide on the item's right-click menu, and Media on a slide's. The slide's
   thumbnail shows the media behind its words.
-- A slide's right-click menu: Edit, Cut, Copy, Paste, Delete, Group (mark where a verse, chorus
+- A slide's right-click menu: Edit, Cut, Copy, Paste (each with its key), Duplicate, Delete…, Move Up, Move Down, Group (mark where a verse, chorus
   or bridge starts), Copy and Paste Text Style, Label (Blank Slide, Instrumental, Repeat, Spoken Word), Transition (its own,
   or as all slides), Hot Key (a letter or digit that puts the slide on screen, shown on its
   picture), Go to Next (after a number of seconds, shown on its picture), Disable, Template.

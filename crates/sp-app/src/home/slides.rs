@@ -2377,7 +2377,7 @@ fn slide_menu(
     made: bool,
 ) {
     let (which, index) = (here.presentation, here.slide);
-    if ui.button("Edit Slide").clicked() {
+    if ui.button("Edit").clicked() {
         state.editing = EditDraft::of(show, here);
         ui.close();
     }
@@ -2396,23 +2396,44 @@ fn slide_menu(
     if these.is_empty() {
         these.push(index);
     }
-    if ui.button("Cut").clicked() {
+    let key = |letter: &str| crate::keys::with_modifier(letter);
+    if ui.add(egui::Button::new("Cut").shortcut_text(key("X"))).clicked() {
         copy_slides(ui.ctx(), state, presentation, &these);
         state.slide_request = Some((here, SlideRequest::DeleteMany(these.clone())));
         ui.close();
     }
-    if ui.button("Copy").clicked() {
+    if ui.add(egui::Button::new("Copy").shortcut_text(key("C"))).clicked() {
         copy_slides(ui.ctx(), state, presentation, &these);
         ui.close();
     }
     let clip = state.slide_clip.clone();
-    if ui.add_enabled(!clip.is_empty(), egui::Button::new("Paste")).clicked() {
+    if ui.add_enabled(!clip.is_empty(), egui::Button::new("Paste").shortcut_text(key("V"))).clicked() {
         state.slide_request = Some((here, SlideRequest::PasteAfter(clip)));
+        ui.close();
+    }
+    // A copy of the slides (this one, or those picked with it) just after them.
+    if ui.button("Duplicate").clicked() {
+        let copies: Vec<Slide> =
+            these.iter().filter_map(|at| presentation.slide(*at).map(|(_, one)| one.clone())).collect();
+        let last = SlideRef { slide: these.last().copied().unwrap_or(index), ..here };
+        state.slide_request = Some((last, SlideRequest::PasteAfter(copies)));
         ui.close();
     }
     if ui.button("Delete…").clicked() {
         state.confirm_delete_slides =
             if state.picked_slides.contains(&here) { state.picked_slides.clone() } else { vec![here] };
+        ui.close();
+    }
+    // One place up or down the song (with the slides picked with it).
+    let (first, last) = (these.first().copied().unwrap_or(index), these.last().copied().unwrap_or(index));
+    if ui.add_enabled(first > 0, egui::Button::new("Move Up")).clicked() {
+        let to = first - 1;
+        state.slide_request = Some((here, SlideRequest::Move { slides: these.clone(), to, after: false }));
+        ui.close();
+    }
+    if ui.add_enabled(last + 1 < presentation.slide_count(), egui::Button::new("Move Down")).clicked() {
+        let to = last + 1;
+        state.slide_request = Some((here, SlideRequest::Move { slides: these.clone(), to, after: true }));
         ui.close();
     }
     ui.separator();
