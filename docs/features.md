@@ -8,6 +8,9 @@ line.
 SoftPresenter is young: some of this is rough, and file formats may still change. When a
 feature changes, this page changes in the same commit.
 
+No list, page or menu in the app shows a scroll bar: everything scrolls by the trackpad, the
+mouse wheel (with Shift for sideways) or the keys, and the whole width is the content's.
+
 ## Running a service
 - Songs shown as a grid of slides, a words-only view or a table (number, group, words, notes),
   with a size slider. Click a slide, or use the [keys](../README.md#keys), to put it on the

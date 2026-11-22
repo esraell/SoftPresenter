@@ -607,6 +607,23 @@ pub fn apply_style(ctx: &egui::Context) {
         style.spacing.button_padding = vec2(10.0, 5.0);
         style.spacing.item_spacing = vec2(8.0, 6.0);
         style.spacing.interact_size.y = 26.0;
+        // No scroll bars anywhere, egui's own lists and menus included: everything scrolls by
+        // the trackpad, the wheel or the keys, and no strip at the edge takes room or clicks.
+        style.spacing.scroll = egui::style::ScrollStyle {
+            floating: true,
+            bar_width: 0.0,
+            floating_width: 0.0,
+            floating_allocated_width: 0.0,
+            bar_inner_margin: 0.0,
+            bar_outer_margin: 0.0,
+            dormant_background_opacity: 0.0,
+            active_background_opacity: 0.0,
+            interact_background_opacity: 0.0,
+            dormant_handle_opacity: 0.0,
+            active_handle_opacity: 0.0,
+            interact_handle_opacity: 0.0,
+            ..egui::style::ScrollStyle::floating()
+        };
     });
 }
 
@@ -5131,6 +5148,44 @@ pub mod tests {
             });
             output.drop_without_applying_deltas();
         }
+    }
+
+    #[test]
+    fn a_list_too_long_for_its_room_shows_no_scroll_bar_and_its_right_edge_takes_clicks() {
+        let ctx = styled();
+        let style = ctx.global_style();
+        assert_eq!(style.spacing.scroll.allocated_width(), 0.0, "no room is kept for a bar");
+        assert_eq!(style.spacing.scroll.bar_width, 0.0, "no strip at the edge senses the pointer");
+        // Forty rows in a list 200 high and 300 wide: a click 1 point in from its right edge,
+        // where a bar would be, still reaches the first row.
+        let (mut clicked, mut width) = (false, 0.0);
+        let first_row = pos2(299.0, 12.0);
+        let frames =
+            [vec![Event::PointerMoved(first_row)], vec![press(first_row, true)], vec![press(first_row, false)], vec![]];
+        for (n, events) in frames.into_iter().enumerate() {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(300.0, 400.0))),
+                time: Some(n as f64 * 0.1),
+                events,
+                ..RawInput::default()
+            };
+            let output = ctx.run_ui(input, |ui| {
+                ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                egui::Frame::NONE.inner_margin(0.0).show(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                        width = ui.available_width();
+                        for row in 0..40 {
+                            let response =
+                                ui.add_sized([ui.available_width(), 24.0], egui::Button::new(format!("Row {row}")));
+                            clicked |= row == 0 && response.clicked();
+                        }
+                    });
+                });
+            });
+            output.drop_without_applying_deltas();
+        }
+        assert!(clicked, "the row under the right edge took the click");
+        assert!(width >= 299.0, "the rows have the list's whole width, {width}");
     }
 
     fn press(at: egui::Pos2, pressed: bool) -> Event {
