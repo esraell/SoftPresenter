@@ -137,7 +137,6 @@ rather than a feature, but no church on Windows can use the app without them.
 
 - **Corner pin (keystone).** Pull each output's four corners to square up a projector that is off-axis. · M · Medium
 - **Screen sizes, and NDI size and frame rate.** LED walls, a wide lyric banner, 720p or 4K NDI, 1080p at 60 frames a second. (started: everything at 1920 × 1080, and NDI at 30 frames a second) · L · Medium
-- **Transparent output (alpha key).** Words on a see-through background over NDI (M), or key and fill (L), for a video switcher in a church that streams. (started: NDI carries no transparency yet) · M–L · Medium
 - **Colour correction per output.** Red, green, blue, gamma and black level, to match projectors and TVs. · M · Low
 - **Video delay per output.** · S–M · Low
 - **Part of a display per screen.** Send half or a quarter of a display (2×1, 2×2, 3×1 or your own split) for splitters. · S–M · Low
@@ -149,7 +148,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Test pattern window.** About ten patterns with options, a logo, and a choice of screen. (started: colour bars, a grid and white in the Screens menu) · S–M · Low
 - **Screens settings.** A performance overlay, the timing source, 10-bit colour and HDR, and Keynote screens. · S–L · Low
 - **Recording or streaming a screen.** Capture to disk, or stream over RTMP or to Resi, with a Live menu in the toolbar and capture actions. · L · Low
-- **Blackmagic SDI and HDMI outputs.** · L · Low
+- **Blackmagic SDI and HDMI outputs.** Including a see-through screen's fill and key on a card's two outputs, in step. (started: see-through screens, and a key screen on a display, a window or NDI) · L · Low
 
 ## Stage
 

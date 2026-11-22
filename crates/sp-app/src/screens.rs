@@ -6,6 +6,9 @@ use sp_model::{Rgba, Uuid};
 
 use crate::displays::{DisplayInfo, Placement, choose_output};
 
+mod background_ui;
+pub use background_ui::{background_rows, paint_background};
+
 /// Where a screen's picture goes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -79,8 +82,7 @@ pub struct Look {
     /// Shows another audience screen's key instead of the show, by that screen's id: how
     /// solid each pixel of its picture is, as a grey (white where solid, black where clear,
     /// greys at the soft edges), for a switcher that takes the words and their key as two
-    /// inputs. The key is made from the very picture that screen shows (see `window_fill`
-    /// and `ndi_fill` in output.rs).
+    /// inputs. The key is made from the very picture that screen shows (see `key_trouble`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key_of: Option<Uuid>,
 }
@@ -95,6 +97,24 @@ pub enum Alpha {
     Straight,
     /// The colour already multiplied by how solid it is, as if laid over black.
     Premultiplied,
+}
+
+impl Alpha {
+    pub fn name(self) -> &'static str {
+        match self {
+            Alpha::Straight => "straight",
+            Alpha::Premultiplied => "premultiplied",
+        }
+    }
+
+    /// The kind a word names, as `sp` takes it.
+    pub fn parse(word: &str) -> Option<Alpha> {
+        match word.trim().to_lowercase().as_str() {
+            "straight" => Some(Alpha::Straight),
+            "premultiplied" | "premultiply" | "pre-multiplied" => Some(Alpha::Premultiplied),
+            _ => None,
+        }
+    }
 }
 
 impl Default for Look {
@@ -117,6 +137,70 @@ impl Look {
     pub fn is_default(&self) -> bool {
         *self == Look::default()
     }
+
+    /// Every layer, black, nothing covered: the look given back by Show Everything, which
+    /// keeps whether the screen is see-through or a key, so a stream never turns solid by it.
+    pub fn everything(self) -> Look {
+        Look { see_through: self.see_through, key_of: self.key_of, ..Look::default() }
+    }
+
+    /// True when it shows every layer, black, nothing covered, whatever its background.
+    pub fn shows_everything(&self) -> bool {
+        self.everything() == *self
+    }
+}
+
+/// What the operator is told of a key screen, in plain words, when it is not showing its
+/// fill's key as it should: then it shows black (which keys nothing in, so a switcher shows
+/// its camera untouched), or for a solid fill, white. `None` when all is well, or the screen
+/// is not a key. `shown` says, for each screen in the list, whether it is going out now.
+///
+/// A key is made from the very picture its fill shows, so the two never show different
+/// moments: the key of a display or window from that screen's painted picture as its window
+/// is given it, the key of an NDI screen from the same picture as it comes back from the GPU.
+/// So a key and its fill are both displays or windows, or both NDI, and both going out.
+pub fn key_trouble(screens: &[Screen], index: usize, shown: &[bool]) -> Option<String> {
+    let screen = screens.get(index)?;
+    let fill_id = screen.look.key_of.filter(|_| screen.kind == Kind::Audience)?;
+    let Some(at) = screens.iter().position(|other| other.id == fill_id) else {
+        return Some("The screen it is the key of has been removed, so it shows black.".to_owned());
+    };
+    let fill = &screens[at];
+    let name = &fill.name;
+    if at == index {
+        return Some("A screen can't be its own key, so it shows black.".to_owned());
+    }
+    if fill.kind == Kind::Stage {
+        return Some(format!("\"{name}\" is a stage screen, which has no key, so this shows black."));
+    }
+    if fill.look.key_of.is_some() {
+        return Some(format!("\"{name}\" is a key itself, so this shows black."));
+    }
+    let ndi = |screen: &Screen| matches!(screen.output, Output::Ndi(_));
+    if ndi(screen) != ndi(fill) {
+        let on = if ndi(fill) { "NDI" } else { "a display or window" };
+        return Some(format!(
+            "\"{name}\" is on {on}. A key goes out beside its fill on two displays or windows, or on two NDI names, so this shows black."
+        ));
+    }
+    if !shown.get(at).copied().unwrap_or(false) {
+        return Some(format!("\"{name}\" isn't going out, so this shows black."));
+    }
+    if fill.look.see_through.is_none() {
+        return Some(format!("\"{name}\" is solid, so its key is all white. Make it see-through."));
+    }
+    None
+}
+
+/// What a screen's background is, in a few words, for `sp screens` and the Screens window:
+/// `None` for an ordinary solid screen.
+pub fn background_words(screens: &[Screen], index: usize) -> Option<String> {
+    let screen = screens.get(index).filter(|screen| screen.kind == Kind::Audience)?;
+    if let Some(fill) = screen.look.key_of {
+        let name = screens.iter().find(|other| other.id == fill).map_or("a screen that has gone", |other| &other.name);
+        return Some(format!("key of \"{name}\""));
+    }
+    screen.look.see_through.map(|alpha| format!("see-through, {} alpha", alpha.name()))
 }
 
 /// Where a screen ends up on this computer as it is now.
@@ -347,8 +431,62 @@ mod tests {
         let text = to_json(&[stream.clone(), key.clone()]);
         assert!(text.contains("\"see_through\": \"premultiplied\""), "{text}");
         assert_eq!(from_json(&text), Some(vec![stream.clone(), key.clone()]));
-        // Straight is the usual kind.
+        // Straight is the usual kind; every kind reads back by its name.
         assert_eq!(Alpha::default(), Alpha::Straight);
+        for alpha in [Alpha::Straight, Alpha::Premultiplied] {
+            assert_eq!(Alpha::parse(alpha.name()), Some(alpha));
+        }
+        assert_eq!(Alpha::parse("Premultiplied "), Some(Alpha::Premultiplied));
+        assert_eq!(Alpha::parse("shaped"), None);
+        // Show Everything gives back every layer but keeps the background, so a stream is
+        // never made solid by it.
+        assert_eq!(stream.look.everything(), Look { see_through: Some(Alpha::Premultiplied), ..Look::default() });
+        assert!(!stream.look.shows_everything() && stream.look.everything().shows_everything());
+        assert!(!stream.look.everything().is_default(), "still see-through, so still sent to the screens");
+        assert_eq!(
+            background_words(&[stream.clone(), key.clone()], 0).as_deref(),
+            Some("see-through, premultiplied alpha")
+        );
+        assert_eq!(background_words(&[stream, key], 1).as_deref(), Some("key of \"Stream\""));
+    }
+
+    #[test]
+    fn a_key_says_why_it_shows_black_whenever_it_cannot_follow_its_fill() {
+        let see_through = Look { see_through: Some(Alpha::Straight), ..Look::default() };
+        let fill = Screen { look: see_through, ..Screen::new("Stream".to_owned(), Output::Window) };
+        let key_of = |id| Look { key_of: Some(id), ..Look::default() };
+        let key = Screen { look: key_of(fill.id), ..Screen::new("Key".to_owned(), Output::Window) };
+        let trouble = |screens: &[Screen], shown: &[bool]| key_trouble(screens, screens.len() - 1, shown);
+        // Two windows (or displays), both going out: all is well.
+        assert_eq!(trouble(&[fill.clone(), key.clone()], &[true, true]), None);
+        assert_eq!(key_trouble(&[fill.clone(), key.clone()], 0, &[true, true]), None, "the fill is no key");
+        // Both on NDI: all is well too.
+        let ndi = |screen: &Screen, name: &str| Screen { output: Output::Ndi(name.to_owned()), ..screen.clone() };
+        assert_eq!(trouble(&[ndi(&fill, "Fill"), ndi(&key, "Key")], &[true, true]), None);
+        // One on NDI and one in a window: they could not show the same moment.
+        let mixed = trouble(&[ndi(&fill, "Fill"), key.clone()], &[true, true]).unwrap();
+        assert!(mixed.contains("is on NDI") && mixed.contains("shows black"), "{mixed}");
+        let mixed = trouble(&[fill.clone(), ndi(&key, "Key")], &[true, true]).unwrap();
+        assert!(mixed.contains("display or window"), "{mixed}");
+        // The fill not going out (off, or its display unplugged).
+        let off = trouble(&[fill.clone(), key.clone()], &[false, true]).unwrap();
+        assert!(off.contains("isn't going out"), "{off}");
+        // A solid fill: its key is all white.
+        let solid = Screen { look: Look::default(), ..fill.clone() };
+        assert!(trouble(&[solid, key.clone()], &[true, true]).unwrap().contains("all white"));
+        // Its own key, a stage screen's, another key's, or one that has gone.
+        let own = Screen { look: key_of(key.id), ..key.clone() };
+        assert!(trouble(&[fill.clone(), own], &[true, true]).unwrap().contains("own key"));
+        let stage = Screen { look: see_through, ..Screen::stage("Band".to_owned(), Output::Window) };
+        let of_stage = Screen { look: key_of(stage.id), ..key.clone() };
+        assert!(trouble(&[stage, of_stage], &[true, true]).unwrap().contains("stage screen"));
+        let other_key = Screen { look: key_of(fill.id), ..Screen::new("Key 1".to_owned(), Output::Window) };
+        let of_key = Screen { look: key_of(other_key.id), ..key.clone() };
+        assert!(trouble(&[fill.clone(), other_key, of_key], &[true, true, true]).unwrap().contains("a key itself"));
+        assert!(trouble(std::slice::from_ref(&key), &[true]).unwrap().contains("removed"));
+        // A stage screen is never a key, whatever its file says.
+        let stage_key = Screen { look: key_of(fill.id), ..Screen::stage("Band".to_owned(), Output::Window) };
+        assert_eq!(trouble(&[fill, stage_key], &[true, true]), None);
     }
 
     fn displays(names: &[&str]) -> Vec<DisplayInfo> {

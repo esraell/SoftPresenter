@@ -6921,6 +6921,9 @@ impl ApplicationHandler<AppEvent> for App {
                     );
                 }
                 let _ = incoming.reply.send(reply);
+                // A screen changed from the command line reaches the screens now, not at the
+                // window's next redraw (which an idle or hidden window may not have for a while).
+                self.sync_screens(el);
                 self.sync_panels(el);
                 return;
             }

@@ -4155,6 +4155,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
         let (picture, _) = ui.allocate_exact_size(vec2(width, (width * 9.0 / 16.0).min(190.0)), Sense::hover());
         let frame_rect = Rect::from_center_size(picture.center(), vec2(picture.height() * 16.0 / 9.0, picture.height()));
         ui.painter().rect_filled(frame_rect, 8.0, Color32::BLACK);
+        crate::screens::paint_background(ui.painter(), frame_rect, &screen.look);
         ui.painter().rect_stroke(frame_rect, 8.0, Stroke::new(1.0, LINE), StrokeKind::Inside);
         let target = match &screen.output {
             Output::Automatic => "Automatic".to_owned(),
@@ -4334,10 +4335,12 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
             if *look != before {
                 changed = true;
             }
-            if !look.is_default() && ui.small_button("Show Everything").on_hover_text("Back to every layer, black, nothing covered").clicked() {
-                *look = crate::screens::Look::default();
+            if !look.shows_everything() && ui.small_button("Show Everything").on_hover_text("Back to every layer, black, nothing covered").clicked() {
+                *look = look.everything();
                 changed = true;
             }
+            // Solid or see-through, or the key of another screen.
+            changed |= crate::screens::background_rows(ui, &mut state.screens, index, &state.screen_status);
         }
         if screen.kind == Kind::Stage {
             ui.add_space(6.0);

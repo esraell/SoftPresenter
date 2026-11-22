@@ -945,6 +945,8 @@ Screens and settings
   screen set SCREEN key=value… name= output=display:NAME|window|ndi:NAME|automatic|off
                                kind=audience|stage layers=slides,media,… color=#RRGGBB
                                edges=L,T,R,B theme=THEME|main layout=STAGE-LAYOUT
+                               background=solid|see-through alpha=straight|premultiplied
+                               key=SCREEN|none (shows that screen's key: white where solid)
   screen delete SCREEN --yes
   settings                     the choices kept between runs
   groups                       each group's colour, and the letter key that jumps to it
@@ -1788,18 +1790,29 @@ impl crate::App {
     }
 
     /// Each screen, and what it is doing: filling a display, in a window, sending over NDI, or
-    /// off and why.
+    /// off and why; and a see-through screen's alpha, or whose key a key screen shows (and
+    /// why it shows black, when it can't).
     fn ctl_screens(&self) -> Reply {
         let Some(state) = self.running.as_ref().map(|r| &r.home_state) else {
             return Reply::with("", serde_json::json!([]));
         };
+        let shown: Vec<bool> = state.screen_status.iter().map(|(_, shown)| *shown).collect();
         let lines: Vec<String> = state
             .screens
             .iter()
             .enumerate()
-            .map(|(at, screen)| match state.screen_status.get(at) {
-                Some((doing, _)) => format!("{}: {doing}", screen.name),
-                None => screen.name.clone(),
+            .map(|(at, screen)| {
+                let mut line = match state.screen_status.get(at) {
+                    Some((doing, _)) => format!("{}: {doing}", screen.name),
+                    None => screen.name.clone(),
+                };
+                if let Some(background) = crate::screens::background_words(&state.screens, at) {
+                    line.push_str(&format!("; {background}"));
+                }
+                if let Some(trouble) = crate::screens::key_trouble(&state.screens, at, &shown) {
+                    line.push_str(&format!(" ({trouble})"));
+                }
+                line
             })
             .collect();
         let data: Vec<serde_json::Value> = state
@@ -1807,8 +1820,21 @@ impl crate::App {
             .iter()
             .enumerate()
             .map(|(at, screen)| {
-                let (doing, shown) = state.screen_status.get(at).cloned().unwrap_or_default();
-                serde_json::json!({"name": screen.name, "doing": doing, "shown": shown})
+                let (doing, shown_now) = state.screen_status.get(at).cloned().unwrap_or_default();
+                let audience = screen.kind == crate::screens::Kind::Audience;
+                let key_of = screen.look.key_of.filter(|_| audience).and_then(|fill| {
+                    state.screens.iter().find(|other| other.id == fill).map(|other| other.name.clone())
+                });
+                let see_through = screen.look.see_through.filter(|_| audience && screen.look.key_of.is_none());
+                serde_json::json!({
+                    "name": screen.name,
+                    "doing": doing,
+                    "shown": shown_now,
+                    "background": if see_through.is_some() { "see-through" } else { "solid" },
+                    "alpha": see_through.map(crate::screens::Alpha::name),
+                    "key_of": key_of,
+                    "key_trouble": crate::screens::key_trouble(&state.screens, at, &shown),
+                })
             })
             .collect();
         Reply::with(numbered(&lines), serde_json::json!(data))

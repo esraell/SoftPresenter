@@ -106,10 +106,12 @@ impl crate::App {
         Ok(Reply::done(format!("Added the {} screen {name}, on {said}.", if stage { "stage" } else { "audience" })))
     }
 
-    /// `screen set SCREEN key=value…`: name, output, kind, layers, color, edges, theme, layout.
+    /// `screen set SCREEN key=value…`: name, output, kind, layers, color, edges, theme, layout,
+    /// background, alpha, key.
     fn screen_set(&mut self, words: &[String]) -> Result<Reply, String> {
         let usage = "screen set SCREEN name=… output=display:NAME|window|ndi:NAME|automatic|off kind=audience|stage \
-                     layers=slides,media,props,messages,announcements color=#RRGGBB edges=LEFT,TOP,RIGHT,BOTTOM theme=THEME|main layout=STAGE-LAYOUT";
+                     layers=slides,media,props,messages,announcements color=#RRGGBB edges=LEFT,TOP,RIGHT,BOTTOM theme=THEME|main layout=STAGE-LAYOUT \
+                     background=solid|see-through alpha=straight|premultiplied key=SCREEN|none";
         let at = words.iter().position(|w| w.contains('=')).filter(|at| *at > 0).ok_or(usage)?;
         let theme_names: Vec<(sp_model::Uuid, String)> = self.themes.iter().map(|t| (t.id, t.name.clone())).collect();
         let connected = self.connected_displays();
@@ -120,9 +122,47 @@ impl crate::App {
             state.stage_layouts.iter().map(|l| (l.id, l.name.clone())).collect();
         let mut screen = state.screens[index].clone();
         let mut said = Vec::new();
+        // Solid or see-through, and the alpha, are weighed together once all are read.
+        let (mut background, mut alpha): (Option<bool>, Option<crate::screens::Alpha>) = (None, None);
         for setting in &words[at..] {
             let (key, value) = setting.split_once('=').ok_or(usage)?;
             match key.to_lowercase().as_str() {
+                "background" => {
+                    background = Some(match value.to_lowercase().replace([' ', '_'], "-").as_str() {
+                        "solid" => false,
+                        "see-through" | "seethrough" | "transparent" | "clear" => true,
+                        other => return Err(format!("background is solid or see-through, not {other}.")),
+                    });
+                }
+                "alpha" => {
+                    alpha = Some(
+                        crate::screens::Alpha::parse(value)
+                            .ok_or_else(|| format!("alpha is straight or premultiplied, not {value}."))?,
+                    );
+                }
+                "key" | "key_of" | "key-of" => {
+                    if ["none", "off", "no"].contains(&value.to_lowercase().as_str()) {
+                        screen.look.key_of = None;
+                        said.push("not a key".to_owned());
+                    } else {
+                        let fill = find("screen", &names, value)?;
+                        let of = &state.screens[fill];
+                        if fill == index {
+                            return Err(format!("{} can't be its own key.", names[index]));
+                        }
+                        if of.kind != Kind::Audience {
+                            return Err(format!("{} is a stage screen, which has no key.", of.name));
+                        }
+                        if of.look.key_of.is_some() {
+                            return Err(format!(
+                                "{} is a key itself; a key is of a screen that shows the show.",
+                                of.name
+                            ));
+                        }
+                        screen.look.key_of = Some(of.id);
+                        said.push(format!("the key of {}", of.name));
+                    }
+                }
                 "name" => {
                     screen.name = value.trim().to_owned();
                     said.push(format!("called {}", screen.name));
@@ -211,6 +251,37 @@ impl crate::App {
                 }
                 other => return Err(format!("{other} isn't a screen setting. {usage}")),
             }
+        }
+        match (background, alpha) {
+            (Some(false), Some(_)) => {
+                return Err("A solid screen has no alpha; alpha is for background=see-through.".to_owned());
+            }
+            (Some(false), None) => {
+                screen.look.see_through = None;
+                said.push("solid".to_owned());
+            }
+            (Some(true), _) => {
+                let alpha = alpha.or(screen.look.see_through).unwrap_or_default();
+                screen.look.see_through = Some(alpha);
+                said.push(format!("see-through, {} alpha", alpha.name()));
+            }
+            (None, Some(alpha)) if screen.look.see_through.is_some() => {
+                screen.look.see_through = Some(alpha);
+                said.push(format!("{} alpha", alpha.name()));
+            }
+            (None, Some(_)) => {
+                return Err(format!(
+                    "{} is solid; add background=see-through to send it see-through with that alpha.",
+                    screen.name
+                ));
+            }
+            (None, None) => {}
+        }
+        if (background == Some(true) || screen.look.key_of.is_some()) && screen.kind != Kind::Audience {
+            return Err(format!("{} is a stage screen; only an audience screen is see-through or a key.", screen.name));
+        }
+        if background == Some(true) && screen.look.key_of.is_some() {
+            said.push("(a key shows its screen's key, not a background of its own)".to_owned());
         }
         let was = std::mem::replace(&mut state.screens[index], screen);
         state.screens_changed = true;

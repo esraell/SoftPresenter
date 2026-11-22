@@ -537,6 +537,35 @@ feature changes, this page changes in the same commit.
   themselves: one not opened yet (normally the slide thumbnails have opened it already) is
   opened meanwhile and the slide drawn again once it is there, within a few thousandths of a
   second; until then its words are drawn in fonts already opened, or left out.
+- **See-through screens, for a church that streams.** An audience screen's Background can be
+  Solid (as usual) or See-through: clear wherever nothing is drawn, so a video switcher or
+  streaming software lays the words over its camera picture. A see-through screen leaves out
+  whatever would cover the whole picture: the media behind the words, every theme's background
+  colour and picture (the announcements' too), and its own colour; its covered edges are cut
+  away, not coloured. Everything placed on the slides stays: the words, the layout's and the
+  slide's own shapes and pictures (a lower third's bar), props, messages, the copyright line and
+  the announcements' words. With the audience screens off it is all clear. Its fades are true
+  cross-fades (a push or a wipe would leave the old words showing under the new, with nothing
+  solid to cover them), and a fade through black or white goes through clear. Over NDI the clear
+  parts go with the picture (NDI's RGBA, which NDI's documentation says is not premultiplied);
+  Soft edges chooses how a partly solid pixel's colour is sent, Straight (the usual, and NDI's
+  own way) or Premultiplied, for whatever the switcher expects. A display or window can't show
+  see-through, so there the screen shows its picture solid: the colours as they are, or
+  premultiplied (as over black). The Screens window's small picture of the screen has a
+  chequerboard behind it; the Program preview shows the room's picture, not the see-through one.
+- **Key and fill.** For a switcher that takes the words and their shape as two inputs, another
+  audience screen can be made the Key of a see-through one: it shows how solid each pixel of
+  that screen's picture is, white where solid, black where clear, greys at the soft edges, while
+  the see-through screen shows the colours (the fill). The key is made from the very picture its
+  fill shows, so the two always show the same slide at the same moment, fades and builds
+  included: on two displays or windows, from the picture painted for the fill's window as it is
+  given it; on two NDI names, from the same pixels read back from the GPU once and handed to
+  both together. A key whose fill is not going out, or is on the other kind of output (one NDI,
+  one a display), shows black, which keys nothing in, and the Screens window and `sp screens`
+  say why; the key of a solid screen is all white. Two displays, or two NDI names, still go out
+  each on its own clock, so unless the outputs are locked together a switcher may get the two
+  up to a frame apart; over NDI, one see-through screen (which carries its own alpha) has no
+  such gap.
 
 <img src="images/screens.png" alt="The Screens window" width="620">
 
@@ -618,7 +647,8 @@ feature changes, this page changes in the same commit.
   NAME`.
 - Screens and settings from the command line: `screen add audience|stage NAME [on display
   NAME|window|ndi NAME|automatic]`, `screen set SCREEN key=value…` (name, output, kind, layers,
-  colour, edges, theme, stage layout), `screen delete SCREEN --yes`; `settings` and `settings set
+  colour, edges, theme, stage layout, background solid or see-through, alpha, key of another
+  screen), `screen delete SCREEN --yes`; `settings` and `settings set
   key=value…` (transitions, the copyright line and CCLI licence, the audience screens at start,
   what starts with the app, the continuous playlist, the slide view and size); `view reflow
   [SONG]`; and `help COMMAND` for one command's help, without the app running. Bible downloads

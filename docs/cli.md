@@ -140,7 +140,7 @@ mistake impossible:
 | `playlists`, `playlist [NAME]` | The playlists; one playlist's items (the one in front if none is named) |
 | `media` | The media bin's pictures and videos |
 | `themes`, `timers`, `messages`, `props`, `macros`, `audio` | Each list, with its state: a timer's kind, time and whether it runs; a message's words and whether it shows; a prop on screen; a macro's steps |
-| `screens`, `displays`, `stage layouts` | Each screen and what it is doing (for a screen on NDI, how many receivers are watching it, or that nobody is); the connected displays; the stage layouts and the screens that use them |
+| `screens`, `displays`, `stage layouts` | Each screen and what it is doing (for a screen on NDI, how many receivers are watching it, or that nobody is), and whether it is see-through (with its alpha) or the key of another (and why it shows black, if it does); the connected displays; the stage layouts and the screens that use them |
 | `groups` | The group names that have a jump key, with their colours |
 | `settings` | The app's settings |
 | `menu` | Every menu bar item: its id and its words |
@@ -711,7 +711,7 @@ kept with:
 | Command | Does |
 |---|---|
 | `screen add audience\|stage NAME [on display NAME\|window\|ndi NAME\|automatic]` | A new screen (in a window unless told) |
-| `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|automatic\|off`, `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT` |
+| `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|automatic\|off`, `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT`; for an audience screen `background=solid\|see-through`, `alpha=straight\|premultiplied` (how a see-through screen sends its soft edges; straight unless told), `key=SCREEN\|none` (shows that screen's key) |
 | `screen delete SCREEN --yes` | Deletes a screen (there is always one) |
 | `settings set key=value…` | `transition=KIND[:SECONDS]`, `media_transition=…`, `copyright=never\|first\|last\|every`, `ccli_licence=DIGITS`, `start_audience=on\|off`, `start_with=nothing\|media-playlist:NAME\|announcements:SONG`, `continuous=on\|off`, `view=grid\|easy\|table`, `columns=1-12` |
 
@@ -732,6 +732,38 @@ kept with:
 
 A screen set to a display that isn't plugged in keeps it by name and waits for it. Displays are
 named as macOS names them (`sp displays`); the main display, with the menu bar, is never filled.
+
+A see-through screen is clear wherever nothing is drawn, for a video switcher or streaming
+software to lay the words over its camera picture: the media, the themes' backgrounds and the
+screen's colour are left out (features.md says what stays). Over NDI it carries its clear parts.
+For a switcher that takes the words and their shape as two inputs, a second screen is made its
+key, on a second display or NDI name of the same kind:
+
+    $ sp screen set Stream background=see-through
+    The screen Stream: see-through, straight alpha.
+    $ sp screen set Stream alpha=premultiplied
+    The screen Stream: premultiplied alpha.
+    $ sp screen add audience Stream key on ndi Sanctuary key
+    Added the audience screen Stream key, on NDI as Sanctuary key.
+    $ sp screen set "Stream key" key=Stream
+    The screen Stream key: the key of Stream.
+    $ sp screens
+      1. Screen 1: Filling "3DTV", 1920 x 1080
+      2. Stream: Sending as "Sanctuary" to 1 receiver; see-through, premultiplied alpha
+      3. Stream key: Sending as "Sanctuary key" to 1 receiver; key of "Stream"
+    $ sp screen set "Stream key" output=window
+    The screen Stream key: on a window.
+    $ sp screens
+      …
+      3. Stream key: In a window; key of "Stream" ("Stream" is on NDI. A key goes out beside its fill on two displays or windows, or on two NDI names, so this shows black.)
+    $ sp screen set Lobby alpha=straight
+    Lobby is solid; add background=see-through to send it see-through with that alpha.
+    $ sp screen set "Stream key" key=none
+    The screen Stream key: not a key.
+
+The JSON of `screens` gives each screen's `background` (`solid` or `see-through`), `alpha`
+(`straight`, `premultiplied`, or null), `key_of` (the name of the screen whose key it shows, or
+null) and `key_trouble` (why a key shows black, or null), beside `name`, `doing` and `shown`.
 
 ## VoxLive
 

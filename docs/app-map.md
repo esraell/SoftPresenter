@@ -176,7 +176,7 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 
 | Window | Opened from | Holds |
 |---|---|---|
-| Screens | Settings, Screens; or Screens, Configure Screens… | Audience and stage screens: where each goes (a display, a window, NDI, off), its name, its look (which layers, colour, covered edges); what each is doing now (for NDI, how many receivers are watching, or that nobody is); Identify |
+| Screens | Settings, Screens; or Screens, Configure Screens… | Audience and stage screens: where each goes (a display, a window, NDI, off), its name, its look (which layers, colour, covered edges); an audience screen's Background, Solid or See-through (clear where nothing is drawn, for a switcher to lay over a camera; Soft edges Straight or Premultiplied), and Key (shows another screen's key, white where solid, beside it on a second display or NDI name), in `screens/background_ui.rs`; what each is doing now (for NDI, how many receivers are watching, or that nobody is; why a key shows black); Identify. `sp screen set SCREEN background=… alpha=… key=…`, `sp screens` |
 | Settings | ⚙ or Command-comma | General (copyright line, start-up choices), Screens, Groups (names and colours), Key Mappings, Integrations (VoxLive: its API key, its state, the church's screens; click a screen to change its look, with a preview, and save it to VoxLive; `voxlive …`, `voxlive look`) |
 
 ## Where the app keeps things
