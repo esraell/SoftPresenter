@@ -1062,11 +1062,14 @@ fn open_edit_kind(show: &Show, state: &mut HomeState) {
     }
     state.edit_kind_request = None;
     match kind {
-        EditKind::Slides => {
-            if let Some(draft) = EditDraft::of(show, slide_to_edit(show, state)) {
-                state.editing = Some(draft);
-            }
-        }
+        // Never nothing: a song that can be edited (see `song_to_edit`), or a word on why not.
+        EditKind::Slides => match song_to_edit(show, state).and_then(|at| EditDraft::of(show, at)) {
+            Some(draft) => state.editing = Some(draft),
+            None => state.say(format!(
+                "There is no song to edit yet. Make one with New Song ({}), or import some.",
+                crate::keys::hint_key("N")
+            )),
+        },
         EditKind::Themes => state.theme_request = Some(crate::home::ThemeRequest::Edit(state.theme_for_songs)),
         EditKind::Props => {
             if let Some(draft) = prop_draft(state, 0) {
@@ -2233,6 +2236,30 @@ pub fn slide_to_edit(show: &Show, state: &HomeState) -> SlideRef {
         .filter(|at| at.presentation == song)
         .or_else(|| show.cursor().filter(|at| at.presentation == song))
         .unwrap_or(SlideRef { presentation: song, slide: 0 })
+}
+
+/// The slide Edit opens on, so that Edit (Command-3, its key in the top bar, View › Edit)
+/// always opens something when there is a song: [`slide_to_edit`] when the song chosen can be
+/// edited; when it can't (it has no slides, or it is a Bible passage or the VoxLive item, which
+/// the app makes), the slide on screen or last on screen when that is in a song that can, then
+/// the first song of the playlist in front, then the first song there is. `None` with no song
+/// that has a slide.
+pub fn song_to_edit(show: &Show, state: &HomeState) -> Option<SlideRef> {
+    let editable = |at: SlideRef| {
+        !state.app_made(at.presentation)
+            && !state.removed_songs.contains(&at.presentation)
+            && show.presentations().get(at.presentation).is_some_and(|song| song.slide(at.slide).is_some())
+    };
+    let first = |song: usize| Some(SlideRef { presentation: song, slide: 0 }).filter(|at| editable(*at));
+    let playlist = state.services.front().items.iter().filter_map(|item| match item {
+        crate::service::Item::Song { key, .. } => playlist_song(show, state, key),
+        _ => None,
+    });
+    Some(slide_to_edit(show, state))
+        .filter(|at| editable(*at))
+        .or_else(|| show.live().or(show.cursor()).filter(|at| editable(*at)))
+        .or_else(|| playlist.into_iter().find_map(first))
+        .or_else(|| (0..show.presentations().len()).find_map(first))
 }
 
 /// A question asked before something is deleted, drawn as a macOS alert: a small rounded panel

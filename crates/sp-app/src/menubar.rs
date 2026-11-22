@@ -561,10 +561,24 @@ mod mac {
             Code::KeyY,
             Code::KeyZ,
         ];
+        // Every digit: a shortcut with one this table lacked got no key in the menu bar, while
+        // the window still left that key to the menu (see `claims`), so it did nothing at all.
+        // Command-3 (Edit) was lost that way.
+        const DIGITS: [Code; 10] = [
+            Code::Digit0,
+            Code::Digit1,
+            Code::Digit2,
+            Code::Digit3,
+            Code::Digit4,
+            Code::Digit5,
+            Code::Digit6,
+            Code::Digit7,
+            Code::Digit8,
+            Code::Digit9,
+        ];
         match key {
             'A'..='Z' => LETTERS.get(usize::from(key as u8 - b'A')).copied(),
-            '1' => Some(Code::Digit1),
-            '2' => Some(Code::Digit2),
+            '0'..='9' => DIGITS.get(usize::from(key as u8 - b'0')).copied(),
             ',' => Some(Code::Comma),
             '=' => Some(Code::Equal),
             '-' => Some(Code::Minus),
@@ -678,6 +692,21 @@ mod mac {
                     *shown = now;
                 }
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn every_shortcut_the_window_leaves_to_the_menu_has_a_key_in_the_menu() {
+            for (action, shortcut) in super::super::items() {
+                let Some(shortcut) = shortcut else { continue };
+                assert!(code(shortcut.key).is_some(), "{action:?}: {}", shortcut.key);
+                assert!(accelerator(Some(shortcut)).is_some(), "{action:?}");
+            }
+            assert_eq!(code('3'), Some(Code::Digit3), "Command-3 is Edit");
         }
     }
 }

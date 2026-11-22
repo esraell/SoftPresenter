@@ -510,6 +510,12 @@ feature changes, this page changes in the same commit.
 ![The Bible page: John 3:16-18 in the Russian Synodal and the King James Version, beside the book, chapter and verse lists](images/bible.png)
 
 ## Editing
+- **Edit always opens something.** Command-3, the Edit key in the top bar and View › Edit open
+  the song chosen in the Show view (at the slide picked out, or the slide on screen when it is in
+  that song). When that song can't be edited (it has no slides, or it is a Bible passage or the
+  VoxLive item, which the app makes), Edit opens the song on screen, then the first song of the
+  playlist in front, then the first song there is; with no song at all a notice says how to make
+  one. On a Mac, Command-3 had stopped reaching the menu bar's Edit; it does again.
 - **Moving slides.** Drag a slide to another place in its song, in the Show view's grid or the
   Edit view's list; an ink line shows where it will go (before or after the slide it is dropped
   on, by which half of it the pointer is over, in that slide's group), the slides being moved go

@@ -7766,6 +7766,78 @@ mod tests {
         }
     }
 
+    /// Command-3 (Ctrl+3 elsewhere) pressed in the window, and the frame after it, in which the
+    /// view switch opens what was asked for. Returns the song the slide editor opened, if any.
+    fn press_edit_key(ctx: &egui::Context, show: &Show, state: &mut HomeState) -> Option<usize> {
+        frame_commands(ctx, show, state, vec![], 0.0);
+        frame_commands(ctx, show, state, pressed(Key::Num3, Modifiers::COMMAND), 0.1);
+        frame_commands(ctx, show, state, vec![], 0.2);
+        state.editing.as_ref().map(|draft| draft.at.presentation)
+    }
+
+    #[test]
+    fn edit_opens_the_song_chosen_whatever_playlist_item_is_open() {
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        show.apply(Command::Select(1));
+        show.add_media(sp_model::MediaItem::new("Welcome.png".into(), "Welcome.png".into()));
+        let id = show.media()[0].id;
+        let mut state = HomeState { playlist_open: true, ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        state.song_keys = vec!["title:Alpha".to_owned(), "title:Beta".to_owned()];
+        state.services.add(crate::service::Item::Song { key: "title:Beta".to_owned(), title: "Beta".to_owned() });
+        state.services.add(crate::service::Item::Media { id, name: "Welcome.png".to_owned() });
+        state.services.add(crate::service::Item::Placeholder { name: "Sermon".to_owned() });
+        // A picture, then a placeholder, opened from the playlist: Edit opens Beta, the song chosen.
+        for item in [1, 2] {
+            let mut state = HomeState { services: state.services.clone(), ..HomeState::default() };
+            (state.playlist_open, state.bible.slots, state.song_keys) =
+                (true, Some([2, 3]), vec!["title:Alpha".to_owned(), "title:Beta".to_owned()]);
+            state.services.chosen = Some(item);
+            assert_eq!(press_edit_key(&ctx, &show, &mut state), Some(1), "item {item}");
+        }
+        state.services.chosen = Some(0);
+        assert_eq!(press_edit_key(&ctx, &show, &mut state), Some(1));
+    }
+
+    #[test]
+    fn edit_never_does_nothing_and_never_opens_a_bible_passage() {
+        let ctx = egui::Context::default();
+        // The song chosen has no slides: the song on screen (Alpha) is opened instead.
+        let mut show = service_with_bible_places();
+        let empty = sp_model::Presentation {
+            title: "Empty".to_owned(),
+            groups: Vec::new(),
+            ..(*show.presentations()[1]).clone()
+        };
+        show.replace_presentation(1, Arc::new(empty));
+        show.apply(Command::Select(1));
+        let mut state = HomeState::default();
+        state.bible.slots = Some([2, 3]);
+        assert_eq!(press_edit_key(&ctx, &show, &mut state), Some(0), "the song on screen");
+        // A Bible passage chosen (as `sp bible --show` leaves it) and on screen: a song, not the passage.
+        let mut show = service_with_bible_places();
+        let mut state = HomeState::default();
+        state.bible.slots = Some([2, 3]);
+        state.bible.lookup = "jn 3:16".to_owned();
+        state.bible.look_up(None);
+        as_the_app_does(&mut show, &mut state, vec![]);
+        show.apply(Command::Select(2));
+        show.apply(Command::GoTo(SlideRef { presentation: 2, slide: 0 }));
+        assert_eq!(press_edit_key(&ctx, &show, &mut state), Some(0), "the first song");
+        // No song at all: Edit says so, and the view stays.
+        let mut show = service_with_bible_places();
+        for at in 0..2 {
+            let empty = sp_model::Presentation { groups: Vec::new(), ..(*show.presentations()[at]).clone() };
+            show.replace_presentation(at, Arc::new(empty));
+        }
+        let mut state = HomeState::default();
+        state.bible.slots = Some([2, 3]);
+        assert_eq!(press_edit_key(&ctx, &show, &mut state), None);
+        let said = state.toast.as_ref().map(|(words, _)| words.clone()).unwrap_or_default();
+        assert!(said.starts_with("There is no song to edit yet"), "{said}");
+    }
+
     #[test]
     fn a_click_on_a_slide_puts_it_on_screen_as_before_and_the_pick_goes() {
         let ctx = egui::Context::default();
