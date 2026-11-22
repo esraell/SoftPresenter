@@ -67,8 +67,8 @@ SoftPresenter is built to be:
   app watches, and an announcements layer that loops by itself. Videos play as they are, never
   converted.
 - **Screens.** Any number of audience screens on displays (never the one the operator works
-  on), in windows, over NDI or out of a Blackmagic DeckLink card (SDI or HDMI, with the card's
-  keyer), each with its own look and theme if you like (a lobby can show
+  on), in windows, over NDI or out of a Blackmagic Design DeckLink card (SDI or HDMI, with the
+  card's keyer), each with its own look and theme if you like (a lobby can show
   only the media, a stream a lower third); stage screens with layouts you design; test patterns
   and Identify Screens.
 - **Live tools.** Timers, messages over the slides, props such as a logo, macros that do several

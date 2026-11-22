@@ -23,7 +23,7 @@ pub enum Output {
     Window,
     /// The network, over NDI, under this name.
     Ndi(String),
-    /// A Blackmagic DeckLink card's output (SDI or HDMI).
+    /// A Blackmagic Design DeckLink card's output (SDI or HDMI).
     #[serde(rename = "decklink")]
     DeckLink(DeckLinkOut),
     /// Nowhere. The screen is kept in the list for later.

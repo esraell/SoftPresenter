@@ -602,7 +602,7 @@ feature changes, this page changes in the same commit.
 
 ## Screens
 - Any number of audience screens, each sent to a display, a window, the network over NDI, or
-  a Blackmagic DeckLink card's output (SDI or HDMI), all showing the same picture, set up in the
+  a Blackmagic Design DeckLink card's output (SDI or HDMI), all showing the same picture, set up in the
   Screens window (**Option-Command-1**).
 - **DeckLink outputs** (SoftPresenter for Blackmagic Design DeckLink). With Blackmagic's driver,
   Desktop Video 16.0 or later, installed, each output the card offers is a choice for any

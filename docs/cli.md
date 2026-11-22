@@ -744,38 +744,46 @@ kept with:
 A screen set to a display that isn't plugged in keeps it by name and waits for it. Displays are
 named as macOS names them (`sp displays`); the main display, with the menu bar, is never filled.
 
-A screen can play out of a Blackmagic DeckLink card, where Blackmagic's Desktop Video (16.0 or
+A screen can play out of a Blackmagic Design DeckLink card, where Blackmagic's Desktop Video (16.0 or
 later) is installed. `sp decklink` lists the outputs as the driver names them (a DeckLink Duo 2
 shows four, one for each SDI connector), with the formats each plays in and whether it can key;
 a new DeckLink screen starts in 1080i59.94 (or the nearest the device has), and `mode=` sets
 the format the switcher or projector expects. Each output plays one screen. A screen keeps its
 output while the card is away and plays out of it again when it is back, never out of another
 card. A quiet test copy (`SOFTPRESENTER_QUIET`) never plays out of a card; with
-`SOFTPRESENTER_PRETEND_DECKLINK=1` it lists made-up devices that play into nothing, to try this:
+`SOFTPRESENTER_PRETEND_DECKLINK=1` it lists made-up devices that play into nothing, to try this.
+On such a test copy (a real card is listed by its own name, "DeckLink Duo (1)"):
 
     $ sp decklink
-      1. DeckLink Duo (1): SDI, no keying; formats 720p50, 720p59.94, 720p60, 1080i50, 1080i59.94, 1080i60, 1080p23.98, 1080p24, 1080p25, 1080p29.97, 1080p30, 1080p50, 1080p59.94, 1080p60; a new output starts in 1080i59.94
+      1. Pretend DeckLink (1): SDI, no keying; formats 720p50, 720p59.94, 720p60, 1080i50, 1080i59.94, 1080i60, 1080p23.98, 1080p24, 1080p25, 1080p29.97, 1080p30, 1080p50, 1080p59.94, 1080p60; a new output starts in 1080i59.94
       …
+      5. Pretend DeckLink Keyer: SDI, external and internal keying; formats 720p50, …; a new output starts in 1080i59.94
     $ sp screen add audience Switcher on decklink 1
-    Added the audience screen Switcher, on DeckLink Duo (1) at 1080i59.94.
+    Added the audience screen Switcher, on Pretend DeckLink (1) at 1080i59.94.
     $ sp screen set Switcher mode=1080p29.97
     The screen Switcher: in 1080p29.97.
     $ sp screens
-      1. Screen 1: Filling "3DTV", 1920 x 1080
+      1. Screen 1: In a window
       2. Switcher: Playing at 1080p29.97
     $ sp screen set Switcher mode=1080i47
-    DeckLink Duo (1) has no format 1080i47. Its formats: 720p50, 720p59.94, …
+    Pretend DeckLink (1) has no format 1080i47. Its formats: 720p50, 720p59.94, 720p60, 1080i50, 1080i59.94, 1080i60, 1080p23.98, 1080p24, 1080p25, 1080p29.97, 1080p30, 1080p50, 1080p59.94, 1080p60.
 
 Where the card can key (`sp decklink` says so; a DeckLink Duo 2 can once Desktop Video Setup
 pairs its connectors), the card itself can send a see-through screen's fill and key, in step:
 
+    $ sp screen set Switcher keyer=external
+    Pretend DeckLink (1) can't do external keying in its card's present profile (it can do no keying).
+    $ sp screen set Switcher output=decklink:5
+    The screen Switcher: on Pretend DeckLink Keyer at 1080i59.94.
     $ sp screen set Switcher background=see-through keyer=external
-    The screen Switcher: see-through, straight alpha, fill and key from the card's keyer.
-    $ sp screen set Switcher keyer=internal
-    DeckLink Duo (1) can't do internal keying in its card's present profile (it can do external keying).
+    The screen Switcher: fill and key from the card's keyer, see-through, straight alpha.
+    $ sp screens
+      1. Screen 1: In a window
+      2. Switcher: Playing at 1080i59.94, fill and key; see-through, straight alpha
 
 Without the driver, `sp decklink` says Desktop Video isn't installed (or is too old) and there
 are no DeckLink outputs to choose; a screen saved with one says the same in `sp screens`.
+
 ### Checking a DeckLink card
 
 `softpresenter decklink-check` is the app's own program run from a terminal, with no app

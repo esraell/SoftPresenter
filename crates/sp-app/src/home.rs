@@ -3405,7 +3405,8 @@ fn output_label(output: &Output, displays: &[DisplayInfo]) -> String {
         },
         Output::Window => "A window".to_owned(),
         Output::Ndi(_) => "NDI".to_owned(),
-        Output::DeckLink(out) => format!("{}   (DeckLink)", out.device),
+        // As the driver names it ("DeckLink Duo (1)"), and nothing more.
+        Output::DeckLink(out) => out.device.clone(),
         Output::Off => "Off".to_owned(),
     }
 }
@@ -4372,7 +4373,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
             Output::Display(name) => name.clone(),
             Output::Window => "Window".to_owned(),
             Output::Ndi(name) => format!("NDI  ·  {name}"),
-            Output::DeckLink(out) => format!("DeckLink  ·  {}", out.device),
+            Output::DeckLink(out) => out.device.clone(),
             Output::Off => "Off".to_owned(),
         };
         let repeats = status.trim() == target.trim();
@@ -4466,7 +4467,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                 "Other computers on the network can show this screen, at 1920 × 1080. NDI® is a registered trademark of Vizrt NDI AB."
             }
             Output::DeckLink(_) => {
-                "Played out of a Blackmagic DeckLink card, on its connector, in the format chosen here. A new slide goes at once, without a dissolve."
+                "Played out of a Blackmagic Design DeckLink card, on its connector, in the format chosen here. A new slide goes at once, without a dissolve."
             }
             Output::Off => "This screen is kept in the list and shows nowhere.",
         };
