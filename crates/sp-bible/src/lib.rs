@@ -577,6 +577,21 @@ mod tests {
     }
 
     #[test]
+    fn every_books_name_in_one_language_reads_back_as_that_book_whatever_language_is_preferred() {
+        // Names written in the page's language are read back with the first Bible's preferred
+        // ("1 Царів" is Ukrainian 1 Kings, though "1 цар" is a Russian short form for 1 Samuel).
+        for book in 0..BOOKS.len() {
+            for written in ["en", "ru", "uk"] {
+                for preferred in ["en", "ru", "uk"] {
+                    let name = format!("{} 1", book_name(book, written));
+                    let read = parse_reference_in(&name, preferred).map(|range| range.start.book);
+                    assert_eq!(read, Ok(book), "{name} read with {preferred} preferred");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn a_psalm_reads_as_one_and_psalms_as_several_and_each_reads_back_as_the_same_verses() {
         let psalms = book_by_code("PSA").unwrap();
         let at = |chapter, verse| VerseRef { book: psalms, chapter, verse };
