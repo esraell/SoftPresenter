@@ -1554,6 +1554,10 @@ pub fn home_ui(
     canvas: Option<TextureId>,
 ) -> Vec<Command> {
     let mut commands = Vec::new();
+    // The window's own colour behind everything, the gaps between the three columns and round
+    // their corners included: the margins a column's frame leaves are not painted by it, and
+    // would otherwise show the black the window is cleared to.
+    ui.ctx().layer_painter(egui::LayerId::background()).rect_filled(ui.ctx().content_rect(), 0.0, crate::studio::BG);
     // The lists made from the songs are made again only once the songs have changed.
     let hidden = state.hidden_slots();
     state.lists.songs.check(show, &state.song_keys, hidden, &state.removed_songs);
