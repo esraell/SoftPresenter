@@ -171,13 +171,17 @@ pub fn paint_light(painter: &egui::Painter, centre: egui::Pos2, lit: Option<Colo
     }
 }
 
+/// The faint inner edge of every chosen control (a pill, a key, a flat or menu button that is
+/// on): white at 14%, as the design has it.
+pub const ON_EDGE: Color32 = Color32::from_rgba_premultiplied(36, 36, 36, 36);
+
 /// The pill of a segmented switch or of a row of tabs: the chosen one is the lighter grey
 /// with a faint inner edge, the others are only their words.
 fn paint_pill(painter: &egui::Painter, cell: Rect, on: bool) {
     if on {
         let round = cell.height() / 2.0;
         painter.rect_filled(cell, round, SELECTED);
-        painter.rect_stroke(cell, round, Stroke::new(1.0, Color32::from_white_alpha(26)), StrokeKind::Inside);
+        painter.rect_stroke(cell, round, Stroke::new(1.0, ON_EDGE), StrokeKind::Inside);
     }
 }
 
@@ -448,7 +452,7 @@ pub fn round_key(ui: &egui::Ui, centre: egui::Pos2, side: f32, id: &str, fill: C
     let painter = ui.painter();
     if on {
         painter.circle_filled(centre, side / 2.0, SELECTED);
-        painter.circle_stroke(centre, side / 2.0 - 0.5, Stroke::new(1.0, Color32::from_white_alpha(26)));
+        painter.circle_stroke(centre, side / 2.0 - 0.5, Stroke::new(1.0, ON_EDGE));
     } else {
         painter.circle_filled(centre, side / 2.0, if response.hovered() { BUTTON_HOVER } else { fill });
     }
@@ -481,7 +485,7 @@ pub fn paint_flat(painter: &egui::Painter, rect: Rect, corner: f32, look: Flat, 
         }
         Flat::On => {
             painter.rect_filled(rect, corner, SELECTED);
-            painter.rect_stroke(rect, corner, Stroke::new(1.0, Color32::from_white_alpha(26)), StrokeKind::Inside);
+            painter.rect_stroke(rect, corner, Stroke::new(1.0, ON_EDGE), StrokeKind::Inside);
         }
         Flat::Main => {
             painter.rect_filled(rect, corner, if hovered { Color32::WHITE } else { TEXT });
@@ -1415,7 +1419,7 @@ pub fn labelled_button(
     let painter = ui.painter();
     if on {
         painter.rect_filled(rect, 9.0, SELECTED);
-        painter.rect_stroke(rect, 9.0, Stroke::new(1.0, Color32::from_white_alpha(26)), StrokeKind::Inside);
+        painter.rect_stroke(rect, 9.0, Stroke::new(1.0, ON_EDGE), StrokeKind::Inside);
     } else {
         painter.rect_filled(rect, 9.0, if response.hovered() || open { BUTTON_HOVER } else { BUTTON });
     }
