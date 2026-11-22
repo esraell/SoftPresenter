@@ -997,7 +997,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   jumps to another display); it goes back to its display as soon as it is connected again.
   Identify Screens marks each screen with its name, a border and a wash of its own colour that
   breathes a few times to catch the eye (the Screens window shows each screen's colour beside
-  it), and the Screens menu puts a test pattern
+  it). While it is on, however it was started (the menu bar or the Screens window), the row
+  under the preview says "Identifying the screens: the room sees it" with **Stop**, which ends it,
+  before anything else that plays; choosing Identify Screens again ends it too. The Screens menu
+  puts a test pattern
   (colour bars, a grid, or white) on the audience screens.
 - Each audience screen has a look: which layers it shows (slides, media, props, messages; a
   lobby screen might show only the media), its colour where nothing is drawn, and how much of

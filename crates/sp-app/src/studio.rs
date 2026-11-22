@@ -4443,7 +4443,20 @@ fn preview_block(
     // The row for whatever is playing: always there, so Clear All never moves.
     let row =
         Rect::from_min_max(pos2(inner.min.x + 2.0, readout.max.y + 6.0), pos2(inner.max.x - 2.0, readout.max.y + 36.0));
-    if let Some(video) = state.video_live.clone() {
+    // Identify first: it covers every screen the room sees, so it can be stopped from here
+    // whatever else plays, however it was started.
+    if state.identify {
+        if playing_line(
+            ui,
+            row,
+            "Identifying the screens:",
+            "the room sees it",
+            "Stop",
+            "Take each screen's name and colour off it",
+        ) {
+            state.identify = false;
+        }
+    } else if let Some(video) = state.video_live.clone() {
         video_row(ui, state, &video, row);
     } else if let Some((_, name)) = state.announcement_live.clone() {
         if playing_line(ui, row, "Announcements:", &name, "Clear", "Take the announcements off the screens") {

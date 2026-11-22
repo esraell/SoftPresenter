@@ -12762,6 +12762,33 @@ mod tests {
     }
 
     #[test]
+    fn identify_shows_under_the_preview_and_stop_ends_it() {
+        let ctx = egui::Context::default();
+        let show = three_songs();
+        // Started from the menu bar, with a test pattern on too: Identify is what the row shows.
+        let mut state =
+            HomeState { identify: true, test_pattern: Some(crate::props::TestPattern::Grid), ..HomeState::default() };
+        frame_texts(&ctx, &show, &mut state, vec![], 0.0);
+        let texts = frame_texts(&ctx, &show, &mut state, vec![], 0.1);
+        assert!(drawn_at(&texts, "Identifying the screens:").is_some());
+        assert!(drawn_at(&texts, "the room sees it").is_some());
+        assert!(drawn_at(&texts, "Test pattern:").is_none(), "one thing at a time in the row");
+        let stop = drawn_at(&texts, "Stop").expect("its Stop key");
+        let press = |pressed| Event::PointerButton {
+            pos: stop,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        frame_texts(&ctx, &show, &mut state, vec![Event::PointerMoved(stop), press(true)], 0.2);
+        frame_texts(&ctx, &show, &mut state, vec![press(false)], 0.3);
+        assert!(!state.identify, "Stop ends it");
+        let texts = frame_texts(&ctx, &show, &mut state, vec![], 0.4);
+        assert!(drawn_at(&texts, "Identifying the screens:").is_none());
+        assert!(drawn_at(&texts, "Test pattern:").is_some(), "the row goes back to what plays");
+    }
+
+    #[test]
     fn a_timer_renamed_takes_its_messages_along_once_names_are_its_own() {
         let mut state = HomeState::default();
         // Two timers of one name, as an older file may have: a token shows the first.
