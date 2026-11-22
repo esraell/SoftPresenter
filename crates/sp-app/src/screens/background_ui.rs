@@ -21,6 +21,11 @@ const KEY_HINT: &str = "For a video switcher that takes the words and their shap
      this screen shows the chosen screen's key, white where that screen is solid, black where it is clear, and greys \
      at the soft edges. Send the two on two displays, or on two NDI names.";
 
+/// Why the Key choice is greyed: there is no other audience screen whose key this one could
+/// show, or every other one is a key itself.
+pub const NO_FILL: &str = "There is no other audience screen for this one to show the key of";
+pub const ALL_KEYS: &str = "The other audience screens are keys themselves";
+
 /// The background rows for the screen at `index` (an audience screen), under its look. True
 /// when anything was changed. `status` is what each screen is doing, and whether it is going
 /// out, as the Screens window shows it.
@@ -68,21 +73,30 @@ pub fn background_rows(ui: &mut egui::Ui, screens: &mut [Screen], index: usize, 
             fills.iter().find(|(have, _)| *have == fill).map_or("a screen that has gone".to_owned(), |(_, n)| n.clone())
         };
         let shown = look.key_of.map_or("Not a key".to_owned(), |fill| format!("Key of \"{}\"", fill_name(fill)));
-        egui::ComboBox::from_id_salt(("screen key", index))
-            .selected_text(shown)
-            .width(220.0)
-            .show_ui(ui, |ui| {
-                if ui.selectable_label(look.key_of.is_none(), "Not a key").clicked() {
-                    look.key_of = None;
-                }
-                for (fill, fill_name) in &fills {
-                    if ui.selectable_label(look.key_of == Some(*fill), format!("Key of \"{fill_name}\"")).clicked() {
-                        look.key_of = Some(*fill);
+        // With no other screen it could be the key of, the choice is greyed and says why (a
+        // screen that is a key already keeps it, so Not a key can still be chosen).
+        let choosable = !fills.is_empty() || look.key_of.is_some();
+        let others = screens.iter().any(|other| other.id != id && other.kind == Kind::Audience);
+        let why = if others { ALL_KEYS } else { NO_FILL };
+        ui.add_enabled_ui(choosable, |ui| {
+            egui::ComboBox::from_id_salt(("screen key", index))
+                .selected_text(shown)
+                .width(220.0)
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(look.key_of.is_none(), "Not a key").clicked() {
+                        look.key_of = None;
                     }
-                }
-            })
-            .response
-            .on_hover_text(KEY_HINT);
+                    for (fill, fill_name) in &fills {
+                        let on = look.key_of == Some(*fill);
+                        if ui.selectable_label(on, format!("Key of \"{fill_name}\"")).clicked() {
+                            look.key_of = Some(*fill);
+                        }
+                    }
+                })
+                .response
+                .on_hover_text(KEY_HINT)
+                .on_disabled_hover_text(why);
+        });
     });
     // A line in plain words of what the choice does, or why a key is not doing it.
     let shown: Vec<bool> = status.iter().map(|(_, shown)| *shown).collect();

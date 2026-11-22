@@ -438,6 +438,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   A song's menu has Loop to First Slide, for a loop of announcements. Undo and Redo (Command-Z, Shift-Command-Z) step back through
   these changes in the Show view and on the Bible page, and the audience stays on the same slide;
   what was deleted takes its turn in the same order.
+- **Greyed, not refused:** a control that can't do anything now is greyed, and its hover says why, so
+  there is nothing to refuse. Undo and Redo (the buttons under the slides, in the stage layout editor and the
+  inspector, and the Edit menu) are greyed with "Nothing to undo" or "Nothing to redo", following the history in
+  force (the Show view's, or the Edit view's own order). Paste Style is greyed until a style is copied ("Copy a
+  style first"). Remove on the last audience screen ("There is always one audience screen"), Delete on the last
+  stage layout, a theme's last usual template and a song's last slide, Move Up and Move Down at the ends of a list
+  ("Already at the top", "Already at the bottom"), and the Key choice of a screen with no other audience screen to
+  show are greyed the same way. The Delete key, which has no greyed look, still says why with a brief cue, as do
+  the keyboard's refusals (such as the last slide).
 - **Deleting, one rule:** what Undo can bring back goes at once, with no question and no
   notice: slides, items taken out of a playlist (or out of a media playlist), playlists,
   libraries, audio playlists, timer,

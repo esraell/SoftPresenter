@@ -527,7 +527,8 @@ fn message_menu(ui: &mut egui::Ui, open: bool, has_clip: bool) -> Option<Message
     if ui.button("Copy").clicked() {
         asked = Some(MessageAsk::Copy);
     }
-    if ui.add_enabled(has_clip, egui::Button::new("Paste")).clicked() {
+    let paste = ui.add_enabled(has_clip, egui::Button::new("Paste"));
+    if paste.on_disabled_hover_text("Copy or cut a message first").clicked() {
         asked = Some(MessageAsk::Paste);
     }
     ui.separator();
@@ -1868,10 +1869,11 @@ fn track_menu(ui: &mut egui::Ui, first: bool, last: bool) -> Option<TrackAsk> {
         asked = Some(TrackAsk::Play);
     }
     ui.separator();
-    if ui.add_enabled(!first, egui::Button::new("Move Up")).clicked() {
+    if ui.add_enabled(!first, egui::Button::new("Move Up")).on_disabled_hover_text(crate::studio::AT_TOP).clicked() {
         asked = Some(TrackAsk::Up);
     }
-    if ui.add_enabled(!last, egui::Button::new("Move Down")).clicked() {
+    let down = ui.add_enabled(!last, egui::Button::new("Move Down"));
+    if down.on_disabled_hover_text(crate::studio::AT_BOTTOM).clicked() {
         asked = Some(TrackAsk::Down);
     }
     if ui.button("Rename").clicked() {
@@ -1954,7 +1956,8 @@ fn audio_heading(ui: &mut egui::Ui, state: &mut HomeState) {
         }
         ui.separator();
         // At once, asking nothing: Undo puts it back (the files stay on this computer).
-        if ui.add_enabled(many, egui::Button::new("Delete")).clicked() {
+        let delete = ui.add_enabled(many, egui::Button::new("Delete"));
+        if delete.on_disabled_hover_text("There is always one audio playlist").clicked() {
             state.delete_audio_playlist(state.audio.current.min(state.audio.playlists.len() - 1));
         }
     });

@@ -3900,6 +3900,33 @@ impl App {
         }
     }
 
+    /// Whether Undo (or Redo) in the Show view has a step to take, as [`App::undo_show`] takes
+    /// it: something deleted to put back (or delete again), or a change to a song that is still
+    /// there. Something just deleted, not yet in the history, goes in first, which leaves nothing
+    /// to redo.
+    fn show_can_step(&self, redo: bool) -> bool {
+        if self.running.as_ref().is_some_and(|r| !r.home_state.removed.is_empty()) {
+            return !redo;
+        }
+        self.history.removed_next(redo)
+            || self.history.peek(redo).is_some_and(|index| index < self.show.presentations().len())
+    }
+
+    /// Tells the window what the Show view's history can undo and redo now, so Undo and Redo are
+    /// greyed when it has nothing. After the frame's work (`redraw`), a change asks for the window
+    /// to be drawn again, so the buttons follow at once.
+    fn note_show_history(&mut self, redraw: bool) {
+        let now = (self.show_can_step(false), self.show_can_step(true));
+        if let Some(running) = self.running.as_mut()
+            && running.home_state.show_history != now
+        {
+            running.home_state.show_history = now;
+            if redraw {
+                running.home_window.request_redraw();
+            }
+        }
+    }
+
     /// A change of a song's slides made from the Edit view goes in its undo order.
     fn note_song_step(&mut self) {
         if let Some(running) = self.running.as_mut()
@@ -6913,6 +6940,8 @@ impl App {
 
     /// Draws one frame of the home window and returns what the operator asked for.
     fn draw_home(&mut self) -> Vec<Command> {
+        // Undo and Redo are drawn greyed when the history has nothing to take back.
+        self.note_show_history(false);
         // The song in front (being edited, or chosen) may have a theme of its own.
         let in_front = self
             .running
@@ -8351,7 +8380,7 @@ impl App {
     }
 
     /// Ticks the menu bar's items that are on now: the view, the slide view, the audience
-    /// output and Identify Screens.
+    /// output and Identify Screens; and greys those that can't be chosen now (`menubar::enabled`).
     fn tick_menu(&mut self) {
         #[cfg(target_os = "macos")]
         if let (Some(menu), Some(running)) = (self.menu.as_mut(), self.running.as_ref()) {
@@ -8372,7 +8401,16 @@ impl App {
                 home::SlideView::Table => A::TableView,
             };
             let output_on = self.show.output_enabled();
-            menu.set_editing(state.editing.is_some());
+            // A field being typed in, or a window of its own with the keyboard (Settings), has
+            // an undo of its own: Undo and Redo stay on for it.
+            let in_panel = running.panels.iter().any(|panel| Some(panel.window.id()) == self.focused);
+            menu.set_enabled(&menubar::Greying {
+                editing: state.editing.is_some(),
+                typing: running.egui_ctx.text_edit_focused() || in_panel,
+                can_undo: state.can_undo(false),
+                can_redo: state.can_undo(true),
+                style_copied: state.inspector.copied_style.is_some(),
+            });
             menu.set_checked(|action| match action {
                 A::Audience => output_on,
                 A::Stage => state.stage_on,
@@ -9035,6 +9073,8 @@ impl ApplicationHandler<AppEvent> for App {
                 self.sync_screens(el);
                 self.sync_panels(el);
                 self.sync_overlay();
+                // Undo and Redo follow what the work above did to the history at once.
+                self.note_show_history(true);
                 self.tick_menu();
                 // Leaving the Edit view writes the songs changed there straight away (other changes
                 // are written once they pause for a second).

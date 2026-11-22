@@ -615,6 +615,9 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let stage = state.editing.as_ref().is_some_and(crate::stage_editor::is_stage) && state.theme_edit.is_none();
     let for_theme = state.theme_edit.is_some() || stage;
     let screens = if stage { state.screens.clone() } else { Vec::new() };
+    // Undo and Redo here take the Edit view's steps in turn, as Command-Z does.
+    let history = (state.can_undo(false), state.can_undo(true));
+    let menu_asked = &mut state.menu_asked;
     let lock_shape = &mut state.inspector.lock_shape;
     let Some(draft) = state.editing.as_mut() else { return };
     let themed = draft.selected_object().map(|object| object_frame(&draft.slide, object, theme));
@@ -828,11 +831,19 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     }
     ui.horizontal_wrapped(|ui| {
         let small = |label: &str| egui::Button::new(egui::RichText::new(label).size(12.0));
-        if ui.add_enabled(draft.can_undo(), small("Undo")).on_hover_text("Undo the last change (Cmd+Z)").clicked() {
-            draft.undo();
-        }
-        if ui.add_enabled(draft.can_redo(), small("Redo")).on_hover_text("Redo (Shift+Cmd+Z)").clicked() {
-            draft.redo();
+        for (words, redo, hint) in [
+            ("Undo", false, crate::keys::hint("Undo the last change", "Z", false)),
+            ("Redo", true, crate::keys::hint("Redo it", "Z", true)),
+        ] {
+            let can = if redo { history.1 } else { history.0 };
+            let button = ui
+                .add_enabled(can, small(words))
+                .on_hover_text(hint)
+                .on_disabled_hover_text(crate::home::nothing_to(redo));
+            if button.clicked() {
+                use crate::menubar::Action;
+                *menu_asked = Some(if redo { Action::Redo } else { Action::Undo });
+            }
         }
         if ui.add(small("Bring Forward")).on_hover_text("Move in front of the next object").clicked() {
             draft.restack(true);
@@ -896,7 +907,8 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
                 ui.add_sized([half, ROW], egui::Button::new("Paste Style"))
             })
             .inner
-            .on_hover_text("Give this text the look that was copied");
+            .on_hover_text("Give this text the look that was copied")
+            .on_disabled_hover_text(crate::home::COPY_A_STYLE);
         if paste.clicked()
             && let Some(copied) = &inspector.copied_style
         {

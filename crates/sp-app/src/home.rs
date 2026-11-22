@@ -245,6 +245,10 @@ pub struct HomeState {
     pub edit_steps: Vec<EditStep>,
     pub edit_redo: Vec<EditStep>,
     pub edit_steps_draft: u64,
+    /// Whether the app's one history (the Show view's) has a step to undo, and one to redo: set
+    /// by the app before each frame and after its work, so Undo and Redo are greyed when there is
+    /// nothing to take back (see [`HomeState::can_undo`]).
+    pub show_history: (bool, bool),
     /// Asked of the app: undo (false) or redo (true) the song's last change of its slides.
     pub song_undo: Option<bool>,
     /// Asked of the app: this song's changes can no longer be undone safely; drop them.
@@ -1714,6 +1718,7 @@ impl Default for HomeState {
             edit_steps: Vec::new(),
             edit_redo: Vec::new(),
             edit_steps_draft: 0,
+            show_history: (false, false),
             song_undo: None,
             forget_song_history: None,
             clear_song_redo: false,
@@ -1873,6 +1878,20 @@ impl HomeState {
         } else {
             self.stage_editor_open.then_some(EditKind::Stage)
         }
+    }
+
+    /// Whether Undo (or, with `redo`, Redo) has a step to take now, in the history in force: in
+    /// the Edit view its own undo order, as Command-Z takes it there (the newest step the app
+    /// takes back, or else the open draft's own; nothing with no draft open); elsewhere the app's
+    /// one history. Undo and Redo are greyed when it is false.
+    pub fn can_undo(&self, redo: bool) -> bool {
+        if self.edit_kind().is_none() {
+            return if redo { self.show_history.1 } else { self.show_history.0 };
+        }
+        let Some(draft) = self.editing.as_ref() else { return false };
+        let steps = if redo { &self.edit_redo } else { &self.edit_steps };
+        matches!(steps.last(), Some(EditStep::Song | EditStep::Deleted))
+            || if redo { draft.can_redo() } else { draft.can_undo() }
     }
 
     /// True for a presentation the app makes itself (a Bible passage, the VoxLive item): shown,
@@ -2309,16 +2328,18 @@ fn home_view(
             }
             // Slides go at once, asking nothing (Undo puts them back): those picked out of one
             // song, the song of the slide picked last. A slide the app made has none to delete.
+            // A song always keeps one slide: with all of them picked (or its only one) the menu's
+            // Delete is greyed, and the key says why.
             Picking::Slides => {
                 if let Some((song, slides)) = picks_of_one_song(&state.picked_slides)
                     && !state.app_made(song)
                 {
-                    delete_slides(state, song, &slides);
+                    delete_slides_or_say(show, state, song, &slides);
                 }
             }
             Picking::Nothing => {
                 if let Some(at) = state.selected_slide.filter(|at| !state.app_made(at.presentation)) {
-                    delete_slides(state, at.presentation, &[at.slide]);
+                    delete_slides_or_say(show, state, at.presentation, &[at.slide]);
                 }
             }
             // The playlist's items picked (or the one open) are taken out of it at once: no
@@ -2420,7 +2441,7 @@ fn empty_props_view(
         .frame(crate::studio::column_frame(Column::Left));
     let left = left.show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        crate::studio::edit_kinds(ui, state);
+        crate::studio::edit_kinds(ui, show, state);
         if let Some(ask) = prop_list_head(ui, state, false) {
             apply_prop_ask(state, ask);
         }
@@ -2721,16 +2742,19 @@ fn edit_view(
         && state.picking == Picking::Themes
         && state.confirm_delete_theme.is_none()
         && state.renaming_theme.is_none();
-    if delete_theme
-        && let Some(open) = state.theme_edit.as_ref().map(|edit| edit.index)
-        && !state.themes_kept.contains(&open)
-    {
-        state.confirm_delete_theme = Some(open);
+    if delete_theme && let Some(open) = state.theme_edit.as_ref().map(|edit| edit.index) {
+        // A built-in theme's Delete… is greyed; the key, with no greyed look, says why.
+        if state.themes_kept.contains(&open) {
+            state.notices.refuse(format!("{KEPT_THEMES}."));
+        } else {
+            state.confirm_delete_theme = Some(open);
+        }
     }
     if let Some(draft) = state.editing.as_mut() {
         // Undo and Redo take the newest step, whichever it is: a change to this slide (its
         // draft's own), or one the app takes back: to the song's slides (moved, pasted,
         // deleted), or something deleted from the list (a template, prop, layout or version).
+        // `HomeState::can_undo` says the same, for the buttons that are greyed without one.
         let apps = |step: Option<&EditStep>| matches!(step, Some(EditStep::Song | EditStep::Deleted));
         if undo && !keys_taken {
             if apps(state.edit_steps.last()) {
@@ -2813,7 +2837,7 @@ fn edit_view(
         .frame(crate::studio::column_frame(Column::Left));
     let left = left.show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        crate::studio::edit_kinds(ui, state);
+        crate::studio::edit_kinds(ui, show, state);
         // Slides, props and stage layouts: a heading and the keys that act on the one open here
         // (for slides, the songs above them); their pictures fill the room between these and
         // the Objects shelf, further down.
@@ -3295,12 +3319,13 @@ fn edit_view(
                 }
             }
             let any = draft.selected.is_some();
-            let mut asked = None;
+            let style_copied = state.inspector.copied_style.is_some();
+            let asked = std::cell::Cell::new(None);
             response.context_menu(|ui| {
                 use crate::menubar::Action as A;
-                let mut item = |ui: &mut egui::Ui, label: &str, action: A| {
+                let item = |ui: &mut egui::Ui, label: &str, action: A| {
                     if ui.button(label).clicked() {
-                        asked = Some(action);
+                        asked.set(Some(action));
                         ui.close();
                     }
                 };
@@ -3330,7 +3355,12 @@ fn edit_view(
                         }
                     });
                     item(ui, "Copy Style", A::CopyStyle);
-                    item(ui, "Paste Style", A::PasteStyle);
+                    // Greyed until a look is copied, saying so.
+                    let paste_style = ui.add_enabled(style_copied, egui::Button::new("Paste Style"));
+                    if paste_style.on_disabled_hover_text(COPY_A_STYLE).clicked() {
+                        asked.set(Some(A::PasteStyle));
+                        ui.close();
+                    }
                     item(ui, "Lock", A::Lock);
                 } else {
                     item(ui, "Paste", A::Paste);
@@ -3338,8 +3368,8 @@ fn edit_view(
                     item(ui, "Add Text", A::InsertText);
                 }
             });
-            if asked.is_some() {
-                state.menu_asked = asked;
+            if let Some(action) = asked.get() {
+                state.menu_asked = Some(action);
             }
             if response.drag_stopped() || response.clicked() {
                 draft.release();
@@ -3680,21 +3710,17 @@ fn stage_tools(ui: &mut egui::Ui, state: &mut HomeState, inner: Rect, layout: us
         state.picture_request = true;
     }
     // They take the Edit view's steps in turn, as Command-Z does: the layout's own changes, and
-    // a layout deleted from the list.
-    let deleted = |step: Option<&EditStep>| step == Some(&EditStep::Deleted);
-    let (can_undo, can_redo) = state.editing.as_ref().map_or((false, false), |draft| {
-        (draft.can_undo() || deleted(state.edit_steps.last()), draft.can_redo() || deleted(state.edit_redo.last()))
-    });
+    // a layout deleted from the list; greyed when there is none, saying so.
     let (undo_hint, redo_hint) =
         (crate::keys::hint("Undo the last change", "Z", false), crate::keys::hint("Redo it", "Z", true));
-    for (bar, words, enabled, hint, back) in [
-        (undo_bar, "Undo", can_undo, undo_hint.as_str(), true),
-        (redo_bar, "Redo", can_redo, redo_hint.as_str(), false),
-    ] {
+    for (bar, words, hint, back) in
+        [(undo_bar, "Undo", undo_hint.as_str(), true), (redo_bar, "Redo", redo_hint.as_str(), false)]
+    {
         let id = ui.scope_id().with(("stage history", words));
         let look = crate::studio::Flat::Plain;
+        let enabled = state.can_undo(!back);
         let pressed = crate::studio::flat_button(ui, bar, id, words, font.clone(), look, enabled);
-        if pressed.on_hover_text(hint).clicked() {
+        if pressed.on_hover_text(if enabled { hint } else { nothing_to(!back) }).clicked() {
             use crate::menubar::Action;
             state.menu_asked = Some(if back { Action::Undo } else { Action::Redo });
         }
@@ -3761,26 +3787,22 @@ fn slide_list_head(
                 area = area.vertical_scroll_offset((place as f32 - 1.0).max(0.0) * PLAIN_ROW);
             }
         }
-        let mut empty = None;
         area.show_rows(ui, PLAIN_ROW, songs.len(), |ui, shown| {
             for song in &songs[shown] {
                 let found = show.presentations().get(*song);
                 let title = found.map_or("", |song| song.title.as_str());
                 let is_open = *song == at.presentation;
-                let look = crate::studio::PlainRow { icon: Icon::Document, name: Some(title), tag: None, on: is_open };
-                if crate::studio::plain_row(ui, &look).0.clicked() && !is_open {
-                    // A song with no slides has nothing to open: the Edit view stays as it is.
-                    if found.is_some_and(|song| song.slide_count() > 0) {
-                        open = Some(SlideRef { presentation: *song, slide: 0 });
-                    } else {
-                        empty = Some(title.to_owned());
-                    }
+                // A song with no slides has nothing to open: it is greyed, and says why.
+                let greyed = !is_open && !found.is_some_and(|song| song.slide_count() > 0);
+                let look =
+                    crate::studio::PlainRow { icon: Icon::Document, name: Some(title), tag: None, on: is_open, greyed };
+                let row = crate::studio::plain_row(ui, &look).0;
+                let row = if greyed { row.on_hover_text(no_slides_yet(title)) } else { row };
+                if row.clicked() && !is_open {
+                    open = Some(SlideRef { presentation: *song, slide: 0 });
                 }
             }
         });
-        if let Some(title) = empty {
-            state.notices.refuse(format!("\u{201c}{title}\u{201d} has no slides yet."));
-        }
         ui.add_space(4.0);
         crate::studio::list_heading(ui, "Slides");
         let count = show.presentations().get(at.presentation).map_or(0, |song| song.slide_count());
@@ -3796,7 +3818,14 @@ fn slide_list_head(
             if several { "Move the slides picked out up one place" } else { "Move this slide up one place" },
             if several { "Move the slides picked out down one place" } else { "Move this slide down one place" },
         ];
-        if let Some(key) = crate::studio::list_keys(ui, "slide keys", can, hints).or(list_delete_key(delete, can)) {
+        let why = if movable {
+            [APP_MADE, APP_MADE, ONE_SLIDE, crate::studio::AT_TOP, crate::studio::AT_BOTTOM]
+        } else {
+            [APP_MADE; 5]
+        };
+        let pressed = crate::studio::list_keys(ui, "slide keys", can, hints, why)
+            .or_else(|| list_delete_key(delete, can, why, &mut state.notices));
+        if let Some(key) = pressed {
             act_on_slides(show, state, at, &these, key);
         }
     });
@@ -3980,19 +4009,21 @@ fn slide_list(
                 let (first, last) = (these[0], these[these.len() - 1]);
                 let mut chose = None;
                 response.context_menu(|ui| {
-                    let mut item = |ui: &mut egui::Ui, words: &str, can: bool, choice: SlideChoice| {
-                        if ui.add_enabled(can, egui::Button::new(words)).clicked() {
+                    // Greyed, a choice says why when hovered.
+                    let mut item = |ui: &mut egui::Ui, words: &str, can: bool, why: &str, choice: SlideChoice| {
+                        if ui.add_enabled(can, egui::Button::new(words)).on_disabled_hover_text(why).clicked() {
                             chose = Some(choice);
                             ui.close();
                         }
                     };
-                    item(ui, "Rename Group", true, SlideChoice::RenameGroup);
+                    item(ui, "Rename Group", true, "", SlideChoice::RenameGroup);
                     ui.separator();
-                    item(ui, "Duplicate", true, SlideChoice::Key(ListKey::Copy));
-                    item(ui, "Delete", these.len() < count, SlideChoice::Key(ListKey::Delete));
+                    item(ui, "Duplicate", true, "", SlideChoice::Key(ListKey::Copy));
+                    item(ui, "Delete", these.len() < count, ONE_SLIDE, SlideChoice::Key(ListKey::Delete));
                     ui.separator();
-                    item(ui, "Move Up", first > 0, SlideChoice::Key(ListKey::Up));
-                    item(ui, "Move Down", last + 1 < count, SlideChoice::Key(ListKey::Down));
+                    item(ui, "Move Up", first > 0, crate::studio::AT_TOP, SlideChoice::Key(ListKey::Up));
+                    let down = last + 1 < count;
+                    item(ui, "Move Down", down, crate::studio::AT_BOTTOM, SlideChoice::Key(ListKey::Down));
                 });
                 match chose {
                     // Its field is on this slide, which opens.
@@ -4095,7 +4126,11 @@ fn prop_list_head(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) -> Opt
             "Move this prop up the list",
             "Move this prop down the list",
         ];
-        let pressed = crate::studio::list_keys(ui, "prop keys", can, hints).or(list_delete_key(delete, can));
+        const NO_PROP: &str = "Add a prop first";
+        let why = [NO_PROP, NO_PROP, NO_PROP, crate::studio::AT_TOP, crate::studio::AT_BOTTOM];
+        let why = if open.is_some() { why } else { [NO_PROP; 5] };
+        let pressed = crate::studio::list_keys(ui, "prop keys", can, hints, why)
+            .or_else(|| list_delete_key(delete, can, why, &mut state.notices));
         asked = match (pressed, open) {
             (Some(ListKey::Add), _) => Some(PropListAsk::Of(open.unwrap_or(0), PropAsk::New)),
             (Some(ListKey::Copy), Some(at)) => Some(PropListAsk::Of(at, PropAsk::Duplicate)),
@@ -5317,9 +5352,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                         .add_enabled_ui(!only, |ui| ui.add_sized(small, egui::Button::new("−")))
                         .inner
                         .on_hover_text("Remove the selected screen")
-                        .on_disabled_hover_text(
-                            "There is always one audience screen. Set its output to Off to show nothing.",
-                        );
+                        .on_disabled_hover_text("There is always one audience screen");
                     // Undo can't bring a screen back, so it asks first (see `confirm_remove_screen`).
                     if remove.clicked()
                         && !only
@@ -5827,6 +5860,18 @@ pub fn picks_of_one_song(picked: &[SlideRef]) -> Option<(usize, Vec<usize>)> {
     Some((song, slides))
 }
 
+/// The Delete key on slides of the Show view: deletes them at once, as [`delete_slides`] does,
+/// unless they are all the song's slides, which a song never loses (it always keeps one): then
+/// a refusal's cue says so, and nothing goes.
+fn delete_slides_or_say(show: &Show, state: &mut HomeState, song: usize, slides: &[usize]) {
+    let count = show.presentations().get(song).map_or(0, |song| song.slide_count());
+    if slides.len() >= count {
+        state.notices.refuse(format!("{ONE_SLIDE}."));
+    } else {
+        delete_slides(state, song, slides);
+    }
+}
+
 /// Asks before taking items out of the media bin, and takes them out.
 fn confirm_delete_media(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     if state.confirm_delete_media.is_empty() {
@@ -5984,6 +6029,7 @@ fn theme_rows(ui: &mut egui::Ui, state: &mut HomeState) {
                 name: (!renaming).then_some(name.as_str()),
                 tag: main.then_some("Main"),
                 on: open,
+                greyed: false,
             };
             // The built-in theme, first, stays there.
             let sense = if index == 0 { Sense::click() } else { Sense::click_and_drag() };
@@ -6077,7 +6123,7 @@ fn theme_row_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, start_
     }
     let delete = ui
         .add_enabled(!state.themes_kept.contains(&index), egui::Button::new("Delete\u{2026}"))
-        .on_disabled_hover_text("The built-in themes are always kept");
+        .on_disabled_hover_text(KEPT_THEMES);
     if delete.clicked() {
         state.confirm_delete_theme = Some(index);
         ui.close();
@@ -6249,7 +6295,17 @@ fn template_actions(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) {
         "Move the open template up",
         "Move the open template down",
     ];
-    match crate::studio::list_keys(ui, "template keys", enabled, hints).or(list_delete_key(delete, enabled)) {
+    const NONE_OPEN: &str = "No template is open";
+    let why = [
+        "",
+        NONE_OPEN,
+        if count == 0 { NONE_OPEN } else { ONE_TEMPLATE },
+        crate::studio::AT_TOP,
+        crate::studio::AT_BOTTOM,
+    ];
+    let pressed = crate::studio::list_keys(ui, "template keys", enabled, hints, why)
+        .or_else(|| list_delete_key(delete, enabled, why, &mut state.notices));
+    match pressed {
         Some(crate::studio::ListKey::Add) => add_template_shown(state, false),
         Some(crate::studio::ListKey::Copy) => add_template_shown(state, true),
         Some(crate::studio::ListKey::Delete) => delete_template(state, at),
@@ -6412,7 +6468,11 @@ fn template_pictures(
                         duplicate = Some(index);
                         ui.close();
                     }
-                    if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
+                    if ui
+                        .add_enabled(can_delete, egui::Button::new("Delete"))
+                        .on_disabled_hover_text(ONE_TEMPLATE)
+                        .clicked()
+                    {
                         ask_delete = Some(index);
                         ui.close();
                     }
@@ -6485,6 +6545,29 @@ fn template_pictures(
     chosen
 }
 
+/// Why the version sheet's Add version (or Rename) can't be pressed now, in the words the app
+/// gives when it refuses (`versions::version_ask`), or `None` when it can: no name; a rename to
+/// another version's name; a name the theme has a version of already; nothing to start from.
+fn version_sheet_blocked(
+    sheet: &VersionSheet,
+    theme: &sp_model::Theme,
+    versions: &[sp_model::Version],
+) -> Option<String> {
+    let typed = sheet.name.trim().to_lowercase();
+    let named = |version: &&sp_model::Version| version.name.to_lowercase() == typed;
+    if typed.is_empty() {
+        return Some("A version needs a name".to_owned());
+    }
+    if let Some(renaming) = sheet.renaming {
+        let taken = versions.iter().filter(|version| version.id != renaming).find(named);
+        return taken.map(|_| format!("Another version is called {} already", sheet.name.trim()));
+    }
+    if let Some(had) = versions.iter().filter(|version| theme.has_version(version.id)).find(named) {
+        return Some(format!("{} has the {} version already", theme.name, had.name));
+    }
+    (!sheet.songs && !sheet.bible).then(|| "Choose a template for the version to start from".to_owned())
+}
+
 /// The sheet that adds a version to the theme being edited, or renames one in every theme.
 pub struct VersionSheet {
     /// The version renamed; none when one is being added.
@@ -6539,6 +6622,7 @@ fn version_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
         .corner_radius(14.0)
         .inner_margin(egui::Margin { left: 18, right: 18, top: 16, bottom: 16 });
     let mut decided = None;
+    let mut refused = None;
     let id = egui::Id::unique("version sheet");
     let area = egui::Modal::default_area(id).anchor(Align2::CENTER_CENTER, vec2(0.0, -30.0)).fade_in(false);
     egui::Modal::new(id).area(area).backdrop_color(Color32::from_black_alpha(110)).frame(frame).show(ui.ctx(), |ui| {
@@ -6622,7 +6706,10 @@ fn version_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
             note(ui, "A kind it has no template for (songs or Bible) keeps the usual look while the version is on.");
         }
         ui.add_space(4.0);
-        let ready = !sheet.name.trim().is_empty() && (sheet.renaming.is_some() || sheet.songs || sheet.bible);
+        // Add version (or Rename) is greyed while it would be refused, with the reason as its
+        // hover, in the words the app gives when it refuses.
+        let blocked = version_sheet_blocked(sheet, theme, &state.versions);
+        let ready = blocked.is_none();
         let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
         let font = FontId::proportional(12.5);
         let yes_words = if sheet.renaming.is_some() { "Rename" } else { "Add version" };
@@ -6635,17 +6722,28 @@ fn version_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
         {
             decided = Some(false);
         }
-        if crate::studio::flat_button(ui, yes, ui.scope_id().with("yes"), yes_words, font, Flat::Main, ready).clicked()
-        {
+        let yes = crate::studio::flat_button(ui, yes, ui.scope_id().with("yes"), yes_words, font, Flat::Main, ready);
+        let yes = match &blocked {
+            Some(why) => yes.on_hover_text(why.as_str()),
+            None => yes,
+        };
+        if yes.clicked() {
             decided = Some(true);
         }
         if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             decided = Some(false);
         }
-        if decided == Some(true) && !ready {
+        // Return in the name field while the button is greyed: the key says why.
+        if decided == Some(true)
+            && let Some(why) = &blocked
+        {
+            refused = Some(format!("{why}."));
             decided = None;
         }
     });
+    if let Some(why) = refused {
+        state.notices.refuse(why);
+    }
     match decided {
         Some(true) => {
             let Some(sheet) = state.version_sheet.take() else { return };
@@ -7952,7 +8050,11 @@ fn slide_clipboard_keys(ui: &egui::Ui, show: &Show, which: usize, state: &mut Ho
     }
     if (copy || cut) && !picked.is_empty() {
         copy_slides(ui.ctx(), state, song, &picked);
-        if cut {
+        // Copied, but a song always keeps one slide: the key says why they stay (the menu's Cut
+        // is greyed).
+        if cut && picked.len() >= song.slide_count() {
+            state.notices.refuse(format!("{ONE_SLIDE}."));
+        } else if cut {
             state.slide_request =
                 Some((SlideRef { presentation: which, slide: picked[0] }, SlideRequest::DeleteMany(picked.clone())));
         }
@@ -8030,9 +8132,42 @@ pub(crate) fn dragged_to(rows: &[Rect], from: usize, y: f32) -> Option<usize> {
     (to != from && to < rows.len()).then_some(to)
 }
 
+/// Why Undo (or, with `redo`, Redo) is greyed: the history in force has no step to take.
+pub fn nothing_to(redo: bool) -> &'static str {
+    if redo { "Nothing to redo" } else { "Nothing to undo" }
+}
+
+/// Why Paste Style is greyed: no look has been copied.
+pub const COPY_A_STYLE: &str = "Copy a style first";
+
+/// Why Delete is greyed on a song's only slide (or on all its slides picked together).
+pub const ONE_SLIDE: &str = "A song always keeps one slide";
+/// Why the keys over a Bible passage's or the captions' slides are greyed in the Edit view.
+pub const APP_MADE: &str = "SoftPresenter makes these slides itself";
+/// Why Delete is greyed on the last stage layout.
+pub const ONE_LAYOUT: &str = "There is always one stage layout";
+/// Why Delete is greyed on a theme's last usual template.
+pub const ONE_TEMPLATE: &str = "A theme always keeps one usual template";
+/// Why a built-in theme's Delete… is greyed.
+const KEPT_THEMES: &str = "The built-in themes are always kept";
+
+/// Why a song with no slides is greyed in the Edit view's list of songs: nothing to open.
+fn no_slides_yet(title: &str) -> String {
+    format!("\u{201c}{title}\u{201d} has no slides yet")
+}
+
 /// The Delete key pressed with nothing picked on the canvas, as the list's own Delete key, when
-/// that can be pressed (`can`, as [`crate::studio::list_keys`] takes it).
-pub(crate) fn list_delete_key(delete: bool, can: [bool; 5]) -> Option<crate::studio::ListKey> {
+/// that can be pressed (`can` and `why`, as [`crate::studio::list_keys`] takes them). When the
+/// list's Delete is greyed, a key has no greyed look to show, so it says why, as a refusal's cue.
+pub(crate) fn list_delete_key(
+    delete: bool,
+    can: [bool; 5],
+    why: [&str; 5],
+    notices: &mut crate::notices::Notices,
+) -> Option<crate::studio::ListKey> {
+    if delete && !can[2] {
+        notices.refuse(format!("{}.", why[2]));
+    }
     (delete && can[2]).then_some(crate::studio::ListKey::Delete)
 }
 
@@ -10248,7 +10383,82 @@ mod tests {
         };
         let show = Show::new(vec![show.presentations()[0].clone(), Arc::new(empty)]);
         assert_eq!(click_slide_words(&ctx, &show, &mut state, "Empty"), None, "the Edit view stays");
-        assert!(state.notices.refused().is_some_and(|words| words.contains("no slides")));
+        // The row is greyed, so there is nothing to refuse: it says why when hovered.
+        assert!(state.notices.refused().is_none(), "a greyed row gives no cue");
+        let said = hover_words(&ctx, &show, &mut state, Rect::from_min_size(pos2(10.0, 0.0), vec2(200.0, 400.0)));
+        assert!(said.contains(&no_slides_yet("Empty")), "{said:?}");
+    }
+
+    /// Every tooltip drawn while the pointer rests, a moment each, over a grid of points in `area`
+    /// of the slides' column (for a test of what greyed controls say when hovered).
+    fn hover_words(
+        ctx: &egui::Context,
+        show: &Show,
+        state: &mut HomeState,
+        area: Rect,
+    ) -> std::collections::BTreeSet<String> {
+        fn texts(shape: &egui::Shape, into: &mut std::collections::BTreeSet<String>) {
+            match shape {
+                egui::Shape::Text(text) => {
+                    into.insert(text.galley.text().to_owned());
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, into)),
+                _ => {}
+            }
+        }
+        ctx.all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let mut said = std::collections::BTreeSet::new();
+        let mut y = area.min.y + 2.0;
+        while y < area.max.y {
+            let mut x = area.min.x + 2.0;
+            while x < area.max.x {
+                for _ in 0..3 {
+                    let (output, _) = slide_column(ctx, show, state, vec![Event::PointerMoved(pos2(x, y))]);
+                    output.shapes.iter().for_each(|clipped| texts(&clipped.shape, &mut said));
+                    output.drop_without_applying_deltas();
+                }
+                x += 14.0;
+            }
+            y += 6.0;
+        }
+        said
+    }
+
+    #[test]
+    fn a_songs_only_slide_has_its_delete_and_the_ends_have_their_moves_greyed_with_reasons() {
+        let ctx = crate::studio::tests::styled();
+        let (show, mut state) = song_open(&[("Verse 1", 1)], 0);
+        let said = hover_words(&ctx, &show, &mut state, Rect::from_min_size(pos2(10.0, 0.0), vec2(300.0, 400.0)));
+        for why in [ONE_SLIDE, crate::studio::AT_TOP, crate::studio::AT_BOTTOM] {
+            assert!(said.contains(why), "{why:?} not said: {said:?}");
+        }
+        // The Delete key (the slide list's) says why with a cue, as it can't be greyed.
+        let mut notices = crate::notices::Notices::default();
+        let why = [""; 5];
+        let why = [why[0], why[1], ONE_SLIDE, why[3], why[4]];
+        assert_eq!(list_delete_key(true, [true, true, false, true, true], why, &mut notices), None);
+        assert!(notices.refused().is_some_and(|words| words.contains(ONE_SLIDE)));
+    }
+
+    #[test]
+    fn undo_and_redo_follow_the_history_in_force() {
+        let (_, mut state) = song_open(&[("Verse 1", 2)], 0);
+        // The Edit view: the open draft's own steps.
+        assert!(!state.can_undo(false) && !state.can_undo(true));
+        state.edit_steps.push(EditStep::Song);
+        assert!(state.can_undo(false) && !state.can_undo(true));
+        state.edit_steps.clear();
+        state.edit_redo.push(EditStep::Deleted);
+        assert!(state.can_undo(true));
+        // Elsewhere: the app's one history.
+        let mut show_view = HomeState::default();
+        assert!(!show_view.can_undo(false) && !show_view.can_undo(true));
+        show_view.show_history = (true, false);
+        assert!(show_view.can_undo(false) && !show_view.can_undo(true));
+        assert_eq!(nothing_to(false), "Nothing to undo");
+        assert_eq!(nothing_to(true), "Nothing to redo");
+        assert_eq!(COPY_A_STYLE, "Copy a style first");
+        assert_eq!(crate::studio::AT_TOP, "Already at the top");
     }
 
     #[test]

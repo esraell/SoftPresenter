@@ -183,8 +183,13 @@ pub fn list_head(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) -> Opti
             "Move this layout up the list",
             "Move this layout down the list",
         ];
-        let pressed =
-            crate::studio::list_keys(ui, "stage layout keys", can, hints).or(crate::home::list_delete_key(delete, can));
+        const NONE_OPEN: &str = "No stage layout is open";
+        let why = match open {
+            Some(_) => ["", NONE_OPEN, crate::home::ONE_LAYOUT, crate::studio::AT_TOP, crate::studio::AT_BOTTOM],
+            None => ["", NONE_OPEN, NONE_OPEN, NONE_OPEN, NONE_OPEN],
+        };
+        let pressed = crate::studio::list_keys(ui, "stage layout keys", can, hints, why)
+            .or_else(|| crate::home::list_delete_key(delete, can, why, &mut state.notices));
         let Some(at) = open else {
             asked = (pressed == Some(ListKey::Add)).then_some(ListRequest::New);
             return;
@@ -321,7 +326,8 @@ fn layout_menu(ui: &mut egui::Ui, only_one: bool) -> Option<Choice> {
     }
     let delete = ui
         .add_enabled(!only_one, egui::Button::new("Delete"))
-        .on_hover_text("Delete this layout; stage screens that use it show the first one");
+        .on_hover_text("Delete this layout; stage screens that use it show the first one")
+        .on_disabled_hover_text(crate::home::ONE_LAYOUT);
     if delete.clicked() {
         chose = Some(Choice::Delete);
     }

@@ -539,10 +539,41 @@ pub fn needs_editor(action: Action) -> bool {
     )
 }
 
+/// What decides which of the menus' items are greyed now (see [`enabled`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Greying {
+    /// Something is open in the editor (a slide, a template, a prop or a stage layout).
+    pub editing: bool,
+    /// The keyboard is in a field being typed in, or in a window of its own (Settings, say),
+    /// which has an undo of its own the app can't see.
+    pub typing: bool,
+    /// The history in force has a step to undo, and one to redo (`HomeState::can_undo`).
+    pub can_undo: bool,
+    pub can_redo: bool,
+    /// A look has been copied, for Paste Style.
+    pub style_copied: bool,
+}
+
+/// Whether a menu item can be chosen now. An item that only works in the editor is greyed
+/// elsewhere; Undo and Redo are greyed when there is nothing to take back (never while typing,
+/// as the field's own undo may have something); Paste Style is greyed until a look is copied.
+/// A Mac menu item has no hover, so these say nothing more than their grey; the buttons in the
+/// window that do the same say why.
+pub fn enabled(action: Action, now: &Greying) -> bool {
+    use Action as A;
+    match action {
+        A::Undo => now.typing || now.can_undo,
+        A::Redo => now.typing || now.can_redo,
+        A::PasteStyle => now.editing && now.style_copied,
+        _ => now.editing || !needs_editor(action),
+    }
+}
+
 /// True when a key pressed with these modifiers is one of the menus' shortcuts. Such a key
 /// is left to the menu, so it is acted on once. An item that only works in the editor is
 /// greyed out elsewhere and leaves its key to the window there (Command-B is Bold in the
-/// editor and the Bible page elsewhere).
+/// editor and the Bible page elsewhere). Undo, Redo and Paste Style, greyed when they have
+/// nothing to do, keep their keys: then the key does nothing, as the item would.
 pub fn claims(key: KeyCode, held: ModifiersState, editing: bool) -> bool {
     let wanted = |action: &Action| editing || !needs_editor(*action);
     items().filter(|(action, _)| wanted(action)).filter_map(|(_, shortcut)| shortcut).any(|shortcut| {
@@ -562,12 +593,12 @@ mod mac {
     use muda::accelerator::{Accelerator, Code, Modifiers};
     use muda::{AboutMetadata, CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 
-    use super::{Action, Entry, MENUS, Shortcut, System, id_of};
+    use super::{Action, Entry, Greying, MENUS, Shortcut, System, enabled, id_of};
 
     /// What a menu's lines are built into, and what the menu bar keeps of them.
     struct Built {
         checks: Vec<(Action, CheckMenuItem, bool)>,
-        editor_items: Vec<(MenuItem, bool)>,
+        items: Vec<(Action, MenuItem, bool)>,
     }
 
     /// Builds one line of a menu (a group of choices with its own lines).
@@ -575,9 +606,7 @@ mod mac {
         Ok(match entry {
             Entry::Do(action, label, shortcut) => {
                 let item = MenuItem::with_id(id_of(*action), *label, true, accelerator(*shortcut));
-                if super::needs_editor(*action) {
-                    built.editor_items.push((item.clone(), true));
-                }
+                built.items.push((*action, item.clone(), true));
                 Box::new(item)
             }
             Entry::Check(action, label, shortcut) => {
@@ -694,15 +723,15 @@ mod mac {
     pub struct MenuBar {
         _menu: Menu,
         checks: Vec<(Action, CheckMenuItem, bool)>,
-        /// Items that only work in the editor, and whether they are enabled now.
-        editor_items: Vec<(MenuItem, bool)>,
+        /// The items that do something, and whether each is enabled now.
+        items: Vec<(Action, MenuItem, bool)>,
     }
 
     impl MenuBar {
         /// Builds the menus and puts them in the menu bar. Call once the app has started.
         pub fn install() -> Result<MenuBar, String> {
             let menu = Menu::new();
-            let mut built = Built { checks: Vec::new(), editor_items: Vec::new() };
+            let mut built = Built { checks: Vec::new(), items: Vec::new() };
             for (title, entries) in MENUS {
                 let submenu = Submenu::new(*title, true);
                 for entry in *entries {
@@ -717,15 +746,17 @@ mod mac {
                 }
             }
             menu.init_for_nsapp();
-            Ok(MenuBar { _menu: menu, checks: built.checks, editor_items: built.editor_items })
+            Ok(MenuBar { _menu: menu, checks: built.checks, items: built.items })
         }
 
-        /// Greys out the items that only work in the editor while it is not open.
-        pub fn set_editing(&mut self, editing: bool) {
-            for (item, enabled) in &mut self.editor_items {
-                if *enabled != editing {
-                    item.set_enabled(editing);
-                    *enabled = editing;
+        /// Greys out the items that can't be chosen now (see [`enabled`]). Cheap when nothing
+        /// changed.
+        pub fn set_enabled(&mut self, now: &Greying) {
+            for (action, item, shown) in &mut self.items {
+                let wanted = enabled(*action, now);
+                if *shown != wanted {
+                    item.set_enabled(wanted);
+                    *shown = wanted;
                 }
             }
         }
@@ -884,5 +915,26 @@ mod tests {
         assert!(needs_editor(Action::Duplicate));
         assert!(claims(KeyCode::KeyD, command, true) && !claims(KeyCode::KeyD, command, false));
         assert!(claims(KeyCode::KeyZ, command, false), "Undo is everywhere");
+    }
+
+    #[test]
+    fn undo_redo_and_paste_style_are_greyed_when_they_have_nothing_to_do() {
+        let none = Greying { editing: true, ..Greying::default() };
+        assert!(!enabled(Action::Undo, &none) && !enabled(Action::Redo, &none), "nothing to take back");
+        let undo = Greying { can_undo: true, ..none };
+        assert!(enabled(Action::Undo, &undo) && !enabled(Action::Redo, &undo), "only Undo has a step");
+        let redo = Greying { can_redo: true, ..none };
+        assert!(!enabled(Action::Undo, &redo) && enabled(Action::Redo, &redo));
+        // Typing, the field's own undo may have something the app can't see.
+        let typing = Greying { typing: true, ..none };
+        assert!(enabled(Action::Undo, &typing) && enabled(Action::Redo, &typing));
+        // Paste Style: in the editor, once a look is copied.
+        assert!(!enabled(Action::PasteStyle, &none), "nothing copied");
+        assert!(enabled(Action::PasteStyle, &Greying { style_copied: true, ..none }));
+        let elsewhere = Greying { style_copied: true, ..Greying::default() };
+        assert!(!enabled(Action::PasteStyle, &elsewhere), "not outside the editor");
+        // The rest as before: editor-only items greyed outside the editor, others always on.
+        assert!(!enabled(Action::Bold, &Greying::default()) && enabled(Action::Bold, &none));
+        assert!(enabled(Action::NewSong, &Greying::default()));
     }
 }

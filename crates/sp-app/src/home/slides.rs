@@ -2584,7 +2584,11 @@ fn slide_menu(
         Some((here, SlideRequest::Edit(edits.collect())))
     };
     let key = |letter: &str| crate::keys::with_modifier(letter);
-    if ui.add(egui::Button::new("Cut").shortcut_text(key("X"))).clicked() {
+    // A song always keeps one slide: with every slide of it picked (or its only one), Cut and
+    // Delete are greyed, and say so.
+    let all = these.len() >= presentation.slide_count();
+    let cut = ui.add_enabled(!all, egui::Button::new("Cut").shortcut_text(key("X")));
+    if cut.on_disabled_hover_text(crate::home::ONE_SLIDE).clicked() {
         copy_slides(ui.ctx(), state, presentation, &these);
         state.slide_request = Some((here, SlideRequest::DeleteMany(these.clone())));
         ui.close();
@@ -2594,7 +2598,8 @@ fn slide_menu(
         ui.close();
     }
     let clip = state.slide_clip.clone();
-    if ui.add_enabled(!clip.is_empty(), egui::Button::new("Paste").shortcut_text(key("V"))).clicked() {
+    let paste = ui.add_enabled(!clip.is_empty(), egui::Button::new("Paste").shortcut_text(key("V")));
+    if paste.on_disabled_hover_text("Copy or cut a slide first").clicked() {
         state.slide_request = Some((here, SlideRequest::PasteAfter(clip)));
         ui.close();
     }
@@ -2609,18 +2614,20 @@ fn slide_menu(
     // At once, asking nothing (Undo puts them back): this slide, or the slides of this song
     // picked with it, never slides of another song.
     let delete = if these.len() > 1 { format!("Delete {} Slides", these.len()) } else { "Delete".to_owned() };
-    if ui.button(delete).clicked() {
+    if ui.add_enabled(!all, egui::Button::new(delete)).on_disabled_hover_text(crate::home::ONE_SLIDE).clicked() {
         crate::home::delete_slides(state, which, &these);
         ui.close();
     }
     // One place up or down the song (with the slides picked with it).
     let (first, last) = (these.first().copied().unwrap_or(index), these.last().copied().unwrap_or(index));
-    if ui.add_enabled(first > 0, egui::Button::new("Move Up")).clicked() {
+    let up = ui.add_enabled(first > 0, egui::Button::new("Move Up"));
+    if up.on_disabled_hover_text(crate::studio::AT_TOP).clicked() {
         let to = first - 1;
         state.slide_request = Some((here, SlideRequest::Move { slides: these.clone(), to, after: false }));
         ui.close();
     }
-    if ui.add_enabled(last + 1 < presentation.slide_count(), egui::Button::new("Move Down")).clicked() {
+    let down = ui.add_enabled(last + 1 < presentation.slide_count(), egui::Button::new("Move Down"));
+    if down.on_disabled_hover_text(crate::studio::AT_BOTTOM).clicked() {
         let to = last + 1;
         state.slide_request = Some((here, SlideRequest::Move { slides: these.clone(), to, after: true }));
         ui.close();
@@ -2740,6 +2747,7 @@ fn slide_menu(
     if ui
         .add_enabled(state.inspector.copied_style.is_some(), egui::Button::new("Paste Style"))
         .on_hover_text("Give every text box on the slide (and the slides picked with it) the look that was copied")
+        .on_disabled_hover_text(crate::home::COPY_A_STYLE)
         .clicked()
         && let Some(copied) = state.inspector.copied_style.clone()
     {
@@ -3142,6 +3150,9 @@ mod tests {
         assert!(state.bible.go_live.is_none());
     }
 
+    /// How far Redo is from Undo in the bar.
+    const UNDO_STEP: f32 = 70.0;
+
     #[test]
     fn the_bar_under_the_slides_switches_continuous_and_asks_for_undo() {
         let (show, mut state) = playlist(&[("Alpha", 2)]);
@@ -3159,8 +3170,17 @@ mod tests {
         click(&ctx, &show, &mut state, continuous, &mut time);
         assert!(!state.continuous, "and off again");
         let undo = continuous + vec2(47.0 + 13.0 + 29.0, 0.0);
+        // With nothing to undo the button is greyed and asks for nothing.
+        click(&ctx, &show, &mut state, undo, &mut time);
+        assert_eq!(state.menu_asked, None, "greyed: nothing to undo");
+        state.show_history = (true, false);
+        run(&ctx, &show, &mut state, Vec::new(), &mut time);
         click(&ctx, &show, &mut state, undo, &mut time);
         assert_eq!(state.menu_asked, Some(crate::menubar::Action::Undo));
+        state.menu_asked = None;
+        // Redo, next to it, is still greyed.
+        click(&ctx, &show, &mut state, undo + vec2(UNDO_STEP, 0.0), &mut time);
+        assert_eq!(state.menu_asked, None, "greyed: nothing to redo");
         // The transition: Cut is the first part of the switch.
         assert_ne!(state.transition.kind, sp_model::TransitionKind::Cut);
         click(&ctx, &show, &mut state, pos2(left + 20.0, middle), &mut time);

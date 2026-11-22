@@ -1173,10 +1173,7 @@ fn open_edit_kind(show: &Show, state: &mut HomeState) {
         // Never nothing: a song that can be edited (see `song_to_edit`), or a word on why not.
         EditKind::Slides => match song_to_edit(show, state).and_then(|at| EditDraft::of(show, at)) {
             Some(draft) => state.editing = Some(draft),
-            None => state.notices.refuse(format!(
-                "There is no song to edit yet. Make one with New Song ({}), or import some.",
-                crate::keys::hint_key("N")
-            )),
+            None => state.notices.refuse(no_song_to_edit()),
         },
         EditKind::Themes => state.theme_request = Some(crate::home::ThemeRequest::Edit(state.theme_for_songs)),
         // With no props yet, their list, empty, with Add.
@@ -1196,6 +1193,12 @@ fn open_edit_kind(show: &Show, state: &mut HomeState) {
     }
 }
 
+/// Why there are no slides to edit: said when the Edit view is asked for slides, and the hover
+/// of the Slides switch, greyed.
+fn no_song_to_edit() -> String {
+    format!("There is no song to edit yet. Make one with New Song ({}), or import some.", crate::keys::hint_key("N"))
+}
+
 /// A prop opened in the editor, as a slide of its own.
 pub fn prop_draft(state: &HomeState, index: usize) -> Option<EditDraft> {
     let mut draft = EditDraft::of_slide(state.props.get(index)?.slide.clone(), index);
@@ -1205,11 +1208,15 @@ pub fn prop_draft(state: &HomeState, index: usize) -> Option<EditDraft> {
 
 /// The switch at the top of the Edit view's left column: what is being edited, slides, themes,
 /// props or stage layouts. It takes the column's width, less 10 either side, 12 down.
-pub fn edit_kinds(ui: &mut egui::Ui, state: &mut HomeState) {
+pub fn edit_kinds(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     use crate::home::EditKind;
     const KINDS: [EditKind; 4] = [EditKind::Slides, EditKind::Themes, EditKind::Props, EditKind::Stage];
+    let open = state.edit_kind().and_then(|kind| KINDS.iter().position(|each| *each == kind));
+    // With no song that can be edited, Slides is greyed, and says why.
+    let no_song = open != Some(0) && song_to_edit(show, state).is_none();
+    let why = no_song_to_edit();
     let hints: [&str; 4] = [
-        "Edit a song's slides",
+        if no_song { why.as_str() } else { "Edit a song's slides" },
         "Edit the themes and their templates",
         "Make and edit the props",
         "Edit the stage screens' layouts",
@@ -1219,14 +1226,13 @@ pub fn edit_kinds(ui: &mut egui::Ui, state: &mut HomeState) {
         hints: &hints,
         dots: &[],
         tags: &[],
-        off: &[false; 4],
+        off: &[no_song, false, false, false],
         tall: 23.5,
         size: 11.5,
     };
     let width = ui.available_width() - 20.0;
     let (place, _) =
         ui.allocate_exact_size(vec2(ui.available_width(), 12.0 + tab_switch_height(&tabs)), Sense::hover());
-    let open = state.edit_kind().and_then(|kind| KINDS.iter().position(|each| *each == kind));
     let (_, clicked) = tab_switch(ui, "edit kinds", place.min + vec2(10.0, 12.0), width, &tabs, open);
     if let Some(clicked) = clicked.filter(|clicked| Some(*clicked) != open) {
         state.edit_kind_request = Some(KINDS[clicked]);
@@ -1272,13 +1278,16 @@ pub struct PlainRow<'a> {
     pub tag: Option<&'a str>,
     /// The one open: the chosen grey, and its name heavier and brighter.
     pub on: bool,
+    /// Nothing to open in it: its name faint, and it takes no click (only a hover, for the
+    /// reason).
+    pub greyed: bool,
 }
 
 /// Draws a plain row, 34 high, as songs and themes are listed above their pictures. Returns its
 /// response, where its name starts (at the middle of its line) and how far right the name may
 /// reach, for a field that retypes it.
 pub fn plain_row(ui: &mut egui::Ui, look: &PlainRow) -> (egui::Response, egui::Pos2, f32) {
-    plain_row_sensing(ui, look, Sense::click())
+    plain_row_sensing(ui, look, if look.greyed { Sense::hover() } else { Sense::click() })
 }
 
 /// A [`plain_row`] that senses what `sense` says: clicks and drags for a row that can be dragged
@@ -1287,7 +1296,7 @@ pub fn plain_row_sensing(ui: &mut egui::Ui, look: &PlainRow, sense: Sense) -> (e
     let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), PLAIN_ROW), sense);
     if look.on {
         ui.painter().rect_filled(row, RADIUS, CARD);
-    } else if response.hovered() {
+    } else if response.hovered() && !look.greyed {
         ui.painter().rect_filled(row, RADIUS, ROW_HOVER);
     }
     let middle = row.center().y;
@@ -1308,12 +1317,21 @@ pub fn plain_row_sensing(ui: &mut egui::Ui, look: &PlainRow, sense: Sense) -> (e
     }
     let start = pos2(row.min.x + 35.0, middle);
     if let Some(name) = look.name {
-        let (font, ink) = if look.on { (semibold(13.5), TEXT) } else { (FontId::proportional(13.5), TEXT_DIM) };
+        let (font, ink) = match (look.on, look.greyed) {
+            (true, _) => (semibold(13.5), TEXT),
+            (false, true) => (FontId::proportional(13.5), TEXT_FAINT),
+            (false, false) => (FontId::proportional(13.5), TEXT_DIM),
+        };
         let clip = Rect::from_min_max(pos2(start.x, row.min.y), pos2(right.max(start.x), row.max.y));
         ui.painter().with_clip_rect(clip).text(start, Align2::LEFT_CENTER, name, font, ink);
     }
     (response, start, right)
 }
+
+/// What a greyed ↑ or ↓ (Move Up, Move Down) says when hovered: what it would move is at that
+/// end of the list already.
+pub const AT_TOP: &str = "Already at the top";
+pub const AT_BOTTOM: &str = "Already at the bottom";
 
 /// One of the keys over a list of pictures in the Edit view's left column.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1350,8 +1368,10 @@ pub const LIST_TOP: f32 = 2.0;
 /// one open, 30 high and 8 in from each side, 4 apart. The arrows are 26 wide; the three with
 /// words share what is left, each as wide as its words with 3 to 6 either side, and any more
 /// shared 1 : 1 : 1.2 (the left column is just wide enough for Duplicate). `can` says which of
-/// the five can be pressed (in that order), `hints` what each does. Returns the one pressed.
-pub fn list_keys(ui: &mut egui::Ui, salt: &str, can: [bool; 5], hints: [&str; 5]) -> Option<ListKey> {
+/// the five can be pressed (in that order), `hints` what each does, and `why` why each can't
+/// be: a key that can't be pressed is greyed, with the reason as its hover (a control is greyed
+/// rather than made to refuse). Returns the one pressed.
+pub fn list_keys(ui: &mut egui::Ui, salt: &str, can: [bool; 5], hints: [&str; 5], why: [&str; 5]) -> Option<ListKey> {
     const TALL: f32 = 30.0;
     const ARROW: f32 = 26.0;
     const BETWEEN: f32 = 4.0;
@@ -1371,7 +1391,8 @@ pub fn list_keys(ui: &mut egui::Ui, salt: &str, can: [bool; 5], hints: [&str; 5]
         let rect = Rect::from_min_size(pos2(left, row.min.y), vec2(widths[at], TALL));
         let id = ui.scope_id().with((salt, at));
         let response = flat_button(ui, rect, id, key.words(), font.clone(), Flat::Plain, can[at]);
-        if response.on_hover_text(hints[at]).clicked() {
+        // A greyed key still senses the pointer, so it takes a hover: the reason.
+        if response.on_hover_text(if can[at] { hints[at] } else { why[at] }).clicked() {
             pressed = Some(key);
         }
         left = rect.max.x + BETWEEN;
@@ -2529,7 +2550,8 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
                 ui.close();
             }
             ui.separator();
-            if ui.add_enabled(several, egui::Button::new("Delete Playlist")).clicked() {
+            let delete_playlist = ui.add_enabled(several, egui::Button::new("Delete Playlist"));
+            if delete_playlist.on_disabled_hover_text("There is always one playlist").clicked() {
                 delete = Some(index);
                 ui.close();
             }
@@ -3381,12 +3403,15 @@ pub fn song_menu(
         state.song_loop_request = Some(index);
         ui.close();
     }
-    // The Announcements layer: the song's slides go round by themselves over everything else.
+    // The Announcements layer: the song's slides go round by themselves over everything else
+    // (only those that are on).
+    let none_on = !show.presentations().get(index).is_some_and(|song| song.slides().any(|(_, slide)| slide.enabled));
     announce_button(
         ui,
         state,
         crate::announcements::Announce::Song(index),
         "Its slides go round by themselves over the slides (each for its Go to Next time, or 8 seconds)",
+        none_on.then_some(NO_SLIDE_ON),
     );
     // How its slides give way to each other, unless a slide has its own.
     let own_transition = show.presentations().get(index).and_then(|song| song.transition);
@@ -3575,7 +3600,17 @@ pub fn item_menu(
         _ => None,
     };
     if let Some(what) = announced {
-        announce_button(ui, state, what, "It goes round by itself over the slides until it is cleared");
+        // A media playlist with nothing in it: Play is greyed, saying so.
+        let empty = match what {
+            crate::announcements::Announce::MediaPlaylist(id) => state
+                .media_playlists
+                .iter()
+                .find(|playlist| playlist.id == id)
+                .is_none_or(|playlist| crate::media::playlist_places(&playlist.files, show.media()).is_empty()),
+            _ => false,
+        };
+        let hint = "It goes round by itself over the slides until it is cleared";
+        announce_button(ui, state, what, hint, empty.then_some(NOTHING_TO_PLAY));
         ui.separator();
     }
     version_section(ui, state, index);
@@ -3644,19 +3679,35 @@ pub fn show_with_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, he
 }
 
 /// Play on Announcements Layer, for a song, a picture, a video or a media playlist; Stop
-/// Announcements while it plays there.
-pub fn announce_button(ui: &mut egui::Ui, state: &mut HomeState, what: crate::announcements::Announce, hint: &str) {
+/// Announcements while it plays there. `nothing` says why there is nothing to play (a media
+/// playlist with nothing in it, a song with every slide off): then Play is greyed, with that as
+/// its hover.
+pub fn announce_button(
+    ui: &mut egui::Ui,
+    state: &mut HomeState,
+    what: crate::announcements::Announce,
+    hint: &str,
+    nothing: Option<&str>,
+) {
     let announcing = state.announcement_live.as_ref().is_some_and(|(live, _)| *live == what);
     let (label, hint) = if announcing {
         ("Stop Announcements", "Take it off the Announcements layer")
     } else {
         ("Play on Announcements Layer", hint)
     };
-    if ui.button(label).on_hover_text(hint).clicked() {
+    let can = announcing || nothing.is_none();
+    let button = ui.add_enabled(can, egui::Button::new(label)).on_hover_text(hint);
+    if button.on_disabled_hover_text(nothing.unwrap_or_default()).clicked() {
         state.announcement_request = Some((!announcing).then_some(what));
         ui.close();
     }
 }
+
+/// Why a media playlist's Play is greyed, in the words the app refuses with.
+pub const NOTHING_TO_PLAY: &str = "That media playlist has nothing in it to play";
+
+/// Why a song's Play on Announcements Layer is greyed, in the words the app refuses with.
+const NO_SLIDE_ON: &str = "That song has no slide that is on";
 
 /// The part of a playlist item's menu that is about its place in the playlist: filling a
 /// placeholder, renaming a header or a placeholder, moving it up or down, taking it out.
@@ -3699,11 +3750,12 @@ fn item_moves(ui: &mut egui::Ui, show: &Show, state: &HomeState, index: usize, a
         1 => ("Move Up".to_owned(), "Move Down".to_owned()),
         many => (format!("Move {many} Up"), format!("Move {many} Down")),
     };
-    if ui.add_enabled(first > 0, egui::Button::new(up)).clicked() {
+    if ui.add_enabled(first > 0, egui::Button::new(up)).on_disabled_hover_text(AT_TOP).clicked() {
         *ask = Some(ItemAsk::Earlier(index));
         ui.close();
     }
-    if ui.add_enabled(last + 1 < items.len(), egui::Button::new(down)).clicked() {
+    let down = ui.add_enabled(last + 1 < items.len(), egui::Button::new(down));
+    if down.on_disabled_hover_text(AT_BOTTOM).clicked() {
         *ask = Some(ItemAsk::Later(index));
         ui.close();
     }
@@ -4864,11 +4916,14 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
             x += 13.0;
             let hints = [crate::keys::hint("Undo", "Z", false), crate::keys::hint("Redo", "Z", true)];
             for ((label, action), hint) in [("Undo", Action::Undo), ("Redo", Action::Redo)].into_iter().zip(&hints) {
+                // Greyed when the history in force has nothing to take back, saying so.
+                let redo = action == Action::Redo;
+                let enabled = state.can_undo(redo);
                 let place = Rect::from_min_size(pos2(x, middle - 15.0), vec2(UNDO, 30.0));
-                if labelled_button(ui, place, ui.scope_id().with(label), label, None, false)
-                    .on_hover_text(hint)
-                    .clicked()
-                {
+                let font = FontId::proportional(12.5);
+                let button = flat_button(ui, place, ui.scope_id().with(label), label, font, Flat::Plain, enabled);
+                let why = crate::home::nothing_to(redo);
+                if button.on_hover_text(if enabled { hint.as_str() } else { why }).clicked() {
                     state.menu_asked = Some(action);
                 }
                 x += UNDO + 8.0;
@@ -5078,7 +5133,7 @@ pub fn media_strip(
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .show(|ui| transition_picker(ui, &mut state.media_transition, "media"));
         // From the left: the menu of media playlists.
-        media_playlist_picker(ui, state, label.max.x + 12.0, middle);
+        media_playlist_picker(ui, show, state, label.max.x + 12.0, middle);
         ui.add_space(6.0);
         // Nothing in it yet: a big place to click, or to drop files on.
         if empty && !crate::file_drop::media_coming(state) {
@@ -5520,7 +5575,7 @@ fn video_bar(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
 
 /// The menu beside MEDIA: all media or one media playlist, a new playlist, and renaming or
 /// deleting the one shown.
-fn media_playlist_picker(ui: &egui::Ui, state: &mut HomeState, left: f32, middle: f32) -> Rect {
+fn media_playlist_picker(ui: &egui::Ui, show: &Show, state: &mut HomeState, left: f32, middle: f32) -> Rect {
     let shown = state.media_playlist_shown.and_then(|id| state.media_playlists.iter().find(|p| p.id == id));
     if shown.is_none() {
         state.media_playlist_shown = None;
@@ -5528,12 +5583,12 @@ fn media_playlist_picker(ui: &egui::Ui, state: &mut HomeState, left: f32, middle
     let label = shown.map_or_else(|| "All Media".to_owned(), |playlist| playlist.name.clone());
     let picker = menu_pill(ui, "media source", left, middle, &label, false).on_hover_text("Choose a media playlist");
     let place = picker.rect;
-    media_playlist_menu(state, &picker);
+    media_playlist_menu(show, state, &picker);
     place
 }
 
 /// What the menu beside MEDIA offers.
-fn media_playlist_menu(state: &mut HomeState, picker: &egui::Response) {
+fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Response) {
     egui::Popup::from_toggle_button_response(picker)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
@@ -5580,15 +5635,18 @@ fn media_playlist_menu(state: &mut HomeState, picker: &egui::Response) {
                     state.services.add(crate::service::Item::MediaPlaylist { id, name });
                     ui.close();
                 }
-                // Played item after item on the media layer, round and round.
+                // Played item after item on the media layer, round and round; greyed, with the
+                // reason, while it has nothing in it to play.
+                let empty = crate::media::playlist_places(&state.media_playlists[at].files, show.media()).is_empty();
                 if state.media_playing == Some(id) {
                     if ui.button("Stop Playing").clicked() {
                         state.media_request = Some(crate::home::MediaRequest::PlayPlaylist(None));
                         ui.close();
                     }
                 } else if ui
-                    .button("Play This Playlist")
+                    .add_enabled(!empty, egui::Button::new("Play This Playlist"))
                     .on_hover_text("Its pictures (8 seconds each) and videos (to their end) in turn, round and round")
+                    .on_disabled_hover_text(NOTHING_TO_PLAY)
                     .clicked()
                 {
                     state.media_request = Some(crate::home::MediaRequest::PlayPlaylist(Some(id)));
@@ -5599,6 +5657,7 @@ fn media_playlist_menu(state: &mut HomeState, picker: &egui::Response) {
                     state,
                     crate::announcements::Announce::MediaPlaylist(id),
                     "Its pictures and videos in turn over the slides, round and round, until it is cleared",
+                    empty.then_some(NOTHING_TO_PLAY),
                 );
                 // A folder it follows: what is in the folder is in the playlist.
                 match state.media_playlists[at].folder.clone() {
@@ -5704,7 +5763,7 @@ fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index:
     } else {
         "Over the slides until it is cleared"
     };
-    announce_button(ui, state, crate::announcements::Announce::Media(item.id), hint);
+    announce_button(ui, state, crate::announcements::Announce::Media(item.id), hint, None);
     ui.menu_button("Media Playlists", |ui| {
         if state.media_playlists.is_empty() {
             ui.label(
