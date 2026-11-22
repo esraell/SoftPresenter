@@ -1742,12 +1742,22 @@ fn found_added_to_library(ctx: &egui::Context, state: &mut HomeState, id: sp_mod
 }
 
 /// What is carried beside the pointer while it is dragged: its name (or how many), on a small
-/// grey chip, until it is dropped.
+/// grey chip, until it is dropped. Long words are cut short with …, and near the window's right
+/// edge the chip goes on the pointer's left, so all of it shows.
 pub fn paint_carried(ctx: &egui::Context, words: &str) {
     let Some(at) = ctx.pointer_latest_pos() else { return };
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("carried")));
-    let text = painter.layout_no_wrap(words.to_owned(), semibold(12.5), Color32::WHITE);
-    let chip = Rect::from_min_size(at + vec2(14.0, 10.0), text.size() + vec2(18.0, 10.0));
+    let format = egui::TextFormat { font_id: semibold(12.5), color: Color32::WHITE, ..Default::default() };
+    let mut job = egui::text::LayoutJob::single_section(words.to_owned(), format);
+    job.wrap =
+        egui::text::TextWrapping {
+            max_width: 300.0, max_rows: 1, break_anywhere: true, overflow_character: Some('…')
+        };
+    let text = painter.layout_job(job);
+    let mut chip = Rect::from_min_size(at + vec2(14.0, 10.0), text.size() + vec2(18.0, 10.0));
+    if chip.max.x > ctx.content_rect().max.x - 4.0 {
+        chip = chip.translate(vec2(-(chip.width() + 28.0), 0.0));
+    }
     painter.rect_filled(chip, 8.0, SELECTED);
     painter.rect_stroke(chip, 8.0, Stroke::new(1.0, Color32::from_white_alpha(30)), StrokeKind::Inside);
     painter.galley(chip.min + vec2(9.0, 5.0), text, Color32::WHITE);

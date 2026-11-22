@@ -47,7 +47,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **More show shortcuts.** F7 to clear announcements, ⌘→ and ⌘← for the next and previous background, ⇧⌘L to show the live announcement, ⌥⌘L to find a song in its library, a key for the stage editor (⌘1 to ⌘7 are the tool tabs now), holding ~ to peek at Easy view, and Option-click to load a video paused. (started: the menu items for F7 and ⌘→/⌘← are there without their keys) · S · Low
 - **Slide view settings.** Font, size, colour and truncation in Easy view, a notes column in Table view, slides shown by group, and background colours. (started: the three views and the size slider) · S · Low
 - **Audio level meter by the Program preview.** · S · Low
-- **Warnings for missing things.** A badge on macros whose target has gone and on media playlists whose folder is missing. (started: a badge on slides whose text overflows, and missing songs dimmed in playlists) · S · Low
+- **Warnings for missing things.** A badge on macros whose target has gone and on media playlists whose folder is missing. (started: a badge on slides whose text overflows, missing songs dimmed in playlists, and a macro step whose target has gone saying so in amber) · S · Low
 - **Removing actions from several slides at once.** (started: removing actions from one slide) · S · Low
 
 ## Slides and editing

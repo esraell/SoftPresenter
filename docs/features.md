@@ -391,14 +391,21 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   stop or reset timers, switch the audience screens, go to songs, show a picture from the
   media bin, play a media playlist, a picture, a video or a song on the Announcements layer, and
   fetch a fresh video from Canva. Each is a card with its colour as a dot, its name, how many
-  steps, a Run key (the only thing that runs it), a chevron that opens its steps (each with
-  Earlier and Remove, then **+ Add a step**), and ⋯ with Edit Steps…, Colour, Run When
-  SoftPresenter Opens, Rename, Duplicate and Delete. + Add a step opens every step in groups,
-  under the heading ADD A STEP: Clear, Messages, Props, Timers, Audience Screens, Go to a Song,
-  Show a Picture or Video, Announcements (a media playlist, a picture or video, or a song), and
-  Sync from Canva on its own; a slide's Add Action is the same menu. A step whose song, message, prop, timer,
-  picture or media playlist has gone says so, as "Play on the Announcements Layer: (a song no
-  longer in the library)".
+  steps, a Run key (the only thing that runs it), a chevron that opens its steps, and ⋯ with
+  Edit Steps…, Colour, Run When SoftPresenter Opens, Rename, Duplicate and Delete. Opened, each
+  step is its number, a button with its words and a faint chevron, and × to remove it; then
+  **+ Add a step**. + Add a step opens every step in groups, under the heading ADD A STEP:
+  Clear, Messages, Props, Timers, Audience Screens, Go to a Song, Show a Picture or Video,
+  Announcements (a media playlist, a picture or video, or a song), and Sync from Canva on its
+  own; a slide's Add Action is the same menu. A click on a step (or a right-click) opens the
+  same menu headed CHANGE THIS STEP TO, with the step's group and its choice marked: the one
+  chosen takes the step's place. A step is **dragged** by its row into a new order: it goes
+  faint, its words follow the pointer, and an ink line shows where it will go, above or below
+  the step by which half the pointer is over; a press that barely moves is a click, and Escape
+  stops the drag. A step whose song, message, prop, timer, picture or media playlist has gone
+  says so in amber, as "Play on the Announcements Layer: (a song no longer in the library)", and
+  a click on it offers the others; a step's words wrap to a second line before they are cut
+  short. Macros save as they change, and have no undo.
 - **Start-up is a macro**: a macro with Run When SoftPresenter Opens switched on (a switch at
   the top of the opened macro, and in its menu) runs when the app opens, such as one that plays
   the announcement loop before the service. Its step Audience Screens Off takes effect before

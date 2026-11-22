@@ -1071,15 +1071,27 @@ fn listed_songs<'a>(
 /// An action in words. Songs and pictures are looked up only for the actions that name one, so
 /// the Macros tab doesn't copy the whole library on every frame.
 pub fn describe_action(show: &sp_engine::Show, state: &HomeState, action: &sp_model::ShowAction) -> String {
-    crate::macros::describe(
+    step_words(show, state, action).0
+}
+
+/// An action in words, and whether what it names (a song, a message, a prop, a timer, a picture
+/// or a media playlist) has gone.
+fn step_words(show: &sp_engine::Show, state: &HomeState, action: &sp_model::ShowAction) -> (String, bool) {
+    let gone = std::cell::Cell::new(false);
+    let found = |name: Option<String>| {
+        gone.set(gone.get() || name.is_none());
+        name
+    };
+    let words = crate::macros::describe(
         action,
-        |id| state.messages.iter().find(|m| m.id == id).map(|m| m.name.clone()),
-        |id| state.props.iter().find(|p| p.id == id).map(|p| p.name.clone()),
-        |id| state.timers.iter().find(|t| t.id == id).map(|t| t.name.clone()),
-        |key| song_title(show, state, key),
-        |id| show.media().iter().find(|item| item.id == id).map(|item| item.name.clone()),
-        |id| state.media_playlists.iter().find(|p| p.id == id).map(|p| p.name.clone()),
-    )
+        |id| found(state.messages.iter().find(|m| m.id == id).map(|m| m.name.clone())),
+        |id| found(state.props.iter().find(|p| p.id == id).map(|p| p.name.clone())),
+        |id| found(state.timers.iter().find(|t| t.id == id).map(|t| t.name.clone())),
+        |key| found(song_title(show, state, key)),
+        |id| found(show.media().iter().find(|item| item.id == id).map(|item| item.name.clone())),
+        |id| found(state.media_playlists.iter().find(|p| p.id == id).map(|p| p.name.clone())),
+    );
+    (words, gone.get())
 }
 
 /// The groups of steps a macro or a slide can do, in the order their menus list them.
@@ -1333,7 +1345,10 @@ enum MacroAsk {
     Color(sp_model::Rgba),
     Startup,
     Add(sp_model::ShowAction),
-    Earlier(usize),
+    /// The step at a place does this instead.
+    Change(usize, sp_model::ShowAction),
+    /// The step at a place goes to another (both counting from 0).
+    Move(usize, usize),
     Remove(usize),
     Duplicate,
     Delete,
@@ -1405,7 +1420,7 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
         let made = &state.macros[index];
         let id = made.id;
         let open = open_macro == Some(id);
-        let steps: Vec<String> = made.actions.iter().map(|action| describe_action(show, state, action)).collect();
+        let steps: Vec<(String, bool)> = made.actions.iter().map(|action| step_words(show, state, action)).collect();
         egui::Frame::new().fill(CARD).corner_radius(RADIUS_CARD as u8).inner_margin(MACRO_MARGIN).show(ui, |ui| {
             ui.set_width(ui.available_width());
             let made = &state.macros[index];
@@ -1483,7 +1498,11 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
                     asked = Some((index, ask));
                 }
             });
-            let summary = if steps.is_empty() { "No steps yet".to_owned() } else { steps.join("\n") };
+            let summary = if steps.is_empty() {
+                "No steps yet".to_owned()
+            } else {
+                steps.iter().map(|(words, _)| words.as_str()).collect::<Vec<_>>().join("\n")
+            };
             back.on_hover_text(summary).context_menu(|ui| {
                 if let Some(ask) = macro_menu(ui, made, open) {
                     asked = Some((index, ask));
@@ -1520,39 +1539,70 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
                 .font(FontId::proportional(11.5))
                 .color(TEXT_FAINT),
             );
-            // Its steps, in the order they are done, each with Earlier and Remove; then a menu
-            // of steps to add.
+            // Its steps, in the order they are done. Each is a button (its words and a faint chevron)
+            // that changes what it does, in place; its row is dragged to another place; × removes
+            // it. Words naming something gone are amber, and wrap to a second line before they
+            // are cut short.
             ui.add_space(6.0);
             ui.spacing_mut().item_spacing.y = 2.0;
             let inner = width - 4.0;
             if steps.is_empty() {
                 empty_note(ui, "No steps yet");
             }
-            for (at, words) in steps.iter().enumerate() {
-                let (line, _) = ui.allocate_exact_size(vec2(inner, 28.0), Sense::hover());
+            let mut rows: Vec<Rect> = Vec::with_capacity(steps.len());
+            let (mut dragging, mut dropped) = (None, None);
+            let font = FontId::proportional(12.5);
+            // From the left: the number, the button (6 points of room round its words and the
+            // chevron), and ×.
+            let (number_wide, remove_wide, pad, mark) = (16.0, 26.0, 6.0, 9.0);
+            let button_wide = inner - number_wide - remove_wide - 6.0;
+            for (at, (words, gone)) in steps.iter().enumerate() {
+                let ink = if *gone { crate::studio::CARE } else { TEXT };
+                let text = fitted(ui, words, font.clone(), ink, button_wide - 3.0 * pad - mark, 2);
+                let (line, _) = ui.allocate_exact_size(vec2(inner, (text.size().y + 6.0).max(26.0)), Sense::hover());
+                rows.push(line);
                 let cy = line.center().y;
+                let button =
+                    Rect::from_min_size(pos2(line.min.x + number_wide, line.min.y), vec2(button_wide, line.height()));
+                // The whole row takes the press, ahead of ×, which is laid over it.
+                let response = ui.interact(line, egui::Id::unique(("macro step", id, at)), Sense::click_and_drag());
+                let menu_open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&response));
+                if response.hovered() || menu_open {
+                    ui.painter().rect_filled(button, 6.0, crate::studio::BUTTON);
+                }
                 let number = format!("{}", at + 1);
                 ui.painter().text(pos2(line.min.x, cy), Align2::LEFT_CENTER, number, fixed(12.0), TEXT_FAINT);
-                let remove = Rect::from_min_size(pos2(line.max.x - 28.0, cy - 14.0), vec2(28.0, 28.0));
-                let earlier = remove.translate(vec2(-30.0, 0.0));
-                let text =
-                    fitted(ui, words, FontId::proportional(12.5), TEXT, earlier.min.x - 6.0 - line.min.x - 22.0, 1);
-                ui.painter().galley(pos2(line.min.x + 22.0, cy - text.size().y / 2.0), text, TEXT);
-                if at > 0
-                    && quiet_icon(
-                        ui,
-                        earlier,
-                        egui::Id::unique(("macro step earlier", id, at)),
-                        Icon::ChevronUp,
-                        12.0,
-                        0.6,
-                        Some(crate::studio::BUTTON),
-                    )
-                    .on_hover_text("Do this step earlier")
-                    .clicked()
-                {
-                    asked = Some((index, MacroAsk::Earlier(at)));
+                ui.painter().galley(pos2(button.min.x + pad, cy - text.size().y / 2.0), text, ink);
+                let chevron = Rect::from_center_size(pos2(button.max.x - pad - mark / 2.0, cy), vec2(mark, mark));
+                crate::icons::paint(ui.painter(), Icon::ChevronDown, chevron, TEXT_FAINT);
+                if response.dragged() {
+                    dragging = Some(at);
                 }
+                if crate::studio::drag_let_go(&response) {
+                    dropped = Some(at);
+                }
+                let hint = if *gone {
+                    "What this step names has gone: click to choose another"
+                } else {
+                    "Click to change this step; drag it to another place"
+                };
+                let response = response.on_hover_text(hint);
+                // A click (or a right-click) opens every step in groups, its own marked; the one
+                // chosen takes its place.
+                let change = |ui: &mut egui::Ui, asked: &mut Option<(usize, MacroAsk)>| {
+                    let current = &made.actions[at];
+                    if let Some(step) = step_menu(ui, show, state, "Change this step to", Some(current)) {
+                        if step != *current {
+                            *asked = Some((index, MacroAsk::Change(at, step)));
+                        }
+                        ui.close();
+                    }
+                };
+                let opened = response.clicked() || response.secondary_clicked();
+                egui::Popup::menu(&response)
+                    .open_memory(opened.then_some(egui::SetOpenCommand::Toggle))
+                    .show(|ui| change(ui, &mut asked));
+                let remove = Rect::from_min_size(pos2(line.max.x - remove_wide, cy - 13.0), vec2(remove_wide, 26.0));
                 if quiet_icon(
                     ui,
                     remove,
@@ -1566,6 +1616,22 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
                 .clicked()
                 {
                     asked = Some((index, MacroAsk::Remove(at)));
+                }
+            }
+            // A step being dragged goes faint, its words follow the pointer, and an ink line shows
+            // where it will go, by which half of a step the pointer is over; letting go moves it
+            // there, and Escape leaves it where it was (as the playlist's items do).
+            if let Some(y) = ui.input(|input| input.pointer.interact_pos()).map(|at| at.y) {
+                let slot = crate::studio::drop_slot(&rows, y);
+                if let Some(from) = dragging {
+                    crate::studio::paint_rows_moving(ui.painter(), &rows, |at| at == from, slot, CARD);
+                    crate::studio::paint_carried(ui.ctx(), &steps[from].0);
+                }
+                if let Some(from) = dropped {
+                    let to = if slot > from { slot - 1 } else { slot };
+                    if to != from {
+                        asked = Some((index, MacroAsk::Move(from, to)));
+                    }
                 }
             }
             // + Add a step: a small button opening every step, in their groups.
@@ -1614,7 +1680,12 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
             MacroAsk::Color(color) => state.macros[index].color = color,
             MacroAsk::Startup => state.macros[index].on_startup = !state.macros[index].on_startup,
             MacroAsk::Add(action) => state.macros[index].actions.push(action),
-            MacroAsk::Earlier(at) => state.macros[index].actions.swap(at - 1, at),
+            MacroAsk::Change(at, step) => {
+                state.macros[index].replace_step(at, step);
+            }
+            MacroAsk::Move(from, to) => {
+                state.macros[index].move_step(from, to);
+            }
             MacroAsk::Remove(at) => {
                 state.macros[index].actions.remove(at);
             }
@@ -2774,6 +2845,157 @@ mod tests {
         let added = vec![ShowAction::Clear { what: ClearWhat::All }, ShowAction::Prop { id: logo, show: true }];
         assert_eq!(state.macros[0].actions, added);
         assert!(state.macros_changed);
+    }
+
+    /// The rows of an open macro's first `count` steps, top to bottom, as drawn last.
+    fn step_rows(ctx: &egui::Context, id: sp_model::Uuid, count: usize) -> Vec<Rect> {
+        (0..count).map(|at| ctx.read_response(egui::Id::unique(("macro step", id, at))).expect("drawn").rect).collect()
+    }
+
+    /// Steps that clear these, and what the first macro's steps clear now.
+    fn clearing(what: &[sp_model::ClearWhat]) -> Vec<ShowAction> {
+        what.iter().map(|what| ShowAction::Clear { what: *what }).collect()
+    }
+
+    fn cleared(state: &HomeState) -> Vec<sp_model::ClearWhat> {
+        let what = |step: &ShowAction| if let ShowAction::Clear { what } = step { Some(*what) } else { None };
+        state.macros[0].actions.iter().filter_map(what).collect()
+    }
+
+    /// Presses at `from` and carries it to `to` in a few steps, holding it there; returns what the
+    /// last frame drew. `let_go` lets go (with Escape first when `escape`).
+    fn hold(
+        ctx: &egui::Context,
+        show: &sp_engine::Show,
+        state: &mut HomeState,
+        from: egui::Pos2,
+        to: egui::Pos2,
+    ) -> Vec<(String, Rect)> {
+        let press = Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        };
+        let mut frames = vec![vec![Event::PointerMoved(from)], vec![press]];
+        frames.extend((1..=4).map(|step| vec![Event::PointerMoved(from + (to - from) * (step as f32 / 4.0))]));
+        let mut texts = Vec::new();
+        for events in frames {
+            texts = frame(ctx, show, state, events, next(ctx));
+        }
+        texts
+    }
+
+    fn let_go(
+        ctx: &egui::Context,
+        show: &sp_engine::Show,
+        state: &mut HomeState,
+        at: egui::Pos2,
+        escape: bool,
+    ) -> Vec<(String, Rect)> {
+        let release = Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        };
+        let key = Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        let mut frames = if escape { vec![vec![key]] } else { Vec::new() };
+        frames.extend([vec![release], vec![]]);
+        let mut texts = Vec::new();
+        for events in frames {
+            texts = frame(ctx, show, state, events, next(ctx));
+        }
+        texts
+    }
+
+    #[test]
+    fn a_step_dragged_goes_where_the_ink_line_was() {
+        use sp_model::ClearWhat::{All, Media, Props, Slide};
+        let show = show();
+        let (ctx, mut state, id) = opened(clearing(&[All, Slide, Media, Props]));
+        frame(&ctx, &show, &mut state, vec![], 0.0);
+        let rows = step_rows(&ctx, id, 4);
+        // The first step, over the lower half of the third: its words follow the pointer, and it
+        // goes after the third.
+        let to = rows[2].center() + vec2(0.0, rows[2].height() / 4.0);
+        let held = hold(&ctx, &show, &mut state, rows[0].center(), to);
+        assert_eq!(held.iter().filter(|(words, _)| words == "Clear All").count(), 2, "its words follow the pointer");
+        assert_eq!(cleared(&state), [All, Slide, Media, Props], "nothing moves until it is let go");
+        let texts = let_go(&ctx, &show, &mut state, to, false);
+        assert_eq!(cleared(&state), [Slide, Media, All, Props]);
+        assert!(state.macros_changed);
+        assert!(!texts.iter().any(|(words, _)| words == "CHANGE THIS STEP TO"), "a drag opens no menu");
+        // The last, over the upper half of the first: it goes first.
+        let to = rows[0].center() - vec2(0.0, rows[0].height() / 4.0);
+        hold(&ctx, &show, &mut state, rows[3].center(), to);
+        let_go(&ctx, &show, &mut state, to, false);
+        assert_eq!(cleared(&state), [Props, Slide, Media, All]);
+    }
+
+    #[test]
+    fn escape_stops_a_step_being_dragged_and_it_stays_where_it_was() {
+        use sp_model::ClearWhat::{All, Media, Slide};
+        let show = show();
+        let (ctx, mut state, id) = opened(clearing(&[All, Slide, Media]));
+        frame(&ctx, &show, &mut state, vec![], 0.0);
+        let rows = step_rows(&ctx, id, 3);
+        let to = rows[2].center() + vec2(0.0, rows[2].height() / 4.0);
+        hold(&ctx, &show, &mut state, rows[0].center(), to);
+        let texts = let_go(&ctx, &show, &mut state, to, true);
+        assert_eq!(cleared(&state), [All, Slide, Media]);
+        assert!(!state.macros_changed);
+        assert!(!texts.iter().any(|(words, _)| words == "CHANGE THIS STEP TO"), "nor is it a click");
+    }
+
+    #[test]
+    fn a_press_on_a_step_that_barely_moves_is_a_click_and_opens_its_menu() {
+        use sp_model::ClearWhat::{All, Slide};
+        let show = show();
+        let (ctx, mut state, id) = opened(clearing(&[All, Slide]));
+        frame(&ctx, &show, &mut state, vec![], 0.0);
+        let rows = step_rows(&ctx, id, 2);
+        // Pressed on the first, moved 3 points towards the second, let go.
+        let at = rows[0].center();
+        hold(&ctx, &show, &mut state, at, at + vec2(0.0, 3.0));
+        let texts = let_go(&ctx, &show, &mut state, at + vec2(0.0, 3.0), false);
+        place_of(&texts, "CHANGE THIS STEP TO");
+        assert_eq!(cleared(&state), [All, Slide]);
+        assert!(!state.macros_changed);
+    }
+
+    #[test]
+    fn a_step_changed_from_its_menu_keeps_its_place() {
+        use sp_model::ClearWhat::All;
+        let show = show();
+        let (ctx, mut state, id) = opened(Vec::new());
+        let (logo, phones) = (state.props[0].id, state.messages[0].id);
+        let off = ShowAction::Audience { on: false };
+        state.macros[0].actions =
+            vec![ShowAction::Clear { what: All }, ShowAction::Prop { id: logo, show: true }, off.clone()];
+        click(&ctx, &show, &mut state, egui::Id::unique(("macro step", id, 1)), vec2(0.0, 0.0));
+        let texts = frame(&ctx, &show, &mut state, vec![], next(&ctx));
+        place_of(&texts, "CHANGE THIS STEP TO");
+        let texts = point(&ctx, &show, &mut state, place_of(&texts, "Messages"), false);
+        point(&ctx, &show, &mut state, place_of(&texts, "Show Phones"), true);
+        let changed = vec![ShowAction::Clear { what: All }, ShowAction::Message { id: phones, show: true }, off];
+        assert_eq!(state.macros[0].actions, changed);
+        assert!(state.macros_changed);
+    }
+
+    #[test]
+    fn a_step_whose_song_has_gone_says_so() {
+        let show = show();
+        let gone = ShowAction::Announce { what: sp_model::Announced::Song { key: "nowhere".to_owned() } };
+        let (ctx, mut state, _) = opened(vec![gone]);
+        let texts = frame(&ctx, &show, &mut state, vec![], 0.0);
+        place_of(&texts, "Play on the Announcements Layer: (a song no longer in the library)");
     }
 
     #[test]
