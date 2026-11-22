@@ -576,8 +576,18 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   translation's. A verse found by its words is numbered as the Bible it was found in. A name the
   operator reads is numbered as its language numbers (never a Russian name with an English
   number), so it reads back as the same passage. The page reads the operator's language first,
-  and the next Bible in use under it; the keypad, the lists and the page's verse numbers stay the
-  first translation's.
+  and the next Bible in use under it.
+- **The Bible page uses one numbering: the language it is read in** (the Аа choice, or on Auto
+  the language last typed). The keypad's and the lists' chapters and verses (how many verses a
+  chapter has too), the page's verse numbers and the title are all numbered as that language's
+  Bible numbers them, so the key lit always agrees with the title: `Psalm 23` typed in English
+  lights 23; `Пс 22` typed, or Аа on Русский, lights 22 and is titled `Псалом 22`; key 23 clicked
+  while reading in English opens the English 23rd psalm. Where the Bible under it numbers a verse
+  otherwise, that line begins with its own reference in small faint figures (`Псалом 22:1` under
+  Psalm 23:1; `Psalm 51:1` under the Synodal's 50:3, whose title is two verses). Changing the
+  language read in numbers the keypad, the lists, the title and the page again for the same
+  passage; it never puts anything on screen or changes the passage's verses. The slides, and
+  what + Add, Command-Return and History keep, are as before.
 - With nothing typed to go by (the Bible page opened fresh, a book or verse clicked, a passage
   from History or a playlist), the operator reads in the language last typed this session; at
   the start of a session, in the computer's: Russian if its first language is Russian,
@@ -649,8 +659,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   before, and a double-click opens the whole chapter with that verse picked. What a click loads
   has its first verse (or the verse double-clicked) picked, so Enter puts it on screen and Next
   goes on through its chapter; nothing goes on screen from them. The
-  passage showing is lit, however it was looked up. Chapters and verses are numbered as the first
-  translation numbers them.
+  passage showing is lit, however it was looked up. Chapters and verses are numbered as the page
+  is read (see above), and what a click opens is kept named in that language.
 - Four Bibles ship with the app (King James, World English, Berean Standard, Russian Synodal)
   and sixteen more can be downloaded. Options › Bibles opens the Bibles window: a search box,
   the Bibles installed (each with Remove, but for the four built in), and every Bible that can

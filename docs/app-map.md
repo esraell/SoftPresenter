@@ -187,7 +187,8 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   keys named short in the operator's language (`book_key`), then the book's chapters, then the
   chapter's verses, in one column that scrolls. The lists: book, chapter and verse side by side,
   each scrolling on its own, opened on what is chosen (the books in full under the testaments).
-  Both dim what the first translation lacks and number chapters and verses as it does; both hand
+  Both dim what the first translation lacks and number chapters and verses as the page's Bible
+  does (`BiblePage::page_bible`: the first in use of the language the page is read in); both hand
   a click to the one `choose`. History: the passages that were on screen, newest first, a click
   brings one back, and Clear history. Hide puts the column away and the middle takes its room;
   Books, beside the reference field, brings it back (kept with the preferences).
@@ -207,8 +208,9 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   playlist's passage runs as its own slides (`SlidesOf::Passage`); Open on the Bible Page opens
   it as the page opens any (`SlidesOf::Page`). The history notes the passage asked for
   (`passage_held`).
-- Page (`bible_page.rs`, `page_view`): the passage's whole chapter, a verse to a row with the
-  same verse in the next Bible under it; the passage's verses bright, the verse on screen tinted
+- Page (`bible_page.rs`, `page_view`): the passage's whole chapter as the page's Bible numbers it,
+  a verse to a row with the same verse in the next Bible under it (with that Bible's own reference
+  in small faint figures when it numbers it otherwise); the passage's verses bright, the verse on screen tinted
   orange, the verse picked in a well with a ring. A click on a verse with a slide puts that slide
   on screen (its slide is its place among the verses the slides were made from); a click on a
   verse with none looks it up and picks it. Laid out once per passage,

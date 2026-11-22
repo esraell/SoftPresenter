@@ -12,7 +12,8 @@
 //! read in the numbering of the language it was typed in, and a name the operator reads is
 //! numbered as its language numbers, never a Russian name with an English number (see
 //! `bible::numbering_of`). So a name written back in the field reads again as the same passage.
-//! Inside, the slides and the page are numbered as the first translation numbers them.
+//! Inside, the slides are numbered as the first translation numbers them; the Bible page (its
+//! keypad, lists, verses and title) is numbered as the language it is read in.
 //!
 //! A language can also be chosen on the Bible page (its Аа button, kept between starts): the
 //! operator then reads in it whatever is typed, while a Bible in use is in it (see [`Reading`]).
