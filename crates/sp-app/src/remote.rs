@@ -173,7 +173,12 @@ pub struct Remote {
     pub cert_news: Option<String>,
     /// When it was last looked whether the certificate must be made again.
     cert_checked: Option<Instant>,
+    /// Wrong passwords have been said in the notices, and not yet stopped for the hour.
+    wrong_said: bool,
 }
+
+/// How many wrong passwords in the hour are said in the notices.
+const WRONG_TO_SAY: usize = 3;
 
 /// Slides drawn for pages each time the event loop goes round, at most.
 pub const DRAW_AT_ONCE: usize = 3;
@@ -206,6 +211,7 @@ impl Remote {
             looks: state::Looks::default(),
             cert_news: None,
             cert_checked: None,
+            wrong_said: false,
         }
     }
 
@@ -830,6 +836,20 @@ impl crate::App {
         // window is drawn again when the pages connected change.
         let pages = self.remote.page_count();
         let wrong = self.remote.shared().map_or(0, |shared| shared.wrong_passwords_lately());
+        // Wrong passwords coming again and again are said once in the notices, which a remote
+        // page can't clear; said again only after they stopped for the hour.
+        if wrong >= WRONG_TO_SAY && !self.remote.wrong_said {
+            self.remote.wrong_said = true;
+            if let Some(running) = self.running.as_mut() {
+                running.home_state.notices.secure(
+                    crate::notices::Kind::Trouble,
+                    "Wrong Remote Control passwords were tried several times in the last hour. See Settings › Remote Control.",
+                );
+                running.home_window.request_redraw();
+            }
+        } else if wrong == 0 {
+            self.remote.wrong_said = false;
+        }
         let showing = self.running.as_ref().is_some_and(|r| {
             r.home_state.preferences_open
                 && crate::home::PANES.get(r.home_state.preferences_pane) == Some(&"Remote Control")
@@ -893,7 +913,7 @@ impl crate::App {
             && let Some(running) = self.running.as_mut()
         {
             running.home_state.remote.said = Some((news.clone(), false));
-            running.home_state.notices.info(news);
+            running.home_state.notices.secure(crate::notices::Kind::Info, news);
             running.home_window.request_redraw();
         }
         let state_at = self.tick_remote_state(false);

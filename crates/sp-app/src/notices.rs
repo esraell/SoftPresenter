@@ -78,6 +78,10 @@ pub struct Notice {
     /// What a question is about: the answer goes there.
     #[serde(skip)]
     pub about: Option<Waiting>,
+    /// Something about security (a new certificate key, wrong passwords coming again and
+    /// again): a remote page can't mark it seen or clear it; only the operator, in the app.
+    #[serde(skip)]
+    pub secure: bool,
 }
 
 /// A refusal's cue: a small dark chip under the place of action, for [`CUE_FOR`] seconds.
@@ -140,6 +144,16 @@ impl Notices {
         let text = text.into();
         if !self.list.iter().any(|notice| notice.kind == Kind::Trouble && notice.text == text.trim()) {
             self.trouble(text);
+        }
+    }
+
+    /// Something about security, in the list like any other, but kept from a remote page's
+    /// `notices seen` and `notices clear` until the operator has seen it in the app.
+    pub fn secure(&mut self, kind: Kind, text: impl Into<String>) {
+        let text = text.into();
+        self.push(kind, text.clone(), None, Vec::new());
+        if let Some(notice) = self.list.iter_mut().find(|notice| notice.kind == kind && notice.text == text.trim()) {
+            notice.secure = true;
         }
     }
 
@@ -244,6 +258,20 @@ impl Notices {
         self.list.retain(|notice| notice.kind == Kind::Question);
     }
 
+    /// What a remote page's `notices clear` does: as Clear All, but what is about security stays
+    /// until the operator has seen it in the app.
+    pub fn clear_all_for_page(&mut self) {
+        self.list.retain(|notice| notice.kind == Kind::Question || (notice.secure && !notice.seen));
+    }
+
+    /// What a remote page's `notices seen` does: as closing the list, but what is about security
+    /// is left unseen.
+    pub fn mark_seen_for_page(&mut self) {
+        for notice in &mut self.list {
+            notice.seen = notice.seen || (notice.kind != Kind::Question && !notice.secure);
+        }
+    }
+
     /// Whether Clear All has anything to take away.
     pub fn clearable(&self) -> bool {
         self.list.iter().any(|notice| notice.kind != Kind::Question)
@@ -303,7 +331,7 @@ impl Notices {
         }
         crate::applog::event(if kind == Kind::Question { "question" } else { "notice" }, &text);
         self.next += 1;
-        self.list.insert(0, Notice { id: self.next, kind, text, time, seen: false, actions, about });
+        self.list.insert(0, Notice { id: self.next, kind, text, time, seen: false, actions, about, secure: false });
         let mut kept = 0;
         self.list.retain(|notice| {
             if notice.kind == Kind::Question {
@@ -746,6 +774,30 @@ mod tests {
         assert!(!notices.clearable(), "Clear All has nothing more to take");
         notices.settle(Waiting::Song(3));
         assert!(notices.entries().next().is_none() && notices.look() == Look::Quiet);
+    }
+
+    #[test]
+    fn a_remote_page_cannot_see_off_or_clear_what_is_about_security() {
+        let mut notices = Notices::default();
+        notices.info("Added Harbour Lights to Evening.");
+        notices.secure(Kind::Info, "A new certificate key.");
+        notices.secure(Kind::Trouble, "Wrong passwords keep coming.");
+        notices.mark_seen_for_page();
+        let seen = |notices: &Notices, text: &str| notices.entries().find(|n| n.text == text).map(|n| n.seen);
+        assert_eq!(seen(&notices, "Added Harbour Lights to Evening."), Some(true));
+        assert_eq!(seen(&notices, "A new certificate key."), Some(false));
+        assert_eq!(seen(&notices, "Wrong passwords keep coming."), Some(false));
+        notices.clear_all_for_page();
+        assert_eq!(notices.entries().count(), 2, "the ordinary one went, the two about security stay");
+        // The operator closes the list in the app: seen, and now a page may clear them.
+        notices.mark_seen();
+        notices.clear_all_for_page();
+        assert_eq!(notices.entries().count(), 0);
+        // Said again while unseen, it is not doubled, and is still about security.
+        notices.secure(Kind::Info, "A new certificate key.");
+        notices.secure(Kind::Info, "A new certificate key.");
+        assert_eq!(notices.entries().count(), 1);
+        assert!(notices.entries().all(|n| n.secure));
     }
 
     #[test]

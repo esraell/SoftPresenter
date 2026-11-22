@@ -359,7 +359,10 @@ demand: `["playlist", "NAME"]`.
 the same commands as `sp`: `["notices", "answer", "ID", "ACTION_ID"]` answers a question with one
 of its own actions (`outside:reload`, `outside:keep`; any other is refused), `["notices",
 "seen"]` marks every entry seen (as closing the list does), `["notices", "clear"]` is Clear All
-(a question stays until answered).
+(a question stays until answered). Entries about security (a new certificate key, wrong
+passwords tried several times in the hour) are the page's to read but not to dismiss: from a
+page, `seen` leaves them unseen and `clear` keeps them until the operator has seen them in the
+app (closing the list there marks them seen).
 
 **`versions`** — `{"versions": [{"id", "name"}], "on": {"id", "keep", "waiting"}}`.
 

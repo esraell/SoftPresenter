@@ -2086,11 +2086,18 @@ impl crate::App {
                 Ok(Reply::with(text, serde_json::to_value(&entries).unwrap_or_default()))
             }
             Some("seen") => {
-                self.with_state(|state| state.notices.mark_seen());
+                // A remote page leaves the notices about security unseen: the operator sees them.
+                let page = self.remote_call;
+                self.with_state(
+                    |state| if page { state.notices.mark_seen_for_page() } else { state.notices.mark_seen() },
+                );
                 Ok(Reply::done("Every notice is marked seen."))
             }
             Some("clear") => {
-                self.with_state(|state| state.notices.clear_all());
+                let page = self.remote_call;
+                self.with_state(
+                    |state| if page { state.notices.clear_all_for_page() } else { state.notices.clear_all() },
+                );
                 Ok(Reply::done("Cleared the notices (questions stay until they are answered)."))
             }
             Some("answer") => {

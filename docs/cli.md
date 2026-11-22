@@ -1057,8 +1057,8 @@ The list under the status button (≡) after the find box: information, trouble 
 |---|---|
 | `notices` | The entries, questions first, then newest first: each with its number, kind (`info`, `trouble`, `ask`), words, whether it is new, and a question's answers (`--json`: id, kind, text, time in seconds since 1970, seen, actions with id and label) |
 | `notices answer N ANSWER` | Answers question N with one of its own answers (`outside:reload` reads the file again, `outside:keep` keeps SoftPresenter's version), as its button does; the reply is what the list then says |
-| `notices seen` | Marks every entry seen, as closing the list does (a question stays new until answered) |
-| `notices clear` | Clear All: the list empties but for questions |
+| `notices seen` | Marks every entry seen, as closing the list does (a question stays new until answered). From a remote page, entries about security (a new certificate key, wrong passwords coming again and again) stay unseen until the operator sees them in the app |
+| `notices clear` | Clear All: the list empties but for questions. From a remote page, entries about security stay until the operator has seen them in the app |
 
 ## Undo, jobs and the menu bar
 
