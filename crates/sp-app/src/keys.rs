@@ -450,7 +450,7 @@ fn every_key_on(f_keys: bool) -> Vec<(&'static str, Vec<Row>)> {
                 row(vec![m("C"), m("X"), m("V")], "Copy, cut, paste the picked slides (objects in Edit)"),
                 row(
                     one("Delete"),
-                    "Delete what is picked: what Undo brings back goes at once (playlist items, slides), and so do items in a media playlist's view; songs in a library, pictures in the bin and screens ask first",
+                    "Delete what is picked: what Undo brings back goes at once (playlist items, slides, a media playlist's items); songs in a library, pictures in the bin and screens ask first",
                 ),
                 row(one(&m("N")), "A new song"),
                 row(vec!["T".to_owned(), m("D"), m("A")], "In Edit: a new text box, duplicate, pick everything"),

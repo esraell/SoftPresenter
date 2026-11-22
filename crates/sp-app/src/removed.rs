@@ -70,6 +70,13 @@ pub enum Removed {
         at: usize,
         version: ThemeVersion,
     },
+    /// Pictures and videos taken out of a media playlist (by its id, and its name), each with
+    /// its place in it; they stayed in the media bin.
+    MediaPlaylistFiles {
+        playlist: Uuid,
+        name: String,
+        files: Vec<(usize, std::path::PathBuf)>,
+    },
 }
 
 /// Puts `thing` back at `at` in `list` (at its end if the list has since grown shorter).
@@ -100,6 +107,7 @@ impl Removed {
             Removed::StageLayout { layout, .. } => ("stage layout", &layout.name),
             Removed::Template { template, .. } => ("template", &template.name),
             Removed::Version { version, .. } => ("version", &version.name),
+            Removed::MediaPlaylistFiles { name, .. } => ("media playlist", name),
         }
     }
 
@@ -112,12 +120,24 @@ impl Removed {
     /// What `sp undo` (or `sp redo`) says it did: put it back (`back`), or deleted it again. The
     /// window says nothing: what is put back is there to see.
     pub fn said(&self, back: bool) -> String {
-        if let Removed::Items(removed) = self {
-            let what = match removed.items.as_slice() {
-                [(_, one)] => one.title().to_owned(),
-                many => format!("{} items", many.len()),
-            };
-            let name = &removed.name;
+        let taken_out = match self {
+            Removed::Items(removed) => Some((
+                match removed.items.as_slice() {
+                    [(_, one)] => one.title().to_owned(),
+                    many => format!("{} items", many.len()),
+                },
+                &removed.name,
+            )),
+            Removed::MediaPlaylistFiles { name, files, .. } => Some((
+                match files.as_slice() {
+                    [(_, one)] => one.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+                    many => format!("{} items", many.len()),
+                },
+                name,
+            )),
+            _ => None,
+        };
+        if let Some((what, name)) = taken_out {
             return if back {
                 format!("Put {what} back in {name}.")
             } else {
@@ -132,7 +152,9 @@ impl Removed {
     pub fn changed_since(&self) -> String {
         let (kind, name) = self.named();
         match self {
-            Removed::Items(_) => format!("{name} has changed since, so that can't be undone."),
+            Removed::Items(_) | Removed::MediaPlaylistFiles { .. } => {
+                format!("{name} has changed since, so that can't be undone.")
+            }
             _ => format!("The {kind} {name} has changed since, so that can't be undone."),
         }
     }
@@ -258,6 +280,28 @@ impl Removed {
                     let at = state.stage_layouts.iter().position(|have| have.id == layout.id);
                     at.and_then(|at| crate::stage_editor::take_out(state, at)).is_some()
                 }
+            }
+            Removed::MediaPlaylistFiles { playlist, files, .. } => {
+                let Some(list) = state.media_playlists.iter_mut().find(|have| have.id == *playlist) else {
+                    return false;
+                };
+                if back {
+                    // Each at its old place, the earliest first, so every place is as it was.
+                    for (at, file) in files {
+                        let at = (*at).min(list.files.len());
+                        list.files.insert(at, file.clone());
+                    }
+                } else {
+                    let there = files.iter().all(|(at, file)| list.files.get(*at) == Some(file));
+                    if !there {
+                        return false;
+                    }
+                    for (at, _) in files.iter().rev() {
+                        list.files.remove(*at);
+                    }
+                }
+                state.media_playlists_changed = true;
+                true
             }
             // The app keeps the themes, and puts these back itself (see `redo_in_theme`).
             Removed::Template { .. } | Removed::Version { .. } => false,
@@ -563,6 +607,30 @@ mod tests {
         assert!(!state.delete_audio_playlist(0));
         assert!(state.delete_timer(0).is_none());
         assert!(state.removed.is_empty());
+    }
+
+    #[test]
+    fn pictures_taken_out_of_a_media_playlist_come_back_where_they_were() {
+        let mut state = HomeState::default();
+        let mut playlist = crate::media::Playlist::new("Loop".to_owned());
+        playlist.files = ["a.png", "b.png", "c.png", "d.png"].iter().map(std::path::PathBuf::from).collect();
+        let id = playlist.id;
+        state.media_playlists = vec![playlist];
+        let gone = Removed::MediaPlaylistFiles {
+            playlist: id,
+            name: "Loop".to_owned(),
+            files: vec![(1, "b.png".into()), (3, "d.png".into())],
+        };
+        state.media_playlists[0].files.retain(|file| file != "b.png" && file != "d.png");
+        let files = |state: &HomeState| state.media_playlists[0].files.clone();
+        assert!(gone.redo(&mut state, true));
+        assert_eq!(files(&state), ["a.png", "b.png", "c.png", "d.png"].map(std::path::PathBuf::from));
+        assert!(gone.redo(&mut state, false));
+        assert_eq!(files(&state), ["a.png", "c.png"].map(std::path::PathBuf::from));
+        assert_eq!(gone.said(true), "Put 2 items back in Loop.");
+        // Gone since: nothing to put back into.
+        state.media_playlists.clear();
+        assert!(!gone.redo(&mut state, true));
     }
 
     #[test]

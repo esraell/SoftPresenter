@@ -5815,7 +5815,8 @@ fn remove_words(these: &[usize], playlist: &str) -> String {
 }
 
 /// Takes media bin items (by place) out of the media playlist shown, at once: they stay in the
-/// bin and in any other playlist. Nothing is taken out of one that follows a folder.
+/// bin and in any other playlist, and Undo puts them back. Nothing is taken out of one that
+/// follows a folder.
 pub fn remove_from_media_playlist(show: &Show, state: &mut HomeState, these: &[usize]) {
     let paths: Vec<&std::path::Path> =
         these.iter().filter_map(|at| show.media().get(*at)).map(|item| item.path.as_path()).collect();
@@ -5826,12 +5827,21 @@ pub fn remove_from_media_playlist(show: &Show, state: &mut HomeState, these: &[u
     else {
         return;
     };
-    let before = playlist.files.len();
-    playlist.files.retain(|file| !paths.contains(&file.as_path()));
-    if playlist.files.len() != before {
-        state.media_playlists_changed = true;
-        state.picked_media.retain(|at| !these.contains(at));
+    let files: Vec<(usize, std::path::PathBuf)> = playlist
+        .files
+        .iter()
+        .enumerate()
+        .filter(|(_, file)| paths.contains(&file.as_path()))
+        .map(|(at, file)| (at, file.clone()))
+        .collect();
+    if files.is_empty() {
+        return;
     }
+    playlist.files.retain(|file| !paths.contains(&file.as_path()));
+    let (id, name) = (playlist.id, playlist.name.clone());
+    state.media_playlists_changed = true;
+    state.picked_media.retain(|at| !these.contains(at));
+    state.removed.push(crate::removed::Removed::MediaPlaylistFiles { playlist: id, name, files });
 }
 
 #[cfg(test)]

@@ -98,7 +98,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | Escape (off a Mac, F1 too) | Clear all; with the chooser of playlists and libraries or Edit Words open, Escape closes it instead (Edit Words without keeping what was typed) and clears nothing |
 | F2, F3, F4, F5, F6 (off a Mac) | Clear slide, media, props, audio, messages. A Mac's F keys are the system's, so there these are the layer keys' alone ("Button only" in the list of keys) |
 | A letter | The slide with that hot key, or the group it stands for (A for the first verse, S for the second, C for the chorus, E for the ending…; the letter shows at the right of a group's bar). In the Bible view a letter or number starts the next reference in the reference field instead |
-| Delete | Delete what is picked out: what Undo brings back goes at once (a playlist's items), and in a media playlist's view its items are taken out of it at once; songs in a library, slides and media ask first, saying "This can't be undone."; in Edit, with nothing picked on the canvas, the list's open one (its Delete key) |
+| Delete | Delete what is picked out: what Undo brings back goes at once (a playlist's items, slides, and in a media playlist's view its items, taken out of it); songs in a library and media bin items ask first, saying "This can't be undone."; in Edit, with nothing picked on the canvas, the list's open one (its Delete key) |
 | Command-N | New song |
 | Command-1, -2, -3 | Show, Bible (cursor in the reference), Edit (Ctrl on other computers, for all of these) |
 | Command-B | Bible as well (Bold while editing a slide) |

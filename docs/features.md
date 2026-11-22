@@ -344,7 +344,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   A media playlist's own view shows its items in the order it plays them; there an item's menu
   has **Remove from “<playlist>”** (Remove 2 Items from … with several picked) in place of
   Delete…, and Delete does the same: taken out of that playlist only, at once, staying in the
-  bin and any other playlist. Items are dragged into another order there, with the others
+  bin and any other playlist; Undo puts them back where they were. Items are dragged into another order there, with the others
   picked out with them, an ink line showing where they go (dragged out of the strip they still
   go onto a slide). A playlist that follows a folder keeps the folder's files in name order, so
   nothing is moved or taken out of it there. The menu beside MEDIA shows All Media or one
@@ -417,7 +417,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   these changes in the Show view and on the Bible page, and the audience stays on the same slide;
   what was deleted takes its turn in the same order.
 - **Deleting, one rule:** what Undo can bring back goes at once, with no question and no
-  notice: slides, items taken out of a playlist, playlists, libraries, audio playlists, timer,
+  notice: slides, items taken out of a playlist (or out of a media playlist), playlists,
+  libraries, audio playlists, timer,
   message, prop and macro cards (Cut on a message too), and in the Edit view props, stage
   layouts, theme templates and a theme's version. Undo puts it back where it was (a playlist in
   front again, a library shown again, items picked again, a prop, layout or template open
