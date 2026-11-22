@@ -18,11 +18,13 @@ use std::time::{Duration, Instant, SystemTime};
 use serde::{Deserialize, Serialize};
 
 /// The shortest password Settings takes.
-pub const SHORTEST_PASSWORD: usize = 8;
+pub const SHORTEST_PASSWORD: usize = 10;
 /// The longest: more is refused before it is hashed.
 pub const LONGEST_PASSWORD: usize = 256;
 /// The most devices remembered at once; one more must wait until one is forgotten.
 pub const MOST_DEVICES: usize = 50;
+/// A device not seen for this long is forgotten (it signs in again with the password).
+pub const FORGET_UNUSED_AFTER: u64 = 180 * 24 * 60 * 60;
 
 /// What is kept in `remote/settings.json`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -79,7 +81,20 @@ impl Store {
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Saved>(&bytes).ok())
             .unwrap_or_else(|| Saved { port: DEFAULT_PORT, ..Saved::default() });
-        Store { folder: folder.to_owned(), saved, seen_unsaved: false, last_written: Instant::now() }
+        let mut store = Store { folder: folder.to_owned(), saved, seen_unsaved: false, last_written: Instant::now() };
+        store.forget_unused(now_seconds());
+        store
+    }
+
+    /// Forgets the devices not seen for [`FORGET_UNUSED_AFTER`]; true if any were.
+    pub fn forget_unused(&mut self, now: u64) -> bool {
+        let before = self.saved.devices.len();
+        self.saved.devices.retain(|device| now.saturating_sub(device.last_seen) < FORGET_UNUSED_AFTER);
+        let gone = self.saved.devices.len() != before;
+        if gone {
+            let _ = self.save();
+        }
+        gone
     }
 
     pub fn folder(&self) -> &Path {
@@ -338,6 +353,11 @@ pub struct Guard {
     tries: HashMap<IpAddr, Tries>,
     /// Wrong passwords from everywhere in the minute that began then.
     minute: (Instant, u32),
+    /// Wrong passwords from everywhere lately (one less for each half minute without one), and
+    /// when the last came: past a few, every sign-in waits, longer the more there are.
+    everyone: (f64, Instant),
+    /// When the wrong passwords of the last hour came, for Settings and the status line.
+    lately: std::collections::VecDeque<Instant>,
 }
 
 /// Wrong passwords answered at once before waits begin.
@@ -350,10 +370,19 @@ const LONGEST_WAIT: Duration = Duration::from_secs(60);
 const MOST_A_MINUTE: u32 = 30;
 /// Addresses remembered at once; the one heard from longest ago goes first.
 const MOST_ADDRESSES: usize = 1024;
+/// Wrong passwords from everywhere, lately, before every sign-in waits; and the longest wait
+/// that grows to.
+const EVERYONE_FREE: f64 = 10.0;
+const EVERYONE_LONGEST: Duration = Duration::from_secs(120);
 
 impl Default for Guard {
     fn default() -> Guard {
-        Guard { tries: HashMap::new(), minute: (Instant::now(), 0) }
+        Guard {
+            tries: HashMap::new(),
+            minute: (Instant::now(), 0),
+            everyone: (0.0, Instant::now()),
+            lately: std::collections::VecDeque::new(),
+        }
     }
 }
 
@@ -361,13 +390,24 @@ impl Guard {
     /// How long an address must wait before its password is even looked at; `None` when it may
     /// try now.
     pub fn wait(&self, ip: IpAddr, now: Instant) -> Option<Duration> {
-        let everyone = (self.minute.1 >= MOST_A_MINUTE && now < self.minute.0 + Duration::from_secs(60))
+        let minute = (self.minute.1 >= MOST_A_MINUTE && now < self.minute.0 + Duration::from_secs(60))
             .then(|| self.minute.0 + Duration::from_secs(60) - now);
         let own = self.tries.get(&ip).filter(|t| t.wait_until > now).map(|t| t.wait_until - now);
-        match (own, everyone) {
-            (Some(a), Some(b)) => Some(a.max(b)),
-            (a, b) => a.or(b),
-        }
+        let (_, last) = self.everyone;
+        let everyone =
+            Some(last + everyone_wait(self.everyone_now(now))).filter(|until| *until > now).map(|until| until - now);
+        [own, minute, everyone].into_iter().flatten().max()
+    }
+
+    /// Wrong passwords from everywhere lately, as of `now`.
+    fn everyone_now(&self, now: Instant) -> f64 {
+        let (count, last) = self.everyone;
+        (count - now.saturating_duration_since(last).as_secs_f64() / 30.0).max(0.0)
+    }
+
+    /// Wrong passwords in the hour before `now`.
+    pub fn wrong_lately(&self, now: Instant) -> usize {
+        self.lately.iter().filter(|at| now.saturating_duration_since(**at) < Duration::from_secs(3600)).count()
     }
 
     /// A wrong password from an address: returns how long it must now wait, if at all.
@@ -376,6 +416,14 @@ impl Guard {
             self.minute = (now, 0);
         }
         self.minute.1 += 1;
+        self.everyone = (self.everyone_now(now) + 1.0, now);
+        self.lately.push_back(now);
+        while self.lately.front().is_some_and(|at| now.saturating_duration_since(*at) >= Duration::from_secs(3600)) {
+            self.lately.pop_front();
+        }
+        if self.lately.len() > 10_000 {
+            self.lately.pop_front();
+        }
         if !self.tries.contains_key(&ip) && self.tries.len() >= MOST_ADDRESSES {
             let oldest = self.tries.iter().min_by_key(|(_, t)| t.last).map(|(ip, _)| *ip);
             if let Some(oldest) = oldest {
@@ -402,6 +450,17 @@ impl Guard {
     }
 }
 
+/// How long every sign-in waits after the last wrong password, for so many lately from
+/// everywhere: nothing up to [`EVERYONE_FREE`], then 1 s, doubling every five more, up to
+/// [`EVERYONE_LONGEST`].
+fn everyone_wait(lately: f64) -> Duration {
+    if lately <= EVERYONE_FREE {
+        return Duration::ZERO;
+    }
+    let doublings = ((lately - EVERYONE_FREE) / 5.0).floor().min(10.0);
+    Duration::from_secs_f64(2f64.powf(doublings)).min(EVERYONE_LONGEST)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -423,6 +482,8 @@ mod tests {
         // The same password twice has two salts, so two hashes.
         assert_ne!(hash, hash_password("correct horse").expect("hashed"));
         assert!(hash_password("short").is_err());
+        assert!(hash_password("nine char").is_err(), "at least ten");
+        assert!(hash_password("ten chars!").is_ok());
         assert!(hash_password(&"x".repeat(LONGEST_PASSWORD + 1)).is_err());
     }
 
@@ -501,6 +562,51 @@ mod tests {
         let newcomer: IpAddr = "10.9.9.9".parse().unwrap();
         assert!(guard.wait(newcomer, now + Duration::from_secs(1)).is_some());
         assert_eq!(guard.wait(newcomer, now + Duration::from_secs(61)), None);
+    }
+
+    #[test]
+    fn wrong_passwords_from_everywhere_slow_every_sign_in_more_and_more() {
+        let mut guard = Guard::default();
+        let now = Instant::now();
+        let fresh: IpAddr = "10.9.9.9".parse().unwrap();
+        // Two wrong ones from each of many addresses (none waits on its own account).
+        let mut n = 0u32;
+        let mut wrong = |guard: &mut Guard, times: u32| {
+            for _ in 0..times {
+                n += 1;
+                guard.wrong(IpAddr::from([10, 1, (n / 2 / 200) as u8, (n / 2 % 200) as u8]), now);
+            }
+        };
+        wrong(&mut guard, 10);
+        assert_eq!(guard.wait(fresh, now), None, "a few are let be");
+        wrong(&mut guard, 1);
+        assert_eq!(guard.wait(fresh, now), Some(Duration::from_secs(1)));
+        wrong(&mut guard, 5);
+        assert_eq!(guard.wait(fresh, now), Some(Duration::from_secs(2)));
+        wrong(&mut guard, 5);
+        assert_eq!(guard.wait(fresh, now), Some(Duration::from_secs(4)));
+        // Quiet for a while, it eases off.
+        assert_eq!(guard.wait(fresh, now + Duration::from_secs(600)), None);
+        assert_eq!(guard.wrong_lately(now), 21);
+        assert_eq!(guard.wrong_lately(now + Duration::from_secs(3601)), 0);
+        assert_eq!(everyone_wait(1000.0), EVERYONE_LONGEST);
+    }
+
+    #[test]
+    fn a_device_unused_for_half_a_year_is_forgotten() {
+        let folder = folder("unused");
+        let ip: IpAddr = "192.168.1.30".parse().unwrap();
+        let mut store = Store::open(&folder);
+        let hash = hash_password("a long password").expect("hashed");
+        store.set_password(hash.clone()).expect("set");
+        let (old, _) = store.remember("Safari on an iPad", ip, &hash).expect("remembered");
+        let (recent, _) = store.remember("Chrome on Windows", ip, &hash).expect("remembered");
+        let now = now_seconds();
+        store.saved.devices[0].last_seen = now - FORGET_UNUSED_AFTER - 1;
+        assert!(store.forget_unused(now));
+        assert!(store.device_of(&old).is_none());
+        assert!(store.device_of(&recent).is_some());
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]

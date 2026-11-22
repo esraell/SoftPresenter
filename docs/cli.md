@@ -1082,7 +1082,7 @@ in [remote-api.md](remote-api.md).
 | Command | Does |
 |---|---|
 | `remote`, `remote status` | On or off; the address to open on another device and the certificate's SHA-256 fingerprint (to check against the one the browser shows); whether a password is set; the pages connected (`--json`: id, device, name, address, since) and the devices remembered (id, name, first and last seen, address) |
-| `remote password` | Sets the password, read from the standard input (unshown when typed at a terminal; never an argument, which would stay in the shell's history); at least 8 long. Every device remembered is forgotten and its pages close: each signs in again |
+| `remote password` | Sets the password, read from the standard input (unshown when typed at a terminal; never an argument, which would stay in the shell's history); at least 10 long. Every device remembered is forgotten and its pages close: each signs in again |
 | `remote on`, `remote off` | Listens (on every network the computer is on; a quiet test copy on this computer only), or stops: every page's connection closes and the port is let go. Needs a password first. It stays on or off the next time the app opens |
 | `remote port N` | The port, 1024 up (4316 unless changed); with Remote Control on, it listens on the new one at once |
 | `remote forget ID\|all` | Forgets a device (its id from `remote --json`), or all: it must sign in again, and its open pages close now |

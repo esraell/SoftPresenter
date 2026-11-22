@@ -2419,7 +2419,8 @@ impl crate::App {
         if canva.old_here && canva.status != Status::Connected {
             lines.push("The old sync script's sign-in is on this computer: sp canva import takes it over.".to_owned());
         }
-        if settings.old_script_warning {
+        // The steps name places in the user's home folder: said at the computer only.
+        if settings.old_script_warning && !self.remote_call {
             lines.push(
                 "Switch the old sync script off now (whichever refreshes the sign-in next breaks the other's):"
                     .to_owned(),
@@ -2451,7 +2452,10 @@ impl crate::App {
         match args.get(1).map(|word| word.to_lowercase()).as_deref() {
             None => {
                 let connected = self.voxlive.status == crate::voxlive::Status::Connected;
-                let hint = self.voxlive.key_hint();
+                // A remote page is told only the kind of key, never its characters.
+                let hint = self.voxlive.key_hint().map(|hint| {
+                    if self.remote_call { format!("{}…", hint.chars().take(4).collect::<String>()) } else { hint }
+                });
                 let count = self.voxlive.screens.len();
                 // A refusal or a problem is a sentence that names VoxLive already.
                 let mut text = match &self.voxlive.status {

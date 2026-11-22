@@ -72,6 +72,12 @@ pub const WRITE_WITHIN: Duration = Duration::from_secs(10);
 /// with a burst of twice that.
 pub const MOST_WAITING_COMMANDS: usize = 4;
 pub const COMMANDS_A_SECOND: f64 = 20.0;
+/// Commands from every page together, a second (twice that at once): the app's main thread
+/// carries each out, so all the pages at once can't keep it busy.
+pub const ALL_COMMANDS_A_SECOND: f64 = 40.0;
+/// Pages one device may connect, a minute (ten at once): a page reconnecting over and over
+/// can't keep the app publishing fresh snapshots.
+pub const CONNECTS_A_MINUTE: f64 = 12.0;
 /// How long a command may take before the page is told the app didn't answer (as `sp`).
 pub const ANSWER_WITHIN: Duration = Duration::from_secs(15);
 /// The live preview is sent at most this often.
@@ -79,6 +85,8 @@ pub const PREVIEW_EVERY: Duration = Duration::from_millis(100);
 /// Slide pictures being drawn for pages at once, and the bytes of them kept.
 pub const MOST_DRAWING: usize = 2;
 pub const THUMB_CACHE_BYTES: usize = 24 * 1024 * 1024;
+/// Slide pictures kept at once, whatever their size.
+pub const MOST_THUMBS_KEPT: usize = 4096;
 
 /// The cookie a remembered device carries. `__Host-` makes browsers insist on Secure, path /
 /// and no domain.
@@ -205,7 +213,7 @@ impl ThumbCache {
         }
         self.bytes += jpeg.len();
         self.kept.insert(key, Kept { look, jpeg, used: self.tick });
-        while self.bytes > THUMB_CACHE_BYTES {
+        while self.bytes > THUMB_CACHE_BYTES || self.kept.len() > MOST_THUMBS_KEPT {
             let Some(oldest) = self.kept.iter().min_by_key(|(_, kept)| kept.used).map(|(key, _)| *key) else { break };
             if let Some(gone) = self.kept.remove(&oldest) {
                 self.bytes -= gone.jpeg.len();
@@ -235,6 +243,16 @@ pub struct Shared {
     connections: Mutex<HashMap<IpAddr, usize>>,
     connection_count: AtomicUsize,
     closing: watch::Sender<bool>,
+    /// Commands from every page together.
+    commands: Mutex<Bucket>,
+    /// Connects by each device.
+    connects: Mutex<HashMap<String, Bucket>>,
+    /// The theme versions there are: a picture asked for in any other is drawn in the usual
+    /// look, so made-up version ids can't make the app draw again and again.
+    versions: Mutex<std::collections::HashSet<Uuid>>,
+    /// The computer's own name on the network (`church-mac.local`), answered as a Host as its
+    /// address is.
+    local_name: Mutex<Option<String>>,
 }
 
 impl Shared {
@@ -260,6 +278,10 @@ impl Shared {
             connections: Mutex::new(HashMap::new()),
             connection_count: AtomicUsize::new(0),
             closing: watch::channel(false).0,
+            commands: Mutex::new(Bucket::new(ALL_COMMANDS_A_SECOND, ALL_COMMANDS_A_SECOND * 2.0)),
+            connects: Mutex::new(HashMap::new()),
+            versions: Mutex::new(std::collections::HashSet::new()),
+            local_name: Mutex::new(None),
         }))
     }
 
@@ -320,6 +342,30 @@ impl Shared {
         if let Ok(mut slot) = self.preview_read.lock() {
             *slot = read;
         }
+    }
+
+    /// The theme versions there are now (from the app's main thread).
+    pub fn set_versions(&self, versions: impl IntoIterator<Item = Uuid>) {
+        if let Ok(mut known) = self.versions.lock() {
+            *known = versions.into_iter().collect();
+        }
+    }
+
+    /// The computer's own name on the network, answered as a Host too.
+    pub fn set_local_name(&self, name: Option<String>) {
+        if let Ok(mut slot) = self.local_name.lock() {
+            *slot = name.map(|name| name.to_ascii_lowercase());
+        }
+    }
+
+    /// Wrong passwords in the last hour, for Settings and the status line.
+    pub fn wrong_passwords_lately(&self) -> usize {
+        self.guard.lock().map_or(0, |guard| guard.wrong_lately(Instant::now()))
+    }
+
+    /// Whether a device is still remembered.
+    fn remembered(&self, device: &str) -> bool {
+        self.store.lock().is_ok_and(|store| store.saved.devices.iter().any(|d| d.id == device))
     }
 
     /// The pictures of slides kept are let go (the themes changed, say): they are drawn again
@@ -546,7 +592,10 @@ fn gate(shared: &Shared, parts: &Parts) -> Result<Gate, Box<Response<Body>>> {
         return Err(Box::new(plain(StatusCode::INTERNAL_SERVER_ERROR, "", "Something went wrong.")));
     };
     let host = parts.headers.get(header::HOST).and_then(|value| value.to_str().ok()).unwrap_or("");
-    if !host_allowed(host, conn.local) {
+    let named = shared.local_name.lock().ok().and_then(|name| name.clone());
+    if !host_allowed(host, conn.local)
+        && !named.is_some_and(|name| host.eq_ignore_ascii_case(&format!("{name}:{}", conn.local.port())))
+    {
         return Err(Box::new(plain(
             StatusCode::MISDIRECTED_REQUEST,
             "",
@@ -650,7 +699,7 @@ fn finish(mut response: Response<Body>, host: &str) -> Response<Body> {
     let headers = response.headers_mut();
     let policy = format!(
         "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self' wss://{host}; \
-         base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+         base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types 'none'"
     );
     if let Ok(policy) = HeaderValue::from_str(&policy) {
         headers.insert(header::CONTENT_SECURITY_POLICY, policy);
@@ -844,10 +893,13 @@ async fn login(State(shared): State<Arc<Shared>>, request: Request) -> Response<
     }
     let verified = hash.clone();
     let right = tokio::task::spawn_blocking(move || auth::password_is(&hash, &password)).await.unwrap_or(false);
-    drop(permit);
     if !right {
+        // Counted before the next sign-in may be checked, whatever runs the server's tasks.
         let wait = shared.guard.lock().ok().and_then(|mut guard| guard.wrong(gate.ip, Instant::now()));
+        drop(permit);
         shared.backend.log(&format!("A wrong password from {}.", gate.ip));
+        // Settings and the status line say when wrong passwords keep coming.
+        shared.backend.pages_changed();
         return match wait {
             Some(wait) => {
                 if wait >= Duration::from_secs(60) {
@@ -865,6 +917,7 @@ async fn login(State(shared): State<Arc<Shared>>, request: Request) -> Response<
     if let Ok(mut guard) = shared.guard.lock() {
         guard.right(gate.ip);
     }
+    drop(permit);
     let store = shared.store.clone();
     let (ip, named) = (gate.ip, name.clone());
     let remembered = tokio::task::spawn_blocking(move || {
@@ -939,6 +992,8 @@ async fn thumb(State(shared): State<Arc<Shared>>, request: Request) -> Response<
     let Some((slide, version, look)) = thumb_path(parts.uri.path()) else {
         return plain(StatusCode::NOT_FOUND, host, "Not here.");
     };
+    // A version no theme has is the usual look: made-up versions can't make the app draw anew.
+    let version = version.filter(|v| shared.versions.lock().is_ok_and(|known| known.contains(v)));
     let key = (slide, version);
     let kept = shared.thumbs.lock().ok().and_then(|mut thumbs| thumbs.get(&key, &look));
     if let Some(jpeg) = kept {
@@ -1059,6 +1114,15 @@ async fn socket(State(shared): State<Arc<Shared>>, request: Request) -> Response
     if let Some(full) = full(&shared, &device) {
         return plain(StatusCode::SERVICE_UNAVAILABLE, &host, full);
     }
+    let may_connect = shared.connects.lock().is_ok_and(|mut connects| {
+        if connects.len() > 4 * auth::MOST_DEVICES {
+            connects.clear();
+        }
+        connects.entry(device.clone()).or_insert_with(|| Bucket::new(CONNECTS_A_MINUTE / 60.0, 10.0)).take()
+    });
+    if !may_connect {
+        return plain(StatusCode::TOO_MANY_REQUESTS, &host, "This device has connected too often; wait a minute.");
+    }
     let upgrade = match WebSocketUpgrade::from_request_parts(&mut parts, &()).await {
         Ok(upgrade) => upgrade,
         Err(rejection) => return finish(rejection.into_response(), &host),
@@ -1142,8 +1206,14 @@ fn register(shared: &Arc<Shared>, caller: &Caller, kick: Arc<Kick>) -> Option<Re
     });
     shared.page_count.store(pages.len(), Ordering::Release);
     drop(pages);
+    let registered = Registered { shared: shared.clone(), id: caller.client, watching: false };
+    // Listed first, then looked at: a device forgotten from here on is closed by the forget's
+    // own sign-out; one forgotten since its connection was let in is caught now.
+    if !shared.remembered(&caller.device) {
+        return None;
+    }
     shared.backend.pages_changed();
-    Some(Registered { shared: shared.clone(), id: caller.client, watching: false })
+    Some(registered)
 }
 
 /// Milliseconds since 1970, the clock every time in the state is on.
@@ -1151,17 +1221,22 @@ pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
-/// Commands a page may still send now: twenty a second, forty at once.
+/// How many of something may still be done now: `rate` a second, at most `most` at once.
 struct Bucket {
     tokens: f64,
     at: Instant,
+    rate: f64,
+    most: f64,
 }
 
 impl Bucket {
+    fn new(rate: f64, most: f64) -> Bucket {
+        Bucket { tokens: most, at: Instant::now(), rate, most }
+    }
+
     fn take(&mut self) -> bool {
         let now = Instant::now();
-        self.tokens =
-            (self.tokens + now.duration_since(self.at).as_secs_f64() * COMMANDS_A_SECOND).min(COMMANDS_A_SECOND * 2.0);
+        self.tokens = (self.tokens + now.duration_since(self.at).as_secs_f64() * self.rate).min(self.most);
         self.at = now;
         if self.tokens >= 1.0 {
             self.tokens -= 1.0;
@@ -1223,7 +1298,12 @@ struct PageState {
 async fn page(shared: Arc<Shared>, mut socket: WebSocket, caller: Caller) {
     let kick = Arc::new(Kick::default());
     let Some(mut registered) = register(&shared, &caller, kick.clone()) else {
-        close_with(&mut socket, close::FULL, "Too many pages are connected.").await;
+        let (code, reason) = if shared.remembered(&caller.device) {
+            (close::FULL, "Too many pages are connected.")
+        } else {
+            (close::SIGNED_OUT, "Signed out.")
+        };
+        close_with(&mut socket, code, reason).await;
         return;
     };
     let mut changes = shared.hub_tx.subscribe();
@@ -1233,7 +1313,7 @@ async fn page(shared: Arc<Shared>, mut socket: WebSocket, caller: Caller) {
     let mut state = PageState {
         epoch: String::new(),
         version: None,
-        bucket: Bucket { tokens: COMMANDS_A_SECOND * 2.0, at: Instant::now() },
+        bucket: Bucket::new(COMMANDS_A_SECOND, COMMANDS_A_SECOND * 2.0),
         waiting: Arc::new(Semaphore::new(MOST_WAITING_COMMANDS)),
     };
     let started = Instant::now();
@@ -1274,7 +1354,10 @@ async fn page(shared: Arc<Shared>, mut socket: WebSocket, caller: Caller) {
                         }
                     }
                     Message::Binary(_) => {
-                        if !say(&mut socket, Message::text(error_message("Send messages as text (JSON)."))).await {
+                        // Counted as any message is; past the limit, not even answered.
+                        if state.bucket.take()
+                            && !say(&mut socket, Message::text(error_message("Send messages as text (JSON)."))).await
+                        {
                             break;
                         }
                     }
@@ -1289,6 +1372,10 @@ async fn page(shared: Arc<Shared>, mut socket: WebSocket, caller: Caller) {
             }
             changed = changes.changed(), if state.version.is_some() => {
                 if changed.is_err() {
+                    break;
+                }
+                if !shared.remembered(&caller.device) {
+                    close_with(&mut socket, close::SIGNED_OUT, "Signed out.").await;
                     break;
                 }
                 let out = {
@@ -1311,6 +1398,10 @@ async fn page(shared: Arc<Shared>, mut socket: WebSocket, caller: Caller) {
             }
             changed = frames.changed(), if registered.watching => {
                 if changed.is_err() {
+                    break;
+                }
+                if !shared.remembered(&caller.device) {
+                    close_with(&mut socket, close::SIGNED_OUT, "Signed out.").await;
                     break;
                 }
                 let frame = frames.borrow_and_update().clone();
@@ -1348,15 +1439,27 @@ async fn take_message(
     replies: &mpsc::Sender<String>,
     text: &str,
 ) -> Option<String> {
+    // Every message counts, whatever it is, before anything else is done for it: a page sending
+    // too many is answered only with a refusal (a command's with its id), and nothing is locked.
+    let allowed = state.bucket.take();
     let Ok(message) = serde_json::from_str::<serde_json::Value>(text) else {
-        return Some(error_message("That isn't JSON."));
+        return allowed.then(|| error_message("That isn't JSON."));
     };
-    match message.get("type").and_then(serde_json::Value::as_str) {
+    let kind = message.get("type").and_then(serde_json::Value::as_str);
+    if !allowed {
+        return match (kind, message.get("id")) {
+            (Some("command"), Some(id)) if id.is_number() || id.as_str().is_some_and(|id| id.len() <= 64) => {
+                Some(reply_message(id, &Reply::failed("Too many commands at once; slow down.")))
+            }
+            _ => Some(error_message("Too many messages at once; slow down.")),
+        };
+    }
+    match kind {
         Some("hello") => {
-            // Counted as a command is, so a page saying hello over and over can't keep the app
-            // busy.
-            if !state.bucket.take() {
-                return Some(error_message("Too many messages at once; slow down."));
+            // A device forgotten since it connected is told so, and closed.
+            if !shared.remembered(&caller.device) {
+                shared.sign_out(&caller.device);
+                return Some(error_message("This device has been signed out."));
             }
             if let Some(on) = message.get("preview").and_then(serde_json::Value::as_bool) {
                 registered.watch(on);
@@ -1379,9 +1482,6 @@ async fn take_message(
             Some(out)
         }
         Some("preview") => {
-            if !state.bucket.take() {
-                return Some(error_message("Too many messages at once; slow down."));
-            }
             registered.watch(message.get("on").and_then(serde_json::Value::as_bool).unwrap_or(false));
             None
         }
@@ -1404,20 +1504,19 @@ async fn take_message(
             };
             // The device is still remembered (it is closed as soon as it is forgotten; this is
             // the check at the moment it counts).
-            let remembered = shared
-                .store
-                .lock()
-                .ok()
-                .is_some_and(|store| store.saved.devices.iter().any(|device| device.id == caller.device));
-            if !remembered {
+            if !shared.remembered(&caller.device) {
                 shared.sign_out(&caller.device);
                 return Some(reply_message(&id, &Reply::failed("This device has been signed out.")));
             }
             if let Some(refused) = policy::refusal(caller.role, &args) {
                 return Some(reply_message(&id, &Reply::failed(refused)));
             }
-            if !state.bucket.take() {
-                return Some(reply_message(&id, &Reply::failed("Too many commands at once; slow down.")));
+            // Every page's commands together are counted too: the app carries each out.
+            if !shared.commands.lock().is_ok_and(|mut all| all.take()) {
+                return Some(reply_message(
+                    &id,
+                    &Reply::failed("Remote Control is busy with other pages' commands; try again in a moment."),
+                ));
             }
             let Ok(permit) = state.waiting.clone().try_acquire_owned() else {
                 return Some(reply_message(&id, &Reply::failed("Still busy with the commands before; try again.")));

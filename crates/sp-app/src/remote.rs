@@ -165,6 +165,10 @@ pub struct Remote {
     pub(crate) published_slow: Option<Instant>,
     pub clock: Clock,
     pub(crate) looks: state::Looks,
+    /// A new certificate the operator should hear of, once.
+    pub cert_news: Option<String>,
+    /// When it was last looked whether the certificate must be made again.
+    cert_checked: Option<Instant>,
 }
 
 /// Slides drawn for pages each time the event loop goes round, at most.
@@ -195,6 +199,8 @@ impl Remote {
             published_slow: None,
             clock: Clock::new(),
             looks: state::Looks::default(),
+            cert_news: None,
+            cert_checked: None,
         }
     }
 
@@ -263,11 +269,30 @@ impl Remote {
         if let Some(stopping) = self.stopping.take() {
             let _ = stopping.join();
         }
-        let cert = cert::load_or_make(&folder)?;
+        // Devices not seen for half a year are forgotten.
+        if let Ok(mut store) = store.lock() {
+            store.forget_unused(auth::now_seconds());
+        }
+        let names = cert::Names::now(lan_address(), cert::own_name());
+        let had = self.fingerprint.clone().or_else(|| cert_kept(&folder));
+        let (cert, made) = cert::load_or_make(&folder, &names)?;
         let fingerprint = cert.fingerprint.clone();
+        if made {
+            crate::applog::event("remote", &format!("Made a new certificate, for {}.", names.names.join(", ")));
+            // A certificate there was before is replaced: every device sees a warning again,
+            // and the operator is told the new fingerprint to check it against.
+            if had.is_some_and(|had| had != fingerprint) {
+                self.cert_news = Some(
+                    "Remote Control has a new certificate (the computer's address or name changed, or the old one was running out). Each device warns once more: check the fingerprint it shows against Settings › Remote Control."
+                        .to_owned(),
+                );
+            }
+        }
         let shared = server::Shared::new(store, Box::new(bridge()))?;
+        shared.set_local_name(names.local_name());
         let running = server::start(server::Config { bind: bind_address(), port, cert }, shared)?;
         crate::applog::event("remote", &format!("Switched on, on port {}.", running.local.port()));
+        self.cert_checked = Some(Instant::now());
         self.running = Some(running);
         self.fingerprint = Some(fingerprint);
         self.published = None;
@@ -387,7 +412,7 @@ impl Remote {
     pub fn new_certificate(&mut self, bridge: impl FnOnce() -> Bridge) -> Result<(), String> {
         let folder =
             self.store.as_ref().and_then(|s| s.lock().ok().map(|s| s.folder().to_owned())).ok_or("No data folder.")?;
-        let cert = cert::make(&folder)?;
+        let cert = cert::make(&folder, &cert::Names::now(lan_address(), cert::own_name()))?;
         self.fingerprint = Some(cert.fingerprint);
         crate::applog::event("remote", "Made a new certificate.");
         if self.running.is_some() {
@@ -397,6 +422,69 @@ impl Remote {
         Ok(())
     }
 }
+
+/// Where a path written in words starts: an absolute path (`/…`, or `C:\…` on Windows) at the
+/// start of the words or after a space, a bracket or a quote.
+fn path_starts(bytes: &[u8], at: usize) -> bool {
+    let before = at.checked_sub(1).map(|b| bytes[b]);
+    let starts = before.is_none_or(|b| matches!(b, b' ' | b'\t' | b'\n' | b'(' | b'[' | b'"' | b'\'' | b'='));
+    let unix =
+        bytes[at] == b'/' && bytes.get(at + 1).is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'.' || *b == b'~');
+    let windows =
+        bytes[at].is_ascii_alphabetic() && bytes.get(at + 1) == Some(&b':') && bytes.get(at + 2) == Some(&b'\\');
+    starts && (unix || windows)
+}
+
+/// Words with every absolute path in them cut to its file name, for what a remote page is
+/// sent: the computer's folders (and the user's name in them) stay on the computer. A path ends
+/// at a closing bracket, a quote or the end of the line.
+pub fn without_paths(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        if path_starts(bytes, at) {
+            let end = text[at..].find([')', ']', '"', '\'', '\n']).map_or(text.len(), |len| at + len);
+            let path = &text[at..end];
+            let name = path.rsplit(['/', '\\']).find(|part| !part.is_empty()).unwrap_or("");
+            out.push_str(name);
+            at = end;
+            continue;
+        }
+        let next = text[at..].chars().next().map_or(1, char::len_utf8);
+        out.push_str(&text[at..at + next]);
+        at += next;
+    }
+    out
+}
+
+/// The same for every string in a piece of JSON.
+pub fn json_without_paths(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(text) if text.contains(['/', '\\']) => *text = without_paths(text),
+        serde_json::Value::Array(items) => items.iter_mut().for_each(json_without_paths),
+        serde_json::Value::Object(map) => map.values_mut().for_each(json_without_paths),
+        _ => {}
+    }
+}
+
+/// A reply as a remote page is sent it: `sp`'s, with the computer's paths cut to file names.
+pub fn reply_for_page(mut reply: Reply) -> Reply {
+    if reply.text.contains(['/', '\\']) {
+        reply.text = without_paths(&reply.text);
+    }
+    json_without_paths(&mut reply.data);
+    reply
+}
+
+/// The fingerprint of the certificate kept in a folder, if there is one.
+fn cert_kept(folder: &std::path::Path) -> Option<String> {
+    std::fs::read(folder.join("cert.der")).ok().filter(|der| !der.is_empty()).map(|der| cert::fingerprint(&der))
+}
+
+/// How often it is looked, while Remote Control is on, whether its certificate must be made
+/// again (the computer's address or name changed, or it is running out).
+const CERT_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// Switching off needs no bridge.
 fn unreachable_bridge() -> Bridge {
@@ -568,7 +656,7 @@ impl crate::App {
                         // places they would be opened, whatever words reached the handler.
                         self.remote_call = true;
                         self.run_control(el, &args, Some(&from), |answer| {
-                            let _ = reply.send(answer);
+                            let _ = reply.send(reply_for_page(answer));
                         });
                         self.remote_call = false;
                     }
@@ -661,6 +749,7 @@ impl crate::App {
         // The pane shows the settings, devices and pages as they are now, while it is open; the
         // window is drawn again when the pages connected change.
         let pages = self.remote.page_count();
+        let wrong = self.remote.shared().map_or(0, |shared| shared.wrong_passwords_lately());
         let showing = self.running.as_ref().is_some_and(|r| {
             r.home_state.preferences_open
                 && crate::home::PANES.get(r.home_state.preferences_pane) == Some(&"Remote Control")
@@ -669,6 +758,7 @@ impl crate::App {
         if showing
             || self.running.as_ref().is_some_and(|r| r.home_state.remote.on != self.remote.is_on())
             || pages != self.remote_pages_seen
+            || self.running.as_ref().is_some_and(|r| r.home_state.remote.wrong != wrong)
         {
             self.remote_pages_seen = pages;
             let (on, port, address, fingerprint) = (
@@ -681,7 +771,8 @@ impl crate::App {
                 (self.remote.has_password(), self.remote.hashing(), self.remote.devices(), self.remote.pages());
             if let Some(running) = self.running.as_mut() {
                 let view = &mut running.home_state.remote;
-                let changed = view.on != on || view.pages != pages || view.devices != devices;
+                let changed = view.on != on || view.pages != pages || view.devices != devices || view.wrong != wrong;
+                view.wrong = wrong;
                 view.on = on;
                 if view.port.is_empty() || changed {
                     view.port = port.to_string();
@@ -696,6 +787,32 @@ impl crate::App {
                     running.home_window.request_redraw();
                 }
             }
+        }
+        // The certificate made again while nobody is connected, when it must be (a page
+        // connected would have to accept the new one in the middle of a service).
+        if self.remote.is_on()
+            && pages == 0
+            && self.remote.cert_checked.is_none_or(|at| at.elapsed() >= CERT_CHECK_EVERY)
+        {
+            self.remote.cert_checked = Some(Instant::now());
+            let folder = self.remote.store.as_ref().and_then(|s| s.lock().ok().map(|s| s.folder().to_owned()));
+            if let Some(folder) = folder
+                && cert::needs_making(&folder, &cert::Names::now(lan_address(), cert::own_name()))
+            {
+                let bridge = self.remote_bridge();
+                let off = self.remote.switch(false, unreachable_bridge);
+                if let Err(problem) = off.and_then(|()| self.remote.switch(true, move || bridge)) {
+                    crate::applog::problem("remote", &format!("Could not make a new certificate: {problem}"));
+                }
+                self.remote_preview_source();
+            }
+        }
+        if let Some(news) = self.remote.cert_news.take()
+            && let Some(running) = self.running.as_mut()
+        {
+            running.home_state.remote.said = Some((news.clone(), false));
+            running.home_state.notices.info(news);
+            running.home_window.request_redraw();
         }
         let state_at = self.tick_remote_state(false);
         [state_at, view_at].into_iter().flatten().min()
@@ -716,6 +833,8 @@ pub struct View {
     pub password_again: String,
     pub devices: Vec<auth::Device>,
     pub pages: Vec<server::Page>,
+    /// Wrong passwords in the last hour.
+    pub wrong: usize,
     /// What to tell the operator: a problem, or how a change went.
     pub said: Option<(String, bool)>,
     pub request: Option<Request>,
@@ -736,6 +855,31 @@ pub enum Request {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paths_are_cut_to_file_names_and_nothing_else_is_touched() {
+        assert_eq!(
+            without_paths("a picture (/Users/pat/Documents/SoftPresenter/Images/x 1.png)"),
+            "a picture (x 1.png)"
+        );
+        assert_eq!(without_paths("/Users/pat/Movies/Walk in.mp4"), "Walk in.mp4");
+        assert_eq!(
+            without_paths("Run: launchctl unload /Users/pat/Library/LaunchAgents/com.old.plist\nthen"),
+            "Run: launchctl unload com.old.plist\nthen"
+        );
+        assert_eq!(without_paths("Saved C:\\Users\\pat\\song.sppack, done"), "Saved song.sppack, done");
+        // Words that only look like paths in part are left as they are.
+        for text in ["slide 2/3", "https://example.org/a/b", "1/2 of the way", "On screen: River Song.", "and/or", "/"]
+        {
+            assert_eq!(without_paths(text), text);
+        }
+        let mut value = serde_json::json!({"raw": {"objects": [{"file": "/Users/pat/x.png", "words": "a/b"}]}, "n": 1});
+        json_without_paths(&mut value);
+        assert_eq!(value, serde_json::json!({"raw": {"objects": [{"file": "x.png", "words": "a/b"}]}, "n": 1}));
+        let reply = reply_for_page(Reply::with("Made /Users/pat/a.txt", serde_json::json!(["/private/tmp/b.png"])));
+        assert_eq!(reply.text, "Made a.txt");
+        assert_eq!(reply.data, serde_json::json!(["b.png"]));
+    }
 
     #[test]
     fn the_clock_gives_one_time_for_one_instant() {

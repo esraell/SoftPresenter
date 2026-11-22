@@ -1149,18 +1149,24 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         } else if state.remote.on {
             // Otherwise, while Remote Control is on, that it is and how many pages are connected.
             // A click opens its page in Settings.
-            let words = match state.remote.pages.len() {
+            let mut words = match state.remote.pages.len() {
                 0 => "Remote on".to_owned(),
                 pages => format!("Remote on \u{b7} {pages} connected"),
             };
+            // Wrong passwords coming again and again: somebody may be guessing.
+            let guessing = state.remote.wrong >= 3;
+            if guessing {
+                words.push_str(&format!(" \u{b7} {} wrong passwords", state.remote.wrong));
+            }
+            let ink = if guessing { TALLY } else { TEXT_DIM };
             let right = clock.min.x - 10.0;
-            let wide = (right - free_from).min(200.0);
+            let wide = (right - free_from).min(320.0);
             if wide >= 60.0 {
                 let room = Rect::from_min_max(pos2(right - wide, bar.min.y), pos2(right, bar.max.y));
-                let galley = spaced(ui, &words.to_uppercase(), fixed(11.0), TEXT_DIM, 0.5);
+                let galley = spaced(ui, &words.to_uppercase(), fixed(11.0), ink, 0.5);
                 let at = pos2((right - galley.size().x).max(room.min.x), middle - galley.size().y / 2.0);
                 let shown = ui.interact(room, ui.scope_id().with("remote control line"), Sense::click());
-                ui.painter().with_clip_rect(room).galley(at, galley, TEXT_DIM);
+                ui.painter().with_clip_rect(room).galley(at, galley, ink);
                 let hint = state.remote.address.as_ref().map_or_else(
                     || "Settings › Remote Control".to_owned(),
                     |address| format!("Open {address} on another device (Settings › Remote Control)"),

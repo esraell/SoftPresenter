@@ -1273,8 +1273,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 ## Remote Control
 - **Run the show from another device** on the church's network: a computer, tablet or phone
   opens the address Settings › Remote Control shows (`https://` the computer's address and the
-  port, 4316 unless changed; 1024 up) and signs in with a password. Only devices on a local
-  network are answered. Off by default; switched
+  port, 4316 unless changed; 1024 up) and signs in with a password of at least ten characters.
+  Only devices on a local network are answered. Off by default; switched
   on, it stays on the next time the app opens. Off, nothing listens; switching it off closes
   every page's connection at once. While on, the top bar's status line (when no timer runs and
   Canva Sync has nothing to say) reads REMOTE ON · N CONNECTED, and a click opens its pane.
@@ -1286,7 +1286,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   thread by the same handler, and gets the same replies. Not those that reach the computer's
   own files and folders (importing, exporting, adding media or audio, a picture or song text
   from a file, following a folder, a Bible from a file), the services' keys and sign-ins, the
-  menu bar, or Remote Control itself: those are refused in words, and are done at the computer.
+  menu bar, putting a web page on a slide, sending a screen over NDI, or Remote Control
+  itself: those are refused in words, and are done at the computer; a sub-command added later
+  stays closed to pages until it is listed. Any path in what a page is sent is cut to its file
+  name.
 - **The page keeps its own open item and picks**, so two computers never fight over the
   window's: it names the item each time (`next --aim ITEM`, `go --aim ITEM SLIDE`), and the
   window's open item, picks and chosen song stay as they are.
@@ -1298,17 +1301,23 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   while the slide looks the same; the live preview is the window's own Program preview, read
   back at most ten times a second and only while a page watches it.
 - **Secure**: HTTPS only, with a certificate made on this computer the first time it is
-  switched on (nobody else vouches for it, so a browser warns once; the pane shows its SHA-256
-  fingerprint to check against the browser's; Make a New Certificate replaces it). The
+  switched on, for 396 days and the addresses it is opened at (the computer's address and its
+  own name on the network), made again before it runs out or when they change, with a notice
+  (nobody else vouches for it, so a browser warns once; the pane shows its SHA-256 fingerprint
+  to check against the browser's; Make a New Certificate replaces it). The
   password is kept only as an argon2id hash; a device that signs in is remembered by a long
   random token in a cookie only the page's own requests carry (Secure, HttpOnly,
   SameSite=Strict), of which only a hash is kept. Wrong passwords from an address wait longer
   each time (after three, 1 s, 2 s, 4 s… up to a minute), and ten in a row shut it out for 15
-  minutes. Only the computer's own address is answered (not another name pointed at it), and
+  minutes; past ten wrong lately from everywhere, every sign-in waits too, longer the more there
+  are, and from three in an hour the status line says so in red. Only the computer's own address
+  and name are answered (not another name pointed at it), and
   only pages served from it may sign in or connect. The pane lists the pages connected (device,
   address, since) with Disconnect, and the devices remembered (from their browser: "Safari on an
   iPad"; first and last seen, address) with Forget and Forget All; Forget, and a new password,
-  close their pages at once. `sp remote` does the same from the command line.
+  close their pages at once, and a device not seen for 180 days is forgotten. A web page on a
+  slide can never go on to plain http on this computer (only a test's stand-in opened there
+  can). `sp remote` does the same from the command line.
 
 ## From the command line
 - Preparing a service from the command line, as the window does it: `playlist new|rename|delete|

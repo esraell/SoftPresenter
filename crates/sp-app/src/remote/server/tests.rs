@@ -21,6 +21,7 @@ struct Fake {
     commands: Mutex<Vec<Vec<String>>>,
     refreshed: AtomicUsize,
     drawn: AtomicUsize,
+    versions_asked: Mutex<Vec<Option<Uuid>>>,
 }
 
 struct FakeBackend(Arc<Fake>);
@@ -40,7 +41,10 @@ impl Backend for FakeBackend {
         answer
     }
 
-    fn thumb(&self, slide: Uuid, _version: Option<Uuid>) -> oneshot::Receiver<Option<Drawn>> {
+    fn thumb(&self, slide: Uuid, version: Option<Uuid>) -> oneshot::Receiver<Option<Drawn>> {
+        if let Ok(mut asked) = self.0.versions_asked.lock() {
+            asked.push(version);
+        }
         let (reply, answer) = oneshot::channel();
         let drawn = (!slide.is_nil()).then(|| {
             self.0.drawn.fetch_add(1, Ordering::AcqRel);
@@ -89,7 +93,7 @@ fn start_test(name: &str) -> Test {
     let _ = std::fs::remove_dir_all(&folder);
     let mut store = auth::Store::open(&folder);
     store.set_password(auth::hash_password(PASSWORD).expect("hashed")).expect("kept");
-    let cert = crate::remote::cert::make(&folder).expect("certificate");
+    let cert = crate::remote::cert::make(&folder, &crate::remote::cert::Names::now(None, None)).expect("certificate");
     let fake = Arc::new(Fake::default());
     let shared = Shared::new(Arc::new(Mutex::new(store)), Box::new(FakeBackend(fake.clone()))).expect("shared");
     let config = Config { bind: IpAddr::from([127, 0, 0, 1]), port: 0, cert: cert.clone() };
@@ -632,6 +636,81 @@ fn the_live_preview_reaches_every_page_watching_and_is_never_read_for_nobody() {
         assert_eq!(next_binary(&mut second).await[0], 1);
         assert_eq!(reads.load(Ordering::Acquire), 2);
     });
+}
+
+#[test]
+fn a_device_forgotten_while_its_page_connects_or_waits_is_closed_and_sent_nothing() {
+    let test = start_test("forgotten");
+    let token = test.token();
+    let id = test.shared.store.lock().unwrap().device_of(&token).expect("remembered").id.clone();
+    // Registering checks the store after the page is listed: a device gone by then isn't let in.
+    let caller = Caller {
+        client: 999,
+        device: "no-such-device".to_owned(),
+        name: "x".to_owned(),
+        ip: IpAddr::from([127, 0, 0, 1]),
+        role: Role::Control,
+    };
+    assert!(register(&test.shared, &caller, Arc::new(Kick::default())).is_none());
+    assert_eq!(test.shared.page_count(), 0, "and not left listed");
+    test.runtime.block_on(async {
+        let mut page = test.socket(&token, Some(&test.origin())).await.expect("connected");
+        page.send(tungstenite::Message::text(r#"{"type":"hello","preview":true}"#)).await.expect("sent");
+        assert_eq!(next_json(&mut page).await["type"], "snapshot");
+        // Forgotten without its pages being told (as if the sign-out had missed this one): the
+        // next change isn't sent; the page is closed, signed out.
+        test.shared.store.lock().unwrap().forget(&id);
+        test.shared.publish([("live", "{\"slide\":9}".to_owned())]);
+        assert_eq!(closed_with(&mut page).await, Some(close::SIGNED_OUT));
+    });
+}
+
+#[test]
+fn every_message_counts_against_a_pages_limit_even_ones_that_make_no_sense() {
+    let test = start_test("flood");
+    let token = test.token();
+    test.runtime.block_on(async {
+        let mut page = test.socket(&token, Some(&test.origin())).await.expect("connected");
+        page.send(tungstenite::Message::text(r#"{"type":"hello"}"#)).await.expect("sent");
+        next_json(&mut page).await;
+        for _ in 0..100 {
+            page.send(tungstenite::Message::text("not json")).await.expect("sent");
+        }
+        // Straight after, commands are refused with their ids, never reaching the app.
+        for id in 0..5 {
+            let command = serde_json::json!({"type": "command", "id": id, "args": ["next"]});
+            page.send(tungstenite::Message::text(command.to_string())).await.expect("sent");
+        }
+        // Only as many of the rest were answered as the limit allows; the others got nothing.
+        let (mut answered, mut refused) = (0, 0);
+        while let Ok(Some(Ok(message))) = tokio::time::timeout(Duration::from_millis(500), page.next()).await {
+            if let tungstenite::Message::Text(text) = message {
+                if text.contains("\"type\":\"error\"") {
+                    answered += 1;
+                } else if text.contains("\"type\":\"reply\"") && text.contains("\"ok\":false") {
+                    refused += 1;
+                }
+            }
+        }
+        assert!((30..=45).contains(&answered), "{answered} answered");
+        assert!(refused >= 4, "{refused} refused");
+    });
+    assert!(test.fake.commands.lock().unwrap().len() <= 1);
+}
+
+#[test]
+fn a_picture_in_a_version_nobody_has_is_the_usual_one() {
+    let test = start_test("versions");
+    let token = test.token();
+    let known = Uuid::from_u128(0x5eed);
+    test.shared.set_versions([known]);
+    let slide = "7f6a1c2e-0000-4000-8000-000000000001";
+    for version in ["5bd2ad3e-0000-4000-8000-00000000abcd", "6cd2ad3e-0000-4000-8000-00000000abce"] {
+        assert_eq!(test.get(&format!("/thumb/{slide}/{version}/00ff00ff00ff00ff.jpg"), Some(&token)).status, 200);
+    }
+    assert_eq!(test.get(&format!("/thumb/{slide}/{known}/00ff00ff00ff00ff.jpg"), Some(&token)).status, 200);
+    let asked = test.fake.versions_asked.lock().unwrap().clone();
+    assert_eq!(asked, vec![None, Some(known)], "made-up versions are the usual look, drawn once");
 }
 
 #[test]

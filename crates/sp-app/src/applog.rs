@@ -27,8 +27,23 @@ fn folder() -> Option<PathBuf> {
     crate::bible_store::data_dir()
 }
 
+/// Opens the log for adding to, readable by this user only (it names Remote Control's devices
+/// and the addresses they came from): a new log is made so, and one already there is set so.
 fn open(path: &PathBuf) -> Option<File> {
-    OpenOptions::new().create(true).append(true).open(path).ok()
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(path).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
+    Some(file)
 }
 
 /// Opens the log and says the app has started. Also writes any crash to it.

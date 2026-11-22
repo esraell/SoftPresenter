@@ -92,6 +92,45 @@ pub const OPEN: &[&str] = &[
 /// Commands never open to a page: Remote Control's own (switching it, its password).
 pub const CLOSED: &[&str] = &["remote"];
 
+/// For the open commands made of sub-commands, the sub-commands open to Control (`""` for the
+/// command alone); any other is closed, so a sub-command added later, or one taking a key, a
+/// link or a file, stays closed until it is looked at and listed. (`bible` is not here: a word
+/// after it that isn't one of its sub-commands is a reference to look up.)
+pub const OPEN_SUBCOMMANDS: &[(&str, &[&str])] = &[
+    ("voxlive", &["", "screens", "show", "look", "refresh"]),
+    ("canva", &["", "status", "sync", "pages", "divider"]),
+    ("settings", &["", "set"]),
+    ("screen", &["add", "set", "delete"]),
+    (
+        "song",
+        &[
+            "new",
+            "delete",
+            "rename",
+            "duplicate",
+            "theme",
+            "transition",
+            "info",
+            "arrangements",
+            "arrangement",
+            "text",
+            "reload",
+            "keep",
+        ],
+    ),
+    ("media", &["", "show", "delete", "next", "previous", "prev", "back", "set"]),
+];
+
+/// The sub-commands of those that are closed on purpose, with why (for the test that checks
+/// every sub-command `sp help` shows is one or the other).
+#[cfg(test)]
+pub const CLOSED_SUBCOMMANDS: &[(&str, &[&str])] = &[
+    ("voxlive", &["connect", "disconnect"]),
+    ("canva", &["connect", "import", "disconnect", "presentation"]),
+    ("song", &["import", "export"]),
+    ("media", &["add"]),
+];
+
 /// Why a page in this role may not send this command, in words to show it; `None` when it may.
 pub fn refusal(role: Role, args: &[String]) -> Option<String> {
     let args = as_carried_out(args);
@@ -126,6 +165,27 @@ fn control_refusal(args: &[String]) -> Option<String> {
     if CLOSED.contains(&first.as_str()) || !OPEN.contains(&first.as_str()) {
         return Some(format!("The remote page can't use the command \u{201c}{}\u{201d}.", args[0]));
     }
+    // Sub-commands: only those listed as open.
+    if let Some((_, open)) = OPEN_SUBCOMMANDS.iter().find(|(word, _)| *word == first)
+        && !open.contains(&second.as_str())
+    {
+        return Some(match (first.as_str(), second.as_str()) {
+            ("voxlive", _) => "Connecting VoxLive is done at the computer, not from the remote page.".to_owned(),
+            ("canva", _) => {
+                "Canva Sync's sign-in and presentation are set at the computer, not from the remote page.".to_owned()
+            }
+            ("song", "import") => "Importing songs is done at the computer, not from the remote page.".to_owned(),
+            ("song", "export") => "Exporting a song pack is done at the computer, not from the remote page.".to_owned(),
+            ("media", "add") => {
+                "Adding pictures and videos is done at the computer, not from the remote page.".to_owned()
+            }
+            _ => format!(
+                "The remote page can't use \u{201c}{} {}\u{201d}.",
+                args[0],
+                args.get(1).map_or("", String::as_str)
+            ),
+        });
+    }
     match (first.as_str(), second.as_str()) {
         // The page is sent every change as it happens; a wait would hold a place on the app's
         // main thread for nothing.
@@ -134,13 +194,7 @@ fn control_refusal(args: &[String]) -> Option<String> {
         }
         // The menu bar's items include Quit and the ones that open the computer's own windows.
         ("menu", _) if args.len() > 1 => at_computer("Choosing from the menu bar"),
-        // Keys and sign-ins for services.
-        ("voxlive", "connect" | "disconnect") => at_computer("Connecting VoxLive"),
-        ("canva", "connect" | "import" | "disconnect") => at_computer("Signing in to Canva"),
-        // Files and folders on the computer: reading them in, writing them out, following them.
-        ("song", "import") => at_computer("Importing songs"),
-        ("song", "export") => at_computer("Exporting a song pack"),
-        ("media", "add") => at_computer("Adding pictures and videos"),
+        // Files and folders on the computer: reading them in, following them.
         ("audio", "add") => at_computer("Adding audio tracks"),
         ("media-playlist", "follow") if !(args.len() == 4 && word(3) == "off") => at_computer("Following a folder"),
         ("bible", "install") if !(args.len() == 3 && offered_bible(&args[2])) => {
@@ -155,10 +209,28 @@ fn control_refusal(args: &[String]) -> Option<String> {
             first,
             second
         )),
-        // A web page on a slide: https only. Plain http reaches only this computer's own
-        // services, which the page has no business putting on screen.
-        ("slide", "web") if args.last().is_some_and(|address| !web_address_open(address)) => {
-            Some("From the remote page, a web page on a slide must be an https:// address.".to_owned())
+        // A web page on a slide runs its own scripts in the computer's web view, on the
+        // screens: put up at the computer only. Taking one off is open.
+        ("slide", "web")
+            if !args
+                .last()
+                .is_some_and(|word| word.eq_ignore_ascii_case("off") || word.eq_ignore_ascii_case("none")) =>
+        {
+            at_computer("Putting a web page on a slide")
+        }
+        // NDI sends a screen to anyone on the network who asks, with no password: turned on at
+        // the computer only.
+        ("screen", "add" | "set")
+            if args.iter().skip(2).any(|word| {
+                let word = word.to_lowercase();
+                word == "ndi" || word.starts_with("output=ndi")
+            }) =>
+        {
+            at_computer("Sending a screen over NDI")
+        }
+        // Reading every song again from its file: one song at a time from a page.
+        ("song", "reload") if args.iter().skip(2).all(|word| word.starts_with("--")) => {
+            Some("From the remote page, name the song to read again: song reload SONG".to_owned())
         }
         _ => None,
     }
@@ -167,19 +239,6 @@ fn control_refusal(args: &[String]) -> Option<String> {
 /// Whether a Bible's name is one SoftPresenter offers to download (`bibles` lists them).
 fn offered_bible(typed: &str) -> bool {
     crate::bible::OFFERED.iter().any(|b| b.short.eq_ignore_ascii_case(typed) || b.id.eq_ignore_ascii_case(typed))
-}
-
-/// Whether a slide's web address may be set from a page: `off`, a bare host (made https), or
-/// https.
-fn web_address_open(address: &str) -> bool {
-    let address = address.trim();
-    if address.eq_ignore_ascii_case("off") || address.eq_ignore_ascii_case("none") {
-        return true;
-    }
-    match address.split_once("://") {
-        Some((scheme, _)) => scheme.eq_ignore_ascii_case("https"),
-        None => true,
-    }
 }
 
 #[cfg(test)]
@@ -215,9 +274,13 @@ mod tests {
             "bible install ASV",
             "bible John 3:16 --show",
             "media-playlist follow Loop off",
-            "slide web Amazing 2 https://example.org",
-            "slide web Amazing 2 example.org",
             "slide web Amazing 2 off",
+            "screen add audience Front on display Projector",
+            "screen set Front output=window",
+            "song reload Amazing",
+            "settings set continuous=on",
+            "media next",
+            "voxlive show 1",
             "menu",
             "voxlive",
             "canva sync",
@@ -254,6 +317,18 @@ mod tests {
             "status --wait 5",
             "slide web Amazing 2 http://127.0.0.1:8080",
             "slide web Amazing 2 file:///etc/hosts",
+            "slide web Amazing 2 https://example.org",
+            "slide web Amazing 2 example.org",
+            "screen add audience Stream on ndi Church",
+            "screen set Front output=ndi:Church",
+            "screen set Front OUTPUT=NDI:Church",
+            "song reload",
+            "song reload --now",
+            "canva presentation https://www.canva.com/design/DAFxxxx/edit",
+            "voxlive key",
+            "song frobnicate x",
+            "media import x",
+            "settings reset",
             "remote off",
             "remote password",
             "install-cli",
@@ -320,6 +395,39 @@ mod tests {
                 OPEN.contains(&word.as_str()) || CLOSED.contains(&word.as_str()),
                 "{word} is neither open nor closed to the remote page"
             );
+        }
+    }
+
+    /// Every sub-command `sp help` shows for the commands made of them is listed as open or
+    /// closed, so a new one is looked at before a page can use it.
+    #[test]
+    fn every_sub_command_the_help_shows_is_open_or_closed() {
+        let mut seen = 0;
+        for line in crate::control::HELP.lines() {
+            if !line.starts_with("  ") || line.starts_with("   ") {
+                continue;
+            }
+            let shape = line.trim_start().split("   ").next().unwrap_or("");
+            for one in shape.split(" | ") {
+                let mut parts = one.split_whitespace();
+                let (Some(first), second) = (parts.next(), parts.next()) else { continue };
+                let Some((_, open)) = OPEN_SUBCOMMANDS.iter().find(|(word, _)| *word == first) else { continue };
+                let sub = second.unwrap_or("");
+                // A placeholder (SONG, N…) or an option isn't a sub-command.
+                if sub.chars().any(|c| c.is_ascii_uppercase()) || sub.starts_with('[') || sub.starts_with('-') {
+                    continue;
+                }
+                let sub = sub.split('|').next().unwrap_or("");
+                let closed = CLOSED_SUBCOMMANDS.iter().find(|(word, _)| *word == first).map_or(&[][..], |(_, c)| *c);
+                assert!(open.contains(&sub) || closed.contains(&sub), "{first} {sub} is neither open nor closed");
+                seen += 1;
+            }
+        }
+        assert!(seen >= 20, "only {seen} sub-commands seen");
+        // Closed and open never overlap.
+        for (word, closed) in CLOSED_SUBCOMMANDS {
+            let open = OPEN_SUBCOMMANDS.iter().find(|(have, _)| have == word).map_or(&[][..], |(_, o)| *o);
+            assert!(closed.iter().all(|sub| !open.contains(sub)), "{word}");
         }
     }
 

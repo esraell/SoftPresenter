@@ -32,12 +32,31 @@ answers only devices on a local network (private and link-local addresses, and t
 shows the address to open, such as `https://192.168.1.20:4316`. Nothing listens while it is
 off, and switching it off closes every connection.
 
-The certificate is made on the computer itself the first time Remote Control is switched on
-(ECDSA P-256, valid for ten years, naming no address so it survives the computer's address
-changing). Nobody else vouches for it, so **the browser warns the first time**. The pane shows
-its SHA-256 fingerprint; the operator compares it with the one the browser shows (in Chrome:
-the warning page › Advanced, or the padlock › Certificate) and goes on only if they match. Make
-a New Certificate replaces it (every device then sees a new fingerprint, and a warning again).
+The certificate is made on the computer itself the first time Remote Control is switched on:
+ECDSA P-256, for serving (the server-authentication purpose), for 396 days, naming the
+addresses it is opened at (`localhost`, 127.0.0.1, the computer's address on its network, and
+its own name there, such as `church-mac.local`). It is made again a month before it runs out,
+and when the computer's address or name changes (looked at when Remote Control is switched on,
+and every ten minutes while no page is connected); the operator is told, and Settings shows the
+new fingerprint. Nobody else vouches for it, so **the browser warns the first time**. Make a New
+Certificate replaces it on request (every device then sees a new fingerprint, and a warning
+again).
+
+### How a new device trusts it
+
+1. Open the address Settings shows (`https://192.168.1.20:4316`, or `https://church-mac.local:4316`).
+2. The browser warns that the certificate isn't trusted. Open its details (Chrome: Advanced, or
+   the padlock › Certificate; Safari: Show Details › View the certificate) and compare the
+   SHA-256 fingerprint with the one in Settings › Remote Control, all 32 pairs.
+3. Only if they match, go on (Chrome: Proceed; Safari: visit this website). Sign in.
+4. A new certificate (Settings says so) means doing this once more on each device.
+
+**Needs checking on an iPad or iPhone (step 1 hasn't been tried there):** Safari may not let the
+page's WebSocket connect to a certificate it only let through on a warning. The certificate is
+made the way Apple asks of server certificates (at most 397 days, the server purpose, the
+addresses and name it is opened at) so that, if need be, it can be installed and trusted on the
+device instead (Settings › General › About › Certificate Trust Settings); whether that is
+needed, and works for a certificate that signs itself, is still to be tried.
 
 A test copy started with `SOFTPRESENTER_QUIET=1` listens on 127.0.0.1 only.
 
@@ -77,9 +96,10 @@ are remembered at once.
 ## The rules every request goes through
 
 1. **Host.** The `Host` header must be the address the connection came in on, as figures with
-   the port (`192.168.1.20:4316`; IPv6 in brackets), or `localhost:PORT` on the computer
-   itself. Anything else is `421`. So a web page elsewhere that gets its own name pointed at
-   the computer (DNS rebinding) is refused. Open the page by its address, as the pane shows it.
+   the port (`192.168.1.20:4316`; IPv6 in brackets), the computer's own name on the network
+   with the port (`church-mac.local:4316`), or `localhost:PORT` on the computer itself.
+   Anything else is `421`. So a web page elsewhere that gets its own name pointed at the
+   computer (DNS rebinding) is refused.
 2. **A signed-in device**, for everything except `/login`, `/login.js`, `/style.css` and
    `/favicon.ico`: otherwise `401` (or `303` to `/login` for `/`).
 3. **Origin** must be `https://` + that Host on `POST /api/login`, `POST /api/logout` and the
@@ -173,8 +193,10 @@ reply:
 
     {"type": "reply", "id": 7, "reply": {"ok": true, "text": "On screen: River Song, slide 1 of 6 (Verse 1).", "data": …}}
 
-`reply` is byte for byte the reply `sp --json` gets: carried out on the app's main thread by the
-same handler as `sp` and the window's own buttons. `ok: false` is a **refusal**; `text` is the
+`reply` is the reply `sp --json` gets, byte for byte, but for one thing: any absolute path in it
+(a picture's file, a folder) is cut to its file name, so the computer's folders and the user's
+name in them stay on the computer (the state is sent the same way). It is carried out on the
+app's main thread by the same handler as `sp` and the window's own buttons. `ok: false` is a **refusal**; `text` is the
 app's own words for why (show it as the cue chip), such as "That is the last slide." or "River
 Song has 6 slides; there is no slide 9.". Every command gets exactly one reply, within 15
 seconds ("SoftPresenter did not answer in time." otherwise).
@@ -186,17 +208,25 @@ Refused before they reach the app, with words saying so (read as the app would r
   `media add`, `audio add`, `media-playlist follow FOLDER`, `bible install FILE` (a Bible
   `bibles` offers, by name, is fine), and `song new`, `song text`, `prop new` with more than one
   word after them (send the title as **one** word, spaces and all: `["song", "new", "Morning
-  Hymn"]`, never read as a file);
-- **keys and sign-ins**: `voxlive connect|disconnect`, `canva connect|import|disconnect`;
+  Hymn"]`, never read as a file); the app refuses them again where each would open a file;
+- **keys, sign-ins and links**: `voxlive connect|disconnect`, `canva connect|import|disconnect`,
+  `canva presentation`;
 - the **menu bar**: `menu ITEM` (`menu` alone lists it);
-- a web page on a slide other than `https://` (`slide web`);
-- `status --wait` (the page is sent changes anyway);
+- **a web page on a slide** (`slide web … URL`): a page runs its own scripts in the computer's
+  web view, on the screens, so it is put up at the computer; `slide web SONG N off` is open;
+- **NDI**: `screen add … on ndi NAME`, `screen set … output=ndi:…` (NDI sends to anyone on the
+  network who asks, with no password);
+- `song reload` without a song (reads every song again), and `status --wait`;
 - **Remote Control itself**: `remote …`;
-- anything the server doesn't know (a command added to the app later is closed to pages until
-  it is looked at).
+- anything the server doesn't know: a command, **or a sub-command** of `voxlive`, `canva`,
+  `settings`, `screen`, `song` or `media`, added to the app later is closed to pages until it is
+  looked at and listed (`crates/sp-app/src/remote/policy.rs`).
 
-And to keep the app responsive: at most four commands waiting for the app at once, twenty a
-second (forty in a burst) from one page; past that, a refusal saying to slow down.
+And to keep the app responsive: every message a page sends counts, whatever it is: twenty a
+second (forty in a burst) from one page, past which a command is refused with its id and
+anything else is not answered; at most four commands from a page waiting for the app at once;
+forty commands a second (eighty in a burst) from every page together; a device connects at most
+twelve pages a minute (ten at once).
 
 A message the server can't read gets `{"type": "error", "text": "…"}`.
 
@@ -389,13 +419,15 @@ since), with Disconnect.
 | Sign-in body | 4 KB |
 | Pages (WebSockets) | 16 at once; 4 from one device |
 | A message from a page | 64 KB (more closes the socket) |
-| Commands (and hellos, and preview switches) | 4 waiting, 20 a second (40 in a burst) per page; 15 s for an answer |
+| Messages from a page (any kind) | 20 a second, 40 in a burst; past that a command is refused, the rest unanswered |
+| Commands | 4 waiting per page; 40 a second (80 in a burst) from all pages together; 15 s for an answer |
+| Connecting | 12 pages a minute per device (10 at once) |
 | Hello | within 10 s |
 | Silence | 45 s, then closed |
 | Writing to a slow page | 10 s, then closed (it reconnects and catches up) |
-| Slide pictures | 2 drawn at once (more wait up to 10 s); 24 MB kept |
+| Slide pictures | 2 drawn at once (more wait up to 10 s); 24 MB and 4,096 pictures kept; a version no theme has is drawn as the usual look |
 | Live preview | 10 a second at most, newest only |
-| Devices remembered | 50 |
+| Devices remembered | 50; one not seen for 180 days is forgotten |
 
 ## The security model
 
@@ -406,18 +438,29 @@ browser on the network (trusted with nothing).
 | Threat | How it is met |
 |---|---|
 | Someone on the network reads or changes the traffic, or steals a session | HTTPS only (rustls, TLS 1.2 and 1.3), with a certificate made on the computer; the operator checks its fingerprint once per device. The cookie is `Secure` |
-| Guessing the password | argon2id (19 MiB, two passes), checked one at a time off the server's thread; per-address waits that grow, a 15-minute shutout, and a cap for everyone together; an address that must wait isn't checked at all. Settings asks for at least 8 characters |
+| Guessing the password | argon2id (19 MiB, two passes), checked one at a time off the server's thread; per-address waits that grow, a 15-minute shutout, and a cap for everyone together; an address that must wait isn't checked at all. Settings asks for at least 10 characters; and past ten wrong passwords lately from everywhere, every sign-in waits (1 s, doubling every five more, up to 2 minutes) |
 | The password or tokens leaking from the computer | The password is kept only as an argon2id hash with a random salt, tokens only as SHA-256, in `remote/settings.json` in a folder only the user may enter (0700, files 0600); neither is ever logged (the log has sign-ins by device and address, wrong passwords by address, and the commands pages sent). The data folder may be in Documents, which a Mac can sync: the hashes and the certificate's key go with it (see residual risks) |
 | A stolen or old device | Forget (or a new password) revokes at once, closing its open pages |
 | Another site's page using a signed-in browser (cross-site requests, cross-site WebSocket) | SameSite=Strict, HttpOnly cookie; `Origin` checked on the WebSocket and every POST; sign-in needs JSON |
 | DNS rebinding | `Host` must be the address the connection came in on |
 | Someone on the internet, if the computer is reachable from it (a forwarded port) | Only local-network addresses are answered |
 | Reading or writing the computer's files through the page | No path from a request is ever served; commands that name files or folders are refused for pages by their words, and again where each would open a file, whatever words got there (a title or name is then all words; the disk is never looked at for a page); pictures are found by id |
-| Reaching the computer's own web services | `slide web` with anything but https is refused for pages |
+| Reaching the computer's own web services | Pages can't put web pages on slides; and no web page on a slide (a page's, or a song pack's) can redirect, post or frame its way to plain http on this computer, only one opened at such an address itself (a test's) |
+| Sending the screens to anyone on the network | Pages can't turn on NDI output |
+| The computer's folders and user name | Absolute paths in replies and state are cut to file names; VoxLive's key is shown to pages only as `vxk_…`; Canva's switch-off steps (which name home folder places) aren't sent |
+| Somebody guessing at the password | Wrong passwords in the last hour are shown in Settings, and from three on in the status line, in red |
+| The log | Readable by the user only (it names devices and addresses) |
 | Keys, sign-ins, the menu bar (Quit, Install Command Line Tool), Remote Control's own settings | Closed to pages |
 | Script injection into the page | Strict CSP (no inline script, no eval), `textContent` only, no framing |
 | Flooding the app or the server | The limits above; commands are carried out on the main thread one at a time as `sp`'s are, never blocking the screens' thread; pictures drawn a few per turn of the event loop; the preview read back on the server's own thread from the window's own textures |
 | A page left open forever | Heartbeats, and closing after 45 s of silence |
+
+**Needs checking at each church (for the owner):** "only the local network is answered" looks at
+the address a connection comes from. A router that forwards a port to the computer with its own
+address in place of the sender's (source NAT, "hairpin" forwarding), a reverse proxy in front of
+it, or a VPN that hands out addresses in 100.64/10 (Tailscale does) makes devices outside look
+local, and then only the password stands in their way. **Don't forward Remote Control's port on
+the church's router**; reach it from outside, if ever, through a VPN the church controls.
 
 Residual risks, known and accepted for step 1: someone on the network can hold connection
 slots open (up to the limits above) and keep a new device from signing in for a while

@@ -168,7 +168,14 @@ impl crate::App {
                 ("versions", self.remote_versions()),
             ]);
         }
-        parts.into_iter().map(|(name, value)| (name, value.to_string())).collect()
+        // The computer's folders stay on it: any path in the state is cut to its file name.
+        parts
+            .into_iter()
+            .map(|(name, mut value)| {
+                super::json_without_paths(&mut value);
+                (name, value.to_string())
+            })
+            .collect()
     }
 
     /// What is on screen, and the switches beside it: `sp status` less what ticks, and more.
@@ -441,6 +448,10 @@ impl crate::App {
             self.remote.published = Some(now);
             if slow {
                 self.remote.published_slow = Some(now);
+                // The versions a picture may be asked for in (any other is drawn as usual).
+                if let Some(state) = self.running.as_ref().map(|r| &r.home_state) {
+                    shared.set_versions(state.versions.iter().map(|version| version.id));
+                }
                 return wake;
             }
             // The seldom-changing parts are looked at once more when they are due, in case

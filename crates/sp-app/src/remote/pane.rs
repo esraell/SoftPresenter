@@ -100,7 +100,7 @@ pub fn pane(ui: &mut egui::Ui, view: &mut View) {
             RichText::new(if view.has_password {
                 "A new password forgets every device: each signs in again with it."
             } else {
-                "Set a password before switching Remote Control on: at least 8 letters, figures or signs."
+                "Set a password before switching Remote Control on: at least 10 letters, figures or signs."
             })
             .size(11.5)
             .color(TEXT_DIM),
@@ -117,7 +117,7 @@ pub fn pane(ui: &mut egui::Ui, view: &mut View) {
             if view.password != view.password_again {
                 view.said = Some(("The two passwords differ.".to_owned(), true));
             } else if view.password.chars().count() < super::auth::SHORTEST_PASSWORD {
-                view.said = Some(("A password needs at least 8 letters, figures or signs.".to_owned(), true));
+                view.said = Some(("A password needs at least 10 letters, figures or signs.".to_owned(), true));
             } else {
                 view.request = Some(Request::Password(std::mem::take(&mut view.password)));
                 view.password_again.clear();
@@ -127,6 +127,15 @@ pub fn pane(ui: &mut egui::Ui, view: &mut View) {
     if let Some((said, problem)) = &view.said {
         ui.add_space(6.0);
         ui.label(RichText::new(said).color(if *problem { crate::studio::TALLY } else { TEXT_DIM }));
+    }
+
+    if view.wrong > 0 {
+        ui.add_space(6.0);
+        let words = match view.wrong {
+            1 => "A wrong password was tried in the last hour.".to_owned(),
+            n => format!("{n} wrong passwords were tried in the last hour."),
+        };
+        ui.label(RichText::new(words).color(if view.wrong >= 3 { crate::studio::TALLY } else { TEXT_DIM }));
     }
 
     ui.add_space(14.0);
