@@ -339,7 +339,13 @@ fn timers_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 }
             });
             if open {
-                state.timers_changed |= timer_settings(ui, &mut state.timers[index]);
+                let (changed, renamed) = timer_settings(ui, &mut state.timers[index]);
+                state.timers_changed |= changed;
+                if let Some(name) = renamed
+                    && let Err(problem) = state.rename_timer(index, &name)
+                {
+                    state.say(problem);
+                }
                 ui.add_space(6.0);
                 let done = Rect::from_min_size(ui.cursor().min, vec2(64.0, 24.0));
                 ui.allocate_rect(done, Sense::hover());
@@ -386,14 +392,32 @@ fn timers_tab(ui: &mut egui::Ui, state: &mut HomeState) {
 }
 
 /// A timer's settings, under its card while they are open: its name, what it counts, and
-/// whether it runs over. Returns true when one changed.
-fn timer_settings(ui: &mut egui::Ui, timer: &mut Timer) -> bool {
+/// whether it runs over. Returns true when one changed, and a new name once one is typed: it is
+/// kept on Return or leaving the field (Escape puts the old one back), and then given to the
+/// timer and the messages that show it together (see `HomeState::rename_timer`).
+fn timer_settings(ui: &mut egui::Ui, timer: &mut Timer) -> (bool, Option<String>) {
     ui.add_space(8.0);
     let mut changed = false;
+    let mut renamed = None;
     egui::Grid::new(("timer settings", timer.id)).num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
         ui.label(egui::RichText::new("Name").color(TEXT_DIM));
-        changed |=
-            ui.add(egui::TextEdit::singleline(&mut timer.name).background_color(PANEL).desired_width(160.0)).changed();
+        // The name as typed so far, while the field has the keyboard.
+        let field_id = egui::Id::unique(("timer name", timer.id));
+        let draft_id = field_id.with("typed");
+        let mut typed = ui.data(|data| data.get_temp::<String>(draft_id)).unwrap_or_else(|| timer.name.clone());
+        let field =
+            ui.add(egui::TextEdit::singleline(&mut typed).id(field_id).background_color(PANEL).desired_width(160.0));
+        if field.lost_focus() {
+            let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
+            if !escape && typed.trim() != timer.name {
+                renamed = Some(typed.trim().to_owned());
+            }
+            ui.data_mut(|data| data.remove::<String>(draft_id));
+        } else if field.has_focus() {
+            ui.data_mut(|data| data.insert_temp(draft_id, typed));
+        } else {
+            ui.data_mut(|data| data.remove::<String>(draft_id));
+        }
         ui.end_row();
         ui.label(egui::RichText::new("Counts").color(TEXT_DIM));
         let kind_name = match timer.kind {
@@ -469,7 +493,7 @@ fn timer_settings(ui: &mut egui::Ui, timer: &mut Timer) -> bool {
         }
     });
     changed |= ui.checkbox(&mut timer.allow_overrun, "Runs over (counts on past the end)").changed();
-    changed
+    (changed, renamed)
 }
 
 /// Something asked of a message from its card.
@@ -2753,6 +2777,61 @@ mod tests {
     /// A moment after the last frame.
     fn next(ctx: &egui::Context) -> f64 {
         ctx.input(|input| input.time) + 0.1
+    }
+
+    #[test]
+    fn a_timer_renamed_takes_the_messages_that_show_it_along() {
+        let key = |key: egui::Key| Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        let ctx = egui::Context::default();
+        let show = show();
+        let mut state = HomeState::default();
+        state.timers.push(Timer::new("Sermon".to_owned()));
+        state.timers.push(Timer::new("Walk-in".to_owned()));
+        let mut message = Message::new("Ends".to_owned());
+        message.text = "Ends in {Timer: Sermon}".to_owned();
+        state.messages.push(message);
+        state.live_tab = 0;
+        state.timer_open = Some(state.timers[0].id);
+        let field = egui::Id::unique(("timer name", state.timers[0].id));
+        let typing = |state: &mut HomeState, words: &str, end: egui::Key| {
+            frame(&ctx, &show, state, vec![], next(&ctx));
+            ctx.memory_mut(|memory| memory.request_focus(field));
+            frame(&ctx, &show, state, vec![], next(&ctx));
+            // Typed over the whole name.
+            let all = vec![Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::COMMAND,
+            }];
+            frame(&ctx, &show, state, all, next(&ctx));
+            frame(&ctx, &show, state, vec![Event::Text(words.to_owned())], next(&ctx));
+            frame(&ctx, &show, state, vec![key(end)], next(&ctx));
+            frame(&ctx, &show, state, vec![], next(&ctx));
+        };
+        // While it is typed, nothing changes; Return gives the timer and the message the name.
+        typing(&mut state, "Preaching", egui::Key::Enter);
+        assert_eq!(state.timers[0].name, "Preaching");
+        assert_eq!(state.messages[0].text, "Ends in {Timer: Preaching}");
+        assert!(state.timers_changed && state.messages_changed);
+        // Escape puts the name back, and the message keeps it.
+        typing(&mut state, "Talk", egui::Key::Escape);
+        assert_eq!(state.timers[0].name, "Preaching");
+        assert_eq!(state.messages[0].text, "Ends in {Timer: Preaching}");
+        // Another timer's name is refused, and says so.
+        typing(&mut state, "walk-in", egui::Key::Enter);
+        assert_eq!(state.timers[0].name, "Preaching");
+        assert_eq!(
+            state.toast.as_ref().map(|(words, _)| words.as_str()),
+            Some("There is a timer called walk-in already.")
+        );
     }
 
     /// The middle of where `words` were drawn last (in a menu, when it is open).

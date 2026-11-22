@@ -182,6 +182,11 @@ impl crate::App {
             }
             // `timer set NAME countdown 5:00 | to 10:30 | up | overrun on|off | name NEW`
             "set" => self.timer_set(words),
+            // `timer rename OLD to NEW`: the messages that show it are changed with it.
+            "rename" => match split_at_word(words, "to") {
+                (old, Some(new)) if !old.is_empty() => self.timer_rename(&old.join(" "), &new),
+                _ => Err("timer rename OLD to NEW".to_owned()),
+            },
             "delete" => {
                 let (yes, name) = wants_yes(words);
                 self.with_named("timer", &name.join(" "), |state| state.timers.iter().map(|t| t.name.clone()).collect())
@@ -225,6 +230,13 @@ impl crate::App {
         Ok(Reply::done(format!("Made the timer {name}: it {}.", kind_words(&kind))))
     }
 
+    fn timer_rename(&mut self, old: &str, new: &str) -> Result<Reply, String> {
+        let index = self.with_named("timer", old, |state| state.timers.iter().map(|t| t.name.clone()).collect())?;
+        let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
+        let was = state.rename_timer(index, new)?;
+        Ok(Reply::done(format!("Renamed the timer {was} to {}.", new.trim())))
+    }
+
     fn timer_set(&mut self, words: &[String]) -> Result<Reply, String> {
         let usage = "timer set NAME countdown M:SS | to HH:MM | up [to M:SS] | overrun on|off | name NEW";
         // As for timer new: the first place the rest reads as a setting.
@@ -250,12 +262,13 @@ impl crate::App {
                 state.timers[index].allow_overrun = on;
                 format!("{} past its end", if on { "keeps counting" } else { "stops" })
             }
+            // Renamed with the messages that show it, as in the window.
             "name" => {
                 let new = rest[1..].join(" ");
                 if new.trim().is_empty() {
                     return Err(usage.to_owned());
                 }
-                state.timers[index].name = new.trim().to_owned();
+                state.rename_timer(index, &new)?;
                 format!("is now called {}", new.trim())
             }
             _ => {

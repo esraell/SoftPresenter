@@ -73,6 +73,18 @@ pub fn timer_token(name: &str) -> String {
     format!("{{Timer: {name}}}")
 }
 
+/// Writes a timer's new name into every message that shows it, so `{Timer: old}` becomes
+/// `{Timer: new}`. Returns true when a message changed.
+pub fn rename_timer(messages: &mut [Message], old: &str, new: &str) -> bool {
+    let (was, now) = (timer_token(old), timer_token(new));
+    let mut changed = false;
+    for message in messages.iter_mut().filter(|message| message.text.contains(&was)) {
+        message.text = message.text.replace(&was, &now);
+        changed = true;
+    }
+    changed
+}
+
 /// True when the words have a token whose value changes as time passes.
 pub fn has_tokens(text: &str) -> bool {
     text.contains(CLOCK_TOKEN) || text.contains("{Timer:")
@@ -157,6 +169,17 @@ pub fn save(messages: &[Message]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_timers_new_name_is_written_into_the_messages_that_show_it() {
+        let mut messages = vec![Message::new("A".to_owned()), Message::new("B".to_owned())];
+        messages[0].text = format!("{} then {}", timer_token("Sermon"), timer_token("Sermon"));
+        messages[1].text = format!("{} at {CLOCK_TOKEN}", timer_token("Sermon notes"));
+        assert!(rename_timer(&mut messages, "Sermon", "Talk"));
+        assert_eq!(messages[0].text, "{Timer: Talk} then {Timer: Talk}");
+        assert_eq!(messages[1].text, "{Timer: Sermon notes} at {Clock}", "another timer's token is left");
+        assert!(!rename_timer(&mut messages, "Sermon", "Talk"), "nothing left to change");
+    }
 
     #[test]
     fn tokens_are_filled_in_with_the_time_and_timers() {

@@ -921,6 +921,7 @@ Layers and controls
   timer start|stop|reset NAME
   timer new NAME countdown M:SS | to HH:MM | up [to M:SS]     (30 alone is 30 minutes)
   timer set NAME countdown …|to …|up … | overrun on|off | name NEW
+  timer rename OLD to NEW
   timer delete NAME --yes
   message new NAME [WORDS] | message set NAME text=… leaves=SECONDS|never name=…
   message delete NAME --yes | message show --text WORDS   (words once, as Quick message)

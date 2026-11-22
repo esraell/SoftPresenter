@@ -2003,6 +2003,33 @@ impl HomeState {
         }
     }
 
+    /// Renames a timer (by its place), and in the same change every message that shows it, so
+    /// a message on the screens goes on showing its time. A name another timer has is refused,
+    /// as is an empty one: the words say why. Returns the name it had.
+    pub fn rename_timer(&mut self, index: usize, name: &str) -> Result<String, String> {
+        let name = name.trim();
+        let Some(was) = self.timers.get(index).map(|timer| timer.name.clone()) else {
+            return Err("There is no such timer.".to_owned());
+        };
+        if name.is_empty() {
+            return Err("A timer needs a name.".to_owned());
+        }
+        if name == was {
+            return Ok(was);
+        }
+        if self.timers.iter().enumerate().any(|(at, timer)| at != index && timer.name.eq_ignore_ascii_case(name)) {
+            return Err(format!("There is a timer called {name} already."));
+        }
+        // A message's token names the first timer called so; only that timer takes it along.
+        let shows_it = self.timers.iter().position(|timer| timer.name == was) == Some(index);
+        if shows_it && crate::messages::rename_timer(&mut self.messages, &was, name) {
+            self.messages_changed = true;
+        }
+        self.timers[index].name = name.to_owned();
+        self.timers_changed = true;
+        Ok(was)
+    }
+
     /// Says something for a moment, under the top bar (that the playlist has ended, say). It
     /// changes nothing.
     pub fn say(&mut self, words: impl Into<String>) {
@@ -12732,6 +12759,30 @@ mod tests {
         assert_eq!(state.notice.as_deref(), Some("Added John 3:16 to Playlist 1."));
         assert_eq!(state.renaming_service, Some((1, "Playlist 1".to_owned())));
         assert!(state.chooser_open && state.playlist_open && state.view_request == Some(0));
+    }
+
+    #[test]
+    fn a_timer_renamed_takes_its_messages_along_once_names_are_its_own() {
+        let mut state = HomeState::default();
+        // Two timers of one name, as an older file may have: a token shows the first.
+        for name in ["Sermon", "Sermon", "Walk-in"] {
+            state.timers.push(crate::timers::Timer::new(name.to_owned()));
+        }
+        state.messages.push(crate::messages::Message::new("Ends".to_owned()));
+        state.messages[0].text = "Ends in {Timer: Sermon}".to_owned();
+        assert_eq!(state.rename_timer(1, "Second"), Ok("Sermon".to_owned()));
+        assert_eq!(state.messages[0].text, "Ends in {Timer: Sermon}", "the second Sermon wasn't the one shown");
+        assert!(!state.messages_changed && state.timers_changed);
+        assert_eq!(state.rename_timer(0, " Preaching "), Ok("Sermon".to_owned()));
+        assert_eq!(
+            (state.timers[0].name.as_str(), state.messages[0].text.as_str()),
+            ("Preaching", "Ends in {Timer: Preaching}")
+        );
+        assert!(state.messages_changed);
+        assert_eq!(state.rename_timer(0, "WALK-IN"), Err("There is a timer called WALK-IN already.".to_owned()));
+        assert_eq!(state.rename_timer(0, "  "), Err("A timer needs a name.".to_owned()));
+        assert_eq!(state.rename_timer(9, "Other"), Err("There is no such timer.".to_owned()));
+        assert_eq!(state.timers[0].name, "Preaching");
     }
 
     #[test]

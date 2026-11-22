@@ -351,7 +351,7 @@ with Continuous Playlist on; open it with `playlist go` to run through the playl
 | `prop new NAME [PICTURE]`, `prop delete NAME --yes` | A prop showing a picture, or its name in words |
 | `timer start\|stop\|reset NAME` | A timer |
 | `timer new NAME countdown M:SS \| to HH:MM \| up [to M:SS]` | A timer counting down from a length (`30` alone is 30 minutes), down to a time of day (`10:30am`), or up |
-| `timer set NAME countdown …\|to …\|up …\|overrun on\|off\|name NEW`, `timer delete NAME --yes` | Changes a timer, or deletes it |
+| `timer set NAME countdown …\|to …\|up …\|overrun on\|off\|name NEW`, `timer rename OLD to NEW`, `timer delete NAME --yes` | Changes a timer, or deletes it. A new name goes into every message that shows the timer, in the same change; a name another timer has is refused |
 | `macro run NAME` | Runs a macro's steps in turn |
 | `macro new NAME`, `macro add NAME STEP [then STEP…]`, `macro remove NAME N`, `macro delete NAME --yes` | Makes a macro and gives it steps |
 | `macro step NAME N STEP` | Step N does STEP instead, at the same point among the steps (STEP in the words `macro add` takes; one step) |

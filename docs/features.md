@@ -383,7 +383,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **Timers** count down, count down to a time of day, or count up. Each is a card with its
   name, its time in the fixed-width face (green, on a green-tinted card, while it runs; a
   countdown to a time of day says when it ends until it is started), Reset, Start or Stop, and
-  ⋯ with Edit… (its name, what it counts, whether it runs over) and Delete.
+  ⋯ with Edit… (its name, what it counts, whether it runs over) and Delete. A new name is kept
+  on Return or leaving the field (Escape puts the old one back; a name another timer has is
+  refused, with a notice), and every message that shows the timer takes the new name with it,
+  so a message on the screens goes on showing its time; `sp timer rename OLD to NEW` and
+  `timer set NAME name NEW` do the same.
 - **Messages** shown over the slides, with the time or a timer in them, an optional time to
   leave by themselves, and a look of their own such as a band, a box in the middle or a lower
   third. Each is a card with its name, its words on one line, Show or Hide (the card is tinted
@@ -1148,7 +1152,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   song's id and number; `status --json` names the song on screen by id and number, and the
   playlist item it came from. A song can be named by its id wherever a song is named.
 - Making things from the command line: timers (`timer new NAME countdown 5:00 | to 10:30 | up
-  [to M:SS]`, `timer set`, `timer delete`), messages (`message new`, `message set NAME text=…
+  [to M:SS]`, `timer set`, `timer rename OLD to NEW`, `timer delete`), messages (`message new`, `message set NAME text=…
   leaves=…`, `message delete`, and `message show --text WORDS` for words shown once), props
   (`prop new NAME [PICTURE]`, `prop delete`), macros (`macro new`, `macro add NAME STEP then
   STEP…` in the slide-action words, `macro step NAME N STEP` to change a step where it is,
