@@ -232,8 +232,15 @@ fn control_refusal(args: &[String]) -> Option<String> {
         {
             at_computer("Sending a screen over NDI")
         }
-        // Reading every song again from its file: one song at a time from a page.
-        ("song", "reload") if args.iter().skip(2).all(|word| word.starts_with("--")) => {
+        // Reading every song again from its file: one song at a time from a page. The command
+        // reads what is left of the words, less `--now`, as the song's name: nothing, or "all",
+        // reads them all (so `--now` alone, a blank word and "ALL" are refused too).
+        ("song", "reload")
+            if {
+                let typed = args.iter().skip(2).filter(|w| *w != "--now").cloned().collect::<Vec<_>>().join(" ");
+                typed.trim().is_empty() || typed.trim().eq_ignore_ascii_case("all")
+            } =>
+        {
             Some("From the remote page, name the song to read again: song reload SONG".to_owned())
         }
         _ => None,
@@ -255,6 +262,29 @@ mod tests {
 
     fn refused(line: &str) -> bool {
         refusal(Role::Control, &words(line)).is_some()
+    }
+
+    #[test]
+    fn reading_every_song_again_is_refused_however_it_is_worded() {
+        let to_args = |list: &[&str]| list.iter().map(|w| (*w).to_owned()).collect::<Vec<String>>();
+        for list in [
+            &["song", "reload", ""][..],
+            &["song", "reload", " "],
+            &["song", "reload", "all"],
+            &["song", "reload", " All "],
+            &["song", "reload", "", "--now"],
+            &["song", "reload", "--now", "ALL"],
+            &["song", "reload", "--now", ""],
+        ] {
+            assert!(refusal(Role::Control, &to_args(list)).is_some(), "{list:?}");
+        }
+        for list in [
+            &["song", "reload", "Amazing"][..],
+            &["song", "reload", "--now", "Amazing"],
+            &["song", "reload", "all", "the"],
+        ] {
+            assert!(refusal(Role::Control, &to_args(list)).is_none(), "{list:?}");
+        }
     }
 
     #[test]
@@ -332,6 +362,9 @@ mod tests {
             "screen set Front OUTPUT=NDI:Church",
             "song reload",
             "song reload --now",
+            "song reload all",
+            "song reload ALL",
+            "song reload --now all",
             "canva presentation https://www.canva.com/design/DAFxxxx/edit",
             "voxlive key",
             "song frobnicate x",
