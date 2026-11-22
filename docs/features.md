@@ -473,8 +473,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   nothing happens and the search stays open. The find box does not search playlists or media), a
   running timer's name and time just before the clock (in room nothing else uses, so nothing
   moves when it starts or stops), the clock (on a 12-hour or a
-  24-hour clock as the computer is set, with the computer's own words for morning and
-  afternoon), the Audience and Stage
+  24-hour clock as the computer is set, the figures alone, with no AM or PM), the Audience and Stage
   keys, a `?` (the list of every key, as the `?` key opens it) and Settings.
 - **Keys for getting around**, the same on every computer (Command on a Mac, Ctrl elsewhere;
   they don't depend on the Mac's menu bar): **Command-1, -2 and -3** go to Show, Bible (with

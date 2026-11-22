@@ -55,11 +55,6 @@ impl TimeForm {
             format!("{hour}{sep}{minute:02}{sep}{second:02}")
         }
     }
-
-    /// The word that goes with the figures at this hour: none on a 24-hour clock.
-    pub fn marker(&self, hour: u32) -> Option<&str> {
-        self.twelve.then_some(if hour < 12 { self.am.as_str() } else { self.pm.as_str() })
-    }
 }
 
 /// One time as the computer wrote it, taken apart: the words before its figures, the figures
@@ -326,12 +321,11 @@ mod tests {
         let day = TimeForm::default();
         assert_eq!(day.figures(15, 4, 5), "15:04:05");
         assert_eq!(day.figures(0, 0, 0), "00:00:00");
-        assert_eq!(day.marker(15), None);
         let half = TimeForm { twelve: true, pad_hour: false, ..TimeForm::default() };
-        assert_eq!((half.figures(15, 4, 5), half.marker(15)), ("3:04:05".to_owned(), Some("PM")));
-        assert_eq!((half.figures(0, 30, 0), half.marker(0)), ("12:30:00".to_owned(), Some("AM")));
-        assert_eq!((half.figures(12, 0, 9), half.marker(12)), ("12:00:09".to_owned(), Some("PM")));
-        assert_eq!((half.figures(11, 59, 59), half.marker(11)), ("11:59:59".to_owned(), Some("AM")));
+        assert_eq!(half.figures(15, 4, 5), "3:04:05");
+        assert_eq!(half.figures(0, 30, 0), "12:30:00");
+        assert_eq!(half.figures(12, 0, 9), "12:00:09");
+        assert_eq!(half.figures(11, 59, 59), "11:59:59");
         let padded = TimeForm { pad_hour: true, ..half };
         assert_eq!(padded.figures(15, 4, 5), "03:04:05");
     }
@@ -368,10 +362,7 @@ mod tests {
         let forced = on_a_mac(true, false, twelve.clone());
         assert_eq!((forced.twelve, forced.figures(15, 4, 5)), (false, "15:04:05".to_owned()));
         let forced = on_a_mac(false, true, day.clone());
-        assert_eq!(
-            (forced.twelve, forced.figures(15, 4, 5), forced.marker(15)),
-            (true, "3:04:05".to_owned(), Some("PM"))
-        );
+        assert_eq!((forced.twelve, forced.figures(15, 4, 5)), (true, "3:04:05".to_owned()));
         // A switch that agrees with what was written changes nothing; nothing read is 24 hours.
         assert_eq!(on_a_mac(true, false, day.clone()), day.clone().unwrap_or_default());
         assert_eq!(on_a_mac(false, true, twelve.clone()), twelve.unwrap_or_default());
