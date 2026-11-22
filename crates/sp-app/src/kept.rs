@@ -161,7 +161,9 @@ pub struct Lists {
 
 /// The songs a library search finds, best first, each by its place with the line of its words
 /// that matched (none when its title did).
-pub type Found = Vec<(usize, Option<String>)>;
+/// Songs found: each by its place among the show's presentations, the slide found (its first
+/// for a title), and the line of its words that has what was typed (none for a title).
+pub type Found = Vec<(usize, usize, Option<String>)>;
 
 /// For each item of a playlist: the song it names, by its place, and the library that song is
 /// in.

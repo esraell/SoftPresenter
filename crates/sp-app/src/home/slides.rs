@@ -45,6 +45,8 @@ const TABLE_HEAD: f32 = 19.0;
 /// stays, and between it and the bottom, where the fade is.
 pub const CLEAR_ABOVE: f32 = 60.0;
 pub const CLEAR_BELOW: f32 = 44.0;
+/// How long a slide found with the find box keeps its ring, in seconds.
+const SPOTLIGHT_FOR: f64 = 1.8;
 /// How tall the line is that says "Not in this arrangement", over the slides it leaves out.
 const LEFT_OUT_HEAD: f32 = 34.0;
 /// The ring round slides picked out to change several at once.
@@ -842,6 +844,28 @@ pub fn slide_scroll(
         {
             ui.scroll_with_delta_animation(vec2(0.0, viewport.min.y - place.top), ScrollAnimation::none());
         }
+        // A slide found with the find box: the view goes to it, in the middle, once its song is
+        // shown (it may take a frame or two to be).
+        if state.spotlight_scroll > 0
+            && let Some((found, _)) = state.spotlight
+        {
+            state.spotlight_scroll -= 1;
+            let place = decks.iter().enumerate().find_map(|(at, deck)| match deck {
+                Deck::Slides(slides) if slides.at == Some(found.presentation) => {
+                    let index = entries(&slides.deck).iter().position(|entry| entry.slide == found.slide)?;
+                    Some(sheet.slide(&places[at], &shapes[at].body, index))
+                }
+                _ => None,
+            });
+            if let Some(rect) = place {
+                let middle = rect.center().y - origin.y;
+                let to = (middle - viewport.height() / 2.0).max(0.0);
+                ui.scroll_with_delta_animation(vec2(0.0, viewport.min.y - to), ScrollAnimation::none());
+                state.spotlight_scroll = 0;
+            } else {
+                ui.ctx().request_repaint();
+            }
+        }
         let live_now = show.live().map(|live| (live, show.position().map(|(step, _)| step)));
         if live_now != state.live_seen {
             state.live_seen = live_now;
@@ -1395,6 +1419,21 @@ fn draw_slides(
                     );
                     ui.painter().with_clip_rect(clip).galley(at, galley, ink);
                 }
+            }
+        }
+        // A slide found with the find box: an ink ring for a moment.
+        if let (Some(here), Some((found, since))) = (here, state.spotlight.as_mut())
+            && here == *found
+            && !entry.again
+        {
+            let now = ui.input(|input| input.time);
+            let since = *since.get_or_insert(now);
+            if now - since < SPOTLIGHT_FOR {
+                let ring = if list { rect } else { Rect::from_min_size(rect.min, sheet.grid.picture) };
+                ui.painter().rect_stroke(ring, ROUND, Stroke::new(3.0, TEXT), StrokeKind::Outside);
+                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(SPOTLIGHT_FOR - (now - since)));
+            } else {
+                state.spotlight = None;
             }
         }
         // Under an arrangement: a slide sung again is a little faint, and one it leaves out more

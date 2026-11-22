@@ -267,6 +267,11 @@ pub struct HomeState {
     /// The playlist item whose slide went on screen last (a click on it, or a key starting
     /// it), so a song the playlist holds twice is known to be on screen from the right place.
     pub live_item: Option<usize>,
+    /// A slide found with the find box, lit for a moment with an ink ring, and when it was first
+    /// drawn; and for how many more frames the view may still be brought to it (the song may
+    /// first have to be shown).
+    pub spotlight: Option<(SlideRef, Option<f64>)>,
+    pub spotlight_scroll: u8,
     /// A notice that comes and goes under the top bar (see `say`), and when it was first shown.
     pub toast: Option<(String, Option<f64>)>,
     /// The numbers on the open tool tab's cards or the media strip's pictures, after
@@ -1315,6 +1320,8 @@ impl Default for HomeState {
             live_row_seen: None,
             live_item: None,
             toast: None,
+            spotlight: None,
+            spotlight_scroll: 0,
             numbers: None,
             key_tags: false,
             modifier_since: None,
@@ -3622,7 +3629,7 @@ fn reflow_editor(ui: &mut egui::Ui, title: &str, state: &mut HomeState) {
 
 /// The songs a library search finds, best first: titles that hold the words, then songs whose
 /// lyrics do, with the line that matched. Songs not listed in the library are left out.
-fn search_songs(show: &Show, listed: impl Fn(usize) -> bool, query: &str) -> Vec<(usize, Option<String>)> {
+fn search_songs(show: &Show, listed: impl Fn(usize) -> bool, query: &str) -> Vec<(usize, usize, Option<String>)> {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
         return Vec::new();
@@ -3630,17 +3637,21 @@ fn search_songs(show: &Show, listed: impl Fn(usize) -> bool, query: &str) -> Vec
     let mut by_title = Vec::new();
     let mut by_words = Vec::new();
     for (index, song) in show.presentations().iter().enumerate().filter(|(index, _)| listed(*index)) {
+        // A title found: the song once, at its first slide.
         if song.title.to_lowercase().contains(&query) {
-            by_title.push((index, None));
+            by_title.push((index, 0, None));
             continue;
         }
-        let line = song
-            .slides()
-            .flat_map(|(_, slide)| slide.texts().into_iter().map(|(_, text)| text))
-            .flat_map(|text| text.lines().map(str::to_owned).collect::<Vec<_>>())
-            .find(|line| line.to_lowercase().contains(&query));
-        if let Some(line) = line {
-            by_words.push((index, Some(line)));
+        // Words found: each slide that has them, with the line.
+        for (slide, (_, one)) in song.slides().enumerate() {
+            let line = one
+                .texts()
+                .into_iter()
+                .flat_map(|(_, text)| text.lines().map(str::to_owned).collect::<Vec<_>>())
+                .find(|line| line.to_lowercase().contains(&query));
+            if let Some(line) = line {
+                by_words.push((index, slide, Some(line)));
+            }
         }
     }
     by_title.extend(by_words);
@@ -3715,7 +3726,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     let picked = *picked;
     // What a place in the list holds.
     enum Pick<'a> {
-        Song(usize),
+        Song(usize, usize),
         Bible(&'a crate::find::BibleRow),
     }
     let at = |place: usize| -> Option<Pick<'_>> {
@@ -3723,8 +3734,8 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             return Some(Pick::Bible(row));
         }
         let place = place - passage.len();
-        if let Some((index, _)) = songs.get(place) {
-            return Some(Pick::Song(*index));
+        if let Some((index, slide, _)) = songs.get(place) {
+            return Some(Pick::Song(*index, *slide));
         }
         verses.get(place - songs.len()).map(Pick::Bible)
     };
@@ -3790,9 +3801,15 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 for (place, found) in passage.iter().enumerate() {
                     row(ui, place, &found.title, &found.tag, Some(&found.line));
                 }
-                for (place, (index, line)) in songs.iter().enumerate() {
+                // A song found by its title, or each slide found by its words: its number and
+                // group at the right, the line found under.
+                for (place, (index, slide, line)) in songs.iter().enumerate() {
                     let Some(song) = show.presentations().get(*index) else { continue };
-                    row(ui, passage.len() + place, &song.title, "SONG", line.as_deref());
+                    let tag = match (line, song.slide(*slide)) {
+                        (Some(_), Some((group, _))) => format!("{:02} {}", slide + 1, group.name.to_uppercase()),
+                        _ => "SONG".to_owned(),
+                    };
+                    row(ui, passage.len() + place, &song.title, &tag, line.as_deref());
                 }
                 for (place, found) in verses.iter().enumerate() {
                     row(ui, passage.len() + songs.len() + place, &found.title, &found.tag, Some(&found.line));
@@ -3828,7 +3845,8 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     // What to do, worked out while the lists are still at hand: a song by its place, a passage
     // by what to look up; and whether to add it to the playlist in front instead of opening it.
     enum Do {
-        Song(usize),
+        /// A song, and the slide found in it.
+        Song(usize, usize),
         /// What to look up (as the first Bible names it), and the language the operator reads it in.
         Passage(String, Option<String>),
     }
@@ -3836,7 +3854,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     let chosen = chosen.and_then(|(place, add)| {
         Some((
             match at(place)? {
-                Pick::Song(index) => Do::Song(index),
+                Pick::Song(index, slide) => Do::Song(index, slide),
                 Pick::Bible(row) => Do::Passage(row.lookup.clone(), row.language.clone()),
             },
             add,
@@ -3851,16 +3869,20 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     }) == Some(true);
     let ended = chosen.is_some() || escape || pressed_outside;
     match chosen {
-        Some((Do::Song(index), true)) => {
+        Some((Do::Song(index, _), true)) => {
             if let (Some(key), Some(song)) = (state.song_keys.get(index), show.presentations().get(index)) {
                 state.services.add(crate::service::Item::Song { key: key.clone(), title: song.title.clone() });
             }
         }
-        Some((Do::Song(index), false)) => {
+        // The song, with the view brought to the slide found, lit for a moment; nothing goes on
+        // the screens.
+        Some((Do::Song(index, slide), false)) => {
             commands.push(Command::Select(index));
             state.editing = None;
             state.bible_open = false;
             state.reflow = None;
+            state.spotlight = Some((SlideRef { presentation: index, slide }, None));
+            state.spotlight_scroll = 12;
         }
         // Kept in the playlist with the translations and choices the Bible view has now, as its
         // own Add does.
@@ -7090,7 +7112,7 @@ mod tests {
         frame_commands(&ctx, &show, &mut state, vec![], 0.0);
         // The song is found by a line of its words, and the Bibles in use give verses.
         let songs = search_songs(&show, |_| true, "shepherd");
-        assert_eq!(songs, vec![(0, Some("The shepherd leads me on".to_owned()))]);
+        assert_eq!(songs, vec![(0, 0, Some("The shepherd leads me on".to_owned()))]);
         let in_use: Vec<String> =
             state.bible.rows.iter().filter_map(|row| Some(state.bible.shelf.bibles[row.bible?].id.clone())).collect();
         let session = state.bible.session_language();
@@ -7546,10 +7568,44 @@ mod tests {
             std::sync::Arc::new(sp_model::parse_song_text("Steady Ground", "You are the light on the farther side\n")),
         ]);
         let found = search_songs(&show, |_| true, "light");
-        assert_eq!(found.iter().map(|(index, _)| *index).collect::<Vec<_>>(), [0, 1]);
-        assert_eq!(found[1].1.as_deref(), Some("You are the light on the farther side"));
+        assert_eq!(found.iter().map(|(index, _, _)| *index).collect::<Vec<_>>(), [0, 1]);
+        assert_eq!(found[1].2.as_deref(), Some("You are the light on the farther side"));
         assert!(search_songs(&show, |_| true, "  ").is_empty());
         assert!(search_songs(&show, |index| index != 0, "harbour").is_empty(), "a song not listed is left out");
+        // Words found on two slides of a song: each slide, by its place, with its line.
+        let show = Show::new(vec![std::sync::Arc::new(sp_model::parse_song_text(
+            "Lanterns",
+            "[Verse 1]\nA lamp in the window\n\n[Chorus]\nThe lamp is lit\n\n[Verse 2]\nNothing here\n",
+        ))]);
+        let found = search_songs(&show, |_| true, "lamp");
+        assert_eq!(
+            found,
+            vec![(0, 0, Some("A lamp in the window".to_owned())), (0, 1, Some("The lamp is lit".to_owned()))]
+        );
+    }
+
+    #[test]
+    fn a_slide_picked_in_the_find_list_is_brought_into_view_and_lit_and_nothing_goes_on_screen() {
+        let ctx = egui::Context::default();
+        let show = Show::new(vec![
+            Arc::new(parse_song_text("Alpha", "Words\n")),
+            Arc::new(parse_song_text("Lanterns", "[Verse 1]\nA lamp\n\n[Chorus]\nThe chorus words\n")),
+        ]);
+        let mut state = HomeState { library_search: Some(("chorus words".to_owned(), 0)), ..HomeState::default() };
+        state.song_keys = vec!["one".to_owned(), "two".to_owned()];
+        frame_commands(&ctx, &show, &mut state, vec![], 0.0);
+        let enter = Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        let commands = frame_commands(&ctx, &show, &mut state, vec![enter], 0.1);
+        assert!(commands.contains(&Command::Select(1)), "{commands:?}");
+        assert!(!commands.iter().any(|c| matches!(c, Command::GoTo(_) | Command::GoToStep { .. })));
+        assert_eq!(state.spotlight.map(|(at, _)| at), Some(SlideRef { presentation: 1, slide: 1 }));
+        assert!(state.library_search.is_none());
     }
 
     #[test]

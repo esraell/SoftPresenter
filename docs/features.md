@@ -306,8 +306,9 @@ feature changes, this page changes in the same commit.
 - A slide can carry the same actions as a macro, done when it goes on screen.
 - **The window** is three round panels on a dark window: the left column, the middle, and a
   right column that is the same in every view. Along the top: the views (Show, Bible, Edit), a
-  find box (press `/`, or Command-F: it finds songs by title and then by a line of their
-  words, a Bible passage when a reference is typed (named and quoted in the language it was
+  find box (press `/`, or Command-F: it finds songs by title and then each slide whose words
+  have what is typed, with its number and group, a slide picked being brought into view and
+  ringed in ink for a moment, a Bible passage when a reference is typed (named and quoted in the language it was
   typed in), and verses that hold the words, from the Bibles in use written in the words'
   alphabet, each saying which Bible it is from; Return opens what is picked without putting anything on the screens, and
   Command-Return adds it to the playlist in front; it does not search playlists or media), a
