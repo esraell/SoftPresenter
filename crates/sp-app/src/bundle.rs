@@ -75,7 +75,7 @@ pub struct Opened {
     pub slides: Vec<(Uuid, usize)>,
     /// The pictures and videos the song shows that the bundle doesn't hold, by file name.
     pub missing: Vec<String>,
-    /// What was left out of the bundle, and why.
+    /// What was left out of the bundle, by file name, and why.
     pub left_out: Vec<String>,
     /// The folder the pictures and videos were put in, removed once the song is in.
     pub staging: PathBuf,
@@ -157,7 +157,7 @@ fn take_out(
 ) -> Option<usize> {
     let file = file_part(&label.name).to_owned();
     let path = Path::new(&file);
-    let refuse = |opened: &mut Opened, why: &str| opened.left_out.push(format!("{} ({why})", shown(&label.name)));
+    let refuse = |opened: &mut Opened, why: &str| opened.left_out.push(format!("{} ({why})", shown(&file)));
     if !crate::media::is_media(path) {
         refuse(opened, "not a picture or video SoftPresenter shows");
         return None;
@@ -306,13 +306,13 @@ fn entries(zip: &mut Zip, name: &str, limits: &Limits) -> Result<(usize, Vec<Lab
             continue;
         }
         if entry.is_symlink() || entry.encrypted() || climbs(&raw) {
-            left_out.push(format!("{} (not a plain file in the bundle)", shown(&raw)));
+            left_out.push(format!("{} (not a plain file in the bundle)", shown(file_part(&raw))));
             continue;
         }
         if is_song(&raw) {
             match song {
                 None => song = Some(at),
-                Some(_) => left_out.push(format!("{} (a second song)", shown(&raw))),
+                Some(_) => left_out.push(format!("{} (a second song)", shown(file_part(&raw)))),
             }
             continue;
         }
@@ -767,8 +767,8 @@ mod tests {
         assert_eq!(
             left,
             [
-                "../../escaped.png (not a plain file in the bundle)",
-                "/tmp/../../escaped2.png (not a plain file in the bundle)",
+                "escaped.png (not a plain file in the bundle)",
+                "escaped2.png (not a plain file in the bundle)",
                 "Big.png (too large)"
             ]
         );

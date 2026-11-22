@@ -138,7 +138,9 @@ feature changes, this page changes in the same commit.
   row of the chooser, or the open playlist, where they go after the item under the pointer)
   they come into the library and into that playlist; on a library (a row of the chooser, or the
   song list) into that library; anywhere else into the library shown, as before. A song the
-  library has already still goes into the playlist or library dropped on. Pictures and videos
+  library has already still goes into the playlist or library dropped on. A song pack's songs
+  go into the library it is dropped on, or the library shown, never a playlist (a pack brings
+  its own), so playlists don't light up for a pack. Pictures and videos
   go into the media bin, and into a playlist they are dropped on; in the Edit view, onto the
   slide. Several files dropped together each go their own way. While files are over the
   window, the place they would land has an ink outline (and the open playlist a line where

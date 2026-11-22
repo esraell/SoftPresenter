@@ -32,8 +32,11 @@ use crate::home::HomeState;
 /// What a file dragged onto the window is, for where it can land.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
-    /// A song file of any kind, a song pack or bundle, a songbook, or a folder of songs.
+    /// A song file of any kind, a song bundle, a songbook, or a folder of songs.
     Song,
+    /// A song pack, whose songs go into a library (it may bring its own playlist), never into a
+    /// playlist dropped on.
+    Pack,
     /// A picture or video.
     Media,
     /// A presentation, PDF or folder of pictures, which becomes slides in the library shown.
@@ -46,7 +49,7 @@ pub enum Kind {
 /// then songs, then pictures and videos).
 pub fn kind_of(path: &Path) -> Kind {
     if crate::pack::is_pack(path) {
-        return Kind::Song;
+        return Kind::Pack;
     }
     if path.extension().is_some_and(|ext| ext == "spbible" || ext == "pcbible") {
         return Kind::Other;
@@ -86,7 +89,7 @@ impl DropTarget {
     pub fn takes(&self, kind: Kind) -> bool {
         match self {
             DropTarget::Playlist { .. } => matches!(kind, Kind::Song | Kind::Media),
-            DropTarget::Library(_) => kind == Kind::Song,
+            DropTarget::Library(_) => matches!(kind, Kind::Song | Kind::Pack),
             DropTarget::MediaStrip => kind == Kind::Media,
         }
     }
@@ -163,6 +166,11 @@ impl FileDrag {
         self.files.iter().any(|(_, have)| *have == kind)
     }
 
+    /// Whether songs are coming: song files or song packs.
+    pub fn has_songs(&self) -> bool {
+        self.has(Kind::Song) || self.has(Kind::Pack)
+    }
+
     fn kinds(&self) -> Vec<Kind> {
         self.files.iter().map(|(_, kind)| *kind).collect()
     }
@@ -228,7 +236,7 @@ pub fn offer_library_row(ui: &egui::Ui, state: &mut HomeState, row: Rect, librar
 /// Whether song files are coming and the system says where the pointer is, so the chooser
 /// shows to aim them at a playlist or library.
 pub fn wants_chooser(state: &HomeState) -> bool {
-    state.drop_hover && state.file_drag.has(Kind::Song) && state.file_drag.pointer.is_some()
+    state.drop_hover && state.file_drag.has_songs() && state.file_drag.pointer.is_some()
 }
 
 /// Whether pictures or videos are coming, so the media strip opens.
@@ -267,7 +275,10 @@ pub fn paint(ctx: &egui::Context, state: &HomeState) {
     if let Some(place) = hit {
         light(place);
     }
-    if drag.has(Kind::Song) && !drag.hit.as_ref().is_some_and(|place| place.target.takes(Kind::Song)) {
+    let songs_placed = drag.hit.as_ref().is_some_and(|place| {
+        drag.files.iter().any(|(_, kind)| matches!(kind, Kind::Song | Kind::Pack) && place.target.takes(*kind))
+    });
+    if drag.has_songs() && !songs_placed {
         drag.places.iter().filter(|place| place.songs_land).for_each(light);
     }
 }
@@ -290,13 +301,15 @@ pub fn route(files: &[(PathBuf, Kind)], target: Option<&DropTarget>) -> Route {
     let mut route = Route::default();
     for (path, kind) in files {
         match kind {
-            Kind::Song => route.songs.push(path.clone()),
+            Kind::Song | Kind::Pack => route.songs.push(path.clone()),
             Kind::Media => route.media.push(path.clone()),
             Kind::Slides => route.slides.push(path.clone()),
             Kind::Other => route.other.push(path.clone()),
         }
     }
-    route.songs_to = target.filter(|target| target.takes(Kind::Song)).cloned();
+    let songs: Vec<Kind> =
+        files.iter().map(|(_, kind)| *kind).filter(|kind| matches!(kind, Kind::Song | Kind::Pack)).collect();
+    route.songs_to = target.filter(|target| songs.iter().any(|kind| target.takes(*kind))).cloned();
     if let Some(DropTarget::Playlist { index, after }) = target {
         route.media_playlist = Some((*index, *after));
     }
@@ -349,11 +362,16 @@ mod tests {
             "Lantern.cho",
             "Lantern.docx",
             "Lantern.sppres",
-            "Sunday.sppack",
             "Hymns.sps",
         ] {
             assert_eq!(kind_of(Path::new(song)), Kind::Song, "{song}");
         }
+        // A song pack goes to the songs too, into a library: not into a playlist dropped on.
+        assert_eq!(kind_of(Path::new("Sunday.sppack")), Kind::Pack);
+        let pack = vec![(PathBuf::from("Sunday.sppack"), Kind::Pack)];
+        assert_eq!(route(&pack, Some(&DropTarget::MediaStrip)).songs, vec![PathBuf::from("Sunday.sppack")]);
+        assert_eq!(route(&pack, Some(&DropTarget::Playlist { index: 0, after: None })).songs_to, None);
+        assert!(DropTarget::Library(None).takes(Kind::Pack));
         for media in ["Sky.png", "Waves.mov", "Clip.mp4"] {
             assert_eq!(kind_of(Path::new(media)), Kind::Media, "{media}");
         }

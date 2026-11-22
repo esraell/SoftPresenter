@@ -9,8 +9,9 @@ Size: S = under a day, M = days, L = a week or more. Sunday: how much it matters
 
 ## Coming first
 
-1. **Playlists and media from a church's existing presentation software.** Songs and libraries
-   come across already; playlists, pictures, videos and bundles are next. · M
+1. **Playlists and media from a church's existing presentation software.** Songs, libraries
+   and song bundles (with their pictures and videos) come across already; playlists, and the
+   pictures and videos a plain song document names on the computer it is on, are next. · M
 2. **Fixing a slide's words from the Show view.** Mend a typo on the live slide without leaving
    the Show view. · S–M
 3. **Corner pin (keystone).** Square up a projector that is off-axis. · M
@@ -178,7 +179,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Choices when importing songs.** How slides are split (paragraph, line or marker, and how many lines), and the theme, library and playlist imported songs go to. (started: File › Import Songs…, drops and `sp song import` read text, lyric, ChordPro, rich-text and Word files, find sections, and share long stretches into slides of up to four lines) · S · Medium
 - **PowerPoint import.** As editable slides, as pictures, or as objects and text (weekly sermon slides). (started: PowerPoint, Keynote and OpenDocument files, PDFs and folders of pictures become picture slides; editable slides to come) · L · High
 - **Lighter screens for picture-heavy decks.** The drawing library keeps up to about thirty full-size pictures per screen (roughly half a gigabyte each) until its texture fills; let them go sooner. · S–M · Medium
-- **Importing from a church's existing presentation software**, so a library can move over in one go: songs, playlists and their media. (started: ProPresenter 7 songs and library folders, with groups, arrangements, labels, notes and copyright details; not yet playlists, pictures, videos or bundles) · M · High
+- **Importing from a church's existing presentation software**, so a library can move over in one go: songs, playlists and their media. (started: ProPresenter 7 songs, library folders and song bundles, with groups, arrangements, labels, notes and copyright details, and a bundle's pictures and videos; not yet playlists, or the pictures and videos a plain song document names) · M · High
 - **SongSelect inside the app.** Search, preview and import from the search panel (⌘F). May need CCLI's agreement. · L · Medium
 - **Cue, stream and hidden items in a playlist.** A cue (an action on its own), a video or audio stream, and items hidden from the running order. (started: playlists hold songs, saved passages, headers, pictures and videos, media playlists and placeholders) · M · Low
 - **CCLI usage reporting.** Each song shown is logged, then exported or reported automatically. (started: CCLI song numbers and the licence number) · M · Medium

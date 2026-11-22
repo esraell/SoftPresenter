@@ -591,8 +591,10 @@ struct Imported {
     titles: Vec<String>,
     /// A sentence for each file or song that didn't come in (one here already among them).
     problems: Vec<String>,
-    /// Presentations being made into slides, and song packs being opened.
+    /// Presentations being made into slides.
     decks: Vec<String>,
+    /// What each song pack opened brought in (or that it is being opened).
+    packs: Vec<String>,
     /// Song bundles being read on a thread of their own.
     opening: Vec<String>,
     /// What a bundle's song came without (pictures or videos missing or left out).
@@ -605,6 +607,8 @@ struct Imported {
     landed: Vec<usize>,
     /// The playlist they were added to.
     playlist: Option<String>,
+    /// The library a drop on it put them into.
+    library: Option<String>,
     /// Pictures and videos brought into the media bin from bundles.
     pictures: usize,
     videos: usize,
@@ -2971,7 +2975,7 @@ impl App {
             running.home_window.request_redraw();
             target
         });
-        applog::event("drop", &format!("{} dropped on {target:?}", files.len()));
+        applog::event("drop", &format!("{} dropped at {pointer:?} (window points) on {target:?}", files.len()));
         let route = file_drop::route(&files, target.as_ref());
         // Pictures first and songs last, so that what is said about the songs stays in sight.
         let mut media_to = route.media_playlist;
@@ -4895,7 +4899,8 @@ impl App {
     /// [`App::import_songs_to`]). Returns the titles imported, a plain sentence for each file
     /// that wasn't, and what is being made into slides or opened in the background.
     fn import_songs(&mut self, paths: &[PathBuf]) -> (Vec<String>, Vec<String>, Vec<String>) {
-        let done = self.import_songs_to(paths, &SongsTo::default());
+        let mut done = self.import_songs_to(paths, &SongsTo::default());
+        done.decks.append(&mut done.packs);
         (done.titles, done.problems, done.decks)
     }
 
@@ -4917,7 +4922,7 @@ impl App {
         for path in paths {
             if pack::is_pack(path) {
                 match self.open_pack(path.clone(), None, self.library_for(to), false) {
-                    Ok(said) => done.decks.push(said),
+                    Ok(said) => done.packs.push(said),
                     Err(problem) => done.problems.push(problem),
                 }
             } else if deck::is_presentation_file(path) {
@@ -5060,6 +5065,11 @@ impl App {
             .map(|(at, s)| ((s.title.trim().to_lowercase(), sp_model::to_song_text(s)), at))
             .collect();
         let chosen_library = to.library.or(self.import_library_override);
+        if let Some(Some(id)) = to.library {
+            done.library = self.running.as_ref().and_then(|r| {
+                r.home_state.libraries.iter().find(|library| library.id == id).map(|library| library.name.clone())
+            });
+        }
         for SongRead { song, path, library, bundle } in read {
             let (path, library) = (&path, &library);
             // A bundle's own folder goes once its song is in (or isn't coming).
@@ -5265,11 +5275,11 @@ impl App {
             applog::event("songs", &format!("not imported: {problem}"));
         }
         let into = match done.libraries_used.as_slice() {
-            [] => String::new(),
+            [] => done.library.as_ref().map_or_else(String::new, |name| format!(" into the library {name}")),
             [one] => format!(" into the library {one}"),
             many => format!(" into {} libraries", many.len()),
         };
-        let busy = !done.decks.is_empty() || !done.opening.is_empty();
+        let busy = !done.decks.is_empty() || !done.opening.is_empty() || !done.packs.is_empty();
         let said = match (done.titles.as_slice(), done.problems.as_slice()) {
             ([], []) if busy => None,
             ([], []) => Some("There were no songs to import there.".to_owned()),
@@ -5286,6 +5296,7 @@ impl App {
             )),
         };
         let mut words: Vec<String> = said.into_iter().collect();
+        words.extend(done.packs.iter().cloned());
         let things: Vec<String> = [(done.pictures, "picture"), (done.videos, "video")]
             .into_iter()
             .filter(|(n, _)| *n > 0)
@@ -5297,6 +5308,10 @@ impl App {
         words.extend(done.notes.iter().cloned());
         if let Some(name) = &done.playlist {
             words.push(format!("Added to the playlist {name}."));
+        }
+        // Songs here already, dropped on a library: they are in it now.
+        if let Some(name) = done.library.as_ref().filter(|_| done.titles.is_empty() && !done.landed.is_empty()) {
+            words.push(format!("Put into the library {name}."));
         }
         if !done.decks.is_empty() {
             words.push(format!("Making slides from {}\u{2026}", done.decks.join(", ")));
