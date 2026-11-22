@@ -294,6 +294,8 @@ fn action_commands(show: &Show, state: &home::HomeState, action: &sp_model::Show
             ClearWhat::Media => Command::Clear(sp_engine::Layer::Media),
             ClearWhat::Props => Command::Clear(sp_engine::Layer::Props),
             ClearWhat::Messages => Command::Clear(sp_engine::Layer::Messages),
+            ClearWhat::Audio => Command::Clear(sp_engine::Layer::Audio),
+            ClearWhat::Announcements => Command::Clear(sp_engine::Layer::Announcements),
         }]),
         ShowAction::Audience { on } => Some(vec![Command::SetOutputEnabled(*on)]),
         ShowAction::Media { id } => {
@@ -9457,6 +9459,23 @@ mod tests {
             }
         }
         assert_eq!(state.props_live.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [logo.id]);
+    }
+
+    #[test]
+    fn a_macro_can_stop_the_audio_and_take_the_announcements_off() {
+        use sp_model::{ClearWhat, ShowAction};
+        let show = Show::new(vec![Arc::new(sp_model::parse_song_text("Song", "One\n"))]);
+        let state = home::HomeState::default();
+        // The same commands as the Audio and Announce keys and the Presentation menu's Clear
+        // Audio and Clear Announcements, which `apply` stops the audio and takes the layer off for.
+        let clear = |what| action_commands(&show, &state, &ShowAction::Clear { what });
+        assert_eq!(clear(ClearWhat::Audio), Some(vec![Command::Clear(sp_engine::Layer::Audio)]));
+        assert_eq!(clear(ClearWhat::Announcements), Some(vec![Command::Clear(sp_engine::Layer::Announcements)]));
+        // Kept in a macro's file by their own words.
+        let step = ShowAction::Clear { what: ClearWhat::Announcements };
+        let text = serde_json::to_string(&step).unwrap();
+        assert!(text.contains("\"announcements\""), "{text}");
+        assert_eq!(serde_json::from_str::<ShowAction>(&text).unwrap(), step);
     }
 
     #[test]

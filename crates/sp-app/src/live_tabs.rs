@@ -3032,6 +3032,21 @@ mod tests {
         assert!(state.macros_changed);
     }
 
+    #[test]
+    fn a_macro_step_can_clear_the_audio_or_the_announcements() {
+        use sp_model::ClearWhat;
+        let show = show();
+        let (ctx, mut state, id) = opened(vec![ShowAction::Clear { what: ClearWhat::All }]);
+        click(&ctx, &show, &mut state, egui::Id::unique(("macro add step", id)), vec2(0.0, 0.0));
+        let texts = frame(&ctx, &show, &mut state, vec![], next(&ctx));
+        let texts = point(&ctx, &show, &mut state, place_of(&texts, "Clear"), false);
+        // Every layer the right column's keys clear, under Clear All.
+        let heights: Vec<f32> = ClearWhat::ALL.iter().map(|what| place_of(&texts, what.name()).y).collect();
+        assert!(heights.windows(2).all(|pair| pair[0] < pair[1]), "in this order: {:?}", ClearWhat::ALL);
+        point(&ctx, &show, &mut state, place_of(&texts, "Clear Announcements"), true);
+        assert_eq!(cleared(&state), [ClearWhat::All, ClearWhat::Announcements]);
+    }
+
     /// The rows of an open macro's first `count` steps, top to bottom, as drawn last.
     fn step_rows(ctx: &egui::Context, id: sp_model::Uuid, count: usize) -> Vec<Rect> {
         (0..count).map(|at| ctx.read_response(egui::Id::unique(("macro step", id, at))).expect("drawn").rect).collect()

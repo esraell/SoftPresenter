@@ -359,7 +359,7 @@ with Continuous Playlist on; open it with `playlist go` to run through the playl
 | `macro startup NAME on\|off` | Runs the macro when SoftPresenter opens, or not (start-up is a macro: Settings has no start-up choice of its own) |
 | `announce SONG`, `announce media ITEM`, `announce media-playlist NAME`, `announce stop` | Plays something on the Announcements layer, going round until it is cleared: a song's slides in turn, a picture, a video (looping), or a media playlist's pictures and videos in turn; `stop` clears the layer |
 
-Macro steps: `clear all|slide|media|props|messages`, `show|hide message NAME`,
+Macro steps: `clear all|slide|media|props|messages|audio|announcements`, `show|hide message NAME`,
 `show|hide prop NAME`, `start|stop|reset timer NAME`, `audience on|off`, `song SONG`,
 `media ITEM`, `announce SONG|media ITEM|media-playlist NAME` (on the Announcements layer),
 `canva sync`, `version NAME [keep]|usual` (a [theme version](#theme-versions), kept until switched

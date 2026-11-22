@@ -16,6 +16,24 @@ fn split_at_word<'a>(words: &'a [String], keyword: &str) -> (&'a [String], Optio
     }
 }
 
+/// What a macro's `clear` step takes off, by the word after it (`all` when there is none).
+fn clear_word(what: &str) -> Result<ClearWhat, String> {
+    Ok(match what {
+        "all" | "" => ClearWhat::All,
+        "slide" | "slides" => ClearWhat::Slide,
+        "media" => ClearWhat::Media,
+        "props" | "prop" => ClearWhat::Props,
+        "messages" | "message" => ClearWhat::Messages,
+        "audio" => ClearWhat::Audio,
+        "announcements" | "announcement" => ClearWhat::Announcements,
+        other => {
+            return Err(format!(
+                "clear {other}? Say clear all, slide, media, props, messages, audio or announcements."
+            ));
+        }
+    })
+}
+
 /// A length of time as typed: `M:SS`, `H:MM:SS`, or a number of minutes.
 pub fn parse_length(typed: &str) -> Result<u32, String> {
     let bad = || format!("{typed} isn't a length of time: say 5:00 (minutes and seconds), 1:15:00, or 30 (minutes).");
@@ -623,17 +641,7 @@ impl crate::App {
         let first = words.first().map(|w| w.to_lowercase()).unwrap_or_default();
         let second = words.get(1).map(|w| w.to_lowercase()).unwrap_or_default();
         match (first.as_str(), second.as_str()) {
-            ("clear", what) => {
-                let what = match what {
-                    "all" | "" => ClearWhat::All,
-                    "slide" | "slides" => ClearWhat::Slide,
-                    "media" => ClearWhat::Media,
-                    "props" | "prop" => ClearWhat::Props,
-                    "messages" | "message" => ClearWhat::Messages,
-                    other => return Err(format!("clear {other}? Say clear all, slide, media, props or messages.")),
-                };
-                Ok(ShowAction::Clear { what })
-            }
+            ("clear", what) => Ok(ShowAction::Clear { what: clear_word(what)? }),
             ("show" | "hide", "message") => {
                 let at = named("message", state.messages.iter().map(|m| m.name.clone()).collect(), rest(2))?;
                 Ok(ShowAction::Message { id: state.messages[at].id, show: first == "show" })
@@ -1004,6 +1012,16 @@ mod tests {
             step_texts(&["audience off; song Amazing Grace".to_owned()]),
             ["audience off", "song Amazing Grace"]
         );
+    }
+
+    #[test]
+    fn a_clear_step_can_stop_the_audio_and_take_the_announcements_off() {
+        assert_eq!(clear_word(""), Ok(ClearWhat::All));
+        assert_eq!(clear_word("audio"), Ok(ClearWhat::Audio));
+        assert_eq!(clear_word("announcements"), Ok(ClearWhat::Announcements));
+        assert_eq!(clear_word("announcement"), Ok(ClearWhat::Announcements));
+        let said = clear_word("lights").unwrap_err();
+        assert!(said.contains("audio or announcements"), "{said}");
     }
 
     #[test]

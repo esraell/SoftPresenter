@@ -12,11 +12,22 @@ pub enum ClearWhat {
     Media,
     Props,
     Messages,
+    /// Stops the audio playing.
+    Audio,
+    /// Takes the Announcements layer off.
+    Announcements,
 }
 
 impl ClearWhat {
-    pub const ALL: [ClearWhat; 5] =
-        [ClearWhat::All, ClearWhat::Slide, ClearWhat::Media, ClearWhat::Props, ClearWhat::Messages];
+    pub const ALL: [ClearWhat; 7] = [
+        ClearWhat::All,
+        ClearWhat::Slide,
+        ClearWhat::Media,
+        ClearWhat::Props,
+        ClearWhat::Messages,
+        ClearWhat::Audio,
+        ClearWhat::Announcements,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -25,6 +36,8 @@ impl ClearWhat {
             ClearWhat::Media => "Clear Media",
             ClearWhat::Props => "Clear Props",
             ClearWhat::Messages => "Clear Messages",
+            ClearWhat::Audio => "Clear Audio",
+            ClearWhat::Announcements => "Clear Announcements",
         }
     }
 }

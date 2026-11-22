@@ -402,7 +402,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   and down and deleted; a prop's right-click menu there has Clears Itself, Rename, Duplicate
   and Delete…, and the strip under the picture of one that shows is orange. With the last prop
   deleted there, the Edit view goes on to the slides.
-- **Macros**: steps done in turn, which clear layers, show or hide messages and props, start,
+- **Macros**: steps done in turn, which clear layers (all, or the slide, the media, the props,
+  the message, the audio or the announcements alone), show or hide messages and props, start,
   stop or reset timers, switch the audience screens, go to songs, show a picture from the
   media bin, play a media playlist, a picture, a video or a song on the Announcements layer, and
   fetch a fresh video from Canva. Each is a card with its colour as a dot, its name, how many
