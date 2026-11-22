@@ -1564,8 +1564,9 @@ impl Output {
         for readback in &mut self.ndi_pending {
             forget.extend(ndi_strip(&mut readback.ids, &seen));
         }
-        for (_, ndi) in self.ndi.iter().filter(|(id, _)| forget.contains(id)) {
-            ndi.forget();
+        // A see-through screen is covered with clear, not black (see `NdiOutput::forget_as`).
+        for (id, ndi) in self.ndi.iter().filter(|(id, _)| forget.contains(id)) {
+            ndi.forget_as(self.see_through(*id).is_some());
         }
         let groups = ndi_groups(&seen);
         if groups.is_empty() {
@@ -1694,8 +1695,8 @@ impl Output {
     /// picture nobody is watching for any more is owed to nobody. Said in the log once while
     /// it lasts.
     fn ndi_lost(&mut self, ids: &[Uuid]) {
-        for (_, ndi) in self.ndi.iter().filter(|(id, _)| ids.contains(id)) {
-            ndi.forget();
+        for (id, ndi) in self.ndi.iter().filter(|(id, _)| ids.contains(id)) {
+            ndi.forget_as(self.see_through(*id).is_some());
         }
         if ndi_lost_is_owed(ids, &self.ndi_seen()) {
             self.ndi_lost.one_lost();
@@ -1759,7 +1760,7 @@ impl Output {
                             let sent = if readback.keys.contains(id) { sp_ndi::Sent::Key } else { readback.sent };
                             sources.push((ndi, sent));
                         } else {
-                            ndi.forget();
+                            ndi.forget_as(self.see_through(*id).is_some());
                         }
                     }
                     if !sources.is_empty() {

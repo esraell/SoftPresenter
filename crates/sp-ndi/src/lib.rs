@@ -25,8 +25,9 @@
 //!   connects, before the source can know of it. While that picture is still what is on the
 //!   screens, that is welcome: the receiver has its picture at once. When it no longer is
 //!   (something changed, and nobody was watching to be sent it), the source is told to
-//!   [`NdiOutput::forget`], and sends one black picture to take its place. A receiver that
-//!   connects then sees black until its picture is drawn, within about a second.
+//!   [`NdiOutput::forget`], and sends one black picture to take its place (all clear, for a
+//!   see-through screen: [`NdiOutput::forget_as`]). A receiver that connects then sees black
+//!   (or nothing, over its camera) until its picture is drawn, within about a second.
 //!
 //! What the thread drawing the screens needs, none of which ever makes it wait:
 //!
@@ -166,8 +167,9 @@ impl Picture {
 enum Told {
     /// The picture to send from now on.
     Picture(Picture),
-    /// The picture last handed over is out of date, and no newer one is coming for now.
-    Forget,
+    /// The picture last handed over is out of date, and no newer one is coming for now; true
+    /// when the screen is see-through, so what covers it is all clear rather than black.
+    Forget(bool),
 }
 
 /// What a source is doing.
@@ -328,10 +330,17 @@ impl NdiOutput {
     /// Never blocks. Said again before the next picture is handed over, it does nothing, so it
     /// can be said for every picture that is not drawn.
     pub fn forget(&self) {
+        self.forget_as(false);
+    }
+
+    /// Says what [`NdiOutput::forget`] says, for a screen that is see-through when `see_through`
+    /// is true: then what takes the old picture's place is all clear, not black, whatever the
+    /// old picture was, so a switcher shows its camera rather than black where the words were.
+    pub fn forget_as(&self, see_through: bool) {
         if !self.forgotten.swap(true, Ordering::Relaxed)
             && let Some(tx) = &self.tx
         {
-            let _ = tx.send(Told::Forget);
+            let _ = tx.send(Told::Forget(see_through));
         }
     }
 }
@@ -406,15 +415,15 @@ fn spawn<S: Sink + 'static>(
 }
 
 /// What has queued up comes to, `first` included: the newest picture, if there is one, and
-/// whether the word to forget came after it (or with no picture at all). Word to forget from
-/// before the newest picture is overtaken by it.
-fn newest(rx: &Receiver<Told>, first: Told) -> (Option<Picture>, bool) {
-    let (mut picture, mut forget) = (None, false);
+/// whether the word to forget came after it (or with no picture at all), with whether the
+/// screen was see-through then. Word to forget from before the newest picture is overtaken by it.
+fn newest(rx: &Receiver<Told>, first: Told) -> (Option<Picture>, Option<bool>) {
+    let (mut picture, mut forget) = (None, None);
     let mut next = Some(first);
     while let Some(told) = next {
         match told {
-            Told::Picture(newer) => (picture, forget) = (Some(newer), false),
-            Told::Forget => forget = true,
+            Told::Picture(newer) => (picture, forget) = (Some(newer), None),
+            Told::Forget(see_through) => forget = Some(see_through),
         }
         next = rx.try_recv().ok();
     }
@@ -488,6 +497,10 @@ struct Gate {
     given: Option<(u32, u32, bool)>,
     /// That picture is out of date: a newer one was dropped or never drawn, nobody watching.
     stale: bool,
+    /// Whether what made it out of date was see-through, when that is known: the black picture
+    /// due then goes all clear for a see-through one, whatever the picture it covers was (a
+    /// screen made see-through while nobody watched, say).
+    cover: Option<bool>,
     next_count: Instant,
     next_resend: Instant,
 }
@@ -501,6 +514,7 @@ impl Gate {
             fresh: false,
             given: None,
             stale: false,
+            cover: None,
             next_count: now,
             next_resend: now,
         }
@@ -528,8 +542,10 @@ impl Gate {
             self.current = Some(picture);
             self.fresh = true;
             self.stale = false;
+            self.cover = None;
         } else {
             self.stale = true;
+            self.cover = Some(picture.sent.alpha());
         }
     }
 
@@ -539,15 +555,16 @@ impl Gate {
     /// is for a source that was being watched all along (a newer one was lost on the way): it
     /// is sent, and marked out of date. For a source nobody was watching, the word means a
     /// newer picture was not drawn: that picture is from before whoever has come since, and
-    /// is not sent to them.
-    fn told(&mut self, picture: Option<Picture>, forget: bool, watched_before: bool) {
+    /// is not sent to them. The word says whether the screen is see-through.
+    fn told(&mut self, picture: Option<Picture>, forget: Option<bool>, watched_before: bool) {
         if let Some(picture) = picture
-            && (!forget || watched_before)
+            && (forget.is_none() || watched_before)
         {
             self.picture(picture);
         }
-        if forget {
+        if let Some(see_through) = forget {
             self.forget();
+            self.cover = Some(see_through);
         }
     }
 
@@ -564,18 +581,20 @@ impl Gate {
     }
 
     /// The size of the black picture to send now, if one is due, and whether it goes
-    /// see-through (all clear) as the picture it covers did: when nobody is watching and the
-    /// last picture sent is out of date. NDI gives a receiver the last picture a source sent
-    /// the moment it connects, before the source can know of it; this puts black (or nothing)
-    /// in the place of a slide that has gone, once. While someone is watching none is due:
-    /// they were given the picture when it was the newest, and a new one is on its way to them.
-    /// Should they leave before it comes (it could not be drawn, say), black is due then.
+    /// see-through (all clear): as what made the picture out of date was, if that is known,
+    /// else as the picture it covers. Due when nobody is watching and the last picture sent is
+    /// out of date. NDI gives a receiver the last picture a source sent the moment it connects,
+    /// before the source can know of it; this puts black (or nothing) in the place of a slide
+    /// that has gone, once. While someone is watching none is due: they were given the
+    /// picture when it was the newest, and a new one is on its way to them. Should they leave
+    /// before it comes (it could not be drawn, say), black is due then.
     fn blank_due(&mut self) -> Option<(u32, u32, bool)> {
         if !self.stale || self.watched() {
             return None;
         }
         self.stale = false;
-        self.given.take()
+        let cover = self.cover.take();
+        self.given.take().map(|(width, height, alpha)| (width, height, cover.unwrap_or(alpha)))
     }
 
     /// Whether it is time to count the receivers again.
@@ -591,9 +610,12 @@ impl Gate {
         let changed = self.receivers != receivers;
         self.receivers = receivers;
         if !self.watched() {
-            self.current = None;
+            let dropped = self.current.take();
             // A picture not sent yet goes unsent, so the one sent before it is out of date.
-            self.stale |= std::mem::take(&mut self.fresh);
+            if std::mem::take(&mut self.fresh) {
+                self.stale = true;
+                self.cover = dropped.map(|picture| picture.sent.alpha());
+            }
         }
         changed
     }
@@ -720,19 +742,21 @@ mod tests {
     #[test]
     fn the_newest_queued_picture_wins() {
         let (tx, rx) = channel();
-        let width = |(picture, forget): (Option<Picture>, bool)| (picture.map(|picture| picture.width), forget);
+        let width = |(picture, forget): (Option<Picture>, Option<bool>)| (picture.map(|picture| picture.width), forget);
         for width in [2, 3] {
             tx.send(Told::Picture(picture(width))).unwrap();
         }
-        assert_eq!(width(newest(&rx, Told::Picture(picture(1)))), (Some(3), false));
+        assert_eq!(width(newest(&rx, Told::Picture(picture(1)))), (Some(3), None));
         assert!(rx.try_recv().is_err(), "the older ones are gone");
         // Word to forget after a picture: both are kept, for the gate to weigh.
-        tx.send(Told::Forget).unwrap();
-        assert_eq!(width(newest(&rx, Told::Picture(picture(1)))), (Some(1), true));
-        // A picture after it overtakes it; with no picture, there is only the word.
+        tx.send(Told::Forget(false)).unwrap();
+        assert_eq!(width(newest(&rx, Told::Picture(picture(1)))), (Some(1), Some(false)));
+        // A picture after it overtakes it; with no picture, there is only the word, the newest
+        // saying whether the screen is see-through.
         tx.send(Told::Picture(picture(4))).unwrap();
-        assert_eq!(width(newest(&rx, Told::Forget)), (Some(4), false));
-        assert_eq!(width(newest(&rx, Told::Forget)), (None, true));
+        assert_eq!(width(newest(&rx, Told::Forget(false))), (Some(4), None));
+        tx.send(Told::Forget(true)).unwrap();
+        assert_eq!(width(newest(&rx, Told::Forget(false))), (None, Some(true)));
     }
 
     #[test]
@@ -746,7 +770,7 @@ mod tests {
         gate.counted(t, Some(1));
         gate.picture(picture(1));
         assert_eq!(sent(&mut gate, t), Some(1));
-        gate.told(Some(picture(2)), true, true);
+        gate.told(Some(picture(2)), Some(false), true);
         assert_eq!(sent(&mut gate, t), Some(2));
         assert_eq!(sent(&mut gate, t + SECOND), Some(2), "and again each second");
         // It is marked out of date: black, if they leave before a newer one comes.
@@ -758,11 +782,49 @@ mod tests {
         let mut gate = Gate::new(t);
         gate.counted(t, Some(0));
         gate.counted(t + SECOND / 2, Some(1));
-        gate.told(Some(picture(3)), true, false);
+        gate.told(Some(picture(3)), Some(false), false);
         assert_eq!(sent(&mut gate, t + SECOND), None);
         // A picture alone, or after the word, goes as always.
-        gate.told(Some(picture(4)), false, false);
+        gate.told(Some(picture(4)), None, false);
         assert_eq!(sent(&mut gate, t + SECOND), Some(4));
+    }
+
+    #[test]
+    fn a_screen_made_see_through_while_nobody_watches_is_covered_with_clear() {
+        let t = Instant::now();
+        // A solid picture was sent; nobody watches; the screen is made see-through, and its
+        // picture is not drawn: what covers the solid one is all clear, not black.
+        let mut gate = Gate::new(t);
+        gate.counted(t, Some(1));
+        gate.picture(picture(3));
+        assert_eq!(sent(&mut gate, t), Some(3));
+        gate.counted(t + SECOND, Some(0));
+        gate.told(None, Some(true), false);
+        assert_eq!(gate.blank_due(), Some((3, 1, true)));
+        // Made solid again, the other way about: black.
+        gate.counted(t + 2 * SECOND, Some(1));
+        gate.picture(Picture::new(4, 1, Arc::new(vec![9; 16]), Sent::Straight));
+        assert_eq!(sent(&mut gate, t + 2 * SECOND), Some(4));
+        gate.counted(t + 3 * SECOND, Some(0));
+        gate.told(None, Some(false), false);
+        assert_eq!(gate.blank_due(), Some((4, 1, false)));
+        // A see-through picture handed over just as the last receiver left, so never sent:
+        // clear covers the solid one it would have replaced.
+        let mut gate = Gate::new(t);
+        gate.counted(t, Some(1));
+        gate.picture(picture(2));
+        assert_eq!(sent(&mut gate, t), Some(2));
+        gate.picture(Picture::new(5, 1, Arc::new(vec![9; 20]), Sent::Premultiplied));
+        gate.counted(t + SECOND, Some(0));
+        assert_eq!(gate.blank_due(), Some((2, 1, true)));
+        // And one handed over after they left, dropped: the same.
+        let mut gate = Gate::new(t);
+        gate.counted(t, Some(1));
+        gate.picture(picture(2));
+        assert_eq!(sent(&mut gate, t), Some(2));
+        gate.counted(t + SECOND, Some(0));
+        gate.picture(Picture::new(5, 1, Arc::new(vec![9; 20]), Sent::Straight));
+        assert_eq!(gate.blank_due(), Some((2, 1, true)));
     }
 
     #[test]

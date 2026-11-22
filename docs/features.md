@@ -497,11 +497,11 @@ feature changes, this page changes in the same commit.
 - A screen sent over NDI is drawn and sent only while someone is watching it. With no receiver
   connected it costs nothing; when one connects, the picture on the screens is drawn for it,
   and it has it within about a second, in the middle of a dissolve too. It is never shown a
-  slide that has gone: if anything changed while nobody was watching, it sees black until its
-  picture comes. That is longer than a second only when the GPU is too slow to draw the
-  picture: it is then tried again like any screen's (during a dissolve, when the dissolve
-  ends, so that the room's fade is never held up for NDI), and the operator is told if it
-  still cannot be drawn. A picture that was drawn and then lost on its way to NDI is drawn
+  slide that has gone: if anything changed while nobody was watching, it sees black (all clear,
+  for a see-through screen) until its picture comes. That is longer than a second only when
+  the GPU is too slow to draw the picture: it is then tried again like any screen's (during a
+  dissolve, when the dissolve ends, so that the room's fade is never held up for NDI), and the
+  operator is told if it still cannot be drawn. A picture that was drawn and then lost on its way to NDI is drawn
   once more; if that is lost too, the operator is told, and it is drawn again every five
   seconds until one arrives. A new slide goes to NDI at
   once, with no dissolve, as it does to the stage screens. The Screens window and `sp screens`
@@ -513,7 +513,8 @@ feature changes, this page changes in the same commit.
   own window is. A fresh start puts the first screen on the first other display, or in a
   window on a Mac with one display.
 - Switching the audience (or stage) screens off closes their windows, so the display shows
-  what is behind them, not black; NDI goes on sending black, so a stream keeps its source. A
+  what is behind them, not black; NDI goes on sending black (all clear, for a see-through
+  screen), so a stream keeps its source. A
   screen in a window opens on a display the operator doesn't work on when there is one.
 - A screen keeps the display it was set to, by name. If that display isn't connected, the
   Screens window shows it as disconnected and the screen shows nothing anywhere (it never
