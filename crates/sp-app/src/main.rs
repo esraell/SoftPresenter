@@ -2726,6 +2726,47 @@ impl App {
         None
     }
 
+    /// Space and the arrows while a slide is picked and nothing is on screen (the owner's rule,
+    /// 2026-11-21): Space puts the picked slide on, as Enter does; → and ← move the pick to the
+    /// next or the previous slide of its passage or song, in the order sung, putting nothing on.
+    /// With something on screen they run it as ever (false: not taken here), so a song can be
+    /// finished with a reading picked and waiting for Enter.
+    fn pick_key(&mut self, key: &Key) -> bool {
+        let Some(running) = self.running.as_ref() else { return false };
+        let state = &running.home_state;
+        let picked = state.pick(&self.show);
+        let decided = running::pick_key(
+            matches!(key, Key::Named(NamedKey::Space)),
+            matches!(key, Key::Named(NamedKey::ArrowRight)),
+            matches!(key, Key::Named(NamedKey::ArrowLeft)),
+            picked.is_some(),
+            self.show.live().is_some(),
+            state.edit_kind().is_some(),
+        );
+        let (running::PickKey::Move(forward), Some(at)) = (decided, picked) else {
+            if decided == running::PickKey::TakeIt {
+                self.enter_key();
+                return true;
+            }
+            return false;
+        };
+        let word = state.picked_word(&self.show).unwrap_or("slide");
+        let bible = state.picked.as_ref().is_some_and(|picked| picked.passage.is_some());
+        let order = self.show.presentations().get(at.presentation).map(|song| song.order()).unwrap_or_default();
+        let next = running::pick_beside(&order, at.slide, forward);
+        let Some(running) = self.running.as_mut() else { return true };
+        match next {
+            Some(slide) => running.home_state.set_pick(
+                &self.show,
+                sp_engine::SlideRef { presentation: at.presentation, slide },
+                bible,
+            ),
+            None => running.home_state.say(format!("That is the {} {word}.", if forward { "last" } else { "first" })),
+        }
+        running.home_window.request_redraw();
+        true
+    }
+
     /// Enter: the slide picked goes on screen; otherwise the open item of the playlist from its
     /// first slide, with a library listed the song chosen, and in the Bible view nothing (see
     /// `running::enter`).
@@ -7913,7 +7954,10 @@ impl ApplicationHandler<AppEvent> for App {
                         && !self.held.control_key()
                         && let Some(command) = show_key_command(&event.logical_key, &self.show)
                     {
-                        self.show_key(command);
+                        let logical = event.logical_key.clone();
+                        if !self.pick_key(&logical) {
+                            self.show_key(command);
+                        }
                     }
                 }
                 _ => {}
@@ -7955,7 +7999,10 @@ impl ApplicationHandler<AppEvent> for App {
             let something_open = escape_closes_something(&running.home_state, &running.egui_ctx);
             let escape = matches!(key.logical_key, Key::Named(NamedKey::Escape));
             if !(escape && something_open) {
-                self.show_key(command);
+                let logical = key.logical_key.clone();
+                if !self.pick_key(&logical) {
+                    self.show_key(command);
+                }
                 return;
             }
         }

@@ -193,7 +193,7 @@ status` instead of `sp status`.
 
 | Key | Does |
 |---|---|
-| Right arrow, Space | next slide; with another playlist item opened, start that item (a slide picked waits for Enter) |
+| Right arrow, Space | next slide; with another playlist item opened, start that item; with a slide picked and nothing on screen, Space puts it on and the arrows move the pick |
 | Left arrow | previous slide; with another playlist item opened, start that item |
 | Up / Down arrow | open the playlist item above / below; in the Bible view, pick the verse before / after |
 | Enter | put the picked slide on screen (the first verse or slide of what the find box or Scripture Lookup just opened, or the verse picked); otherwise the open item from its first slide |

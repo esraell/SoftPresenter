@@ -89,7 +89,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 
 | Key | Does |
 |---|---|
-| Space, → | Next slide. With another item opened (↑, ↓ or a click on its row), starts that item at its first slide; at the end of a song, with Continuous on, goes on into the next song or Bible passage. While a slide picked waits for Enter, goes on with what is on screen (with nothing on screen, puts nothing on and says so) |
+| Space, → | Next slide. With another item opened (↑, ↓ or a click on its row), starts that item at its first slide; at the end of a song, with Continuous on, goes on into the next song or Bible passage. While a slide picked waits for Enter, goes on with what is on screen; with nothing on screen, Space puts the picked slide on and → / ← move the pick |
 | ← | Previous slide; starts another item opened, as Space does; at a song's first slide, with Continuous on, goes back into the item before |
 | ↑, ↓ | Opens the playlist item above or below (a notice says so at either end); in the Bible view, picks the verse before or after without putting it on screen |
 | Enter | The slide picked goes on screen (the first slide or verse of what the find box or Scripture Lookup just opened, or the verse ↑ or ↓ picked in the Bible view); with none, the open item from its first slide (with a library listed, the song chosen) |
@@ -186,7 +186,8 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 - Add to "…" keeps the passage in a playlist, to open again with these settings.
 - Keys: Return in Scripture Lookup (or in the find box) picks the passage's first verse and gives
   the keyboard back; ↑ and ↓ pick the verse before or after (never putting it on screen); Enter
-  puts the verse picked on screen; Space, → and ← then go verse by verse. The pick is
+  puts the verse picked on screen (so does Space with nothing on screen, while → and ← move the
+  pick); Space, → and ← then go verse by verse. The pick is
   `HomeState::picked` (`home.rs`), the rules for the keys `running.rs`.
 - The lists: a click on a book loads its first chapter, on a chapter that chapter, on a verse
   that verse (Shift for a passage; a double-click opens the chapter with the verse), each with its

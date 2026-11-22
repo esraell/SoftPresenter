@@ -200,6 +200,43 @@ pub fn move_pick(count: usize, picked: Option<usize>, live: Option<usize>, down:
     }
 }
 
+/// What Space or an arrow does while a slide is picked (the owner's rule, 2026-11-21).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PickKey {
+    /// Put the picked slide on screen, as Enter does.
+    TakeIt,
+    /// Move the pick to the next (true) or the previous slide, putting nothing on.
+    Move(bool),
+    /// Not the pick's: run what is on screen as ever.
+    Pass,
+}
+
+/// Which: with nothing on screen, Space takes the pick and → / ← move it; with something on
+/// screen (or no pick, or in an editor) they run the show as ever, so a song can be finished
+/// with a reading picked and waiting for Enter.
+pub fn pick_key(space: bool, right: bool, left: bool, picked: bool, showing: bool, editing: bool) -> PickKey {
+    if !picked || showing || editing {
+        return PickKey::Pass;
+    }
+    if space {
+        PickKey::TakeIt
+    } else if right || left {
+        PickKey::Move(right)
+    } else {
+        PickKey::Pass
+    }
+}
+
+/// The slide after (`forward`) or before `at` in a song's or passage's order (as sung), or its
+/// first when `at` is not in it; `None` past either end.
+pub fn pick_beside(order: &[usize], at: usize, forward: bool) -> Option<usize> {
+    match order.iter().position(|slide| *slide == at) {
+        Some(place) if forward => order.get(place + 1).copied(),
+        Some(place) => place.checked_sub(1).and_then(|place| order.get(place).copied()),
+        None => order.first().copied(),
+    }
+}
+
 /// What ↑ or ↓ says when there is no item above or below to open.
 pub fn no_item_beyond(down: bool) -> &'static str {
     if down { "That is the last item in the playlist." } else { "That is the first item in the playlist." }
@@ -420,5 +457,31 @@ mod tests {
         assert_eq!(move_pick(5, None, None, true), Ok(0));
         assert_eq!(move_pick(5, None, None, false), Ok(4));
         assert!(move_pick(0, None, None, true).is_err(), "no passage");
+    }
+
+    #[test]
+    fn with_nothing_on_screen_space_takes_the_pick_and_the_arrows_move_it() {
+        // Nothing on screen, a verse picked: Space puts it on, → and ← move the pick.
+        assert_eq!(pick_key(true, false, false, true, false, false), PickKey::TakeIt);
+        assert_eq!(pick_key(false, true, false, true, false, false), PickKey::Move(true));
+        assert_eq!(pick_key(false, false, true, true, false, false), PickKey::Move(false));
+        // A song on screen: Space and the arrows go on running it; Enter takes the pick.
+        assert_eq!(pick_key(true, false, false, true, true, false), PickKey::Pass);
+        assert_eq!(pick_key(false, true, false, true, true, false), PickKey::Pass);
+        // No pick, or in an editor: as ever.
+        assert_eq!(pick_key(true, false, false, false, false, false), PickKey::Pass);
+        assert_eq!(pick_key(true, false, false, true, false, true), PickKey::Pass);
+    }
+
+    #[test]
+    fn the_pick_moves_in_the_order_sung_and_stops_at_the_ends() {
+        // An arrangement that sings slide 2 (the chorus) twice.
+        let order = [0, 2, 1, 2, 3];
+        assert_eq!(pick_beside(&order, 0, true), Some(2));
+        assert_eq!(pick_beside(&order, 1, true), Some(2));
+        assert_eq!(pick_beside(&order, 1, false), Some(2));
+        assert_eq!(pick_beside(&order, 3, true), None, "the last");
+        assert_eq!(pick_beside(&order, 0, false), None, "the first");
+        assert_eq!(pick_beside(&order, 9, true), Some(0), "not in it: the first");
     }
 }

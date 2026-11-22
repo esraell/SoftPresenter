@@ -224,11 +224,12 @@ feature changes, this page changes in the same commit.
   verse alone), and so does a passage looked up with Return in Scripture Lookup; in the Bible view ↑
   and ↓ pick the verse before or after (from the verse on screen when none is picked). The slide
   picked is ringed as slides picked out are (never in orange, which is only for what is on
-  screen), brought into view, and the keyboard is the show's again. Only Enter puts it on
-  screen; then Space, → and ← go on from it as from any slide. While one waits, Space, → and ←
-  go on with whatever is on screen (a song can be run to its end with the reading picked), and
-  with nothing on screen they put nothing on and say "Press Enter to put the picked verse on
-  screen." A click on a slide takes over from the pick, and the pick goes once a slide of its
+  screen), brought into view, and the keyboard is the show's again. Enter puts it on screen;
+  then Space, → and ← go on from it as from any slide. With nothing on screen, Space puts the
+  picked slide on too, and → and ← move the pick to the next or previous slide (in the order
+  sung) without putting anything on, so a reading can be looked up and the right verse picked
+  by the arrows. With something on screen, Space, → and ← go on with that (a song can be run to
+  its end with the reading picked), and Enter takes the pick. A click on a slide takes over from the pick, and the pick goes once a slide of its
   passage or song goes on screen, or another song, passage or view is opened. In the Bible
   view, Enter with nothing picked does nothing.
 - A playlist also holds **pictures and videos** from the media bin (the countdown video),
