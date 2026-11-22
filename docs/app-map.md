@@ -98,7 +98,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | Escape (F1) | Clear all; with the chooser of playlists and libraries or the Reflow editor open, Escape closes it instead (the Reflow editor without keeping what was typed) and clears nothing |
 | F2, F3, F4, F5, F6 | Clear slide, media, props, audio, messages |
 | A letter | The slide with that hot key, or the group it stands for (A for the first verse, S for the second, C for the chorus, E for the ending…; the letter shows at the right of a group's bar). In the Bible view a letter or number starts the next reference in the reference field instead |
-| Delete | Delete what is picked out, after asking |
+| Delete | Delete what is picked out: a playlist's items go at once (Command-Z puts them back); songs in a library, slides and media ask first |
 | Command-N | New song |
 | Command-1, -2, -3 | Show, Bible (cursor in the reference), Edit (Ctrl on other computers, for all of these) |
 | Command-B | Bible as well (Bold while editing a slide) |
@@ -292,7 +292,7 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 | Window | Opened from | Holds |
 |---|---|---|
 | Screens | Settings, Screens; or Screens, Configure Screens… | Audience and stage screens: where each goes (a display, a window, NDI, a DeckLink output with its format (starting in the card's own, as Desktop Video Setup sets it, and saying where the format comes from, in `screens/decklink_ui.rs`) and keyer, off; `decklink`, `screen set SCREEN output=decklink:N mode=FORMAT keyer=external`), its name, its look (which layers, colour, covered edges); an audience screen's Background, Solid or See-through (clear where nothing is drawn, for a switcher to lay over a camera; Soft edges Straight or Premultiplied), and Key (shows another screen's key, white where solid, beside it on a second display or NDI name), in `screens/background_ui.rs`; what each is doing now (for NDI, how many receivers are watching, or that nobody is; why a key shows black); Identify. `sp screen set SCREEN background=… alpha=… key=…`, `sp screens` |
-| Settings | ⚙ or Command-comma | General (copyright line), Screens (Configure Screens…, stage screens on; what happens at start is a macro run when SoftPresenter opens), Groups (names and colours), Key Mappings, Integrations (VoxLive: its API key, its state, the church's screens; click a screen to change its look, with a preview, and save it to VoxLive; `voxlive …`, `voxlive look`. Canva Sync: connect with the church's integration or take over the old sync script's sign-in, the presentation and its divider page chosen from its pages' pictures, where the video goes, Sync Now; `canva …`) |
+| Settings | ⚙ or Command-comma | General (copyright line), Screens (Configure Screens…, stage screens on; what happens at start is a macro run when SoftPresenter opens), Groups (names and colours), Key Mappings (every key the list of keys has, from the same list, then the menus' shortcuts), Integrations (VoxLive: its API key, its state, the church's screens; click a screen to change its look, with a preview, and save it to VoxLive; `voxlive …`, `voxlive look`. Canva Sync: connect with the church's integration or take over the old sync script's sign-in, the presentation and its divider page chosen from its pages' pictures, where the video goes, Sync Now; `canva …`) |
 
 ## Where the app keeps things
 

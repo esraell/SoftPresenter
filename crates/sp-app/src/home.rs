@@ -5131,31 +5131,9 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
                 ui.label(egui::RichText::new("The keys that run the show, and the menu shortcuts.").color(TEXT_DIM));
                 ui.add_space(8.0);
                 egui::Grid::new("keys").num_columns(3).spacing([16.0, 6.0]).striped(true).show(ui, |ui| {
-                    let show_keys = [
-                        ("Show", "Next slide", "→ or Space"),
-                        ("Show", "Previous slide", "←"),
-                        ("Show", "Put the slide picked on screen", "Enter"),
-                        ("Bible", "Pick the verse before / after (on the page, as ← / →)", "↑ / ↓"),
-                        ("Show", "First / last slide", "Home / End"),
-                        ("Show", "Clear All", "Esc or F1"),
-                        ("Show", "Clear Slide", "F2"),
-                        ("Show", "Clear Media", "F3"),
-                        ("Show", "Clear Props", "F4"),
-                        ("Show", "Clear Messages", "F6"),
-                        ("Show", "Jump to a group", "its letter (see Groups)"),
-                        ("Show", "Find a song, a line or a verse", "/"),
-                    ];
-                    for (area, command, key) in show_keys {
-                        ui.label(egui::RichText::new(area).color(TEXT_DIM));
-                        ui.label(command);
-                        ui.label(egui::RichText::new(key).monospace());
-                        ui.end_row();
-                    }
-                    // The keys for getting around, which work on every computer.
+                    // Every key the list of keys (`?`) has, from the same list so the two always
+                    // agree; then the menus' shortcuts.
                     for (group, rows) in crate::keys::every_key() {
-                        if !matches!(group, "Going places" | "The live tools") {
-                            continue;
-                        }
                         for (keys, what) in rows {
                             ui.label(egui::RichText::new(group).color(TEXT_DIM));
                             ui.label(what);
@@ -12617,6 +12595,39 @@ mod tests {
             assert_eq!(state.screens, screens);
         }
         assert_eq!(output_label(&screens[2].output, &[]), "Gone   (disconnected)");
+    }
+
+    #[test]
+    fn key_mappings_list_every_key_the_list_of_keys_has() {
+        fn words(shape: &egui::Shape, into: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => into.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| words(shape, into)),
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        let mut state = HomeState { preferences_pane: 3, ..HomeState::default() };
+        let mut drawn = Vec::new();
+        for _ in 0..2 {
+            let raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 6000.0))),
+                ..RawInput::default()
+            };
+            let output = ctx.run_ui(raw, |ui| settings_ui(ui, &mut state));
+            drawn.clear();
+            output.shapes.iter().for_each(|clipped| words(&clipped.shape, &mut drawn));
+            output.drop_without_applying_deltas();
+        }
+        for (group, rows) in crate::keys::every_key() {
+            for (keys, what) in rows {
+                assert!(drawn.contains(&what), "{group}: {what}");
+                assert!(drawn.contains(&keys.join("  ")), "{group}: {keys:?}");
+            }
+        }
+        // Among them the audio's F5, and Delete as it is.
+        assert!(drawn.iter().any(|words| words.contains("F5")));
+        assert!(drawn.iter().any(|words| words.contains("playlist items go at once")));
     }
 
     #[test]

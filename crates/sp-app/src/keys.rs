@@ -335,28 +335,31 @@ pub fn frame(ctx: &egui::Context, state: &mut HomeState, voxlive: bool) -> Optio
 }
 
 /// One row of the list of keys: the keys, and what they do.
-type Row = (Vec<String>, &'static str);
+type Row = (Vec<String>, String);
 
-/// The list of every key, in groups, as the window shows it.
+/// The list of every key, in groups, as the window shows it: the list of keys (`?`) and
+/// Settings › Key Mappings are both made from it.
 pub fn every_key() -> Vec<(&'static str, Vec<Row>)> {
     let m = with_modifier;
     let one = |key: &str| vec![key.to_owned()];
+    let keys = |keys: &[&str]| keys.iter().map(|key| (*key).to_owned()).collect::<Vec<_>>();
+    let row = |keys: Vec<String>, what: &str| (keys, what.to_owned());
     vec![
         (
             "Running the slides",
             vec![
-                (vec!["Space".to_owned(), "\u{2192}".to_owned()], "Next slide"),
-                (one("\u{2190}"), "Previous slide"),
-                (
-                    vec!["\u{2191}".to_owned(), "\u{2193}".to_owned()],
+                row(keys(&["Space", "\u{2192}"]), "Next slide"),
+                row(one("\u{2190}"), "Previous slide"),
+                row(
+                    keys(&["\u{2191}", "\u{2193}"]),
                     "The item above or below; in Bible, pick the verse before or after",
                 ),
-                (
+                row(
                     one("Enter"),
                     "The slide picked goes on screen (found with / or looked up, or picked in Bible); else the open item, from its first slide",
                 ),
-                (vec!["Home".to_owned(), "End".to_owned()], "First or last slide of the song"),
-                (
+                row(keys(&["Home", "End"]), "First or last slide of the song"),
+                row(
                     one("A letter"),
                     "Jump to a group (C for the chorus), or a slide\u{2019}s own hot key; in Bible, start the next reference",
                 ),
@@ -365,58 +368,61 @@ pub fn every_key() -> Vec<(&'static str, Vec<Row>)> {
         (
             "Clearing",
             vec![
-                (vec!["Esc".to_owned(), "F1".to_owned()], "Clear everything"),
-                (
-                    vec!["F2".to_owned(), "F3".to_owned(), "F4".to_owned(), "F5".to_owned(), "F6".to_owned()],
-                    "Clear the slide, media, props, audio, message",
-                ),
+                row(keys(&["Esc", "F1"]), "Clear everything"),
+                row(keys(&["F2", "F3", "F4", "F5", "F6"]), "Clear the slide, media, props, audio, message"),
             ],
         ),
         (
             "Going places",
             vec![
-                (vec![m("1"), m("2"), m("3")], "Show, Bible (ready for a reference), Edit"),
-                (one(&m("B")), "Bible, too (Bold while editing a slide)"),
-                (one(&m(",")), "Settings"),
-                (one(&m("P")), "Playlists and libraries"),
-                (vec!["/".to_owned(), m("F")], "Find a song, a line or a verse"),
-                (one("?"), "This list (its foot has Show keys on buttons)"),
+                row(vec![m("1"), m("2"), m("3")], "Show, Bible (ready for a reference), Edit"),
+                row(one(&m("B")), "Bible, too (Bold while editing a slide)"),
+                row(one(&m(",")), "Settings"),
+                row(one(&m("P")), "Playlists and libraries"),
+                row(vec!["/".to_owned(), m("F")], "Find a song, a line or a verse"),
+                row(one("?"), "This list (its foot has Show keys on buttons)"),
             ],
         ),
         (
             "The live tools",
             vec![
-                (
+                row(
                     vec![format!("{} \u{2026} {}", tab_key(0), tab_key(6))],
                     "Open Timers, Messages, Props, Macros, Stage, Audio, VoxLive",
                 ),
-                (
+                row(
                     one("then 1 \u{2026} 9"),
                     "Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track",
                 ),
-                (vec![media_key(), "then 1 \u{2026} 9".to_owned()], "Show that picture or video"),
-                (vec![audience_key(), stage_key()], "Audience screens, stage screens, on or off"),
-                (one(&m("O")), "The menu for the slide on screen"),
+                row(vec![media_key(), "then 1 \u{2026} 9".to_owned()], "Show that picture or video"),
+                row(vec![audience_key(), stage_key()], "Audience screens, stage screens, on or off"),
+                row(one(&m("O")), "The menu for the slide on screen"),
             ],
         ),
         (
             "Menus and windows",
             vec![
-                (vec!["\u{2191}".to_owned(), "\u{2193}".to_owned()], "Move"),
-                (vec!["\u{2192}".to_owned(), "\u{2190}".to_owned()], "Open a group of choices; go back"),
-                (one("Enter"), "Choose"),
-                (one("Esc"), "Close"),
+                row(keys(&["\u{2191}", "\u{2193}"]), "Move"),
+                row(keys(&["\u{2192}", "\u{2190}"]), "Open a group of choices; go back"),
+                row(one("Enter"), "Choose"),
+                row(one("Esc"), "Close"),
             ],
         ),
         (
             "Changing things",
             vec![
-                (vec![m("Z"), with_shift("Z")], "Undo, redo"),
-                (vec![m("C"), m("X"), m("V")], "Copy, cut, paste the picked slides (objects in Edit)"),
-                (one("Delete"), "Delete what is picked, after asking"),
-                (one(&m("N")), "A new song"),
-                (vec!["T".to_owned(), m("D"), m("A")], "In Edit: a new text box, duplicate, pick everything"),
-                (one("Arrows"), "In Edit: nudge the picked object (Shift for one pixel)"),
+                row(vec![m("Z"), with_shift("Z")], "Undo, redo"),
+                row(vec![m("C"), m("X"), m("V")], "Copy, cut, paste the picked slides (objects in Edit)"),
+                (
+                    one("Delete"),
+                    format!(
+                        "Delete what is picked: playlist items go at once ({} puts them back); songs in a library, slides and media ask first",
+                        m("Z")
+                    ),
+                ),
+                row(one(&m("N")), "A new song"),
+                row(vec!["T".to_owned(), m("D"), m("A")], "In Edit: a new text box, duplicate, pick everything"),
+                row(one("Arrows"), "In Edit: nudge the picked object (Shift for one pixel)"),
             ],
         ),
     ]
@@ -512,7 +518,7 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
                     }
                     let key_bottom = line + 24.0;
                     let room = column - keys_width - 10.0;
-                    let words = painter.layout(what.to_owned(), FontId::proportional(13.0), TEXT, room);
+                    let words = painter.layout(what, FontId::proportional(13.0), TEXT, room);
                     let words_height = words.size().y;
                     painter.galley(pos2(left + keys_width + 10.0, y + 3.0), words, TEXT);
                     y = key_bottom.max(y + 3.0 + words_height) + 6.0;
