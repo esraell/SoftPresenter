@@ -446,10 +446,15 @@ pub fn without_paths(text: &str) -> String {
         if path_starts(bytes, at) {
             let end = text[at..].find([')', ']', '"', '\'', '\n']).map_or(text.len(), |len| at + len);
             let path = &text[at..end];
-            let name = path.rsplit(['/', '\\']).find(|part| !part.is_empty()).unwrap_or("");
-            out.push_str(name);
-            at = end;
-            continue;
+            // A folder and a name in it at least (`/Users/pat`, `C:\Users\pat`): a word that
+            // only starts with a slash ("Psalm 23 /Gospel version") is left alone, and so is an
+            // address of this server's own (a slide picture's, `/thumb/…`).
+            if path.matches(['/', '\\']).count() >= 2 && !path.starts_with("/thumb/") {
+                let name = path.rsplit(['/', '\\']).find(|part| !part.is_empty()).unwrap_or("");
+                out.push_str(name);
+                at = end;
+                continue;
+            }
         }
         let next = text[at..].chars().next().map_or(1, char::len_utf8);
         out.push_str(&text[at..at + next]);
@@ -869,10 +874,22 @@ mod tests {
         );
         assert_eq!(without_paths("Saved C:\\Users\\pat\\song.sppack, done"), "Saved song.sppack, done");
         // Words that only look like paths in part are left as they are.
-        for text in ["slide 2/3", "https://example.org/a/b", "1/2 of the way", "On screen: River Song.", "and/or", "/"]
-        {
+        for text in [
+            "slide 2/3",
+            "https://example.org/a/b",
+            "1/2 of the way",
+            "On screen: River Song.",
+            "and/or",
+            "/",
+            "Psalm 23 /Gospel version",
+            "/thumb/7f6a1c2e-0000-4000-8000-000000000001/usual/00ff00ff00ff00ff.jpg",
+        ] {
             assert_eq!(without_paths(text), text);
         }
+        // The state's own picture addresses stay whole.
+        let mut part = serde_json::json!({"thumb": "/thumb/a/usual/b.jpg", "poster": "/thumb/c/usual/d.jpg"});
+        json_without_paths(&mut part);
+        assert_eq!(part, serde_json::json!({"thumb": "/thumb/a/usual/b.jpg", "poster": "/thumb/c/usual/d.jpg"}));
         let mut value = serde_json::json!({"raw": {"objects": [{"file": "/Users/pat/x.png", "words": "a/b"}]}, "n": 1});
         json_without_paths(&mut value);
         assert_eq!(value, serde_json::json!({"raw": {"objects": [{"file": "x.png", "words": "a/b"}]}, "n": 1}));
