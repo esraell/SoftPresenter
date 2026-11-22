@@ -35,13 +35,28 @@ pub enum State {
     Waiting(String),
 }
 
-/// What everyone else can see of an output: its state and its counts of frames.
+/// One time the output's thread opened its device, or tried to: the device, when it began, how
+/// long it took, and whether it opened.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Try {
+    pub device: String,
+    pub began: Instant,
+    pub took: Duration,
+    pub opened: bool,
+}
+
+/// A try at opening the device this long or longer is said in the log.
+const SLOW_TRY: Duration = Duration::from_millis(100);
+
+/// What everyone else can see of an output: its state, its counts of frames, and its last try
+/// at opening the device.
 #[derive(Debug)]
 struct Shared {
     state: Mutex<State>,
     played: AtomicU64,
     late: AtomicU64,
     dropped: AtomicU64,
+    tried: Mutex<Option<Try>>,
 }
 
 impl Shared {
@@ -65,6 +80,10 @@ impl Shared {
         }
     }
 
+    fn last_try(&self) -> Option<Try> {
+        self.tried.lock().ok().and_then(|tried| tried.clone())
+    }
+
     /// Adds what a run of playing has counted since it last said.
     fn add(&self, more: Counts) {
         self.played.fetch_add(more.played, Ordering::Relaxed);
@@ -85,6 +104,13 @@ impl Watch {
     /// Frames played, late and dropped since the output started.
     pub fn counts(&self) -> Counts {
         self.0.counts()
+    }
+
+    /// The output's last try at opening its device, once it has made one. For the log of the
+    /// thread drawing the screens: what the output's own thread was doing when they were held
+    /// up. Waits only for that thread to note a try, which it does in a moment.
+    pub fn last_try(&self) -> Option<Try> {
+        self.0.last_try()
     }
 }
 
@@ -157,6 +183,11 @@ impl DeckLinkOutput {
         Watch(self.shared.clone())
     }
 
+    /// The last try at opening the device (see [`Watch::last_try`]).
+    pub fn last_try(&self) -> Option<Try> {
+        self.shared.last_try()
+    }
+
     /// Stops the output and waits for its thread to have let the device go. For a program that
     /// ends straight after (the check); the app drops outputs instead, never waiting.
     pub fn stop(mut self) {
@@ -198,6 +229,7 @@ fn spawn<O: Opener>(wanted: Wanted, opener: O, log: Log) -> Result<DeckLinkOutpu
         played: AtomicU64::new(0),
         late: AtomicU64::new(0),
         dropped: AtomicU64::new(0),
+        tried: Mutex::new(None),
     });
     let theirs = shared.clone();
     let thread = std::thread::Builder::new()
@@ -225,7 +257,17 @@ fn run<O: Opener>(mut opener: O, mut wanted: Wanted, rx: &Receiver<Told>, shared
     // The last problem said, so that one that lasts is said once.
     let mut said: Option<String> = None;
     loop {
-        let trouble = match opener.open(&wanted) {
+        let began = Instant::now();
+        let opening = opener.open(&wanted);
+        let took = began.elapsed();
+        let tried = Try { device: wanted.device.clone(), began, took, opened: opening.is_ok() };
+        if let Ok(mut last) = shared.tried.lock() {
+            *last = Some(tried);
+        }
+        if took >= SLOW_TRY {
+            log(&format!("Opening {} took {} ms.", wanted.device, took.as_millis()), false);
+        }
+        let trouble = match opening {
             Ok(mut opened) => {
                 let what = playing_in_words(&opened);
                 log(&format!("{} plays out at {what}, in {}", opened.device, opened.layout.format.in_words()), false);

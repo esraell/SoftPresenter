@@ -381,6 +381,9 @@ pub struct Renderer {
     longest_wait: std::time::Duration,
     most_runs: usize,
     frames_to_drop: u32,
+    // SoftPresenter: how long this renderer has waited for the GPU, in all, reading back the
+    // counters of frames it had to check (see `gpu_waited`).
+    gpu_waited: std::time::Duration,
     #[cfg(feature = "debug_layers")]
     debug: debug::DebugRenderer,
     #[cfg(feature = "wgpu-profiler")]
@@ -527,6 +530,7 @@ impl Renderer {
             longest_wait: GPU_WAIT,
             most_runs: RUNS,
             frames_to_drop: 0,
+            gpu_waited: std::time::Duration::ZERO,
             #[cfg(feature = "debug_layers")]
             debug,
             #[cfg(feature = "wgpu-profiler")]
@@ -676,8 +680,10 @@ impl Renderer {
                 self.engine.free_download(bump_buf);
                 Ok(scratch::Verdict::Fits)
             } else {
-                self.read_bump(device, bump_buf, give_up_at)
-                    .map(|bump| self.scratch.judge(&plan, &bump, print, now))
+                let waiting = std::time::Instant::now();
+                let bump = self.read_bump(device, bump_buf, give_up_at);
+                self.gpu_waited += waiting.elapsed();
+                bump.map(|bump| self.scratch.judge(&plan, &bump, print, now))
             };
             let mut rest = Recording::default();
             if matches!(verdict, Ok(scratch::Verdict::Fits)) {
@@ -922,6 +928,13 @@ impl Renderer {
     /// a scene already known to be too heavy.
     pub fn scratch_runs(&self) -> u64 {
         self.coarse_runs
+    }
+
+    /// SoftPresenter: how long this renderer has waited for the GPU, in all, reading back the
+    /// counters of the frames it checked (a frame known to fit is not waited for). A caller
+    /// timing a frame subtracts this before and after to tell the GPU's time from its own.
+    pub fn gpu_waited(&self) -> std::time::Duration {
+        self.gpu_waited
     }
 
     /// Vello 0.12's own `render_to_texture`: one pass with constant scratch sizes, which does

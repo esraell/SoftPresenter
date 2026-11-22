@@ -86,7 +86,9 @@ Everything is marked `SoftPresenter:` in the source. Removed from the published 
     waits, and says whether the GPU still holds any buffer given back, by `rest` or by a
     frame as it was drawn), `Renderer::set_fixed_scratch`,
     `Renderer::spare_bytes`, `Renderer::scratch_wanted`, `Renderer::scratch_reruns`,
-    `Renderer::scratch_runs`, `Renderer::scratch_unwaited`; for tests,
+    `Renderer::scratch_runs`, `Renderer::scratch_unwaited`, `Renderer::gpu_waited` (how long
+    the renderer has waited for the GPU, in all, reading back counters: the app's log of a
+    hold-up of the screens tells the GPU's time from the renderer's own by it); for tests,
     `Renderer::set_longest_wait`, `Renderer::set_most_runs` and `Renderer::drop_frames`; the
     errors above and
     `Error::GpuWait`; the types `ScratchSizes`, `ScratchPlan` and `ScratchRoom`.

@@ -342,6 +342,12 @@ impl Painter {
         self.renderer.scratch_runs()
     }
 
+    /// How long [`Painter::paint`] has waited for the GPU, in all, checking whether pictures
+    /// fitted: the rest of a paint's time is the painter's own work.
+    pub fn gpu_waited(&self) -> std::time::Duration {
+        self.renderer.gpu_waited()
+    }
+
     /// Sets how long one [`Painter::paint`] waits for the GPU before it gives the picture up
     /// with [`PaintError::NotNow`]; `None` is the usual wait. For tests of what happens when
     /// the GPU is too slow.

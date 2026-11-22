@@ -51,9 +51,27 @@ pub fn start() {
     }));
 }
 
+thread_local! {
+    /// How long this thread has spent writing to the log, in all, the wait for the file
+    /// included.
+    static WRITING: std::cell::Cell<std::time::Duration> = const { std::cell::Cell::new(std::time::Duration::ZERO) };
+}
+
+/// How long the calling thread has spent writing to the log, in all: the screens' thread reads
+/// it to say how much of a hold-up that was.
+pub fn time_writing() -> std::time::Duration {
+    WRITING.with(std::cell::Cell::get)
+}
+
 /// Writes one line: the clock time, the seconds since the start, what part of the app it is
 /// about, and what happened.
 pub fn event(area: &str, message: &str) {
+    let began = Instant::now();
+    write_event(area, message);
+    WRITING.with(|writing| writing.set(writing.get() + began.elapsed()));
+}
+
+fn write_event(area: &str, message: &str) {
     let Some(Ok(mut guard)) = FILE.get().map(Mutex::lock) else { return };
     let Some((file, path)) = guard.as_mut() else { return };
     let since = STARTED.get().map_or(0.0, |started| started.elapsed().as_secs_f64());

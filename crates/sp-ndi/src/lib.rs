@@ -63,7 +63,7 @@
 #[allow(unsafe_code)]
 mod runtime;
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -194,11 +194,19 @@ struct Shared {
     receivers: AtomicU32,
     /// How many times receivers have been found after a count of none.
     arrivals: AtomicU32,
+    /// The longest one picture took to send, in microseconds, since it was last asked
+    /// (`NdiOutput::longest_send`).
+    longest_send: AtomicU64,
 }
 
 impl Shared {
     fn new() -> Shared {
-        Shared { state: Mutex::new(State::Starting), receivers: AtomicU32::new(UNKNOWN), arrivals: AtomicU32::new(0) }
+        Shared {
+            state: Mutex::new(State::Starting),
+            receivers: AtomicU32::new(UNKNOWN),
+            arrivals: AtomicU32::new(0),
+            longest_send: AtomicU64::new(0),
+        }
     }
 
     fn state(&self) -> State {
@@ -216,6 +224,11 @@ impl Shared {
             UNKNOWN => None,
             count => Some(count),
         }
+    }
+
+    /// A picture took this long to send.
+    fn sent_in(&self, took: Duration) {
+        self.longest_send.fetch_max(u64::try_from(took.as_micros()).unwrap_or(u64::MAX), Ordering::Relaxed);
     }
 
     fn set_receivers(&self, count: Option<u32>) {
@@ -290,6 +303,13 @@ impl NdiOutput {
     /// moves on before `wake` is called for that change. Never waits.
     pub fn arrivals(&self) -> u32 {
         self.shared.arrivals.load(Ordering::Relaxed)
+    }
+
+    /// The longest one picture has taken to send (on the source's own thread, which may wait
+    /// for NDI there) since this was last asked, and the count begun again. For the log of the
+    /// thread drawing the screens, which never waits on a send. Never waits.
+    pub fn longest_send(&self) -> Duration {
+        Duration::from_micros(self.shared.longest_send.swap(0, Ordering::Relaxed))
     }
 
     /// A way to see what the source is doing from another thread.
@@ -471,12 +491,16 @@ fn serve(sink: &impl Sink, rx: &Receiver<Told>, shared: &Shared, wake: &mut impl
         // Black for a solid source; for a see-through one, all clear (zeros sent as RGBA), so
         // that a video switcher shows its camera rather than black where the words were.
         if let Some((width, height, alpha)) = gate.blank_due() {
+            let began = Instant::now();
             sink.send(width, height, &vec![0; width as usize * height as usize * 4], alpha);
+            shared.sent_in(began.elapsed());
         }
         if let Some(picture) = gate.picture_due(Instant::now()) {
             // Changed once, the first time it is sent, then sent again as it is each second.
+            let began = Instant::now();
             picture.prepare();
             sink.send(picture.width, picture.height, &picture.rgba, picture.sent.alpha());
+            shared.sent_in(began.elapsed());
         }
     }
 }

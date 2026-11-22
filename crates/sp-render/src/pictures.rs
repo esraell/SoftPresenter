@@ -16,7 +16,8 @@
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Sender, channel};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{LockResult, Mutex, MutexGuard, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::Picture;
 
@@ -45,6 +46,25 @@ static ON_LOADED: Mutex<Option<Loaded>> = Mutex::new(None);
 thread_local! {
     /// Whether this thread only draws pictures already kept (the screens' thread).
     static KEPT_ONLY: Cell<bool> = const { Cell::new(false) };
+    /// How long this thread has waited, in all, for the locks every thread that draws shares
+    /// (the pictures kept, the font files read).
+    static LOCK_WAITS: Cell<Duration> = const { Cell::new(Duration::ZERO) };
+}
+
+/// Takes one of the locks every thread that draws shares, adding the time it waited for it to
+/// this thread's [`lock_waits`].
+pub(crate) fn timed_lock<T>(lock: &Mutex<T>) -> LockResult<MutexGuard<'_, T>> {
+    let asked = Instant::now();
+    let taken = lock.lock();
+    LOCK_WAITS.with(|waits| waits.set(waits.get() + asked.elapsed()));
+    taken
+}
+
+/// How long the calling thread has waited, in all, for the locks every thread that draws
+/// shares: the pictures kept and the font files read. Another thread holding one while it does
+/// something slow would show here; the screens' thread reads it to say where a hold-up went.
+pub fn lock_waits() -> Duration {
+    LOCK_WAITS.with(Cell::get)
 }
 
 /// Says how a picture object's file is read. Set once, when the app starts.
@@ -70,7 +90,7 @@ pub fn read_ahead(slide: &sp_model::Slide) {
     for object in &slide.objects {
         if let sp_model::ObjectKind::Image { file, .. } = &object.kind {
             let kept = KEPT.get_or_init(|| Mutex::new(Kept::new(KEEP_BYTES)));
-            if let Ok(mut kept) = kept.lock()
+            if let Ok(mut kept) = timed_lock(kept)
                 && !kept.pictures.contains_key(file.as_str())
                 && !kept.live.contains(file.as_str())
             {
@@ -83,7 +103,7 @@ pub fn read_ahead(slide: &sp_model::Slide) {
 /// True while a file's picture is being read by the loader thread (so it is drawn as nothing
 /// for now, not as a picture that can't be read).
 pub(crate) fn coming(file: &str) -> bool {
-    KEPT.get().and_then(|kept| kept.lock().ok()).is_some_and(|kept| kept.reading.contains(file))
+    KEPT.get().and_then(|kept| timed_lock(kept).ok()).is_some_and(|kept| kept.reading.contains(file))
 }
 
 /// Has the loader thread read a file, unless it is reading it already.
@@ -113,7 +133,7 @@ fn read_into_kept(file: &str) {
     let read = LOADER.get().and_then(|load| load(file));
     let small = read.as_ref().map(|full| full.shrunk(SMALL_SIDE));
     let kept = KEPT.get_or_init(|| Mutex::new(Kept::new(KEEP_BYTES)));
-    if let Ok(mut kept) = kept.lock() {
+    if let Ok(mut kept) = timed_lock(kept) {
         kept.reading.remove(file);
         // A video's newest frame shown in its place meanwhile wins over its still.
         if !kept.live.contains(file) {
@@ -138,7 +158,7 @@ fn kept_only() -> bool {
 /// its small copy, if kept, stands in for it.
 pub(crate) fn picture(file: &str) -> Option<Picture> {
     let kept = KEPT.get_or_init(|| Mutex::new(Kept::new(KEEP_BYTES)));
-    if let Ok(mut kept) = kept.lock() {
+    if let Ok(mut kept) = timed_lock(kept) {
         if let Some(found) = kept.get(file) {
             return found;
         }
@@ -149,7 +169,7 @@ pub(crate) fn picture(file: &str) -> Option<Picture> {
     }
     // Read without holding the lock, so another screen isn't kept waiting.
     let read = LOADER.get().and_then(|load| load(file));
-    if let Ok(mut kept) = kept.lock() {
+    if let Ok(mut kept) = timed_lock(kept) {
         kept.insert(file, read.clone());
     }
     read
@@ -165,7 +185,7 @@ pub(crate) fn picture_at(file: &str, drawn_side: f64) -> Option<Picture> {
     }
     let kept = KEPT.get_or_init(|| Mutex::new(Kept::new(KEEP_BYTES)));
     let small = small_name(file);
-    if let Ok(mut kept) = kept.lock() {
+    if let Ok(mut kept) = timed_lock(kept) {
         if kept.live.contains(file) {
             return kept.get(file).flatten();
         }
@@ -188,7 +208,7 @@ pub(crate) fn picture_at(file: &str, drawn_side: f64) -> Option<Picture> {
         }
     }
     let read = LOADER.get().and_then(|load| load(file)).map(|full| full.shrunk(SMALL_SIDE));
-    if let Ok(mut kept) = kept.lock() {
+    if let Ok(mut kept) = timed_lock(kept) {
         kept.insert(&small, read.clone());
     }
     read
@@ -198,7 +218,7 @@ pub(crate) fn picture_at(file: &str, drawn_side: f64) -> Option<Picture> {
 /// never read from a file.
 pub(crate) fn shown(name: &str) -> Option<Picture> {
     let kept = KEPT.get_or_init(|| Mutex::new(Kept::new(KEEP_BYTES)));
-    let mut kept = kept.lock().ok()?;
+    let mut kept = timed_lock(kept).ok()?;
     if !kept.live.contains(name) {
         return None;
     }
@@ -215,7 +235,7 @@ pub fn web_key(url: &str, width: f32, height: f32) -> String {
 /// newest frame where its still would be.
 pub fn show_picture(file: &str, picture: Picture) {
     let kept = KEPT.get_or_init(|| Mutex::new(Kept::new(KEEP_BYTES)));
-    if let Ok(mut kept) = kept.lock() {
+    if let Ok(mut kept) = timed_lock(kept) {
         kept.insert(file, Some(picture));
         kept.live.insert(file.to_owned());
         kept.remove(&small_name(file));
@@ -224,7 +244,7 @@ pub fn show_picture(file: &str, picture: Picture) {
 
 /// Forgets a file's picture, so it is read again the next time it is drawn.
 pub fn forget_picture(file: &str) {
-    if let Some(Ok(mut kept)) = KEPT.get().map(Mutex::lock) {
+    if let Some(Ok(mut kept)) = KEPT.get().map(timed_lock) {
         kept.remove(file);
         kept.remove(&small_name(file));
         kept.live.remove(file);

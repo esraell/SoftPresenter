@@ -10,7 +10,9 @@ use sp_model::{Slide, Theme, Uuid};
 use sp_ndi::NdiOutput;
 
 mod decklink;
+mod held;
 pub use decklink::DeckLinkStatus;
+use held::{For, Held, Part, Totals};
 use sp_render::{
     Fonts, Layers, MovingPicture, Painter, Picture, Solid, SolidPass, build_layers, read_pixels,
     see_through_transition, target_texture, vello, wgpu,
@@ -82,9 +84,11 @@ pub struct Overlay {
 
 pub enum OutputMsg {
     Show(Frame),
-    /// A window to draw a screen in. The thread takes ownership of its surface.
+    /// A window to draw a screen in. The thread takes ownership of its surface. The screen's
+    /// name is for the log.
     AddSurface {
         id: Uuid,
+        name: String,
         surface: wgpu::Surface<'static>,
         format: wgpu::TextureFormat,
         w: u32,
@@ -797,6 +801,8 @@ impl Announcement {
 /// A window a screen is drawn in.
 struct Target {
     id: Uuid,
+    /// The screen's name when its window opened, for the log.
+    name: String,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     blitter: wgpu::util::TextureBlitter,
@@ -822,6 +828,53 @@ struct Target {
 /// their bytes come (the GPU reads either), so copying is all the work there is.
 fn copied(lent: &sp_video::Lent<'_>) -> Option<Picture> {
     Picture::from_rows(lent.width, lent.height, lent.bytes, lent.bytes_per_row, pixel_order(lent.order), lent.opaque)
+}
+
+/// The picture a playing video lends, sent into its texture on the GPU (made, or made again for
+/// another size), to draw as the media; a copy where that can't be done.
+fn into_texture(
+    lent: &sp_video::Lent<'_>,
+    painter: &mut Painter,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    video_texture: &mut Option<MovingPicture>,
+) -> Option<Picture> {
+    // The GPU draws each pixel's fourth byte as its alpha. A picture shown opaque whatever those
+    // bytes say goes there as it is only when every one is full (as the system's player decodes
+    // all but a video with clear parts); a picture where one isn't is drawn from a copy made
+    // opaque.
+    if lent.opaque && !lent.fourth_bytes_full() {
+        return copied(lent);
+    }
+    let order = pixel_order(lent.order);
+    // The video's first picture, or one of another size than its last: a new texture.
+    if !video_texture.as_ref().is_some_and(|kept| kept.fits(lent.width, lent.height, order)) {
+        *video_texture = painter.moving_picture(device, lent.width, lent.height, order);
+    }
+    video_texture
+        .as_ref()
+        .filter(|kept| painter.show_rows(queue, kept, lent.bytes, lent.bytes_per_row))
+        .map(MovingPicture::picture)
+        // A picture too large for a texture is drawn from a copy.
+        .or_else(|| copied(lent))
+}
+
+/// A copy of a playing video's newest picture, if a new one has come, with the time taken to
+/// fetch it and to copy it noted apart.
+fn copied_from(frames: &sp_video::Frames, held: &mut Held) -> Option<Picture> {
+    let fetching = Instant::now();
+    let mut copying = Duration::ZERO;
+    let picture = frames.next_with(|lent| {
+        let began = Instant::now();
+        let picture = copied(lent);
+        copying = began.elapsed();
+        picture
+    });
+    held.add(Part::VideoFetch, For::Nothing, fetching.elapsed().saturating_sub(copying));
+    if picture.is_some() {
+        held.add(Part::VideoCopy, For::Nothing, copying);
+    }
+    picture.flatten()
 }
 
 fn pixel_order(order: sp_video::PixelOrder) -> sp_render::PixelOrder {
@@ -943,6 +996,9 @@ struct Output {
     /// How often and how long the screens are drawn, and how many video pictures came, for the log.
     timing: crate::applog::Timing,
     video_pictures: u64,
+    /// Where the pass under way spends its time, written to the log when it is held up (see
+    /// `output/held.rs`).
+    held: Held,
     /// The live preview: what the window is told, the two textures drawn into, and when the
     /// last was drawn.
     live_preview: Arc<LivePreview>,
@@ -1037,6 +1093,7 @@ fn run(
         started: Instant::now(),
         timing: crate::applog::Timing::new("screen drawings"),
         video_pictures: 0,
+        held: Held::new(Instant::now()),
         live_preview,
         waker,
         preview_targets: Vec::new(),
@@ -1050,12 +1107,19 @@ fn run(
         queue,
     };
 
+    output.held.begin(Instant::now(), output.totals());
     loop {
+        // Each time round is a pass of its own, as is the work after each wait below: one held
+        // up is written to the log with where its time went.
+        output.end_pass();
+        output.held.begin(Instant::now(), output.totals());
         // The GPU library lets go of what a finished drawing used (a bind group and a texture
         // view for every picture the renderer paints) only when the device is asked to look,
         // and nothing else asks: without this, each frame drawn left about a kilobyte behind,
         // for good (a few thousand objects for every half minute of video). It never waits.
+        let polled = Instant::now();
         let _ = output.device.poll(wgpu::PollType::Poll);
+        output.held.since(Part::Poll, For::Nothing, polled);
         // What the operator has asked for meanwhile comes first: it is drawn below, in place
         // of a picture that was due to be drawn again.
         let waiting = match rx.try_recv() {
@@ -1081,7 +1145,8 @@ fn run(
         } else if output.ndi_waiting() {
             // NDI pictures on their way back from the GPU are looked for every couple of
             // milliseconds (never waited on), with a playing video kept going meanwhile.
-            match rx.recv_timeout(Duration::from_millis(2)) {
+            let look = Duration::from_millis(2);
+            match output.idle(Some(look), || rx.recv_timeout(look)) {
                 Ok(msg) => Some(msg),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     // The picture that was waiting may be painted now: a drawing of its own,
@@ -1100,7 +1165,8 @@ fn run(
         } else if capture_wanted() {
             // Testing aid: while a picture of the output is still to be taken, keep drawing, so
             // it is taken even where no window asks to be drawn (a quiet run's are hidden).
-            match rx.recv_timeout(Duration::from_millis(200)) {
+            let look = Duration::from_millis(200);
+            match output.idle(Some(look), || rx.recv_timeout(look)) {
                 Ok(msg) => Some(msg),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     // With a video's (or web page's) newest picture, as the screens show it.
@@ -1123,7 +1189,7 @@ fn run(
             };
             // No longer than until a picture the GPU was too slow with is due again.
             let wait = output.draw_again_in().map_or(wait, |due| wait.min(due));
-            match rx.recv_timeout(wait) {
+            match output.idle(Some(wait), || rx.recv_timeout(wait)) {
                 Ok(msg) => Some(msg),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     // Woken for that picture: it redraws every screen, the time included.
@@ -1154,7 +1220,8 @@ fn run(
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
             }
         } else if output.plays_video() {
-            match rx.recv_timeout(output.video_poll()) {
+            let wait = output.video_poll();
+            match output.idle(Some(wait), || rx.recv_timeout(wait)) {
                 Ok(msg) => Some(msg),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     if output.take_video_picture() {
@@ -1168,14 +1235,16 @@ fn run(
             // Nothing moves until the next message: memory a heavy picture took is given back.
             // That never waits here; while the GPU still holds some of it, or a picture it was
             // too slow with is to be drawn again, the thread comes back in a moment to look.
+            let resting = Instant::now();
             let rested = output.painter.rest(&output.device, &output.queue);
+            output.held.since(Part::Rest, For::Nothing, resting);
             match output.look_again_in(rested) {
-                None => match rx.recv() {
+                None => match output.idle(None, || rx.recv()) {
                     Ok(msg) => Some(msg),
                     Err(_) => return,
                 },
                 // The top of the loop looks at the GPU, and draws a picture again if it is due.
-                Some(wait) => match rx.recv_timeout(wait) {
+                Some(wait) => match output.idle(Some(wait), || rx.recv_timeout(wait)) {
                     Ok(msg) => Some(msg),
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
@@ -1191,7 +1260,9 @@ fn run(
                 output.draw(false);
                 // With no window to wait for (only NDI), keep to about the screens' pace.
                 if output.targets.is_empty() {
+                    let pausing = Instant::now();
                     std::thread::sleep(Duration::from_millis(16));
+                    output.held.since(Part::Pause, For::Nothing, pausing);
                 }
             }
             continue;
@@ -1211,7 +1282,9 @@ fn run(
                     let now = Instant::now();
                     // The next slide's pictures are read meanwhile, so it goes on at once.
                     if let Some(next) = frame.next.as_deref() {
+                        let asking = Instant::now();
                         sp_render::read_ahead(next);
+                        output.held.since(Part::Locks, For::Nothing, asking);
                     }
                     // Another version over the same slide gives way to it as another slide does.
                     let same_slide = output.frame.slide.as_deref() == frame.slide.as_deref()
@@ -1246,7 +1319,9 @@ fn run(
                     // A video box that stops playing goes back to its still.
                     for (file, _) in &output.frame.slide_video {
                         if !frame.slide_video.iter().any(|(still, _)| still == file) {
+                            let forgetting = Instant::now();
                             sp_render::forget_picture(file);
+                            output.held.since(Part::Locks, For::Nothing, forgetting);
                         }
                     }
                     let same_media = match (&output.frame.media, &frame.media) {
@@ -1264,14 +1339,26 @@ fn run(
                     output.look = if same_slide && !same_media { frame.media_transition } else { frame.transition };
                     output.frame = frame;
                 }
-                OutputMsg::AddSurface { id, surface, format, w, h } => output.add_surface(id, surface, format, w, h),
+                OutputMsg::AddSurface { id, name, surface, format, w, h } => {
+                    let setting_up = Instant::now();
+                    output.add_surface(id, name, surface, format, w, h);
+                    output.held.since(Part::Setup, For::Window(id), setting_up);
+                }
                 OutputMsg::PreviewTargets(targets) => output.preview_targets = targets,
-                OutputMsg::Resized(id, w, h) => output.resize(id, w, h),
+                OutputMsg::Resized(id, w, h) => {
+                    let setting_up = Instant::now();
+                    output.resize(id, w, h);
+                    output.held.since(Part::Setup, For::Window(id), setting_up);
+                }
                 OutputMsg::Redraw => {}
                 OutputMsg::SetNdi { id, name } => output.set_ndi(id, name),
                 OutputMsg::NdiReceivers => receivers_changed = true,
                 OutputMsg::SetDeckLink { id, wanted } => output.set_decklink(id, wanted),
-                OutputMsg::RemoveSurface(id) => output.targets.retain(|target| target.id != id),
+                OutputMsg::RemoveSurface(id) => {
+                    let letting_go = Instant::now();
+                    output.targets.retain(|target| target.id != id);
+                    output.held.since(Part::Setup, For::Window(id), letting_go);
+                }
                 OutputMsg::Announcement(announcement) => {
                     // A video that stops playing on the layer goes back to its still (unless a
                     // box on the slide plays the same file).
@@ -1281,7 +1368,9 @@ fn run(
                         && now != Some(was.as_str())
                         && !output.frame.slide_video.iter().any(|(file, _)| *file == was)
                     {
+                        let forgetting = Instant::now();
                         sp_render::forget_picture(&was);
+                        output.held.since(Part::Locks, For::Nothing, forgetting);
                     }
                     let same = match (&output.announcement, &announcement) {
                         (Some(before), Some(after)) => before.same_picture(after),
@@ -1329,7 +1418,9 @@ fn run(
         }
         // The Screens window says how many are watching each source: it looks again.
         if receivers_changed && let Some(wake) = &output.waker {
+            let waking = Instant::now();
             wake();
+            output.held.since(Part::Wake, For::Nothing, waking);
         }
         if nothing_else && preview_again {
             // Only the preview is drawn, at once, for the screen it now looks at.
@@ -1359,7 +1450,99 @@ fn fade_amount(started: Instant, seconds: f32) -> f32 {
 }
 
 impl Output {
-    fn add_surface(&mut self, id: Uuid, surface: wgpu::Surface<'static>, format: wgpu::TextureFormat, w: u32, h: u32) {
+    /// The running totals a pass's share of is told when it is held up.
+    fn totals(&self) -> Totals {
+        Totals {
+            gpu_wait: self.painter.gpu_waited(),
+            runs: self.painter.runs(),
+            reruns: self.painter.reruns(),
+            shared_locks: sp_render::lock_waits(),
+            log: crate::applog::time_writing(),
+        }
+    }
+
+    /// Ends the pass under way; one held up is written to the log, with where its time went and
+    /// what the DeckLink and NDI threads were doing.
+    fn end_pass(&mut self) {
+        let now = Instant::now();
+        let Some(took) = self.held.end(now) else { return };
+        let began_at = chrono::Local::now() - chrono::Duration::from_std(took).unwrap_or_default();
+        let began_at = began_at.format("%H:%M:%S%.3f").to_string();
+        let mut line = self.held.words(took, &began_at, self.totals(), |what| self.step_for(what));
+        for (_, output) in &self.decklink {
+            let Some(tried) = output.last_try() else { continue };
+            let state = match output.state() {
+                sp_decklink::State::Starting => "starting",
+                sp_decklink::State::Playing(_) => "playing",
+                sp_decklink::State::Waiting(_) => "waiting for its device",
+            };
+            line.push_str(&format!(
+                " DeckLink {}: {state}; last tried {:.1} s before the end, for {:.1} ms ({}).",
+                tried.device,
+                now.saturating_duration_since(tried.began).as_secs_f64(),
+                tried.took.as_secs_f64() * 1000.0,
+                if tried.opened { "opened" } else { "not opened" },
+            ));
+        }
+        for (_, ndi) in &self.ndi {
+            let receivers =
+                ndi.receivers().map_or_else(|| "receivers not known".to_owned(), |n| format!("{n} receivers"));
+            line.push_str(&format!(
+                " NDI \"{}\": {receivers}, longest send lately {:.1} ms.",
+                ndi.name(),
+                ndi.longest_send().as_secs_f64() * 1000.0
+            ));
+        }
+        crate::applog::event("output", &line);
+    }
+
+    /// Waits as `wait` does (for at most `most`, when it says), as the end of one pass and the
+    /// start of the next; a wait that went on well past `most` is noted for the minute.
+    fn idle<T>(&mut self, most: Option<Duration>, wait: impl FnOnce() -> T) -> T {
+        self.end_pass();
+        let asked = Instant::now();
+        let got = wait();
+        let now = Instant::now();
+        if let Some(most) = most {
+            self.held.woke_late(now.saturating_duration_since(asked).saturating_sub(most));
+        }
+        self.held.begin(now, self.totals());
+        got
+    }
+
+    /// What a step was for, in words for the log.
+    fn step_for(&self, what: For) -> String {
+        let screen = |id: Uuid| -> String {
+            if let Some(target) = self.targets.iter().find(|target| target.id == id) {
+                return format!("\"{}\"", target.name);
+            }
+            if let Some((_, ndi)) = self.ndi.iter().find(|(have, _)| *have == id) {
+                return format!("NDI \"{}\"", ndi.name());
+            }
+            if let Some(tried) = self.decklink.iter().find(|(have, _)| *have == id).and_then(|(_, out)| out.last_try())
+            {
+                return format!("DeckLink {}", tried.device);
+            }
+            "a screen".to_owned()
+        };
+        match what {
+            For::Nothing => String::new(),
+            For::Window(id) => format!("the window of {}", screen(id)),
+            For::Ndi(id) => format!("the NDI and DeckLink picture of {}", screen(id)),
+            For::Screen(id) => format!("what {} shows", screen(id)),
+            For::Preview => "the operator's preview".to_owned(),
+        }
+    }
+
+    fn add_surface(
+        &mut self,
+        id: Uuid,
+        name: String,
+        surface: wgpu::Surface<'static>,
+        format: wgpu::TextureFormat,
+        w: u32,
+        h: u32,
+    ) {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -1376,6 +1559,7 @@ impl Output {
         self.targets.retain(|target| target.id != id);
         self.targets.push(Target {
             id,
+            name,
             blitter: wgpu::util::TextureBlitter::new(&self.device, format),
             pass: None,
             texture: target_texture(&self.device, config.width, config.height),
@@ -1433,10 +1617,12 @@ impl Output {
             let frame = self.frame.clone();
             self.send_ndi(&frame, NdiChange::Nothing);
         }
+        let locking = Instant::now();
         if let Ok(mut shared) = self.ndi_status.lock() {
             shared.retain(|(have, _)| *have != id);
             shared.extend(status.map(|status| (id, status)));
         }
+        self.held.since(Part::Locks, For::Nothing, locking);
     }
 
     /// Nothing is read back for NDI or DeckLink any more: whatever such picture could not be
@@ -1573,6 +1759,13 @@ impl Output {
 
     /// Builds what a screen shows now for a target of a size.
     fn scene_for(&mut self, id: Uuid, frame: &Frame, w: u32, h: u32) -> vello::Scene {
+        let building = self.held.scene_begins();
+        let scene = self.build_scene_for(id, frame, w, h);
+        self.held.scene_built(building, For::Screen(id));
+        scene
+    }
+
+    fn build_scene_for(&mut self, id: Uuid, frame: &Frame, w: u32, h: u32) -> vello::Scene {
         // While screens are identified, each is marked over what it shows.
         let identified =
             self.identify.iter().find(|(have, ..)| *have == id).map(|(_, name, color)| (name.clone(), *color));
@@ -1706,7 +1899,7 @@ impl Output {
             let scene = self.scene_for(group.of, frame, w, h);
             let target = self.ndi_target.get_or_insert_with(|| target_texture(&self.device, w, h)).clone();
             let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-            if let Err(e) = self.paint(&scene, &view, w, h, see_through.is_some()) {
+            if let Err(e) = self.paint(&scene, &view, w, h, see_through.is_some(), For::Ndi(group.of)) {
                 let message = format!("The NDI picture could not be drawn: {e}");
                 if self.ndi_trouble.is_news(&message) {
                     crate::applog::problem("output", &message);
@@ -1718,6 +1911,7 @@ impl Output {
             }
             // The copy is queued after the drawing, so it takes this picture even though the next
             // group is drawn into the same texture straight after.
+            let reading_back = Instant::now();
             let padded_row = (w as usize * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize)
                 * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
             let buffer = self.ndi_buffers.pop().unwrap_or_else(|| {
@@ -1749,6 +1943,7 @@ impl Output {
                     *flag = Some(result.is_ok());
                 }
             });
+            self.held.since(Part::Readback, For::Ndi(group.of), reading_back);
             let ids = group.fills.into_iter().chain(group.keys.iter().copied()).collect();
             let sent = ndi_sent(see_through);
             self.ndi_pending.push(NdiReadback { ids, keys: group.keys, sent, place, buffer, padded_row, done });
@@ -1846,13 +2041,17 @@ impl Output {
         if self.ndi_pending.is_empty() {
             return;
         }
+        let polling = Instant::now();
         let _ = self.device.poll(wgpu::PollType::Poll);
+        self.held.since(Part::Poll, For::Nothing, polling);
         let (w, h) = NDI_SIZE;
         let row = w as usize * 4;
         let mut still = Vec::new();
         let mut lost: Vec<Uuid> = Vec::new();
         for readback in std::mem::take(&mut self.ndi_pending) {
+            let locking = Instant::now();
             let mut done = readback.done.lock().ok().and_then(|done| *done);
+            self.held.since(Part::Locks, For::Nothing, locking);
             // Testing aid: SOFTPRESENTER_NDI_LOSE (see `PretendLost`).
             let watched = |id: &Uuid| self.ndi.iter().any(|(have, ndi)| have == id && ndi.receivers() > Some(0));
             if done == Some(true)
@@ -1880,9 +2079,12 @@ impl Output {
                         }
                     }
                     let cards = self.decklink_for(&readback.ids, &readback.keys, readback.sent);
+                    // Timed apart, then noted: the sources borrow the list the times go in.
+                    let (mut rows, mut handed) = (Duration::ZERO, Duration::ZERO);
                     if !sources.is_empty() || !cards.is_empty() {
                         // The rows are copied out of the buffer once, without the padding, and
                         // every source sends those same pixels.
+                        let copying = Instant::now();
                         let pixels = {
                             let slice = readback.buffer.slice(..);
                             let Ok(mapped) = slice.get_mapped_range() else {
@@ -1895,14 +2097,23 @@ impl Output {
                             }
                             Arc::new(pixels)
                         };
+                        let handing = Instant::now();
+                        rows = handing - copying;
                         for (ndi, sent) in sources {
                             ndi.show_shared(w, h, pixels.clone(), sent);
                         }
                         for (card, alpha) in cards {
                             card.show_shared(w, h, pixels.clone(), alpha);
                         }
+                        handed = handing.elapsed();
                     }
+                    let unmapping = Instant::now();
                     readback.buffer.unmap();
+                    rows += unmapping.elapsed();
+                    self.held.add(Part::Rows, For::Nothing, rows);
+                    if handed > Duration::ZERO {
+                        self.held.add(Part::HandOver, For::Nothing, handed);
+                    }
                     // Kept for the next picture, two at most.
                     if self.ndi_buffers.len() < 2 {
                         self.ndi_buffers.push(readback.buffer);
@@ -1942,7 +2153,23 @@ impl Output {
         self.draw_now(new_picture);
         self.timing.add(started.elapsed());
         let (videos, screens, ndi) = (self.video_pictures, self.targets.len(), self.ndi.len());
-        let extra = || format!("{videos} video pictures, {screens} windows, {ndi} NDI");
+        let (held, sources) = (&mut self.held, &self.ndi);
+        let extra = || {
+            let mut words = format!("{videos} video pictures, {screens} windows, {ndi} NDI; {}", held.minute_words());
+            // A picture NDI took long to send held up nothing here (sending is on the source's
+            // own thread), but is worth knowing of.
+            for (_, source) in sources {
+                let longest = source.longest_send();
+                if longest >= held::HELD {
+                    words.push_str(&format!(
+                        "; NDI \"{}\" took {:.1} ms to send a picture",
+                        source.name(),
+                        longest.as_secs_f64() * 1000.0
+                    ));
+                }
+            }
+            words
+        };
         if self.timing.report_each_minute("output", extra) {
             self.video_pictures = 0;
         }
@@ -1992,7 +2219,9 @@ impl Output {
         }
         let (w, h) = LIVE_PREVIEW_SIZE;
         let look = self.fading.map_or(sp_model::Transition::default(), |(_, look)| look);
+        let mixing = Instant::now();
         let mixed = sp_render::transition(look.kind, look.direction, &from, &to, amount, w, h);
+        self.held.since(Part::Scene, For::Preview, mixing);
         self.paint_live_preview(&mixed);
         self.preview_fade = Some((from, to));
     }
@@ -2009,7 +2238,7 @@ impl Output {
         let (w, h) = LIVE_PREVIEW_SIZE;
         let back = 1 - self.live_preview.front.load(Acquire).min(1);
         let view = self.preview_targets[back].create_view(&wgpu::TextureViewDescriptor::default());
-        if let Err(e) = self.paint(scene, &view, w, h, false) {
+        if let Err(e) = self.paint(scene, &view, w, h, false, For::Preview) {
             self.preview_state.failed(&e);
             return false;
         }
@@ -2021,7 +2250,9 @@ impl Output {
         if !self.live_preview.wake_pending.swap(true, Acquire)
             && let Some(wake) = &self.waker
         {
+            let waking = Instant::now();
             wake();
+            self.held.since(Part::Wake, For::Preview, waking);
         }
         true
     }
@@ -2105,6 +2336,7 @@ impl Output {
         w: u32,
         h: u32,
         see_through: bool,
+        what: For,
     ) -> Result<(), sp_render::PaintError> {
         // Testing aid: SOFTPRESENTER_GPU_TOO_SLOW (see `PretendSlow`).
         let pretending =
@@ -2112,11 +2344,13 @@ impl Output {
         if self.pretend_slow.is_some() {
             self.painter.wait_at_most(pretending.then_some(Duration::ZERO));
         }
+        let painting = Instant::now();
         let painted = if see_through {
             self.painter.paint_see_through(&self.device, &self.queue, scene, view, w, h)
         } else {
             self.painter.paint(&self.device, &self.queue, scene, view, w, h)
         };
+        self.held.since(Part::Paint, what, painting);
         // Only a picture that was given up counts: one drawn before is not waited for.
         if pretending
             && painted.as_ref().is_err_and(sp_render::PaintError::worth_trying_again)
@@ -2148,11 +2382,15 @@ impl Output {
             let told = worst.map_or("Every screen shows what it was asked to again.", Undrawn::in_words);
             crate::applog::event("output", &format!("The operator's window is told: {told}"));
             if let Some(wake) = &self.waker {
+                let waking = Instant::now();
                 wake();
+                self.held.since(Part::Wake, For::Nothing, waking);
             }
         }
         if self.round.failed && !self.round.presented {
+            let pausing = Instant::now();
             std::thread::sleep(UNDRAWN_PAUSE);
+            self.held.since(Part::Pause, For::Nothing, pausing);
         }
     }
 
@@ -2183,6 +2421,7 @@ impl Output {
         self.windows_behind = behind && !stage;
         let scene = self.scene_for(id, frame, w, h);
         self.windows_behind = behind;
+        let capturing = Instant::now();
         let target = target_texture(&self.device, w, h);
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
         let saved = self
@@ -2197,6 +2436,7 @@ impl Output {
                 png.set_depth(png::BitDepth::Eight);
                 png.write_header().and_then(|mut writer| writer.write_image_data(&pixels)).map_err(|e| e.to_string())
             });
+        self.held.since(Part::Capture, For::Nothing, capturing);
         match saved {
             Ok(()) => eprintln!("saved the output to {}", std::path::Path::new(&path).display()),
             Err(e) => eprintln!("could not save the output: {e}"),
@@ -2221,49 +2461,43 @@ impl Output {
         // The video behind the slide: its pixels go straight from the player into a texture on
         // the GPU, the same one for every picture, with nothing copied or put in another order
         // on the way. Only this thread's painter draws it (the screens, the live preview, NDI).
-        let Output { frame, painter, device, queue, video_texture, .. } = self;
-        let shown = frame.video.as_ref().and_then(|frames| {
-            frames.next_with(|lent| {
-                // The GPU draws each pixel's fourth byte as its alpha. A picture shown opaque
-                // whatever those bytes say goes there as it is only when every one is full
-                // (as the system's player decodes all but a video with clear parts); a picture
-                // where one isn't is drawn from a copy made opaque.
-                if lent.opaque && !lent.fourth_bytes_full() {
-                    return copied(lent);
-                }
-                let order = pixel_order(lent.order);
-                // The video's first picture, or one of another size than its last: a new texture.
-                if !video_texture.as_ref().is_some_and(|kept| kept.fits(lent.width, lent.height, order)) {
-                    *video_texture = painter.moving_picture(device, lent.width, lent.height, order);
-                }
-                video_texture
-                    .as_ref()
-                    .filter(|kept| painter.show_rows(queue, kept, lent.bytes, lent.bytes_per_row))
-                    .map(MovingPicture::picture)
-                    // A picture too large for a texture is drawn from a copy.
-                    .or_else(|| copied(lent))
-            })
-        });
-        if let Some(shown) = shown {
-            self.video_picture = shown;
-            self.video_pictures += 1;
-            new |= self.video_picture.is_some();
+        let Output { frame, painter, device, queue, video_texture, held, .. } = self;
+        if let Some(frames) = frame.video.as_ref() {
+            let fetching = Instant::now();
+            let mut copying = Duration::ZERO;
+            let shown = frames.next_with(|lent| {
+                let began = Instant::now();
+                let shown = into_texture(lent, painter, device, queue, video_texture);
+                copying = began.elapsed();
+                shown
+            });
+            held.add(Part::VideoFetch, For::Nothing, fetching.elapsed().saturating_sub(copying));
+            if let Some(shown) = shown {
+                held.add(Part::VideoCopy, For::Nothing, copying);
+                self.video_picture = shown;
+                self.video_pictures += 1;
+                new |= self.video_picture.is_some();
+            }
         }
         // Each video in a box on the slide: its newest picture stands in for the box's still.
         // It is a copy, because every thread that draws the slide (the operator's window too)
         // shows it.
         for (file, frames) in &self.frame.slide_video {
-            if let Some(Some(picture)) = frames.next_with(copied) {
+            if let Some(picture) = copied_from(frames, &mut self.held) {
+                let showing = Instant::now();
                 sp_render::show_picture(file, picture);
+                self.held.since(Part::VideoCopy, For::Nothing, showing);
                 self.video_pictures += 1;
                 new = true;
             }
         }
         // A video on the Announcements layer, the same way: its box shows its newest picture.
         if let Some((name, frames)) = self.announcement.as_ref().and_then(|shown| shown.video.as_ref())
-            && let Some(Some(picture)) = frames.next_with(copied)
+            && let Some(picture) = copied_from(frames, &mut self.held)
         {
+            let showing = Instant::now();
             sp_render::show_picture(name, picture);
+            self.held.since(Part::VideoCopy, For::Nothing, showing);
             self.video_pictures += 1;
             new = true;
         }
@@ -2434,11 +2668,13 @@ impl Output {
                 let (id, w, h) =
                     (self.targets[index].id, self.targets[index].config.width, self.targets[index].config.height);
                 // On a see-through screen, a true cross-fade (see `see_through_transition`).
+                let mixing = Instant::now();
                 let scene = if self.see_through(id).is_some() {
                     see_through_transition(look.kind, &from, &to, amount, w, h)
                 } else {
                     sp_render::transition(look.kind, look.direction, &from, &to, amount, w, h)
                 };
+                self.held.since(Part::Scene, For::Window(id), mixing);
                 self.present(index, &scene);
                 self.targets[index].fade = Some((from, to));
             }
@@ -2529,8 +2765,8 @@ impl Output {
         }
         // A see-through screen is painted on clear, and shown solid as its alpha says.
         let see_through = self.see_through(id);
-        let painted = self.paint(scene, &view, w, h, see_through.is_some());
-        let Output { device, queue, targets, round, .. } = self;
+        let painted = self.paint(scene, &view, w, h, see_through.is_some(), For::Window(id));
+        let Output { device, queue, targets, round, held, .. } = self;
         let target = &mut targets[index];
         if let Err(e) = painted {
             let message = format!("The output could not draw a frame, and keeps what it shows: {e}");
@@ -2544,7 +2780,7 @@ impl Output {
         if let Some(more) = target.trouble.over() {
             crate::applog::event("output", &format!("The output draws again, after {more} more frames not drawn"));
         }
-        if show_in_window(device, queue, target, &view, see_through.map(solid_fill)) {
+        if show_in_window(device, queue, target, &view, see_through.map(solid_fill), held) {
             round.presented = true;
         }
         // The keys of this picture, made from it now, so they never show another moment. (A
@@ -2565,11 +2801,11 @@ impl Output {
             return;
         }
         let picture = self.targets[fill].texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let Output { device, queue, targets, round, .. } = self;
+        let Output { device, queue, targets, round, held, .. } = self;
         for key in keys {
             let target = &mut targets[key];
             target.state.painted();
-            if show_in_window(device, queue, target, &picture, Some(Solid::Key)) {
+            if show_in_window(device, queue, target, &picture, Some(Solid::Key), held) {
                 round.presented = true;
             }
         }
@@ -2695,24 +2931,48 @@ fn show_in_window(
     target: &mut Target,
     picture: &wgpu::TextureView,
     solid: Option<Solid>,
+    held: &mut Held,
 ) -> bool {
+    let shown = show_in_window_timed(device, queue, target, picture, solid, held);
+    held.window_shown(shown);
+    shown
+}
+
+/// [`show_in_window`]'s work, each step timed for the log.
+fn show_in_window_timed(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    target: &mut Target,
+    picture: &wgpu::TextureView,
+    solid: Option<Solid>,
+    held: &mut Held,
+) -> bool {
+    let window = For::Window(target.id);
     // A window whose surface isn't set up is set up first, or skipped this frame.
     if !target.configured {
+        let setting_up = Instant::now();
         target.configured = configure(device, &target.surface, &target.config);
+        let pausing = held.since(Part::Setup, window, setting_up);
         if !target.configured {
             std::thread::sleep(Duration::from_millis(8));
+            held.since(Part::Pause, window, pausing);
             return false;
         }
     }
     if let Some(shown) = solid
         && target.pass.as_ref().is_none_or(|pass| pass.shown() != shown || pass.format() != target.config.format)
     {
+        let setting_up = Instant::now();
         target.pass = Some(SolidPass::new(device, target.config.format, shown));
+        held.since(Part::Setup, window, setting_up);
     }
     // A lost or outdated surface is set up again and tried once more; anything else
     // (hidden window, timeout) skips this frame and the next message redraws.
     for attempt in 0..2 {
-        let Some(next) = next_texture(&target.surface) else {
+        let acquiring = Instant::now();
+        let next = next_texture(&target.surface);
+        let after = held.since(Part::Acquire, window, acquiring);
+        let Some(next) = next else {
             target.configured = false;
             return false;
         };
@@ -2725,11 +2985,14 @@ fn show_in_window(
                     _ => target.blitter.copy(device, &mut encoder, picture, &surface_view),
                 }
                 queue.submit([encoder.finish()]);
+                let presenting = held.since(Part::Blit, window, after);
                 queue.present(frame);
+                held.since(Part::Present, window, presenting);
                 return true;
             }
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost if attempt == 0 => {
                 target.configured = configure(device, &target.surface, &target.config);
+                held.since(Part::Setup, window, after);
                 if !target.configured {
                     return false;
                 }
@@ -2737,6 +3000,7 @@ fn show_in_window(
             // A hidden window shows nothing; wait a moment so a fade does not spin.
             _ => {
                 std::thread::sleep(Duration::from_millis(8));
+                held.since(Part::Pause, window, after);
                 return false;
             }
         }

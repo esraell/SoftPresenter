@@ -302,7 +302,7 @@ fn font_file(path: &Path) -> Option<Blob<u8>> {
 /// The font files read so far. A thread that panicked while it held them left them whole (each
 /// change is a single insert or remove), so they are used as they are.
 fn files() -> std::sync::MutexGuard<'static, Files> {
-    FILES.get_or_init(Mutex::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    crate::pictures::timed_lock(FILES.get_or_init(Mutex::default)).unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Hands the loader thread a job, starting it the first time. False if it couldn't be.

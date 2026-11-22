@@ -1049,6 +1049,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   each on its own clock, so unless the outputs are locked together a switcher may get the two
   up to a frame apart; over NDI, one see-through screen (which carries its own alpha) has no
   such gap.
+- **A hold-up of the screens says where it went.** Should the screens ever stand still for a
+  tenth of a second or more, the log gets one line saying when, the longest step and what it
+  was for (a window, the NDI and DeckLink picture of a screen, the preview), and how long each
+  kind of step took: the video's picture, building the picture, painting it, reading it back
+  for NDI and DeckLink, handing it over, a window's next picture from the system, showing it,
+  and the locks shared with the operator's window. The line each minute counts the passes over
+  50 and 100 ms and the pictures the windows showed and didn't; screens' windows being covered
+  and uncovered, the displays changing and a slow try at opening a DeckLink device are logged
+  too. All of it costs a few readings of the clock.
 
 <img src="images/screens.png" alt="The Screens window" width="620">
 

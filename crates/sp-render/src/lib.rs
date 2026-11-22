@@ -12,7 +12,7 @@ mod see_through;
 pub use fonts::{Fonts, copy_large_fonts_into_caches};
 pub use gpu::{MovingPicture, PaintError, Painter, read_pixels, target_texture};
 pub use picture::{Picture, PixelOrder};
-pub use pictures::{draw_kept_only, forget_picture, read_ahead, set_picture_loader, show_picture, web_key};
+pub use pictures::{draw_kept_only, forget_picture, lock_waits, read_ahead, set_picture_loader, show_picture, web_key};
 pub use scene::{
     Built, Layers, ScreenPicture, build_layers, build_overlay, build_scene, cross_fade, fit_rect, layout_objects,
     object_frame, scrolls, set_web_stand_in, show_placeholders, transition, with_screen_pictures,

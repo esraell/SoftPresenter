@@ -339,6 +339,28 @@ The log is `~/Library/Logs/SoftPresenter/SoftPresenter.log`: what went on screen
 change something (not those that only read, such as `sp status`), problems, and once a minute
 how long drawing took.
 
+When the screens are held up, the log says where the time went. The screens' thread
+(`output.rs`) times each pass of its loop (the work between two waits) step by step, with the
+clock alone (`output/held.rs`). A pass held 100 ms or more writes one `[output]` line: when it
+began, its longest step and what that step was for, the time and count of each kind of step,
+and what was left over ("other"). The kinds are video fetch (asking the player for its newest
+picture) and video copy, scene build, vello paint (with its wait for the GPU, and how many
+times it ran the picture and ran it again for room), NDI readback and NDI rows (copying a
+picture back from the GPU), hand-over (to NDI and DeckLink, which never waits), surface acquire
+(a window's next picture from the window system), blit, present, window set-up, GPU poll,
+painter rest, locks, waking the window, pauses taken on purpose, and capture. The line also
+gives the time spent within those steps waiting for the locks every drawing thread shares and
+writing the log, each DeckLink output's state and last try at opening its device, and each NDI
+source's receivers and longest send lately (NDI and DeckLink send on threads of their own):
+
+    [output] The screens' thread was held 1019.1 ms from 10:00:16.976. Longest step: surface acquire for the window of "TV", 1003.2 ms. All steps: surface acquire 1003.4 ms ×1; present 0.2 ms ×1; blit 0.1 ms ×1; vello paint 9.1 ms ×4 (GPU wait 0.0 ms, 4 runs, 0 again for room); … other 1.2 ms. Within them: … DeckLink DeckLink Duo (1): waiting for its device; last tried 0.4 s before the end, for 0.1 ms (not opened). NDI "Stage": 1 receivers, longest send lately 4.0 ms.
+
+The per-minute `[output]` line adds the longest pass, how many passes were over 50 ms and over
+100 ms, how many pictures reached the windows and how many didn't (a covered window shows
+none), how late the thread woke when that was 50 ms or more, and an NDI send of 100 ms or more.
+A DeckLink output's thread says when opening its device took 100 ms or more, and the window
+says when a screen's window is covered or uncovered and when the displays change (`[screens]`).
+
 ## How the code is laid out
 
 | Crate | Holds |

@@ -913,6 +913,11 @@ fn surface_format(surface: &wgpu::Surface<'_>, adapter: &wgpu::Adapter) -> Resul
         .ok_or_else(|| "This display does not offer a colour format SoftPresenter can draw to.".to_owned())
 }
 
+/// A screen's name, by its id, for the log.
+fn screen_name(state: &HomeState, id: Uuid) -> &str {
+    state.screens.iter().find(|screen| screen.id == id).map_or("A screen", |screen| screen.name.as_str())
+}
+
 /// The connected displays as the window system lists them.
 /// Notes in the log where a screen's window was asked to go and which display it is on, so a
 /// screen on the wrong display can be seen from the log.
@@ -6268,6 +6273,13 @@ impl App {
             running.home_state.screens_changed = true;
         }
         if displays != running.home_state.displays {
+            // Said in the log: a display that goes or comes back, or changes size, can hold up the
+            // screens' windows on it (see `output/held.rs`).
+            let listed: Vec<String> = displays
+                .iter()
+                .map(|display| format!("{} {}x{} at {},{}", display.name, display.w, display.h, display.x, display.y))
+                .collect();
+            applog::event("screens", &format!("Displays now: {}", listed.join("; ")));
             running.home_state.displays = displays.clone();
         }
         if std::mem::take(&mut running.home_state.screens_changed)
@@ -6437,7 +6449,14 @@ impl App {
                 }
             };
             let size = window.inner_size();
-            output.send(OutputMsg::AddSurface { id: screen.id, surface, format, w: size.width, h: size.height });
+            output.send(OutputMsg::AddSurface {
+                id: screen.id,
+                name: screen.name.clone(),
+                surface,
+                format,
+                w: size.width,
+                h: size.height,
+            });
             screen_windows.push(ScreenWindow {
                 screen: screen.id,
                 window,
@@ -8523,9 +8542,22 @@ impl ApplicationHandler<AppEvent> for App {
                 // words on screen. Do not also redraw on RedrawRequested: presenting a frame makes
                 // the system ask for another, which loops without end.
                 WindowEvent::Occluded(false) => {
+                    applog::event(
+                        "screens",
+                        &format!("{}: the window is uncovered", screen_name(&running.home_state, screen)),
+                    );
                     if let Some(output) = &running.output {
                         output.send(OutputMsg::Redraw);
                     }
+                }
+                // Said in the log, as uncovering is: while macOS counts a screen's window as
+                // covered it shows none of its pictures, and the moment it changes is when a
+                // window's next picture can be slow to come (see `output/held.rs`).
+                WindowEvent::Occluded(true) => {
+                    applog::event(
+                        "screens",
+                        &format!("{}: the window is covered", screen_name(&running.home_state, screen)),
+                    );
                 }
                 WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                     if !self.held.super_key()

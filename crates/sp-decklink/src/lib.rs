@@ -38,7 +38,7 @@ use std::path::PathBuf;
 
 pub use convert::PixelFormat;
 pub use discover::Discovery;
-pub use play::{DeckLinkOutput, Log, State, Wanted, Watch};
+pub use play::{DeckLinkOutput, Log, State, Try, Wanted, Watch};
 pub use player::Counts;
 
 /// What the operator is told when the driver can't be found.
