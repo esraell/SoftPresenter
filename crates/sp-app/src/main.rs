@@ -358,20 +358,38 @@ fn do_state_action(state: &mut home::HomeState, action: &sp_model::ShowAction, n
     }
 }
 
-/// The changes made to songs in the Show view: each step is a song's place and the song as it
-/// was. Undo puts the song back and keeps how it is now, to redo.
+/// The changes made in the Show view, in the order Undo takes them back: songs changed (each
+/// step a song's place and the song as it was: Undo puts the song back and keeps how it is now,
+/// to redo), and items taken out of a playlist (Undo puts them back; Redo takes them out again).
 #[derive(Default)]
-struct SongHistory {
-    /// Each step: the song's place, the song as it was, and when the step was taken (a count).
-    undo: Vec<(usize, Arc<sp_model::Presentation>, u64)>,
-    redo: Vec<(usize, Arc<sp_model::Presentation>, u64)>,
+struct ShowHistory {
+    /// Each step, and when it was taken (a count).
+    undo: Vec<(ShowStep, u64)>,
+    redo: Vec<(ShowStep, u64)>,
     next: u64,
 }
 
-impl SongHistory {
+/// One step of the Show view's undo order.
+enum ShowStep {
+    /// A song's place, and the song as it was (or, to redo, as it was before the undo).
+    Song(usize, Arc<sp_model::Presentation>),
+    /// Items taken out of a playlist.
+    Items(home::RemovedItems),
+}
+
+impl ShowHistory {
     /// Keeps a song as it is before a change, and drops what could be redone.
     fn remember(&mut self, index: usize, song: Arc<sp_model::Presentation>) {
-        self.undo.push((index, song, self.next));
+        self.keep(ShowStep::Song(index, song));
+    }
+
+    /// Keeps items just taken out of a playlist, to put back, and drops what could be redone.
+    fn remember_items(&mut self, removed: home::RemovedItems) {
+        self.keep(ShowStep::Items(removed));
+    }
+
+    fn keep(&mut self, step: ShowStep) {
+        self.undo.push((step, self.next));
         self.next += 1;
         if self.undo.len() > 100 {
             self.undo.remove(0);
@@ -386,8 +404,10 @@ impl SongHistory {
 
     /// Drops a song's steps taken before `mark` (see [`mark`](Self::mark)), keeping later ones.
     fn forget_before(&mut self, index: usize, mark: u64) {
-        self.undo.retain(|(at, _, when)| *at != index || *when >= mark);
-        self.redo.retain(|(at, _, when)| *at != index || *when >= mark);
+        let keep =
+            |(step, when): &(ShowStep, u64)| !matches!(step, ShowStep::Song(at, _) if *at == index) || *when >= mark;
+        self.undo.retain(keep);
+        self.redo.retain(keep);
     }
 
     /// Where the history is now, for [`forget_before`](Self::forget_before).
@@ -400,21 +420,54 @@ impl SongHistory {
         self.redo.clear();
     }
 
-    /// The song the next undo (or redo) would change.
+    /// The song the next undo (or redo) would change, when it changes a song.
     fn peek(&self, redo: bool) -> Option<usize> {
-        if redo { self.redo.last() } else { self.undo.last() }.map(|(index, _, _)| *index)
+        match if redo { self.redo.last() } else { self.undo.last() } {
+            Some((ShowStep::Song(index, _), _)) => Some(*index),
+            _ => None,
+        }
     }
 
-    /// Takes the next undo (or redo) step, keeping the song as it is now to step back to.
+    /// Whether the next undo (or redo) puts back items taken out of a playlist (or takes them
+    /// out again).
+    fn items_next(&self, redo: bool) -> bool {
+        matches!(if redo { self.redo.last() } else { self.undo.last() }, Some((ShowStep::Items(_), _)))
+    }
+
+    /// Takes the next undo (or redo) step when it changes a song, keeping the song as it is now
+    /// to step back to.
     fn step(
         &mut self,
         redo: bool,
         current: Arc<sp_model::Presentation>,
     ) -> Option<(usize, Arc<sp_model::Presentation>)> {
         let (from, to) = if redo { (&mut self.redo, &mut self.undo) } else { (&mut self.undo, &mut self.redo) };
-        let (index, song, when) = from.pop()?;
-        to.push((index, current, when));
-        Some((index, song))
+        match from.pop()? {
+            (ShowStep::Song(index, song), when) => {
+                to.push((ShowStep::Song(index, current), when));
+                Some((index, song))
+            }
+            other => {
+                from.push(other);
+                None
+            }
+        }
+    }
+
+    /// Takes the next undo (or redo) step when it is items taken out of a playlist: they are to
+    /// be put back (or taken out again).
+    fn step_items(&mut self, redo: bool) -> Option<home::RemovedItems> {
+        let (from, to) = if redo { (&mut self.redo, &mut self.undo) } else { (&mut self.undo, &mut self.redo) };
+        match from.pop()? {
+            (ShowStep::Items(removed), when) => {
+                to.push((ShowStep::Items(removed.clone()), when));
+                Some(removed)
+            }
+            other => {
+                from.push(other);
+                None
+            }
+        }
     }
 }
 
@@ -1147,7 +1200,7 @@ struct App {
     held_songs: Vec<usize>,
     held_themes: Vec<usize>,
     /// The changes made to songs in the Show view, to undo and redo.
-    history: SongHistory,
+    history: ShowHistory,
     /// The song open in the Edit view, if any, and where the song history was when it opened:
     /// steps from before then are dropped once the editor changes the song.
     edit_song: Option<usize>,
@@ -3400,6 +3453,10 @@ impl App {
         if std::mem::take(&mut state.clear_song_redo) {
             self.history.clear_redo();
         }
+        // Items taken out of a playlist take their place in the Show view's undo order.
+        for removed in std::mem::take(&mut state.removed_items) {
+            self.history.remember_items(removed);
+        }
         let editing = state
             .editing
             .as_ref()
@@ -3453,6 +3510,17 @@ impl App {
     }
 
     fn undo_show(&mut self, redo: bool) {
+        // Items taken out of a playlist, when they were the last change: put back (or taken
+        // out again).
+        if self.history.items_next(redo) {
+            if let Some(said) = self.undo_items(redo)
+                && let Some(running) = self.running.as_mut()
+            {
+                running.home_state.say(said);
+                running.home_window.request_redraw();
+            }
+            return;
+        }
         let Some(current) = self.history.peek(redo).and_then(|index| self.show.presentations().get(index).cloned())
         else {
             return;
@@ -3470,6 +3538,17 @@ impl App {
         if changes.slides {
             self.refresh_output();
         }
+    }
+
+    /// Puts back the items last taken out of a playlist (or, to redo, takes them out again).
+    /// Returns what to tell the operator: what was done, or why it couldn't be.
+    fn undo_items(&mut self, redo: bool) -> Option<String> {
+        let removed = self.history.step_items(redo)?;
+        let state = &mut self.running.as_mut()?.home_state;
+        Some(
+            studio::redo_removed(state, &removed, !redo)
+                .unwrap_or_else(|| format!("{} has changed since, so that can't be undone.", removed.name)),
+        )
     }
 
     /// Turns a song's looping on or off, from its menu.
@@ -8594,7 +8673,7 @@ fn main() -> ExitCode {
         },
         bin_started: None,
         unsaved: Vec::new(),
-        history: SongHistory::default(),
+        history: ShowHistory::default(),
         edit_song: None,
         edit_mark: 0,
         action_depth: None,
@@ -8836,7 +8915,7 @@ mod tests {
     #[test]
     fn the_editor_drops_only_a_songs_steps_from_before_it_opened() {
         let song = Arc::new(sp_model::parse_song_text("A", "One\n"));
-        let mut history = SongHistory::default();
+        let mut history = ShowHistory::default();
         history.remember(0, song.clone());
         let opened = history.mark();
         history.remember(0, song.clone());
@@ -8847,10 +8926,37 @@ mod tests {
     }
 
     #[test]
+    fn items_taken_out_of_a_playlist_take_their_turn_in_the_show_views_undo() {
+        let a = Arc::new(sp_model::parse_song_text("A", "One\n"));
+        let removed = home::RemovedItems {
+            playlist: 0,
+            name: "Sunday".to_owned(),
+            items: vec![(1, service::Item::Header { name: "Word".to_owned() })],
+        };
+        let mut history = ShowHistory::default();
+        history.remember(0, a.clone());
+        history.remember_items(removed.clone());
+        // The items, taken out last, are put back first; then the song's change is undone.
+        assert!(history.items_next(false));
+        assert_eq!((history.peek(false), history.step(false, a.clone())), (None, None), "not a song's step");
+        assert_eq!(history.step_items(false), Some(removed.clone()));
+        assert_eq!(history.peek(false), Some(0));
+        history.step(false, a.clone());
+        // Redone in the order they were made: the song, then the items.
+        assert_eq!(history.peek(true), Some(0));
+        history.step(true, a.clone());
+        assert!(history.items_next(true));
+        assert_eq!(history.step_items(true), Some(removed));
+        // Forgetting a song's steps leaves the items' step.
+        history.forget(0);
+        assert!(history.items_next(false));
+    }
+
+    #[test]
     fn undo_steps_go_back_and_forth_and_are_dropped_with_their_song() {
         let a = Arc::new(sp_model::parse_song_text("A", "One\n"));
         let b = Arc::new(sp_model::parse_song_text("B", "Two\n"));
-        let mut history = SongHistory::default();
+        let mut history = ShowHistory::default();
         history.remember(0, a.clone());
         history.remember(1, b.clone());
         assert_eq!(history.peek(false), Some(1));

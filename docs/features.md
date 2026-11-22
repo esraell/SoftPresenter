@@ -256,9 +256,13 @@ feature changes, this page changes in the same commit.
   picked lets the others go when the button comes up, so they can still be dragged together.
   Picked songs dragged out of the list go into a playlist or library together, in the list's
   order; several playlist items dragged move together, in their order, to the one ink line, and
-  stay picked. Delete asks first, then deletes what is picked in the list last clicked (songs,
-  media items or slides; playlist items are taken out from their menu); picked slides go in one
-  step that Undo brings back.
+  stay picked. Delete (or Backspace) acts on the list last clicked: in a playlist it takes the
+  items picked (or the one open) out of it at once, asking nothing, as no song is deleted; any
+  kind of item, the one on screen too, which stays on screen. A notice says what went
+  ("Removed Harbour Lights from Sunday. ⌘Z puts it back.") and Undo (Command-Z) puts them back
+  where they were, picked out again; Remove from Playlist in an item's menu does the same, for all
+  the items picked when it is one of them. In a song list, a media strip or the slides, Delete
+  asks first, then deletes what is picked; picked slides go in one step that Undo brings back.
 - Pictures and videos dropped on the window, or added with the media bin's +, go into the media
   bin, are kept between runs, and can be shown behind the words; Delete, or Delete… on an item's
   right-click menu, takes it out of the bin after asking (the file stays where it is).
@@ -316,7 +320,8 @@ feature changes, this page changes in the same commit.
   or as all slides), Hot Key (a letter or digit that puts the slide on screen, shown on its
   picture), Go to Next (after a number of seconds, shown on its picture), Disable, Template.
   A song's menu has Loop to First Slide, for a loop of announcements. Undo and Redo (Command-Z, Shift-Command-Z) step back through
-  these changes in the Show view and on the Bible page, and the audience stays on the same slide.
+  these changes in the Show view and on the Bible page, and the audience stays on the same slide;
+  items taken out of a playlist take their turn in the same order.
   `sp undo` and `sp redo` do the same from the command line whatever the window shows, and say
   which song and slides changed.
 - A song's menu (its ⋯, or a right-click): Add to the playlist in front, Add to Playlist (any

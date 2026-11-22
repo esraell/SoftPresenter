@@ -40,8 +40,8 @@ pub enum Picking {
     Slides,
     /// A theme in the Theme Editor's list.
     Themes,
-    /// Items of the playlist in front, picked out with Command or Shift (see [`ItemPicks`]).
-    /// Delete doesn't take them out: their menu's Remove from Playlist does.
+    /// Items of the playlist in front, picked out or opened (see [`ItemPicks`]): Delete takes
+    /// them out of the playlist, never deleting a song.
     Items,
 }
 
@@ -72,6 +72,33 @@ impl ItemPicks {
     /// Whether several are picked, so that they are lit together and move together.
     pub fn several(&self) -> bool {
         self.places.len() > 1
+    }
+}
+
+/// Items taken out of a playlist, kept in the Show view's undo order to be put back: the
+/// playlist (by its place, and its name, so that a playlist since renamed or deleted is left
+/// alone), and each item with the place it had.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RemovedItems {
+    pub playlist: usize,
+    pub name: String,
+    pub items: Vec<(usize, crate::service::Item)>,
+}
+
+impl RemovedItems {
+    /// What the notice says once they are taken out (with the key that puts them back), or
+    /// put back.
+    pub fn said(&self, back: bool) -> String {
+        let (what, them) = match self.items.as_slice() {
+            [(_, one)] => (one.title().to_owned(), "it"),
+            many => (format!("{} items", many.len()), "them"),
+        };
+        let name = &self.name;
+        if back {
+            format!("Put {what} back in {name}.")
+        } else {
+            format!("Removed {what} from {name}. {} puts {them} back.", crate::keys::with_modifier("Z"))
+        }
     }
 }
 
@@ -299,6 +326,8 @@ pub struct HomeState {
     pub media_anchor: Option<usize>,
     /// The items of the playlist in front picked out (several with Command or Shift).
     pub item_picks: ItemPicks,
+    /// Items just taken out of a playlist, for the app to keep in the Show view's undo order.
+    pub removed_items: Vec<RemovedItems>,
     pub picking: Picking,
     /// A drag across a list picking things out, while it lasts.
     pub sweep: Option<Sweep>,
@@ -1345,6 +1374,7 @@ impl Default for HomeState {
             picked_media: Vec::new(),
             media_anchor: None,
             item_picks: ItemPicks::default(),
+            removed_items: Vec::new(),
             picking: Picking::Nothing,
             sweep: None,
             slides_jump_to: None,
@@ -1787,8 +1817,14 @@ pub fn home_ui(
                 let from_bible = |at: SlideRef| state.app_made(at.presentation);
                 state.confirm_delete_slides = state.selected_slide.filter(|at| !from_bible(*at)).into_iter().collect();
             }
-            // Themes are deleted in the Theme Editor, where the list is; playlist items are
-            // taken out with their menu's Remove from Playlist, never deleted as songs.
+            // The playlist's items picked (or the one open) are taken out of it at once: no
+            // song is deleted, so nothing is asked, and Undo puts them back. Only while the
+            // playlist is listed.
+            Picking::Items if state.playlist_open => {
+                let places = crate::studio::items_to_take_out(state);
+                crate::studio::take_out_items(state, &places);
+            }
+            // Themes are deleted in the Theme Editor, where the list is.
             Picking::Themes | Picking::Items => {}
         }
     }
@@ -9096,6 +9132,74 @@ mod tests {
         assert_eq!(state.picked_songs.len(), 5, "Command-A picks every song listed");
         click_holding(&ctx, (&mut show, &mut state), row("Delta"), Modifiers::NONE, &mut time, &mut commands);
         assert_eq!((state.picked_songs.clone(), show.selected()), (vec![3], 3));
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn delete_takes_picked_items_out_of_the_playlist_at_once_and_undo_puts_them_back() {
+        use crate::service::Item;
+        let titles = |state: &HomeState| -> Vec<String> {
+            state.services.front().items.iter().map(|item| item.title().to_owned()).collect()
+        };
+        for key in [Key::Delete, Key::Backspace] {
+            let (mut show, mut state) = picking_setting();
+            let (ctx, mut commands, mut time) = (egui::Context::default(), Vec::new(), 0.0);
+            let drawn = found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+            let row = |title: &str| drawn.left(title).center();
+            click_holding(&ctx, (&mut show, &mut state), row("Beta"), Modifiers::NONE, &mut time, &mut commands);
+            click_holding(&ctx, (&mut show, &mut state), row("Delta"), Modifiers::COMMAND, &mut time, &mut commands);
+            found_step(&ctx, &mut show, &mut state, pressed(key, Modifiers::NONE), time + 0.1, &mut commands);
+            found_step(&ctx, &mut show, &mut state, vec![], time + 0.2, &mut commands);
+            assert_eq!(titles(&state), ["Alpha", "Gamma", "Epsilon"], "{key:?}");
+            assert!(state.confirm_delete_songs.is_empty() && !state.alert_open(), "nothing is asked");
+            assert!(state.songs_to_delete.is_empty(), "no song is deleted");
+            let said = state.toast.as_ref().map(|(words, _)| words.clone()).unwrap_or_default();
+            assert_eq!(
+                said,
+                format!("Removed 2 items from Service. {} puts them back.", crate::keys::with_modifier("Z"))
+            );
+            // The app keeps what went in the Show view's undo order; Undo puts it back in place,
+            // picked out again, and Redo takes it out again.
+            let removed = state.removed_items.pop().expect("kept for Undo");
+            assert_eq!(
+                removed.items.iter().map(|(at, item)| (*at, item.title())).collect::<Vec<_>>(),
+                [(1, "Beta"), (3, "Delta")]
+            );
+            assert_eq!(
+                crate::studio::redo_removed(&mut state, &removed, true).as_deref(),
+                Some("Put 2 items back in Service.")
+            );
+            assert_eq!(titles(&state), ["Alpha", "Beta", "Gamma", "Delta", "Epsilon"]);
+            assert_eq!(state.item_picks.places, [1, 3]);
+            assert!(crate::studio::redo_removed(&mut state, &removed, false).is_some());
+            assert_eq!(titles(&state), ["Alpha", "Gamma", "Epsilon"]);
+            nothing_went_live(&show, &commands);
+        }
+        // The item on screen (Alpha, opened with a click) is taken out; its slide stays on screen.
+        let (mut show, mut state) = picking_setting();
+        let (ctx, mut commands, mut time) = (egui::Context::default(), Vec::new(), 0.0);
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        let alpha = drawn.left("Alpha").center();
+        click_holding(&ctx, (&mut show, &mut state), alpha, Modifiers::NONE, &mut time, &mut commands);
+        found_step(&ctx, &mut show, &mut state, pressed(Key::Delete, Modifiers::NONE), time + 0.1, &mut commands);
+        assert!(!state.services.front().items.iter().any(|item| item.title() == "Alpha"));
+        assert!(matches!(state.services.front().items.first(), Some(Item::Song { title, .. }) if title == "Beta"));
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn delete_in_a_library_asks_before_deleting_the_songs_picked() {
+        let (mut show, mut state) = picking_setting();
+        state.playlist_open = false;
+        let (ctx, mut commands, mut time) = (egui::Context::default(), Vec::new(), 0.0);
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        let row = |title: &str| drawn.left(title).center();
+        click_holding(&ctx, (&mut show, &mut state), row("Beta"), Modifiers::NONE, &mut time, &mut commands);
+        click_holding(&ctx, (&mut show, &mut state), row("Delta"), Modifiers::SHIFT, &mut time, &mut commands);
+        found_step(&ctx, &mut show, &mut state, pressed(Key::Delete, Modifiers::NONE), time + 0.1, &mut commands);
+        assert_eq!(state.confirm_delete_songs, [1, 2, 3], "it asks about the three songs picked");
+        assert!(state.songs_to_delete.is_empty(), "and deletes nothing until told to");
+        assert_eq!(state.services.front().items.len(), 5, "the playlist is as it was");
         nothing_went_live(&show, &commands);
     }
 

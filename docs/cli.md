@@ -85,9 +85,10 @@ app.
 - **Help:** `sp help` lists every command, and `sp help song` the ones starting with that word.
   Both work with the app closed.
 - **Saving and undo:** changes are saved at once. A change to a song or a slide can be undone
-  with `sp undo`; changes to playlists, libraries, themes and settings can't, as in the window.
-  `sp undo` takes back the last change to a song even when a theme or playlist change came
-  after it, and says which song it changed.
+  with `sp undo`, and so can items taken out of a playlist in the window (with Delete, or Remove
+  from Playlist in an item's menu); other changes to playlists, and changes to libraries, themes
+  and settings, can't, as in the window. `sp undo` takes back the last of those even when a
+  theme or playlist change came after it, and says what it changed.
 - Each command that changes something is written to the app's log with its result (`done` or
   `refused`). Commands that only read are not, so a script or page asking every second or two
   doesn't fill it: `status`, `songs`, `slides`, `slide SONG N` and `slide item …`, `playlists`,
@@ -885,7 +886,7 @@ to 127.0.0.1 or localhost only).
 
 | Command | Does |
 |---|---|
-| `undo`, `redo` | Undoes or redoes the last change to a song or slide, whatever the window shows, and says what it was |
+| `undo`, `redo` | Undoes or redoes the last change to a song or slide, or puts back the items last taken out of a playlist in the window (redo takes them out again), whatever the window shows, and says what it was |
 | `job N` | How a background job (a pack with videos, a large pack import, a Bible download) went, or "still going" |
 | `menu`, `menu ITEM` | Lists the menu bar items; chooses one by id (`ClearAll`, `NewSong`) or words ("Clear All"), as a click does |
 

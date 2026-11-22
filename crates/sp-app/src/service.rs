@@ -216,13 +216,52 @@ impl Services {
         true
     }
 
-    /// Takes an item out of the service in front. Returns true if there was one.
-    pub fn remove(&mut self, index: usize) -> bool {
-        if index >= self.front().items.len() {
+    /// Takes items out of a playlist (by its place among the playlists), all at once. Returns
+    /// each item taken out with the place it had, in order, for [`put_back`](Self::put_back). In
+    /// the playlist in front, the open item stays open where it now is, unless it went.
+    pub fn remove_items(&mut self, playlist: usize, places: &[usize]) -> Vec<(usize, Item)> {
+        let Some(list) = self.list.get_mut(playlist) else { return Vec::new() };
+        let mut places: Vec<usize> = places.iter().copied().filter(|at| *at < list.items.len()).collect();
+        places.sort_unstable();
+        places.dedup();
+        let mut removed: Vec<(usize, Item)> = places.iter().rev().map(|at| (*at, list.items.remove(*at))).collect();
+        removed.reverse();
+        if removed.is_empty() {
+            return removed;
+        }
+        self.changed = true;
+        if playlist == self.current {
+            self.chosen = self
+                .chosen
+                .filter(|open| places.binary_search(open).is_err())
+                .map(|open| open - places.iter().filter(|at| **at < open).count());
+        }
+        removed
+    }
+
+    /// Puts items taken out by [`remove_items`](Self::remove_items) back where they were, in
+    /// the same playlist. Returns false (and changes nothing) if that playlist is no longer
+    /// there or has become too short for them.
+    pub fn put_back(&mut self, playlist: usize, removed: &[(usize, Item)]) -> bool {
+        let Some(list) = self.list.get_mut(playlist) else { return false };
+        // Each goes in at its old place, the earliest first: then every place is as it was.
+        let fits = removed.iter().enumerate().all(|(before, (at, _))| *at <= list.items.len() + before);
+        if removed.is_empty() || !fits {
             return false;
         }
-        self.front_mut().items.remove(index);
-        self.chosen = None;
+        for (at, item) in removed {
+            list.items.insert(*at, item.clone());
+        }
+        self.changed = true;
+        if playlist == self.current
+            && let Some(open) = self.chosen.as_mut()
+        {
+            for (at, _) in removed {
+                if *open >= *at {
+                    *open += 1;
+                }
+            }
+        }
         true
     }
 
@@ -750,8 +789,8 @@ mod tests {
         assert_eq!(services.front().items.iter().map(Item::title).collect::<Vec<_>>(), ["A", "C", "B"]);
         assert!(!services.nudge(0, true));
         assert!(!services.nudge(2, false));
-        assert!(services.remove(1));
-        assert!(!services.remove(9));
+        assert_eq!(services.remove_items(0, &[1]).len(), 1);
+        assert!(services.remove_items(0, &[9]).is_empty());
         assert_eq!(services.front().items.len(), 2);
         // Headers are kept, renamed, and items are dragged to a new place.
         services.add(Item::Header { name: "Worship".to_owned() });
@@ -761,6 +800,32 @@ mod tests {
         assert!(!services.move_item(0, 0));
         let again = Services::from_json(&services.to_json()).unwrap();
         assert_eq!(again.front().items[0], Item::Header { name: "Sermon".to_owned() });
+    }
+
+    #[test]
+    fn items_taken_out_go_back_where_they_were() {
+        let mut services = Services::default();
+        for key in ["a", "b", "c", "d", "e"] {
+            services.add(song(key));
+        }
+        let titles = |services: &Services| -> Vec<String> {
+            services.front().items.iter().map(|item| item.title().to_owned()).collect()
+        };
+        services.chosen = Some(4);
+        let removed = services.remove_items(0, &[3, 1, 9]);
+        assert_eq!(removed.iter().map(|(at, item)| (*at, item.title())).collect::<Vec<_>>(), [(1, "B"), (3, "D")]);
+        assert_eq!(titles(&services), ["A", "C", "E"]);
+        assert_eq!(services.chosen, Some(2), "E, still open where it now is");
+        assert!(services.put_back(0, &removed));
+        assert_eq!(titles(&services), ["A", "B", "C", "D", "E"]);
+        assert_eq!(services.chosen, Some(4));
+        // The open item taken out is no longer open; a playlist too short, or gone, takes nothing.
+        services.chosen = Some(1);
+        let removed = services.remove_items(0, &[1, 4]);
+        assert_eq!(services.chosen, None);
+        services.remove_items(0, &[0, 1, 2]);
+        assert!(!services.put_back(0, &removed), "nowhere to put E back");
+        assert!(!services.put_back(5, &removed));
     }
 
     #[test]

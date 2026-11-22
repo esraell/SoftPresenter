@@ -2761,6 +2761,11 @@ impl crate::App {
             self.menu_action(el, if redo { crate::menubar::Action::Redo } else { crate::menubar::Action::Undo });
             return Ok(Reply::done(format!("Took the Edit view's {word} step (as Cmd-Z does there).")));
         }
+        // Items taken out of a playlist, when they were the last change.
+        if self.history.items_next(redo) {
+            let said = self.undo_items(redo).ok_or_else(|| format!("There is nothing to {word}."))?;
+            return Ok(Reply::done(said));
+        }
         let index = self.history.peek(redo).ok_or_else(|| format!("There is nothing to {word}."))?;
         let before = self.show.presentations().get(index).cloned().ok_or("That song is gone.")?;
         self.undo_show(redo);
