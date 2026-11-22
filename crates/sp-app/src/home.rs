@@ -4270,7 +4270,7 @@ fn confirm_delete_prop(ui: &mut egui::Ui, state: &mut HomeState) {
         return;
     };
     let question = format!("Delete \u{201c}{}\u{201d}?", state.props[index].name);
-    let note = "It comes off the screens if it is showing. You can\u{2019}t undo this.";
+    let note = "It comes off the screens if it is showing.";
     let Some(delete) = confirm_delete(ui, &question, note) else { return };
     state.confirm_delete_prop = None;
     if delete {
@@ -5307,6 +5307,34 @@ pub(crate) fn switch(ui: &mut egui::Ui, on: bool, hint: &str) -> bool {
     response.on_hover_text(hint).clicked()
 }
 
+/// Where the Screens window keeps the screen its − asked to remove, while the question is open.
+fn removing_screen_id() -> egui::Id {
+    egui::Id::unique("removing screen")
+}
+
+/// The question the Screens window's − asks, as Undo can't bring a screen back, and the removing
+/// once it is answered. Returns true when the screen went.
+fn confirm_remove_screen(ui: &mut egui::Ui, state: &mut HomeState) -> bool {
+    let Some(id) = ui.data(|data| data.get_temp::<sp_model::Uuid>(removing_screen_id())) else { return false };
+    let Some(at) = state.screens.iter().position(|screen| screen.id == id) else {
+        ui.data_mut(|data| data.remove::<sp_model::Uuid>(removing_screen_id()));
+        return false;
+    };
+    let question = format!("Remove the screen \u{201c}{}\u{201d}?", state.screens[at].name);
+    let note = cant_undo("Nothing more is sent to it, and its settings go.");
+    let Some(remove) = crate::studio::alert(ui.ctx(), "remove screen", Icon::Trash, &question, &note, "Remove") else {
+        return false;
+    };
+    ui.data_mut(|data| data.remove::<sp_model::Uuid>(removing_screen_id()));
+    if !remove {
+        return false;
+    }
+    state.screens.remove(at);
+    state.screen_selected = state.screen_selected.min(state.screens.len().saturating_sub(1));
+    state.ndi_draft = None;
+    true
+}
+
 /// The Screens window's contents: the audience screens on the left, and where the chosen one's
 /// picture goes on the right. Every screen shows the same picture. Changes take effect, and are
 /// saved, as they are made. `output_on` is whether the audience output is on; switching it is
@@ -5314,7 +5342,7 @@ pub(crate) fn switch(ui: &mut egui::Ui, on: bool, hint: &str) -> bool {
 pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> Vec<Command> {
     use crate::studio::{ACCENT, CARD, HOVER, LINE, PANEL, TEXT, TEXT_DIM, TEXT_FAINT};
     let mut commands = Vec::new();
-    let mut changed = false;
+    let mut changed = confirm_remove_screen(ui, state);
     state.screen_selected = state.screen_selected.min(state.screens.len().saturating_sub(1));
 
     // The list of screens, with + and − under it, as Mac lists have.
@@ -5336,11 +5364,12 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                         .on_disabled_hover_text(
                             "There is always one audience screen. Set its output to Off to show nothing.",
                         );
-                    if remove.clicked() && !only && state.screen_selected < state.screens.len() {
-                        state.screens.remove(state.screen_selected);
-                        state.screen_selected = state.screen_selected.saturating_sub(1);
-                        state.ndi_draft = None;
-                        changed = true;
+                    // Undo can't bring a screen back, so it asks first (see `confirm_remove_screen`).
+                    if remove.clicked()
+                        && !only
+                        && let Some(screen) = state.screens.get(state.screen_selected)
+                    {
+                        ui.data_mut(|data| data.insert_temp(removing_screen_id(), screen.id));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let identify = ui.add(egui::Button::selectable(state.identify, "Identify")).on_hover_text(
@@ -5938,11 +5967,18 @@ fn confirm_delete_template(ui: &mut egui::Ui, state: &mut HomeState) {
     }
 }
 
-/// Asks whether to delete something, as a macOS alert does. Return deletes, as the Delete
+/// Asks whether to delete something Undo can't bring back, as a macOS alert does: its note,
+/// then always "This can't be undone." (see [`cant_undo`]). Return deletes, as the Delete
 /// button does; Escape cancels. `None` until it is answered.
 fn confirm_delete(ui: &mut egui::Ui, question: &str, note: &str) -> Option<bool> {
-    let message = if note.is_empty() { "You can\u{2019}t undo this.".to_owned() } else { note.to_owned() };
-    crate::studio::alert(ui.ctx(), question, crate::icons::Icon::Trash, question, &message, "Delete")
+    crate::studio::alert(ui.ctx(), question, crate::icons::Icon::Trash, question, &cant_undo(note), "Delete")
+}
+
+/// What a question about something Undo can't bring back says under it: its note, then always
+/// "This can't be undone." Anything Undo can bring back goes at once, with no question.
+pub fn cant_undo(note: &str) -> String {
+    const CANT: &str = "This can\u{2019}t be undone.";
+    if note.is_empty() { CANT.to_owned() } else { format!("{note} {CANT}") }
 }
 
 /// What a template is for, in a word or two, as its strip says it: Songs, Bible, Songs and
@@ -13148,6 +13184,41 @@ mod tests {
             assert_eq!(state.screens, screens);
         }
         assert_eq!(output_label(&screens[2].output, &[]), "Gone   (disconnected)");
+    }
+
+    #[test]
+    fn every_question_about_what_undo_cant_bring_back_says_so() {
+        assert_eq!(cant_undo(""), "This can\u{2019}t be undone.");
+        assert_eq!(
+            cant_undo("The file stays where it is on your Mac."),
+            "The file stays where it is on your Mac. This can\u{2019}t be undone."
+        );
+    }
+
+    #[test]
+    fn removing_a_screen_asks_first_and_return_removes_it() {
+        let ctx = egui::Context::default();
+        let screens =
+            vec![Screen::new("Main".to_owned(), Output::Automatic), Screen::new("Lobby".to_owned(), Output::Window)];
+        let mut state =
+            HomeState { settings_open: true, screen_selected: 1, screens: screens.clone(), ..HomeState::default() };
+        // The − asked about the lobby: the question is open, and nothing has gone yet.
+        ctx.data_mut(|data| data.insert_temp(removing_screen_id(), screens[1].id));
+        let frame = |state: &mut HomeState, key| {
+            let mut drawn = ctx.run_ui(input(key), |ui| {
+                screens_ui(ui, state, true);
+            });
+            drawn.textures_delta.clear();
+        };
+        frame(&mut state, None);
+        assert_eq!((state.screens.len(), state.screens_changed), (2, false), "asked, not removed");
+        frame(&mut state, Some(Key::Escape));
+        assert_eq!(state.screens.len(), 2, "Escape keeps it");
+        ctx.data_mut(|data| data.insert_temp(removing_screen_id(), screens[1].id));
+        frame(&mut state, Some(Key::Enter));
+        assert_eq!(state.screens, screens[..1], "Return removes it");
+        assert!(state.screens_changed);
+        assert_eq!(state.screen_selected, 0);
     }
 
     #[test]

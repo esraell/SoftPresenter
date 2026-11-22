@@ -172,7 +172,7 @@ fn voxlive_page(ui: &mut egui::Ui, view: &mut View) {
                         )
                         .clicked()
                     {
-                        view.request = Some(Request::Disconnect);
+                        ask_to_disconnect(ui, "voxlive");
                     }
                     if ui.button("Find Screens Again").clicked() {
                         view.request = Some(Request::Refresh);
@@ -186,6 +186,10 @@ fn voxlive_page(ui: &mut egui::Ui, view: &mut View) {
             ui.add_space(14.0);
             screens(ui, view);
         }
+    }
+    let note = "The key is forgotten on this computer; it stays in VoxLive until you revoke it there.";
+    if disconnect_answered(ui, "voxlive", "Disconnect VoxLive?", note) {
+        view.request = Some(Request::Disconnect);
     }
 }
 
@@ -273,7 +277,7 @@ fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
                         )
                         .clicked()
                     {
-                        request = Some(R::Disconnect);
+                        ask_to_disconnect(ui, "canva");
                     }
                 });
             });
@@ -316,9 +320,38 @@ fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
             );
         }
     }
+    let note = "The sign-in is forgotten on this computer; it stays in Canva until you take it back there.";
+    if disconnect_answered(ui, "canva", "Disconnect Canva Sync?", note) {
+        request = Some(R::Disconnect);
+    }
     if request.is_some() {
         view.request = request;
     }
+}
+
+/// Where a page keeps that its Disconnect asked, while the question is open.
+fn disconnecting_id(service: &str) -> egui::Id {
+    egui::Id::unique(("disconnecting", service))
+}
+
+/// Disconnect was clicked: Undo can't connect again, so it asks first (see
+/// [`disconnect_answered`]).
+fn ask_to_disconnect(ui: &egui::Ui, service: &str) {
+    ui.data_mut(|data| data.insert_temp(disconnecting_id(service), true));
+}
+
+/// The question Disconnect asks, while it is open: true once it is answered Disconnect.
+fn disconnect_answered(ui: &egui::Ui, service: &str, question: &str, note: &str) -> bool {
+    if !ui.data(|data| data.get_temp::<bool>(disconnecting_id(service))).unwrap_or(false) {
+        return false;
+    }
+    let note = crate::home::cant_undo(note);
+    let icon = crate::icons::Icon::Close;
+    let Some(answer) = crate::studio::alert(ui.ctx(), service, icon, question, &note, "Disconnect") else {
+        return false;
+    };
+    ui.data_mut(|data| data.remove::<bool>(disconnecting_id(service)));
+    answer
 }
 
 /// How to connect: the integration's ID and secret and Sign In, or the old script's sign-in.
@@ -875,5 +908,35 @@ mod tests {
         assert_eq!(hex_of(colour_of("#00000080"), true), "#00000080");
         assert_eq!(setting_name("letterSpacing"), "Letter spacing");
         assert_eq!(setting_name("maxLines"), "Lines");
+    }
+
+    #[test]
+    fn disconnect_asks_first_and_only_return_disconnects() {
+        let ctx = egui::Context::default();
+        let frame = |key: Option<egui::Key>| {
+            let events = key
+                .map(|key| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .into_iter()
+                .collect();
+            let mut answered = false;
+            let mut drawn = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                answered = disconnect_answered(ui, "voxlive", "Disconnect VoxLive?", "The key is forgotten.");
+            });
+            drawn.textures_delta.clear();
+            answered
+        };
+        assert!(!frame(Some(egui::Key::Enter)), "not asked: Return does nothing");
+        ctx.data_mut(|data| data.insert_temp(disconnecting_id("voxlive"), true));
+        assert!(!frame(None), "asked, not answered");
+        assert!(!frame(Some(egui::Key::Escape)), "Escape keeps the key");
+        assert!(!frame(Some(egui::Key::Enter)), "and the question has gone");
+        ctx.data_mut(|data| data.insert_temp(disconnecting_id("voxlive"), true));
+        assert!(frame(Some(egui::Key::Enter)), "Return disconnects");
     }
 }

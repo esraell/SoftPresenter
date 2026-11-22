@@ -961,7 +961,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 ## Screens
 - Any number of audience screens, each sent to a display, a window, the network over NDI, or
   a Blackmagic Design DeckLink card's output (SDI or HDMI), all showing the same picture, set up in the
-  Screens window (**Option-Command-1**).
+  Screens window (**Option-Command-1**). Its − asks before a screen goes ("Remove the screen
+  “Lobby”? Nothing more is sent to it, and its settings go. This can't be undone."), as Undo
+  can't bring a screen back.
 - **DeckLink outputs** (SoftPresenter for Blackmagic Design DeckLink). With Blackmagic's driver,
   Desktop Video 16.0 or later, installed, each output the card offers is a choice for any
   audience or stage screen, named as the driver names it ("DeckLink Duo (1)": a DeckLink Duo 2
@@ -1119,7 +1121,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   VoxLive screens (name, language, captions or Scripture), found again every 30 seconds; a
   key VoxLive refuses stops the asking until another is given, so the church's other devices
   aren't locked out, and a "wait" answer is waited out. Disconnect forgets the key on this
-  computer.
+  computer, after asking ("Disconnect VoxLive? … This can't be undone.").
 - **Canva Sync** (Settings › Integrations): keeps the announcements video fresh from the
   church's Canva presentation. It connects with an integration of the church's own, made in
   Canva's developer portal (an open-source app can't carry a secret of its own): the client ID
@@ -1143,7 +1145,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the next sync fails"). Quitting closes the screens at once; a refresh under way is then waited
   for with the window still answering ("Keeping the Canva sign-in…"), at most as long as a token
   request may take, and a sign-in that couldn't be kept before is kept. Disconnect forgets it on
-  this computer.
+  this computer, after asking ("Disconnect Canva Sync? … This can't be undone.").
   The presentation is chosen by pasting its link; its pages show with their pictures, and a click
   makes one the **divider page**: only the pages above it go in the video (Canva can't tell an
   app which slides are hidden, so volunteers drag old slides below it). If the divider is gone

@@ -297,9 +297,7 @@ pub fn confirm_delete(state: &mut HomeState, answer: impl FnOnce(&str, &str) -> 
         return;
     };
     let question = format!("Delete \u{201c}{}\u{201d}?", state.stage_layouts[index].name);
-    let Some(delete) =
-        answer(&question, "Stage screens that use it show the first layout. You can\u{2019}t undo this.")
-    else {
+    let Some(delete) = answer(&question, "Stage screens that use it show the first layout.") else {
         return;
     };
     state.confirm_delete_layout = None;
