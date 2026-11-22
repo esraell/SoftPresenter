@@ -2603,4 +2603,27 @@ mod tests {
             assert!(left, "{place}: Escape ends it");
         }
     }
+
+    #[test]
+    fn an_audio_playlist_renamed_keeps_its_menu_round_it_and_its_name_where_it_was() {
+        use crate::studio::tests::{drawn, key, letters, same_letters, styled};
+        let ctx = styled();
+        let show = show();
+        let mut state = HomeState { live_tab: 5, ..HomeState::default() };
+        state.audio.shown_mut().name = "Walk-in".to_owned();
+        let drawn_tab = |state: &mut HomeState, events: Vec<Event>| {
+            drawn(&ctx, events, |ui| live_tabs(ui, &show, state, &mut |_| None))
+        };
+        let menu = || ctx.read_response(egui::Id::unique("audio playlist picker")).expect("drawn").rect;
+        let before = letters(drawn_tab(&mut state, vec![]), "Walk-in");
+        let was = menu();
+        let renaming = egui::Id::unique("audio playlist renaming");
+        ctx.data_mut(|data| data.insert_temp(renaming, "Walk-in".to_owned()));
+        drawn_tab(&mut state, vec![]).drop_without_applying_deltas();
+        same_letters(&before, &letters(drawn_tab(&mut state, vec![]), "Walk-in"), "audio playlist");
+        assert_eq!(menu(), was, "the menu is still drawn round the name");
+        drawn_tab(&mut state, vec![Event::Text(" music".to_owned())]).drop_without_applying_deltas();
+        drawn_tab(&mut state, vec![key(egui::Key::Enter)]).drop_without_applying_deltas();
+        assert_eq!(state.audio.shown().name, "Walk-in music", "Return keeps what was typed");
+    }
 }
