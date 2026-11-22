@@ -1827,6 +1827,9 @@ impl crate::App {
                     Some((doing, _)) => format!("{}: {doing}", screen.name),
                     None => screen.name.clone(),
                 };
+                if let Some((format, _)) = crate::screens::decklink_format(screen, &state.decklink) {
+                    line.push_str(&format!("; format {format}"));
+                }
                 if let Some(background) = crate::screens::background_words(&state.screens, at) {
                     line.push_str(&format!("; {background}"));
                 }
@@ -1847,10 +1850,17 @@ impl crate::App {
                     state.screens.iter().find(|other| other.id == fill).map(|other| other.name.clone())
                 });
                 let see_through = screen.look.see_through.filter(|_| audience && screen.look.key_of.is_none());
+                let format = crate::screens::decklink_format(screen, &state.decklink);
                 serde_json::json!({
                     "name": screen.name,
                     "doing": doing,
                     "shown": shown_now,
+                    "format": match &screen.output {
+                        crate::screens::Output::DeckLink(out) => Some(out.mode.clone()),
+                        _ => None,
+                    },
+                    "format_from": format.as_ref().map(|(_, from)| *from),
+                    "format_words": format.map(|(words, _)| words),
                     "background": if see_through.is_some() { "see-through" } else { "solid" },
                     "alpha": see_through.map(crate::screens::Alpha::name),
                     "key_of": key_of,

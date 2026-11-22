@@ -138,7 +138,7 @@ fn play(args: &[String], program: &str) -> ExitCode {
     };
     let format = match &asked.format {
         Some(name) => device.mode(name),
-        None => device.default_mode(),
+        None => device.start(asked.keying != Keying::Off).map(|start| start.mode),
     };
     let Some(format) = format else {
         let names: Vec<&str> = device.offered().map(|mode| mode.name.as_str()).collect();
@@ -362,10 +362,24 @@ fn describe(number: usize, device: &Device) -> String {
             out.push_str(&format!("     {}\n", row.join("   ")));
         }
     }
-    if let Some(mode) = device.default_mode() {
-        out.push_str(&format!("   A new output starts in {}.\n", mode.name));
+    if let Some(start) = device.start(false) {
+        out.push_str(&format!("   A new output starts in {}.\n", start.in_words()));
     }
+    out.push_str(&format!(
+        "   Desktop Video Setup's default format, as the driver gives it: {}.\n",
+        card_mode_in_words(device)
+    ));
     out
+}
+
+/// The device's own default format exactly as the driver gave it, so that what Desktop Video
+/// Setup is set to can be checked against it: "'Hp30'", "'iunk'", "nothing".
+fn card_mode_in_words(device: &Device) -> String {
+    let raw = match device.card_mode {
+        None => return "nothing (it doesn't say)".to_owned(),
+        Some(raw) => u32::try_from(raw).map_or_else(|_| raw.to_string(), crate::code_in_words),
+    };
+    if device.card_mode_3d { format!("{raw}, in 3D") } else { raw }
 }
 
 #[cfg(test)]
@@ -380,8 +394,16 @@ mod tests {
         assert!(text.contains("sub-device 1 of 4"));
         assert!(text.contains("Keying: external and internal keying."));
         assert!(text.contains("1080i59.94 BYK"));
-        assert!(text.contains("A new output starts in 1080i59.94."));
-        assert!(!text.contains("NTSC"), "standard definition is not offered");
+        assert!(text.contains("A new output starts in 1080p30, as Desktop Video Setup has it."), "{text}");
+        assert!(text.contains("Desktop Video Setup's default format, as the driver gives it: 'Hp30'."), "{text}");
+        assert!(text.contains(
+            "A new output starts in 1080i59.94, the usual HD format: Desktop Video Setup has NTSC, which SoftPresenter doesn't offer."
+        ));
+        assert!(
+            text.contains("A new output starts in 1080i59.94, the usual HD format: Desktop Video Setup sets none.")
+        );
+        assert!(text.contains("as the driver gives it: 'iunk'.") && text.contains("as the driver gives it: nothing"));
+        assert!(!text.contains("486i"), "standard definition is not offered");
     }
 
     #[test]

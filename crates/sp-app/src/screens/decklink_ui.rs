@@ -11,8 +11,9 @@ use crate::studio::TEXT_DIM;
 const WARNING: Color32 = Color32::from_rgb(255, 170, 120);
 
 const MODE_HINT: &str = "The video format the card sends. Set it to what the switcher, recorder or projector it goes \
-     to expects: they must match exactly. 1080i59.94 is the usual HD format where power is 60 Hz, 1080i50 where it is \
-     50 Hz. A 720p format is scaled down from SoftPresenter's 1920 × 1080 picture.";
+     to expects: they must match exactly. A new screen starts in the format set for the card in Desktop Video Setup; \
+     where none is set (or SoftPresenter can't play it), in 1080i59.94, the usual HD format where power is 60 Hz \
+     (1080i50 where it is 50 Hz). A 720p format is scaled down from SoftPresenter's 1920 × 1080 picture.";
 const KEYER_HINT: &str = "Off: the picture goes solid. Fill and key: the card sends the picture on this connector and \
      its key (white where solid, black where clear) on the connector paired with it, in step, for a switcher's keyer: \
      better than a second screen as this one's key. Over its input: the card lays the picture over the video coming \
@@ -41,6 +42,11 @@ pub fn decklink_rows(ui: &mut egui::Ui, screen: &mut Screen, found: &sp_decklink
                 }
             });
     });
+    // Where the format comes from: the card's own setting, the usual one, or set here.
+    if let Some(device) = device.filter(|device| device.mode(&out.mode).is_some()) {
+        let words = device.format_in_words(&out.mode);
+        ui.label(egui::RichText::new(format!("{words}.")).size(11.5).color(TEXT_DIM)).on_hover_text(MODE_HINT);
+    }
     // The keyer, where the card has one (in its present profile), or one is set.
     let (external, internal) = device.map_or((false, false), |device| (device.external_keying, device.internal_keying));
     if external || internal || out.keyer != Keyer::Off {

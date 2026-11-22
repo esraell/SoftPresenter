@@ -34,6 +34,8 @@ struct RawDevice {
     internal_keying: i32,
     external_keying: i32,
     modes: i32,
+    default_mode: i64,
+    default_mode_flags: i64,
 }
 
 /// `SpDlMode` in the bridge.
@@ -127,6 +129,10 @@ pub fn api_version() -> Option<u32> {
     u32::try_from(version).ok().filter(|version| *version != 0)
 }
 
+/// `bmdVideoOutputDualStream3D`, in the `BMDVideoOutputFlags` the driver gives for a device's
+/// default format.
+const DUAL_STREAM_3D: i64 = 1 << 4;
+
 /// Room for this many devices, and modes in all, in one listing: more than any computer has.
 const DEVICE_ROOM: usize = 32;
 const MODE_ROOM: usize = 2048;
@@ -193,6 +199,8 @@ pub fn list() -> Option<Vec<Device>> {
                     internal_keying: raw.internal_keying == 1,
                     external_keying: raw.external_keying == 1,
                     modes: own,
+                    card_mode: (raw.default_mode >= 0).then_some(raw.default_mode),
+                    card_mode_3d: raw.default_mode_flags & DUAL_STREAM_3D != 0,
                 }
             })
             .collect(),

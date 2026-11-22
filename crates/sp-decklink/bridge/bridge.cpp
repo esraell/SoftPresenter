@@ -60,6 +60,12 @@ struct SpDlDevice {
     int32_t internal_keying;   // 1 when its keyer can lay pictures over its input
     int32_t external_keying;   // 1 when it can send fill and key on two connectors
     int32_t modes;             // how many of the modes that follow are this device's
+    // The format the device plays out in by default, as Desktop Video Setup sets it: the
+    // BMDDisplayMode that bmdDeckLinkConfigDefaultVideoOutputMode holds, as the driver gives
+    // it, or -1 when the driver doesn't say. With it, bmdDeckLinkConfigDefaultVideoOutputModeFlags
+    // (BMDVideoOutputFlags: whether that format is meant as dual-stream 3D), 0 when not said.
+    int64_t default_mode;
+    int64_t default_mode_flags;
 };
 
 // One way a device can play out.
@@ -477,9 +483,10 @@ int64_t sp_dl_api_version(void) {
     return version;
 }
 
-// Lists every device into `devices` (up to `device_room`) and the ways each can play out into
-// `modes` (up to `mode_room` in all; each device says how many of them are its). Says how
-// many of each it wrote. 1 when the list could be made, 0 when the driver isn't open.
+// Lists every device into `devices` (up to `device_room`), with the format it plays out in by
+// default, and the ways each can play out into `modes` (up to `mode_room` in all; each device
+// says how many of them are its). Says how many of each it wrote. 1 when the list could be
+// made, 0 when the driver isn't open. Only reads the devices' settings; never changes one.
 int32_t sp_dl_list(SpDlDevice* devices, int32_t device_room, SpDlMode* modes, int32_t mode_room,
                    int32_t* device_count, int32_t* mode_count) {
     *device_count = 0;
@@ -515,6 +522,19 @@ int32_t sp_dl_list(SpDlDevice* devices, int32_t device_room, SpDlMode* modes, in
         about->external_keying = flag_attribute(attributes, BMDDeckLinkSupportsExternalKeying) ? 1 : 0;
         int64_t io = int_attribute(attributes, BMDDeckLinkVideoIOSupport, 0);
         release(attributes);
+        about->default_mode = -1;
+        IDeckLinkConfiguration* config = nullptr;
+        if (query(device, IID_IDeckLinkConfiguration, &config)) {
+            int64_t value = 0;
+            if (config->GetInt(bmdDeckLinkConfigDefaultVideoOutputMode, &value) == S_OK) {
+                about->default_mode = value;
+            }
+            value = 0;
+            if (config->GetInt(bmdDeckLinkConfigDefaultVideoOutputModeFlags, &value) == S_OK) {
+                about->default_mode_flags = value;
+            }
+            release(config);
+        }
 
         IDeckLinkOutput* output = nullptr;
         // A device the driver gives no output for (an input only, or an older driver that

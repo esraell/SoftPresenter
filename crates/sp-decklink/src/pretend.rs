@@ -65,8 +65,13 @@ fn modes(keying: bool) -> Vec<Mode> {
     modes
 }
 
-/// Four outputs as a four-connector card shows them, and one more that can key.
+/// Four outputs as a four-connector card shows them, and one more that can key. Their own
+/// default formats, as Desktop Video Setup would set them, cover each way a new output's
+/// format is chosen: the first is set to 1080p30, which a new output starts in; the second to
+/// NTSC, which SoftPresenter doesn't offer; the third to none; the fourth and the keyer don't
+/// say, so a new output on them starts in 1080i59.94.
 pub fn devices() -> Vec<Device> {
+    let card_modes = [Some(*b"Hp30"), Some(*b"ntsc"), Some(*b"iunk"), None];
     let mut devices: Vec<Device> = (0..4)
         .map(|at| Device {
             name: format!("Pretend DeckLink ({})", at + 1),
@@ -81,6 +86,8 @@ pub fn devices() -> Vec<Device> {
             internal_keying: false,
             external_keying: false,
             modes: modes(false),
+            card_mode: card_modes[at as usize].map(|code| i64::from(u32::from_be_bytes(code))),
+            card_mode_3d: false,
         })
         .collect();
     devices.push(Device {
@@ -96,6 +103,8 @@ pub fn devices() -> Vec<Device> {
         internal_keying: true,
         external_keying: true,
         modes: modes(true),
+        card_mode: None,
+        card_mode_3d: false,
     });
     devices
 }
@@ -304,7 +313,18 @@ mod tests {
         assert!(devices.iter().all(|device| device.name.starts_with("Pretend")));
         assert!(devices.iter().all(Device::usable));
         assert_eq!(devices[0].offered().count(), 14, "the standard-definition mode is left out");
-        assert_eq!(devices[0].default_mode().map(|mode| mode.name.as_str()), Some("1080i59.94"));
+        let starts: Vec<String> = devices.iter().map(|device| device.start(false).unwrap().in_words()).collect();
+        assert_eq!(
+            starts,
+            [
+                "1080p30, as Desktop Video Setup has it",
+                "1080i59.94, the usual HD format: Desktop Video Setup has NTSC, which SoftPresenter doesn't offer",
+                "1080i59.94, the usual HD format: Desktop Video Setup sets none",
+                "1080i59.94, the usual HD format: Desktop Video Setup sets none",
+                "1080i59.94, the usual HD format: Desktop Video Setup sets none",
+            ]
+        );
+        assert_eq!(devices[0].default_mode().map(|mode| mode.name.as_str()), Some("1080p30"));
         assert!(devices.iter().filter(|device| device.external_keying).count() == 1);
         for device in &devices {
             for mode in device.offered() {

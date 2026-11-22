@@ -60,6 +60,9 @@ const PROGRESSIVE: u32 = u32::from_be_bytes(*b"prog");
 /// `bmdDuplexInactive`: a sub-device its card's profile leaves unused.
 const DUPLEX_INACTIVE: u32 = u32::from_be_bytes(*b"dxin");
 
+/// `bmdModeUnknown`: no display mode.
+const MODE_UNKNOWN: u32 = u32::from_be_bytes(*b"iunk");
+
 /// How the driver stands on this computer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Driver {
@@ -141,6 +144,14 @@ pub struct Device {
     pub external_keying: bool,
     /// Every way it can play out, as the driver lists them.
     pub modes: Vec<Mode>,
+    /// The format it plays out in by default, as Desktop Video Setup sets it: the value of
+    /// `bmdDeckLinkConfigDefaultVideoOutputMode` exactly as the driver gives it (a
+    /// `BMDDisplayMode`; 0 or `bmdModeUnknown` when none is set), or `None` when the driver
+    /// doesn't say. See [`Device::card_format`].
+    pub card_mode: Option<i64>,
+    /// That format is meant as dual-stream 3D (`bmdDeckLinkConfigDefaultVideoOutputModeFlags`
+    /// has `bmdVideoOutputDualStream3D`), which SoftPresenter doesn't play.
+    pub card_mode_3d: bool,
 }
 
 impl Device {
@@ -169,9 +180,53 @@ impl Device {
         self.offered().find(|mode| mode.name.eq_ignore_ascii_case(name.trim()))
     }
 
-    /// The mode a new output starts in: see [`default_mode`].
+    /// The mode a new output starts in: see [`Device::start`].
     pub fn default_mode(&self) -> Option<&Mode> {
-        default_mode(&self.offered().collect::<Vec<_>>())
+        self.start(false).map(|start| start.mode)
+    }
+
+    /// The format a new output on this device starts in, and why: the device's own default, as
+    /// Desktop Video Setup sets it, where SoftPresenter offers that format here and can play it
+    /// (and key in it, when `keying`); else the usual one ([`default_mode`]).
+    pub fn start(&self, keying: bool) -> Option<Start<'_>> {
+        let card = self.card_format(keying);
+        let mode = match card {
+            CardFormat::Usable(mode) => mode,
+            _ => default_mode(&self.offered().collect::<Vec<_>>())?,
+        };
+        Some(Start { mode, card })
+    }
+
+    /// What the device's own default format is to SoftPresenter. The driver gives it as a
+    /// `BMDDisplayMode`, which is looked for among every mode the device lists (not only those
+    /// offered), so one that can't be used can still be named.
+    pub fn card_format(&self, keying: bool) -> CardFormat<'_> {
+        let Some(code) =
+            self.card_mode.and_then(|raw| u32::try_from(raw).ok()).filter(|code| *code != 0 && *code != MODE_UNKNOWN)
+        else {
+            return CardFormat::NotSet;
+        };
+        let Some(mode) = self.modes.iter().find(|mode| mode.code == code) else { return CardFormat::NotListed(code) };
+        if !mode.offered() {
+            CardFormat::NotOffered(mode)
+        } else if self.card_mode_3d {
+            CardFormat::ThreeD(mode)
+        } else if keying && !mode.keying {
+            CardFormat::CantKey(mode)
+        } else {
+            CardFormat::Usable(mode)
+        }
+    }
+
+    /// Where a screen's format on this device comes from, in words: the format a new output
+    /// starts in, with why ("1080p30, as Desktop Video Setup has it"; "1080i59.94, the usual HD
+    /// format: Desktop Video Setup sets none"), or another, set in SoftPresenter, with what
+    /// Desktop Video Setup has ("720p50, set in SoftPresenter: Desktop Video Setup has 1080p30").
+    pub fn format_in_words(&self, mode: &str) -> String {
+        match self.start(false) {
+            Some(start) if start.mode.name.eq_ignore_ascii_case(mode.trim()) => start.in_words(),
+            _ => format!("{}, set in SoftPresenter: {}", mode.trim(), self.card_format(false).in_words()),
+        }
     }
 
     /// Whether it can key at all, in words: "external and internal keying", "no keying".
@@ -290,11 +345,12 @@ pub fn mode_name(height: u32, interlaced: bool, frame_duration: i64, time_scale:
     format!("{height}{}{rate}", if interlaced { "i" } else { "p" })
 }
 
-/// The mode a new DeckLink output starts in, among the modes offered: 1080i59.94, the usual HD
-/// format for SDI in countries with 60 Hz power, which every HD switcher and recorder takes and
-/// which needs only a 1.5G link; else 1080i50, its counterpart where power is 50 Hz; else the
-/// first 1080-line mode, as SoftPresenter draws every screen at 1920 x 1080; else the first.
-/// The operator picks the mode their switcher or projector is set to.
+/// The mode a new DeckLink output starts in, among the modes offered, when the device's own
+/// default (as Desktop Video Setup sets it) can't be used: 1080i59.94, the usual HD format for
+/// SDI in countries with 60 Hz power, which every HD switcher and recorder takes and which
+/// needs only a 1.5G link; else 1080i50, its counterpart where power is 50 Hz; else the first
+/// 1080-line mode, as SoftPresenter draws every screen at 1920 x 1080; else the first. The
+/// operator picks the mode their switcher or projector is set to.
 pub fn default_mode<'m>(modes: &[&'m Mode]) -> Option<&'m Mode> {
     ["1080i59.94", "1080i50"]
         .iter()
@@ -302,6 +358,96 @@ pub fn default_mode<'m>(modes: &[&'m Mode]) -> Option<&'m Mode> {
         .or_else(|| modes.iter().find(|mode| mode.height == 1080))
         .or_else(|| modes.first())
         .copied()
+}
+
+/// What a device's own default format, as Desktop Video Setup sets it, is to SoftPresenter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CardFormat<'d> {
+    /// None is set, or the driver doesn't say.
+    NotSet,
+    /// A format SoftPresenter offers on the device and can play (and key in, when asked): a new
+    /// output starts in it.
+    Usable(&'d Mode),
+    /// A format the device doesn't list (the `BMDDisplayMode` the driver gave).
+    NotListed(u32),
+    /// A format SoftPresenter doesn't offer: not 720p or 1080 lines, segmented frames, or
+    /// neither 8-bit BGRA nor 8-bit YUV.
+    NotOffered(&'d Mode),
+    /// Meant as dual-stream 3D.
+    ThreeD(&'d Mode),
+    /// A format the device can't key in, when keying is asked.
+    CantKey(&'d Mode),
+}
+
+impl CardFormat<'_> {
+    /// The format's name, where the device lists it: SoftPresenter's name, or for one it
+    /// doesn't offer, the driver's own name for it (which says what it is, where SoftPresenter's
+    /// name might not, as for segmented frames).
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            CardFormat::Usable(mode) | CardFormat::ThreeD(mode) | CardFormat::CantKey(mode) => Some(&mode.name),
+            CardFormat::NotOffered(mode) if !mode.driver_name.is_empty() => Some(&mode.driver_name),
+            CardFormat::NotOffered(mode) => Some(&mode.name),
+            CardFormat::NotSet | CardFormat::NotListed(_) => None,
+        }
+    }
+
+    /// What Desktop Video Setup has, in words: "Desktop Video Setup has 1080p30", "Desktop
+    /// Video Setup sets none".
+    pub fn in_words(&self) -> String {
+        let name = self.name().unwrap_or_default();
+        match self {
+            CardFormat::NotSet => "Desktop Video Setup sets none".to_owned(),
+            CardFormat::Usable(_) => format!("Desktop Video Setup has {name}"),
+            CardFormat::NotListed(code) => {
+                format!("Desktop Video Setup has a format this output doesn't list ({})", code_in_words(*code))
+            }
+            CardFormat::NotOffered(_) => format!("Desktop Video Setup has {name}, which SoftPresenter doesn't offer"),
+            CardFormat::ThreeD(_) => format!("Desktop Video Setup has {name} in 3D, which SoftPresenter doesn't play"),
+            CardFormat::CantKey(_) => format!("Desktop Video Setup has {name}, which this output can't key in"),
+        }
+    }
+}
+
+/// The format a new output starts in, and the device's own default beside it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Start<'d> {
+    pub mode: &'d Mode,
+    /// The device's own default: [`CardFormat::Usable`] when `mode` is it.
+    pub card: CardFormat<'d>,
+}
+
+impl Start<'_> {
+    /// True when the format is the device's own default.
+    pub fn from_card(&self) -> bool {
+        matches!(self.card, CardFormat::Usable(_))
+    }
+
+    /// The format and where it comes from: "1080p30, as Desktop Video Setup has it";
+    /// "1080i59.94, the usual HD format: Desktop Video Setup sets none".
+    pub fn in_words(&self) -> String {
+        if self.from_card() {
+            return format!("{}, as Desktop Video Setup has it", self.mode.name);
+        }
+        let usual = match self.mode.name.as_str() {
+            "1080i59.94" => "the usual HD format",
+            "1080i50" => "the usual HD format where power is 50 Hz",
+            _ if self.mode.height == 1080 => "this output's first 1080-line format",
+            _ => "this output's first format",
+        };
+        format!("{}, {usual}: {}", self.mode.name, self.card.in_words())
+    }
+}
+
+/// A `BMDDisplayMode` as the SDK writes it, its four letters ('Hp30'), or in hex when they
+/// aren't letters.
+pub fn code_in_words(code: u32) -> String {
+    let bytes = code.to_be_bytes();
+    if bytes.iter().all(|byte| byte.is_ascii_graphic() || *byte == b' ') {
+        format!("'{}'", String::from_utf8_lossy(&bytes))
+    } else {
+        format!("{code:#010x}")
+    }
 }
 
 /// Whether the screens' thread may hand pictures over with alpha: how the alpha is to be read.
@@ -462,6 +608,127 @@ mod tests {
         assert!(default_mode(&[]).is_none());
     }
 
+    /// A device with these modes, each with its own code, its own default as `card_mode`.
+    fn card(modes: Vec<Mode>, card_mode: Option<i64>) -> Device {
+        let modes = modes.into_iter().enumerate().map(|(at, mode)| Mode { code: 100 + at as u32, ..mode }).collect();
+        Device {
+            name: "DeckLink Duo (1)".to_owned(),
+            model: "DeckLink Duo 2".to_owned(),
+            id: Some(1),
+            sub_device: Some(0),
+            sub_devices: Some(4),
+            profile: 0,
+            duplex: 0,
+            connections: 1,
+            can_play: true,
+            internal_keying: false,
+            external_keying: false,
+            modes,
+            card_mode,
+            card_mode_3d: false,
+        }
+    }
+
+    fn hd_modes() -> Vec<Mode> {
+        vec![
+            mode(720, b"prog", 1000, 50000),                                      // 100
+            mode(1080, b"uppr", 1001, 30000),                                     // 101
+            mode(1080, b"prog", 1000, 30000),                                     // 102
+            mode(1080, b"psf ", 1000, 25000),                                     // 103, segmented frames: not offered
+            Mode { bgra: false, yuv: false, ..mode(1080, b"prog", 1000, 25000) }, // 104, can't be sent
+            Mode::new(
+                0,
+                "NTSC".to_owned(),
+                (720, 486),
+                (1001, 30000),
+                u32::from_be_bytes(*b"lowr"),
+                (true, true, false),
+            ), // 105
+        ]
+    }
+
+    #[test]
+    fn a_new_output_starts_in_the_cards_own_default_where_it_is_offered_and_can_be_played() {
+        let set = card(hd_modes(), Some(102));
+        let start = set.start(false).unwrap();
+        assert_eq!((start.mode.name.as_str(), start.from_card()), ("1080p30", true));
+        assert_eq!(start.in_words(), "1080p30, as Desktop Video Setup has it");
+        assert_eq!(set.default_mode().map(|mode| mode.name.as_str()), Some("1080p30"));
+        let p720 = card(hd_modes(), Some(100));
+        assert_eq!(p720.default_mode().map(|mode| mode.name.as_str()), Some("720p50"), "a 720p default too");
+    }
+
+    #[test]
+    fn a_default_that_is_unset_or_cant_be_used_leaves_the_usual_format() {
+        let usual = |device: &Device| {
+            let start = device.start(false).unwrap();
+            assert!(!start.from_card(), "{start:?}");
+            (start.mode.name.clone(), start.in_words())
+        };
+        for raw in [None, Some(0), Some(i64::from(MODE_UNKNOWN)), Some(-1), Some(i64::from(u32::MAX) + 1)] {
+            let unset = card(hd_modes(), raw);
+            assert_eq!(unset.card_format(false), CardFormat::NotSet, "{raw:?}");
+            assert_eq!(
+                usual(&unset),
+                ("1080i59.94".to_owned(), "1080i59.94, the usual HD format: Desktop Video Setup sets none".to_owned())
+            );
+        }
+        let segmented = card(hd_modes(), Some(103));
+        assert!(matches!(segmented.card_format(false), CardFormat::NotOffered(_)));
+        assert_eq!(usual(&segmented).0, "1080i59.94");
+        let unplayable = card(hd_modes(), Some(104));
+        assert!(matches!(unplayable.card_format(false), CardFormat::NotOffered(_)), "neither BGRA nor YUV");
+        let sd = card(hd_modes(), Some(105));
+        assert_eq!(
+            usual(&sd).1,
+            "1080i59.94, the usual HD format: Desktop Video Setup has NTSC, which SoftPresenter doesn't offer"
+        );
+        let unlisted = card(hd_modes(), Some(i64::from(u32::from_be_bytes(*b"4k30"))));
+        assert_eq!(unlisted.card_format(false), CardFormat::NotListed(u32::from_be_bytes(*b"4k30")));
+        assert!(usual(&unlisted).1.ends_with("Desktop Video Setup has a format this output doesn't list ('4k30')"));
+        let three_d = Device { card_mode_3d: true, ..card(hd_modes(), Some(102)) };
+        assert!(usual(&three_d).1.ends_with("Desktop Video Setup has 1080p30 in 3D, which SoftPresenter doesn't play"));
+        // Without 1080i59.94, the rest of the usual order, with its own words.
+        let no_5994 = card(vec![mode(720, b"prog", 1000, 50000), mode(1080, b"uppr", 1000, 25000)], None);
+        assert_eq!(
+            usual(&no_5994).1,
+            "1080i50, the usual HD format where power is 50 Hz: Desktop Video Setup sets none"
+        );
+        let only_p = card(vec![mode(720, b"prog", 1000, 50000), mode(1080, b"prog", 1000, 25000)], Some(999));
+        assert!(usual(&only_p).1.starts_with("1080p25, this output's first 1080-line format: "));
+        assert!(card(Vec::new(), Some(100)).start(false).is_none(), "nothing to start in");
+    }
+
+    #[test]
+    fn to_key_the_cards_default_must_be_one_the_device_keys_in() {
+        let mut modes = hd_modes();
+        modes[1].keying = true; // 1080i59.94 keys, 1080p30 doesn't
+        let device = card(modes, Some(102));
+        assert!(device.start(false).unwrap().from_card());
+        let keyed = device.start(true).unwrap();
+        assert_eq!(keyed.card, CardFormat::CantKey(&device.modes[2]));
+        assert_eq!(keyed.mode.name, "1080i59.94");
+        assert!(keyed.in_words().ends_with("Desktop Video Setup has 1080p30, which this output can't key in"));
+    }
+
+    #[test]
+    fn a_screens_format_says_where_it_came_from() {
+        let set = card(hd_modes(), Some(102));
+        assert_eq!(set.format_in_words("1080p30"), "1080p30, as Desktop Video Setup has it");
+        assert_eq!(
+            set.format_in_words("1080i59.94"),
+            "1080i59.94, set in SoftPresenter: Desktop Video Setup has 1080p30"
+        );
+        let unset = card(hd_modes(), None);
+        assert_eq!(
+            unset.format_in_words("1080i59.94"),
+            "1080i59.94, the usual HD format: Desktop Video Setup sets none"
+        );
+        assert_eq!(unset.format_in_words("720p50"), "720p50, set in SoftPresenter: Desktop Video Setup sets none");
+        assert_eq!(code_in_words(u32::from_be_bytes(*b"Hp30")), "'Hp30'");
+        assert_eq!(code_in_words(0), "0x00000000");
+    }
+
     #[test]
     fn a_device_is_found_by_its_id_and_never_swapped_for_another_of_the_same_name() {
         let device = |name: &str, id: Option<i64>| Device {
@@ -477,6 +744,8 @@ mod tests {
             internal_keying: false,
             external_keying: false,
             modes: vec![mode(1080, b"uppr", 1001, 30000)],
+            card_mode: None,
+            card_mode_3d: false,
         };
         let found =
             Found { driver: Driver::Ready("16.3".to_owned()), devices: vec![device("DeckLink Duo (1)", Some(7))] };

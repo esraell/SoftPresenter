@@ -53,6 +53,22 @@ impl DeckLinkOut {
         }
     }
 
+    /// Where its format comes from, against the card as last found: in words ("1080p30, as
+    /// Desktop Video Setup has it"; "720p50, set in SoftPresenter: Desktop Video Setup has
+    /// 1080p30"), and as one word for scripts: "card" (the card's own default, as Desktop Video
+    /// Setup sets it), "usual" (the usual format a new output starts in when the card's can't be
+    /// used), or "set" (another, set in SoftPresenter). Worked out afresh each time, never saved,
+    /// so it follows what Desktop Video Setup has now. `None` while the device isn't connected.
+    pub fn format_from(&self, found: &sp_decklink::Found) -> Option<(String, &'static str)> {
+        let device = found.find(self.id, &self.device)?;
+        let from = match device.start(false) {
+            Some(start) if start.mode.name == self.mode && start.from_card() => "card",
+            Some(start) if start.mode.name == self.mode => "usual",
+            _ => "set",
+        };
+        Some((device.format_in_words(&self.mode), from))
+    }
+
     /// What the output thread is to play.
     pub fn wanted(&self) -> sp_decklink::Wanted {
         sp_decklink::Wanted {
@@ -104,8 +120,10 @@ impl Keyer {
 }
 
 /// The DeckLink outputs a screen can be given: each device that can play now, in the format a
-/// new output starts in; and the one the screen has, kept as it is (its format and keyer), even
-/// while it isn't connected. None without Desktop Video.
+/// new output starts in (the card's own, as Desktop Video Setup sets it, where it can be used;
+/// see `sp_decklink::Device::start`); and the one the screen has, kept as it is (its format and
+/// keyer), even while it isn't connected or the card's own format has changed. None without
+/// Desktop Video.
 pub fn decklink_choices(current: &Output, found: &sp_decklink::Found) -> Vec<Output> {
     let mut choices = Vec::new();
     let mut kept = false;
@@ -125,6 +143,16 @@ pub fn decklink_choices(current: &Output, found: &sp_decklink::Found) -> Vec<Out
         choices.push(current.clone());
     }
     choices
+}
+
+/// A DeckLink screen's format and where it comes from, for `sp screens` (see
+/// [`DeckLinkOut::format_from`]). `None` for a screen on anything else, or while its device
+/// isn't connected.
+pub fn decklink_format(screen: &Screen, found: &sp_decklink::Found) -> Option<(String, &'static str)> {
+    match &screen.output {
+        Output::DeckLink(out) => out.format_from(found),
+        _ => None,
+    }
 }
 
 /// What a screen is for.
@@ -756,6 +784,8 @@ mod tests {
                 u32::from_be_bytes(*b"uppr"),
                 (true, true, false),
             )],
+            card_mode: None,
+            card_mode_3d: false,
         }];
         let found = sp_decklink::Found { driver: sp_decklink::Driver::Ready("16.3".to_owned()), devices };
         let choices = decklink_choices(&Output::Window, &found);
@@ -778,6 +808,86 @@ mod tests {
         assert_eq!(decklink_choices(&mine, &found), vec![mine.clone()], "kept with its own format");
         let gone = decklink("DeckLink 8K Pro (1)", Some(99));
         assert_eq!(decklink_choices(&gone, &found).last(), Some(&gone), "kept while it isn't connected");
+    }
+
+    #[test]
+    fn a_new_decklink_screen_starts_in_the_cards_own_format_and_a_saved_one_keeps_its_own() {
+        let card = |name: &str, id: i64, card_mode: Option<&[u8; 4]>| {
+            let mode = |code: &[u8; 4], height, dominance: &[u8; 4], rate: (i64, i64)| {
+                sp_decklink::Mode::new(
+                    u32::from_be_bytes(*code),
+                    String::new(),
+                    (if height == 720 { 1280 } else { 1920 }, height),
+                    rate,
+                    u32::from_be_bytes(*dominance),
+                    (true, true, false),
+                )
+            };
+            sp_decklink::Device {
+                name: name.to_owned(),
+                model: "DeckLink Duo 2".to_owned(),
+                id: Some(id),
+                sub_device: Some(0),
+                sub_devices: Some(4),
+                profile: 0,
+                duplex: 0,
+                connections: 1,
+                can_play: true,
+                internal_keying: false,
+                external_keying: false,
+                modes: vec![
+                    mode(b"hp50", 720, b"prog", (1000, 50000)),
+                    mode(b"Hi59", 1080, b"uppr", (1001, 30000)),
+                    mode(b"Hp30", 1080, b"prog", (1000, 30000)),
+                ],
+                card_mode: card_mode.map(|code| i64::from(u32::from_be_bytes(*code))),
+                card_mode_3d: false,
+            }
+        };
+        let found = sp_decklink::Found {
+            driver: sp_decklink::Driver::Ready("16.3".to_owned()),
+            devices: vec![
+                card("DeckLink Duo (1)", 1, Some(b"Hp30")),
+                card("DeckLink Duo (2)", 2, Some(b"ntsc")),
+                card("DeckLink Duo (3)", 3, None),
+            ],
+        };
+        // A new screen: the first card is set to 1080p30 in Desktop Video Setup, the second to
+        // a format it doesn't list, the third to none.
+        let choices = decklink_choices(&Output::Window, &found);
+        let mode_of = |output: &Output| match output {
+            Output::DeckLink(out) => out.mode.clone(),
+            _ => unreachable!(),
+        };
+        assert_eq!(choices.iter().map(mode_of).collect::<Vec<_>>()[..3], ["1080p30", "1080i59.94", "1080i59.94"]);
+        let new = Screen::new("Switcher".to_owned(), choices[0].clone());
+        assert_eq!(decklink_format(&new, &found), Some(("1080p30, as Desktop Video Setup has it".to_owned(), "card")));
+        let usual = Screen::new("Stream".to_owned(), choices[2].clone());
+        assert_eq!(
+            decklink_format(&usual, &found),
+            Some(("1080i59.94, the usual HD format: Desktop Video Setup sets none".to_owned(), "usual"))
+        );
+        // A screen saved before, at 1080i59.94 on the card now set to 1080p30, keeps its format,
+        // in its file and in the choices, and says what the card has.
+        let saved = Screen::new(
+            "Old".to_owned(),
+            Output::DeckLink(DeckLinkOut {
+                device: "DeckLink Duo (1)".to_owned(),
+                id: Some(1),
+                mode: "1080i59.94".to_owned(),
+                keyer: Keyer::Off,
+            }),
+        );
+        let reopened = from_json(&to_json(std::slice::from_ref(&saved))).unwrap();
+        assert_eq!(reopened, vec![saved.clone()], "its file is as it was");
+        assert_eq!(decklink_choices(&saved.output, &found)[0], saved.output, "chosen again, it keeps its format");
+        assert_eq!(
+            decklink_format(&saved, &found),
+            Some(("1080i59.94, set in SoftPresenter: Desktop Video Setup has 1080p30".to_owned(), "set"))
+        );
+        let away = sp_decklink::Found { driver: sp_decklink::Driver::Ready("16.3".to_owned()), devices: Vec::new() };
+        assert_eq!(decklink_format(&saved, &away), None, "nothing said while the card is away");
+        assert_eq!(decklink_format(&Screen::new("W".to_owned(), Output::Window), &found), None);
     }
 
     #[test]

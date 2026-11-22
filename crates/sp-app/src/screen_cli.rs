@@ -34,20 +34,25 @@ fn parse_output(words: &[String], found: &sp_decklink::Found, current: Option<&O
     }
 }
 
-fn output_words(output: &Output) -> String {
+/// Where a screen goes, in words; a DeckLink output's format with where it comes from ("at
+/// 1080p30, as Desktop Video Setup has it").
+fn output_words(output: &Output, found: &sp_decklink::Found) -> String {
     match output {
         Output::Automatic => "the first other display (or a window)".to_owned(),
         Output::Display(name) => format!("the display {name}"),
         Output::Window => "a window".to_owned(),
         Output::Ndi(name) => format!("NDI as {name}"),
-        Output::DeckLink(out) => format!("{} at {}", out.device, out.mode),
+        Output::DeckLink(out) => match out.format_from(found) {
+            Some((words, _)) => format!("{} at {words}", out.device),
+            None => format!("{} at {}", out.device, out.mode),
+        },
         Output::Off => "nowhere (off)".to_owned(),
     }
 }
 
 /// The DeckLink output typed: a device that can play now, by its number in `sp decklink` or its
-/// name, in the format a new output starts in, or the screen's own format when it is already on
-/// that device.
+/// name, in the format a new output starts in (the card's own, as Desktop Video Setup sets it,
+/// where it can be used), or the screen's own format when it is already on that device.
 fn decklink_output(typed: &str, found: &sp_decklink::Found, current: Option<&Output>) -> Result<Output, String> {
     if !matches!(found.driver, sp_decklink::Driver::Ready(_)) {
         return Err(found.driver.in_words());
@@ -120,7 +125,7 @@ impl crate::App {
         if state.screens.iter().any(|s| s.name.eq_ignore_ascii_case(&name)) {
             return Err(format!("There is a screen called {name} already."));
         }
-        let mut said = output_words(&output);
+        let mut said = output_words(&output, &found);
         if let Output::Display(display) = &output
             && !connected.iter().any(|d| d.is_named(display))
         {
@@ -204,7 +209,7 @@ impl crate::App {
                         None => vec![value.to_owned()],
                     };
                     screen.output = parse_output(&words, &found, Some(&screen.output))?;
-                    said.push(format!("on {}", output_words(&screen.output)));
+                    said.push(format!("on {}", output_words(&screen.output, &found)));
                     // A display not connected now is kept (the screen waits for it), and said.
                     if let Output::Display(name) = &screen.output
                         && !connected.iter().any(|display| display.is_named(name))
@@ -431,8 +436,8 @@ impl crate::App {
                 }
                 let modes: Vec<&str> = device.offered().map(|mode| mode.name.as_str()).collect();
                 let start = device
-                    .default_mode()
-                    .map_or(String::new(), |mode| format!("; a new output starts in {}", mode.name));
+                    .start(false)
+                    .map_or(String::new(), |start| format!("; a new output starts in {}", start.in_words()));
                 format!(
                     "{}: {}, {}; formats {}{start}",
                     device.name,
@@ -457,6 +462,9 @@ impl crate::App {
                     "formats": device.offered().map(|mode| mode.name.clone()).collect::<Vec<_>>(),
                     "keyed_formats": device.offered().filter(|mode| mode.keying).map(|mode| mode.name.clone()).collect::<Vec<_>>(),
                     "default_format": device.default_mode().map(|mode| mode.name.clone()),
+                    "default_format_from": device.start(false).map(|start| if start.from_card() { "card" } else { "usual" }),
+                    "default_format_words": device.start(false).map(|start| start.in_words()),
+                    "card_format": device.card_format(false).name(),
                 })
             })
             .collect();

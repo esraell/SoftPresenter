@@ -671,11 +671,17 @@ feature changes, this page changes in the same commit.
   Desktop Video 16.0 or later, installed, each output the card offers is a choice for any
   audience or stage screen, named as the driver names it ("DeckLink Duo (1)": a DeckLink Duo 2
   shows its four SDI connectors as four), with the format it plays in: 720p, 1080i or 1080p at
-  every rate the device has. A new DeckLink screen starts in 1080i59.94, the usual HD format for
-  SDI where power is 60 Hz (else 1080i50, else the device's first 1080-line format); set it to
-  what the switcher or projector expects. The devices are found on a thread of their own when
-  the app starts (the driver can be slow), and found again when one is plugged in or taken
-  away. Without the driver there are no DeckLink choices and nothing else changes; a driver
+  every rate the device has. A new DeckLink screen starts in the format the card is set to play
+  out in by default in Desktop Video Setup, where SoftPresenter offers that format on the output
+  and can play it; else in 1080i59.94, the usual HD format for SDI where power is 60 Hz (else
+  1080i50, else the device's first 1080-line format). Set it to what the switcher or projector
+  expects; a screen keeps the format it has, whatever Desktop Video Setup is changed to later.
+  Under the format, the Screens window says where it comes from ("1080p30, as Desktop Video
+  Setup has it"; "1080i59.94, the usual HD format: Desktop Video Setup sets none"; or for
+  another, "720p50, set in SoftPresenter: Desktop Video Setup has 1080p30"), and so do `sp
+  screens`, `sp decklink` and `decklink-check`. The devices, with each one's own default
+  format, are found on a thread of their own when the app starts (the driver can be slow), and
+  found again when one is plugged in or taken away, or `sp decklink` is run. Without the driver there are no DeckLink choices and nothing else changes; a driver
   older than 16.0 is said to be too old. The screen is drawn at 1920 x 1080 with the NDI
   pictures and read back from the GPU once, and handed to the output's own thread, so the card
   never holds up the screens. That thread plays it on the card's own clock, a few frames
@@ -701,7 +707,9 @@ feature changes, this page changes in the same commit.
   own keyer keeps them closer in step. Changing the profile is left to Desktop Video Setup:
   SoftPresenter never changes it, and lists the devices again when asked (`sp decklink`).
 - **A DeckLink check from the terminal.** `softpresenter decklink-check` lists the devices,
-  their formats and keying without the app, and `decklink-check play DEVICE` sends colour bars
+  their formats and keying and the format Desktop Video Setup has for each (as the driver gives
+  it, to check against Desktop Video Setup) without the app, and `decklink-check play DEVICE`
+  sends colour bars
   with a moving bar (and with `--key`, a picture with clear parts and soft edges, through the
   card's keyer) to one named device for a few seconds, through the same output the app uses,
   after saying what it will send where and waiting for yes ([cli.md](cli.md#checking-a-decklink-card)).

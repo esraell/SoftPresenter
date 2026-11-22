@@ -141,7 +141,7 @@ mistake impossible:
 | `playlists`, `playlist [NAME]` | The playlists; one playlist's items (the one in front if none is named) |
 | `media` | The media bin's pictures and videos |
 | `themes`, `timers`, `messages`, `props`, `macros`, `audio` | Each list, with its state: a timer's kind, time and whether it runs; a message's words and whether it shows; a prop on screen; a macro's steps |
-| `screens`, `displays`, `decklink`, `stage layouts` | Each screen and what it is doing (for a screen on NDI, how many receivers are watching it, or that nobody is; for one on DeckLink, the format it plays in, or why it isn't playing), and whether it is see-through (with its alpha) or the key of another (and why it shows black, if it does); the connected displays; the DeckLink outputs, numbered, with their formats and keying (or why there are none); the stage layouts and the screens that use them |
+| `screens`, `displays`, `decklink`, `stage layouts` | Each screen and what it is doing (for a screen on NDI, how many receivers are watching it, or that nobody is; for one on DeckLink, the format it plays in, or why it isn't playing, and where its format comes from), and whether it is see-through (with its alpha) or the key of another (and why it shows black, if it does); the connected displays; the DeckLink outputs, numbered, with their formats and keying and the format a new output starts in, with where it comes from (or why there are none); the stage layouts and the screens that use them |
 | `groups` | The group names that have a jump key, with their colours |
 | `settings` | The app's settings |
 | `menu` | Every menu bar item: its id and its words |
@@ -747,25 +747,34 @@ named as macOS names them (`sp displays`); the main display, with the menu bar, 
 
 A screen can play out of a Blackmagic Design DeckLink card, where Blackmagic's Desktop Video (16.0 or
 later) is installed. `sp decklink` lists the outputs as the driver names them (a DeckLink Duo 2
-shows four, one for each SDI connector), with the formats each plays in and whether it can key;
-a new DeckLink screen starts in 1080i59.94 (or the nearest the device has), and `mode=` sets
-the format the switcher or projector expects. Each output plays one screen. A screen keeps its
+shows four, one for each SDI connector), with the formats each plays in and whether it can key.
+A new DeckLink screen (and `output=decklink:…` without `mode=`) starts in the format set for
+that output in Desktop Video Setup, where SoftPresenter offers it there and can play it; else in
+1080i59.94, the usual HD format (else 1080i50, else the output's first 1080-line format).
+`mode=` sets the format the switcher or projector expects, and a screen keeps the format it has.
+`sp decklink`, `sp screens` and the replies to `screen add` and `screen set … output=` say where
+the format comes from: as Desktop Video Setup has it, the usual one (and why: Desktop Video
+Setup sets none, or one SoftPresenter doesn't offer), or set in SoftPresenter (with what Desktop
+Video Setup has). The card's setting is read when the app starts, when a card is plugged in or
+taken away, and when `sp decklink` is run. Each output plays one screen. A screen keeps its
 output while the card is away and plays out of it again when it is back, never out of another
 card. A quiet test copy (`SOFTPRESENTER_QUIET`) never plays out of a card; with
 `SOFTPRESENTER_PRETEND_DECKLINK=1` it lists made-up devices that play into nothing, to try this.
 On such a test copy (a real card is listed by its own name, "DeckLink Duo (1)"):
 
     $ sp decklink
-      1. Pretend DeckLink (1): SDI, no keying; formats 720p50, 720p59.94, 720p60, 1080i50, 1080i59.94, 1080i60, 1080p23.98, 1080p24, 1080p25, 1080p29.97, 1080p30, 1080p50, 1080p59.94, 1080p60; a new output starts in 1080i59.94
+      1. Pretend DeckLink (1): SDI, no keying; formats 720p50, 720p59.94, 720p60, 1080i50, 1080i59.94, 1080i60, 1080p23.98, 1080p24, 1080p25, 1080p29.97, 1080p30, 1080p50, 1080p59.94, 1080p60; a new output starts in 1080p30, as Desktop Video Setup has it
+      2. Pretend DeckLink (2): SDI, no keying; formats 720p50, …; a new output starts in 1080i59.94, the usual HD format: Desktop Video Setup has NTSC, which SoftPresenter doesn't offer
+      3. Pretend DeckLink (3): SDI, no keying; formats 720p50, …; a new output starts in 1080i59.94, the usual HD format: Desktop Video Setup sets none
       …
-      5. Pretend DeckLink Keyer: SDI, external and internal keying; formats 720p50, …; a new output starts in 1080i59.94
+      5. Pretend DeckLink Keyer: SDI, external and internal keying; formats 720p50, …; a new output starts in 1080i59.94, the usual HD format: Desktop Video Setup sets none
     $ sp screen add audience Switcher on decklink 1
-    Added the audience screen Switcher, on Pretend DeckLink (1) at 1080i59.94.
+    Added the audience screen Switcher, on Pretend DeckLink (1) at 1080p30, as Desktop Video Setup has it.
     $ sp screen set Switcher mode=1080p29.97
     The screen Switcher: in 1080p29.97.
     $ sp screens
       1. Screen 1: In a window
-      2. Switcher: Playing at 1080p29.97
+      2. Switcher: Playing at 1080p29.97; format 1080p29.97, set in SoftPresenter: Desktop Video Setup has 1080p30
     $ sp screen set Switcher mode=1080i47
     Pretend DeckLink (1) has no format 1080i47. Its formats: 720p50, 720p59.94, 720p60, 1080i50, 1080i59.94, 1080i60, 1080p23.98, 1080p24, 1080p25, 1080p29.97, 1080p30, 1080p50, 1080p59.94, 1080p60.
 
@@ -775,12 +784,21 @@ pairs its connectors), the card itself can send a see-through screen's fill and 
     $ sp screen set Switcher keyer=external
     Pretend DeckLink (1) can't do external keying in its card's present profile (it can do no keying).
     $ sp screen set Switcher output=decklink:5
-    The screen Switcher: on Pretend DeckLink Keyer at 1080i59.94.
+    The screen Switcher: on Pretend DeckLink Keyer at 1080i59.94, the usual HD format: Desktop Video Setup sets none.
     $ sp screen set Switcher background=see-through keyer=external
     The screen Switcher: fill and key from the card's keyer, see-through, straight alpha.
     $ sp screens
       1. Screen 1: In a window
-      2. Switcher: Playing at 1080i59.94, fill and key; see-through, straight alpha
+      2. Switcher: Playing at 1080i59.94, fill and key; format 1080i59.94, the usual HD format: Desktop Video Setup sets none; see-through, straight alpha
+
+In `--json`, `sp screens` gives a DeckLink screen's `format`, `format_from` (`card`, `usual` or
+`set`) and `format_words`, all `null` for other screens (while the card is away, `format` is
+still given and the other two are `null`);
+`sp decklink` gives each output's `default_format` with `default_format_from` (`card` or
+`usual`) and `default_format_words`, and `card_format`, the format Desktop Video Setup has for
+it (`null` when none is set, the driver doesn't say, or the output doesn't list it). The
+pretend devices are set as a real card might be: (1) to 1080p30, (2) to NTSC, (3) to none, and
+(4) and the keyer don't say.
 
 Without the driver, `sp decklink` says Desktop Video isn't installed (or is too old) and there
 are no DeckLink outputs to choose; a screen saved with one says the same in `sp screens`.
@@ -805,6 +823,22 @@ where, and waits for `yes` (or `--yes`), before it does. It plays through the sa
 app uses, stops after the seconds asked for (10 unless told), and says how many frames played,
 late and dropped. From the source, `cargo run -p sp-decklink --example decklink_check -- …` is
 the same.
+
+The listing says, for each device, the format a new output starts in and where it comes from,
+and the format Desktop Video Setup has for it exactly as the driver gives it (the SDK's four
+letters, such as `'Hp30'` for 1080p30; `'iunk'` or nothing when none is set). `play` without
+`--format` sends in the same format, or with `--key`, in the usual one if the card can't key in
+Desktop Video Setup's. With pretend devices:
+
+    1. Pretend DeckLink (1)
+       …
+       A new output starts in 1080p30, as Desktop Video Setup has it.
+       Desktop Video Setup's default format, as the driver gives it: 'Hp30'.
+
+    3. Pretend DeckLink (3)
+       …
+       A new output starts in 1080i59.94, the usual HD format: Desktop Video Setup sets none.
+       Desktop Video Setup's default format, as the driver gives it: 'iunk'.
 
 A see-through screen is clear wherever nothing is drawn, for a video switcher or streaming
 software to lay the words over its camera picture: the media, the themes' backgrounds and the
@@ -836,7 +870,8 @@ key, on a second display or NDI name of the same kind:
 
 The JSON of `screens` gives each screen's `background` (`solid` or `see-through`), `alpha`
 (`straight`, `premultiplied`, or null), `key_of` (the name of the screen whose key it shows, or
-null) and `key_trouble` (why a key shows black, or null), beside `name`, `doing` and `shown`.
+null) and `key_trouble` (why a key shows black, or null), beside `name`, `doing` and `shown`;
+for a DeckLink screen, `format`, `format_from` and `format_words` ([above](#screens-and-settings)).
 
 ## VoxLive
 
