@@ -289,10 +289,10 @@ pub struct HomeState {
     pub libraries_changed: bool,
     /// A song whose looping is to be turned on or off, from its menu.
     pub song_loop_request: Option<usize>,
-    /// A song asked to play on the Announcements layer (`Some(None)` to stop it), and the one
-    /// playing there.
-    pub announcement_request: Option<Option<usize>>,
-    pub announcement_live: Option<usize>,
+    /// Something asked to play on the Announcements layer (`Some(None)` to stop it), and what
+    /// plays there, with its name.
+    pub announcement_request: Option<Option<crate::announcements::Announce>>,
+    pub announcement_live: Option<(crate::announcements::Announce, String)>,
     /// A song given a transition of its own (or none, to follow the one for all).
     pub song_transition_request: Option<(usize, Option<sp_model::Transition>)>,
     /// A theme chosen for a song from its menu: the song, and the theme by its place (`None`

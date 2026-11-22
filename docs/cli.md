@@ -354,7 +354,7 @@ with Continuous Playlist on; open it with `playlist go` to run through the playl
 | `timer set NAME countdown …\|to …\|up …\|overrun on\|off\|name NEW`, `timer delete NAME --yes` | Changes a timer, or deletes it |
 | `macro run NAME` | Runs a macro's steps in turn |
 | `macro new NAME`, `macro add NAME STEP [then STEP…]`, `macro remove NAME N`, `macro delete NAME --yes` | Makes a macro and gives it steps |
-| `announce SONG`, `announce stop` | Plays a song's slides on the Announcements layer, or stops it |
+| `announce SONG`, `announce media ITEM`, `announce media-playlist NAME`, `announce stop` | Plays something on the Announcements layer, going round until it is cleared: a song's slides in turn, a picture, a video (looping), or a media playlist's pictures and videos in turn; `stop` clears the layer |
 
 Macro steps: `clear all|slide|media|props|messages`, `show|hide message NAME`,
 `show|hide prop NAME`, `start|stop|reset timer NAME`, `audience on|off`, `song SONG`,

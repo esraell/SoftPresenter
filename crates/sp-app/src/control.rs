@@ -848,7 +848,7 @@ Layers and controls
                                NAME, show|hide prop NAME, start|stop|reset timer NAME,
                                audience on|off, song SONG, media ITEM
   macro run NAME
-  announce SONG | announce stop
+  announce SONG | announce media ITEM | announce media-playlist NAME | announce stop
   audio play TRACK | audio pause | audio stop | audio volume 0-100
   audio next|previous | audio shuffle on|off | audio through on|off | audio crossfade SECONDS
   audio add FILE… [to PLAYLIST] | audio playlists | audio playlist new NAME | delete NAME --yes
@@ -1415,7 +1415,7 @@ impl crate::App {
         }
         // What else is going on: the announcements, a media playlist playing, the timers running,
         // the audio, and the window's own state.
-        let announcing = self.announcing_song().map(|(title, slide)| format!("{title}, slide {slide}"));
+        let announcing = self.announcing_words();
         if let Some(announcing) = &announcing {
             lines.push(format!("Announcements: {announcing}"));
         }
@@ -1582,13 +1582,6 @@ impl crate::App {
             },
             |id| self.show.media().iter().find(|x| x.id == id).map(|x| x.name.clone()),
         )
-    }
-
-    /// The song on the Announcements layer, and its slide (from 1).
-    fn announcing_song(&self) -> Option<(String, usize)> {
-        let on = self.announcing.as_ref()?;
-        let song = self.show.presentations().get(on.song)?;
-        Some((song.title.clone(), on.slide + 1))
     }
 
     /// The media playlist playing item after item, by name.
@@ -2405,18 +2398,48 @@ impl crate::App {
         self.run_actions();
     }
 
+    /// `announce SONG | announce media ITEM | announce media-playlist NAME | announce stop`:
+    /// something going round on the Announcements layer, or nothing.
     fn ctl_announce(&mut self, args: &[String]) -> Result<Reply, String> {
+        use crate::announcements::Announce;
         let typed = rest(args, 1);
         if typed.eq_ignore_ascii_case("stop") || typed.trim().is_empty() {
             self.with_state(|state| state.announcement_request = Some(None));
             self.handle_announcement();
             return Ok(Reply::done("The Announcements layer is clear."));
         }
-        let at = self.find_song(&typed)?;
-        self.with_state(|state| state.announcement_request = Some(Some(at)));
+        let (what, name) = match args.get(1).map(|w| w.to_lowercase()).as_deref() {
+            Some("media") if args.len() > 2 => {
+                let at = find("media item", &self.media_names(), &rest(args, 2))?;
+                let item = &self.show.media()[at];
+                (Announce::Media(item.id), item.name.clone())
+            }
+            Some("media-playlist") if args.len() > 2 => {
+                let lists: Vec<(sp_model::Uuid, String)> = self
+                    .running
+                    .as_ref()
+                    .map(|r| r.home_state.media_playlists.iter().map(|p| (p.id, p.name.clone())).collect())
+                    .unwrap_or_default();
+                let names: Vec<String> = lists.iter().map(|(_, name)| name.clone()).collect();
+                let at = find("media playlist", &names, &rest(args, 2))?;
+                if self.playlist_media(lists[at].0).is_empty() {
+                    return Err(format!("The media playlist {} has nothing in it to play.", names[at]));
+                }
+                (Announce::MediaPlaylist(lists[at].0), format!("the media playlist {}", names[at]))
+            }
+            _ => {
+                let at = self.find_song(&typed)?;
+                let title = self.show.presentations().get(at).map(|s| s.title.clone()).unwrap_or_default();
+                (Announce::Song(at), title)
+            }
+        };
+        self.with_state(|state| state.announcement_request = Some(Some(what)));
         self.handle_announcement();
-        let title = self.show.presentations().get(at).map(|s| s.title.clone()).unwrap_or_default();
-        Ok(Reply::done(format!("Playing {title} on the Announcements layer.")))
+        if self.announcing.as_ref().is_none_or(|on| on.what != what) {
+            let why = self.running.as_ref().and_then(|r| r.home_state.notice.clone());
+            return Err(why.unwrap_or_else(|| format!("{name} could not be played on the Announcements layer.")));
+        }
+        Ok(Reply::done(format!("Playing {name} on the Announcements layer.")))
     }
 
     fn ctl_audio(&mut self, args: &[String]) -> Result<Reply, String> {

@@ -132,7 +132,8 @@ The full list, area by area, is in [docs/features.md](docs/features.md).
    back any passage that was on screen.
 5. **Add pictures and videos.** Drop them on the window to put them in the media bin, and group
    them in a media playlist (the menu beside MEDIA). For a loop before the service, choose Play
-   This Playlist, or right-click a song and choose Play on Announcements Layer. To start it every
+   This Playlist, or right-click a song, a picture, a video or a media playlist and choose Play
+   on Announcements Layer. To start it every
    time the app opens, set it under Settings, Screens, When SoftPresenter Opens.
 6. **Choose what the stage sees.** In the Stage tab, give each stage screen a layout: Words and
    Next, Words Only, Words and Notes, Clock and Timer, or one you design.

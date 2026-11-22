@@ -1,5 +1,6 @@
 //! SoftPresenter: a home window with a slide grid, and a separate output for the audience.
 
+mod announcements;
 mod applog;
 mod audio;
 mod bible;
@@ -154,7 +155,6 @@ struct MediaCycle {
 /// How long a picture stays up in a playing media playlist.
 const PICTURE_SECONDS: f32 = 8.0;
 
-/// A song going round on the Announcements layer.
 /// A file's name alone, for the log and replies (no home folder in them).
 fn file_name(path: &std::path::Path) -> String {
     path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
@@ -194,16 +194,6 @@ impl Reloaded {
         if parts.is_empty() { "Every song is as its file has it.".to_owned() } else { parts.join(" ") }
     }
 }
-
-struct Announcing {
-    song: usize,
-    slide: usize,
-    since: Instant,
-    shown: output::Announcement,
-}
-
-/// How long an announcement slide stays up when it doesn't say.
-const ANNOUNCEMENT_SECONDS: f32 = 8.0;
 
 /// The shortest time between two drawings of a window for an animation: one refresh of a
 /// 60 Hz screen.
@@ -1284,9 +1274,9 @@ struct App {
     voxlive_preview: Option<LookPreview>,
     /// How the last save of a VoxLive look went, for `sp voxlive`.
     voxlive_said: Option<String>,
-    /// The song on the Announcements layer: which, the slide shown, since when, and what was
-    /// sent to the screens.
-    announcing: Option<Announcing>,
+    /// What plays on the Announcements layer: a song, a picture, a video or a media playlist
+    /// (see `announcements`).
+    announcing: Option<announcements::Announcing>,
     /// A media playlist playing.
     media_cycle: Option<MediaCycle>,
     /// What is known of the files in followed folders, and when the folders were last looked
@@ -1896,6 +1886,7 @@ impl App {
             .flat_map(|song| song.slides().flat_map(|(_, slide)| shown(&slide.actions)).collect::<Vec<_>>())
             .collect();
         used.extend(self.show.live_media().and_then(|index| self.show.media().get(index)).map(|item| item.id));
+        used.extend(self.announced_media());
         if let Some(running) = self.running.as_ref() {
             let state = &running.home_state;
             for service in &state.services.list {
@@ -1921,7 +1912,7 @@ impl App {
                 if let Some(running) = self.running.as_mut()
                     && let Some(index) = running.home_state.song_keys.iter().position(|key| *key == song)
                 {
-                    running.home_state.announcement_request = Some(Some(index));
+                    running.home_state.announcement_request = Some(Some(announcements::Announce::Song(index)));
                 }
             }
         }
@@ -3135,7 +3126,7 @@ impl App {
             time: 0.0,
             backdrop: None,
             mask: [0.0; 4],
-            announcement: announcement.as_ref().map(|(slide, theme)| (&**slide, &**theme)),
+            announcement: announcement.as_ref().map(|shown| (&*shown.slide, &*shown.theme)),
         };
         let (now, before) = running.thumbs.preview(&running.gpu, &mut running.egui_renderer, &layers, &theme);
         running.preview = now;
@@ -3605,79 +3596,6 @@ impl App {
     }
 
     /// Turns a song's looping on or off, from its menu.
-    /// Starts a song on the Announcements layer, or stops it.
-    fn handle_announcement(&mut self) {
-        let Some(asked) = self.running.as_mut().and_then(|r| r.home_state.announcement_request.take()) else {
-            return;
-        };
-        match asked {
-            Some(song) => {
-                self.announcing = None;
-                if let Some(first) = self.next_announcement_slide(song, None) {
-                    self.show_announcement(song, first);
-                }
-            }
-            None => self.apply(vec![Command::Clear(sp_engine::Layer::Announcements)]),
-        }
-    }
-
-    /// The slide that follows `after` on the Announcements layer: the next one that is on, round
-    /// to the first after the last. `None` when the song has no slide that is on.
-    fn next_announcement_slide(&self, song: usize, after: Option<usize>) -> Option<usize> {
-        let song = self.show.presentations().get(song)?;
-        let enabled: Vec<usize> =
-            song.slides().enumerate().filter(|(_, (_, slide))| slide.enabled).map(|(at, _)| at).collect();
-        let start = after.map_or(0, |after| after + 1);
-        enabled.iter().copied().find(|at| *at >= start).or_else(|| enabled.first().copied())
-    }
-
-    /// Puts one slide of a song on the Announcements layer.
-    fn show_announcement(&mut self, song: usize, slide: usize) {
-        let Some((_, shown)) = self.show.presentations().get(song).and_then(|s| s.slide(slide)) else {
-            self.announcing = None;
-            return;
-        };
-        let theme = self.theme_of(song).clone();
-        let shown: output::Announcement = (Arc::new(shown.clone()), theme);
-        if let Some(running) = self.running.as_mut() {
-            if let Some(output) = &running.output {
-                output.send(OutputMsg::Announcement(Some(shown.clone())));
-            }
-            running.home_state.announcement_live = Some(song);
-            running.home_window.request_redraw();
-        }
-        if self.announcing.as_ref().is_none_or(|was| was.song != song) {
-            let title = self.show.presentations().get(song).map_or("", |s| s.title.as_str());
-            applog::event("announcements", &format!("playing {title}"));
-        }
-        self.announcing = Some(Announcing { song, slide, since: Instant::now(), shown });
-        self.refresh_preview(false);
-    }
-
-    /// Moves the Announcements layer on when its slide has been up long enough. Says when to
-    /// look again.
-    fn tick_announcements(&mut self) -> Option<Instant> {
-        let (song, slide, since) = self.announcing.as_ref().map(|a| (a.song, a.slide, a.since))?;
-        let seconds = self
-            .show
-            .presentations()
-            .get(song)
-            .and_then(|s| s.slide(slide))
-            .and_then(|(_, s)| s.advance)
-            .filter(|seconds| *seconds > 0.0)
-            .unwrap_or(ANNOUNCEMENT_SECONDS);
-        let due = since + Duration::from_secs_f32(seconds);
-        if Instant::now() < due {
-            return Some(due);
-        }
-        match self.next_announcement_slide(song, Some(slide)) {
-            Some(next) => self.show_announcement(song, next),
-            None => self.apply(vec![Command::Clear(sp_engine::Layer::Announcements)]),
-        }
-        // Looked at again straight away, to work out when the new slide is due.
-        self.announcing.as_ref().map(|_| Instant::now() + Duration::from_millis(50))
-    }
-
     /// Gives a song a transition of its own, or takes it away.
     fn handle_song_transition(&mut self) {
         let Some((index, transition)) = self.running.as_mut().and_then(|r| r.home_state.song_transition_request.take())
@@ -4084,7 +4002,7 @@ impl App {
     /// screen, on the Announcements layer, or (unless `editor_too` is false) open in the editor.
     fn song_in_use(&self, index: usize, editor_too: bool) -> bool {
         let live = self.show.live().is_some_and(|at| at.presentation == index);
-        let announcing = self.announcing.as_ref().is_some_and(|on| on.song == index);
+        let announcing = self.announcing.as_ref().is_some_and(|on| on.song() == Some(index));
         let editing = editor_too
             && self.running.as_ref().is_some_and(|r| {
                 r.home_state.theme_edit.is_none()
@@ -6705,7 +6623,7 @@ impl App {
             if running.frames == GO_LIVE_AT + 2
                 && let Some(song) = std::env::var("SOFTPRESENTER_ANNOUNCE").ok().and_then(|s| s.parse().ok())
             {
-                running.home_state.announcement_request = Some(Some(song));
+                running.home_state.announcement_request = Some(Some(announcements::Announce::Song(song)));
             }
             // Testing aid: pick out songs, media items or the playlist in front's items by their
             // places ("songs:0,2", "media:0,1" or "items:1,3"), as Command-clicks on them do; then

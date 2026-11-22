@@ -326,12 +326,19 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   media is put on or cleared.
 - Settings, Screens, **When SoftPresenter Opens**: play nothing, a media playlist, or a song on
   the Announcements layer, for a loop before and after the service.
-- **Announcements layer**: a song's right-click menu has Play on Announcements Layer. Its
-  slides go round by themselves (each for its Go to Next time, or 8 seconds) on a layer over
-  the slides and media and under props and messages, dissolving from one to the next. Each
-  screen's Look can show or hide it (a lobby screen can show only announcements); the
-  Announce key (lit while it plays), Presentation › Clear Announcements and Clear All take it
-  off; while it plays, the preview block's row names the song with a Clear key beside it.
+- **Announcements layer**: anything that loops can play on it, over the slides and media and
+  under props and messages, until it is cleared. **Play on Announcements Layer** is in the
+  right-click (and ⋯) menu of a song, a picture or video in the media bin, a picture, video or
+  media playlist in a playlist, and in the menu beside MEDIA for the media playlist shown. A
+  song's slides go round by themselves (each for its Go to Next time, or 8 seconds), dissolving
+  from one to the next; a picture stays; a video loops (such as the church's one announcements
+  video); a media playlist shows its pictures (8 seconds each) and videos (to their end) in
+  turn, round and round, and one video alone loops. A picture or video fills the screen as its
+  media bin item is set to (Scale to Fill, Fit or Stretch), on black. Each screen's Look can
+  show or hide the layer (a lobby screen can show only announcements); the Announce key (lit
+  while it plays), Presentation › Clear Announcements and Clear All take it off; while it
+  plays, the preview block's row names it with a Clear key beside it, and the same menu item
+  reads Stop Announcements.
 - **Media slides**: drag a media item onto a slide to have that slide show it when it goes on
   screen (an ink outline shows it will), or onto a song's bar in the slides, or the space under
   a song shown by itself, to add a slide of its own; also

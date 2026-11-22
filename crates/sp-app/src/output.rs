@@ -765,8 +765,27 @@ impl OutputHandle {
 /// What a screen shows: the picture behind, the slide, words over them, and the theme.
 type Content = (Option<Picture>, Option<Arc<Slide>>, Option<Arc<Slide>>, Arc<Theme>, Option<Announcement>);
 
-/// What the Announcements layer shows: a slide and the theme it is drawn with.
-pub type Announcement = (Arc<Slide>, Arc<Theme>);
+/// What the Announcements layer shows: a slide and the theme it is drawn with, and the video
+/// playing in it, if one is: the name its box shows it under, and where its pictures come from.
+#[derive(Clone)]
+pub struct Announcement {
+    pub slide: Arc<Slide>,
+    pub theme: Arc<Theme>,
+    pub video: Option<(String, sp_video::Frames)>,
+}
+
+impl Announcement {
+    /// The name the video's pictures are shown under, if one plays.
+    fn video_name(&self) -> Option<&str> {
+        self.video.as_ref().map(|(name, _)| name.as_str())
+    }
+
+    /// The same slide drawn with the same theme: a change of where the video's pictures come
+    /// from (FFmpeg taking it over) is not a new announcement.
+    fn same_picture(&self, other: &Announcement) -> bool {
+        Arc::ptr_eq(&self.slide, &other.slide) && Arc::ptr_eq(&self.theme, &other.theme)
+    }
+}
 
 /// A window a screen is drawn in.
 struct Target {
@@ -1063,7 +1082,7 @@ fn run(
                     output.round.begin_part();
                     output.finish_ndi();
                     output.end_round();
-                    if output.frame.plays_video() && output.take_video_picture() {
+                    if output.plays_video() && output.take_video_picture() {
                         output.draw(false);
                     }
                     continue;
@@ -1089,7 +1108,7 @@ fn run(
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(Duration::ZERO, |since| Duration::from_nanos(u64::from(since.subsec_nanos())));
             // A playing video is looked at for a new picture far more often.
-            let wait = if output.frame.plays_video() {
+            let wait = if output.plays_video() {
                 output.video_poll()
             } else {
                 Duration::from_secs(1).saturating_sub(into_second) + Duration::from_millis(5)
@@ -1111,7 +1130,7 @@ fn run(
                     // Otherwise the time changes only as a second begins (a video, or a web page
                     // or video in a box, wakes this far more often than that).
                     let new_second =
-                        !output.frame.plays_video() || into_second + output.video_poll() >= Duration::from_secs(1);
+                        !output.plays_video() || into_second + output.video_poll() >= Duration::from_secs(1);
                     if !new_second {
                         continue;
                     }
@@ -1126,7 +1145,7 @@ fn run(
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
             }
-        } else if output.frame.plays_video() {
+        } else if output.plays_video() {
             match rx.recv_timeout(output.video_poll()) {
                 Ok(msg) => Some(msg),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
@@ -1244,11 +1263,27 @@ fn run(
                 OutputMsg::SetDeckLink { id, wanted } => output.set_decklink(id, wanted),
                 OutputMsg::RemoveSurface(id) => output.targets.retain(|target| target.id != id),
                 OutputMsg::Announcement(announcement) => {
-                    // A new announcement dissolves in over what is there, and gets all its tries.
-                    output.round.new_picture();
+                    // A video that stops playing on the layer goes back to its still (unless a
+                    // box on the slide plays the same file).
+                    let was = output.announcement.as_ref().and_then(Announcement::video_name).map(str::to_owned);
+                    let now = announcement.as_ref().and_then(Announcement::video_name);
+                    if let Some(was) = was
+                        && now != Some(was.as_str())
+                        && !output.frame.slide_video.iter().any(|(file, _)| *file == was)
+                    {
+                        sp_render::forget_picture(&was);
+                    }
+                    let same = match (&output.announcement, &announcement) {
+                        (Some(before), Some(after)) => before.same_picture(after),
+                        _ => false,
+                    };
                     output.announcement = announcement;
-                    output.look = sp_model::Transition::default();
-                    new_picture = true;
+                    // A new announcement dissolves in over what is there, and gets all its tries.
+                    if !same {
+                        output.round.new_picture();
+                        output.look = sp_model::Transition::default();
+                        new_picture = true;
+                    }
                 }
                 OutputMsg::Overlay(overlay) => output.overlay = overlay,
                 OutputMsg::Looks(looks) => output.looks = looks,
@@ -1569,7 +1604,7 @@ impl Output {
             time,
             backdrop,
             mask: look.mask,
-            announcement: announcement.as_ref().map(|(slide, theme)| (&**slide, &**theme)),
+            announcement: announcement.as_ref().map(|shown| (&*shown.slide, &*shown.theme)),
         };
         // A stage screen's screen pictures show those screens' own pictures of this moment.
         let pictures = self.screen_pictures(id, frame);
@@ -1907,7 +1942,7 @@ impl Output {
         if self.preview_targets.len() < 2 {
             return;
         }
-        if !new_picture && frame.plays_video() && self.previewed_at.elapsed() < LIVE_PREVIEW_EVERY {
+        if !new_picture && self.plays_video() && self.previewed_at.elapsed() < LIVE_PREVIEW_EVERY {
             return;
         }
         let (w, h) = LIVE_PREVIEW_SIZE;
@@ -2117,7 +2152,7 @@ impl Output {
         let after = std::env::var("SOFTPRESENTER_CAPTURE_OUTPUT_AFTER").ok().and_then(|s| s.parse().ok());
         let started = *STARTED.get_or_init(Instant::now);
         // Taken once something is on screen.
-        let showing = frame.slide.is_some() || frame.media.is_some();
+        let showing = frame.slide.is_some() || frame.media.is_some() || self.announcement.is_some();
         if started.elapsed().as_secs_f32() < after.unwrap_or(3.0)
             || !showing
             || CAPTURE_DONE.swap(true, std::sync::atomic::Ordering::Relaxed)
@@ -2153,6 +2188,12 @@ impl Output {
             Ok(()) => eprintln!("saved the output to {}", std::path::Path::new(&path).display()),
             Err(e) => eprintln!("could not save the output: {e}"),
         }
+    }
+
+    /// True while a video plays: as the media, in a box on the slide, or on the Announcements
+    /// layer.
+    fn plays_video(&self) -> bool {
+        self.frame.plays_video() || self.announcement.as_ref().is_some_and(|shown| shown.video.is_some())
     }
 
     /// Takes the playing video's newest picture, if a new one has come. True when it has.
@@ -2204,6 +2245,14 @@ impl Output {
                 self.video_pictures += 1;
                 new = true;
             }
+        }
+        // A video on the Announcements layer, the same way: its box shows its newest picture.
+        if let Some((name, frames)) = self.announcement.as_ref().and_then(|shown| shown.video.as_ref())
+            && let Some(Some(picture)) = frames.next_with(copied)
+        {
+            sp_render::show_picture(name, picture);
+            self.video_pictures += 1;
+            new = true;
         }
         if new {
             self.video_moved_at = Instant::now();
@@ -2619,7 +2668,7 @@ fn plain_theme(kept: &mut Vec<(Arc<Theme>, Arc<Theme>)>, theme: &Arc<Theme>) -> 
 /// in a prop, which can hold a picture or a video with clear parts.)
 fn see_through_content(content: Content, mut plain: impl FnMut(&Arc<Theme>) -> Arc<Theme>) -> Content {
     let (_media, slide, overlay, theme, announcement) = content;
-    let announcement = announcement.map(|(slide, own)| (slide, plain(&own)));
+    let announcement = announcement.map(|shown| Announcement { theme: plain(&shown.theme), ..shown });
     (None, slide, overlay, plain(&theme), announcement)
 }
 
@@ -2914,16 +2963,16 @@ mod tests {
         let words = Arc::new(Slide::new(vec![sp_model::Object::text(sp_model::Role::primary(), "Light rises")]));
         let message = Arc::new(Slide::new(vec![sp_model::Object::text(sp_model::Role::primary(), "Welcome")]));
         let media = Picture::from_rgba(1, 1, vec![9, 9, 9, 255]);
-        let content: Content =
-            (media, Some(words.clone()), Some(message.clone()), theme.clone(), Some((words.clone(), own.clone())));
+        let shown = Announcement { slide: words.clone(), theme: own.clone(), video: None };
+        let content: Content = (media, Some(words.clone()), Some(message.clone()), theme.clone(), Some(shown));
         let mut kept = Vec::new();
         let (media, slide, over, plain, announcement) = see_through_content(content, |t| plain_theme(&mut kept, t));
         assert!(media.is_none(), "the media behind the words would hide the camera");
         assert!(plain.background.is_none() && plain.background_picture.is_none());
         assert_eq!(plain.templates, theme.templates, "the theme lays the words out as it did");
-        let (announced, announced_theme) = announcement.expect("the announcements stay");
-        assert!(announced_theme.background.is_none(), "without the background that covers the screen");
-        assert!(Arc::ptr_eq(&announced, &words));
+        let announced = announcement.expect("the announcements stay");
+        assert!(announced.theme.background.is_none(), "without the background that covers the screen");
+        assert!(Arc::ptr_eq(&announced.slide, &words));
         assert!(slide.is_some_and(|slide| Arc::ptr_eq(&slide, &words)), "the words stay");
         assert!(over.is_some_and(|over| Arc::ptr_eq(&over, &message)), "the props and the message stay");
         // Each theme is copied once and kept; one with no background is used as it is.

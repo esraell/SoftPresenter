@@ -2891,19 +2891,12 @@ pub fn song_menu(
         ui.close();
     }
     // The Announcements layer: the song's slides go round by themselves over everything else.
-    let announcing = state.announcement_live == Some(index);
-    let (label, hint) = if announcing {
-        ("Stop Announcements", "Take this song off the Announcements layer")
-    } else {
-        (
-            "Play on Announcements Layer",
-            "Its slides go round by themselves over the slides (each for its Go to Next time, or 8 seconds)",
-        )
-    };
-    if ui.button(label).on_hover_text(hint).clicked() {
-        state.announcement_request = Some((!announcing).then_some(index));
-        ui.close();
-    }
+    announce_button(
+        ui,
+        state,
+        crate::announcements::Announce::Song(index),
+        "Its slides go round by themselves over the slides (each for its Go to Next time, or 8 seconds)",
+    );
     // How its slides give way to each other, unless a slide has its own.
     let own_transition = show.presentations().get(index).and_then(|song| song.transition);
     ui.menu_button("Transition", |ui| {
@@ -3062,7 +3055,31 @@ pub fn item_menu(
         ui.menu_button("Song", |ui| song_menu(ui, show, state, commands, song, asks));
         ui.separator();
     }
+    let announced = match state.services.front().items.get(index) {
+        Some(Item::Media { id, .. }) => Some(crate::announcements::Announce::Media(*id)),
+        Some(Item::MediaPlaylist { id, .. }) => Some(crate::announcements::Announce::MediaPlaylist(*id)),
+        _ => None,
+    };
+    if let Some(what) = announced {
+        announce_button(ui, state, what, "It goes round by itself over the slides until it is cleared");
+        ui.separator();
+    }
     item_moves(ui, show, state, index, ask);
+}
+
+/// Play on Announcements Layer, for a song, a picture, a video or a media playlist; Stop
+/// Announcements while it plays there.
+pub fn announce_button(ui: &mut egui::Ui, state: &mut HomeState, what: crate::announcements::Announce, hint: &str) {
+    let announcing = state.announcement_live.as_ref().is_some_and(|(live, _)| *live == what);
+    let (label, hint) = if announcing {
+        ("Stop Announcements", "Take it off the Announcements layer")
+    } else {
+        ("Play on Announcements Layer", hint)
+    };
+    if ui.button(label).on_hover_text(hint).clicked() {
+        state.announcement_request = Some((!announcing).then_some(what));
+        ui.close();
+    }
 }
 
 /// The part of a playlist item's menu that is about its place in the playlist: filling a
@@ -3954,8 +3971,8 @@ fn preview_block(
         Rect::from_min_max(pos2(inner.min.x + 2.0, readout.max.y + 6.0), pos2(inner.max.x - 2.0, readout.max.y + 36.0));
     if let Some(video) = state.video_live.clone() {
         video_row(ui, state, &video, row);
-    } else if let Some(song) = state.announcement_live.and_then(|index| show.presentations().get(index)) {
-        if playing_line(ui, row, "Announcements:", &song.title, "Clear", "Take the announcements off the screens") {
+    } else if let Some((_, name)) = state.announcement_live.clone() {
+        if playing_line(ui, row, "Announcements:", &name, "Clear", "Take the announcements off the screens") {
             commands.push(Command::Clear(Layer::Announcements));
         }
     } else if let Some(pattern) = state.test_pattern {
@@ -4861,6 +4878,12 @@ fn media_playlist_menu(state: &mut HomeState, picker: &egui::Response) {
                     state.media_request = Some(crate::home::MediaRequest::PlayPlaylist(Some(id)));
                     ui.close();
                 }
+                announce_button(
+                    ui,
+                    state,
+                    crate::announcements::Announce::MediaPlaylist(id),
+                    "Its pictures and videos in turn over the slides, round and round, until it is cleared",
+                );
                 // A folder it follows: what is in the folder is in the playlist.
                 match state.media_playlists[at].folder.clone() {
                     Some(folder) => {
@@ -4944,6 +4967,12 @@ fn media_item_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, item:
         state.services.add(crate::service::Item::Media { id: item.id, name: item.name.clone() });
         ui.close();
     }
+    let hint = if crate::media::is_video(&item.path) {
+        "Over the slides, looping, until it is cleared"
+    } else {
+        "Over the slides until it is cleared"
+    };
+    announce_button(ui, state, crate::announcements::Announce::Media(item.id), hint);
     ui.menu_button("Media Playlists", |ui| {
         if state.media_playlists.is_empty() {
             ui.label(
