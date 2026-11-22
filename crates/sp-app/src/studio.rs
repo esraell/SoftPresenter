@@ -884,9 +884,13 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             0
         };
         let hints = [
-            crate::keys::hint("Show", "S", false),
-            crate::keys::hint("Bible, ready for a reference", "B", false),
-            crate::keys::hint("Edit", "E", false),
+            crate::keys::hint("Show", "1", false),
+            format!(
+                "{}; {} too",
+                crate::keys::hint("Bible, ready for a reference", "2", false),
+                crate::keys::hint_key("B")
+            ),
+            crate::keys::hint("Edit", "3", false),
         ];
         let hints: Vec<&str> = hints.iter().map(String::as_str).collect();
         let at = pos2(name.max.x + 14.0, middle - 16.45);
@@ -899,10 +903,11 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             ORDER.iter().position(|shown| *shown == view),
             &SwitchLook::views(),
         );
-        // Holding the modifier: each view's key beside it.
+        // With Show Keys on Buttons: each view's key beside it (Command-1, 2 and 3; Ctrl
+        // elsewhere).
         if crate::keys::tags_shown(state) {
             let cells = pill_cells(ui, at, &["Show", "Bible", "Edit"], &SwitchLook::views());
-            for (cell, key) in cells.iter().zip(["S", "B", "E"]) {
+            for (cell, key) in cells.iter().zip(["1", "2", "3"]) {
                 crate::keys::corner_tag(ui.painter(), *cell, &crate::keys::with_modifier(key));
             }
         }
@@ -1166,7 +1171,7 @@ fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
     let hint = if cfg!(target_os = "macos") {
         "Find a song by its title or a line of its words, or a Bible passage or verse (press /, or Command-F)"
     } else {
-        "Find a song by its title or a line of its words, or a Bible passage or verse (press /, or Ctrl-F)"
+        "Find a song by its title or a line of its words, or a Bible passage or verse (press /, or Ctrl+F)"
     };
     response.on_hover_text(hint);
     state.find_rect = Some(find);
@@ -1519,7 +1524,7 @@ fn left_foot(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &m
         let add = Rect::from_min_size(pos2(area.min.x, top), vec2(area.width(), 30.0));
         if library {
             let button = labelled_button(ui, add, ui.scope_id().with("new song"), "New song", Some(Icon::Plus), false);
-            if button.on_hover_text("New song (Command-N)").clicked() {
+            if button.on_hover_text(crate::keys::hint("New song", "N", false)).clicked() {
                 state.new_song = true;
             }
         } else {
@@ -3678,9 +3683,8 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
             use crate::menubar::Action;
             dock_divider(ui, x + 6.5, middle);
             x += 13.0;
-            for (label, action, hint) in
-                [("Undo", Action::Undo, "Undo (Command-Z)"), ("Redo", Action::Redo, "Redo (Shift-Command-Z)")]
-            {
+            let hints = [crate::keys::hint("Undo", "Z", false), crate::keys::hint("Redo", "Z", true)];
+            for ((label, action), hint) in [("Undo", Action::Undo), ("Redo", Action::Redo)].into_iter().zip(&hints) {
                 let place = Rect::from_min_size(pos2(x, middle - 15.0), vec2(UNDO, 30.0));
                 if labelled_button(ui, place, ui.scope_id().with(label), label, None, false)
                     .on_hover_text(hint)

@@ -1859,8 +1859,13 @@ fn item_bar(
                     state.copyright_request = Some((at, details));
                 }
             });
-        let words = icon_button(ui, place(), id.with("words"), Icon::Reflow, strength, false)
-            .on_hover_text("Words as text: edit the song's words as text (Control-R)");
+        // Control-R is the Mac menu bar's key for it.
+        let words_hint = if cfg!(target_os = "macos") {
+            "Words as text: edit the song's words as text (Control-R)"
+        } else {
+            "Words as text: edit the song's words as text"
+        };
+        let words = icon_button(ui, place(), id.with("words"), Icon::Reflow, strength, false).on_hover_text(words_hint);
         if words.clicked() {
             state.reflow = Some((at, sp_model::to_song_text(song)));
         }

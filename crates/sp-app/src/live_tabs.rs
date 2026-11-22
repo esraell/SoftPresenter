@@ -31,11 +31,8 @@ pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeStat
         state.voxlive_slot.and_then(|slot| show.presentations().get(slot)).is_some_and(|item| item.slide_count() > 0);
     const NAMES: [&str; 7] = ["Timers", "Messages", "Props", "Macros", "Stage", "Audio", "VoxLive"];
     // Each tab's key opens it and numbers what is in it (see `keys`).
-    let hints: Vec<String> = NAMES
-        .iter()
-        .enumerate()
-        .map(|(at, name)| crate::keys::hint(&format!("{name}, numbered"), &(at + 1).to_string(), false))
-        .collect();
+    let hints: Vec<String> =
+        NAMES.iter().enumerate().map(|(at, name)| crate::keys::tab_hint(&format!("{name}, numbered"), at)).collect();
     let hints: Vec<&str> = hints.iter().map(String::as_str).collect();
     let tags: Vec<String> =
         if crate::keys::tags_shown(state) { (0..NAMES.len()).map(crate::keys::tab_key).collect() } else { Vec::new() };

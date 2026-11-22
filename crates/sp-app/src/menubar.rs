@@ -96,6 +96,9 @@ pub enum Action {
     Website,
     ReportIssue,
     WhatsNew,
+    /// Each button's key written beside it, all the time, or never (the key list has the same
+    /// switch, for computers without this menu bar).
+    KeysOnButtons,
 }
 
 /// A keyboard shortcut. Every one has Command or Control in it, so none is ever taken from
@@ -354,6 +357,8 @@ pub const MENUS: &[(&str, &[Entry])] = &[
         &[
             Do(Action::Website, "SoftPresenter Help", None),
             Do(Action::WhatsNew, "What's New in SoftPresenter", None),
+            Line,
+            Check(Action::KeysOnButtons, "Show Keys on Buttons", None),
             Line,
             Do(Action::ReportIssue, "Report an Issue…", None),
         ],

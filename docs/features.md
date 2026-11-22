@@ -380,9 +380,11 @@ feature changes, this page changes in the same commit.
   that layout or play that track; **Shift-Command-M** numbers the pictures and videos in the
   media strip, and 1 to 9 shows one. The numbers stay four seconds after the last one is used,
   or until Escape, which then only puts them away. **Shift-Command-1 and -2** switch the
-  audience and the stage screens on and off. **Holding Command** (or Option) a moment shows a
-  small amber tag beside each thing that
-  has a key; `?` (or the `?` in the top bar) lists every key. In an open menu the arrows move
+  audience and the stage screens on and off. **Show Keys on Buttons** (in the Help menu on a
+  Mac, and a switch at the foot of the list of keys on every computer; kept with the
+  preferences, off at first) writes each thing's key beside it in a small amber tag, all the
+  time: Command-1, 2 and 3 on the views, Option-1 to 7 on the tool tabs, and the rest; holding
+  Command or Option no longer shows them. `?` (or the `?` in the top bar) lists every key. In an open menu the arrows move
   between its choices, Right opens a group of them, Left goes back, Enter chooses and Escape
   closes; Space and the arrows don't run the show while a menu is open. After a slider or a
   menu is used, the keyboard goes back to running the show.

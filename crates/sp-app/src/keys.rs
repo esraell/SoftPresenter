@@ -1,11 +1,13 @@
 //! Keys for getting around the window, which work on every computer (the menu bar is the
 //! Mac's only): Command on a Mac, Ctrl elsewhere, with a letter or a number.
 //!
-//! - Holding the modifier shows a small amber tag beside everything that has a key.
-//! - Modifier-1 to 7 opens a tool tab and numbers what is in it; then 1 to 9 starts that timer,
-//!   shows that message or prop, runs that macro, switches to that stage layout or plays that
-//!   track. Shift-modifier-M numbers the pictures and videos in the media strip, and 1 to 9
-//!   shows one. The numbers stay four seconds, or until Escape, which then only puts them away.
+//! - With Show Keys on Buttons on (in the Help menu, and in the list of keys), a small amber tag
+//!   beside everything that has a key names it, all the time; off (as it starts), never.
+//! - Command-1, 2 and 3 are Show, Bible and Edit. Option-1 to 7 (Alt elsewhere) opens a tool
+//!   tab and numbers what is in it; then 1 to 9 starts that timer, shows that message or prop,
+//!   runs that macro, switches to that stage layout or plays that track. Shift-modifier-M
+//!   numbers the pictures and videos in the media strip, and 1 to 9 shows one. The numbers stay
+//!   four seconds, or until Escape, which then only puts them away.
 //! - `?` (and the round button in the top bar) opens the list of every key.
 //!
 //! The keys that run the show (Space, the arrows, Escape, the F keys, the letters) are read in
@@ -16,9 +18,6 @@ use egui::{Align2, Color32, FontId, Key, Rect, Stroke, StrokeKind, pos2, vec2};
 use crate::home::HomeState;
 use crate::studio::{CARE, LINE, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, fixed, fixed_semibold, semibold};
 
-/// How long the modifier is held alone before the tags show, so a Command-click that picks
-/// slides doesn't flash them.
-const HELD_FOR: f64 = 0.3;
 /// How long the numbers after modifier-1 to 7 (or Shift-modifier-M) stay.
 pub const NUMBERS_FOR: f64 = 4.0;
 
@@ -104,7 +103,7 @@ pub fn hint_key(key: &str) -> String {
     if cfg!(target_os = "macos") { format!("Command-{key}") } else { format!("Ctrl+{key}") }
 }
 
-/// A key said in a tooltip: "Show (Command-S)" on a Mac, "Show (Ctrl+S)" elsewhere.
+/// A key said in a tooltip: "Show (Command-1)" on a Mac, "Show (Ctrl+1)" elsewhere.
 pub fn hint(what: &str, key: &str, shift: bool) -> String {
     let mac = cfg!(target_os = "macos");
     match (mac, shift) {
@@ -115,9 +114,15 @@ pub fn hint(what: &str, key: &str, shift: bool) -> String {
     }
 }
 
-/// Whether the tags beside things with keys show now (see [`frame`]).
+/// A tool tab's key said in a tooltip: "Timers (Option-1)" on a Mac, "Timers (Alt+1)" elsewhere.
+pub fn tab_hint(what: &str, tab: usize) -> String {
+    if cfg!(target_os = "macos") { format!("{what} (Option-{})", tab + 1) } else { format!("{what} (Alt+{})", tab + 1) }
+}
+
+/// Whether the tags beside things with keys show: Show Keys on Buttons is on (or a testing aid
+/// shows them for a picture).
 pub fn tags_shown(state: &HomeState) -> bool {
-    state.key_tags
+    state.keys_on_buttons || state.key_tags_for_capture
 }
 
 /// How wide a key's tag is.
@@ -201,38 +206,21 @@ pub enum Ask {
     LiveMenu,
 }
 
-/// Reads the keys for getting around, once a frame, before the window is drawn: shows or hides
-/// the tags, ends the numbers when their time is up, and does what a key asks. Nothing is read
-/// while text is typed, or while a question, a sheet or the setup is open.
+/// Reads the keys for getting around, once a frame, before the window is drawn: ends the
+/// numbers when their time is up, and does what a key asks. Nothing is read while text is
+/// typed, or while a question, a sheet or the setup is open. (Holding a modifier no longer shows
+/// the keys' tags: Show Keys on Buttons does, all the time.)
 pub fn frame(ctx: &egui::Context, state: &mut HomeState, voxlive: bool) -> Option<Ask> {
     let now = ctx.input(|input| input.time);
-    // The tags: while the modifier is held alone, after a moment, and not while a mouse button
-    // is down (a Command-click picks slides).
-    let (command, shift, alt, down, keyed) = ctx.input(|input| {
-        let keyed = input.events.iter().any(|event| matches!(event, egui::Event::Key { pressed: true, .. }));
-        (input.modifiers.command, input.modifiers.shift, input.modifiers.alt, input.pointer.any_down(), keyed)
-    });
-    // Option held alone shows them too: it is the tool tabs' modifier.
-    let tab_held = alt && !command && !shift && !ctx.text_edit_focused();
-    if (command && !shift && !alt || tab_held) && !down && !keyed {
-        let since = *state.modifier_since.get_or_insert(now);
-        state.key_tags = now - since >= HELD_FOR;
-        if !state.key_tags {
-            ctx.request_repaint_after(std::time::Duration::from_secs_f64(HELD_FOR - (now - since) + 0.01));
-        }
-    } else if !command && !tab_held || down {
-        state.modifier_since = None;
-        state.key_tags = false;
-    }
-    // Testing aid: SOFTPRESENTER_CAPTURE_KEYS=tags shows the tags as if the modifier were held;
-    // `numbers` numbers the open tab's things and `media` the media strip's, as the keys do;
-    // `sheet` opens the list of every key. Several may be given, with commas between. For
-    // pictures of them.
+    // Testing aid: SOFTPRESENTER_CAPTURE_KEYS=tags shows the tags as Show Keys on Buttons does,
+    // without changing the setting; `numbers` numbers the open tab's things and `media` the
+    // media strip's, as the keys do; `sheet` opens the list of every key. Several may be given,
+    // with commas between. For pictures of them.
     static TEST: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let test = TEST.get_or_init(|| std::env::var("SOFTPRESENTER_CAPTURE_KEYS").unwrap_or_default());
     for part in test.split(',') {
         match part {
-            "tags" => state.key_tags = true,
+            "tags" => state.key_tags_for_capture = true,
             "numbers" => state.numbers = Some(Numbers { of: NumbersOf::Tab, since: now, picked: None }),
             "media" => state.numbers = Some(Numbers { of: NumbersOf::Media, since: now, picked: None }),
             "sheet" => state.key_sheet = true,
@@ -388,7 +376,7 @@ pub fn every_key() -> Vec<(&'static str, Vec<Row>)> {
                 (one(&m(",")), "Settings"),
                 (one(&m("P")), "Playlists and libraries"),
                 (vec!["/".to_owned(), m("F")], "Find a song, a line or a verse"),
-                (one("?"), "This list"),
+                (one("?"), "This list (its foot has Show keys on buttons)"),
             ],
         ),
         (
@@ -530,14 +518,41 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
             let bottom = tops[0].max(tops[1]);
             ui.allocate_rect(Rect::from_min_max(origin, pos2(origin.x + width, bottom)), egui::Sense::hover());
         });
-        // The foot: what holding the modifier does, and Done.
+        // The foot: the switch that writes each button's key beside it (on a Mac also in the
+        // Help menu; here for every computer), a note, and Done.
         let foot = sheet.max.y - 59.0;
-        let note = format!(
-            "Hold {} to see the keys beside the things they do. Settings \u{203a} Key Mappings has the menu bar's too.",
-            if cfg!(target_os = "macos") { "Command" } else { "Ctrl" }
+        let label = painter.layout_no_wrap("Show keys on buttons".to_owned(), FontId::proportional(13.0), TEXT);
+        let track = Rect::from_min_size(pos2(sheet.min.x + 18.0, foot + 19.5), vec2(30.0, 17.0));
+        let switch = Rect::from_min_max(
+            track.min - vec2(4.0, 6.0),
+            pos2(track.max.x + 10.0 + label.size().x + 4.0, track.max.y + 6.0),
         );
-        let note = painter.layout(note.to_uppercase(), fixed(11.5), TEXT_FAINT, width - 36.0 - 90.0);
-        painter.galley(pos2(sheet.min.x + 18.0, foot + 12.0), note, TEXT_FAINT);
+        let switch_response = ui.interact(switch, ui.scope_id().with("keys on buttons"), egui::Sense::click());
+        if switch_response.clicked() {
+            state.keys_on_buttons = !state.keys_on_buttons;
+        }
+        let on = state.keys_on_buttons;
+        painter.rect_filled(track, 8.5, if on { SELECTED } else { crate::studio::BUTTON });
+        if on {
+            painter.rect_stroke(track, 8.5, Stroke::new(1.0, Color32::from_white_alpha(36)), StrokeKind::Inside);
+        }
+        let knob = if on { track.right_center() - vec2(8.5, 0.0) } else { track.left_center() + vec2(8.5, 0.0) };
+        painter.circle_filled(knob, 6.0, if on { TEXT } else { TEXT_DIM });
+        painter.galley(pos2(track.max.x + 10.0, track.center().y - label.size().y / 2.0), label, TEXT);
+        let where_else = if cfg!(target_os = "macos") {
+            "Also in the Help menu. Settings \u{203a} Key Mappings has the menu bar's keys."
+        } else {
+            "Settings \u{203a} Key Mappings has the menu keys too."
+        };
+        let left = switch.max.x + 14.0;
+        let note = painter.layout(
+            where_else.to_uppercase(),
+            fixed(11.0),
+            TEXT_FAINT,
+            (sheet.max.x - 18.0 - 70.0 - left).max(60.0),
+        );
+        painter.galley(pos2(left, track.center().y - note.size().y / 2.0), note, TEXT_FAINT);
+        switch_response.on_hover_text("Write each button's key beside it, all the time");
         let done = Rect::from_min_size(pos2(sheet.max.x - 18.0 - 57.3, foot + 12.5), vec2(57.3, 30.0));
         let done_response = ui.interact(done, ui.scope_id().with("done keys"), egui::Sense::click());
         painter.rect_filled(done, 9.0, if done_response.hovered() { Color32::WHITE } else { TEXT });
@@ -736,7 +751,7 @@ mod tests {
     }
 
     #[test]
-    fn the_tags_show_once_the_modifier_has_been_held_a_moment_and_not_during_a_click() {
+    fn holding_a_modifier_shows_no_tags_and_show_keys_on_buttons_shows_them_all_the_time() {
         let ctx = egui::Context::default();
         let mut state = HomeState::default();
         let run = |state: &mut HomeState, time: f64, events: Vec<egui::Event>| {
@@ -746,17 +761,48 @@ mod tests {
             })
             .drop_without_applying_deltas();
         };
-        run(&mut state, 1.0, vec![egui::Event::ModifiersChanged(egui::Modifiers::COMMAND)]);
-        assert!(!state.key_tags, "not at once");
-        run(&mut state, 1.4, Vec::new());
-        assert!(state.key_tags, "after a moment");
-        let click = egui::Event::PointerButton {
-            pos: pos2(10.0, 10.0),
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::COMMAND,
+        assert!(!tags_shown(&state), "off as it starts");
+        for modifiers in [egui::Modifiers::COMMAND, egui::Modifiers::ALT] {
+            run(&mut state, 1.0, vec![egui::Event::ModifiersChanged(modifiers)]);
+            run(&mut state, 2.0, Vec::new());
+            assert!(!tags_shown(&state), "holding {modifiers:?} shows nothing");
+        }
+        state.keys_on_buttons = true;
+        run(&mut state, 3.0, vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+        assert!(tags_shown(&state), "on: shown with nothing held");
+        // Kept with the preferences.
+        let prefs = state.prefs();
+        assert!(prefs.keys_on_buttons);
+        let mut fresh = HomeState::default();
+        fresh.apply_prefs(&prefs);
+        assert!(fresh.keys_on_buttons);
+    }
+
+    #[test]
+    fn the_switch_at_the_foot_of_the_key_list_turns_the_keys_on_buttons_on_and_off() {
+        let ctx = egui::Context::default();
+        let mut state = HomeState { key_sheet: true, ..HomeState::default() };
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 900.0));
+        let sheet = Rect::from_center_size(screen.center(), vec2(720.0, 868.0));
+        let at = pos2(sheet.min.x + 18.0 + 15.0, sheet.max.y - 59.0 + 28.0);
+        let frame_with = |state: &mut HomeState, time: f64, events: Vec<egui::Event>| {
+            let input = egui::RawInput { time: Some(time), screen_rect: Some(screen), events, ..Default::default() };
+            ctx.run_ui(input, |ui| key_sheet(ui.ctx(), state)).drop_without_applying_deltas();
         };
-        run(&mut state, 1.5, vec![click]);
-        assert!(!state.key_tags, "a Command-click hides them");
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        // The sheet is laid out in its first frame and takes clicks from the next.
+        frame_with(&mut state, 0.0, vec![]);
+        frame_with(&mut state, 0.05, vec![egui::Event::PointerMoved(at)]);
+        frame_with(&mut state, 0.1, vec![press(true)]);
+        frame_with(&mut state, 0.2, vec![press(false)]);
+        assert!(state.keys_on_buttons && state.key_sheet, "on, and the list stays open");
+        frame_with(&mut state, 0.3, vec![press(true)]);
+        frame_with(&mut state, 0.4, vec![press(false)]);
+        assert!(!state.keys_on_buttons, "off again");
     }
 }

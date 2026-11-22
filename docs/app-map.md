@@ -106,8 +106,8 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | Shift-Command-M, then 1 … 9 | Shows that picture or video from the media strip |
 | Shift-Command-1, -2 | Audience screens, stage screens, on or off |
 | Command-O | The menu of the slide on screen |
-| ? | Every key, as a list |
-| Holding Command | A small amber tag beside everything that has a key |
+| ? | Every key, as a list; the switch at its foot is Show keys on buttons |
+| Help › Show Keys on Buttons (a Mac's menu bar; the key list's switch everywhere) | A small amber tag beside everything that has a key, all the time; off, never (kept with the preferences; holding Command no longer shows them) (`keys.rs`) |
 | SoftPresenter › Set Up SoftPresenter… | The setup a fresh install starts with: screens, songs, Bibles, permissions |
 | File › Import Songs… (or drop song files on the window) | Import songs from text, lyric, ChordPro, rich-text or Word files, `.pro` documents and `.proBundle` bundles (whose pictures and videos go into the media bin, `bundle.rs`) |
 | File › Import from ProPresenter… (or drop a folder) | Bring a library folder across; each folder becomes a library; song documents and bundles can be chosen too |

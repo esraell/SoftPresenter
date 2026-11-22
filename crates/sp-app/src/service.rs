@@ -394,6 +394,9 @@ pub struct Prefs {
     /// The order a library's songs are listed in: `listed`, `az` or `longest`.
     #[serde(default)]
     pub song_order: String,
+    /// True when each button's key is written beside it (Help › Show Keys on Buttons).
+    #[serde(default)]
+    pub keys_on_buttons: bool,
 }
 
 /// When a song's copyright line is shown.
@@ -454,6 +457,7 @@ impl Default for Prefs {
             bible_rows_open: false,
             playlist_in_front: false,
             song_order: "listed".to_owned(),
+            keys_on_buttons: false,
         }
     }
 }

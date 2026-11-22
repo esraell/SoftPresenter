@@ -294,10 +294,11 @@ pub struct HomeState {
     /// The numbers on the open tool tab's cards or the media strip's pictures, after
     /// modifier-1 to 7 or Shift-modifier-M (see `keys`).
     pub numbers: Option<crate::keys::Numbers>,
-    /// Whether the tags beside things with keys show (the modifier held a moment), and since
-    /// when the modifier has been held alone.
-    pub key_tags: bool,
-    pub modifier_since: Option<f64>,
+    /// Whether each button's key is written beside it in a small tag, all the time (Help › Show
+    /// Keys on Buttons, or the switch in the list of keys; kept with the preferences), and
+    /// whether a testing aid shows them for a picture without changing the setting.
+    pub keys_on_buttons: bool,
+    pub key_tags_for_capture: bool,
     /// The list of every key is open.
     pub key_sheet: bool,
     /// Open the menu of the slide on screen, as its "more" button does (modifier-O): the frame
@@ -1351,8 +1352,8 @@ impl Default for HomeState {
             picked: None,
             pick_scroll: 0,
             numbers: None,
-            key_tags: false,
-            modifier_since: None,
+            keys_on_buttons: false,
+            key_tags_for_capture: false,
             key_sheet: false,
             live_menu: None,
 
@@ -1573,6 +1574,7 @@ impl HomeState {
             bible_rows_open: self.bible.rows_open,
             playlist_in_front: self.playlist_open,
             song_order: self.song_order.name().to_owned(),
+            keys_on_buttons: self.keys_on_buttons,
             ..crate::service::Prefs::default()
         }
     }
@@ -1605,6 +1607,7 @@ impl HomeState {
         self.bible.rows_open = prefs.bible_rows_open;
         self.playlist_open = prefs.playlist_in_front;
         self.song_order = crate::kept::SongOrder::named(&prefs.song_order);
+        self.keys_on_buttons = prefs.keys_on_buttons;
     }
 
     /// How long a new picture takes to fade in on the output; zero when slides cut.
@@ -3423,9 +3426,11 @@ fn stage_tools(ui: &mut egui::Ui, state: &mut HomeState, inner: Rect, layout: us
     }
     let (can_undo, can_redo) =
         state.editing.as_ref().map_or((false, false), |draft| (draft.can_undo(), draft.can_redo()));
+    let (undo_hint, redo_hint) =
+        (crate::keys::hint("Undo the last change", "Z", false), crate::keys::hint("Redo it", "Z", true));
     for (bar, words, enabled, hint, back) in [
-        (undo_bar, "Undo", can_undo, "Undo the last change (Command-Z)", true),
-        (redo_bar, "Redo", can_redo, "Redo it (Shift-Command-Z)", false),
+        (undo_bar, "Undo", can_undo, undo_hint.as_str(), true),
+        (redo_bar, "Redo", can_redo, redo_hint.as_str(), false),
     ] {
         let id = ui.scope_id().with(("stage history", words));
         let look = crate::studio::Flat::Plain;
@@ -4220,7 +4225,13 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
                 );
             }
             "Screens" => {
-                if ui.button("Configure Screens…").on_hover_text("Option-Command-1").clicked() {
+                // Its key is the Mac menu bar's.
+                let hint = if cfg!(target_os = "macos") {
+                    "Configure Screens (Option-Command-1)"
+                } else {
+                    "Configure Screens"
+                };
+                if ui.button("Configure Screens…").on_hover_text(hint).clicked() {
                     state.settings_open = true;
                 }
                 ui.add_space(10.0);

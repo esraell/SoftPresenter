@@ -7529,6 +7529,7 @@ impl App {
                 state.test_pattern = if state.test_pattern == Some(pattern) { None } else { Some(pattern) };
             }
             A::IdentifyScreens => state.identify = !state.identify,
+            A::KeysOnButtons => state.keys_on_buttons = !state.keys_on_buttons,
             A::Website | A::WhatsNew | A::ReportIssue => {
                 let page = match action {
                     A::WhatsNew => "https://github.com/esraell/SoftPresenter/commits/master",
@@ -7601,6 +7602,7 @@ impl App {
                 A::AudioTab => state.live_tab == 5,
                 A::MediaBin => !state.media_hidden,
                 A::IdentifyScreens => state.identify,
+                A::KeysOnButtons => state.keys_on_buttons,
                 _ => action == view || action == slide_view,
             });
         }
