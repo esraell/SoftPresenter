@@ -1477,7 +1477,7 @@ impl Output {
                 sp_decklink::State::Waiting(_) => "waiting for its device",
             };
             line.push_str(&format!(
-                " DeckLink {}: {state}; last tried {:.1} s before the end, for {:.1} ms ({}).",
+                " DeckLink \"{}\": {state}; last tried {:.1} s before the end, for {:.1} ms ({}).",
                 tried.device,
                 now.saturating_duration_since(tried.began).as_secs_f64(),
                 tried.took.as_secs_f64() * 1000.0,
@@ -1485,8 +1485,11 @@ impl Output {
             ));
         }
         for (_, ndi) in &self.ndi {
-            let receivers =
-                ndi.receivers().map_or_else(|| "receivers not known".to_owned(), |n| format!("{n} receivers"));
+            let receivers = match ndi.receivers() {
+                None => "receivers not known".to_owned(),
+                Some(1) => "1 receiver".to_owned(),
+                Some(count) => format!("{count} receivers"),
+            };
             line.push_str(&format!(
                 " NDI \"{}\": {receivers}, longest send lately {:.1} ms.",
                 ndi.name(),
@@ -1517,11 +1520,11 @@ impl Output {
                 return format!("\"{}\"", target.name);
             }
             if let Some((_, ndi)) = self.ndi.iter().find(|(have, _)| *have == id) {
-                return format!("NDI \"{}\"", ndi.name());
+                return format!("\"{}\" (NDI)", ndi.name());
             }
             if let Some(tried) = self.decklink.iter().find(|(have, _)| *have == id).and_then(|(_, out)| out.last_try())
             {
-                return format!("DeckLink {}", tried.device);
+                return format!("\"{}\" (DeckLink)", tried.device);
             }
             "a screen".to_owned()
         };

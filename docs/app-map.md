@@ -353,7 +353,7 @@ gives the time spent within those steps waiting for the locks every drawing thre
 writing the log, each DeckLink output's state and last try at opening its device, and each NDI
 source's receivers and longest send lately (NDI and DeckLink send on threads of their own):
 
-    [output] The screens' thread was held 1019.1 ms from 10:00:16.976. Longest step: surface acquire for the window of "TV", 1003.2 ms. All steps: surface acquire 1003.4 ms ×1; present 0.2 ms ×1; blit 0.1 ms ×1; vello paint 9.1 ms ×4 (GPU wait 0.0 ms, 4 runs, 0 again for room); … other 1.2 ms. Within them: … DeckLink DeckLink Duo (1): waiting for its device; last tried 0.4 s before the end, for 0.1 ms (not opened). NDI "Stage": 1 receivers, longest send lately 4.0 ms.
+    [output] The screens' thread was held 1019.1 ms from 10:00:16.976. Longest step: surface acquire for the window of "TV", 1003.2 ms. All steps: surface acquire 1003.4 ms ×1; present 0.2 ms ×1; blit 0.1 ms ×1; vello paint 9.1 ms ×4 (GPU wait 0.0 ms, 4 runs, 0 again for room); … other 1.2 ms. Within them: … DeckLink "DeckLink Duo (1)": waiting for its device; last tried 0.4 s before the end, for 0.1 ms (not opened). NDI "Stage": 1 receiver, longest send lately 4.0 ms.
 
 The per-minute `[output]` line adds the longest pass, how many passes were over 50 ms and over
 100 ms, how many pictures reached the windows and how many didn't (a covered window shows
