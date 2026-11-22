@@ -86,12 +86,13 @@ impl Store {
         store
     }
 
-    /// Forgets the devices not seen for [`FORGET_UNUSED_AFTER`]; true if any were.
-    pub fn forget_unused(&mut self, now: u64) -> bool {
-        let before = self.saved.devices.len();
-        self.saved.devices.retain(|device| now.saturating_sub(device.last_seen) < FORGET_UNUSED_AFTER);
-        let gone = self.saved.devices.len() != before;
-        if gone {
+    /// Forgets the devices not seen for [`FORGET_UNUSED_AFTER`]; the ids of those that were
+    /// (their pages are for the caller to close).
+    pub fn forget_unused(&mut self, now: u64) -> Vec<String> {
+        let unused = |device: &Device| now.saturating_sub(device.last_seen) >= FORGET_UNUSED_AFTER;
+        let gone: Vec<String> = self.saved.devices.iter().filter(|d| unused(d)).map(|d| d.id.clone()).collect();
+        if !gone.is_empty() {
+            self.saved.devices.retain(|device| !unused(device));
             let _ = self.save();
         }
         gone
@@ -132,7 +133,9 @@ impl Store {
                 found = Some(device);
             }
         }
-        found
+        // One not seen for half a year is let in no more, whether or not it has been forgotten
+        // yet (that is done when someone signs in, and every ten minutes).
+        found.filter(|device| now_seconds().saturating_sub(device.last_seen) < FORGET_UNUSED_AFTER)
     }
 
     /// Notes that a device was seen now, from this address.
@@ -151,6 +154,8 @@ impl Store {
         if self.saved.password.as_deref() != Some(verified) {
             return Err("The password changed a moment ago: sign in with the new one.".to_owned());
         }
+        // Devices not seen for half a year go now, so they don't take the places of the rest.
+        self.forget_unused(now_seconds());
         if self.saved.devices.len() >= MOST_DEVICES {
             return Err(format!(
                 "{MOST_DEVICES} devices are remembered already. Forget one in Settings › Remote Control first."
@@ -602,10 +607,21 @@ mod tests {
         let (old, _) = store.remember("Safari on an iPad", ip, &hash).expect("remembered");
         let (recent, _) = store.remember("Chrome on Windows", ip, &hash).expect("remembered");
         let now = now_seconds();
+        let old_id = store.saved.devices[0].id.clone();
         store.saved.devices[0].last_seen = now - FORGET_UNUSED_AFTER - 1;
-        assert!(store.forget_unused(now));
+        // Not let in even before it is forgotten.
         assert!(store.device_of(&old).is_none());
         assert!(store.device_of(&recent).is_some());
+        assert_eq!(store.forget_unused(now), vec![old_id]);
+        assert_eq!(store.saved.devices.len(), 1);
+        assert!(store.forget_unused(now).is_empty());
+        // Signing in forgets them too, so they don't take the places of the rest.
+        let (_, _) = store.remember("Firefox on Linux", ip, &hash).expect("remembered");
+        store.saved.devices[0].last_seen = now - FORGET_UNUSED_AFTER - 1;
+        let stale_id = store.saved.devices[0].id.clone();
+        store.remember("Edge on Windows", ip, &hash).expect("remembered");
+        assert!(store.saved.devices.iter().all(|d| d.id != stale_id));
+        assert_eq!(store.saved.devices.len(), 2);
         let _ = std::fs::remove_dir_all(&folder);
     }
 

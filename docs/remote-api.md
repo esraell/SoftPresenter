@@ -457,7 +457,7 @@ since), with Disconnect.
 | Writing to a slow page | 10 s, then closed (it reconnects and catches up) |
 | Slide pictures | 2 drawn at once (more wait up to 10 s); 24 MB and 4,096 pictures kept; a version no theme has is drawn as the usual look |
 | Live preview | 10 a second at most, newest only |
-| Devices remembered | 50; one not seen for 180 days is forgotten |
+| Devices remembered | 50; one not seen for 180 days is let in no more, and is forgotten (with its pages closed) when Remote Control is switched on, when anyone signs in and every ten minutes |
 
 ## The security model
 

@@ -173,6 +173,8 @@ pub struct Remote {
     pub cert_news: Option<String>,
     /// When it was last looked whether the certificate must be made again.
     cert_checked: Option<Instant>,
+    /// When devices not seen for half a year were last looked for.
+    devices_checked: Option<Instant>,
     /// Wrong passwords have been said in the notices, and not yet stopped for the hour.
     wrong_said: bool,
 }
@@ -211,6 +213,7 @@ impl Remote {
             looks: state::Looks::default(),
             cert_news: None,
             cert_checked: None,
+            devices_checked: None,
             wrong_said: false,
         }
     }
@@ -293,9 +296,7 @@ impl Remote {
             let _ = stopping.join();
         }
         // Devices not seen for half a year are forgotten.
-        if let Ok(mut store) = store.lock() {
-            store.forget_unused(auth::now_seconds());
-        }
+        self.forget_unused_devices();
         let names = cert::Names::now(cert::own_name());
         let had = self.fingerprint.clone().or_else(|| cert::kept_fingerprint(&folder));
         let (cert, made) = cert::load_or_make(&folder, &names)?;
@@ -422,6 +423,21 @@ impl Remote {
             shared.sign_out_all();
         }
         crate::applog::event("remote", "Forgot every device.");
+    }
+
+    /// Forgets the devices not seen for half a year, and closes their pages.
+    pub fn forget_unused_devices(&mut self) {
+        let gone = self
+            .store
+            .as_ref()
+            .and_then(|store| store.lock().ok())
+            .map(|mut store| store.forget_unused(auth::now_seconds()));
+        for id in gone.unwrap_or_default() {
+            if let Some(shared) = self.shared() {
+                shared.sign_out(&id);
+            }
+            crate::applog::event("remote", &format!("Forgot the device {id}: not seen for half a year."));
+        }
     }
 
     /// Closes one page's connection; its device stays remembered.
@@ -889,6 +905,11 @@ impl crate::App {
                     running.home_window.request_redraw();
                 }
             }
+        }
+        // Devices not seen for half a year are forgotten, while on, every ten minutes too.
+        if self.remote.is_on() && self.remote.devices_checked.is_none_or(|at| at.elapsed() >= CERT_CHECK_EVERY) {
+            self.remote.devices_checked = Some(Instant::now());
+            self.remote.forget_unused_devices();
         }
         // The certificate made again while nobody is connected, when it must be (a page
         // connected would have to accept the new one in the middle of a service).
