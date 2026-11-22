@@ -13,7 +13,7 @@ use sp_bible::{Bible, Info};
 /// Where the Bible files are published: the address their names are added to. They are
 /// files attached to a release of the project on GitHub. While the project is private this
 /// address answers nobody, and Install says the download could not be made.
-const DOWNLOADS: Option<&str> = Some("https://github.com/esraell/SoftPresenter/releases/download/bibles-3");
+const DOWNLOADS: Option<&str> = Some("https://github.com/esraell/SoftPresenter/releases/download/bibles-4");
 
 /// The largest Bible file that will be fetched. The biggest so far is under 2 MB.
 const LARGEST: u64 = 16 * 1024 * 1024;

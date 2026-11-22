@@ -74,7 +74,7 @@ The full list, area by area, is in [docs/features.md](docs/features.md), and wha
 - **Presentations.** A `.pptx` comes in as slides you can edit, read straight from the file, or
   as pictures of its slides drawn by an app on the Mac that can open it; PDFs and folders of
   pictures come in as slides.
-- **Bible.** Four Bibles come with the app and sixteen more install from its Bibles window;
+- **Bible.** Four Bibles come with the app and twenty-four more install from its Bibles window;
   up to four translations on one slide, and book names in English, Russian and Ukrainian.
 - **Media.** Pictures and videos behind the words or on their own, and an announcements layer
   that loops by itself. Video the Mac plays goes to the screens without being copied.

@@ -1,7 +1,8 @@
 # Bibles SoftPresenter may offer
 
 Which Bible translations can be downloaded from inside the app, or shipped with it, and what
-each one's terms ask. Researched on 2026-11-19. This is a working note, not legal advice, and it
+each one's terms ask. Researched on 2026-11-19; the Bibles added for `bibles-4` on 2026-11-22.
+This is a working note, not legal advice, and it
 comes from one pass of reading: **read each source again before the download is built**, and
 before a version of the app is sold.
 
@@ -13,7 +14,7 @@ at the source named here.
 
 "eBible" means the translation's own copyright page at `https://ebible.org/<ID>/copyright.htm`.
 eBible states its public-domain findings as true in the United States to the best of its
-knowledge.
+knowledge. The rows marked † were read on 2026-11-22, for `bibles-4`; the rest on 2026-11-19.
 
 | Language | Translation | eBible ID | Terms | What they ask |
 |---|---|---|---|---|
@@ -25,6 +26,13 @@ knowledge.
 | English | Darby Translation (1884) | `engDBY` | Public domain | Nothing |
 | English | Douay-Rheims, American edition (1899) | `engDRA` | Public domain | Nothing |
 | English | Geneva Bible (1599) | `enggnv` | Public domain | Nothing |
+| English | Literal Standard Version (2020) † | `englsv` | © 2020 Covenant Press, CC BY-SA 4.0 | Credit with the copyright and source; say that changes were made; changed text stays under the same licence. The file's credit says so, and that notes and headings are left out |
+| English | Majority Standard Bible † | `engmsb` | Public domain ("dedicated to the public domain", Berean Bible Translation Committee) | Nothing |
+| English | World English Bible British Edition † | `engwebpb` | Public domain | As the World English Bible: the name is a trademark, for unchanged text only |
+| English | Free Bible Version † | `engfbv` | © 2018 Dr. Jonathan Gallagher, CC BY-SA 4.0 | As the Literal Standard Version |
+| English | Unlocked Literal Bible † | `engULB` | © 2017 Door43 World Missions Community, CC BY-SA 4.0 | As the Literal Standard Version |
+| English | Revised Version (1885) † | `eng-rv` | Public domain | Nothing. eBible's edition carries the Apocrypha (1895); they are left out |
+| English | Noah Webster Bible (1833) † | `engwebster` | Public domain | Nothing |
 | French | Louis Segond (1910) | `fraLSG` | Public domain | Nothing |
 | French | Bible Darby (1885) | `frajnd` | Public domain | Nothing |
 | German | Luther (1912) | `deu1912` | Public domain | Nothing |
@@ -35,7 +43,7 @@ knowledge.
 | Hebrew | Westminster Leningrad Codex | `hboWLC` | Text public domain | Its word-by-word data is CC BY-SA; we use the text only |
 | Portuguese | Bíblia Livre (2018) | `porbr2018` | CC BY 4.0 | Credit; "BLIVRE" is enough on a slide |
 | Russian | Синодальный перевод (1876) | `russyn` | Public domain | Nothing. Which printed edition the text follows was not confirmed |
-| Russian | Russian Open Bible | Door43 `ru_rob` | CC BY-SA 4.0 | Credit; changed text stays under the same licence |
+| Russian | Russian Open Bible † | Door43 `ru_rob` | CC BY-SA 4.0, Door43 World Missions Community (read in the release's LICENSE.md and manifest.yaml, git.door43.org/Door43-Catalog/ru_rob, release v8 of 2021-06-23) | Credit; say that changes were made; changed text stays under the same licence. A modern Russian translation made from the Synodal by the Russian Open Bible Committee, at Door43's checking level 3 (its manifest); numbered as the Synodal |
 | Spanish | Reina-Valera (1909) | `spaRV1909` | Public domain | Nothing |
 | Spanish | Versión Biblia Libre | `spavbl` | CC BY-SA 4.0 | Credit; changed text stays under the same licence |
 | Ukrainian | Куліш and Пулюй (1905) | `ukr1871` | Public domain | Nothing |
@@ -76,7 +84,7 @@ has bought one of these elsewhere cannot get it through SoftPresenter.
 For Russian, Ukrainian and English first: every translation eBible lists in those languages,
 and Door43's Russian and Ukrainian Bibles.
 
-- **Russian.** Besides the Synodal, the Russian Open Bible (below, now offered) is the only
+- **Russian.** Besides the Synodal, the Russian Open Bible (in the table above) is the only
   finished, openly licensed whole Bible. Not offered: Библия свободы (a draft, above); Door43's
   Russian Unlocked Literal Bible (`ru_ulb`, CC BY-SA 4.0, the New Testament only; free, and
   could be added); Door43's other Russian texts, which are unfinished translators' aids
@@ -130,7 +138,7 @@ and Door43's Russian and Ukrainian Bibles.
 
 ## Downloads
 
-- The Bibles under "Free" are files attached to the project's `bibles-3` release on GitHub (`bibles-2` holds the first fifteen, unchanged, for older versions of the app).
+- The Bibles under "Free" are files attached to the project's `bibles-4` release on GitHub (`bibles-3` and `bibles-2` hold the earlier sets, unchanged, for older versions of the app).
   Install fetches `<id>.spbible` from there, checks it against the SHA-256 written into the
   app for that Bible, checks that it reads as that Bible, and only then keeps it in the
   Bibles folder (`~/Library/Application Support/SoftPresenter/Bibles` on a Mac). A file with
@@ -139,13 +147,20 @@ and Door43's Russian and Ukrainian Bibles.
 - To publish a new or corrected Bible: convert it, attach it to a new release (the next `bibles-N`, with every file the app offers),
   and update its checksum and the release name in the app. Files in a release that the app
   already points at must never be replaced, or older versions of the app will refuse them.
-- Offered now (16): ASV, Young's, Darby, Geneva, Louis Segond, French Darby, Luther 1912,
+- Offered now (24): ASV, Young's, Darby, Geneva, Louis Segond, French Darby, Luther 1912,
   Elberfelder 1905, SBL Greek New Testament, Byzantine, Westminster Leningrad Codex, Bíblia
   Livre, Reina-Valera 1909, Versión Biblia Libre, Kulish, and the Open New Ukrainian
-  Translation (added 2026-11-19 in `bibles-3`).
+  Translation (added 2026-11-19 in `bibles-3`); the Literal Standard Version, Majority Standard
+  Bible, World English Bible British Edition, Free Bible Version, Unlocked Literal Bible,
+  Revised Version, Noah Webster Bible and Russian Open Bible (added 2026-11-22 for `bibles-4`,
+  converted from their USFM with `cargo run -p sp-bible --example import`; the Revised
+  Version's Apocrypha are left out, as the app keeps the sixty-six books).
+- `bibles-4` holds all 24 files: the sixteen of `bibles-3`, byte for byte the same (the same
+  checksums), and the eight new ones. The app asks for `<id>.pcbible`, the ending the files
+  were first published with.
 - Not offered yet, though free: Douay-Rheims and Brenton's Septuagint (they have books beyond
-  the sixty-six, which the app does not handle yet) and the Russian Open Bible (published in a
-  different file format).
+  the sixty-six within books the app has, such as Daniel and Esther, which the app does not
+  handle yet).
 - **Numbering.** The French Darby, the Hebrew text and the SBL Greek follow the
   original-language numbering exactly. Geneva and Kulish mostly follow the English numbering
   (they differ from it in 40 and 55 chapters, by a verse or so) and Louis Segond mostly follows
