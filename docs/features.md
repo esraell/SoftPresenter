@@ -431,7 +431,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - A song's menu (its ⋯, or a right-click): Add to the playlist in front, Add to Playlist (any
   playlist, or a new one; for a song in a playlist, from its item or its title bar, the
   playlist it is in isn't offered; with no other playlist, **Add to New Playlist…** in its
-  place), Libraries, Rename, Duplicate, Theme (a theme of its own, or
+  place), Libraries, Rename, Duplicate (a copy beside it: next in the song list, just after it in
+  the libraries it is in, and from a playlist's item a new item just after it, opened, the left
+  column staying on the playlist; after a restart the list is in its usual order), Theme (a
+  theme of its own, or
   the songs theme), Transition (its own, or Usual: the one under the slides, named), Edit Words, and Delete… (a song made in the app goes to the Trash). In a library,
   Export… and Delete… take the songs picked out with it when it is one of them, and so do Add to
   the playlist in front and Add to Playlist ▸, as dragging them does. Add to Playlist ▸ marks a

@@ -364,6 +364,9 @@ pub struct HomeState {
     pub media_request: Option<MediaRequest>,
     /// Songs taken out of the library this run, by their place in the show.
     pub removed_songs: Vec<usize>,
+    /// The copies made this run with Duplicate, each with its original, by their places in the
+    /// show: listed just after it while the list is in its own order (see `studio::song_list`).
+    pub copies: Vec<(usize, usize)>,
     /// A change to the selected objects asked for from the menu bar.
     pub edit_request: Option<EditRequest>,
     /// A menu bar command chosen from a right-click menu in the window, carried out as if it
@@ -1748,6 +1751,7 @@ impl Default for HomeState {
             passages: slides::PassageDecks::default(),
             rows: slides::RowHeights::default(),
             removed_songs: Vec::new(),
+            copies: Vec::new(),
             media_request: None,
             library_search: None,
             find_rect: None,
@@ -1879,6 +1883,27 @@ impl HomeState {
     /// never edited, moved or deleted.
     pub fn app_made(&self, presentation: usize) -> bool {
         self.bible.slots.is_some_and(|slots| slots.contains(&presentation)) || self.voxlive_slot == Some(presentation)
+    }
+
+    /// Puts a song's copy (Duplicate) beside it: next in the song list, just after it in each
+    /// library it is in, and, made from a playlist's item (`item`, its place in the playlist in
+    /// front), as a new item just after it, which becomes the open one, so the left column stays
+    /// on the playlist. `copy` and `key` are the copy's place in the show and the name a
+    /// playlist knows it by.
+    pub fn copy_beside(&mut self, original: usize, copy: usize, key: &str, item: Option<usize>, title: &str) {
+        self.copies.push((copy, original));
+        if let Some(of) = self.song_keys.get(original).cloned() {
+            for library in &mut self.libraries {
+                if let Some(at) = library.songs.iter().position(|have| *have == of) {
+                    library.songs.insert(at + 1, key.to_owned());
+                    self.libraries_changed = true;
+                }
+            }
+        }
+        if let Some(item) = item {
+            let front = self.services.front_at();
+            self.services.put_in(front, Some(item), vec![crate::service::Item::song(key, title)]);
+        }
     }
 
     /// The presentations kept out of the song lists: the Bible page's two and the VoxLive item
@@ -4486,7 +4511,11 @@ pub fn media_of(slide: &Slide) -> Option<sp_model::Uuid> {
 /// A change to a song asked for from its right-click menu in the library.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SongRequest {
-    Duplicate,
+    /// A copy beside it: next in the song list, in the libraries it is in, and, asked from a
+    /// playlist's item (its place here), as a new item just after it, opened.
+    Duplicate {
+        item: Option<usize>,
+    },
     Delete,
 }
 

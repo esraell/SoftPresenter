@@ -2743,6 +2743,16 @@ fn song_list(show: &Show, state: &HomeState, library: Option<&crate::libraries::
         }
     }
     state.song_order.sort(show, &mut shown);
+    // In the list's own order, a copy made this run comes just after its original.
+    if state.song_order == crate::kept::SongOrder::Listed {
+        for (copy, original) in &state.copies {
+            if let (Some(from), true) = (shown.iter().position(|at| at == copy), shown.contains(original)) {
+                shown.remove(from);
+                let after = shown.iter().position(|at| at == original).map_or(shown.len(), |at| at + 1);
+                shown.insert(after, *copy);
+            }
+        }
+    }
     crate::kept::SongList { total, shown }
 }
 
@@ -3400,8 +3410,13 @@ pub fn song_menu(
         state.rename_started = true;
         ui.close();
     }
+    // A copy beside it: from a playlist's item, a new item just after it too.
     if ui.button("Duplicate").clicked() {
-        state.song_request = Some((index, crate::home::SongRequest::Duplicate));
+        let item = in_playlist
+            .then(|| state.song_keys.get(index).cloned())
+            .flatten()
+            .and_then(|key| state.services.place_of(state.services.front_at(), &crate::service::Item::song(key, "")));
+        state.song_request = Some((index, crate::home::SongRequest::Duplicate { item }));
         ui.close();
     }
     if ui.button("Export…").on_hover_text("Save as a song pack, to open on another computer").clicked() {
@@ -6202,6 +6217,40 @@ pub mod tests {
         carry_out_item_ask(&show, &mut state, &mut commands, ItemAsk::Fill(1, 2));
         assert_eq!(state.services.front().items[1], Item::song("three", "Three"));
         assert_eq!((state.services.chosen, commands), (Some(1), vec![Command::Select(2)]));
+    }
+
+    #[test]
+    fn a_duplicate_goes_beside_its_original_in_the_list_its_libraries_and_the_playlist() {
+        use crate::service::Item;
+        // One, Two and Three, and Two's copy made last (at the end of the show).
+        let titles = ["One", "Two", "Three", "Two copy"];
+        let show =
+            Show::new(titles.iter().map(|title| Arc::new(sp_model::parse_song_text(title, "Words\n"))).collect());
+        let mut state = HomeState {
+            song_keys: titles[..3].iter().map(|title| title.to_lowercase()).collect(),
+            playlist_open: true,
+            ..HomeState::default()
+        };
+        let mut library = crate::libraries::Library::new("Hymns".to_owned());
+        library.songs = vec!["three".to_owned(), "two".to_owned(), "one".to_owned()];
+        state.libraries = vec![library, crate::libraries::Library::new("Other".to_owned())];
+        state.services.list[0].items =
+            vec![Item::song("one", "One"), Item::song("two", "Two"), Item::song("three", "Three")];
+        state.song_keys.push("two copy".to_owned());
+        state.copy_beside(1, 3, "two copy", Some(1), "Two copy");
+        // Next in the song list, as long as it is in its own order.
+        assert_eq!(song_list(&show, &state, None).shown, [0, 1, 3, 2]);
+        state.song_order = crate::kept::SongOrder::AZ;
+        assert_eq!(song_list(&show, &state, None).shown, [0, 2, 1, 3], "A to Z sorts it with the rest");
+        state.song_order = crate::kept::SongOrder::Listed;
+        // In the library it is in, just after it; not in the other.
+        assert_eq!(state.libraries[0].songs, ["three", "two", "two copy", "one"]);
+        assert!(state.libraries[1].songs.is_empty() && state.libraries_changed);
+        assert_eq!(song_list(&show, &state, Some(&state.libraries[0])).shown, [0, 1, 3, 2]);
+        // A new item just after Two's, open, so the left column stays on the playlist.
+        let names: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
+        assert_eq!(names, ["One", "Two", "Two copy", "Three"]);
+        assert_eq!(state.services.chosen, Some(2));
     }
 
     #[test]

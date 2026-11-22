@@ -7667,7 +7667,7 @@ impl App {
         };
         let Some(song) = self.show.presentations().get(index).cloned() else { return };
         match request {
-            SongRequest::Duplicate => {
+            SongRequest::Duplicate { item } => {
                 let mut copy = (*song).clone();
                 copy.id = Uuid::new_v4();
                 copy.title = format!("{} copy", song.title);
@@ -7690,10 +7690,12 @@ impl App {
                 self.sources.push(path.clone());
                 self.unsaved.push(at);
                 self.save_unsaved();
-                self.apply(vec![Command::Select(at)]);
                 if let Some(running) = self.running.as_mut() {
-                    running.home_state.song_keys.push(song_ids::key_for(path.as_deref(), id, &title));
+                    let key = song_ids::key_for(path.as_deref(), id, &title);
+                    running.home_state.song_keys.push(key.clone());
+                    running.home_state.copy_beside(index, at, &key, item, &title);
                 }
+                self.apply(vec![Command::Select(at)]);
             }
             SongRequest::Delete => {
                 // A song made in the app goes to the Trash; one opened from elsewhere stays put.

@@ -517,7 +517,7 @@ names the passage as it was typed, while the screens and the playlist follow the
 | `song import FILE… \| FOLDER… [--library NAME\|none]` | Imports songs, as File › Import Songs does (any of its kinds of file; formats below). A folder becomes a library of its name (and each folder in it another), unless `--library` says where its songs go. A song already in the library is skipped |
 | `song text SONG` | Prints the song as song text |
 | `song text SONG FILE` | Replaces the song's words from a song text file, keeping the song (its id, theme, playlist places) and its slides' looks, labels and notes where they still match |
-| `song rename SONG to TITLE`, `song duplicate SONG [as TITLE]` | Renames or copies a song |
+| `song rename SONG to TITLE`, `song duplicate SONG [as TITLE]` | Renames or copies a song (the copy goes just after it in the libraries it is in, and next to it in the window's song list) |
 | `song theme SONG THEME\|main`, `song transition SONG KIND [SECONDS]\|none` | The song's theme; its transition (0 to 5 seconds) |
 | `song info SONG [artist=… author=… publisher=… year=… ccli=…]` | Reads or sets the song's details (a year is four digits, a CCLI number digits) |
 | `song arrangements SONG`, `song arrangement SONG use NAME\|none`, `song arrangement SONG set NAME GROUP…`, `song arrangement SONG delete NAME` | The song's groups in another order; Next follows the one in use |

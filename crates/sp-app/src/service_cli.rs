@@ -575,7 +575,7 @@ impl crate::App {
         let at = self.find_song(song)?;
         let was = self.show.presentations()[at].title.clone();
         let before = self.show.presentations().len();
-        self.with_state(|state| state.song_request = Some((at, crate::home::SongRequest::Duplicate)));
+        self.with_state(|state| state.song_request = Some((at, crate::home::SongRequest::Duplicate { item: None })));
         self.handle_song_request();
         let copy = (before < self.show.presentations().len()).then_some(self.show.presentations().len() - 1);
         let copy = copy.ok_or_else(|| format!("{was} could not be copied."))?;
