@@ -248,7 +248,8 @@ feature changes, this page changes in the same commit.
   Announce key (lit while it plays), Presentation › Clear Announcements and Clear All take it
   off; while it plays, the preview block's row names the song with a Clear key beside it.
 - **Media slides**: drag a media item onto a slide to have that slide show it when it goes on
-  screen, or onto the space under the slides (or Add Slide) to add a slide of its own; also
+  screen (an ink outline shows it will), or onto a song's bar in the slides, or the space under
+  a song shown by itself, to add a slide of its own; also
   Add to Song as Slide on the item's right-click menu, and Media on a slide's. The slide's
   thumbnail shows the media behind its words.
 - A slide's right-click menu: Edit, Cut, Copy, Paste, Delete, Group (mark where a verse, chorus
@@ -420,8 +421,10 @@ feature changes, this page changes in the same commit.
 
 ## Editing
 - **Moving slides.** Drag a slide to another place in its song, in the Show view's grid or the
-  Edit view's list; a line shows where it will go (before or after the slide it is dropped on,
-  in that slide's group), and the list scrolls when the drag nears its top or bottom. Pick out
+  Edit view's list; an ink line shows where it will go (before or after the slide it is dropped
+  on, by which half of it the pointer is over, in that slide's group), the slides being moved go
+  faint, and the list scrolls when the drag nears its top or bottom. A press that barely moves
+  is a click. Under an arrangement a slide moves only among its own group. Pick out
   several (Command or Shift) and drag one of them to move them all, in their order. In the Edit
   view, a slide dropped on a group's name goes at its start, and its right-click menu has Move
   Up and Move Down. The slide on screen stays on screen; Undo puts them back. A drag between

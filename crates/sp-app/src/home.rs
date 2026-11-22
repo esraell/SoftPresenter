@@ -5938,8 +5938,9 @@ fn scroll_while_dragging(ui: &mut egui::Ui) {
     }
 }
 
-/// The colour of the line that shows where dragged slides will go.
-const DROP_LINE: Color32 = Color32::from_rgb(80, 150, 255);
+/// The colour of the line that shows where dragged things will go, and of the outline round
+/// what they are dropped onto: ink, never the on-screen orange.
+const DROP_LINE: Color32 = crate::studio::TEXT;
 
 /// Whether slides dropped on a slide go after it: on its right half in a grid, its lower half
 /// in a list.
@@ -5955,7 +5956,7 @@ fn paint_drop_line(ui: &egui::Ui, rect: Rect, after: bool, list: bool, gap: f32)
         .ctx()
         .layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("slide drop line")))
         .with_clip_rect(ui.clip_rect());
-    let stroke = Stroke::new(3.0, DROP_LINE);
+    let stroke = Stroke::new(2.0, DROP_LINE);
     if list {
         let y = if after { rect.max.y + gap / 2.0 } else { rect.min.y - gap / 2.0 };
         painter.hline(rect.x_range(), y, stroke);
@@ -5990,7 +5991,7 @@ fn paint_drag_ghost(ui: &egui::Ui, texture: Option<TextureId>, count: usize) {
             Align2::CENTER_CENTER,
             count.to_string(),
             crate::studio::semibold(12.0),
-            Color32::WHITE,
+            Color32::from_rgb(0x11, 0x11, 0x11),
         );
     }
 }

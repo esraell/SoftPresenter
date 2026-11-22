@@ -1433,7 +1433,7 @@ fn draw_slides(
     // with how many there are.
     if let (Some(drag), Some(at)) = (moving, deck.at) {
         for rect in &moving_rects {
-            ui.painter().rect_filled(*rect, ROUND, PANEL.gamma_multiply(0.7));
+            ui.painter().rect_filled(*rect, ROUND, PANEL.gamma_multiply(0.6));
         }
         let first = drag.slides.first().and_then(|at| song.slide(*at)).map(|(_, slide)| slide);
         let texture = first.and_then(|slide| {
@@ -1638,6 +1638,19 @@ fn item_bar(
     let song = slides.filter(|slides| !slides.made).and_then(|slides| Some((slides.at?, &slides.deck)));
     let id = ui.scope_id().with(("bar", item, slides.and_then(|slides| slides.at)));
     let response = ui.interact(bar, id, Sense::click());
+    // A picture or video dropped on a song's bar becomes a slide of its own at the song's end
+    // (after the slide on screen, when that is in it); an ink outline shows it will.
+    if let Some((at, _)) = song {
+        if response.dnd_hover_payload::<MediaDrag>().is_some() {
+            ui.painter().rect_stroke(bar.shrink(2.0), ROUND, Stroke::new(2.0, TEXT), StrokeKind::Inside);
+        }
+        if let Some(dropped) = response.dnd_release_payload::<MediaDrag>() {
+            if show.selected() != at {
+                commands.push(Command::Select(at));
+            }
+            state.media_request = Some(MediaRequest::AddAsSlide(dropped.0));
+        }
+    }
     let near = ui.rect_contains_pointer(bar);
     let painter = ui.painter().with_clip_rect(bar);
     let middle = bar.min.y + if height >= SONG_BAR { 30.0 } else { 25.5 };
@@ -3083,6 +3096,46 @@ mod tests {
         // Beside where it already stands, or on itself: nothing changes.
         assert_eq!(piece_drop(&chips, &starts, 0, pos2(90.0, 13.0)), None);
         assert_eq!(piece_drop(&chips, &starts, 1, pos2(100.0, 13.0)), None);
+    }
+
+    #[test]
+    fn a_slide_dragged_lands_before_or_after_a_tile_by_which_half_the_pointer_is_over() {
+        let (show, mut state) = playlist(&[("Alpha", 4)]);
+        let ctx = egui::Context::default();
+        let mut time = 0.0;
+        run(&ctx, &show, &mut state, Vec::new(), &mut time);
+        let (from, onto) = (rect_of(&state, 0, 0), rect_of(&state, 0, 2));
+        let button = |pos, pressed| Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let drag_to = |state: &mut HomeState, time: &mut f64, to: egui::Pos2| {
+            let start = from.center();
+            for events in [
+                vec![Event::PointerMoved(start)],
+                vec![button(start, true)],
+                vec![Event::PointerMoved(start + vec2(30.0, 0.0))],
+                vec![Event::PointerMoved(to)],
+                vec![Event::PointerMoved(to)],
+                vec![button(to, false)],
+                Vec::new(),
+            ] {
+                run(&ctx, &show, state, events, time);
+            }
+            state.slide_request.take()
+        };
+        let right_half = pos2(onto.max.x - 10.0, onto.center().y);
+        match drag_to(&mut state, &mut time, right_half) {
+            Some((_, SlideRequest::Move { slides, to, after })) => assert_eq!((slides, to, after), (vec![0], 2, true)),
+            other => panic!("expected a move after the third slide, got {other:?}"),
+        }
+        let left_half = pos2(onto.min.x + 10.0, onto.center().y);
+        match drag_to(&mut state, &mut time, left_half) {
+            Some((_, SlideRequest::Move { to, after, .. })) => assert_eq!((to, after), (2, false)),
+            other => panic!("expected a move before the third slide, got {other:?}"),
+        }
     }
 
     #[test]

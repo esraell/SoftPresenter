@@ -3003,7 +3003,11 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             }
         }
     }
-    if let (Some(_), Some(slot)) = (dragging, slot) {
+    if let (Some(moving), Some(slot)) = (dragging, slot) {
+        // The row being moved goes faint where it is.
+        if let Some(at) = row_items.iter().position(|item| *item == moving) {
+            ui.painter().rect_filled(rows[at], RADIUS, PANEL.gamma_multiply(0.6));
+        }
         let y = rows.get(slot).map_or_else(|| rows.last().map_or(0.0, |row| row.max.y), |row| row.min.y);
         let (left, right) = rows.first().map_or((0.0, 0.0), |row| (row.min.x, row.max.x));
         ui.painter().line_segment([pos2(left + 4.0, y), pos2(right - 4.0, y)], Stroke::new(2.0, TEXT));
