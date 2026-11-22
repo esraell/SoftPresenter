@@ -634,9 +634,9 @@ pub fn shown_args(args: &[String]) -> Vec<String> {
     if secret { vec![args[0].clone(), args[1].clone(), "…".to_owned()] } else { args.to_vec() }
 }
 
-/// The app doesn't share the terminal's folder, so a file or folder named in `song import` or
-/// `song new` is sent as a full path. Only those commands: elsewhere a word that happens to match a file
-/// in the folder (a song called "notes") is meant as words.
+/// The app doesn't share the terminal's folder, so a file or folder named in `song import`,
+/// `song new` or `bible install` is sent as a full path. Only those commands: elsewhere a word
+/// that happens to match a file in the folder (a song called "notes") is meant as words.
 fn with_full_paths(args: Vec<String>) -> Vec<String> {
     let second = |words: &[&str]| args.get(1).is_some_and(|w| words.iter().any(|word| w.eq_ignore_ascii_case(word)));
     let first = |word: &str| args.first().is_some_and(|w| w.eq_ignore_ascii_case(word));
@@ -650,6 +650,17 @@ fn with_full_paths(args: Vec<String>) -> Vec<String> {
             && let Ok(here) = std::env::current_dir()
         {
             args[at + 1] = here.join(word).to_string_lossy().into_owned();
+        }
+        return args;
+    }
+    // `bible install FILE [--name …]`: only the file is made whole, never a name given after it.
+    if first("bible") && second(&["install"]) {
+        let mut args = args;
+        if let Some(word) = args.get(2)
+            && Path::new(word).exists()
+            && let Ok(full) = Path::new(word).canonicalize()
+        {
+            args[2] = full.to_string_lossy().into_owned();
         }
         return args;
     }

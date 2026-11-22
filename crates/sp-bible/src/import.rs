@@ -140,12 +140,14 @@ impl Imported {
         self.about.clone().or(&self.suggested)
     }
 
-    /// What is missing for the command line to say, such as `--short and --language`.
-    pub fn missing_flags(&self) -> String {
+    /// What neither the file nor `given` says, for the command line to ask for, such as
+    /// `--short and --language`; empty when nothing is missing.
+    pub fn missing_flags(&self, given: &About) -> String {
+        let have = given.tidied().or(&self.about);
         let missing: Vec<&str> = [
-            (self.about.name.is_empty(), "--name"),
-            (self.about.short.is_empty(), "--short"),
-            (self.about.language.is_empty(), "--language"),
+            (have.name.is_empty(), "--name"),
+            (have.short.is_empty(), "--short"),
+            (have.language.is_empty(), "--language"),
         ]
         .into_iter()
         .filter_map(|(missing, flag)| missing.then_some(flag))
@@ -438,8 +440,9 @@ fn suggest(file_name: &str, about: &About, verses: &BTreeMap<VerseRef, String>) 
     };
     let short = if about.name.chars().filter(|c| c.is_alphanumeric()).count() >= 2 && about.name.contains(' ') {
         initials(&about.name)
-    } else if !stem.contains([' ', '_']) && stem.chars().count() <= 10 && !stem.is_empty() {
-        stem.to_uppercase()
+    } else if (!stem.contains([' ', '_']) && stem.chars().count() <= 10) || initials(&name).chars().count() < 2 {
+        // A short file name, or one of a single word: its first letters.
+        stem.chars().filter(|c| c.is_alphanumeric()).take(8).flat_map(char::to_uppercase).collect()
     } else {
         initials(&name)
     };
@@ -567,7 +570,7 @@ fn latin_for(c: char) -> &'static str {
 }
 
 /// A number with its thousands marked: 31,102.
-fn grouped(number: usize) -> String {
+pub fn grouped(number: usize) -> String {
     let digits = number.to_string();
     let mut out = String::new();
     for (at, digit) in digits.chars().enumerate() {

@@ -123,6 +123,34 @@ impl Shelf {
         }
     }
 
+    /// Puts a Bible just installed from a file on the shelf: one installed before under the
+    /// same short name for files (never one built in) is replaced at its place, and read again
+    /// when next asked for.
+    pub fn put_installed(&mut self, path: std::path::PathBuf, info: sp_bible::Info) {
+        match self.bibles.iter_mut().find(|shelved| shelved.id == info.id && !shelved.shipped) {
+            Some(shelved) => {
+                shelved.name = info.name;
+                shelved.short = info.short;
+                shelved.language = info.language;
+                shelved.terms = info.terms;
+                shelved.credit = info.credit;
+                shelved.loose = info.loose;
+                shelved.kept = Kept::File(path);
+                shelved.loaded = None;
+            }
+            None => self.add_file(path, info),
+        }
+    }
+
+    /// The short name for files of a Bible installed from a file (not one built in) with this
+    /// name and short name: the same Bible installed again replaces it.
+    pub fn installed_as(&self, name: &str, short: &str) -> Option<&str> {
+        self.bibles
+            .iter()
+            .find(|shelved| !shelved.shipped && shelved.name == name && shelved.short == short)
+            .map(|shelved| shelved.id.as_str())
+    }
+
     /// Takes a downloaded Bible off the shelf and moves its file to the Trash. The Bibles that
     /// come with the app cannot be removed.
     pub fn remove(&mut self, index: usize) -> Result<(), String> {
@@ -617,6 +645,118 @@ pub struct BibleOptions {
     pub menu_was_open: bool,
     /// A downloaded Bible asked to be removed, by its place on the shelf.
     pub remove: Option<usize>,
+    /// Install from File… was clicked: the window for choosing a file is to open.
+    pub file_request: bool,
+    /// A Bible file read that doesn't say what it is: the sheet asking for its details.
+    pub details: Option<DetailsSheet>,
+}
+
+/// The sheet that asks for a Bible file's name, short name and language when the file doesn't
+/// say them, each filled in with what the file says or else a guess, before it is installed.
+#[derive(Debug)]
+pub struct DetailsSheet {
+    pub imported: sp_bible::import::Imported,
+    pub about: sp_bible::import::About,
+    /// True until the first empty field has been given the keyboard.
+    pub focus: bool,
+}
+
+impl DetailsSheet {
+    pub fn new(imported: sp_bible::import::Imported) -> DetailsSheet {
+        let about = imported.prefilled();
+        DetailsSheet { imported, about, focus: true }
+    }
+}
+
+/// The sheet asking what a Bible file is (see [`DetailsSheet`]): its name, the short name
+/// shown on slides and its language, then Install. `Some(true)` when Install is clicked (or
+/// Return pressed) with all three given, `Some(false)` for Cancel or Escape.
+pub fn details_sheet(ctx: &egui::Context, sheet: &mut DetailsSheet) -> Option<bool> {
+    let mut decided = None;
+    // A modal, as the Bibles window is, so it comes over that window when opened from it.
+    let frame = Frame::new()
+        .fill(Color32::from_rgb(38, 38, 40))
+        .stroke(Stroke::new(1.0, Color32::from_white_alpha(22)))
+        .corner_radius(14.0)
+        .inner_margin(egui::Margin { left: 22, right: 22, top: 18, bottom: 16 })
+        .shadow(egui::Shadow { offset: [0, 16], blur: 44, spread: 0, color: Color32::from_black_alpha(150) });
+    let id = egui::Id::unique("bible details");
+    let area = egui::Modal::default_area(id).anchor(Align2::CENTER_CENTER, vec2(0.0, -30.0));
+    egui::Modal::new(id).area(area).backdrop_color(Color32::from_black_alpha(90)).frame(frame).show(ctx, |ui| {
+        ui.set_width(440.0);
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("Install a Bible").font(crate::studio::semibold(16.0)));
+        ui.add_space(4.0);
+        let imported = &sheet.imported;
+        let count = |n: usize, one: &str, many: &str| {
+            format!("{} {}", sp_bible::import::grouped(n), if n == 1 { one } else { many })
+        };
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(format!(
+                    "{} doesn't say all of this. Check the name, the short name shown on slides and the language, then Install.\n{}: {}, {}.",
+                    imported.file_name,
+                    imported.format.name(),
+                    count(imported.book_count(), "book", "books"),
+                    count(imported.verse_count(), "verse", "verses")
+                ))
+                .size(11.5)
+                .color(DIM),
+            )
+            .wrap(),
+        );
+        ui.add_space(8.0);
+        let first_empty = [&sheet.about.name, &sheet.about.short, &sheet.about.language]
+            .iter()
+            .position(|field| field.trim().is_empty())
+            .unwrap_or(0);
+        let mut enter = false;
+        egui::Grid::new("bible details").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
+            let fields: [(&str, &str, &mut String); 3] = [
+                ("Name", "The Bible's full name", &mut sheet.about.name),
+                ("Short name", "Shown on slides, such as KJV", &mut sheet.about.short),
+                ("Language", "en, ru, uk…", &mut sheet.about.language),
+            ];
+            for (at, (label, hint, value)) in fields.into_iter().enumerate() {
+                ui.label(egui::RichText::new(label).color(DIM));
+                let width = if at == 0 { 320.0 } else { 140.0 };
+                let field = ui.add(egui::TextEdit::singleline(value).hint_text(hint).desired_width(width));
+                if sheet.focus && at == first_empty {
+                    field.request_focus();
+                }
+                if field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                    enter = true;
+                }
+                ui.end_row();
+            }
+        });
+        sheet.focus = false;
+        let language = sp_bible::import::language_code(&sheet.about.language);
+        if !language.is_empty() {
+            ui.label(egui::RichText::new(language_name(&language)).size(11.0).color(DIM));
+        }
+        ui.add_space(10.0);
+        let ready = sheet.imported.details(&sheet.about).is_some();
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let size = vec2(96.0, 30.0);
+                let emphasis = if ready { crate::studio::Emphasis::Plain } else { crate::studio::Emphasis::Idle };
+                if crate::studio::block_button(ui, size, "Install", "", emphasis).clicked() && ready {
+                    decided = Some(true);
+                }
+                if crate::studio::block_button(ui, size, "Cancel", "", crate::studio::Emphasis::Plain).clicked() {
+                    decided = Some(false);
+                }
+            });
+        });
+        if enter && ready {
+            decided = Some(true);
+        }
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            decided = Some(false);
+        }
+    });
+    decided
 }
 
 impl Default for BibleOptions {
@@ -632,6 +772,8 @@ impl Default for BibleOptions {
             problem: None,
             menu_was_open: false,
             remove: None,
+            file_request: false,
+            details: None,
         }
     }
 }
@@ -992,10 +1134,17 @@ pub fn manage_bibles(
                     if ui.button("Done").clicked() {
                         close = true;
                     }
+                    if ui
+                        .button("Install from File…")
+                        .on_hover_text("A Bible file you have: Zefania, OSIS, Beblia or other XML, USFM or USX (zipped or not), or .spbible")
+                        .clicked()
+                    {
+                        options.file_request = true;
+                    }
                     ui.add(
                         egui::TextEdit::singleline(&mut options.manage_search)
                             .hint_text("Search by name or language")
-                            .desired_width(220.0),
+                            .desired_width(200.0),
                     );
                 });
             });
@@ -1031,7 +1180,7 @@ pub fn manage_bibles(
                 ui.add_space(12.0);
                 heading(ui, "AVAILABLE");
                 if !can_download {
-                    nothing(ui, "Downloads aren't available in this copy. Drop a Bible file (.spbible) on the window to install it.");
+                    nothing(ui, "Downloads aren't available in this copy. Drop a Bible file on the window, or use Install from File…, to install it.");
                 }
                 let mut language = "";
                 let mut shown = 0;
@@ -1065,7 +1214,7 @@ pub fn manage_bibles(
             ui.add_space(10.0);
             ui.label(
                 egui::RichText::new(
-                    "Every Bible here may be shared freely: public domain, or an open licence. A Bible file you have (.spbible) installs when dropped on the window.",
+                    "Every Bible here may be shared freely: public domain, or an open licence. A Bible file you have (Zefania, OSIS, USFM and others, or .spbible) installs when dropped on the window or chosen with Install from File…",
                 )
                 .size(11.0)
                 .color(DIM),
@@ -1075,7 +1224,8 @@ pub fn manage_bibles(
             }
         },
     );
-    if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+    // Escape with the sheet asking what a Bible file is open closes only the sheet.
+    if close || (options.details.is_none() && ctx.input(|input| input.key_pressed(egui::Key::Escape))) {
         options.manage_open = false;
     }
 }
@@ -1377,6 +1527,31 @@ mod tests {
         );
         assert!(build_passage("Nobody 1:1", &rows, &BibleOptions::default(), None).unwrap_err().contains("No book"));
         assert!(build_passage("John 3:16", &[], &BibleOptions::default(), None).is_err());
+    }
+
+    #[test]
+    fn a_bible_installed_again_replaces_its_earlier_copy_but_never_a_built_in_one() {
+        let info = |id: &str, name: &str| sp_bible::Info {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            short: "TB".to_owned(),
+            language: "en".to_owned(),
+            terms: String::new(),
+            credit: String::new(),
+            source: String::new(),
+            numbering: Numbering::English,
+            loose: false,
+        };
+        let mut shelf = Shelf::shipped();
+        let shipped = shelf.bibles.len();
+        shelf.put_installed("a.spbible".into(), info("tb", "Test Bible"));
+        assert_eq!(shelf.installed_as("Test Bible", "TB"), Some("tb"));
+        assert_eq!(shelf.installed_as("King James Version", "KJV"), None, "a built-in Bible is never replaced");
+        shelf.put_installed("b.spbible".into(), info("tb", "Test Bible, corrected"));
+        assert_eq!(shelf.bibles.len(), shipped + 1);
+        assert_eq!(shelf.bibles[shipped].name, "Test Bible, corrected");
+        shelf.put_installed("kjv.spbible".into(), info("kjv", "Not the King James"));
+        assert_eq!(shelf.bibles[0].name, "King James Version");
     }
 
     #[test]

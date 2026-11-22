@@ -100,7 +100,7 @@ has bought one of these elsewhere cannot get it through SoftPresenter.
   app for that Bible, checks that it reads as that Bible, and only then keeps it in the
   Bibles folder (`~/Library/Application Support/SoftPresenter/Bibles` on a Mac). A file with
   any other checksum is not installed.
-- Dropping a `.spbible` file on the window installs it too.
+- Dropping a `.spbible` file on the window installs it too, and so does a Bible file in another program's format (Zefania, OSIS, Beblia, USFM, USX and others; see [bible-formats.md](bible-formats.md)): a church installs only what it has the right to use.
 - To publish a new or corrected Bible: convert it, attach it to a new release (the next `bibles-N`, with every file the app offers),
   and update its checksum and the release name in the app. Files in a release that the app
   already points at must never be replaced, or older versions of the app will refuse them.

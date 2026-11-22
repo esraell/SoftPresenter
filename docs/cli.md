@@ -438,7 +438,7 @@ deleted)".
 | `bible books [keypad\|lists]` | How the page's left column offers the books: a key for every book, or the book, chapter and verse lists |
 | `bible language [auto\|en\|ru\|uk]` | The language the operator reads the page in (book names, the reference, the page, the find box's Bible rows): Auto, or one with a Bible in use; the slides on screen never change with it |
 | `bibles` | The Bibles installed, and those that can be downloaded |
-| `bible install NAME\|FILE`, `bible remove NAME --yes` | Downloads an offered Bible as a job (or installs a `.spbible` file); removes one (the four that come with the app stay) |
+| `bible install NAME\|FILE [--name NAME] [--short SHORT] [--language CODE]`, `bible remove NAME --yes` | Downloads an offered Bible as a job, or installs a Bible file: the app's own `.spbible`, or Zefania, OSIS, Beblia or `<b>`/`<c>`/`<v>` XML, USFM or USX (a file, a zip, or a folder of books), told by what it holds and made into the app's own; the reply says what came in (books, verses, empty verses, books left out, how it is numbered). The flags give what the file doesn't say, or say otherwise; one that doesn't say its name, short name or language is refused with the flags to add. The same Bible installed again replaces the earlier copy. `remove` removes one (the four that come with the app stay) |
 
 References are typed as on the Bible page, in English, Russian or Ukrainian: `John 3:16-18`,
 `jn 3:16`, `Psalm 23`, `Genesis 1` (the whole chapter), `Пс 22:1-3`, `Ів 3:16`. Chapter and
@@ -465,6 +465,12 @@ verses later.
     Bible options: verse numbers on, a new slide for each verse off, the translation's name off, the last slide names the passage.
     $ sp bible install ASV --wait
     Installed the American Standard Version.
+    $ sp bible install russyn_usfm.zip
+    russyn_usfm.zip doesn't say its short name. Give --short too, such as: --name "Синодальный перевод" --short СП --language ru
+    $ sp bible install russyn_usfm.zip --short RST
+    Installed Синодальный перевод (66 books, 31,169 verses), numbered as the Russian Synodal Bible is, judged by its Psalms.
+    $ sp bible install Bible.xml --name "Test Bible" --short TB --language en
+    Installed Test Bible (1 book, 2 verses), numbered as English Bibles are (nothing in it tells the ways of numbering apart); 1 verse was empty.
     $ sp bible remove KJV --yes
     The King James Version comes with the app and stays.
 

@@ -106,6 +106,96 @@ pub fn install_file(path: &Path) -> Result<(PathBuf, Info), String> {
     install_bytes(&std::fs::read(path).map_err(|e| format!("Could not read that file: {e}"))?)
 }
 
+/// True for a SoftPresenter Bible file.
+fn is_own_bible_file(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("spbible") || ext.eq_ignore_ascii_case("pcbible"))
+}
+
+/// True for a Bible the app can install: its own file, or a Bible in another program's format
+/// (a file, a zip or a folder of books), told by what it holds. Only files whose ending a Bible
+/// may have (or none) are looked into, and only their first few kilobytes.
+pub fn is_bible_file(path: &Path) -> bool {
+    if is_own_bible_file(path) {
+        return true;
+    }
+    let ending = path.extension().map(|ext| ext.to_string_lossy().to_ascii_lowercase());
+    match ending.as_deref() {
+        None | Some("xml" | "zip" | "usfm" | "sfm" | "usx" | "osis" | "zef" | "txt" | "bible") => {
+            sp_bible::import::looks_like_bible(path)
+        }
+        _ => false,
+    }
+}
+
+/// How opening a Bible file the operator has went.
+#[derive(Debug)]
+pub enum Opened {
+    /// It was installed: where it is kept, what it says about itself, and what to tell the
+    /// operator ("Installed … (66 books, 31,102 verses) …").
+    Installed(PathBuf, Info, String),
+    /// It was read, but doesn't say its name, short name or language: they are asked for, and
+    /// then [`install_imported`] installs it.
+    NeedsDetails(sp_bible::import::Imported),
+}
+
+/// Opens a Bible file the operator has (dropped on the window, chosen with Install from File…,
+/// or named to `sp bible install`): the app's own file is installed as it is; one in another
+/// program's format is read, made into the app's own and installed, with the details `given`
+/// in place of the file's. What is installed goes on the shelf with
+/// [`crate::bible::Shelf::put_installed`].
+pub fn open_file(path: &Path, given: &sp_bible::import::About, shelf: &crate::bible::Shelf) -> Result<Opened, String> {
+    if is_own_bible_file(path) {
+        let (kept, info) = install_file(path)?;
+        let said = format!("Installed the {}.", info.name);
+        return Ok(Opened::Installed(kept, info, said));
+    }
+    let imported = sp_bible::import::read_path(path, &sp_bible::import::Limits::NORMAL)?;
+    match imported.details(given) {
+        Some(details) => {
+            let (kept, info, said) = install_imported(&imported, &details, shelf)?;
+            Ok(Opened::Installed(kept, info, said))
+        }
+        None => Ok(Opened::NeedsDetails(imported)),
+    }
+}
+
+/// Installs a Bible read from another program's file, under the details given. The same Bible
+/// installed from a file before (its name and short name alike) is replaced; otherwise it gets
+/// a short name for its file no Bible installed or offered has (`rst`, else `rst-2`…), so it
+/// never stands in for one of them. Returns where, what it says about itself, and what to tell
+/// the operator.
+pub fn install_imported(
+    imported: &sp_bible::import::Imported,
+    details: &sp_bible::import::About,
+    shelf: &crate::bible::Shelf,
+) -> Result<(PathBuf, Info, String), String> {
+    let folder = folder().ok_or_else(|| "Could not find where to keep Bibles on this computer.".to_owned())?;
+    let offered = |id: &str| crate::bible::OFFERED.iter().any(|bible| bible.id == id);
+    let again = shelf.installed_as(&details.name, &details.short).filter(|id| !offered(id));
+    install_imported_in(&folder, imported, details, again, &|id| shelf.position(id).is_some() || offered(id))
+}
+
+fn install_imported_in(
+    folder: &Path,
+    imported: &sp_bible::import::Imported,
+    details: &sp_bible::import::About,
+    again: Option<&str>,
+    taken: &dyn Fn(&str) -> bool,
+) -> Result<(PathBuf, Info, String), String> {
+    let base = sp_bible::import::id_from(&details.short, &details.name);
+    let id = match again {
+        Some(id) => id.to_owned(),
+        None => std::iter::once(base.clone())
+            .chain((2..1000).map(|n| format!("{base}-{n}")))
+            .find(|id| !taken(id))
+            .ok_or_else(|| "Too many Bibles are installed under that name.".to_owned())?,
+    };
+    let bible = imported.bible(&id, details);
+    let (kept, info) = install_bytes_in(folder, &bible.to_bytes())?;
+    let said = imported.summary(&info.name);
+    Ok((kept, info, said))
+}
+
 /// Downloads a Bible's file, trying once more if the first try fails or comes back short.
 fn fetch(address: &str) -> Result<Vec<u8>, String> {
     fetch_once(address).or_else(|_| fetch_once(address))
@@ -260,6 +350,42 @@ mod tests {
     #[test]
     fn the_checksum_is_sha256_in_hex() {
         assert_eq!(checksum(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
+
+    #[test]
+    fn a_bible_in_another_format_is_installed_under_a_short_name_nothing_else_has() {
+        let folder = empty_folder("imported");
+        let zefania = "<XMLBIBLE biblename=\"Тестова Біблія\"><INFORMATION><identifier>НПУ</identifier><language>ukr</language></INFORMATION>\
+<BIBLEBOOK bnumber=\"43\"><CHAPTER cnumber=\"3\"><VERS vnumber=\"16\">Слова для перевірки.</VERS></CHAPTER></BIBLEBOOK></XMLBIBLE>";
+        let imported =
+            sp_bible::import::read_bytes(zefania.as_bytes(), "test.xml", &sp_bible::import::Limits::NORMAL).unwrap();
+        let details = imported.details(&sp_bible::import::About::default()).unwrap();
+        // "npu" is taken (as an installed or offered Bible's would be): the next is used.
+        let (path, info, said) = install_imported_in(&folder, &imported, &details, None, &|id| id == "npu").unwrap();
+        assert_eq!(path, folder.join("npu-2.spbible"));
+        assert_eq!((info.id.as_str(), info.short.as_str(), info.language.as_str()), ("npu-2", "НПУ", "uk"));
+        assert!(said.starts_with("Installed Тестова Біблія (1 book, 1 verse)"), "{said}");
+        let bible = Bible::from_bytes(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(bible.verse_count(), 1);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn bible_files_are_told_by_what_they_hold_and_only_likely_ones_are_read() {
+        let folder = empty_folder("sniff");
+        std::fs::create_dir_all(&folder).unwrap();
+        let usfm = folder.join("GEN.txt");
+        std::fs::write(&usfm, "\\id GEN\n\\c 1\n\\v 1 Words for a test.\n").unwrap();
+        assert!(is_bible_file(&usfm), "a USFM book ending in .txt");
+        let song = folder.join("Song.txt");
+        std::fs::write(&song, "Words of a song\n\nAnother slide").unwrap();
+        assert!(!is_bible_file(&song));
+        // An ending no Bible has is never opened, whatever it holds.
+        let movie = folder.join("film.mp4");
+        std::fs::write(&movie, "\\id GEN\n\\c 1\n\\v 1 Words.\n").unwrap();
+        assert!(!is_bible_file(&movie));
+        assert!(is_bible_file(Path::new("missing/KJV.spbible")));
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]

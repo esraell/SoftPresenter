@@ -224,6 +224,15 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   `BiblePage::ringed`). Which is kept with the preferences.
 - Options: how verses become slides, the theme and layout for Bible slides, and the Bibles
   installed (more can be downloaded).
+- The Bibles window (`bible.rs`, `manage_bibles`): a search box, Install from File… (the
+  system's window for choosing a file, `handle_bible_file_request` in `main.rs`), Done; the
+  Bibles installed, each with Remove (but for the four built in); those offered, by language,
+  with Install. A Bible file dropped on the window or chosen goes through
+  `bible_store::open_file`: the app's own `.spbible` as it is, another program's format read by
+  `sp_bible::import` and made into one (`install_imported`). One that doesn't say its name,
+  short name and language opens the sheet that asks (`bible::details_sheet`, a modal with
+  Name, Short name, Language, Cancel and Install). `sp bible install FILE --name --short
+  --language`.
 - Add keeps the passage in a playlist, to open again with these settings.
 - Keys: Return in the reference field (or in the find box) picks the passage's first verse and
   gives the keyboard back; ↑ and ↓ pick the verse before or after (never putting it on screen;
@@ -318,7 +327,7 @@ how long drawing took.
 | `sp-video` | Playing videos: macOS's own player, FFmpeg for other formats; web pages drawn off-screen by macOS's web view (`web`, `web_mac`), copied into frames as a video's are |
 | `sp-ndi` | Sending screens over NDI (the runtime is opened when an NDI screen starts) |
 | `sp-decklink` | Playing screens out of Blackmagic Design DeckLink cards: finding the devices, their modes and each one's own default format on a thread of its own, choosing the format a new output starts in (`Device::start`), and SoftPresenter's C++ bridge to the driver (`bridge/bridge.cpp`, the only place it is called, through `src/ffi.rs`); the SDK's headers are in `third_party/decklink-sdk` |
-| `sp-bible` | Bibles: references, verse numbering, search |
+| `sp-bible` | Bibles: references, verse numbering (and judging it from a Bible's chapters), search, and reading Bibles in other programs' formats (`import`: Zefania, OSIS, Beblia, `<b>`/`<c>`/`<v>` XML, USFM, USX, zipped or not, with limits for untrusted files) |
 | `sp-app` | The app: the window (egui), the screens' thread (`output.rs`), the views (`home.rs`, `studio.rs`, `editor.rs`, `inspector.rs`), the stage layouts (`stage.rs` for what they hold and show, `stage_editor.rs` for their parts of the Edit view), the command line (`control.rs`, and `slide_cli.rs` for changing slides), the menu bar (`menubar.rs`) |
 
 ## Trying the app safely (for agents and tests)

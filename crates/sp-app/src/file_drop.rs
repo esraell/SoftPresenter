@@ -55,7 +55,9 @@ pub fn kind_of(path: &Path) -> Kind {
     if crate::pack::is_pack(path) {
         return Kind::Pack;
     }
-    if path.extension().is_some_and(|ext| ext == "spbible" || ext == "pcbible") {
+    // A Bible (the app's own file, or another program's told by what it holds: a book of USFM
+    // may end in .txt, a folder of them is no folder of songs).
+    if crate::bible_store::is_bible_file(path) {
         return Kind::Other;
     }
     if crate::deck::is_pdf(path)

@@ -793,13 +793,14 @@ fn template_names(theme: &Theme) -> Vec<String> {
 }
 
 /// Whether Escape has something in the window to close (a pop-up, the Settings window, the
-/// Bible page's Options or Bibles window, the setup), which it closes instead of clearing the
-/// screens.
+/// Bible page's Options or Bibles window, the sheet asking what a Bible file is, the setup),
+/// which it closes instead of clearing the screens.
 fn escape_closes_something(state: &home::HomeState, ctx: &egui::Context) -> bool {
     state.settings_open
         || state.key_sheet
         || state.bible.options.open
         || state.bible.options.manage_open
+        || state.bible.options.details.is_some()
         || state.setup.is_some()
         || state.library_search.is_some()
         || egui::Popup::is_any_open(ctx)
@@ -3355,21 +3356,50 @@ impl App {
     /// Any other file dropped on the window: a Bible is installed; anything else is offered to
     /// the media bin, which says why it can't take it.
     fn add_dropped_file(&mut self, path: &std::path::Path) {
-        if path.extension().is_some_and(|ext| ext == "spbible" || ext == "pcbible") {
-            let Some(running) = self.running.as_mut() else {
-                return;
-            };
-            match bible_store::install_file(path) {
-                Ok((kept, info)) => {
-                    running.home_state.notice = Some(format!("Installed the {}.", info.name));
-                    running.home_state.bible.shelf.add_file(kept, info);
-                }
-                Err(message) => running.home_state.notice = Some(message),
-            }
-            running.home_window.request_redraw();
+        if bible_store::is_bible_file(path) {
+            self.install_bible(path);
             return;
         }
         let _ = self.add_media_file(path);
+    }
+
+    /// Installs a Bible file the operator has (dropped, or chosen with the Bibles window's
+    /// Install from File…), in the app's own format or another program's. One that doesn't say
+    /// its name, short name or language opens the sheet that asks for them.
+    fn install_bible(&mut self, path: &std::path::Path) {
+        let Some(running) = self.running.as_mut() else {
+            return;
+        };
+        let bible = &mut running.home_state.bible;
+        let opened = bible_store::open_file(path, &sp_bible::import::About::default(), &bible.shelf);
+        if let Err(problem) = &opened {
+            applog::event("bible", &format!("could not install {}: {problem}", path.display()));
+        }
+        match opened {
+            Ok(bible_store::Opened::Installed(kept, info, said)) => {
+                running.home_state.notice = Some(said);
+                bible.shelf.put_installed(kept, info);
+            }
+            Ok(bible_store::Opened::NeedsDetails(imported)) => {
+                bible.options.details = Some(crate::bible::DetailsSheet::new(imported));
+            }
+            Err(message) => running.home_state.notice = Some(message),
+        }
+        running.home_window.request_redraw();
+    }
+
+    /// The Bibles window's Install from File…: the system's window for choosing a file, then
+    /// the Bible installed as a dropped one is.
+    fn handle_bible_file_request(&mut self) {
+        let Some(running) = self.running.as_mut() else { return };
+        if !std::mem::take(&mut running.home_state.bible.options.file_request) {
+            return;
+        }
+        // Any file may be a Bible, whatever its ending: what it holds decides.
+        let chosen = rfd::FileDialog::new().set_title("Choose a Bible File").pick_file();
+        if let Some(path) = chosen {
+            self.install_bible(&path);
+        }
     }
 
     /// Puts a picture or video in the media bin (and in the media playlist shown, if any).
@@ -8453,6 +8483,7 @@ impl ApplicationHandler<AppEvent> for App {
                 self.handle_reflow();
                 self.handle_media_request();
                 self.handle_picture_request();
+                self.handle_bible_file_request();
                 self.handle_song_request();
                 // A template chosen from a slide's menu: the slide is changed and, if it is on
                 // screen, the screen too.

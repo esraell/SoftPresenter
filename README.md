@@ -63,7 +63,8 @@ SoftPresenter is built to be:
   all 66 (or in lists), or search by word. Up to four translations on one slide, a history of
   the passages shown, and book names in English, Russian and Ukrainian, read in the language
   typed or one chosen. Four Bibles come with the app and sixteen more install from
-  its Bibles window.
+  its Bibles window; a Bible file the church already has (Zefania, OSIS, USFM and other common
+  formats) installs when dropped on the window.
 - **Media.** Pictures and videos behind the words or on their own, media playlists, folders the
   app watches, and an announcements layer that loops a song, a picture, a video or a media
   playlist by itself. Canva Sync fetches the announcements video fresh from a Canva

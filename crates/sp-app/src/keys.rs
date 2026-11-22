@@ -246,6 +246,7 @@ pub fn frame(ctx: &egui::Context, state: &mut HomeState, voxlive: bool) -> Optio
     }
     if ctx.text_edit_focused()
         || state.new_song_sheet.is_some()
+        || state.bible.options.details.is_some()
         || state.alert_open()
         || state.setup.is_some()
         || state.library_search.is_some()

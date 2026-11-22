@@ -26,7 +26,7 @@ impl crate::App {
             "rows" => self.bible_rows(words),
             "options" => self.bible_options(words),
             "history" => self.bible_history(),
-            "install" => self.bible_install(&words.join(" ")),
+            "install" => self.bible_install(words),
             "remove" => self.bible_remove(words),
             "view" | "books" | "language" => self.bible_look(&word, words.first().map(String::as_str)),
             _ => return None,
@@ -244,18 +244,68 @@ impl crate::App {
         Ok(Reply::with(lines.join("\n"), data))
     }
 
-    /// `bible install NAME|FILE`: a Bible offered, downloaded in the background, or a Bible file.
-    fn bible_install(&mut self, typed: &str) -> Result<Reply, String> {
+    /// `bible install NAME|FILE [--name NAME] [--short SHORT] [--language CODE]`: a Bible
+    /// offered, downloaded in the background, or a Bible file (the app's own, or another
+    /// program's: a file, a zip or a folder of books). The flags give what the file doesn't say
+    /// (or say otherwise); one that says too little is refused with the flags it needs, as no
+    /// sheet can ask.
+    fn bible_install(&mut self, words: &[String]) -> Result<Reply, String> {
+        let mut given = sp_bible::import::About::default();
+        let mut rest: Vec<&str> = Vec::new();
+        let mut at = 0;
+        while at < words.len() {
+            let field = match words[at].as_str() {
+                "--name" => Some(&mut given.name),
+                "--short" => Some(&mut given.short),
+                "--language" => Some(&mut given.language),
+                _ => None,
+            };
+            match field {
+                Some(field) => {
+                    let value = words.get(at + 1).ok_or_else(|| format!("{} needs a value after it.", words[at]))?;
+                    value.clone_into(field);
+                    at += 2;
+                }
+                None => {
+                    rest.push(&words[at]);
+                    at += 1;
+                }
+            }
+        }
+        let typed = rest.join(" ");
         let typed = typed.trim();
         if typed.is_empty() {
-            return Err("bible install NAME | FILE.spbible   (bibles lists those offered)".to_owned());
+            return Err(
+                "bible install NAME | FILE [--name NAME --short SHORT --language CODE]   (bibles lists those offered)"
+                    .to_owned(),
+            );
         }
         let path = std::path::Path::new(typed);
-        if path.is_file() {
-            let (kept, info) = crate::bible_store::install_file(path)?;
-            let name = info.name.clone();
-            self.with_state(|state| state.bible.shelf.add_file(kept, info));
-            return Ok(Reply::done(format!("Installed the {name}.")));
+        if path.exists() {
+            if !crate::bible_store::is_bible_file(path) {
+                return Err(format!("{typed} isn't a Bible file SoftPresenter can read."));
+            }
+            let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
+            let opened = crate::bible_store::open_file(path, &given, &state.bible.shelf)?;
+            return match opened {
+                crate::bible_store::Opened::Installed(kept, info, said) => {
+                    state.bible.shelf.put_installed(kept, info);
+                    Ok(Reply::done(said))
+                }
+                crate::bible_store::Opened::NeedsDetails(imported) => {
+                    let missing = imported.missing_flags(&given);
+                    let offered = imported.prefilled();
+                    Err(format!(
+                        "{} doesn't say its {}. Give {} too, such as: --name \"{}\" --short {} --language {}",
+                        imported.file_name,
+                        missing.replace("--short", "short name").replace("--", ""),
+                        missing,
+                        offered.name,
+                        if offered.short.is_empty() { "SHORT" } else { offered.short.as_str() },
+                        if offered.language.is_empty() { "en" } else { offered.language.as_str() }
+                    ))
+                }
+            };
         }
         let ctx = self.running.as_ref().ok_or("The app isn't ready.")?.egui_ctx.clone();
         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;

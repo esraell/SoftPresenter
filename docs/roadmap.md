@@ -116,7 +116,6 @@ rather than a feature, but no church on Windows can use the app without them.
 
 - **Modern licensed translations.** NIV, ESV, NKJV, NLT, RV1960 and others, which English-speaking churches expect; each needs a licence. · L · Medium
 - **More free Bibles in more languages.** (started: 4 ship with the app and 15 more can be downloaded, in 9 languages in all) · M · Low
-- **Importing a Bible file a church already has** (USFM, OSIS, Zefania). (started: a converter for developers, and .spbible files that install when dropped on the window) · M · Low
 - **A transition of its own for Bible slides.** (started: the shared slide transition) · S · Low
 - **The reference straight after the verse.** The reference follows the last word, on the same line. (started: the reference can go on a line of its own in the same box) · S · Low
 - **Red-letter text.** Needs the data for each Bible. · M · Low

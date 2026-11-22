@@ -193,16 +193,38 @@ fn book_ending(name: &str) -> bool {
 pub(super) fn looks_like_bible(path: &Path) -> bool {
     let Ok(meta) = std::fs::metadata(path) else { return false };
     if meta.is_dir() {
-        let Ok(read) = std::fs::read_dir(path) else { return false };
-        return read.flatten().take(400).any(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let path = entry.path();
-            path.is_file()
-                && !name.starts_with('.')
-                && (book_ending(&name)
-                    || (worth_reading(&name)
-                        && std::fs::File::open(&path).ok().and_then(head_of).is_some_and(|head| head_is_bible(&head))))
-        });
+        // Books by their endings, three folders deep as a bundle keeps them (four hundred
+        // entries looked at in all); any other file only at the top, by its start.
+        let mut folders = vec![(path.to_owned(), 0)];
+        let mut looked = 0;
+        while let Some((here, depth)) = folders.pop() {
+            let Ok(read) = std::fs::read_dir(&here) else { continue };
+            for entry in read.flatten() {
+                looked += 1;
+                if looked > 400 {
+                    return false;
+                }
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let Ok(kind) = entry.file_type() else { continue };
+                if name.starts_with('.') {
+                    continue;
+                }
+                if kind.is_dir() && depth < 3 {
+                    folders.push((entry.path(), depth + 1));
+                } else if kind.is_file()
+                    && (book_ending(&name)
+                        || (depth == 0
+                            && worth_reading(&name)
+                            && std::fs::File::open(entry.path())
+                                .ok()
+                                .and_then(head_of)
+                                .is_some_and(|head| head_is_bible(&head))))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
     let Ok(mut file) = std::fs::File::open(path) else { return false };
     let Some(head) = head_bytes(&mut file) else { return false };

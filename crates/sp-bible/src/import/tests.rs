@@ -153,7 +153,7 @@ fn a_file_that_does_not_say_what_it_is_asks_with_the_file_name_offered() {
     let tags = r#"<bible><b n="Genesis"><c n="1"><v n="1">The first words of a test.</v><v n="2">And the second, of the test.</v></c></b></bible>"#;
     let imported = read(tags, "RST.xml");
     assert!(!imported.complete());
-    assert_eq!(imported.missing_flags(), "--name, --short and --language");
+    assert_eq!(imported.missing_flags(&About::default()), "--name, --short and --language");
     let offered = imported.prefilled();
     assert_eq!((offered.name.as_str(), offered.short.as_str(), offered.language.as_str()), ("RST", "RST", "en"));
     // Nothing given: it can't be made yet; given, it can.
@@ -177,7 +177,7 @@ fn a_file_that_does_not_say_what_it_is_asks_with_the_file_name_offered() {
         (imported.about.name.as_str(), imported.about.terms.as_str()),
         ("Test Translation", "Written for a test")
     );
-    assert_eq!(imported.missing_flags(), "--short and --language");
+    assert_eq!(imported.missing_flags(&About::default()), "--short and --language");
     assert_eq!(imported.prefilled().short, "TT", "the first letters of its name");
     assert_eq!(imported.verse(at("JOH", 3, 16)), Some("Words for a test."));
 }

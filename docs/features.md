@@ -693,6 +693,27 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the Bibles installed (each with Remove, but for the four built in), and every Bible that can
   be downloaded, grouped by language and written in it, with its terms and an Install button
   that shows the download going on.
+- **A Bible file the church has installs too**, in the formats other programs keep Bibles in:
+  Zefania XML, OSIS XML, Beblia XML, XML marking books, chapters and verses with `<b>`, `<c>`
+  and `<v>`, USFM (eBible.org's main format: a folder or zip of `.usfm`/`.SFM` books) and USX,
+  each as a file or zipped, as well as the app's own `.spbible`. Drop it on the window, choose
+  it with the Bibles window's Install from File…, or `sp bible install FILE`. What it is comes
+  from what it holds, not its ending. It becomes one of the app's own Bibles, kept offline: the
+  publisher's words without notes, cross references, Strong's numbers, headings or footnote
+  markers, words of Jesus as plain words, a verse split over several parts joined, a psalm's
+  title at the start of its first verse. Books are found by the format's codes (or by name, in
+  English, Russian or Ukrainian); books beyond the sixty-six are left out and named. The verses
+  keep their numbers, and how they are numbered (as English Bibles, the Russian Synodal or the
+  Hebrew and Greek) is judged from the chapters' lengths, the Psalms telling the Synodal apart,
+  so a Synodal-numbered Bible lines up with English ones as the built-in Synodal does. The
+  name, short name, language and terms come from the file (or from eBible's `copr.htm`, a
+  Door43 `manifest.yaml` or a Bible bundle's `metadata.xml` beside the books); where the file
+  doesn't say, a small sheet asks for them, filled in from the file's name and the alphabet of
+  its words. A notice says what came in: "Installed King James (Authorized) Version (66 books,
+  31,102 verses), numbered as English Bibles are, judged by its Psalms; 3 verses were empty."
+  The same Bible installed again replaces the copy installed before; one never takes the place
+  of a built-in or offered Bible. The files are read with limits (size, a zip's entries and
+  what they unpack to), and nothing a file declares or names is expanded or fetched.
 - One click keeps a passage: + Add puts it in the playlist in front (its tooltip names the
   playlist; the ▾ beside it picks another), to be brought back with the same settings: the
   passage asked for (John 3:16), never the chapter round it, named in the language it was typed
@@ -1063,7 +1084,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   layouts and the screens showing each.
 - The Bible page, themes and arrangements from the command line: `bible search WORDS`, `bible
   rows [BIBLE…]`, `bible options key=value…`, `bible history`, `bibles` (installed and to
-  download), `bible install NAME|FILE`, `bible remove NAME --yes`; `theme templates THEME`, `theme
+  download), `bible install NAME|FILE [--name --short --language]` (a Bible file in any of the formats above), `bible remove NAME --yes`; `theme templates THEME`, `theme
   main THEME`, `theme duplicate|rename|delete`, `theme box THEME TEMPLATE BOX key=value…` (the
   slide style keys and x= y= w= h=), `theme template THEME TEMPLATE for=songs|bible|both|none`;
   `song arrangements SONG`, `song arrangement SONG use NAME|none`, `set NAME GROUP…`, `delete

@@ -32,7 +32,7 @@ fn main() {
     let Some(about) = imported.details(&given) else {
         return eprintln!(
             "{input} doesn't say its {}: give them as name=, short= and language=.",
-            imported.missing_flags()
+            imported.missing_flags(&given)
         );
     };
     let id = get("id").unwrap_or_else(|| sp_bible::import::id_from(&about.short, &about.name));
