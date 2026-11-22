@@ -4882,7 +4882,7 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
                         ("Show", "Next slide", "→ or Space"),
                         ("Show", "Previous slide", "←"),
                         ("Show", "Put the slide picked on screen", "Enter"),
-                        ("Bible", "Pick the verse before / after", "↑ / ↓"),
+                        ("Bible", "Pick the verse before / after (on the page, as ← / →)", "↑ / ↓"),
                         ("Show", "First / last slide", "Home / End"),
                         ("Show", "Clear All", "Esc or F1"),
                         ("Show", "Clear Slide", "F2"),
@@ -5812,10 +5812,14 @@ fn target_menu(
     });
 }
 
-/// ↑ and ↓ in the Bible view pick the verse before or after (see `running::move_pick`); they
-/// never put it on screen, Enter does. Not while something is typed, under a menu, the Options
+/// ↑ and ↓ in the Bible view. Under Slides they pick the verse before or after (see
+/// `running::move_pick`) and never put it on screen; Enter does. On the page, where the verses
+/// run down, ↓ is as → and ↑ as ←, by the owner's rules (`running::pick_key`, 2026-11-22): with a
+/// verse picked and nothing on screen they move the pick to the verse below or above; with
+/// something on screen they go on with it, as → and ← do (Enter takes the pick). With neither,
+/// both pick the passage's first verse. Not while something is typed, under a menu, the Options
 /// or the list of keys, or with a search's verses listed in place of the slides.
-fn bible_pick_keys(ui: &egui::Ui, show: &Show, state: &mut HomeState) {
+fn bible_pick_keys(ui: &egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
     let free = !ui.ctx().text_edit_focused()
         && state.library_search.is_none()
         && state.edit_kind().is_none()
@@ -5827,6 +5831,15 @@ fn bible_pick_keys(ui: &egui::Ui, show: &Show, state: &mut HomeState) {
         && !egui::Popup::is_any_open(ui.ctx());
     let (up, down) = ui.input(|input| (input.key_pressed(egui::Key::ArrowUp), input.key_pressed(egui::Key::ArrowDown)));
     if !free || !(up || down) {
+        return;
+    }
+    let showing = show.live().is_some();
+    if state.bible.view == BibleView::Page
+        && crate::running::pick_key(false, down, up, state.pick(show).is_some(), showing, false)
+            == crate::running::PickKey::Pass
+        && showing
+    {
+        commands.push(if down { Command::Next } else { Command::Previous });
         return;
     }
     let Some(slot) = state.bible.slots.map(|slots| slots[state.bible.showing]) else { return };
@@ -5856,7 +5869,7 @@ fn bible_area(
     commands: &mut Vec<Command>,
 ) {
     let live = show.live().map(|at| at.presentation);
-    bible_pick_keys(ui, show, state);
+    bible_pick_keys(ui, show, state, commands);
     egui::CentralPanel::default().frame(panel_frame(CANVAS, 0)).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         let side = |left: i8, top: i8| egui::Margin { left, right: left, top, bottom: 0 };
@@ -6240,7 +6253,7 @@ fn bible_field(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, rect: Rect
         .show(&mut place, field, |query| book_suggestions(query.text, &language));
     let lookup = completion.text_edit.response.response.clone().on_hover_text(format!(
         "Type a reference, such as John 3:16, or words to find. Return picks its first verse, Enter puts it on \
-         screen, \u{2191} and \u{2193} pick another ({} comes here)",
+         screen; with nothing on screen the arrows pick another ({} comes here)",
         crate::keys::hint_key("2")
     ));
     if lookup.has_focus() {
@@ -6257,7 +6270,8 @@ fn bible_field(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, rect: Rect
     } else if entered(&lookup, ui) {
         state.bible.look_up(live);
         // Its first verse is picked and the keyboard goes back to the show, as from the find
-        // box: Enter puts the verse on screen, ↑ and ↓ pick another. A reference not understood
+        // box: Enter puts the verse on screen; with nothing on screen the arrows pick another (with
+        // something on screen they go on with it; see `bible_pick_keys`). A reference not understood
         // keeps the keyboard, its words selected, to be put right.
         if !state.pick_passage(show) {
             lookup.request_focus();
@@ -9082,11 +9096,14 @@ mod tests {
     }
 
     #[test]
-    fn up_and_down_in_the_bible_view_move_the_pick_and_put_nothing_on_screen() {
+    fn up_and_down_under_slides_move_the_pick_and_put_nothing_on_screen() {
         let ctx = egui::Context::default();
         let mut show = service_with_bible_places();
         let mut state = HomeState { library_search: Some(("jn 3:16-18".to_owned(), 0)), ..HomeState::default() };
         state.bible.slots = Some([2, 3]);
+        // Under Slides; on the page they follow the owner's rules for → and ← (see
+        // `on_the_page_the_arrows_go_the_way_they_point…`).
+        state.bible.view = BibleView::Slides;
         let key =
             |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
@@ -9123,6 +9140,69 @@ mod tests {
         }
         assert_eq!(state.pick(&show), verse(35), "the last verse stays picked");
         assert_eq!(state.toast.as_ref().map(|(words, _)| words.as_str()), Some("That is the last verse."));
+    }
+
+    #[test]
+    fn on_the_page_the_arrows_go_the_way_they_point_by_the_owners_rules() {
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        // Nothing on screen.
+        show.apply(Command::ClearAll);
+        assert!(show.live().is_none());
+        let mut state = HomeState { library_search: Some(("jn 3:16-18".to_owned(), 0)), ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        assert_eq!(state.bible.view, BibleView::Page);
+        let key =
+            |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::Enter)], 0.1);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.2);
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+        let verse = |slide: usize| Some(SlideRef { presentation: slot, slide });
+        assert_eq!(state.pick(&show), verse(15), "John 3:16 picked");
+        // A verse picked, nothing on screen: ↓ picks the verse below, ↑ the one above, and
+        // nothing goes on screen; the pick is brought into sight as it moves.
+        let mut commands = frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.3);
+        assert_eq!(state.pick(&show), verse(16), "John 3:17");
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.35);
+        let in_sight = ctx.read_response(page_verse(17)).is_some_and(|row| row.interact_rect.height() > 20.0);
+        assert!(in_sight, "John 3:17 brought into sight");
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.4));
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowUp)], 0.5));
+        assert_eq!(state.pick(&show), verse(16));
+        assert!(!goes_on_screen(&commands) && show.live().is_none(), "{commands:?}");
+        // Not while the reference field has the keyboard: the arrows are the field's.
+        state.bible.focus_lookup = true;
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.55);
+        frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.6);
+        assert_eq!(state.pick(&show), verse(16), "the field's keys");
+        ctx.memory_mut(|memory| memory.surrender_focus(scripture_lookup_id()));
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.65);
+        // Enter puts it on screen; then, with no pick, ↓ goes on to the verse below, as → does,
+        // and ↑ back.
+        press_enter(&mut show, &state);
+        assert_eq!(show.live(), verse(16));
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.7);
+        let commands = frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.8);
+        assert_eq!(commands, vec![Command::Next]);
+        assert_eq!(show.live(), verse(17), "John 3:18 on screen");
+        frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowUp)], 0.9);
+        assert_eq!(show.live(), verse(16));
+        // A verse picked while something else is on screen (the song): ↓ goes on with the song,
+        // as → does, and the pick waits for Enter.
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        state.set_pick(&show, SlideRef { presentation: slot, slide: 20 }, true);
+        frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 1.0);
+        let song = |slide: usize| Some(SlideRef { presentation: 0, slide });
+        assert_eq!((show.live(), state.pick(&show)), (song(1), verse(20)));
+        press_enter(&mut show, &state);
+        assert_eq!(show.live(), verse(20), "Enter takes the pick");
+        // Under Slides, ↓ still picks the verse after without putting it on screen.
+        state.bible.view = BibleView::Slides;
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 1.1);
+        let commands = frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 1.2);
+        assert!(!goes_on_screen(&commands));
+        assert_eq!((show.live(), state.pick(&show)), (verse(20), verse(21)));
     }
 
     #[test]

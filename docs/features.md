@@ -243,7 +243,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   slide a verse its slides are its whole chapter's, so after Enter Next goes on through the
   chapter after it; Command-Return keeps the verse alone), and so does a passage looked up with
   Return in the reference field; in the Bible view ↑ and ↓ pick the verse before or after (from
-  the verse on screen when none is picked, or the passage's first when neither is). The slide
+  the verse on screen when none is picked, or the passage's first when neither is). On the
+  Bible page, where the verses run down, ↓ is as → and ↑ as ←: with a verse picked and nothing
+  on screen they move the pick to the verse below or above (brought into sight), putting nothing
+  on; with something on screen they go on with it, as → and ← do, and Enter takes the pick;
+  under Slides ↑ and ↓ always move the pick. The slide
   picked has a 2-point ink ring, its strip in ink and a small ink key cap for Enter after its
   label (in words only or a table, its row has the chosen grey and a fine dim ring inside); never
   orange, which is only for what is on screen, nor the blue of slides picked out to change several;
@@ -621,7 +625,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Enter pressed). While a book's name is being typed, the books it could be are offered under
   the field (arrows pick, Tab or Return takes one). Return looks the passage up, picks its first
   verse and gives the keyboard back to the show, so Enter puts the verse on screen, Space and →
-  go on to the next, ← back, and ↑ and ↓ pick another without putting it on (a reference not
+  go on to the next, ← back, and ↑ and ↓ pick another without putting it on (on the page,
+  once something is on screen, ↓ and ↑ go on with it as → and ← do) (a reference not
   understood keeps the keyboard in the field instead). In the Bible view a letter or number
   typed with no field taking the keyboard starts the next reference in the field (so "ps 23"
   typed after Return goes there); it never jumps the song on screen to a group, as letters do in

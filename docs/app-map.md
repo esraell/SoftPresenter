@@ -92,7 +92,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 |---|---|
 | Space, → | Next slide. With another item opened (↑, ↓ or a click on its row), starts that item at its first slide; at the end of a song, with Continuous on, goes on into the next song or Bible passage. While a slide picked waits for Enter, goes on with what is on screen; with nothing on screen, Space puts the picked slide on and → / ← move the pick |
 | ← | Previous slide; starts another item opened, as Space does; at a song's first slide, with Continuous on, goes back into the item before |
-| ↑, ↓ | Opens the playlist item above or below (a notice says so at either end); in the Bible view, picks the verse before or after without putting it on screen |
+| ↑, ↓ | Opens the playlist item above or below (a notice says so at either end); in the Bible view under Slides, picks the verse before or after without putting it on screen; on the Bible page, as ← and → (with a verse picked and nothing on screen, moves the pick to the verse above or below; with something on screen, goes on with it) |
 | Enter | The slide picked goes on screen (the first slide or verse of what the find box or the reference field just opened, or the verse ↑ or ↓ picked in the Bible view); with none, the open item from its first slide (with a library listed, the song chosen) |
 | Home, End | First, last slide of the song |
 | Escape (F1) | Clear all |
@@ -222,7 +222,8 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   installed (more can be downloaded).
 - Add keeps the passage in a playlist, to open again with these settings.
 - Keys: Return in the reference field (or in the find box) picks the passage's first verse and
-  gives the keyboard back; ↑ and ↓ pick the verse before or after (never putting it on screen);
+  gives the keyboard back; ↑ and ↓ pick the verse before or after (never putting it on screen;
+  on the page they follow `running::pick_key` as → and ← do, see `bible_pick_keys`);
   Enter puts the verse picked on screen (so does Space with nothing on screen, while → and ← move
   the pick); Space, → and ← then go verse by verse. The pick is `HomeState::picked` (`home.rs`),
   the rules for the keys `running.rs`.
