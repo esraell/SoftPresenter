@@ -5328,6 +5328,15 @@ fn bible_area(
                     response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))
                 };
                 let lookup_id = ui.scope_id().with("scripture lookup");
+                // A letter or number typed with no field taking it (after Return has picked a
+                // verse and given the keyboard back) starts the next reference here; the app
+                // keeps such keys from the show in the Bible view (see `show_key_held_back`).
+                let started = next_reference_typed(ui, state);
+                if let Some(typed) = &started {
+                    state.bible.lookup = typed.clone();
+                    state.bible.typed_at = Some(ui.input(|input| input.time));
+                    state.bible.search_last = false;
+                }
                 // While a book's name is being typed, the books it could be are offered under
                 // the field, each named in the language typed in: arrows pick, Tab or Return
                 // (or a click) takes one, Escape hides them.
@@ -5390,6 +5399,11 @@ fn bible_area(
                     select_all_text(ui.ctx(), lookup_id, &state.bible.lookup);
                     // Drawn again at once, so the field shows it has the keyboard without
                     // waiting for the mouse to move.
+                    ui.ctx().request_repaint();
+                } else if started.is_some() {
+                    // The field takes the keyboard, the cursor after what was typed.
+                    lookup.request_focus();
+                    cursor_to_end(ui.ctx(), lookup_id, &state.bible.lookup);
                     ui.ctx().request_repaint();
                 }
                 if wide {
@@ -6062,6 +6076,41 @@ fn has_chapter(typed: &str) -> bool {
     name_onwards.chars().any(|c| c.is_ascii_digit())
 }
 
+/// What was typed this frame in the Bible view that starts a new reference: letters or numbers
+/// (not `?`, which opens the list of keys, nor `/`, the find box) with no field taking the
+/// keyboard and nothing open over the view.
+fn next_reference_typed(ui: &egui::Ui, state: &HomeState) -> Option<String> {
+    let free = !ui.ctx().text_edit_focused()
+        && state.library_search.is_none()
+        && !state.key_sheet
+        && state.numbers.is_none()
+        && !state.alert_open()
+        && !state.bible.options.open
+        && !state.bible.options.manage_open
+        && !egui::Popup::is_any_open(ui.ctx());
+    if !free {
+        return None;
+    }
+    let typed: String = ui.input(|input| {
+        input
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                egui::Event::Text(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
+    });
+    typed.chars().next().filter(|first| first.is_alphanumeric()).map(|_| typed)
+}
+
+/// Puts the cursor of a text field after its last letter.
+fn cursor_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
+    let mut edit = egui::text_edit::TextEditState::load(ctx, id).unwrap_or_default();
+    edit.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(text.chars().count()))));
+    edit.store(ctx, id);
+}
+
 /// The id of the Bible view's Search field.
 fn bible_search_id() -> egui::Id {
     egui::Id::unique("bible search field")
@@ -6072,7 +6121,9 @@ fn bible_search_id() -> egui::Id {
 /// translation's, which book names are read in first).
 fn lookup_words<'a>(typed: &'a str, language: &str) -> Option<&'a str> {
     let trimmed = typed.trim();
-    let book = !sp_bible::suggest_books(trimmed, language, 1).is_empty();
+    // A book's name, whole or begun, in any of the languages read, or a short form of one.
+    let book = !sp_bible::suggest_books(trimmed, language, 1).is_empty()
+        || sp_bible::read_reference(&format!("{trimmed} 1"), language).is_ok();
     (trimmed.chars().count() >= 3 && !has_chapter(trimmed) && !trimmed.contains(':') && !book).then_some(trimmed)
 }
 
@@ -6907,10 +6958,15 @@ mod tests {
         assert_eq!(state.bible.shown, "От Иоанна 3:16");
         assert!(!goes_on_screen(&commands), "{commands:?}");
         assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }));
-        // A book's name being typed is not searched for.
-        assert_eq!(lookup_words("Быт", "ru"), None);
-        assert_eq!(lookup_words("John", "ru"), None);
+        // A book's name being typed, or a short form of one, is not searched for.
+        for book in ["Быт", "John", "1 Цар", "Флп", "Деян", "Откр", "phil", "1 cor", "Пс", "Ін", "Від Івана"]
+        {
+            for language in ["ru", "en"] {
+                assert_eq!(lookup_words(book, language), None, "{book} ({language})");
+            }
+        }
         assert_eq!(lookup_words("love one another", "ru"), Some("love one another"));
+        assert_eq!(lookup_words("долиною смертной", "ru"), Some("долиною смертной"));
     }
 
     #[test]
@@ -7907,6 +7963,14 @@ mod tests {
         let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
         assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 0 }));
         assert!(ctx.memory(|memory| memory.focused().is_none()), "the keyboard is back with the window");
+        // Typing again with no field taking the keyboard starts the next reference in the field
+        // (the app keeps letters from the show in the Bible view): nothing goes on screen.
+        let typed = frame_then_app(&ctx, &mut show, &mut state, vec![Event::Text("p".to_owned())], 0.35);
+        assert!(!goes_on_screen(&typed), "{typed:?}");
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.36);
+        assert!(ctx.text_edit_focused(), "Scripture Lookup has the keyboard again");
+        frame_then_app(&ctx, &mut show, &mut state, vec![Event::Text("s 23".to_owned())], 0.37);
+        assert_eq!(state.bible.lookup, "ps 23", "the typing went on in the field");
         // A reference not understood keeps the keyboard, to be put right.
         state.bible.focus_lookup = true;
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.4);

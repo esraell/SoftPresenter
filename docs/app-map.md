@@ -96,7 +96,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | Home, End | First, last slide of the song |
 | Escape (F1) | Clear all |
 | F2, F3, F4, F5, F6 | Clear slide, media, props, audio, messages |
-| A letter | The slide with that hot key, or the group it stands for (A for the first verse, S for the second, C for the chorus, E for the ending…; the letter shows at the right of a group's bar) |
+| A letter | The slide with that hot key, or the group it stands for (A for the first verse, S for the second, C for the chorus, E for the ending…; the letter shows at the right of a group's bar). In the Bible view a letter or number starts the next reference in Scripture Lookup instead |
 | Delete | Delete what is picked out, after asking |
 | Command-N | New song |
 | Command-1, -2, -3 | Show, Bible (cursor in the reference), Edit (Ctrl on other computers, for all of these) |

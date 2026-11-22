@@ -683,9 +683,15 @@ fn show_key_command(key: &Key, show: &Show) -> Option<Command> {
 
 /// Keys that run the show but belong to something open in the window: under the list of keys
 /// nothing runs the show; while the numbers show (after modifier-1 to 7), a number and Escape
-/// are theirs; in an open menu the arrows, Space and Enter move in it and choose.
+/// are theirs; in an open menu the arrows, Space and Enter move in it and choose. In the Bible
+/// view a letter or a number starts the next reference in Scripture Lookup (see `bible_area` in
+/// `home.rs`), never a jump to a group of the song on screen: after Return has picked a verse and
+/// given the keyboard back, typing "ps 23" must not put the song's second verse up with its "s".
 fn show_key_held_back(state: &home::HomeState, ctx: &egui::Context, key: &Key) -> bool {
     if state.key_sheet {
+        return true;
+    }
+    if state.bible_open && matches!(key, Key::Character(_)) && !opens_find(key) {
         return true;
     }
     let digit = matches!(key, Key::Character(typed) if typed.chars().count() == 1 && typed.chars().all(|c| ('1'..='9').contains(&c)));
@@ -8677,6 +8683,25 @@ mod tests {
         state.stage_editor_open = false;
         state.key_sheet = true;
         assert!(!enter_key_is_free(&state, &ctx), "the list of keys");
+    }
+
+    #[test]
+    fn in_the_bible_view_a_letter_never_jumps_the_song_on_screen_to_a_group() {
+        let song = sp_model::parse_song_text("Alpha", "[Verse 1]\nOne\n\n[Verse 2]\nTwo\n\n[Chorus]\nThree\n");
+        let mut show = Show::new(vec![Arc::new(song)]);
+        show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        let ctx = egui::Context::default();
+        let s = Key::Character("s".into());
+        // The key itself would put the song's second verse up...
+        assert!(matches!(show_key_command(&s, &show), Some(Command::GoTo(_))));
+        // ...so in the Bible view it is held back from the show, for Scripture Lookup.
+        let mut state = home::HomeState { bible_open: true, ..home::HomeState::default() };
+        assert!(show_key_held_back(&state, &ctx, &s));
+        assert!(show_key_held_back(&state, &ctx, &Key::Character("2".into())));
+        assert!(!show_key_held_back(&state, &ctx, &Key::Named(NamedKey::Space)), "Space still runs the show");
+        assert!(!show_key_held_back(&state, &ctx, &Key::Named(NamedKey::Escape)), "and Escape clears");
+        state.bible_open = false;
+        assert!(!show_key_held_back(&state, &ctx, &s), "the Show view keeps its group letters");
     }
 
     fn args(list: &[&str]) -> Result<Option<Options>, String> {

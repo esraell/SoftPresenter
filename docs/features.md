@@ -480,8 +480,11 @@ feature changes, this page changes in the same commit.
   field (arrows pick, Tab or Return takes one). Return looks the passage up, picks its first
   verse and gives the keyboard back to the show, so Enter puts the verse on screen, Space and →
   go on to the next, ← back, and ↑ and ↓ pick another without putting it on (a reference not
-  understood keeps the keyboard in the field instead). Command-2 or Command-B (Ctrl elsewhere),
-  from anywhere, goes back to the field with its words selected, ready for the next reference.
+  understood keeps the keyboard in the field instead). In the Bible view a letter or number
+  typed with no field taking the keyboard starts the next reference in the field (so "ps 23"
+  typed after Return goes there); it never jumps the song on screen to a group, as letters do in
+  the Show view. Command-2 or Command-B (Ctrl elsewhere), from anywhere, goes back to the field
+  with its words selected, ready for the next reference.
 - History lists the passages that were on screen, newest first, with the time (or the day,
   for earlier ones); one click brings a passage back. It is kept between starts, holds the last
   hundred, and Clear History empties it.

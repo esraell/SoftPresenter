@@ -355,7 +355,10 @@ pub fn every_key() -> Vec<(&'static str, Vec<Row>)> {
                     "The slide picked goes on screen (found with / or looked up, or picked in Bible); else the open item, from its first slide",
                 ),
                 (vec!["Home".to_owned(), "End".to_owned()], "First or last slide of the song"),
-                (one("A letter"), "Jump to a group (C for the chorus), or a slide\u{2019}s own hot key"),
+                (
+                    one("A letter"),
+                    "Jump to a group (C for the chorus), or a slide\u{2019}s own hot key; in Bible, start the next reference",
+                ),
             ],
         ),
         (
