@@ -95,7 +95,9 @@ message.
   add none. The copy of Fontique in `third_party/fontique` is not a workspace crate either and
   carries Fontique's own `unsafe` code (calls into the systems' font services, and mapping
   font files while it looks for fonts); changes made to it here removed two of its maps and
-  add none. The owner agreed to carrying it on 2026-11-21.
+  added one, which maps only a font file nothing else can change (a Mac's read-only system
+  volume, or a private copy left with no name) and says why it is sound. The owner agreed to
+  carrying it, with `unsafe` code of its own, on 2026-11-21.
 - **Live safety.** Nothing slow (reading files, decoding, network, waiting on NDI) runs on the
   thread that draws the screens. The audience must never see a freeze or the wrong slide because
   the operator's window was busy.

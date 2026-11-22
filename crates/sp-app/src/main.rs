@@ -7471,6 +7471,8 @@ fn main() -> ExitCode {
     }
     // Picture objects on slides are read from the app's Images folder.
     sp_render::set_picture_loader(images::load);
+    // Large font files are mapped from private copies in the app's caches folder.
+    sp_render::copy_large_fonts_into_caches();
     // The operator's window draws a placeholder for a web page box with no picture yet; the
     // screens, on their own threads, never do.
     sp_render::show_placeholders(true);

@@ -46,6 +46,7 @@ libm = ["read-fonts/libm"]
 std = [
     "read-fonts/std",
     "dep:memmap2",
+    "dep:rustix",
     "parlance/std",
 ]
 system = [
@@ -94,6 +95,13 @@ default-features = false
 
 [dependencies.smallvec]
 version = "1.16.2"
+
+# SoftPresenter: added, to tell where a font file is kept before it is mapped (`src/mapped.rs`).
+[target.'cfg(unix)'.dependencies.rustix]
+version = "1.1.6"
+features = ["fs", "std"]
+optional = true
+default-features = false
 
 [target.'cfg(all(any(target_os = "linux", target_os = "freebsd"), not(target_env = "ohos")))'.dependencies.yeslogic-fontconfig-sys]
 version = "6.0.1"

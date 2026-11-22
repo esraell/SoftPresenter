@@ -42,18 +42,44 @@ Everything is marked `SoftPresenter:` in the source. Removed from the published 
 
 - **`src/source_cache.rs`:**
   - `load_blob` reads the file into memory of its own (`std::fs::read`) where it was mapped.
-    Only the fonts the shaper asks for are loaded, as before; each now costs its file's size
-    in memory, where mapped pages could be dropped by the system. Measured on a Mac
-    (2026-11-21): a song in three families and the Bible template's came to about 7 MB, read
-    once for every thread. But a slide with one emoji reads Apple Color Emoji whole (188 MB),
-    and a sign the theme's font lacks (a cross, ✝) can lead the shaper on to a large fallback
-    font (STHeiti Medium, 54 MB); SoftPresenter keeps each until it quits.
+    Only the fonts the shaper asks for are loaded, as before; each costs its file's size in
+    memory, where mapped pages could be dropped by the system. SoftPresenter doesn't use it
+    (it gives the cache a loader, below), so this costs it nothing.
   - New: the type `SourceLoader` and `SourceCache::set_loader`. A cache given a loader has it
     read font files in place of reading them itself, and a loader may say no (`None`), which the
     cache remembers as a failure until `prune` is asked to forget failures, as before.
     SoftPresenter uses it to keep one copy of each font file for every thread, to check the data
     is still a font before it is used, and to refuse to read on the thread that draws the
     screens (a loader thread reads the file meanwhile).
+- **`src/mapped.rs`:** new. `map_unchanging` maps a font file, but only where nothing another
+  program does can change what is mapped, and `None` elsewhere (the caller then reads the file
+  whole). Reading every font whole cost too much: measured on a Mac (2026-11-21), a slide with
+  one emoji read Apple Color Emoji whole (188 MB, about 20 ms), and a sign the theme's font lacks
+  (a cross, ✝) led the shaper on to STHeiti Medium (54 MB), each kept until the app quit. A map
+  costs only the pages used, and the system can drop those again. Two cases are mapped:
+  - On macOS, a file on the system volume the computer started from: `fstatfs` on the open
+    descriptor must say read-only, local, the root file system and a snapshot. That volume is
+    the signed system volume (macOS 11 and later), a read-only snapshot that nothing can write
+    to and that can't be unmounted while the system runs; the large fallback fonts are on it.
+    A read-only disk image or share lacks some of those flags (it could be ejected beneath the
+    map), and is never mapped in place.
+  - On macOS and Linux, a private copy: the file is copied with `std::fs::copy` (which clones on
+    APFS, `fclonefileat`, and lets Linux reflink on Btrfs or XFS, `copy_file_range`) under a name
+    no copy has had, into a folder the caller keeps to its user; the copy is opened, its name
+    removed, and mapped only if it then has no name anywhere (`st_nlink` 0, so no program can
+    open it) and is on a disk of this computer (macOS: `MNT_LOCAL`; Linux: ext2 to ext4, Btrfs,
+    XFS, F2FS, bcachefs or ZFS, not tmpfs, which would save nothing, nor a network file system).
+    A clone shares the original's blocks until either changes; whatever then happens to the
+    original (cut short, written over, replaced, deleted) leaves the copy as it was. Nothing is
+    left in the folder unless the process ends between the copy and the removal of its name;
+    such copies end in `COPY_SUFFIX`, for the caller to clear.
+  Windows is not mapped at all: Microsoft's documentation says a file with a mapping can't be
+  cut short (`SetEndOfFile`), and a handle opened without `FILE_SHARE_WRITE` and
+  `FILE_SHARE_DELETE` keeps any other program from opening it to write, delete or rename it, so
+  holding the file open that way and mapping it would do; but it could not be run here, so Windows
+  still reads font files whole.
+- **`Cargo.toml`:** `rustix` (with `fs` and `std`) on Unix, enabled by the `std` feature, for
+  `fstatfs`. SoftPresenter already ships that version of `rustix` through another library.
 - **`src/font.rs`:** `FontInfo::from_source` reads a font file where it mapped it. The
   DirectWrite (Windows) and fontconfig (Linux) backends call it the first time a family is
   looked up.
@@ -63,19 +89,26 @@ Everything is marked `SoftPresenter:` in the source. Removed from the published 
   from a scan holds any of the file's data. A file cut short during the moment it is being
   scanned can still kill the process; SoftPresenter scans once, as it starts, on a thread that
   doesn't draw the screens.
-- **`src/lib.rs`:** exports `SourceLoader`.
+- **`src/lib.rs`:** exports `SourceLoader`, and `map_unchanging`, `MappedFrom` and
+  `COPY_SUFFIX`.
 
-Changing this copy removes two of upstream's `unsafe` blocks (the two maps above) and adds none.
-The crate keeps upstream's other `unsafe` code: the scan's map, and the calls into Core Text,
-DirectWrite and fontconfig that look for the computer's fonts.
+Changing this copy removes two of upstream's `unsafe` blocks (the two maps above) and adds one:
+the map in `src/mapped.rs`, of files nothing else can change, which says why it is sound. The
+crate keeps upstream's other `unsafe` code: the scan's map, and the calls into Core Text,
+DirectWrite and fontconfig that look for the computer's fonts. The owner agreed to the copy
+carrying `unsafe` code of its own on 2026-11-21.
 
 ## Checking it
 
 `cargo test -p sp-render --lib fonts` runs SoftPresenter's tests of this: text is laid out and
 drawn in a copy of a font file; the copy is then cut short, written over, or taken away, and the
 same text, with letters and kerning pairs not used before, is laid out and drawn again, in a
-process of its own, which must neither be killed nor draw anything different. With the published
-crate, cutting the file short or writing over it kills that process with SIGBUS.
+process of its own, which must neither be killed nor draw anything different. It is done once
+with the font read whole and once mapped from a private copy (the test checks the copy was
+mapped, and left no name behind). With the published crate, cutting the file short or writing
+over it kills that process with SIGBUS, and so it does if the file itself is mapped (tried by
+hand, 2026-11-21: the helper ended with signal 10). Another test checks that a font file under
+the test's folder is never mapped in place and that a system font on a Mac is.
 
 ## Updating
 

@@ -525,14 +525,18 @@ feature changes, this page changes in the same commit.
 - Each audience screen has a look: which layers it shows (slides, media, props, messages; a
   lobby screen might show only the media), its colour where nothing is drawn, and how much of
   each edge to cover for a screen that cuts them off.
-- A font is read into memory the first time a slide uses it, once for the screens, the
-  thumbnails and the editor together; fonts no slide uses are never read. A font file that a
-  font manager, an update or an installer changes or removes while SoftPresenter runs changes
-  nothing until the next start (it could once crash the app in the middle of a song). The
-  screens never read a font file themselves: one not read yet (normally the slide thumbnails
-  have read it already) is read meanwhile and the slide drawn again once it is there, within a
-  few thousandths of a second for an ordinary font and a few hundredths for a very large one,
-  such as the emoji font; until then its words are drawn in fonts already read, or left out.
+- A font is opened the first time a slide uses it, once for the screens, the thumbnails and the
+  editor together; fonts no slide uses are never opened. A large font costs memory only for the
+  letters used: on a Mac the emoji font and the other large fonts the computer comes with are
+  used where they are, from its read-only system volume, and another font of 4 MB or more (on a
+  Mac or Linux) from a private copy, an instant clone on a Mac's own disk, made in a folder of
+  the caches only the user may enter, and nameless as soon as it is opened. Smaller fonts, and
+  every font on Windows, are read into memory. A font file that a font manager, an update or an
+  installer changes or removes while SoftPresenter runs changes nothing until the next start (it
+  could once crash the app in the middle of a song). The screens never open a font file
+  themselves: one not opened yet (normally the slide thumbnails have opened it already) is
+  opened meanwhile and the slide drawn again once it is there, within a few thousandths of a
+  second; until then its words are drawn in fonts already opened, or left out.
 
 <img src="images/screens.png" alt="The Screens window" width="620">
 

@@ -21,5 +21,10 @@ It ships as part of the app like the rest of the code, so [NOTICE.md](../../NOTI
 [`third_party/fontique/PROVENANCE.md`](../../third_party/fontique/PROVENANCE.md) has the exact
 source and the list of changes. In short: Fontique 0.13 maps font files into memory, and a font
 file that another program rewrites while it is mapped kills the app with a bus error. The copy
-reads font files instead, and lets SoftPresenter read them itself: once for every thread, and
-never on the thread that draws the screens.
+maps only a font file nothing else can change (on a Mac, one on the read-only system volume; on a
+Mac or Linux, a private copy left with no name), and lets SoftPresenter read the rest itself:
+once for every thread, and never on the thread that draws the screens.
+
+To tell where a font file is kept, the copy also uses `rustix` (Apache-2.0 WITH LLVM-exception
+OR Apache-2.0 OR MIT) on Mac and Linux, the version already part of the app through another
+library; it can be combined with the GNU GPL version 3, as NOTICE.md's "Other libraries" says.

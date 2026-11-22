@@ -71,6 +71,9 @@ mod family_name;
 mod font;
 mod generic;
 mod impl_fontconfig;
+// SoftPresenter: added; see `mapped.rs`.
+#[cfg(feature = "std")]
+mod mapped;
 mod matching;
 mod scan;
 mod script;
@@ -97,6 +100,9 @@ pub use source_cache::{SourceCache, SourceCacheOptions};
 // SoftPresenter: added; see `SourceLoader` in `source_cache.rs`.
 #[cfg(feature = "std")]
 pub use source_cache::SourceLoader;
+// SoftPresenter: added; see `mapped.rs`.
+#[cfg(feature = "std")]
+pub use mapped::{COPY_SUFFIX, MappedFrom, map_unchanging};
 
 #[cfg(not(target_has_atomic = "64"))]
 use core::sync::atomic::AtomicU32 as AtomicCounter;

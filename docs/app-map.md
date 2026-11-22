@@ -210,6 +210,12 @@ The command line's socket, while the app runs, is `~/Library/Caches/SoftPresente
 `control/ctl.sock` in a folder `SOFTPRESENTER_DATA` names. On Windows it is
 `%LOCALAPPDATA%\SoftPresenter\control\ctl.sock`.
 
+Private copies of large font files are made in `~/Library/Caches/SoftPresenter/font copies`
+(on Linux, `SoftPresenter/font copies` in the caches folder; with `SOFTPRESENTER_DATA`, `font
+copies` in that folder), a folder only the user may enter. Each copy loses its name as soon as it
+is opened, so the folder is empty almost all the time; one left by a run that ended at that
+moment is cleared the next time a copy is made.
+
 The log is `~/Library/Logs/SoftPresenter/SoftPresenter.log`: what went on screen, commands that
 change something (not those that only read, such as `sp status`), problems, and once a minute
 how long drawing took.
@@ -222,7 +228,7 @@ how long drawing took.
 | `sp-engine` | The show's state: what is selected, what is on screen, next and previous, clearing layers |
 | `sp-render` | Drawing slides on the GPU with vello: screens, thumbnails, transitions |
 | `third_party/vello` | Not a workspace crate: vello 0.12.0's main crate with SoftPresenter's change, which sizes the renderer's GPU working memory from what is drawn and checks that a picture fitted the first time it is drawn (a picture too heavy to draw is an error, and the one before it stays up) (`PROVENANCE.md` there, and `docs/licences/vello.md`) |
-| `third_party/fontique` | Not a workspace crate: fontique 0.13.0, which finds the computer's fonts for the text layout, with SoftPresenter's change: font files are read into memory, not mapped, and SoftPresenter can read them itself (once for every thread, never on the screens' thread), so a font file rewritten while the app runs cannot crash it (`PROVENANCE.md` there, and `docs/licences/fontique.md`) |
+| `third_party/fontique` | Not a workspace crate: fontique 0.13.0, which finds the computer's fonts for the text layout, with SoftPresenter's change: a font file is mapped only where nothing else can change it (a Mac's read-only system volume, or a private copy left with no name, `mapped.rs`), and SoftPresenter has the rest read into memory itself (once for every thread, never on the screens' thread), so a font file rewritten while the app runs cannot crash it (`PROVENANCE.md` there, and `docs/licences/fontique.md`) |
 | `sp-video` | Playing videos: macOS's own player, FFmpeg for other formats; web pages drawn off-screen by macOS's web view (`web`, `web_mac`), copied into frames as a video's are |
 | `sp-ndi` | Sending screens over NDI (the runtime is opened when an NDI screen starts) |
 | `sp-bible` | Bibles: references, verse numbering, search |
