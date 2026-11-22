@@ -517,6 +517,83 @@ fn row(ui: &mut egui::Ui, notice: &Notice, line_above: bool, form: &crate::clock
     clicked
 }
 
+/// What a song changed outside SoftPresenter asks under its title bar, with room for all of it.
+pub const CHANGED_OUTSIDE: &str =
+    "This song was changed outside SoftPresenter. Read it again from its file, or keep SoftPresenter\u{2019}s version?";
+
+/// The strip asking under a song's title bar: the room above and below it, its padding, and
+/// its fill (the amber mixed 12% into a card's grey).
+const STRIP_ABOVE: f32 = 6.0;
+const STRIP_BELOW: f32 = 10.0;
+const STRIP_PAD: egui::Vec2 = egui::vec2(12.0, 9.0);
+const STRIP_FILL: Color32 = Color32::from_rgb(0x3d, 0x36, 0x1f);
+const STRIP_BUTTON_HIGH: f32 = 24.0;
+
+/// The strip's words, laid out to wrap in what its buttons leave of `width`, and the buttons'
+/// widths (Reload, Keep mine).
+fn strip_layout(ui: &egui::Ui, width: f32) -> (std::sync::Arc<egui::Galley>, [f32; 2]) {
+    let font = FontId::proportional(12.0);
+    let buttons = ["Reload", "Keep mine"].map(|words| crate::studio::flat_button_width(ui, &[words], &font, 10.0));
+    let text_wide = (width - 2.0 * STRIP_PAD.x - 16.0 - 10.0 - buttons[0] - buttons[1] - 2.0 * 10.0).max(120.0);
+    let mut job = egui::text::LayoutJob::simple(
+        CHANGED_OUTSIDE.to_owned(),
+        FontId::proportional(13.0),
+        Color32::PLACEHOLDER,
+        text_wide,
+    );
+    if let Some(section) = job.sections.first_mut() {
+        section.format.line_height = Some(13.0 * 1.4);
+    }
+    (ui.fonts_mut(|fonts| fonts.layout_job(job)), buttons)
+}
+
+/// How tall the strip asking under a song's title bar is, `width` wide (the same at every
+/// width the song's slides are laid out in, so the slides under it never overlap it).
+pub fn ask_strip_height(ui: &egui::Ui, width: f32) -> f32 {
+    let (galley, _) = strip_layout(ui, width);
+    STRIP_ABOVE + galley.size().y.max(STRIP_BUTTON_HIGH) + 2.0 * STRIP_PAD.y + STRIP_BELOW
+}
+
+/// The strip asking about a song changed outside SoftPresenter, under its title bar, in `band`
+/// ([`ask_strip_height`] tall): the question whole, with Reload (the ink) and Keep mine. The
+/// answer is carried out as one given in the list is.
+pub fn ask_strip(ui: &egui::Ui, state: &mut crate::home::HomeState, band: Rect, about: Waiting) {
+    let (galley, [reload_wide, keep_wide]) = strip_layout(ui, band.width());
+    let strip = Rect::from_min_max(band.min + vec2(0.0, STRIP_ABOVE), band.max - vec2(0.0, STRIP_BELOW));
+    let painter = ui.painter();
+    painter.rect_filled(strip, 11.0, STRIP_FILL);
+    let middle = strip.center().y;
+    paint_mark(painter, pos2(strip.min.x + STRIP_PAD.x + 8.0, middle), Kind::Question);
+    let text_at = pos2(strip.min.x + STRIP_PAD.x + 16.0 + 10.0, middle - galley.size().y / 2.0);
+    painter.galley(text_at, galley, TEXT);
+    let font = FontId::proportional(12.0);
+    let keep = Rect::from_min_size(
+        pos2(strip.max.x - STRIP_PAD.x - keep_wide, middle - STRIP_BUTTON_HIGH / 2.0),
+        vec2(keep_wide, STRIP_BUTTON_HIGH),
+    );
+    let reload =
+        Rect::from_min_size(pos2(keep.min.x - 10.0 - reload_wide, keep.min.y), vec2(reload_wide, STRIP_BUTTON_HIGH));
+    let main = crate::studio::Flat::Main;
+    if crate::studio::flat_button(ui, reload, strip_answer_id(about, RELOAD), "Reload", font.clone(), main, true)
+        .on_hover_text("Take the file's version (SoftPresenter's changes to it go)")
+        .clicked()
+    {
+        state.waiting_choice = Some((about, true));
+    }
+    let plain = crate::studio::Flat::Plain;
+    if crate::studio::flat_button(ui, keep, strip_answer_id(about, KEEP_MINE), "Keep mine", font, plain, true)
+        .on_hover_text("Save SoftPresenter's version over the file")
+        .clicked()
+    {
+        state.waiting_choice = Some((about, false));
+    }
+}
+
+/// The id of one of the strip's answers ([`RELOAD`] or [`KEEP_MINE`]) for what it asks about.
+pub fn strip_answer_id(about: Waiting, answer: &str) -> egui::Id {
+    button_id().with(("strip", about, answer))
+}
+
 /// At the end of every frame of the main window: notes what was clicked (or where something was
 /// dropped), then draws the last refusal's cue, a small dark chip under the place of action:
 /// under what was clicked when the refusal came within [`CLICK_NEAR`] of the click, else under

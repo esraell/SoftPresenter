@@ -14,6 +14,7 @@ use egui::style::ScrollAnimation;
 use sp_model::{Presentation, Uuid};
 
 use super::*;
+use crate::outside::Waiting;
 use crate::service::{Item, SavedPassage};
 use crate::studio::{
     CARD, ICON_BUTTON, ItemAsk, LINE, MORE_BUTTON, PANEL, RADIUS, ROW_HOVER, SongAsks, TALLY, TEXT, TEXT_DIM,
@@ -744,6 +745,13 @@ impl Sheet {
     }
 }
 
+/// How tall the strip asking about a song changed outside SoftPresenter is, under its title bar
+/// (none while nothing is asked about it), for slides laid out `width` wide.
+fn ask_height(ui: &egui::Ui, state: &HomeState, slides: &SlideDeck, width: f32) -> f32 {
+    let asked = slides.at.filter(|_| !slides.made).is_some_and(|at| state.notices.asks_about(Waiting::Song(at)));
+    if asked { crate::notices::ask_strip_height(ui, width - 2.0 * INSET) } else { 0.0 }
+}
+
 /// How much room an item takes.
 fn shape_of(ui: &egui::Ui, state: &mut HomeState, deck: &Deck, sheet_grid: &Grid, columns: &ListColumns) -> Shape {
     match deck {
@@ -757,7 +765,8 @@ fn shape_of(ui: &egui::Ui, state: &mut HomeState, deck: &Deck, sheet_grid: &Grid
                 (true, false) => ITEM_BAR,
             };
             let strip = if tools {
-                arrangement_layout(ui, &slides.deck, sheet_grid.width).map_or(0.0, |layout| layout.height)
+                ask_height(ui, state, slides, sheet_grid.width)
+                    + arrangement_layout(ui, &slides.deck, sheet_grid.width).map_or(0.0, |layout| layout.height)
             } else {
                 0.0
             };
@@ -976,14 +985,22 @@ pub fn slide_scroll(
                     });
                 }
                 Deck::Slides(slides) => {
-                    if place.strip > 0.0 {
+                    // A song changed outside SoftPresenter asks under its title bar, as the
+                    // notices do, then comes its arrangement.
+                    let ask = ask_height(ui, state, slides, across);
+                    if let Some(at) = slides.at.filter(|_| ask > 0.0) {
+                        let top = sheet.y(place.top + place.bar);
+                        let band = Rect::from_min_size(pos2(left + INSET, top), vec2(across - 2.0 * INSET, ask));
+                        crate::notices::ask_strip(ui, state, band, Waiting::Song(at));
+                    }
+                    if place.strip > ask {
                         arrangement_strip(
                             ui,
                             show,
                             slides,
                             state,
                             commands,
-                            pos2(left, sheet.y(place.top + place.bar)),
+                            pos2(left, sheet.y(place.top + place.bar + ask)),
                             across,
                         );
                     }

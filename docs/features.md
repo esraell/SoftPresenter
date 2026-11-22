@@ -54,8 +54,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   `sp` command. The app never saves over a song or theme file changed since it read it: it asks,
   with **Reload** (the file's version) or **Keep mine** (SoftPresenter's written over it), as a
   question in the notices (the status button turns amber with "?"; the list never opens by
-  itself). A song on screen, being edited, or holding changes not saved is never swapped
-  unasked; the question offers it instead, and the answer is noted in the list. File › Reload Songs from Their Files (`sp song reload`) reads
+  itself), and for a song also in an amber-tinted strip under its title bar in the Show view:
+  "This song was changed outside SoftPresenter. Read it again from its file, or keep
+  SoftPresenter's version?". A song on screen, being edited, or holding changes not saved is
+  never swapped unasked; the question offers it instead. Answered in either place, it goes,
+  and the answer is noted in the list. File › Reload Songs from Their Files (`sp song reload`) reads
   every changed song and theme again and adds song files put in the Songs folder (a copy of one
   already there gets an id of its own). `sp song reload SONG [--now]` and `sp song keep SONG` do
   the same for one song, and `sp songs` marks a song whose file changed. Quitting with a change

@@ -58,7 +58,7 @@ impl Stamps {
 }
 
 /// Something changed outside the app that it is waiting on a choice for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Waiting {
     Song(usize),
     Theme(usize),

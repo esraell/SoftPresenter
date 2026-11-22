@@ -13636,6 +13636,51 @@ mod tests {
     }
 
     #[test]
+    fn a_song_changed_outside_asks_under_its_title_bar_with_reload_and_keep_mine() {
+        use crate::outside::Waiting;
+        let show = three_songs();
+        let (ctx, mut state, mut time) = (egui::Context::default(), HomeState::default(), 0.0);
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), time);
+        let first_line = |texts: &[(String, Rect)]| {
+            texts.iter().find(|(words, _)| words.starts_with("01")).map(|(_, at)| at.min.y).expect("a slide's strip")
+        };
+        let before = first_line(&texts);
+        state.notices.ask(Waiting::Song(show.selected()), "One was changed outside SoftPresenter.");
+        time += 0.1;
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), time);
+        let (_, asked) = texts
+            .iter()
+            .find(|(words, _)| words.starts_with("This song was changed outside SoftPresenter."))
+            .expect("the strip asks under the song's title bar");
+        assert!(asked.height() > 14.0 || asked.width() < 900.0, "the whole question: {asked:?}");
+        let under = first_line(&texts);
+        assert!(under > before + asked.height(), "the slides make room for it: {before} then {under}");
+        assert!(!crate::notices::list_open(&ctx), "the list stays shut: the question never opens it");
+        // Its two answers, clicked where they are drawn.
+        let about = Waiting::Song(show.selected());
+        // (A frame or two at the size the clicks are made in, for the layout to settle.)
+        for _ in 0..2 {
+            time += 0.05;
+            frame_events(&ctx, &show, &mut state, Vec::new(), time);
+        }
+        let place = |answer: &str| {
+            ctx.read_response(crate::notices::strip_answer_id(about, answer)).expect(answer).rect.center()
+        };
+        let keep = place(crate::notices::KEEP_MINE);
+        click_at(&ctx, &show, &mut state, keep, &mut time);
+        assert_eq!(state.waiting_choice.take(), Some((about, false)));
+        let reload = place(crate::notices::RELOAD);
+        assert!(reload.x < keep.x, "Reload, then Keep mine");
+        click_at(&ctx, &show, &mut state, reload, &mut time);
+        assert_eq!(state.waiting_choice.take(), Some((about, true)));
+        // Answered (the app settles it), the strip goes and the slides come back up.
+        state.notices.settle(Waiting::Song(show.selected()));
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), time + 0.1);
+        assert!(!texts.iter().any(|(words, _)| words.starts_with("This song was changed outside")));
+        assert_eq!(first_line(&texts), before);
+    }
+
+    #[test]
     fn an_output_that_stops_is_trouble_said_once() {
         let mut state = HomeState::default();
         for _ in 0..30 {
