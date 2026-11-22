@@ -519,7 +519,7 @@ fn row(ui: &mut egui::Ui, notice: &Notice, line_above: bool, form: &crate::clock
 
 /// What a song changed outside SoftPresenter asks under its title bar, with room for all of it.
 pub const CHANGED_OUTSIDE: &str =
-    "This song was changed outside SoftPresenter. Read it again from its file, or keep SoftPresenter\u{2019}s version?";
+    "This song was changed outside SoftPresenter. Read it again from its file, or keep SoftPresenter's version?";
 
 /// The strip asking under a song's title bar: the room above and below it, its padding, and
 /// its fill (the amber mixed 12% into a card's grey).

@@ -4386,6 +4386,51 @@ impl App {
         }
     }
 
+    /// Testing aid: SOFTPRESENTER_NOTICES fills the notices for each look of the status button,
+    /// a few frames after the start, in a quiet run as in a capture: `new` (information only),
+    /// `trouble`, `ask` (the song shown changed outside SoftPresenter), `list` (all of them, with
+    /// the list open), `refuse` (a key refused, again every two seconds so a picture finds its
+    /// cue). Nothing else is changed: no file is read or written for it.
+    fn notices_testing_aid(&mut self) {
+        static LAST_REFUSAL: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+        let Ok(look) = std::env::var("SOFTPRESENTER_NOTICES") else { return };
+        let Some(frames) = self.running.as_ref().map(|r| r.frames) else { return };
+        if look == "refuse" {
+            let Ok(mut last) = LAST_REFUSAL.lock() else { return };
+            let due = frames >= 5 && last.is_none_or(|at| at.elapsed() >= Duration::from_secs(2));
+            if due && let Some(running) = self.running.as_mut() {
+                *last = Some(Instant::now());
+                running.home_state.notices.refuse("That is the last slide of the playlist.");
+                running.home_window.request_redraw();
+            }
+            return;
+        }
+        if frames != 5 {
+            return;
+        }
+        let selected = self.show.selected();
+        let Some(running) = self.running.as_mut() else { return };
+        let notices = &mut running.home_state.notices;
+        if matches!(look.as_str(), "new" | "list") {
+            notices.info("\u{201c}Harbour Lights\u{201d} added to Wednesday Evening");
+            notices.info("Reading Ukrainian_Ogienko.xml\u{2026}");
+            notices.info("Installed Ukrainian Ogienko");
+        }
+        if matches!(look.as_str(), "trouble" | "list") {
+            notices.trouble(
+                "SoftPresenter couldn't save the playlists: the disk is full. Make room, and they are saved \
+                 again with the next change.",
+            );
+        }
+        if matches!(look.as_str(), "list") {
+            egui::Popup::open_id(&running.egui_ctx, notices::list_id());
+        }
+        running.home_window.request_redraw();
+        if matches!(look.as_str(), "ask" | "list") {
+            self.wait_on(outside::Waiting::Song(selected));
+        }
+    }
+
     /// Whether a song is in use where it can't be swapped for its file's version unasked: on
     /// screen, on the Announcements layer, or (unless `editor_too` is false) open in the editor.
     fn song_in_use(&self, index: usize, editor_too: bool) -> bool {
@@ -8818,6 +8863,7 @@ impl ApplicationHandler<AppEvent> for App {
                     .and_then(|s| s.parse::<f32>().ok())
                     .is_some_and(|after| self.started.elapsed().as_secs_f32() >= after) => {}
             WindowEvent::RedrawRequested => {
+                self.notices_testing_aid();
                 let drawing = Instant::now();
                 let commands = self.draw_home();
                 self.home_timing.add(drawing.elapsed());
