@@ -45,6 +45,8 @@ const TABLE_HEAD: f32 = 19.0;
 /// stays, and between it and the bottom, where the fade is.
 pub const CLEAR_ABOVE: f32 = 60.0;
 pub const CLEAR_BELOW: f32 = 44.0;
+/// How tall the line is that says "Not in this arrangement", over the slides it leaves out.
+const LEFT_OUT_HEAD: f32 = 34.0;
 /// The ring round slides picked out to change several at once.
 const PICKED: Color32 = Color32::from_rgb(0x6a, 0xa5, 0xff);
 /// The narrowest a slide in the grid gets, in points, before fewer go across.
@@ -98,6 +100,8 @@ pub struct Rows {
     tops: Vec<f32>,
     heights: Vec<f32>,
     total: f32,
+    /// Where the line over the slides an arrangement leaves out starts, if it has any.
+    left_out: Option<f32>,
 }
 
 /// What stands under an item's bar.
@@ -107,6 +111,9 @@ pub enum Body {
     None,
     /// Tiles in a grid: how many.
     Tiles(usize),
+    /// A song in an arrangement: its tiles in the order sung, then, under a line saying so,
+    /// the tiles of the groups the arrangement leaves out (none, when it leaves none out).
+    Sung { sung: usize, out: usize },
     /// One box the size of a tile's picture, with no strip (a placeholder).
     Box,
     /// Rows, in the words-only and table views.
@@ -155,6 +162,9 @@ pub fn lay_out(shapes: &[Shape], grid: &Grid) -> (Vec<Place>, f32) {
             let body = match &shape.body {
                 Body::None => 0.0,
                 Body::Tiles(count) => grid.tiles_height(*count),
+                Body::Sung { sung, out } => {
+                    grid.tiles_height(*sung) + if *out > 0 { LEFT_OUT_HEAD + grid.tiles_height(*out) } else { 0.0 }
+                }
                 Body::Box => grid.picture.y + 2.0 * INSET,
                 Body::Rows(rows) => rows.total,
                 Body::Line => LIST_ROW + 2.0 * INSET,
@@ -285,7 +295,12 @@ impl RowHeights {
         let font = columns.font.clone();
         let mut rows = Rows::default();
         let mut top = if view == SlideView::Table { TABLE_HEAD + LIST_GAP } else { 0.0 };
-        for (_, slide) in deck.slides() {
+        for entry in entries(deck) {
+            let Some((_, slide)) = deck.slide(entry.slide) else { continue };
+            if entry.out && rows.left_out.is_none() {
+                rows.left_out = Some(top);
+                top += LEFT_OUT_HEAD;
+            }
             let words = ui.painter().layout(slide_words(slide), font.clone(), TEXT, width.max(20.0));
             let height = (words.size().y + 8.0).max(LIST_ROW).round();
             rows.tops.push(top);
@@ -297,6 +312,39 @@ impl RowHeights {
         self.kept.insert(key, KeptRows { _deck: deck.clone(), width, view, rows: rows.clone(), used: self.frame });
         rows
     }
+}
+
+/// One tile (or row) of a song in the scroll: which slide; with an arrangement, its place in
+/// the order sung and whether it is sung again there, or that the arrangement leaves it out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Entry {
+    pub slide: usize,
+    pub step: Option<usize>,
+    pub again: bool,
+    pub out: bool,
+}
+
+/// A song's tiles in the order they stand: as written, or, with an arrangement, in the order
+/// sung (a group sung again stands again, as the same slides), then what it leaves out.
+pub fn entries(song: &Presentation) -> Vec<Entry> {
+    match song.sung() {
+        Some((sung, out)) => sung
+            .into_iter()
+            .map(|one| Entry { slide: one.slide, step: Some(one.step), again: one.again, out: false })
+            .chain(out.into_iter().map(|slide| Entry { slide, step: None, again: false, out: true }))
+            .collect(),
+        None => (0..song.slide_count()).map(|slide| Entry { slide, step: None, again: false, out: false }).collect(),
+    }
+}
+
+/// Which of a song's tiles is the slide on screen: `slide` at `step` in the order sung (an
+/// arrangement's slide sung twice is lit only where the song is), or a slide it leaves out.
+pub fn live_entry(entries: &[Entry], slide: usize, step: Option<usize>) -> Option<usize> {
+    entries
+        .iter()
+        .position(|entry| entry.slide == slide && entry.step.is_some() && entry.step == step)
+        .or_else(|| entries.iter().position(|entry| entry.slide == slide && (entry.out || entry.step.is_none())))
+        .or_else(|| entries.iter().position(|entry| entry.slide == slide))
 }
 
 /// A slide's words on one line, its own lines set apart by a stroke.
@@ -642,12 +690,29 @@ impl Sheet {
         )
     }
 
-    /// Where a slide of an item is: its tile, or its row.
+    /// Where a tile or row of an item is, by its place among them (see [`entries`]).
     fn slide(&self, place: &Place, body: &Body, index: usize) -> Rect {
         match body {
             Body::Rows(rows) if index < rows.tops.len() => self.row(place, rows, index),
+            // Under an arrangement, what it leaves out stands under its own line.
+            Body::Sung { sung, .. } if index >= *sung => {
+                self.tile(place, index - sung).translate(vec2(0.0, self.grid.tiles_height(*sung) + LEFT_OUT_HEAD))
+            }
             _ => self.tile(place, index),
         }
+    }
+
+    /// The line over the slides an arrangement leaves out, if the item has any.
+    fn left_out_line(&self, place: &Place, body: &Body) -> Option<Rect> {
+        let top = match body {
+            Body::Sung { sung, out } if *out > 0 => place.body_top() + self.grid.tiles_height(*sung),
+            Body::Rows(rows) => place.body_top() + rows.left_out?,
+            _ => return None,
+        };
+        Some(Rect::from_min_size(
+            pos2(self.left + INSET, self.y(top)),
+            vec2(self.grid.width - 2.0 * INSET, LEFT_OUT_HEAD),
+        ))
     }
 
     fn in_view(&self, rect: Rect) -> bool {
@@ -680,7 +745,10 @@ fn shape_of(ui: &egui::Ui, state: &mut HomeState, deck: &Deck, sheet_grid: &Grid
             let body = if count == 0 {
                 Body::Line
             } else if sheet_grid.view == SlideView::Grid {
-                Body::Tiles(count)
+                match slides.deck.sung() {
+                    Some((sung, out)) => Body::Sung { sung: sung.len(), out: out.len() },
+                    None => Body::Tiles(count),
+                }
             } else {
                 Body::Rows(state.rows.get(ui, &slides.deck, sheet_grid.view, columns))
             };
@@ -752,8 +820,17 @@ pub fn slide_scroll(
             if let Deck::Slides(slides) = deck
                 && let Some(presentation) = slides.at
             {
-                for slide in 0..slides.deck.slide_count() {
-                    state.slide_rects.push((SlideRef { presentation, slide }, sheet.slide(place, &shape.body, slide)));
+                // Each slide once: a slide an arrangement sings again is picked where it first stands.
+                if slides.deck.active_arrangement().is_some() {
+                    for (index, entry) in entries(&slides.deck).iter().enumerate().filter(|(_, entry)| !entry.again) {
+                        let rect = sheet.slide(place, &shape.body, index);
+                        state.slide_rects.push((SlideRef { presentation, slide: entry.slide }, rect));
+                    }
+                } else {
+                    for slide in 0..slides.deck.slide_count() {
+                        let rect = sheet.slide(place, &shape.body, slide);
+                        state.slide_rects.push((SlideRef { presentation, slide }, rect));
+                    }
                 }
             }
         }
@@ -789,7 +866,15 @@ pub fn slide_scroll(
                     state.services.chosen = Some(item);
                     state.live_item = Some(item);
                 }
-                let rect = sheet.slide(&places[at], &shapes[at].body, slide);
+                // Its tile: under an arrangement, the one for where the song is.
+                let step = show.position().map(|(step, _)| step);
+                let index = match &decks[at] {
+                    Deck::Slides(deck) if deck.deck.active_arrangement().is_some() => {
+                        live_entry(&entries(&deck.deck), slide, step).unwrap_or(slide)
+                    }
+                    _ => slide,
+                };
+                let rect = sheet.slide(&places[at], &shapes[at].body, index);
                 let range = egui::Rangef::new(rect.min.y - origin.y, rect.max.y - origin.y);
                 if let Some(to) = follow_offset(viewport.min.y, viewport.height(), range) {
                     ui.scroll_with_delta_animation(vec2(0.0, viewport.min.y - to), ScrollAnimation::none());
@@ -997,22 +1082,49 @@ fn draw_slides(
         }
     }
     let live = deck.live_slide(show, state);
+    // The tiles in the order they stand: as written, or in the order sung.
+    let order = entries(song);
+    let arranged = song.active_arrangement().is_some();
+    let live_at = live.and_then(|slide| {
+        if arranged { live_entry(&order, slide, show.position().map(|(step, _)| step)) } else { Some(slide) }
+    });
+    // The group each slide is in, for a drag under an arrangement, which stays in its group.
+    let group_of = |slide: usize| song.slide(slide).map(|(group, _)| group.id);
+    // The line over the slides an arrangement leaves out.
+    if let Some(line) = sheet.left_out_line(place, body).filter(|line| sheet.in_view(*line)) {
+        crate::studio::paint_spaced(
+            ui,
+            pos2(line.min.x, line.center().y + 2.0),
+            Align2::LEFT_CENTER,
+            "NOT IN THIS ARRANGEMENT \u{b7} STILL THERE TO CLICK",
+            fixed_semibold(11.5),
+            TEXT_FAINT,
+            0.6,
+        );
+    }
     // Slides of this song being dragged to another place in it.
     let moving =
         deck.at.and_then(|at| egui::DragAndDrop::payload::<SlideDrag>(ui.ctx()).filter(|drag| drag.presentation == at));
     let mut moving_rects: Vec<Rect> = Vec::new();
     let list = view != SlideView::Grid;
     let mut last_group = None;
-    for (index, (group, slide)) in song.slides().enumerate() {
-        // A group's name is heavier on its first slide.
+    let mut was_out = false;
+    for (at, entry) in order.iter().enumerate() {
+        let index = entry.slide;
+        let Some((group, slide)) = song.slide(index) else { continue };
+        // A group's name is heavier on its first slide (the first left out starts afresh).
+        if entry.out && !was_out {
+            last_group = None;
+        }
+        was_out = entry.out;
         let first = last_group != Some(group.id);
         last_group = Some(group.id);
-        let rect = sheet.slide(place, body, index);
+        let rect = sheet.slide(place, body, at);
         if !sheet.in_view(rect) {
             continue;
         }
         let here = deck.slide_ref(index);
-        let id = ui.scope_id().with(("slide", deck.item, deck.at, index));
+        let id = ui.scope_id().with(("slide", deck.item, deck.at, at));
         let response = ui.interact(rect, id, Sense::click_and_drag());
         if moving.as_ref().is_some_and(|drag| drag.slides.contains(&index)) {
             moving_rects.push(rect);
@@ -1028,15 +1140,23 @@ fn draw_slides(
                     start_slide_box(ui, state, &response);
                 } else {
                     // A slide dragged goes to another place in its song, and the slides
-                    // picked out with it when it is one of them; a line shows where.
-                    if response.dragged() {
+                    // picked out with it when it is one of them; a line shows where. A slide
+                    // sung again is dragged where it first stands.
+                    if response.dragged() && !entry.again {
                         let mut picked: Vec<usize> =
                             state.picked_slides.iter().filter(|p| p.presentation == which).map(|p| p.slide).collect();
                         picked.sort_unstable();
                         let slides = if picked.contains(&index) { picked } else { vec![index] };
                         response.dnd_set_drag_payload(SlideDrag { presentation: which, slides });
                     }
-                    let target = |drag: &SlideDrag| drag.presentation == which && !drag.slides.contains(&index);
+                    // Under an arrangement the groups stand where it puts them: a slide moves
+                    // only among its own group.
+                    let same_group = |drag: &SlideDrag| {
+                        !arranged || drag.slides.iter().all(|slide| group_of(*slide) == Some(group.id))
+                    };
+                    let target = |drag: &SlideDrag| {
+                        drag.presentation == which && !drag.slides.contains(&index) && same_group(drag)
+                    };
                     if response.dnd_hover_payload::<SlideDrag>().is_some_and(|drag| target(&drag)) {
                         let after = drop_after(ui, rect, list);
                         paint_drop_line(ui, rect, after, list, if list { LIST_GAP } else { GAP_X });
@@ -1069,7 +1189,17 @@ fn draw_slides(
                     state.picked_slides.clear();
                     // Delete no longer means the songs or media last picked out.
                     state.picking = Picking::Nothing;
-                    deck.show_slide(show, state, index, commands);
+                    // Under an arrangement, the song goes to that place in the order sung.
+                    match entry.step {
+                        Some(step) => {
+                            commands.push(Command::GoToStep { presentation: which, step });
+                            if deck.item.is_some() {
+                                state.services.chosen = deck.item;
+                                state.live_item = deck.item;
+                            }
+                        }
+                        None => deck.show_slide(show, state, index, commands),
+                    }
                 }
                 if response.secondary_clicked() {
                     state.selected_slide = Some(here);
@@ -1093,11 +1223,12 @@ fn draw_slides(
         {
             response.clone().on_hover_text(format!("{} (key {key})", group.name));
         }
-        let is_live = live == Some(index);
+        let is_live = live_at == Some(at);
         let picked = here.is_some_and(|here| state.selected_slide == Some(here) || state.picked_slides.contains(&here));
         // The slide that was on screen before it was cleared: Next goes on from it.
         let was_live = show.live().is_none() && here.is_some() && show.cursor() == here;
-        let number = format!("{:02}", index + 1);
+        // Numbered in the order sung, under an arrangement.
+        let number = format!("{:02}", entry.step.unwrap_or(index) + 1);
         let name = match slide.label.as_deref().filter(|label| !label.is_empty()) {
             Some(label) if group.name.is_empty() => label.to_owned(),
             Some(label) => format!("{} \u{b7} {label}", group.name),
@@ -1168,7 +1299,11 @@ fn draw_slides(
                 ui.painter().circle_filled(pos2(drawn.max.x + 7.0 + 4.0, middle), 4.0, dot.gamma_multiply(strength));
                 let mut right =
                     pencil.map_or(if has_menu { more.min.x } else { rect.max.x - 3.0 }, |pencil| pencil.min.x) - 4.0;
-                for (words, key) in slide_tags(slide).into_iter().rev() {
+                let mut tags = slide_tags(slide);
+                if entry.again {
+                    tags.insert(0, ("AGAIN".to_owned(), false));
+                }
+                for (words, key) in tags.into_iter().rev() {
                     let galley = crate::studio::spaced(ui, &words, fixed_semibold(11.0), TEXT_DIM, 0.3);
                     let tag = Rect::from_min_max(
                         pos2(right - galley.size().x - 8.0, middle - 8.5),
@@ -1261,6 +1396,18 @@ fn draw_slides(
                     ui.painter().with_clip_rect(clip).galley(at, galley, ink);
                 }
             }
+        }
+        // Under an arrangement: a slide sung again is a little faint, and one it leaves out more
+        // so (both still take clicks); not while on screen.
+        let faint = if entry.out {
+            0.5
+        } else if entry.again {
+            0.22
+        } else {
+            0.0
+        };
+        if faint > 0.0 && !is_live {
+            ui.painter().rect_filled(rect.expand(1.0), ROUND, PANEL.gamma_multiply(faint));
         }
         // The pencil opens the slide in the editor; the "more" button opens what a
         // right-click does. Made after the slide itself, so a click on one of them is theirs
@@ -1681,8 +1828,9 @@ fn item_bar(
     response.context_menu(|ui| menu(ui, state));
 }
 
-/// The Arrangement button beside a song's title: play the song as written or in one of its
-/// arrangements, make a new one, rename, duplicate or delete the one in use.
+/// The arrangement menu, from the Arrangement button beside a song's title or the arrangement's
+/// name at the start of its row: sing the song as written or in one of its arrangements, make a
+/// new one, rename, duplicate or delete the one in use.
 fn arrangement_menu(index: usize, song: &Presentation, state: &mut HomeState, button: &egui::Response) {
     let active = song.active_arrangement();
     let named = |arrangement: &sp_model::Arrangement| {
@@ -1690,17 +1838,21 @@ fn arrangement_menu(index: usize, song: &Presentation, state: &mut HomeState, bu
     };
     let mut arrangements = song.arrangements.clone();
     let mut chosen = song.arrangement;
+    // Rename… opens a field in the menu, kept open while the menu is.
+    let renaming_id = button.id.with("renaming");
     egui::Popup::from_toggle_button_response(button)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.set_min_width(220.0);
-            if ui.add(egui::Button::selectable(active.is_none(), "As Written")).clicked() {
+            if ui.add(egui::Button::selectable(active.is_none(), "As written")).clicked() {
                 chosen = None;
+                ui.close();
             }
             for arrangement in &song.arrangements {
                 let on = active.is_some_and(|have| have.id == arrangement.id);
                 if ui.add(egui::Button::selectable(on, named(arrangement))).clicked() {
                     chosen = Some(arrangement.id);
+                    ui.close();
                 }
             }
             ui.separator();
@@ -1708,37 +1860,46 @@ fn arrangement_menu(index: usize, song: &Presentation, state: &mut HomeState, bu
                 let made = song.new_arrangement();
                 chosen = Some(made.id);
                 arrangements.push(made);
+                ui.data_mut(|data| data.insert_temp(renaming_id, true));
             }
             if let Some(at) = active.and_then(|have| arrangements.iter().position(|a| a.id == have.id)) {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Name").color(DIM));
-                    ui.add(egui::TextEdit::singleline(&mut arrangements[at].name).desired_width(150.0));
-                });
-                ui.horizontal(|ui| {
-                    if ui.button("Duplicate").clicked() {
-                        let copy = sp_model::Arrangement {
-                            id: sp_model::Uuid::new_v4(),
-                            name: format!("{} copy", arrangements[at].name),
-                            groups: arrangements[at].groups.clone(),
-                        };
-                        chosen = Some(copy.id);
-                        arrangements.push(copy);
-                    }
-                    if ui.button("Delete").clicked() {
-                        arrangements.remove(at);
-                        chosen = None;
-                    }
-                });
+                let renaming = ui.data(|data| data.get_temp::<bool>(renaming_id).unwrap_or(false));
+                if renaming {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Name").color(DIM));
+                        ui.add(egui::TextEdit::singleline(&mut arrangements[at].name).desired_width(150.0));
+                    });
+                } else if ui.button("Rename\u{2026}").clicked() {
+                    ui.data_mut(|data| data.insert_temp(renaming_id, true));
+                }
+                if ui.button("Duplicate").clicked() {
+                    let copy = sp_model::Arrangement {
+                        id: sp_model::Uuid::new_v4(),
+                        name: format!("{} copy", arrangements[at].name),
+                        groups: arrangements[at].groups.clone(),
+                    };
+                    chosen = Some(copy.id);
+                    arrangements.push(copy);
+                }
+                if ui.button("Delete").clicked() {
+                    arrangements.remove(at);
+                    chosen = None;
+                    ui.close();
+                }
             }
         });
+    if !egui::Popup::is_id_open(&button.ctx, egui::Popup::default_response_id(button)) {
+        button.ctx.data_mut(|data| data.remove::<bool>(renaming_id));
+    }
     if chosen != song.arrangement || arrangements != song.arrangements {
         state.arrangement_request = Some((index, arrangements, chosen));
     }
 }
 
-/// Where the parts of a song's arrangement strip go, from the strip's top left corner: the
-/// arrangement's name, a pill for each group in the order played, and the button that adds
-/// one. They wrap to more rows when there are many.
+/// Where the parts of a song's arrangement row go, from the row's top left corner: the
+/// arrangement's name, a pill for each piece in the order sung (a group sung several times
+/// running is one pill), and the button that adds one. They wrap to more rows when there are
+/// many.
 struct ArrangementLayout {
     name: Rect,
     chips: Vec<ChipPlace>,
@@ -1748,15 +1909,24 @@ struct ArrangementLayout {
 
 struct ChipPlace {
     rect: Rect,
-    /// Its place in the arrangement's list of groups, and the group's place in the song.
-    at: usize,
+    /// The piece: where it starts in the arrangement's list of groups and how many times it is
+    /// sung; and the group's place in the song.
+    run: sp_model::Run,
     group: usize,
-    /// The steps of the play order it covers: the first, and how many.
+    /// The places in the order sung it covers: the first, and how many one time through takes.
     first: usize,
     len: usize,
 }
 
 const CHIP: f32 = 26.0;
+
+/// The words of a piece's mark: ×3, or while it is on screen which time through it is (2/3).
+fn chip_mark(count: usize, time: Option<usize>) -> Option<String> {
+    (count > 1).then(|| match time {
+        Some(time) => format!("{time}/{count}"),
+        None => format!("\u{d7}{count}"),
+    })
+}
 
 fn arrangement_layout(ui: &egui::Ui, song: &Presentation, width: f32) -> Option<ArrangementLayout> {
     let arrangement = song.active_arrangement()?;
@@ -1774,21 +1944,103 @@ fn arrangement_layout(ui: &egui::Ui, song: &Presentation, width: f32) -> Option<
     let label = if arrangement.name.trim().is_empty() { "Untitled" } else { arrangement.name.as_str() };
     let name = put(wide(&format!("{label} \u{25be}"), fixed_semibold(11.0)) + 26.0);
     let mut chips = Vec::new();
-    let mut step = 0;
-    for (at, id) in arrangement.groups.iter().enumerate() {
-        let Some(group) = song.groups.iter().position(|group| group.id == *id) else { continue };
-        let found = &song.groups[group];
-        let rect = put(wide(&found.name, FontId::proportional(12.0)) + 33.0);
-        chips.push(ChipPlace { rect, at, group, first: step, len: found.slides.len() });
-        step += found.slides.len();
+    let steps = song.run_steps();
+    for (run, (first, len)) in arrangement.runs().into_iter().zip(steps) {
+        let Some(group) = song.groups.iter().position(|group| group.id == run.group) else { continue };
+        // Room for the widest mark it can show (its count, or "n/n" while on screen).
+        let mark = chip_mark(run.count, Some(run.count)).map_or(0.0, |mark| wide(&mark, fixed_semibold(11.0)) + 16.0);
+        let rect = put(10.0
+            + 7.0
+            + 6.0
+            + wide(&song.groups[group].name, FontId::proportional(12.0))
+            + mark
+            + 6.0
+            + 13.0
+            + 8.0);
+        chips.push(ChipPlace { rect, run, group, first, len });
     }
     let add = put(CHIP);
     Some(ArrangementLayout { name, chips, add, height: y + CHIP + 12.0 })
 }
 
-/// The arrangement a song is played in, under its bar: its name (which opens the arrangement
-/// menu), then its groups in the order they are played. The one on screen is orange; a click
-/// goes to it; its menu moves or removes it; + adds a group at the end.
+/// An arrangement's piece being dragged to another place in its row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PieceDrag {
+    song: usize,
+    start: usize,
+}
+
+/// Where a piece dragged along an arrangement's row would land, with the pointer at `pointer`:
+/// the nearest piece decides (nearness across counts four times less than up and down), and
+/// which half of it the pointer is over says before it or after it. `None` when it would land
+/// where it already is. Returns the piece's start and whether it goes after it.
+fn piece_drop(chips: &[Rect], starts: &[usize], moving: usize, pointer: egui::Pos2) -> Option<(usize, bool)> {
+    let nearest = chips
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| {
+            let far = |r: &Rect| (pointer.y - r.center().y).abs() * 4.0 + (pointer.x - r.center().x).abs();
+            far(a).total_cmp(&far(b))
+        })
+        .map(|(at, _)| at)?;
+    let after = pointer.x > chips[nearest].center().x;
+    let me = starts.iter().position(|start| *start == moving)?;
+    // On itself, or beside it on the side it already stands: nothing would change.
+    if nearest == me || (after && nearest + 1 == me) || (!after && nearest == me + 1) {
+        return None;
+    }
+    Some((starts[nearest], after))
+}
+
+/// The menu of a piece of an arrangement: how many times it is sung, moving it, taking it out.
+/// Returns the arrangement's groups changed, if they were.
+fn piece_menu(ui: &mut egui::Ui, arrangement: &sp_model::Arrangement, chip: usize, count: usize) -> Option<Vec<Uuid>> {
+    let runs = arrangement.runs();
+    let run = runs.get(chip)?;
+    let mut changed = arrangement.clone();
+    ui.set_min_width(190.0);
+    ui.label(egui::RichText::new("How many times").size(11.5).color(TEXT_FAINT));
+    let mut done = false;
+    for (times, words) in [(1, "Once"), (2, "\u{d7}2"), (3, "\u{d7}3"), (4, "\u{d7}4")] {
+        if ui.add(egui::Button::selectable(run.count == times, words)).clicked() {
+            changed.set_times(run.start, times);
+            done = true;
+        }
+    }
+    // More: up to twenty times.
+    let mut times = run.count.max(5);
+    ui.horizontal(|ui| {
+        ui.label(if run.count > 4 { format!("\u{d7}{} \u{b7} More", run.count) } else { "More\u{2026}".to_owned() });
+        let field = ui.add(egui::DragValue::new(&mut times).range(1..=sp_model::MOST_TIMES).suffix(" times"));
+        if field.changed() || (field.lost_focus() && run.count <= 4 && times > 4) {
+            changed.set_times(run.start, times);
+            done = true;
+        }
+    });
+    ui.separator();
+    if ui.add_enabled(chip > 0, egui::Button::new("Move Left")).clicked() {
+        changed.move_run(run.start, runs[chip - 1].start, false);
+        done = true;
+        ui.close();
+    }
+    if ui.add_enabled(chip + 1 < count, egui::Button::new("Move Right")).clicked() {
+        changed.move_run(run.start, runs[chip + 1].start, true);
+        done = true;
+        ui.close();
+    }
+    if ui.add_enabled(runs.len() > 1, egui::Button::new("Remove")).clicked() {
+        changed.remove_run(run.start);
+        done = true;
+        ui.close();
+    }
+    (done && changed.groups != arrangement.groups).then_some(changed.groups)
+}
+
+/// The arrangement a song is sung in, under its bar: its name (which opens the arrangement
+/// menu), then a pill for each piece in the order sung, a group sung several times running
+/// marked ×2, ×3…; the piece on screen is orange and says which time through it is (2/3). A
+/// click goes to that point in the song; the arrow (or a right-click) sets how many times,
+/// moves or removes it; a drag along the row moves it; + adds a group at the end.
 fn arrangement_strip(
     ui: &mut egui::Ui,
     show: &Show,
@@ -1816,76 +2068,113 @@ fn arrangement_strip(
         &format!("{label} \u{25be}"),
         fixed_semibold(11.0),
         TEXT_DIM,
-        0.5,
+        0.7,
     );
     arrangement_menu(index, song, state, &button.on_hover_text("Choose, make or change an arrangement"));
-    let mut groups = arrangement.groups.clone();
-    let mut changed = false;
+    let mut groups: Option<Vec<Uuid>> = None;
     let count = layout.chips.len();
+    let rects: Vec<Rect> = layout.chips.iter().map(|chip| chip.rect.translate(origin.to_vec2())).collect();
+    let starts: Vec<usize> = layout.chips.iter().map(|chip| chip.run.start).collect();
+    let carried = egui::DragAndDrop::payload::<PieceDrag>(ui.ctx()).filter(|drag| drag.song == index).map(|drag| *drag);
     for (chip, place) in layout.chips.iter().enumerate() {
-        let rect = place.rect.translate(origin.to_vec2());
+        let rect = rects[chip];
         let group = &song.groups[place.group];
-        let on = live.is_some_and(|step| step >= place.first && step < place.first + place.len);
-        let response = ui.interact(rect, id.with(("chip", chip)), Sense::click());
+        let span = place.len * place.run.count;
+        let on = live.is_some_and(|step| step >= place.first && step < place.first + span);
+        let time = live.filter(|_| on && place.len > 0).map(|step| (step - place.first) / place.len + 1);
+        let response = ui.interact(rect, id.with(("chip", chip)), Sense::click_and_drag());
+        let moving = carried.is_some_and(|drag| drag.start == place.run.start);
         let fill = if on {
             TALLY
-        } else if response.hovered() {
+        } else if response.hovered() && carried.is_none() {
             crate::studio::BUTTON
         } else {
             CARD
         };
-        ui.painter().rect_filled(rect, CHIP / 2.0, fill);
+        // The piece being carried goes faint where it is.
+        let strength = if moving { 0.4 } else { 1.0 };
+        ui.painter().rect_filled(rect, CHIP / 2.0, fill.gamma_multiply(strength));
         let (dot, ink) = if on { (Color32::WHITE, Color32::WHITE) } else { (dot_colour(group.color), TEXT_DIM) };
-        ui.painter().circle_filled(pos2(rect.min.x + 10.0 + 3.5, rect.center().y), 3.5, dot);
-        ui.painter().text(
+        ui.painter().circle_filled(pos2(rect.min.x + 10.0 + 3.5, rect.center().y), 3.5, dot.gamma_multiply(strength));
+        let words = ui.painter().text(
             pos2(rect.min.x + 23.0, rect.center().y),
             Align2::LEFT_CENTER,
             group.name.as_str(),
             FontId::proportional(12.0),
-            ink,
+            ink.gamma_multiply(strength),
         );
-        let response = response.on_hover_text("Click to show this part; right-click to move or remove it");
+        if let Some(mark) = chip_mark(place.run.count, time) {
+            let galley = ui.painter().layout_no_wrap(mark, fixed_semibold(11.0), Color32::WHITE);
+            let back =
+                Rect::from_min_size(pos2(words.max.x + 6.0, rect.center().y - 8.4), vec2(galley.size().x + 10.0, 16.8));
+            let shade = if on { Color32::from_black_alpha(77) } else { crate::studio::BUTTON };
+            ui.painter().rect_filled(back, 5.0, shade);
+            let mark_ink = if on { Color32::WHITE } else { TEXT };
+            ui.painter().galley(pos2(back.min.x + 5.0, rect.center().y - galley.size().y / 2.0), galley, mark_ink);
+        }
+        // The arrow: how many times, move, remove.
+        let arrow = Rect::from_center_size(pos2(rect.max.x - 8.0 - 6.5, rect.center().y), vec2(13.0, 13.0));
+        let arrow_reach = Rect::from_min_max(pos2(arrow.min.x - 4.0, rect.min.y), rect.max);
+        let arrow_response = ui.interact(arrow_reach, id.with(("chip arrow", chip)), Sense::click());
+        let arrow_ink = if on { Color32::WHITE } else { TEXT_DIM };
+        let arrow_strength = if arrow_response.hovered() { 1.0 } else { 0.6 };
+        icons::paint(ui.painter(), Icon::ChevronDown, arrow, arrow_ink.gamma_multiply(arrow_strength));
+        egui::Popup::menu(&arrow_response.on_hover_text("Times, move or remove")).show(|ui| {
+            if let Some(changed) = piece_menu(ui, arrangement, chip, count) {
+                groups = Some(changed);
+            }
+        });
+        // A drag along the row moves the piece; a press that barely moves is a click.
+        if response.drag_started() {
+            response.dnd_set_drag_payload(PieceDrag { song: index, start: place.run.start });
+        }
+        let response =
+            response.on_hover_text("Click to go there \u{b7} drag to move \u{b7} the arrow sets how many times");
         if response.clicked() {
             commands.push(Command::GoToStep { presentation: index, step: place.first });
             if deck.item.is_some() {
                 state.services.chosen = deck.item;
+                state.live_item = deck.item;
             }
         }
         response.context_menu(|ui| {
-            if ui.add_enabled(chip > 0, egui::Button::new("Move Left")).clicked() {
-                groups.swap(place.at, layout.chips[chip - 1].at);
-                changed = true;
-                ui.close();
-            }
-            if ui.add_enabled(chip + 1 < count, egui::Button::new("Move Right")).clicked() {
-                groups.swap(place.at, layout.chips[chip + 1].at);
-                changed = true;
-                ui.close();
-            }
-            if ui.button("Repeat").on_hover_text("Play this part again straight after").clicked() {
-                groups.insert(place.at + 1, group.id);
-                changed = true;
-                ui.close();
-            }
-            ui.separator();
-            if ui.button("Remove").clicked() {
-                groups.remove(place.at);
-                changed = true;
-                ui.close();
+            if let Some(changed) = piece_menu(ui, arrangement, chip, count) {
+                groups = Some(changed);
             }
         });
+    }
+    // The whole row takes a dropped piece; an ink line shows the gap it will go into.
+    if let Some(drag) = carried
+        && let Some(pointer) = ui.ctx().pointer_hover_pos()
+    {
+        let row = Rect::from_min_size(origin, vec2(width, layout.height)).expand2(vec2(0.0, 4.0));
+        if row.contains(pointer)
+            && let Some((to, after)) = piece_drop(&rects, &starts, drag.start, pointer)
+            && let Some(target) = starts.iter().position(|start| *start == to)
+        {
+            let rect = rects[target];
+            let x = if after { rect.max.x + 3.0 } else { rect.min.x - 3.0 };
+            ui.painter().vline(x, rect.y_range().expand(2.0), Stroke::new(2.0, TEXT));
+            if ui.input(|input| input.pointer.any_released()) {
+                let mut moved = arrangement.clone();
+                moved.move_run(drag.start, to, after);
+                groups = Some(moved.groups);
+            }
+        }
+        ui.ctx().request_repaint();
     }
     let add = icon_button(ui, layout.add.translate(origin.to_vec2()), id.with("add"), Icon::Plus, 1.0, false)
         .on_hover_text("Add a group to the end");
     egui::Popup::menu(&add).show(|ui| {
         for group in &song.groups {
             if ui.button(group.name.as_str()).clicked() {
-                groups.push(group.id);
-                changed = true;
+                let mut added = arrangement.groups.clone();
+                added.push(group.id);
+                groups = Some(added);
             }
         }
     });
-    if changed {
+    if let Some(groups) = groups {
         let mut arrangements = song.arrangements.clone();
         if let Some(edited) = arrangements.iter_mut().find(|have| have.id == arrangement.id) {
             edited.groups = groups;
@@ -2724,9 +3013,110 @@ mod tests {
         };
         let (chip, height) = layout;
         let strip_top = tile.min.y - INSET - height;
-        let at = pos2(tile.min.x - INSET + chip.center().x, strip_top + chip.center().y);
+        // On the pill's dot and name (its arrow, at the right end, opens its menu).
+        let at = pos2(tile.min.x - INSET + chip.min.x + 14.0, strip_top + chip.center().y);
         let asked = click(&ctx, &show, &mut state, at, &mut time);
         assert!(asked.contains(&Command::GoToStep { presentation: 1, step: 0 }), "{asked:?}");
         assert!(!asked.iter().any(|c| matches!(c, Command::GoToStep { presentation: 0, .. } | Command::GoTo(_))));
+    }
+
+    /// A song with Verse 1, Chorus and Verse 2 (one slide each), sung Verse 1, Chorus ×3,
+    /// Verse 2, in a playlist of its own.
+    fn arranged() -> (Show, HomeState) {
+        let mut song = parse_song_text("Arranged", "[Verse 1]\nA\n\n[Chorus]\nB\n\n[Verse 2]\nC\n");
+        let [v1, chorus, v2] = [song.groups[0].id, song.groups[1].id, song.groups[2].id];
+        let arrangement = sp_model::Arrangement {
+            id: Uuid::new_v4(),
+            name: "As sung".to_owned(),
+            groups: vec![v1, chorus, chorus, chorus, v2],
+        };
+        song.arrangement = Some(arrangement.id);
+        song.arrangements.push(arrangement);
+        let show = Show::new(vec![Arc::new(song)]);
+        let mut state = HomeState { playlist_open: true, ..HomeState::default() };
+        state.services.add(Item::Song { key: "title:Arranged".to_owned(), title: "Arranged".to_owned() });
+        state.services.chosen = Some(0);
+        (show, state)
+    }
+
+    #[test]
+    fn a_group_sung_three_times_running_is_one_pill_and_its_slides_stand_in_the_order_sung() {
+        let (show, mut state) = arranged();
+        let ctx = egui::Context::default();
+        let mut pills = Vec::new();
+        ctx.run_ui(RawInput::default(), |ui| {
+            let layout = arrangement_layout(ui, &show.presentations()[0], 700.0).expect("arranged");
+            pills = layout.chips.iter().map(|chip| chip.run.count).collect();
+        })
+        .drop_without_applying_deltas();
+        assert_eq!(pills, [1, 3, 1], "Verse 1, Chorus ×3, Verse 2");
+        assert_eq!(chip_mark(3, None).as_deref(), Some("\u{d7}3"));
+        assert_eq!(chip_mark(3, Some(2)).as_deref(), Some("2/3"), "the second time through, on screen");
+        assert_eq!(chip_mark(1, None), None);
+        // Five tiles in the order sung: the chorus three times, the second and third AGAIN.
+        let order = entries(&show.presentations()[0]);
+        assert_eq!(order.iter().map(|e| e.slide).collect::<Vec<_>>(), [0, 1, 1, 1, 2]);
+        assert_eq!(order.iter().map(|e| e.again).collect::<Vec<_>>(), [false, false, true, true, false]);
+        // A click on the third chorus tile puts the song at that place, not at the first chorus.
+        let mut time = 0.0;
+        run(&ctx, &show, &mut state, Vec::new(), &mut time);
+        let third = state.slide_rects.iter().filter(|(at, _)| at.slide == 1).count();
+        assert_eq!(third, 1, "a slide sung again is picked where it first stands");
+        let (_, place) = state.slide_rects.iter().find(|(at, _)| at.slide == 2).copied().expect("Verse 2's tile");
+        // Verse 2 is the fifth tile: the one before it is the third chorus.
+        let before = Rect::from_min_size(place.min - vec2(place.width() + GAP_X, 0.0), place.size());
+        let asked = click(&ctx, &show, &mut state, before.center(), &mut time);
+        assert!(asked.contains(&Command::GoToStep { presentation: 0, step: 3 }), "{asked:?}");
+    }
+
+    #[test]
+    fn a_piece_lands_before_or_after_the_nearest_by_which_half_the_pointer_is_over() {
+        let pill = |x: f32| Rect::from_min_size(pos2(x, 0.0), vec2(80.0, 26.0));
+        let chips = [pill(0.0), pill(86.0), pill(172.0)];
+        let starts = [0, 1, 4];
+        // The last piece onto the left half of the first: in front.
+        assert_eq!(piece_drop(&chips, &starts, 4, pos2(10.0, 13.0)), Some((0, false)));
+        // The first onto the right half of the second: after it.
+        assert_eq!(piece_drop(&chips, &starts, 0, pos2(160.0, 13.0)), Some((1, true)));
+        // Past the end of the row: after the last.
+        assert_eq!(piece_drop(&chips, &starts, 0, pos2(400.0, 13.0)), Some((4, true)));
+        // Beside where it already stands, or on itself: nothing changes.
+        assert_eq!(piece_drop(&chips, &starts, 0, pos2(90.0, 13.0)), None);
+        assert_eq!(piece_drop(&chips, &starts, 1, pos2(100.0, 13.0)), None);
+    }
+
+    #[test]
+    fn a_press_on_a_pill_that_barely_moves_is_a_click() {
+        let (show, mut state) = arranged();
+        let ctx = egui::Context::default();
+        let mut time = 0.0;
+        run(&ctx, &show, &mut state, Vec::new(), &mut time);
+        let tile = rect_of(&state, 0, 0);
+        let mut layout = None;
+        ctx.run_ui(RawInput::default(), |ui| {
+            layout = arrangement_layout(ui, &show.presentations()[0], 700.0).map(|l| (l.chips[1].rect, l.height));
+        })
+        .drop_without_applying_deltas();
+        let (chip, height) = layout.expect("arranged");
+        let at = pos2(tile.min.x - INSET + chip.min.x + 14.0, tile.min.y - INSET - height + chip.center().y);
+        let button = |pos, pressed| Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let moved = at + vec2(2.0, 1.0);
+        let mut asked = Vec::new();
+        for events in [
+            vec![Event::PointerMoved(at)],
+            vec![button(at, true)],
+            vec![Event::PointerMoved(moved)],
+            vec![button(moved, false)],
+            Vec::new(),
+        ] {
+            asked.extend(run(&ctx, &show, &mut state, events, &mut time));
+        }
+        assert!(asked.contains(&Command::GoToStep { presentation: 0, step: 1 }), "the chorus pill: {asked:?}");
+        assert!(egui::DragAndDrop::payload::<PieceDrag>(&ctx).is_none(), "nothing is being carried");
     }
 }

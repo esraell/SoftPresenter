@@ -522,6 +522,130 @@ pub struct Arrangement {
     pub groups: Vec<Uuid>,
 }
 
+/// A piece of an arrangement: a group sung once, or several times running (shown as one pill
+/// marked ×2, ×3…). It is stored as the group listed that many times.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Run {
+    pub group: Uuid,
+    /// Where it starts in the arrangement's list of groups, and how many times it is listed.
+    pub start: usize,
+    pub count: usize,
+}
+
+/// The most times running a group can be sung in one piece.
+pub const MOST_TIMES: usize = 20;
+
+impl Arrangement {
+    /// Its pieces in order: each group listed several times running is one piece.
+    pub fn runs(&self) -> Vec<Run> {
+        let mut runs: Vec<Run> = Vec::new();
+        for (at, group) in self.groups.iter().enumerate() {
+            match runs.last_mut() {
+                Some(last) if last.group == *group => last.count += 1,
+                _ => runs.push(Run { group: *group, start: at, count: 1 }),
+            }
+        }
+        runs
+    }
+
+    /// Sets how many times running the piece starting at `start` is sung (1 to 20).
+    pub fn set_times(&mut self, start: usize, times: usize) {
+        let Some(run) = self.runs().into_iter().find(|run| run.start == start) else { return };
+        let times = times.clamp(1, MOST_TIMES);
+        self.groups.splice(run.start..run.start + run.count, std::iter::repeat_n(run.group, times));
+    }
+
+    /// Takes the piece starting at `start` out.
+    pub fn remove_run(&mut self, start: usize) {
+        if let Some(run) = self.runs().into_iter().find(|run| run.start == start) {
+            self.groups.drain(run.start..run.start + run.count);
+        }
+    }
+
+    /// Moves the piece starting at `from` to just before (or, with `after`, just after) the piece
+    /// starting at `to`. Two pieces of the same group that come together are one piece after.
+    pub fn move_run(&mut self, from: usize, to: usize, after: bool) {
+        let mut runs = self.runs();
+        let Some(moving) = runs.iter().position(|run| run.start == from) else { return };
+        if !runs.iter().any(|run| run.start == to) || from == to {
+            return;
+        }
+        let piece = runs.remove(moving);
+        let Some(target) = runs.iter().position(|run| run.start == to) else { return };
+        runs.insert(target + usize::from(after), piece);
+        self.groups = runs.iter().flat_map(|run| std::iter::repeat_n(run.group, run.count)).collect();
+    }
+}
+
+/// One slide of a song as it is sung: its place among the song's slides, its place in the
+/// order sung, and whether it was sung earlier in that order (the same slide, again).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sung {
+    pub slide: usize,
+    pub step: usize,
+    pub again: bool,
+}
+
+/// Where the slide at a place in the order sung stands in its arrangement: the piece, and which
+/// time through it (from 1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pass {
+    pub run: usize,
+    pub time: usize,
+}
+
+impl Presentation {
+    /// With an arrangement, the slides in the order sung (a group sung again comes again, as
+    /// the same slides), and the slides of the groups it leaves out, in their written order.
+    /// `None` when the song is sung as written.
+    pub fn sung(&self) -> Option<(Vec<Sung>, Vec<usize>)> {
+        self.active_arrangement()?;
+        let order = self.order();
+        let mut seen = vec![false; self.slide_count()];
+        let sung = order
+            .iter()
+            .enumerate()
+            .map(|(step, slide)| {
+                let again = seen.get(*slide).copied().unwrap_or(false);
+                if let Some(seen) = seen.get_mut(*slide) {
+                    *seen = true;
+                }
+                Sung { slide: *slide, step, again }
+            })
+            .collect();
+        let left_out = (0..self.slide_count()).filter(|slide| !seen[*slide]).collect();
+        Some((sung, left_out))
+    }
+
+    /// The first place in the order sung of each piece of the arrangement in use, and how many
+    /// places one time through it takes (its group's slides).
+    pub fn run_steps(&self) -> Vec<(usize, usize)> {
+        let Some(arrangement) = self.active_arrangement() else { return Vec::new() };
+        let length = |group: &Uuid| self.groups.iter().find(|have| have.id == *group).map_or(0, |g| g.slides.len());
+        let mut step = 0;
+        arrangement
+            .runs()
+            .iter()
+            .map(|run| {
+                let len = length(&run.group);
+                let first = step;
+                step += len * run.count;
+                (first, len)
+            })
+            .collect()
+    }
+
+    /// Which piece of the arrangement the place `step` in the order sung is in, and which time
+    /// through it.
+    pub fn pass_at(&self, step: usize) -> Option<Pass> {
+        let runs = self.active_arrangement()?.runs();
+        self.run_steps().iter().zip(&runs).enumerate().find_map(|(at, ((first, len), run))| {
+            let end = first + len * run.count;
+            (*len > 0 && step >= *first && step < end).then(|| Pass { run: at, time: (step - first) / len + 1 })
+        })
+    }
+}
+
 /// A song's copyright details, as a CCLI report asks for them.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -1084,6 +1208,88 @@ mod arrangement_tests {
         song.arrangements[0].groups = vec![Uuid::new_v4()];
         assert_eq!(song.order(), [0, 1, 2, 3]);
         assert_eq!(song.new_arrangement().name, "Arrangement 2");
+    }
+
+    /// The song with an arrangement in use: Verse 1, Chorus ×3, Verse 2, Chorus.
+    fn arranged() -> (Presentation, [Uuid; 3]) {
+        let mut song = song();
+        let ids = [song.groups[0].id, song.groups[1].id, song.groups[2].id];
+        let [v1, chorus, v2] = ids;
+        let arrangement = Arrangement {
+            id: Uuid::new_v4(),
+            name: "As sung".to_owned(),
+            groups: vec![v1, chorus, chorus, chorus, v2, chorus],
+        };
+        song.arrangement = Some(arrangement.id);
+        song.arrangements.push(arrangement);
+        (song, ids)
+    }
+
+    #[test]
+    fn a_group_sung_several_times_running_is_one_piece_stored_as_the_group_listed_that_often() {
+        let (song, [v1, chorus, v2]) = arranged();
+        let arrangement = song.active_arrangement().unwrap();
+        let runs: Vec<(Uuid, usize)> = arrangement.runs().iter().map(|run| (run.group, run.count)).collect();
+        assert_eq!(runs, [(v1, 1), (chorus, 3), (v2, 1), (chorus, 1)]);
+        // Saved and read back, it is still a plain list of groups.
+        let saved = serde_json::to_string(&song).unwrap();
+        assert!(
+            saved.contains(&format!(
+                "\"groups\":[\"{v1}\",\"{chorus}\",\"{chorus}\",\"{chorus}\",\"{v2}\",\"{chorus}\"]"
+            ))
+        );
+        let read: Presentation = serde_json::from_str(&saved).unwrap();
+        assert_eq!(read, song);
+        assert_eq!(read.active_arrangement().unwrap().runs()[1].count, 3);
+        // Once, ×4, More (up to 20).
+        let mut changed = arrangement.clone();
+        changed.set_times(1, 1);
+        assert_eq!(changed.groups, [v1, chorus, v2, chorus]);
+        changed.set_times(1, 4);
+        assert_eq!(changed.groups.iter().filter(|g| **g == chorus).count(), 5);
+        changed.set_times(1, 99);
+        assert_eq!(changed.runs()[1].count, MOST_TIMES);
+    }
+
+    #[test]
+    fn pieces_move_left_and_right_and_come_out_whole() {
+        let (song, [v1, chorus, v2]) = arranged();
+        let mut arrangement = song.active_arrangement().unwrap().clone();
+        // The ending chorus to the front, before Verse 1.
+        arrangement.move_run(5, 0, false);
+        assert_eq!(arrangement.groups, [chorus, v1, chorus, chorus, chorus, v2]);
+        // Verse 2 after the last piece.
+        let mut arrangement = song.active_arrangement().unwrap().clone();
+        arrangement.move_run(4, 5, true);
+        assert_eq!(arrangement.groups, [v1, chorus, chorus, chorus, chorus, v2]);
+        assert_eq!(arrangement.runs().len(), 3, "the two choruses meet, and are one piece ×4");
+        let mut arrangement = song.active_arrangement().unwrap().clone();
+        arrangement.remove_run(1);
+        assert_eq!(arrangement.groups, [v1, v2, chorus]);
+    }
+
+    #[test]
+    fn with_an_arrangement_the_slides_stand_in_the_order_sung_and_the_rest_wait_underneath() {
+        let (mut song, [v1, chorus, _]) = arranged();
+        let (sung, left_out) = song.sung().unwrap();
+        let slides: Vec<usize> = sung.iter().map(|one| one.slide).collect();
+        assert_eq!(slides, [0, 1, 2, 2, 2, 3, 2]);
+        let again: Vec<bool> = sung.iter().map(|one| one.again).collect();
+        assert_eq!(again, [false, false, false, true, true, false, true], "the same slide, sung again");
+        assert_eq!(sung[4].step, 4);
+        assert!(left_out.is_empty());
+        // The chorus's second time through, and Verse 2.
+        assert_eq!(song.pass_at(3), Some(Pass { run: 1, time: 2 }));
+        assert_eq!(song.pass_at(5), Some(Pass { run: 2, time: 1 }));
+        assert_eq!(song.run_steps(), [(0, 2), (2, 1), (5, 1), (6, 1)]);
+        // Verse 2 left out: it waits underneath.
+        song.arrangements[0].groups = vec![v1, chorus];
+        let (sung, left_out) = song.sung().unwrap();
+        assert_eq!(sung.len(), 3);
+        assert_eq!(left_out, [3]);
+        // As written: none of this.
+        song.arrangement = None;
+        assert_eq!(song.sung(), None);
     }
 
     #[test]

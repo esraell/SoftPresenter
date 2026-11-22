@@ -63,10 +63,20 @@ feature changes, this page changes in the same commit.
   the first start changes those to ids, keeping a copy of each file it changes in
   "Backup before song ids", and a song file copied in the Finder gets an id of its own.
 - **Arrangements**: a song's groups in the order to sing them (Verse 1, Chorus, Verse 2, Chorus…),
-  from the Arrangement icon at the right of its header. Next and Previous follow it, a group can come more than
-  once, the stage screens show what comes next in it, and a row of its
-  groups shows the one on screen; click one to go to it, right-click to move, repeat or
-  remove it, + to add a group.
+  from the Arrangement icon at the right of its header or the arrangement's name at the start
+  of its row (As written, the song's arrangements, New Arrangement, Rename…, Duplicate,
+  Delete). Next and Previous follow it, a group can come more than once, and the stage screens
+  show what comes next in it. The row under the song's bar has a pill for each piece in the
+  order sung: **a group sung several times running is one pill marked ×2, ×3…** (it is saved
+  as the group listed that many times, so files are as before), and while it is on screen the
+  pill is orange and says which time through it is (2/3). A click on a pill goes to that point;
+  its arrow (or a right-click) sets how many times (Once, ×2, ×3, ×4, or More, up to 20), moves
+  it left or right, or removes it; a pill dragged along the row goes where the ink line shows;
+  + adds a group at the end. **With an arrangement the slides stand in the order sung**:
+  a group sung again stands again (the same slides, tagged AGAIN and a little faint), numbered
+  in the order sung, and only the tile for where the song is lights up; the groups it leaves
+  out wait underneath, under "Not in this arrangement", fainter and still there to click.
+  Under an arrangement a slide is dragged only among its own group.
 - Nineteen transitions: Cut, Dissolve, Fade, Fade Black, Fade White, Push, Move In, Reveal,
   Fly In, Zoom In, Door, Flip, Swap, Wipe, Split, Blinds, Iris, Clock and Checkerboard, with
   their direction and time (0 to 5 seconds), from Cut, Dissolve or Advanced. One is chosen for all slides from the bar under the slides; a song
@@ -148,8 +158,8 @@ feature changes, this page changes in the same commit.
   item after item, each under a bar with its name that stays at the top while its slides
   scroll under it. The open item's bar has a dot; a song's bar carries its tools (details,
   words as text, arrangement, notes, and ⋯ for the song's menu, Add Slide and its place in the
-  playlist), and a song played in an arrangement has that arrangement's groups as a row of
-  pills under its bar. Other items say what they are in a small label. A **Bible passage** kept
+  playlist), and a song played in an arrangement has a row of pills under its bar and its
+  slides in the order sung (see Arrangements above). Other items say what they are in a small label. A **Bible passage** kept
   in the playlist is shown as its slides, drawn by the Bible theme as the Bible page draws
   them; a click on one looks the passage up as the Bible page would and puts that verse on
   screen, and Next and Previous then go verse by verse. Clicking a slide of any item puts it

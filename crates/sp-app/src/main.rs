@@ -5966,6 +5966,15 @@ impl App {
                 let presentation = self.show.selected();
                 commands.push(Command::GoTo(sp_engine::SlideRef { presentation, slide: slide.saturating_sub(1) }));
             }
+            // Testing aid: SOFTPRESENTER_CAPTURE_STEP=N puts the song chosen on screen at the Nth
+            // place of the order it is sung in (a chorus sung the second time, say).
+            if running.frames == GO_LIVE_AT + 6
+                && let Some(step) =
+                    std::env::var("SOFTPRESENTER_CAPTURE_STEP").ok().and_then(|s| s.parse::<usize>().ok())
+            {
+                let presentation = self.show.selected();
+                commands.push(Command::GoToStep { presentation, step: step.saturating_sub(1) });
+            }
             // Testing aid: list the playlist in front in the left column.
             if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_PLAYLIST").is_some() {
                 running.home_state.playlist_open = true;
