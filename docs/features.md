@@ -174,7 +174,8 @@ feature changes, this page changes in the same commit.
   row has opened another item, the next Next or Previous starts that item at its first slide:
   a song or Bible passage goes on screen, a picture or video is shown, a media playlist plays.
   ↑ and ↓ open the item above or below (passing over headers), and say so at either end;
-  Enter puts the open item on screen from its first slide. With Continuous on (in the bar
+  Enter puts the open item on screen from its first slide (with a library listed, the song
+  chosen). With Continuous on (in the bar
   under the slides), Next at the end of a song goes on into the next song or **Bible
   passage**, passing over headers, placeholders, pictures and videos, and Previous at a song's
   first slide goes back into the last slide of the one before; at either end of the playlist,
