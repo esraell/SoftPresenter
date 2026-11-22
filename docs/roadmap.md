@@ -25,8 +25,7 @@ Size: S = under a day, M = days, L = a week or more. Sunday: how much it matters
 9. **Fill-in fields in messages**, for paging parents from the nursery. · S–M
 10. **What a video does when it ends, in and out points, and video sound against background
     music.** · M
-11. **A fuller stage layout editor.** Free text, timers chosen by name, a video countdown and
-    slide pictures. · M
+11. **More on stage.** A video countdown, and the current or next slide as a picture. · M
 
 Next in line: the network API, with the whole app in a browser and a phone remote, spell check, formatting one word, CCLI usage
 reporting, editable key mappings, adding time to a running timer, and Russian and Ukrainian
@@ -152,9 +151,8 @@ rather than a feature, but no church on Windows can use the app without them.
 
 ## Stage
 
-- **A fuller stage layout editor.** Free text ("Time left"), shapes, pictures, fonts, a background colour, several timers chosen by name, and any item more than once. (started: nine fixed items, once each, with size, colour and place; the Timer item shows the first running timer) · M · Medium
 - **Video countdown on stage.** Time left in the playing video, and in the audio. · S · Medium
-- **Slide pictures and screen previews on stage.** The current or next slide as a picture, or a live copy of any screen; several make a multiviewer for the booth. (started: the current and next slide as words) · M · Medium
+- **Slide pictures and screen previews on stage.** The current or next slide as a picture, or a live copy of any screen; several make a multiviewer for the booth. (started: the current and next slide as words; a live picture of any audience screen, as many as a layout holds) · M · Medium
 - **Stage layout action.** A slide or macro switches a stage screen's layout (to a sermon timer, say). · S · Medium
 - **Stage screens on phones, tablets and browsers.** Needs the network API. · M · Medium
 - **Chord charts.** A chart attached to a slide, and chords shown on stage, for the band. · L · Low

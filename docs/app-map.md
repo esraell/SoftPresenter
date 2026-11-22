@@ -81,7 +81,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | Tabs: Messages | A card each, with fill-in tokens (the time, a timer), shown over the slides: Show or Hide; ⋯ for Edit…, Rename, Duplicate, Cut, Copy, Paste, Delete; Words once… shows typed words at once (kept as Quick message) | `messages`, `message show NAME`, `message hide`, `message show --text WORDS` |
 | Tabs: Props | Slides of their own laid over the show (logos, lower thirds), a card each with its picture: Show or Hide; ⋯ for Edit in the Editor, Clears Itself, Rename, Duplicate, Delete | `props`, `prop show\|hide NAME`, `prop new\|delete` |
 | Tabs: Macros | Steps done in turn, a card each: Run (the name alone does nothing); the chevron opens its steps (Earlier, Remove, Add a step…); ⋯ for Colour, Run When SoftPresenter Opens, Rename, Duplicate, Delete | `macros`, `macro run NAME`, `macro new\|add\|remove\|delete` |
-| Tabs: Stage | Which stage screen (with more than one; all by default); every layout as a tile with a picture of the stage in it, the one in use ticked, a click switches; Edit layouts…; the stage message (Show on stage, Change it, Clear) | `stage on\|off`, `stage layout SCREEN LAYOUT`, `stage message TEXT\|clear` |
+| Tabs: Stage | Which stage screen (with more than one; all by default); every layout as a tile with a picture of the stage in it, the one in use ticked, a click switches; Edit layouts…; the stage message (Show on stage, Change it, Clear) | `stage on\|off`, `stage layout SCREEN LAYOUT`, `stage message TEXT\|clear`, `stage objects\|picture\|frame LAYOUT …` |
 | Tabs: Audio | Audio playlists (chosen at its head; ⋯ and + to rename, make, delete); the player: a line to drag, previous, −15, play or pause, +15, next, volume with mute, Play through, Shuffle, Crossfade; the tracks (click to play, drag to move, ⋯ for Move Up, Move Down, Rename, Remove; Add tracks…) | `audio`, `audio play\|pause\|stop\|next\|previous`, `audio volume N`, `audio add FILE…` |
 | Tabs: VoxLive (once VoxLive is connected) | The church's VoxLive screens, a card each: Show puts that screen's captions on the screens in place of a verse (it reads On screen, on an orange-tinted card, while they show) | `voxlive show N\|NAME` |
 
@@ -149,10 +149,17 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 - **Footer** (at the foot of the inspector): Slide Notes, Live Edit (changes reach the screens
   as they are made), Done.
 - **Stage** (Edit › Stage; Screens › Edit Stage Layouts… and the Stage tab's Edit Layouts… open
-  it): the layouts for the stage screens (now, next, notes, clock, timer, message). The middle
-  is a picture of the stage screen with the layout's boxes, dragged to move and by a corner to
-  resize; the chosen box's size, colour and alignment, and Add Item, are in the right column
-  under Clear All. While it is open the keyboard does not run the show, as in the rest of Edit.
+  it): the layouts for the stage screens, edited with the same canvas, Objects list and
+  inspector as a slide. Left: STAGE LAYOUTS with + (a new layout) and a row for each, ⋯ on it
+  for Rename, Duplicate, Delete. Over the canvas: the layout's name, Add ▾ (Text, a shape, a
+  picture or video, a web page, then what the stage shows live: Current Slide, Next Slide, Next
+  Label, Clock, Timer, Slide Notes, Song Title, Group, Stage Message, and Screen Picture with
+  the audience screens), Undo and Redo; under it two lines saying the keyboard edits here. The
+  inspector, with nothing picked, is LAYOUT (its name, the stage screens using it); for an item
+  the Text tab starts with what it shows and its own settings (which timer, the clock's form,
+  lines of notes); for a screen picture the Shape tab starts with its screen, corners and
+  label. The arrows move an object 10, Shift one pixel (on a slide 1, and Shift 10). While it
+  is open the keyboard does not run the show, as in the rest of Edit.
 - **Themes** (Edit › Themes; View › Themes, Control-T and `sp view themes` open it): the same canvas, tools and inspector, editing a theme's
   layouts (templates). A layout's text boxes say where each kind of words goes; its shapes,
   pictures and videos are drawn behind the words on every slide that uses it. The list on the
@@ -209,6 +216,7 @@ of this one copies it to Documents, checks the copy, and keeps the old folder as
 | `libraries.json` | Libraries, each a list of song ids |
 | `media.json` | The media bin and media playlists |
 | `timers.json`, `messages.json`, `macros.json` | Timers, messages and macros |
+| `stage-layouts.json` | The stage layouts, each kept as a theme's template: `objects` are its objects in order from the back (an item such as the clock is a text object whose role says what it shows; a screen picture names its screen by id, or none for the main one), and `boxes` hold each item's look and place as earlier versions read them |
 | `screens.json` | The screens and their looks |
 | `preferences.json`, `bible-page.json`, `bible-history.json` | Small choices, how the Bible page was left, and the Bible passages looked up |
 | `.softpresenter-library` | Says the folder is SoftPresenter's library |
@@ -244,7 +252,7 @@ how long drawing took.
 | `sp-video` | Playing videos: macOS's own player, FFmpeg for other formats; web pages drawn off-screen by macOS's web view (`web`, `web_mac`), copied into frames as a video's are |
 | `sp-ndi` | Sending screens over NDI (the runtime is opened when an NDI screen starts) |
 | `sp-bible` | Bibles: references, verse numbering, search |
-| `sp-app` | The app: the window (egui), the screens' thread (`output.rs`), the views (`home.rs`, `studio.rs`, `editor.rs`, `inspector.rs`), the command line (`control.rs`, and `slide_cli.rs` for changing slides), the menu bar (`menubar.rs`) |
+| `sp-app` | The app: the window (egui), the screens' thread (`output.rs`), the views (`home.rs`, `studio.rs`, `editor.rs`, `inspector.rs`), the stage layouts (`stage.rs` for what they hold and show, `stage_editor.rs` for their parts of the Edit view), the command line (`control.rs`, and `slide_cli.rs` for changing slides), the menu bar (`menubar.rs`) |
 
 ## Trying the app safely (for agents and tests)
 

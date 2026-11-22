@@ -337,6 +337,9 @@ impl crate::App {
             }
             "layout" => self.stage_layout(&args[2..]),
             "layouts" => self.stage_layouts(),
+            "objects" => self.stage_objects(&args[2..]),
+            "picture" => self.stage_picture(&args[2..]),
+            "frame" => self.stage_frame(&args[2..]),
             _ => return None,
         };
         Some(result)
@@ -357,6 +360,193 @@ impl crate::App {
         state.screens[at].stage_layout = Some(state.stage_layouts[which].id);
         state.screens_changed = true;
         Ok(Reply::done(format!("{} shows the stage layout {}.", screens[at], layouts[which])))
+    }
+
+    /// A stage layout by its name or number, as `stage layouts` lists them.
+    fn stage_layout_at(&self, typed: &str) -> Result<usize, String> {
+        let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
+        let layouts: Vec<String> = state.stage_layouts.iter().map(|l| l.name.clone()).collect();
+        find("stage layout", &layouts, typed)
+            .map_err(|problem| format!("{problem} The stage layouts: {}.", layouts.join(", ")))
+    }
+
+    /// Puts a changed stage layout in place, to be saved; the Edit view, if it has the layout
+    /// open, opens it again as it now is.
+    fn put_stage_layout(&mut self, at: usize, layout: sp_model::ThemeTemplate) {
+        self.with_state(|state| {
+            state.stage_layouts[at] = layout;
+            state.stage_layouts_changed = true;
+            let open = state.editing.as_ref().is_some_and(|d| crate::stage_editor::is_stage(d) && d.at.slide == at);
+            if open {
+                state.editing = crate::stage_editor::draft(state, at);
+            }
+        });
+    }
+
+    /// `stage objects LAYOUT`: a stage layout's objects, back first as they are drawn: what each
+    /// shows, and where.
+    fn stage_objects(&self, words: &[String]) -> Result<Reply, String> {
+        let at = self.stage_layout_at(&words.join(" ")).map_err(|p| format!("stage objects LAYOUT: {p}"))?;
+        let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
+        let layout = &state.stage_layouts[at];
+        let objects = crate::stage::objects(layout);
+        let mut lines = Vec::new();
+        let mut data = Vec::new();
+        for (number, object) in objects.iter().enumerate() {
+            let shows = crate::stage::describe(object, &state.screens);
+            let place = object.frame.unwrap_or(sp_model::SlideRect { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 });
+            let marks = match (object.hidden, object.locked) {
+                (true, true) => " (hidden, locked)",
+                (true, false) => " (hidden)",
+                (false, true) => " (locked)",
+                (false, false) => "",
+            };
+            lines.push(format!(
+                "{}. {}: {shows}, at x={:.0} y={:.0} w={:.0} h={:.0}{marks}",
+                number + 1,
+                object.name,
+                place.x,
+                place.y,
+                place.w,
+                place.h
+            ));
+            let screen = match &object.kind {
+                sp_model::ObjectKind::Screen { screen, .. } => {
+                    let (shown, fell_back) = crate::stage::source_screen(*screen, &state.screens);
+                    let name = |id: Option<sp_model::Uuid>| {
+                        state.screens.iter().find(|s| Some(s.id) == id).map(|s| s.name.clone())
+                    };
+                    serde_json::json!({"chosen": screen.map_or("main".to_owned(), |_| name(*screen).unwrap_or_default()),
+                        "shows": name(shown), "fell_back": fell_back})
+                }
+                _ => serde_json::Value::Null,
+            };
+            data.push(serde_json::json!({
+                "object": number + 1,
+                "name": object.name,
+                "shows": shows,
+                "item": crate::stage::item_of(object),
+                "screen": screen,
+                "frame": {"x": place.x, "y": place.y, "w": place.w, "h": place.h},
+                "hidden": object.hidden,
+                "locked": object.locked,
+            }));
+        }
+        let text = format!("{}, back first:\n{}", layout.name, lines.join("\n"));
+        Ok(Reply::with(text, serde_json::json!(data)))
+    }
+
+    /// `stage picture LAYOUT main|SCREEN|off`: the layout's screen picture shows that audience
+    /// screen (one is added, at the top right, if it has none); `off` takes its screen pictures
+    /// away.
+    fn stage_picture(&mut self, words: &[String]) -> Result<Reply, String> {
+        let usage = "stage picture LAYOUT main|SCREEN|off   (a picture of what an audience screen shows, live)";
+        let [layout, source @ ..] = words else { return Err(usage.to_owned()) };
+        if source.is_empty() {
+            return Err(usage.to_owned());
+        }
+        let at = self.stage_layout_at(layout)?;
+        let source = source.join(" ");
+        let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
+        let mut changed = crate::stage::normalized(&state.stage_layouts[at]);
+        let name = changed.name.clone();
+        let is_picture = |o: &sp_model::Object| matches!(o.kind, sp_model::ObjectKind::Screen { .. });
+        if source.eq_ignore_ascii_case("off") {
+            let before = changed.objects.len();
+            changed.objects.retain(|o| !is_picture(o));
+            let gone = before - changed.objects.len();
+            self.put_stage_layout(at, changed);
+            return Ok(Reply::done(match gone {
+                0 => format!("{name} has no screen picture."),
+                1 => format!("Took the screen picture off {name}."),
+                n => format!("Took {n} screen pictures off {name}."),
+            }));
+        }
+        let audience: Vec<&crate::screens::Screen> =
+            state.screens.iter().filter(|s| s.kind == crate::screens::Kind::Audience).collect();
+        let wanted = if source.eq_ignore_ascii_case("main") {
+            None
+        } else {
+            let names: Vec<String> = audience.iter().map(|s| s.name.clone()).collect();
+            if let Some(stage) = state
+                .screens
+                .iter()
+                .find(|s| s.kind == crate::screens::Kind::Stage && s.name.eq_ignore_ascii_case(source.trim()))
+            {
+                return Err(format!(
+                    "{} is a stage screen; a screen picture shows an audience screen: main, {}.",
+                    stage.name,
+                    names.join(", ")
+                ));
+            }
+            let found = find("audience screen", &names, &source)
+                .map_err(|problem| format!("{problem} The audience screens: main, {}.", names.join(", ")))?;
+            Some(audience[found].id)
+        };
+        let listed: Vec<(sp_model::Uuid, String)> = audience.iter().map(|s| (s.id, s.name.clone())).collect();
+        let shown_name = crate::stage_editor::screen_object_name(wanted, &listed);
+        let place = match changed.objects.iter_mut().find(|o| is_picture(o)) {
+            Some(object) => {
+                if let sp_model::ObjectKind::Screen { screen, .. } = &mut object.kind {
+                    *screen = wanted;
+                }
+                object.name = shown_name;
+                object.frame
+            }
+            None => {
+                let mut object = sp_model::Object::screen(wanted);
+                object.name = shown_name;
+                let place = object.frame;
+                changed.objects.push(object);
+                place
+            }
+        };
+        let describe = |id: Option<sp_model::Uuid>| match id.and_then(|id| listed.iter().find(|(have, _)| *have == id))
+        {
+            Some((_, name)) => name.clone(),
+            None => format!(
+                "the main audience screen ({})",
+                listed.first().map_or("there is none".to_owned(), |(_, name)| name.clone())
+            ),
+        };
+        let place = place.unwrap_or(sp_model::SlideRect { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 });
+        let said = format!(
+            "{name} shows what {} shows, at x={:.0} y={:.0} w={:.0} h={:.0}.",
+            describe(wanted),
+            place.x,
+            place.y,
+            place.w,
+            place.h
+        );
+        self.put_stage_layout(at, changed);
+        Ok(Reply::done(said))
+    }
+
+    /// `stage frame LAYOUT OBJECT x=… y=… w=… h=…`: where one of a stage layout's objects sits,
+    /// in the stage's pixels (1920 × 1080). OBJECT is its number in `stage objects` or its name.
+    fn stage_frame(&mut self, words: &[String]) -> Result<Reply, String> {
+        let usage = "stage frame LAYOUT OBJECT x=… y=… w=… h=…";
+        let [layout, object, settings @ ..] = words else { return Err(usage.to_owned()) };
+        if settings.is_empty() {
+            return Err(usage.to_owned());
+        }
+        let at = self.stage_layout_at(layout)?;
+        let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
+        let current = &state.stage_layouts[at];
+        let objects = crate::stage::objects(current);
+        let names: Vec<String> = objects.iter().map(|o| o.name.clone()).collect();
+        let index = find("object", &names, object)
+            .map_err(|problem| format!("{problem} {}'s objects: {}.", current.name, names.join(", ")))?;
+        let was = objects[index].frame.unwrap_or(sp_model::SlideRect { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 });
+        let frame = crate::slide_cli::set_frame(was, settings)?;
+        let name = names[index].clone();
+        let changed = crate::stage::with_frame(current, index, frame);
+        let layout_name = current.name.clone();
+        self.put_stage_layout(at, changed);
+        Ok(Reply::done(format!(
+            "{layout_name}: {name} at x={:.0} y={:.0} w={:.0} h={:.0}.",
+            frame.x, frame.y, frame.w, frame.h
+        )))
     }
 
     /// `stage layouts`: each stage layout, and the screens that show it.

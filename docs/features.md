@@ -363,10 +363,33 @@ feature changes, this page changes in the same commit.
   until it draws again. (The warning covers those two cases. It does not see a picture the GPU dropped
   after it was worked out, or a window macOS is not showing.)
 - **Stage layouts**: each stage screen shows a layout picked in the Stage tab (Words and Next,
-  Words Only, Words and Notes, Clock and Timer, or your own). Edit › Stage (also Screens > Edit Stage
-  Layouts…) lays them out: the current and next slide, the next label, the clock, a timer, the slide's notes, the
-  song's title and group, and the stage message, each dragged into place and resized, with its
-  size, colour and alignment.
+  Words Only, Words and Notes, Clock and Timer, or your own). Edit › Stage (also Screens > Edit
+  Stage Layouts… and the Stage tab's Edit layouts…) edits them with the slide editor: each thing
+  a layout shows live is an object on the canvas (the current and next slide, the next label,
+  the clock, a timer, the slide's notes, the song's title and group, the stage message), beside
+  words of its own, shapes, pictures, videos, web pages and screen pictures, all from one Add
+  menu. Objects are picked (Shift or Command for several, or a box dragged round them), moved,
+  resized, nudged with the arrows (10 at a time, Shift for one pixel), lined up, spread out,
+  brought forward or sent back, duplicated, copied, deleted, hidden and locked, with undo, and
+  listed under Objects, front first. The inspector has their place, fill, outline, shadow and
+  text look, and each item's own settings: which timer (the first one running, or one chosen by
+  name, running or not), the clock on a 12- or 24-hour clock and with or without seconds, how
+  many lines of the notes. An item can be on a layout more than once. The layouts are listed on
+  the left with + for a new one and, on each, ⋯ (or a right-click, or a double click to rename)
+  for Rename, Duplicate and Delete; with nothing picked the inspector names the layout and the
+  stage screens that use it. A layout saved by an earlier version opens and looks as it did,
+  and keeps what it had (each item's look and place are still written where earlier versions
+  read them).
+- **Screen pictures on stage**: a stage layout can show, live, what an audience screen shows
+  (its slide, media and video, props, messages and announcements, as that screen draws them,
+  with its own theme and look), scaled into a box that has a border, round corners and a label
+  of its own like any object. It shows Audience screens (main), the first audience screen
+  whichever that is, or a screen chosen by name and kept by its id, so renaming the screen keeps
+  it; a screen that is removed, or made a stage screen, gives way to the main one, and the
+  inspector says so. A stage screen is never offered. The stage screens draw it from the very
+  picture that screen's window holds (in a fade, the same mix), so it always shows the same
+  moment, and fades as that screen fades. In the editor, the Stage tab's pictures and the
+  preview, it stands in as a dark box with a screen in it.
 
 ![A stage screen: the slide on screen in English and Russian, the next slide, a sermon timer and the clock](images/stage.png)
 
@@ -670,8 +693,9 @@ feature changes, this page changes in the same commit.
 - Running the show from the command line: `playlist go ITEM [SLIDE]` (opens an item as a click
   does, so the continuous playlist follows on), `group NAME|LETTER [in SONG]`, `hotkey KEY`,
   `continuous on|off`, `video play|pause|restart|seek|loop|mute`, `media next|previous`, `media
-  set ITEM scaling=… loop=…`, `stage message TEXT|clear`, `stage layout SCREEN LAYOUT`, and `test
-  bars|grid|white|off`. `sp status` also says what is on the Announcements layer, the media
+  set ITEM scaling=… loop=…`, `stage message TEXT|clear`, `stage layout SCREEN LAYOUT`, `stage
+  objects LAYOUT`, `stage picture LAYOUT main|SCREEN|off` (a picture of an audience screen on a
+  stage layout), `stage frame LAYOUT OBJECT x= y= w= h=`, and `test bars|grid|white|off`. `sp status` also says what is on the Announcements layer, the media
   playlist playing, the timers running, the audio, the playlist and item open, the continuous
   playlist, Identify and the main theme; `timers`, `messages`, `props` and `macros` list each
   with its state, and `slide SONG N` and `slides` show what a slide sets for itself (off, label,

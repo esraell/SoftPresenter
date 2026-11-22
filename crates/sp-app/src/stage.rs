@@ -350,6 +350,42 @@ pub fn with_sources(layout: &ThemeTemplate, screens: &[crate::screens::Screen]) 
     layout
 }
 
+/// The layout with one of its objects (by its place among [`objects`]) moved to `frame`, its
+/// box following it when it is an item's first.
+pub fn with_frame(layout: &ThemeTemplate, index: usize, frame: SlideRect) -> ThemeTemplate {
+    let mut slide = as_slide(layout);
+    if let Some(object) = slide.objects.get_mut(index) {
+        object.frame = Some(frame);
+    }
+    with_slide(layout, &slide)
+}
+
+/// What one of a layout's objects shows, in words, for the command line.
+pub fn describe(object: &Object, screens: &[crate::screens::Screen]) -> String {
+    let name_of = |id: Option<Uuid>| screens.iter().find(|screen| Some(screen.id) == id).map(|s| s.name.clone());
+    match (&object.kind, item_of(object)) {
+        (_, Some(item)) => {
+            let role = Role(item.to_owned());
+            format!("shows {}", item_name(&role).to_lowercase())
+        }
+        (ObjectKind::Screen { screen, .. }, None) => {
+            let (shows, fell_back) = source_screen(*screen, screens);
+            match (screen, shows.and_then(|id| name_of(Some(id)))) {
+                (_, None) => "a screen picture, with no audience screen to show".to_owned(),
+                (None, Some(main)) => format!("what the main audience screen ({main}) shows"),
+                (Some(_), Some(shown)) if fell_back => {
+                    format!("what the main audience screen ({shown}) shows, as the screen it named has gone")
+                }
+                (Some(_), Some(shown)) => format!("what {shown} shows"),
+            }
+        }
+        (ObjectKind::Text { text, .. }, None) => format!("the words \u{201c}{}\u{201d}", text.replace('\n', " / ")),
+        (ObjectKind::Shape { shape }, None) => format!("a shape ({})", shape.name().to_lowercase()),
+        (ObjectKind::Image { file, .. }, None) => format!("a picture ({file})"),
+        (ObjectKind::Web { url }, None) => format!("a web page ({url})"),
+    }
+}
+
 /// The screens a layout's screen pictures show, each once, as [`with_sources`] left them.
 pub fn sources(layout: &ThemeTemplate) -> Vec<Uuid> {
     let mut found = Vec::new();
@@ -1076,5 +1112,30 @@ Band: clock=TIME/None | timer=Some("Sermon  TIMER")/None | stage-message=Some("W
         let state = crate::home::HomeState { screens, ..Default::default() };
         let offered = crate::stage_editor::audience_screens(&state);
         assert_eq!(offered.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [main.id, hdmi.id]);
+    }
+
+    #[test]
+    fn the_command_line_says_what_objects_show_and_moves_them() {
+        let main = Screen::new("Main".to_owned(), Output::Automatic);
+        let hdmi = Screen::new("HDMI main".to_owned(), Output::Window);
+        let screens = vec![main.clone(), hdmi.clone()];
+        let mut layout = builtin_layouts().remove(0);
+        layout.objects.push(Object::screen(Some(hdmi.id)));
+        layout.objects.push(Object::screen(None));
+        let said: Vec<String> = objects(&layout).iter().map(|o| describe(o, &screens)).collect();
+        assert_eq!(said[0], "shows clock");
+        assert_eq!(said[said.len() - 2], "what HDMI main shows");
+        assert_eq!(said[said.len() - 1], "what the main audience screen (Main) shows");
+        let gone = describe(&layout.objects[layout.objects.len() - 2], std::slice::from_ref(&main));
+        assert_eq!(gone, "what the main audience screen (Main) shows, as the screen it named has gone");
+        // Moving the clock moves its box with it; moving a screen picture moves only it.
+        let place = SlideRect { x: 10.0, y: 20.0, w: 300.0, h: 100.0 };
+        let moved = with_frame(&layout, 0, place);
+        assert_eq!(moved.objects[0].frame, Some(place));
+        assert_eq!(moved.style_for(&Role(CLOCK.to_owned())).unwrap().rect, place);
+        let last = moved.objects.len() - 1;
+        let moved = with_frame(&moved, last, place);
+        assert_eq!(moved.objects[last].frame, Some(place));
+        assert_eq!(moved.boxes, with_frame(&layout, 0, place).boxes);
     }
 }

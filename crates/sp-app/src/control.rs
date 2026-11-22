@@ -820,6 +820,9 @@ Running the show
   media set ITEM scaling=fit|fill|stretch loop=on|off
   stage message TEXT | stage message clear      words for the stage screens only
   stage layouts | stage layout SCREEN LAYOUT    the stage layouts; which one a screen shows
+  stage objects LAYOUT         a stage layout's objects, what each shows and where
+  stage picture LAYOUT main|SCREEN|off   a picture of what an audience screen shows, live
+  stage frame LAYOUT OBJECT x= y= w= h=  where one of a stage layout's objects sits
   test bars|grid|white|off     a test pattern on the audience screens
   go SONG [SLIDE]              put a slide on screen (SONG by name or number; SLIDE from 1)
   select SONG                  show a song's slides without putting anything on screen
@@ -1103,7 +1106,9 @@ impl crate::App {
                 Reply::done(format!("The audience screens are {}.", if on { "on" } else { "off" }))
             }),
             "stage" if self.ctl_stage_more_applies(args) => self.ctl_stage_more(args).unwrap_or_else(|| {
-                Err("stage on|off | stage message TEXT|clear | stage layout SCREEN LAYOUT".to_owned())
+                Err("stage on|off | stage message TEXT|clear | stage layout SCREEN LAYOUT | stage objects LAYOUT | \
+                     stage picture LAYOUT main|SCREEN|off | stage frame LAYOUT OBJECT x= y= w= h="
+                    .to_owned())
             }),
             "stage" => on_off(args.get(1)).map(|on| {
                 self.with_state(|state| state.stage_on = on);
@@ -1551,7 +1556,8 @@ impl crate::App {
 
     /// Whether a `stage` command is one of the newer ones (message, layout).
     fn ctl_stage_more_applies(&self, args: &[String]) -> bool {
-        args.get(1).is_some_and(|w| ["message", "layout", "layouts"].iter().any(|word| w.eq_ignore_ascii_case(word)))
+        let newer = ["message", "layout", "layouts", "objects", "picture", "frame"];
+        args.get(1).is_some_and(|w| newer.iter().any(|word| w.eq_ignore_ascii_case(word)))
     }
 
     /// What a slide or macro action does, in words.

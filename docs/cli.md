@@ -270,6 +270,9 @@ each time with the token the last reply gave.
 | `identify on\|off` | Identify Screens |
 | `stage message TEXT`, `stage message clear` | Words for the stage screens only (`\n` starts a new line) |
 | `stage layout SCREEN LAYOUT` | Which stage layout a stage screen shows |
+| `stage objects LAYOUT` | A stage layout's objects, back first as they are drawn: each one's number, name, what it shows (an item such as the clock, words of its own, a shape, a picture, or a screen's picture) and where it is |
+| `stage picture LAYOUT main\|SCREEN\|off` | A picture of what an audience screen shows, live, on a stage layout: the layout's screen picture shows `main` (the first audience screen, whichever that is) or the audience screen named, kept by its id so renaming it changes nothing; a layout with none gets one at the top right. `off` takes the layout's screen pictures away. A stage screen is never shown |
+| `stage frame LAYOUT OBJECT x= y= w= h=` | Where one of a stage layout's objects sits, in the stage's pixels (1920 × 1080). OBJECT is its number in `stage objects` or its name |
 | `test bars\|grid\|white\|off` | A test pattern on the audience screens |
 | `view show\|edit\|bible\|themes`, `view reflow [SONG]` | Switches the window's view (`themes` is the Edit view on the themes; `edit` is the Edit view on a song's slides) |
 
@@ -296,6 +299,12 @@ each time with the token the last reply gave.
     $ sp stage message "Two minutes\nthen the sermon"
     On the stage screens: “Two minutes
     then the sermon”
+    $ sp stage picture "Words and Next" "HDMI main"
+    Words and Next shows what HDMI main shows, at x=1240 y=130 w=640 h=360.
+    $ sp stage frame "Words and Next" "Screen: HDMI main" x=1200 y=300
+    Words and Next: Screen: HDMI main at x=1200 y=300 w=640 h=360.
+    $ sp stage picture "Words and Next" Band
+    Band is a stage screen; a screen picture shows an audience screen: main, Screen 1, HDMI main.
     $ sp test bars
     Colour bars on the audience screens.
 
@@ -1002,6 +1011,7 @@ the command's facts where it has any:
 | `screens` | `[{"name": "Screen 1", "doing": "In a window", "shown": true}]` |
 | `displays` | `[{"name": "Built-in Retina Display", "width": 3024, "height": 1964, "main": true}]` |
 | `stage layouts` | `[{"name": "Words Only", "screens": ["Band"]}]` |
+| `stage objects LAYOUT` | `[{"object": 7, "name": "Screen: HDMI main", "shows": "what HDMI main shows", "item": null, "screen": {"chosen": "HDMI main", "shows": "HDMI main", "fell_back": false}, "frame": {"x": 1240, "y": 130, "w": 640, "h": 360}, "hidden": false, "locked": false}]`; `item` is the role of what an item shows (`clock`, `now`…), `screen` is null for anything but a screen picture, and `fell_back` is true when the screen it chose has gone and it shows the main one |
 | `groups` | `[{"key": "C", "group": "Chorus", "names": ["chorus", "chorus 1"], "color": "#cc4eb4"}]` |
 | `menu` | `[{"id": "ClearAll", "label": "Clear All"}]` |
 | `slides [SONG]`, `slides item N` | `[{"slide": 1, "group": "Verse 1", "words": "…", "on_screen": false, "enabled": true, "label": null, "hot_key": null}]` |
@@ -1023,7 +1033,9 @@ These need the window for now; some can be reached with `sp menu`.
 
 - Adding or deleting objects on a slide (text boxes, shapes, pictures, videos), builds, and the
   inspector's fills, gradients and shadow details beyond the `slide style` keys.
-- Key mappings, and editing stage layouts.
+- Key mappings; a stage layout's objects other than its screen picture (adding, deleting and
+  restyling them; `stage frame` moves any of them), and making, renaming or deleting stage
+  layouts.
 - A slide's other actions (clearing a layer, a message, a prop, a timer, another song,
   the audience screens; `slide media` sets only the media), and its "goes on after" time.
 - Whether a song loops back to its first slide (`song info` shows it).
