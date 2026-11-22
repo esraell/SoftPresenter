@@ -138,15 +138,12 @@ pub fn list(ui: &mut egui::Ui, state: &mut HomeState) -> Option<ListRequest> {
                 let renaming = state.stage_rename.as_ref().is_some_and(|(at, _)| *at == index);
                 if renaming {
                     if let Some((_, typed)) = state.stage_rename.as_mut() {
-                        let field = crate::studio::rename_field_at(
-                            ui,
-                            typed,
+                        let look = crate::studio::Lettering::plain(
                             crate::studio::semibold(14.0),
-                            TEXT,
-                            crate::studio::ACCENT,
-                            name_area.left_center(),
-                            name_area.max.x,
+                            if chosen { TEXT } else { TEXT_DIM },
                         );
+                        let field =
+                            crate::studio::rename_field_at(ui, typed, &look, name_area.left_center(), name_area.max.x);
                         if std::mem::take(&mut state.stage_rename_started) {
                             field.request_focus();
                         }
@@ -540,5 +537,29 @@ mod tests {
             assert_eq!(crate::stage::item_sample(&role), sample);
             assert!(!sample.is_empty());
         }
+    }
+
+    #[test]
+    fn a_stage_layout_renamed_in_the_list_keeps_its_name_where_and_as_it_was() {
+        use egui::Event;
+
+        use crate::studio::tests::{drawn, key, letters, same_letters, styled};
+        let ctx = styled();
+        let mut state = crate::home::HomeState { stage_layouts: crate::stage::builtin_layouts(), ..Default::default() };
+        let name = state.stage_layouts[0].name.clone();
+        let list = |state: &mut crate::home::HomeState, events: Vec<Event>| {
+            drawn(&ctx, events, |ui| {
+                super::list(ui, state);
+            })
+        };
+        let before = letters(list(&mut state, vec![]), &name);
+        state.stage_rename = Some((0, name.clone()));
+        state.stage_rename_started = true;
+        list(&mut state, vec![]).drop_without_applying_deltas();
+        same_letters(&before, &letters(list(&mut state, vec![]), &name), "stage layout");
+        list(&mut state, vec![Event::Text(" Two".to_owned())]).drop_without_applying_deltas();
+        list(&mut state, vec![key(egui::Key::Enter)]).drop_without_applying_deltas();
+        assert_eq!(state.stage_layouts[0].name, format!("{name} Two"), "Return keeps what was typed");
+        assert!(state.stage_rename.is_none());
     }
 }

@@ -16,9 +16,9 @@ use crate::icons::Icon;
 use crate::messages::Message;
 use crate::screens::Kind;
 use crate::studio::{
-    ACCENT, CARD, CARD_RUNNING, CARD_SHOWN, Flat, PANEL, RADIUS_CARD, READY, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, Tabs,
-    fixed, fixed_semibold, flat_button, flat_button_width, icon_key, paint_spaced, quiet_icon, semibold, spaced,
-    tab_switch, tab_switch_height,
+    CARD, CARD_RUNNING, CARD_SHOWN, Flat, PANEL, RADIUS_CARD, READY, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, Tabs, fixed,
+    fixed_semibold, flat_button, flat_button_width, icon_key, paint_spaced, quiet_icon, semibold, spaced, tab_switch,
+    tab_switch_height,
 };
 use crate::timers::{self, Timer};
 
@@ -625,7 +625,8 @@ fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 Some((_, typed)) => {
                     let start = pos2(row.min.x, top + first_line / 2.0);
                     let right = row.min.x + text_wide;
-                    let field = crate::studio::rename_field_at(ui, typed, name_font(), TEXT, ACCENT, start, right);
+                    let look = crate::studio::Lettering::plain(name_font(), TEXT);
+                    let field = crate::studio::rename_field_at(ui, typed, &look, start, right);
                     if std::mem::take(&mut rename_started) {
                         field.request_focus();
                     }
@@ -949,8 +950,8 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut Thumb) {
             match state.prop_rename.as_mut().filter(|(renaming, _)| *renaming == id) {
                 Some((_, typed)) => {
                     let start = pos2(left, top + first_line / 2.0);
-                    let field =
-                        crate::studio::rename_field_at(ui, typed, name_font(), TEXT, ACCENT, start, left + text_wide);
+                    let look = crate::studio::Lettering::plain(name_font(), TEXT);
+                    let field = crate::studio::rename_field_at(ui, typed, &look, start, left + text_wide);
                     if std::mem::take(&mut rename_started) {
                         field.request_focus();
                     }
@@ -1275,15 +1276,8 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
             match state.macro_rename.as_mut().filter(|(renaming, _)| *renaming == id) {
                 Some((_, typed)) => {
                     let start = pos2(name_left, name_y);
-                    let field = crate::studio::rename_field_at(
-                        ui,
-                        typed,
-                        name_font(),
-                        TEXT,
-                        ACCENT,
-                        start,
-                        row.min.x + text_wide,
-                    );
+                    let look = crate::studio::Lettering::plain(name_font(), TEXT);
+                    let field = crate::studio::rename_field_at(ui, typed, &look, start, row.min.x + text_wide);
                     if std::mem::take(&mut rename_started) {
                         field.request_focus();
                     }
@@ -1554,16 +1548,11 @@ fn audio_heading(ui: &mut egui::Ui, state: &mut HomeState) {
     let name = state.audio.shown().name.clone();
     match renaming {
         Some(mut typed) => {
+            // The menu stays drawn round the name, which is typed where it was shown.
+            small_select(ui, select, egui::Id::unique("audio playlist picker"), "");
             let start = pos2(select.min.x + 8.0, select.center().y);
-            let field = crate::studio::rename_field_at(
-                ui,
-                &mut typed,
-                FontId::proportional(11.5),
-                TEXT,
-                ACCENT,
-                start,
-                select.max.x,
-            );
+            let look = crate::studio::Lettering::plain(FontId::proportional(11.5), TEXT);
+            let field = crate::studio::rename_field_at(ui, &mut typed, &look, start, select.max.x - 22.0);
             let (enter, escape) =
                 ui.input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
             if !field.has_focus() && !field.lost_focus() {
@@ -1971,9 +1960,9 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         let name_right = more.min.x - 8.0;
         match renaming.as_mut().filter(|(renamed, _)| *renamed == id) {
             Some((_, typed)) => {
-                let font = name_font();
-                let field =
-                    crate::studio::rename_field_at(ui, typed, font, TEXT, ACCENT, pos2(name_left, y), name_right);
+                let font = if chosen { semibold(13.0) } else { FontId::proportional(13.0) };
+                let look = crate::studio::Lettering::plain(font, TEXT);
+                let field = crate::studio::rename_field_at(ui, typed, &look, pos2(name_left, y), name_right);
                 if !field.has_focus() && !field.lost_focus() {
                     field.request_focus();
                 }
@@ -2573,5 +2562,45 @@ mod tests {
         assert_eq!(state.audio_request.take(), Some(AudioRequest::Volume(0.0)));
         click(&ctx, &show, &mut state, egui::Id::unique("audio mute"), vec2(0.0, 0.0));
         assert_eq!(state.audio_request.take(), Some(AudioRequest::Volume(0.8)));
+    }
+
+    #[test]
+    fn a_card_or_track_renamed_in_place_keeps_its_name_where_and_as_it_was_and_its_height() {
+        use crate::studio::tests::{drawn, key, letters, same_letters, styled};
+        let ctx = styled();
+        let show = show();
+        let mut state = HomeState::default();
+        state.messages.push(Message::new("Notice for parents".to_owned()));
+        state.props.push(crate::props::Prop::new("Logo".to_owned()));
+        state.macros.push(crate::macros::Macro::new("Start the service".to_owned()));
+        let track = tracks(&mut state, &["Prelude"])[0];
+        let ids = [state.messages[0].id, state.props[0].id, state.macros[0].id, track];
+        let places = [("message card", 1), ("prop card", 2), ("macro card", 3), ("audio track", 5)];
+        let names = ["Notice for parents", "Logo", "Start the service", "Prelude"];
+        for (((place, tab), id), words) in places.into_iter().zip(ids).zip(names) {
+            state.live_tab = tab;
+            let drawn_tab = |state: &mut HomeState, events: Vec<Event>| {
+                drawn(&ctx, events, |ui| live_tabs(ui, &show, state, &mut |_| None))
+            };
+            let card = || ctx.read_response(egui::Id::unique((place, id))).expect("drawn").rect;
+            let before = letters(drawn_tab(&mut state, vec![]), words);
+            let was = card();
+            let renaming = (id, words.to_owned());
+            match tab {
+                1 => state.message_rename = Some(renaming),
+                2 => state.prop_rename = Some(renaming),
+                3 => state.macro_rename = Some(renaming),
+                _ => ctx.data_mut(|data| {
+                    data.insert_temp(egui::Id::unique("audio track renaming"), renaming);
+                }),
+            }
+            state.rename_started = true;
+            drawn_tab(&mut state, vec![]).drop_without_applying_deltas();
+            same_letters(&before, &letters(drawn_tab(&mut state, vec![]), words), place);
+            assert_eq!(card(), was, "{place}: as tall, in the same place");
+            drawn_tab(&mut state, vec![key(egui::Key::Escape)]).drop_without_applying_deltas();
+            let left = state.message_rename.is_none() && state.prop_rename.is_none() && state.macro_rename.is_none();
+            assert!(left, "{place}: Escape ends it");
+        }
     }
 }

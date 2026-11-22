@@ -6977,6 +6977,68 @@ impl App {
                     _ => inspector::InspectorTab::Text,
                 };
             }
+            // Testing aid: SOFTPRESENTER_RENAME=WHAT starts retyping a name where it is shown, as
+            // a double click on it does, for a picture of it being retyped beside one without:
+            // playlist, library, song (the one chosen), header, theme and template (in the
+            // Theme Editor), stage-layout, group and object (in the slide editor), message,
+            // prop or macro; the first of each, or the one open.
+            if running.frames == GO_LIVE_AT + 8
+                && let Ok(what) = std::env::var("SOFTPRESENTER_RENAME")
+            {
+                let state = &mut running.home_state;
+                state.rename_started = true;
+                let first = |names: Vec<(sp_model::Uuid, String)>| names.into_iter().next();
+                match what.as_str() {
+                    "playlist" => {
+                        state.chooser_open = true;
+                        state.renaming_service = Some(state.services.front().name.clone());
+                    }
+                    "library" => {
+                        state.chooser_open = true;
+                        state.renaming_library =
+                            first(state.libraries.iter().map(|l| (l.id, l.name.clone())).collect());
+                    }
+                    "song" => {
+                        state.renaming_song =
+                            self.show.presentations().get(self.show.selected()).map(|s| s.title.clone());
+                    }
+                    "header" => {
+                        let items = &state.services.front().items;
+                        let at = items.iter().position(|item| matches!(item, service::Item::Header { .. }));
+                        state.renaming_header = at.map(|at| (at, items[at].title().to_owned()));
+                    }
+                    "theme" => state.renaming_theme = state.theme_edit.as_ref().map(|edit| edit.theme.name.clone()),
+                    "template" => {
+                        let name = state.theme_edit.as_ref().and_then(|edit| edit.theme.templates.first());
+                        state.renaming_template = name.map(|template| (0, template.name.clone()));
+                    }
+                    "stage-layout" => {
+                        state.stage_rename = state.stage_layouts.first().map(|layout| (0, layout.name.clone()));
+                        state.stage_rename_started = true;
+                    }
+                    "group" => {
+                        let song = state
+                            .editing
+                            .as_ref()
+                            .and_then(|draft| self.show.presentations().get(draft.at.presentation));
+                        state.renaming_group =
+                            song.and_then(|song| song.groups.first()).map(|group| (0, group.name.clone()));
+                    }
+                    "object" => {
+                        if let Some(draft) = state.editing.as_mut() {
+                            draft.renaming = draft.slide.objects.last().map(|object| (object.id, object.name.clone()));
+                        }
+                    }
+                    "message" => {
+                        state.message_rename = first(state.messages.iter().map(|m| (m.id, m.name.clone())).collect())
+                    }
+                    "prop" => state.prop_rename = first(state.props.iter().map(|p| (p.id, p.name.clone())).collect()),
+                    "macro" => {
+                        state.macro_rename = first(state.macros.iter().map(|m| (m.id, m.name.clone())).collect())
+                    }
+                    _ => eprintln!("SOFTPRESENTER_RENAME: nothing called \"{what}\" to rename"),
+                }
+            }
             if running.frames >= CAPTURE_AT && waited && !self.capture_done {
                 match capture(gpu, egui_renderer, &jobs, &screen, home_config.format, path) {
                     Ok(()) => println!("saved {}", path.display()),

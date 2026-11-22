@@ -20,6 +20,12 @@ feature changes, this page changes in the same commit.
   out the songs on the way), or the item above or below in a playlist (passing over headers);
   ← → and Space go on moving the slides.
 - Groups (Verse 1, Chorus, Bridge…) with a dot in the group's colour and one-key jumps.
+- **Renaming in place** (a playlist, a library, a song's title, a header or placeholder, a
+  theme, a template, a stage layout, a group, an object, a message, a prop, a macro, an audio
+  playlist or track): the name stays as it was shown, in the same letters and colour on the
+  same spot, and is typed into there; only a thin grey edge round it says so, and nothing
+  beside it moves. A name longer than its room scrolls inside it. Return or a click elsewhere
+  keeps it; Escape puts the old name back.
 - **Songs changed outside the app** (in a text editor, by a script or an agent) come in when the
   song is next opened: chosen in the list or a playlist, opened in the editor, or named in an
   `sp` command. The app never saves over a song or theme file changed since it read it: a bar

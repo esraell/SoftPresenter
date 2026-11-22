@@ -657,45 +657,102 @@ fn load_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-/// A field for renaming something in place. It keeps the look of the text it stands in for
-/// (same font, same colour, no filled box) and adds only a thin outline, so the words stay
-/// where they were and it is plain that they can now be typed over.
-fn rename_field<'t>(text: &'t mut String, font: FontId, ink: Color32, outline: Color32) -> egui::TextEdit<'t> {
-    egui::TextEdit::singleline(text)
-        .font(font)
-        .text_color(ink)
-        .background_color(Color32::TRANSPARENT)
-        .min_size(egui::Vec2::ZERO)
-        .frame(
-            Frame::new().stroke(Stroke::new(1.0, outline)).corner_radius(4).inner_margin(egui::Margin::symmetric(4, 0)),
-        )
+/// How a line of words is set where it is shown: its face (the heavier cut, or the fixed-width
+/// face, where it uses them), its colour, the room added between its letters (as [`spaced`]
+/// adds it) and whether it is shown in capitals (as [`cap`] shows it). A field that retypes the
+/// words sets them the same way.
+#[derive(Clone)]
+pub struct Lettering {
+    pub font: FontId,
+    pub ink: Color32,
+    pub spacing: f32,
+    pub capitals: bool,
 }
 
-/// Puts a field for retyping a name exactly over the name, so nothing around it moves. `start`
-/// is where the name's text begins, at the middle of its line; the field's text begins there
-/// too, the field is one line of the font tall, and it reaches `right`. It takes no room in
-/// the layout.
+impl Lettering {
+    /// Words in a face and a colour, nothing more.
+    pub fn plain(font: FontId, ink: Color32) -> Lettering {
+        Lettering { font, ink, spacing: 0.0, capitals: false }
+    }
+
+    /// Words set as [`cap`] sets them.
+    pub fn cap(ink: Color32) -> Lettering {
+        Lettering { font: fixed_semibold(11.5), ink, spacing: 0.6, capitals: true }
+    }
+
+    /// The words on one line, as they are shown. In capitals each letter stands for one letter
+    /// typed (a letter whose capital is two, such as ß, stays as it is), so the cursor keeps
+    /// its place.
+    fn lay_out(&self, ui: &egui::Ui, words: &str) -> Arc<egui::Galley> {
+        let shown = if self.capitals {
+            words
+                .chars()
+                .map(|letter| {
+                    let mut capital = letter.to_uppercase();
+                    match (capital.next(), capital.next()) {
+                        (Some(one), None) => one,
+                        _ => letter,
+                    }
+                })
+                .collect()
+        } else {
+            words.to_owned()
+        };
+        let format = egui::TextFormat {
+            font_id: self.font.clone(),
+            color: self.ink,
+            extra_letter_spacing: self.spacing,
+            ..Default::default()
+        };
+        let mut job = egui::text::LayoutJob::single_section(shown, format);
+        job.break_on_newline = false;
+        // A space typed at the end is shown, so the cursor moves when one is typed.
+        job.keep_trailing_whitespace = true;
+        ui.fonts_mut(|fonts| fonts.layout_job(job))
+    }
+}
+
+/// Retypes a name where it is shown. The words stay as they were drawn, set as `look` says, on
+/// the same pixels: no box, no other padding; only the thin inner edge a field has while it
+/// takes the keyboard, drawn round them, and the lighter grey of a selection. `start` is where
+/// the words begin, at the middle of their line; the field reaches `right`, and words longer
+/// than that scroll inside it. It takes no room in the layout, so nothing around it moves.
 pub fn rename_field_at(
     ui: &mut egui::Ui,
     text: &mut String,
-    font: FontId,
-    ink: Color32,
-    outline: Color32,
+    look: &Lettering,
     start: egui::Pos2,
     right: f32,
 ) -> egui::Response {
-    let height = ui.fonts_mut(|fonts| fonts.row_height(&font)) + 2.0;
-    // The field's frame is a line of 1 and a margin of 4, so its text lines up with the name's.
-    let rect = Rect::from_min_max(
-        egui::pos2(start.x - 5.0, start.y - height / 2.0),
-        egui::pos2(right.max(start.x + 40.0), start.y + height / 2.0),
-    );
-    let mut child = ui.new_child(
-        egui::UiBuilder::new().max_rect(rect).layout(Layout::centered_and_justified(egui::Direction::TopDown)),
-    );
-    // The theme gives fields a least height taller than a line of text; not here.
+    // As tall as the words laid out (which the name drawn is centred on), and at least a line
+    // of the face, as a field is; the words are centred in it, so they stay where they were.
+    let line = ui.fonts_mut(|fonts| fonts.row_height(&look.font));
+    let height = look.lay_out(ui, text).size().y.max(line);
+    let words =
+        Rect::from_min_max(pos2(start.x, start.y - height / 2.0), pos2(right.max(start.x), start.y + height / 2.0));
+    // The edge goes round the words, in room of its own outside them.
+    let frame = Frame::new()
+        .inner_margin(egui::Margin::symmetric(3, 1))
+        .stroke(Stroke::new(1.5, TEXT_FAINT))
+        .corner_radius(RADIUS as u8);
+    let layout = Layout::left_to_right(Align::Center).with_main_justify(true);
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(words + frame.total_margin()).layout(layout));
+    // The theme gives fields a least height taller than a line of words; not here.
     child.spacing_mut().interact_size = egui::Vec2::ZERO;
-    child.add(rename_field(text, font, ink, outline))
+    // The cursor in the words' own colour, not the toolkit's blue; a selection the lighter grey
+    // wherever the field is.
+    child.visuals_mut().text_cursor.stroke.color = look.ink;
+    child.visuals_mut().selection.bg_fill = SELECTED;
+    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, _wrap: f32| look.lay_out(ui, text.as_str());
+    child.add(
+        egui::TextEdit::singleline(text)
+            .font(look.font.clone())
+            .frame(frame)
+            .layouter(&mut layouter)
+            .text_color(look.ink)
+            .align(Align2::LEFT_CENTER)
+            .desired_width(f32::INFINITY),
+    )
 }
 
 /// A small heading in capitals, as each section starts with.
@@ -1205,7 +1262,8 @@ const CHOOSER_ROW: f32 = 36.0;
 
 /// A small capital label in the fixed-width face, as sections and strips are headed.
 pub fn cap(ui: &egui::Ui, at: egui::Pos2, anchor: Align2, text: &str, ink: Color32) -> Rect {
-    paint_spaced(ui, at, anchor, &text.to_uppercase(), fixed_semibold(11.5), ink, 0.6)
+    let look = Lettering::cap(ink);
+    paint_spaced(ui, at, anchor, &text.to_uppercase(), look.font, ink, look.spacing)
 }
 
 /// A button that is only its icon: lighter under the pointer, and drawn at `strength` (1 for
@@ -1965,7 +2023,9 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
             .inner;
         crate::file_drop::offer(ui, state, crate::file_drop::Place::onto(response.rect, target.clone()));
         if renaming && let Some(typed) = state.renaming_service.as_mut() {
-            let field = rename_field_at(ui, typed, FontId::proportional(14.0), TEXT, ACCENT, start, right);
+            // Set as the row sets the name.
+            let look = Lettering::plain(if on { semibold(14.0) } else { FontId::proportional(14.0) }, TEXT);
+            let field = rename_field_at(ui, typed, &look, start, right);
             if std::mem::take(&mut state.rename_started) {
                 field.request_focus();
             }
@@ -1977,6 +2037,10 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
                 let typed = typed.clone();
                 state.services.rename(&typed);
                 state.renaming_service = None;
+            }
+            // The row's ⋯ stays where it was.
+            if let Some(place) = more {
+                more_button(ui, place, ui.scope_id().with(("playlist more", index)), false);
             }
             continue;
         }
@@ -2075,7 +2139,9 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
             .inner;
         crate::file_drop::offer_library_row(ui, state, response.rect, Some(id));
         if renaming && let Some((_, typed)) = state.renaming_library.as_mut() {
-            let field = rename_field_at(ui, typed, FontId::proportional(14.0), TEXT, ACCENT, start, right);
+            // Set as the row sets the name.
+            let look = Lettering::plain(if on { semibold(14.0) } else { FontId::proportional(14.0) }, TEXT);
+            let field = rename_field_at(ui, typed, &look, start, right);
             if std::mem::take(&mut state.rename_started) {
                 field.request_focus();
             }
@@ -2092,6 +2158,10 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
                     state.libraries_changed = true;
                 }
                 state.renaming_library = None;
+            }
+            // The row's ⋯ stays where it was.
+            if let Some(place) = more {
+                more_button(ui, place, ui.scope_id().with(("library more", id)), false);
             }
             continue;
         }
@@ -2808,12 +2878,12 @@ pub fn song_menu(
 fn rename_in_row(
     ui: &mut egui::Ui,
     typed: &mut String,
-    font: FontId,
+    look: &Lettering,
     at: egui::Pos2,
     right: f32,
     focus: bool,
 ) -> Option<Option<String>> {
-    let field = rename_field_at(ui, typed, font, TEXT, ACCENT, at, right);
+    let field = rename_field_at(ui, typed, look, at, right);
     if focus {
         field.request_focus();
     }
@@ -3221,7 +3291,8 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 match state.renaming_header.as_mut().filter(|(at, _)| *at == index) {
                     Some((_, typed)) => {
                         let focus = std::mem::take(&mut rename_started);
-                        if let Some(done) = rename_in_row(ui, typed, fixed_semibold(11.5), at, row.max.x - 4.0, focus) {
+                        let look = Lettering::cap(TEXT_DIM);
+                        if let Some(done) = rename_in_row(ui, typed, &look, at, row.max.x - 4.0, focus) {
                             renamed = Some(done.map(|name| (index, name)));
                         }
                     }
@@ -3293,7 +3364,10 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 let row = response.rect;
                 let focus = std::mem::take(&mut rename_started);
                 let at = pos2(row.min.x + 48.0, row.center().y);
-                if let Some(done) = rename_in_row(ui, typed, FontId::proportional(13.5), at, more.min.x - 4.0, focus) {
+                // Faint, as a placeholder's name is, and short of its mark at the right.
+                let look = Lettering::plain(FontId::proportional(13.5), TEXT_FAINT.gamma_multiply(0.7));
+                let right = more.min.x - 10.0 - 14.0 - 8.0;
+                if let Some(done) = rename_in_row(ui, typed, &look, at, right, focus) {
                     renamed = Some(done.map(|name| (index, name)));
                 }
             }
@@ -4918,7 +4992,7 @@ fn media_item_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, item:
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::sync::Arc;
 
     use egui::{Event, Modifiers, PointerButton, RawInput, pos2};
@@ -5203,5 +5277,190 @@ mod tests {
         let frames = vec![vec![press(pos2(100.0, 730.0), false)], vec![]];
         media_frames(&show, &mut state, &frames);
         assert!(state.sweep.is_none(), "letting go ends the box");
+    }
+
+    /// A context set up as the window is, with its fonts and look.
+    pub fn styled() -> egui::Context {
+        let ctx = egui::Context::default();
+        apply_style(&ctx);
+        // The fonts are taken up at the start of the next frame.
+        ctx.run_ui(RawInput::default(), |_| {}).drop_without_applying_deltas();
+        ctx
+    }
+
+    /// Runs one frame in a window 1280 by 800, with these events, and gives what it drew.
+    pub fn drawn(ctx: &egui::Context, events: Vec<Event>, body: impl FnOnce(&mut egui::Ui)) -> egui::FullOutput {
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+            events,
+            ..RawInput::default()
+        };
+        let mut body = Some(body);
+        ctx.run_ui(raw, |ui| {
+            if let Some(body) = body.take() {
+                body(ui);
+            }
+        })
+    }
+
+    /// How a line of words was set, and where each of its letters was drawn: the face, the room
+    /// between letters and the colour, then each letter's place in the window.
+    pub type Letters = ((FontId, f32, Color32), Vec<(char, egui::Pos2)>);
+
+    /// The letters of the line `words` a frame drew.
+    pub fn letters(output: egui::FullOutput, words: &str) -> Letters {
+        fn walk(shape: &egui::Shape, into: &mut Vec<egui::epaint::TextShape>) {
+            match shape {
+                egui::Shape::Text(text) => into.push(text.clone()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let mut texts = Vec::new();
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut texts));
+        output.drop_without_applying_deltas();
+        let text = texts.into_iter().find(|text| text.galley.job.text == words).expect(words);
+        let format = &text.galley.job.sections[0].format;
+        let row = &text.galley.rows[0];
+        let places = row.row.glyphs.iter().map(|glyph| (glyph.chr, text.pos + row.pos.to_vec2() + glyph.pos.to_vec2()));
+        ((format.font_id.clone(), format.extra_letter_spacing, format.color), places.collect())
+    }
+
+    /// Two lines' letters are set the same way, each on the same spot.
+    pub fn same_letters(shown: &Letters, typed: &Letters, what: &str) {
+        assert_eq!(shown.0, typed.0, "{what}: set differently");
+        assert_eq!(shown.1.len(), typed.1.len(), "{what}: other letters");
+        for ((was, at), (now, to)) in shown.1.iter().zip(&typed.1) {
+            assert_eq!(was, now, "{what}");
+            assert!(at.distance(*to) < 0.001, "{what}: {was} moved from {at:?} to {to:?}");
+        }
+    }
+
+    /// A key pressed, with nothing held.
+    pub fn key(key: egui::Key) -> Event {
+        Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }
+    }
+
+    #[test]
+    fn a_name_retyped_in_place_keeps_its_letters_where_and_as_they_were_and_the_room_it_was_given() {
+        let ctx = styled();
+        let start = pos2(40.25, 30.5);
+        let looks = [
+            Lettering::plain(semibold(14.0), TEXT),
+            Lettering::plain(FontId::proportional(13.5), TEXT_DIM),
+            Lettering::plain(fixed(12.0), TEXT_FAINT),
+            Lettering::cap(TEXT_DIM),
+        ];
+        // The last has letters only the wide face has, where the computer has one.
+        let names = ["Sunday Morning", "Evening", "Kids 10:30", "Worship \u{793c}\u{62dd}"];
+        for (look, words) in looks.iter().zip(names) {
+            let shown = if look.capitals { words.to_uppercase() } else { words.to_owned() };
+            let label = drawn(&ctx, vec![], |ui| {
+                if look.capitals {
+                    cap(ui, start, Align2::LEFT_CENTER, words, look.ink);
+                } else {
+                    ui.painter().text(start, Align2::LEFT_CENTER, words, look.font.clone(), look.ink);
+                }
+            });
+            let shown_letters = letters(label, &shown);
+            let mut typed = words.to_owned();
+            let mut place = Rect::NOTHING;
+            let mut field = |ctx: &egui::Context| {
+                drawn(ctx, vec![], |ui| {
+                    let response = rename_field_at(ui, &mut typed, look, start, 300.0);
+                    response.request_focus();
+                    place = response.rect;
+                })
+            };
+            field(&ctx).drop_without_applying_deltas();
+            let typed_letters = letters(field(&ctx), &shown);
+            same_letters(&shown_letters, &typed_letters, words);
+            assert!(ctx.memory(|memory| memory.focused().is_some()), "it has the keyboard");
+            let height = ctx.fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(shown.clone(), look.font.clone(), look.ink)
+                    .size()
+                    .y
+                    .max(fonts.row_height(&look.font))
+            });
+            let room = Rect::from_min_max(pos2(start.x, start.y - height / 2.0), pos2(300.0, start.y + height / 2.0));
+            assert_eq!(place, room.expand2(vec2(4.5, 2.5)), "{words}: the edge goes round the room given");
+        }
+    }
+
+    #[test]
+    fn a_playlist_or_library_renamed_in_the_chooser_stays_put_return_keeps_it_and_escape_puts_it_back() {
+        let ctx = styled();
+        let show = Show::new(Vec::new());
+        let mut state = HomeState { playlist_open: true, ..HomeState::default() };
+        state.services.list[0].name = "Sunday Morning".to_owned();
+        state.libraries.push(crate::libraries::Library::new("Hymns".to_owned()));
+        let library = state.libraries[0].id;
+        let height = std::cell::Cell::new(0.0);
+        let chooser_frame = |state: &mut HomeState, events: Vec<Event>| {
+            drawn(&ctx, events, |ui| {
+                chooser(ui, &show, state, &mut Vec::new());
+                height.set(ui.min_rect().height());
+            })
+        };
+        let playlist = letters(chooser_frame(&mut state, vec![]), "Sunday Morning");
+        let hymns = letters(chooser_frame(&mut state, vec![]), "Hymns");
+        let tall = height.get();
+        // The open playlist's name is set heavier; a library not open, plainly.
+        assert_eq!(playlist.0.0, semibold(14.0));
+        assert_eq!(hymns.0.0, FontId::proportional(14.0));
+        for which in ["playlist", "library"] {
+            let (words, before) = if which == "playlist" { ("Sunday Morning", &playlist) } else { ("Hymns", &hymns) };
+            for (press, kept) in [(egui::Key::Enter, true), (egui::Key::Escape, false)] {
+                if which == "playlist" {
+                    state.renaming_service = Some(words.to_owned());
+                } else {
+                    state.renaming_library = Some((library, words.to_owned()));
+                }
+                state.rename_started = true;
+                chooser_frame(&mut state, vec![]).drop_without_applying_deltas();
+                same_letters(before, &letters(chooser_frame(&mut state, vec![]), words), which);
+                assert_eq!(height.get(), tall, "{which}: the chooser is as tall as it was");
+                chooser_frame(&mut state, vec![Event::Text(" Two".to_owned())]).drop_without_applying_deltas();
+                chooser_frame(&mut state, vec![key(press)]).drop_without_applying_deltas();
+                let name = if which == "playlist" {
+                    state.services.front().name.clone()
+                } else {
+                    state.libraries[0].name.clone()
+                };
+                assert!(state.renaming_service.is_none() && state.renaming_library.is_none(), "{which}: done");
+                assert_eq!(name, if kept { format!("{words} Two") } else { words.to_owned() }, "{which}");
+                // Back as it was, for the next round.
+                state.services.list[0].name = "Sunday Morning".to_owned();
+                state.libraries[0].name = "Hymns".to_owned();
+            }
+        }
+    }
+
+    #[test]
+    fn a_header_or_placeholder_renamed_in_the_playlist_keeps_its_capitals_spacing_and_place() {
+        use crate::service::Item;
+        let ctx = styled();
+        let show = Show::new(Vec::new());
+        let mut state = HomeState { playlist_open: true, ..HomeState::default() };
+        state.services.list[0].items =
+            vec![Item::Header { name: "Worship".to_owned() }, Item::Placeholder { name: "Offering".to_owned() }];
+        let mut commands = Vec::new();
+        let mut items_frame = |state: &mut HomeState, events: Vec<Event>| {
+            drawn(&ctx, events, |ui| playlist_items(ui, &show, state, &mut commands))
+        };
+        let header = letters(items_frame(&mut state, vec![]), "WORSHIP");
+        let placeholder = letters(items_frame(&mut state, vec![]), "Offering");
+        assert_eq!(header.0, (fixed_semibold(11.5), 0.6, TEXT_DIM), "as a small capital label");
+        for (at, words, before) in [(0, "WORSHIP", &header), (1, "Offering", &placeholder)] {
+            let typed = state.services.front().items[at].title().to_owned();
+            state.renaming_header = Some((at, typed));
+            state.rename_started = true;
+            items_frame(&mut state, vec![]).drop_without_applying_deltas();
+            same_letters(before, &letters(items_frame(&mut state, vec![]), words), words);
+            items_frame(&mut state, vec![key(egui::Key::Escape)]).drop_without_applying_deltas();
+            assert!(state.renaming_header.is_none(), "{words}: Escape ends it");
+        }
+        assert_eq!(state.services.front().items[0].title(), "Worship", "Escape keeps the name it had");
     }
 }

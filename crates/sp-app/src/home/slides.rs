@@ -1789,16 +1789,12 @@ fn item_bar(
     let font = semibold(14.0);
     let renaming = state.renaming_song.is_some() && song.is_some_and(|(at, _)| at == show.selected());
     if renaming && let (Some(typed), Some((at, song))) = (state.renaming_song.as_mut(), song) {
-        let wide = painter.layout_no_wrap(typed.clone(), font.clone(), TEXT).size().x;
-        let field = crate::studio::rename_field_at(
-            ui,
-            typed,
-            font,
-            TEXT,
-            crate::studio::ACCENT,
-            pos2(x, middle),
-            (x + wide + TITLE_ROOM).min(right),
-        );
+        // The field takes the room the title had, so the tools after it stay where they were;
+        // a longer title scrolls inside it.
+        let shown = if song.title.is_empty() { "Untitled" } else { song.title.as_str() };
+        let wide = painter.layout_no_wrap(shown.to_owned(), font.clone(), TEXT).size().x;
+        let look = crate::studio::Lettering::plain(font, TEXT);
+        let field = crate::studio::rename_field_at(ui, typed, &look, pos2(x, middle), (x + wide).min(right));
         if std::mem::take(&mut state.rename_started) {
             field.request_focus();
         }
@@ -1812,7 +1808,7 @@ fn item_bar(
             }
             state.renaming_song = None;
         }
-        x += wide + TITLE_ROOM;
+        x += wide;
     } else {
         let ink = if faint { TEXT_FAINT } else { TEXT };
         let words = if title.is_empty() { "Untitled" } else { title };

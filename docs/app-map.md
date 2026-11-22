@@ -289,7 +289,10 @@ how long drawing took.
   listed, in any run, so `sp` can be tried on what it opens and picks), `_FIND_DRAG=WORDS@X,Y`
   (types the words, then drags the first result to X,Y in the window's points and holds it
   there, for a picture of a drag; `WORDS@X,Y,drop` lets go there; for a capture run, as macOS
-  doesn't draw a quiet copy's window kept behind the others).
+  doesn't draw a quiet copy's window kept behind the others), `_RENAME=WHAT` (starts
+  retyping a name where it is shown, as a double click does: `playlist`, `library`, `song`,
+  `header`, `theme`, `template`, `stage-layout`, `group`, `object`, `message`, `prop` or
+  `macro`, for a picture beside one taken without it).
 - A quiet copy never tidies the library (moves unused pictures to the Trash) unless
   `SOFTPRESENTER_SWEEP=DAYS` is set with a data folder of its own; it then tidies as if every file
   were that many days older. `touch -t` can't make a file look old to it: it goes by the newest of

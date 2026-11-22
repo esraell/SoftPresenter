@@ -2333,12 +2333,11 @@ fn edit_view(
                         // The name, or a field in its place while it is being retyped.
                         let being_renamed = draft.renaming.as_ref().is_some_and(|(id, _)| *id == object.id);
                         if being_renamed && let Some((_, name)) = draft.renaming.as_mut() {
+                            let look = crate::studio::Lettering::plain(FontId::proportional(13.0), ink);
                             let field = crate::studio::rename_field_at(
                                 ui,
                                 name,
-                                FontId::proportional(13.0),
-                                crate::studio::TEXT,
-                                crate::studio::ACCENT,
+                                &look,
                                 row.left_center() + vec2(32.0, 0.0),
                                 row.max.x - 46.0,
                             );
@@ -2569,12 +2568,11 @@ fn edit_view(
                     );
                     let being_renamed = state.renaming_template.as_ref().is_some_and(|(which, _)| *which == template);
                     if being_renamed && let Some((_, typed)) = state.renaming_template.as_mut() {
+                        let look = crate::studio::Lettering::plain(FontId::proportional(11.5), ink);
                         let field = crate::studio::rename_field_at(
                             ui,
                             typed,
-                            FontId::proportional(11.5),
-                            ink,
-                            ink,
+                            &look,
                             pos2(number.max.x + 6.0, image.max.y + 10.0),
                             name_area.max.x,
                         );
@@ -2749,12 +2747,11 @@ fn edit_view(
                     // The group's name; a click turns it into a field to retype it.
                     let renaming = state.renaming_group.as_ref().is_some_and(|(at, _)| *at == group_index);
                     if renaming && let Some((_, typed)) = state.renaming_group.as_mut() {
+                        let look = crate::studio::Lettering::plain(FontId::proportional(12.5), ink);
                         let field = crate::studio::rename_field_at(
                             ui,
                             typed,
-                            FontId::proportional(12.5),
-                            ink,
-                            ink,
+                            &look,
                             bar.left_center() + vec2(18.0, 0.0),
                             bar.max.x - 4.0,
                         );
@@ -4400,9 +4397,6 @@ pub fn end_search(ctx: &egui::Context, state: &mut HomeState) {
 /// The key that adds each shape in the editor, in the order of `Shape::ALL`.
 pub const SHAPE_KEYS: [char; 10] = ['O', 'R', 'E', 'G', 'L', 'H', 'P', 'S', 'D', 'A'];
 
-/// Room after a song's title, for the field it turns into when renamed to fit in.
-const TITLE_ROOM: f32 = 12.0;
-
 /// The Settings window's panes, in order (`preferences_pane` is a place in it).
 pub const PANES: [&str; 5] = ["General", "Screens", "Groups", "Key Mappings", "Integrations"];
 
@@ -5292,12 +5286,12 @@ fn theme_list(ui: &mut egui::Ui, state: &mut HomeState) {
                     let name_area =
                         Rect::from_min_max(pos2(row.min.x + 6.0, row.min.y + 3.0), pos2(right - 2.0, row.max.y - 3.0));
                     if open && let Some(typed) = state.renaming_theme.as_mut() {
+                        // The open theme's name is white.
+                        let look = crate::studio::Lettering::plain(FontId::proportional(13.5), Color32::WHITE);
                         let field = crate::studio::rename_field_at(
                             ui,
                             typed,
-                            FontId::proportional(13.5),
-                            TEXT,
-                            ACCENT,
+                            &look,
                             pos2(row.min.x + 10.0, row.center().y),
                             name_area.max.x,
                         );
