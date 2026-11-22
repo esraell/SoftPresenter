@@ -8681,6 +8681,86 @@ mod tests {
         assert_eq!(state.prefs().bible_books, "keypad");
     }
 
+    /// What one frame of the window draws: each rectangle (where, its fill, its outline) and
+    /// each run of words (and the size of its letters). The app carries out the frame after.
+    type Painted = (Vec<(Rect, Color32, Stroke)>, Vec<(String, f32)>);
+    fn drawn_frame(ctx: &egui::Context, show: &mut Show, state: &mut HomeState, time: f64) -> Painted {
+        fn walk(shape: &egui::Shape, drawn: &mut Painted) {
+            match shape {
+                egui::Shape::Rect(rect) => drawn.0.push((rect.rect, rect.fill, rect.stroke)),
+                egui::Shape::Text(text) => {
+                    let size = text.galley.job.sections.first().map_or(0.0, |section| section.format.font_id.size);
+                    drawn.1.push((text.galley.text().to_owned(), size));
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, drawn)),
+                _ => {}
+            }
+        }
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+            time: Some(time),
+            ..RawInput::default()
+        };
+        let mut commands = Vec::new();
+        let output = ctx.run_ui(raw, |ui| {
+            commands.extend(home_ui(ui, show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None));
+        });
+        let mut drawn = (Vec::new(), Vec::new());
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut drawn));
+        output.drop_without_applying_deltas();
+        as_the_app_does(show, state, commands);
+        drawn
+    }
+
+    #[test]
+    fn the_book_open_is_lit_as_every_choice_that_is_on_and_the_lists_headings_are_11_points() {
+        use crate::studio::{SELECTED, paint_flat};
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { bible_open: true, ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        let psalms = sp_bible::BOOKS.iter().position(|book| book.code == "PSA").unwrap();
+        state.bible.list_book = psalms;
+        drawn_frame(&ctx, &mut show, &mut state, 0.0);
+        let (rects, _) = drawn_frame(&ctx, &mut show, &mut state, 0.05);
+        // The chosen key is drawn as a flat button that is on: the same fill and inner edge.
+        let key = ctx.read_response(crate::bible::list_row_id(("book", psalms))).expect("the key").rect;
+        let on = {
+            let shapes = egui::Context::default();
+            let mut drawn = Vec::new();
+            let output = shapes.run_ui(RawInput::default(), |ui| {
+                paint_flat(ui.painter(), key, 6.0, crate::studio::Flat::On, false);
+            });
+            for clipped in &output.shapes {
+                if let egui::Shape::Rect(rect) = &clipped.shape {
+                    drawn.push((rect.rect, rect.fill, rect.stroke));
+                }
+            }
+            output.drop_without_applying_deltas();
+            drawn
+        };
+        assert!(on.iter().any(|(_, fill, _)| *fill == SELECTED));
+        for look in &on {
+            assert!(
+                rects.contains(look),
+                "the chosen key has {look:?}: {:?}",
+                rects.iter().filter(|r| r.0 == key).collect::<Vec<_>>()
+            );
+        }
+        // Another key keeps the button grey.
+        let genesis = ctx.read_response(crate::bible::list_row_id(("book", 0usize))).expect("Genesis").rect;
+        assert!(rects.iter().any(|(rect, fill, _)| *rect == genesis && *fill == crate::studio::BUTTON));
+        assert!(!rects.iter().any(|(rect, fill, _)| *rect == genesis && *fill == SELECTED));
+        // In the lists, the testaments (and Ch and Verse) are named at 11 points.
+        state.bible.books = BookPicker::Lists;
+        drawn_frame(&ctx, &mut show, &mut state, 0.1);
+        let (_, texts) = drawn_frame(&ctx, &mut show, &mut state, 0.15);
+        for heading in ["OLD TESTAMENT", "CH", "VERSE"] {
+            let size = texts.iter().find(|(text, _)| text == heading).map(|(_, size)| *size);
+            assert_eq!(size, Some(11.0), "{heading}");
+        }
+    }
+
     #[test]
     fn every_books_key_is_short_and_its_own_in_each_language() {
         for language in ["en", "ru", "uk"] {

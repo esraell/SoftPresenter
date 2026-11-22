@@ -610,7 +610,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   keys, every one a click away, named short in the operator's language (`Gen`, `Exo`…; `Быт`,
   `Исх`…; `Бут`, `Вих`…; the whole name on hover), a little room between the Testaments, those
   the first translation lacks darker; under them the chapters of the book open, then the verses
-  of the chapter open ("⇧ for a passage"); the column scrolls. The **lists**: book, chapter and
+  of the chapter open ("⇧ for a passage"); the column scrolls. The book and chapter open, and
+  the verses of the passage, are lit in the lighter grey every choice that is on has, with its
+  faint inner edge. The **lists**: book, chapter and
   verse side by side, each scrolling on its own and opened on what is chosen, the books named in
   full under Old Testament and New Testament (a long name ends in an ellipsis), the chosen row a
   well with a faint ring. Both do the same: a click on a book loads its first chapter; a click on

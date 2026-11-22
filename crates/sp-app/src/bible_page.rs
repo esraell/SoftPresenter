@@ -243,9 +243,10 @@ fn one_line(ui: &egui::Ui, text: &str, font: FontId, ink: Color32, width: f32) -
     ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
-/// A small heading in the lists: "Old Testament", "Ch".
+/// A small heading in the lists: "Old Testament", "Ch". 11 points, the smallest the design
+/// sets words in.
 fn list_heading(ui: &egui::Ui, at: egui::Pos2, anchor: Align2, text: &str) {
-    crate::studio::paint_spaced(ui, at, anchor, &text.to_uppercase(), fixed_semibold(10.5), TEXT_FAINT, 0.8);
+    crate::studio::paint_spaced(ui, at, anchor, &text.to_uppercase(), fixed_semibold(11.0), TEXT_FAINT, 0.8);
 }
 
 /// The book, chapter and verse lists, side by side and each scrolling on its own, opened on
@@ -402,23 +403,24 @@ const KEY_HEIGHT: f32 = 30.0;
 const KEY_GAP: f32 = 4.0;
 
 /// How a key of the keypad is drawn: the button grey with its words in ink when the Bible has
-/// what it stands for, darker with faint words when not; the one chosen keeps the grey and gets
-/// a faint inner edge.
+/// what it stands for, darker with faint words when not; the one chosen in the lighter grey of
+/// every choice that is on, with its faint inner edge.
 fn key(ui: &egui::Ui, id: egui::Id, rect: Rect, text: &str, has: bool, chosen: bool) -> egui::Response {
     let response = ui.interact(rect, id, Sense::click());
     let painter = ui.painter();
     let down = response.is_pointer_button_down_on();
     // Pressed, it gives a little, as a flat key does.
     let face = if down { rect.shrink(0.6) } else { rect };
-    let fill = match (has, response.hovered()) {
-        (true, true) => BUTTON_HOVER,
-        (true, false) => BUTTON,
-        (false, true) => BUTTON,
-        (false, false) => ROW_HOVER,
-    };
-    painter.rect_filled(face, 6.0, fill);
     if chosen {
-        painter.rect_stroke(face, 6.0, Stroke::new(1.0, Color32::from_white_alpha(36)), StrokeKind::Inside);
+        crate::studio::paint_flat(painter, face, 6.0, Flat::On, response.hovered());
+    } else {
+        let fill = match (has, response.hovered()) {
+            (true, true) => BUTTON_HOVER,
+            (true, false) => BUTTON,
+            (false, true) => BUTTON,
+            (false, false) => ROW_HOVER,
+        };
+        painter.rect_filled(face, 6.0, fill);
     }
     let ink = if has || response.hovered() { TEXT } else { TEXT_FAINT };
     painter.text(face.center(), Align2::CENTER_CENTER, text, fixed_semibold(11.0), ink);
