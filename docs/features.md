@@ -412,10 +412,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   optional time to clear themselves. Each is a card with a small picture of it, its name, Show
   or Hide (the card is tinted orange while it shows), and ⋯ with Edit in the Editor (a
   double-click does the same), Clears Itself, Rename, Duplicate and Delete. The Props key (off
-  a Mac, F4 too) takes them all off. In the Edit view, under Props, they are also made (Add), copied, moved up
-  and down and deleted; a prop's right-click menu there has Clears Itself, Rename, Duplicate
-  and Delete…, and the strip under the picture of one that shows is orange. With the last prop
-  deleted there, the Edit view goes on to the slides.
+  a Mac, F4 too) takes them all off. In the Edit view, under Props, they are also made (Add), copied
+  (Duplicate), moved (↑ and ↓, or dragged) and deleted; a prop's right-click menu there has
+  Clears Itself, Rename, Duplicate and Delete…, and the strip under the picture of one that
+  shows is orange. With no props, Edit › Props shows the list empty, with Add to make the
+  first; with the last prop deleted there, the list stays, empty.
 - **Macros**: steps done in turn, which clear layers (all, or the slide, the media, the props,
   the message, the audio or the announcements alone), show or hide messages and props, start,
   stop or reset timers, switch the audience screens, go to songs, show a picture from the
@@ -521,12 +522,16 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   column: a song's Slides, the Themes and their templates, the Props, and the Stage screens'
   layouts. View › Themes, Control-T and `sp view themes` open
   it on the themes. Under Slides, Props and Stage the left column lists them the same way: a
-  heading (SLIDES, PROPS, STAGE LAYOUTS), a row of keys that act on the one open (Add, Copy,
-  Delete, which asks first, and ↑ and ↓ to move it up or down the list), then each as its
-  picture with its number and name under it, the one open on a lighter grey with a ring round
-  it. A click opens one, a double click retypes its name in place (the name keeps its look
-  while it is retyped), and a right-click opens its other choices; the objects of the one open
-  stay at the foot of the column. Under Slides, a SONG heading comes first, over the songs to
+  heading (SLIDES, PROPS, STAGE LAYOUTS), a row of keys that act on the one open (Add,
+  Duplicate, Delete, which asks first, and ↑ and ↓ to move it up or down the list), then each
+  as its picture with its number and name under it, the one open on a lighter grey with a ring
+  round it. A click opens one, a double click retypes its name in place (the name keeps its
+  look while it is retyped), a drag moves it to where the ink line is (the one open stays
+  open), and a right-click opens its other choices; the objects of the one open stay at the
+  foot of the column. Delete with nothing picked on the canvas is the list's Delete key: it
+  acts on the slides picked out (or the one open), the prop, the stage layout or the template
+  open. Templates and themes are dragged to another place the same way (the built-in theme
+  stays first, and the themes' order is kept for the next start). Under Slides, a SONG heading comes first, over the songs to
   choose from as plain rows with a song's mark (those of the playlist the Show view lists, or
   of the library it lists, and the song open), the open one lighter; a long list scrolls in
   its own room.
@@ -567,7 +572,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   name, running or not), the clock on a 12- or 24-hour clock and with or without seconds, how
   many lines of the notes. An item can be on a layout more than once. The layouts are listed on
   the left, each as a live picture of what the stage would show in it now (drawn again only
-  when that changes, as in the Stage tab), under Add, Copy, Delete, ↑ and ↓; a right-click on
+  when that changes, as in the Stage tab), under Add, Duplicate, Delete, ↑ and ↓; a right-click on
   one offers Rename, Duplicate and Delete…, and a double click renames it. Delete asks first,
   and is not offered for the only layout. With nothing picked the inspector names the layout
   and the stage screens that use it. A layout saved by an earlier version opens and looks as it did,
@@ -795,7 +800,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   open has a ring round it, the one on screen an orange strip, slides picked out a faint ring,
   and a slide switched off is dimmed. The keys over them act on the slides picked out, or the
   one open: Add puts a new slide just after the one open, laid out like it with its boxes
-  empty, and opens it; Copy puts copies just after the last of them and opens the first copy;
+  empty, and opens it; Duplicate puts copies just after the last of them and opens the first copy;
   Delete asks first (it is off when it would take every slide), and the slide after a deleted
   one opens in its place; ↑ and ↓ move them one place, into the group they move into. A
   double click on a slide, or Rename Group on its right-click menu, retypes its group's name
@@ -907,7 +912,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     copies of which templates it starts from (the song templates, the Bible template); the
     first copy opens on the canvas. With a version picked, a line says it is used while that
     version is on, with ⋯ for Rename… (in every theme), Add a Copy Of ▸ and Remove It From the
-    theme (which asks). Add, Copy, Delete, ↑ and ↓ act on the templates shown; each is a picture
+    theme (which asks). Add, Duplicate, Delete, ↑ and ↓ act on the templates shown; each is a picture
     with a strip (its number, name and what it is for: Songs, Bible, Songs and Bible, or By
     hand), and a right-click has Used For, Rename…, Duplicate and Delete…. The canvas is titled
     with the theme, the version and the template.

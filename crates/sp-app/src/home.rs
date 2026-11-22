@@ -525,6 +525,9 @@ pub struct HomeState {
     /// object to pick when it opens (its place in the Objects list, front first).
     pub stage_editor_open: bool,
     pub stage_edit: (usize, Option<usize>),
+    /// True while Edit › Props is open with no props yet: its list shows, empty, with Add.
+    /// With a prop, the prop open is a draft in `editing` instead.
+    pub props_editor_open: bool,
     /// A stage layout being renamed in the list, with its name so far, and whether that has
     /// only just begun (so its field takes the keyboard once).
     pub stage_rename: Option<(usize, String)>,
@@ -1650,6 +1653,9 @@ pub enum ThemeRequest {
     Edit(usize),
     /// Delete the theme at this place in the list, for good.
     Delete(usize),
+    /// Move the theme at a place in the list to another (never the built-in theme, which stays
+    /// first).
+    Move(usize, usize),
 }
 
 /// The picture of the audience screen for the Program panel: what is there now, what was
@@ -1855,6 +1861,7 @@ impl Default for HomeState {
             stage_layouts_changed: false,
             stage_editor_open: false,
             stage_edit: (0, None),
+            props_editor_open: false,
             stage_rename: None,
             stage_rename_started: false,
             confirm_delete_layout: None,
@@ -1908,6 +1915,8 @@ impl HomeState {
                 crate::stage::STAGE_SLOT => EditKind::Stage,
                 _ => EditKind::Slides,
             })
+        } else if self.props_editor_open {
+            Some(EditKind::Props)
         } else {
             self.stage_editor_open.then_some(EditKind::Stage)
         }
@@ -2350,6 +2359,10 @@ pub fn home_ui(
         edit_view(ui, show, state, theme, thumb, canvas, preview, &mut commands);
         return commands;
     }
+    if state.props_editor_open && state.theme_edit.is_none() {
+        empty_props_view(ui, show, state, preview, &mut commands);
+        return commands;
+    }
     // In the Bible view the left column holds the books and the history instead (none when
     // they are put away).
     if !state.bible_open {
@@ -2396,6 +2409,50 @@ fn release_focus(ctx: &egui::Context) {
             }
         });
     }
+}
+
+/// Edit › Props with no props yet: the props' list, empty, with its Add key, which makes the
+/// first and opens it; the right column with nothing to inspect under Clear All, and a word in
+/// the middle on what a prop is.
+fn empty_props_view(
+    ui: &mut egui::Ui,
+    show: &Show,
+    state: &mut HomeState,
+    preview: Preview,
+    commands: &mut Vec<Command>,
+) {
+    use crate::studio::Column;
+    let left = egui::Panel::left("edit slides")
+        .resizable(false)
+        .show_separator_line(false)
+        .exact_size(crate::studio::column_outer(crate::studio::LEFT_WIDTH))
+        .frame(crate::studio::column_frame(Column::Left));
+    let left = left.show(ui, |ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        crate::studio::edit_kinds(ui, state);
+        if let Some(ask) = prop_list_head(ui, state, false) {
+            apply_prop_ask(state, ask);
+        }
+        Frame::new().inner_margin(egui::Margin::symmetric(18, 6)).show(ui, |ui| {
+            ui.label(egui::RichText::new("No props yet. Add makes one.").size(12.0).color(DIM));
+        });
+    });
+    crate::studio::round_corners(ui, crate::studio::column_panel(left.response.rect, Column::Left));
+    // Nothing to inspect yet: the column ends at Clear All.
+    crate::studio::right_column(ui, show, state, preview, commands, |_, _| {});
+    let middle = crate::studio::column_panel(ui.available_rect_before_wrap(), Column::Middle);
+    let surround = panel_frame(EDIT_SURROUND, 0).outer_margin(crate::studio::column_margin(Column::Middle));
+    egui::CentralPanel::default().frame(surround).show(ui, |ui| {
+        let room = ui.max_rect();
+        ui.painter().text(
+            room.center(),
+            Align2::CENTER_CENTER,
+            "A prop stays over the slides until it is taken off, such as a name in a corner.",
+            FontId::proportional(13.0),
+            DIM,
+        );
+    });
+    crate::studio::round_corners(ui, middle);
 }
 
 const EDIT_PANEL: Color32 = crate::studio::PANEL;
@@ -2713,15 +2770,18 @@ fn edit_view(
         }
     }
 
-    // Delete with no box selected, in the Theme Editor, is for the template itself.
-    let delete_template_key = delete
-        && theme_mode
+    // Delete with nothing picked on the canvas is the Delete key of the list on the left, for
+    // the one open there (or the slides picked out): a template, a prop, a stage layout, slides.
+    let renaming = state.renaming_template.is_some()
+        || state.prop_rename.is_some()
+        || state.stage_rename.is_some()
+        || state.renaming_group.is_some();
+    let list_delete = delete
         && !delete_theme
         && !had_selection
         && state.editing.as_ref().is_some_and(|draft| draft.selected.is_none())
-        && state.renaming_template.is_none()
-        && state.confirm_delete_template.is_none()
-        && state.confirm_delete_theme.is_none();
+        && !renaming
+        && !state.alert_open();
     // Left: the slide navigator, with the slide's objects below it.
     let mut chosen = None;
     // With no object selected and nothing being typed, ↑ and ↓ open the slide before or after.
@@ -2765,13 +2825,13 @@ fn edit_view(
         // (for slides, the songs above them); their pictures fill the room between these and
         // the Objects shelf, further down.
         if theme_mode {
-            theme_column(ui, state);
+            theme_column(ui, state, list_delete);
         } else if prop_mode {
-            prop_ask = prop_list_head(ui, state);
+            prop_ask = prop_list_head(ui, state, list_delete);
         } else if stage_mode {
-            stage_request = crate::stage_editor::list_head(ui, state);
+            stage_request = crate::stage_editor::list_head(ui, state, list_delete);
         } else if presentation.is_some()
-            && let Some(open) = slide_list_head(ui, show, state, at)
+            && let Some(open) = slide_list_head(ui, show, state, at, list_delete)
         {
             chosen = Some(open);
         }
@@ -3029,7 +3089,7 @@ fn edit_view(
         );
 
         if state.theme_edit.is_some() {
-            chosen_template = template_pictures(ui, state, thumb, canvas, delete_template_key);
+            chosen_template = template_pictures(ui, state, thumb, canvas);
         } else if prop_mode {
             prop_ask = prop_ask.or(prop_list(ui, state, thumb));
         } else if stage_mode {
@@ -3684,9 +3744,16 @@ fn slides_to_act_on(state: &HomeState, at: SlideRef) -> Vec<usize> {
 
 /// The top of the slides' part of the Edit view's left column: the songs to choose from under
 /// their heading, then the slides' heading and the keys that act on the slides picked out (or
-/// the one open): Add (a slide after the one open), Copy, Delete (which asks first), ↑ and ↓.
-/// Returns the song to open, when another one is clicked.
-fn slide_list_head(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, at: SlideRef) -> Option<SlideRef> {
+/// the one open): Add (a slide after the one open), Duplicate, Delete (which asks first), ↑ and
+/// ↓. `delete` is the Delete key pressed with nothing picked on the canvas, which is the Delete
+/// key here. Returns the song to open, when another one is clicked.
+fn slide_list_head(
+    ui: &mut egui::Ui,
+    show: &Show,
+    state: &mut HomeState,
+    at: SlideRef,
+    delete: bool,
+) -> Option<SlideRef> {
     use crate::studio::PLAIN_ROW;
     let songs = songs_to_edit(show, state, at.presentation);
     let mut open = None;
@@ -3737,7 +3804,7 @@ fn slide_list_head(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, at: Sl
             if several { "Move the slides picked out up one place" } else { "Move this slide up one place" },
             if several { "Move the slides picked out down one place" } else { "Move this slide down one place" },
         ];
-        if let Some(key) = crate::studio::list_keys(ui, "slide keys", can, hints) {
+        if let Some(key) = crate::studio::list_keys(ui, "slide keys", can, hints).or(list_delete_key(delete, can)) {
             act_on_slides(show, state, at, &these, key);
         }
     });
@@ -3982,30 +4049,16 @@ fn slide_list(
                 Some(held) => vec![held],
                 None => Vec::new(),
             };
-            // The list is the pictures and the room either side of them, to the column's edges,
-            // as much of it as shows (not the keys above it or the objects under it).
-            let across = rows.first().map(|row| row.x_range().expand(10.0));
-            let down = ui.clip_rect().y_range();
-            let pointer = ui
-                .input(|input| input.pointer.interact_pos())
-                .filter(|pointer| across.is_some_and(|across| across.contains(pointer.x)) && down.contains(pointer.y));
-            if dragging.is_some() {
-                if let Some(pointer) = pointer {
-                    let slot = crate::studio::drop_slot(&rows, pointer.y);
-                    crate::studio::paint_rows_moving(ui.painter(), &rows, |at| moving.contains(&at), slot, PANEL);
-                }
-                let words = match moving.as_slice() {
-                    [one] => song
-                        .slide(*one)
-                        .map(|(group, slide)| format!("{:02} {}", one + 1, slides::strip_name(group, slide)))
-                        .unwrap_or_default(),
-                    many => format!("{} slides", many.len()),
-                };
-                crate::studio::paint_carried(ui.ctx(), words.trim());
-                scroll_while_dragging(ui);
-            }
-            if let (Some(_), Some(pointer)) = (dropped, pointer)
-                && let Some((to, after)) = slide_drop(&rows, &moving, pointer.y)
+            let words = match moving.as_slice() {
+                _ if dragging.is_none() => String::new(),
+                [one] => song
+                    .slide(*one)
+                    .map(|(group, slide)| format!("{:02} {}", one + 1, slides::strip_name(group, slide)))
+                    .unwrap_or_default(),
+                many => format!("{} slides", many.len()),
+            };
+            if let Some(y) = list_drag(ui, &rows, (dragging, dropped), &moving, &words)
+                && let Some((to, after)) = slide_drop(&rows, &moving, y)
             {
                 state.slide_request = Some((
                     SlideRef { presentation: at.presentation, slide: moving[0] },
@@ -4023,11 +4076,15 @@ fn slide_list(
 enum PropListAsk {
     Open(usize),
     Of(usize, crate::live_tabs::PropAsk),
+    /// The prop at a place dragged to another.
+    Move(usize, usize),
 }
 
 /// The top of the props' part of the Edit view's left column: the heading, and the keys that
-/// act on the prop open (Add, Copy, Delete, which asks first, and ↑ and ↓ to move it).
-fn prop_list_head(ui: &mut egui::Ui, state: &mut HomeState) -> Option<PropListAsk> {
+/// act on the prop open (Add, Duplicate, Delete, which asks first, and ↑ and ↓ to move it).
+/// `delete` is the Delete key pressed with nothing picked on the canvas: the Delete key here.
+/// With no props, only Add can be pressed.
+fn prop_list_head(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) -> Option<PropListAsk> {
     use crate::live_tabs::PropAsk;
     use crate::studio::ListKey;
     let open = state.editing.as_ref().map(|draft| draft.at.slide).filter(|at| *at < state.props.len());
@@ -4049,7 +4106,7 @@ fn prop_list_head(ui: &mut egui::Ui, state: &mut HomeState) -> Option<PropListAs
             "Move this prop up the list",
             "Move this prop down the list",
         ];
-        let pressed = crate::studio::list_keys(ui, "prop keys", can, hints);
+        let pressed = crate::studio::list_keys(ui, "prop keys", can, hints).or(list_delete_key(delete, can));
         asked = match (pressed, open) {
             (Some(ListKey::Add), _) => Some(PropListAsk::Of(open.unwrap_or(0), PropAsk::New)),
             (Some(ListKey::Copy), Some(at)) => Some(PropListAsk::Of(at, PropAsk::Duplicate)),
@@ -4063,8 +4120,9 @@ fn prop_list_head(ui: &mut egui::Ui, state: &mut HomeState) -> Option<PropListAs
 }
 
 /// The props, under their heading and keys: each its picture, with its number and name under
-/// it. A click opens one, a double click retypes its name in place, and a right-click offers
-/// what the Props tab's ⋯ does (but Edit in the Editor). Returns what was asked for.
+/// it. A click opens one, a double click retypes its name in place, a drag moves it to where
+/// the ink line is, and a right-click offers what the Props tab's ⋯ does (but Edit in the
+/// Editor). Returns what was asked for.
 fn prop_list(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut crate::studio::Thumb) -> Option<PropListAsk> {
     use crate::studio::{ListPicture, TEXT};
     let open = state.editing.as_ref().map(|draft| draft.at.slide);
@@ -4076,6 +4134,7 @@ fn prop_list(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut crate::studio
             ui.spacing_mut().item_spacing = vec2(0.0, crate::studio::LIST_BETWEEN);
             let mut renamed: Option<Option<(sp_model::Uuid, String)>> = None;
             let mut rename_started = std::mem::take(&mut state.rename_started);
+            let (mut rows, mut dragging, mut dropped) = (Vec::with_capacity(state.props.len()), None, None);
             for (index, prop) in state.props.iter().enumerate() {
                 let renaming = state.prop_rename.as_ref().is_some_and(|(id, _)| *id == prop.id);
                 let look = ListPicture {
@@ -4087,6 +4146,13 @@ fn prop_list(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut crate::studio
                     renaming,
                 };
                 let (response, places) = crate::studio::list_picture(ui, list, index, &look);
+                rows.push(response.rect);
+                if response.dragged() {
+                    dragging = Some(index);
+                }
+                if crate::studio::drag_let_go(&response) {
+                    dropped = Some(index);
+                }
                 // Only the pictures in sight are drawn, or asked for.
                 if ui.is_rect_visible(places.picture) {
                     crate::live_tabs::prop_picture(ui, thumb, places.picture, crate::studio::LIST_PICTURE_CORNER, prop);
@@ -4118,6 +4184,13 @@ fn prop_list(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut crate::studio
                 }
             }
             state.rename_started = rename_started;
+            let moving: Vec<usize> = dragging.or(dropped).into_iter().collect();
+            let words = dragging.and_then(|at| state.props.get(at)).map(|prop| prop.name.clone()).unwrap_or_default();
+            if let (Some(from), Some(y)) = (dropped, list_drag(ui, &rows, (dragging, dropped), &moving, &words))
+                && let Some(to) = dragged_to(&rows, from, y)
+            {
+                asked = Some(PropListAsk::Move(from, to));
+            }
             match renamed {
                 Some(Some((id, name))) => {
                     if let Some(prop) = state.props.iter_mut().find(|prop| prop.id == id)
@@ -4152,6 +4225,20 @@ fn apply_prop_ask(state: &mut HomeState, ask: PropListAsk) {
         }
         PropListAsk::Of(index, PropAsk::Delete) => {
             state.confirm_delete_prop = state.props.get(index).map(|prop| prop.id);
+            return;
+        }
+        // Dragged to another place: the prop open stays open, in the same draft, wherever it went.
+        PropListAsk::Move(from, to) => {
+            if from < state.props.len() && to < state.props.len() {
+                let prop = state.props.remove(from);
+                state.props.insert(to, prop);
+                state.props_changed = true;
+                if let Some(draft) =
+                    state.editing.as_mut().filter(|draft| draft.at.presentation == crate::props::PROP_SLOT)
+                {
+                    draft.at.slide = place_after_move(draft.at.slide, from, to);
+                }
+            }
             return;
         }
         PropListAsk::Of(index, ask) => (index, ask),
@@ -4203,7 +4290,7 @@ fn delete_prop(state: &mut HomeState, index: usize) {
     }
     if state.props.is_empty() {
         state.editing = None;
-        state.edit_kind_request = Some(EditKind::Slides);
+        state.props_editor_open = true;
         return;
     }
     match open_id.and_then(|id| state.props.iter().position(|prop| prop.id == id)) {
@@ -5882,7 +5969,10 @@ fn unused_name(base: &str, names: &[String]) -> String {
 /// double click renames it, and a right-click has its other choices); then TEMPLATES: a switch
 /// between the usual templates and each version the theme has, + Version, a line about the
 /// version shown with its ⋯, and the row of actions on the templates shown.
-fn theme_column(ui: &mut egui::Ui, state: &mut HomeState) {
+/// The Theme Editor's left column: the themes, then the templates' heading, the switch between
+/// the usual templates and the versions, and the keys over the templates (`delete`: the Delete
+/// key pressed with nothing picked on the canvas, the Delete key there).
+fn theme_column(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) {
     Frame::new().inner_margin(egui::Margin::symmetric(10, 0)).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         if crate::studio::list_heading_with_add(ui, "Theme", "New theme: a copy of the main theme").clicked() {
@@ -5892,11 +5982,12 @@ fn theme_column(ui: &mut egui::Ui, state: &mut HomeState) {
         crate::studio::list_heading(ui, "Templates");
         version_switch(ui, state);
         version_line(ui, state);
-        template_actions(ui, state);
+        template_actions(ui, state, delete);
     });
 }
 
-/// The themes, each a plain row: the theme icon, its name, MAIN on the main one.
+/// The themes, each a plain row: the theme icon, its name, MAIN on the main one. A row is
+/// dragged to another place as slides are; the built-in theme stays first.
 fn theme_rows(ui: &mut egui::Ui, state: &mut HomeState) {
     let editing = state.theme_edit.as_ref().map_or(0, |edit| edit.index);
     let names = state.theme_names.clone();
@@ -5904,6 +5995,7 @@ fn theme_rows(ui: &mut egui::Ui, state: &mut HomeState) {
     let mut renamed: Option<Option<String>> = None;
     egui::ScrollArea::vertical().id_salt("theme list").max_height(150.0).auto_shrink([false, true]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        let (mut rows, mut dragging, mut dropped) = (Vec::with_capacity(names.len()), None, None);
         for (index, name) in names.iter().enumerate() {
             let open = index == editing;
             let renaming = open && state.renaming_theme.is_some();
@@ -5914,7 +6006,16 @@ fn theme_rows(ui: &mut egui::Ui, state: &mut HomeState) {
                 tag: main.then_some("Main"),
                 on: open,
             };
-            let (response, start, right) = crate::studio::plain_row(ui, &look);
+            // The built-in theme, first, stays there.
+            let sense = if index == 0 { Sense::click() } else { Sense::click_and_drag() };
+            let (response, start, right) = crate::studio::plain_row_sensing(ui, &look, sense);
+            rows.push(response.rect);
+            if response.dragged() {
+                dragging = Some(index);
+            }
+            if crate::studio::drag_let_go(&response) {
+                dropped = Some(index);
+            }
             if renaming && let Some(typed) = state.renaming_theme.as_mut() {
                 let look = crate::studio::Lettering::plain(crate::studio::semibold(13.5), crate::studio::TEXT);
                 let field = crate::studio::rename_field_at(ui, typed, &look, start, right);
@@ -5943,6 +6044,13 @@ fn theme_rows(ui: &mut egui::Ui, state: &mut HomeState) {
                 }
             }
             response.context_menu(|ui| theme_row_menu(ui, state, index, &mut start_rename));
+        }
+        let moving: Vec<usize> = dragging.or(dropped).into_iter().collect();
+        let words = dragging.and_then(|at| names.get(at)).cloned().unwrap_or_default();
+        if let (Some(from), Some(y)) = (dropped, list_drag(ui, &rows, (dragging, dropped), &moving, &words))
+            && let Some(to) = dragged_to(&rows, from, y)
+        {
+            state.theme_request = Some(ThemeRequest::Move(from, to.max(1)));
         }
     });
     if let Some(index) = start_rename {
@@ -6145,8 +6253,9 @@ fn version_line(ui: &mut egui::Ui, state: &mut HomeState) {
 }
 
 /// The row of actions on the templates shown: Add (a new one with the open one's main box),
-/// Copy, Delete (asks first), and ↑ and ↓ to move the open one among them.
-fn template_actions(ui: &mut egui::Ui, state: &mut HomeState) {
+/// Duplicate, Delete (asks first; also the Delete key, `delete`), and ↑ and ↓ to move the open
+/// one among them.
+fn template_actions(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) {
     let Some(edit) = state.theme_edit.as_ref() else { return };
     let (count, at, version) = (edit.templates().len(), edit.template, edit.version);
     let can_delete = count > 1 || version.is_some();
@@ -6158,7 +6267,7 @@ fn template_actions(ui: &mut egui::Ui, state: &mut HomeState) {
         "Move the open template up",
         "Move the open template down",
     ];
-    match crate::studio::list_keys(ui, "template keys", enabled, hints) {
+    match crate::studio::list_keys(ui, "template keys", enabled, hints).or(list_delete_key(delete, enabled)) {
         Some(crate::studio::ListKey::Add) => add_template_shown(state, false),
         Some(crate::studio::ListKey::Copy) => add_template_shown(state, true),
         Some(crate::studio::ListKey::Delete) => state.confirm_delete_template = Some(at),
@@ -6207,14 +6316,14 @@ fn move_template_shown(state: &mut HomeState, up: bool) {
 
 /// The templates shown in Edit › Themes, each a picture with a strip (its number, its name and
 /// what it is for), the open one in the chosen grey. A click opens one; a click on the open
-/// one's name, or a double click, renames it; a right-click has Used For, Rename…, Duplicate
-/// and Delete…. Returns the template clicked, to open.
+/// one's name, or a double click, renames it; a drag moves it to where the ink line is; a
+/// right-click has Used For, Rename…, Duplicate and Delete…. Returns the template clicked, to
+/// open.
 fn template_pictures(
     ui: &mut egui::Ui,
     state: &mut HomeState,
     thumb: &mut dyn FnMut(ThumbOf) -> Option<(TextureId, bool)>,
     canvas: Option<TextureId>,
-    delete_key: bool,
 ) -> Option<usize> {
     let edit = state.theme_edit.as_ref()?;
     let shown: Vec<(String, bool, bool, Slide)> =
@@ -6228,11 +6337,13 @@ fn template_pictures(
     let mut start_rename = None;
     let mut renamed: Option<Option<(usize, String)>> = None;
     let mut rename_started = std::mem::take(&mut state.rename_started);
+    let mut moved = None;
     let list = egui::Id::unique(("theme template pictures", version));
     egui::ScrollArea::vertical().id_salt("theme layout list").auto_shrink([false, false]).show(ui, |ui| {
         let side = egui::Margin { left: 20, right: 20, top: crate::studio::LIST_TOP as i8, bottom: 12 };
         Frame::new().inner_margin(side).show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, crate::studio::LIST_BETWEEN);
+            let (mut rows, mut dragging, mut dropped) = (Vec::with_capacity(shown.len()), None, None);
             for (index, (name, songs, bible, slide)) in shown.iter().enumerate() {
                 let open = index == current;
                 let renaming = state.renaming_template.as_ref().is_some_and(|(which, _)| *which == index);
@@ -6246,6 +6357,13 @@ fn template_pictures(
                     renaming,
                 };
                 let (response, places) = crate::studio::list_picture(ui, list, index, &look);
+                rows.push(response.rect);
+                if response.dragged() {
+                    dragging = Some(index);
+                }
+                if crate::studio::drag_let_go(&response) {
+                    dropped = Some(index);
+                }
                 let image = places.picture;
                 // Only the pictures in sight are drawn, or asked for; the open template is shown
                 // as it is on the canvas this instant.
@@ -6318,11 +6436,28 @@ fn template_pictures(
                     }
                 });
             }
+            let moving: Vec<usize> = dragging.or(dropped).into_iter().collect();
+            let words = dragging.and_then(|at| shown.get(at)).map(|(name, ..)| name.clone()).unwrap_or_default();
+            if let (Some(from), Some(y)) = (dropped, list_drag(ui, &rows, (dragging, dropped), &moving, &words)) {
+                moved = dragged_to(&rows, from, y).map(|to| (from, to));
+            }
         });
     });
-    // Delete, with no box selected, deletes the template open (once confirmed).
-    if delete_key && can_delete {
-        ask_delete = Some(current);
+    // Dragged to another place: the template open stays open, wherever it went.
+    if let Some((from, to)) = moved
+        && let Some(edit) = state.theme_edit.as_mut()
+        && let Some(templates) = edit.theme.set_mut(version)
+        && from < templates.len()
+        && to < templates.len()
+    {
+        let template = templates.remove(from);
+        templates.insert(to, template);
+        edit.template = place_after_move(edit.template, from, to);
+        edit.changed = true;
+        if let Some(draft) = state.editing.as_mut() {
+            draft.at.slide = edit.template;
+        }
+        state.renaming_template = None;
     }
     if let Some(template) = ask_delete {
         state.confirm_delete_template = Some(template);
@@ -7901,6 +8036,64 @@ fn scroll_while_dragging(ui: &mut egui::Ui) {
     }
 }
 
+/// Carries on a drag in one of the Edit view's lists (`rows`, top to bottom, as drawn this
+/// frame), as the slides' list has it: while one is being dragged (`held.0`), the ones moving
+/// (by place) go faint, an ink line shows where they would go, `words` follow the pointer, and
+/// the list scrolls at its ends. The list is the rows and the room either side of them, to the
+/// column's edges, as much of it as shows (not the keys above it or what is under it). Returns
+/// the pointer's height when the one dragged was let go over the list (`held.1`); let go
+/// elsewhere, or stopped with Escape, nothing moves.
+pub(crate) fn list_drag(
+    ui: &mut egui::Ui,
+    rows: &[Rect],
+    held: (Option<usize>, Option<usize>),
+    moving: &[usize],
+    words: &str,
+) -> Option<f32> {
+    let (dragging, dropped) = held;
+    let across = rows.first().map(|row| row.x_range().expand(10.0));
+    let down = ui.clip_rect().y_range();
+    let pointer = ui
+        .input(|input| input.pointer.interact_pos())
+        .filter(|pointer| across.is_some_and(|across| across.contains(pointer.x)) && down.contains(pointer.y));
+    if dragging.is_some() {
+        if let Some(pointer) = pointer {
+            let slot = crate::studio::drop_slot(rows, pointer.y);
+            crate::studio::paint_rows_moving(ui.painter(), rows, |at| moving.contains(&at), slot, crate::studio::PANEL);
+        }
+        crate::studio::paint_carried(ui.ctx(), words.trim());
+        scroll_while_dragging(ui);
+    }
+    dropped.and(pointer).map(|pointer| pointer.y)
+}
+
+/// Where one of a list's rows dragged from `from` and let go with the pointer at `y` goes: the
+/// place of the ink line, in the list without it. `None` when that is where it was.
+pub(crate) fn dragged_to(rows: &[Rect], from: usize, y: f32) -> Option<usize> {
+    let slot = crate::studio::drop_slot(rows, y);
+    let to = if slot > from { slot - 1 } else { slot };
+    (to != from && to < rows.len()).then_some(to)
+}
+
+/// The Delete key pressed with nothing picked on the canvas, as the list's own Delete key, when
+/// that can be pressed (`can`, as [`crate::studio::list_keys`] takes it).
+pub(crate) fn list_delete_key(delete: bool, can: [bool; 5]) -> Option<crate::studio::ListKey> {
+    (delete && can[2]).then_some(crate::studio::ListKey::Delete)
+}
+
+/// Where the one at `at` in a list is once the one at `from` has moved to `to`.
+pub(crate) fn place_after_move(at: usize, from: usize, to: usize) -> usize {
+    if at == from {
+        to
+    } else if from < at && at <= to {
+        at - 1
+    } else if to <= at && at < from {
+        at + 1
+    } else {
+        at
+    }
+}
+
 /// The colour of the line that shows where dragged things will go, and of the outline round
 /// what they are dropped onto: ink, never the on-screen orange.
 const DROP_LINE: Color32 = crate::studio::TEXT;
@@ -9405,11 +9598,26 @@ mod tests {
         frame_with(&ctx, &show, &mut state, None);
         assert_eq!(state.edit_kind(), None);
         assert!(!state.stage_editor_open);
-        // With no props there is nothing for Props to open: things stay as they are.
+        // With no props, Props opens their list, empty, with Add, which makes one and opens it.
         state.props.clear();
         state.edit_kind_request = Some(EditKind::Props);
         frame_with(&ctx, &show, &mut state, None);
-        assert_eq!((state.edit_kind(), state.edit_kind_request), (None, None));
+        assert_eq!((state.edit_kind(), state.edit_kind_request), (Some(EditKind::Props), None));
+        assert!(state.editing.is_none() && state.props_editor_open);
+        let asked = click_prop_words(&ctx, &mut state, "Add", egui::PointerButton::Primary).expect("Add");
+        apply_prop_ask(&mut state, asked);
+        frame_with(&ctx, &show, &mut state, None);
+        assert_eq!(state.props.len(), 1);
+        assert_eq!(state.editing.as_ref().map(|draft| draft.at.presentation), Some(crate::props::PROP_SLOT));
+        assert!(!state.props_editor_open, "the prop open takes the empty list's place");
+        // Show leaves it, as any kind.
+        state.props.clear();
+        state.editing = None;
+        state.edit_kind_request = Some(EditKind::Props);
+        frame_with(&ctx, &show, &mut state, None);
+        state.view_request = Some(0);
+        frame_with(&ctx, &show, &mut state, None);
+        assert_eq!(state.edit_kind(), None);
     }
 
     #[test]
@@ -9460,12 +9668,151 @@ mod tests {
         let output = crate::studio::tests::drawn(ctx, events, |ui| {
             ui.scope_builder(egui::UiBuilder::new().max_rect(column), |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                let head = prop_list_head(ui, state);
+                let head = prop_list_head(ui, state, false);
                 let list = prop_list(ui, state, &mut |_| None);
                 asked = head.or(list);
             });
         });
         (output, asked)
+    }
+
+    #[test]
+    fn a_prop_dragged_in_the_edit_views_list_moves_there_and_the_one_open_stays_open() {
+        let ctx = crate::studio::tests::styled();
+        let mut state = props_open(&["Logo", "Name", "Welcome"], 1);
+        let (output, _) = prop_column(&ctx, &mut state, vec![]);
+        let logo = crate::studio::tests::place_of(&output, "LOGO").expect("drawn");
+        let welcome = crate::studio::tests::place_of(&output, "WELCOME").expect("drawn");
+        output.drop_without_applying_deltas();
+        let mut asked = None;
+        for events in crate::studio::tests::drag_frames(logo, welcome) {
+            let (output, now) = prop_column(&ctx, &mut state, events);
+            output.drop_without_applying_deltas();
+            asked = asked.or(now);
+        }
+        assert_eq!(asked, Some(PropListAsk::Move(0, 2)));
+        apply_prop_ask(&mut state, PropListAsk::Move(0, 2));
+        let names: Vec<&str> = state.props.iter().map(|prop| prop.name.as_str()).collect();
+        assert_eq!(names, ["Name", "Welcome", "Logo"]);
+        assert_eq!(state.editing.as_ref().map(|draft| draft.at.slide), Some(0), "Name stays open");
+        assert!(state.props_changed);
+    }
+
+    #[test]
+    fn the_keys_over_a_list_fit_the_left_column_with_duplicate_spelt_out() {
+        let ctx = crate::studio::tests::styled();
+        let mut state = props_open(&["Logo"], 0);
+        let (output, _) = prop_column(&ctx, &mut state, vec![]);
+        let place = |words: &str| crate::studio::tests::place_of(&output, words).expect(words);
+        let (add, duplicate, delete, down) = (place("Add"), place("Duplicate"), place("Delete"), place("\u{2193}"));
+        output.drop_without_applying_deltas();
+        assert!(add.x < duplicate.x && duplicate.x < delete.x && delete.x < down.x);
+        // The column's room is LEFT_WIDTH less 10 either side; the keys stand 8 in from it, the
+        // last 26 wide.
+        let right = 10.0 + crate::studio::LEFT_WIDTH - 10.0 - 8.0;
+        assert!(down.x + 13.0 <= right + 0.5, "the last key ends at {} of {right}", down.x + 13.0);
+    }
+
+    #[test]
+    fn a_row_dragged_in_a_list_lands_where_the_ink_line_is() {
+        let rows: Vec<Rect> =
+            (0..4).map(|n| Rect::from_min_size(pos2(0.0, n as f32 * 50.0), vec2(200.0, 40.0))).collect();
+        // The first onto the third's lower half: third place, counting without it.
+        assert_eq!(dragged_to(&rows, 0, 2.0 * 50.0 + 30.0), Some(2));
+        // The last above the first.
+        assert_eq!(dragged_to(&rows, 3, 5.0), Some(0));
+        // Let go where it was: nothing moves.
+        assert_eq!(dragged_to(&rows, 1, 50.0 + 10.0), None);
+        assert_eq!(dragged_to(&rows, 1, 50.0 + 30.0), None);
+        // What was open follows the move.
+        assert_eq!([0, 1, 2, 3].map(|at| place_after_move(at, 0, 2)), [2, 0, 1, 3]);
+        assert_eq!([0, 1, 2, 3].map(|at| place_after_move(at, 3, 1)), [0, 2, 3, 1]);
+    }
+
+    #[test]
+    fn delete_with_nothing_picked_on_the_canvas_is_the_lists_delete_key() {
+        let ctx = egui::Context::default();
+        // A prop open: Delete asks about it, as the list's Delete key does.
+        let show = three_songs();
+        let mut state = props_open(&["Logo", "Name"], 1);
+        frame_with(&ctx, &show, &mut state, None);
+        frame_with(&ctx, &show, &mut state, Some(Key::Delete));
+        assert_eq!(state.confirm_delete_prop, Some(state.props[1].id));
+        // A song's slide open, nothing picked on the canvas: the slide.
+        let (show, mut state) = song_open(&[("Verse 1", 2), ("Chorus", 1)], 1);
+        frame_with(&ctx, &show, &mut state, None);
+        frame_with(&ctx, &show, &mut state, Some(Key::Delete));
+        assert_eq!(state.confirm_delete_slides, vec![SlideRef { presentation: 0, slide: 1 }]);
+        // With a box picked on the canvas, Delete takes the box, and the slide stays.
+        let (show, mut state) = song_open(&[("Verse 1", 2), ("Chorus", 1)], 1);
+        frame_with(&ctx, &show, &mut state, None);
+        if let Some(draft) = state.editing.as_mut() {
+            let first = draft.slide.objects.first().map(|object| object.id);
+            draft.select_only(first);
+        }
+        let boxes = state.editing.as_ref().map_or(0, |draft| draft.slide.objects.len());
+        frame_with(&ctx, &show, &mut state, Some(Key::Delete));
+        assert!(state.confirm_delete_slides.is_empty());
+        assert_eq!(state.editing.as_ref().map(|draft| draft.slide.objects.len()), Some(boxes - 1));
+        // A stage layout open: the layout.
+        let show = three_songs();
+        let mut state = HomeState { edit_kind_request: Some(EditKind::Stage), ..HomeState::default() };
+        frame_with(&ctx, &show, &mut state, None);
+        frame_with(&ctx, &show, &mut state, None);
+        frame_with(&ctx, &show, &mut state, Some(Key::Delete));
+        assert_eq!(state.confirm_delete_layout, Some(state.stage_layouts[0].id));
+    }
+
+    #[test]
+    fn templates_and_themes_drag_to_another_place_in_the_theme_editor() {
+        let (ctx, show) = (egui::Context::default(), three_songs());
+        let theme = Theme::builtin();
+        let first = theme.templates[0].name.clone();
+        let draft = EditDraft::of_slide(theme.templates[0].as_slide(), 0);
+        let mut state = HomeState {
+            theme_edit: Some(ThemeEdit::of(0, theme)),
+            editing: Some(draft),
+            theme_names: vec!["Built-in".to_owned(), "Alpha".to_owned(), "Beta".to_owned()],
+            ..HomeState::default()
+        };
+        let texts = frame_texts(&ctx, &show, &mut state, vec![], 0.0);
+        let mut labels: Vec<&(String, Rect)> =
+            texts.iter().filter(|(text, rect)| text.contains(" \u{b7} ") && rect.min.x < 300.0).collect();
+        labels.sort_by(|a, b| a.1.min.y.total_cmp(&b.1.min.y));
+        let (top, second) = (labels[0].1.center(), labels[1].1.center());
+        // The first template, open, onto the second's lower half: after it, and still open.
+        let mut time = 0.1;
+        for events in crate::studio::tests::drag_frames(top, second + vec2(0.0, 6.0)) {
+            frame_texts(&ctx, &show, &mut state, events, time);
+            time += 0.1;
+        }
+        let edit = state.theme_edit.as_ref().expect("still editing");
+        assert_eq!(edit.templates()[1].name, first);
+        assert_eq!(edit.template, 1, "the template open stays open");
+        assert_eq!(state.editing.as_ref().map(|draft| draft.at.slide), Some(1));
+        // A theme onto the row under it: asked of the app; the built-in theme stays first.
+        let place = |texts: &[(String, Rect)], name: &str| {
+            texts.iter().find(|(text, _)| text == name).map(|(_, rect)| rect.center()).expect(name)
+        };
+        let texts = frame_texts(&ctx, &show, &mut state, vec![], time);
+        let (alpha, beta, built_in) = (place(&texts, "Alpha"), place(&texts, "Beta"), place(&texts, "Built-in"));
+        for events in crate::studio::tests::drag_frames(alpha, beta + vec2(0.0, 8.0)) {
+            time += 0.1;
+            frame_texts(&ctx, &show, &mut state, events, time);
+        }
+        assert_eq!(state.theme_request, Some(ThemeRequest::Move(1, 2)));
+        state.theme_request = None;
+        for events in crate::studio::tests::drag_frames(beta, built_in - vec2(0.0, 8.0)) {
+            time += 0.1;
+            frame_texts(&ctx, &show, &mut state, events, time);
+        }
+        assert_eq!(state.theme_request, Some(ThemeRequest::Move(2, 1)), "under the built-in theme");
+        state.theme_request = None;
+        for events in crate::studio::tests::drag_frames(built_in, beta + vec2(0.0, 8.0)) {
+            time += 0.1;
+            frame_texts(&ctx, &show, &mut state, events, time);
+        }
+        assert_eq!(state.theme_request, None, "the built-in theme isn't dragged");
     }
 
     /// Clicks `words` where the props' column draws them, and returns what was asked for.
@@ -9522,8 +9869,8 @@ mod tests {
         let mut state = props_open(&["Logo", "Name", "Welcome"], 1);
         let open = |state: &HomeState| state.editing.as_ref().map(|draft| draft.at.slide);
         let names = |state: &HomeState| state.props.iter().map(|prop| prop.name.clone()).collect::<Vec<_>>();
-        // Copy: a copy of the open prop just after it, and it opens.
-        let asked = click_prop_words(&ctx, &mut state, "Copy", Primary).expect("asked");
+        // Duplicate: a copy of the open prop just after it, and it opens.
+        let asked = click_prop_words(&ctx, &mut state, "Duplicate", Primary).expect("asked");
         apply_prop_ask(&mut state, asked);
         assert_eq!(names(&state), ["Logo", "Name", "Name copy", "Welcome"]);
         assert_eq!(open(&state), Some(2));
@@ -9556,11 +9903,11 @@ mod tests {
         // Deleting a prop before the open one keeps the open one open.
         delete_prop(&mut state, 0);
         assert_eq!((names(&state)[2].as_str(), open(&state)), ("Prop 1", Some(2)));
-        // With the last prop deleted, the editor goes on to the slides.
+        // With the last prop deleted, the props' list stays, empty, with Add.
         let mut state = props_open(&["Logo"], 0);
         delete_prop(&mut state, 0);
         assert!(state.props.is_empty());
-        assert_eq!((state.editing.is_none(), state.edit_kind_request), (true, Some(EditKind::Slides)));
+        assert_eq!((state.editing.is_none(), state.edit_kind()), (true, Some(EditKind::Props)));
     }
 
     #[test]
@@ -9597,7 +9944,7 @@ mod tests {
         assert!(said.is_empty(), "{said:?}");
         frame_events(&ctx, &show, &mut state, vec![], 0.5);
         assert!(state.props.is_empty());
-        assert_eq!(state.edit_kind(), Some(EditKind::Slides));
+        assert_eq!(state.edit_kind(), Some(EditKind::Props), "the empty list, with Add");
         // A stage layout the same way: Escape keeps it, Return deletes it.
         state.edit_kind_request = Some(EditKind::Stage);
         frame_events(&ctx, &show, &mut state, vec![], 0.6);
@@ -9669,7 +10016,7 @@ mod tests {
         let output = ctx.run_ui(raw, |ui| {
             ui.scope_builder(egui::UiBuilder::new().max_rect(column), |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                let head = slide_list_head(ui, show, state, at);
+                let head = slide_list_head(ui, show, state, at, false);
                 let list = slide_list(ui, show, state, &mut |_| None, at);
                 asked = head.or(list);
             });
@@ -9758,7 +10105,7 @@ mod tests {
         let away = pos2(600.0, third.y);
         drag_slides(&ctx, &show, &mut state, first - vec2(0.0, 60.0), away, false).drop_without_applying_deltas();
         assert_eq!(state.slide_request, None, "let go over the slide being edited");
-        let keys = slide_column_place(&ctx, &show, &mut state, "Copy");
+        let keys = slide_column_place(&ctx, &show, &mut state, "Duplicate");
         drag_slides(&ctx, &show, &mut state, third - vec2(0.0, 60.0), keys, false).drop_without_applying_deltas();
         assert_eq!(state.slide_request, None, "let go over the keys above the list");
     }
@@ -9822,7 +10169,7 @@ mod tests {
         let words = |slides: &[Slide]| slides.iter().map(|slide| slide.texts()[0].1.clone()).collect::<Vec<_>>();
         // The second and third picked out.
         state.picked_slides = vec![SlideRef { presentation: 0, slide: 2 }, SlideRef { presentation: 0, slide: 1 }];
-        click_slide_words(&ctx, &show, &mut state, "Copy");
+        click_slide_words(&ctx, &show, &mut state, "Duplicate");
         match state.slide_request.take() {
             Some((at, SlideRequest::AddAfter(copies))) => {
                 assert_eq!(at.slide, 2, "after the last of them");
@@ -9849,12 +10196,12 @@ mod tests {
             }
             other => panic!("Add asked for {other:?}"),
         }
-        // Nothing picked out: Copy copies the slide open, as the editor has it now.
+        // Nothing picked out: Duplicate copies the slide open, as the editor has it now.
         state.picked_slides.clear();
         if let Some(draft) = state.editing.as_mut() {
             draft.slide.set_words("Changed in the editor", "");
         }
-        click_slide_words(&ctx, &show, &mut state, "Copy");
+        click_slide_words(&ctx, &show, &mut state, "Duplicate");
         match state.slide_request.take() {
             Some((at, SlideRequest::AddAfter(copies))) => {
                 assert_eq!((at.slide, words(&copies)), (1, vec!["Changed in the editor".to_owned()]));

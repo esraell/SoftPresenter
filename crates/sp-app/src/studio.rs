@@ -1023,6 +1023,10 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         if other_draft || state.theme_edit.is_some() {
             state.stage_editor_open = false;
         }
+        // A prop made or opened, or another kind, takes the empty props list's place.
+        if state.editing.is_some() || state.theme_edit.is_some() || state.stage_editor_open {
+            state.props_editor_open = false;
+        }
         let kind = state.edit_kind();
         let view = if kind.is_some() {
             1
@@ -1074,6 +1078,7 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
                     None => {
                         state.editing = None;
                         state.stage_editor_open = false;
+                        state.props_editor_open = false;
                     }
                 }
                 state.bible_open = to == 2;
@@ -1206,8 +1211,8 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
 /// Carries out a request for one of the Edit view's kinds (from the switch at the top of its
 /// left column, the View menu, the command line, the Stage tab or a testing switch). The Theme
 /// Editor is left through the app, which saves the theme, so a request made while it is open
-/// waits a frame for that. A kind that has nothing to open (no song, no prop) leaves things as
-/// they are.
+/// waits a frame for that. With no song, a word says why; with no prop, the props' list opens
+/// empty, with Add.
 fn open_edit_kind(show: &Show, state: &mut HomeState) {
     use crate::home::EditKind;
     let Some(kind) = state.edit_kind_request else { return };
@@ -1221,6 +1226,7 @@ fn open_edit_kind(show: &Show, state: &mut HomeState) {
         return;
     }
     state.edit_kind_request = None;
+    state.props_editor_open = false;
     match kind {
         // Never nothing: a song that can be edited (see `song_to_edit`), or a word on why not.
         EditKind::Slides => match song_to_edit(show, state).and_then(|at| EditDraft::of(show, at)) {
@@ -1231,11 +1237,15 @@ fn open_edit_kind(show: &Show, state: &mut HomeState) {
             )),
         },
         EditKind::Themes => state.theme_request = Some(crate::home::ThemeRequest::Edit(state.theme_for_songs)),
-        EditKind::Props => {
-            if let Some(draft) = prop_draft(state, 0) {
-                state.editing = Some(draft);
+        // With no props yet, their list, empty, with Add.
+        EditKind::Props => match prop_draft(state, 0) {
+            Some(draft) => state.editing = Some(draft),
+            None => {
+                state.editing = None;
+                state.stage_editor_open = false;
+                state.props_editor_open = true;
             }
-        }
+        },
         // The open layout's draft is made by the Edit view while this says it is open.
         EditKind::Stage => {
             state.editing = None;
@@ -1256,15 +1266,10 @@ pub fn prop_draft(state: &HomeState, index: usize) -> Option<EditDraft> {
 pub fn edit_kinds(ui: &mut egui::Ui, state: &mut HomeState) {
     use crate::home::EditKind;
     const KINDS: [EditKind; 4] = [EditKind::Slides, EditKind::Themes, EditKind::Props, EditKind::Stage];
-    let no_props = state.props.is_empty();
     let hints: [&str; 4] = [
         "Edit a song's slides",
         "Edit the themes and their templates",
-        if no_props {
-            "There are no props yet. Make one in the Props tab of the Show view, then edit it here"
-        } else {
-            "Edit the props"
-        },
+        "Make and edit the props",
         "Edit the stage screens' layouts",
     ];
     let tabs = Tabs {
@@ -1272,7 +1277,7 @@ pub fn edit_kinds(ui: &mut egui::Ui, state: &mut HomeState) {
         hints: &hints,
         dots: &[],
         tags: &[],
-        off: &[false, false, no_props, false],
+        off: &[false; 4],
         tall: 23.5,
         size: 11.5,
     };
@@ -1288,10 +1293,11 @@ pub fn edit_kinds(ui: &mut egui::Ui, state: &mut HomeState) {
 
 // Every kind of the Edit view lists what it edits in the left column the same way: what it is
 // picked from, when there is a choice (the songs), as plain rows with an icon; a heading in
-// small capitals, a row of keys (Add, Copy, Delete, ↑, ↓) that act on the one open, then each
-// one as a picture with a strip under it (its number and name), the one open on the well with a
-// ring round it. A picture's other choices are on its right-click menu. Its caller draws the
-// picture itself, and the menu.
+// small capitals, a row of keys (Add, Duplicate, Delete, ↑, ↓) that act on the one open, then
+// each one as a picture with a strip under it (its number and name), the one open on the well
+// with a ring round it, dragged to another place as slides are. A picture's other choices are on
+// its right-click menu. Its caller draws the picture itself, and the menu. Delete with nothing
+// picked on the canvas is the list's Delete key.
 
 /// The heading of a list in the Edit view's left column, in small capitals: 14 under what is
 /// above it and 8 in, with 8 under it.
@@ -1330,7 +1336,13 @@ pub struct PlainRow<'a> {
 /// response, where its name starts (at the middle of its line) and how far right the name may
 /// reach, for a field that retypes it.
 pub fn plain_row(ui: &mut egui::Ui, look: &PlainRow) -> (egui::Response, egui::Pos2, f32) {
-    let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), PLAIN_ROW), Sense::click());
+    plain_row_sensing(ui, look, Sense::click())
+}
+
+/// A [`plain_row`] that senses what `sense` says: clicks and drags for a row that can be dragged
+/// to another place (the themes).
+pub fn plain_row_sensing(ui: &mut egui::Ui, look: &PlainRow, sense: Sense) -> (egui::Response, egui::Pos2, f32) {
+    let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), PLAIN_ROW), sense);
     if look.on {
         ui.painter().rect_filled(row, RADIUS, CARD);
     } else if response.hovered() {
@@ -1378,7 +1390,7 @@ impl ListKey {
     fn words(self) -> &'static str {
         match self {
             ListKey::Add => "Add",
-            ListKey::Copy => "Copy",
+            ListKey::Copy => "Duplicate",
             ListKey::Delete => "Delete",
             ListKey::Up => "\u{2191}",
             ListKey::Down => "\u{2193}",
@@ -1392,23 +1404,31 @@ impl ListKey {
 const LIST_KEYS_UNDER: f32 = 10.0;
 pub const LIST_TOP: f32 = 2.0;
 
-/// The row of keys under a list's heading: Add, Copy and Delete, then ↑ and ↓ to move the one
-/// open, 30 high and 8 in from each side. The arrows are 30 wide; Add and Copy share what is
-/// left, and Delete a fifth more than each. `can` says which of the five can be pressed (in
-/// that order), `hints` what each does. Returns the one pressed.
+/// The row of keys under a list's heading: Add, Duplicate and Delete, then ↑ and ↓ to move the
+/// one open, 30 high and 8 in from each side, 4 apart. The arrows are 26 wide; the three with
+/// words share what is left, each as wide as its words with 3 to 6 either side, and any more
+/// shared 1 : 1 : 1.2 (the left column is just wide enough for Duplicate). `can` says which of
+/// the five can be pressed (in that order), `hints` what each does. Returns the one pressed.
 pub fn list_keys(ui: &mut egui::Ui, salt: &str, can: [bool; 5], hints: [&str; 5]) -> Option<ListKey> {
     const TALL: f32 = 30.0;
-    const ARROW: f32 = 30.0;
-    const BETWEEN: f32 = 6.0;
+    const ARROW: f32 = 26.0;
+    const BETWEEN: f32 = 4.0;
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), TALL + LIST_KEYS_UNDER), Sense::hover());
-    let share = (row.width() - 16.0 - 2.0 * ARROW - 4.0 * BETWEEN) / 3.2;
-    let widths = [share, share, 1.2 * share, ARROW, ARROW];
+    let font = FontId::proportional(12.5);
+    let room = row.width() - 16.0 - 2.0 * ARROW - 4.0 * BETWEEN;
+    let words = [ListKey::Add, ListKey::Copy, ListKey::Delete]
+        .map(|key| ui.painter().layout_no_wrap(key.words().to_owned(), font.clone(), TEXT).size().x);
+    let all_words: f32 = words.iter().sum();
+    let pad = ((room - all_words) / 6.0).clamp(3.0, 6.0);
+    let spare = (room - all_words - 6.0 * pad).max(0.0) / 3.2;
+    let widths =
+        [words[0] + 2.0 * pad + spare, words[1] + 2.0 * pad + spare, words[2] + 2.0 * pad + 1.2 * spare, ARROW, ARROW];
     let mut left = row.min.x + 8.0;
     let mut pressed = None;
     for (at, key) in ListKey::ALL.into_iter().enumerate() {
         let rect = Rect::from_min_size(pos2(left, row.min.y), vec2(widths[at], TALL));
         let id = ui.scope_id().with((salt, at));
-        let response = flat_button(ui, rect, id, key.words(), FontId::proportional(12.5), Flat::Plain, can[at]);
+        let response = flat_button(ui, rect, id, key.words(), font.clone(), Flat::Plain, can[at]);
         if response.on_hover_text(hints[at]).clicked() {
             pressed = Some(key);
         }
@@ -6251,6 +6271,40 @@ pub mod tests {
             }
         }
         output.shapes.iter().find_map(|clipped| walk(&clipped.shape, words))
+    }
+
+    /// Where the last of `words` drawn was: in an open menu, which is drawn over what is under it,
+    /// when the same words are also in the window (Duplicate is a list key and a menu's choice).
+    pub fn last_place_of(output: &egui::FullOutput, words: &str) -> Option<egui::Pos2> {
+        fn walk(shape: &egui::Shape, words: &str, into: &mut Vec<egui::Pos2>) {
+            match shape {
+                egui::Shape::Text(text) if text.galley.job.text == words => {
+                    into.push(text.pos + text.galley.rect.center().to_vec2());
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, words, into)),
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, words, &mut found));
+        found.pop()
+    }
+
+    /// The frames of a drag from `from` to `to`: the pointer presses there, goes in four steps,
+    /// is held a frame, lets go, and one frame more.
+    pub fn drag_frames(from: egui::Pos2, to: egui::Pos2) -> Vec<Vec<Event>> {
+        let button = |pos, pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut frames = vec![vec![Event::PointerMoved(from)], vec![button(from, true)]];
+        for step in 1..=4 {
+            frames.push(vec![Event::PointerMoved(from + (to - from) * (step as f32 / 4.0))]);
+        }
+        frames.extend([vec![], vec![button(to, false)], vec![]]);
+        frames
     }
 
     /// The frames of a click at `at` with a button: the pointer goes there, presses, lets go,

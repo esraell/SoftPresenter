@@ -20,8 +20,8 @@ fn in_use_file() -> Option<PathBuf> {
 
 /// Every theme, the place in the list of the main theme (the one songs and Bible slides are
 /// drawn with), and the places of themes changed while loading, to be saved. The built-in
-/// theme is always first, as it was last saved if it has been changed; the others follow in
-/// name order.
+/// theme is always first, as it was last saved if it has been changed; the others follow in the
+/// order they were dragged into, and any the note doesn't list after them in name order.
 pub fn load_all() -> (Vec<Theme>, usize, Vec<usize>) {
     let mut themes = folder().map_or_else(|| vec![Theme::builtin()], |folder| load_from(&folder));
     let note = in_use_file().and_then(|file| std::fs::read_to_string(file).ok()).unwrap_or_default();
@@ -35,6 +35,13 @@ pub fn load_all() -> (Vec<Theme>, usize, Vec<usize>) {
 /// template, looking as it did, and the main theme is returned among those to save.
 fn settle(themes: &mut [Theme], note: &str) -> (usize, Vec<usize>) {
     themes[1..].sort_by_key(|theme| theme.name.to_lowercase());
+    // The order kept: `order=<id>,<id>…`.
+    let order: Vec<Uuid> = note
+        .lines()
+        .find_map(|line| line.strip_prefix("order="))
+        .map(|ids| ids.split(',').filter_map(|id| Uuid::parse_str(id.trim()).ok()).collect())
+        .unwrap_or_default();
+    themes[1..].sort_by_key(|theme| order.iter().position(|id| *id == theme.id).unwrap_or(usize::MAX));
     // The note has a line for each thing: `main=<id>` (earlier, `songs=<id>`), and in old
     // notes `bible=<id>` and `bible_template=<id>`.
     let noted = |kind: &str| {
@@ -130,14 +137,20 @@ pub fn delete(theme: &Theme) -> Result<(), String> {
     Ok(())
 }
 
-/// Remembers which theme is the main one, for the next start.
-pub fn remember_in_use(main: &Theme) {
+/// Remembers which theme is the main one, and the order of the list, for the next start.
+pub fn remember_in_use(main: &Theme, themes: &[Theme]) {
     if let Some(file) = in_use_file() {
         if let Some(dir) = file.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let _ = std::fs::write(file, format!("main={}\n", main.id));
+        let _ = std::fs::write(file, in_use_note(main, themes));
     }
+}
+
+/// The note of the main theme and the order of the list.
+fn in_use_note(main: &Theme, themes: &[Theme]) -> String {
+    let order: Vec<String> = themes.iter().map(|theme| theme.id.to_string()).collect();
+    format!("main={}\norder={}\n", main.id, order.join(","))
 }
 
 #[cfg(test)]
@@ -167,6 +180,29 @@ mod tests {
         save_in(&folder, &Theme::builtin_bible()).unwrap();
         assert_eq!(load_from(&folder).len(), 3);
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn the_themes_come_back_in_the_order_they_were_dragged_into() {
+        let theme = |name: &str| Theme { id: Uuid::new_v4(), name: name.to_owned(), ..Theme::builtin() };
+        let (alpha, beta, gamma) = (theme("Alpha"), theme("Beta"), theme("Gamma"));
+        // Dragged into Gamma, Alpha, Beta, with the built-in theme first; Gamma is the main one.
+        let dragged = vec![Theme::builtin(), gamma.clone(), alpha.clone(), beta.clone()];
+        let note = in_use_note(&gamma, &dragged);
+        let mut loaded = vec![Theme::builtin(), beta.clone(), alpha.clone(), gamma.clone()];
+        let (main, _) = settle(&mut loaded, &note);
+        let names: Vec<&str> = loaded.iter().map(|theme| theme.name.as_str()).collect();
+        assert_eq!(names[1..], ["Gamma", "Alpha", "Beta"]);
+        assert_eq!(main, 1, "the main theme found again");
+        // One the note doesn't know comes after them, by name; a note without an order is by name.
+        let mut more = vec![Theme::builtin(), theme("Delta"), beta.clone(), alpha.clone(), gamma.clone()];
+        settle(&mut more, &note);
+        let names: Vec<&str> = more.iter().map(|theme| theme.name.as_str()).collect();
+        assert_eq!(names[1..], ["Gamma", "Alpha", "Beta", "Delta"]);
+        let mut plain = vec![Theme::builtin(), gamma, beta, alpha];
+        settle(&mut plain, &format!("main={}\n", Uuid::nil()));
+        let names: Vec<&str> = plain.iter().map(|theme| theme.name.as_str()).collect();
+        assert_eq!(names[1..], ["Alpha", "Beta", "Gamma"]);
     }
 
     #[test]

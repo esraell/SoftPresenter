@@ -138,16 +138,18 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 - **Left**: at the top a switch, Slides · Themes · Props · Stage, for what is edited. Under it,
   for Themes the themes and the open theme's templates. Slides, Props and Stage share one look
   (`studio::list_heading`, `list_keys` and `list_picture`): SLIDES, PROPS or STAGE LAYOUTS, a
-  row of keys acting on the one open (Add, Copy, Delete…, ↑, ↓), then each as its picture with
-  a strip under it (number and name); a click opens one, a double click renames it in place, a
-  right-click has its other choices (a prop's: Clears Itself, Rename, Duplicate, Delete…; a
-  layout's: Rename, Duplicate, Delete…). Props is faint until there is one (make the first in
-  the Props tab of the Show view). The objects of what is open sit at the foot, front first
-  (lock, hide, rename, drag to reorder).
+  row of keys acting on the one open (Add, Duplicate, Delete…, ↑, ↓), then each as its picture
+  with a strip under it (number and name); a click opens one, a double click renames it in
+  place, a drag moves it to the ink line (`home::list_drag`, as the slides do; templates and
+  themes too, the built-in theme staying first), a right-click has its other choices (a prop's:
+  Clears Itself, Rename, Duplicate, Delete…; a layout's: Rename, Duplicate, Delete…). Delete
+  with nothing picked on the canvas is the list's Delete key. Props with none yet shows the
+  list empty, with Add (`home::empty_props_view`). The objects of what is open sit at the
+  foot, front first (lock, hide, rename, drag to reorder).
 - **Slides** (`home::slide_list_head` and `slide_list`): SONG over the songs to choose from
   (`studio::list_choice` rows: the playlist's songs, or the library's, and the song open;
   click to edit another), then SLIDES and its keys, which act on the slides picked out or the
-  one open (Add a slide after it, Copy, Delete… which asks, ↑, ↓), then the slides in the order
+  one open (Add a slide after it, Duplicate, Delete… which asks, ↑, ↓), then the slides in the order
   written. A strip has the number, the group's dot and the group's name (and label); the
   slide on screen has an orange strip, slides picked out a faint ring, a slide switched off is
   dimmed. A double click (or Rename Group on the right-click menu, with Duplicate, Delete…,
@@ -165,7 +167,7 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   as they are made), Done.
 - **Stage** (Edit › Stage; Screens › Edit Stage Layouts… and the Stage tab's Edit Layouts… open
   it): the layouts for the stage screens, edited with the same canvas, Objects list and
-  inspector as a slide. Left: STAGE LAYOUTS, Add, Copy, Delete…, ↑ and ↓, and each layout as
+  inspector as a slide. Left: STAGE LAYOUTS, Add, Duplicate, Delete…, ↑ and ↓, and each layout as
   a live picture of the stage in it (shared with the Stage tab, `live_tabs::StagePictures`),
   its right-click menu for Rename, Duplicate, Delete…. Over the canvas: the layout's name, Add ▾ (Text, a shape, a
   picture or video, a web page, then what the stage shows live: Current Slide, Next Slide, Next
@@ -185,7 +187,7 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   switch, Usual | each version the theme has, and + Version (a sheet: the name, offered from
   other themes' versions, and which templates it starts as copies of); with a version shown,
   a line about it with ⋯ (Rename… in every theme, Add a Copy Of, Remove It From the theme…);
-  the row Add, Copy, Delete, ↑, ↓ acting on the templates shown; and the templates as
+  the row Add, Duplicate, Delete, ↑, ↓ acting on the templates shown; and the templates as
   pictures with a strip (number, name, what it is for; a right-click for Used For, Rename…,
   Duplicate, Delete…). Over the canvas, at the left, the theme, the version and the template,
   with the tools at the right.

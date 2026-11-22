@@ -6074,7 +6074,7 @@ impl App {
             Some(ThemeRequest::UseForSongs(index)) if index < count && index != self.songs_theme => {
                 self.songs_theme = index;
                 self.themes_changed();
-                theme_store::remember_in_use(&self.theme);
+                theme_store::remember_in_use(&self.theme, &self.themes);
                 // Bible slides now use this theme's Bible template: the translations are pointed
                 // at its boxes, as a fresh start.
                 if let Some(running) = self.running.as_mut() {
@@ -6128,6 +6128,20 @@ impl App {
                 self.open_theme_editor(self.themes.len() - 1);
             }
             Some(ThemeRequest::Edit(index)) if index < count => self.open_theme_editor(index),
+            // Dragged to another place in the list (the built-in theme stays first): the themes
+            // are written first, so the places in the list still mean what they did, and the
+            // order is kept for the next start.
+            Some(ThemeRequest::Move(from, to)) if from > 0 && to > 0 && from < count && to < count && from != to => {
+                self.save_unsaved();
+                let theme = self.themes.remove(from);
+                self.themes.insert(to, theme);
+                self.songs_theme = home::place_after_move(self.songs_theme, from, to);
+                if let Some(edit) = self.running.as_mut().and_then(|r| r.home_state.theme_edit.as_mut()) {
+                    edit.index = home::place_after_move(edit.index, from, to);
+                }
+                self.themes_changed();
+                theme_store::remember_in_use(&self.theme, &self.themes);
+            }
             // The built-in theme, at the front of the list, is always kept.
             Some(ThemeRequest::Delete(index)) if index > 0 && index < count => {
                 // Write what is waiting first, so the places in the list still mean what they did.
@@ -6143,7 +6157,7 @@ impl App {
                 let main_gone = index == self.songs_theme;
                 self.songs_theme = moved(self.songs_theme);
                 self.themes_changed();
-                theme_store::remember_in_use(&self.theme);
+                theme_store::remember_in_use(&self.theme, &self.themes);
                 if main_gone && let Some(running) = self.running.as_mut() {
                     running.home_state.bible.assign_boxes();
                 }
@@ -7228,11 +7242,15 @@ impl App {
             // SOFTPRESENTER_OPEN_ITEM has opened it), with its top object selected; otherwise the
             // first song's third slide.
             // Testing aid: SOFTPRESENTER_CAPTURE_EDITOR=props opens the Edit view on the props
-            // instead (on a prop made for the picture when there is none).
-            let on_props = std::env::var("SOFTPRESENTER_CAPTURE_EDITOR").as_deref() == Ok("props");
+            // instead (on a prop made for the picture when there is none); `no-props` on the
+            // props with none, their list empty.
+            let props_capture = std::env::var("SOFTPRESENTER_CAPTURE_EDITOR").unwrap_or_default();
+            let on_props = props_capture == "props" || props_capture == "no-props";
             if running.frames == GO_LIVE_AT + 2 && on_props {
                 let state = &mut running.home_state;
-                if state.props.is_empty() {
+                if props_capture == "no-props" {
+                    state.props.clear();
+                } else if state.props.is_empty() {
                     state.props.push(props::Prop::new("Logo".to_owned()));
                 }
                 state.edit_kind_request = Some(home::EditKind::Props);
@@ -9197,7 +9215,7 @@ fn main() -> ExitCode {
                 eprintln!("{problem}");
             }
         }
-        theme_store::remember_in_use(&themes[songs_theme]);
+        theme_store::remember_in_use(&themes[songs_theme], &themes);
     }
     let (bible_theme, bible_layout) = (songs_theme, themes[songs_theme].bible_template_index());
     // How each song and theme file is now, as it was just read (and the themes saved above).
