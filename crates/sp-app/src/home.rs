@@ -281,9 +281,6 @@ pub struct HomeState {
     pub songs_to_delete: Vec<usize>,
     /// Media bin items waiting for a yes before they are taken out of the bin.
     pub confirm_delete_media: Vec<usize>,
-    /// Slides waiting for a yes before they are deleted, and slides to delete now.
-    pub confirm_delete_slides: Vec<SlideRef>,
-    pub slides_to_delete: Vec<SlideRef>,
     /// The slides picked out in the slide area (Command- or Shift-click, or a box dragged
     /// across them), and where each slide was drawn last, for the box to find them.
     pub picked_slides: Vec<SlideRef>,
@@ -1738,8 +1735,6 @@ impl Default for HomeState {
             confirm_delete_songs: Vec::new(),
             songs_to_delete: Vec::new(),
             confirm_delete_media: Vec::new(),
-            confirm_delete_slides: Vec::new(),
-            slides_to_delete: Vec::new(),
             picked_slides: Vec::new(),
             slide_rects: Vec::new(),
             picked_songs: Vec::new(),
@@ -2012,7 +2007,6 @@ impl HomeState {
     pub fn alert_open(&self) -> bool {
         !self.confirm_delete_songs.is_empty()
             || !self.confirm_delete_media.is_empty()
-            || !self.confirm_delete_slides.is_empty()
             || self.confirm_delete_theme.is_some()
     }
 
@@ -2238,9 +2232,9 @@ pub fn home_ui(
     version_sheet(ui, state);
     confirm_delete_song(ui, show, state);
     confirm_delete_media(ui, show, state);
-    confirm_delete_slides(ui, show, state);
-    // Delete (or Backspace) deletes what is picked out in the list last clicked, after asking;
-    // with neither list last clicked, the slide picked out by a right-click.
+    // Delete (or Backspace) deletes what is picked out in the list last clicked: what Undo
+    // brings back at once (slides, playlist items), the rest after asking; with neither list
+    // last clicked, the slide picked out by a right-click.
     let delete_key = ui.input(|input| input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace));
     if delete_key
         && state.edit_kind().is_none()
@@ -2276,14 +2270,19 @@ pub fn home_ui(
                     None => state.confirm_delete_media = picked,
                 }
             }
+            // Slides go at once, asking nothing (Undo puts them back): those picked out of one
+            // song, the song of the slide picked last. A slide the app made has none to delete.
             Picking::Slides => {
-                let from_bible = |at: &SlideRef| state.app_made(at.presentation);
-                state.confirm_delete_slides =
-                    state.picked_slides.iter().copied().filter(|at| !from_bible(at)).collect();
+                if let Some((song, slides)) = picks_of_one_song(&state.picked_slides)
+                    && !state.app_made(song)
+                {
+                    delete_slides(state, song, &slides);
+                }
             }
             Picking::Nothing => {
-                let from_bible = |at: SlideRef| state.app_made(at.presentation);
-                state.confirm_delete_slides = state.selected_slide.filter(|at| !from_bible(*at)).into_iter().collect();
+                if let Some(at) = state.selected_slide.filter(|at| !state.app_made(at.presentation)) {
+                    delete_slides(state, at.presentation, &[at.slide]);
+                }
             }
             // The playlist's items picked (or the one open) are taken out of it at once: no
             // song is deleted, so nothing is asked, and Undo puts them back. Only while the
@@ -3702,8 +3701,8 @@ fn slides_to_act_on(state: &HomeState, at: SlideRef) -> Vec<usize> {
 
 /// The top of the slides' part of the Edit view's left column: the songs to choose from under
 /// their heading, then the slides' heading and the keys that act on the slides picked out (or
-/// the one open): Add (a slide after the one open), Duplicate, Delete (which asks first), ↑ and
-/// ↓. `delete` is the Delete key pressed with nothing picked on the canvas, which is the Delete
+/// the one open): Add (a slide after the one open), Duplicate, Delete (at once), ↑ and ↓.
+/// `delete` is the Delete key pressed with nothing picked on the canvas, which is the Delete
 /// key here. Returns the song to open, when another one is clicked.
 fn slide_list_head(
     ui: &mut egui::Ui,
@@ -3758,7 +3757,7 @@ fn slide_list_head(
         let hints = [
             "A new slide after this one, laid out like it",
             if several { "Copies of the slides picked out, after them" } else { "A copy of this slide, after it" },
-            if several { "Delete the slides picked out; it asks first" } else { "Delete this slide; it asks first" },
+            if several { "Delete the slides picked out" } else { "Delete this slide" },
             if several { "Move the slides picked out up one place" } else { "Move this slide up one place" },
             if several { "Move the slides picked out down one place" } else { "Move this slide down one place" },
         ];
@@ -3774,9 +3773,9 @@ fn slide_list_head(
 
 /// Carries out one of the keys over the Edit view's slides, or the same choice from a slide's
 /// menu, on `these`, slides of the song open, in order: Add puts a new slide laid out like the
-/// one open just after it; Copy puts copies just after the last of them; Delete asks first; ↑
-/// and ↓ move them one place. The app makes the change after the frame; the slide open follows
-/// its slide, and Add and Copy open the first slide they made.
+/// one open just after it; Copy puts copies just after the last of them; Delete deletes them at
+/// once (Undo puts them back); ↑ and ↓ move them one place. The app makes the change after the
+/// frame; the slide open follows its slide, and Add and Copy open the first slide they made.
 fn act_on_slides(show: &Show, state: &mut HomeState, at: SlideRef, these: &[usize], key: crate::studio::ListKey) {
     use crate::studio::ListKey;
     let Some(song) = show.presentations().get(at.presentation) else { return };
@@ -3792,10 +3791,7 @@ fn act_on_slides(show: &Show, state: &mut HomeState, at: SlideRef, these: &[usiz
             let copies = these.iter().filter_map(|index| slide(*index)).collect();
             Some((SlideRef { slide: last, ..at }, SlideRequest::AddAfter(copies)))
         }
-        ListKey::Delete => {
-            state.confirm_delete_slides = these.iter().map(|slide| SlideRef { slide: *slide, ..at }).collect();
-            None
-        }
+        ListKey::Delete => Some((at, SlideRequest::DeleteMany(these.to_vec()))),
         ListKey::Up if first > 0 => {
             Some((at, SlideRequest::Move { slides: these.to_vec(), to: first - 1, after: false }))
         }
@@ -3958,7 +3954,7 @@ fn slide_list(
                     item(ui, "Rename Group", true, SlideChoice::RenameGroup);
                     ui.separator();
                     item(ui, "Duplicate", true, SlideChoice::Key(ListKey::Copy));
-                    item(ui, "Delete\u{2026}", these.len() < count, SlideChoice::Key(ListKey::Delete));
+                    item(ui, "Delete", these.len() < count, SlideChoice::Key(ListKey::Delete));
                     ui.separator();
                     item(ui, "Move Up", first > 0, SlideChoice::Key(ListKey::Up));
                     item(ui, "Move Down", last + 1 < count, SlideChoice::Key(ListKey::Down));
@@ -5770,28 +5766,25 @@ fn confirm_delete_song(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     }
 }
 
-/// Asks before deleting slides from their songs, and deletes them.
-fn confirm_delete_slides(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
-    let present = |at: &SlideRef| show.presentations().get(at.presentation).is_some_and(|s| at.slide < s.slide_count());
-    state.confirm_delete_slides.retain(present);
-    let slides = state.confirm_delete_slides.clone();
-    let question = match slides.as_slice() {
-        [] => return,
-        [one] => {
-            let title = show.presentations().get(one.presentation).map_or("", |song| song.title.as_str());
-            format!("Delete slide {} of \u{201c}{title}\u{201d}?", one.slide + 1)
-        }
-        many => format!("Delete {} slides?", many.len()),
-    };
-    let note = if slides.len() == 1 { "Edit > Undo brings it back." } else { "Edit > Undo brings them back." };
-    if let Some(delete) = confirm_delete(ui, &question, note) {
-        state.confirm_delete_slides.clear();
-        if delete {
-            state.selected_slide = None;
-            state.picked_slides.clear();
-            state.slides_to_delete = slides;
-        }
-    }
+/// Deletes slides of one song at once, asking nothing, in one step Undo takes back whole (it puts
+/// them back where they were, picked). `slides` are places in the song; a song keeps at least
+/// one slide.
+pub fn delete_slides(state: &mut HomeState, song: usize, slides: &[usize]) {
+    let Some(&first) = slides.iter().min() else { return };
+    state.selected_slide = None;
+    state.picked_slides.clear();
+    state.slide_request =
+        Some((SlideRef { presentation: song, slide: first }, SlideRequest::DeleteMany(slides.to_vec())));
+}
+
+/// The slides picked out of one song only: those of the song of the slide picked last. Delete
+/// never takes slides from more than one song.
+pub fn picks_of_one_song(picked: &[SlideRef]) -> Option<(usize, Vec<usize>)> {
+    let song = picked.last()?.presentation;
+    let mut slides: Vec<usize> = picked.iter().filter(|at| at.presentation == song).map(|at| at.slide).collect();
+    slides.sort_unstable();
+    slides.dedup();
+    Some((song, slides))
 }
 
 /// Asks before taking items out of the media bin, and takes them out.
@@ -9689,11 +9682,12 @@ mod tests {
         frame_with(&ctx, &show, &mut state, Some(Key::Delete));
         assert_eq!(state.props.iter().map(|prop| prop.name.as_str()).collect::<Vec<_>>(), ["Logo"]);
         assert!(matches!(state.removed.as_slice(), [crate::removed::Removed::Prop { at: 1, .. }]));
-        // A song's slide open, nothing picked on the canvas: the slide.
+        // A song's slide open, nothing picked on the canvas: the slide, at once.
         let (show, mut state) = song_open(&[("Verse 1", 2), ("Chorus", 1)], 1);
         frame_with(&ctx, &show, &mut state, None);
         frame_with(&ctx, &show, &mut state, Some(Key::Delete));
-        assert_eq!(state.confirm_delete_slides, vec![SlideRef { presentation: 0, slide: 1 }]);
+        let asked = state.slide_request.take().map(|(_, request)| request);
+        assert_eq!(asked, Some(SlideRequest::DeleteMany(vec![1])), "deleted at once");
         // With a box picked on the canvas, Delete takes the box, and the slide stays.
         let (show, mut state) = song_open(&[("Verse 1", 2), ("Chorus", 1)], 1);
         frame_with(&ctx, &show, &mut state, None);
@@ -9703,7 +9697,7 @@ mod tests {
         }
         let boxes = state.editing.as_ref().map_or(0, |draft| draft.slide.objects.len());
         frame_with(&ctx, &show, &mut state, Some(Key::Delete));
-        assert!(state.confirm_delete_slides.is_empty());
+        assert!(state.slide_request.is_none());
         assert_eq!(state.editing.as_ref().map(|draft| draft.slide.objects.len()), Some(boxes - 1));
         // A stage layout open: the layout.
         let show = three_songs();
@@ -10143,10 +10137,9 @@ mod tests {
         let asked = state.slide_request.take().map(|(_, request)| request);
         assert_eq!(asked, Some(SlideRequest::Move { slides: vec![1, 2], to: 3, after: true }));
         click_slide_words(&ctx, &show, &mut state, "Delete");
-        let asked: Vec<usize> = state.confirm_delete_slides.iter().map(|at| at.slide).collect();
-        assert_eq!(asked, [1, 2], "asked about, not deleted yet");
-        assert!(state.alert_open());
-        state.confirm_delete_slides.clear();
+        let asked = state.slide_request.take().map(|(_, request)| request);
+        assert_eq!(asked, Some(SlideRequest::DeleteMany(vec![1, 2])), "deleted at once, in one step");
+        assert!(!state.alert_open(), "nothing is asked");
         // Add: one slide after the one open, laid out like it with no words.
         click_slide_words(&ctx, &show, &mut state, "Add");
         match state.slide_request.take() {
@@ -10170,7 +10163,7 @@ mod tests {
         // Every slide picked out: Delete would leave none, so it does nothing.
         state.picked_slides = (0..5).map(|slide| SlideRef { presentation: 0, slide }).collect();
         click_slide_words(&ctx, &show, &mut state, "Delete");
-        assert!(state.confirm_delete_slides.is_empty());
+        assert!(state.slide_request.is_none());
     }
 
     #[test]
@@ -10266,9 +10259,9 @@ mod tests {
         assert!(state.alert_open(), "still asking");
         assert_eq!(state.editing.as_ref().map(|draft| draft.slide.clone()), before, "the words stay, unmoved");
         assert_eq!(state.props.len(), 2);
-        // A song's slide, asked whether to delete it: ↓ doesn't open the next slide.
+        // A song's slide open, the song asked about: ↓ doesn't open the next slide.
         let (show, mut state) = song_open(&[("Verse 1", 3)], 0);
-        state.confirm_delete_slides = vec![SlideRef { presentation: 0, slide: 0 }];
+        state.confirm_delete_songs = vec![0];
         frame_events(&ctx, &show, &mut state, pressed(Key::ArrowDown, Modifiers::NONE), 0.2);
         assert_eq!(state.editing.as_ref().map(|draft| draft.at.slide), Some(0));
         // A theme asked about, with a box of a template picked: Delete doesn't take the box.
@@ -12020,9 +12013,23 @@ mod tests {
         assert!(state.sweep.is_none());
         assert!(show.live().is_none(), "picking puts nothing on screen");
         frame_with(&ctx, &show, &mut state, Some(Key::Delete));
-        assert_eq!(state.confirm_delete_slides.len(), 2, "Delete asks about both");
-        frame_with(&ctx, &show, &mut state, Some(Key::Enter));
-        assert_eq!(state.slides_to_delete.len(), 2);
+        assert!(!state.alert_open(), "Delete asks nothing");
+        let asked = state.slide_request.take().map(|(at, request)| (at.presentation, request));
+        assert_eq!(asked, Some((0, SlideRequest::DeleteMany(vec![0, 1]))), "both, at once, in one step");
+        assert!(state.picked_slides.is_empty());
+    }
+
+    #[test]
+    fn delete_takes_the_picked_slides_of_one_song_only() {
+        let at = |presentation, slide| SlideRef { presentation, slide };
+        // Picked in two songs: the song of the slide picked last.
+        assert_eq!(picks_of_one_song(&[at(0, 2), at(1, 0), at(0, 1)]), Some((0, vec![1, 2])));
+        assert_eq!(picks_of_one_song(&[at(0, 2), at(1, 3), at(1, 0)]), Some((1, vec![0, 3])));
+        assert_eq!(picks_of_one_song(&[]), None);
+        let mut state = HomeState { picked_slides: vec![at(0, 2), at(1, 0), at(0, 1)], ..HomeState::default() };
+        let (song, slides) = picks_of_one_song(&state.picked_slides).expect("picked");
+        delete_slides(&mut state, song, &slides);
+        assert_eq!(state.slide_request, Some((at(0, 1), SlideRequest::DeleteMany(vec![1, 2]))));
     }
 
     #[test]

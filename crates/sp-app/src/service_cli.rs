@@ -674,10 +674,10 @@ impl crate::App {
         let words = &args[2..];
         let result = match word.as_str() {
             "add" => self.slide_add(words),
-            "delete" => self.slide_edit(words, true, |song, index, _| {
+            "delete" => self.slide_edit(words, |song, index, _| {
                 song.without_slide(index).map(|song| (song, format!("deleted slide {}", index + 1)))
             }),
-            "duplicate" => self.slide_edit(words, false, |song, index, _| {
+            "duplicate" => self.slide_edit(words, |song, index, _| {
                 let (_, slide) = song.slide(index)?;
                 let copy = slide.clone();
                 song.with_slides_after(index, &[copy])
@@ -692,7 +692,7 @@ impl crate::App {
                         }
                         (_, Err(_)) => Err("slide move SONG N to M".to_owned()),
                         (_, Ok(target)) => {
-                            self.slide_edit(&[song.clone(), number.clone()], false, move |song, index, _| {
+                            self.slide_edit(&[song.clone(), number.clone()], move |song, index, _| {
                                 let to = target - 1;
                                 if to == index {
                                     return Some((song.clone(), format!("slide {} is there already", index + 1)));
@@ -723,7 +723,7 @@ impl crate::App {
             }),
             "enable" | "disable" => {
                 let on = word == "enable";
-                self.slide_edit(words, false, move |song, index, _| {
+                self.slide_edit(words, move |song, index, _| {
                     let (_, slide) = song.slide(index)?;
                     let mut changed = slide.clone();
                     changed.enabled = on;
@@ -744,7 +744,7 @@ impl crate::App {
             }),
             "transition" => match words {
                 [song, number, kind @ ..] if !kind.is_empty() => match parse_transition(kind) {
-                    Ok(transition) => self.slide_edit(&[song.clone(), number.clone()], false, move |song, index, _| {
+                    Ok(transition) => self.slide_edit(&[song.clone(), number.clone()], move |song, index, _| {
                         let (_, slide) = song.slide(index)?;
                         let mut changed = slide.clone();
                         changed.transition = transition;
@@ -769,14 +769,12 @@ impl crate::App {
 
     /// Finds the song and slide named by `words[0]` and `words[1]`, makes a changed copy of the
     /// song with `change` (given the song, the slide's index and the rest of the words), and puts
-    /// it in place, undoably. With `asks`, it must be confirmed with --yes.
+    /// it in place, undoably (so nothing needs --yes; an old one is let by).
     fn slide_edit(
         &mut self,
         words: &[String],
-        asks: bool,
         change: impl FnOnce(&Presentation, usize, &str) -> Option<(Presentation, String)>,
     ) -> Result<Reply, String> {
-        let yes = words.iter().any(|w| w == "--yes");
         let words: Vec<String> = words.iter().filter(|w| *w != "--yes").cloned().collect();
         let [song, number, rest @ ..] = words.as_slice() else {
             return Err("Which song and slide? (SONG N)".to_owned());
@@ -790,13 +788,6 @@ impl crate::App {
             .filter(|n| (1..=count).contains(n))
             .ok_or_else(|| format!("{} has {count} slides; there is no slide {number}.", presentation.title))?
             - 1;
-        if asks && !yes {
-            return Err(format!(
-                "This deletes slide {} of {}. Add --yes to do it (Undo brings it back).",
-                index + 1,
-                presentation.title
-            ));
-        }
         let (song, said) = change(&presentation, index, &rest.join(" ")).ok_or("That can't be done to that slide.")?;
         self.change_song(at, song);
         Ok(Reply::done(format!("{}: {said}.", presentation.title)))
@@ -812,7 +803,7 @@ impl crate::App {
         if words.len() < 3 {
             return Err(usage.to_owned());
         }
-        self.slide_edit(words, false, change)
+        self.slide_edit(words, change)
     }
 
     /// The same, for a change made to the slide itself, which may refuse the value.
@@ -826,7 +817,7 @@ impl crate::App {
             return Err(usage.to_owned());
         }
         let mut refused = None;
-        let reply = self.slide_edit(words, false, |song, index, value| {
+        let reply = self.slide_edit(words, |song, index, value| {
             let (_, slide) = song.slide(index)?;
             let mut changed = slide.clone();
             match change(&mut changed, value) {
@@ -925,7 +916,7 @@ impl crate::App {
         let id = template.as_ref().map(|t| t.id);
         let said =
             template.map_or_else(|| "the template that suits it".to_owned(), |t| format!("the template {}", t.name));
-        self.slide_edit(&[song.clone(), number.clone()], false, move |song, index, _| {
+        self.slide_edit(&[song.clone(), number.clone()], move |song, index, _| {
             let (_, slide) = song.slide(index)?;
             let mut changed = slide.clone();
             changed.template = id;
@@ -949,7 +940,7 @@ impl crate::App {
             let at = find("media item", &names, &wanted)?;
             Some((self.show.media()[at].id, names[at].clone()))
         };
-        self.slide_edit(&[song.clone(), number.clone()], false, move |song, index, _| {
+        self.slide_edit(&[song.clone(), number.clone()], move |song, index, _| {
             let (_, slide) = song.slide(index)?;
             let mut changed = slide.clone();
             changed.actions.retain(|action| !matches!(action, ShowAction::Media { .. }));
@@ -973,7 +964,7 @@ impl crate::App {
         if !off && !sp_video::web::allowed(&address) {
             return Err(format!("{address} isn't an address SoftPresenter shows: it must start with https://."));
         }
-        self.slide_edit(&[song.clone(), number.clone()], false, move |song, index, _| {
+        self.slide_edit(&[song.clone(), number.clone()], move |song, index, _| {
             let (_, slide) = song.slide(index)?;
             let mut changed = slide.clone();
             let said = if off {

@@ -1009,6 +1009,45 @@ impl Presentation {
         Some(copy)
     }
 
+    /// A copy where these slides (by their places) are a group of this name, as Group does for
+    /// several slides picked together: one slide alone is [`with_group_starting`]; with several,
+    /// each run of them in a row becomes a group of that name, and the slide after a run goes on
+    /// in the group it was in. `None` if a place has no slide.
+    ///
+    /// [`with_group_starting`]: Self::with_group_starting
+    pub fn with_group_over(&self, slides: &[usize], name: &str) -> Option<Presentation> {
+        let mut places = slides.to_vec();
+        places.sort_unstable();
+        places.dedup();
+        if let [one] = places.as_slice() {
+            return self.with_group_starting(*one, name);
+        }
+        let mut copy = self.clone();
+        // Runs of slides in a row, from the last, so each split leaves the earlier places as
+        // they were.
+        let mut runs: Vec<(usize, usize)> = Vec::new();
+        for at in places {
+            match runs.last_mut() {
+                Some((_, end)) if *end + 1 == at => *end = at,
+                _ => runs.push((at, at)),
+            }
+        }
+        for (start, end) in runs.into_iter().rev() {
+            let (group, _) = copy.locate(end)?;
+            let was = copy.groups[group].name.clone();
+            if copy.locate(end + 1).is_some_and(|(after, _)| after == group) {
+                copy = copy.with_group_starting(end + 1, &was)?;
+            }
+            // The run's first slide, and each slide in it that starts a group of its own.
+            for at in (start..=end).rev() {
+                if at == start || copy.locate(at)?.1 == 0 {
+                    copy = copy.with_group_starting(at, name)?;
+                }
+            }
+        }
+        Some(copy)
+    }
+
     /// A copy where a group with this name starts at the slide at `index`: the slide and the
     /// rest of its group become a group of that name, in its colour. A slide that already
     /// starts its group renames the group. `None` if there is no slide there.
@@ -1223,6 +1262,14 @@ mod tests {
         // On a group's first slide it renames the group.
         let renamed = song.with_group_starting(3, "Bridge").unwrap();
         assert_eq!(words(&renamed), ["Verse 1:A", "Verse 1:B", "Verse 1:C", "Bridge:D"]);
+        // Several picked together: just they become the group, and the verse goes on after.
+        let over = song.with_group_over(&[1], "Pre-chorus").unwrap();
+        assert_eq!(words(&over), words(&split), "one alone starts the group, as before");
+        let over = song.with_group_over(&[1, 0], "Tag").unwrap();
+        assert_eq!(words(&over), ["Tag:A", "Tag:B", "Verse 1:C", "Chorus:D"]);
+        let over = song.with_group_over(&[0, 2, 3], "Tag").unwrap();
+        assert_eq!(words(&over), ["Tag:A", "Verse 1:B", "Tag:C", "Tag:D"]);
+        assert!(song.with_group_over(&[1, 9], "Tag").is_none());
     }
 
     #[test]

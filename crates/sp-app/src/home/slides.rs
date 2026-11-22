@@ -2583,9 +2583,11 @@ fn slide_menu(
         state.slide_request = Some((last, SlideRequest::PasteAfter(copies)));
         ui.close();
     }
-    if ui.button("Delete…").clicked() {
-        state.confirm_delete_slides =
-            if state.picked_slides.contains(&here) { state.picked_slides.clone() } else { vec![here] };
+    // At once, asking nothing (Undo puts them back): this slide, or the slides of this song
+    // picked with it, never slides of another song.
+    let delete = if these.len() > 1 { format!("Delete {} Slides", these.len()) } else { "Delete".to_owned() };
+    if ui.button(delete).clicked() {
+        crate::home::delete_slides(state, which, &these);
         ui.close();
     }
     // One place up or down the song (with the slides picked with it).

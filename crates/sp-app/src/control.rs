@@ -1046,7 +1046,7 @@ Changing a slide (each change is saved, can be undone, and shows on screen at on
   slide frame SONG N|all OBJECT x= y= w= h=
                                where an object sits, in the slide's pixels (reset: the theme's)
   slide add SONG [after N] [group NAME] WORDS   a new slide (at the end unless after N)
-  slide delete SONG N --yes | slide duplicate SONG N | slide move SONG N to M
+  slide delete SONG N | slide duplicate SONG N | slide move SONG N to M
   slide group SONG N NAME      slide N starts a group of that name (or renames its group)
   slide label SONG N LABEL|none | slide notes SONG N TEXT|none
   slide enable SONG N | slide disable SONG N     (a disabled slide is passed over)

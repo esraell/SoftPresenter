@@ -67,9 +67,9 @@ app.
 - **`--json`**, anywhere on the line, prints the whole reply as JSON ([below](#replies-as-json)).
 - **`--yes`** is needed by every command that deletes something Undo can't bring back (a song,
   a media bin item, a theme, a screen, a Bible, a connection), as the window asks about those.
-  What Undo brings back goes at once, as in the window, and `sp undo` puts it back: playlists,
-  items taken out of a playlist, libraries, audio playlists, timers, messages, props,
-  macros and theme versions. An old `--yes` on those is let by.
+  What Undo brings back goes at once, as in the window, and `sp undo` puts it back: slides,
+  playlists, items taken out of a playlist, libraries, audio playlists, timers, messages,
+  props, macros and theme versions. An old `--yes` on those is let by.
 - **`--wait`** makes a command that runs in the background (a pack with videos, a large pack
   import, a Bible download) wait until it is done; see [jobs](#undo-jobs-and-the-menu-bar).
   `status --wait SECONDS` is something else: it waits for a change
@@ -573,7 +573,7 @@ the background. Anything else is refused, with the list of what is read.
 | `slide style SONG N\|all [OBJECT] key=value…` | An object's look on one slide or every slide; `key=reset`, or `reset` alone, goes back to the theme's. `slide style keys` lists the settings |
 | `slide frame SONG N\|all OBJECT x= y= w= h=` | Where an object sits, in the slide's pixels (1920 × 1080); `reset` puts it back. A box partly or wholly off the slide is warned about |
 | `slide add SONG [after N] [group NAME] WORDS` | A new slide, at the end unless after N; with a group, only the new slide is in it |
-| `slide delete SONG N --yes`, `slide duplicate SONG N`, `slide move SONG N to M` | Deletes, copies or moves a slide (a moved slide joins the group where it lands) |
+| `slide delete SONG N`, `slide duplicate SONG N`, `slide move SONG N to M` | Deletes (at once; `sp undo` puts it back), copies or moves a slide (a moved slide joins the group where it lands) |
 | `slide group SONG N NAME` | Slide N starts a group of that name (or renames the group it starts) |
 | `slide label SONG N LABEL\|none`, `slide notes SONG N TEXT\|none`, `slide hotkey SONG N KEY\|none` | A slide's label, operator notes and hot key (one letter or digit) |
 | `slide enable\|disable SONG N` | A switched-off slide is passed over by Next |
@@ -607,7 +607,7 @@ it in an editor that has it open, and shows at once on a slide that is on screen
     $ sp slide move "Blessed Assurance" 2 to 5
     Blessed Assurance: moved slide 2 to 5; it is now in Verse 2.
     $ sp slide delete "Blessed Assurance" 5
-    This deletes slide 5 of Blessed Assurance. Add --yes to do it (Undo brings it back).
+    Blessed Assurance: deleted slide 5.
     $ sp slide web "Blessed Assurance" 1 http://127.0.0.1:8765/
     Blessed Assurance: slide 1 shows the web page http://127.0.0.1:8765/.
     $ sp slide web "Blessed Assurance" 2 http://example.com

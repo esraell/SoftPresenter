@@ -3897,13 +3897,29 @@ impl App {
         else {
             return;
         };
+        let had: std::collections::HashSet<Uuid> =
+            current.groups.iter().flat_map(|group| group.slides.iter().map(|slide| slide.id)).collect();
         let Some((index, song)) = self.history.step(redo, current) else { return };
+        // Slides deleted and put back by Undo (every slide there is still there, and more) are
+        // picked again, where they are now; slides deleted again by Redo are let go.
+        let now: Vec<Uuid> = song.groups.iter().flat_map(|group| group.slides.iter().map(|slide| slide.id)).collect();
+        let only_added = had.iter().all(|id| now.contains(id));
+        let back: Vec<usize> = (0..now.len()).filter(|at| only_added && !had.contains(&now[*at])).collect();
+        let gone = now.len() < had.len();
         let changes = self.show.replace_presentation_following(index, song);
         if !self.unsaved.contains(&index) {
             self.unsaved.push(index);
         }
         self.save_unsaved();
         if let Some(running) = self.running.as_mut() {
+            let state = &mut running.home_state;
+            if !back.is_empty() {
+                state.picked_slides =
+                    back.iter().map(|slide| sp_engine::SlideRef { presentation: index, slide: *slide }).collect();
+                state.picking = home::Picking::Slides;
+            } else if gone {
+                state.picked_slides.retain(|at| at.presentation != index);
+            }
             running.thumbs.clear_except(&mut running.egui_renderer, |_| false);
             running.home_window.request_redraw();
         }
@@ -7487,27 +7503,9 @@ impl App {
         commands
     }
 
-    /// Carries out a change asked for from a slide's right-click menu.
+    /// Carries out a change asked for from a slide's right-click menu, the keys over the Edit
+    /// view's slides, or Delete.
     fn handle_slide_request(&mut self) {
-        use home::SlideRequest;
-        // Slides Delete was pressed on: each song's at once, so one Undo brings them back.
-        let many =
-            self.running.as_mut().map(|r| std::mem::take(&mut r.home_state.slides_to_delete)).unwrap_or_default();
-        let mut songs: Vec<usize> = many.iter().map(|at| at.presentation).collect();
-        songs.sort_unstable();
-        songs.dedup();
-        for song in songs {
-            let slides: Vec<usize> = many.iter().filter(|at| at.presentation == song).map(|at| at.slide).collect();
-            if let Some(running) = self.running.as_mut() {
-                running.home_state.slide_request =
-                    Some((sp_engine::SlideRef { presentation: song, slide: 0 }, SlideRequest::DeleteMany(slides)));
-            }
-            self.handle_one_slide_request();
-        }
-        self.handle_one_slide_request();
-    }
-
-    fn handle_one_slide_request(&mut self) {
         use home::SlideRequest;
         let Some((at, request)) = self.running.as_mut().and_then(|r| r.home_state.slide_request.take()) else {
             return;
@@ -8108,7 +8106,6 @@ impl App {
                     state.confirm_delete_theme = None;
                     state.confirm_delete_songs.clear();
                     state.confirm_delete_media.clear();
-                    state.confirm_delete_slides.clear();
                 } else if let Some(screen) =
                     running.screen_windows.iter().find(|have| Some(have.window.id()) == self.focused).map(|w| w.screen)
                     && let Some(closed) = state.screens.iter_mut().find(|have| have.id == screen)

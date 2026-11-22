@@ -295,8 +295,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   column's (in the Show view, not on the Bible page, with the chooser put away). Nothing is said,
   as what went is there to see; Undo (Command-Z) puts them back where they were, picked out
   again; Remove from Playlist in an item's menu does the same, for all the items picked when it
-  is one of them. In a song list, a media strip or the slides, Delete
-  asks first, then deletes what is picked; picked slides go in one step that Undo brings back.
+  is one of them. Slides picked go at once too, asking nothing, in one step Undo takes back
+  whole (they come back picked); only the slides picked in one song, the song of the slide
+  picked last, never slides of another song. In a song list or a media strip, Delete asks
+  first ("This can't be undone."), then deletes what is picked.
 - Pictures and videos dropped on the window, or added with the media bin's +, go into the media
   bin, are kept between runs, and can be shown behind the words; Delete, or Delete… on an item's
   right-click menu, takes it out of the bin after asking (the file stays where it is).
@@ -383,7 +385,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   a song shown by itself, to add a slide of its own; also
   Add to Song as Slide on the item's right-click menu, and Media on a slide's. The slide's
   thumbnail shows the media behind its words.
-- A slide's right-click menu: Edit, Cut, Copy, Paste (each with its key), Duplicate, Delete…, Move Up, Move Down, Group (mark where a verse, chorus
+- A slide's right-click menu: Edit, Cut, Copy, Paste (each with its key), Duplicate, Delete (at once; with several picked in the song, Delete 2 Slides), Move Up, Move Down, Group (mark where a verse, chorus
   or bridge starts; the group the slide is in is ticked), Copy Style and Paste Style, Label (Blank Slide, Instrumental, Repeat, Spoken Word), Transition (its own,
   or Usual: the song's, else the one under the slides, named as "Usual (Dissolve, 0.4 s)"), Media (a picture or video, or None), Hot Key (a letter or digit that puts the slide on screen, shown on its
   picture; or None), Go to Next (after a number of seconds, shown on its picture; or None), Disable, Template (one of
@@ -392,7 +394,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   these changes in the Show view and on the Bible page, and the audience stays on the same slide;
   what was deleted takes its turn in the same order.
 - **Deleting, one rule:** what Undo can bring back goes at once, with no question and no
-  notice: items taken out of a playlist, playlists, libraries, audio playlists, timer,
+  notice: slides, items taken out of a playlist, playlists, libraries, audio playlists, timer,
   message, prop and macro cards (Cut on a message too), and in the Edit view props, stage
   layouts, theme templates and a theme's version. Undo puts it back where it was (a playlist in
   front again, a library shown again, items picked again, a prop, layout or template open
@@ -545,7 +547,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   layouts. View › Themes, Control-T and `sp view themes` open
   it on the themes. Under Slides, Props and Stage the left column lists them the same way: a
   heading (SLIDES, PROPS, STAGE LAYOUTS), a row of keys that act on the one open (Add,
-  Duplicate, Delete (a prop or a layout goes at once, and Undo puts it back; slides ask first),
+  Duplicate, Delete, at once, as Undo puts it back,
   and ↑ and ↓ to move it up or down the list), then each as its picture with its number and
   name under it, the one open on a lighter grey with a ring round it. A click opens one, a double click retypes its name in place (the name keeps its
   look while it is retyped), a drag moves it to where the ink line is (the one open stays
@@ -823,10 +825,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   and a slide switched off is dimmed. The keys over them act on the slides picked out, or the
   one open: Add puts a new slide just after the one open, laid out like it with its boxes
   empty, and opens it; Duplicate puts copies just after the last of them and opens the first copy;
-  Delete asks first (it is off when it would take every slide), and the slide after a deleted
+  Delete goes at once, Undo putting them back (it is off when it would take every slide), and the slide after a deleted
   one opens in its place; ↑ and ↓ move them one place, into the group they move into. A
   double click on a slide, or Rename Group on its right-click menu, retypes its group's name
-  in its strip (a group's colour follows its name); the menu also has Duplicate, Delete…,
+  in its strip (a group's colour follows its name); the menu also has Duplicate, Delete,
   Move Up and Move Down. ↑ and ↓ open the slide before or after (with no object selected).
   Shift-click picks out the slides from the one open to the one clicked, Command-click picks
   one out or puts it back, as in the Show view and the lists of songs and media; the slides
