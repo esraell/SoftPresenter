@@ -332,12 +332,14 @@ impl crate::App {
     /// goes on at once.
     fn read_ahead_on_layer(&mut self) {
         let Some(Announce::MediaPlaylist(id)) = self.announcing.as_ref().map(|on| on.what) else { return };
-        let Some(at) = self.announcing.as_ref().map(|on| on.at) else { return };
+        let Some((at, shown)) = self.announcing.as_ref().map(|on| (on.at, on.item)) else { return };
         let items = self.playlist_media(id);
         if items.len() < 2 {
             return;
         }
-        if let Some(item) = self.show.media().get(items[(at + 1) % items.len()])
+        let shown = shown.and_then(|item| self.show.media().iter().position(|have| have.id == item));
+        let next = shown.map_or((at + 1) % items.len(), |shown| crate::media::next_in_cycle(&items, at, shown));
+        if let Some(item) = self.show.media().get(items[next])
             && !crate::media::is_video(&item.path)
         {
             sp_render::read_ahead(&media_slide(&shown_name(&item.path), &item.name, item.fit));
@@ -401,8 +403,10 @@ impl crate::App {
                     _ => true,
                 };
                 if done {
-                    let next_at = if index.is_some_and(|index| items.get(at) == Some(&index)) { at + 1 } else { at };
-                    let next_at = next_at % items.len();
+                    // After the one shown, wherever it is now (the playlist may have been
+                    // reordered while it played); if it was taken out, the one in its place.
+                    let next_at =
+                        index.map_or(at % items.len(), |index| crate::media::next_in_cycle(&items, at, index));
                     self.show_media_announcement(what, next_at, items[next_at]);
                     return Some(Instant::now() + Duration::from_millis(50));
                 }

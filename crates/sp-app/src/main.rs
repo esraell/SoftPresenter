@@ -7941,7 +7941,7 @@ impl App {
         // being typed, Undo and Redo step through the changes made to songs.
         let in_show = self.running.as_ref().is_some_and(|r| {
             let state = &r.home_state;
-            state.editing.is_none() && state.theme_edit.is_none() && !r.egui_ctx.text_edit_focused()
+            state.edit_kind().is_none() && !r.egui_ctx.text_edit_focused()
         });
         if in_show && matches!(action, A::Undo | A::Redo) {
             return self.undo_show(action == A::Redo);
@@ -8051,6 +8051,8 @@ impl App {
             A::NewSlide => {
                 let song = match (&state.editing, &state.theme_edit) {
                     (Some(draft), None) => draft.at.presentation,
+                    // Edit › Props with no props: no song is open there.
+                    (None, None) if state.props_editor_open => usize::MAX,
                     _ => self.show.selected(),
                 };
                 if !self.bible_slots.contains(&song)
@@ -9502,6 +9504,17 @@ mod tests {
             }
         }
         assert_eq!(state.props_live.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [logo.id]);
+    }
+
+    #[test]
+    fn the_empty_props_list_keeps_the_keyboard_from_running_the_show() {
+        let ctx = egui::Context::default();
+        let mut state = home::HomeState { props_editor_open: true, ..home::HomeState::default() };
+        assert!(state.editing.is_none());
+        assert_eq!(state.edit_kind(), Some(home::EditKind::Props), "it is the Edit view");
+        assert!(!find_key_is_free(&state, &ctx) && !enter_key_is_free(&state, &ctx));
+        state.props_editor_open = false;
+        assert!(find_key_is_free(&state, &ctx) && enter_key_is_free(&state, &ctx));
     }
 
     #[test]

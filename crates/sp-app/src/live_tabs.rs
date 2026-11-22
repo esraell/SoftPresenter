@@ -2988,6 +2988,21 @@ mod tests {
     }
 
     #[test]
+    fn a_new_audio_playlist_is_shown_with_its_name_ready_to_type() {
+        let show = show();
+        let mut state = HomeState { live_tab: 5, ..HomeState::default() };
+        let ctx = egui::Context::default();
+        let before = state.audio.playlists.len();
+        click(&ctx, &show, &mut state, egui::Id::unique(("tab heading +", "Audio")), vec2(0.0, 0.0));
+        assert_eq!(state.audio.playlists.len(), before + 1);
+        assert_eq!(state.audio.current, before, "the new one is shown");
+        assert_eq!(state.audio.shown().name, "New Audio Playlist");
+        let typing = ctx.data(|data| data.get_temp::<String>(egui::Id::unique("audio playlist renaming")));
+        assert_eq!(typing.as_deref(), Some("New Audio Playlist"), "its name is ready to type");
+        assert!(state.audio_changed);
+    }
+
+    #[test]
     fn a_macro_runs_from_its_run_key_and_not_from_its_name() {
         let show = show();
         let mut state = HomeState { live_tab: 3, ..HomeState::default() };
