@@ -19,6 +19,7 @@ mod images;
 mod inspector;
 mod integrations;
 mod kept;
+mod keys;
 mod libraries;
 mod library_folder;
 mod links;
@@ -550,6 +551,7 @@ fn template_names(theme: &Theme) -> Vec<String> {
 /// screens.
 fn escape_closes_something(state: &home::HomeState, ctx: &egui::Context) -> bool {
     state.settings_open
+        || state.key_sheet
         || state.bible.options.open
         || state.bible.options.manage_open
         || state.setup.is_some()
@@ -585,10 +587,26 @@ fn show_key_command(key: &Key, show: &Show) -> Option<Command> {
     }
 }
 
+/// Keys that run the show but belong to something open in the window: under the list of keys
+/// nothing runs the show; while the numbers show (after modifier-1 to 7), a number and Escape
+/// are theirs; in an open menu the arrows, Space and Enter move in it and choose.
+fn show_key_held_back(state: &home::HomeState, ctx: &egui::Context, key: &Key) -> bool {
+    if state.key_sheet {
+        return true;
+    }
+    let digit = matches!(key, Key::Character(typed) if typed.chars().count() == 1 && typed.chars().all(|c| ('1'..='9').contains(&c)));
+    if state.numbers.is_some() && (digit || matches!(key, Key::Named(NamedKey::Escape))) {
+        return true;
+    }
+    egui::Popup::is_any_open(ctx)
+        && matches!(key, Key::Named(NamedKey::ArrowLeft | NamedKey::ArrowRight | NamedKey::Space | NamedKey::Enter))
+}
+
 /// Whether `/` is free to open the find box: the keyboard is not in a text field, the Edit view
 /// is not open, and no sheet, question or menu is up.
 fn find_key_is_free(state: &home::HomeState, ctx: &egui::Context) -> bool {
     !ctx.text_edit_focused()
+        && !state.key_sheet
         && state.edit_kind().is_none()
         && state.new_song_sheet.is_none()
         && !state.alert_open()
@@ -7175,7 +7193,7 @@ impl ApplicationHandler<AppEvent> for App {
             && let WindowEvent::KeyboardInput { event: key, .. } = &event
             && key.state == ElementState::Pressed
             && let winit::keyboard::PhysicalKey::Code(code) = key.physical_key
-            && menubar::claims(code, self.held)
+            && menubar::claims(code, self.held, self.running.as_ref().is_some_and(|r| r.home_state.editing.is_some()))
         {
             return;
         }
@@ -7275,6 +7293,7 @@ impl ApplicationHandler<AppEvent> for App {
             && !running.home_state.alert_open()
             && !self.held.super_key()
             && !self.held.control_key()
+            && !show_key_held_back(&running.home_state, &running.egui_ctx, &key.logical_key)
             && let Some(command) = show_key_command(&key.logical_key, &self.show)
         {
             // Escape clears the screen only when there is nothing else for it to close.

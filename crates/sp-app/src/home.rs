@@ -269,6 +269,18 @@ pub struct HomeState {
     pub live_item: Option<usize>,
     /// A notice that comes and goes under the top bar (see `say`), and when it was first shown.
     pub toast: Option<(String, Option<f64>)>,
+    /// The numbers on the open tool tab's cards or the media strip's pictures, after
+    /// modifier-1 to 7 or Shift-modifier-M (see `keys`).
+    pub numbers: Option<crate::keys::Numbers>,
+    /// Whether the tags beside things with keys show (the modifier held a moment), and since
+    /// when the modifier has been held alone.
+    pub key_tags: bool,
+    pub modifier_since: Option<f64>,
+    /// The list of every key is open.
+    pub key_sheet: bool,
+    /// Open the menu of the slide on screen, as its "more" button does (modifier-O): the frame
+    /// it was asked in, as the slide may first need to be scrolled into view.
+    pub live_menu: Option<u64>,
     /// The Bible passages kept in playlists, as slides.
     pub passages: slides::PassageDecks,
     /// How tall each slide's row is in the words-only and table views.
@@ -1300,6 +1312,11 @@ impl Default for HomeState {
             live_row_seen: None,
             live_item: None,
             toast: None,
+            numbers: None,
+            key_tags: false,
+            modifier_since: None,
+            key_sheet: false,
+            live_menu: None,
 
             media_playlists: Vec::new(),
             media_playlist_shown: None,
@@ -1531,6 +1548,21 @@ pub fn home_ui(
     state.lists.songs.check(show, &state.song_keys, hidden, &state.removed_songs);
     // Text boxes are dark wells in the lighter side columns.
     ui.visuals_mut().extreme_bg_color = FIELD;
+    // The keys for getting around: the views, the tool tabs and their numbers, the screens.
+    let voxlive =
+        state.voxlive_slot.and_then(|slot| show.presentations().get(slot)).is_some_and(|v| v.slide_count() > 0);
+    match crate::keys::frame(ui.ctx(), state, voxlive) {
+        Some(crate::keys::Ask::Audience) => commands.push(Command::SetOutputEnabled(!show.output_enabled())),
+        // The menu of the slide on screen: its slide is brought into view, and its menu opened.
+        Some(crate::keys::Ask::LiveMenu) if show.live().is_some() && !state.bible_open => {
+            state.live_menu = Some(ui.ctx().cumulative_frame_nr());
+            state.live_seen = None;
+        }
+        Some(crate::keys::Ask::LiveMenu) => state.say("Put a slide on screen to open its menu."),
+        None => {}
+    }
+    // A press that ends on a slider or a menu leaves the keyboard to the show again.
+    release_focus(ui.ctx());
     crate::studio::toolbar(ui, show, state, &mut commands);
     crate::studio::changed_outside_bar(ui, show, state);
     crate::setup::setup_ui(ui.ctx(), show, state, &mut commands);
@@ -1631,8 +1663,23 @@ pub fn home_ui(
         slide_area(ui, show, state, theme, thumb, &mut commands);
     }
     crate::studio::round_corners(ui, middle);
+    crate::keys::key_sheet(ui.ctx(), state);
     crate::studio::toast(ui.ctx(), state);
     commands
+}
+
+/// After the pointer lets go of a slider, a dropdown or a button, the keyboard goes back to
+/// running the show: nothing but a text field keeps it. Not while a menu is open, where the
+/// arrows move between its choices.
+fn release_focus(ctx: &egui::Context) {
+    let released = ctx.input(|input| input.pointer.any_released());
+    if released && !ctx.text_edit_focused() && !egui::Popup::is_any_open(ctx) {
+        ctx.memory_mut(|memory| {
+            if let Some(focused) = memory.focused() {
+                memory.surrender_focus(focused);
+            }
+        });
+    }
 }
 
 const EDIT_PANEL: Color32 = crate::studio::PANEL;
@@ -3951,6 +3998,18 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
                         ui.label(command);
                         ui.label(egui::RichText::new(key).monospace());
                         ui.end_row();
+                    }
+                    // The keys for getting around, which work on every computer.
+                    for (group, rows) in crate::keys::every_key() {
+                        if !matches!(group, "Going places" | "The live tools") {
+                            continue;
+                        }
+                        for (keys, what) in rows {
+                            ui.label(egui::RichText::new(group).color(TEXT_DIM));
+                            ui.label(what);
+                            ui.label(egui::RichText::new(keys.join("  ")).monospace());
+                            ui.end_row();
+                        }
                     }
                     for (menu, command, key) in crate::menubar::shortcuts() {
                         ui.label(egui::RichText::new(menu).color(TEXT_DIM));

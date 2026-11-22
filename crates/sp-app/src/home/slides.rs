@@ -943,6 +943,15 @@ pub fn slide_scroll(
             item_bar(ui, show, state, deck, bar, place.bar, &sheet, theme, open, commands, &mut ask, &mut asks);
         }
         sweep_slides(ui, state);
+        // Asked for while the slide on screen is out of view: it is scrolled to, and its menu
+        // opens when it is drawn, a frame or two later; not kept for longer.
+        if let Some(asked) = state.live_menu {
+            if ui.ctx().cumulative_frame_nr() > asked + 3 {
+                state.live_menu = None;
+            } else {
+                ui.ctx().request_repaint();
+            }
+        }
     });
     asks.carry_out(show, state);
     if let Some(ask) = ask {
@@ -1265,6 +1274,10 @@ fn draw_slides(
         }
         if let Some(here) = here {
             let button = more_button(ui, more, id.with("more"), near);
+            // Modifier-O: the menu of the slide on screen opens as if its button were clicked.
+            if is_live && state.live_menu.take().is_some() {
+                egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&button));
+            }
             egui::Popup::menu(&button).show(|ui| slide_menu(ui, show, state, song, here, slide, deck.made));
             response.context_menu(|ui| slide_menu(ui, show, state, song, here, slide, deck.made));
         }

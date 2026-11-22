@@ -30,20 +30,15 @@ pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeStat
     let voxlive =
         state.voxlive_slot.and_then(|slot| show.presentations().get(slot)).is_some_and(|item| item.slide_count() > 0);
     const NAMES: [&str; 7] = ["Timers", "Messages", "Props", "Macros", "Stage", "Audio", "VoxLive"];
-    // Each tab's key is in the View menu, which only a Mac has.
-    const HINTS: &[&str] = if cfg!(target_os = "macos") {
-        &[
-            "Timers (Control-C)",
-            "Messages (Control-M)",
-            "Props (Control-P)",
-            "Macros (Control-Shift-M)",
-            "Stage (Shift-Command-S)",
-            "Audio (Control-A)",
-            "VoxLive",
-        ]
-    } else {
-        &[]
-    };
+    // Each tab's key opens it and numbers what is in it (see `keys`).
+    let hints: Vec<String> = NAMES
+        .iter()
+        .enumerate()
+        .map(|(at, name)| crate::keys::hint(&format!("{name}, numbered"), &(at + 1).to_string(), false))
+        .collect();
+    let hints: Vec<&str> = hints.iter().map(String::as_str).collect();
+    let tags: Vec<String> =
+        if crate::keys::tags_shown(state) { (0..NAMES.len()).map(crate::keys::tab_key).collect() } else { Vec::new() };
     let count = if voxlive { 7 } else { 6 };
     if state.live_tab >= count {
         state.live_tab = 0;
@@ -59,10 +54,22 @@ pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeStat
         state.audio_playing.track.is_some().then_some(TALLY),
         None,
     ];
-    let tabs = Tabs { hints: &HINTS[..count.min(HINTS.len())], dots: &dots[..count], ..Tabs::plain(&NAMES[..count]) };
+    let tabs = Tabs {
+        hints: &hints[..count],
+        dots: &dots[..count],
+        tags: &tags[..tags.len().min(count)],
+        ..Tabs::plain(&NAMES[..count])
+    };
     let (place, _) = ui.allocate_exact_size(vec2(width, tab_switch_height(&tabs)), Sense::hover());
-    if let (_, Some(tab)) = tab_switch(ui, "live tabs", place.min, width, &tabs, Some(state.live_tab)) {
+    let (block, chosen) = tab_switch(ui, "live tabs", place.min, width, &tabs, Some(state.live_tab));
+    if let Some(tab) = chosen {
         state.live_tab = tab;
+    }
+    // While the tab's things are numbered, the tabs are outlined in amber.
+    if crate::keys::Numbers::showing(&state.numbers, crate::keys::NumbersOf::Tab) {
+        let round = if count > 4 { 14.0 } else { block.height() / 2.0 };
+        let edge = egui::Stroke::new(1.5, crate::studio::CARE);
+        ui.painter().rect_stroke(block.expand(1.0), round + 1.0, edge, egui::StrokeKind::Outside);
     }
     ui.add_space(4.0);
     let mut area = egui::ScrollArea::vertical().id_salt("live tab").auto_shrink([false, false]);
@@ -148,6 +155,26 @@ fn card<R>(ui: &mut egui::Ui, fill: Color32, contents: impl FnOnce(&mut egui::Ui
             contents(ui)
         })
         .inner
+}
+
+/// While the numbers show on the open tab (after modifier-1 to 7), the card's number at its
+/// top left corner; and whether it was just picked by its number, which does what the card's
+/// main key does. `row` is the card's first line; `place` counts from 0.
+fn numbered(ui: &egui::Ui, state: &HomeState, row: Rect, place: usize) -> bool {
+    let card = Rect::from_min_max(
+        row.min - vec2(f32::from(CARD_MARGIN.left), f32::from(CARD_MARGIN.top)),
+        row.max + vec2(f32::from(CARD_MARGIN.right), f32::from(CARD_MARGIN.bottom)),
+    );
+    numbered_at(ui, &state.numbers, card, place)
+}
+
+/// The same for a thing whose whole rectangle is known (a stage layout's tile, a track's row).
+fn numbered_at(ui: &egui::Ui, numbers: &Option<crate::keys::Numbers>, rect: Rect, place: usize) -> bool {
+    use crate::keys::{Numbers, NumbersOf};
+    if place < 9 && Numbers::showing(numbers, NumbersOf::Tab) {
+        crate::keys::number_badge(ui.painter(), rect, place + 1);
+    }
+    Numbers::picked(numbers, NumbersOf::Tab, place)
 }
 
 /// The part of a card behind its keys, which takes a right-click (for the card's menu), a
@@ -274,6 +301,9 @@ fn timers_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             let name = fitted(ui, &timer.name, name_font(), TEXT, name_wide, 2);
             let (row, _) = ui.allocate_exact_size(vec2(width, name.size().y.max(CARD_KEY)), Sense::hover());
             let back = card_back(ui, row, egui::Id::unique(("timer card", id)));
+            if numbered(ui, state, row, index) {
+                asked = Some((index, TimerAsk::Toggle));
+            }
             let y = row.center().y;
             ui.painter().galley(pos2(row.min.x, y - name.size().y / 2.0), name, TEXT);
             let key = |place: f32| {
@@ -589,6 +619,9 @@ fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             let block = name.size().y + sub.size().y;
             let (row, _) = ui.allocate_exact_size(vec2(width, block.max(CARD_KEY)), Sense::hover());
             let back = card_back(ui, row, egui::Id::unique(("message card", id)));
+            if numbered(ui, state, row, index) {
+                asked = Some((index, MessageAsk::Toggle));
+            }
             let top = row.center().y - block / 2.0;
             let (name_tall, first_line) = (name.size().y, name.rows.first().map_or(15.0, |row| row.height()));
             match state.message_rename.as_mut().filter(|(renaming, _)| *renaming == id) {
@@ -905,6 +938,9 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut Thumb) {
             let block = name.size().y + sub.size().y;
             let (row, _) = ui.allocate_exact_size(vec2(width, block.max(CARD_KEY).max(picture.y)), Sense::hover());
             let back = card_back(ui, row, egui::Id::unique(("prop card", id)));
+            if numbered(ui, state, row, index) {
+                asked = Some((index, PropAsk::Toggle));
+            }
             let y = row.center().y;
             let place = Rect::from_min_size(pos2(row.min.x, y - picture.y / 2.0), picture);
             let key = sp_model::Uuid::from_u128(prop.id.as_u128() ^ 0x7072_6f70_7069_6374_7572_6500_0000_0000);
@@ -1213,6 +1249,9 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
             let made = &state.macros[index];
             let width = ui.available_width();
             let (row, _) = ui.allocate_exact_size(vec2(width, 34.7), Sense::hover());
+            if numbered(ui, state, row, index) {
+                asked = Some((index, MacroAsk::Run));
+            }
             let reach = Rect::from_min_max(
                 row.min - vec2(f32::from(MACRO_MARGIN.left), f32::from(MACRO_MARGIN.top)),
                 row.max + vec2(f32::from(MACRO_MARGIN.right), f32::from(MACRO_MARGIN.bottom)),
@@ -1967,7 +2006,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 asked = Some((at, ask));
             }
         });
-        if response.clicked() {
+        if response.clicked() || numbered_at(ui, &state.numbers, line, at) {
             asked = Some((at, TrackAsk::Play));
         }
         response.on_hover_text("Click to play this track; drag it to another place").context_menu(|ui| {
@@ -2202,7 +2241,8 @@ fn stage_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, t
         let (font, ink) = if on { (semibold(12.5), TEXT) } else { (FontId::proportional(12.5), TEXT_DIM) };
         let name = fitted(ui, &layout.name, font, ink, tile.max.x - 9.0 - left, 1);
         ui.painter().galley(pos2(left, name_y - name.size().y / 2.0), name, ink);
-        if response.on_hover_text(format!("Switch the stage to {}", layout.name)).clicked() {
+        let picked = numbered_at(ui, &state.numbers, tile, place);
+        if response.on_hover_text(format!("Switch the stage to {}", layout.name)).clicked() || picked {
             switch_to = Some(layout.id);
         }
     }
@@ -2305,7 +2345,10 @@ fn voxlive_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState)
                 ("Show", Flat::Plain, "Put these captions on the screens, in place of what is there")
             };
             let id = egui::Id::unique(("voxlive show", index));
-            if flat_button(ui, button, id, words, button_font.clone(), look, true).on_hover_text(hint).clicked() {
+            let picked = numbered(ui, state, row, index);
+            if flat_button(ui, button, id, words, button_font.clone(), look, true).on_hover_text(hint).clicked()
+                || picked
+            {
                 state.voxlive_go = Some(index);
             }
         });

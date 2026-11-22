@@ -36,9 +36,9 @@ sources) drawn by their own thread.
 | Show / Bible / Edit | Switches the view. Edit has four kinds, chosen at the top of its left column: Slides, Themes, Props and Stage | `view show\|edit\|bible`; `view themes` opens Edit on the themes |
 | Find box | Finds as you type, listed under it: a Bible passage first when the words are a reference (`John 3:16`, `Ин 3:16-18`, `ps 23`), named and quoted in the language it was typed in; then songs, by title and then by a line of their words; then verses that hold the words, from the Bibles in use written in their alphabet (each tagged with its Bible). Return or a click opens the one picked (a song in the Show view, a passage or verse in the Bible view; nothing goes on the screens), Command-Return (Ctrl on other computers) adds it to the playlist in front, Escape or a click elsewhere ends the search. `/` goes to it, and so does Command-F. It does not search playlists or media (`find.rs`) | |
 | Clock | The time of day, on a 12-hour or a 24-hour clock as the computer is set (`clock.rs`) | |
-| Audience ON/OFF | The audience screens on or off (Command-1) | `audience on\|off` |
-| Stage ON/OFF | The stage screens on or off (Command-2) | `stage on\|off` |
-| ? | Opens Settings at Key Mappings | |
+| Audience ON/OFF | The audience screens on or off (Shift-Command-1; Ctrl+Shift+1 on other computers) | `audience on\|off` |
+| Stage ON/OFF | The stage screens on or off (Shift-Command-2) | `stage on\|off` |
+| ? | The list of every key (the `?` key opens it too; Escape, Enter or Done close it) (`keys.rs`) | |
 | ⚙ | Settings: General, Screens, Groups, Key Mappings, Integrations (Command-comma) | `menu Settings` |
 
 ### Left column: a playlist or a library
@@ -98,6 +98,14 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | A letter | The slide with that hot key, or the group it stands for (A for the first verse, S for the second, C for the chorus, E for the ending…; the letter shows at the right of a group's bar) |
 | Delete | Delete what is picked out, after asking |
 | Command-N | New song |
+| Command-S, -B, -E | Show, Bible (cursor in the reference; Bold while editing a slide), Edit (Ctrl on other computers, for all of these) |
+| Command-P | The chooser of playlists and libraries |
+| Command-1 … 7, then 1 … 9 | Opens that tool tab and numbers what is in it; a number then starts that timer, shows that message or prop, runs that macro, switches that stage layout or plays that track. The numbers go after four seconds; Escape puts them away and clears nothing |
+| Shift-Command-M, then 1 … 9 | Shows that picture or video from the media strip |
+| Shift-Command-1, -2 | Audience screens, stage screens, on or off |
+| Command-O | The menu of the slide on screen |
+| ? | Every key, as a list |
+| Holding Command | A small amber tag beside everything that has a key |
 | SoftPresenter › Set Up SoftPresenter… | The setup a fresh install starts with: screens, songs, Bibles, permissions |
 | File › Import Songs… (or drop song files on the window) | Import songs from text, lyric, ChordPro, rich-text or Word files |
 | File › Import from ProPresenter… (or drop a folder) | Bring a library folder across; each folder becomes a library |

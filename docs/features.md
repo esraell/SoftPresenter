@@ -303,7 +303,23 @@ feature changes, this page changes in the same commit.
   clock (on a 12-hour or a
   24-hour clock as the computer is set, with the computer's own words for morning and
   afternoon), the Audience and Stage
-  keys, a `?` (it opens Settings at Key Mappings) and Settings.
+  keys, a `?` (the list of every key, as the `?` key opens it) and Settings.
+- **Keys for getting around**, the same on every computer (Command on a Mac, Ctrl elsewhere;
+  they don't depend on the Mac's menu bar): Command-S, -B and -E go to Show, Bible (with the
+  cursor in the reference) and Edit (Command-B stays Bold while editing a slide); Command-P
+  opens the chooser of playlists and libraries; Command-F (or `/`) finds; Command-comma opens
+  Settings; Command-O opens the menu of the slide on screen. **Command-1 to 7** open a tool tab
+  (Timers, Messages, Props, Macros, Stage, Audio, VoxLive) and number what is in it, and then
+  **1 to 9** start that timer, show that message or prop, run that macro, switch the stage to
+  that layout or play that track; **Shift-Command-M** numbers the pictures and videos in the
+  media strip, and 1 to 9 shows one. The numbers stay four seconds after the last one is used,
+  or until Escape, which then only puts them away. **Shift-Command-1 and -2** switch the
+  audience and the stage screens on and off (they were Command-1 and -2, which now open the
+  first two tabs). **Holding Command** a moment shows a small amber tag beside each thing that
+  has a key; `?` (or the `?` in the top bar) lists every key. In an open menu the arrows move
+  between its choices, Right opens a group of them, Left goes back, Enter chooses and Escape
+  closes; Space and the arrows don't run the show while a menu is open. After a slider or a
+  menu is used, the keyboard goes back to running the show.
 - **The Edit view** edits four kinds of thing, chosen by a switch at the top of its left
   column: a song's Slides, the Themes and their templates, the Props, and the Stage screens'
   layouts. View › Themes, Control-T and `sp view themes` open

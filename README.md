@@ -205,10 +205,16 @@ status` instead of `sp status`.
 | / or Cmd+F | find a song (title or words) or a Bible passage or verse |
 | Cmd+, | Settings |
 | Option+Cmd+1 | Screens |
-| Cmd+1 / Cmd+2 | audience / stage screens on or off |
-| Control+S, E, B, T | Show, Edit, Bible, Edit on the themes |
+| Shift+Cmd+1 / Shift+Cmd+2 | audience / stage screens on or off |
+| Cmd+S, Cmd+B, Cmd+E | Show, Bible (ready for a reference), Edit (Control+S, B, E and T work too on a Mac) |
+| Cmd+P | the playlists and libraries to choose from |
+| Cmd+1 … Cmd+7, then 1 … 9 | open a tool tab and number what is in it, then start, show, run or play the one with that number |
+| Shift+Cmd+M, then 1 … 9 | show that picture or video |
+| Cmd+O | the menu of the slide on screen |
+| ? | every key, as a list (holding Cmd shows each key beside what it does) |
 
-The letter for each group is shown on its first slide.
+The letter for each group is shown on its first slide. On Windows and Linux, Ctrl takes the
+place of Cmd.
 
 ### Song text files
 

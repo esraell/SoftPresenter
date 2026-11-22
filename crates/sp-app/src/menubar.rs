@@ -326,8 +326,8 @@ pub const MENUS: &[(&str, &[Entry])] = &[
     (
         "Screens",
         &[
-            Check(Action::Audience, "Audience Output", cmd('1')),
-            Check(Action::Stage, "Stage Output", cmd('2')),
+            Check(Action::Audience, "Audience Output", shift_cmd('1')),
+            Check(Action::Stage, "Stage Output", shift_cmd('2')),
             Check(Action::IdentifyScreens, "Identify Screens", None),
             Line,
             Check(Action::TestBars, "Test Pattern: Color Bars", None),
@@ -508,9 +508,12 @@ pub fn needs_editor(action: Action) -> bool {
 }
 
 /// True when a key pressed with these modifiers is one of the menus' shortcuts. Such a key
-/// is left to the menu, so it is acted on once.
-pub fn claims(key: KeyCode, held: ModifiersState) -> bool {
-    items().filter_map(|(_, shortcut)| shortcut).any(|shortcut| {
+/// is left to the menu, so it is acted on once. An item that only works in the editor is
+/// greyed out elsewhere and leaves its key to the window there (Command-B is Bold in the
+/// editor and the Bible page elsewhere).
+pub fn claims(key: KeyCode, held: ModifiersState, editing: bool) -> bool {
+    let wanted = |action: &Action| editing || !needs_editor(*action);
+    items().filter(|(action, _)| wanted(action)).filter_map(|(_, shortcut)| shortcut).any(|shortcut| {
         key_code(shortcut.key) == Some(key)
             && shortcut.command == held.super_key()
             && shortcut.control == held.control_key()
@@ -706,6 +709,7 @@ mod tests {
     #[test]
     fn a_shortcut_is_claimed_only_with_exactly_its_modifiers() {
         let command = ModifiersState::SUPER;
+        let claims = |key, held| claims(key, held, true);
         assert!(claims(KeyCode::KeyZ, command));
         assert!(claims(KeyCode::KeyZ, command | ModifiersState::SHIFT));
         assert!(claims(KeyCode::Comma, command));
@@ -719,5 +723,17 @@ mod tests {
         assert!(!claims(KeyCode::ArrowRight, ModifiersState::empty()));
         // Command-S is not a menu shortcut.
         assert!(!claims(KeyCode::KeyS, command));
+        // Command-1 to 7 are the tool tabs' keys; Shift-Command-1 and 2 the screens.
+        assert!(!claims(KeyCode::Digit1, command));
+        assert!(claims(KeyCode::Digit1, command | ModifiersState::SHIFT));
+        assert!(claims(KeyCode::Digit2, command | ModifiersState::SHIFT));
+    }
+
+    #[test]
+    fn an_editor_only_shortcut_is_left_to_the_window_outside_the_editor() {
+        let command = ModifiersState::SUPER;
+        assert!(claims(KeyCode::KeyB, command, true), "Bold in the editor");
+        assert!(!claims(KeyCode::KeyB, command, false), "the Bible page elsewhere");
+        assert!(claims(KeyCode::KeyZ, command, false), "Undo is everywhere");
     }
 }

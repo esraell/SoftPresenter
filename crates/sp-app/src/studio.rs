@@ -269,6 +269,20 @@ pub fn pill_switch(
     (track, clicked)
 }
 
+/// Where each pill of a [`pill_switch`] with its top left corner at `min` stands.
+pub fn pill_cells(ui: &egui::Ui, min: egui::Pos2, labels: &[&str], look: &SwitchLook) -> Vec<Rect> {
+    let mut x = min.x + look.inset;
+    labels
+        .iter()
+        .map(|label| {
+            let wide = spaced(ui, label, look.font.clone(), look.idle, look.spacing).size().x + 2.0 * look.pad;
+            let cell = Rect::from_min_size(pos2(x, min.y + look.inset), vec2(wide, look.height));
+            x += wide + 2.0;
+            cell
+        })
+        .collect()
+}
+
 /// How tall a block of tabs made by [`tab_switch`] is.
 pub fn tab_switch_height(tabs: &Tabs) -> f32 {
     let rows = tabs.labels.len().div_ceil(TABS_IN_A_ROW).max(1) as f32;
@@ -282,6 +296,8 @@ pub struct Tabs<'a> {
     pub labels: &'a [&'a str],
     pub hints: &'a [&'a str],
     pub dots: &'a [Option<Color32>],
+    /// A key's tag for each tab, while the modifier is held (none otherwise).
+    pub tags: &'a [String],
     /// The tabs that cannot be chosen now (none, when empty): drawn faint, and not clickable.
     pub off: &'a [bool],
     /// How tall a tab is drawn (it takes clicks from at least [`LEAST_CLICK`]), and the size
@@ -293,7 +309,7 @@ pub struct Tabs<'a> {
 impl<'a> Tabs<'a> {
     /// Tabs of the usual size with nothing but their names.
     pub fn plain(labels: &'a [&'a str]) -> Tabs<'a> {
-        Tabs { labels, hints: &[], dots: &[], off: &[], tall: 26.9, size: 12.5 }
+        Tabs { labels, hints: &[], dots: &[], tags: &[], off: &[], tall: 26.9, size: 12.5 }
     }
 }
 
@@ -312,7 +328,7 @@ pub fn tab_switch(
     tabs: &Tabs,
     chosen: Option<usize>,
 ) -> (Rect, Option<usize>) {
-    let Tabs { labels, hints, dots, off, tall, size } = *tabs;
+    let Tabs { labels, hints, dots, tags, off, tall, size } = *tabs;
     const BETWEEN: f32 = 2.0;
     const INSET: f32 = 3.0;
     let block = Rect::from_min_size(min, vec2(width, tab_switch_height(tabs)));
@@ -341,9 +357,15 @@ pub fn tab_switch(
                 (false, true) => TEXT,
                 (false, false) => TEXT_DIM,
             };
-            let words = ui.painter().text(cell.center(), Align2::CENTER_CENTER, *label, font.clone(), ink);
+            // With a key's tag, the name and the tag stand together in the middle.
+            let tag_wide = tags.get(index).map_or(0.0, |tag| crate::keys::tag_width(ui.painter(), tag) + 5.0);
+            let centre = cell.center() - vec2(tag_wide / 2.0, 0.0);
+            let words = ui.painter().text(centre, Align2::CENTER_CENTER, *label, font.clone(), ink);
             if let Some(Some(colour)) = dots.get(index) {
                 ui.painter().circle_filled(pos2(words.max.x + 6.5, cell.center().y), 2.5, *colour);
+            }
+            if let Some(tag) = tags.get(index) {
+                crate::keys::tag(ui.painter(), words.max.x + tag_wide, cell.center().y, tag);
             }
             if let Some(hint) = hints.get(index) {
                 response = response.on_hover_text(*hint);
@@ -860,20 +882,29 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         } else {
             0
         };
-        let hints: &[&str] = if cfg!(target_os = "macos") {
-            &["Show (Control-S)", "Bible (Control-B)", "Edit (Control-E)"]
-        } else {
-            &["Show", "Bible", "Edit"]
-        };
+        let hints = [
+            crate::keys::hint("Show", "S", false),
+            crate::keys::hint("Bible, ready for a reference", "B", false),
+            crate::keys::hint("Edit", "E", false),
+        ];
+        let hints: Vec<&str> = hints.iter().map(String::as_str).collect();
+        let at = pos2(name.max.x + 14.0, middle - 16.45);
         let (switch, clicked) = pill_switch(
             ui,
             "views",
-            pos2(name.max.x + 14.0, middle - 16.45),
+            at,
             &["Show", "Bible", "Edit"],
-            hints,
+            &hints,
             ORDER.iter().position(|shown| *shown == view),
             &SwitchLook::views(),
         );
+        // Holding the modifier: each view's key beside it.
+        if crate::keys::tags_shown(state) {
+            let cells = pill_cells(ui, at, &["Show", "Bible", "Edit"], &SwitchLook::views());
+            for (cell, key) in cells.iter().zip(["S", "B", "E"]) {
+                crate::keys::corner_tag(ui.painter(), *cell, &crate::keys::with_modifier(key));
+            }
+        }
         // A click on the view that is open does nothing. Asked for by name (the View menu, the
         // command line), Edit is the slide editor and Themes the Theme Editor, whichever kind
         // of the Edit view is open.
@@ -911,7 +942,7 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             state.preferences_open = !state.preferences_open;
         }
 
-        // The keys: for now it opens Settings at Key Mappings, where the keys are listed.
+        // The keys: the list of every key, as `?` opens it.
         let keys = pos2(gear.min.x - 10.0 - 14.0, middle);
         let response = ui.interact(
             Rect::from_center_size(keys, egui::Vec2::splat(28.0)),
@@ -920,28 +951,24 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         );
         ui.painter().circle_filled(keys, 14.0, if response.hovered() { HOVER } else { CARD });
         ui.painter().text(keys, Align2::CENTER_CENTER, "?", fixed_semibold(13.0), TEXT_DIM);
-        if response.on_hover_text("The keys (opens Settings at Key Mappings)").clicked() {
-            state.preferences_open = true;
-            if let Some(pane) = crate::home::PANES.iter().position(|pane| *pane == "Key Mappings") {
-                state.preferences_pane = pane;
-            }
+        if response.on_hover_text("Every key (press ?)").clicked() {
+            state.key_sheet = true;
         }
 
         let stage_on = state.stage_on;
         let (response, left) = screens_key(ui, bar, keys.x - 14.0 - 10.0, "Stage", stage_on);
-        let hint =
-            if cfg!(target_os = "macos") { "Stage screens on or off (Command-2)" } else { "Stage screens on or off" };
-        if response.on_hover_text(hint).clicked() {
+        if crate::keys::tags_shown(state) {
+            crate::keys::corner_tag(ui.painter(), response.rect, &crate::keys::stage_key());
+        }
+        if response.on_hover_text(crate::keys::hint("Stage screens on or off", "2", true)).clicked() {
             state.stage_on = !stage_on;
         }
         let on = show.output_enabled();
         let (response, left) = screens_key(ui, bar, left - 10.0, "Audience", on);
-        let hint = if cfg!(target_os = "macos") {
-            "Audience screens on or off (Command-1)"
-        } else {
-            "Audience screens on or off"
-        };
-        if response.on_hover_text(hint).clicked() {
+        if crate::keys::tags_shown(state) {
+            crate::keys::corner_tag(ui.painter(), response.rect, &crate::keys::audience_key());
+        }
+        if response.on_hover_text(crate::keys::hint("Audience screens on or off", "1", true)).clicked() {
             commands.push(Command::SetOutputEnabled(!on));
         }
 
@@ -1062,6 +1089,7 @@ pub fn edit_kinds(ui: &mut egui::Ui, state: &mut HomeState) {
         labels: &["Slides", "Themes", "Props", "Stage"],
         hints: &hints,
         dots: &[],
+        tags: &[],
         off: &[false, false, no_props, false],
         tall: 23.5,
         size: 11.5,
@@ -1390,7 +1418,12 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         let clip = Rect::from_min_max(pos2(row.min.x + 32.0, row.min.y), pos2(chevron.min.x - 8.0, row.max.y));
         let galley = spaced(ui, &title, semibold(19.0), ink, -0.38);
         ui.painter().with_clip_rect(clip).galley(pos2(clip.min.x, middle - galley.size().y / 2.0), galley, ink);
-        if name.on_hover_text("Choose a playlist or a library").clicked() {
+        if crate::keys::tags_shown(state) {
+            let tag_at = Rect::from_min_max(pos2(chevron.min.x - 30.0, name.rect.min.y + 6.0), chevron.max);
+            crate::keys::corner_tag(ui.painter(), tag_at, &crate::keys::with_modifier("P"));
+        }
+        let hint = crate::keys::hint("Choose a playlist or a library", "P", false);
+        if name.on_hover_text(hint).clicked() {
             state.chooser_open = !state.chooser_open;
         }
         if state.chooser_open {
@@ -3594,6 +3627,14 @@ pub fn media_strip(
         let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
         let middle = head.center().y;
         let label = cap(ui, pos2(head.min.x, middle), Align2::LEFT_CENTER, "Media", TEXT_DIM);
+        // Holding the modifier: the key that numbers the pictures and videos, after the label.
+        let mut label = label;
+        if crate::keys::tags_shown(state) {
+            let words = format!("{} then 1\u{2013}9", crate::keys::media_key());
+            let wide = crate::keys::tag_width(ui.painter(), &words);
+            let tag = crate::keys::tag(ui.painter(), label.max.x + 8.0 + wide, middle, &words);
+            label.max.x = tag.max.x;
+        }
         if folded {
             let count = show.media().len();
             let words = match count {
@@ -3745,6 +3786,11 @@ pub fn media_strip(
                             let (rect, response) =
                                 ui.allocate_exact_size(image_size + vec2(0.0, 22.2), Sense::click_and_drag());
                             placed.push((index, rect));
+                            // Its number, after Shift-modifier-M: the number shows it.
+                            let numbers = &state.numbers;
+                            if crate::keys::Numbers::picked(numbers, crate::keys::NumbersOf::Media, placed.len() - 1) {
+                                commands.push(Command::ShowMedia(index));
+                            }
                             // A drag starting on an item picks out the items it passes over while it
                             // stays in the bin; dragged out onto a slide it becomes what the slide
                             // shows, onto the space under the slides a slide of its own.
@@ -3837,6 +3883,11 @@ pub fn media_strip(
                             });
                         }
                     });
+                    if crate::keys::Numbers::showing(&state.numbers, crate::keys::NumbersOf::Media) {
+                        for (place, (_, rect)) in placed.iter().take(9).enumerate() {
+                            crate::keys::number_badge(ui.painter(), *rect, place + 1);
+                        }
+                    }
                     sweep_media(ui, state, &placed, bin, pointer, down);
                 },
             );
