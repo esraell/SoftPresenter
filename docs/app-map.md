@@ -351,9 +351,11 @@ picture back from the GPU), hand-over (to NDI and DeckLink, which never waits), 
 painter rest, locks, waking the window, pauses taken on purpose, and capture. The line also
 gives the time spent within those steps waiting for the locks every drawing thread shares and
 writing the log, each DeckLink output's state and last try at opening its device, and each NDI
-source's receivers and longest send lately (NDI and DeckLink send on threads of their own):
+source's receivers and longest send lately (NDI and DeckLink send on threads of their own).
+From a test copy laid out as the church's, its window held back for a second with
+`SOFTPRESENTER_HOLD_WINDOW_PICTURE=1000@40` before that wait was taken off the thread:
 
-    [output] The screens' thread was held 1019.1 ms from 10:00:16.976. Longest step: surface acquire for the window of "TV", 1003.2 ms. All steps: surface acquire 1003.4 ms ×1; present 0.2 ms ×1; blit 0.1 ms ×1; vello paint 9.1 ms ×4 (GPU wait 0.0 ms, 4 runs, 0 again for room); … other 1.2 ms. Within them: … DeckLink "DeckLink Duo (1)": waiting for its device; last tried 0.4 s before the end, for 0.1 ms (not opened). NDI "Stage": 1 receiver, longest send lately 4.0 ms.
+    [output] The screens' thread was held 1021.7 ms from 11:13:24.243. Longest step: surface acquire for the window of "TV", 1005.0 ms. All steps: surface acquire 1005.0 ms ×1; vello paint 6.1 ms ×5 (GPU wait 2.7 ms, 5 runs, 0 again for room); scene build 0.1 ms ×5; video fetch 0.0 ms ×1; video copy 0.3 ms ×2; NDI readback 0.1 ms ×3; waking the window 0.0 ms ×1; pauses 10.0 ms ×1; other 0.0 ms. Within them: waiting for the pictures' and fonts' locks 0.0 ms, writing the log 0.0 ms. DeckLink "DeckLink Duo (1)": waiting for its device; last tried 1.0 s before the end, for 0.1 ms (not opened). DeckLink "DeckLink Duo (2)": waiting for its device; last tried 1.0 s before the end, for 0.1 ms (not opened). NDI "SPTEST Stage": 1 receiver, longest send lately 46.9 ms. NDI "SPTEST Main": 0 receivers, longest send lately 0.0 ms.
 
 The per-minute `[output]` line adds the longest pass, how many passes were over 50 ms and over
 100 ms, how many pictures reached the windows and how many didn't (a covered window shows
@@ -370,7 +372,7 @@ DeckLink and the preview go on. The log says when a window was passed over and w
 picture came:
 
     [output] The window of "TV" was not given its next picture by the system within 50 ms. The other screens go on; it keeps the picture it shows until the next comes.
-    [output] The window of "TV" was given its next picture after 1004 ms.
+    [output] The window of "TV" was given its next picture after 1005 ms.
 
 ## How the code is laid out
 
