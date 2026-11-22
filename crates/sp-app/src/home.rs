@@ -166,6 +166,9 @@ pub struct HomeState {
     /// Displayed media thumbnail width in points.
     /// True while a file is being dragged over the window.
     pub drop_hover: bool,
+    /// The files being dragged over the window, where the pointer is, and the places they could
+    /// land (`file_drop.rs`).
+    pub file_drag: crate::file_drop::FileDrag,
     /// A short message for the operator, shown in the media bin (a file that could not be
     /// added, a song that could not be saved).
     pub notice: Option<String>,
@@ -1236,6 +1239,7 @@ impl Default for HomeState {
             filter: String::new(),
             output_stopped: false,
             drop_hover: false,
+            file_drag: crate::file_drop::FileDrag::default(),
             notice: None,
             waiting: Vec::new(),
             waiting_choice: None,
@@ -1570,6 +1574,8 @@ pub fn home_ui(
     // their corners included: the margins a column's frame leaves are not painted by it, and
     // would otherwise show the black the window is cleared to.
     ui.ctx().layer_painter(egui::LayerId::background()).rect_filled(ui.ctx().content_rect(), 0.0, crate::studio::BG);
+    // Files dragged from the Finder: the place under the pointer, from the last frame's places.
+    crate::file_drop::begin_frame(ui.ctx(), state);
     // The lists made from the songs are made again only once the songs have changed.
     let hidden = state.hidden_slots();
     state.lists.songs.check(show, &state.song_keys, hidden, &state.removed_songs);
@@ -1689,6 +1695,7 @@ pub fn home_ui(
     crate::studio::round_corners(ui, middle);
     crate::keys::key_sheet(ui.ctx(), state);
     crate::studio::toast(ui.ctx(), state);
+    crate::file_drop::paint(ui.ctx(), state);
     commands
 }
 
@@ -2922,8 +2929,8 @@ fn edit_view(
         let to_screen = |f: SlideRect| Rect::from_min_size(slide.min + vec2(f.x, f.y) * scale, vec2(f.w, f.h) * scale);
         let response = ui.interact(area, ui.scope_id().with("canvas"), Sense::click_and_drag());
         let for_theme = state.theme_edit.is_some();
-        // A file dragged over the editor is put on the slide when dropped.
-        if state.drop_hover {
+        // A picture or video dragged over the editor is put on the slide when dropped.
+        if state.drop_hover && state.file_drag.has(crate::file_drop::Kind::Media) {
             let painter = ui.painter();
             painter.rect_filled(slide, 0.0, crate::studio::ACCENT.gamma_multiply(0.15));
             painter.rect_stroke(slide.shrink(4.0), 6.0, Stroke::new(2.0, crate::studio::ACCENT), StrokeKind::Inside);

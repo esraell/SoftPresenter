@@ -40,6 +40,9 @@ fs4.workspace = true
 muda.workspace = true
 # The VoxLive API key, kept in the Keychain.
 security-framework = "3"
+# Where the pointer is while files are dragged onto the window from the Finder, which the
+# window library doesn't say (file_drop.rs). Already linked, for sp-video.
+objc2-core-graphics = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 # The socket `sp` reaches the app through: the kind Unix has, which the standard library

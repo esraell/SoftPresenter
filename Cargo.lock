@@ -3413,6 +3413,7 @@ dependencies = [
  "fs4",
  "image",
  "muda",
+ "objc2-core-graphics",
  "png",
  "pollster 1.0.3",
  "rfd",

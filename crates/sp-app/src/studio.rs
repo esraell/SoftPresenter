@@ -1453,9 +1453,9 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             return;
         }
         left_foot(ui, show, state, commands);
-        // While songs are carried the chooser shows above the list, so they can be dropped
-        // on a playlist or a library.
-        if egui::DragAndDrop::has_payload_of_type::<SongDrag>(ui.ctx()) {
+        // While songs are carried (or song files dragged in from the Finder) the chooser shows
+        // above the list, so they can be dropped on a playlist or a library.
+        if egui::DragAndDrop::has_payload_of_type::<SongDrag>(ui.ctx()) || crate::file_drop::wants_chooser(state) {
             let most = ui.available_height() * 0.6;
             egui::ScrollArea::vertical().id_salt("chooser").max_height(most).show(ui, |ui| {
                 chooser(ui, show, state);
@@ -1750,6 +1750,8 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
                 chooser_row(ui, Icon::Playlist, PLAYLIST_TINT, shown, *count, "item", on, true)
             })
             .inner;
+        let target = crate::file_drop::DropTarget::Playlist { index, after: None };
+        crate::file_drop::offer(ui, state, crate::file_drop::Place::onto(response.rect, target));
         if renaming && let Some(typed) = state.renaming_service.as_mut() {
             let field = rename_field_at(ui, typed, FontId::proportional(14.0), TEXT, ACCENT, start, right);
             if std::mem::take(&mut state.rename_started) {
@@ -1834,6 +1836,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     let (all, ..) = ui
         .push_id("all songs", |ui| chooser_row(ui, Icon::Library, LIBRARY_TINT, "All Songs", songs, "song", on, false))
         .inner;
+    crate::file_drop::offer_library_row(ui, state, all.rect, None);
     if all.clicked() {
         state.library_shown = None;
         state.playlist_open = false;
@@ -1856,6 +1859,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
         let (response, more, start, right) = ui
             .push_id(("library", id), |ui| chooser_row(ui, Icon::Library, LIBRARY_TINT, shown, count, "song", on, true))
             .inner;
+        crate::file_drop::offer_library_row(ui, state, response.rect, Some(id));
         if renaming && let Some((_, typed)) = state.renaming_library.as_mut() {
             let field = rename_field_at(ui, typed, FontId::proportional(14.0), TEXT, ACCENT, start, right);
             if std::mem::take(&mut state.rename_started) {
@@ -2031,6 +2035,8 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
     let live_in = show.live().map(|at| at.presentation);
     let mut asks = SongAsks::default();
     let list = ui.available_rect_before_wrap();
+    let target = crate::file_drop::DropTarget::Library(state.library_shown);
+    crate::file_drop::offer(ui, state, crate::file_drop::Place::onto(list, target).where_songs_land());
     let (pointer, mods, down) =
         ui.input(|input| (input.pointer.interact_pos(), input.modifiers, input.pointer.primary_down()));
     // Songs picked out lose the ones no longer listed.
@@ -2985,6 +2991,14 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         }
     });
     asks.carry_out(show, state);
+    // Files dragged from the Finder: into the playlist, after the item under the pointer.
+    let (area, current) = (list.inner_rect, state.services.current);
+    let target = |after| crate::file_drop::DropTarget::Playlist { index: current, after };
+    crate::file_drop::offer(ui, state, crate::file_drop::Place::onto(area, target(None)));
+    for (row, item) in rows.iter().zip(&row_items) {
+        let place = crate::file_drop::Place::onto(row.intersect(area), target(Some(*item)));
+        crate::file_drop::offer(ui, state, place.outlining(area).line_at(row.max.y.min(area.max.y)));
+    }
     // Where a dragged row would land: a line between rows, and on release the move.
     let pointer = ui.input(|input| input.pointer.interact_pos());
     let pointer_y = pointer.map(|at| at.y);
@@ -3722,7 +3736,7 @@ pub fn media_strip(
 ) {
     // Folded down (with its chevron, or from the View menu) to a slim bar that opens it again;
     // opened by itself while there is something to say or a file is being dropped.
-    let folded = state.media_hidden && state.notice.is_none() && !state.drop_hover;
+    let folded = state.media_hidden && state.notice.is_none() && !crate::file_drop::media_coming(state);
     let empty = show.media().is_empty();
     let height = if folded { 30.0 } else { MEDIA_STRIP_HEIGHT } + GAP;
     let margin =
@@ -3739,6 +3753,13 @@ pub fn media_strip(
     panel.show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         let area = ui.max_rect().expand2(vec2(20.0, 4.0));
+        if crate::file_drop::media_coming(state) {
+            crate::file_drop::offer(
+                ui,
+                state,
+                crate::file_drop::Place::onto(area, crate::file_drop::DropTarget::MediaStrip),
+            );
+        }
         let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
         let middle = head.center().y;
         let label = cap(ui, pos2(head.min.x, middle), Align2::LEFT_CENTER, "Media", TEXT_DIM);
@@ -3803,7 +3824,7 @@ pub fn media_strip(
         }
         ui.add_space(6.0);
         // Nothing in it yet: a big place to click, or to drop files on.
-        if empty && !state.drop_hover {
+        if empty && !crate::file_drop::media_coming(state) {
             let room = ui.available_size() - vec2(0.0, 2.0);
             let (place, response) = ui.allocate_exact_size(room, Sense::click());
             let hot = response.hovered();
@@ -4007,7 +4028,7 @@ pub fn media_strip(
                 },
             );
         }
-        if state.drop_hover {
+        if crate::file_drop::strip_lit(state) {
             let painter = ui.painter();
             painter.rect_filled(area, 0.0, TEXT.gamma_multiply(0.08));
             painter.rect_stroke(area.shrink(4.0), RADIUS, Stroke::new(2.0, TEXT), StrokeKind::Inside);

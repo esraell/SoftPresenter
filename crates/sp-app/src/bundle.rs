@@ -192,8 +192,9 @@ fn take_out(
     }
 }
 
-/// Brings a bundle's pictures and videos into the library's Media folder (or finds the file
-/// with the same contents there already), and has each slide of `song` (the bundle's song, or
+/// Brings a bundle's pictures and videos into the library's Media folder, each under its own
+/// file name (made safe, and numbered when the name is taken; the media bin names an item by its
+/// file), or finds the file with the same contents there already; and has each slide of `song` (the bundle's song, or
 /// a copy of it) show its one. `item_for` gives the media bin item for a file in the library
 /// (adding one if the bin hasn't got it); a file just copied in that it gives none for (one
 /// that can't be read as a picture or video) is taken out again. Says the files that couldn't
@@ -212,7 +213,7 @@ pub fn bring(
         .iter()
         .map(|staged| {
             let before = (brought.pictures, brought.videos);
-            let placed = pack::place(&staged.file, &staged.name, &dir, brought, staged.video).map(|n| dir.join(n));
+            let placed = place(staged, &dir, brought);
             let item = placed.as_deref().and_then(|path| item_for(path, staged));
             if item.is_none() {
                 if let Some(path) = placed.filter(|_| (brought.pictures, brought.videos) != before) {
@@ -232,6 +233,44 @@ pub fn bring(
         }
     }
     failed
+}
+
+/// Puts a picture or video taken out of a bundle in `dir`: the file there with the same contents
+/// if there is one, else under its own name made safe for every system, numbered ("Sky 2.png")
+/// when that is taken. A file already there is never written over. Returns where it is.
+fn place(staged: &Staged, dir: &Path, brought: &mut pack::Brought) -> Option<PathBuf> {
+    if let Some(same) = pack::same_file_in(dir, &staged.file) {
+        brought.already += 1;
+        return Some(dir.join(same));
+    }
+    std::fs::create_dir_all(dir).ok()?;
+    // The ending is the one checked when it was taken out, not whatever the name says.
+    let ending = staged.file.extension().map_or_else(String::new, |e| e.to_string_lossy().into_owned());
+    let stem = Path::new(&staged.name).file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+    let stem = pack::safe_file_name(stem.trim_start_matches('.'));
+    for n in 1..1000 {
+        let name = if n == 1 { format!("{stem}.{ending}") } else { format!("{stem} {n}.{ending}") };
+        let to = dir.join(name);
+        // The name is taken first (an empty file, made only if there is none), then the file is
+        // moved over it, so that nothing already there is lost.
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&to) {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return None,
+        }
+        let moved = std::fs::rename(&staged.file, &to).or_else(|_| std::fs::copy(&staged.file, &to).map(|_| ()));
+        if moved.is_err() {
+            let _ = std::fs::remove_file(&to);
+            return None;
+        }
+        if staged.video {
+            brought.videos += 1;
+        } else {
+            brought.pictures += 1;
+        }
+        return Some(to);
+    }
+    None
 }
 
 /// What a bundle's name says about it, for messages.
@@ -617,7 +656,11 @@ mod tests {
         assert_eq!(asked.len(), 1);
         let (placed, shown) = &asked[0];
         assert_eq!(shown, "Sky.png");
-        assert_eq!(placed.parent(), Some(library.join("Media").as_path()));
+        assert_eq!(
+            placed,
+            &library.join("Media").join("Sky.png"),
+            "named as in the bundle, so the bin shows that name"
+        );
         assert_eq!(std::fs::read(placed).unwrap(), picture);
         assert!(files_in(&opened.staging).is_empty(), "nothing is left pointing into the staging folder");
         let showing: Vec<Option<Uuid>> = song.groups[0]
@@ -640,6 +683,20 @@ mod tests {
         });
         assert_eq!((brought.pictures, brought.already), (0, 1));
         assert_eq!(files_in(&library.join("Media")).len(), 1);
+        // Another picture by the same name is numbered; the first is not written over.
+        let other_sky = dir.0.join("Other Sky.probundle");
+        zip_of(
+            &other_sky,
+            &[("Sky.png", b"another picture's bytes"), ("Harbour Lights.pro", &song_showing(&[("Sky.png", "", None)]))],
+        );
+        let other = open(&other_sky, &dir.0.join("staging-4")).unwrap();
+        let mut named = Vec::new();
+        bring(&mut other.song.clone(), &other, &library, &mut pack::Brought::default(), |path, _| {
+            named.push(path.to_path_buf());
+            Some(item)
+        });
+        assert_eq!(named, vec![library.join("Media").join("Sky 2.png")]);
+        assert_eq!(std::fs::read(library.join("Media").join("Sky.png")).unwrap(), picture);
         // A picture the bin can't read is not left behind in a library it was copied into, and
         // its slides show nothing.
         let other = open(&bundle, &dir.0.join("staging-3")).unwrap();

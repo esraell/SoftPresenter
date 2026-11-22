@@ -6,7 +6,9 @@ Song packs (`.sppack`, `crates/sp-app/src/pack.rs`) are zip files. SoftPresenter
 reads them with the [`zip`](https://crates.io/crates/zip) crate, built with deflate only
 (`default-features = false, features = ["deflate-flate2"]`), compressing with
 [`flate2`](https://crates.io/crates/flate2)'s pure-Rust backend (`miniz_oxide`). No other
-compression format and no native library comes with it.
+compression format and no native library comes with it. Song bundles (`.proBundle`,
+`crates/sp-app/src/bundle.rs`) are read with the same crate, as untrusted input in the same
+way (see [song-documents.md](song-documents.md)).
 
 | Crate | Licence |
 |---|---|

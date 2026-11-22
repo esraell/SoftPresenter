@@ -727,7 +727,7 @@ pub(crate) fn place(from: &Path, label: &str, dir: &Path, brought: &mut Brought,
 }
 
 /// The name of a file directly in `dir` with the same contents as `file`, if there is one.
-fn same_file_in(dir: &Path, file: &Path) -> Option<String> {
+pub(crate) fn same_file_in(dir: &Path, file: &Path) -> Option<String> {
     let size = std::fs::metadata(file).ok()?.len();
     std::fs::read_dir(dir).ok()?.flatten().find_map(|entry| {
         let meta = entry.metadata().ok()?;

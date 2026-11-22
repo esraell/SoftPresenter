@@ -130,7 +130,26 @@ feature changes, this page changes in the same commit.
   read as untrusted: nothing is ever written where an entry's name says, only the song and the
   pictures and videos it shows are taken out, each within a size limit, and nothing in it is
   run. A bundle larger than 64 MB is read in the background; the notice says when its song is
-  in.
+  in. Its pictures keep their own file names in the Media folder (numbered when the name is
+  taken), so the media bin shows those names.
+- **Dropping files from the Finder lands them where the pointer is.** Song files of every
+  kind (song documents and bundles, text, lyric and ChordPro files, songbooks, song packs,
+  folders of songs) always go to the songs, never into the media bin: dropped on a playlist (a
+  row of the chooser, or the open playlist, where they go after the item under the pointer)
+  they come into the library and into that playlist; on a library (a row of the chooser, or the
+  song list) into that library; anywhere else into the library shown, as before. A song the
+  library has already still goes into the playlist or library dropped on. Pictures and videos
+  go into the media bin, and into a playlist they are dropped on; in the Edit view, onto the
+  slide. Several files dropped together each go their own way. While files are over the
+  window, the place they would land has an ink outline (and the open playlist a line where
+  they go in); while song files are over it the chooser shows above the list, as it does while
+  songs are dragged in the window, and with nothing in particular under the pointer the library
+  they would go to is outlined (its song list, or its row in the chooser). The media strip opens
+  and lights up for pictures and videos only; songs over it go to the library shown, which is
+  outlined. On macOS the window asks the system where the pointer is while files are over it
+  (redrawing at most 30 times a second, for at most a minute of one drag), as the window
+  library doesn't say. On Windows and Linux it can't tell, so there songs go to the library
+  shown and pictures to the media bin, as before, and only those places light up.
   Sections are found from lines naming them ("Verse 1", "Chorus:", "Bridge", "Куплет 1",
   "Припев", "Приспів"…); slides break at blank lines, and more than four lines without one are
   shared out evenly (eight lines make two slides of four). A song the library already has,

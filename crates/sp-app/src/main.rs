@@ -13,6 +13,7 @@ mod convert;
 mod deck;
 mod displays;
 mod editor;
+mod file_drop;
 mod find;
 mod home;
 mod icons;
@@ -609,6 +610,21 @@ struct Imported {
     videos: usize,
 }
 
+/// Where the pointer is in the window, in its points, while files are dragged over it: asked of
+/// the system, as the window library doesn't say (see `file_drop.rs`). `None` where the system
+/// can't say.
+fn file_drop_pointer(window: &Window, ctx: &egui::Context) -> Option<egui::Pos2> {
+    // Testing aid: SOFTPRESENTER_DROP_AT=X,Y puts the pointer there, in the window's points,
+    // for files dragged over or dropped on the window.
+    if let Ok(at) = std::env::var("SOFTPRESENTER_DROP_AT") {
+        let (x, y) = at.split_once(',')?;
+        return Some(egui::pos2(x.trim().parse().ok()?, y.trim().parse().ok()?));
+    }
+    let screen = file_drop::pointer_on_screen()?;
+    let inner = window.inner_position().ok()?;
+    Some(file_drop::window_point(screen, (inner.x, inner.y), window.scale_factor(), ctx.pixels_per_point()))
+}
+
 /// A song pack is read at once (the reply waits for it) when its file is no bigger than this;
 /// a larger one, which holds videos, is read on a thread of its own.
 const PACK_READ_AT_ONCE: u64 = 64 * 1024 * 1024;
@@ -1063,6 +1079,10 @@ struct App {
     /// While `sp song import … --library NAME|none` runs: the library its songs (a folder's
     /// included) go into, or none.
     import_library_override: Option<Option<Uuid>>,
+    /// Files dropped on the window, waiting until all of one drop have come, and where the
+    /// pointer was at the drop (see `finish_drop`).
+    dropped: Vec<PathBuf>,
+    drop_pointer: Option<egui::Pos2>,
     /// Bible downloads started from the command line: each job's number, the Bible's id and name.
     bible_jobs: Vec<(u64, String, String)>,
     /// The socket `softpresenter ctl` reaches the app through, while it listens.
@@ -2914,65 +2934,133 @@ impl App {
         running.preview_changed = if fade { now } else { now.checked_sub(Duration::from_secs(60)).unwrap_or(now) };
     }
 
-    /// Adds a file dropped on the window to the media bin, or says why it could not be added.
-    fn add_dropped_file(&mut self, path: &std::path::Path) {
-        // A song pack: its songs and what they need come into the library.
-        if pack::is_pack(path) {
-            let library = self.running.as_ref().and_then(|r| r.home_state.library_shown);
-            let said = self.open_pack(path.to_owned(), None, library, false).unwrap_or_else(|problem| problem);
-            if let Some(running) = self.running.as_mut() {
-                running.home_state.drop_hover = false;
-                running.home_state.notice = Some(said);
-            }
+    /// Notes a file dropped on the window from the Finder. The system hands over several
+    /// dropped together one after another; they are taken in together once all have come (see
+    /// [`App::finish_drop`]), each to the place the pointer was over at the drop.
+    fn file_dropped(&mut self, path: PathBuf) {
+        if self.dropped.is_empty() {
+            self.drop_pointer =
+                self.running.as_ref().and_then(|running| file_drop_pointer(&running.home_window, &running.egui_ctx));
+        }
+        self.dropped.push(path);
+    }
+
+    /// Takes in the files dropped on the window since the last look: songs to the songs (into the
+    /// playlist or library dropped on, if any, else the library shown), never into the media bin;
+    /// pictures and videos into the media bin (and the playlist dropped on), or onto the slide in
+    /// the editor; presentations and PDFs as slides; a Bible installed. See `file_drop.rs`.
+    fn finish_drop(&mut self) {
+        if self.dropped.is_empty() {
             return;
         }
-        // A Bible file is installed rather than added as media.
-        if path.extension().is_some_and(|ext| ext == "spbible" || ext == "pcbible") {
-            let Some(running) = self.running.as_mut() else {
-                return;
-            };
-            running.home_state.drop_hover = false;
-            match bible_store::install_file(path) {
-                Ok((kept, info)) => {
-                    running.home_state.notice = Some(format!("Installed the {}.", info.name));
-                    running.home_state.bible.shelf.add_file(kept, info);
-                }
-                Err(message) => running.home_state.notice = Some(message),
-            }
+        let paths = std::mem::take(&mut self.dropped);
+        let pointer = self.drop_pointer.take();
+        let files: Vec<(PathBuf, file_drop::Kind)> = paths
+            .into_iter()
+            .map(|path| {
+                let kind = file_drop::kind_of(&path);
+                (path, kind)
+            })
+            .collect();
+        let target = self.running.as_mut().and_then(|running| {
+            let state = &mut running.home_state;
+            let target = file_drop::target_at(&state.file_drag.places, &files, pointer);
+            // The drag is over: the system says nothing more after a drop.
+            state.drop_hover = false;
+            state.file_drag = file_drop::FileDrag::default();
             running.home_window.request_redraw();
-            return;
+            target
+        });
+        applog::event("drop", &format!("{} dropped on {target:?}", files.len()));
+        let route = file_drop::route(&files, target.as_ref());
+        // Pictures first and songs last, so that what is said about the songs stays in sight.
+        let mut media_to = route.media_playlist;
+        for path in &route.media {
+            self.add_dropped_media(path, &mut media_to);
         }
-        // A song file, or text, lyric, ChordPro, rich-text, Word or song document, is imported
-        // as a song; a folder of them as a library.
-        // A PDF or a folder of pictures becomes slides.
-        let deck = deck::is_pdf(path)
-            || deck::is_presentation_file(path)
-            || (path.is_dir() && deck::pictures_in(path).is_some());
-        if deck
-            || load::is_importable(path)
-            || load::is_song_file(path)
-            || (path.is_dir() && !load::files_to_import(&[path.to_owned()]).is_empty())
-        {
-            if let Some(running) = self.running.as_mut() {
-                running.home_state.drop_hover = false;
+        for path in &route.other {
+            self.add_dropped_file(path);
+        }
+        if !route.slides.is_empty() {
+            self.import_songs(&route.slides);
+        }
+        if !route.songs.is_empty() {
+            let to = self.songs_to(route.songs_to.as_ref());
+            self.import_songs_to(&route.songs, &to);
+        }
+    }
+
+    /// Where songs dropped on a playlist or library go.
+    fn songs_to(&self, target: Option<&file_drop::DropTarget>) -> SongsTo {
+        match target {
+            Some(file_drop::DropTarget::Library(library)) => SongsTo { library: Some(*library), playlist: None },
+            Some(file_drop::DropTarget::Playlist { index, after }) => {
+                let name = self
+                    .running
+                    .as_ref()
+                    .and_then(|r| r.home_state.services.list.get(*index))
+                    .map(|playlist| playlist.name.clone());
+                let playlist = name.map(|name| PlaylistSpot { index: *index, name, after: *after });
+                SongsTo { library: None, playlist }
             }
-            self.import_songs(&[path.to_owned()]);
-            return;
+            _ => SongsTo::default(),
         }
-        // In the editor (a song's or a theme's), a picture or video dropped on the window goes
-        // on the slide or the layout, as Media… puts it there.
+    }
+
+    /// A picture or video dropped on the window: in the editor (a song's or a theme's), onto the
+    /// slide or the layout, as Media… puts it there; else into the media bin, and into the
+    /// playlist it was dropped on (`to`: the playlist, and the item it goes after, moved on past
+    /// it for the next).
+    fn add_dropped_media(&mut self, path: &std::path::Path, to: &mut Option<(usize, Option<usize>)>) {
         if let Some(running) = self.running.as_mut()
             && running.home_state.editing.is_some()
-            && media::is_media(path)
         {
             let state = &mut running.home_state;
-            state.drop_hover = false;
             match images::import(path) {
                 Ok(imported) => {
                     applog::event("editor", &format!("dropped {} on the slide", path.display()));
                     state.picture_to_add.push(imported);
                 }
                 Err(problem) => state.notice = Some(problem),
+            }
+            running.home_window.request_redraw();
+            return;
+        }
+        if self.add_media_file(path).is_err() {
+            return;
+        }
+        let Some((index, after)) = *to else { return };
+        let Some(item) = self.show.media().iter().find(|item| item.path == path) else { return };
+        let media = service::Item::Media { id: item.id, name: item.name.clone() };
+        let Some(running) = self.running.as_mut() else { return };
+        let services = &mut running.home_state.services;
+        match after {
+            Some(after) if index == services.current => {
+                services.insert(after + 1, media);
+                *to = Some((index, Some(after + 1)));
+            }
+            _ => {
+                services.add_to(index, media);
+            }
+        }
+        if let Some(playlist) = services.list.get(index) {
+            running.home_state.notice = Some(format!("Added {} to the playlist {}.", item.name, playlist.name));
+        }
+    }
+
+    /// Any other file dropped on the window: a Bible is installed; anything else is offered to
+    /// the media bin, which says why it can't take it.
+    fn add_dropped_file(&mut self, path: &std::path::Path) {
+        if path.extension().is_some_and(|ext| ext == "spbible" || ext == "pcbible") {
+            let Some(running) = self.running.as_mut() else {
+                return;
+            };
+            match bible_store::install_file(path) {
+                Ok((kept, info)) => {
+                    running.home_state.notice = Some(format!("Installed the {}.", info.name));
+                    running.home_state.bible.shelf.add_file(kept, info);
+                }
+                Err(message) => running.home_state.notice = Some(message),
             }
             running.home_window.request_redraw();
             return;
@@ -6066,6 +6154,11 @@ impl App {
             ..
         } = running;
         let mut raw_input = egui_state.take_egui_input(home_window);
+        // Where the pointer is while files are dragged over the window: asked of the system, as
+        // the window library doesn't say (see file_drop.rs).
+        if running.home_state.drop_hover {
+            running.home_state.file_drag.pointer = file_drop_pointer(home_window, egui_ctx);
+        }
         // A new size is taken on once it has stopped changing for a moment. Until then the
         // window is drawn at the size it had, which macOS stretches to fit.
         const SETTLE: Duration = Duration::from_millis(120);
@@ -7735,15 +7828,19 @@ impl ApplicationHandler<AppEvent> for App {
             running.home_window.request_redraw();
         }
         match event {
-            WindowEvent::HoveredFile(_) => {
+            // Files dragged over the window from the Finder, each told one after another; where
+            // the pointer is, the window asks the system as it draws (see file_drop.rs).
+            WindowEvent::HoveredFile(path) => {
                 running.home_state.drop_hover = true;
+                running.home_state.file_drag.add(path);
                 running.home_window.request_redraw();
             }
             WindowEvent::HoveredFileCancelled => {
                 running.home_state.drop_hover = false;
+                running.home_state.file_drag = file_drop::FileDrag::default();
                 running.home_window.request_redraw();
             }
-            WindowEvent::DroppedFile(path) => self.add_dropped_file(&path),
+            WindowEvent::DroppedFile(path) => self.file_dropped(path),
             WindowEvent::CloseRequested => self.quit(el),
             WindowEvent::Resized(size) => {
                 if size.width > 0 && size.height > 0 {
@@ -7778,11 +7875,24 @@ impl ApplicationHandler<AppEvent> for App {
                     self.notice_logged = notice;
                 }
                 self.apply(commands);
-                // Testing aid: drop a file on the window, as dragging it from the Finder does.
-                if let Ok(path) = std::env::var("SOFTPRESENTER_DROP")
-                    && self.running.as_ref().is_some_and(|r| r.frames == 12)
+                // Testing aid: drag files over the window (SOFTPRESENTER_HOVER, kept there, for a
+                // picture of where they would land) or drop them on it a few frames after they
+                // come over it (SOFTPRESENTER_DROP), as dragging them from the Finder does. Either
+                // takes several files, separated as in PATH. SOFTPRESENTER_DROP_AT=X,Y puts the
+                // pointer at that place in the window, in its points.
+                let frame = self.running.as_ref().map_or(0, |r| r.frames);
+                let testing =
+                    std::env::var_os("SOFTPRESENTER_DROP").or_else(|| std::env::var_os("SOFTPRESENTER_HOVER"));
+                if let Some(files) = testing.filter(|_| frame == 2)
+                    && let Some(running) = self.running.as_mut()
                 {
-                    self.add_dropped_file(std::path::Path::new(&path));
+                    running.home_state.drop_hover = true;
+                    std::env::split_paths(&files).for_each(|path| running.home_state.file_drag.add(path));
+                    running.home_window.request_redraw();
+                }
+                if let Some(files) = std::env::var_os("SOFTPRESENTER_DROP").filter(|_| frame == 12) {
+                    std::env::split_paths(&files).for_each(|path| self.file_dropped(path));
+                    self.finish_drop();
                 }
                 // Testing aid: choose menu bar items by their ids, one every few frames, the way
                 // a click on them reaches the app.
@@ -7913,6 +8023,8 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        // Files dropped on the window, now that all of the drop have come.
+        self.finish_drop();
         // What runs by the clock is done here too, not only when the operator window draws:
         // macOS stops drawing a window that is minimised or covered, and a timed slide, a
         // slide's actions, or a message that leaves by itself must not wait for it.
@@ -8231,6 +8343,8 @@ fn main() -> ExitCode {
         jobs: Vec::new(),
         last_job: None,
         import_library_override: None,
+        dropped: Vec::new(),
+        drop_pointer: None,
         bible_jobs: Vec::new(),
         waiting: Vec::new(),
         // Commands from `softpresenter ctl` come in on the control socket. Without it (another
