@@ -67,6 +67,7 @@ pub fn describe(
     song_name: impl Fn(&str) -> Option<String>,
     media_name: impl Fn(Uuid) -> Option<String>,
     media_playlist_name: impl Fn(Uuid) -> Option<String>,
+    version_name: impl Fn(Uuid) -> Option<String>,
 ) -> String {
     let gone = |what: &'static str| move || format!("({what})");
     let (song_gone, media_gone) =
@@ -98,6 +99,14 @@ pub fn describe(
             format!("Play on the Announcements Layer: {name}")
         }
         ShowAction::CanvaSync => "Sync from Canva".to_owned(),
+        ShowAction::Version { id: None, .. } => "Back to the usual look".to_owned(),
+        ShowAction::Version { id: Some(id), keep } => {
+            let until = if *keep { " until switched back" } else { "" };
+            match version_name(*id) {
+                Some(name) => format!("Use the {name} version{until}"),
+                None => format!("Use {}{until}", gone("a version that has been removed")()),
+            }
+        }
     }
 }
 
@@ -217,25 +226,47 @@ mod tests {
         let words: Vec<String> = start
             .actions
             .iter()
-            .map(|action| describe(action, |_| None, |_| None, named, |_| None, |_| None, |_| None))
+            .map(|action| describe(action, |_| None, |_| None, named, |_| None, |_| None, |_| None, |_| None))
             .collect();
         assert_eq!(words, ["Clear All", "Start Timer: Countdown", "Audience Screens On"]);
         let loop_list = Uuid::new_v4();
         let announce = ShowAction::Announce { what: Announced::MediaPlaylist { id: loop_list } };
         let playlist = |id: Uuid| (id == loop_list).then(|| "Announcements".to_owned());
         assert_eq!(
-            describe(&announce, |_| None, |_| None, |_| None, |_| None, |_| None, playlist),
+            describe(&announce, |_| None, |_| None, |_| None, |_| None, |_| None, playlist, |_| None),
             "Play on the Announcements Layer: Announcements"
         );
         // Something a step names that has gone is said plainly.
         let song = ShowAction::Announce { what: Announced::Song { key: "41".to_owned() } };
         assert_eq!(
-            describe(&song, |_| None, |_| None, |_| None, |_| None, |_| None, |_| None),
+            describe(&song, |_| None, |_| None, |_| None, |_| None, |_| None, |_| None, |_| None),
             "Play on the Announcements Layer: (a song no longer in the library)"
         );
         assert_eq!(
-            describe(&start.actions[1], |_| None, |_| None, |_| None, |_| None, |_| None, |_| None),
+            describe(&start.actions[1], |_| None, |_| None, |_| None, |_| None, |_| None, |_| None, |_| None),
             "Start Timer: (a timer that has been deleted)"
+        );
+        // A theme version's steps, by the version's name.
+        let offering = Uuid::new_v4();
+        let version = |id: Uuid| (id == offering).then(|| "Offering".to_owned());
+        let steps = [
+            ShowAction::Version { id: Some(offering), keep: false },
+            ShowAction::Version { id: Some(offering), keep: true },
+            ShowAction::Version { id: None, keep: false },
+            ShowAction::Version { id: Some(Uuid::new_v4()), keep: false },
+        ];
+        let words: Vec<String> = steps
+            .iter()
+            .map(|step| describe(step, |_| None, |_| None, |_| None, |_| None, |_| None, |_| None, version))
+            .collect();
+        assert_eq!(
+            words,
+            [
+                "Use the Offering version",
+                "Use the Offering version until switched back",
+                "Back to the usual look",
+                "Use (a version that has been removed)"
+            ]
         );
         let copy = start.duplicate();
         assert_ne!(copy.id, start.id);

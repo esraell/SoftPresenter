@@ -467,7 +467,8 @@ pub struct Theme {
     /// Stays the same when the theme is renamed; its file is named by it.
     pub id: Uuid,
     pub name: String,
-    /// At least one. The first is the one used when nothing else decides.
+    /// At least one. The first is the one used when nothing else decides. These are the usual
+    /// templates; a version's are kept with the version.
     pub templates: Vec<ThemeTemplate>,
     /// The colour behind everything on a slide. `None` is black.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -476,6 +477,41 @@ pub struct Theme {
     /// the app's Images folder, or a whole path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background_picture: Option<String>,
+    /// Other sets of templates, each used while its version is on (the offering, say).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub versions: Vec<ThemeVersion>,
+}
+
+/// A version as the screens are switched to it: a name shared by every theme that has a
+/// version of that name, and an id that stays the same when it is renamed. A theme has it while
+/// it keeps templates for it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Version {
+    pub id: Uuid,
+    pub name: String,
+}
+
+/// A theme's templates for one version: used in place of the usual ones, on every screen with
+/// the theme, while the version is on. A kind of slide (songs or Bible) it has no template for
+/// keeps the usual look; words with no box in its template are left off.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThemeVersion {
+    pub id: Uuid,
+    pub name: String,
+    /// At least one: a version whose last template goes leaves the theme.
+    pub templates: Vec<ThemeTemplate>,
+}
+
+/// Every version any of these themes has, once each, in the themes' order; a name is the one
+/// the first theme with it gives.
+pub fn all_versions(themes: &[Theme]) -> Vec<Version> {
+    let mut all: Vec<Version> = Vec::new();
+    for version in themes.iter().flat_map(|theme| &theme.versions) {
+        if !all.iter().any(|have| have.id == version.id) {
+            all.push(Version { id: version.id, name: version.name.clone() });
+        }
+    }
+    all
 }
 
 /// A theme as its file has it. Files written before themes had free templates hold one set
@@ -497,6 +533,8 @@ struct ThemeOnDisk {
     solo_primary: Option<SlideRect>,
     #[serde(default)]
     template_names: [Option<String>; 2],
+    #[serde(default)]
+    versions: Vec<ThemeVersion>,
 }
 
 impl From<ThemeOnDisk> for Theme {
@@ -541,6 +579,8 @@ impl From<ThemeOnDisk> for Theme {
             templates,
             background: file.background,
             background_picture: file.background_picture,
+            // A version left with no templates is not one the theme has.
+            versions: file.versions.into_iter().filter(|version| !version.templates.is_empty()).collect(),
         }
     }
 }
@@ -579,6 +619,19 @@ fn role_from_name(name: &str) -> Role {
 
 /// Where a box with no place of its own goes: the middle of the slide.
 const MIDDLE: SlideRect = SlideRect { x: 120.0, y: 240.0, w: 1680.0, h: 600.0 };
+
+/// Of these templates, the one that suits a slide best: the first that has a box for every role
+/// on it and no language box it leaves empty.
+fn best_fit<'a>(candidates: impl Iterator<Item = &'a ThemeTemplate>, slide: &Slide) -> Option<&'a ThemeTemplate> {
+    let on_slide: Vec<&Role> = slide.objects.iter().filter_map(|o| o.role.as_ref()).collect();
+    let languages = [Role::primary(), Role::translation()];
+    candidates.min_by_key(|template| {
+        let missing = on_slide.iter().filter(|role| template.style_for(role).is_none()).count();
+        let unused =
+            languages.iter().filter(|role| template.style_for(role).is_some() && !on_slide.contains(role)).count();
+        (missing, unused)
+    })
+}
 
 impl ThemeTemplate {
     pub fn style_for(&self, role: &Role) -> Option<&BoxStyle> {
@@ -776,6 +829,7 @@ impl Theme {
             .collect(),
             background: None,
             background_picture: None,
+            versions: Vec::new(),
         }
     }
 
@@ -784,8 +838,12 @@ impl Theme {
     /// and no language box the slide leaves empty. So with the built-in theme a slide with a
     /// translation uses "Two languages" and one without uses "One language".
     pub fn template_for(&self, slide: &Slide) -> Option<&ThemeTemplate> {
-        if let Some(named) = slide.template.and_then(|id| self.templates.iter().find(|t| t.id == id)) {
-            return Some(named);
+        if let Some(id) = slide.template {
+            // A slide shown in a version names that version's template (see `slide_in_version`).
+            let mut named = self.templates.iter().chain(self.versions.iter().flat_map(|v| &v.templates));
+            if let Some(named) = named.find(|t| t.id == id) {
+                return Some(named);
+            }
         }
         // A Bible slide gets the theme's Bible template; a theme without one picks for it as
         // for a song, among all its templates.
@@ -793,17 +851,101 @@ impl Theme {
         if bible && let Some(template) = self.bible_template() {
             return Some(template);
         }
-        let on_slide: Vec<&Role> = slide.objects.iter().filter_map(|o| o.role.as_ref()).collect();
-        let languages = [Role::primary(), Role::translation()];
         // A song picks among the templates for songs (all of them, if none is).
         let any_for_songs = self.templates.iter().any(|template| template.songs);
-        let candidates = self.templates.iter().filter(|template| bible || template.songs || !any_for_songs);
-        candidates.min_by_key(|template| {
-            let missing = on_slide.iter().filter(|role| template.style_for(role).is_none()).count();
-            let unused =
-                languages.iter().filter(|role| template.style_for(role).is_some() && !on_slide.contains(role)).count();
-            (missing, unused)
-        })
+        best_fit(self.templates.iter().filter(|template| bible || template.songs || !any_for_songs), slide)
+    }
+
+    /// The template a slide is drawn with while a version is on, if the theme has one of that
+    /// version for its kind: the version's Bible template for a Bible slide, and for a song's,
+    /// among the version's templates for songs, the one that suits it. A version's template
+    /// wins over one the slide names. `None` when the slide keeps the usual look.
+    pub fn version_template_for(&self, slide: &Slide, version: Uuid) -> Option<&ThemeTemplate> {
+        let templates = &self.versions.iter().find(|have| have.id == version)?.templates;
+        if slide.template == Some(BIBLE_TEMPLATE) {
+            return templates.iter().find(|template| template.bible);
+        }
+        best_fit(templates.iter().filter(|template| template.songs), slide)
+    }
+
+    /// A slide as it is drawn while a version is on: drawn with the version's template, and
+    /// without the words that template has no box for (the translation, say). `None` when the
+    /// theme has nothing of that version for the slide's kind, which keeps the usual look.
+    pub fn slide_in_version(&self, slide: &Slide, version: Uuid) -> Option<Slide> {
+        let template = self.version_template_for(slide, version)?;
+        let mut shown = slide.clone();
+        shown.template = Some(template.id);
+        shown.objects.retain(|object| object.role.as_ref().is_none_or(|role| template.style_for(role).is_some()));
+        Some(shown)
+    }
+
+    /// Whether the theme has a version: templates kept for it.
+    pub fn has_version(&self, version: Uuid) -> bool {
+        self.versions.iter().any(|have| have.id == version && !have.templates.is_empty())
+    }
+
+    /// The usual templates (`None`) or a version's: empty for a version the theme hasn't.
+    pub fn set(&self, version: Option<Uuid>) -> &[ThemeTemplate] {
+        match version {
+            None => &self.templates,
+            Some(id) => self.versions.iter().find(|have| have.id == id).map_or(&[], |have| &have.templates),
+        }
+    }
+
+    /// The usual templates, or a version's, to change; `None` for a version the theme hasn't.
+    pub fn set_mut(&mut self, version: Option<Uuid>) -> Option<&mut Vec<ThemeTemplate>> {
+        match version {
+            None => Some(&mut self.templates),
+            Some(id) => self.versions.iter_mut().find(|have| have.id == id).map(|have| &mut have.templates),
+        }
+    }
+
+    /// Gives the theme a version, its templates copies of the usual templates at `from` (in that
+    /// order), with ids of their own. Returns false, changing nothing, when the theme has the
+    /// version already or nothing is to be copied.
+    pub fn add_version(&mut self, version: &Version, from: &[usize]) -> bool {
+        let copies: Vec<ThemeTemplate> = from
+            .iter()
+            .filter_map(|at| self.templates.get(*at))
+            .map(|template| ThemeTemplate { id: Uuid::new_v4(), ..template.clone() })
+            .collect();
+        if copies.is_empty() || self.has_version(version.id) {
+            return false;
+        }
+        self.versions.retain(|have| have.id != version.id);
+        self.versions.push(ThemeVersion { id: version.id, name: version.name.clone(), templates: copies });
+        true
+    }
+
+    /// Adds a copy of a usual template to a version the theme has. Returns its place in the
+    /// version's templates.
+    pub fn add_copy_to_version(&mut self, version: Uuid, from: usize) -> Option<usize> {
+        let copy = ThemeTemplate { id: Uuid::new_v4(), ..self.templates.get(from)?.clone() };
+        let templates = self.set_mut(Some(version))?;
+        // One template of a set is the one Bible slides use.
+        if copy.bible {
+            templates.iter_mut().for_each(|template| template.bible = false);
+        }
+        templates.push(copy);
+        Some(templates.len() - 1)
+    }
+
+    /// Takes a version out of the theme, with its templates. Returns true if it had it.
+    pub fn remove_version(&mut self, version: Uuid) -> bool {
+        let before = self.versions.len();
+        self.versions.retain(|have| have.id != version);
+        self.versions.len() != before
+    }
+
+    /// Renames a version the theme has. Returns true if it had it under another name.
+    pub fn rename_version(&mut self, version: Uuid, name: &str) -> bool {
+        match self.versions.iter_mut().find(|have| have.id == version && have.name != name) {
+            Some(have) => {
+                have.name = name.to_owned();
+                true
+            }
+            None => false,
+        }
     }
 
     /// The template Bible slides are drawn with, if the theme has one.
@@ -831,7 +973,13 @@ impl Theme {
 
     /// Makes the template at `index` the one Bible slides are drawn with, and no other.
     pub fn set_bible_template(&mut self, index: usize) {
-        for (at, template) in self.templates.iter_mut().enumerate() {
+        self.set_bible_template_in(None, index);
+    }
+
+    /// Makes a template of the usual ones, or of a version, the one Bible slides are drawn with
+    /// in that set, and no other of it.
+    pub fn set_bible_template_in(&mut self, set: Option<Uuid>, index: usize) {
+        for (at, template) in self.set_mut(set).into_iter().flatten().enumerate() {
             template.bible = at == index;
         }
     }
@@ -858,25 +1006,53 @@ impl Theme {
 
     /// Adds a template: a copy of the one at `index`, placed after it. Returns its place.
     pub fn add_template(&mut self, index: usize) -> usize {
-        let taken = |name: &str| self.templates.iter().any(|t| t.name == name);
-        let name = (self.templates.len() + 1..).map(|n| format!("Template {n}")).find(|name| !taken(name));
-        let boxes = self.templates.get(index).map(|t| t.boxes.clone()).unwrap_or_default();
-        let objects = self.templates.get(index).map(|t| t.objects.clone()).unwrap_or_default();
+        self.add_template_in(None, index).unwrap_or(0)
+    }
+
+    /// Adds a template to the usual ones or to a version's: a copy of the one at `index` of that
+    /// set, placed after it. Returns its place in the set; `None` for a version the theme hasn't.
+    pub fn add_template_in(&mut self, set: Option<Uuid>, index: usize) -> Option<usize> {
+        let templates = self.set_mut(set)?;
+        let taken = |name: &str| templates.iter().any(|t| t.name == name);
+        let name = (templates.len() + 1..).map(|n| format!("Template {n}")).find(|name| !taken(name));
+        let boxes = templates.get(index).map(|t| t.boxes.clone()).unwrap_or_default();
+        let objects = templates.get(index).map(|t| t.objects.clone()).unwrap_or_default();
         // The copy is for songs if its original is; it is never also the Bible template.
-        let songs = self.templates.get(index).is_none_or(|t| t.songs);
-        let at = (index + 1).min(self.templates.len());
+        let songs = templates.get(index).is_none_or(|t| t.songs);
+        let at = (index + 1).min(templates.len());
         let name = name.unwrap_or_default();
-        self.templates.insert(at, ThemeTemplate { id: Uuid::new_v4(), name, boxes, objects, songs, bible: false });
-        at
+        templates.insert(at, ThemeTemplate { id: Uuid::new_v4(), name, boxes, objects, songs, bible: false });
+        Some(at)
     }
 
     /// Removes a template. The last one cannot be removed. Returns true if it was removed.
     pub fn remove_template(&mut self, index: usize) -> bool {
-        if self.templates.len() <= 1 || index >= self.templates.len() {
+        self.remove_template_in(None, index)
+    }
+
+    /// Removes a template of the usual ones or of a version's. The last usual template cannot
+    /// be removed; a version's last takes the version out of the theme. Returns true if it was
+    /// removed.
+    pub fn remove_template_in(&mut self, set: Option<Uuid>, index: usize) -> bool {
+        let least = if set.is_none() { 2 } else { 1 };
+        let Some(templates) = self.set_mut(set).filter(|templates| templates.len() >= least && index < templates.len())
+        else {
             return false;
-        }
-        self.templates.remove(index);
+        };
+        templates.remove(index);
+        self.versions.retain(|version| !version.templates.is_empty());
         true
+    }
+
+    /// Moves a template of a set one place earlier or later in it. Returns its new place.
+    pub fn move_template_in(&mut self, set: Option<Uuid>, index: usize, earlier: bool) -> Option<usize> {
+        let templates = self.set_mut(set)?;
+        let to = if earlier { index.checked_sub(1)? } else { index + 1 };
+        if to >= templates.len() || index >= templates.len() {
+            return None;
+        }
+        templates.swap(index, to);
+        Some(to)
     }
 
     /// The theme as a file's text.
@@ -1186,6 +1362,128 @@ mod tests {
         // The second has no translation, and the main box where it used to go alone.
         assert!(theme.templates[1].style_for(&Role::translation()).is_none());
         assert_eq!(theme.templates[1].style_for(&Role::primary()).unwrap().rect.x, 1.0);
+    }
+
+    /// The built-in theme with an "Offering" version: copies of its two song templates, the
+    /// first without the translation box and with a picture where it was.
+    fn with_offering() -> (Theme, Uuid) {
+        let mut theme = Theme::builtin();
+        let offering = Version { id: Uuid::from_u128(77), name: "Offering".to_owned() };
+        assert!(theme.add_version(&offering, &[0, 1]));
+        let first = &mut theme.versions[0].templates[0];
+        first.boxes.retain(|look| look.role != Role::translation());
+        first.objects.push(Object::image("give.png".to_owned(), "Give".to_owned(), 400, 400));
+        (theme, offering.id)
+    }
+
+    #[test]
+    fn a_version_draws_its_kind_with_its_own_templates_and_others_keep_the_usual_look() {
+        let (theme, offering) = with_offering();
+        let song = slide_with(&[Role::primary(), Role::translation()]);
+        let shown = theme.slide_in_version(&song, offering).expect("the theme has the version for songs");
+        let used = theme.template_for(&shown).unwrap();
+        assert_eq!(used.id, theme.versions[0].templates[0].id, "drawn with the version's template");
+        assert!(theme.templates.iter().all(|usual| usual.id != used.id));
+        // Without the version on, the same slide is drawn as it always was.
+        assert_eq!(theme.template_for(&song).unwrap().name, "Two languages");
+        assert_eq!(theme.template_for(&song).unwrap().id, theme.templates[0].id);
+        // A theme without the version keeps the usual look, and so does a kind the version has
+        // no template for (this one has none for Bible slides).
+        assert!(Theme::builtin().slide_in_version(&song, offering).is_none());
+        let mut bible = slide_with(&[Role::primary(), Role::reference()]);
+        bible.template = Some(BIBLE_TEMPLATE);
+        assert!(theme.slide_in_version(&bible, offering).is_none());
+        // Given a Bible template of its own, the version draws Bible slides with it.
+        let mut with_bible = theme.clone();
+        let bible_at = with_bible.bible_template_index();
+        let at = with_bible.add_copy_to_version(offering, bible_at).unwrap();
+        let shown = with_bible.slide_in_version(&bible, offering).unwrap();
+        assert_eq!(with_bible.template_for(&shown).unwrap().id, with_bible.versions[0].templates[at].id);
+        // A version's templates are never chosen for a slide when it is off.
+        assert_eq!(with_bible.template_for(&bible).unwrap().id, with_bible.templates[bible_at].id);
+    }
+
+    #[test]
+    fn words_with_no_box_in_the_versions_template_are_left_off() {
+        let (theme, offering) = with_offering();
+        let mut song = slide_with(&[Role::primary(), Role::translation()]);
+        song.objects.push(Object::image("own.png".to_owned(), "Own".to_owned(), 400, 400));
+        let shown = theme.slide_in_version(&song, offering).unwrap();
+        let roles: Vec<Option<&Role>> = shown.objects.iter().map(|object| object.role.as_ref()).collect();
+        assert_eq!(roles, [Some(&Role::primary()), None], "the translation goes; the slide's own picture stays");
+        assert_eq!(shown.id, song.id);
+    }
+
+    #[test]
+    fn a_versions_template_wins_over_the_one_a_slide_names() {
+        let (theme, offering) = with_offering();
+        let mut named = slide_with(&[Role::primary()]);
+        named.template = Some(theme.templates[1].id);
+        let shown = theme.slide_in_version(&named, offering).unwrap();
+        let used = theme.template_for(&shown).unwrap();
+        // Of the version's templates, the first that suits the slide (both do: the first has
+        // lost its translation box), not the usual one it names.
+        assert_eq!(used.id, theme.versions[0].templates[0].id);
+        assert_ne!(used.id, theme.templates[1].id);
+    }
+
+    #[test]
+    fn a_versions_last_template_takes_it_out_of_the_theme_and_the_usual_last_stays() {
+        let (mut theme, offering) = with_offering();
+        assert!(theme.has_version(offering));
+        assert_eq!(all_versions(std::slice::from_ref(&theme)).len(), 1);
+        assert!(theme.remove_template_in(Some(offering), 0));
+        assert!(theme.has_version(offering));
+        assert!(theme.remove_template_in(Some(offering), 0));
+        assert!(!theme.has_version(offering) && theme.versions.is_empty());
+        assert!(all_versions(std::slice::from_ref(&theme)).is_empty());
+        while theme.templates.len() > 1 {
+            assert!(theme.remove_template_in(None, 0));
+        }
+        assert!(!theme.remove_template_in(None, 0), "a theme keeps one usual template");
+        // A version is given once.
+        let (mut again, offering) = with_offering();
+        let version = Version { id: offering, name: "Offering".to_owned() };
+        assert!(!again.add_version(&version, &[0]));
+        assert!(again.rename_version(offering, "Giving") && again.versions[0].name == "Giving");
+        assert!(again.remove_version(offering) && !again.has_version(offering));
+    }
+
+    #[test]
+    fn versions_are_listed_once_across_themes_and_a_set_moves_and_marks_its_own_bible_template() {
+        let (built_in, offering) = with_offering();
+        let (mut lower, _) = with_offering();
+        lower.id = Uuid::from_u128(5);
+        let communion = Version { id: Uuid::from_u128(78), name: "Communion".to_owned() };
+        assert!(lower.add_version(&communion, &[1]));
+        let names: Vec<String> = all_versions(&[built_in, lower.clone()]).into_iter().map(|v| v.name).collect();
+        assert_eq!(names, ["Offering", "Communion"]);
+        let first = lower.versions[0].templates[0].id;
+        assert_eq!(lower.move_template_in(Some(offering), 0, false), Some(1));
+        assert_eq!(lower.versions[0].templates[1].id, first);
+        assert_eq!(lower.move_template_in(Some(offering), 1, false), None);
+        lower.set_bible_template_in(Some(offering), 0);
+        assert!(lower.versions[0].templates[0].bible && !lower.versions[0].templates[1].bible);
+        assert!(lower.bible_template().is_some_and(|usual| lower.templates.iter().any(|t| t.id == usual.id)));
+        assert_eq!(lower.add_template_in(Some(offering), 0), Some(1));
+        assert_eq!(lower.set(Some(offering)).len(), 3);
+        assert!(lower.set(Some(Uuid::from_u128(99))).is_empty());
+    }
+
+    #[test]
+    fn a_theme_with_versions_survives_its_file_and_one_without_is_written_as_before() {
+        let (theme, _) = with_offering();
+        let text = theme.to_json();
+        assert!(text.contains("\"versions\""));
+        assert_eq!(Theme::from_json(&text), Ok(theme));
+        // Without versions, nothing new is written: the file reads and writes as it always did.
+        let plain = Theme::builtin().to_json();
+        assert!(!plain.contains("versions") && plain.contains("\"version\": 2"));
+        assert_eq!(Theme::from_json(&plain).unwrap().to_json(), plain);
+        let bible = include_str!("../themes/bible.sptheme");
+        let read = Theme::from_json(bible).unwrap();
+        assert!(read.versions.is_empty());
+        assert_eq!(Theme::from_json(&read.to_json()), Ok(read));
     }
 
     #[test]

@@ -1732,7 +1732,7 @@ fn placeholder_tile(
     if let Some(song) = picked
         && let (Some(key), Some(found)) = (state.song_keys.get(song), show.presentations().get(song))
     {
-        let filled = Item::Song { key: key.clone(), title: found.title.clone() };
+        let filled = Item::song(key.clone(), found.title.clone());
         if state.services.fill(item, filled) {
             commands.push(Command::Select(song));
         }
@@ -2756,7 +2756,7 @@ mod tests {
         let show = Show::new(songs.iter().map(|(title, slides)| song(title, *slides)).collect());
         let mut state = HomeState { playlist_open: true, ..HomeState::default() };
         for (title, _) in songs {
-            state.services.add(Item::Song { key: format!("title:{title}"), title: (*title).to_owned() });
+            state.services.add(Item::song(format!("title:{title}"), (*title).to_owned()));
         }
         state.services.chosen = Some(0);
         (show, state)
@@ -3219,7 +3219,7 @@ mod tests {
         song.arrangements.push(arrangement);
         let show = Show::new(vec![Arc::new(song)]);
         let mut state = HomeState { playlist_open: true, ..HomeState::default() };
-        state.services.add(Item::Song { key: "title:Arranged".to_owned(), title: "Arranged".to_owned() });
+        state.services.add(Item::song("title:Arranged".to_owned(), "Arranged".to_owned()));
         state.services.chosen = Some(0);
         (show, state)
     }

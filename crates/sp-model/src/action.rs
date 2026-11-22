@@ -86,6 +86,18 @@ pub enum ShowAction {
     },
     /// Fetches a fresh announcements video from Canva (Settings › Integrations › Canva Sync).
     CanvaSync,
+    /// Shows every screen whose theme has a version in it (by the version's id), until the next
+    /// item goes on screen, or until switched back when `keep`; with no version, the usual look.
+    Version {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<Uuid>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        keep: bool,
+    },
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// What an Announce action plays on the Announcements layer: a song (by its library key), a
@@ -113,5 +125,20 @@ mod tests {
             assert_eq!(serde_json::from_str::<ShowAction>(&text).unwrap(), step);
         }
         assert_eq!(serde_json::to_string(&ShowAction::CanvaSync).unwrap(), r#"{"do":"canva_sync"}"#);
+    }
+
+    #[test]
+    fn a_version_step_keeps_its_version_and_whether_it_is_kept_in_its_file() {
+        let id = Uuid::from_u128(7);
+        for step in [
+            ShowAction::Version { id: Some(id), keep: false },
+            ShowAction::Version { id: Some(id), keep: true },
+            ShowAction::Version { id: None, keep: false },
+        ] {
+            let text = serde_json::to_string(&step).unwrap();
+            assert_eq!(serde_json::from_str::<ShowAction>(&text).unwrap(), step);
+        }
+        let usual = serde_json::to_string(&ShowAction::Version { id: None, keep: false }).unwrap();
+        assert_eq!(usual, r#"{"do":"version"}"#);
     }
 }

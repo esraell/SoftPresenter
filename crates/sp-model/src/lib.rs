@@ -30,8 +30,8 @@ pub use song_text::{
 };
 pub use theme::{
     Align, BIBLE_TEMPLATE, BIBLE_THEME_ID, BoxStyle, Caps, Gradient, GradientKind, LINE_HEIGHT, LineFill,
-    LineTransform, ListStyle, Scaling, Scroll, Shadow, SlideRect, TextStyle, Theme, ThemeTemplate, VAlign, fonts_used,
-    missing_fonts,
+    LineTransform, ListStyle, Scaling, Scroll, Shadow, SlideRect, TextStyle, Theme, ThemeTemplate, ThemeVersion,
+    VAlign, Version, all_versions, fonts_used, missing_fonts,
 };
 pub use transition::{Direction, Transition, TransitionKind};
 pub use types::{

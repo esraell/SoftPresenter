@@ -228,6 +228,7 @@ pub fn editor_theme(layout: &ThemeTemplate) -> Theme {
         templates: vec![ThemeTemplate { boxes, objects: Vec::new(), ..layout.clone() }],
         background: None,
         background_picture: None,
+        versions: Vec::new(),
     }
 }
 
@@ -301,6 +302,7 @@ pub fn theme_for(layout: &ThemeTemplate) -> Theme {
         templates: vec![layout],
         background: None,
         background_picture: None,
+        versions: Vec::new(),
     }
 }
 

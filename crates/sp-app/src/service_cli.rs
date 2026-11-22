@@ -230,6 +230,8 @@ impl crate::App {
                     _ => Err("playlist fill PLACEHOLDER with SONG | with media ITEM [in PLAYLIST]".to_owned()),
                 }
             }
+            // `playlist item N show-with NAME|usual [--keep] [in PLAYLIST]`
+            "item" => self.playlist_show_with(words),
             _ => return None,
         };
         Some(result)
@@ -375,7 +377,7 @@ impl crate::App {
                 let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
                 let key = state.song_keys.get(song).cloned().ok_or("That song is gone.")?;
                 let title = self.show.presentations().get(song).map(|found| found.title.clone()).unwrap_or_default();
-                Item::Song { key, title }
+                Item::song(key, title)
             }
         };
         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
@@ -1067,7 +1069,7 @@ mod tests {
     #[test]
     fn playlist_items_say_their_kind_and_keep_their_old_line() {
         let id = sp_model::Uuid::new_v4();
-        let song = Item::Song { key: id.to_string(), title: "River Song".to_owned() };
+        let song = Item::song(id.to_string(), "River Song".to_owned());
         let (line, data) = item_entry(2, &song, &Found::Song { id, number: Some(7) });
         assert_eq!(line, "River Song");
         assert_eq!(data["item"], 2);
@@ -1082,10 +1084,10 @@ mod tests {
         assert_eq!(line, "River Song (missing)");
         assert_eq!((data["missing"].clone(), data["id"].clone()), (serde_json::json!(true), serde_json::json!(id)));
         assert!(data["number"].is_null());
-        let by_title = Item::Song { key: "title:Old Hymn".to_owned(), title: "Old Hymn".to_owned() };
+        let by_title = Item::song("title:Old Hymn".to_owned(), "Old Hymn".to_owned());
         assert!(item_entry(1, &by_title, &Found::Nothing).1["id"].is_null(), "a title is not an id");
 
-        let voxlive = Item::Song { key: "title:VoxLive".to_owned(), title: "VoxLive".to_owned() };
+        let voxlive = Item::song("title:VoxLive".to_owned(), "VoxLive".to_owned());
         let (line, data) = item_entry(1, &voxlive, &Found::VoxLive);
         assert_eq!((line.as_str(), data["kind"].as_str()), ("VoxLive", Some("voxlive")));
 
@@ -1120,6 +1122,7 @@ mod tests {
             break_on_new_verse: true,
             display_translation: false,
             reference_style: String::new(),
+            show_with: None,
         });
         let (line, data) = item_entry(8, &passage, &Found::Nothing);
         assert_eq!((line.as_str(), data["kind"].as_str()), ("John 3:16-18", Some("passage")));

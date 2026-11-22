@@ -827,6 +827,24 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - Templates can be added, duplicated, renamed and deleted. Changes save as you make them.
 - A theme can have a background colour and a picture behind all its slides (shown while no
   media is on), set when no box is selected in the theme editor.
+- **Theme versions.** A theme can keep a named version of its templates beside its usual ones,
+  for a moment in the service: "Offering", say, with the words moved up and a giving picture
+  where the translation was. The name is shared across themes, so one switch changes every
+  audience screen whose theme has that version, each its own way (the room's theme and the
+  stream's); a screen whose theme has none, or no template of it for the slide's kind (songs or
+  Bible), keeps the usual look. While it is on, a version's template wins over one a slide
+  names, and words it has no box for are left off. Only the slide changes: props, messages and
+  the copyright line keep their look.
+  - A song or a passage in a playlist can be set to show in a version: when it goes on screen it
+    brings the version. This is the playlist's; the song itself doesn't change.
+  - A version can also be switched on by a macro step ("Use the Offering version", "… until
+    switched back", "Back to the usual look") or from the command line (`sp version use`).
+  - When the next item goes on screen it is back to the usual look, unless the version was kept;
+    then it stays until switched back. Switched on with nothing on screen, it waits for the next
+    item.
+  - Each theme file keeps its versions' names and templates. A version no theme has any more is
+    gone, and items set to it go back to the usual look. An older SoftPresenter opening the file
+    draws the usual look.
 
 ![The theme editor](images/themes.png)
 

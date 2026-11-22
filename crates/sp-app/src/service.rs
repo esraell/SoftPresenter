@@ -37,10 +37,27 @@ pub struct SavedPassage {
     /// `verse`, `passage_each`, `passage_last` or `none`.
     #[serde(default)]
     pub reference_style: String,
+    /// The theme version the passage is shown in, as a playlist item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_with: Option<ShowWith>,
 }
 
 fn yes() -> bool {
     true
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// What a playlist item asks of the themes when it goes on screen: to show it in one of their
+/// versions (the offering, say), and whether that version stays on after it, until it is
+/// switched back. It is the playlist's; the song itself doesn't change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShowWith {
+    pub version: Uuid,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub keep: bool,
 }
 
 /// One thing in a service.
@@ -52,6 +69,9 @@ pub enum Item {
     Song {
         key: String,
         title: String,
+        /// The theme version it is shown in, if not the usual look.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        show_with: Option<ShowWith>,
     },
     Passage(SavedPassage),
     /// A heading that groups the items under it, such as "Worship" or "Sermon".
@@ -78,6 +98,29 @@ pub enum Item {
 }
 
 impl Item {
+    /// A song from the library, by the key that finds it and its title, in the usual look.
+    pub fn song(key: impl Into<String>, title: impl Into<String>) -> Item {
+        Item::Song { key: key.into(), title: title.into(), show_with: None }
+    }
+
+    /// The theme version the item is shown in, if it is set to one.
+    pub fn show_with(&self) -> Option<ShowWith> {
+        match self {
+            Item::Song { show_with, .. } => *show_with,
+            Item::Passage(saved) => saved.show_with,
+            _ => None,
+        }
+    }
+
+    /// Where a song or a passage keeps the version it is shown in; other kinds have none.
+    pub fn show_with_mut(&mut self) -> Option<&mut Option<ShowWith>> {
+        match self {
+            Item::Song { show_with, .. } => Some(show_with),
+            Item::Passage(saved) => Some(&mut saved.show_with),
+            _ => None,
+        }
+    }
+
     /// What the item is called in the list.
     pub fn title(&self) -> &str {
         match self {
@@ -720,7 +763,7 @@ mod tests {
     }
 
     fn song_titled(key: &str, title: &str) -> Item {
-        Item::Song { key: key.to_owned(), title: title.to_owned() }
+        Item::song(key.to_owned(), title.to_owned())
     }
 
     #[test]
@@ -775,7 +818,7 @@ mod tests {
         let mut playlists = Services::default();
         playlists.add_service();
         playlists.show(0);
-        let song = Item::Song { key: "songs/joy".to_owned(), title: "Joy".to_owned() };
+        let song = Item::song("songs/joy".to_owned(), "Joy".to_owned());
         assert!(playlists.add_to(1, song.clone()));
         assert!(!playlists.add_to(1, song), "a song already there is not added again");
         assert!(!playlists.add_to(9, Item::Header { name: "x".to_owned() }));
@@ -784,7 +827,7 @@ mod tests {
     }
 
     fn song(key: &str) -> Item {
-        Item::Song { key: key.to_owned(), title: key.to_uppercase() }
+        Item::song(key.to_owned(), key.to_uppercase())
     }
 
     fn passage(lookup: &str) -> Item {
@@ -796,6 +839,7 @@ mod tests {
             break_on_new_verse: true,
             display_translation: false,
             reference_style: "verse".to_owned(),
+            show_with: None,
         })
     }
 
@@ -811,6 +855,32 @@ mod tests {
         services.add(passage("John 3:16"));
         assert_eq!(services.front().items.len(), 3);
         assert!(services.changed);
+    }
+
+    #[test]
+    fn the_version_an_item_shows_in_survives_the_file_and_older_files_read_as_before() {
+        let mut services = Services::default();
+        services.add(song("a"));
+        services.add(passage("John 3:16"));
+        services.add(song("b"));
+        let offering = ShowWith { version: Uuid::from_u128(9), keep: true };
+        *services.list[0].items[0].show_with_mut().unwrap() = Some(offering);
+        *services.list[0].items[1].show_with_mut().unwrap() = Some(ShowWith { keep: false, ..offering });
+        let text = services.to_json();
+        assert!(text.contains("\"show_with\""));
+        let again = Services::from_json(&text).unwrap();
+        assert_eq!(again.list, services.list);
+        assert_eq!(again.front().items[1].show_with(), Some(ShowWith { keep: false, ..offering }));
+        // An item in the usual look writes nothing new, and other kinds have no such choice.
+        assert!(!serde_json::to_string(&song("c")).unwrap().contains("show_with"));
+        assert!(Item::Header { name: "Word".to_owned() }.show_with_mut().is_none());
+        // A file from before reads with every item in the usual look.
+        let old = r#"{"format":"softpresenter-services","version":2,"current":0,
+            "list":[{"name":"Sunday","items":[{"kind":"song","key":"a","title":"A"}]}]}"#;
+        let read = Services::from_json(old).unwrap();
+        assert_eq!(read.front().items[0], Item::song("a", "A"));
+        assert_eq!(read.front().items[0].show_with(), None);
+        assert!(read.to_json().contains("\"version\": 2"));
     }
 
     #[test]

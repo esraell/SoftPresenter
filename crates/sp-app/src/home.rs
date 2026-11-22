@@ -568,6 +568,12 @@ pub struct HomeState {
     pub themes_kept: Vec<usize>,
     /// What each theme calls its two templates, the one for two languages first.
     pub template_names: Vec<Vec<String>>,
+    /// Every version a theme has, for the menus that switch to one (see `versions`).
+    pub versions: Vec<sp_model::Version>,
+    /// The version the screens are in now, and when it ends.
+    pub version_switch: crate::versions::Switch,
+    /// What was asked about versions this frame, for the app to carry out.
+    pub version_asks: Vec<crate::versions::Ask>,
     /// The templates of the theme songs use, by id and name, for a slide's Template menu.
     pub song_templates: Vec<(sp_model::Uuid, String)>,
     /// A slide whose template was just chosen from its menu (`None` lets the theme choose).
@@ -981,6 +987,7 @@ impl BiblePage {
                 ReferenceStyle::NoReference => "none",
             }
             .to_owned(),
+            show_with: None,
         }
     }
 
@@ -1578,7 +1585,9 @@ pub struct ThemeEdit {
     /// The theme's place in the list.
     pub index: usize,
     pub theme: Theme,
-    /// Which of the theme's two layouts is on the canvas.
+    /// The templates shown in the left column: the usual ones (`None`) or a version's.
+    pub version: Option<sp_model::Uuid>,
+    /// Which of those templates is on the canvas.
     pub template: usize,
     /// Set when the theme has changed this frame. The app takes the theme and clears this.
     pub changed: bool,
@@ -1588,7 +1597,31 @@ pub struct ThemeEdit {
 
 impl ThemeEdit {
     pub fn of(index: usize, theme: Theme) -> ThemeEdit {
-        ThemeEdit { index, theme, template: 0, changed: false, leave: false }
+        ThemeEdit { index, theme, version: None, template: 0, changed: false, leave: false }
+    }
+
+    /// The templates shown: the usual ones, or the version's.
+    pub fn templates(&self) -> &[sp_model::ThemeTemplate] {
+        self.theme.set(self.version)
+    }
+
+    /// The template on the canvas.
+    pub fn open_template(&self) -> Option<&sp_model::ThemeTemplate> {
+        self.templates().get(self.template)
+    }
+
+    /// The template on the canvas, to change.
+    pub fn open_template_mut(&mut self) -> Option<&mut sp_model::ThemeTemplate> {
+        let at = self.template;
+        self.theme.set_mut(self.version).and_then(|templates| templates.get_mut(at))
+    }
+
+    /// Shows the usual templates or a version's (one the theme no longer has shows the usual
+    /// ones), with one of them on the canvas. Returns the draft to edit it in.
+    pub fn show(&mut self, version: Option<sp_model::Uuid>, template: usize) -> Option<EditDraft> {
+        self.version = version.filter(|id| self.theme.has_version(*id));
+        self.template = template.min(self.templates().len().saturating_sub(1));
+        self.open_template().map(|opened| EditDraft::of_slide(opened.as_slide(), self.template))
     }
 }
 
@@ -1832,6 +1865,9 @@ impl Default for HomeState {
             theme_names: Vec::new(),
             themes_kept: vec![0],
             template_names: Vec::new(),
+            versions: Vec::new(),
+            version_switch: crate::versions::Switch::default(),
+            version_asks: Vec::new(),
             song_templates: Vec::new(),
             pending_template: None,
             renaming_template: None,
@@ -3804,7 +3840,7 @@ fn edit_view(
                 // later does not turn it into a different box.
                 let mut taken: Vec<sp_model::Role> =
                     draft.slide.objects.iter().filter_map(|o| o.role.clone()).collect();
-                if let Some(template) = edit.theme.templates.get_mut(edit.template) {
+                if let Some(template) = edit.open_template_mut() {
                     let is_text = |o: &sp_model::Object| matches!(o.kind, sp_model::ObjectKind::Text { .. });
                     for object in draft.slide.objects.iter_mut().filter(|o| o.role.is_none() && is_text(o)) {
                         let role = template.unused_role(&object.name, &taken);
@@ -3853,10 +3889,9 @@ fn edit_view(
         if leave {
             edit.leave = true;
         } else if let Some(template) = chosen_template
-            && let Some(opened) = edit.theme.templates.get(template)
+            && let Some(draft) = edit.show(edit.version, template)
         {
-            edit.template = template;
-            state.editing = Some(EditDraft::of_slide(opened.as_slide(), template));
+            state.editing = Some(draft);
         }
     } else if leave {
         state.editing = None;
@@ -4858,7 +4893,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         let carry = match at(place) {
             Some(Pick::Song(index, slide, _)) => {
                 state.song_keys.get(index).zip(show.presentations().get(index)).map(|(key, song)| FoundDrag {
-                    item: crate::service::Item::Song { key: key.clone(), title: song.title.clone() },
+                    item: crate::service::Item::song(key.clone(), song.title.clone()),
                     song: Some(index),
                     name: song.title.clone(),
                     from: Found::Song(index, slide),
@@ -4917,7 +4952,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     match chosen {
         Some((Do::Song(index, ..), true)) => {
             if let (Some(key), Some(song)) = (state.song_keys.get(index), show.presentations().get(index)) {
-                state.services.add(crate::service::Item::Song { key: key.clone(), title: song.title.clone() });
+                state.services.add(crate::service::Item::song(key.clone(), song.title.clone()));
             }
         }
         // The song, with the view brought to the slide found, lit for a moment; nothing goes on
@@ -7346,6 +7381,7 @@ mod tests {
             break_on_new_verse: true,
             display_translation: false,
             reference_style: "passage_last".to_owned(),
+            show_with: None,
         };
         let passage = page.passage_of(&saved).expect("made");
         assert_eq!(passage.title, "John 3:16-18");
@@ -8802,7 +8838,7 @@ mod tests {
         let show = three_songs();
         let mut state = HomeState { playlist_open: true, key_sheet: true, ..HomeState::default() };
         for title in ["One", "Two", "Three"] {
-            state.services.add(crate::service::Item::Song { key: format!("title:{title}"), title: title.to_owned() });
+            state.services.add(crate::service::Item::song(format!("title:{title}"), title.to_owned()));
         }
         state.services.chosen = Some(0);
         frame_commands(&ctx, &show, &mut state, vec![], 0.0);
@@ -9697,7 +9733,7 @@ mod tests {
         let mut state = HomeState { playlist_open: true, ..HomeState::default() };
         state.bible.slots = Some([2, 3]);
         state.song_keys = vec!["title:Alpha".to_owned(), "title:Beta".to_owned()];
-        state.services.add(crate::service::Item::Song { key: "title:Beta".to_owned(), title: "Beta".to_owned() });
+        state.services.add(crate::service::Item::song("title:Beta".to_owned(), "Beta".to_owned()));
         state.services.add(crate::service::Item::Media { id, name: "Welcome.png".to_owned() });
         state.services.add(crate::service::Item::Placeholder { name: "Sermon".to_owned() });
         // A picture, then a placeholder, opened from the playlist: Edit opens Beta, the song chosen.
@@ -10519,9 +10555,9 @@ mod tests {
         let songs = ["Alpha", "Beta"].map(|title| Arc::new(parse_song_text(title, "Words\n")));
         let show = Show::new(songs.to_vec());
         let mut state = HomeState { playlist_open: true, ..HomeState::default() };
-        state.services.add(Item::Song { key: "title:Alpha".to_owned(), title: "Alpha".to_owned() });
+        state.services.add(Item::song("title:Alpha".to_owned(), "Alpha".to_owned()));
         state.services.add(Item::Header { name: "Sermon".to_owned() });
-        state.services.add(Item::Song { key: "title:Beta".to_owned(), title: "Beta".to_owned() });
+        state.services.add(Item::song("title:Beta".to_owned(), "Beta".to_owned()));
         state.services.chosen = Some(0);
         let ctx = egui::Context::default();
         let mut asked = Vec::new();
@@ -10542,10 +10578,10 @@ mod tests {
         show.add_media(sp_model::MediaItem::new("Walk-in.mp4".into(), "Walk-in.mp4".into()));
         let walk_in = show.media()[0].id;
         let mut state = HomeState { playlist_open: true, ..HomeState::default() };
-        state.services.add(Item::Song { key: "title:Alpha".to_owned(), title: "Alpha".to_owned() });
+        state.services.add(Item::song("title:Alpha".to_owned(), "Alpha".to_owned()));
         state.services.add(Item::Media { id: walk_in, name: "Walk-in.mp4".to_owned() });
         state.services.add(Item::Placeholder { name: "Sermon slides".to_owned() });
-        state.services.add(Item::Song { key: "title:Beta".to_owned(), title: "Beta".to_owned() });
+        state.services.add(Item::song("title:Beta".to_owned(), "Beta".to_owned()));
         state.services.chosen = Some(0);
         let ctx = egui::Context::default();
         let mut all_asked = Vec::new();
@@ -10584,9 +10620,9 @@ mod tests {
         let mut show = Show::new(songs.to_vec());
         show.add_media(sp_model::MediaItem::new("Welcome.png".into(), "Welcome.png".into()));
         let mut state = HomeState { playlist_open: true, ..HomeState::default() };
-        state.services.add(Item::Song { key: "title:Alpha".to_owned(), title: "Alpha".to_owned() });
+        state.services.add(Item::song("title:Alpha".to_owned(), "Alpha".to_owned()));
         state.services.add(Item::Placeholder { name: "Sermon slides".to_owned() });
-        state.services.add(Item::Song { key: "title:Beta".to_owned(), title: "Beta".to_owned() });
+        state.services.add(Item::song("title:Beta".to_owned(), "Beta".to_owned()));
         let ctx = egui::Context::default();
         let press = |pressed: bool| Event::PointerButton {
             pos: at,
@@ -10662,8 +10698,8 @@ mod tests {
         let mut state = HomeState { playlist_open: true, ..HomeState::default() };
         state.bible.slots = Some([3, 4]);
         state.song_keys = ["alpha", "beta", "gamma", "bible-a", "bible-b"].map(str::to_owned).to_vec();
-        state.services.add(Item::Song { key: "alpha".to_owned(), title: "Alpha".to_owned() });
-        state.services.add(Item::Song { key: "beta".to_owned(), title: "Beta".to_owned() });
+        state.services.add(Item::song("alpha".to_owned(), "Alpha".to_owned()));
+        state.services.add(Item::song("beta".to_owned(), "Beta".to_owned()));
         state.services.chosen = None;
         state.services.list.push(Service { name: "Evening".to_owned(), items: Vec::new() });
         state.libraries.push(crate::libraries::Library::new("Hymns".to_owned()));
@@ -10844,7 +10880,7 @@ mod tests {
         use crate::service::Item;
         let (mut show, mut state) = find_drag_setting();
         let (commands, ..) = drag_found(&mut show, &mut state, "gamma", 0, |drawn| drawn.left("Evening").center());
-        assert_eq!(state.services.list[1].items, [Item::Song { key: "gamma".to_owned(), title: "Gamma".to_owned() }]);
+        assert_eq!(state.services.list[1].items, [Item::song("gamma".to_owned(), "Gamma".to_owned())]);
         assert_eq!(state.services.front().items.len(), 2, "the playlist in front is as it was");
         assert!(state.library_search.is_none());
         assert!(state.toast.as_ref().is_some_and(|(words, _)| words == "Added Gamma to Evening."), "{:?}", state.toast);
@@ -10952,7 +10988,7 @@ mod tests {
         state.song_keys = titles.iter().map(|title| title.to_lowercase()).collect();
         state.song_keys.extend(["bible-a".to_owned(), "bible-b".to_owned()]);
         for title in titles {
-            state.services.add(Item::Song { key: title.to_lowercase(), title: title.to_owned() });
+            state.services.add(Item::song(title.to_lowercase(), title.to_owned()));
         }
         state.services.chosen = None;
         (show, state)
@@ -11309,7 +11345,7 @@ mod tests {
         let mut show = Show::new(songs.to_vec());
         let mut state = HomeState { playlist_open: true, ..HomeState::default() };
         for title in ["Alpha", "Beta", "Gamma"] {
-            state.services.add(Item::Song { key: format!("title:{title}"), title: title.to_owned() });
+            state.services.add(Item::song(format!("title:{title}"), title.to_owned()));
         }
         state.services.chosen = Some(0);
         let ctx = egui::Context::default();

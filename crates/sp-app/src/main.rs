@@ -59,6 +59,7 @@ mod theme_cli;
 mod theme_store;
 mod thumbs;
 mod timers;
+mod versions;
 mod voxlive;
 
 use std::path::PathBuf;
@@ -318,7 +319,8 @@ fn action_commands(show: &Show, state: &home::HomeState, action: &sp_model::Show
         | ShowAction::Prop { .. }
         | ShowAction::Timer { .. }
         | ShowAction::Announce { .. }
-        | ShowAction::CanvaSync => None,
+        | ShowAction::CanvaSync
+        | ShowAction::Version { .. } => None,
     }
 }
 
@@ -398,6 +400,10 @@ fn do_state_action(state: &mut home::HomeState, action: &sp_model::ShowAction, n
         }
         // A sync from Canva, taken up by `tick_canva`.
         ShowAction::CanvaSync => state.canva.sync_request = true,
+        // A theme version, switched as the button beside Continuous switches it.
+        ShowAction::Version { id, keep } => {
+            state.version_asks.push(versions::Ask::Use { version: *id, keep: *keep });
+        }
         ShowAction::Clear { .. } | ShowAction::Audience { .. } | ShowAction::Song { .. } | ShowAction::Media { .. } => {
         }
     }
@@ -1281,6 +1287,9 @@ struct App {
     voxlive_slot: usize,
     /// The VoxLive screens the item in its place was last made from, and that item.
     voxlive_item_from: Option<(Vec<voxlive::Screen>, Arc<sp_model::Presentation>)>,
+    /// The slide on screen, the item it was put on screen from and the open item when the
+    /// theme version last followed them (see `follow_version`).
+    version_seen: Option<(sp_engine::SlideRef, Option<usize>, Option<usize>)>,
     /// PDFs and folders of pictures being made into slides, each on a thread of its own.
     decks: deck::Decks,
     /// The media items' pictures, by item: a small copy of each for the window, and the
@@ -1573,6 +1582,7 @@ impl App {
                 theme_for_songs: self.songs_theme,
                 theme_layouts: self.theme_layouts(),
                 template_names: self.themes.iter().map(template_names).collect(),
+                versions: sp_model::all_versions(&self.themes),
                 song_templates: song_templates(&self.theme),
                 bible_layout: self.bible_layout,
                 services: service::load(),
@@ -3056,8 +3066,48 @@ impl App {
         Some(sp_engine::SlideRef { presentation: slot, slide: if last { count - 1 } else { 0 } })
     }
 
+    /// What the slide on screen is from: its song and, when it was put on screen from the
+    /// playlist in front, the item.
+    fn showing(&self) -> Option<versions::Showing> {
+        let live = self.show.live()?;
+        let (stops, _) = self.playlist_stops();
+        let item = match self.cursor_item(&stops) {
+            running::Here::Item(at) => Some(at),
+            running::Here::Elsewhere | running::Here::Nothing => None,
+        };
+        Some(versions::Showing { song: live.presentation, item })
+    }
+
+    /// Brings the theme version in step with the slide on screen: another item going on screen
+    /// ends it unless it was kept, and an item set to a version brings it. Nothing is worked out
+    /// while no theme has a version, nor while the same slide stays on screen.
+    fn follow_version(&mut self) {
+        let Some(running) = self.running.as_ref() else { return };
+        let state = &running.home_state;
+        let Some(live) = self.show.live().filter(|_| !state.versions.is_empty()) else { return };
+        let seen = (live, state.live_item, state.services.chosen);
+        if self.version_seen == Some(seen) {
+            return;
+        }
+        self.version_seen = Some(seen);
+        let Some(here) = self.showing() else { return };
+        let Some(running) = self.running.as_mut() else { return };
+        let state = &mut running.home_state;
+        let versions = &state.versions;
+        let asked = here
+            .item
+            .and_then(|at| state.services.front().items.get(at))
+            .and_then(service::Item::show_with)
+            .filter(|asked| versions.iter().any(|version| version.id == asked.version));
+        if state.version_switch.slide_on(here, asked) {
+            let now = state.version_switch.version().and_then(|id| versions.iter().find(|v| v.id == id));
+            applog::event("version", now.map_or("the usual look", |version| version.name.as_str()));
+        }
+    }
+
     /// Tells the output what is on each layer now, then redraws the operator's preview.
     fn refresh_output(&mut self) {
+        self.follow_version();
         self.sync_video();
         self.sync_slide_video();
         self.sync_web_pages();
@@ -3095,6 +3145,7 @@ impl App {
                 slide_video,
                 slide: slide.clone(),
                 theme: theme.clone(),
+                version: running.home_state.version_switch.version(),
                 enabled: self.show.output_enabled(),
                 // A slide's own transition, if it has one; then its song's; otherwise the one
                 // chosen for all.
@@ -3164,8 +3215,12 @@ impl App {
             stage_message: state.stage_message_live.then_some(state.stage_message.as_str()),
             copyright: copyright.as_deref(),
         };
+        // The audience's picture shows the slide in the version that is on, as the screens do;
+        // the stage's shows it as it is.
+        let version = state.version_switch.version().filter(|_| !state.preview_stage);
         let slide = self.show.live_slide().map(|(_, slide)| {
-            let built = slide.built(&theme, sp_model::BuildClock::settled(step)).0;
+            let in_version = version.and_then(|version| theme.slide_in_version(slide, version));
+            let built = in_version.as_ref().unwrap_or(slide).built(&theme, sp_model::BuildClock::settled(step)).0;
             Arc::new(links::fill(&built, &values).into_owned())
         });
         running.stage_preview_at = Instant::now();
@@ -5548,9 +5603,7 @@ impl App {
         let items: Vec<service::Item> = done
             .landed
             .iter()
-            .filter_map(|&at| {
-                Some(service::Item::Song { key: state.song_keys.get(at)?.clone(), title: songs.get(at)?.title.clone() })
-            })
+            .filter_map(|&at| Some(service::Item::song(state.song_keys.get(at)?.clone(), songs.get(at)?.title.clone())))
             .collect();
         let services = &mut state.services;
         let found = if services.list.get(spot.index).is_some_and(|playlist| playlist.name == spot.name) {
@@ -5869,6 +5922,17 @@ impl App {
             state.theme_for_bible = self.bible_theme;
             state.theme_layouts = layouts;
             state.template_names = self.themes.iter().map(template_names).collect();
+            // A version no theme has any more is gone: the screens go back to the usual look,
+            // and so do the playlist items set to it.
+            let versions = sp_model::all_versions(&self.themes);
+            if versions != state.versions {
+                let have = |id: Uuid| versions.iter().any(|version| version.id == id);
+                if state.version_switch.forget_unless(have) {
+                    applog::event("version", "the usual look: the version on is in no theme now");
+                }
+                versions::forget_in_playlists(&mut state.services, have);
+                state.versions = versions;
+            }
             state.song_templates = song_templates(&self.theme);
             state.bible_layout = self.bible_layout;
             state.bible.boxes = home::layout_boxes(&self.theme_for_bible, self.bible_layout);
@@ -8514,6 +8578,7 @@ impl ApplicationHandler<AppEvent> for App {
                 }
                 self.edit_undo_bookkeeping();
                 self.handle_themes();
+                self.handle_versions();
                 self.handle_songs();
                 self.handle_decks();
                 self.handle_setup();
@@ -8944,6 +9009,7 @@ fn main() -> ExitCode {
         bible_slots,
         voxlive_slot,
         voxlive_item_from: None,
+        version_seen: None,
         decks: deck::Decks::default(),
         // A picture read on a reader's thread wakes the window's thread to take it in.
         bin_pictures: {
@@ -9422,7 +9488,7 @@ mod tests {
         assert_eq!(landed, [1, 0, 1, 2]);
         // Dropped on the playlist in front after its first item: in, in order, there; on
         // another playlist's row: at its end, in order.
-        let item = |at: usize| service::Item::Song { key: format!("song-{at}"), title: songs[at].title.clone() };
+        let item = |at: usize| service::Item::song(format!("song-{at}"), songs[at].title.clone());
         let mut services = service::Services::default();
         services.list[0].items = vec![
             service::Item::Header { name: "Welcome".to_owned() },

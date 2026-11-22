@@ -130,7 +130,7 @@ mistake impossible:
 
 | Command | Gives |
 |---|---|
-| `sp` or `status` | What is on screen (song, slide, words), the next slide, the media, any message and props, the announcements layer, a media playlist playing, running timers, the audio, the playlist in front, whether the screens, Continuous Playlist and Identify are on, and the main theme |
+| `sp` or `status` | What is on screen (song, slide, words), the next slide, the media, any message and props, the announcements layer, a media playlist playing, running timers, the audio, the playlist in front, the theme version on (once any theme has one), whether the screens, Continuous Playlist and Identify are on, and the main theme |
 | `status --wait SECONDS [--since TOKEN]` | The same, once something has changed since TOKEN (or, with no TOKEN, from now), or when SECONDS (0 to 30) are up; see [waiting for a change](#waiting-for-a-change) |
 | `songs` | Every song in the library, numbered; saved Bible passages and slides made from presentations too. A song whose file changed outside the app is marked |
 | `slides [SONG]` | A song's slides: number, group, words (lines joined with " / ", main language first), which is on screen, and marks for a slide that is off, labelled or has a hot key |
@@ -362,7 +362,8 @@ with Continuous Playlist on; open it with `playlist go` to run through the playl
 Macro steps: `clear all|slide|media|props|messages`, `show|hide message NAME`,
 `show|hide prop NAME`, `start|stop|reset timer NAME`, `audience on|off`, `song SONG`,
 `media ITEM`, `announce SONG|media ITEM|media-playlist NAME` (on the Announcements layer),
-`canva sync`. Steps are parted by `then`, or by `;` inside one quoted argument. A macro's name
+`canva sync`, `version NAME [keep]|usual` (a [theme version](#theme-versions), kept until switched
+back or not, or the usual look). Steps are parted by `then`, or by `;` inside one quoted argument. A macro's name
 may hold a number or a step's word ("Macro 1", "Start service"); `macro step` takes the number
 just before the step as the step's. `sp macros` marks a macro
 that runs when SoftPresenter opens, and says what a step names that has gone, such as "Play on
@@ -658,6 +659,7 @@ it and `slide frame` moves it, while `slide text` and `slide style` say "The sli
 | `playlist media-playlist NAME [at N] [in PLAYLIST]` | A media playlist (the announcement loop), to play from the playlist |
 | `playlist placeholder NAME [at N] [in PLAYLIST]` | A place kept for something to come (the sermon slides) |
 | `playlist fill PLACEHOLDER with SONG`, `… with media ITEM` `[in PLAYLIST]` | Puts a song, or a picture or video, in a placeholder's place (a song already in the playlist moves there) |
+| `playlist item N show-with NAME\|usual [--keep] [in PLAYLIST]` | The theme version a song or passage goes on screen in (see [theme versions](#theme-versions)) |
 
 In `playlist header|media|media-playlist|placeholder`, a last `in` names a playlist only when
 there is one called that, and a last `at` a place only when a number follows, so either word
@@ -762,6 +764,45 @@ kept with:
     Evening is the main theme: songs that don't set their own use it.
     $ sp theme delete Built-in --yes
     The Built-in theme stays; it can be changed but not deleted.
+
+### Theme versions
+
+A theme can keep a **version**: other templates for a moment in the service, such as the
+offering (the words moved up, a giving picture where the translation was). The name is shared:
+switching to "Offering" changes every audience screen whose theme has an Offering version, each
+in its own way; a screen whose theme has none, or no template of it for the slide's kind (songs
+or Bible), keeps the usual look. A version's template wins over one a slide names, and words
+it has no box for (the translation, say) are left off. Only the slide changes: props, messages
+and the copyright line keep their look.
+
+| Command | Does |
+|---|---|
+| `version list` (or `version`) | The versions, the themes that have each with their templates, and which is on |
+| `version add NAME to THEME [from TEMPLATE…]` | Gives a theme a version, starting from copies of the templates named (each one word, or quoted), or of its song templates. A name another theme's version has makes it that version, so the screens switch together |
+| `version rename OLD NEW` | Renames a version in every theme that has it (`version rename OLD to NEW` too) |
+| `version remove NAME from THEME --yes` | Takes a version out of a theme, with its templates. A version no theme has any more is gone, and playlist items set to it show in the usual look |
+| `version use NAME [--keep]`, `version off` | Shows every screen whose theme has it in that version, until the next item goes on screen (with `--keep`, until switched back); `off` is the usual look. With nothing on screen, it waits for the next item |
+| `version keep on\|off` | The version on stays after the next item, or ends with it |
+| `playlist item N show-with NAME\|usual [--keep] [in PLAYLIST]` | A song or passage of a playlist brings that version when it goes on screen (and keeps it after, with `--keep`); it is the playlist's, the song itself doesn't change |
+
+    $ sp version add Offering to Built-in from "One language"
+    Built-in has the Offering version: copies of One language.
+    $ sp version add offering to Evening
+    Evening has the Offering version: copies of Two languages, One language.
+    $ sp playlist item 3 show-with Offering
+    Harbour Lights shows in the Offering version.
+    $ sp playlist go 3
+    On screen: Harbour Lights, slide 1 of 6 (Verse 1).
+    $ sp status
+    …
+    Theme version: Offering (until the next item)
+    $ sp version use Offering --keep
+    The screens show the Offering version, kept until switched back.
+    $ sp version off
+    The screens show the usual look.
+
+A version's templates are changed in Edit › Themes; `theme templates` and `theme box` work on
+the usual ones.
 
 ## Screens and settings
 

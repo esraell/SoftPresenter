@@ -974,7 +974,7 @@ mod tests {
             videos_left_out: Vec::new(),
             playlist: Some(PlaylistFile {
                 name: "Sunday".to_owned(),
-                items: vec![Item::Song { key: song.id.to_string(), title: song.title.clone() }],
+                items: vec![Item::song(song.id.to_string(), song.title.clone())],
             }),
             media_items: Vec::new(),
             media_playlists: Vec::new(),

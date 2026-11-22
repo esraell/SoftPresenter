@@ -1061,8 +1061,8 @@ pub fn describe_action(show: &sp_engine::Show, state: &HomeState, action: &sp_mo
     step_words(show, state, action).0
 }
 
-/// An action in words, and whether what it names (a song, a message, a prop, a timer, a picture
-/// or a media playlist) has gone.
+/// An action in words, and whether what it names (a song, a message, a prop, a timer, a picture,
+/// a media playlist or a theme version) has gone.
 fn step_words(show: &sp_engine::Show, state: &HomeState, action: &sp_model::ShowAction) -> (String, bool) {
     let gone = std::cell::Cell::new(false);
     let found = |name: Option<String>| {
@@ -1077,6 +1077,7 @@ fn step_words(show: &sp_engine::Show, state: &HomeState, action: &sp_model::Show
         |_| found(crate::macros::step_song_title(show, state, action)),
         |id| found(show.media().iter().find(|item| item.id == id).map(|item| item.name.clone())),
         |id| found(state.media_playlists.iter().find(|p| p.id == id).map(|p| p.name.clone())),
+        |id| found(state.versions.iter().find(|v| v.id == id).map(|v| v.name.clone())),
     );
     (words, gone.get())
 }
@@ -1092,11 +1093,12 @@ enum StepGroup {
     Song,
     Media,
     Announcements,
+    Version,
     CanvaSync,
 }
 
 impl StepGroup {
-    const ALL: [StepGroup; 9] = [
+    const ALL: [StepGroup; 10] = [
         StepGroup::Clear,
         StepGroup::Messages,
         StepGroup::Props,
@@ -1105,6 +1107,7 @@ impl StepGroup {
         StepGroup::Song,
         StepGroup::Media,
         StepGroup::Announcements,
+        StepGroup::Version,
         StepGroup::CanvaSync,
     ];
 
@@ -1120,6 +1123,7 @@ impl StepGroup {
             ShowAction::Song { .. } => StepGroup::Song,
             ShowAction::Media { .. } => StepGroup::Media,
             ShowAction::Announce { .. } => StepGroup::Announcements,
+            ShowAction::Version { .. } => StepGroup::Version,
             ShowAction::CanvaSync => StepGroup::CanvaSync,
         }
     }
@@ -1134,6 +1138,7 @@ impl StepGroup {
             StepGroup::Song => "Go to a Song",
             StepGroup::Media => "Show a Picture or Video",
             StepGroup::Announcements => "Announcements",
+            StepGroup::Version => "Theme Version",
             StepGroup::CanvaSync => "Sync from Canva",
         }
     }
@@ -1271,6 +1276,20 @@ fn group_steps(
                 });
             });
         }
+        // A theme version on every screen whose theme has it, kept or not, or the usual look.
+        StepGroup::Version => {
+            if state.versions.is_empty() {
+                ui.label("No versions yet: add one in Edit \u{203a} Themes");
+            }
+            for version in &state.versions {
+                for keep in [false, true] {
+                    let step = ShowAction::Version { id: Some(version.id), keep };
+                    offer(ui, &describe_action(show, state, &step), step);
+                }
+            }
+            let usual = ShowAction::Version { id: None, keep: false };
+            offer(ui, &describe_action(show, state, &usual), usual);
+        }
         StepGroup::CanvaSync => {
             let hint = "Fetch a fresh announcements video (Settings \u{203a} Integrations \u{203a} Canva Sync)";
             let marked = current == Some(&ShowAction::CanvaSync);
@@ -1283,10 +1302,10 @@ fn group_steps(
 }
 
 /// Every step a macro or a slide can do, in groups (Clear, Messages, Props, Timers, Audience
-/// Screens, Go to a Song, Show a Picture or Video, Announcements), each opening its steps, and
-/// Sync from Canva on its own. The one menu that adds a step, changes one, and adds a slide's
-/// action, so they never drift apart. `current` is the step being changed: its group and its
-/// step are marked. Returns the one chosen.
+/// Screens, Go to a Song, Show a Picture or Video, Announcements, Theme Version), each opening
+/// its steps, and Sync from Canva on its own. The one menu that adds a step, changes one, and
+/// adds a slide's action, so they never drift apart. `current` is the step being changed: its
+/// group and its step are marked. Returns the one chosen.
 fn step_groups(
     ui: &mut egui::Ui,
     show: &sp_engine::Show,
@@ -2921,6 +2940,7 @@ mod tests {
             "Go to a Song",
             "Show a Picture or Video",
             "Announcements",
+            "Theme Version",
             "Sync from Canva",
         ];
         let heights: Vec<f32> = groups.iter().map(|group| place_of(&texts, group).y).collect();
@@ -3082,6 +3102,27 @@ mod tests {
         let (ctx, mut state, _) = opened(vec![gone]);
         let texts = frame(&ctx, &show, &mut state, vec![], 0.0);
         place_of(&texts, "Play on the Announcements Layer: (a song no longer in the library)");
+    }
+
+    #[test]
+    fn a_version_step_reads_by_its_name_and_a_removed_one_says_so() {
+        let show = show();
+        let offering = sp_model::Version { id: sp_model::Uuid::from_u128(7), name: "Offering".to_owned() };
+        let steps = vec![
+            ShowAction::Version { id: Some(offering.id), keep: true },
+            ShowAction::Version { id: Some(sp_model::Uuid::from_u128(8)), keep: false },
+        ];
+        let (ctx, mut state, id) = opened(steps);
+        state.versions = vec![offering.clone()];
+        let texts = frame(&ctx, &show, &mut state, vec![], 0.0);
+        place_of(&texts, "Use the Offering version until switched back");
+        place_of(&texts, "Use (a version that has been removed)");
+        // Its menu offers the version's steps under Theme Version; one chosen takes its place.
+        click(&ctx, &show, &mut state, egui::Id::unique(("macro step", id, 1)), vec2(0.0, 0.0));
+        let texts = frame(&ctx, &show, &mut state, vec![], next(&ctx));
+        let texts = point(&ctx, &show, &mut state, place_of(&texts, "Theme Version"), false);
+        point(&ctx, &show, &mut state, place_of(&texts, "Back to the usual look"), true);
+        assert_eq!(state.macros[0].actions[1], ShowAction::Version { id: None, keep: false });
     }
 
     #[test]

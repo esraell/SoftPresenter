@@ -578,6 +578,7 @@ const PLAYLIST_CHANGES: &[&str] = &[
     "media-playlist",
     "placeholder",
     "fill",
+    "item",
 ];
 
 /// The words after `slide` that change something, rather than name a song to read.
@@ -611,6 +612,7 @@ pub fn only_reads(args: &[String]) -> bool {
         "" | "help" | "status" | "songs" | "slides" | "playlists" | "libraries" | "themes" | "screens" | "timers"
         | "messages" | "props" | "macros" | "groups" | "displays" | "decklink" | "bibles" | "search" | "job" => true,
         "media" | "media-playlist" | "settings" | "menu" => alone,
+        "version" => alone || (args.len() == 2 && word(1) == "list"),
         "audio" => alone || (args.len() == 2 && word(1) == "playlists"),
         "voxlive" => alone || (args.len() == 2 && word(1) == "screens"),
         "canva" => alone || (args.len() == 2 && word(1) == "status"),
@@ -776,6 +778,7 @@ const COMMANDS: &[&str] = &[
     "displays",
     "decklink",
     "theme",
+    "version",
     "menu",
 ];
 
@@ -919,7 +922,7 @@ Layers and controls
                                steps: clear all|slide|media|props|messages, show|hide message
                                NAME, show|hide prop NAME, start|stop|reset timer NAME,
                                audience on|off, song SONG, media ITEM, announce SONG|media
-                               ITEM|media-playlist NAME, canva sync
+                               ITEM|media-playlist NAME, canva sync, version NAME [keep]|usual
   macro step NAME N STEP       step N does STEP instead, at the same point
   macro move NAME N to M       step N becomes step M
   macro startup NAME on|off    run it when SoftPresenter opens, or not
@@ -993,6 +996,21 @@ Themes
   theme box THEME TEMPLATE BOX key=value…   a template box's look (slide style keys) and place
                                (x= y= w= h=); quote names with spaces
   theme template THEME TEMPLATE for=songs|bible|both|none
+  version list                 the theme versions (other templates for a moment in the service,
+                               such as the offering), the themes that have each, and the one on
+  version add NAME to THEME [from TEMPLATE…]
+                               give a theme a version, starting from copies of its templates
+                               (its song templates if none are named); the name another theme's
+                               version has makes it that version, so the screens switch together
+  version rename OLD NEW | version remove NAME from THEME --yes
+  version use NAME [--keep] | version off
+                               every screen whose theme has it in that version, until the next
+                               item goes on screen (with --keep, until switched back); off is
+                               the usual look. With nothing on screen it waits for the next item
+  version keep on|off          the version on stays after the next item, until switched back
+  playlist item N show-with NAME|usual [--keep] [in PLAYLIST]
+                               a song or passage of a playlist goes on screen in that version
+                               (the song itself doesn't change)
   song text SONG [FILE]        the song as song text, or its words replaced from a file (its
                                slides keep their looks, labels and notes)
   song reload [SONG [--now]]   read songs again from their files, if changed outside the app
@@ -1235,6 +1253,7 @@ impl crate::App {
             "displays" => self.ctl_displays(),
             "decklink" => self.ctl_decklink(),
             "theme" => self.ctl_theme(args),
+            "version" => self.ctl_version(args),
             "undo" => self.ctl_undo(el, false),
             "redo" => self.ctl_undo(el, true),
             "menu" => self.ctl_menu(el, args),
@@ -1540,6 +1559,22 @@ impl crate::App {
                 item.as_ref().map_or_else(String::new, |item| format!("; item last opened from it: {item}"))
             ));
         }
+        // The theme version the screens are in, said once any theme has one.
+        let version = state.and_then(|s| {
+            let on = s.version_switch.on?;
+            let name = s.versions.iter().find(|version| version.id == on.version)?.name.clone();
+            Some((name, on.keep, on.from.is_none()))
+        });
+        if let Some((name, kept, waiting)) = &version {
+            let how = match (kept, waiting) {
+                (_, true) => " (from the next item to go on screen)",
+                (true, false) => " (kept until switched back)",
+                (false, false) => " (until the next item)",
+            };
+            lines.push(format!("Theme version: {name}{how}"));
+        } else if state.is_some_and(|s| !s.versions.is_empty()) {
+            lines.push("Theme version: the usual look".to_owned());
+        }
         let theme = self.themes.get(self.songs_theme).map(|t| t.name.clone());
         lines.push(format!(
             "Continuous playlist: {}   Identify screens: {}   Main theme: {}",
@@ -1556,6 +1591,7 @@ impl crate::App {
             "continuous": state.is_some_and(|s| s.continuous),
             "identify": state.is_some_and(|s| s.identify),
             "main_theme": theme,
+            "version": version.as_ref().map(|(name, kept, waiting)| serde_json::json!({"name": name, "kept": kept, "waiting": waiting})),
             "live": live.map(|at| {
                 // Which song exactly (titles can repeat), and the playlist item it came from.
                 let number = self.song_number(at.presentation);
@@ -1669,6 +1705,7 @@ impl crate::App {
             |_| crate::macros::step_song_title(&self.show, state, action),
             |id| self.show.media().iter().find(|x| x.id == id).map(|x| x.name.clone()),
             |id| state.media_playlists.iter().find(|p| p.id == id).map(|p| p.name.clone()),
+            |id| state.versions.iter().find(|v| v.id == id).map(|v| v.name.clone()),
         )
     }
 
@@ -2075,7 +2112,7 @@ impl crate::App {
                 let state = &mut running.home_state;
                 let key = state.song_keys.get(song).cloned().ok_or("That song can't go in a playlist.")?;
                 let title = self.show.presentations().get(song).map(|s| s.title.clone()).unwrap_or_default();
-                let item = crate::service::Item::Song { key, title: title.clone() };
+                let item = crate::service::Item::song(key, title.clone());
                 let at = list.unwrap_or_else(|| {
                     state.services.list.iter().position(|p| p.name == state.services.front().name).unwrap_or(0)
                 });

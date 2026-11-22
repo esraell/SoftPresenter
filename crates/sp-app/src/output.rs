@@ -39,6 +39,10 @@ pub struct Frame {
     pub slide_video: Vec<(String, sp_video::Frames)>,
     pub slide: Option<Arc<Slide>>,
     pub theme: Arc<Theme>,
+    /// The theme version the screens are in (see `versions`): a screen whose theme has it draws
+    /// the slide with that version's template. Only the slide: props, messages and the
+    /// copyright line over it keep their own look.
+    pub version: Option<Uuid>,
     /// When false the output is black whatever the slide is.
     pub enabled: bool,
     /// How the picture before gives way to this one.
@@ -986,6 +990,7 @@ fn run(
             slide_video: Vec::new(),
             slide: None,
             theme,
+            version: None,
             enabled: true,
             transition: sp_model::Transition::of(sp_model::TransitionKind::Cut),
             media_transition: sp_model::Transition::of(sp_model::TransitionKind::Cut),
@@ -1208,8 +1213,10 @@ fn run(
                     if let Some(next) = frame.next.as_deref() {
                         sp_render::read_ahead(next);
                     }
+                    // Another version over the same slide gives way to it as another slide does.
                     let same_slide = output.frame.slide.as_deref() == frame.slide.as_deref()
-                        && output.frame.enabled == frame.enabled;
+                        && output.frame.enabled == frame.enabled
+                        && output.frame.version == frame.version;
                     if !same_slide {
                         // Builds that start with the slide wait for its transition to end.
                         output.slide_on = now + Duration::from_secs_f32(frame.transition.duration());
@@ -1487,9 +1494,11 @@ impl Output {
         // The copyright line goes with the slide's words.
         under.extend(copyright.filter(|_| look.slides));
         let over = crate::props::overlay(&under, message.as_ref()).map(Arc::new);
-        // The slide as far as its builds have got, with its linked text filled in.
+        // The slide as far as its builds have got, with its linked text filled in; in the
+        // version that is on, when this screen's theme has it for the slide's kind.
         let slide = frame.slide.as_ref().filter(|_| look.slides).map(|slide| {
-            let (built, _) = slide.built(&theme, self.build_clock());
+            let in_version = frame.version.and_then(|version| theme.slide_in_version(slide, version));
+            let (built, _) = in_version.as_ref().unwrap_or(slide).built(&theme, self.build_clock());
             Arc::new(crate::links::fill(&built, &values).into_owned())
         });
         let media = self.video_picture.clone().or_else(|| frame.media.clone());

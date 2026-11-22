@@ -1822,7 +1822,7 @@ impl Carried {
                 .iter()
                 .filter_map(|at| {
                     let (key, song) = (state.song_keys.get(*at)?, show.presentations().get(*at)?);
-                    Some(Item::Song { key: key.clone(), title: song.title.clone() })
+                    Some(Item::song(key.clone(), song.title.clone()))
                 })
                 .collect(),
             Carried::Media(at) => show
@@ -2204,7 +2204,7 @@ fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, c
         if let Some(song) = song_picker(ui, show, state)
             && let (Some(key), Some(found)) = (state.song_keys.get(song), show.presentations().get(song))
         {
-            made = Some((Item::Song { key: key.clone(), title: found.title.clone() }, false));
+            made = Some((Item::song(key.clone(), found.title.clone()), false));
             ui.close();
         }
     });
@@ -2262,7 +2262,7 @@ fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, c
             .on_hover_text("Your VoxLive screens, a slide each: a click on one puts its captions on the screens")
             .clicked()
     {
-        made = Some((Item::Song { key: crate::voxlive::ITEM_KEY.to_owned(), title: "VoxLive".to_owned() }, false));
+        made = Some((Item::song(crate::voxlive::ITEM_KEY.to_owned(), "VoxLive".to_owned()), false));
         ui.close();
     }
     let Some((item, rename)) = made else { return };
@@ -2623,13 +2623,13 @@ impl SongAsks {
         if let Some(index) = self.add
             && let (Some(key), Some(song)) = (state.song_keys.get(index), show.presentations().get(index))
         {
-            state.services.add(Item::Song { key: key.clone(), title: song.title.clone() });
+            state.services.add(Item::song(key.clone(), song.title.clone()));
         }
         // To the playlist chosen, or to a new one, which is then shown with its name ready to type.
         if let Some((index, playlist)) = self.add_to
             && let (Some(key), Some(song)) = (state.song_keys.get(index).cloned(), show.presentations().get(index))
         {
-            let item = Item::Song { key, title: song.title.clone() };
+            let item = Item::song(key, song.title.clone());
             match playlist {
                 Some(at) => {
                     let name = state.services.list.get(at).map_or_else(String::new, |p| p.name.clone());
@@ -3512,7 +3512,7 @@ pub fn carry_out_item_ask(show: &Show, state: &mut HomeState, commands: &mut Vec
         }
         ItemAsk::Fill(index, song) => {
             if let (Some(key), Some(found)) = (state.song_keys.get(song), show.presentations().get(song)) {
-                let item = Item::Song { key: key.clone(), title: found.title.clone() };
+                let item = Item::song(key.clone(), found.title.clone());
                 if state.services.fill(index, item) {
                     commands.push(Command::Select(song));
                     state.bible_open = false;

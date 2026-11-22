@@ -101,8 +101,8 @@ fn wants_yes(words: &[String]) -> (bool, Vec<String>) {
 }
 
 /// The first words of the steps `macro add` and `macro step` take.
-const STEP_WORDS: [&str; 11] =
-    ["clear", "show", "hide", "start", "stop", "reset", "audience", "song", "media", "announce", "canva"];
+const STEP_WORDS: [&str; 12] =
+    ["clear", "show", "hide", "start", "stop", "reset", "audience", "song", "media", "announce", "canva", "version"];
 
 /// Where the steps begin in `macro add NAME STEP…`, or in `macro step NAME N STEP…` when
 /// `numbered` (N just before them): the place of the first step's first word. The name is at
@@ -544,7 +544,7 @@ impl crate::App {
     fn macro_add(&mut self, words: &[String]) -> Result<Reply, String> {
         let usage = "macro add NAME STEP [then STEP…]   steps: clear all|slide|media|props|messages, show|hide message NAME, \
                      show|hide prop NAME, start|stop|reset timer NAME, audience on|off, song SONG, media ITEM, \
-                     announce SONG|media ITEM|media-playlist NAME, canva sync";
+                     announce SONG|media ITEM|media-playlist NAME, canva sync, version NAME [keep]|usual";
         let names = self.macro_names();
         let at = steps_start(words, &names, false).ok_or(usage)?;
         let index = find("macro", &names, &words[..at].join(" "))?;
@@ -663,6 +663,15 @@ impl crate::App {
                 })
             }
             ("canva", "sync") => Ok(ShowAction::CanvaSync),
+            // `version usual`, `version NAME`, `version NAME keep` (kept until switched back).
+            ("version", "usual" | "off") => Ok(ShowAction::Version { id: None, keep: false }),
+            ("version", _) => {
+                let keep = words.last().is_some_and(|w| w.eq_ignore_ascii_case("keep"));
+                let name = words.get(1..words.len() - usize::from(keep)).map(|w| w.join(" ")).unwrap_or_default();
+                let names: Vec<String> = state.versions.iter().map(|v| v.name.clone()).collect();
+                let at = named("version", names, name)?;
+                Ok(ShowAction::Version { id: Some(state.versions[at].id), keep })
+            }
             ("announce", _) => {
                 let at = self.find_song_as_is(&rest(1))?;
                 let key = state.song_keys.get(at).cloned().ok_or("That song can't be played as announcements.")?;
