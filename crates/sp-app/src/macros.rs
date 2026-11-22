@@ -101,6 +101,29 @@ pub fn describe(
     }
 }
 
+/// The song an Announcements step plays, by its place among the open songs: the one kept under
+/// exactly the step's key.
+pub fn announced_song(state: &crate::home::HomeState, key: &str) -> Option<usize> {
+    state.song_keys.iter().position(|have| have == key)
+}
+
+/// The song a step names, by its place among the open songs, found as running the step finds
+/// it: an Announcements step's by `announced_song`, a Go to Song step's as a playlist finds its
+/// songs (by key, id or their one title). `None` when the step names no song, or it can't be
+/// found, so a step reads as gone exactly when running it would find nothing.
+pub fn step_song(show: &sp_engine::Show, state: &crate::home::HomeState, step: &ShowAction) -> Option<usize> {
+    match step {
+        ShowAction::Announce { what: Announced::Song { key } } => announced_song(state, key),
+        ShowAction::Song { key } => crate::studio::playlist_song(show, state, key),
+        _ => None,
+    }
+}
+
+/// The title of the song a step names, found as `step_song` finds it.
+pub fn step_song_title(show: &sp_engine::Show, state: &crate::home::HomeState, step: &ShowAction) -> Option<String> {
+    step_song(show, state, step).and_then(|at| show.presentations().get(at)).map(|song| song.title.clone())
+}
+
 /// The name of the macro made from what Settings once said to play when SoftPresenter opened.
 pub const OPENING_MACRO: &str = "When SoftPresenter opens";
 

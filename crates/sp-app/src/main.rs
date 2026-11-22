@@ -375,9 +375,7 @@ fn do_state_action(state: &mut home::HomeState, action: &sp_model::ShowAction, n
         }
         ShowAction::Announce { what } => {
             let asked = match what {
-                Announced::Song { key } => {
-                    state.song_keys.iter().position(|have| have == key).map(announcements::Announce::Song)
-                }
+                Announced::Song { key } => macros::announced_song(state, key).map(announcements::Announce::Song),
                 Announced::Media { id } => Some(announcements::Announce::Media(*id)),
                 Announced::MediaPlaylist { id } => Some(announcements::Announce::MediaPlaylist(*id)),
             };

@@ -1048,12 +1048,6 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut Thumb) {
     }
 }
 
-/// The title of the song an action names by its key, found as running the action finds it (and
-/// as `sp macros` says it), so a step reads as gone exactly when its song can't be found.
-fn song_title(show: &sp_engine::Show, state: &HomeState, key: &str) -> Option<String> {
-    crate::studio::playlist_song(show, state, key).map(|at| show.presentations()[at].title.clone())
-}
-
 /// The songs an action can name, each with its key: those in the library, in order.
 fn listed_songs<'a>(
     show: &'a sp_engine::Show,
@@ -1087,7 +1081,7 @@ fn step_words(show: &sp_engine::Show, state: &HomeState, action: &sp_model::Show
         |id| found(state.messages.iter().find(|m| m.id == id).map(|m| m.name.clone())),
         |id| found(state.props.iter().find(|p| p.id == id).map(|p| p.name.clone())),
         |id| found(state.timers.iter().find(|t| t.id == id).map(|t| t.name.clone())),
-        |key| found(song_title(show, state, key)),
+        |_| found(crate::macros::step_song_title(show, state, action)),
         |id| found(show.media().iter().find(|item| item.id == id).map(|item| item.name.clone())),
         |id| found(state.media_playlists.iter().find(|p| p.id == id).map(|p| p.name.clone())),
     );
@@ -3071,6 +3065,45 @@ mod tests {
         let (ctx, mut state, _) = opened(vec![gone]);
         let texts = frame(&ctx, &show, &mut state, vec![], 0.0);
         place_of(&texts, "Play on the Announcements Layer: (a song no longer in the library)");
+    }
+
+    #[test]
+    fn a_right_click_on_a_step_opens_its_menu_too() {
+        use sp_model::ClearWhat::{All, Slide};
+        let show = show();
+        let (ctx, mut state, id) = opened(clearing(&[All, Slide]));
+        frame(&ctx, &show, &mut state, vec![], 0.0);
+        let at = step_rows(&ctx, id, 2)[1].center();
+        let button = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut texts = Vec::new();
+        for events in [vec![Event::PointerMoved(at)], vec![button(true)], vec![button(false)], vec![]] {
+            texts = frame(&ctx, &show, &mut state, events, next(&ctx));
+        }
+        place_of(&texts, "CHANGE THIS STEP TO");
+    }
+
+    #[test]
+    fn a_steps_song_is_found_as_running_the_step_finds_it() {
+        // The song One is kept under another key than its id: Go to Song finds it by its id, as a
+        // playlist does, but the Announcements layer plays only the song kept under the key itself.
+        let show = show();
+        let id = show.presentations()[0].id.to_string();
+        let steps = vec![
+            ShowAction::Song { key: id.clone() },
+            ShowAction::Announce { what: sp_model::Announced::Song { key: id } },
+            ShowAction::Announce { what: sp_model::Announced::Song { key: "one-file".to_owned() } },
+        ];
+        let (ctx, mut state, _) = opened(steps);
+        state.song_keys = vec!["one-file".to_owned()];
+        let texts = frame(&ctx, &show, &mut state, vec![], 0.0);
+        place_of(&texts, "Go to Song: One");
+        place_of(&texts, "Play on the Announcements Layer: (a song no longer in the library)");
+        place_of(&texts, "Play on the Announcements Layer: One");
     }
 
     #[test]

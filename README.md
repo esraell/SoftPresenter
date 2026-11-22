@@ -135,7 +135,7 @@ The full list, area by area, is in [docs/features.md](docs/features.md).
    them in a media playlist (the menu beside MEDIA). For a loop before the service, choose Play
    This Playlist, or right-click a song, a picture, a video or a media playlist and choose Play
    on Announcements Layer. To start it every
-   time the app opens, make a macro that plays it (Add a step…, Play on the Announcements Layer)
+   time the app opens, make a macro that plays it (+ Add a step, Announcements)
    and tick Run When SoftPresenter Opens in the macro's menu.
 6. **Choose what the stage sees.** In the Stage tab, give each stage screen a layout: Words and
    Next, Words Only, Words and Notes, Clock and Timer, or one you design.

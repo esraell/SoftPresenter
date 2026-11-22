@@ -1650,10 +1650,7 @@ impl crate::App {
             |id| state.messages.iter().find(|x| x.id == id).map(|x| x.name.clone()),
             |id| state.props.iter().find(|x| x.id == id).map(|x| x.name.clone()),
             |id| state.timers.iter().find(|x| x.id == id).map(|x| x.name.clone()),
-            |key| {
-                crate::studio::playlist_song(&self.show, state, key)
-                    .map(|at| self.show.presentations()[at].title.clone())
-            },
+            |_| crate::macros::step_song_title(&self.show, state, action),
             |id| self.show.media().iter().find(|x| x.id == id).map(|x| x.name.clone()),
             |id| state.media_playlists.iter().find(|p| p.id == id).map(|p| p.name.clone()),
         )
@@ -1762,23 +1759,7 @@ impl crate::App {
     fn ctl_macros(&self) -> Reply {
         let Some(state) = self.running.as_ref().map(|r| &r.home_state) else { return Reply::done("(none)") };
         let steps = |m: &crate::macros::Macro| -> Vec<String> {
-            m.actions
-                .iter()
-                .map(|action| {
-                    crate::macros::describe(
-                        action,
-                        |id| state.messages.iter().find(|x| x.id == id).map(|x| x.name.clone()),
-                        |id| state.props.iter().find(|x| x.id == id).map(|x| x.name.clone()),
-                        |id| state.timers.iter().find(|x| x.id == id).map(|x| x.name.clone()),
-                        |key| {
-                            crate::studio::playlist_song(&self.show, state, key)
-                                .map(|at| self.show.presentations()[at].title.clone())
-                        },
-                        |id| self.show.media().iter().find(|x| x.id == id).map(|x| x.name.clone()),
-                        |id| state.media_playlists.iter().find(|p| p.id == id).map(|p| p.name.clone()),
-                    )
-                })
-                .collect()
+            m.actions.iter().map(|action| self.action_words(action)).collect()
         };
         let lines: Vec<String> = state
             .macros
@@ -2601,9 +2582,9 @@ impl crate::App {
         let lost = actions
             .iter()
             .filter(|action| match action {
-                sp_model::ShowAction::Song { key }
-                | sp_model::ShowAction::Announce { what: sp_model::Announced::Song { key } } => {
-                    crate::studio::playlist_song(&self.show, state, key).is_none()
+                sp_model::ShowAction::Song { .. }
+                | sp_model::ShowAction::Announce { what: sp_model::Announced::Song { .. } } => {
+                    crate::macros::step_song(&self.show, state, action).is_none()
                 }
                 _ => false,
             })
