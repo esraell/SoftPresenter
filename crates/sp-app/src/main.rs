@@ -2572,8 +2572,13 @@ impl App {
         None
     }
 
-    /// Enter: the open item of the playlist goes on screen from its first slide.
+    /// Enter: the open item of the playlist goes on screen from its first slide; with a library
+    /// listed, the song chosen.
     fn enter_key(&mut self) {
+        if self.running.as_ref().is_some_and(|r| !r.home_state.playlist_open) {
+            self.apply(vec![Command::First]);
+            return;
+        }
         let Some(open) = self.running.as_ref().and_then(|r| r.home_state.services.chosen) else { return };
         let (stops, _) = self.playlist_stops();
         if let Some(running::Do::Start { item, last }) = running::enter(&stops, Some(open)) {
@@ -7361,7 +7366,6 @@ impl ApplicationHandler<AppEvent> for App {
             && running.egui_ctx.memory(|memory| memory.focused().is_none())
             && running.home_state.edit_kind().is_none()
             && !running.home_state.bible_open
-            && running.home_state.playlist_open
             && !escape_closes_something(&running.home_state, &running.egui_ctx)
             && running.home_state.new_song_sheet.is_none()
             && !running.home_state.alert_open()
@@ -8187,6 +8191,24 @@ mod tests {
         state.editing = None;
         state.new_song_sheet = Some(home::NewSong::default());
         assert!(!find_key_is_free(&state, &ctx));
+    }
+
+    #[test]
+    fn show_keys_wait_under_the_list_of_keys_and_while_the_numbers_show() {
+        let ctx = egui::Context::default();
+        let digit = Key::Character("2".into());
+        let space = Key::Named(NamedKey::Space);
+        let escape = Key::Named(NamedKey::Escape);
+        let mut state = home::HomeState::default();
+        assert!(!show_key_held_back(&state, &ctx, &space), "nothing open: Space runs the show");
+        assert!(!show_key_held_back(&state, &ctx, &digit), "a digit is a slide's hot key");
+        state.numbers = Some(keys::Numbers { of: keys::NumbersOf::Tab, since: 0.0, picked: None });
+        assert!(show_key_held_back(&state, &ctx, &digit), "while the numbers show, a digit picks");
+        assert!(show_key_held_back(&state, &ctx, &escape), "and Escape only puts them away");
+        assert!(!show_key_held_back(&state, &ctx, &space), "Space still runs the show");
+        state.numbers = None;
+        state.key_sheet = true;
+        assert!(show_key_held_back(&state, &ctx, &space), "nothing runs the show under the list of keys");
     }
 
     #[test]

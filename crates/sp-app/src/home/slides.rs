@@ -867,7 +867,10 @@ pub fn slide_scroll(
             }
         }
         let live_now = show.live().map(|live| (live, show.position().map(|(step, _)| step)));
-        if live_now != state.live_seen {
+        // The menu of the slide on screen asked for (modifier-O): its slide is brought into view
+        // too, without making its item the open one again.
+        let changed = live_now != state.live_seen;
+        if changed || state.live_menu.is_some() {
             state.live_seen = live_now;
             let (open, started) = (state.services.chosen, state.live_item);
             // When a song is in the playlist twice: the item it was put on screen from (a
@@ -886,7 +889,7 @@ pub fn slide_scroll(
             if let Some((at, _, slide)) = found {
                 // The item whose slide has just gone on screen is the open one: Next going on
                 // into the next song takes the open item with it.
-                if let Some(item) = decks[at].item() {
+                if changed && let Some(item) = decks[at].item() {
                     state.services.chosen = Some(item);
                     state.live_item = Some(item);
                 }

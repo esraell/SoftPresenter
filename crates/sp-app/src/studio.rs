@@ -2751,7 +2751,14 @@ pub fn carry_out_item_ask(show: &Show, state: &mut HomeState, commands: &mut Vec
 /// Whether ↑ and ↓ go through the song list or the playlist: in the Show view, with nothing
 /// being typed and the song search closed.
 fn list_keys_work(ui: &egui::Ui, state: &HomeState) -> bool {
-    !ui.ctx().text_edit_focused() && state.library_search.is_none() && state.edit_kind().is_none() && !state.bible_open
+    // Not under an open menu, where the arrows move between its choices, nor under the list of
+    // keys.
+    !ui.ctx().text_edit_focused()
+        && state.library_search.is_none()
+        && state.edit_kind().is_none()
+        && !state.bible_open
+        && !state.key_sheet
+        && !egui::Popup::is_any_open(ui.ctx())
 }
 
 /// The items of the playlist in front, in running order: each with its number, its title, a

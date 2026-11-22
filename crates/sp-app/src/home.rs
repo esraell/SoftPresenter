@@ -1567,7 +1567,6 @@ pub fn home_ui(
         // The menu of the slide on screen: its slide is brought into view, and its menu opened.
         Some(crate::keys::Ask::LiveMenu) if show.live().is_some() && !state.bible_open => {
             state.live_menu = Some(ui.ctx().cumulative_frame_nr());
-            state.live_seen = None;
         }
         Some(crate::keys::Ask::LiveMenu) => state.say("Put a slide on screen to open its menu."),
         None => {}
@@ -7025,6 +7024,75 @@ mod tests {
         });
         output.drop_without_applying_deltas();
         commands
+    }
+
+    /// A key pressed with these modifiers, as the window passes it on.
+    fn pressed(key: Key, modifiers: Modifiers) -> Vec<Event> {
+        vec![
+            Event::ModifiersChanged(modifiers),
+            Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers },
+        ]
+    }
+
+    #[test]
+    fn modifier_one_then_one_starts_the_first_timer_and_shift_modifier_m_then_one_shows_a_picture() {
+        let (ctx, show) = (egui::Context::default(), {
+            let mut show = Show::new(vec![Arc::new(parse_song_text("Alpha", "Words\n"))]);
+            show.add_media(sp_model::MediaItem::new("Welcome.png".into(), "Welcome.png".into()));
+            show
+        });
+        let mut state = HomeState::default();
+        state.timers.push(crate::timers::Timer::new("Sermon".to_owned()));
+        state.live_tab = 2;
+        frame_commands(&ctx, &show, &mut state, vec![], 1.0);
+        frame_commands(&ctx, &show, &mut state, pressed(Key::Num1, Modifiers::COMMAND), 1.1);
+        assert_eq!(state.live_tab, 0, "the Timers tab");
+        frame_commands(&ctx, &show, &mut state, pressed(Key::Num1, Modifiers::NONE), 1.2);
+        assert!(state.timers[0].running(), "1 started the first timer, as its Start key does");
+        frame_commands(&ctx, &show, &mut state, vec![], 1.3);
+        assert!(state.timers[0].running(), "and only once");
+        let shift = Modifiers::COMMAND | Modifiers::SHIFT;
+        frame_commands(&ctx, &show, &mut state, pressed(Key::M, shift), 2.0);
+        let asked = frame_commands(&ctx, &show, &mut state, pressed(Key::Num1, Modifiers::NONE), 2.1);
+        assert!(asked.contains(&Command::ShowMedia(0)), "{asked:?}");
+    }
+
+    #[test]
+    fn the_list_of_keys_takes_every_click_and_a_click_outside_it_puts_it_away() {
+        let ctx = egui::Context::default();
+        let show = three_songs();
+        let mut state = HomeState { key_sheet: true, ..HomeState::default() };
+        frame_commands(&ctx, &show, &mut state, vec![], 0.0);
+        // At the right column's foot, under the dimmed window: nothing there is pressed.
+        let at = pos2(1240.0, 780.0);
+        let button = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut asked = Vec::new();
+        for (time, events) in
+            [(0.1, vec![Event::PointerMoved(at)]), (0.2, vec![button(true)]), (0.3, vec![button(false)])]
+        {
+            asked.extend(frame_commands(&ctx, &show, &mut state, events, time));
+        }
+        assert!(asked.is_empty(), "{asked:?}");
+        assert!(!state.key_sheet, "a click outside the sheet closes it");
+    }
+
+    #[test]
+    fn up_and_down_leave_the_open_item_alone_under_a_menu_or_the_list_of_keys() {
+        let ctx = egui::Context::default();
+        let show = three_songs();
+        let mut state = HomeState { playlist_open: true, key_sheet: true, ..HomeState::default() };
+        for title in ["One", "Two", "Three"] {
+            state.services.add(crate::service::Item::Song { key: format!("title:{title}"), title: title.to_owned() });
+        }
+        state.services.chosen = Some(0);
+        frame_commands(&ctx, &show, &mut state, vec![], 0.0);
+        frame_commands(&ctx, &show, &mut state, pressed(Key::ArrowDown, Modifiers::NONE), 0.1);
+        assert_eq!(state.services.chosen, Some(0));
     }
 
     #[test]

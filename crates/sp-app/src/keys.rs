@@ -410,17 +410,22 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
     let sheet = Rect::from_center_size(screen.center(), vec2(width, height));
     let area = egui::Area::new(egui::Id::unique("key sheet"))
         .order(egui::Order::Foreground)
-        .fixed_pos(sheet.min)
+        .fixed_pos(screen.min)
         .constrain(false);
     area.show(ctx, |ui| {
+        ui.set_clip_rect(screen);
+        // The whole window under it takes the pointer, so nothing there is clicked; a click
+        // outside the sheet puts it away.
+        let outside = ui.allocate_rect(screen, egui::Sense::click());
+        if outside.clicked() && !outside.interact_pointer_pos().is_some_and(|at| sheet.contains(at)) {
+            state.key_sheet = false;
+        }
         // The window under it is dimmed, in the sheet's own layer so the sheet stays bright.
         ui.painter().with_clip_rect(screen).rect_filled(screen, 0.0, Color32::from_black_alpha(153));
         let painter = ui.painter().clone();
         painter.rect_filled(sheet.translate(vec2(0.0, 30.0)).expand(30.0), 48.0, Color32::from_black_alpha(40));
         painter.rect_filled(sheet, 18.0, Color32::from_rgb(0x1f, 0x1f, 0x1f));
         painter.rect_stroke(sheet, 18.0, Stroke::new(1.0, LINE), StrokeKind::Inside);
-        // The whole sheet takes the pointer, so nothing under it is clicked.
-        ui.allocate_rect(sheet, egui::Sense::click());
         painter.text(pos2(sheet.min.x + 18.0, sheet.min.y + 29.0), Align2::LEFT_CENTER, "Keys", semibold(15.0), TEXT);
         let close = Rect::from_min_size(pos2(sheet.max.x - 12.0 - 30.0, sheet.min.y + 14.0), vec2(30.0, 30.0));
         let close_response = ui.interact(close, ui.scope_id().with("close keys"), egui::Sense::click());
@@ -619,6 +624,50 @@ mod tests {
         assert!(state.key_sheet);
         press(&ctx, &mut state, 2.0, Key::Escape, egui::Modifiers::NONE);
         assert!(!state.key_sheet);
+    }
+
+    #[test]
+    fn in_an_open_menu_down_then_enter_chooses_its_first_choice() {
+        let ctx = egui::Context::default();
+        let mut chosen = Vec::new();
+        let mut frame_with = |time: f64, events: Vec<egui::Event>, open: bool| {
+            let input = egui::RawInput {
+                time: Some(time),
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0))),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| {
+                let button = ui.button("More");
+                if open {
+                    egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&button));
+                }
+                egui::Popup::menu(&button).show(|ui| {
+                    for name in ["First", "Second"] {
+                        if ui.button(name).clicked() {
+                            chosen.push(name);
+                        }
+                    }
+                });
+            })
+            .drop_without_applying_deltas();
+        };
+        let key = |key: Key| {
+            vec![egui::Event::Key {
+                key,
+                physical_key: Some(key),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        frame_with(0.0, Vec::new(), true);
+        frame_with(0.1, Vec::new(), false);
+        frame_with(0.2, key(Key::ArrowDown), false);
+        frame_with(0.3, Vec::new(), false);
+        frame_with(0.4, key(Key::Enter), false);
+        frame_with(0.5, Vec::new(), false);
+        assert_eq!(chosen, ["First"]);
     }
 
     #[test]
