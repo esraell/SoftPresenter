@@ -70,11 +70,12 @@ fn log_to_app(waker: Option<Waker>) -> sp_decklink::Log {
 }
 
 /// How a DeckLink output is to read the alpha of a picture read back for NDI.
-pub(super) fn alpha_of(sent: sp_ndi::Sent) -> Alpha {
+fn alpha_of(sent: sp_ndi::Sent) -> Alpha {
     match sent {
-        sp_ndi::Sent::Opaque | sp_ndi::Sent::Key => Alpha::Opaque,
+        sp_ndi::Sent::Opaque => Alpha::Opaque,
         sp_ndi::Sent::Straight => Alpha::Straight,
         sp_ndi::Sent::Premultiplied => Alpha::Premultiplied,
+        sp_ndi::Sent::Key => Alpha::Key,
     }
 }
 
@@ -118,8 +119,19 @@ impl Output {
         }
     }
 
-    /// The DeckLink outputs a picture read back is for.
-    pub(super) fn decklink_for(&self, ids: &[Uuid]) -> Vec<&DeckLinkOutput> {
-        self.decklink.iter().filter(|(id, _)| ids.contains(id)).map(|(_, output)| output).collect()
+    /// The DeckLink outputs a picture read back is for, each with how to read its alpha: as
+    /// `sent` says, or as its key for those of them that are `keys` (made from these same
+    /// pixels, so the key never shows another moment than its fill).
+    pub(super) fn decklink_for(
+        &self,
+        ids: &[Uuid],
+        keys: &[Uuid],
+        sent: sp_ndi::Sent,
+    ) -> Vec<(&DeckLinkOutput, Alpha)> {
+        self.decklink
+            .iter()
+            .filter(|(id, _)| ids.contains(id))
+            .map(|(id, output)| (output, if keys.contains(id) { Alpha::Key } else { alpha_of(sent) }))
+            .collect()
     }
 }

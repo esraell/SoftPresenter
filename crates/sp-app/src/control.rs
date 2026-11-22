@@ -949,6 +949,7 @@ Screens and settings
   screen add audience|stage NAME [on display NAME|window|ndi NAME|decklink NAME|automatic]
   screen set SCREEN key=value… name= output=display:NAME|window|ndi:NAME|decklink:NAME|
                                automatic|off mode=FORMAT (a DeckLink output's: 1080i59.94…)
+                               keyer=off|external|internal (a DeckLink card's keyer)
                                kind=audience|stage layers=slides,media,… color=#RRGGBB
                                edges=L,T,R,B theme=THEME|main layout=STAGE-LAYOUT
                                background=solid|see-through alpha=straight|premultiplied

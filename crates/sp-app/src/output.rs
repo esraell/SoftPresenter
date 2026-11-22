@@ -1493,11 +1493,12 @@ impl Output {
         self.targets.iter().position(|target| target.id == fill)
     }
 
-    /// For a key on NDI, its fill's NDI source, whose picture it is made from (see
+    /// For a key on NDI or DeckLink, its fill's NDI source or DeckLink output, whose picture it
+    /// is made from: both are given the same pictures read back from the GPU (see
     /// `window_fill`).
     fn ndi_fill(&self, key: Uuid) -> Option<Uuid> {
         let fill = self.fill_of(key)?;
-        self.ndi.iter().any(|(id, _)| *id == fill).then_some(fill)
+        (self.ndi.iter().any(|(id, _)| *id == fill) || self.decklink.iter().any(|(id, _)| *id == fill)).then_some(fill)
     }
 
     /// Where the slide on screen is in its builds now.
@@ -1719,8 +1720,10 @@ impl Output {
         // The show is drawn once for every source that shows it as it is; a screen being
         // identified, a stage screen or one with its own look gets its own picture.
         // The NDI sources that send another's key, and whose.
-        let keys: Vec<(Uuid, Uuid)> =
-            self.ndi.iter().filter_map(|(id, _)| self.ndi_fill(*id).map(|fill| (*id, fill))).collect();
+        let keys: Vec<(Uuid, Uuid)> = (self.ndi.iter().map(|(id, _)| *id))
+            .chain(self.decklink.iter().map(|(id, _)| *id))
+            .filter_map(|id| self.ndi_fill(id).map(|fill| (id, fill)))
+            .collect();
         let alone = |id: &Uuid| {
             self.identify.iter().any(|(have, ..)| have == id)
                 || self.is_stage(*id)
@@ -1746,7 +1749,7 @@ impl Output {
             arrivals: 0,
             wanted: true,
             alone: alone(id),
-            key_of: None,
+            key_of: keys.iter().find(|(key, _)| key == id).map(|(_, fill)| *fill),
             unwatched: false,
             stage: self.is_stage(*id),
         });
@@ -1828,7 +1831,7 @@ impl Output {
                             ndi.forget_as(self.see_through(*id).is_some());
                         }
                     }
-                    let cards = self.decklink_for(&readback.ids);
+                    let cards = self.decklink_for(&readback.ids, &readback.keys, readback.sent);
                     if !sources.is_empty() || !cards.is_empty() {
                         // The rows are copied out of the buffer once, without the padding, and
                         // every source sends those same pixels.
@@ -1847,8 +1850,8 @@ impl Output {
                         for (ndi, sent) in sources {
                             ndi.show_shared(w, h, pixels.clone(), sent);
                         }
-                        for card in cards {
-                            card.show_shared(w, h, pixels.clone(), decklink::alpha_of(readback.sent));
+                        for (card, alpha) in cards {
+                            card.show_shared(w, h, pixels.clone(), alpha);
                         }
                     }
                     readback.buffer.unmap();

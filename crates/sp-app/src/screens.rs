@@ -89,6 +89,18 @@ impl Keyer {
             Keyer::Internal => sp_decklink::Keying::Internal,
         }
     }
+
+    pub fn name(self) -> &'static str {
+        self.keying().name()
+    }
+
+    pub fn parse(word: &str) -> Option<Keyer> {
+        Some(match sp_decklink::Keying::parse(word)? {
+            sp_decklink::Keying::Off => Keyer::Off,
+            sp_decklink::Keying::External => Keyer::External,
+            sp_decklink::Keying::Internal => Keyer::Internal,
+        })
+    }
 }
 
 /// The DeckLink outputs a screen can be given: each device that can play now, in the format a
@@ -247,8 +259,9 @@ impl Look {
 ///
 /// A key is made from the very picture its fill shows, so the two never show different
 /// moments: the key of a display or window from that screen's painted picture as its window
-/// is given it, the key of an NDI screen from the same picture as it comes back from the GPU.
-/// So a key and its fill are both displays or windows, or both NDI, and both going out.
+/// is given it, the key of an NDI or DeckLink screen from the same picture as it comes back
+/// from the GPU. So a key and its fill are both displays or windows, or both NDI or DeckLink,
+/// and both going out. (A DeckLink card with a keyer sends a screen's key itself, beside it.)
 pub fn key_trouble(screens: &[Screen], index: usize, shown: &[bool]) -> Option<String> {
     let screen = screens.get(index)?;
     let fill_id = screen.look.key_of.filter(|_| screen.kind == Kind::Audience)?;
@@ -266,11 +279,15 @@ pub fn key_trouble(screens: &[Screen], index: usize, shown: &[bool]) -> Option<S
     if fill.look.key_of.is_some() {
         return Some(format!("\"{name}\" is a key itself, so this shows black."));
     }
-    let ndi = |screen: &Screen| matches!(screen.output, Output::Ndi(_));
-    if ndi(screen) != ndi(fill) {
-        let on = if ndi(fill) { "NDI" } else { "a display or window" };
+    let read_back = |screen: &Screen| matches!(screen.output, Output::Ndi(_) | Output::DeckLink(_));
+    if read_back(screen) != read_back(fill) {
+        let on = match fill.output {
+            Output::Ndi(_) => "NDI",
+            Output::DeckLink(_) => "a DeckLink output",
+            _ => "a display or window",
+        };
         return Some(format!(
-            "\"{name}\" is on {on}. A key goes out beside its fill on two displays or windows, or on two NDI names, so this shows black."
+            "\"{name}\" is on {on}. A key goes out beside its fill on two displays or windows, or on two NDI or DeckLink outputs, so this shows black."
         ));
     }
     if !shown.get(at).copied().unwrap_or(false) {
@@ -567,6 +584,20 @@ mod tests {
         assert!(mixed.contains("is on NDI") && mixed.contains("shows black"), "{mixed}");
         let mixed = trouble(&[fill.clone(), ndi(&key, "Key")], &[true, true]).unwrap();
         assert!(mixed.contains("display or window"), "{mixed}");
+        // A DeckLink output goes with NDI: both are given the same pictures read back.
+        let card = |screen: &Screen, device: &str| Screen {
+            output: Output::DeckLink(DeckLinkOut {
+                device: device.to_owned(),
+                id: None,
+                mode: "1080i50".to_owned(),
+                keyer: Keyer::Off,
+            }),
+            ..screen.clone()
+        };
+        assert_eq!(trouble(&[card(&fill, "Duo (1)"), card(&key, "Duo (2)")], &[true, true]), None);
+        assert_eq!(trouble(&[ndi(&fill, "Fill"), card(&key, "Duo (2)")], &[true, true]), None);
+        let mixed = trouble(&[card(&fill, "Duo (1)"), key.clone()], &[true, true]).unwrap();
+        assert!(mixed.contains("is on a DeckLink output"), "{mixed}");
         // The fill not going out (off, or its display unplugged).
         let off = trouble(&[fill.clone(), key.clone()], &[false, true]).unwrap();
         assert!(off.contains("isn't going out"), "{off}");

@@ -6165,8 +6165,8 @@ impl App {
                         ("Starting NDI…".to_owned(), false)
                     }
                 },
-                Placed::DeckLink(out) => match output.decklink_status(screen.id) {
-                    output::DeckLinkStatus::Playing(what) => (format!("Playing out of {} at {what}", out.device), true),
+                Placed::DeckLink(_) => match output.decklink_status(screen.id) {
+                    output::DeckLinkStatus::Playing(what) => (format!("Playing at {what}"), true),
                     output::DeckLinkStatus::Waiting(why) => (why, false),
                     output::DeckLinkStatus::Off | output::DeckLinkStatus::Starting => {
                         starting = true;

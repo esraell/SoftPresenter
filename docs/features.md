@@ -624,6 +624,19 @@ feature changes, this page changes in the same commit.
   is told when one stops, the Screens window and `sp screens` say what each is doing, and the
   log has a line each minute for each output: frames played, late and dropped. A quiet run (a
   test) never opens a card. Windows has no DeckLink outputs yet.
+- **Keying with a DeckLink card.** Where the card can key (a DeckLink Duo 2 can once Desktop
+  Video Setup pairs its connectors: one sub-device, full duplex), a DeckLink screen's Keyer
+  can be Fill and key, the card sending the picture on one connector and its key on the one
+  paired with it (on a Duo 2, fill on SDI 2 and key on SDI 1), in step, for a switcher's
+  keyer; or Over its input, the card laying the picture over the video coming into it. Only
+  the choices the card has in its present profile are offered. The screen is made see-through
+  (under Look) so that only the words are keyed: a see-through screen's picture goes to the
+  card with its alpha, straight or premultiplied as its Soft edges say; a solid screen's key is
+  all white, which the Screens window points out. Without a keyer, another screen on a second
+  DeckLink output (or an NDI name) can be the first one's key, as with NDI: the two are made
+  from the same picture, read back once, though each output keeps its own clock, so the card's
+  own keyer keeps them closer in step. Changing the profile is left to Desktop Video Setup:
+  SoftPresenter never changes it, and lists the devices again when asked (`sp decklink`).
 - Stage screens for the people on stage: the words on screen now, the next slide's words, the
   time, a running timer and the stage message.
 - A screen sent over NDI is drawn and sent only while someone is watching it. With no receiver

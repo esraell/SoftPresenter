@@ -316,6 +316,9 @@ pub enum Alpha {
     /// See-through, each colour to be multiplied by its alpha before it goes, for a keyer that
     /// expects that.
     Premultiplied,
+    /// The key of a see-through picture: its alpha as solid greys, white where solid, black
+    /// where clear (for a screen that is another's key, played out of a card without a keyer).
+    Key,
 }
 
 /// How an output uses its card's keyer.

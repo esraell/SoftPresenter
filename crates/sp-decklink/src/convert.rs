@@ -96,7 +96,7 @@ pub fn to_frame(rgba: &[u8], width: u32, height: u32, layout: Layout, alpha: Alp
         // is divided again afterwards.
         let premultiplied = match alpha {
             Alpha::Opaque => solid(rgba),
-            Alpha::Straight | Alpha::Premultiplied => premultiply(rgba),
+            Alpha::Straight | Alpha::Premultiplied | Alpha::Key => premultiply(rgba),
         };
         scaled = scale(&premultiplied, width, height, w, h);
         (&scaled, true)
@@ -126,11 +126,15 @@ pub fn to_frame(rgba: &[u8], width: u32, height: u32, layout: Layout, alpha: Alp
 /// One pixel as it is to go. `scaled` says it has been scaled already, and so is a colour
 /// multiplied by its alpha (or solid).
 fn pass(&[r, g, b, a]: &[u8; 4], alpha: Alpha, keyed: bool, scaled: bool) -> [u8; 4] {
+    if alpha == Alpha::Key {
+        return [a, a, a, 255];
+    }
     if scaled {
         return match (alpha, keyed) {
             (Alpha::Opaque, _) | (_, false) => [r, g, b, if keyed { a } else { 255 }],
             (Alpha::Premultiplied, true) => [r, g, b, a],
             (Alpha::Straight, true) => [unmultiply(r, a), unmultiply(g, a), unmultiply(b, a), a],
+            (Alpha::Key, true) => [a, a, a, 255],
         };
     }
     match (alpha, keyed) {
@@ -138,6 +142,7 @@ fn pass(&[r, g, b, a]: &[u8; 4], alpha: Alpha, keyed: bool, scaled: bool) -> [u8
         (Alpha::Straight, true) => [r, g, b, a],
         (Alpha::Premultiplied, true) => [times(r, a), times(g, a), times(b, a), a],
         (Alpha::Straight | Alpha::Premultiplied, false) => [times(r, a), times(g, a), times(b, a), 255],
+        (Alpha::Key, _) => [a, a, a, 255],
     }
 }
 
@@ -330,6 +335,21 @@ mod tests {
         assert_eq!(to_frame(&half_white, 1, 1, bgra, Alpha::Straight, false), vec![128, 128, 128, 255]);
         let yuv = to_frame(&half_white.repeat(2), 2, 1, layout(2, 1, PixelFormat::Yuv), Alpha::Straight, true);
         assert_eq!(yuv, yuv_pair([128, 128, 128, 255], [128, 128, 128, 255]).to_vec(), "YUV never keys");
+    }
+
+    #[test]
+    fn a_key_is_the_alpha_as_solid_greys_in_either_format() {
+        let half_white = [255, 255, 255, 128];
+        let bgra = layout(1, 1, PixelFormat::Bgra);
+        assert_eq!(to_frame(&half_white, 1, 1, bgra, Alpha::Key, false), vec![128, 128, 128, 255]);
+        assert_eq!(to_frame(&half_white, 1, 1, bgra, Alpha::Key, true), vec![128, 128, 128, 255], "solid even keyed");
+        let solid_and_clear = [9, 9, 9, 255, 9, 9, 9, 0];
+        let yuv = to_frame(&solid_and_clear, 2, 1, layout(2, 1, PixelFormat::Yuv), Alpha::Key, false);
+        assert_eq!(yuv, yuv_pair([255, 255, 255, 255], [0, 0, 0, 255]).to_vec());
+        assert_eq!([yuv[1], yuv[3]], [235, 16], "white where solid, black where clear");
+        // Scaled to one pixel: half covered, half grey.
+        let scaled = to_frame(&solid_and_clear, 2, 1, layout(1, 1, PixelFormat::Bgra), Alpha::Key, false);
+        assert_eq!(scaled, vec![128, 128, 128, 255]);
     }
 
     #[test]

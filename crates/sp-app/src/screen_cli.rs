@@ -139,7 +139,7 @@ impl crate::App {
     /// `screen set SCREEN key=value…`: name, output, kind, layers, color, edges, theme, layout,
     /// background, alpha, key.
     fn screen_set(&mut self, words: &[String]) -> Result<Reply, String> {
-        let usage = "screen set SCREEN name=… output=display:NAME|window|ndi:NAME|decklink:NAME|automatic|off mode=FORMAT kind=audience|stage \
+        let usage = "screen set SCREEN name=… output=display:NAME|window|ndi:NAME|decklink:NAME|automatic|off mode=FORMAT keyer=off|external|internal kind=audience|stage \
                      layers=slides,media,props,messages,announcements color=#RRGGBB edges=LEFT,TOP,RIGHT,BOTTOM theme=THEME|main layout=STAGE-LAYOUT \
                      background=solid|see-through alpha=straight|premultiplied key=SCREEN|none";
         let at = words.iter().position(|w| w.contains('=')).filter(|at| *at > 0).ok_or(usage)?;
@@ -229,6 +229,50 @@ impl crate::App {
                     })?;
                     out.mode = mode.name.clone();
                     said.push(format!("in {}", out.mode));
+                }
+                "keyer" => {
+                    let Output::DeckLink(out) = &mut screen.output else {
+                        return Err("keyer is for a screen on a DeckLink output (output=decklink:NAME).".to_owned());
+                    };
+                    let keyer = Keyer::parse(value)
+                        .ok_or_else(|| format!("keyer is off, external or internal, not {value}."))?;
+                    if keyer != Keyer::Off {
+                        let device = found
+                            .find(out.id, &out.device)
+                            .ok_or_else(|| format!("{} isn't connected now, so its keyer isn't known.", out.device))?;
+                        let can = match keyer {
+                            Keyer::External => device.external_keying,
+                            Keyer::Internal => device.internal_keying,
+                            Keyer::Off => true,
+                        };
+                        if !can {
+                            return Err(format!(
+                                "{} can't do {} keying in its card's present profile (it can do {}).",
+                                device.name,
+                                keyer.name(),
+                                device.keying_in_words()
+                            ));
+                        }
+                        if !device.mode(&out.mode).is_some_and(|mode| mode.keying) {
+                            let keyed: Vec<&str> =
+                                device.offered().filter(|mode| mode.keying).map(|mode| mode.name.as_str()).collect();
+                            return Err(format!(
+                                "{} can't key in {}. It can key in: {}.",
+                                device.name,
+                                out.mode,
+                                keyed.join(", ")
+                            ));
+                        }
+                    }
+                    out.keyer = keyer;
+                    said.push(
+                        match keyer {
+                            Keyer::Off => "keyer off",
+                            Keyer::External => "fill and key from the card's keyer",
+                            Keyer::Internal => "keyed by the card over its input",
+                        }
+                        .to_owned(),
+                    );
                 }
                 "kind" => {
                     screen.kind = match value.to_lowercase().as_str() {

@@ -722,7 +722,7 @@ kept with:
 | Command | Does |
 |---|---|
 | `screen add audience\|stage NAME [on display NAME\|window\|ndi NAME\|decklink NAME\|automatic]` | A new screen (in a window unless told); a DeckLink output by its name or its number in `sp decklink` |
-| `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|decklink:NAME\|automatic\|off`, `mode=FORMAT` (a DeckLink screen's format: `1080i59.94`, `720p50`…), `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT`; for an audience screen `background=solid\|see-through`, `alpha=straight\|premultiplied` (how a see-through screen sends its soft edges; straight unless told), `key=SCREEN\|none` (shows that screen's key) |
+| `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|decklink:NAME\|automatic\|off`, `mode=FORMAT` (a DeckLink screen's format: `1080i59.94`, `720p50`…), `keyer=off\|external\|internal` (a DeckLink card's keyer: fill and key on two connectors, or over the card's input), `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT`; for an audience screen `background=solid\|see-through`, `alpha=straight\|premultiplied` (how a see-through screen sends its soft edges; straight unless told), `key=SCREEN\|none` (shows that screen's key) |
 | `screen delete SCREEN --yes` | Deletes a screen (there is always one) |
 | `settings set key=value…` | `transition=KIND[:SECONDS]`, `media_transition=…`, `copyright=never\|first\|last\|every`, `ccli_licence=DIGITS`, `start_audience=on\|off`, `start_with=nothing\|media-playlist:NAME\|announcements:SONG`, `continuous=on\|off`, `view=grid\|easy\|table`, `columns=1-12` |
 
@@ -762,9 +762,17 @@ card. A quiet test copy (`SOFTPRESENTER_QUIET`) never plays out of a card; with
     The screen Switcher: in 1080p29.97.
     $ sp screens
       1. Screen 1: Filling "3DTV", 1920 x 1080
-      2. Switcher: Playing out of DeckLink Duo (1) at 1080p29.97
+      2. Switcher: Playing at 1080p29.97
     $ sp screen set Switcher mode=1080i47
     DeckLink Duo (1) has no format 1080i47. Its formats: 720p50, 720p59.94, …
+
+Where the card can key (`sp decklink` says so; a DeckLink Duo 2 can once Desktop Video Setup
+pairs its connectors), the card itself can send a see-through screen's fill and key, in step:
+
+    $ sp screen set Switcher background=see-through keyer=external
+    The screen Switcher: see-through, straight alpha, fill and key from the card's keyer.
+    $ sp screen set Switcher keyer=internal
+    DeckLink Duo (1) can't do internal keying in its card's present profile (it can do external keying).
 
 Without the driver, `sp decklink` says Desktop Video isn't installed (or is too old) and there
 are no DeckLink outputs to choose; a screen saved with one says the same in `sp screens`.
