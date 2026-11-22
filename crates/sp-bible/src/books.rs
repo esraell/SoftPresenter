@@ -355,15 +355,16 @@ pub fn book_by_number(number: u32) -> Option<usize> {
 /// A book's place in [`BOOKS`] from its name as a Bible file writes it, in English, Russian or
 /// Ukrainian: a name, short form or code exactly; else the most words at its start that are
 /// one ("Revelation of John", "Деяния апостолов"). Books some Bibles add ("Judith") find none.
+///
+/// A file's name for a book is untrusted and may be any length: only its first
+/// [`WRITTEN_NAME_CHARS`] characters and [`WRITTEN_NAME_WORDS`] words are looked at, against
+/// every book's names made plain once, so it takes the same short time whatever it is.
 pub fn book_by_written_name(name: &str) -> Option<usize> {
-    let exactly = |typed: &str| {
-        BOOKS.iter().position(|book| {
-            [book.english, book.russian, book.ukrainian].iter().any(|n| plain(n) == typed)
-                || book.english_short.iter().chain(book.russian_short).chain(book.ukrainian_short).any(|s| *s == typed)
-                || book.code.eq_ignore_ascii_case(typed)
-        })
-    };
-    let mut words: Vec<String> = name.split([' ', '.', '\u{a0}']).map(plain).filter(|w| !w.is_empty()).collect();
+    let known = written_names();
+    let exactly = |typed: &str| known.get(typed).copied();
+    let name: String = name.chars().take(WRITTEN_NAME_CHARS).collect();
+    let mut words: Vec<String> =
+        name.split([' ', '.', '\u{a0}']).map(plain).filter(|w| !w.is_empty()).take(WRITTEN_NAME_WORDS).collect();
     // "II Kings" is 2 Kings.
     let several = words.len() > 1;
     if let Some(first) = words.first_mut()
@@ -373,6 +374,38 @@ pub fn book_by_written_name(name: &str) -> Option<usize> {
         *first = (number + 1).to_string();
     }
     (1..=words.len()).rev().find_map(|count| exactly(&words[..count].concat()))
+}
+
+/// The most characters of a book's name in a Bible file that are looked at. The longest name
+/// of a book is under forty.
+const WRITTEN_NAME_CHARS: usize = 100;
+/// The most words of a book's name in a Bible file that are looked at.
+const WRITTEN_NAME_WORDS: usize = 12;
+
+/// Every book's names, short forms and code, made plain, each with the book it names (the
+/// first book, in the usual order, where two share one). Made once.
+fn written_names() -> &'static std::collections::HashMap<String, usize> {
+    static NAMES: std::sync::OnceLock<std::collections::HashMap<String, usize>> = std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut names = std::collections::HashMap::new();
+        for (at, book) in BOOKS.iter().enumerate() {
+            let forms = [book.english, book.russian, book.ukrainian]
+                .into_iter()
+                .map(plain)
+                .chain(
+                    book.english_short
+                        .iter()
+                        .chain(book.russian_short)
+                        .chain(book.ukrainian_short)
+                        .map(|s| (*s).to_owned()),
+                )
+                .chain(std::iter::once(book.code.to_lowercase()));
+            for form in forms {
+                names.entry(form).or_insert(at);
+            }
+        }
+        names
+    })
 }
 
 #[cfg(test)]

@@ -11,11 +11,19 @@ use quick_xml::escape::resolve_predefined_entity;
 use quick_xml::events::{BytesStart, Event};
 
 use super::usfm::{is_heading_style, is_skipped_character_style, is_title_style};
-use super::{About, Collector, Format, one_line, verse_number};
+use super::{About, Collector, Format, VERSE_ROOM, one_line, push_within, verse_number};
 use crate::{VerseRef, book_by_number, book_by_osis, book_by_standard_code, book_by_written_name};
 
 /// Elements open at once past this are refused: no Bible nests so deep.
 const DEEPEST: usize = 200;
+/// The most attributes taken from one element; any past these are passed over. No Bible
+/// format gives an element more than a handful.
+const MOST_ATTRIBUTES: usize = 32;
+/// The most a field of what a Bible says about itself (its name, its copyright…) may grow to,
+/// in bytes, while it is read.
+const FIELD_ROOM: usize = 4096;
+/// The most verses one OSIS `osisID` may name.
+const MOST_IDS: usize = 200;
 
 /// An element as it opens: its name without any prefix, in lower case, and its attributes the
 /// same way, with their values read.
@@ -35,6 +43,7 @@ impl Element {
             .attributes()
             .with_checks(false)
             .flatten()
+            .take(MOST_ATTRIBUTES)
             .map(|attribute| {
                 let value = attribute
                     .normalized_value(quick_xml::XmlVersion::Implicit1_0)
@@ -197,10 +206,10 @@ impl Reader<'_> {
 
     fn words(&mut self, text: &str) {
         if let Some((_, field)) = self.field.as_mut() {
-            field.push_str(text);
+            push_within(field, text, FIELD_ROOM);
         } else if self.skip > 0 {
         } else if let Some(title) = self.title.as_mut().filter(|_| self.frames.iter().any(|f| f.title)) {
-            title.push_str(text);
+            push_within(title, text, VERSE_ROOM);
         } else if let Some(at) = self.verse {
             self.out.add(at, text);
         }
@@ -240,7 +249,7 @@ impl Reader<'_> {
         }
         if frame.title {
             // A title in two paragraphs is one title.
-            self.title.get_or_insert_with(String::new).push(' ');
+            push_within(self.title.get_or_insert_with(String::new), " ", VERSE_ROOM);
         }
         self.frames.push(frame);
     }
@@ -366,6 +375,7 @@ impl Reader<'_> {
                 let Some(ids) = element.get("osisid") else { return };
                 let ids: Vec<(Option<usize>, u16, u16)> = ids
                     .split_whitespace()
+                    .take(MOST_IDS)
                     .filter_map(|id| {
                         let mut parts = id.split('.');
                         let (book, chapter, verse) = (parts.next()?, parts.next()?, parts.next()?);
@@ -575,14 +585,14 @@ pub(super) fn metadata_about(text: &str) -> Option<About> {
             Step::Text(text) => {
                 let names: Vec<&str> = path.iter().map(String::as_str).collect();
                 match names.as_slice() {
-                    [_, "identification", "name"] => about.name.push_str(text),
-                    [_, "identification", "namelocal"] => local_name.push_str(text),
-                    [_, "identification", "abbreviation"] => about.short.push_str(text),
-                    [_, "identification", "abbreviationlocal"] => local_short.push_str(text),
-                    [_, "language", "iso"] => about.language.push_str(text),
-                    [_, "copyright", ..] if terms.len() < 2000 => {
-                        terms.push_str(text);
-                        terms.push(' ');
+                    [_, "identification", "name"] => push_within(&mut about.name, text, FIELD_ROOM),
+                    [_, "identification", "namelocal"] => push_within(&mut local_name, text, FIELD_ROOM),
+                    [_, "identification", "abbreviation"] => push_within(&mut about.short, text, FIELD_ROOM),
+                    [_, "identification", "abbreviationlocal"] => push_within(&mut local_short, text, FIELD_ROOM),
+                    [_, "language", "iso"] => push_within(&mut about.language, text, FIELD_ROOM),
+                    [_, "copyright", ..] => {
+                        push_within(&mut terms, text, FIELD_ROOM);
+                        push_within(&mut terms, " ", FIELD_ROOM);
                     }
                     _ => {}
                 }

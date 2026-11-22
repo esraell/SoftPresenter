@@ -435,3 +435,147 @@ fn books_are_found_by_the_codes_and_names_files_use() {
         assert_eq!(code(crate::book_by_written_name(name)), book, "{name}");
     }
 }
+
+// Files made to keep the reader busy: each must be read (or refused) in a moment.
+
+/// Fails if `work` takes longer than `most`; a whole Bible takes far less even in a slow build.
+fn quickly<T>(most: std::time::Duration, what: &str, work: impl FnOnce() -> T) -> T {
+    let started = std::time::Instant::now();
+    let done = work();
+    assert!(started.elapsed() < most, "{what} took {:?}", started.elapsed());
+    done
+}
+
+#[test]
+fn a_huge_book_name_is_looked_up_in_a_moment() {
+    let name = "q.".repeat(500_000);
+    let found = quickly(std::time::Duration::from_millis(100), "a 1 MB name", || crate::book_by_written_name(&name));
+    assert_eq!(found, None);
+    // As the `<b n>` of a Bible tagged b/c/v, zipped small.
+    let file = format!(
+        r#"<bible><b n="{name}"><c n="1"><v n="1">Words.</v></c></b><b n="John"><c n="3"><v n="16">More words.</v></c></b></bible>"#
+    );
+    let zip = zipped(&[("bible.xml", file.as_bytes())]);
+    let imported = quickly(std::time::Duration::from_millis(500), "a Bible with a 1 MB book name", || {
+        read_bytes(&zip, "names.zip", &Limits::NORMAL).unwrap()
+    });
+    assert_eq!(imported.verse(at("JOH", 3, 16)), Some("More words."));
+    assert_eq!(imported.left_out.len(), 1);
+    assert!(imported.left_out[0].chars().count() <= 60);
+    // A long name of a real book still finds it by its first words.
+    assert_eq!(crate::book_by_written_name(&format!("Revelation {}", "of John ".repeat(10_000))), book_by_code("REV"));
+}
+
+#[test]
+fn the_same_verse_begun_over_and_over_costs_no_more_each_time() {
+    let usfm = format!("\\id PSA\n{}", "\\c 1\n\\d A title.\n\\v 1 Words.\n".repeat(100_000));
+    let imported = quickly(std::time::Duration::from_millis(100), "100,000 repeats in USFM", || read(&usfm, "x.usfm"));
+    let verse = imported.verse(at("PSA", 1, 1)).unwrap();
+    assert!(verse.starts_with("A title.") && verse.chars().count() <= LONGEST_VERSE, "{}", verse.len());
+    let usx = format!(
+        "<usx version=\"3.0\"><book code=\"PSA\" style=\"id\"/>{}</usx>",
+        "<chapter number=\"1\" style=\"c\"/><para style=\"d\">A title.</para><para style=\"q1\"><verse number=\"1\" style=\"v\"/>Words.</para>"
+            .repeat(100_000)
+    );
+    // Thirteen megabytes of XML: the time is reading them, once.
+    let imported = quickly(std::time::Duration::from_millis(1000), "100,000 repeats in USX", || read(&usx, "x.usx"));
+    assert!(imported.verse(at("PSA", 1, 1)).unwrap().chars().count() <= LONGEST_VERSE);
+    // A title that never ends, and one verse's words in one enormous piece, stay within bounds.
+    let long = format!("\\id PSA\n\\c 2\n\\d {}\n\\v 1 {}\n", "title ".repeat(200_000), "word ".repeat(200_000));
+    let imported = quickly(std::time::Duration::from_millis(1500), "a 2 MB title and verse", || read(&long, "x.usfm"));
+    assert!(imported.verse(at("PSA", 2, 1)).unwrap().chars().count() <= LONGEST_VERSE);
+}
+
+/// A zip whose second entry is the first one again under another name: their packed bytes
+/// overlap.
+fn overlapping_zip() -> Vec<u8> {
+    let mut bytes = zipped(&[("a.usfm", GENESIS_USFM.as_bytes()), ("b.usfm", GENESIS_USFM.as_bytes())]);
+    let u16_at = |bytes: &[u8], at: usize| usize::from(u16::from_le_bytes([bytes[at], bytes[at + 1]]));
+    let u32_at = |bytes: &[u8], at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+    let end = bytes.len() - 22;
+    assert_eq!(&bytes[end..end + 4], b"PK\x05\x06");
+    let first = u32_at(&bytes, end + 16);
+    let second = first + 46 + u16_at(&bytes, first + 28) + u16_at(&bytes, first + 30) + u16_at(&bytes, first + 32);
+    assert_eq!(&bytes[second..second + 4], b"PK\x01\x02");
+    let offset = bytes[first + 42..first + 46].to_vec();
+    bytes[second + 42..second + 46].copy_from_slice(&offset);
+    bytes
+}
+
+#[test]
+fn a_zip_whose_files_overlap_is_refused() {
+    let refused = read_bytes(&overlapping_zip(), "overlap.zip", &Limits::NORMAL).unwrap_err();
+    assert!(refused.contains("overlap"), "{refused}");
+    // The same two files, honestly packed, are read.
+    let honest = zipped(&[("a.usfm", GENESIS_USFM.as_bytes()), ("b.usfm", GENESIS_USFM.as_bytes())]);
+    assert!(read_bytes(&honest, "honest.zip", &Limits::NORMAL).is_ok());
+}
+
+#[test]
+fn text_that_grows_when_decoded_counts_against_what_may_be_unpacked() {
+    let small = Limits { file: 1 << 20, entry: 1 << 20, unpacked: 1 << 20, entries: 10 };
+    // 600 KB of a byte that is "€" (three bytes of UTF-8) in the old Western encoding.
+    let refused = read_bytes(&zipped(&[("bible.xml", &vec![0x80; 600 * 1024])]), "euro.zip", &small).unwrap_err();
+    assert!(refused.contains("unpacks to more than any Bible"), "{refused}");
+    assert!(read_bytes(&vec![0x80; 600 * 1024], "euro.xml", &small).unwrap_err().contains("unpacks to more"));
+}
+
+#[test]
+fn a_folder_of_too_many_entries_is_refused_whatever_they_are() {
+    let small = Limits { file: 1 << 20, entry: 1 << 20, unpacked: 1 << 20, entries: 10 };
+    let folder = std::env::temp_dir().join(format!("softpresenter-entries-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    for n in 0..20 {
+        std::fs::write(folder.join(format!("{n}.jpg")), b"picture").unwrap();
+    }
+    std::fs::write(folder.join("GEN.usfm"), GENESIS_USFM).unwrap();
+    let refused = read_path(&folder, &small).unwrap_err();
+    assert!(refused.contains("too many files"), "{refused}");
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn only_the_first_attributes_of_an_element_are_taken() {
+    let many: String = (0..40).map(|n| format!(" a{n}=\"x\"")).collect();
+    let file = format!(
+        "<XMLBIBLE biblename=\"T\"><BIBLEBOOK bnumber=\"1\"><CHAPTER cnumber=\"1\"><VERS vnumber=\"1\">Kept.</VERS><VERS{many} vnumber=\"2\">Not kept.</VERS></CHAPTER></BIBLEBOOK></XMLBIBLE>"
+    );
+    let imported = read(&file, "attributes.xml");
+    assert_eq!(imported.verse(at("GEN", 1, 1)), Some("Kept."));
+    assert_eq!(imported.verse(at("GEN", 1, 2)), None, "vnumber comes after the first 32 attributes");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_pipe_is_never_opened() {
+    let folder = std::env::temp_dir().join(format!("softpresenter-pipe-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    let pipe = folder.join("bible.xml");
+    assert!(std::process::Command::new("mkfifo").arg(&pipe).status().unwrap().success());
+    // Opening a pipe nothing writes to would wait for ever: the answer must come at once.
+    let (tx, rx) = std::sync::mpsc::channel();
+    let path = pipe.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send((looks_like_bible(&path), read_path(&path, &Limits::NORMAL).map(|_| ())));
+    });
+    let (looks, read) = rx.recv_timeout(std::time::Duration::from_secs(5)).expect("reading a pipe waited");
+    assert!(!looks);
+    assert!(read.unwrap_err().contains("isn't a file or folder"));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_file_name_is_said_on_one_line_and_never_names_a_device() {
+    let imported = read(ZEFANIA, "two\nlines\u{7}.xml");
+    assert_eq!(imported.file_name, "two lines .xml");
+    let refused = read_bytes(b"not a bible", "a\nname.txt", &Limits::NORMAL).unwrap_err();
+    assert!(!refused.contains('\n'), "{refused}");
+    assert_eq!(id_from("CON", ""), "con-bible");
+    assert_eq!(id_from("Nul", ""), "nul-bible");
+    assert_eq!(id_from("COM1", ""), "com1-bible");
+    assert_eq!(id_from("com", ""), "com");
+    assert_eq!(id_from("COM0", ""), "com0");
+    assert!(is_device_name("LPT9") && is_device_name("aux.spbible") && !is_device_name("kjv"));
+}

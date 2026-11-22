@@ -88,28 +88,51 @@ fn too_large(name: &str) -> String {
     format!("{name} is larger than any Bible, so it wasn't read.")
 }
 
-/// The documents at a path: the file's, a zip's, or a folder's.
-pub(super) fn documents_at(path: &Path, limits: &Limits) -> Result<Vec<Document>, String> {
-    let name = path.file_name().map_or_else(|| "That".to_owned(), |name| name.to_string_lossy().into_owned());
+fn too_many(name: &str) -> String {
+    format!("{name} has too many files in it to be a Bible.")
+}
+
+fn unpacks_too_much(name: &str) -> String {
+    format!("{name} unpacks to more than any Bible, so it wasn't read.")
+}
+
+/// The documents at a path: the file's, a zip's, or a folder's. Anything that is neither a
+/// file nor a folder (a pipe, a device) is refused without being opened, as opening one could
+/// wait for ever.
+pub(super) fn documents_at(path: &Path, name: &str, limits: &Limits) -> Result<Vec<Document>, String> {
     let meta = std::fs::metadata(path).map_err(|e| format!("Could not read {name}: {e}"))?;
     if meta.is_dir() {
-        return documents_in_folder(path, &name, limits);
+        return documents_in_folder(path, name, limits);
+    }
+    if !meta.is_file() {
+        return Err(format!("{name} isn't a file or folder SoftPresenter can read."));
     }
     if meta.len() > limits.file {
-        return Err(too_large(&name));
+        return Err(too_large(name));
     }
     let mut bytes = Vec::new();
     std::fs::File::open(path)
         .and_then(|file| file.take(limits.file + 1).read_to_end(&mut bytes))
         .map_err(|e| format!("Could not read {name}: {e}"))?;
     if bytes.len() as u64 > limits.file {
-        return Err(too_large(&name));
+        return Err(too_large(name));
     }
-    documents_in(&bytes, &name, limits)
+    documents_in(&bytes, name, limits)
 }
 
 fn is_zip(bytes: &[u8]) -> bool {
     bytes.starts_with(b"PK\x03\x04") || bytes.starts_with(b"PK\x05\x06")
+}
+
+/// Text decoded from what was read, counted against what may be unpacked in all: decoding can
+/// make text longer than its bytes (one byte of an old encoding can be three of UTF-8).
+fn decoded(bytes: &[u8], unpacked: &mut u64, limits: &Limits, name: &str) -> Result<String, String> {
+    let text = sp_model::decode_text(bytes);
+    *unpacked += (text.len() as u64).max(bytes.len() as u64);
+    if *unpacked > limits.unpacked {
+        return Err(unpacks_too_much(name));
+    }
+    Ok(text)
 }
 
 /// The documents in a file's bytes: itself, or what a zip holds.
@@ -117,52 +140,74 @@ pub(super) fn documents_in(bytes: &[u8], name: &str, limits: &Limits) -> Result<
     if bytes.len() as u64 > limits.file {
         return Err(too_large(name));
     }
+    let mut unpacked = 0_u64;
     if !is_zip(bytes) {
-        return Ok(vec![Document { name: name.to_owned(), text: sp_model::decode_text(bytes) }]);
+        let text = decoded(bytes, &mut unpacked, limits, name)?;
+        return Ok(vec![Document { name: name.to_owned(), text }]);
     }
     let not_zip = || format!("{name} is a damaged zip file.");
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|_| not_zip())?;
     if zip.len() > limits.entries {
-        return Err(format!("{name} has too many files in it to be a Bible."));
+        return Err(too_many(name));
+    }
+    // Entries that share their packed bytes would make the same unpacking be done over and over:
+    // such a zip is refused (none is ever made that way honestly).
+    if zip.has_overlapping_files().unwrap_or(true) {
+        return Err(format!("{name} is a damaged zip file: its files overlap."));
     }
     let mut documents = Vec::new();
-    let mut unpacked = 0_u64;
+    let mut packed = 0_u64;
     for at in 0..zip.len() {
-        let (entry_name, wanted) = {
+        let (entry_name, wanted, size) = {
             let entry = zip.by_index_raw(at).map_err(|_| not_zip())?;
             let entry_name = String::from_utf8_lossy(entry.name_raw()).into_owned();
             let plain = !entry.is_dir() && !entry.is_symlink() && !entry.encrypted();
-            (entry_name, plain && worth_reading(&String::from_utf8_lossy(entry.name_raw())))
+            (entry_name.clone(), plain && worth_reading(&entry_name), entry.compressed_size())
         };
         if !wanted {
             continue;
         }
+        // The entries read can't be packed into more bytes than the zip has.
+        packed = packed.saturating_add(size);
+        if packed > bytes.len() as u64 {
+            return Err(not_zip());
+        }
         let mut entry = zip.by_index(at).map_err(|_| not_zip())?;
         // What the entry says about its size is not trusted: only what is read counts.
-        let room = limits.entry.min(limits.unpacked - unpacked);
-        let mut bytes = Vec::new();
-        entry.by_ref().take(room + 1).read_to_end(&mut bytes).map_err(|_| not_zip())?;
-        if bytes.len() as u64 > room {
-            return Err(format!("{name} unpacks to more than any Bible, so it wasn't read."));
+        let room = limits.entry.min(limits.unpacked.saturating_sub(unpacked));
+        let mut read = Vec::new();
+        entry.by_ref().take(room + 1).read_to_end(&mut read).map_err(|_| not_zip())?;
+        if read.len() as u64 > room {
+            return Err(unpacks_too_much(name));
         }
-        unpacked += bytes.len() as u64;
         // A zip in a zip is never opened.
-        if is_zip(&bytes) {
+        if is_zip(&read) {
+            unpacked += read.len() as u64;
             continue;
         }
-        documents.push(Document { name: entry_name, text: sp_model::decode_text(&bytes) });
+        let text = decoded(&read, &mut unpacked, limits, name)?;
+        documents.push(Document { name: entry_name, text });
     }
     Ok(documents)
 }
 
 /// The documents in a folder and the folders in it, three deep (a Bible bundle keeps its books
-/// a folder or two down), taken in name order. Links are not followed.
+/// a folder or two down), taken in name order. Links are not followed, and no more than
+/// [`Limits::entries`] entries are looked at in all, files or not.
 fn documents_in_folder(folder: &Path, name: &str, limits: &Limits) -> Result<Vec<Document>, String> {
     let mut files: Vec<PathBuf> = Vec::new();
     let mut folders: Vec<(PathBuf, usize)> = vec![(folder.to_owned(), 0)];
+    let mut looked = 0_usize;
     while let Some((here, depth)) = folders.pop() {
         let Ok(read) = std::fs::read_dir(&here) else { continue };
-        let mut entries: Vec<PathBuf> = read.flatten().map(|entry| entry.path()).collect();
+        let mut entries: Vec<PathBuf> = Vec::new();
+        for entry in read.flatten() {
+            looked += 1;
+            if looked > limits.entries {
+                return Err(too_many(name));
+            }
+            entries.push(entry.path());
+        }
         entries.sort();
         for path in entries {
             let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
@@ -174,9 +219,6 @@ fn documents_in_folder(folder: &Path, name: &str, limits: &Limits) -> Result<Vec
                 folders.push((path, depth + 1));
             } else if meta.is_file() && worth_reading(&file_name) {
                 files.push(path);
-                if files.len() > limits.entries {
-                    return Err(format!("{name} has too many files in it to be a Bible."));
-                }
             }
         }
     }
@@ -185,7 +227,7 @@ fn documents_in_folder(folder: &Path, name: &str, limits: &Limits) -> Result<Vec
     let mut unpacked = 0_u64;
     for path in files {
         let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let room = limits.entry.min(limits.unpacked - unpacked);
+        let room = limits.entry.min(limits.unpacked.saturating_sub(unpacked));
         let mut bytes = Vec::new();
         if std::fs::File::open(&path).and_then(|file| file.take(room + 1).read_to_end(&mut bytes)).is_err() {
             continue;
@@ -193,11 +235,12 @@ fn documents_in_folder(folder: &Path, name: &str, limits: &Limits) -> Result<Vec
         if bytes.len() as u64 > room {
             return Err(format!("{name} holds more than any Bible, so it wasn't read."));
         }
-        unpacked += bytes.len() as u64;
         if is_zip(&bytes) {
+            unpacked += bytes.len() as u64;
             continue;
         }
-        documents.push(Document { name: file_name, text: sp_model::decode_text(&bytes) });
+        let text = decoded(&bytes, &mut unpacked, limits, name)?;
+        documents.push(Document { name: file_name, text });
     }
     Ok(documents)
 }
@@ -228,7 +271,8 @@ fn book_ending(name: &str) -> bool {
     [".usfm", ".sfm", ".usx"].iter().any(|ending| lower.ends_with(ending))
 }
 
-/// See [`super::looks_like_bible`].
+/// See [`super::looks_like_bible`]. Only a plain file or a folder is opened (never a pipe or a
+/// device, which could keep it waiting), and a zip only when it is small enough to be read.
 pub(super) fn looks_like_bible(path: &Path) -> bool {
     let Ok(meta) = std::fs::metadata(path) else { return false };
     if meta.is_dir() {
@@ -265,12 +309,15 @@ pub(super) fn looks_like_bible(path: &Path) -> bool {
         }
         return false;
     }
+    if !meta.is_file() {
+        return false;
+    }
     let Ok(mut file) = std::fs::File::open(path) else { return false };
     let Some(head) = head_bytes(&mut file) else { return false };
     if !is_zip(&head) {
         return head_is_bible(&sp_model::decode_text(&head));
     }
-    if file.rewind().is_err() {
+    if meta.len() > Limits::NORMAL.file || file.rewind().is_err() {
         return false;
     }
     let Ok(mut zip) = zip::ZipArchive::new(std::io::BufReader::new(file)) else { return false };

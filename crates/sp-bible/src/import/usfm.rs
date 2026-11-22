@@ -5,7 +5,7 @@
 //! Also the lists of styles USX shares with it: which paragraphs are headings, which are a
 //! psalm's title, which character spans are not the text.
 
-use super::{Collector, verse_number};
+use super::{Collector, VERSE_ROOM, push_within, verse_number};
 use crate::{VerseRef, book_by_standard_code};
 
 /// True when a file's start is USFM: its first marker names the book (`\id GEN`).
@@ -254,7 +254,7 @@ impl Reader<'_> {
                 self.heading = false;
                 if self.verse.is_none() {
                     // A title in two paragraphs is one title.
-                    self.title.get_or_insert_with(String::new).push(' ');
+                    push_within(self.title.get_or_insert_with(String::new), " ", VERSE_ROOM);
                     self.reading_title = true;
                 } else {
                     self.words(" ");
@@ -306,7 +306,7 @@ impl Reader<'_> {
     fn words(&mut self, text: &str) {
         if self.reading_title {
             if let Some(title) = self.title.as_mut() {
-                title.push_str(text);
+                push_within(title, text, VERSE_ROOM);
             }
         } else if !self.heading
             && let Some(at) = self.verse

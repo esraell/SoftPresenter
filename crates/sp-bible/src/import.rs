@@ -236,15 +236,23 @@ impl Imported {
 
 /// Reads a Bible from a file, a zip or a folder of book files, with the limits given.
 pub fn read_path(path: &Path, limits: &Limits) -> Result<Imported, String> {
-    let file_name = path.file_name().map_or_else(|| "the file".to_owned(), |name| name.to_string_lossy().into_owned());
-    let documents = archive::documents_at(path, limits)?;
+    let file_name = shown_name(&path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned()));
+    let documents = archive::documents_at(path, &file_name, limits)?;
     from_documents(documents, &file_name)
 }
 
 /// Reads a Bible from a file's bytes (a single file, or a zip), with the limits given.
 pub fn read_bytes(bytes: &[u8], file_name: &str, limits: &Limits) -> Result<Imported, String> {
-    let documents = archive::documents_in(bytes, file_name, limits)?;
-    from_documents(documents, file_name)
+    let file_name = shown_name(file_name);
+    let documents = archive::documents_in(bytes, &file_name, limits)?;
+    from_documents(documents, &file_name)
+}
+
+/// A file's name as it is said to the operator, to `sp` and in the log: one line, not too long
+/// (a name is the file's, and may hold anything).
+pub fn shown_name(name: &str) -> String {
+    let name = one_line(name, 80);
+    if name.is_empty() { "The file".to_owned() } else { name }
 }
 
 /// True when the path looks like a Bible this module reads: a file whose first bytes are one
@@ -412,7 +420,8 @@ fn door43_about(manifest: &str) -> About {
             (["dublin_core", "language"], "identifier") => about.language = value.to_owned(),
             _ => {}
         }
-        if value.is_empty() {
+        // Only the first few levels matter, and the list of them stays short.
+        if value.is_empty() && section.len() < 8 {
             section.push((indent, key.trim().to_owned()));
         }
     }
@@ -517,7 +526,7 @@ pub fn language_code(language: &str) -> String {
 pub fn id_from(short: &str, name: &str) -> String {
     let make = |text: &str| -> String {
         let mut out = String::new();
-        for c in text.to_lowercase().chars() {
+        for c in text.chars().take(64).flat_map(char::to_lowercase) {
             match c {
                 'a'..='z' | '0'..='9' => out.push(c),
                 ' ' | '-' | '_' | '.' => out.push('-'),
@@ -528,7 +537,19 @@ pub fn id_from(short: &str, name: &str) -> String {
         id.truncate(32);
         id.trim_end_matches('-').to_owned()
     };
-    [make(short), make(name)].into_iter().find(|id| !id.is_empty()).unwrap_or_else(|| "bible".to_owned())
+    let id = [make(short), make(name)].into_iter().find(|id| !id.is_empty()).unwrap_or_else(|| "bible".to_owned());
+    if is_device_name(&id) { format!("{id}-bible") } else { id }
+}
+
+/// True for a name Windows keeps for a device (`con`, `nul`, `com1`…), which can't be a file's
+/// name there, whatever follows it.
+pub fn is_device_name(id: &str) -> bool {
+    let stem = id.split('.').next().unwrap_or(id).to_ascii_lowercase();
+    matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+        || ((stem.starts_with("com") || stem.starts_with("lpt"))
+            && stem.len() == 4
+            && stem.as_bytes()[3].is_ascii_digit()
+            && stem.as_bytes()[3] != b'0')
 }
 
 /// A Cyrillic letter in Latin letters; nothing for anything else.
@@ -583,19 +604,54 @@ pub fn grouped(number: usize) -> String {
 }
 
 /// Text made one line: no control characters, single spaces, at most `most` characters.
+/// It stops reading once the line is full, so a long text costs no more than a short one.
 pub(crate) fn one_line(text: &str, most: usize) -> String {
-    let words: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
-    let mut line = words.split_whitespace().collect::<Vec<_>>().join(" ");
-    if let Some((at, _)) = line.char_indices().nth(most) {
-        line.truncate(at);
-        line = line.trim_end().to_owned();
+    let mut line = String::new();
+    let mut count = 0;
+    let mut gap = false;
+    for c in text.chars() {
+        if c.is_whitespace() || c.is_control() {
+            gap = !line.is_empty();
+            continue;
+        }
+        if gap {
+            if count + 1 >= most {
+                break;
+            }
+            line.push(' ');
+            count += 1;
+            gap = false;
+        }
+        if count >= most {
+            break;
+        }
+        line.push(c);
+        count += 1;
     }
     line
+}
+
+/// Adds as much of `text` to `to` as keeps it within `room` bytes, ending at a character's
+/// boundary.
+pub(crate) fn push_within(to: &mut String, text: &str, room: usize) {
+    let left = room.saturating_sub(to.len());
+    if text.len() <= left {
+        to.push_str(text);
+    } else {
+        let mut end = left;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        to.push_str(&text[..end]);
+    }
 }
 
 /// The most a verse may hold, in characters; past that the rest is left out. The longest verse
 /// in any Bible is a few hundred.
 const LONGEST_VERSE: usize = 4_000;
+/// The most a verse's words (or a psalm's title) may grow to, in bytes, while they are read;
+/// they are tidied to [`LONGEST_VERSE`] characters after.
+pub(crate) const VERSE_ROOM: usize = LONGEST_VERSE * 4;
 /// The most verses a Bible may have. There are 31,102 in the sixty-six books.
 const MOST_VERSES: usize = 60_000;
 /// Chapter and verse numbers past this are taken for mistakes and left out (the Psalms have
@@ -625,7 +681,7 @@ impl Collector {
             return false;
         }
         if let Some(words) = self.verses.get_mut(&at) {
-            words.push(' ');
+            push_within(words, " ", VERSE_ROOM);
         } else {
             if self.verses.len() >= MOST_VERSES {
                 self.too_many = true;
@@ -638,20 +694,26 @@ impl Collector {
         true
     }
 
-    /// Words of a verse begun.
+    /// Words of a verse begun, as far as [`VERSE_ROOM`] allows.
     pub fn add(&mut self, at: VerseRef, words: &str) {
-        if let Some(verse) = self.verses.get_mut(&at)
-            && verse.len() < LONGEST_VERSE * 4
-        {
-            verse.push_str(words);
+        if let Some(verse) = self.verses.get_mut(&at) {
+            push_within(verse, words, VERSE_ROOM);
         }
     }
 
-    /// Words put at the start of a verse begun (a psalm's title before its first verse).
+    /// Words put at the start of a verse begun (a psalm's title before its first verse), as far
+    /// as [`VERSE_ROOM`] allows: a verse already full takes nothing more, so a file that begins
+    /// the same verse over and over costs no more each time.
     pub fn put_first(&mut self, at: VerseRef, words: &str) {
-        if let Some(verse) = self.verses.get_mut(&at) {
-            verse.insert_str(0, &format!("{words} "));
+        let Some(verse) = self.verses.get_mut(&at) else { return };
+        let room = VERSE_ROOM.saturating_sub(verse.len());
+        if room < 2 {
+            return;
         }
+        let mut first = String::new();
+        push_within(&mut first, words, room - 1);
+        first.push(' ');
+        verse.insert_str(0, &first);
     }
 
     /// A book in the file that the app does not have.
