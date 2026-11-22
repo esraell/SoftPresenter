@@ -1719,7 +1719,7 @@ fn placeholder_tile(
         && let Some(media) = show.media().get(dropped.0)
     {
         let filled = Item::Media { id: media.id, name: media.name.clone() };
-        state.services.fill(item, filled);
+        crate::studio::fill_placeholder(state, item, filled);
     }
     // Or a song chosen from a list.
     let response = response.on_hover_text("Fill the placeholder with a song from the library");
@@ -1731,7 +1731,7 @@ fn placeholder_tile(
         && let (Some(key), Some(found)) = (state.song_keys.get(song), show.presentations().get(song))
     {
         let filled = Item::song(key.clone(), found.title.clone());
-        if state.services.fill(item, filled) {
+        if crate::studio::fill_placeholder(state, item, filled) {
             commands.push(Command::Select(song));
         }
     }

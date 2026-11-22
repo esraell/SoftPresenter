@@ -2411,19 +2411,13 @@ fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, c
     }
     let Some((item, rename)) = made else { return };
     let name = item.title().to_owned();
-    let song = matches!(item, Item::Song { .. });
-    let count = state.services.front().items.len();
-    let at = state.services.chosen.map_or(count, |open| (open + 1).min(count));
-    state.services.insert(at, item);
-    // A song already in the playlist is not added twice; nothing new is at `at` then.
-    let added = state.services.front().items.len() > count;
-    if !added {
-        if song {
-            state.notice = Some(format!("{name} is already in {}.", state.services.front().name));
-        }
-        return;
-    }
-    if rename {
+    // As every add: after the open item, which it becomes (a song already in the playlist is
+    // not added twice, and the notice says so).
+    let added = add_items(state, state.services.front_at(), vec![item]) > 0;
+    if added
+        && rename
+        && let Some(at) = state.services.chosen
+    {
         // A header or a placeholder is named as it is made.
         state.renaming_header = Some((at, name));
         state.rename_started = true;
@@ -3543,7 +3537,13 @@ pub fn song_picker(ui: &mut egui::Ui, show: &Show, state: &HomeState) -> Option<
             if !wanted.is_empty() && !song.title.to_lowercase().contains(&wanted) {
                 continue;
             }
-            if ui.add(egui::Button::new(song.title.as_str()).frame(false)).clicked() {
+            // A song the playlist in front has already says so, at its right.
+            let mut button = egui::Button::new(song.title.as_str()).frame(false);
+            let key = state.song_keys.get(index).cloned().unwrap_or_default();
+            if state.services.place_of(state.services.front_at(), &crate::service::Item::song(key, "")).is_some() {
+                button = button.shortcut_text("In this playlist");
+            }
+            if ui.add(button).clicked() {
                 picked = Some(index);
             }
             shown += 1;
@@ -3809,7 +3809,7 @@ pub fn carry_out_item_ask(show: &Show, state: &mut HomeState, commands: &mut Vec
         ItemAsk::Fill(index, song) => {
             if let (Some(key), Some(found)) = (state.song_keys.get(song), show.presentations().get(song)) {
                 let item = Item::song(key.clone(), found.title.clone());
-                if state.services.fill(index, item) {
+                if fill_placeholder(state, index, item) {
                     commands.push(Command::Select(song));
                     state.bible_open = false;
                 }
@@ -3832,6 +3832,19 @@ pub fn carry_out_item_ask(show: &Show, state: &mut HomeState, commands: &mut Vec
             state.take_out_items(state.services.current, &places);
         }
     }
+}
+
+/// Fills a placeholder of the playlist in front (by its place) with an item, as its menu's Fill
+/// with Song, its tile and a drop onto it do; it becomes the open item. A song (or passage) the
+/// playlist has already, elsewhere, isn't moved into it: it stays where it is, and the notice
+/// says so ("Harbour Lights is already in Sunday."). True when it was filled.
+pub fn fill_placeholder(state: &mut HomeState, index: usize, item: crate::service::Item) -> bool {
+    let front = state.services.front_at();
+    if state.services.place_of(front, &item).is_some_and(|was| was != index) {
+        state.say(format!("{} is already in {}.", item.title(), state.services.front().name));
+        return false;
+    }
+    state.services.fill(index, item)
 }
 
 /// The items of the playlist in front a menu opened on the item at `index` acts on: those
@@ -4198,7 +4211,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             let count = state.services.front().items.len();
             match onto {
                 Some((_, place)) => {
-                    state.services.fill(*place, item.clone());
+                    fill_placeholder(state, *place, item.clone());
                 }
                 None => {
                     // `slot` counts rows shown, which are every item while nothing filters.
@@ -6147,6 +6160,48 @@ pub mod tests {
         assert_eq!(header, ["Rename", "Move 2 Up", "Move 2 Down", "Remove 2 Items from Playlist"]);
         let song = drawn_words(&mut state, &show, 0);
         assert!(song.iter().any(|words| words == "Move Up"), "not among them: just it {song:?}");
+    }
+
+    #[test]
+    fn the_song_picker_marks_songs_in_this_playlist_and_a_placeholder_never_moves_one() {
+        use crate::service::Item;
+        let titles = ["One", "Two", "Three"];
+        let show =
+            Show::new(titles.iter().map(|title| Arc::new(sp_model::parse_song_text(title, "Words\n"))).collect());
+        let mut state = HomeState {
+            song_keys: titles.iter().map(|title| title.to_lowercase()).collect(),
+            playlist_open: true,
+            ..HomeState::default()
+        };
+        state.services.list[0].items = vec![Item::song("two", "Two"), Item::Placeholder { name: "Sermon".to_owned() }];
+        // The picker (A Song, Fill with Song) marks Two, which the playlist has.
+        let ctx = styled();
+        let output = drawn(&ctx, vec![], |ui| {
+            song_picker(ui, &show, &state);
+        });
+        let mut said = Vec::new();
+        fn words(shape: &egui::Shape, into: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => into.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| words(shape, into)),
+                _ => {}
+            }
+        }
+        output.shapes.iter().for_each(|clipped| words(&clipped.shape, &mut said));
+        output.drop_without_applying_deltas();
+        assert_eq!(said.iter().filter(|words| *words == "In this playlist").count(), 1, "{said:?}");
+        let two = said.iter().position(|words| words == "Two").expect("Two is offered");
+        assert_eq!(said[two + 1], "In this playlist", "beside Two: {said:?}");
+        // Fill with Song: Two isn't moved into the placeholder; it stays, and the notice says so.
+        carry_out_item_ask(&show, &mut state, &mut Vec::new(), ItemAsk::Fill(1, 1));
+        assert_eq!(state.services.front().items[0], Item::song("two", "Two"));
+        assert!(matches!(state.services.front().items[1], Item::Placeholder { .. }));
+        assert_eq!(state.toast.take().map(|(words, _)| words).as_deref(), Some("Two is already in Service."));
+        // Another song fills it, and is opened.
+        let mut commands = Vec::new();
+        carry_out_item_ask(&show, &mut state, &mut commands, ItemAsk::Fill(1, 2));
+        assert_eq!(state.services.front().items[1], Item::song("three", "Three"));
+        assert_eq!((state.services.chosen, commands), (Some(1), vec![Command::Select(2)]));
     }
 
     #[test]

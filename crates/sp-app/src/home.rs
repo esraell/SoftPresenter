@@ -5028,7 +5028,8 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     match chosen {
         Some((Do::Song(index, ..), true)) => {
             if let (Some(key), Some(song)) = (state.song_keys.get(index), show.presentations().get(index)) {
-                state.services.add(crate::service::Item::song(key.clone(), song.title.clone()));
+                let item = crate::service::Item::song(key.clone(), song.title.clone());
+                crate::studio::add_items(state, state.services.front_at(), vec![item]);
             }
         }
         // The song, with the view brought to the slide found, lit for a moment; nothing goes on
@@ -5058,7 +5059,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 numbering: Some(numbering.name().to_owned()),
                 ..state.bible.settings()
             };
-            state.services.add(crate::service::Item::Passage(saved));
+            crate::studio::add_items(state, state.services.front_at(), vec![crate::service::Item::Passage(saved)]);
         }
         // The Bible view opens on the passage, named in the language the operator found it in,
         // which the session goes on in. It is made in the place that is not on screen, so the
@@ -7126,17 +7127,19 @@ fn bible_add(ui: &mut egui::Ui, state: &mut HomeState, add: Rect, arrow: Rect) {
 }
 
 /// Keeps the passage on the Bible page (`saved`, named `reading`) in a playlist, by its place,
-/// and says so; in the playlist in front it becomes the open item. The same passage in the same
-/// translations goes in once: then the notice says it is there already. With no playlist given,
-/// a new one is made with the passage in it and comes to the front, its name ready to type in
-/// the chooser of the Show view, as a song's New Playlist… does.
+/// as every add does (see `studio::add_items`): in the playlist in front after the open item,
+/// which it becomes; and as the Bible page shows no playlist, the notice says where it went.
+/// The same passage in the same translations goes in once: then the notice says it is there
+/// already. With no playlist given, a new one is made with the passage in it and comes to the
+/// front, its name ready to type in the chooser of the Show view, as a song's New Playlist…
+/// does.
 fn add_passage(state: &mut HomeState, playlist: Option<usize>, saved: crate::service::SavedPassage, reading: &str) {
     let item = crate::service::Item::Passage(saved);
     let Some(at) = playlist else {
         state.services.add_service();
         state.services.add(item);
         let name = state.services.front().name.clone();
-        state.notice = Some(format!("Added {reading} to {name}."));
+        state.say(format!("Added {reading} to {name}."));
         state.playlist_open = true;
         state.chooser_open = true;
         state.renaming_service = Some((state.services.front_at(), name));
@@ -7144,11 +7147,7 @@ fn add_passage(state: &mut HomeState, playlist: Option<usize>, saved: crate::ser
         state.view_request = Some(0);
         return;
     };
-    let Some(name) = state.services.list.get(at).map(|list| list.name.clone()) else { return };
-    let added =
-        if at == state.services.front_at() { state.services.add(item) } else { state.services.add_to(at, item) };
-    state.notice =
-        Some(if added { format!("Added {reading} to {name}.") } else { format!("{reading} is already in {name}.") });
+    crate::studio::add_items(state, at, vec![item]);
 }
 
 /// The reference field: a reference in English, Russian or Ukrainian (whole names or short
@@ -10687,7 +10686,8 @@ mod tests {
                 "{how}: {added:?}"
             );
             let front = state.services.front().name.clone();
-            assert_eq!(state.notice, Some(format!("Added John 3:16 to {front}.")), "{how}");
+            let said = state.toast.take().map(|(words, _)| words);
+            assert_eq!(said, Some(format!("Added John 3:16 to {front}.")), "{how}");
             // Enter puts it on screen; Space goes on to John 3:17, ← back.
             press_enter(&mut show, &state);
             assert_eq!(live_name(&show).as_deref(), Some("John 3:16"), "{how}");
@@ -13205,22 +13205,27 @@ mod tests {
             reference_style: String::new(),
             show_with: None,
         };
-        let mut state = HomeState::default();
+        // On the Bible page, which shows no playlist: the notice says where it went.
+        let mut state = HomeState { bible_open: true, ..HomeState::default() };
         state.services.list[0].name = "Sunday".to_owned();
+        let said = |state: &mut HomeState| state.toast.take().map(|(words, _)| words);
         add_passage(&mut state, Some(0), saved(&["kjv"]), "John 3:16");
-        assert_eq!(state.notice.as_deref(), Some("Added John 3:16 to Sunday."));
+        assert_eq!(said(&mut state).as_deref(), Some("Added John 3:16 to Sunday."));
         add_passage(&mut state, Some(0), saved(&["kjv"]), "John 3:16");
-        assert_eq!(state.notice.as_deref(), Some("John 3:16 is already in Sunday."));
+        assert_eq!(said(&mut state).as_deref(), Some("John 3:16 is already in Sunday."));
         assert_eq!(state.services.front().items.len(), 1);
-        // In other translations it goes in again.
+        // In other translations it goes in again, after the open item (the first passage).
+        state.services.list[0].items.push(crate::service::Item::Header { name: "Sermon".to_owned() });
         add_passage(&mut state, Some(0), saved(&["kjv", "asv"]), "John 3:16");
-        assert_eq!(state.notice.as_deref(), Some("Added John 3:16 to Sunday."));
-        assert_eq!(state.services.front().items.len(), 2);
+        assert_eq!(said(&mut state).as_deref(), Some("Added John 3:16 to Sunday."));
+        assert_eq!(state.services.front().items.len(), 3);
+        assert!(matches!(&state.services.front().items[1], crate::service::Item::Passage(_)), "after the open one");
+        assert_eq!(state.services.chosen, Some(1), "and opened");
         // New Playlist…: a playlist of its own, in front, its name ready to type in the Show view.
         add_passage(&mut state, None, saved(&["kjv"]), "John 3:16");
         assert_eq!(state.services.list.len(), 2);
         assert_eq!((state.services.front_at(), state.services.front().items.len()), (1, 1));
-        assert_eq!(state.notice.as_deref(), Some("Added John 3:16 to Playlist 1."));
+        assert_eq!(said(&mut state).as_deref(), Some("Added John 3:16 to Playlist 1."));
         assert_eq!(state.renaming_service, Some((1, "Playlist 1".to_owned())));
         assert!(state.chooser_open && state.playlist_open && state.view_request == Some(0));
     }

@@ -662,7 +662,7 @@ it and `slide frame` moves it, while `slide text` and `slide style` say "The sli
 | `playlist media ITEM [at N] [in PLAYLIST]` | A picture or video from the media bin (the countdown video) |
 | `playlist media-playlist NAME [at N] [in PLAYLIST]` | A media playlist (the announcement loop), to play from the playlist |
 | `playlist placeholder NAME [at N] [in PLAYLIST]` | A place kept for something to come (the sermon slides) |
-| `playlist fill PLACEHOLDER with SONG`, `… with media ITEM` `[in PLAYLIST]` | Puts a song, or a picture or video, in a placeholder's place (a song already in the playlist moves there); in the playlist in front it becomes the open item, in another the open item stays |
+| `playlist fill PLACEHOLDER with SONG`, `… with media ITEM` `[in PLAYLIST]` | Puts a song, or a picture or video, in a placeholder's place (a song the playlist has elsewhere already is refused, and stays where it is: "River Song is already in Sunday Evening (item 4); a playlist has a song once."); in the playlist in front it becomes the open item, in another the open item stays |
 | `playlist item N show-with NAME\|usual [--keep] [in PLAYLIST]` | The theme version a song or passage goes on screen in (see [theme versions](#theme-versions)) |
 
 In `playlist header|media|media-playlist|placeholder`, a last `in` names a playlist only when

@@ -214,6 +214,16 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   header scrolls the slides to it. **Add to playlist**, at the foot, adds a song, a header, a
   placeholder, a picture or video, a media playlist or (once VoxLive is connected) the VoxLive
   item after the open item, and opens the Bible page for a passage; under it is the filter.
+  **Adding is the same everywhere:** Add to playlist, a song's Add to the playlist in front,
+  the find box's Command-Return and the Bible page's + Add put what they add just after the
+  open item (at the end with none open), and it becomes the open item; another playlist takes
+  it at its end. A playlist has a song (or a passage) once: a song's pickers mark the songs it
+  has already ("In this playlist" at the right of the song, in Add to playlist ▸ A Song and Fill
+  with Song), and adding one again changes nothing but says so ("Two is already in Sunday.").
+  Nothing is said for what was added where it is seen; a notice says where it went only when
+  that is out of sight (another playlist, or the playlist in front while a library, the
+  chooser or the Bible page is showing): "Added Harbour Lights to Evening.", "Added 2 songs to
+  Evening.".
 - **The dock** under the slides stays put while they scroll: a bar with the transition for all
   slides (Cut, Dissolve, or another from Advanced, in a switch of a fixed width), Continuous,
   the theme version button once a theme has a version (see Theme versions), Undo and Redo,
@@ -281,7 +291,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   list only scrolls to it, changing nothing on the screens (Next, Space or Enter then shows
   it), and Continuous passes over them. A placeholder is filled with a song chosen from a list (its tile's
   Choose a Song…, or Fill with Song in its right-click menu), or with a picture or video dropped
-  on it. One whose picture, video or media playlist has gone is kept and shown faint. A playlist
+  on it. A song the playlist has elsewhere already isn't moved into it: it stays where it is,
+  and the notice says it is there already. One whose picture, video or media playlist has gone is kept and shown faint. A playlist
   holding any of these is saved as version 3 of the services file; one without is still written
   as version 2, which older SoftPresenters open.
 - Songs, a playlist's items, slides and media items are picked out as in the Finder (Ctrl in

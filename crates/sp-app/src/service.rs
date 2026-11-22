@@ -314,8 +314,8 @@ impl Services {
     }
 
     /// Puts an item in a placeholder's place in the service in front, and chooses it. Returns
-    /// false if the item there isn't a placeholder. A song already elsewhere in the service is
-    /// moved here.
+    /// false if the item there isn't a placeholder, or the service has the item elsewhere
+    /// already (see [`fill_in`](Self::fill_in)).
     pub fn fill(&mut self, index: usize, item: Item) -> bool {
         let front = self.front_at();
         match self.fill_in(front, index, item) {
@@ -329,36 +329,20 @@ impl Services {
 
     /// Puts an item in a placeholder's place in a playlist (by its place among the playlists),
     /// which need not be the one in front. Returns where the item is now, or `None` if the item
-    /// there isn't a placeholder. A song already elsewhere in that playlist is moved here; in
-    /// the playlist in front, the open item stays open where it now is.
+    /// there isn't a placeholder, or the playlist has the song (or passage) elsewhere already: a
+    /// playlist has it once, and it is never moved out of its place silently (see
+    /// [`place_of`](Self::place_of), which says where).
     pub fn fill_in(&mut self, playlist: usize, index: usize, item: Item) -> Option<usize> {
+        if self.place_of(playlist, &item).is_some_and(|was| was != index) {
+            return None;
+        }
         let items = &mut self.list.get_mut(playlist)?.items;
         if !matches!(items.get(index), Some(Item::Placeholder { .. })) {
             return None;
         }
-        let mut at = index;
-        let mut moved = None;
-        if let Item::Song { key, .. } = &item
-            && let Some(was) = items.iter().position(|have| matches!(have, Item::Song { key: k, .. } if k == key))
-        {
-            items.remove(was);
-            moved = Some(was);
-            if was < at {
-                at -= 1;
-            }
-        }
-        items[at] = item;
+        items[index] = item;
         self.changed = true;
-        if playlist == self.front_at()
-            && let Some(was) = moved
-        {
-            self.chosen = self.chosen.map(|open| match open {
-                open if open == was || open == index => at,
-                open if open > was => open - 1,
-                open => open,
-            });
-        }
-        Some(at)
+        Some(index)
     }
 
     /// Takes items out of a playlist (by its place among the playlists), all at once. Returns
@@ -928,10 +912,13 @@ mod tests {
         assert!(services.fill(1, song("three")));
         assert_eq!(services.front().items, vec![song("one"), song("three"), song("two")]);
         assert_eq!(services.chosen, Some(1));
-        // A song already in the playlist moves into the placeholder's place.
+        // A song already in the playlist isn't moved into the placeholder's place: nothing
+        // changes, and the caller says it is there already.
         services.insert(0, Item::Placeholder { name: "Opening".to_owned() });
-        assert!(services.fill(0, song("two")));
-        assert_eq!(services.front().items, vec![song("two"), song("one"), song("three")]);
+        let before = services.front().items.clone();
+        assert!(!services.fill(0, song("two")));
+        assert_eq!(services.front().items, before);
+        assert_eq!(services.place_of(0, &song("two")), Some(3));
     }
 
     #[test]
@@ -1270,11 +1257,11 @@ mod tests {
         assert_eq!(services.list[1].items[1], song("y"));
         assert_eq!((services.current, services.chosen), (0, Some(2)), "the open item stays");
         assert_eq!(services.fill_in(1, 0, song("z")), None, "only a placeholder is filled");
-        // In the playlist in front, with a song moved from above it, the open item keeps up.
+        // In the playlist in front, a song it has above the placeholder stays where it is.
         services.list[0].items.insert(3, Item::Placeholder { name: "Here".to_owned() });
-        assert_eq!(services.fill_in(0, 3, song("a")), Some(2));
-        assert_eq!(services.list[0].items, [song("b"), song("c"), song("a")]);
-        assert_eq!(services.chosen, Some(1), "c is still open");
+        assert_eq!(services.fill_in(0, 3, song("a")), None);
+        assert_eq!(services.list[0].items[..3], [song("a"), song("b"), song("c")]);
+        assert_eq!(services.chosen, Some(2), "c is still open");
     }
 
     #[test]

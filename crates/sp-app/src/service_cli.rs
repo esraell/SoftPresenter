@@ -386,6 +386,10 @@ impl crate::App {
         };
         let name = playlist.name.clone();
         let title = item.title().to_owned();
+        // A song it has elsewhere already isn't moved into the placeholder.
+        if let Some(was) = state.services.place_of(list, &item).filter(|was| *was != at) {
+            return Err(format!("{title} is already in {name} (item {}); a playlist has a song once.", was + 1));
+        }
         // In the playlist in front it becomes the open item, as a drop on it does; in another,
         // the open item of the one in front stays.
         if list == shown {
