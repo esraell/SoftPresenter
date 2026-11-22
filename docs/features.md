@@ -283,7 +283,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   first slide goes back into the last slide of the one before; at either end of the playlist,
   or with Continuous off, nothing changes and a brief cue under the preview's readout says why. The menu
   bar's Next Slide and Previous Slide, and `sp next` and `sp previous`, do the same; a slide
-  that goes on by itself goes on into the next song or passage only with Continuous on.
+  that goes on by itself goes on into the next song or passage only with Continuous on. A
+  page or script that keeps its own open item names it each time (`sp next --aim 3`,
+  `sp go --aim 3 2`): the step is worked out from that item, with nothing picked, and the
+  window's open item, picks and chosen song stay as they are.
 - **A slide picked waits for Enter.** What the find box opens with Return has a slide picked
   (a song's first slide as sung, or the slide whose words were found; a Bible passage's first
   verse: a single verse, typed as a reference or found by its words, is the passage, and with a

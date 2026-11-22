@@ -170,6 +170,18 @@ pub struct Service {
     pub items: Vec<Item>,
 }
 
+impl Service {
+    /// A short word that changes whenever the playlist's items do (added, removed, moved,
+    /// renamed, set to a theme version): a remote page names an item by its place, with this,
+    /// so a playlist changed meanwhile is noticed rather than the wrong item shown.
+    pub fn rev(&self) -> String {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::hash::DefaultHasher::new();
+        serde_json::to_string(&self.items).unwrap_or_default().hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    }
+}
+
 /// Every service, and which one is in front.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Services {

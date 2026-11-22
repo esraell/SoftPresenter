@@ -892,6 +892,11 @@ What is going on
 
 Running the show
   next | previous (or back) | first | last
+  next|previous --aim ITEM [--rev REV]   as if ITEM of the playlist in front were the open item,
+                               nothing picked (a remote page's); the window's own stay as they are
+  go --aim ITEM [SLIDE] [--rev REV]      a slide of that item on screen (its first without
+                               SLIDE), leaving the window's open item alone; REV refuses it if
+                               the playlist changed since the page saw it
   group NAME|LETTER [in SONG]  a group's first slide on screen (C for the chorus…)
   hotkey KEY                   the slide with that hot key on screen
   playlist go ITEM [SLIDE] [in PLAYLIST]   open a playlist item as a click does (and a slide
@@ -1156,6 +1161,37 @@ fn rest(args: &[String], from: usize) -> String {
     args.get(from..).map(|words| words.join(" ")).unwrap_or_default()
 }
 
+/// An item a remote page has open, named in `next|previous|go --aim ITEM [--rev REV]`: the
+/// page keeps its own open item, so it says which one each time. ITEM is the item's number in
+/// the playlist in front, or its title; REV, when given, is the playlist's `rev` as the page
+/// last saw it, so a playlist changed meanwhile is refused rather than the wrong item shown.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Aim {
+    pub item: String,
+    pub rev: Option<String>,
+}
+
+/// Takes `--aim ITEM` and `--rev REV` out of a command's words: the words left, and the aim.
+fn aim_words(words: &[String]) -> Result<(Vec<String>, Option<Aim>), String> {
+    let mut left = Vec::new();
+    let (mut item, mut rev) = (None, None);
+    let mut words = words.iter();
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            "--aim" => {
+                item = Some(words.next().ok_or("--aim ITEM: the item's number in the playlist in front")?.clone())
+            }
+            "--rev" => rev = Some(words.next().ok_or("--rev REV: the playlist's rev as last seen")?.clone()),
+            _ => left.push(word.clone()),
+        }
+    }
+    match (item, rev) {
+        (Some(item), rev) => Ok((left, Some(Aim { item, rev }))),
+        (None, Some(_)) => Err("--rev goes with --aim ITEM.".to_owned()),
+        (None, None) => Ok((left, None)),
+    }
+}
+
 fn on_off(word: Option<&String>) -> Result<bool, String> {
     match word.map(|w| w.to_lowercase()).as_deref() {
         Some("on") => Ok(true),
@@ -1198,11 +1234,18 @@ impl crate::App {
             "props" => Ok(self.ctl_props()),
             "macros" => Ok(self.ctl_macros()),
             "audio" => self.ctl_audio(args),
-            "next" | "previous" | "prev" | "back" | "first" | "last" => {
+            "next" | "previous" | "prev" | "back" | "first" | "last" => (|| {
                 // Next and Previous as the keys do them: on the open item, on into the next
-                // song or passage, or staying put with a word why.
+                // song or passage, or staying put with a word why. `--aim ITEM` acts on that
+                // item of the playlist in front as if it were the open one (a remote page's).
+                let (words, aim) = aim_words(&args[1..])?;
+                let stepping = matches!(word.as_str(), "next" | "previous" | "prev" | "back");
+                if !words.is_empty() || (aim.is_some() && !stepping) {
+                    return Err(format!("{word}{}", if stepping { " [--aim ITEM [--rev REV]]" } else { "" }));
+                }
+                let aim = aim.map(|aim| self.aimed_item(&aim)).transpose()?;
                 let said = match word.as_str() {
-                    "next" => self.step_keys(true),
+                    "next" => self.step_aimed(true, aim),
                     "first" => {
                         self.apply(vec![Command::First]);
                         None
@@ -1211,14 +1254,18 @@ impl crate::App {
                         self.apply(vec![Command::Last]);
                         None
                     }
-                    _ => self.step_keys(false),
+                    _ => self.step_aimed(false, aim),
                 };
                 Ok(Reply::done(match said {
                     Some(said) => format!("{said} {}", self.live_words()),
                     None => self.live_words(),
                 }))
-            }
-            "go" => self.ctl_go(args),
+            })(),
+            "go" => match aim_words(&args[1..]) {
+                Ok((words, Some(aim))) => self.aimed_item(&aim).and_then(|item| self.go_aimed(item, &words)),
+                Ok((_, None)) => self.ctl_go(args),
+                Err(usage) => Err(usage),
+            },
             "select" => self.ctl_select(&rest(args, 1)),
             "clear" => self.ctl_clear(args.get(1).map(String::as_str).unwrap_or("all")),
             "audience" => on_off(args.get(1)).map(|on| {
@@ -1891,6 +1938,64 @@ impl crate::App {
             None => song.order().into_iter().find(|s| song.slide(*s).is_some_and(|(_, sl)| sl.enabled)).unwrap_or(0),
         };
         self.apply(vec![Command::Select(at), Command::GoTo(SlideRef { presentation: at, slide })]);
+        Ok(Reply::done(self.live_words()))
+    }
+
+    /// The place in the playlist in front of the item an aim names, if the playlist is as the
+    /// aim last saw it.
+    fn aimed_item(&self, aim: &Aim) -> Result<usize, String> {
+        let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
+        let list = state.services.front();
+        if aim.rev.as_ref().is_some_and(|rev| *rev != list.rev()) {
+            return Err(format!(
+                "{} has changed since it was last looked at; look again and try once more.",
+                list.name
+            ));
+        }
+        let titles: Vec<String> = list.items.iter().map(|item| item.title().to_owned()).collect();
+        find("item", &titles, &aim.item)
+            .map_err(|problem| format!("{problem} {} has {} items.", list.name, titles.len()))
+    }
+
+    /// `go --aim ITEM [SLIDE]`: a slide of an item of the playlist in front on screen (its first
+    /// without SLIDE; a picture, video or media playlist shown, as 1), for a remote page that
+    /// keeps its own open item: the window's open item, chosen song and page stay as they are.
+    fn go_aimed(&mut self, item: usize, words: &[String]) -> Result<Reply, String> {
+        let usage = "go --aim ITEM [SLIDE] [--rev REV]";
+        let slide = match words {
+            [] => None,
+            [number] => Some(number.parse::<usize>().map_err(|_| usage.to_owned())?),
+            _ => return Err(usage.to_owned()),
+        };
+        let (stops, titles) = self.playlist_stops();
+        let title = titles.get(item).cloned().unwrap_or_default();
+        let presentation = match (stops.get(item), slide) {
+            (Some(crate::running::Stop::Song { at, .. }), Some(_)) => Some(*at),
+            (Some(crate::running::Stop::Passage), Some(_)) => {
+                Some(self.open_passage_now(item, false).ok_or_else(|| format!("Could not open {title}."))?.presentation)
+            }
+            (Some(crate::running::Stop::Media(Some(_)) | crate::running::Stop::MediaPlaylist(true)), Some(n))
+                if n != 1 =>
+            {
+                return Err(format!("{title} has one thing to show: say 1 to show it."));
+            }
+            (Some(crate::running::Stop::Nothing) | None, _)
+            | (Some(crate::running::Stop::Media(None) | crate::running::Stop::MediaPlaylist(false)), _) => {
+                return Err(format!("{title} has nothing to show."));
+            }
+            _ => None,
+        };
+        match (presentation, slide) {
+            (Some(at), Some(number)) => {
+                let count = self.show.presentations().get(at).map_or(0, |song| song.slide_count());
+                if !(1..=count).contains(&number) {
+                    return Err(format!("{title} has {count} slides; there is no slide {number}."));
+                }
+                self.apply(vec![Command::GoTo(SlideRef { presentation: at, slide: number - 1 })]);
+                self.with_state(|state| state.live_item = Some(item));
+            }
+            _ => self.start_item_as(item, false, false),
+        }
         Ok(Reply::done(self.live_words()))
     }
 
@@ -3242,6 +3347,25 @@ mod tests {
             words.extend(pattern.split('|').map(|w| w.trim().trim_matches('"').to_owned()).filter(|w| !w.is_empty()));
         }
         words
+    }
+
+    #[test]
+    fn an_aim_names_an_item_and_the_playlists_rev_and_leaves_the_other_words() {
+        let aim = |item: &str, rev: Option<&str>| Aim { item: item.to_owned(), rev: rev.map(str::to_owned) };
+        assert_eq!(aim_words(&names(&[])), Ok((Vec::new(), None)));
+        assert_eq!(aim_words(&names(&["--aim", "3"])), Ok((Vec::new(), Some(aim("3", None)))));
+        assert_eq!(
+            aim_words(&names(&["--aim", "Opening", "2", "--rev", "00ff"])),
+            Ok((names(&["2"]), Some(aim("Opening", Some("00ff")))))
+        );
+        assert!(aim_words(&names(&["--aim"])).is_err());
+        assert!(aim_words(&names(&["--rev", "00ff"])).is_err());
+        // A playlist's rev changes when its items do, and only then.
+        let mut list = crate::service::Service { name: "Sunday".to_owned(), items: Vec::new() };
+        let empty = list.rev();
+        list.items.push(crate::service::Item::Header { name: "Worship".to_owned() });
+        assert_ne!(list.rev(), empty);
+        assert_eq!(list.rev(), list.clone().rev());
     }
 
     #[test]

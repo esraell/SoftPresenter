@@ -2888,7 +2888,7 @@ impl App {
         let (stops, _) = self.playlist_stops();
         let here = self.cursor_item(&stops);
         match running::go_on(&stops, here, true) {
-            Some(item) => self.start_commands(item, false, &stops).unwrap_or_else(|| vec![command]),
+            Some(item) => self.start_commands(item, false, &stops, true).unwrap_or_else(|| vec![command]),
             None => vec![command],
         }
     }
@@ -2954,19 +2954,27 @@ impl App {
     /// the open item, and leave a slide picked for Enter (see `running`). Returns what was said
     /// instead, if anything was.
     fn step_keys(&mut self, forward: bool) -> Option<String> {
+        self.step_aimed(forward, None)
+    }
+
+    /// Next or Previous as `step_keys` does them, or, with `aim`, as if that item of the
+    /// playlist in front were the open one and nothing were picked: for a remote page, which
+    /// keeps its own open item and picks and must not move the window's. An item it starts goes
+    /// on screen without becoming the window's open item.
+    pub(crate) fn step_aimed(&mut self, forward: bool, aim: Option<usize>) -> Option<String> {
         let command = if forward { Command::Next } else { Command::Previous };
         let running = self.running.as_ref()?;
         let state = &running.home_state;
-        let picked = state.picked_word(&self.show);
+        let picked = if aim.is_some() { None } else { state.picked_word(&self.show) };
         let showing = self.show.live().is_some();
         // In the editors the show steps as it always has; on the Bible page too, unless a verse
-        // picked waits for Enter with nothing on screen.
-        let decided = if state.edit_kind().is_some() {
+        // picked waits for Enter with nothing on screen. An aimed step is the playlist's.
+        let decided = if aim.is_none() && state.edit_kind().is_some() {
             running::Do::Show(command)
-        } else if state.bible_open {
+        } else if aim.is_none() && state.bible_open {
             running::held_for_enter(picked, showing).unwrap_or(running::Do::Show(command))
         } else {
-            let open = if state.playlist_open { state.services.chosen } else { None };
+            let open = aim.or(if state.playlist_open { state.services.chosen } else { None });
             let continuous = state.continuous;
             let (stops, titles) = self.playlist_stops();
             let here = self.cursor_item(&stops);
@@ -2986,7 +2994,7 @@ impl App {
         };
         match decided {
             running::Do::Show(command) => self.apply(vec![command]),
-            running::Do::Start { item, last } => self.start_item(item, last),
+            running::Do::Start { item, last } => self.start_item_as(item, last, aim.is_none()),
             running::Do::Say(words) => {
                 if let Some(running) = self.running.as_mut() {
                     running.home_state.notices.refuse(words.clone());
@@ -3070,13 +3078,21 @@ impl App {
     /// slide (its last when `last`), a picture or video shown, a media playlist played. It
     /// becomes the open item.
     fn start_item(&mut self, item: usize, last: bool) {
+        self.start_item_as(item, last, true);
+    }
+
+    /// Puts an item of the playlist in front on screen as `start_item` does; it becomes the
+    /// open item only when `open_it` (not when a remote page, which keeps its own, started it).
+    fn start_item_as(&mut self, item: usize, last: bool, open_it: bool) {
         let (stops, _) = self.playlist_stops();
         if let Some(running::Stop::MediaPlaylist(true)) = stops.get(item) {
             let id = self.running.as_ref().and_then(|r| match r.home_state.services.front().items.get(item) {
                 Some(service::Item::MediaPlaylist { id, .. }) => Some(*id),
                 _ => None,
             });
-            if let Some(running) = self.running.as_mut() {
+            if let Some(running) = self.running.as_mut()
+                && open_it
+            {
                 running.home_state.services.chosen = Some(item);
             }
             if let Some(id) = id {
@@ -3084,14 +3100,21 @@ impl App {
             }
             return;
         }
-        if let Some(commands) = self.start_commands(item, last, &stops) {
+        if let Some(commands) = self.start_commands(item, last, &stops, open_it) {
             self.apply(commands);
         }
     }
 
     /// What puts a song, a passage or a picture of the playlist in front on screen; a passage is
-    /// made into slides first. The item becomes the open one, and the one on screen.
-    fn start_commands(&mut self, item: usize, last: bool, stops: &[running::Stop]) -> Option<Vec<Command>> {
+    /// made into slides first. The item becomes the one on screen, and the open one when
+    /// `open_it`.
+    fn start_commands(
+        &mut self,
+        item: usize,
+        last: bool,
+        stops: &[running::Stop],
+        open_it: bool,
+    ) -> Option<Vec<Command>> {
         let commands = match stops.get(item)? {
             running::Stop::Song { at, .. } => {
                 let song = self.show.presentations().get(*at)?;
@@ -3105,7 +3128,9 @@ impl App {
             _ => return None,
         };
         let running = self.running.as_mut()?;
-        running.home_state.services.chosen = Some(item);
+        if open_it {
+            running.home_state.services.chosen = Some(item);
+        }
         if !matches!(stops.get(item), Some(running::Stop::Media(_))) {
             running.home_state.live_item = Some(item);
         }
