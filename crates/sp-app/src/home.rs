@@ -1061,6 +1061,16 @@ impl BiblePage {
         self.held[self.showing].slides.clone()
     }
 
+    /// The place of the passage asked for's slides among those of the presentation `deck` at
+    /// `presentation`, when that is one of the page's places and the slides are some of the
+    /// passage's chapter's: to ring them.
+    pub fn ringed(&self, presentation: usize, deck: &sp_model::Presentation) -> Option<std::ops::Range<usize>> {
+        let place = self.slots?.iter().position(|slot| *slot == presentation)?;
+        let held = &self.held[place];
+        let count = deck.slide_count();
+        (held.deck == deck.title && held.slides.end <= count && held.slides.len() < count).then(|| held.slides.clone())
+    }
+
     /// The passage a slide of one of the page's places stands for, when it is on screen: the
     /// passage asked for whose slides the place holds (the presentation titled `title`), or
     /// the slides' own title when the place holds something else.
@@ -5807,7 +5817,10 @@ fn bible_bar(
         BibleView::Page => 0,
         BibleView::Slides => 1,
     };
-    let hints = ["The chapter, to read and click", "The passage's slides, as the Bible theme draws them"];
+    let hints = [
+        "The chapter, to read and click",
+        "The slides, as the Bible theme draws them: the chapter's, with the passage's ringed, a slide a verse",
+    ];
     match crate::studio::pill_switch(ui, "bible view", views_at, &views, &hints, Some(chosen), &look).1 {
         Some(0) => state.bible.view = BibleView::Page,
         Some(_) => state.bible.view = BibleView::Slides,
@@ -8442,6 +8455,94 @@ mod tests {
             assert_eq!(crate::bible_page::title(&mut page).map(|(words, _)| words).as_deref(), Some(title));
             assert_eq!(page.passage_slides(), slides, "{typed}");
         }
+    }
+
+    #[test]
+    fn the_slides_are_the_chapters_with_the_passage_ringed_and_any_of_them_goes_up_with_a_click() {
+        use crate::studio::{TEXT, TEXT_FAINT};
+        let enter = Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        let looked_up = |ctx: &egui::Context, one_a_verse: bool| {
+            let mut show = service_with_bible_places();
+            let mut state = HomeState { library_search: Some(("jn 3:16-18".to_owned(), 0)), ..HomeState::default() };
+            state.bible.slots = Some([2, 3]);
+            state.bible.view = BibleView::Slides;
+            state.bible.options.break_on_new_verse = one_a_verse;
+            english_only(&mut state);
+            frame_then_app(ctx, &mut show, &mut state, vec![], 0.0);
+            frame_then_app(ctx, &mut show, &mut state, vec![enter.clone()], 0.1);
+            // The slides follow the pick into view, and settle.
+            for at in 0..14 {
+                frame_then_app(ctx, &mut show, &mut state, vec![], 0.2 + f64::from(at) * 0.005);
+            }
+            (show, state)
+        };
+        // Each ring drawn round a tile's picture: by the tile's slide, its width and colour.
+        let rings = |rects: &[(Rect, Color32, Stroke)], state: &HomeState| -> Vec<(usize, f32, Color32)> {
+            state
+                .slide_rects
+                .iter()
+                .flat_map(|(at, tile)| {
+                    rects
+                        .iter()
+                        .filter(|(rect, _, stroke)| rect.min == tile.min && stroke.width > 0.0)
+                        .map(|(_, _, stroke)| (at.slide, stroke.width, stroke.color))
+                })
+                .collect()
+        };
+
+        // A slide a verse: the chapter's 36 slides, at the Show view's size; the passage's first
+        // picked (the ink ring), the rest of the passage in a faint ring, the others none.
+        let ctx = egui::Context::default();
+        let (mut show, mut state) = looked_up(&ctx, true);
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+        assert_eq!(show.presentations()[slot].slide_count(), 36);
+        let (rects, _) = drawn_frame(&ctx, &mut show, &mut state, 0.4);
+        let drawn = rings(&rects, &state);
+        let ringed = |slide: usize, width: f32, colour: Color32| drawn.contains(&(slide, width, colour));
+        assert!(ringed(15, 2.0, TEXT), "John 3:16, picked: {drawn:?}");
+        assert!(ringed(16, 2.0, TEXT_FAINT) && ringed(17, 2.0, TEXT_FAINT), "John 3:17-18: {drawn:?}");
+        for other in [13, 14, 18, 19] {
+            assert!(!drawn.iter().any(|(slide, ..)| *slide == other), "John 3:{}: {drawn:?}", other + 1);
+        }
+        let tiles: Vec<usize> = state.slide_rects.iter().map(|(at, _)| at.slide).collect();
+        assert!(tiles.contains(&14) && tiles.contains(&19), "the chapter's slides round the passage: {tiles:?}");
+        // A slide outside the passage (the one before it, in the row in view) goes on screen
+        // with a click, as any slide does (back in the usual window, settled).
+        for at in 0..20 {
+            frame_then_app(&ctx, &mut show, &mut state, vec![], 0.5 + f64::from(at) * 0.005);
+        }
+        let (outside, rect) = state
+            .slide_rects
+            .iter()
+            .find(|(at, _)| at.slide == 14)
+            .map(|(at, rect)| (*at, *rect))
+            .expect("John 3:15, before the passage, is in view");
+        let press = |pressed| Event::PointerButton {
+            pos: rect.center(),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut commands = frame_then_app(&ctx, &mut show, &mut state, vec![Event::PointerMoved(rect.center())], 0.6);
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![press(true)], 0.65));
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![press(false)], 0.7));
+        assert_eq!(commands, vec![Command::GoTo(outside)]);
+        assert_eq!(state.bible.shown, "John 3:16-18", "the passage stays");
+
+        // Made into one slide: that slide alone, and nothing ringed.
+        let ctx = egui::Context::default();
+        let (mut show, mut state) = looked_up(&ctx, false);
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+        assert_eq!(show.presentations()[slot].slide_count(), 1);
+        let (rects, _) = drawn_frame(&ctx, &mut show, &mut state, 0.4);
+        let drawn = rings(&rects, &state);
+        assert!(!drawn.iter().any(|(_, _, colour)| *colour == TEXT_FAINT), "{drawn:?}");
     }
 
     #[test]

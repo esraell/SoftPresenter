@@ -550,8 +550,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   on screen, as a click on the slide does, and the passage stays as it is; a click on a verse
   with none looks that verse up (Shift: the passage from the verse clicked before) and picks it,
   without putting anything on screen. Only the verses in view are drawn, so the longest psalm
-  costs no more than a short chapter. **Slides** shows the passage's slides as the Bible theme
-  draws them. Which of the two is kept between starts.
+  costs no more than a short chapter. **Slides** shows the slides as the Bible theme draws them,
+  at the Show view's size: with a slide a verse, the same chapter as the page, the passage's
+  slides in a fine faint ring (the verse picked in its ink ring with the Enter key cap, the verse
+  on screen in orange), so any verse can be clicked there too; made into one slide, that slide.
+  Which of the two is kept between starts.
 - **What the operator reads follows the language typed; what the screens show does not.** A
   reference typed with an English book name (`gen 1 1`) is named back in English in the
   reference field (`Genesis 1:1`), and in the find box quoted from the first English Bible in

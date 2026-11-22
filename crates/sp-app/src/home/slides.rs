@@ -435,6 +435,9 @@ pub struct SlideDeck {
     pub bible: bool,
     /// Whether it has a bar with its name over it (the Bible page's passage has none).
     pub bar: bool,
+    /// The slides of the passage asked for, ringed, when the Bible page made them into its
+    /// chapter's slides (see `bible::page_deck`).
+    pub ringed: Option<std::ops::Range<usize>>,
 }
 
 impl Deck {
@@ -543,6 +546,7 @@ pub fn decks(show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) ->
                         made: true,
                         bible: true,
                         bar: true,
+                        ringed: None,
                     }),
                     Some(Err(problem)) => Deck::Note { item, title, kind: "Bible", words: problem },
                     None => Deck::Note { item, title, kind: "Bible", words: "Looking it up\u{2026}".to_owned() },
@@ -557,6 +561,7 @@ pub fn decks(show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) ->
                     made: state.app_made(at),
                     bible: false,
                     bar: true,
+                    ringed: None,
                 }),
                 None => Deck::Note { item, title: String::new(), kind: "Missing", words: String::new() },
             },
@@ -574,6 +579,7 @@ pub fn decks(show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) ->
 fn song_alone(show: &Show, state: &HomeState, which: usize, bar: bool) -> Option<Deck> {
     let deck = show.presentations().get(which)?.clone();
     let bible = state.bible.slots.is_some_and(|slots| slots.contains(&which));
+    let ringed = state.bible.ringed(which, &deck);
     Some(Deck::Slides(SlideDeck {
         item: None,
         at: Some(which),
@@ -582,6 +588,7 @@ fn song_alone(show: &Show, state: &HomeState, which: usize, bar: bool) -> Option
         made: state.app_made(which),
         bible,
         bar,
+        ringed,
     }))
 }
 
@@ -1283,6 +1290,9 @@ fn draw_slides(
         let cued = !is_live && !entry.again && here.is_some() && cue == here;
         let picked =
             !cued && here.is_some_and(|here| state.selected_slide == Some(here) || state.picked_slides.contains(&here));
+        // A slide of the passage asked for, among its chapter's on the Bible page: a fine faint
+        // ring, under the rings of what is on screen, picked or chosen.
+        let ringed = !is_live && !cued && !picked && deck.ringed.as_ref().is_some_and(|ringed| ringed.contains(&index));
         // The slide that was on screen before it was cleared: Next goes on from it.
         let was_live = show.live().is_none() && here.is_some() && show.cursor() == here;
         // Numbered in the order sung, under an arrangement.
@@ -1349,6 +1359,8 @@ fn draw_slides(
                     ui.painter().rect_stroke(picture, ROUND, Stroke::new(3.0, PICKED), StrokeKind::Outside);
                 } else if was_live {
                     ui.painter().rect_stroke(picture, ROUND, Stroke::new(1.5, TEXT_FAINT), StrokeKind::Outside);
+                } else if ringed {
+                    ui.painter().rect_stroke(picture, ROUND, Stroke::new(2.0, TEXT_FAINT), StrokeKind::Outside);
                 }
                 // The strip: the number, the group's dot and name, small tags for what the
                 // slide does, then the pencil and the "more" button.
@@ -1423,9 +1435,12 @@ fn draw_slides(
                 if let Some(fill) = fill {
                     ui.painter().rect_filled(rect, ROUND, fill);
                 }
-                // The row that waits for Enter: the well, with a fine dim ring inside.
+                // The row that waits for Enter: the well, with a fine dim ring inside; a row of the
+                // passage among its chapter's, a fainter ring.
                 if cued {
                     ui.painter().rect_stroke(rect, ROUND, Stroke::new(1.5, TEXT_DIM), StrokeKind::Inside);
+                } else if ringed {
+                    ui.painter().rect_stroke(rect, ROUND, Stroke::new(1.5, TEXT_FAINT), StrokeKind::Inside);
                 }
                 let columns = &sheet.columns;
                 let middle = rect.center().y;
@@ -2956,6 +2971,7 @@ mod tests {
             made: true,
             bible: true,
             bar: true,
+            ringed: None,
         };
         broken.show_slide(&show, &mut state, 0, &mut Vec::new());
         assert!(state.bible.pending.is_none(), "{:?}", state.bible.pending.as_ref().map(|(_, deck)| &deck.title));

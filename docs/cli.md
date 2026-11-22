@@ -422,7 +422,7 @@ that runs when SoftPresenter opens.
 | `bible rows [BIBLE…]` | The translations shown, first to last; with names (short or whole), sets them |
 | `bible options [verses=on\|off break=on\|off translation=on\|off reference=verse\|passage\|last\|none]` | Verse numbers, a new slide for each verse, the translation's name, where the reference goes |
 | `bible history` | The passages looked up |
-| `bible view [page\|slides]` | How the Bible page shows a passage: its chapter as a page to read, or its slides; without a word, says which |
+| `bible view [page\|slides]` | How the Bible page shows a passage: its chapter as a page to read, or its slides (with a slide a verse, the chapter's, the passage's ringed); without a word, says which |
 | `bible books [keypad\|lists]` | How the page's left column offers the books: a key for every book, or the book, chapter and verse lists |
 | `bible language [auto\|en\|ru\|uk]` | The language the operator reads the page in (book names, the reference, the page, the find box's Bible rows): Auto, or one with a Bible in use; the slides on screen never change with it |
 | `bibles` | The Bibles installed, and those that can be downloaded |

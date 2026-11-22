@@ -212,8 +212,10 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   orange, the verse picked in a well with a ring. A click on a verse with a slide puts that slide
   on screen (its slide is its place among the verses the slides were made from); a click on a
   verse with none looks it up and picks it. Laid out once per passage,
-  Bibles and width; only the verses in view are drawn. Slides: the passage's slides as tiles
-  drawn by the Bible theme (`slide_grid`). Which is kept with the preferences.
+  Bibles and width; only the verses in view are drawn. Slides: the slides made for the passage
+  as tiles drawn by the Bible theme, at the Show view's size (`slide_grid`): with a slide a verse
+  the chapter's, the passage's in a 2-point faint ring (`SlideDeck::ringed`, from
+  `BiblePage::ringed`). Which is kept with the preferences.
 - Options: how verses become slides, the theme and layout for Bible slides, and the Bibles
   installed (more can be downloaded).
 - Add keeps the passage in a playlist, to open again with these settings.

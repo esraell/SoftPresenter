@@ -71,7 +71,7 @@ impl crate::App {
         let said = match what {
             "view" => match page.view {
                 BibleView::Page => "The Bible page shows the chapter as a page.".to_owned(),
-                BibleView::Slides => "The Bible page shows the passage's slides.".to_owned(),
+                BibleView::Slides => "The Bible page shows the slides, the passage's among its chapter's.".to_owned(),
             },
             "books" => match page.books {
                 BookPicker::Keypad => "The books are a keypad.".to_owned(),
