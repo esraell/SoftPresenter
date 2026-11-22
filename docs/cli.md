@@ -418,7 +418,7 @@ that runs when SoftPresenter opens.
 | `bible REFERENCE` | Looks a passage up on the Bible page, with the translations and options chosen there |
 | `bible REFERENCE --show` | The same, and puts its first verse on screen; `next` and `previous` then go verse by verse (with a slide a verse, on through the passage's chapter) |
 | `bible REFERENCE --add [to PLAYLIST]` | Looks it up and keeps it in a playlist, as the page's Add to button does |
-| `bible search WORDS` | Verses with those words, in the Bibles in use written in their alphabet (in the first translation when none is), each named in its Bible's language with the first translation's numbers; each line names its Bible when more than one has them |
+| `bible search WORDS` | Verses with those words, in the Bibles in use written in their alphabet (in the first translation when none is), each named in its Bible's language with its numbers; each line names its Bible when more than one has them |
 | `bible rows [BIBLE…]` | The translations shown, first to last; with names (short or whole), sets them |
 | `bible options [verses=on\|off break=on\|off translation=on\|off reference=verse\|passage\|last\|none]` | Verse numbers, a new slide for each verse, the translation's name, where the reference goes |
 | `bible history` | The passages looked up |
@@ -430,11 +430,14 @@ that runs when SoftPresenter opens.
 
 References are typed as on the Bible page, in English, Russian or Ukrainian: `John 3:16-18`,
 `jn 3:16`, `Psalm 23`, `Genesis 1` (the whole chapter), `Пс 22:1-3`, `Ів 3:16`. Chapter and
-verse numbers are read in the first translation's numbering. Replies name the book in the
-language the reference was typed in, as the Bible page then names it to the operator (in the
-first translation's language when no Bible in use is in that language); the slides are made
-from the translations chosen on the Bible page, whatever the language typed, and a playlist
-keeps the passage as the first translation names it.
+verse numbers are read in the numbering of the language typed (English: the King James
+numbering; Russian: the Synodal's; Ukrainian: the Ukrainian Bible in use's, else the first
+translation's), whichever Bible is first. Replies name the book in the language the reference
+was typed in, as the Bible page then names it to the operator, numbered as that language
+numbers (in the first translation's language when no Bible in use is in that language); the
+slides are made from the translations chosen on the Bible page, whatever the language typed,
+and a playlist keeps the passage as it was typed, with its numbering, so it opens as the same
+verses later.
 
     $ sp bible "John 3:16-18"
     Looked up John 3:16-18; it is on the Bible page.
@@ -468,11 +471,13 @@ names the passage as it was typed, while the screens and the playlist follow the
     Added Genesis 1:1-2 to Service.
     $ sp playlist
     Service
-      1. Бытие 1:1-2
-    $ sp bible "Psalm 23"                # the Synodal 23rd psalm (the English 24th)
-    Looked up Psalm 23:1-10; it is on the Bible page.
+      1. Genesis 1:1-2
+    $ sp bible "Psalm 23"                # the English 23rd psalm (the Synodal's 22nd)
+    Looked up Psalm 23:1-6; it is on the Bible page.
+    $ sp bible "Пс 22"                   # the same psalm, typed in Russian
+    Looked up Псалом 22:1-6; it is on the Bible page.
     $ sp bible search valley of the shadow
-      1. Psalm 22:4: Yea, though I walk through the valley of the shadow of death, …
+      1. Psalm 23:4: Yea, though I walk through the valley of the shadow of death, …
 
     $ sp bible language ru
     The Bible page reads in Русский.

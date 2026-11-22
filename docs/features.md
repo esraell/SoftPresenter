@@ -568,10 +568,16 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   in Russian and Ukrainian (`Пс`, `1 Кор`) stays with whichever of the two the operator was
   reading. A language with no Bible in use falls back to the first translation. The slides are
   the same whatever language the reference was typed in: which Bible goes in which box, and the
-  reference on them, are as the translations are set. Chapter and verse numbers are always the
-  first translation's, so with the Russian Synodal first, `Psalm 23` is its 23rd psalm (the
-  English 24th), named back as `Psalm 23:1-10`. The page reads the operator's language first,
-  and the next Bible in use under it.
+  reference on them, are as the translations are set. **Chapter and verse numbers follow the
+  language typed**, whichever Bible is listed first: `Psalm 23` typed in English is the English
+  (and King James) 23rd psalm, which the Russian Synodal numbers 22, so its slides show the
+  Synodal's Пс 22 beside it; `Пс 22` typed in Russian is the Synodal's 22nd, the King James
+  Psalm 23. Ukrainian follows the numbering of the Ukrainian Bible in use; with none, the first
+  translation's. A verse found by its words is numbered as the Bible it was found in. A name the
+  operator reads is numbered as its language numbers (never a Russian name with an English
+  number), so it reads back as the same passage. The page reads the operator's language first,
+  and the next Bible in use under it; the keypad, the lists and the page's verse numbers stay the
+  first translation's.
 - With nothing typed to go by (the Bible page opened fresh, a book or verse clicked, a passage
   from History or a playlist), the operator reads in the language last typed this session; at
   the start of a session, in the computer's: Russian if its first language is Russian,
@@ -586,9 +592,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   quoted, such as `BIBLE · SYN`). Typing in another language still finds the passage, read in
   the language chosen; the session still follows what is typed, so Auto carries on from the
   language typed last. It never changes the slides: they follow the translations line, and
-  choosing a language makes nothing again and puts nothing on screen. Chapter and verse numbers
-  stay the first translation's (with the Russian Synodal first and English chosen, `Пс 22` reads
-  as `Psalm 22:1-6`, the English 23rd psalm). The choice is kept between starts; a language
+  choosing a language makes nothing again and puts nothing on screen. The language typed still
+  says which verses are meant, and the title and the field name them in the language chosen,
+  numbered as it numbers (with English chosen, `Пс 22` typed reads `Psalm 23:1-6`; with Russian
+  chosen, `Psalm 23` typed reads `Псалом 22:1-6`). The choice is kept between starts; a language
   chosen whose Bible is taken out of the translations counts as Auto until one is back.
 - Words typed in the reference field that are no reference and no book's name begun are looked
   for in the Bibles in use written in their alphabet (Cyrillic words in the Russian and the
@@ -651,7 +658,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   that shows the download going on.
 - One click keeps a passage: + Add puts it in the playlist in front (its tooltip names the
   playlist; the ▾ beside it picks another), to be brought back with the same settings: the
-  passage asked for (John 3:16), never the chapter round it.
+  passage asked for (John 3:16), never the chapter round it, named in the language it was typed
+  in with that language's numbering, which is kept beside it, so it opens as the same verses
+  whatever the Bibles' order or the language chosen (so does the find box's Command-Return, and
+  History). A passage kept before this opens in the first translation's numbering, as it did.
 
 ![The Bible page: John 3 to read, verses 16 to 18 in the King James Version with the Russian Synodal under them, verse 16 picked, beside the keypad of the books](images/bible.png)
 

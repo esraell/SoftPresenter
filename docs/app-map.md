@@ -231,6 +231,12 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 - Words (not a reference) typed in the reference field list the verses holding them as they are
   typed, in place of the page, found on a thread of their own (`find.rs`, `search_page` and
   `Finder`); `sp bible search` lists them too.
+- Chapter and verse numbers follow the language: what is typed is read in the numbering of the
+  language typed (`bible::numbering_of`: the first Bible in use in it, else English or Synodal,
+  else the first translation's), turned into the first translation's for the slides
+  (`bible::renumbered`, through the versification tables `sp_bible::convert` reads); a name the
+  operator reads is numbered as its language numbers (`bible::named_in`). A playlist's passage
+  and a history entry keep their numbering (`SavedPassage::numbering`, `HistoryEntry::numbering`).
 - What the operator reads (the reference field after a lookup, the books in the keypad and the
   lists, the page, the verses found, the find box's Bible rows) is in the language chosen with Аа
   (kept with the preferences, `bible_language`), or on Auto in the language the reference was

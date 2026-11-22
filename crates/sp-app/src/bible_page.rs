@@ -598,7 +598,8 @@ fn history(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) -> Opti
         );
         return None;
     }
-    let lead = page.lead().and_then(|lead| page.shelf.get(lead).ok());
+    let bibles = page.bibles_in_use();
+    let in_use: Vec<&Bible> = bibles.iter().map(|bible| bible.as_ref()).collect();
     let language = page.names_language();
     let today = chrono::Local::now().date_naive();
     let mut chosen = None;
@@ -622,15 +623,23 @@ fn history(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) -> Opti
                 fixed(11.0),
                 TEXT_FAINT,
             );
-            let name = lead.as_ref().map_or_else(
-                || entry.passage.clone(),
-                |lead| crate::bible::name_for_operator(&entry.passage, lead, &language),
-            );
+            // Named in the operator's language and its numbering, from the numbering it was kept in.
+            let numbering = entry.numbering.as_deref().and_then(sp_bible::Numbering::from_name);
+            let name = match (in_use.first(), numbering) {
+                (None, _) => entry.passage.clone(),
+                (Some(lead), numbering) => crate::bible::named_in(
+                    &entry.passage,
+                    numbering.unwrap_or(lead.info.numbering),
+                    &language,
+                    &in_use,
+                    true,
+                ),
+            };
             let ink = if response.hovered() { TEXT } else { TEXT_DIM };
             let galley = one_line(ui, &name, FontId::proportional(13.5), ink, when.min.x - 8.0 - rect.min.x - 10.0);
             ui.painter().galley(pos2(rect.min.x + 10.0, rect.center().y - galley.size().y / 2.0), galley, ink);
             if response.clicked() {
-                chosen = Some(entry.passage.clone());
+                chosen = Some((entry.passage.clone(), numbering));
             }
         }
         ui.add_space(10.0);
@@ -655,10 +664,10 @@ fn history(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) -> Opti
         page.history.clear();
         page.history_changed = true;
     }
-    let passage = chosen?;
-    // Kept as it was on screen; the field says it in the operator's language.
+    let (passage, numbering) = chosen?;
+    // Kept as it was on screen, in its numbering; the field says it in the operator's language.
     page.found.clear();
-    page.open(passage, live);
+    page.open_kept(passage, numbering, live);
     page.pending.is_some().then(|| page.passage_slides().start)
 }
 
@@ -997,9 +1006,15 @@ fn verses_named(name: &str) -> &str {
 /// names of the Bibles read.
 pub fn title(page: &mut BiblePage) -> Option<(String, String)> {
     let (lead, range) = shown_range(page)?;
+    // Judged and numbered as the operator's language numbers (see `bible::numbering_of`).
+    let bibles = page.bibles_in_use();
+    let in_use: Vec<&Bible> = bibles.iter().map(|bible| bible.as_ref()).collect();
+    let numbering = crate::bible::numbering_of(&page.names_language(), &in_use);
+    let range = crate::bible::renumber(range, lead.info.numbering, numbering, &in_use);
+    let counted = in_use.iter().find(|bible| bible.info.numbering == numbering).copied().unwrap_or(&lead);
     let whole = range.start.verse == 1
         && range.start.book == range.end.book
-        && range.end.verse >= lead.last_verse(range.end.book, range.end.chapter);
+        && range.end.verse >= counted.last_verse(range.end.book, range.end.chapter);
     let (book, from, to) = (range.start.book, range.start.chapter, range.end.chapter);
     let words = match (whole, from == to) {
         (true, true) => format!("{} {from}", sp_bible::reading_book_name(book, &page.names_language(), true)),

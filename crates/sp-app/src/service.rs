@@ -22,6 +22,11 @@ pub struct SavedRow {
 pub struct SavedPassage {
     /// What to type in Scripture Lookup to get it, such as `John 3:16-18`.
     pub lookup: String,
+    /// The verse numbering `lookup` is in (`english`, `synodal`, `original`), so it opens as the
+    /// same verses whatever the Bibles' order; none (a file from before) for the first
+    /// translation's when it is opened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub numbering: Option<String>,
     pub rows: Vec<SavedRow>,
     #[serde(default)]
     pub show_verse_numbers: bool,
@@ -584,6 +589,10 @@ fn bible_page_file() -> Option<std::path::PathBuf> {
 pub struct HistoryEntry {
     pub passage: String,
     pub at: String,
+    /// The verse numbering `passage` is in, as a playlist's passage keeps it; none (from before)
+    /// for the first translation's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub numbering: Option<String>,
 }
 
 fn bible_history_file() -> Option<std::path::PathBuf> {
@@ -749,8 +758,12 @@ mod tests {
             std::env::temp_dir().join(format!("softpresenter-history-{}/bible-history.json", std::process::id()));
         assert!(load_history_from(&path).is_empty(), "no file yet is no history");
         let history = vec![
-            HistoryEntry { passage: "John 3:16".to_owned(), at: "2026-11-19T10:42:05".to_owned() },
-            HistoryEntry { passage: "Psalm 23".to_owned(), at: "2026-11-17T09:30:00".to_owned() },
+            HistoryEntry { passage: "John 3:16".to_owned(), at: "2026-11-19T10:42:05".to_owned(), numbering: None },
+            HistoryEntry {
+                passage: "Psalms 23:1-6".to_owned(),
+                at: "2026-11-17T09:30:00".to_owned(),
+                numbering: Some("english".to_owned()),
+            },
         ];
         save_history_in(&path, &history).unwrap();
         assert_eq!(load_history_from(&path), history);
@@ -777,6 +790,7 @@ mod tests {
     fn passage(lookup: &str) -> Item {
         Item::Passage(SavedPassage {
             lookup: lookup.to_owned(),
+            numbering: None,
             rows: vec![SavedRow { bible: "kjv".to_owned(), verse: Some("primary".to_owned()), reference: None }],
             show_verse_numbers: false,
             break_on_new_verse: true,

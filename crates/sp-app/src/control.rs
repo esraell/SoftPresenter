@@ -2732,8 +2732,10 @@ impl crate::App {
         if let Some(running) = self.running.as_mut() {
             let page = &mut running.home_state.bible;
             let language = page.typed_language(&reference);
-            if let Some(bible) = page.lead().and_then(|lead| page.shelf.get(lead).ok())
-                && let Ok(range) = sp_bible::parse_reference_in(&reference, &bible.info.language)
+            // Counted in the Bible of the numbering it is read in (the language typed's).
+            let lead = page.lead().and_then(|lead| page.shelf.get(lead).ok());
+            if let (Some(bible), Some(lead)) = (page.counted_in(&reference), lead)
+                && let Ok(range) = sp_bible::parse_reference_in(&reference, &lead.info.language)
             {
                 let book = sp_bible::book_name(range.start.book, &language);
                 let chapters = bible.chapter_count(range.start.book);

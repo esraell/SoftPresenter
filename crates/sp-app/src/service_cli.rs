@@ -1114,6 +1114,7 @@ mod tests {
 
         let passage = Item::Passage(crate::service::SavedPassage {
             lookup: "John 3:16-18".to_owned(),
+            numbering: None,
             rows: vec![crate::service::SavedRow { bible: "kjv".to_owned(), verse: None, reference: None }],
             show_verse_numbers: false,
             break_on_new_verse: true,

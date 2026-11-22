@@ -8,9 +8,11 @@
 //! the language last typed this session, or at its start the computer's. A language with no
 //! Bible in use falls back to the first Bible in the translations, as before.
 //!
-//! Chapter and verse numbers are always the first translation's: only the book's name, and the
-//! words quoted, are the operator's. So a name written back in the field reads again as the
-//! same passage.
+//! Chapter and verse numbers follow the language (the owner's rule, 2026-11-22): a reference is
+//! read in the numbering of the language it was typed in, and a name the operator reads is
+//! numbered as its language numbers, never a Russian name with an English number (see
+//! `bible::numbering_of`). So a name written back in the field reads again as the same passage.
+//! Inside, the slides and the page are numbered as the first translation numbers them.
 //!
 //! A language can also be chosen on the Bible page (its Аа button, kept between starts): the
 //! operator then reads in it whatever is typed, while a Bible in use is in it (see [`Reading`]).

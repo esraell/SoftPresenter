@@ -5,7 +5,7 @@ use egui::{Align, Align2, Color32, FontId, Frame, Layout, Rect, Sense, Stroke, p
 
 use std::sync::Arc;
 
-use sp_bible::{Bible, VerseRef, convert, parse_reference_in};
+use sp_bible::{Bible, Numbering, VerseRef, convert, parse_reference_in};
 use sp_model::{Group, Object, Presentation, Rgba, Role, Slide, Uuid};
 
 use crate::home::BibleTarget;
@@ -182,15 +182,87 @@ impl Shelf {
     }
 }
 
-/// A passage named as the first translation names it (as `build_passage` titles its slides),
-/// named again for the operator: the book in `language` (`en`, `ru`, `uk`) as people read it
-/// (one psalm is "Psalm 23", see `sp_bible::reading_label`), the numbers as they are, so the
-/// name reads back as the same passage. The name as it was when it can't be read.
-pub fn name_for_operator(kept: &str, lead: &Bible, language: &str) -> String {
-    match parse_reference_in(kept, &lead.info.language) {
-        Ok(range) => sp_bible::reading_label(language, range.start, range.end),
-        Err(_) => kept.to_owned(),
+/// The numbering a reference written in a language is read in, and a name in that language is
+/// numbered in (the owner's rule, 2026-11-22: chapter and verse numbers follow the language):
+/// that of the first Bible in use written in it; with none, the English numbering for English
+/// and the Synodal for Russian; any other language (Ukrainian with no Ukrainian Bible in use)
+/// the first Bible's. `bibles` are the Bibles in use, the first translation first.
+pub fn numbering_of(language: &str, bibles: &[&Bible]) -> Numbering {
+    let language = crate::bible_language::language_of(language);
+    if let Some(bible) =
+        bibles.iter().find(|bible| crate::bible_language::language_of(&bible.info.language) == language)
+    {
+        return bible.info.numbering;
     }
+    match language.as_str() {
+        "en" => Numbering::English,
+        "ru" => Numbering::Synodal,
+        _ => bibles.first().map_or(Numbering::English, |lead| lead.info.numbering),
+    }
+}
+
+/// A run of verses read in one numbering (`from`), as another (`to`) numbers it: its real
+/// first and last verses, found in a Bible of `from` among `bibles` when one is in use (else as
+/// given, a chapter's end matched through its first verse), each turned through the
+/// versification tables. "Psalm 23" in the English numbering is the Synodal's 22:1-6.
+pub fn renumber(range: sp_bible::Range, from: Numbering, to: Numbering, bibles: &[&Bible]) -> sp_bible::Range {
+    let verses = bibles.iter().find(|bible| bible.info.numbering == from).map(|bible| bible.verses(range));
+    let (first, last) = match verses.as_deref() {
+        Some([(first, _), .., (last, _)]) => (*first, *last),
+        Some([(only, _)]) => (*only, *only),
+        _ => (range.start, range.end),
+    };
+    if from == to {
+        return sp_bible::Range { start: first, end: last };
+    }
+    let end = if last.verse == sp_bible::LAST {
+        VerseRef { verse: sp_bible::LAST, ..convert(VerseRef { verse: 1, ..last }, from, to) }
+    } else {
+        convert(last, from, to)
+    };
+    sp_bible::Range { start: convert(first, from, to), end }
+}
+
+/// A passage named in one numbering (`name`, its book read as the first Bible reads books), as
+/// the first Bible names and numbers it, ready to look up. The name as it is when the numberings
+/// agree or it can't be read (looking it up then says what is wrong).
+pub fn renumbered(name: &str, from: Numbering, bibles: &[&Bible]) -> String {
+    let Some(lead) = bibles.first() else { return name.to_owned() };
+    if from == lead.info.numbering {
+        return name.to_owned();
+    }
+    let Ok(range) = parse_reference_in(name, &lead.info.language) else { return name.to_owned() };
+    let verses = lead.verses(renumber(range, from, lead.info.numbering, bibles));
+    match verses.as_slice() {
+        [(first, _), .., (last, _)] => lead.label(*first, *last),
+        [(only, _)] => lead.label(*only, *only),
+        [] => name.to_owned(),
+    }
+}
+
+/// A passage named in one numbering (`kept`, its book read as the first Bible reads books),
+/// named again in a language (`en`, `ru`, `uk`) with that language's numbering (see
+/// [`numbering_of`]): for people (`read`: one psalm is "Psalm 23", see
+/// `sp_bible::reading_label`) or to keep (the books' own names). So the name read back in that
+/// language is the same passage. The name as it was when it can't be read.
+pub fn named_in(kept: &str, from: Numbering, language: &str, bibles: &[&Bible], read: bool) -> String {
+    let Some(lead) = bibles.first() else { return kept.to_owned() };
+    let Ok(range) = parse_reference_in(kept, &lead.info.language) else { return kept.to_owned() };
+    let there = renumber(range, from, numbering_of(language, bibles), bibles);
+    if read {
+        sp_bible::reading_label(language, there.start, there.end)
+    } else {
+        sp_bible::label_in(language, there.start, there.end)
+    }
+}
+
+/// A passage named as the first translation names and numbers it (as `build_passage` titles
+/// its slides), named again for the operator in `language` (`en`, `ru`, `uk`) with that
+/// language's numbering, as people read it, so the name reads back as the same passage. See
+/// [`named_in`].
+pub fn name_for_operator(kept: &str, bibles: &[&Bible], language: &str) -> String {
+    let from = bibles.first().map_or(Numbering::English, |lead| lead.info.numbering);
+    named_in(kept, from, language, bibles, true)
 }
 
 /// A verse found by the Bible page's Search.
@@ -1124,6 +1196,49 @@ mod tests {
 
     fn texts(slide: &Slide) -> Vec<&str> {
         slide.objects.iter().filter_map(Object::as_text).collect()
+    }
+
+    #[test]
+    fn a_language_reads_in_its_bibles_numbering_and_a_passage_turns_through_the_tables() {
+        use sp_bible::Numbering::{English, Synodal};
+        let mut shelf = Shelf::shipped();
+        let kjv = shelf.get(shelf.position("kjv").unwrap()).unwrap();
+        let syn = shelf.get(shelf.position("syn").unwrap()).unwrap();
+        let both = [syn.as_ref(), kjv.as_ref()];
+        assert_eq!((numbering_of("en", &both), numbering_of("ru", &both)), (English, Synodal));
+        // No Bible in use in the language: English and Russian have their own; Ukrainian the
+        // first Bible's.
+        assert_eq!(numbering_of("ru", &[kjv.as_ref()]), Synodal);
+        assert_eq!((numbering_of("uk", &both), numbering_of("uk", &[kjv.as_ref()])), (Synodal, English));
+        // A Ukrainian Bible in use: its numbering, whatever Bible is first.
+        let info = sp_bible::Info {
+            id: "test-uk".to_owned(),
+            name: "Test Ukrainian".to_owned(),
+            short: "TUK".to_owned(),
+            language: "uk".to_owned(),
+            terms: "Written for a test".to_owned(),
+            credit: String::new(),
+            source: "a test".to_owned(),
+            numbering: English,
+            loose: false,
+        };
+        let ukrainian = Bible::from_verse_lines(info, "PSA 23:1 Words written for a test.", str::to_owned);
+        assert_eq!(numbering_of("uk", &[syn.as_ref(), &ukrainian]), English);
+        // "Psalm 23" in the English numbering is the Synodal's 22:1-6: its end found in the King
+        // James Version; with no Bible of the English numbering in use, its chapter matched.
+        let psalm = parse_reference_in("Psalm 23", "en").unwrap();
+        let at = |chapter, verse| VerseRef { book: psalm.start.book, chapter, verse };
+        let turned = renumber(psalm, English, Synodal, &both);
+        assert_eq!((turned.start, turned.end), (at(22, 1), at(22, 6)));
+        let turned = renumber(psalm, English, Synodal, &[syn.as_ref()]);
+        assert_eq!((turned.start, turned.end), (at(22, 1), at(22, sp_bible::LAST)));
+        // Named for the first Bible to look up, and back for people in each language.
+        assert_eq!(renumbered("Psalms 51:1-19", English, &both), "Псалтирь 50:3-21");
+        assert_eq!(renumbered("Psalm 23", English, &both), "Псалтирь 22:1-6");
+        assert_eq!(renumbered("Psalm 23", English, &[kjv.as_ref(), syn.as_ref()]), "Psalm 23", "as it is");
+        assert_eq!(name_for_operator("Псалтирь 22:1-6", &both, "en"), "Psalm 23:1-6");
+        assert_eq!(name_for_operator("Псалтирь 22:1-6", &both, "ru"), "Псалом 22:1-6");
+        assert_eq!(named_in("Псалтирь 50:3-21", Synodal, "en", &both, false), "Psalms 51:1-19");
     }
 
     #[test]
