@@ -5975,6 +5975,14 @@ impl App {
                 let presentation = self.show.selected();
                 commands.push(Command::GoToStep { presentation, step: step.saturating_sub(1) });
             }
+            // Testing aid: SOFTPRESENTER_START_TIMER=1 starts the first timer, for a picture of a
+            // running timer in the top bar.
+            if running.frames == GO_LIVE_AT + 2
+                && std::env::var_os("SOFTPRESENTER_START_TIMER").is_some()
+                && let Some(timer) = running.home_state.timers.first_mut()
+            {
+                timer.start(Instant::now());
+            }
             // Testing aid: list the playlist in front in the left column.
             if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_PLAYLIST").is_some() {
                 running.home_state.playlist_open = true;

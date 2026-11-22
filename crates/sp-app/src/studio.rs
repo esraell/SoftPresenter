@@ -1015,11 +1015,29 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
 
         // The find box takes the room between the views and the clock, up to its full width.
         let room = clock.min.x - 14.0 - (switch.max.x + 14.0);
+        let mut free_from = switch.max.x + 14.0;
         if room >= 140.0 {
             let find = Rect::from_min_size(pos2(switch.max.x + 14.0, middle - 17.0), vec2(room.min(300.0), 34.0));
             find_box(ui, state, find);
+            free_from = find.max.x + 12.0;
         } else {
             state.find_rect = None;
+        }
+        // A running timer, just before the clock: it takes only room nobody else uses, so
+        // nothing moves when one starts or stops, and none is kept for it while none runs.
+        if let Some(timer) = state.timers.iter().find(|timer| timer.running()) {
+            let words =
+                format!("{} {}", timer.name, timer.text(std::time::Instant::now(), crate::timers::seconds_into_day()));
+            let right = clock.min.x - 10.0;
+            let wide = (right - free_from).min(150.0);
+            if wide >= 48.0 {
+                let room = Rect::from_min_max(pos2(right - wide, bar.min.y), pos2(right, bar.max.y));
+                let galley = spaced(ui, &words.to_uppercase(), fixed(12.0), READY, 0.6);
+                let at = pos2((right - galley.size().x).max(room.min.x), middle - galley.size().y / 2.0);
+                let shown = ui.interact(room, ui.scope_id().with("running timer"), Sense::hover());
+                ui.painter().with_clip_rect(room).galley(at, galley, READY);
+                shown.on_hover_text(format!("{words} (the Timers tab: {})", crate::keys::with_modifier("1")));
+            }
         }
     });
 }

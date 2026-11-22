@@ -310,8 +310,9 @@ feature changes, this page changes in the same commit.
   words, a Bible passage when a reference is typed (named and quoted in the language it was
   typed in), and verses that hold the words, from the Bibles in use written in the words'
   alphabet, each saying which Bible it is from; Return opens what is picked without putting anything on the screens, and
-  Command-Return adds it to the playlist in front; it does not search playlists or media), the
-  clock (on a 12-hour or a
+  Command-Return adds it to the playlist in front; it does not search playlists or media), a
+  running timer's name and time just before the clock (in room nothing else uses, so nothing
+  moves when it starts or stops), the clock (on a 12-hour or a
   24-hour clock as the computer is set, with the computer's own words for morning and
   afternoon), the Audience and Stage
   keys, a `?` (the list of every key, as the `?` key opens it) and Settings.
