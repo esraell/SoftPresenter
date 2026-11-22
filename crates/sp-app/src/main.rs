@@ -328,11 +328,19 @@ fn describe_opening(show: &Show, state: &home::HomeState, step: &sp_model::ShowA
     match step {
         sp_model::ShowAction::Announce { what: sp_model::Announced::Song { key } } => {
             let title = studio::playlist_song(show, state, key).map(|at| show.presentations()[at].title.clone());
-            format!("the song {}", title.unwrap_or_else(|| "it named (gone)".to_owned()))
+            match title {
+                Some(title) => format!("the song \u{201c}{title}\u{201d}"),
+                None => "a song that is no longer in the library, so nothing plays until you choose what it plays"
+                    .to_owned(),
+            }
         }
         sp_model::ShowAction::Announce { what: sp_model::Announced::MediaPlaylist { id } } => {
             let name = state.media_playlists.iter().find(|p| p.id == *id).map(|p| p.name.clone());
-            format!("the media playlist {}", name.unwrap_or_else(|| "it named (gone)".to_owned()))
+            match name {
+                Some(name) => format!("the media playlist \u{201c}{name}\u{201d}"),
+                None => "a media playlist that is no longer there, so nothing plays until you choose what it plays"
+                    .to_owned(),
+            }
         }
         _ => "what it was set to".to_owned(),
     }
@@ -375,7 +383,19 @@ fn do_state_action(state: &mut home::HomeState, action: &sp_model::ShowAction, n
             };
             match asked {
                 Some(asked) => state.announcement_request = Some(Some(asked)),
-                None => state.notice = Some("A step's song for the Announcements layer can't be found.".to_owned()),
+                None => {
+                    // Name the macro, so the operator knows where to choose another.
+                    let holder = state
+                        .macros
+                        .iter()
+                        .find(|made| made.actions.contains(action))
+                        .map(|made| format!(" in the macro \u{201c}{}\u{201d}", made.name))
+                        .unwrap_or_default();
+                    state.notice = Some(format!(
+                        "Nothing plays on the Announcements layer: the song a step{holder} plays is no longer in the \
+                         library. Open the macro in the Macros tab and choose what it plays."
+                    ));
+                }
             }
         }
         // A sync from Canva, taken up by `tick_canva`.
