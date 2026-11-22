@@ -6980,23 +6980,67 @@ fn bible_add(ui: &mut egui::Ui, state: &mut HomeState, add: Rect, arrow: Rect) {
     if response.clicked()
         && let Some(saved) = saved.clone()
     {
-        state.notice = Some(format!("Added {reading} to {front}."));
-        state.services.add(crate::service::Item::Passage(saved));
+        let front = state.services.front_at();
+        add_passage(state, Some(front), saved, &reading);
     }
+    // The other playlists (Add already adds to the one in front), then a new one.
     let open_arrow = open_arrow.on_hover_text("Add it to another playlist");
     egui::Popup::from_toggle_button_response(&open_arrow)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             let Some(saved) = saved.clone() else { return };
-            let names: Vec<String> = state.services.list.iter().map(|playlist| playlist.name.clone()).collect();
-            for (at, name) in names.iter().enumerate() {
+            let front = state.services.front_at();
+            let names: Vec<(usize, String)> = state
+                .services
+                .list
+                .iter()
+                .enumerate()
+                .filter(|(at, _)| *at != front)
+                .map(|(at, playlist)| (at, playlist.name.clone()))
+                .collect();
+            let mut chosen = None;
+            for (at, name) in &names {
                 if ui.button(format!("Add to \u{201c}{name}\u{201d}")).clicked() {
-                    state.services.add_to(at, crate::service::Item::Passage(saved.clone()));
-                    state.notice = Some(format!("Added {reading} to {name}."));
-                    ui.close();
+                    chosen = Some(Some(*at));
                 }
             }
+            if !names.is_empty() {
+                ui.separator();
+            }
+            if ui.button("New Playlist\u{2026}").on_hover_text("A new playlist with this passage in it").clicked() {
+                chosen = Some(None);
+            }
+            if let Some(playlist) = chosen {
+                add_passage(state, playlist, saved, &reading);
+                ui.close();
+            }
         });
+}
+
+/// Keeps the passage on the Bible page (`saved`, named `reading`) in a playlist, by its place,
+/// and says so; in the playlist in front it becomes the open item. The same passage in the same
+/// translations goes in once: then the notice says it is there already. With no playlist given,
+/// a new one is made with the passage in it and comes to the front, its name ready to type in
+/// the chooser of the Show view, as a song's New Playlist… does.
+fn add_passage(state: &mut HomeState, playlist: Option<usize>, saved: crate::service::SavedPassage, reading: &str) {
+    let item = crate::service::Item::Passage(saved);
+    let Some(at) = playlist else {
+        state.services.add_service();
+        state.services.add(item);
+        let name = state.services.front().name.clone();
+        state.notice = Some(format!("Added {reading} to {name}."));
+        state.playlist_open = true;
+        state.chooser_open = true;
+        state.renaming_service = Some((state.services.front_at(), name));
+        state.rename_started = true;
+        state.view_request = Some(0);
+        return;
+    };
+    let Some(name) = state.services.list.get(at).map(|list| list.name.clone()) else { return };
+    let added =
+        if at == state.services.front_at() { state.services.add(item) } else { state.services.add_to(at, item) };
+    state.notice =
+        Some(if added { format!("Added {reading} to {name}.") } else { format!("{reading} is already in {name}.") });
 }
 
 /// The reference field: a reference in English, Russian or Ukrainian (whole names or short
@@ -12606,6 +12650,41 @@ mod tests {
             assert_eq!(state.screens, screens);
         }
         assert_eq!(output_label(&screens[2].output, &[]), "Gone   (disconnected)");
+    }
+
+    #[test]
+    fn a_passage_added_from_the_bible_page_goes_in_once_or_into_a_new_playlist() {
+        let saved = |bibles: &[&str]| crate::service::SavedPassage {
+            lookup: "John 3:16".to_owned(),
+            numbering: Some("english".to_owned()),
+            rows: bibles
+                .iter()
+                .map(|bible| crate::service::SavedRow { bible: (*bible).to_owned(), verse: None, reference: None })
+                .collect(),
+            show_verse_numbers: false,
+            break_on_new_verse: true,
+            display_translation: false,
+            reference_style: String::new(),
+            show_with: None,
+        };
+        let mut state = HomeState::default();
+        state.services.list[0].name = "Sunday".to_owned();
+        add_passage(&mut state, Some(0), saved(&["kjv"]), "John 3:16");
+        assert_eq!(state.notice.as_deref(), Some("Added John 3:16 to Sunday."));
+        add_passage(&mut state, Some(0), saved(&["kjv"]), "John 3:16");
+        assert_eq!(state.notice.as_deref(), Some("John 3:16 is already in Sunday."));
+        assert_eq!(state.services.front().items.len(), 1);
+        // In other translations it goes in again.
+        add_passage(&mut state, Some(0), saved(&["kjv", "asv"]), "John 3:16");
+        assert_eq!(state.notice.as_deref(), Some("Added John 3:16 to Sunday."));
+        assert_eq!(state.services.front().items.len(), 2);
+        // New Playlist…: a playlist of its own, in front, its name ready to type in the Show view.
+        add_passage(&mut state, None, saved(&["kjv"]), "John 3:16");
+        assert_eq!(state.services.list.len(), 2);
+        assert_eq!((state.services.front_at(), state.services.front().items.len()), (1, 1));
+        assert_eq!(state.notice.as_deref(), Some("Added John 3:16 to Playlist 1."));
+        assert_eq!(state.renaming_service, Some((1, "Playlist 1".to_owned())));
+        assert!(state.chooser_open && state.playlist_open && state.view_request == Some(0));
     }
 
     #[test]

@@ -2821,11 +2821,14 @@ impl crate::App {
             let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
             let saved = state.bible.saved().ok_or("The passage could not be kept for a playlist.")?;
             let name = state.services.list[list].name.clone();
-            state.services.add_to(list, crate::service::Item::Passage(saved));
+            // The same passage in the same translations goes in once.
+            let added = state.services.add_to(list, crate::service::Item::Passage(saved));
             if show_it {
                 self.apply(vec![Command::Select(slot), Command::GoTo(SlideRef { presentation: slot, slide: first })]);
             }
-            return Ok(Reply::done(format!("Added {title} to {name}.")));
+            let said =
+                if added { format!("Added {title} to {name}.") } else { format!("{title} is already in {name}.") };
+            return Ok(Reply::done(said));
         }
         if show_it {
             self.apply(vec![Command::Select(slot), Command::GoTo(SlideRef { presentation: slot, slide: first })]);

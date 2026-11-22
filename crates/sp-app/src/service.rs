@@ -138,6 +138,26 @@ impl Item {
         }
     }
 
+    /// Whether this is the same thing as another item, which a playlist takes only once: a song
+    /// with the same key, or a passage of the same verses (the same reference, in the same
+    /// numbering when both say) in the same translations, in the same order, however it is set
+    /// out. The same verses in other translations are another item.
+    pub fn same_as(&self, other: &Item) -> bool {
+        match (self, other) {
+            (Item::Song { key, .. }, Item::Song { key: other, .. }) => key == other,
+            (Item::Passage(one), Item::Passage(other)) => {
+                let numbering = match (&one.numbering, &other.numbering) {
+                    (Some(one), Some(other)) => one == other,
+                    _ => true,
+                };
+                one.lookup.trim().to_lowercase() == other.lookup.trim().to_lowercase()
+                    && numbering
+                    && one.rows.iter().map(|row| &row.bible).eq(other.rows.iter().map(|row| &row.bible))
+            }
+            _ => false,
+        }
+    }
+
     /// A kind of item a services file before version 3 can't hold.
     fn needs_version_3(&self) -> bool {
         matches!(self, Item::Media { .. } | Item::MediaPlaylist { .. } | Item::Placeholder { .. })
@@ -222,42 +242,42 @@ impl Services {
         &mut self.list[at]
     }
 
-    /// Adds an item to the end of the service in front and chooses it. A song already in the
-    /// service is chosen where it is, not added again.
-    pub fn add(&mut self, item: Item) {
-        if let Item::Song { key, .. } = &item
-            && let Some(at) =
-                self.front().items.iter().position(|have| matches!(have, Item::Song { key: k, .. } if k == key))
-        {
+    /// Where a playlist (by its place among the playlists) already has this item, which it then
+    /// takes only once: the same song, or the same passage in the same translations (see
+    /// [`Item::same_as`]).
+    pub fn place_of(&self, playlist: usize, item: &Item) -> Option<usize> {
+        self.list.get(playlist)?.items.iter().position(|have| have.same_as(item))
+    }
+
+    /// Adds an item to the end of the service in front and chooses it. A song or passage already
+    /// in the service is chosen where it is, not added again. Returns true if it was added.
+    pub fn add(&mut self, item: Item) -> bool {
+        if let Some(at) = self.place_of(self.front_at(), &item) {
             self.chosen = Some(at);
-            return;
+            return false;
         }
         let items = &mut self.front_mut().items;
         items.push(item);
         self.chosen = Some(self.front().items.len() - 1);
+        true
     }
 
-    /// Adds an item to the end of a playlist that need not be the one in front; a song already
-    /// in it is not added again. Returns true if it was added.
+    /// Adds an item to the end of a playlist that need not be the one in front; a song or
+    /// passage already in it is not added again. Returns true if it was added.
     pub fn add_to(&mut self, playlist: usize, item: Item) -> bool {
-        let Some(list) = self.list.get_mut(playlist) else { return false };
-        if let Item::Song { key, .. } = &item
-            && list.items.iter().any(|have| matches!(have, Item::Song { key: k, .. } if k == key))
-        {
+        if self.place_of(playlist, &item).is_some() {
             return false;
         }
+        let Some(list) = self.list.get_mut(playlist) else { return false };
         list.items.push(item);
         self.changed = true;
         true
     }
 
     /// Puts an item into the service in front at a place (`slot` items above it) and chooses
-    /// it. A song already in the service is chosen where it is, not added again.
+    /// it. A song or passage already in the service is chosen where it is, not added again.
     pub fn insert(&mut self, slot: usize, item: Item) {
-        if let Item::Song { key, .. } = &item
-            && let Some(at) =
-                self.front().items.iter().position(|have| matches!(have, Item::Song { key: k, .. } if k == key))
-        {
+        if let Some(at) = self.place_of(self.front_at(), &item) {
             self.chosen = Some(at);
             return;
         }
@@ -900,6 +920,43 @@ mod tests {
         assert_eq!(playlists.list[1].name, "Playlist 1");
     }
 
+    #[test]
+    fn a_passage_goes_in_a_playlist_once_in_the_same_translations() {
+        let in_bibles = |lookup: &str, bibles: &[&str]| {
+            let Item::Passage(mut saved) = passage(lookup) else { unreachable!() };
+            saved.rows = bibles
+                .iter()
+                .map(|bible| SavedRow { bible: (*bible).to_owned(), verse: None, reference: None })
+                .collect();
+            Item::Passage(saved)
+        };
+        let mut services = Services::default();
+        services.add_service();
+        services.show(0);
+        let john = in_bibles("John 3:16", &["kjv", "rst"]);
+        assert!(services.add(john.clone()));
+        assert!(!services.add(john.clone()), "the same passage, the same translations: once");
+        assert_eq!((services.front().items.len(), services.chosen), (1, Some(0)), "the one there is opened");
+        // Set out otherwise (verse numbers, boxes, a version), it is still the same passage.
+        let Item::Passage(mut set_out) = john.clone() else { unreachable!() };
+        set_out.show_verse_numbers = true;
+        set_out.rows[0].verse = Some("primary".to_owned());
+        set_out.lookup = " john 3:16".to_owned();
+        assert!(!services.add_to(0, Item::Passage(set_out)));
+        services.insert(0, john.clone());
+        assert_eq!(services.front().items.len(), 1, "nor put in at a place");
+        // The same verses in other translations, or in another order, are another item.
+        assert!(services.add(in_bibles("John 3:16", &["kjv"])));
+        assert!(services.add(in_bibles("John 3:16", &["rst", "kjv"])));
+        assert!(services.add(in_bibles("John 3:17", &["kjv", "rst"])));
+        assert_eq!(services.front().items.len(), 4);
+        // Another playlist takes it once too, and the front stays.
+        assert!(services.add_to(1, john.clone()));
+        assert!(!services.add_to(1, john.clone()));
+        assert_eq!((services.current, services.list[1].items.len()), (0, 1));
+        assert_eq!(services.place_of(1, &john), Some(0));
+    }
+
     fn song(key: &str) -> Item {
         Item::song(key.to_owned(), key.to_uppercase())
     }
@@ -918,16 +975,16 @@ mod tests {
     }
 
     #[test]
-    fn items_are_added_in_order_and_a_song_is_not_added_twice() {
+    fn items_are_added_in_order_and_a_song_or_passage_is_not_added_twice() {
         let mut services = Services::default();
         services.add(song("a"));
         services.add(passage("John 3:16"));
         services.add(song("a"));
         assert_eq!(services.front().items.len(), 2);
         assert_eq!(services.chosen, Some(0));
-        // The same passage may be wanted twice.
-        services.add(passage("John 3:16"));
-        assert_eq!(services.front().items.len(), 3);
+        // The same passage in the same translations is opened where it is, too.
+        assert!(!services.add(passage("John 3:16")));
+        assert_eq!((services.front().items.len(), services.chosen), (2, Some(1)));
         assert!(services.changed);
     }
 

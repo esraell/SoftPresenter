@@ -2005,18 +2005,14 @@ fn found_added_to_playlist(
     added: bool,
     name: &str,
 ) {
-    use crate::service::Item;
     crate::home::end_search(ctx, state);
     let Some(playlist) = state.services.list.get(index) else { return };
     let playlist_name = playlist.name.clone();
     let place = if added {
         playlist.items.len().checked_sub(1)
     } else {
-        // Only a song is ever refused, being there already: it is opened where it is.
-        playlist.items.iter().position(|have| match (have, item) {
-            (Item::Song { key: have, .. }, Item::Song { key, .. }) => have == key,
-            _ => have == item,
-        })
+        // Only a song or a passage is ever refused, being there already: it is opened where it is.
+        state.services.place_of(index, item)
     };
     if index == state.services.current && state.playlist_open {
         if let Some(place) = place {

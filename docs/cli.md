@@ -430,7 +430,7 @@ deleted)".
 |---|---|
 | `bible REFERENCE` | Looks a passage up on the Bible page, with the translations and options chosen there |
 | `bible REFERENCE --show` | The same, and puts its first verse on screen; `next` and `previous` then go verse by verse (with a slide a verse, on through the passage's chapter) |
-| `bible REFERENCE --add [to PLAYLIST]` | Looks it up and keeps it in a playlist, as the page's Add to button does |
+| `bible REFERENCE --add [to PLAYLIST]` | Looks it up and keeps it in a playlist, as the page's + Add does; the same passage in the same translations goes in once ("John 3:16 is already in Sunday.") |
 | `bible search WORDS` | Verses with those words, in the Bibles in use written in their alphabet (in the first translation when none is), each named in its Bible's language with its numbers; each line names its Bible when more than one has them |
 | `bible rows [BIBLE…]` | The translations shown, first to last; with names (short or whole), sets them |
 | `bible options [verses=on\|off break=on\|off translation=on\|off reference=verse\|passage\|last\|none]` | Verse numbers, a new slide for each verse, the translation's name, where the reference goes |

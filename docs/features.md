@@ -732,7 +732,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   book's name may be; a zip whose files overlap is refused), only plain files and folders are
   opened, and nothing a file declares or names is expanded or fetched.
 - One click keeps a passage: + Add puts it in the playlist in front (its tooltip names the
-  playlist; the ▾ beside it picks another), to be brought back with the same settings: the
+  playlist; the ▾ beside it lists the other playlists, then **New Playlist…**, which makes one
+  with the passage in it, brings it to the front and opens the Show view with its name ready to
+  type), to be brought back with the same settings. A playlist takes the same passage in the
+  same translations once: adding it again says "John 3:16 is already in Sunday", as `sp bible
+  REFERENCE --add` does; the same verses in other translations go in as another item. It keeps the
   passage asked for (John 3:16), never the chapter round it, named in the language it was typed
   in with that language's numbering, which is kept beside it, so it opens as the same verses
   whatever the Bibles' order or the language chosen (so does the find box's Command-Return, and
