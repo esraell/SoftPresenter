@@ -411,7 +411,7 @@ deleted)".
 | `audio play TRACK`, `audio pause`, `audio stop`, `audio next`, `audio previous` | The audio player (next and previous stay in the playing track's playlist) |
 | `audio volume 0-100`, `audio shuffle on\|off`, `audio through on\|off`, `audio crossfade SECONDS` | Volume; a random or the next track after one ends; a crossfade of 0 to 12 seconds |
 | `audio add FILE… [to PLAYLIST]` | Adds sound files |
-| `audio playlists`, `audio playlist new NAME`, `audio playlist delete NAME --yes` | Audio playlists (deleting one leaves the files) |
+| `audio playlists`, `audio playlist new NAME`, `audio playlist delete NAME --yes` | Audio playlists (deleting one leaves the files; the last one stays; a track of it that is playing plays on to its end) |
 
     $ sp audio playlist new Walk-in
     Made the audio playlist Walk-in.

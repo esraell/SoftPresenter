@@ -805,15 +805,18 @@ impl crate::App {
     fn audio_step(&mut self, forward: bool) -> Result<Reply, String> {
         let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
         let playing = state.audio_playing.track.ok_or("No track is playing.")?;
-        let (list, at) = state
-            .audio
-            .playlists
-            .iter()
-            .enumerate()
-            .find_map(|(list, p)| p.tracks.iter().position(|t| t.id == playing).map(|at| (list, at)))
-            .ok_or("The track playing isn't in a playlist.")?;
-        let tracks = &state.audio.playlists[list].tracks;
-        let next = if forward { (at + 1) % tracks.len() } else { (at + tracks.len() - 1) % tracks.len() };
+        let (list, at) = state.audio.place_of(playing).ok_or("The track playing isn't in a playlist.")?;
+        let tracks = &list.tracks;
+        if tracks.is_empty() {
+            return Err("The track playing isn't in a playlist.".to_owned());
+        }
+        // From one taken out while it plays, the track now at its place is the next.
+        let listed = tracks.iter().any(|track| track.id == playing);
+        let next = match (forward, listed) {
+            (true, true) => (at + 1) % tracks.len(),
+            (true, false) => at % tracks.len(),
+            (false, _) => (at + tracks.len() - 1) % tracks.len(),
+        };
         let (id, name) = (tracks[next].id, tracks[next].name.clone());
         self.with_state(|state| state.audio_request = Some(crate::home::AudioRequest::Play(id)));
         self.handle_audio();
@@ -846,7 +849,9 @@ impl crate::App {
                         names[at]
                     ));
                 }
-                state.audio.playlists.remove(at);
+                if !state.audio.remove_playlist(at, state.audio_playing.track) {
+                    return Err(format!("{} is the only audio playlist; there is always one.", names[at]));
+                }
                 state.audio.current = state.audio.current.min(state.audio.playlists.len().saturating_sub(1));
                 state.audio_changed = true;
                 Ok(Reply::done(format!("Deleted the audio playlist {}.", names[at])))

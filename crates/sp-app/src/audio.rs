@@ -59,6 +59,20 @@ pub struct Library {
     /// Seconds the next track fades in over the end of the one before; 0 for none.
     #[serde(default)]
     pub crossfade: f32,
+    /// The track playing, when it has been taken out of its playlist: it plays on to its end.
+    /// Not kept between runs.
+    #[serde(skip)]
+    pub leaving: Option<Leaving>,
+}
+
+/// A track taken out of its playlist (or with its playlist) while it played. It plays on to its
+/// end; then the playlist goes on as it now stands, from the place it had.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Leaving {
+    pub track: Track,
+    /// The playlist it was in, and its place there: the track now at that place comes next.
+    pub playlist: Uuid,
+    pub at: usize,
 }
 
 impl Default for Library {
@@ -69,6 +83,7 @@ impl Default for Library {
             shuffle: false,
             through: false,
             crossfade: 0.0,
+            leaving: None,
         }
     }
 }
@@ -100,22 +115,78 @@ impl Library {
         &mut self.playlists[at]
     }
 
-    /// A track in any playlist.
+    /// A track in any playlist, or the one playing that has been taken out of its playlist.
     pub fn track(&self, id: Uuid) -> Option<&Track> {
-        self.playlists.iter().flat_map(|playlist| playlist.tracks.iter()).find(|track| track.id == id)
+        self.playlists
+            .iter()
+            .flat_map(|playlist| playlist.tracks.iter())
+            .chain(self.leaving.as_ref().map(|leaving| &leaving.track))
+            .find(|track| track.id == id)
+    }
+
+    /// The playlist a track is in and its place there. For the one playing that has been taken
+    /// out, the playlist it was in and the place it had, where the track after it now is.
+    pub fn place_of(&self, id: Uuid) -> Option<(&Playlist, usize)> {
+        let listed = self
+            .playlists
+            .iter()
+            .find_map(|playlist| playlist.tracks.iter().position(|track| track.id == id).map(|at| (playlist, at)));
+        listed.or_else(|| {
+            let leaving = self.leaving.as_ref().filter(|leaving| leaving.track.id == id)?;
+            Some((self.playlists.iter().find(|playlist| playlist.id == leaving.playlist)?, leaving.at))
+        })
     }
 
     /// The track to play after this one in its playlist: the next (back to the first after the
     /// last), or with shuffle a random other one. `pick` chooses a number below the one given.
+    /// After the one playing that has been taken out, the playlist goes on as it now stands:
+    /// the track now at its place, or with shuffle any of them.
     pub fn after(&self, id: Uuid, pick: impl FnOnce(usize) -> usize) -> Option<&Track> {
-        let playlist = self.playlists.iter().find(|playlist| playlist.tracks.iter().any(|track| track.id == id))?;
-        let at = playlist.tracks.iter().position(|track| track.id == id)?;
+        let left = self.leaving.as_ref().is_some_and(|leaving| leaving.track.id == id)
+            && !self.playlists.iter().any(|playlist| playlist.tracks.iter().any(|track| track.id == id));
+        let (playlist, at) = self.place_of(id)?;
         let count = playlist.tracks.len();
-        if count < 2 {
-            return None;
-        }
-        let next = if self.shuffle { (at + 1 + pick(count - 1)) % count } else { (at + 1) % count };
+        let next = match (left, self.shuffle) {
+            (true, _) if count == 0 => return None,
+            (true, true) => pick(count),
+            (true, false) => at % count,
+            (false, _) if count < 2 => return None,
+            (false, true) => (at + 1 + pick(count - 1)) % count,
+            (false, false) => (at + 1) % count,
+        };
         playlist.tracks.get(next)
+    }
+
+    /// Takes a track out of the playlist shown. The one playing (`playing`) plays on to its end,
+    /// and the playlist then goes on from its place (see [`after`](Self::after)).
+    pub fn remove_track(&mut self, id: Uuid, playing: Option<Uuid>) {
+        let shown = self.shown_mut();
+        let Some(at) = shown.tracks.iter().position(|track| track.id == id) else { return };
+        let track = shown.tracks.remove(at);
+        let playlist = shown.id;
+        if playing == Some(id) {
+            self.leaving = Some(Leaving { track, playlist, at });
+        }
+    }
+
+    /// Deletes an audio playlist (by its place), unless it is the last. A track of it that is
+    /// playing plays on to its end, and nothing follows it.
+    pub fn remove_playlist(&mut self, at: usize, playing: Option<Uuid>) -> bool {
+        if self.playlists.len() <= 1 || at >= self.playlists.len() {
+            return false;
+        }
+        let gone = self.playlists.remove(at);
+        if let Some(place) = gone.tracks.iter().position(|track| Some(track.id) == playing) {
+            self.leaving = Some(Leaving { track: gone.tracks[place].clone(), playlist: gone.id, at: place });
+        }
+        true
+    }
+
+    /// Lets go of the track taken out while it played once the player no longer plays it.
+    pub fn forget_leaving(&mut self, playing: Option<Uuid>) {
+        if self.leaving.as_ref().is_some_and(|leaving| Some(leaving.track.id) != playing) {
+            self.leaving = None;
+        }
     }
 
     /// A name no audio playlist has.
@@ -352,6 +423,56 @@ mod tests {
         let solo = library.playlists[1].tracks[0].id;
         assert!(library.after(solo, |_| 0).is_none(), "a playlist of one has nothing after");
         assert_eq!(Library::from_json(&serde_json::to_string(&library).unwrap()), Some(library));
+    }
+
+    #[test]
+    fn a_track_taken_out_while_it_plays_plays_on_and_the_playlist_goes_on_as_it_now_stands() {
+        let tracks: Vec<Track> = ["One", "Two", "Three", "Four"]
+            .iter()
+            .map(|name| Track::of(PathBuf::from(format!("/m/{name}.mp3"))))
+            .collect();
+        let id = |at: usize| tracks[at].id;
+        let fresh = || Library {
+            playlists: vec![Playlist { tracks: tracks.clone(), ..Playlist::new("Walk-in".to_owned()) }],
+            ..Library::default()
+        };
+        // Two plays and is taken out: it is still known by name, and Three comes after it.
+        let mut library = fresh();
+        library.remove_track(id(1), Some(id(1)));
+        assert_eq!(library.shown().tracks.len(), 3);
+        assert_eq!(library.track(id(1)).map(|t| t.name.as_str()), Some("Two"));
+        assert_eq!(library.after(id(1), |_| 0).map(|t| t.id), Some(id(2)));
+        let (playlist, at) = library.place_of(id(1)).expect("the place it had");
+        assert_eq!((playlist.name.as_str(), at), ("Walk-in", 1));
+        // Taken out after it too: the playlist as it now stands goes on from that place.
+        library.remove_track(id(2), Some(id(1)));
+        assert_eq!(library.after(id(1), |_| 0).map(|t| t.id), Some(id(3)));
+        // With shuffle, any track left may follow.
+        library.shuffle = true;
+        assert_eq!(library.after(id(1), |_| 0).map(|t| t.id), Some(id(0)));
+        // Once something else plays (or nothing), it is let go.
+        library.forget_leaving(Some(id(1)));
+        assert!(library.leaving.is_some());
+        library.forget_leaving(Some(id(0)));
+        assert!(library.leaving.is_none() && library.track(id(1)).is_none());
+        // The last one taken out while it plays: the first follows.
+        let mut library = fresh();
+        library.remove_track(id(3), Some(id(3)));
+        assert_eq!(library.after(id(3), |_| 0).map(|t| t.id), Some(id(0)));
+        // A track that isn't playing just goes.
+        let mut library = fresh();
+        library.remove_track(id(0), Some(id(2)));
+        assert!(library.leaving.is_none());
+        // Its whole playlist deleted while it plays: it plays on, and nothing follows.
+        let mut library = fresh();
+        library.playlists.push(Playlist::new("Offering".to_owned()));
+        assert!(library.remove_playlist(0, Some(id(2))));
+        assert_eq!(library.track(id(2)).map(|t| t.name.as_str()), Some("Three"));
+        assert!(library.after(id(2), |_| 0).is_none());
+        assert!(!library.remove_playlist(0, None), "there is always one");
+        // Not kept between runs.
+        let again = Library::from_json(&serde_json::to_string(&library).unwrap()).unwrap();
+        assert!(again.leaving.is_none());
     }
 
     /// Plays a quiet file at no volume and checks the player moves through it, pauses and stops.

@@ -2753,11 +2753,9 @@ impl App {
             Some(AudioRequest::Stop) => self.player.stop(),
             Some(AudioRequest::Skip(seconds)) => self.player.skip(seconds),
             Some(AudioRequest::Volume(volume)) => self.player.set_volume(volume),
+            // The track playing plays on to its end; then the playlist goes on as it now stands.
             Some(AudioRequest::Remove(id)) => {
-                if state.audio_playing.track == Some(id) {
-                    self.player.stop();
-                }
-                state.audio.shown_mut().tracks.retain(|track| track.id != id);
+                state.audio.remove_track(id, state.audio_playing.track);
                 state.audio_changed = true;
             }
             None => {}
@@ -2802,6 +2800,8 @@ impl App {
             state.notice = Some(problem);
         }
         let playing = self.player.playing();
+        // A track taken out while it played is let go once something else plays, or nothing.
+        state.audio.forget_leaving(playing.track);
         let shown = |p: &audio::Playing| (p.track, p.position.as_secs(), p.paused);
         if shown(&playing) != shown(&state.audio_playing) {
             running.home_window.request_redraw();

@@ -437,8 +437,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   seconds and Next, the volume (up to 150%) with Mute and the level in numbers, then Play
   through to the next track, Shuffle, and a crossfade of up to ten seconds from one track into
   the next. Then the tracks, with how many and Add tracks…: a click plays one, a drag moves it
-  to another place, and its ⋯ has Play, Move Up, Move Down, Rename and Remove. F5, the Audio
-  key or Clear All stops it.
+  to another place, and its ⋯ has Play, Move Up, Move Down, Rename and Remove. Removing the track
+  that is playing (or deleting its playlist) lets it play to its end, its name still shown; then,
+  with Play through on, the playlist goes on as it now stands, from the place it had. F5, the
+  Audio key or Clear All stops it.
 - **Stage**: with more than one stage screen, a chooser of which (All stage screens to begin
   with); then every stage layout as a tile with a picture of what the stage would show in it
   now (drawn by the screens' renderer, again when the slide, the stage message or the clock's

@@ -1974,9 +1974,8 @@ fn audio_heading(ui: &mut egui::Ui, state: &mut HomeState) {
             "Delete",
         ) {
             Some(true) => {
-                if state.audio.playlists.len() > 1 {
-                    let at = state.audio.current.min(state.audio.playlists.len() - 1);
-                    state.audio.playlists.remove(at);
+                let at = state.audio.current.min(state.audio.playlists.len() - 1);
+                if state.audio.remove_playlist(at, state.audio_playing.track) {
                     state.audio.current = at.saturating_sub(1);
                     state.audio_changed = true;
                 }
@@ -2003,11 +2002,12 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         .or(shown_tracks.first().copied());
     let current = playing.track.or(ready);
     let mut ready_now = current;
-    // The playlist the current track is in, for Previous and Next.
-    let list: Vec<sp_model::Uuid> = current
-        .and_then(|id| state.audio.playlists.iter().find(|playlist| playlist.tracks.iter().any(|t| t.id == id)))
-        .map_or(shown_tracks.clone(), |playlist| playlist.tracks.iter().map(|track| track.id).collect());
-    let place = current.and_then(|id| list.iter().position(|have| *have == id));
+    // The playlist the current track is in, and its place there, for Previous and Next (for
+    // one taken out while it plays, the place it had).
+    let found = current.and_then(|id| state.audio.place_of(id));
+    let list: Vec<sp_model::Uuid> =
+        found.map_or(shown_tracks.clone(), |(playlist, _)| playlist.tracks.iter().map(|track| track.id).collect());
+    let place = found.map(|(_, at)| at);
     let muted_id = egui::Id::unique("audio muted from");
     let muted_from = ui.data(|data| data.get_temp::<f32>(muted_id)).filter(|_| state.audio_volume == 0.0);
 
