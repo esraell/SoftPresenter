@@ -24,8 +24,10 @@ feature changes, this page changes in the same commit.
   theme, a template, a stage layout, a group, an object, a message, a prop, a macro, an audio
   playlist or track): the name stays as it was shown, in the same letters and colour on the
   same spot, and is typed into there; only a thin grey edge round it says so, and nothing
-  beside it moves. A name longer than its room scrolls inside it. Return or a click elsewhere
-  keeps it; Escape puts the old name back.
+  beside it moves. A name longer than its room scrolls inside it (it opens at its end, where the
+  cursor is), and one cut short with … or set on two lines shows whole on one line while it is
+  typed. A box in Edit without a name of its own is listed by its first line of words and is
+  renamed from its own name. Return or a click elsewhere keeps it; Escape puts the old name back.
 - **Songs changed outside the app** (in a text editor, by a script or an agent) come in when the
   song is next opened: chosen in the list or a playlist, opened in the editor, or named in an
   `sp` command. The app never saves over a song or theme file changed since it read it: a bar
