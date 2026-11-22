@@ -248,8 +248,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   → and ↑ as ←: with nothing on screen they move the pick to the verse after or before
   (brought into sight; the passage's first when none is picked), putting nothing on; with
   something on screen they go on with it, as → and ← do, and Enter takes the pick. The slide
-  picked has a 2-point ink ring, its strip in ink and a small ink key cap for Enter after its
-  label (in words only or a table, its row has the chosen grey and a fine dim ring inside); never
+  picked has a 2-point ink ring and its strip in ink (in words only or a table, its row has the chosen grey and a fine dim ring inside); never
   orange, which is only for what is on screen, nor the blue of slides picked out to change several;
   it is brought into view, and the keyboard is the show's again. Enter puts it on screen;
   then Space, → and ← go on from it as from any slide. With nothing on screen, Space puts the
@@ -589,7 +588,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   without putting anything on screen. Only the verses in view are drawn, so the longest psalm
   costs no more than a short chapter. **Slides** shows the slides as the Bible theme draws them,
   at the Show view's size: with a slide a verse, the same chapter as the page, the passage's
-  slides in a fine faint ring (the verse picked in its ink ring with the Enter key cap, the verse
+  slides in a fine faint ring (the verse picked in its ink ring, the verse
   on screen in orange), so any verse can be clicked there too; made into one slide, that slide.
   Which of the two is kept between starts.
 - **What the operator reads follows the language typed; what the screens show does not.** A
