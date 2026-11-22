@@ -871,7 +871,8 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         const ORDER: [usize; 3] = [0, 2, 1];
         use crate::home::EditKind;
         // A slide, a theme or a prop opened some other way takes the stage layouts' place.
-        if state.editing.is_some() || state.theme_edit.is_some() {
+        let other_draft = state.editing.as_ref().is_some_and(|draft| !crate::stage_editor::is_stage(draft));
+        if other_draft || state.theme_edit.is_some() {
             state.stage_editor_open = false;
         }
         let kind = state.edit_kind();
@@ -1072,7 +1073,7 @@ fn open_edit_kind(show: &Show, state: &mut HomeState) {
                 state.editing = Some(draft);
             }
         }
-        // The stage layouts have no draft: the kind is open while this says so.
+        // The open layout's draft is made by the Edit view while this says it is open.
         EditKind::Stage => {
             state.editing = None;
             state.stage_editor_open = true;

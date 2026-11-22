@@ -3115,7 +3115,8 @@ impl App {
             let state = &r.home_state;
             state.editing.as_ref().filter(|_| state.theme_edit.is_none()).map(|draft| draft.at.presentation)
         });
-        if let Some(index) = opened.filter(|index| Some(*index) != self.edit_song && *index != props::PROP_SLOT) {
+        let own_slot = |index: usize| index == props::PROP_SLOT || index == stage::STAGE_SLOT;
+        if let Some(index) = opened.filter(|index| Some(*index) != self.edit_song && !own_slot(*index)) {
             self.freshen(index, true);
         }
         let Some(running) = self.running.as_mut() else { return };
@@ -3131,7 +3132,7 @@ impl App {
             .as_ref()
             .filter(|_| state.theme_edit.is_none())
             .map(|draft| draft.at.presentation)
-            .filter(|at| *at != props::PROP_SLOT);
+            .filter(|at| !own_slot(*at));
         if editing != self.edit_song {
             // The editor closed, or moved to another song: the slide's own steps went; the
             // song's go too if undoing them would lose a later change of the slide.
@@ -5684,11 +5685,16 @@ impl App {
         if editing == running.canvas_for {
             return;
         }
-        if let Some((_, slide)) = &editing {
+        if let Some((at, slide)) = &editing {
+            // A stage layout is drawn with the stage's plain look, as the editor works with it.
+            let stage_theme = (at.presentation == stage::STAGE_SLOT && running.home_state.theme_edit.is_none())
+                .then(|| running.home_state.stage_layouts.get(at.slide).map(stage::editor_theme))
+                .flatten();
             // A theme's layout is drawn with that theme; a slide with its presentation's.
-            let theme = match &running.home_state.theme_edit {
-                Some(edit) => self.themes.get(edit.index).unwrap_or(&self.theme),
-                None => song_theme.as_deref().unwrap_or(&self.theme),
+            let theme = match (&running.home_state.theme_edit, &stage_theme) {
+                (Some(edit), _) => self.themes.get(edit.index).unwrap_or(&self.theme),
+                (None, Some(stage)) => stage,
+                (None, None) => song_theme.as_deref().unwrap_or(&self.theme),
             };
             running.canvas = running.thumbs.canvas(&running.gpu, &mut running.egui_renderer, slide, theme);
         }

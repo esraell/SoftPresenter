@@ -328,6 +328,9 @@ pub struct EditDraft {
     /// Set when undo or redo has just changed the slide, so that change is not itself
     /// recorded as something to undo.
     pub stepped: bool,
+    /// True where several objects may share a role, as on a stage layout (two clocks): a copy
+    /// keeps its original's. Elsewhere a copy belongs to no theme box.
+    pub keeps_roles: bool,
 }
 
 impl EditDraft {
@@ -354,6 +357,7 @@ impl EditDraft {
             redo: Vec::new(),
             last_recorded: f64::NEG_INFINITY,
             stepped: false,
+            keeps_roles: false,
         })
     }
 
@@ -380,6 +384,7 @@ impl EditDraft {
             redo: Vec::new(),
             last_recorded: f64::NEG_INFINITY,
             stepped: false,
+            keeps_roles: false,
         }
     }
 
@@ -480,6 +485,7 @@ impl EditDraft {
             build_in: None,
             build_out: None,
             link: None,
+            shows: sp_model::StageShows::default(),
             gradient: None,
             shown_paragraphs: None,
             kind: ObjectKind::Text { text: "Text".to_owned(), style: TextStyle::default() },
@@ -510,6 +516,14 @@ impl EditDraft {
     pub fn add_image(&mut self, picture: &crate::images::Imported) {
         self.record();
         let object = Object::image(picture.file.clone(), picture.name.clone(), picture.width, picture.height);
+        self.selected = Some(object.id);
+        self.also.clear();
+        self.slide.objects.push(object);
+    }
+
+    /// Puts an object on the slide, in front of everything, selected.
+    pub fn add(&mut self, object: Object) {
+        self.record();
         self.selected = Some(object.id);
         self.also.clear();
         self.slide.objects.push(object);
@@ -602,7 +616,9 @@ impl EditDraft {
             let mut copy = object.clone();
             copy.id = Uuid::new_v4();
             // A copy belongs to no theme box: two boxes with one role would fight over it.
-            copy.role = None;
+            if !self.keeps_roles {
+                copy.role = None;
+            }
             if let Some(frame) = copy.frame.as_mut() {
                 frame.x += 40.0;
                 frame.y += 40.0;

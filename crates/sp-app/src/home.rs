@@ -436,9 +436,15 @@ pub struct HomeState {
     /// The stage layouts, and true when they have changed and are to be saved.
     pub stage_layouts: Vec<sp_model::ThemeTemplate>,
     pub stage_layouts_changed: bool,
-    /// True while the Stage Layouts window is open; the layout chosen in it, and its item chosen.
+    /// True while Edit › Stage is open: the open layout is then a draft in `editing` (made by
+    /// `stage_editor::prepare`). The layout to open first, by its place in the list, and an
+    /// object to pick when it opens (its place in the Objects list, front first).
     pub stage_editor_open: bool,
     pub stage_edit: (usize, Option<usize>),
+    /// A stage layout being renamed in the list, with its name so far, and whether that has
+    /// only just begun (so its field takes the keyboard once).
+    pub stage_rename: Option<(usize, String)>,
+    pub stage_rename_started: bool,
     /// True when the Program preview shows what the stage screens show, not the audience's.
     pub preview_stage: bool,
     /// The one screen the Program preview looks at (the small arrow in its head), drawn as that
@@ -1366,6 +1372,8 @@ impl Default for HomeState {
             stage_layouts_changed: false,
             stage_editor_open: false,
             stage_edit: (0, None),
+            stage_rename: None,
+            stage_rename_started: false,
             preview_stage: false,
             preview_screen: None,
             message_clip: None,
@@ -1407,7 +1415,11 @@ impl HomeState {
         if self.theme_edit.is_some() {
             Some(EditKind::Themes)
         } else if let Some(draft) = self.editing.as_ref() {
-            Some(if draft.at.presentation == crate::props::PROP_SLOT { EditKind::Props } else { EditKind::Slides })
+            Some(match draft.at.presentation {
+                crate::props::PROP_SLOT => EditKind::Props,
+                crate::stage::STAGE_SLOT => EditKind::Stage,
+                _ => EditKind::Slides,
+            })
         } else {
             self.stage_editor_open.then_some(EditKind::Stage)
         }
@@ -1655,12 +1667,10 @@ pub fn home_ui(
         }
     }
     library_search(ui, show, state, &mut commands);
+    // Edit › Stage edits the open layout as a draft, as the other kinds do.
+    crate::stage_editor::prepare(state);
     if state.editing.is_some() {
         edit_view(ui, show, state, theme, thumb, canvas, preview, &mut commands);
-        return commands;
-    }
-    if state.edit_kind() == Some(EditKind::Stage) {
-        stage_view(ui, show, state, preview, &mut commands);
         return commands;
     }
     crate::studio::library(ui, show, state, &mut commands);
@@ -1728,10 +1738,14 @@ fn edit_view(
     let theme_mode = state.theme_edit.is_some();
     let presentation = show.presentations().get(at.presentation);
     let prop_mode = at.presentation == crate::props::PROP_SLOT;
-    if presentation.is_none() && !theme_mode && !prop_mode {
+    // A stage layout is edited with the stage's plain look and nothing drawn behind it.
+    let stage_mode = at.presentation == crate::stage::STAGE_SLOT && !theme_mode;
+    let stage_theme = stage_mode.then(|| state.stage_layouts.get(at.slide).map(crate::stage::editor_theme)).flatten();
+    if presentation.is_none() && !theme_mode && !prop_mode && stage_theme.is_none() {
         state.editing = None;
         return;
     }
+    let theme = stage_theme.as_ref().unwrap_or(theme);
     // Another slide opened (or the same one again): the old draft's own steps went with it.
     if let Some(draft) = state.editing.as_ref()
         && draft.serial != state.edit_steps_draft
@@ -1752,7 +1766,12 @@ fn edit_view(
         let undo = command_key(input, egui::Key::Z, false);
         let redo = command_key(input, egui::Key::Z, true);
         let delete = !typing && (input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace));
-        let step = if input.modifiers.shift { 10.0 } else { 1.0 };
+        // On a stage layout the arrows move 10 and Shift one pixel, as the new design has it;
+        // on a slide, a template or a prop, still one, and Shift 10.
+        let step = match (stage_mode, input.modifiers.shift) {
+            (true, true) | (false, false) => 1.0,
+            (true, false) | (false, true) => 10.0,
+        };
         let mut nudge = (0.0, 0.0);
         if !typing {
             for (key, by) in [
@@ -1807,7 +1826,7 @@ fn edit_view(
                 draft.paste(&state.object_clip);
                 // Pasting again lands further on, not on top of the last copy.
                 state.object_clip = draft.copied(theme);
-            } else if copy && draft.selected.is_none() && !theme_mode && !prop_mode {
+            } else if copy && draft.selected.is_none() && !theme_mode && !prop_mode && !stage_mode {
                 // With no object selected, Copy takes the slides picked out in the list, or the
                 // slide itself, as it now is.
                 let mut picked: Vec<usize> = state
@@ -1830,6 +1849,7 @@ fn edit_view(
                 && *text == state.slide_clip_text
                 && !theme_mode
                 && !prop_mode
+                && !stage_mode
             {
                 // Slides copied go just after the one being edited.
                 state.slide_request = Some((draft.at, SlideRequest::PasteAfter(state.slide_clip.clone())));
@@ -2013,6 +2033,7 @@ fn edit_view(
     // With no object selected and nothing being typed, ↑ and ↓ open the slide before or after.
     if !theme_mode
         && !prop_mode
+        && !stage_mode
         && !typing
         && let Some(draft) = state.editing.as_ref().filter(|draft| draft.selected.is_none())
     {
@@ -2035,6 +2056,7 @@ fn edit_view(
     }
     let mut chosen_template = None;
     let mut open_prop = None;
+    let mut stage_request = None;
     // The left column, as wide here as in every other view.
     use crate::studio::Column;
     let left = egui::Panel::left("edit slides")
@@ -2050,6 +2072,8 @@ fn edit_view(
             theme_list(ui, state);
         } else if prop_mode {
             open_prop = prop_list(ui, state);
+        } else if stage_mode {
+            stage_request = crate::stage_editor::list(ui, state);
         } else if let Some(presentation) = presentation {
             Frame::new().fill(EDIT_HEADER).inner_margin(egui::Margin::symmetric(8, 5)).show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -2149,7 +2173,8 @@ fn edit_view(
                                 rename_done = Some(Some((object.id, name.clone())));
                             }
                         } else {
-                            let shown = if theme_mode { object.name.clone() } else { listed_name(object) };
+                            let shown =
+                                if theme_mode || stage_mode { object.name.clone() } else { listed_name(object) };
                             ui.painter().with_clip_rect(name_area).text(
                                 row.left_center() + vec2(32.0, 0.0),
                                 Align2::LEFT_CENTER,
@@ -2275,7 +2300,8 @@ fn edit_view(
                         }
                     }
                     if draft.slide.objects.is_empty() {
-                        ui.label(egui::RichText::new("   This slide is empty").size(12.0).color(DIM));
+                        let empty = if stage_mode { "   Nothing on this layout yet" } else { "   This slide is empty" };
+                        ui.label(egui::RichText::new(empty).size(12.0).color(DIM));
                     }
                     if let Some(id) = pick {
                         if extend {
@@ -2761,6 +2787,12 @@ fn edit_view(
     let surround = panel_frame(EDIT_SURROUND, 0).outer_margin(crate::studio::column_margin(Column::Middle));
     egui::CentralPanel::default().frame(surround).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        // On a stage layout, two lines at the foot: the keyboard edits here, and how.
+        if stage_mode {
+            let margin = egui::Margin { left: 20, right: 20, top: 10, bottom: 12 };
+            let hint = Frame::new().fill(EDIT_SURROUND).inner_margin(margin);
+            egui::Panel::bottom("stage hint").resizable(false).frame(hint).show(ui, crate::stage_editor::hint);
+        }
         egui::Panel::bottom("edit status").resizable(false).frame(panel_frame(EDIT_STATUS, 4)).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 16.0;
@@ -2917,7 +2949,15 @@ fn edit_view(
                 }
                 // A double click on a text box starts typing its words right there. A theme's
                 // boxes only ever say "Text", so there is nothing to type in them.
-                if response.double_clicked() && !for_theme && draft.selected.is_some() && draft.also.is_empty() {
+                // A stage item shows what it shows, not words typed in it.
+                let shows_item =
+                    stage_mode && draft.selected_object().is_some_and(|o| crate::stage::item_of(o).is_some());
+                if response.double_clicked()
+                    && !for_theme
+                    && !shows_item
+                    && draft.selected.is_some()
+                    && draft.also.is_empty()
+                {
                     draft.typing = draft.selected;
                     draft.typing_started = true;
                 }
@@ -3073,6 +3113,11 @@ fn edit_view(
             }
         }
 
+        // On a stage layout: its name, and one Add menu (with the items it can show live and
+        // the screens' pictures), Undo and Redo.
+        if stage_mode {
+            stage_tools(ui, state, inner, at.slide);
+        } else {
         // The object tools, the same for a song's slide and a theme's layout: a text box, the
         // shapes, and pictures and videos.
         let offset = -104.0;
@@ -3143,6 +3188,7 @@ fn edit_view(
         {
             draft.add_text();
         }
+        }
     });
     crate::studio::round_corners(ui, middle);
 
@@ -3182,6 +3228,13 @@ fn edit_view(
                     state.props_changed = true;
                 }
             }
+            // A stage layout: the layout takes the slide's objects.
+            None if stage_mode => {
+                if let Some(layout) = state.stage_layouts.get_mut(draft.at.slide) {
+                    *layout = crate::stage::with_slide(layout, &draft.slide);
+                    state.stage_layouts_changed = true;
+                }
+            }
             None => state.pending_edit = Some((draft.at, draft.slide.clone())),
         }
     }
@@ -3210,41 +3263,71 @@ fn edit_view(
         }
     } else if leave {
         state.editing = None;
+        state.stage_editor_open = false;
     } else if let Some(here) = chosen {
         state.editing = EditDraft::of(show, here);
     } else if let Some(prop) = open_prop
         && let Some(draft) = crate::studio::prop_draft(state, prop)
     {
         state.editing = Some(draft);
+    } else if let Some(request) = stage_request {
+        crate::stage_editor::apply(state, request);
     }
 }
 
-/// The Edit view on the stage layouts: the layouts down the left under the switch, the picture
-/// of the stage screen with its boxes in the middle, and the chosen box's settings in the right
-/// column, where the inspector is for a slide.
-fn stage_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, preview: Preview, commands: &mut Vec<Command>) {
-    use crate::studio::Column;
-    crate::stage_editor::prepare(state);
-    let left = egui::Panel::left("edit stage layouts")
-        .resizable(false)
-        .show_separator_line(false)
-        .exact_size(crate::studio::column_outer(crate::studio::LEFT_WIDTH))
-        .frame(crate::studio::column_frame(Column::Left));
-    let left = left.show(ui, |ui| {
-        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        crate::studio::edit_kinds(ui, state);
-        let lists = Frame::new().inner_margin(egui::Margin { left: 12, right: 12, top: 14, bottom: 12 });
-        lists.show(ui, |ui| {
-            ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
-            crate::stage_editor::list(ui, state);
-        });
+/// The tools over a stage layout's canvas: the layout's name at the left, and at the right Add
+/// (a menu of everything a layout can hold), Undo and Redo.
+fn stage_tools(ui: &mut egui::Ui, state: &mut HomeState, inner: Rect, layout: usize) {
+    let y = inner.min.y + 22.0;
+    let redo_bar = Rect::from_min_size(pos2(inner.max.x - 72.0, y - 15.0), vec2(72.0, 30.0));
+    let undo_bar = redo_bar.translate(vec2(-80.0, 0.0));
+    let add_bar = Rect::from_min_size(pos2(undo_bar.min.x - 88.0, y - 15.0), vec2(80.0, 30.0));
+    let name = state.stage_layouts.get(layout).map(|layout| layout.name.clone()).unwrap_or_default();
+    let room = Rect::from_min_max(pos2(inner.min.x, inner.min.y), pos2(add_bar.min.x - 14.0, inner.min.y + 44.0));
+    let title = ui.painter().with_clip_rect(room).text(
+        pos2(inner.min.x, y),
+        Align2::LEFT_CENTER,
+        name,
+        crate::studio::semibold(16.0),
+        crate::studio::TEXT,
+    );
+    if title.max.x + 110.0 < room.max.x {
+        let at = pos2(title.max.x + 8.0, y + 1.0);
+        crate::studio::cap(ui, at, Align2::LEFT_CENTER, "Stage layout", crate::studio::TEXT_FAINT);
+    }
+    let add = ui.interact(add_bar, ui.scope_id().with("stage add"), Sense::click());
+    crate::studio::paint_button(ui.painter(), add_bar, add.hovered());
+    let font = crate::studio::semibold(12.5);
+    ui.painter().text(add_bar.center(), Align2::CENTER_CENTER, "Add ▾", font.clone(), crate::studio::TEXT);
+    let add = add.on_hover_text("Add words, a shape, a picture, or something the stage shows live");
+    let mut wants_picture = false;
+    egui::Popup::menu(&add).show(|ui| {
+        if let Some(draft) = state.editing.as_mut() {
+            wants_picture = crate::stage_editor::add_menu(ui, draft);
+        }
     });
-    crate::studio::round_corners(ui, crate::studio::column_panel(left.response.rect, Column::Left));
-    crate::studio::right_column(ui, show, state, preview, commands, crate::stage_editor::item);
-    let middle = crate::studio::column_panel(ui.available_rect_before_wrap(), Column::Middle);
-    let frame = panel_frame(CANVAS, 16).outer_margin(crate::studio::column_margin(Column::Middle));
-    egui::CentralPanel::default().frame(frame).show(ui, |ui| crate::stage_editor::canvas(ui, state));
-    crate::studio::round_corners(ui, middle);
+    if wants_picture {
+        state.picture_request = true;
+    }
+    let (can_undo, can_redo) =
+        state.editing.as_ref().map_or((false, false), |draft| (draft.can_undo(), draft.can_redo()));
+    for (bar, words, enabled, hint, back) in [
+        (undo_bar, "Undo", can_undo, "Undo the last change (Command-Z)", true),
+        (redo_bar, "Redo", can_redo, "Redo it (Shift-Command-Z)", false),
+    ] {
+        let id = ui.scope_id().with(("stage history", words));
+        let look = crate::studio::Flat::Plain;
+        let pressed = crate::studio::flat_button(ui, bar, id, words, font.clone(), look, enabled);
+        if pressed.on_hover_text(hint).clicked()
+            && let Some(draft) = state.editing.as_mut()
+        {
+            if back {
+                draft.undo();
+            } else {
+                draft.redo();
+            }
+        }
+    }
 }
 
 /// The props, in the Edit view's left column while a prop is edited: a click opens another.
@@ -3914,7 +3997,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
 }
 
 /// The key that adds each shape in the editor, in the order of `Shape::ALL`.
-const SHAPE_KEYS: [char; 10] = ['O', 'R', 'E', 'G', 'L', 'H', 'P', 'S', 'D', 'A'];
+pub const SHAPE_KEYS: [char; 10] = ['O', 'R', 'E', 'G', 'L', 'H', 'P', 'S', 'D', 'A'];
 
 /// Room after a song's title, for the field it turns into when renamed to fit in.
 const TITLE_ROOM: f32 = 12.0;
@@ -6956,11 +7039,15 @@ mod tests {
         (state.theme_edit, state.editing) = (None, None);
         frame_with(&ctx, &show, &mut state, None);
         assert_eq!(state.edit_kind(), Some(EditKind::Props));
-        // Stage has no slide of its own open; a slide opened after it takes its place.
+        // Stage opens the first layout in the editor, as a slide of objects; a slide opened after
+        // it takes its place.
         state.edit_kind_request = Some(EditKind::Stage);
         frame_with(&ctx, &show, &mut state, None);
         assert_eq!(state.edit_kind(), Some(EditKind::Stage));
-        assert!(state.editing.is_none() && !state.stage_layouts.is_empty());
+        assert!(!state.stage_layouts.is_empty());
+        let draft = state.editing.as_ref().expect("the layout's draft");
+        assert_eq!((draft.at.presentation, draft.at.slide), (crate::stage::STAGE_SLOT, 0));
+        assert_eq!(draft.slide.objects.len(), state.stage_layouts[0].objects.len());
         state.edit_kind_request = Some(EditKind::Slides);
         frame_with(&ctx, &show, &mut state, None);
         frame_with(&ctx, &show, &mut state, None);

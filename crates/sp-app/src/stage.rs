@@ -1,8 +1,26 @@
 //! What a stage screen shows, in a layout of its own: the words on screen now, the next
-//! slide's words, the time, a timer, the slide's notes, the song's title and group, and the
-//! stage message. Layouts are kept in `stage-layouts.json`; each stage screen picks one.
+//! slide's words, the time, a timer, the slide's notes, the song's title and group, the stage
+//! message, and a picture of what an audience screen shows. Layouts are kept in
+//! `stage-layouts.json`; each stage screen picks one.
+//!
+//! A layout is a list of objects, as a slide is, edited with the slide editor: each item (the
+//! words now, the clock…) is a text object whose role says what it shows, beside shapes,
+//! pictures, words of its own and screen pictures, in order from the back. It is kept as a
+//! theme's template (`ThemeTemplate`): its `objects` are the layout's objects, each item with
+//! its whole look and no words of its own; its `boxes` hold, for each item, the look and place
+//! of its first object, as layouts saved before items were objects held them. A layout saved
+//! then has boxes and no item objects: each of its items becomes an object with its box's look
+//! and place, in the order they were drawn then, so it looks as it did.
 
-use sp_model::{Align, BoxStyle, Object, Rgba, Role, Slide, SlideRect, Theme, ThemeTemplate, Uuid, VAlign};
+use std::borrow::Cow;
+
+use sp_model::{
+    Align, BoxStyle, Object, ObjectKind, Rgba, Role, Slide, SlideRect, TextStyle, Theme, ThemeTemplate, Uuid, VAlign,
+};
+
+/// Where the Edit view's draft of a stage layout says it is from: no song, and the layout by
+/// its place in the list as the slide (as a prop's draft has `PROP_SLOT`).
+pub const STAGE_SLOT: usize = usize::MAX - 2;
 
 const NOW: &str = "now";
 const NEXT_LABEL: &str = "next-label";
@@ -64,7 +82,7 @@ pub fn builtin_layouts() -> Vec<ThemeTemplate> {
     let clock = || item_box(CLOCK, rect(1360.0, 24.0, 520.0, 90.0), 64.0, white, Align::Right, VAlign::Middle);
     let timer = || item_box(TIMER, rect(60.0, 24.0, 900.0, 90.0), 64.0, green, Align::Left, VAlign::Middle);
     let message = || item_box(MESSAGE, rect(0.0, 120.0, 1920.0, 110.0), 64.0, white, Align::Center, VAlign::Middle);
-    vec![
+    [
         ThemeTemplate {
             objects: Vec::new(),
             songs: true,
@@ -123,14 +141,164 @@ pub fn builtin_layouts() -> Vec<ThemeTemplate> {
             ],
         },
     ]
+    .iter()
+    .map(normalized)
+    .collect()
 }
 
-/// A layout as a theme, to draw a stage screen with.
+/// The order the items were drawn in before they were objects, back first: a layout saved
+/// then has its items made into objects in this order, so they overlap as they did.
+const DRAWN_BEFORE: [&str; 9] = [CLOCK, TIMER, NOW, NOTES, TITLE, GROUP, NEXT_LABEL, NEXT, MESSAGE];
+
+/// True when a role is one of the items a stage layout can show.
+pub fn is_item(role: &Role) -> bool {
+    ITEMS.iter().any(|(have, _, _)| *have == role.0)
+}
+
+/// The item a text object shows, if it shows one.
+pub fn item_of(object: &Object) -> Option<&'static str> {
+    let role = object.role.as_ref().filter(|_| matches!(object.kind, ObjectKind::Text { .. }))?;
+    ITEMS.iter().find(|(have, _, _)| *have == role.0).map(|(have, _, _)| *have)
+}
+
+/// An id for an item's object that is the same at every start until the layout is saved, so
+/// a layout from before items were objects is the same each time it is read.
+fn item_id(layout: Uuid, role: &str) -> Uuid {
+    let mut hash: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
+    for byte in role.bytes() {
+        hash ^= u128::from(byte);
+        hash = hash.wrapping_mul(0x0000_0000_0100_0000_0000_0000_0000_013b);
+    }
+    Uuid::from_u128(layout.as_u128() ^ hash)
+}
+
+/// The object an item's box stands for, as a layout from before items were objects has it:
+/// the box's place and whole look, and no words.
+fn item_object(layout: Uuid, style: &BoxStyle) -> Object {
+    let mut object = Object::text(style.role.clone(), "");
+    object.id = item_id(layout, &style.role.0);
+    object.name = item_name(&style.role).to_owned();
+    object.frame = Some(style.rect);
+    if let ObjectKind::Text { style: own, .. } = &mut object.kind {
+        *own = TextStyle::all(style);
+    }
+    object
+}
+
+/// A layout's objects, back first: those it keeps, then an object for each item it has a box
+/// for and no object (a layout saved before items were objects), in the order they were drawn.
+pub fn objects(layout: &ThemeTemplate) -> Cow<'_, [Object]> {
+    let has_object = |role: &str| layout.objects.iter().any(|object| item_of(object) == Some(role));
+    let missing: Vec<&BoxStyle> = DRAWN_BEFORE
+        .iter()
+        .filter(|role| !has_object(role))
+        .filter_map(|role| layout.boxes.iter().find(|style| style.role.0 == *role))
+        .collect();
+    if missing.is_empty() {
+        return Cow::Borrowed(&layout.objects);
+    }
+    let mut all = layout.objects.clone();
+    all.extend(missing.into_iter().map(|style| item_object(layout.id, style)));
+    Cow::Owned(all)
+}
+
+/// The layout with an object for each of its items (see [`objects`]).
+pub fn normalized(layout: &ThemeTemplate) -> ThemeTemplate {
+    match objects(layout) {
+        Cow::Borrowed(_) => layout.clone(),
+        Cow::Owned(objects) => ThemeTemplate { objects, ..layout.clone() },
+    }
+}
+
+/// The look an item's words have in the editor before anything is changed: the plain stage
+/// look, at the item's place. The editor keeps each object's own look as its difference from
+/// this, which does not change while it is open, so undo gives back the look it took away.
+fn editor_box(role: Role, rect: SlideRect, min_size: f32) -> BoxStyle {
+    BoxStyle { role, rect, min_size, ..base_box() }
+}
+
+/// The theme the editor works with on a layout: the plain stage look for every item and for
+/// words of its own, and nothing drawn behind (the layout's objects are all on the slide).
+pub fn editor_theme(layout: &ThemeTemplate) -> Theme {
+    let mut boxes = vec![base_box()];
+    boxes.extend(layout.boxes.iter().map(|style| editor_box(style.role.clone(), style.rect, style.min_size)));
+    Theme {
+        id: Uuid::from_u128(0x7374_6167_6500_0000_0000_0000_0000_0002),
+        name: "Stage".to_owned(),
+        templates: vec![ThemeTemplate { boxes, objects: Vec::new(), ..layout.clone() }],
+        background: None,
+        background_picture: None,
+    }
+}
+
+/// A layout as a slide for the editor: its objects, each item showing words that say what it
+/// is.
+pub fn as_slide(layout: &ThemeTemplate) -> Slide {
+    let objects = objects(layout)
+        .iter()
+        .map(|object| {
+            let mut object = object.clone();
+            let (item, shows) = (item_of(&object), object.shows);
+            if let (Some(item), ObjectKind::Text { text, .. }) = (item, &mut object.kind) {
+                *text = sample_for(item, &shows);
+            }
+            object
+        })
+        .collect();
+    Slide { template: Some(layout.id), ..Slide::new(objects) }
+}
+
+/// The layout as the editor left that slide: its objects as they are on it, each text object
+/// with its whole look (an item with no words of its own), and each item's box following its
+/// first object, for anything that reads the boxes.
+pub fn with_slide(layout: &ThemeTemplate, slide: &Slide) -> ThemeTemplate {
+    let mut boxes: Vec<BoxStyle> = Vec::new();
+    let mut objects = Vec::with_capacity(slide.objects.len());
+    for object in &slide.objects {
+        let mut kept = object.clone();
+        kept.shown_paragraphs = None;
+        let item = item_of(object);
+        if let ObjectKind::Text { text, style } = &mut kept.kind {
+            let role = object.role.clone().unwrap_or_else(Role::primary);
+            let rect = object.frame.unwrap_or(SlideRect { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 });
+            let min_size = layout.style_for(&role).map_or(30.0, |style| style.min_size);
+            let look = style.over(&editor_box(role.clone(), rect, min_size));
+            *style = TextStyle::all(&look);
+            if let Some(item) = item {
+                text.clear();
+                if !boxes.iter().any(|have| have.role.0 == item) {
+                    let mut mirror = layout
+                        .style_for(&role)
+                        .cloned()
+                        .unwrap_or_else(|| item_box(item, rect, look.size, look.fill, look.align, look.valign));
+                    mirror = style.over(&mirror);
+                    mirror.rect = rect;
+                    boxes.push(mirror);
+                }
+            }
+        }
+        objects.push(kept);
+    }
+    // The boxes keep the order they had, new ones after; a box for something that is not an
+    // item (none are made) is kept as it was.
+    let place = |style: &BoxStyle| layout.boxes.iter().position(|have| have.role == style.role).unwrap_or(usize::MAX);
+    boxes.sort_by_key(place);
+    boxes.extend(layout.boxes.iter().filter(|style| !is_item(&style.role)).cloned());
+    ThemeTemplate { boxes, objects, ..layout.clone() }
+}
+
+/// A layout as a theme, to draw a stage screen with: the layout with its objects (the stage's
+/// slide carries each of them itself, so none is drawn behind it twice), each item's box, and
+/// the plain stage look for words of its own.
 pub fn theme_for(layout: &ThemeTemplate) -> Theme {
+    let mut layout = normalized(layout);
+    if layout.style_for(&Role::primary()).is_none() {
+        layout.boxes.push(base_box());
+    }
     Theme {
         id: Uuid::from_u128(0x7374_6167_6500_0000_0000_0000_0000_0001),
         name: "Stage".to_owned(),
-        templates: vec![layout.clone()],
+        templates: vec![layout],
         background: None,
         background_picture: None,
     }
@@ -147,7 +315,13 @@ pub fn layout_for(layouts: &[ThemeTemplate], wanted: Option<Uuid>) -> ThemeTempl
 
 /// A new layout, laid out like the first built-in one, with ids of its own.
 pub fn new_layout(name: String) -> ThemeTemplate {
-    ThemeTemplate { id: Uuid::new_v4(), name, ..builtin_layouts().remove(0) }
+    copy_of(&builtin_layouts().remove(0), name)
+}
+
+/// A copy of a layout under another name, with ids of its own.
+pub fn copy_of(layout: &ThemeTemplate, name: String) -> ThemeTemplate {
+    let objects = objects(layout).iter().map(|object| Object { id: Uuid::new_v4(), ..object.clone() }).collect();
+    ThemeTemplate { id: Uuid::new_v4(), name, objects, bible: false, ..layout.clone() }
 }
 
 fn file() -> Option<std::path::PathBuf> {
@@ -158,9 +332,15 @@ fn file() -> Option<std::path::PathBuf> {
 pub fn load_layouts() -> Vec<ThemeTemplate> {
     file()
         .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| serde_json::from_str::<Vec<ThemeTemplate>>(&text).ok())
-        .filter(|layouts| !layouts.is_empty())
+        .and_then(|text| read_layouts(&text))
         .unwrap_or_else(builtin_layouts)
+}
+
+/// Layouts from a file's words, each with an object for every item; `None` when there are none
+/// or they cannot be read.
+fn read_layouts(text: &str) -> Option<Vec<ThemeTemplate>> {
+    let layouts = serde_json::from_str::<Vec<ThemeTemplate>>(text).ok()?;
+    (!layouts.is_empty()).then(|| layouts.iter().map(normalized).collect())
 }
 
 pub fn save_layouts(layouts: &[ThemeTemplate]) -> Result<(), String> {
@@ -227,9 +407,83 @@ fn words(slide: &Slide) -> String {
         .join("\n")
 }
 
-/// The stage screen's picture as a slide: the time, the words on screen now, the next slide's
-/// words, the first running timer, the slide's notes, the song's title and group, and the stage
-/// message if one is showing: those of them the layout has a box for.
+/// The time on a clock item, in the form it asks for: on a 12-hour clock without seconds, as
+/// stage screens always showed it, unless it says otherwise.
+fn clock_text(shows: &sp_model::StageShows) -> String {
+    let form = match (shows.hours_24, shows.seconds) {
+        (false, false) => "%-I:%M",
+        (false, true) => "%-I:%M:%S",
+        (true, false) => "%H:%M",
+        (true, true) => "%H:%M:%S",
+    };
+    chrono::Local::now().format(form).to_string()
+}
+
+/// The words an item stands in with in the editor.
+fn sample_for(item: &str, shows: &sp_model::StageShows) -> String {
+    match item {
+        CLOCK => match (shows.hours_24, shows.seconds) {
+            (false, false) => "10:42",
+            (false, true) => "10:42:15",
+            (true, false) => "22:42",
+            (true, true) => "22:42:15",
+        }
+        .to_owned(),
+        NOTES if shows.lines > 0 => {
+            (1..=shows.lines).map(|line| format!("Line {line} of the notes")).collect::<Vec<_>>().join("\n")
+        }
+        other => item_sample(&Role(other.to_owned())).to_owned(),
+    }
+}
+
+/// The first `lines` lines of some words, or all of them for 0.
+fn first_lines(text: &str, lines: u8) -> String {
+    if lines == 0 {
+        return text.to_owned();
+    }
+    text.lines().take(usize::from(lines)).collect::<Vec<_>>().join("\n")
+}
+
+/// What an item shows now, or `None` when it has nothing to show (no timer running, no next
+/// slide…): then it is left off the stage, fill and all.
+fn item_value(
+    item: &str,
+    shows: &sp_model::StageShows,
+    now: Option<&Slide>,
+    next: Option<&Slide>,
+    overlay: &crate::output::Overlay,
+    about: &About,
+) -> Option<String> {
+    match item {
+        CLOCK => Some(clock_text(shows)),
+        TIMER => {
+            let timer = match shows.timer {
+                Some(id) => overlay.timers.iter().find(|timer| timer.id == id),
+                None => overlay.timers.iter().find(|timer| timer.running()),
+            }?;
+            let value = timer.text(std::time::Instant::now(), crate::timers::seconds_into_day());
+            Some(format!("{}  {value}", timer.name))
+        }
+        NOW => now.map(words),
+        NOTES => now
+            .and_then(|now| now.notes.as_deref())
+            .filter(|notes| !notes.trim().is_empty())
+            .map(|notes| first_lines(notes, shows.lines)),
+        TITLE => about.title.clone(),
+        GROUP => about.group.clone().filter(|group| !group.trim().is_empty()),
+        NEXT_LABEL => next.map(|_| "NEXT".to_owned()),
+        NEXT => next.map(words),
+        MESSAGE => overlay.stage_message.clone().filter(|message| !message.trim().is_empty()),
+        _ => None,
+    }
+}
+
+/// The stage screen's picture as a slide: the layout's objects, back first, each item showing
+/// what it shows now (the time, the words on screen now, the next slide's words, a timer, the
+/// slide's notes, the song's title and group, the stage message); an item with nothing to show
+/// is hidden, box and fill and all (it is still on the slide, so the layout's copy of it, drawn
+/// behind a slide's objects, is not drawn either). Linked words of the layout's own (the date,
+/// say) are filled in too.
 pub fn slide(
     now: Option<&Slide>,
     next: Option<&Slide>,
@@ -237,37 +491,39 @@ pub fn slide(
     about: &About,
     layout: &ThemeTemplate,
 ) -> Slide {
-    let time = chrono::Local::now().format("%-I:%M").to_string();
-    let mut objects = vec![Object::text(Role(CLOCK.to_owned()), time)];
-    let instant = std::time::Instant::now();
-    if let Some(timer) = overlay.timers.iter().find(|timer| timer.running()) {
-        let value = timer.text(instant, crate::timers::seconds_into_day());
-        objects.push(Object::text(Role(TIMER.to_owned()), format!("{}  {value}", timer.name)));
-    }
-    if let Some(now) = now {
-        objects.push(Object::text(Role(NOW.to_owned()), words(now)));
-        if let Some(notes) = now.notes.as_deref().filter(|notes| !notes.trim().is_empty()) {
-            objects.push(Object::text(Role(NOTES.to_owned()), notes));
+    let values = crate::links::Values {
+        timers: &overlay.timers,
+        title: about.title.as_deref(),
+        group: about.group.as_deref(),
+        next,
+        stage_message: overlay.stage_message.as_deref(),
+        copyright: overlay.copyright.as_deref(),
+    };
+    let empty = Slide::new(Vec::new());
+    let mut shown = Vec::new();
+    for object in objects(layout).iter() {
+        let mut object = object.clone();
+        match item_of(&object).filter(|_| !object.hidden) {
+            Some(item) => {
+                let value = item_value(item, &object.shows, now, next, overlay, about);
+                object.hidden = value.is_none();
+                if let ObjectKind::Text { text, .. } = &mut object.kind {
+                    *text = value.unwrap_or_default();
+                }
+                // The stage message stands out in red, unless its box has a fill of its own.
+                if item == MESSAGE && object.fill.is_none() {
+                    object.fill = Some(Rgba::rgb(190, 30, 30));
+                }
+            }
+            None => {
+                if let (Some(link), ObjectKind::Text { text, .. }) = (object.link, &mut object.kind) {
+                    *text = crate::links::value(link, now.unwrap_or(&empty), &values);
+                }
+            }
         }
+        shown.push(object);
     }
-    if let Some(title) = about.title.as_deref() {
-        objects.push(Object::text(Role(TITLE.to_owned()), title));
-    }
-    if let Some(group) = about.group.as_deref().filter(|group| !group.trim().is_empty()) {
-        objects.push(Object::text(Role(GROUP.to_owned()), group));
-    }
-    if let Some(next) = next {
-        objects.push(Object::text(Role(NEXT_LABEL.to_owned()), "NEXT"));
-        objects.push(Object::text(Role(NEXT.to_owned()), words(next)));
-    }
-    if let Some(message) = overlay.stage_message.as_deref().filter(|message| !message.trim().is_empty()) {
-        let mut banner = Object::text(Role(MESSAGE.to_owned()), message);
-        banner.fill = Some(Rgba::rgb(190, 30, 30));
-        objects.push(banner);
-    }
-    // An item the layout has no box for would be drawn in its first box, over what is there.
-    objects.retain(|object| object.role.as_ref().is_some_and(|role| layout.style_for(role).is_some()));
-    Slide { template: Some(layout.id), ..Slide::new(objects) }
+    Slide { template: Some(layout.id), ..Slide::new(shown) }
 }
 
 #[cfg(test)]
@@ -327,7 +583,14 @@ mod tests {
         assert_eq!(text(NEXT).as_deref(), Some("Two"));
         assert!(text(CLOCK).is_some_and(|time| time.contains(':')));
         // Nothing on screen and nothing next: only the time.
-        assert_eq!(slide(None, None, &crate::output::Overlay::default(), &none, layout).objects.len(), 1);
+        assert_eq!(
+            slide(None, None, &crate::output::Overlay::default(), &none, layout)
+                .objects
+                .iter()
+                .filter(|o| !o.hidden)
+                .count(),
+            1
+        );
         // A running timer and a stage message show too.
         let mut timer = crate::timers::Timer::new("Sermon".to_owned());
         timer.start(std::time::Instant::now());
@@ -393,5 +656,261 @@ mod tests {
             serde_json::from_str::<Vec<ThemeTemplate>>(&serde_json::to_string(&layouts).unwrap()).unwrap(),
             layouts
         );
+    }
+}
+
+/// Stage layouts as objects: old layouts, the editor's work on them, and screen pictures.
+#[cfg(test)]
+mod object_tests {
+    use super::*;
+    use crate::editor::EditDraft;
+
+    /// The stage layouts as the app saved them before items were objects (the four built in
+    /// and one changed by hand, with a shape behind and the stage message moved to the back of
+    /// its boxes), written by that version's own code.
+    const SAVED_BEFORE: &str = include_str!("testdata/stage-layouts-before-objects.json");
+
+    /// What that version's stage screens were given for each of those layouts, with a slide on
+    /// screen and one next, then with neither: each item's role, words and fill, in the order
+    /// drawn. Taken from that version's `slide`; the time and the timer's count stand as TIME
+    /// and TIMER.
+    const SHOWN_BEFORE: &str = r#"Words and Next: clock=TIME/None | timer=Some("Sermon  TIMER")/None | now=Some("One\nОдин")/None | next-label=Some("NEXT")/None | next=Some("Two")/None | stage-message=Some("Wrap up")/Some(Rgba { r: 190, g: 30, b: 30, a: 255 })
+Words and Next: clock=TIME/None | timer=Some("Sermon  TIMER")/None | stage-message=Some("Wrap up")/Some(Rgba { r: 190, g: 30, b: 30, a: 255 })
+Words Only: clock=TIME/None | now=Some("One\nОдин")/None | stage-message=Some("Wrap up")/Some(Rgba { r: 190, g: 30, b: 30, a: 255 })
+Words Only: clock=TIME/None | stage-message=Some("Wrap up")/Some(Rgba { r: 190, g: 30, b: 30, a: 255 })
+Words and Notes: clock=TIME/None | now=Some("One\nОдин")/None | notes=Some("Key change")/None | group=Some("Chorus")/None | stage-message=Some("Wrap up")/Some(Rgba { r: 190, g: 30, b: 30, a: 255 })
+Words and Notes: clock=TIME/None | group=Some("Chorus")/None | stage-message=Some("Wrap up")/Some(Rgba { r: 190, g: 30, b: 30, a: 255 })
+Clock and Timer: clock=TIME/None | timer=Some("Sermon  TIMER")/None | song-title=Some("Song")/None | stage-message=Some("Wrap up")/Some(Rgba { r: 190, g: 30, b: 30, a: 255 })
+Clock and Timer: clock=TIME/None | timer=Some("Sermon  TIMER")/None | song-title=Some("Song")/None | stage-message=Some("Wrap up")/Some(Rgba { r: 190, g: 30, b: 30, a: 255 })
+Band: clock=TIME/None | timer=Some("Sermon  TIMER")/None | now=Some("One\nОдин")/None | notes=Some("Key change")/None | next-label=Some("NEXT")/None | next=Some("Two")/None | stage-message=Some("Wrap up")/Some(Rgba { r: 190, g: 30, b: 30, a: 255 })
+Band: clock=TIME/None | timer=Some("Sermon  TIMER")/None | stage-message=Some("Wrap up")/Some(Rgba { r: 190, g: 30, b: 30, a: 255 })"#;
+
+    fn song() -> sp_model::Presentation {
+        let mut song = sp_model::parse_song_text("S", "[Chorus]\nOne\n--\nОдин\n\nTwo\n");
+        song.groups[0].slides[0].notes = Some("Key change".to_owned());
+        song
+    }
+
+    fn overlay() -> crate::output::Overlay {
+        let mut timer = crate::timers::Timer::new("Sermon".to_owned());
+        timer.start(std::time::Instant::now());
+        crate::output::Overlay { timers: vec![timer], stage_message: Some("Wrap up".to_owned()), ..Default::default() }
+    }
+
+    fn about() -> About {
+        About { title: Some("Song".to_owned()), group: Some("Chorus".to_owned()) }
+    }
+
+    /// One line of what a stage slide shows, as `SHOWN_BEFORE` has it.
+    fn line(name: &str, shown: &Slide) -> String {
+        let parts: Vec<String> = shown
+            .objects
+            .iter()
+            .filter(|object| item_of(object).is_some() && !object.hidden)
+            .map(|object| {
+                let role = &object.role.as_ref().expect("an item").0;
+                let words = match object.as_text() {
+                    Some(text) if role == CLOCK && text.contains(':') => "TIME".to_owned(),
+                    Some(text) if role == TIMER => format!("{:?}", Some(text.replace("00:05:00", "TIMER"))),
+                    other => format!("{other:?}"),
+                };
+                format!("{role}={words}/{:?}", object.fill)
+            })
+            .collect();
+        format!("{name}: {}", parts.join(" | "))
+    }
+
+    #[test]
+    fn layouts_saved_before_items_were_objects_open_and_look_the_same() {
+        let saved: Vec<ThemeTemplate> = serde_json::from_str(SAVED_BEFORE).unwrap();
+        let loaded = read_layouts(SAVED_BEFORE).expect("they read");
+        assert_eq!(loaded.len(), saved.len());
+        let song = song();
+        let (now, next) = (song.slide(0).unwrap().1, song.slide(1).unwrap().1);
+        let mut lines = Vec::new();
+        for (was, layout) in saved.iter().zip(&loaded) {
+            // Nothing the file had is lost or changed: its boxes, its other objects, its id.
+            assert_eq!((&layout.id, &layout.name, &layout.boxes), (&was.id, &was.name, &was.boxes));
+            assert_eq!(&layout.objects[..was.objects.len()], &was.objects[..]);
+            // Each item is an object in its box's place, with its box's whole look.
+            let theme = theme_for(layout);
+            for style in &was.boxes {
+                let made: Vec<&Object> =
+                    layout.objects.iter().filter(|o| o.role.as_ref() == Some(&style.role)).collect();
+                assert_eq!(made.len(), 1, "{}", style.role.0);
+                assert_eq!(made[0].frame, Some(style.rect));
+                let drawn = theme.text_style(made[0].role.as_ref(), made[0].text_style().unwrap()).unwrap();
+                assert_eq!(&drawn, style, "{} is drawn with its box's look", style.role.0);
+            }
+            for (on, after) in [(Some(now), Some(next)), (None, None)] {
+                let shown = slide(on, after, &overlay(), &about(), layout);
+                // The layout's own shape is drawn behind every item, as it was.
+                if let Some(shape) = was.objects.first() {
+                    assert_eq!(shown.objects[0], *shape);
+                }
+                lines.push(line(&layout.name, &shown));
+            }
+        }
+        // Read again, they are the same: the ids made for the items stay put.
+        assert_eq!(read_layouts(SAVED_BEFORE).unwrap(), loaded);
+        assert_eq!(lines.join("\n"), SHOWN_BEFORE);
+        // The built-in layouts are those, with their items as objects.
+        for (made, was) in builtin_layouts().iter().zip(&saved) {
+            assert_eq!(made.boxes, was.boxes);
+            assert_eq!(normalized(was), *made);
+        }
+    }
+
+    /// A draft of a layout, as the Edit view makes one, and the theme it works with.
+    fn draft_of(layout: &ThemeTemplate) -> (EditDraft, Theme) {
+        let mut draft = EditDraft::of_slide(as_slide(layout), 0);
+        draft.at.presentation = STAGE_SLOT;
+        draft.keeps_roles = true;
+        (draft, editor_theme(layout))
+    }
+
+    fn object<'a>(layout: &'a ThemeTemplate, role: &str) -> &'a Object {
+        layout.objects.iter().find(|o| o.role.as_ref().is_some_and(|r| r.0 == role)).unwrap()
+    }
+
+    fn drawn_look(layout: &ThemeTemplate, role: &str) -> BoxStyle {
+        let object = object(layout, role);
+        theme_for(layout).text_style(object.role.as_ref(), object.text_style().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn stage_objects_move_resize_line_up_restack_and_undo_as_slide_objects_do() {
+        let first = builtin_layouts().remove(0);
+        let mut layout = first.clone();
+        // Taken into the editor and straight back, a layout is unchanged.
+        let (mut draft, theme) = draft_of(&layout);
+        assert_eq!(with_slide(&layout, &draft.slide), layout);
+        let clock = object(&layout, CLOCK).clone();
+        let frame = clock.frame.unwrap();
+        let look_before = drawn_look(&layout, CLOCK);
+        // A press on the clock picks it; a drag moves it, as one undo step.
+        let centre = (frame.x + frame.w / 2.0, frame.y + frame.h / 2.0);
+        draft.press(&theme, centre, 8.0, false);
+        assert_eq!(draft.selected, Some(clock.id));
+        draft.drag_to((centre.0 - 300.0, centre.1 + 200.0), false, false);
+        draft.release();
+        layout = with_slide(&layout, &draft.slide);
+        let moved = SlideRect { x: frame.x - 300.0, y: frame.y + 200.0, ..frame };
+        assert_eq!(object(&layout, CLOCK).frame, Some(moved));
+        assert_eq!(layout.style_for(&Role(CLOCK.to_owned())).unwrap().rect, moved, "its box follows it");
+        // Its bottom-right handle resizes it.
+        let theme = editor_theme(&layout);
+        let corner = (moved.x + moved.w, moved.y + moved.h);
+        draft.press(&theme, corner, 8.0, false);
+        draft.drag_to((corner.0 + 40.0, corner.1 + 10.0), false, false);
+        draft.release();
+        layout = with_slide(&layout, &draft.slide);
+        assert_eq!(object(&layout, CLOCK).frame.map(|f| (f.w, f.h)), Some((moved.w + 40.0, moved.h + 10.0)));
+        // Lined up with the stage's right edge.
+        assert!(draft.align_to_slide(&theme, 2));
+        layout = with_slide(&layout, &draft.slide);
+        let lined = object(&layout, CLOCK).frame.unwrap();
+        assert_eq!(lined.x + lined.w, sp_model::SLIDE_WIDTH);
+        // Brought to the front (it starts at the back): drawn last on the stage.
+        assert_eq!(layout.objects[0].id, clock.id);
+        let before = draft.slide.clone();
+        assert!(draft.move_to_end_of_stack(true));
+        draft.record_slide(before);
+        layout = with_slide(&layout, &draft.slide);
+        assert_eq!(layout.objects.last().map(|o| o.id), Some(clock.id));
+        let shown = slide(None, None, &crate::output::Overlay::default(), &About::default(), &layout);
+        assert_eq!(shown.objects.last().map(|o| o.id), Some(clock.id));
+        // Made smaller and green: the stage draws it so, and its box follows.
+        let before = draft.slide.clone();
+        assert!(draft.restyle(&theme, |look| {
+            look.size = 40.0;
+            look.fill = sp_model::Rgba::rgb(0, 200, 0);
+        }));
+        draft.record_slide(before);
+        layout = with_slide(&layout, &draft.slide);
+        let drawn = drawn_look(&layout, CLOCK);
+        assert_eq!((drawn.size, drawn.fill), (40.0, sp_model::Rgba::rgb(0, 200, 0)));
+        assert_eq!(layout.style_for(&Role(CLOCK.to_owned())).unwrap().size, 40.0, "its box follows it");
+        // Undo goes back a step at a time, the look included, to the layout as it was.
+        while draft.undo() {
+            layout = with_slide(&layout, &draft.slide);
+        }
+        assert_eq!(object(&layout, CLOCK).frame, Some(frame));
+        assert_eq!(drawn_look(&layout, CLOCK), look_before);
+        assert_eq!(layout, first, "everything is as it was");
+    }
+
+    #[test]
+    fn stage_objects_are_duplicated_hidden_locked_and_deleted() {
+        let layout = builtin_layouts().remove(0);
+        let (mut draft, theme) = draft_of(&layout);
+        let clock = object(&layout, CLOCK).id;
+        // A copy of the clock is a second clock: both show the time.
+        draft.select_only(Some(clock));
+        let copies = draft.copied(&theme);
+        draft.paste(&copies);
+        let layout = with_slide(&layout, &draft.slide);
+        let overlay = crate::output::Overlay::default();
+        let shown = slide(None, None, &overlay, &About::default(), &layout);
+        let clocks: Vec<&Object> = shown.objects.iter().filter(|o| o.role == Some(Role(CLOCK.to_owned()))).collect();
+        assert_eq!(clocks.len(), 2);
+        assert!(clocks.iter().all(|o| o.as_text().is_some_and(|t| t.contains(':'))));
+        assert_eq!(layout.boxes.iter().filter(|b| b.role.0 == CLOCK).count(), 1, "one box, for older versions");
+        // A hidden one is not drawn; a locked one is passed over by a click.
+        let copy = draft.selected.unwrap();
+        draft.slide.objects.iter_mut().find(|o| o.id == copy).unwrap().hidden = true;
+        let layout = with_slide(&layout, &draft.slide);
+        assert_eq!(
+            slide(None, None, &overlay, &About::default(), &layout).objects.iter().filter(|o| !o.hidden).count(),
+            1
+        );
+        let place = object(&layout, CLOCK).frame.unwrap();
+        draft.slide.objects.iter_mut().find(|o| o.id == clock).unwrap().locked = true;
+        assert_ne!(crate::editor::object_at(&draft.slide, &theme, (place.x + 5.0, place.y + 5.0)), Some(clock));
+        // Deleting every clock takes its box too, so an older version shows none either.
+        draft.slide.objects.retain(|o| o.role != Some(Role(CLOCK.to_owned())));
+        let layout = with_slide(&layout, &draft.slide);
+        assert!(layout.style_for(&Role(CLOCK.to_owned())).is_none());
+        assert!(slide(None, None, &overlay, &About::default(), &layout).objects.iter().all(|o| o.hidden));
+    }
+
+    #[test]
+    fn items_show_the_timer_clock_and_notes_they_are_set_to() {
+        let mut layout = builtin_layouts().remove(2);
+        let sermon = crate::timers::Timer::new("Sermon".to_owned());
+        let mut walk_in = crate::timers::Timer::new("Walk in".to_owned());
+        walk_in.start(std::time::Instant::now());
+        let overlay = crate::output::Overlay { timers: vec![walk_in.clone(), sermon.clone()], ..Default::default() };
+        let mut song = song();
+        song.groups[0].slides[0].notes = Some("First\nSecond\nThird".to_owned());
+        let now = song.slide(0).unwrap().1;
+        let text = |layout: &ThemeTemplate, role: &str| {
+            slide(Some(now), None, &overlay, &About::default(), layout)
+                .objects
+                .iter()
+                .find(|o| o.role == Some(Role(role.to_owned())))
+                .and_then(|o| o.as_text().map(str::to_owned))
+        };
+        // A timer item: the first running one, or the one it names, running or not.
+        layout.objects.push(crate::stage_editor::item_object(TIMER));
+        assert!(text(&layout, TIMER).is_some_and(|t| t.starts_with("Walk in  ")));
+        layout.objects.last_mut().unwrap().shows.timer = Some(sermon.id);
+        assert!(text(&layout, TIMER).is_some_and(|t| t.starts_with("Sermon  ")));
+        // Notes: all of them, or the first lines.
+        assert_eq!(text(&layout, NOTES).as_deref(), Some("First\nSecond\nThird"));
+        layout.objects.iter_mut().find(|o| o.role == Some(Role(NOTES.to_owned()))).unwrap().shows.lines = 2;
+        assert_eq!(text(&layout, NOTES).as_deref(), Some("First\nSecond"));
+        // The clock: twelve hours without seconds unless it says otherwise.
+        let clock = text(&layout, CLOCK).unwrap();
+        assert_eq!(clock.matches(':').count(), 1);
+        let item = layout.objects.iter_mut().find(|o| o.role == Some(Role(CLOCK.to_owned()))).unwrap();
+        item.shows.hours_24 = true;
+        item.shows.seconds = true;
+        let clock = text(&layout, CLOCK).unwrap();
+        assert_eq!((clock.len(), clock.matches(':').count()), (8, 2), "{clock}");
+        // Saved and read again, the settings stay; an object that has none writes none.
+        let read: ThemeTemplate = serde_json::from_str(&serde_json::to_string(&layout).unwrap()).unwrap();
+        assert_eq!(read, layout);
+        assert!(!serde_json::to_string(&builtin_layouts()).unwrap().contains("\"shows\""));
     }
 }

@@ -377,14 +377,16 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         let theme_slide =
             state.theme_edit.is_some() && state.editing.as_ref().is_some_and(|draft| draft.selected.is_none());
-        if theme_slide {
+        let stage = state.theme_edit.is_none() && state.editing.as_ref().is_some_and(crate::stage_editor::is_stage);
+        let layout = stage && state.editing.as_ref().is_some_and(|draft| draft.selected.is_none());
+        if theme_slide || layout {
             // One section has a plain heading, not a lone tab.
             let (heading, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
             crate::studio::paint_spaced(
                 ui,
                 heading.left_center(),
                 Align2::LEFT_CENTER,
-                "THEME SLIDE",
+                if layout { "LAYOUT" } else { "THEME SLIDE" },
                 crate::studio::fixed_semibold(11.5),
                 crate::studio::TEXT_DIM,
                 0.6,
@@ -408,7 +410,7 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
             |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    let for_theme = state.theme_edit.is_some();
+                    let for_theme = state.theme_edit.is_some() || stage;
                     if !for_theme {
                         let open = state.inspector.notes_open;
                         if ui
@@ -435,6 +437,7 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
         // The slide's notes, above the footer while they are open.
         if state.inspector.notes_open
             && state.theme_edit.is_none()
+            && !stage
             && let Some(draft) = state.editing.as_mut()
         {
             egui::Panel::bottom("slide notes").resizable(false).frame(Frame::new().fill(PANEL).inner_margin(8)).show(
@@ -465,6 +468,8 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
                     visuals.selection.bg_fill = BLUE;
                     if theme_slide {
                         theme_slide_panel(ui, state);
+                    } else if layout {
+                        crate::stage_editor::layout_panel(ui, state);
                     } else {
                         // With several objects selected, a change made here is made to them all.
                         let before = state.editing.as_ref().and_then(|draft| draft.selected_object().cloned());
@@ -604,7 +609,8 @@ fn web_address(ui: &mut egui::Ui, object: sp_model::Uuid, url: &mut String) {
 }
 
 fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
-    let for_theme = state.theme_edit.is_some();
+    let stage = state.editing.as_ref().is_some_and(crate::stage_editor::is_stage) && state.theme_edit.is_none();
+    let for_theme = state.theme_edit.is_some() || stage;
     let lock_shape = &mut state.inspector.lock_shape;
     let Some(draft) = state.editing.as_mut() else { return };
     let themed = draft.selected_object().map(|object| object_frame(&draft.slide, object, theme));
@@ -840,6 +846,7 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
 }
 
 fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
+    let stage = state.editing.as_ref().is_some_and(crate::stage_editor::is_stage) && state.theme_edit.is_none();
     let for_theme = state.theme_edit.is_some();
     let fonts = state.fonts.clone();
     let timers: Vec<(sp_model::Uuid, String)> =
@@ -849,6 +856,12 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let Some(object) = draft.selected_object_mut() else {
         return nothing_selected(ui);
     };
+    // A stage item: what it shows, and that item's own settings (which timer, the clock's form).
+    let stage_item = stage && crate::stage::item_of(object).is_some();
+    if stage_item {
+        crate::stage_editor::item_settings(ui, object, &timers);
+        rule(ui);
+    }
     let role = object.role.clone();
     let ObjectKind::Text { text, style } = &mut object.kind else {
         ui.label(
@@ -891,7 +904,7 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         *style = TextStyle::between(&base, &wanted);
     }
 
-    if for_theme {
+    if for_theme || stage_item {
         return;
     }
     // Linked text: the box shows something that changes, such as the time, in place of its words.
@@ -949,6 +962,9 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
             _ => {}
         }
         object.link = link;
+    }
+    if stage {
+        return;
     }
     rule(ui);
     ui.horizontal(|ui| {
@@ -1252,6 +1268,12 @@ fn text_look(
 fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
     use sp_model::{Build, BuildEffect, Direction};
     let Some(draft) = state.editing.as_mut() else { return };
+    // A stage screen shows its layout's objects at once, whatever comes on the slides.
+    if crate::stage_editor::is_stage(draft) && state.theme_edit.is_none() {
+        let said = "A stage layout's objects are on the stage screens all the time; builds are for slides and props.";
+        ui.label(egui::RichText::new(said).size(12.0).color(DIM));
+        return;
+    }
     let order: Vec<String> = draft
         .slide
         .click_steps()

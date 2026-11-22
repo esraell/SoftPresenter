@@ -2719,7 +2719,10 @@ impl crate::App {
         let in_editor = self.running.as_ref().is_some_and(|r| {
             let state = &r.home_state;
             state.theme_edit.is_none()
-                && state.editing.as_ref().is_some_and(|draft| draft.at.presentation != crate::props::PROP_SLOT)
+                && state.editing.as_ref().is_some_and(|draft| {
+                    draft.at.presentation != crate::props::PROP_SLOT
+                        && draft.at.presentation != crate::stage::STAGE_SLOT
+                })
         });
         if in_editor {
             self.menu_action(el, if redo { crate::menubar::Action::Redo } else { crate::menubar::Action::Undo });

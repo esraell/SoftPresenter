@@ -33,7 +33,7 @@ pub use theme::{
 pub use transition::{Direction, Transition, TransitionKind};
 pub use types::{
     Arrangement, Copyright, Group, ImageFit, MOST_TIMES, MediaItem, Object, ObjectKind, Pass, Presentation, Rgba, Role,
-    Run, Shape, Slide, StrokeLook, Sung,
+    Run, Shape, Slide, StageShows, StrokeLook, Sung,
 };
 pub use uuid::Uuid;
 

@@ -87,6 +87,36 @@ pub enum ObjectKind {
     Web { url: String },
 }
 
+/// How an item on a stage layout shows what it shows: which timer, the clock's form, how many
+/// lines of the notes. Each part is for the item it names; on any other object it is left as it
+/// is, which is how it starts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageShows {
+    /// The timer a timer item shows, by its id, running or not. `None` shows the first timer
+    /// that is running, and nothing while none is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timer: Option<Uuid>,
+    /// The clock on a 24-hour clock, not a 12-hour one.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hours_24: bool,
+    /// The clock with its seconds.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub seconds: bool,
+    /// How many lines of the slide's notes show, from the top; 0 shows them all.
+    #[serde(default, skip_serializing_if = "is_zero_lines")]
+    pub lines: u8,
+}
+
+impl StageShows {
+    pub fn is_default(&self) -> bool {
+        *self == StageShows::default()
+    }
+}
+
+fn is_zero_lines(value: &u8) -> bool {
+    *value == 0
+}
+
 /// How a picture sits in its object's place.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -277,6 +307,9 @@ pub struct Object {
     /// For a text object: what it shows instead of its words, if it is linked to something.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<crate::TextLink>,
+    /// On a stage layout, for an item such as the clock or a timer: how it shows what it shows.
+    #[serde(default, skip_serializing_if = "StageShows::is_default")]
+    pub shows: StageShows,
     /// While a build delivers a text object bullet by bullet: how many of its paragraphs show.
     /// Worked out as the slide is drawn, never saved.
     #[serde(skip)]
@@ -306,6 +339,7 @@ impl Object {
             build_in: None,
             build_out: None,
             link: None,
+            shows: StageShows::default(),
             gradient: None,
             shown_paragraphs: None,
             kind: ObjectKind::Text { text: text.into(), style: TextStyle::default() },
@@ -331,6 +365,7 @@ impl Object {
             build_in: None,
             build_out: None,
             link: None,
+            shows: StageShows::default(),
             gradient: None,
             shown_paragraphs: None,
             kind: ObjectKind::Shape { shape },
