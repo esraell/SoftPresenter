@@ -1499,9 +1499,11 @@ fn list_row(ui: &mut egui::Ui, look: &ListRow) -> (egui::Response, Rect) {
         paint_spaced(ui, cell.center(), Align2::CENTER_CENTER, &format!("{number:02}"), fixed(19.0), ink, -0.8);
         left += 28.0 + 10.0;
     }
-    // From the right: the "more" button, then the tally dot, the kind's mark or the count.
+    // From the right: the "more" button, then the tally dot, the kind's mark or the count. A
+    // numbered row (a playlist's item) says it is on screen by its orange number alone, so it
+    // keeps its kind's mark; a row without a number has the dot.
     let mut right = more.min.x - 10.0;
-    if look.live {
+    if look.live && look.number.is_none() {
         paint_tally(ui.painter(), pos2(right - 4.0, row.center().y));
         right -= 8.0 + 8.0;
     } else if let Some(icon) = look.icon {

@@ -189,7 +189,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the list, so they can be dropped on a playlist or a library; a new song made while a library
   is shown goes into it. Which of the two the column was left listing is kept between runs.
 - A playlist lists its items in running order: each with its number, its title, a small mark
-  for a Bible passage, a picture or video, a media playlist or a placeholder, the orange dot on
+  for a Bible passage, a picture or video, a media playlist or a placeholder, an orange number on
   the one on screen (whose row is brought into view when it goes on screen), and ⋯ for its
   menu (for a song, the song's own menu is under Song). Headers are small capital lines. Items
   can be dragged into a new order. A click on a row only **opens** the item: it becomes the
