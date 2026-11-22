@@ -16,6 +16,9 @@ use super::server::{Drawn, Rgba};
 
 /// The state is published at most this often while pages are connected.
 pub const PUBLISH_EVERY: Duration = Duration::from_millis(50);
+/// The parts that change seldom (the library, the playlists, the media bin, the theme
+/// versions) at most this often.
+pub const SLOW_EVERY: Duration = Duration::from_secs(1);
 
 /// What makes a slide's picture what it is, cached per theme: hashing a theme's JSON each time
 /// would cost more than drawing.
@@ -141,13 +144,13 @@ impl crate::App {
     }
 
     /// The state as pages are sent it, part by part, each written as JSON once.
-    pub(crate) fn remote_parts(&mut self) -> Vec<(&'static str, String)> {
-        let parts = [
+    /// With `slow`, the parts that change seldom and cost the most in a large library too (the
+    /// library, the playlists, the media bin, the theme versions), which are published at most
+    /// every [`SLOW_EVERY`].
+    pub(crate) fn remote_parts(&mut self, slow: bool) -> Vec<(&'static str, String)> {
+        let mut parts = vec![
             ("live", self.remote_live()),
             ("playlist", self.remote_playlist()),
-            ("playlists", self.remote_playlists()),
-            ("library", self.remote_library()),
-            ("bin", self.remote_bin()),
             ("media", self.remote_media()),
             ("audio", self.remote_audio()),
             ("timers", self.remote_timers()),
@@ -156,8 +159,15 @@ impl crate::App {
             ("macros", self.ctl_macros().data),
             ("screens", self.remote_screens()),
             ("notices", self.remote_notices()),
-            ("versions", self.remote_versions()),
         ];
+        if slow {
+            parts.extend([
+                ("playlists", self.remote_playlists()),
+                ("library", self.remote_library()),
+                ("bin", self.remote_bin()),
+                ("versions", self.remote_versions()),
+            ]);
+        }
         parts.into_iter().map(|(name, value)| (name, value.to_string())).collect()
     }
 
@@ -424,11 +434,18 @@ impl crate::App {
         }
         let due = self.remote.published.map_or(now, |at| at + PUBLISH_EVERY);
         if force || due <= now {
-            let parts = self.remote_parts();
+            let slow_due = self.remote.published_slow.map_or(now, |at| at + SLOW_EVERY);
+            let slow = force || slow_due <= now;
+            let parts = self.remote_parts(slow);
             shared.publish(parts);
             self.remote.published = Some(now);
-            self.remote.keep_seen();
-            return wake;
+            if slow {
+                self.remote.published_slow = Some(now);
+                return wake;
+            }
+            // The seldom-changing parts are looked at once more when they are due, in case
+            // whatever just happened changed them.
+            return [wake, Some(slow_due)].into_iter().flatten().min();
         }
         // Something happened since it was last published: look again when it is due.
         [wake, Some(due)].into_iter().flatten().min()

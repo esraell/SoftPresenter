@@ -119,7 +119,8 @@
       const row = document.createElement("li");
       row.textContent = item.title;
       if (item.kind === "header") row.className = "header";
-      if (list.live_item === item.number) row.classList.add("live");
+      // `item` is the place in the playlist (`number` is a song's in the library).
+      if (list.live_item === item.item) row.classList.add("live");
       items.appendChild(row);
     }
   }

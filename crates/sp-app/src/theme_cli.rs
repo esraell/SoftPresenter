@@ -286,7 +286,8 @@ impl crate::App {
         let offered_name = crate::bible::OFFERED
             .iter()
             .any(|b| b.short.eq_ignore_ascii_case(typed) || b.id.eq_ignore_ascii_case(typed));
-        if path.exists() && !offered_name {
+        // From a remote page only a Bible offered is installed: the disk is never looked at.
+        if !self.remote_call && path.exists() && !offered_name {
             self.running.as_ref().ok_or("The app isn't ready.")?;
             // Read on a thread of its own, as a dropped file is. The command line waits for the
             // job (the reply asks it to), so it still answers with what came in.

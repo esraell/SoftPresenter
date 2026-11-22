@@ -427,13 +427,17 @@ impl crate::App {
 
     fn prop_new(&mut self, words: &[String]) -> Result<Reply, String> {
         let usage = "prop new NAME [PICTURE]   (words of its name, or a picture filling it)";
+        // From a remote page every word is the name: the disk is never looked at.
+        let files = !self.remote_call;
         let (name_words, picture) = match words.last() {
-            Some(last) if words.len() > 1 && std::path::Path::new(last).is_file() => {
+            Some(last) if files && words.len() > 1 && std::path::Path::new(last).is_file() => {
                 (&words[..words.len() - 1], Some(PathBuf::from(last)))
             }
             // A last word that names a file that isn't there is a mistake, not part of the name.
             Some(last)
-                if words.len() > 1 && (last.contains('/') || crate::media::is_media(std::path::Path::new(last))) =>
+                if files
+                    && words.len() > 1
+                    && (last.contains('/') || crate::media::is_media(std::path::Path::new(last))) =>
             {
                 return Err(format!("There is no file {last}."));
             }
@@ -752,6 +756,7 @@ impl crate::App {
     }
 
     fn audio_add(&mut self, words: &[String]) -> Result<Reply, String> {
+        self.only_at_the_computer("Adding audio tracks")?;
         let (files, playlist) = split_at_word(words, "to");
         if files.is_empty() {
             return Err("audio add FILE… [to PLAYLIST]".to_owned());
@@ -937,6 +942,7 @@ impl crate::App {
         let following = if folder.eq_ignore_ascii_case("off") {
             None
         } else {
+            self.only_at_the_computer("Following a folder")?;
             let path = PathBuf::from(folder);
             if !path.is_dir() {
                 return Err(format!("There is no folder {folder}."));

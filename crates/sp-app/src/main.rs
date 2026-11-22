@@ -1316,6 +1316,9 @@ struct App {
     remote_started: bool,
     /// How many pages were connected when Settings and the status line were last told.
     remote_pages_seen: usize,
+    /// True while a command from a remote page is carried out: the handlers that would open a
+    /// file or folder on the computer refuse then (`only_at_the_computer`), whatever the policy let by.
+    remote_call: bool,
     show: Show,
     /// The file each song came from, in the show's order; `None` for the bundled sample.
     sources: Vec<Option<PathBuf>>,
@@ -9510,6 +9513,7 @@ fn main() -> ExitCode {
         remote: remote::Remote::open(),
         remote_started: false,
         remote_pages_seen: 0,
+        remote_call: false,
         // Commands from `softpresenter ctl` come in on the control socket. Without it (another
         // copy has it, say) the app runs as usual.
         _control: {

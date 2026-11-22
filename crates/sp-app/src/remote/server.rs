@@ -563,12 +563,23 @@ fn gate(shared: &Shared, parts: &Parts) -> Result<Gate, Box<Response<Body>>> {
     }
     let host = host.to_ascii_lowercase();
     let ip = conn.peer.ip();
+    let mut save = false;
     let device = cookie(parts).and_then(|token| {
         let mut store = shared.store.lock().ok()?;
         let device = store.device_of(&token).map(|d| (d.id.clone(), d.name.clone()))?;
         store.seen(&device.0, ip);
+        save = store.seen_due();
         Some(device)
     });
+    // When devices were last seen is written at most once a minute, on a thread for such work.
+    if save {
+        let store = shared.store.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Ok(mut store) = store.lock() {
+                store.save_seen();
+            }
+        });
+    }
     Ok(Gate { host, ip, device })
 }
 
@@ -826,6 +837,12 @@ async fn login(State(shared): State<Arc<Shared>>, request: Request) -> Response<
     let Ok(Ok(permit)) = tokio::time::timeout(Duration::from_secs(5), shared.hashing.acquire()).await else {
         return plain(StatusCode::SERVICE_UNAVAILABLE, host, "Busy; try again in a moment.");
     };
+    // Looked at again now it is this one's turn: several sent at once from one address all
+    // passed the first look before any was counted.
+    if let Some(wait) = shared.guard.lock().ok().and_then(|guard| guard.wait(gate.ip, Instant::now())) {
+        return refuse_wait(wait);
+    }
+    let verified = hash.clone();
     let right = tokio::task::spawn_blocking(move || auth::password_is(&hash, &password)).await.unwrap_or(false);
     drop(permit);
     if !right {
@@ -850,10 +867,11 @@ async fn login(State(shared): State<Arc<Shared>>, request: Request) -> Response<
     }
     let store = shared.store.clone();
     let (ip, named) = (gate.ip, name.clone());
-    let remembered =
-        tokio::task::spawn_blocking(move || store.lock().map_err(|_| "busy".to_owned())?.remember(&named, ip))
-            .await
-            .unwrap_or_else(|_| Err("Could not remember the device.".to_owned()));
+    let remembered = tokio::task::spawn_blocking(move || {
+        store.lock().map_err(|_| "busy".to_owned())?.remember(&named, ip, &verified)
+    })
+    .await
+    .unwrap_or_else(|_| Err("Could not remember the device.".to_owned()));
     match remembered {
         Ok((token, id)) => {
             shared.backend.log(&format!("{name} ({id}) signed in from {}.", gate.ip));
@@ -1242,11 +1260,17 @@ async fn page(shared: Arc<Shared>, mut socket: WebSocket, caller: Caller) {
                 heard = Instant::now();
                 match message {
                     Message::Text(text) => {
+                        let watched = registered.watching;
                         let out = take_message(&shared, &caller, &mut state, &mut registered, &replies_tx, text.as_str()).await;
                         if let Some(out) = out
                             && !say(&mut socket, Message::text(out)).await
                         {
                             break;
+                        }
+                        // A page that starts watching is sent the picture there is now (another
+                        // page may have been watching a still slide, so none new is coming).
+                        if !watched && registered.watching {
+                            frames.mark_changed();
                         }
                     }
                     Message::Binary(_) => {

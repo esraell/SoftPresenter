@@ -259,8 +259,16 @@ version the screens draw in. A Bible passage on screen is `kind: "passage"`, its
 `song`.
 
 **`playlist`** — the playlist in front: `{"name", "number", "rev", "live_item", "items": […]}`,
-the items as `sp playlist --json` lists them (`item` number, `title`, `kind`:
-`song|passage|header|media|media_playlist|placeholder`, `missing`, and what each kind adds).
+the items as `sp playlist --json` lists them. Each has `item` (its place in the playlist: the
+number `--aim` takes), `title`, `text` (as `sp` shows it), `kind`
+(`song|passage|header|media|media_playlist|placeholder`) and `missing`; a song adds its `id` and
+`number` (its place in the library, not the playlist), a picture or video its `media_type` and
+`number` (in the media bin). For example:
+
+    {"item": 1, "kind": "header", "title": "Worship", "text": "— Worship —", "missing": false}
+    {"item": 2, "kind": "song", "id": "58a9…", "number": 2, "title": "Test One", "text": "Test One", "missing": false}
+    {"item": 4, "kind": "media", "media_type": "picture", "number": 2, "title": "pic001.png", "text": "pic001.png (picture)", "missing": false}
+
 `rev` changes whenever the items do; send it with `--aim` ([below](#the-pages-own-state-open-item-picks-cue)).
 
 **`playlists`** — `[{"number", "name", "items", "rev", "front"}]`. A playlist's items come on
@@ -285,9 +293,9 @@ demand: `["playlist", "NAME"]`.
 "position_ms", "volume" (0–100), "mute", "shuffle", "through", "crossfade" (seconds)}`.
 
 **`timers`** — `[{"id", "name", "kind", "words", "overrun", "running", "counted_ms", "started_at"}]`.
-`kind` is one of `{"Countdown": {"seconds": 300}}`, `{"CountdownTo": {"hour": 10, "minute": 30,
-"second": 0}}` (a time of day, the computer's), `{"Elapsed": {"start": 0, "end": 600}}`;
-`words` is how `sp timers` says it.
+`kind` is one of `{"type": "countdown", "seconds": 300}`, `{"type": "countdown_to", "hour": 10,
+"minute": 30, "second": 0}` (a time of day, the computer's), `{"type": "elapsed", "start": 0,
+"end": 600}` (`end` null for none); `words` is how `sp timers` says it ("counts down from 5:00").
 
 **`messages`**, **`props`**, **`macros`** — as `sp messages|props|macros --json` give them
 (which is on screen included).
@@ -333,6 +341,9 @@ act "on the open item" are told which item:
   `go` to the page's cue.
 - `["go", "<song id>", "2"]`: a song's slide from the library.
 
+`first`, `last`, `group NAME` and `hotkey KEY` still act on the song the window shows; from a
+page use `go --aim ITEM SLIDE` (or `go SONG SLIDE`), and `group NAME in SONG`.
+
 The window's open item, picks and chosen song stay as they are. `--rev` is the playlist's `rev`
 from the `playlist` part: if the playlist changed since the page saw it, the command is refused
 ("Sunday has changed since it was last looked at; look again and try once more.") rather than
@@ -356,7 +367,8 @@ objects, its theme, the version, the media behind it): when any of it changes, t
   `ETag`, and `304` to `If-None-Match`.
 - An address with an older look still gets the picture as it is now, with `no-cache`.
 - `404` for a slide that isn't there (a Bible passage only listed, not opened, has no pictures
-  yet; see step 2), `503` when the app is busy (try again).
+  yet; see step 2), and for a media bin item whose picture hasn't been read yet (the `bin` part
+  gives it a new `poster` address once it has); `503` when the app is busy (try again).
 
 ## Roles, and who you are
 
@@ -381,7 +393,7 @@ since), with Disconnect.
 | Hello | within 10 s |
 | Silence | 45 s, then closed |
 | Writing to a slow page | 10 s, then closed (it reconnects and catches up) |
-| Slide pictures | 2 drawn at once, 64 waiting; 24 MB kept |
+| Slide pictures | 2 drawn at once (more wait up to 10 s); 24 MB kept |
 | Live preview | 10 a second at most, newest only |
 | Devices remembered | 50 |
 
@@ -400,15 +412,19 @@ browser on the network (trusted with nothing).
 | Another site's page using a signed-in browser (cross-site requests, cross-site WebSocket) | SameSite=Strict, HttpOnly cookie; `Origin` checked on the WebSocket and every POST; sign-in needs JSON |
 | DNS rebinding | `Host` must be the address the connection came in on |
 | Someone on the internet, if the computer is reachable from it (a forwarded port) | Only local-network addresses are answered |
-| Reading or writing the computer's files through the page | No path from a request is ever served; commands that name files or folders are refused for pages (by their words, never by looking at the disk); pictures are found by id |
+| Reading or writing the computer's files through the page | No path from a request is ever served; commands that name files or folders are refused for pages by their words, and again where each would open a file, whatever words got there (a title or name is then all words; the disk is never looked at for a page); pictures are found by id |
 | Reaching the computer's own web services | `slide web` with anything but https is refused for pages |
 | Keys, sign-ins, the menu bar (Quit, Install Command Line Tool), Remote Control's own settings | Closed to pages |
 | Script injection into the page | Strict CSP (no inline script, no eval), `textContent` only, no framing |
 | Flooding the app or the server | The limits above; commands are carried out on the main thread one at a time as `sp`'s are, never blocking the screens' thread; pictures drawn a few per turn of the event loop; the preview read back on the server's own thread from the window's own textures |
 | A page left open forever | Heartbeats, and closing after 45 s of silence |
 
-Residual risks, known and accepted for step 1: the first visit trusts the certificate on the
-operator's word (the fingerprint check is theirs to do); anyone with the password runs the show
+Residual risks, known and accepted for step 1: someone on the network can hold connection
+slots open (up to the limits above) and keep a new device from signing in for a while
+(remembered devices already connected carry on); the cap on wrong passwords from everywhere
+together means a flood of wrong ones holds up everyone's sign-in for that minute; the first
+visit trusts the certificate on the operator's word (the fingerprint check is theirs to do);
+anyone with the password runs the show
 (as anyone at the computer can), including deleting songs (to the Trash) and changing screens;
 the data folder (and so the password's hash, the device hashes and the certificate's key) may
 be synced by the Mac with the rest of Documents; the `Host` check allows the computer's

@@ -1431,6 +1431,7 @@ impl crate::App {
     /// `song export SONG… [--playlist NAME] --to FILE.sppack [--no-videos]`.
     fn ctl_song_export(&mut self, args: &[String]) -> Result<Reply, String> {
         const USAGE: &str = "song export SONG… [--playlist NAME] --to FILE.sppack [--no-videos]";
+        self.only_at_the_computer("Exporting a song pack")?;
         let mut songs = Vec::new();
         let (mut to, mut playlist, mut videos) = (None, None, true);
         let mut words = args.iter();
@@ -2617,6 +2618,7 @@ impl crate::App {
                 Ok(Reply::done(format!("Showing {}.", self.show.media()[at].name)))
             }
             Some("add") => {
+                self.only_at_the_computer("Adding pictures and videos")?;
                 let files: Vec<PathBuf> = args[2..].iter().map(PathBuf::from).collect();
                 if files.is_empty() {
                     return Err("Add which files?".to_owned());
@@ -3032,13 +3034,17 @@ impl crate::App {
             Some("new") => {
                 // `song new TITLE [FILE.txt]`: the file is the last word when it names a file.
                 let words = &args[2..];
+                // From a remote page every word is the title: the disk is never looked at.
+                let files = !self.remote_call;
                 let (title_words, file) = match words.last() {
-                    Some(last) if words.len() > 1 && Path::new(last).is_file() => {
+                    Some(last) if files && words.len() > 1 && Path::new(last).is_file() => {
                         (&words[..words.len() - 1], Some(last))
                     }
                     // A last word that names a file that isn't there is a mistake, not the title.
                     Some(last)
-                        if words.len() > 1 && (last.contains('/') || crate::load::is_importable(Path::new(last))) =>
+                        if files
+                            && words.len() > 1
+                            && (last.contains('/') || crate::load::is_importable(Path::new(last))) =>
                     {
                         return Err(format!("There is no file {last}."));
                     }
@@ -3100,6 +3106,7 @@ impl crate::App {
             }
             Some("export") => self.ctl_song_export(&args[2..]),
             Some("import") => {
+                self.only_at_the_computer("Importing songs")?;
                 // Song packs: what to do with songs the library has already (skip, unless told).
                 let same = if args.iter().any(|w| w == "--replace") {
                     crate::pack::Same::Replace

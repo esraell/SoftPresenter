@@ -588,6 +588,52 @@ fn limits_hold() {
     assert!(matches!(read, Ok(0) | Err(_)), "closed by the server");
 }
 
+/// The next binary message from a page's socket (text passed over).
+async fn next_binary(socket: &mut WebSocketStream<TlsStream<TcpStream>>) -> Vec<u8> {
+    loop {
+        let message = tokio::time::timeout(Duration::from_secs(5), socket.next()).await.expect("in time");
+        match message.expect("open").expect("a message") {
+            tungstenite::Message::Binary(bytes) => return bytes.to_vec(),
+            tungstenite::Message::Close(frame) => panic!("closed: {frame:?}"),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn the_live_preview_reaches_every_page_watching_and_is_never_read_for_nobody() {
+    let test = start_test("preview");
+    let token = test.token();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let counted = reads.clone();
+    test.shared.set_preview_read(Some(Arc::new(move || {
+        counted.fetch_add(1, Ordering::AcqRel);
+        Some(Rgba { width: 16, height: 9, pixels: vec![200; 16 * 9 * 4] })
+    })));
+    // With nobody watching, a new picture is never read back.
+    test.shared.preview_drawn(1);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(reads.load(Ordering::Acquire), 0);
+    test.runtime.block_on(async {
+        let mut first = test.socket(&token, Some(&test.origin())).await.expect("connected");
+        first.send(tungstenite::Message::text(r#"{"type":"hello","preview":true}"#)).await.expect("sent");
+        let frame = next_binary(&mut first).await;
+        assert_eq!(frame[0], 1, "tagged as the live preview");
+        assert_eq!(&frame[1..3], &[0xFF, 0xD8], "a JPEG");
+        // A second page on the same still picture gets it too, at once, without another read.
+        let mut second = test.socket(&token, Some(&test.origin())).await.expect("connected");
+        second.send(tungstenite::Message::text(r#"{"type":"hello","preview":true}"#)).await.expect("sent");
+        assert_eq!(next_binary(&mut second).await, frame);
+        assert_eq!(reads.load(Ordering::Acquire), 1);
+        // A new picture drawn reaches both, read once.
+        tokio::time::sleep(PREVIEW_EVERY).await;
+        test.shared.preview_drawn(2);
+        assert_eq!(next_binary(&mut first).await[0], 1);
+        assert_eq!(next_binary(&mut second).await[0], 1);
+        assert_eq!(reads.load(Ordering::Acquire), 2);
+    });
+}
+
 #[test]
 fn only_the_local_network_is_answered() {
     for local in [

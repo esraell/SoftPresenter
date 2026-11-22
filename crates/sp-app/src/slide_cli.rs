@@ -447,6 +447,7 @@ impl crate::App {
             let text = sp_model::to_song_text(&presentation);
             return Ok(Reply::with(text.clone(), serde_json::json!({"song": presentation.title, "text": text})));
         };
+        self.only_at_the_computer("Reading a song's words from a file")?;
         // The file named by its name alone in replies (the client sends the whole path).
         let shown =
             std::path::Path::new(file).file_name().map_or_else(|| file.clone(), |n| n.to_string_lossy().into_owned());

@@ -95,9 +95,14 @@ impl Store {
         Ok(())
     }
 
-    /// Writes the store if a device was seen and the file hasn't been written for a minute.
+    /// Whether a device was seen and the file hasn't been written for a minute.
+    pub fn seen_due(&self) -> bool {
+        self.seen_unsaved && self.last_written.elapsed() >= Duration::from_secs(60)
+    }
+
+    /// Writes the store if `seen_due`.
     pub fn save_seen(&mut self) {
-        if self.seen_unsaved && self.last_written.elapsed() >= Duration::from_secs(60) {
+        if self.seen_due() {
             let _ = self.save();
         }
     }
@@ -124,8 +129,13 @@ impl Store {
         }
     }
 
-    /// Remembers a device that just signed in; returns its token (for its cookie) and its id.
-    pub fn remember(&mut self, name: &str, ip: IpAddr) -> Result<(String, String), String> {
+    /// Remembers a device that just signed in with the password kept as `verified` (refused if
+    /// the password has changed since it was checked); returns its token (for its cookie) and
+    /// its id.
+    pub fn remember(&mut self, name: &str, ip: IpAddr, verified: &str) -> Result<(String, String), String> {
+        if self.saved.password.as_deref() != Some(verified) {
+            return Err("The password changed a moment ago: sign in with the new one.".to_owned());
+        }
         if self.saved.devices.len() >= MOST_DEVICES {
             return Err(format!(
                 "{MOST_DEVICES} devices are remembered already. Forget one in Settings › Remote Control first."
@@ -422,7 +432,9 @@ mod tests {
         let ip: IpAddr = "192.168.1.20".parse().unwrap();
         let mut store = Store::open(&folder);
         assert_eq!(store.saved.port, DEFAULT_PORT);
-        let (token, id) = store.remember("Safari on an iPad", ip).expect("remembered");
+        let first = hash_password("first password").expect("hashed");
+        store.set_password(first.clone()).expect("set");
+        let (token, id) = store.remember("Safari on an iPad", ip, &first).expect("remembered");
         assert!(token.len() >= 43, "a 256-bit token: {token}");
         assert_eq!(store.device_of(&token).map(|d| d.id.clone()), Some(id.clone()));
         assert!(store.device_of("a token nobody was given").is_none());
@@ -436,9 +448,14 @@ mod tests {
         assert!(again.forget(&id));
         assert!(again.device_of(&token).is_none());
         // A new password forgets every device.
-        let (token, _) = again.remember("Chrome on Windows", ip).expect("remembered");
-        again.set_password(hash_password("another password").expect("hashed")).expect("set");
+        let (token, _) = again.remember("Chrome on Windows", ip, &first).expect("remembered");
+        let second = hash_password("another password").expect("hashed");
+        again.set_password(second.clone()).expect("set");
         assert!(again.device_of(&token).is_none());
+        // A sign-in checked against the old password, finishing after the change, is refused.
+        assert!(again.remember("Chrome on Windows", ip, &first).is_err());
+        assert!(again.remember("Chrome on Windows", ip, &second).is_ok());
+        again.forget_all();
         assert!(Store::open(&folder).saved.devices.is_empty());
         #[cfg(unix)]
         {

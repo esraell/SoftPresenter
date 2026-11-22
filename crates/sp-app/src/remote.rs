@@ -160,8 +160,9 @@ pub struct Remote {
     hashing: bool,
     /// Slides waiting to be drawn for pages, a few at a time.
     pub(crate) thumbs_waiting: VecDeque<(Uuid, Option<Uuid>, oneshot::Sender<Option<server::Drawn>>)>,
-    /// When the state was last published, and whether something may have changed since.
+    /// When the state was last published, and its seldom-changing parts.
     pub(crate) published: Option<Instant>,
+    pub(crate) published_slow: Option<Instant>,
     pub clock: Clock,
     pub(crate) looks: state::Looks,
 }
@@ -191,6 +192,7 @@ impl Remote {
             hashing: false,
             thumbs_waiting: VecDeque::new(),
             published: None,
+            published_slow: None,
             clock: Clock::new(),
             looks: state::Looks::default(),
         }
@@ -269,6 +271,7 @@ impl Remote {
         self.running = Some(running);
         self.fingerprint = Some(fingerprint);
         self.published = None;
+        self.published_slow = None;
         self.set_on(true);
         Ok(())
     }
@@ -393,13 +396,6 @@ impl Remote {
         }
         Ok(())
     }
-
-    /// Writes the devices' last-seen times, at most once a minute.
-    pub fn keep_seen(&self) {
-        if let Some(mut store) = self.store.as_ref().and_then(|store| store.lock().ok()) {
-            store.save_seen();
-        }
-    }
 }
 
 /// Switching off needs no bridge.
@@ -408,6 +404,15 @@ fn unreachable_bridge() -> Bridge {
 }
 
 impl crate::App {
+    /// Refuses, while a remote page's command runs, what would open a file or folder on the
+    /// computer: called where each such command opens it, behind the policy's own refusal.
+    pub(crate) fn only_at_the_computer(&self, what: &str) -> Result<(), String> {
+        if self.remote_call {
+            return Err(format!("{what} is done at the computer, not from the remote page."));
+        }
+        Ok(())
+    }
+
     /// `remote [status] | on | off | port N | password | forget ID|all | disconnect N`: Remote
     /// Control from the command line (never from a remote page: see `policy`). The password
     /// comes on the standard input (`sp` reads it, unshown at a terminal), never as an argument
@@ -559,9 +564,13 @@ impl crate::App {
                     }
                     None => {
                         let from = format!("{} ({}, {})", caller.name, caller.device, caller.ip);
+                        // Files and folders on the computer stay closed while it runs, at the
+                        // places they would be opened, whatever words reached the handler.
+                        self.remote_call = true;
                         self.run_control(el, &args, Some(&from), |answer| {
                             let _ = reply.send(answer);
                         });
+                        self.remote_call = false;
                     }
                 }
             }
