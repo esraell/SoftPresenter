@@ -1753,6 +1753,44 @@ pub fn paint_carried(ctx: &egui::Context, words: &str) {
     painter.galley(chip.min + vec2(9.0, 5.0), text, Color32::WHITE);
 }
 
+/// Where among a list's `rows` (top to bottom) a row dragged with the pointer at `y` would go:
+/// how many rows are above that place, by which half of a row the pointer is over.
+pub fn drop_slot(rows: &[Rect], y: f32) -> usize {
+    rows.iter().filter(|row| row.center().y < y).count()
+}
+
+/// Whether a row dragged in a list was let go this frame, to go where the ink line is. A drag
+/// that Escape stopped was not: egui ends it without the button being let go, and nothing moves.
+pub fn drag_let_go(response: &egui::Response) -> bool {
+    response.drag_stopped() && response.ctx.input(|input| input.pointer.any_released())
+}
+
+/// While rows of a list are dragged to another place in it, as the playlist's items are: those
+/// being moved (`moving`, by their place among `rows`) go faint where they are, washed with the
+/// colour the list lies on (`ground`), and an ink line shows where they would go (`slot`, from
+/// `drop_slot`), midway between two rows.
+pub fn paint_rows_moving(
+    painter: &egui::Painter,
+    rows: &[Rect],
+    moving: impl Fn(usize) -> bool,
+    slot: usize,
+    ground: Color32,
+) {
+    for (at, row) in rows.iter().enumerate() {
+        if moving(at) {
+            painter.rect_filled(*row, RADIUS, ground.gamma_multiply(0.6));
+        }
+    }
+    let y = match (slot.checked_sub(1).and_then(|above| rows.get(above)), rows.get(slot)) {
+        (Some(above), Some(below)) => (above.max.y + below.min.y) / 2.0,
+        (None, Some(below)) => below.min.y,
+        (Some(above), None) => above.max.y,
+        (None, None) => return,
+    };
+    let (left, right) = rows.first().map_or((0.0, 0.0), |row| (row.min.x, row.max.x));
+    painter.line_segment([pos2(left + 4.0, y), pos2(right - 4.0, y)], Stroke::new(2.0, TEXT));
+}
+
 /// The left column: a small label saying whether a playlist or a library is listed, the name
 /// of the one that is (which opens the chooser of playlists and libraries), its items or
 /// songs, and at the foot what adds to it and a filter.
@@ -3438,7 +3476,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 if response.dragged() && !filtering {
                     dragging = Some(index);
                 }
-                if response.drag_stopped() && !filtering {
+                if drag_let_go(&response) && !filtering {
                     dropped = Some(index);
                 }
                 if response.double_clicked() {
@@ -3511,7 +3549,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             if response.dragged() && !filtering {
                 dragging = Some(index);
             }
-            if response.drag_stopped() && !filtering {
+            if drag_let_go(&response) && !filtering {
                 dropped = Some(index);
             }
             // The library a song is in is said when the pointer rests on its row.
@@ -3586,8 +3624,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     }
     // Where a dragged row would land: a line between rows, and on release the move.
     let pointer = ui.input(|input| input.pointer.interact_pos());
-    let pointer_y = pointer.map(|at| at.y);
-    let slot = pointer_y.map(|y| rows.iter().filter(|row| row.center().y < y).count());
+    let slot = pointer.map(|at| drop_slot(&rows, at.y));
     // A picture or video carried from the media bin, or a result of the find box (a song, or a
     // Bible passage or verse): dropped on a placeholder it takes its place; dropped between
     // rows it goes there, above or below the row by which half of it the pointer is over.
@@ -3600,7 +3637,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             .iter()
             .zip(&row_items)
             .find(|(row, item)| row.contains(at) && matches!(items.get(**item), Some(Item::Placeholder { .. })));
-        let slot = rows.iter().filter(|row| row.center().y < at.y).count();
+        let slot = drop_slot(&rows, at.y);
         let line = |rows: &[Rect]| {
             rows.get(slot)
                 .map_or_else(|| rows.last().map_or(list.inner_rect.min.y + 4.0, |row| row.max.y), |row| row.min.y)
@@ -3653,15 +3690,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         None => Vec::new(),
     };
     if let (Some(_), Some(slot)) = (dragging, slot) {
-        // The rows being moved go faint where they are.
-        for (row, item) in rows.iter().zip(&row_items) {
-            if moving.contains(item) {
-                ui.painter().rect_filled(*row, RADIUS, PANEL.gamma_multiply(0.6));
-            }
-        }
-        let y = rows.get(slot).map_or_else(|| rows.last().map_or(0.0, |row| row.max.y), |row| row.min.y);
-        let (left, right) = rows.first().map_or((0.0, 0.0), |row| (row.min.x, row.max.x));
-        ui.painter().line_segment([pos2(left + 4.0, y), pos2(right - 4.0, y)], Stroke::new(2.0, TEXT));
+        paint_rows_moving(ui.painter(), &rows, |at| moving.contains(&row_items[at]), slot, PANEL);
     }
     if let (Some(index), Some(slot)) = (dropped, slot) {
         if let [_, _, ..] = moving.as_slice() {

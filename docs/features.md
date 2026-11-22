@@ -192,8 +192,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   for a Bible passage, a picture or video, a media playlist or a placeholder, an orange number on
   the one on screen (whose row is brought into view when it goes on screen), and ⋯ for its
   menu (for a song, the song's own menu is under Song). Headers are small capital lines. Items
-  can be dragged into a new order. A click on a row only **opens** the item: it becomes the
-  open one and the slides scroll to it; the screens don't change, and a Bible passage no longer
+  can be dragged into a new order; Escape stops a drag, leaving them where they were. A click
+  on a row only **opens** the item: it becomes the open one and the slides scroll to it; the
+  screens don't change, and a Bible passage no longer
   takes the window to the Bible page (Open on the Bible Page, in its menu, does, opening it as the
   page opens any passage). A passage kept in a playlist runs as its own slides, so Next goes on
   into the next item after its last. A click on a

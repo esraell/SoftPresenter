@@ -10386,6 +10386,49 @@ mod tests {
     }
 
     #[test]
+    fn a_playlist_item_dragged_goes_where_it_is_let_go_and_escape_leaves_it_where_it_was() {
+        use crate::service::Item;
+        for escape in [false, true] {
+            let (mut show, mut state) = find_drag_setting();
+            let ctx = egui::Context::default();
+            let mut commands = Vec::new();
+            let press = |at: egui::Pos2, pressed: bool| Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            };
+            let drawn = found_step(&ctx, &mut show, &mut state, vec![], 0.0, &mut commands);
+            let from = drawn.left("Alpha").center();
+            // Over the lower half of Beta's row: after it.
+            let to = drawn.left("Beta").center() + vec2(0.0, 6.0);
+            let key = Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            };
+            let mut frames = vec![
+                vec![Event::PointerMoved(from)],
+                vec![press(from, true)],
+                vec![Event::PointerMoved(from + vec2(0.0, 12.0))],
+                vec![Event::PointerMoved(to)],
+            ];
+            if escape {
+                frames.push(vec![key]);
+            }
+            frames.extend([vec![press(to, false)], vec![]]);
+            for (n, events) in frames.into_iter().enumerate() {
+                found_step(&ctx, &mut show, &mut state, events, 0.1 * (n + 1) as f64, &mut commands);
+            }
+            let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
+            let order = if escape { ["Alpha", "Beta"] } else { ["Beta", "Alpha"] };
+            assert_eq!(titles, order, "with Escape: {escape}");
+        }
+    }
+
+    #[test]
     fn a_song_found_dragged_between_two_playlist_items_goes_in_there_and_opens() {
         use crate::service::Item;
         let (mut show, mut state) = find_drag_setting();
