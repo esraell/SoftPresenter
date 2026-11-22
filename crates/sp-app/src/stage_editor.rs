@@ -197,7 +197,10 @@ pub fn list(
                     renaming,
                 };
                 let (response, places) = crate::studio::list_picture(ui, list, index, &look);
-                pictures.paint(ui, thumb, places.picture, crate::studio::LIST_PICTURE_CORNER, layout);
+                // Only the pictures in sight are made, drawn or asked for.
+                if ui.is_rect_visible(places.picture) {
+                    pictures.paint(ui, thumb, places.picture, crate::studio::LIST_PICTURE_CORNER, layout);
+                }
                 if renaming && let Some((_, typed)) = state.stage_rename.as_mut() {
                     let look = crate::studio::list_name_look(TEXT);
                     let field = crate::studio::rename_field_at(ui, typed, &look, places.name, places.name_right);

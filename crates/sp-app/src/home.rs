@@ -3983,7 +3983,10 @@ fn prop_list(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut crate::studio
                     renaming,
                 };
                 let (response, places) = crate::studio::list_picture(ui, list, index, &look);
-                crate::live_tabs::prop_picture(ui, thumb, places.picture, crate::studio::LIST_PICTURE_CORNER, prop);
+                // Only the pictures in sight are drawn, or asked for.
+                if ui.is_rect_visible(places.picture) {
+                    crate::live_tabs::prop_picture(ui, thumb, places.picture, crate::studio::LIST_PICTURE_CORNER, prop);
+                }
                 if renaming && let Some((_, typed)) = state.prop_rename.as_mut() {
                     let look = crate::studio::list_name_look(if look.live { crate::studio::TALLY } else { TEXT });
                     let field = crate::studio::rename_field_at(ui, typed, &look, places.name, places.name_right);
@@ -8627,6 +8630,59 @@ mod tests {
         delete_prop(&mut state, 0);
         assert!(state.props.is_empty());
         assert_eq!((state.editing.is_none(), state.edit_kind_request), (true, Some(EditKind::Slides)));
+    }
+
+    #[test]
+    fn a_prop_or_layout_deleted_in_the_edit_view_is_asked_about_and_return_deletes_it() {
+        let (ctx, show) = (egui::Context::default(), three_songs());
+        let mut state = HomeState::default();
+        for name in ["Logo", "Name", "Welcome"] {
+            state.props.push(crate::props::Prop::new(name.to_owned()));
+        }
+        state.edit_kind_request = Some(EditKind::Props);
+        frame_events(&ctx, &show, &mut state, vec![], 0.0);
+        assert_eq!(state.edit_kind(), Some(EditKind::Props));
+        // The second open, and asked to be deleted: the question waits for an answer.
+        state.editing = crate::studio::prop_draft(&state, 1);
+        state.confirm_delete_prop = Some(state.props[1].id);
+        frame_events(&ctx, &show, &mut state, vec![], 0.1);
+        assert_eq!((state.props.len(), state.alert_open()), (3, true));
+        // Return deletes it, and the one after it opens.
+        let said = frame_commands(&ctx, &show, &mut state, pressed(Key::Enter, Modifiers::NONE), 0.2);
+        assert!(said.is_empty(), "Return answers the question and nothing else: {said:?}");
+        let names: Vec<&str> = state.props.iter().map(|prop| prop.name.as_str()).collect();
+        assert_eq!(names, ["Logo", "Welcome"]);
+        assert_eq!(
+            state.editing.as_ref().map(|draft| (draft.at.presentation, draft.at.slide)),
+            Some((crate::props::PROP_SLOT, 1))
+        );
+        assert!(!state.alert_open());
+        // With the last one deleted, the Edit view goes on to the slides.
+        state.props.truncate(1);
+        state.editing = crate::studio::prop_draft(&state, 0);
+        state.confirm_delete_prop = Some(state.props[0].id);
+        frame_events(&ctx, &show, &mut state, vec![], 0.3);
+        let said = frame_commands(&ctx, &show, &mut state, pressed(Key::Enter, Modifiers::NONE), 0.4);
+        assert!(said.is_empty(), "{said:?}");
+        frame_events(&ctx, &show, &mut state, vec![], 0.5);
+        assert!(state.props.is_empty());
+        assert_eq!(state.edit_kind(), Some(EditKind::Slides));
+        // A stage layout the same way: Escape keeps it, Return deletes it.
+        state.edit_kind_request = Some(EditKind::Stage);
+        frame_events(&ctx, &show, &mut state, vec![], 0.6);
+        frame_events(&ctx, &show, &mut state, vec![], 0.7);
+        assert_eq!(state.edit_kind(), Some(EditKind::Stage));
+        let second = state.stage_layouts[1].id;
+        state.confirm_delete_layout = Some(second);
+        frame_events(&ctx, &show, &mut state, vec![], 0.8);
+        frame_events(&ctx, &show, &mut state, pressed(Key::Escape, Modifiers::NONE), 0.9);
+        assert_eq!((state.stage_layouts.len(), state.confirm_delete_layout), (4, None));
+        state.confirm_delete_layout = Some(second);
+        frame_events(&ctx, &show, &mut state, vec![], 1.0);
+        frame_events(&ctx, &show, &mut state, pressed(Key::Enter, Modifiers::NONE), 1.1);
+        assert_eq!(state.stage_layouts.len(), 3);
+        assert!(state.stage_layouts.iter().all(|layout| layout.id != second));
+        assert_eq!(state.edit_kind(), Some(EditKind::Stage));
     }
 
     #[test]
