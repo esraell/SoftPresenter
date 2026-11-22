@@ -174,6 +174,20 @@ impl Default for Services {
     }
 }
 
+/// Where an item at `place` is after the item at `from` is moved to `to` (both places in the
+/// list as it is before and after the move).
+pub fn moved_place(place: usize, from: usize, to: usize) -> usize {
+    if place == from {
+        to
+    } else if from < place && place <= to {
+        place - 1
+    } else if to <= place && place < from {
+        place + 1
+    } else {
+        place
+    }
+}
+
 const FORMAT: &str = "softpresenter-services";
 /// The newest version of the services file: 3, with pictures and videos, media playlists and
 /// placeholders in playlists; 2, library songs named by id (1 named them by their file's path or
@@ -256,22 +270,48 @@ impl Services {
     /// false if the item there isn't a placeholder. A song already elsewhere in the service is
     /// moved here.
     pub fn fill(&mut self, index: usize, item: Item) -> bool {
-        if !matches!(self.front().items.get(index), Some(Item::Placeholder { .. })) {
-            return false;
+        let front = self.front_at();
+        match self.fill_in(front, index, item) {
+            Some(at) => {
+                self.chosen = Some(at);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Puts an item in a placeholder's place in a playlist (by its place among the playlists),
+    /// which need not be the one in front. Returns where the item is now, or `None` if the item
+    /// there isn't a placeholder. A song already elsewhere in that playlist is moved here; in
+    /// the playlist in front, the open item stays open where it now is.
+    pub fn fill_in(&mut self, playlist: usize, index: usize, item: Item) -> Option<usize> {
+        let items = &mut self.list.get_mut(playlist)?.items;
+        if !matches!(items.get(index), Some(Item::Placeholder { .. })) {
+            return None;
         }
         let mut at = index;
+        let mut moved = None;
         if let Item::Song { key, .. } = &item
-            && let Some(was) =
-                self.front().items.iter().position(|have| matches!(have, Item::Song { key: k, .. } if k == key))
+            && let Some(was) = items.iter().position(|have| matches!(have, Item::Song { key: k, .. } if k == key))
         {
-            self.front_mut().items.remove(was);
+            items.remove(was);
+            moved = Some(was);
             if was < at {
                 at -= 1;
             }
         }
-        self.front_mut().items[at] = item;
-        self.chosen = Some(at);
-        true
+        items[at] = item;
+        self.changed = true;
+        if playlist == self.front_at()
+            && let Some(was) = moved
+        {
+            self.chosen = self.chosen.map(|open| match open {
+                open if open == was || open == index => at,
+                open if open > was => open - 1,
+                open => open,
+            });
+        }
+        Some(at)
     }
 
     /// Takes items out of a playlist (by its place among the playlists), all at once. Returns
@@ -418,22 +458,34 @@ impl Services {
         self.changed = true;
     }
 
-    /// Renames the service in front. An empty name is refused.
-    pub fn rename(&mut self, name: &str) {
+    /// Renames a playlist, by its place among the playlists; the one in front stays in front.
+    /// An empty name is refused.
+    pub fn rename_at(&mut self, playlist: usize, name: &str) {
         let name = name.trim();
-        if !name.is_empty() && self.front().name != name {
-            self.front_mut().name = name.to_owned();
+        if let Some(list) = self.list.get_mut(playlist)
+            && !name.is_empty()
+            && list.name != name
+        {
+            list.name = name.to_owned();
+            self.changed = true;
         }
     }
 
-    /// Removes the service in front. The last one cannot be removed.
-    pub fn remove_service(&mut self) -> bool {
-        if self.list.len() <= 1 {
+    /// Removes a playlist, by its place among the playlists. The last one cannot be removed.
+    /// The playlist in front stays in front with its open item, unless it is the one removed:
+    /// then the one before it (or, for the first, the one after) comes to the front.
+    pub fn remove_at(&mut self, playlist: usize) -> bool {
+        if self.list.len() <= 1 || playlist >= self.list.len() {
             return false;
         }
-        self.list.remove(self.current.min(self.list.len() - 1));
-        self.current = self.current.saturating_sub(1).min(self.list.len() - 1);
-        self.chosen = None;
+        let front = self.front_at();
+        self.list.remove(playlist);
+        if playlist == front {
+            self.current = front.saturating_sub(1).min(self.list.len() - 1);
+            self.chosen = None;
+        } else {
+            self.current = if playlist < front { front - 1 } else { front };
+        }
         self.changed = true;
         true
     }
@@ -990,14 +1042,81 @@ mod tests {
         services.add_service();
         assert_eq!((services.list.len(), services.current), (2, 1));
         assert!(services.front().items.is_empty());
-        services.rename("  Sunday ");
-        services.rename("   ");
+        services.rename_at(1, "  Sunday ");
+        services.rename_at(1, "   ");
         assert_eq!(services.front().name, "Sunday");
         services.show(0);
         assert_eq!(services.front().items.len(), 1);
-        assert!(services.remove_service());
+        assert!(services.remove_at(0));
         assert_eq!(services.front().name, "Sunday");
-        assert!(!services.remove_service());
+        assert!(!services.remove_at(0));
+    }
+
+    #[test]
+    fn a_playlist_renamed_or_removed_by_its_place_leaves_the_one_in_front_alone() {
+        let named = |names: &[&str]| Services {
+            list: names
+                .iter()
+                .map(|name| Service { name: (*name).to_owned(), items: vec![song("a"), song("b")] })
+                .collect(),
+            current: 2,
+            chosen: Some(1),
+            changed: false,
+        };
+        let names = |services: &Services| services.list.iter().map(|s| s.name.clone()).collect::<Vec<_>>();
+        // Renaming another playlist renames it there; the one in front and its open item stay.
+        let mut services = named(&["A", "B", "C", "D"]);
+        services.rename_at(0, "Morning");
+        assert_eq!(names(&services), ["Morning", "B", "C", "D"]);
+        assert_eq!((services.front().name.as_str(), services.chosen), ("C", Some(1)));
+        assert!(services.changed);
+        // Removing one before it, or after it: the same playlist stays in front, still open where it was.
+        let mut services = named(&["A", "B", "C", "D"]);
+        assert!(services.remove_at(0));
+        assert_eq!((services.front().name.as_str(), services.current, services.chosen), ("C", 1, Some(1)));
+        assert!(services.remove_at(2));
+        assert_eq!((services.front().name.as_str(), services.current, services.chosen), ("C", 1, Some(1)));
+        // Removing the one in front: the one before it comes to the front, with nothing open.
+        assert!(services.remove_at(1));
+        assert_eq!((services.front().name.as_str(), services.chosen), ("B", None));
+        // The first in front: the next one comes.
+        let mut services = named(&["A", "B"]);
+        services.current = 0;
+        assert!(services.remove_at(0));
+        assert_eq!(services.front().name, "B");
+        assert!(!services.remove_at(0), "there is always one");
+        assert!(!services.remove_at(5));
+    }
+
+    #[test]
+    fn an_item_moved_takes_the_others_with_it() {
+        // A B C D E, with B moved to the fourth place: A C D B E.
+        let after: Vec<usize> = (0..5).map(|at| moved_place(at, 1, 3)).collect();
+        assert_eq!(after, [0, 3, 1, 2, 4]);
+        // And D back to the second: A D B C E.
+        let after: Vec<usize> = (0..5).map(|at| moved_place(at, 3, 1)).collect();
+        assert_eq!(after, [0, 2, 3, 1, 4]);
+        assert_eq!(moved_place(2, 2, 2), 2);
+    }
+
+    #[test]
+    fn a_placeholder_filled_in_another_playlist_leaves_the_open_item_alone() {
+        let mut services = Services::default();
+        services.list[0].items = vec![song("a"), song("b"), song("c")];
+        services.list.push(Service {
+            name: "Evening".to_owned(),
+            items: vec![song("x"), Item::Placeholder { name: "Sermon".to_owned() }],
+        });
+        services.chosen = Some(2);
+        assert_eq!(services.fill_in(1, 1, song("y")), Some(1));
+        assert_eq!(services.list[1].items[1], song("y"));
+        assert_eq!((services.current, services.chosen), (0, Some(2)), "the open item stays");
+        assert_eq!(services.fill_in(1, 0, song("z")), None, "only a placeholder is filled");
+        // In the playlist in front, with a song moved from above it, the open item keeps up.
+        services.list[0].items.insert(3, Item::Placeholder { name: "Here".to_owned() });
+        assert_eq!(services.fill_in(0, 3, song("a")), Some(2));
+        assert_eq!(services.list[0].items, [song("b"), song("c"), song("a")]);
+        assert_eq!(services.chosen, Some(1), "c is still open");
     }
 
     #[test]

@@ -227,8 +227,9 @@ pub struct HomeState {
     pub services: crate::service::Services,
     /// For each presentation, the name its song is found by again in a service.
     pub song_keys: Vec<String>,
-    /// The service's name while it is being retyped.
-    pub renaming_service: Option<String>,
+    /// A playlist being renamed in the chooser: its place among the playlists, and the name as
+    /// typed so far.
+    pub renaming_service: Option<(usize, String)>,
     /// Displayed thumbnail width in points.
     /// Text typed into the library's filter box.
     pub filter: String,
@@ -12643,7 +12644,7 @@ mod tests {
         assert!(commands.is_empty(), "and clears nothing: {commands:?}");
         // Retyping a playlist's name in it, Escape ends the retyping and the chooser stays.
         state.chooser_open = true;
-        state.renaming_service = Some("Sunday".to_owned());
+        state.renaming_service = Some((0, "Sunday".to_owned()));
         state.rename_started = true;
         frame_events(&ctx, &show, &mut state, vec![], 0.2);
         frame_events(&ctx, &show, &mut state, vec![key(Key::Escape)], 0.3);

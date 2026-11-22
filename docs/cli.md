@@ -652,13 +652,13 @@ it and `slide frame` moves it, while `slide text` and `slide style` say "The sli
 |---|---|
 | `playlist open NAME` | Puts a playlist in front |
 | `playlist add SONG [to PLAYLIST]` | Adds a song at the end (of the playlist in front if none is named); `VoxLive` adds the VoxLive item, once VoxLive is connected |
-| `playlist new NAME`, `playlist rename OLD to NEW`, `playlist delete NAME --yes` | Makes, renames or deletes a playlist (the last one stays) |
-| `playlist remove ITEM [from PLAYLIST]`, `playlist move ITEM to N [in PLAYLIST]` | Takes out or moves an item, by number or title |
+| `playlist new NAME`, `playlist rename OLD to NEW`, `playlist delete NAME --yes` | Makes, renames or deletes a playlist (the last one stays). The playlist in front stays in front with its open item; deleting the one in front brings the one before it (or the next) to the front |
+| `playlist remove ITEM [from PLAYLIST]`, `playlist move ITEM to N [in PLAYLIST]` | Takes out or moves an item, by number or title; the open item of the playlist in front stays open (unless it is the one taken out) |
 | `playlist header TEXT [at N] [in PLAYLIST]` | A header that groups the items after it |
 | `playlist media ITEM [at N] [in PLAYLIST]` | A picture or video from the media bin (the countdown video) |
 | `playlist media-playlist NAME [at N] [in PLAYLIST]` | A media playlist (the announcement loop), to play from the playlist |
 | `playlist placeholder NAME [at N] [in PLAYLIST]` | A place kept for something to come (the sermon slides) |
-| `playlist fill PLACEHOLDER with SONG`, `… with media ITEM` `[in PLAYLIST]` | Puts a song, or a picture or video, in a placeholder's place (a song already in the playlist moves there) |
+| `playlist fill PLACEHOLDER with SONG`, `… with media ITEM` `[in PLAYLIST]` | Puts a song, or a picture or video, in a placeholder's place (a song already in the playlist moves there); in the playlist in front it becomes the open item, in another the open item stays |
 | `playlist item N show-with NAME\|usual [--keep] [in PLAYLIST]` | The theme version a song or passage goes on screen in (see [theme versions](#theme-versions)) |
 
 In `playlist header|media|media-playlist|placeholder`, a last `in` names a playlist only when

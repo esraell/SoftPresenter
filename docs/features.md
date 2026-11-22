@@ -182,9 +182,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   song libraries under a line (All Songs, then libraries of your own such as Christmas or
   Youth). The one that is open has a lighter row, a heavier name and a tick. + beside each
   heading makes a new one; a row's ⋯ (or a right-click, or a double click for Rename) renames,
-  exports or deletes it. Choosing puts the list back, and so does Escape, which then clears
-  nothing on the screens. A library lists its songs, each with how
-  many slides it has (and, in All Songs, the library it is in); at the foot are the order they
+  exports or deletes it, where it is: the playlist in front stays in front with its open item
+  (deleting the one in front opens the one before it). Choosing puts the list back, and so
+  does Escape, which then clears nothing on the screens. A library lists its songs, each with
+  how many slides it has (and, in All Songs, the library it is in); at the foot are the order they
   are listed in (**As listed, A–Z, Longest**, kept between runs), **New song** and a filter. A
   song's ⋯, or a right-click, opens its menu. While songs are dragged the chooser shows above
   the list, so they can be dropped on a playlist or a library; a new song made while a library

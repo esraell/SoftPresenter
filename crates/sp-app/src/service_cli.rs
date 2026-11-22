@@ -280,8 +280,8 @@ impl crate::App {
                 "This deletes the playlist {title} (its songs stay in the library). Add --yes to do it."
             ));
         }
-        state.services.show(at);
-        state.services.remove_service();
+        // Deleted where it is: the playlist in front stays in front, unless it is this one.
+        state.services.remove_at(at);
         Ok(Reply::done(format!("Deleted the playlist {title}.")))
     }
 
@@ -289,12 +289,11 @@ impl crate::App {
         let at = self.playlist_at(list)?;
         let which = self.playlist_item(at, item)?;
         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
-        let playlist = &mut state.services.list[at];
-        let gone = playlist.items.remove(which);
-        let name = playlist.name.clone();
-        state.services.chosen = None;
-        state.services.changed = true;
-        Ok(Reply::done(format!("Took {} out of {name}.", gone.title())))
+        // The open item of the playlist in front stays open, unless it is the one taken out.
+        let gone = state.services.remove_items(at, &[which]);
+        let name = state.services.list[at].name.clone();
+        let title = gone.first().map(|(_, item)| item.title().to_owned()).unwrap_or_default();
+        Ok(Reply::done(format!("Took {title} out of {name}.")))
     }
 
     fn playlist_move(&mut self, item: &str, to: usize, list: Option<&str>) -> Result<Reply, String> {
@@ -309,7 +308,10 @@ impl crate::App {
         let title = moving.title().to_owned();
         playlist.items.insert(to - 1, moving);
         let name = playlist.name.clone();
-        state.services.chosen = None;
+        // In the playlist in front, the open item stays open wherever it now is.
+        if at == state.services.current {
+            state.services.chosen = state.services.chosen.map(|open| crate::service::moved_place(open, which, to - 1));
+        }
         state.services.changed = true;
         Ok(Reply::done(format!("Moved {title} to place {to} in {name}.")))
     }
@@ -389,11 +391,13 @@ impl crate::App {
         };
         let name = playlist.name.clone();
         let title = item.title().to_owned();
-        // Filled in the playlist in front, which is where the window's own filling works; the
-        // one in front comes back after.
-        state.services.show(list);
-        state.services.fill(at, item);
-        state.services.show(shown);
+        // In the playlist in front it becomes the open item, as a drop on it does; in another,
+        // the open item of the one in front stays.
+        if list == shown {
+            state.services.fill(at, item);
+        } else {
+            state.services.fill_in(list, at, item);
+        }
         Ok(Reply::done(format!("Filled the placeholder {placeholder} in {name} with {title}.")))
     }
 

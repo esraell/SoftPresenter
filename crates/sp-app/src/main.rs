@@ -7249,7 +7249,7 @@ impl App {
                 match what.as_str() {
                     "playlist" => {
                         state.chooser_open = true;
-                        state.renaming_service = Some(state.services.front().name.clone());
+                        state.renaming_service = Some((state.services.front_at(), state.services.front().name.clone()));
                     }
                     "library" => {
                         state.chooser_open = true;

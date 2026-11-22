@@ -2466,7 +2466,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
     if chooser_head(ui, "Playlists", "New playlist", false) {
         state.services.add_service();
         state.playlist_open = true;
-        state.renaming_service = Some(state.services.front().name.clone());
+        state.renaming_service = Some((state.services.front_at(), state.services.front().name.clone()));
         state.rename_started = true;
     }
     let playlists: Vec<(String, usize)> = state
@@ -2477,10 +2477,10 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
             (playlist.name.clone(), playlist.items.iter().filter(|item| !matches!(item, Item::Header { .. })).count())
         })
         .collect();
-    let mut delete = false;
+    let mut delete = None;
     for (index, (name, count)) in playlists.iter().enumerate() {
         let front = index == state.services.current;
-        let renaming = front && state.renaming_service.is_some();
+        let renaming = state.renaming_service.as_ref().is_some_and(|(at, _)| *at == index);
         let on = state.playlist_open && front;
         let shown = if renaming { "" } else { name.as_str() };
         let target = crate::file_drop::DropTarget::Playlist { index, after: None };
@@ -2490,7 +2490,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
             })
             .inner;
         crate::file_drop::offer(ui, state, crate::file_drop::Place::onto(response.rect, target.clone()));
-        if renaming && let Some(typed) = state.renaming_service.as_mut() {
+        if renaming && let Some((_, typed)) = state.renaming_service.as_mut() {
             // Set as the row sets the name.
             let look = Lettering::plain(if on { semibold(14.0) } else { FontId::proportional(14.0) }, TEXT);
             let field = rename_field_at(ui, typed, &look, start, right);
@@ -2503,7 +2503,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
                 state.renaming_service = None;
             } else if enter || field.lost_focus() {
                 let typed = typed.clone();
-                state.services.rename(&typed);
+                state.services.rename_at(index, &typed);
                 state.renaming_service = None;
             }
             // The row's ⋯ stays where it was.
@@ -2521,7 +2521,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
         if response.double_clicked() {
             state.services.show(index);
             state.chooser_open = true;
-            state.renaming_service = Some(name.clone());
+            state.renaming_service = Some((index, name.clone()));
             state.rename_started = true;
         }
         // Songs, a picture or video, or a result of the find box go at the playlist's end.
@@ -2534,10 +2534,10 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
         }
         let several = playlists.len() > 1;
         let mut menu = |ui: &mut egui::Ui| {
+            // Renamed where it is: the playlist in front stays in front.
             if ui.button("Rename").clicked() {
-                state.services.show(index);
                 state.chooser_open = true;
-                state.renaming_service = Some(name.clone());
+                state.renaming_service = Some((index, name.clone()));
                 state.rename_started = true;
                 ui.close();
             }
@@ -2546,8 +2546,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
                 ui.close();
             }
             if ui.add_enabled(several, egui::Button::new("Delete Playlist")).clicked() {
-                state.services.show(index);
-                delete = true;
+                delete = Some(index);
                 ui.close();
             }
         };
@@ -2557,8 +2556,10 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
         }
         response.context_menu(&mut menu);
     }
-    if delete {
-        state.services.remove_service();
+    // Deleted where it is: the playlist in front stays in front, unless it is the one deleted.
+    if let Some(index) = delete {
+        state.services.remove_at(index);
+        state.renaming_service = None;
     }
     if chooser_head(ui, "Song libraries", "New library", true) {
         let made = crate::libraries::Library::new(crate::libraries::new_name(&state.libraries));
@@ -2745,7 +2746,7 @@ impl SongAsks {
                     state.services.add(item);
                     state.playlist_open = true;
                     state.chooser_open = true;
-                    state.renaming_service = Some(state.services.front().name.clone());
+                    state.renaming_service = Some((state.services.front_at(), state.services.front().name.clone()));
                     state.rename_started = true;
                 }
             }
@@ -6021,6 +6022,30 @@ pub mod tests {
     }
 
     #[test]
+    fn another_playlist_renamed_in_the_chooser_leaves_the_one_in_front_open() {
+        use crate::service::{Item, Service};
+        let ctx = styled();
+        let show = Show::new(Vec::new());
+        let mut state = HomeState { playlist_open: true, chooser_open: true, ..HomeState::default() };
+        state.services.list[0].name = "Morning".to_owned();
+        state.services.list.push(Service { name: "Evening".to_owned(), items: vec![Item::song("a", "A")] });
+        state.services.current = 1;
+        state.services.chosen = Some(0);
+        let frame = |state: &mut HomeState, events: Vec<Event>| {
+            drawn(&ctx, events, |ui| chooser(ui, &show, state, &mut Vec::new())).drop_without_applying_deltas();
+        };
+        state.renaming_service = Some((0, "Morning".to_owned()));
+        state.rename_started = true;
+        frame(&mut state, vec![]);
+        frame(&mut state, vec![Event::Text(" Service".to_owned())]);
+        frame(&mut state, vec![key(egui::Key::Enter)]);
+        assert!(state.renaming_service.is_none());
+        assert_eq!(state.services.list[0].name, "Morning Service", "renamed where it is");
+        assert_eq!(state.services.list[1].name, "Evening");
+        assert_eq!((state.services.current, state.services.chosen), (1, Some(0)), "Evening stays open, its item too");
+    }
+
+    #[test]
     fn a_playlist_or_library_renamed_in_the_chooser_stays_put_return_keeps_it_and_escape_puts_it_back() {
         let ctx = styled();
         let show = Show::new(Vec::new());
@@ -6045,7 +6070,7 @@ pub mod tests {
             let (words, before) = if which == "playlist" { ("Sunday Morning", &playlist) } else { ("Hymns", &hymns) };
             for (press, kept) in [(egui::Key::Enter, true), (egui::Key::Escape, false)] {
                 if which == "playlist" {
-                    state.renaming_service = Some(words.to_owned());
+                    state.renaming_service = Some((0, words.to_owned()));
                 } else {
                     state.renaming_library = Some((library, words.to_owned()));
                 }
