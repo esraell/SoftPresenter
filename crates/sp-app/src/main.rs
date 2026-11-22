@@ -1773,6 +1773,7 @@ impl App {
         let Some(first) = self.playlist_media(id).first().copied() else {
             if let Some(running) = self.running.as_mut() {
                 running.home_state.notices.refuse("That media playlist has nothing in it to play.");
+                running.home_window.request_redraw();
             }
             return;
         };
@@ -2581,6 +2582,14 @@ impl App {
                 || view.screens != self.voxlive.screens
                 || !self.voxlive.key_hint_is(view.key_hint.as_deref())
             {
+                // A key refused, or VoxLive no longer answering, is trouble in the notices too
+                // (said when it comes, not again while it stays).
+                if view.status != self.voxlive.status
+                    && let voxlive::Status::Refused(why) | voxlive::Status::Trouble(why) = &self.voxlive.status
+                {
+                    running.home_state.notices.trouble(format!("VoxLive: {why}"));
+                }
+                let view = &mut running.home_state.voxlive;
                 view.status = self.voxlive.status.clone();
                 view.screens = self.voxlive.screens.clone();
                 view.key_hint = self.voxlive.key_hint();
@@ -6309,6 +6318,14 @@ impl App {
                 };
                 let main_gone = index == self.songs_theme;
                 self.songs_theme = moved(self.songs_theme);
+                // A question about the theme deleted goes; one about a theme after it follows it.
+                if let Some(running) = self.running.as_mut() {
+                    running.home_state.notices.settle(outside::Waiting::Theme(index));
+                    running.home_state.notices.renumber(|about| match about {
+                        outside::Waiting::Theme(at) => outside::Waiting::Theme(moved(at)),
+                        song => song,
+                    });
+                }
                 self.themes_changed();
                 theme_store::remember_in_use(&self.theme, &self.themes);
                 if main_gone && let Some(running) = self.running.as_mut() {
@@ -6619,7 +6636,7 @@ impl App {
             let window = match el.create_window(attrs) {
                 Ok(window) => Arc::new(window),
                 Err(e) => {
-                    home_state.notices.trouble(format!("Could not open a window for \"{}\": {e}", screen.name));
+                    home_state.notices.lasting_trouble(format!("Could not open a window for \"{}\": {e}", screen.name));
                     continue;
                 }
             };
@@ -6634,14 +6651,14 @@ impl App {
             let surface = match context.instance.create_surface(window.clone()) {
                 Ok(surface) => surface,
                 Err(e) => {
-                    home_state.notices.trouble(format!("Could not draw to \"{}\": {e}", screen.name));
+                    home_state.notices.lasting_trouble(format!("Could not draw to \"{}\": {e}", screen.name));
                     continue;
                 }
             };
             let format = match surface_format(&surface, context.devices[*device_id].adapter()) {
                 Ok(format) => format,
                 Err(e) => {
-                    home_state.notices.trouble(e);
+                    home_state.notices.lasting_trouble(e);
                     continue;
                 }
             };

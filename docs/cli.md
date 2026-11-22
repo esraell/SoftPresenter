@@ -1099,8 +1099,8 @@ or an agent may change one while the app runs:
 
 - **The app never saves over a file that changed outside it.** A change made in the app to
   such a song is held, not written: the reply ends with "Not saved: … sp song reload SONG --now
-  takes the file's version; sp song keep SONG saves this one." and exits 1. The window shows a
-  bar with Reload and Keep mine.
+  takes the file's version; sp song keep SONG saves this one." and exits 1. The window asks, with
+  Reload and Keep mine, in its notices and under the song's title bar.
 - **A changed file is read again** when a command names the song, or when it is opened, unless
   the song is on screen, on the Announcements layer, in the editor, or holding changes not
   saved; then it waits for Reload or Keep mine. `songs` marks it "(changed outside

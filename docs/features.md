@@ -21,7 +21,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   button, a click elsewhere, or Escape, which then clears nothing and closes nothing else)
   marks everything seen. Clear All keeps a question that waits for its answer; the list keeps
   the last 40. Only trouble (a file that couldn't be read or saved, an output or a player that
-  stopped), questions, and what happened out of sight (added to another playlist, a file read,
+  stopped, VoxLive refusing its key or not answering), questions, and what happened out of sight (added to another playlist, a file read,
   a Bible installed, written files) earn an entry, and every one goes in the log too; what the
   operator just did and can see is never said. The show keys (← → Space Enter) still run the
   show while the list is open.

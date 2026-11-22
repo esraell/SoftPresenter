@@ -35,8 +35,8 @@ pub const CUE_FADE: f64 = 0.12;
 pub const CLICK_NEAR: f64 = 0.6;
 
 /// The answers a question about a file changed outside SoftPresenter offers.
-pub const RELOAD: &str = "reload";
-pub const KEEP_MINE: &str = "keep";
+pub const RELOAD: &str = "outside:reload";
+pub const KEEP_MINE: &str = "outside:keep";
 
 /// What kind of entry a notice is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -46,7 +46,9 @@ pub enum Kind {
     Info,
     /// Something went wrong: counted in amber on the button.
     Trouble,
-    /// Something waits for an answer: amber, with "?", until answered.
+    /// Something waits for an answer: amber, with "?", until answered. Sent as "ask", the
+    /// design's word for it.
+    #[serde(rename = "ask")]
     Question,
 }
 
@@ -131,6 +133,16 @@ impl Notices {
         self.push(Kind::Trouble, text.into(), None, Vec::new());
     }
 
+    /// Trouble that lasts, said again each time it is tried (a screen's window that can't be
+    /// opened is tried every frame): one entry, raised once; seen, it stays seen while it is in
+    /// the list, so closing the list quiets the button.
+    pub fn lasting_trouble(&mut self, text: impl Into<String>) {
+        let text = text.into();
+        if !self.list.iter().any(|notice| notice.kind == Kind::Trouble && notice.text == text.trim()) {
+            self.trouble(text);
+        }
+    }
+
     /// How a piece of work went: information when it went well, trouble when it didn't.
     pub fn outcome(&mut self, result: Result<String, String>) {
         match result {
@@ -163,6 +175,14 @@ impl Notices {
     /// answer is said by whoever carried it out).
     pub fn settle(&mut self, about: Waiting) {
         self.list.retain(|notice| notice.about != Some(about));
+    }
+
+    /// What the questions are about, after the things they name have moved (a theme before
+    /// them deleted, say).
+    pub fn renumber(&mut self, moved: impl Fn(Waiting) -> Waiting) {
+        for notice in &mut self.list {
+            notice.about = notice.about.map(&moved);
+        }
     }
 
     /// What an answer to an entry asks for: the thing it is about, and true for Reload. `None`
@@ -774,6 +794,35 @@ mod tests {
     }
 
     #[test]
+    fn lasting_trouble_tried_every_frame_stays_quiet_once_seen() {
+        let mut notices = Notices::default();
+        for _ in 0..60 {
+            notices.lasting_trouble("Could not open a window for \u{201c}Left\u{201d}.");
+        }
+        assert_eq!(notices.look(), Look::Trouble(1));
+        notices.mark_seen();
+        for _ in 0..60 {
+            notices.lasting_trouble("Could not open a window for \u{201c}Left\u{201d}.");
+        }
+        assert_eq!(notices.look(), Look::Quiet, "closing the list quiets the button");
+        assert_eq!(notices.entries().count(), 1);
+    }
+
+    #[test]
+    fn a_question_follows_the_theme_it_is_about() {
+        let mut notices = Notices::default();
+        notices.ask(Waiting::Theme(2), "The theme Evening was changed outside SoftPresenter.");
+        notices.ask(Waiting::Song(2), "Two was changed outside SoftPresenter.");
+        // The theme before it is deleted: it is the second theme now; the song's stays.
+        notices.renumber(|about| match about {
+            Waiting::Theme(at) => Waiting::Theme(at - 1),
+            song => song,
+        });
+        assert!(notices.asks_about(Waiting::Theme(1)) && !notices.asks_about(Waiting::Theme(2)));
+        assert!(notices.asks_about(Waiting::Song(2)));
+    }
+
+    #[test]
     fn something_said_again_and_again_is_one_entry_until_seen() {
         let mut notices = Notices::default();
         for _ in 0..100 {
@@ -795,7 +844,8 @@ mod tests {
         notices.ask(Waiting::Song(0), "Harbour Lights was changed outside SoftPresenter.");
         notices.info("Installed Ukrainian Ogienko");
         let sent = serde_json::to_value(notices.to_vec()).unwrap();
-        assert_eq!(sent[0]["kind"], "question");
+        assert_eq!(sent[0]["kind"], "ask");
+        assert_eq!(sent[0]["actions"][0]["id"], "outside:reload");
         assert_eq!(sent[0]["actions"][0]["label"], "Reload");
         assert_eq!(sent[1]["kind"], "info");
         assert_eq!(sent[1]["text"], "Installed Ukrainian Ogienko");

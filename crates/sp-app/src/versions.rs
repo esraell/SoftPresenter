@@ -164,6 +164,7 @@ impl crate::App {
                 && let Some(running) = self.running.as_mut()
             {
                 running.home_state.notices.refuse(problem);
+                running.home_window.request_redraw();
             }
         }
     }
