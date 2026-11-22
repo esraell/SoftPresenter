@@ -92,11 +92,11 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | Space, → | Next slide. With another item opened (↑, ↓ or a click on its row), starts that item at its first slide; at the end of a song, with Continuous on, goes on into the next song or Bible passage. While a slide picked waits for Enter, goes on with what is on screen; with nothing on screen, Space puts the picked slide on and → / ← move the pick |
 | ← | Previous slide; starts another item opened, as Space does; at a song's first slide, with Continuous on, goes back into the item before |
 | ↑, ↓ | Opens the playlist item above or below (a notice says so at either end); in the Bible view, picks the verse before or after without putting it on screen |
-| Enter | The slide picked goes on screen (the first slide or verse of what the find box or Scripture Lookup just opened, or the verse ↑ or ↓ picked in the Bible view); with none, the open item from its first slide (with a library listed, the song chosen) |
+| Enter | The slide picked goes on screen (the first slide or verse of what the find box or the reference field just opened, or the verse ↑ or ↓ picked in the Bible view); with none, the open item from its first slide (with a library listed, the song chosen) |
 | Home, End | First, last slide of the song |
 | Escape (F1) | Clear all |
 | F2, F3, F4, F5, F6 | Clear slide, media, props, audio, messages |
-| A letter | The slide with that hot key, or the group it stands for (A for the first verse, S for the second, C for the chorus, E for the ending…; the letter shows at the right of a group's bar). In the Bible view a letter or number starts the next reference in Scripture Lookup instead |
+| A letter | The slide with that hot key, or the group it stands for (A for the first verse, S for the second, C for the chorus, E for the ending…; the letter shows at the right of a group's bar). In the Bible view a letter or number starts the next reference in the reference field instead |
 | Delete | Delete what is picked out, after asking |
 | Command-N | New song |
 | Command-1, -2, -3 | Show, Bible (cursor in the reference), Edit (Ctrl on other computers, for all of these) |
@@ -168,35 +168,57 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 ## The Bible view
 
 ```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ [John 3:16-18      ] [Books]  [Search          ]   [Add to "Sunday" ] [▾]   [Options] │
-│ [King James ▾]  Verse [Main ▾]   Reference [Reference ▾]                 License  [+] │
-│ [Synodal    ▾]  Verse [Translation ▾] Reference [None ▾]                 License  [−] │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│  verses as slides; click one to put it on screen                                       │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ [‹ Verse] [Verse ›]                    Cut Dissolve Advanced ▾    grid/easy/table  size │
-└────────────────────────────────────────────────────────────────────────────────────────┘
+╭──────────────────────────╮ ╭─────────────────────────────────────────────────────────────╮
+│ [Books|History][Hide]    │ │ (John 3:16    ) [‹][›]  [+ Add|▾] │ [Page|Slides] [Options] │
+│ BOOK                     │ │ TRANSLATIONS [SYN] [KJV] [Change]                           │
+│ OLD TESTAMENT  CH  VERSE │ │ John 3  [KJV + SYN]                                         │
+│ Genesis         1    1   │ │  14  And as Moses lifted up the serpent…                    │
+│ Exodus          2    2   │ │      И как Моисей вознес змию…                              │
+│ …               3    3   │ │ [16  For God so loved the world…   (picked: well, ring)]    │
+│                          │ │       Ибо так возлюбил Бог мир…                             │
+│                          │ │ MEDIA (All Media ▾)                       (Dissolve ▾) +    │
+╰──────────────────────────╯ ╰─────────────────────────────────────────────────────────────╯
 ```
 
-- Up to four Bibles side by side; each row picks a Bible (None frees it for another row), the
-  box its verse goes in, and the box its reference goes in.
+- The left column, in place of the playlist (`bible_page.rs`, `left_column`): Books | History
+  and Hide. Books: the book, chapter and verse lists side by side, each scrolling on its own,
+  opened on what is chosen (the books in full in the operator's language under the testaments,
+  those the first translation lacks dimmed; chapters and verses as the first translation numbers
+  them). History: the passages that were on screen, newest first, a click brings one back, and
+  Clear history. Hide puts the column away and the middle takes its room; Books, beside the
+  reference field, brings it back (kept with the preferences).
+- The bar along the top (`home.rs`, `bible_bar`): the reference field (236 wide when there is
+  room; a reference in English, Russian or Ukrainian, or words to find), ‹ and › (a verse longer
+  at the start or end), + Add (the playlist in front; ▾ for another), Page | Slides, Options. In
+  a middle too narrow for one row, the right part takes a second.
+- The translations line: TRANSLATIONS and each Bible's short name, Change. Opened: a row per
+  translation (up to four), each a Bible (None frees it for another row), the box its verse goes
+  in, the box its reference goes in, its licence (i) and ×; + Another translation, Manage
+  Bibles…, Done.
+- Page (`bible_page.rs`, `page_view`): the passage's whole chapter, a verse to a row with the
+  same verse in the next Bible under it; the passage's verses bright, the verse on screen tinted
+  orange, the verse picked in a well with a ring. A click on a verse of the passage puts its slide
+  on screen (its slide is its place among the verses `build_passage` made the passage from);
+  a click on another verse of the chapter looks it up and picks it. Laid out once per passage,
+  Bibles and width; only the verses in view are drawn. Slides: the passage's slides as tiles
+  drawn by the Bible theme (`slide_grid`). Which is kept with the preferences.
 - Options: how verses become slides, the theme and layout for Bible slides, and the Bibles
   installed (more can be downloaded).
-- Add to "…" keeps the passage in a playlist, to open again with these settings.
-- Keys: Return in Scripture Lookup (or in the find box) picks the passage's first verse and gives
-  the keyboard back; ↑ and ↓ pick the verse before or after (never putting it on screen); Enter
-  puts the verse picked on screen (so does Space with nothing on screen, while → and ← move the
-  pick); Space, → and ← then go verse by verse. The pick is
-  `HomeState::picked` (`home.rs`), the rules for the keys `running.rs`.
+- Add keeps the passage in a playlist, to open again with these settings.
+- Keys: Return in the reference field (or in the find box) picks the passage's first verse and
+  gives the keyboard back; ↑ and ↓ pick the verse before or after (never putting it on screen);
+  Enter puts the verse picked on screen (so does Space with nothing on screen, while → and ← move
+  the pick); Space, → and ← then go verse by verse. The pick is `HomeState::picked` (`home.rs`),
+  the rules for the keys `running.rs`.
 - The lists: a click on a book loads its first chapter, on a chapter that chapter, on a verse
   that verse (Shift for a passage; a double-click opens the chapter with the verse), each with its
-  first verse (or that verse) picked; nothing goes on screen from them (`bible.rs`, `lists`).
-- Search, and words (not a reference) typed in Scripture Lookup, list the verses holding them as
-  they are typed, found on a thread of their own (`find.rs`, `search_page` and `Finder`).
-- What the operator reads (Scripture Lookup after a lookup, the books in the lists, Search's
-  verses, the find box's passage) is in the language the reference was typed in, or with
-  nothing typed the session's (at first the computer's); the slides follow the rows above
+  first verse (or that verse) picked; nothing goes on screen from them (`bible_page.rs`, `choose`).
+- Words (not a reference) typed in the reference field list the verses holding them as they are
+  typed, in place of the page, found on a thread of their own (`find.rs`, `search_page` and
+  `Finder`); `sp bible search` lists them too.
+- What the operator reads (the reference field after a lookup, the books in the lists, the page,
+  the verses found, the find box's passage) is in the language the reference was typed in, or
+  with nothing typed the session's (at first the computer's); the slides follow the rows above
   whatever the language. Chapter and verse numbers are the first row's. The rule is in
   `bible_language.rs`; the computer's language is read once at start in `system_language.rs`.
 - Command line: `bible REFERENCE [--show]`.

@@ -19,13 +19,10 @@ use crate::icons::{self, Icon};
 mod slides;
 use slides::{slide_area, slide_grid};
 
-/// Bars around the slide area and the media bin.
-const BAR: Color32 = crate::studio::PANEL;
 /// The pills that hold toolbar items, and text fields.
 const FIELD: Color32 = crate::studio::CARD;
 /// The outline of what is chosen.
 const CHOSEN_LINE: Color32 = crate::studio::ACCENT;
-const SIDE: Color32 = crate::studio::PANEL;
 const CANVAS: Color32 = crate::studio::PANEL;
 const ON: Color32 = Color32::from_rgb(50, 208, 116);
 const DIM: Color32 = crate::studio::TEXT_DIM;
@@ -642,6 +639,23 @@ pub struct BibleRow {
     pub reference: BibleTarget,
 }
 
+/// Which side of the Bible view's left column is open: the books, or the passages that were
+/// on screen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BibleSide {
+    #[default]
+    Books,
+    History,
+}
+
+/// How the Bible page shows a passage: its chapter as a page to read, or its slides.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BibleView {
+    #[default]
+    Page,
+    Slides,
+}
+
 /// The Bible page: what is typed, the translations chosen, and the passage being shown.
 #[derive(Debug)]
 pub struct BiblePage {
@@ -715,6 +729,13 @@ pub struct BiblePage {
     /// Two verses made with the choices of the moment, for the Options panel's preview when
     /// no passage is showing, and the choices they were made with.
     pub sample: Option<(String, sp_model::Presentation)>,
+    /// The left column's side, and how the passage is shown (kept between starts).
+    pub side: BibleSide,
+    pub view: BibleView,
+    /// The page's chapter as laid out, and what was on screen when it was last drawn (to keep
+    /// the verse on screen in sight as it changes).
+    pub page: crate::bible_page::PageCache,
+    pub page_live_seen: Option<SlideRef>,
 }
 
 impl Default for BiblePage {
@@ -768,6 +789,10 @@ impl Default for BiblePage {
             list_scroll: false,
             go_live: None,
             sample: None,
+            side: BibleSide::Books,
+            view: BibleView::Page,
+            page: crate::bible_page::PageCache::default(),
+            page_live_seen: None,
         }
     }
 }
@@ -999,7 +1024,7 @@ impl BiblePage {
 
     /// The Bibles in use, in the translations' order (a row set to none left out): each one's
     /// place on the shelf and its language.
-    fn in_use(&self) -> (Vec<usize>, Vec<String>) {
+    pub(crate) fn in_use(&self) -> (Vec<usize>, Vec<String>) {
         let places: Vec<usize> = self.rows.iter().filter_map(|row| row.bible).collect();
         let languages = places
             .iter()
@@ -1629,6 +1654,11 @@ impl HomeState {
             setup_done: self.setup_done,
             bible_lists_hidden: !self.bible.lists_open,
             bible_rows_open: self.bible.rows_open,
+            bible_view: match self.bible.view {
+                BibleView::Page => "page",
+                BibleView::Slides => "slides",
+            }
+            .to_owned(),
             playlist_in_front: self.playlist_open,
             song_order: self.song_order.name().to_owned(),
             keys_on_buttons: self.keys_on_buttons,
@@ -1662,6 +1692,7 @@ impl HomeState {
         self.setup_done = prefs.setup_done;
         self.bible.lists_open = !prefs.bible_lists_hidden;
         self.bible.rows_open = prefs.bible_rows_open;
+        self.bible.view = if prefs.bible_view == "slides" { BibleView::Slides } else { BibleView::Page };
         self.playlist_open = prefs.playlist_in_front;
         self.song_order = crate::kept::SongOrder::named(&prefs.song_order);
         self.keys_on_buttons = prefs.keys_on_buttons;
@@ -1847,7 +1878,21 @@ pub fn home_ui(
         edit_view(ui, show, state, theme, thumb, canvas, preview, &mut commands);
         return commands;
     }
-    crate::studio::library(ui, show, state, &mut commands);
+    // In the Bible view the left column holds the books and the history instead (none when
+    // they are put away).
+    if !state.bible_open {
+        crate::studio::library(ui, show, state, &mut commands);
+    } else if state.bible.lists_open {
+        crate::bible_page::left_column(ui, show, state);
+    } else {
+        // Put away: the middle still stands clear of the window's edge.
+        egui::Panel::left("bible books away")
+            .resizable(false)
+            .show_separator_line(false)
+            .exact_size(crate::studio::GAP)
+            .frame(Frame::NONE)
+            .show(ui, |_| {});
+    }
     crate::studio::right_column(ui, show, state, preview, &mut commands, |ui, state| {
         crate::live_tabs::live_tabs(ui, show, state, &mut *thumb);
     });
@@ -5508,9 +5553,9 @@ fn bible_pick_keys(ui: &egui::Ui, show: &Show, state: &mut HomeState) {
     }
 }
 
-/// The Bible page, in place of the slide grid: a field for a reference, a search field, a row
-/// for each translation saying where its verse and its reference go on the slide, the book,
-/// chapter and verse lists, and the passage's slides.
+/// The Bible page, in place of the slides: the bar along its top (the reference, a verse longer
+/// at either end, Add, Page | Slides, Options), the translations line, then the passage's
+/// chapter as a page to read, or its slides, or the verses words were found in.
 fn bible_area(
     ui: &mut egui::Ui,
     show: &Show,
@@ -5521,503 +5566,616 @@ fn bible_area(
     let live = show.live().map(|at| at.presentation);
     bible_pick_keys(ui, show, state);
     egui::CentralPanel::default().frame(panel_frame(CANVAS, 0)).show(ui, |ui| {
-        egui::Panel::bottom("bible bar").resizable(false).frame(panel_frame(BAR, 6)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                // Make the passage one verse longer, at its start or its end.
-                let shown = !state.bible.shown.is_empty();
-                let back = ui.add_enabled(shown, egui::Button::new("‹ Verse")).on_hover_text("Add the verse before");
-                let on = ui.add_enabled(shown, egui::Button::new("Verse ›")).on_hover_text("Add the verse after");
-                if back.clicked() {
-                    state.bible.step(false, live);
-                } else if on.clicked() {
-                    state.bible.step(true, live);
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| crate::studio::view_controls(ui, state));
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        let side = |left: i8, top: i8| egui::Margin { left, right: left, top, bottom: 0 };
+        Frame::new().inner_margin(side(40, 22)).show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            bible_bar(ui, show, state, thumb, live);
+            ui.add_space(14.0);
+            bible_translations(ui, state);
+            // Said when two Bibles are shown together and one only mostly follows a numbering.
+            let own: Vec<&str> = state
+                .bible
+                .rows
+                .iter()
+                .filter_map(|row| row.bible.and_then(|at| state.bible.shelf.bibles.get(at)))
+                .filter(|b| b.loose)
+                .map(|b| b.name.as_str())
+                .collect();
+            let loose = (!own.is_empty() && state.bible.rows.len() > 1).then(|| {
+                format!(
+                    "{} numbers a few verses its own way, so beside another Bible a verse here and there may be one off.",
+                    own.join(" and ")
+                )
             });
-        });
-
-        Frame::new().fill(SIDE).inner_margin(egui::Margin::symmetric(8, 8)).show(ui, |ui| {
-            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-            // One row whenever the two fields can keep a usable width beside Books and the
-            // actions (measured as they are drawn); the fields shrink to make room. Only when
-            // they can't do the actions take a second row.
-            let across = ui.available_width();
-            let gap = ui.spacing().item_spacing.x;
-            let button = |ui: &egui::Ui, words: &str| {
-                let font = egui::TextStyle::Button.resolve(ui.style());
-                ui.painter().layout_no_wrap(words.to_owned(), font, Color32::WHITE).size().x
-                    + ui.spacing().button_padding.x * 2.0
-            };
-            let front = state.services.front().name.clone();
-            let mut actions =
-                button(ui, "Options") + gap + button(ui, &format!("Add to \u{201c}{front}\u{201d}")) + gap;
-            if state.services.list.len() > 1 {
-                actions += button(ui, "▾") + gap;
-            }
-            let books = button(ui, "Books") + gap + button(ui, "History") + gap;
-            // Each field also has its own spacing after it.
-            let room_in_one = across - books - actions - gap * 2.0 - 8.0;
-            let wide = room_in_one >= 260.0;
-            let (lookup_width, search_width) = if wide {
-                ((room_in_one * 0.55).min(280.0), (room_in_one * 0.45).min(240.0))
-            } else {
-                // The whole first row, less the room between the two.
-                let fields = across - gap * 3.0;
-                ((fields * 0.58).floor(), (fields * 0.42).floor())
-            };
-            ui.horizontal(|ui| {
-                let entered = |response: &egui::Response, ui: &egui::Ui| {
-                    response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))
-                };
-                let lookup_id = ui.scope_id().with("scripture lookup");
-                // A letter or number typed with no field taking it (after Return has picked a
-                // verse and given the keyboard back) starts the next reference here; the app
-                // keeps such keys from the show in the Bible view (see `show_key_held_back`).
-                let started = next_reference_typed(ui, state);
-                if let Some(typed) = &started {
-                    state.bible.lookup = typed.clone();
-                    state.bible.typed_at = Some(ui.input(|input| input.time));
-                    state.bible.search_last = false;
-                }
-                // While a book's name is being typed, the books it could be are offered under
-                // the field, each named in the language typed in: arrows pick, Tab or Return
-                // (or a click) takes one, Escape hides them.
-                let language = state
-                    .bible
-                    .lead()
-                    .and_then(|at| state.bible.shelf.get(at).ok())
-                    .map(|bible| bible.info.language.clone())
-                    .unwrap_or_default();
-                let completion = egui::CompletionPopup::new(lookup_id)
-                    .word_boundary(|_| false)
-                    .align(egui::RectAlign::BOTTOM_START)
-                    .max_height(240.0)
-                    .show(
-                        ui,
-                        egui::TextEdit::singleline(&mut state.bible.lookup)
-                            .hint_text("Scripture Lookup")
-                            .desired_width(lookup_width),
-                        |query| book_suggestions(query.text, &language),
-                    );
-                let lookup = completion.text_edit.response.response.clone().on_hover_text(format!(
-                    "Type a reference, such as John 3:16. Return picks its first verse, Enter puts it on screen, \
-                         \u{2191} and \u{2193} pick another ({} comes here)",
-                    crate::keys::hint_key("2")
-                ));
-                let now = ui.input(|input| input.time);
-                if lookup.changed() && completion.accepted.is_none() {
-                    state.bible.typed_at = Some(now);
-                    state.bible.search_last = false;
-                }
-                if entered(&lookup, ui) && lookup_words(&state.bible.lookup, &language).is_some() {
-                    // Words, not a reference: their verses are listed already (see
-                    // `bible_live_search`); the field keeps the keyboard.
-                    lookup.request_focus();
-                } else if entered(&lookup, ui) {
-                    state.bible.look_up(live);
-                    // Its first verse is picked and the keyboard goes back to the show, as from
-                    // the find box: Enter puts the verse on screen, ↑ and ↓ pick another. A
-                    // reference not understood keeps the keyboard, its words selected, to be put
-                    // right.
-                    if !state.pick_made_verse(show, 0) {
-                        lookup.request_focus();
-                        select_all_text(ui.ctx(), lookup_id, &state.bible.lookup);
-                    }
-                } else if let Some(at) = state.bible.typed_at {
-                    // A moment after typing stops, the slides show what is typed. Nothing goes on
-                    // screen until a slide is clicked.
-                    let wait = LOOKUP_PAUSE - (now - at);
-                    if wait <= 0.0 {
-                        state.bible.typed_at = None;
-                        if has_chapter(&state.bible.lookup) {
-                            state.bible.preview(live);
-                        }
-                    } else {
-                        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(wait));
-                    }
-                }
-                if std::mem::take(&mut state.bible.focus_lookup) {
-                    lookup.request_focus();
-                    select_all_text(ui.ctx(), lookup_id, &state.bible.lookup);
-                    // Drawn again at once, so the field shows it has the keyboard without
-                    // waiting for the mouse to move.
-                    ui.ctx().request_repaint();
-                } else if started.is_some() {
-                    // The field takes the keyboard, the cursor after what was typed.
-                    lookup.request_focus();
-                    cursor_to_end(ui.ctx(), lookup_id, &state.bible.lookup);
-                    ui.ctx().request_repaint();
-                }
-                if wide {
-                    bible_nav(ui, state, live);
-                }
-                let search = ui
-                    .add(
-                        egui::TextEdit::singleline(&mut state.bible.search)
-                            .id(bible_search_id())
-                            .hint_text("Search")
-                            .desired_width(search_width),
-                    )
-                    .on_hover_text(
-                        "Type words to find in the Bibles written in their alphabet: the verses holding them are listed as you type",
-                    );
-                if search.changed() {
-                    state.bible.search_last = true;
-                }
-                if entered(&search, ui) {
-                    state.bible.find();
-                }
-                if wide {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        bible_actions(ui, show, state, &mut *thumb)
-                    });
-                }
-            });
-            bible_live_search(ui.ctx(), state);
-            // Too narrow for one row: the two fields share the first, and Books, History and the
-            // actions go on a second, at its two ends.
-            if !wide {
-                ui.horizontal(|ui| {
-                    bible_nav(ui, state, live);
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        bible_actions(ui, show, state, &mut *thumb)
-                    });
-                });
-            }
-
-            let mut add = false;
-            let mut remove = None;
-            let count = state.bible.rows.len();
-            let boxes = state.bible.boxes.clone();
-            let labels = state.bible.box_labels.clone();
-            let used: Vec<(BibleTarget, BibleTarget)> =
-                state.bible.rows.iter().map(|row| (row.verse.clone(), row.reference.clone())).collect();
-            let bibles_used: Vec<usize> = state.bible.rows.iter().filter_map(|row| row.bible).collect();
-            // The translations as a small table: what each column is, said once, then a row for
-            // each translation whose pickers share the width, so each stays on one line however
-            // narrow the window. License (i) and + or − at the end of each row.
-            let gap = 8.0;
-            let ends = 26.0 + 28.0 + gap * 2.0;
-            let room = (ui.available_width() - ends - gap * 2.0).max(240.0);
-            let (bible_width, menu_width) = ((room * 0.44).floor(), (room * 0.28).floor());
-            // Which Bibles show, and where their words go, is set once and seldom changed: folded
-            // into one line of the translations' short names, with Change to open the table (and
-            // Done to fold it again). Whether it is open is kept between starts.
-            let mut fold = false;
-            if state.bible.rows_open {
-                // The headings' row is as tall as a button, so Done at its end is a whole one.
-                ui.horizontal(|ui| {
-                    ui.set_min_height(28.0);
-                    ui.spacing_mut().item_spacing.x = gap;
-                    for (heading, width) in
-                        [("TRANSLATION", bible_width), ("VERSE GOES IN", menu_width), ("REFERENCE GOES IN", menu_width)]
-                    {
-                        let (place, _) = ui.allocate_exact_size(vec2(width, 28.0), Sense::hover());
-                        ui.painter().with_clip_rect(place).text(
-                            place.left_center() + vec2(2.0, 0.0),
-                            Align2::LEFT_CENTER,
-                            heading,
-                            FontId::proportional(10.0),
-                            Color32::from_gray(130),
-                        );
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("Done").on_hover_text("Fold the translations away into one line").clicked() {
-                            fold = true;
-                        }
-                    });
-                });
-                for (index, row) in state.bible.rows.iter_mut().enumerate() {
-                    // Boxes another translation already fills are not offered again.
-                    let taken = |by_verse: bool| -> Vec<sp_model::Role> {
-                        used.iter()
-                            .enumerate()
-                            .flat_map(|(other, (verse, reference))| {
-                                let mine = other == index;
-                                let verse = verse.clone().filter(|_| !(mine && by_verse));
-                                let reference = reference.clone().filter(|_| !mine);
-                                [verse, reference]
-                            })
-                            .flatten()
-                            .collect()
-                    };
-                    let shelved = row.bible.and_then(|at| state.bible.shelf.bibles.get(at));
-                    let chosen = shelved.map_or("None", |b| b.name.as_str()).to_owned();
-                    // Each picker held to its column's width; a longer name is cut off.
-                    let column = |ui: &mut egui::Ui, width: f32, add: &mut dyn FnMut(&mut egui::Ui)| {
-                        ui.allocate_ui_with_layout(vec2(width, 28.0), Layout::left_to_right(Align::Center), |ui| {
-                            ui.set_max_width(width);
-                            add(ui);
-                        });
-                    };
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = gap;
-                        column(ui, bible_width, &mut |ui| {
-                            egui::ComboBox::from_id_salt(("bible translation", index))
-                                .selected_text(&chosen)
-                                .width(bible_width)
-                                .truncate()
-                                .show_ui(ui, |ui| {
-                                    // None frees the row's Bible for another row: to swap two, set one
-                                    // row to None, give its Bible to the other, then pick again.
-                                    if ui
-                                        .add(egui::Button::selectable(row.bible.is_none(), "None"))
-                                        .on_hover_text("Show no Bible in this row, so its Bible can go to another row")
-                                        .clicked()
-                                    {
-                                        row.bible = None;
-                                    }
-                                    ui.separator();
-                                    // A Bible another row already shows is greyed out.
-                                    for (place, bible) in state.bible.shelf.bibles.iter().enumerate() {
-                                        let elsewhere = row.bible != Some(place) && bibles_used.contains(&place);
-                                        let label = format!("{} ({})", bible.name, bible.short);
-                                        let item = ui.add_enabled(
-                                            !elsewhere,
-                                            egui::Button::selectable(row.bible == Some(place), label),
-                                        );
-                                        if item
-                                            .on_disabled_hover_text(
-                                                "Another row shows this Bible. Set that row to None first.",
-                                            )
-                                            .clicked()
-                                        {
-                                            row.bible = Some(place);
-                                        }
-                                    }
-                                });
-                        });
-                        column(ui, menu_width, &mut |ui| {
-                            target_menu(
-                                ui,
-                                ("bible verse", index),
-                                &mut row.verse,
-                                &boxes,
-                                &labels,
-                                &taken(true),
-                                None,
-                                menu_width,
-                            );
-                        });
-                        let with = row.verse.clone();
-                        column(ui, menu_width, &mut |ui| {
-                            target_menu(
-                                ui,
-                                ("bible reference", index),
-                                &mut row.reference,
-                                &boxes,
-                                &labels,
-                                &taken(false),
-                                with.as_ref(),
-                                menu_width,
-                            );
-                        });
-                        bible_row_extras(ui, index, count, shelved, &mut add, &mut remove);
-                    });
-                }
-            } else {
-                let mut open = false;
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    ui.label(egui::RichText::new("TRANSLATIONS").size(10.0).color(Color32::from_gray(130)));
-                    ui.add_space(4.0);
-                    for row in &state.bible.rows {
-                        let Some(bible) = row.bible.and_then(|at| state.bible.shelf.bibles.get(at)) else { continue };
-                        let goes = |target: &BibleTarget| {
-                            target.as_ref().map_or("nowhere".to_owned(), |role| {
-                                boxes
-                                    .iter()
-                                    .position(|(have, _)| have == role)
-                                    .and_then(|at| labels.get(at).cloned())
-                                    .unwrap_or_else(|| role.label())
-                            })
-                        };
-                        let tag =
-                            egui::Button::new(egui::RichText::new(bible.short.as_str()).size(12.0)).corner_radius(10);
-                        let hint = format!(
-                            "{}: its words go in {}, its reference in {}",
-                            bible.name,
-                            goes(&row.verse),
-                            goes(&row.reference)
-                        );
-                        if ui.add(tag).on_hover_text(hint).clicked() {
-                            open = true;
-                        }
-                    }
-                    if ui.button("Change").on_hover_text("Choose the Bibles shown and the boxes they go in").clicked() {
-                        open = true;
-                    }
-                });
-                if open {
-                    state.bible.rows_open = true;
-                }
-            }
-            if fold {
-                state.bible.rows_open = false;
-            }
-            if add {
-                state.bible.add_row();
-            }
-            if let Some(index) = remove {
-                state.bible.remove_row(index);
+            for note in loose.into_iter().chain(state.bible.message.clone()) {
+                ui.add_space(4.0);
+                ui.add(egui::Label::new(egui::RichText::new(note).size(12.5).color(crate::studio::CARE)).wrap());
             }
         });
-
-        // Say so when two Bibles are shown together and one only mostly follows a known numbering.
-        let own: Vec<&str> = state
-            .bible
-            .rows
-            .iter()
-            .filter_map(|row| row.bible.and_then(|at| state.bible.shelf.bibles.get(at)))
-            .filter(|b| b.loose)
-            .map(|b| b.name.as_str())
-            .collect();
-        if !own.is_empty() && state.bible.rows.len() > 1 {
-            let note = format!(
-                "{} numbers a few verses its own way, so beside another Bible a verse here and there may be one off.",
-                own.join(" and ")
-            );
-            Frame::new().inner_margin(egui::Margin::symmetric(12, 4)).show(ui, |ui| {
-                ui.label(egui::RichText::new(note).size(11.5).color(Color32::from_rgb(240, 190, 40)));
-            });
-        }
         // A change to the Bibles or the options remakes the passage that is showing, named for
         // the operator as before.
         if !state.bible.shown.is_empty() && state.bible.made_with != state.bible.choices() {
             state.bible.open(state.bible.shown.clone(), live);
         }
-        if let Some(message) = state.bible.message.clone() {
-            Frame::new().inner_margin(egui::Margin::symmetric(12, 6)).show(ui, |ui| {
-                ui.label(egui::RichText::new(message).color(Color32::from_rgb(255, 150, 120)));
-            });
+        let slides = state.bible.view == BibleView::Slides;
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]);
+        let showing = slot
+            .filter(|slot| show.presentations().get(*slot).is_some_and(|passage| passage.slide_count() > 0))
+            .filter(|_| !state.bible.shown.is_empty());
+        if state.bible.found.is_empty()
+            && showing.is_some()
+            && let Some((words, pill)) = crate::bible_page::title(&mut state.bible, slides)
+        {
+            Frame::new().inner_margin(side(40, 0)).show(ui, |ui| crate::bible_page::paint_title(ui, &words, &pill));
         }
-        if state.bible.lists_open {
-            ui.horizontal_top(|ui| {
-                let height = ui.available_height();
-                ui.allocate_ui_with_layout(
-                    vec2(crate::bible::LISTS_WIDTH, height),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        ui.set_min_size(vec2(crate::bible::LISTS_WIDTH, height));
-                        // What a click there looks up has its first slide (or the verse
-                        // double-clicked) picked, for Enter.
-                        if let Some(slide) = crate::bible::lists(ui, &mut state.bible, live) {
-                            state.pick_made_verse(show, slide);
-                        }
-                    },
-                );
-                ui.allocate_ui_with_layout(ui.available_size(), Layout::top_down(Align::Min), |ui| {
-                    // The slides keep to their own column: without this, what they draw and the
-                    // space between them (which takes clicks) reach over the lists.
-                    ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
-                    bible_results(ui, show, state, thumb, commands, live);
-                });
-            });
-        } else {
-            bible_results(ui, show, state, thumb, commands, live);
+        Frame::new().inner_margin(side(28, 0)).show(ui, |ui| {
+            if !state.bible.found.is_empty() {
+                crate::bible_page::found_list(ui, show, state);
+                return;
+            }
+            match showing {
+                Some(slot) if slides => slide_grid(ui, show, slot, state, thumb, commands),
+                Some(_) => crate::bible_page::page_view(ui, show, state, commands),
+                None => bible_start(ui),
+            }
+        });
+    });
+}
+
+/// What the Bible page says before anything is looked up: centred, in lines no wider than read
+/// well.
+fn bible_start(ui: &mut egui::Ui) {
+    let room = ui.available_size();
+    ui.add_space((room.y * 0.3).max(20.0));
+    ui.vertical_centered(|ui| {
+        ui.set_max_width((room.x - 48.0).clamp(160.0, 440.0));
+        let back = format!("{} comes to the reference from anywhere.", crate::keys::hint_key("2"));
+        for line in [
+            "Type a reference such as John 3:16-18 (or Ин 3:16, or words to find) in the field above, or click a book.",
+            "The chapter appears here as you type. Return picks the first verse, Enter puts it on screen.",
+            back.as_str(),
+        ] {
+            ui.add(egui::Label::new(egui::RichText::new(line).color(DIM)).wrap().halign(Align::Center));
+            ui.add_space(4.0);
         }
     });
 }
 
-/// What the Bible page shows below its controls: verses found by a search, or the passage's
-/// slides, or a word on how to start.
-fn bible_results(
+/// The look of the Bible page's small switches (Page | Slides).
+fn bible_switch_look() -> crate::studio::SwitchLook {
+    crate::studio::SwitchLook {
+        font: FontId::proportional(12.0),
+        spacing: 0.0,
+        pad: 11.0,
+        height: 24.2,
+        inset: 3.0,
+        track: crate::studio::CARD,
+        idle: crate::studio::TEXT_DIM,
+    }
+}
+
+/// The id of the reference field.
+fn scripture_lookup_id() -> egui::Id {
+    egui::Id::unique("bible scripture lookup")
+}
+
+/// The bar along the top of the Bible page: the reference field (236 wide when there is room,
+/// so "От Иоанна 3:16" fits), Books (while the books are put away), a verse longer at the start
+/// and at the end; at the right Add with its arrow for another playlist, Page | Slides and
+/// Options. In a middle too narrow for one row, the right part takes a second.
+fn bible_bar(
     ui: &mut egui::Ui,
     show: &Show,
     state: &mut HomeState,
     thumb: &mut dyn FnMut(ThumbOf) -> Option<(TextureId, bool)>,
-    commands: &mut Vec<Command>,
     live: Option<usize>,
 ) {
-    if !state.bible.found.is_empty() {
-        // Search results: each can be opened as its verse or as its whole chapter.
-        let mut picked: Option<Option<(usize, bool)>> = None;
-        // Found in more than one Bible: each says which.
-        let mixed = state.bible.found.iter().any(|found| found.bible != state.bible.found[0].bible);
-        egui::ScrollArea::vertical().id_salt("bible found").auto_shrink([false, false]).show(ui, |ui| {
-            Frame::new().inner_margin(egui::Margin::symmetric(16, 10)).show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 4.0;
-                ui.horizontal(|ui| {
-                    let count = state.bible.found.len();
-                    let found = if count == 1 { "1 verse found".to_owned() } else { format!("{count} verses found") };
-                    ui.label(egui::RichText::new(found).size(12.0).color(DIM));
-                    if ui.button("Close").clicked() {
-                        picked = Some(None);
-                    }
-                });
-                for (at, found) in state.bible.found.iter().enumerate() {
-                    Frame::new()
-                        .fill(crate::studio::CARD)
-                        .corner_radius(8)
-                        .inner_margin(egui::Margin::symmetric(12, 8))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    if ui.button("Chapter").on_hover_text("Open the whole chapter as slides").clicked()
-                                    {
-                                        picked = Some(Some((at, true)));
-                                    }
-                                    if ui.button("Verse").on_hover_text("Open this verse as a slide").clicked() {
-                                        picked = Some(Some((at, false)));
-                                    }
-                                    ui.with_layout(Layout::left_to_right(Align::Center).with_main_wrap(false), |ui| {
-                                        let reference = if mixed {
-                                            format!("{} \u{b7} {}", found.reference, found.bible)
-                                        } else {
-                                            found.reference.clone()
-                                        };
-                                        ui.label(egui::RichText::new(reference).font(crate::studio::semibold(13.0)));
-                                        ui.add(
-                                            egui::Label::new(
-                                                egui::RichText::new(found.words.as_str()).size(13.0).color(DIM),
-                                            )
-                                            .truncate(),
-                                        );
-                                    });
-                                });
-                            });
-                        });
-                }
-            });
-        });
-        match picked {
-            Some(None) => state.bible.found.clear(),
-            // The verse, or its chapter, with the verse picked for Enter.
-            Some(Some((at, chapter))) => {
-                if let Some(found) = state.bible.found.get(at).cloned() {
-                    state.bible.open_found(&found, chapter, live);
-                    let lead = state.bible.lead().and_then(|lead| state.bible.shelf.get(lead).ok());
-                    let place = lead.as_ref().and_then(|lead| {
-                        let verse = sp_bible::parse_reference_in(&found.kept, &lead.info.language).ok()?.start;
-                        Some(crate::bible::in_its_chapter(lead, verse).1)
-                    });
-                    let slide = place.filter(|_| chapter && state.bible.options.break_on_new_verse).unwrap_or(0);
-                    state.pick_made_verse(show, slide);
+    use crate::studio::{Flat, flat_button, flat_button_width};
+    const GAP: f32 = 12.0;
+    const STEP: f32 = 34.0;
+    const ARROW: f32 = 26.0;
+    let font = FontId::proportional(12.5);
+    let width = ui.available_width();
+    let look = bible_switch_look();
+    let views = ["Page", "Slides"];
+    let views_width =
+        crate::studio::pill_cells(ui, pos2(0.0, 0.0), &views, &look).last().map_or(0.0, |cell| cell.max.x) + look.inset;
+    let options_width = flat_button_width(ui, &["Options"], &font, 13.0);
+    let add_width = flat_button_width(ui, &["Add"], &font, 13.0) + 18.0;
+    let books_width = if state.bible.lists_open { 0.0 } else { flat_button_width(ui, &["Books"], &font, 13.0) + GAP };
+    let left = books_width + GAP + STEP + 6.0 + STEP;
+    let right = add_width + 1.0 + ARROW + GAP + 1.0 + GAP + views_width + 8.0 + options_width;
+    let one_row = width - left - GAP - right;
+    let two_rows = one_row < 170.0;
+    let field_width = if two_rows { width - left } else { one_row }.clamp(120.0, 236.0);
+    let (bar, _) = ui.allocate_exact_size(vec2(width, if two_rows { 34.0 + 8.0 + 30.0 } else { 34.0 }), Sense::hover());
+    let middle = bar.min.y + 17.0;
+    bible_field(ui, show, state, Rect::from_min_size(bar.min, vec2(field_width, 34.0)), live);
+    let mut x = bar.min.x + field_width + GAP;
+    let key = |x: f32, wide: f32, middle: f32| Rect::from_min_size(pos2(x, middle - 15.0), vec2(wide, 30.0));
+    if !state.bible.lists_open {
+        let books = key(x, books_width - GAP, middle);
+        if flat_button(ui, books, egui::Id::unique("bible books button"), "Books", font.clone(), Flat::Plain, true)
+            .on_hover_text("Bring the books, chapters and verses back")
+            .clicked()
+        {
+            state.bible.lists_open = true;
+            state.bible.list_scroll = true;
+        }
+        x += books_width;
+    }
+    // A verse longer at the start, or at the end.
+    let shown = !state.bible.shown.is_empty();
+    let back = key(x, STEP, middle);
+    let on = key(x + STEP + 6.0, STEP, middle);
+    let step_font = crate::studio::semibold(12.5);
+    if flat_button(ui, back, egui::Id::unique("bible verse before"), "\u{2039}", step_font.clone(), Flat::Plain, shown)
+        .on_hover_text("A verse longer at the start")
+        .clicked()
+    {
+        state.bible.step(false, live);
+    }
+    if flat_button(ui, on, egui::Id::unique("bible verse after"), "\u{203a}", step_font, Flat::Plain, shown)
+        .on_hover_text("A verse longer at the end")
+        .clicked()
+    {
+        state.bible.step(true, live);
+    }
+    // From the right: Options, Page | Slides, the divider, Add.
+    let middle = if two_rows { bar.max.y - 15.0 } else { middle };
+    let options = key(bar.max.x - options_width, options_width, middle);
+    let views_at = pos2(options.min.x - 8.0 - views_width, middle - (look.height + 2.0 * look.inset) / 2.0);
+    let divider = views_at.x - GAP - 0.5;
+    ui.painter().vline(divider, middle - 10.0..=middle + 10.0, Stroke::new(1.0, crate::studio::LINE));
+    let arrow = key(divider - 0.5 - GAP - ARROW, ARROW, middle);
+    let add = key(arrow.min.x - 1.0 - add_width, add_width, middle);
+    bible_add(ui, state, add, arrow);
+    let chosen = match state.bible.view {
+        BibleView::Page => 0,
+        BibleView::Slides => 1,
+    };
+    let hints = ["The chapter, to read and click", "The passage's slides, as the Bible theme draws them"];
+    match crate::studio::pill_switch(ui, "bible view", views_at, &views, &hints, Some(chosen), &look).1 {
+        Some(0) => state.bible.view = BibleView::Page,
+        Some(_) => state.bible.view = BibleView::Slides,
+        None => {}
+    }
+    let open = state.bible.options.open;
+    let button = flat_button(
+        ui,
+        options,
+        egui::Id::unique("bible options button"),
+        "Options",
+        font,
+        if open { Flat::On } else { Flat::Plain },
+        true,
+    )
+    .on_hover_text("How verses become slides, and which Bibles are installed");
+    if button.clicked() {
+        state.bible.options.open = !open;
+    }
+    if state.bible.options.open {
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            state.bible.options.open = false;
+        }
+        let preview = bible_preview(show, &mut state.bible, thumb);
+        let bible = &mut state.bible;
+        let picked = crate::bible::options_popup(
+            ui.ctx(),
+            &mut bible.options,
+            button.rect,
+            &crate::bible::ThemeChoice {
+                names: &state.theme_names,
+                template_names: &state.template_names,
+                layouts: &state.theme_layouts,
+                theme: state.theme_for_bible,
+                layout: state.bible_layout,
+            },
+            &preview,
+        );
+        if let Some((index, layout)) = picked {
+            state.theme_request = Some(ThemeRequest::UseForBible(index, layout));
+        }
+        if let Some(index) = state.bible.options.remove.take() {
+            state.bible.remove_bible(index);
+        }
+    }
+}
+
+/// Add, which keeps the passage in the playlist in front (to open again with these settings),
+/// and the arrow beside it, which keeps it in another playlist.
+fn bible_add(ui: &mut egui::Ui, state: &mut HomeState, add: Rect, arrow: Rect) {
+    use crate::studio::{BUTTON, BUTTON_HOVER, TEXT, TEXT_FAINT};
+    let saved = state.bible.saved();
+    let enabled = saved.is_some();
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let corner = |left: bool| {
+        let (round, square) = (crate::studio::RADIUS_CARD as u8, 0);
+        if left {
+            egui::CornerRadius { nw: round, sw: round, ne: square, se: square }
+        } else {
+            egui::CornerRadius { nw: square, sw: square, ne: round, se: round }
+        }
+    };
+    let front = state.services.front().name.clone();
+    let response = ui.interact(add, egui::Id::unique("bible add"), sense);
+    let open_arrow = ui.interact(arrow, egui::Id::unique("bible add elsewhere"), sense);
+    let ink = if enabled { TEXT } else { TEXT_FAINT };
+    for (rect, hovered, left) in [(add, response.hovered(), true), (arrow, open_arrow.hovered(), false)] {
+        let fill = if !enabled {
+            BUTTON.gamma_multiply(0.5)
+        } else if hovered {
+            BUTTON_HOVER
+        } else {
+            BUTTON
+        };
+        ui.painter().rect_filled(rect, corner(left), fill);
+    }
+    let words = ui.painter().layout_no_wrap("Add".to_owned(), FontId::proportional(12.5), ink);
+    let start = add.center().x - (words.size().x + 18.0) / 2.0;
+    icons::paint(
+        ui.painter(),
+        Icon::Plus,
+        Rect::from_center_size(pos2(start + 6.0, add.center().y), vec2(12.0, 12.0)),
+        ink,
+    );
+    ui.painter().galley(pos2(start + 18.0, add.center().y - words.size().y / 2.0), words, ink);
+    ui.painter().text(arrow.center(), Align2::CENTER_CENTER, "\u{25be}", FontId::proportional(11.0), ink);
+    let reading = state.bible.reading.clone();
+    let response = response
+        .on_hover_text(format!("Add {reading} to \u{201c}{front}\u{201d}, to open again with these settings"))
+        .on_disabled_hover_text("Look a passage up first");
+    if response.clicked()
+        && let Some(saved) = saved.clone()
+    {
+        state.notice = Some(format!("Added {} to {front}.", saved.lookup));
+        state.services.add(crate::service::Item::Passage(saved));
+    }
+    let open_arrow = open_arrow.on_hover_text("Add it to another playlist");
+    egui::Popup::from_toggle_button_response(&open_arrow)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            let Some(saved) = saved.clone() else { return };
+            let names: Vec<String> = state.services.list.iter().map(|playlist| playlist.name.clone()).collect();
+            for (at, name) in names.iter().enumerate() {
+                if ui.button(format!("Add to \u{201c}{name}\u{201d}")).clicked() {
+                    state.services.add_to(at, crate::service::Item::Passage(saved.clone()));
+                    state.notice = Some(format!("Added {} to {name}.", saved.lookup));
+                    ui.close();
                 }
             }
-            None => {}
+        });
+}
+
+/// The reference field: a reference in English, Russian or Ukrainian (whole names or short
+/// forms), or words to find. The chapter follows what is typed a moment after typing stops;
+/// Return picks the passage's first verse and gives the keyboard back, for Enter. While a
+/// book's name is typed, the books it could be are offered under it.
+fn bible_field(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, rect: Rect, live: Option<usize>) {
+    let lookup_id = scripture_lookup_id();
+    let entered = |response: &egui::Response, ui: &egui::Ui| {
+        response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))
+    };
+    // A letter or number typed with no field taking it (after Return has picked a verse and
+    // given the keyboard back) starts the next reference here; the app keeps such keys from the
+    // show in the Bible view (see `show_key_held_back`).
+    let started = next_reference_typed(ui, state);
+    if let Some(typed) = &started {
+        state.bible.lookup = typed.clone();
+        state.bible.typed_at = Some(ui.input(|input| input.time));
+        state.bible.search_last = false;
+    }
+    let language = state
+        .bible
+        .lead()
+        .and_then(|at| state.bible.shelf.get(at).ok())
+        .map(|bible| bible.info.language.clone())
+        .unwrap_or_default();
+    let field = egui::TextEdit::singleline(&mut state.bible.lookup)
+        .hint_text("John 3:16 \u{b7} \u{41f}\u{441} 22 \u{b7} or words")
+        .font(crate::studio::semibold(13.0))
+        .align(Align2::LEFT_CENTER)
+        .frame(Frame::new().fill(crate::studio::CARD).corner_radius(17).inner_margin(egui::Margin::symmetric(14, 0)))
+        .min_size(rect.size())
+        .desired_width(rect.width() - 28.0);
+    let completion = ui
+        .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            egui::CompletionPopup::new(lookup_id)
+                .word_boundary(|_| false)
+                .align(egui::RectAlign::BOTTOM_START)
+                .max_height(240.0)
+                .show(ui, field, |query| book_suggestions(query.text, &language))
+        })
+        .inner;
+    let lookup = completion.text_edit.response.response.clone().on_hover_text(format!(
+        "Type a reference, such as John 3:16, or words to find. Return picks its first verse, Enter puts it on \
+         screen, \u{2191} and \u{2193} pick another ({} comes here)",
+        crate::keys::hint_key("2")
+    ));
+    if lookup.has_focus() {
+        ui.painter().rect_stroke(rect, 17.0, Stroke::new(1.5, crate::studio::TEXT_FAINT), StrokeKind::Inside);
+    }
+    let now = ui.input(|input| input.time);
+    if lookup.changed() && completion.accepted.is_none() {
+        state.bible.typed_at = Some(now);
+        state.bible.search_last = false;
+    }
+    if entered(&lookup, ui) && lookup_words(&state.bible.lookup, &language).is_some() {
+        // Words, not a reference: their verses are listed already (see `bible_live_search`);
+        // the field keeps the keyboard.
+        lookup.request_focus();
+    } else if entered(&lookup, ui) {
+        state.bible.look_up(live);
+        // Its first verse is picked and the keyboard goes back to the show, as from the find
+        // box: Enter puts the verse on screen, ↑ and ↓ pick another. A reference not understood
+        // keeps the keyboard, its words selected, to be put right.
+        if !state.pick_made_verse(show, 0) {
+            lookup.request_focus();
+            select_all_text(ui.ctx(), lookup_id, &state.bible.lookup);
+        }
+    } else if let Some(at) = state.bible.typed_at {
+        // A moment after typing stops, the page shows what is typed. Nothing goes on screen.
+        let wait = LOOKUP_PAUSE - (now - at);
+        if wait <= 0.0 {
+            state.bible.typed_at = None;
+            if has_chapter(&state.bible.lookup) {
+                state.bible.preview(live);
+            }
+        } else {
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(wait));
+        }
+    }
+    if std::mem::take(&mut state.bible.focus_lookup) {
+        lookup.request_focus();
+        select_all_text(ui.ctx(), lookup_id, &state.bible.lookup);
+        // Drawn again at once, so the field shows it has the keyboard without waiting for the
+        // mouse to move.
+        ui.ctx().request_repaint();
+    } else if started.is_some() {
+        // The field takes the keyboard, the cursor after what was typed.
+        lookup.request_focus();
+        cursor_to_end(ui.ctx(), lookup_id, &state.bible.lookup);
+        ui.ctx().request_repaint();
+    }
+    bible_live_search(ui.ctx(), state);
+}
+
+/// The translations line: which Bibles are on the slides, as small pills (each says where its
+/// words and reference go), and Change, which opens them as rows: a Bible, the box its verse
+/// goes in and the box its reference goes in, up to four, each with its licence and × to take
+/// it off; Another translation, Manage Bibles… and Done under them. Whether they are open is
+/// kept between starts.
+fn bible_translations(ui: &mut egui::Ui, state: &mut HomeState) {
+    use crate::studio::{CARD, Flat, PANEL, TEXT_DIM, cap, flat_button, flat_button_width};
+    let width = ui.available_width();
+    let small = FontId::proportional(11.5);
+    let boxes = state.bible.boxes.clone();
+    let labels = state.bible.box_labels.clone();
+    let goes = |target: &BibleTarget| {
+        target.as_ref().map_or("nowhere".to_owned(), |role| {
+            boxes
+                .iter()
+                .position(|(have, _)| have == role)
+                .and_then(|at| labels.get(at).cloned())
+                .unwrap_or_else(|| role.label())
+        })
+    };
+    if !state.bible.rows_open {
+        let (line, _) = ui.allocate_exact_size(vec2(width, 30.0), Sense::hover());
+        let middle = line.min.y + 12.0;
+        let mut x = cap(ui, pos2(line.min.x, middle), Align2::LEFT_CENTER, "Translations", TEXT_DIM).max.x + 8.0;
+        let mut open = false;
+        for (at, row) in state.bible.rows.iter().enumerate() {
+            let Some(bible) = row.bible.and_then(|at| state.bible.shelf.bibles.get(at)) else { continue };
+            let galley = crate::studio::spaced(
+                ui,
+                &bible.short.to_uppercase(),
+                crate::studio::fixed_semibold(11.0),
+                TEXT_DIM,
+                0.7,
+            );
+            let pill = Rect::from_min_size(pos2(x, middle - 10.5), vec2(galley.size().x + 18.0, 21.0));
+            let response = ui.interact(pill, egui::Id::unique(("bible translation pill", at)), Sense::click());
+            ui.painter().rect_filled(pill, 10.5, if response.hovered() { crate::studio::BUTTON } else { CARD });
+            ui.painter().galley(pos2(pill.min.x + 9.0, middle - galley.size().y / 2.0), galley, TEXT_DIM);
+            let hint = format!(
+                "{}: its words go in {}, its reference in {}",
+                bible.name,
+                goes(&row.verse),
+                goes(&row.reference)
+            );
+            if response.on_hover_text(hint).clicked() {
+                open = true;
+            }
+            x = pill.max.x + 8.0;
+        }
+        let wide = flat_button_width(ui, &["Change"], &small, 9.0);
+        let change = Rect::from_min_size(pos2(x, middle - 12.0), vec2(wide, 24.0));
+        if flat_button(ui, change, egui::Id::unique("bible translations change"), "Change", small, Flat::Plain, true)
+            .on_hover_text("Choose the Bibles shown and the boxes they go in")
+            .clicked()
+        {
+            open = true;
+        }
+        if open {
+            state.bible.rows_open = true;
         }
         return;
     }
-    let slot = state.bible.slots.map(|slots| slots[state.bible.showing]);
-    match slot.filter(|slot| show.presentations().get(*slot).is_some_and(|p| p.slide_count() > 0)) {
-        Some(slot) => slide_grid(ui, show, slot, state, thumb, commands),
-        None => {
-            // Centred, in lines no wider than reads well, with room either side.
-            let room = ui.available_size();
-            ui.add_space((room.y * 0.38).max(20.0));
-            ui.vertical_centered(|ui| {
-                ui.set_max_width((room.x - 48.0).clamp(160.0, 440.0));
-                let back = format!("{} goes to Scripture Lookup from anywhere.", crate::keys::hint_key("2"));
-                for line in [
-                    "Type a reference such as John 3:16-18 in Scripture Lookup, or click a book.",
-                    "Its verses appear here as slides as you type. Return picks the first, Enter puts it on screen.",
-                    back.as_str(),
-                ] {
-                    ui.add(egui::Label::new(egui::RichText::new(line).color(DIM)).wrap().halign(Align::Center));
+    let mut add = false;
+    let mut remove = None;
+    let mut fold = false;
+    let mut manage = false;
+    let count = state.bible.rows.len();
+    let used: Vec<(BibleTarget, BibleTarget)> =
+        state.bible.rows.iter().map(|row| (row.verse.clone(), row.reference.clone())).collect();
+    let bibles_used: Vec<usize> = state.bible.rows.iter().filter_map(|row| row.bible).collect();
+    Frame::new()
+        .fill(CARD)
+        .corner_radius(11)
+        .inner_margin(10)
+        .outer_margin(egui::Margin { bottom: 8, ..Default::default() })
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            ui.spacing_mut().interact_size.y = 30.0;
+            // The menus are the panel's grey on the well.
+            let widgets = &mut ui.visuals_mut().widgets;
+            for widget in [&mut widgets.inactive, &mut widgets.hovered, &mut widgets.open] {
+                widget.corner_radius = egui::CornerRadius::same(9);
+            }
+            widgets.inactive.weak_bg_fill = PANEL;
+            widgets.inactive.bg_fill = PANEL;
+            let inner = ui.available_width();
+            let caps = |ui: &egui::Ui, text: &str| {
+                crate::studio::spaced(ui, &text.to_uppercase(), crate::studio::fixed_semibold(11.5), TEXT_DIM, 0.6)
+                    .size()
+                    .x
+            };
+            let (verse_cap, reference_cap) = (caps(ui, "Verse in"), caps(ui, "Reference in"));
+            let room = (inner - verse_cap - reference_cap - 26.0 - 28.0 - 8.0 * 6.0).max(240.0);
+            let (bible_width, menu_width) = ((room * 0.42).floor(), (room * 0.29).floor());
+            for (index, row) in state.bible.rows.iter_mut().enumerate() {
+                // Boxes another translation already fills are not offered again.
+                let taken = |by_verse: bool| -> Vec<sp_model::Role> {
+                    used.iter()
+                        .enumerate()
+                        .flat_map(|(other, (verse, reference))| {
+                            let mine = other == index;
+                            let verse = verse.clone().filter(|_| !(mine && by_verse));
+                            let reference = reference.clone().filter(|_| !mine);
+                            [verse, reference]
+                        })
+                        .flatten()
+                        .collect()
+                };
+                let shelved = row.bible.and_then(|at| state.bible.shelf.bibles.get(at));
+                let chosen = shelved.map_or("None", |b| b.name.as_str()).to_owned();
+                let column = |ui: &mut egui::Ui, width: f32, add: &mut dyn FnMut(&mut egui::Ui)| {
+                    ui.allocate_ui_with_layout(vec2(width, 30.0), Layout::left_to_right(Align::Center), |ui| {
+                        ui.set_max_width(width);
+                        add(ui);
+                    });
+                };
+                let cap_at = |ui: &mut egui::Ui, text: &str, wide: f32| {
+                    let (place, _) = ui.allocate_exact_size(vec2(wide, 30.0), Sense::hover());
+                    cap(ui, place.left_center(), Align2::LEFT_CENTER, text, TEXT_DIM);
+                };
+                ui.horizontal(|ui| {
+                    column(ui, bible_width, &mut |ui| {
+                        egui::ComboBox::from_id_salt(("bible translation", index))
+                            .selected_text(&chosen)
+                            .width(bible_width)
+                            .truncate()
+                            .show_ui(ui, |ui| {
+                                // None frees the row's Bible for another row: to swap two, set one
+                                // row to None, give its Bible to the other, then pick again.
+                                if ui
+                                    .add(egui::Button::selectable(row.bible.is_none(), "None"))
+                                    .on_hover_text("Show no Bible in this row, so its Bible can go to another row")
+                                    .clicked()
+                                {
+                                    row.bible = None;
+                                }
+                                ui.separator();
+                                // A Bible another row already shows is greyed out.
+                                for (place, bible) in state.bible.shelf.bibles.iter().enumerate() {
+                                    let elsewhere = row.bible != Some(place) && bibles_used.contains(&place);
+                                    let label = format!("{} ({})", bible.name, bible.short);
+                                    let item = ui.add_enabled(
+                                        !elsewhere,
+                                        egui::Button::selectable(row.bible == Some(place), label),
+                                    );
+                                    if item
+                                        .on_disabled_hover_text(
+                                            "Another row shows this Bible. Set that row to None first.",
+                                        )
+                                        .clicked()
+                                    {
+                                        row.bible = Some(place);
+                                    }
+                                }
+                            });
+                    });
+                    cap_at(ui, "Verse in", verse_cap);
+                    column(ui, menu_width, &mut |ui| {
+                        target_menu(
+                            ui,
+                            ("bible verse", index),
+                            &mut row.verse,
+                            &boxes,
+                            &labels,
+                            &taken(true),
+                            None,
+                            menu_width,
+                        );
+                    });
+                    cap_at(ui, "Reference in", reference_cap);
+                    let with = row.verse.clone();
+                    column(ui, menu_width, &mut |ui| {
+                        target_menu(
+                            ui,
+                            ("bible reference", index),
+                            &mut row.reference,
+                            &boxes,
+                            &labels,
+                            &taken(false),
+                            with.as_ref(),
+                            menu_width,
+                        );
+                    });
+                    bible_row_extras(ui, index, count, shelved, &mut remove);
+                });
+            }
+            // Under the rows: another translation (up to four), the Bibles installed, and Done.
+            let (foot, _) = ui.allocate_exact_size(vec2(inner, 24.0), Sense::hover());
+            let middle = foot.center().y;
+            let mut x = foot.min.x;
+            if count < BiblePage::MAX_ROWS {
+                let words = "+ Another translation";
+                let wide = flat_button_width(ui, &[words], &small, 9.0);
+                let rect = Rect::from_min_size(pos2(x, middle - 12.0), vec2(wide, 24.0));
+                if flat_button(ui, rect, egui::Id::unique("bible row add"), words, small.clone(), Flat::Plain, true)
+                    .on_hover_text("Show another Bible on the slides")
+                    .clicked()
+                {
+                    add = true;
                 }
-            });
-        }
+                x = rect.max.x + 8.0;
+            } else {
+                let said =
+                    ui.painter().text(pos2(x, middle), Align2::LEFT_CENTER, "Four is the most", small.clone(), DIM);
+                x = said.max.x + 8.0;
+            }
+            let words = "Manage Bibles\u{2026}";
+            let wide = flat_button_width(ui, &[words], &small, 9.0);
+            let rect = Rect::from_min_size(pos2(x, middle - 12.0), vec2(wide, 24.0));
+            if flat_button(ui, rect, egui::Id::unique("bible manage"), words, small.clone(), Flat::Plain, true)
+                .on_hover_text("Install and remove Bibles")
+                .clicked()
+            {
+                manage = true;
+            }
+            let wide = flat_button_width(ui, &["Done"], &small, 9.0);
+            let rect = Rect::from_min_size(pos2(foot.max.x - wide, middle - 12.0), vec2(wide, 24.0));
+            if flat_button(ui, rect, egui::Id::unique("bible rows done"), "Done", small.clone(), Flat::Main, true)
+                .on_hover_text("Fold the translations away into one line")
+                .clicked()
+            {
+                fold = true;
+            }
+        });
+    if fold {
+        state.bible.rows_open = false;
+    }
+    if add {
+        state.bible.add_row();
+    }
+    if manage {
+        state.bible.options.manage_open = true;
+    }
+    if let Some(index) = remove {
+        state.bible.remove_row(index);
     }
 }
 
@@ -6065,152 +6223,16 @@ fn bible_preview(
     crate::bible::SlidesPreview { first, last, count: slides.len(), name: passage.title.clone(), sample, translations }
 }
 
-/// The rulers along the top and left of the Edit view's canvas, in the slide's own pixels: a
-/// mark every 100, numbered as often as there is room for, with the selected object's extent
-/// shown on each.
-/// Books, which shows or hides the book, chapter and verse lists, and History, the passages
-/// that were on screen.
-fn bible_nav(ui: &mut egui::Ui, state: &mut HomeState, live: Option<usize>) {
-    // The book, chapter and verse lists beside the slides, for when a passage is
-    // easier to pick than type.
-    let mut chosen = None;
-    if ui
-        .add(egui::Button::new("Books").selected(state.bible.lists_open))
-        .on_hover_text("Show or hide the book, chapter and verse lists")
-        .clicked()
-    {
-        state.bible.lists_open = !state.bible.lists_open;
-        state.bible.list_scroll = true;
-    }
-    // The passages that were on screen, newest first: one click brings one back.
-    ui.menu_button("History", |ui| {
-        if state.bible.history.is_empty() {
-            ui.label(egui::RichText::new("Passages shown on screen are listed here.").color(crate::studio::TEXT_DIM));
-            return;
-        }
-        let today = chrono::Local::now().date_naive();
-        egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
-            for entry in &state.bible.history {
-                let button = egui::Button::new(entry.passage.as_str())
-                    .right_text(egui::RichText::new(history_when(&entry.at, today)).color(crate::studio::TEXT_DIM))
-                    .min_size(vec2(260.0, 0.0));
-                if ui.add(button).clicked() {
-                    chosen = Some(entry.passage.clone());
-                }
-            }
-        });
-        ui.separator();
-        if ui.button("Clear History").clicked() {
-            state.bible.history.clear();
-            state.bible.history_changed = true;
-            ui.close();
-        }
-    })
-    .response
-    .on_hover_text("Passages shown on screen, newest first");
-    if let Some(reference) = chosen {
-        // Kept as it was on screen; the field says it in the operator's language.
-        state.bible.open(reference, live);
-        ui.close();
-    }
-}
-
-/// The Bible page's actions, laid out from the right: Options, then keeping the passage in the
-/// playlist in front (or another playlist), to open again with its settings.
-fn bible_actions(
-    ui: &mut egui::Ui,
-    show: &Show,
-    state: &mut HomeState,
-    thumb: &mut dyn FnMut(ThumbOf) -> Option<(TextureId, bool)>,
-) {
-    let button = ui
-        .add(egui::Button::selectable(state.bible.options.open, "Options"))
-        .on_hover_text("How verses become slides, and which Bibles are installed");
-    if button.clicked() {
-        state.bible.options.open = !state.bible.options.open;
-    }
-    if state.bible.options.open {
-        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            state.bible.options.open = false;
-        }
-        let preview = bible_preview(show, &mut state.bible, thumb);
-        let bible = &mut state.bible;
-        let picked = crate::bible::options_popup(
-            ui.ctx(),
-            &mut bible.options,
-            button.rect,
-            &crate::bible::ThemeChoice {
-                names: &state.theme_names,
-                template_names: &state.template_names,
-                layouts: &state.theme_layouts,
-                theme: state.theme_for_bible,
-                layout: state.bible_layout,
-            },
-            &preview,
-        );
-        if let Some((index, layout)) = picked {
-            state.theme_request = Some(ThemeRequest::UseForBible(index, layout));
-        }
-        if let Some(index) = state.bible.options.remove.take() {
-            state.bible.remove_bible(index);
-        }
-    }
-    // One click each: the passage into the playlist in front (named on the
-    // button; the arrow beside it picks another), or a presentation of its own.
-    let saved = state.bible.saved();
-    let front = state.services.front().name.clone();
-    // Laid out right to left: the arrow, to pick another playlist, sits after Add to.
-    if state.services.list.len() > 1 {
-        let other = ui.add_enabled(saved.is_some(), egui::Button::new("▾")).on_hover_text("Add to another playlist");
-        egui::Popup::from_toggle_button_response(&other)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .show(|ui| {
-                let Some(saved) = saved.clone() else { return };
-                let names: Vec<String> = state.services.list.iter().map(|playlist| playlist.name.clone()).collect();
-                for (at, name) in names.iter().enumerate() {
-                    if ui.button(format!("Add to \u{201c}{name}\u{201d}")).clicked() {
-                        state.services.add_to(at, crate::service::Item::Passage(saved.clone()));
-                        state.notice = Some(format!("Added {} to {name}.", saved.lookup));
-                        ui.close();
-                    }
-                }
-            });
-    }
-    let add = ui
-        .add_enabled(saved.is_some(), egui::Button::new(format!("Add to \u{201c}{front}\u{201d}")))
-        .on_hover_text("Put this passage in the playlist, to open again with these settings")
-        .on_disabled_hover_text("Look a passage up first");
-    if add.clicked()
-        && let Some(saved) = saved.clone()
-    {
-        state.notice = Some(format!("Added {} to {front}.", saved.lookup));
-        state.services.add(crate::service::Item::Passage(saved));
-    }
-}
-
-/// The right end of a Bible row: + to add a translation (on the first row) or − to remove this
-/// one, and License, which shows the Bible's name, abbreviation and terms.
+/// The right end of a translation's row: its licence (a small (i) that opens the Bible's name,
+/// short name and terms) and × to take the translation off (one always stays).
 fn bible_row_extras(
     ui: &mut egui::Ui,
     index: usize,
     count: usize,
     shelved: Option<&crate::bible::Shelved>,
-    add: &mut bool,
     remove: &mut Option<usize>,
 ) {
-    if index == 0 {
-        if ui
-            .add_enabled(count < BiblePage::MAX_ROWS, egui::Button::new("+"))
-            .on_hover_text("Add a translation")
-            .clicked()
-        {
-            *add = true;
-        }
-    } else if ui.button("−").on_hover_text("Remove this translation").clicked() {
-        *remove = Some(index);
-    }
-    // License: a small (i), which opens the Bible's name, abbreviation and terms.
-    let (mark, license) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::click());
+    let (mark, license) = ui.allocate_exact_size(vec2(26.0, 30.0), Sense::click());
     let ink = if license.hovered() { Color32::WHITE } else { DIM };
     ui.painter().circle_stroke(mark.center(), 8.0, Stroke::new(1.2, ink));
     ui.painter().text(mark.center(), Align2::CENTER_CENTER, "i", crate::studio::semibold(11.5), ink);
@@ -6237,8 +6259,25 @@ fn bible_row_extras(
                 });
             }
         });
+    let (place, _) = ui.allocate_exact_size(vec2(28.0, 30.0), Sense::hover());
+    let cell = Rect::from_center_size(place.center(), vec2(28.0, 28.0));
+    if count > 1 {
+        let id = egui::Id::unique(("bible row remove", index));
+        if crate::studio::icon_button(ui, cell, id, Icon::Close, 1.0, false)
+            .on_hover_text("Take this translation off")
+            .clicked()
+        {
+            *remove = Some(index);
+        }
+    } else {
+        let glyph = Rect::from_center_size(cell.center(), vec2(14.0, 14.0));
+        icons::paint(ui.painter(), Icon::Close, glyph, crate::studio::TEXT_FAINT.gamma_multiply(0.5));
+    }
 }
 
+/// The rulers along the top and left of the Edit view's canvas, in the slide's own pixels: a
+/// mark every 100, numbered as often as there is room for, with the selected object's extent
+/// shown on each.
 fn rulers(painter: &egui::Painter, area: Rect, ruler: f32, slide: Rect, scale: f32, selected: Option<SlideRect>) {
     let band = Color32::from_rgb(12, 12, 12);
     let top = Rect::from_min_max(pos2(area.min.x + ruler, area.min.y), pos2(area.max.x, area.min.y + ruler));
@@ -6300,7 +6339,7 @@ const HISTORY_LENGTH: usize = 100;
 
 /// When a passage in the history was on screen: the time for today ("10:42 AM"), the day
 /// before that ("Sun 17 Nov").
-fn history_when(at: &str, today: chrono::NaiveDate) -> String {
+pub(crate) fn history_when(at: &str, today: chrono::NaiveDate) -> String {
     match chrono::NaiveDateTime::parse_from_str(at, "%Y-%m-%dT%H:%M:%S") {
         Ok(at) if at.date() == today => at.format("%-I:%M %p").to_string(),
         Ok(at) => at.format("%a %-d %b").to_string(),
@@ -6351,11 +6390,6 @@ fn cursor_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
     let mut edit = egui::text_edit::TextEditState::load(ctx, id).unwrap_or_default();
     edit.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(text.chars().count()))));
     edit.store(ctx, id);
-}
-
-/// The id of the Bible view's Search field.
-fn bible_search_id() -> egui::Id {
-    egui::Id::unique("bible search field")
 }
 
 /// What is typed in Scripture Lookup when it is words to search for rather than a reference: at
@@ -7167,18 +7201,24 @@ mod tests {
         let mut state = HomeState { bible_open: true, ..HomeState::default() };
         state.bible.slots = Some([2, 3]);
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
-        // In Search: English words, found in the King James Version as they are typed.
-        ctx.memory_mut(|memory| memory.request_focus(bible_search_id()));
+        // In the reference field (the page's one field; it took the Search field's place):
+        // English words, found in the King James Version as they are typed.
+        state.bible.focus_lookup = true;
         let mut commands = frame_then_app(&ctx, &mut show, &mut state, vec![], 0.1);
         commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![Event::Text("valley of".to_owned())], 0.2));
         assert!(!state.bible.found.is_empty(), "listed without Return");
         commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![Event::Text(" the shadow".to_owned())], 0.3));
         assert!(state.bible.found.iter().all(|found| found.bible == "KJV"), "{:?}", state.bible.found);
         assert!(state.bible.found[0].words.to_lowercase().contains("valley of the shadow"), "the newest words");
-        // Emptied: the list goes, and the slides come back.
-        state.bible.search.clear();
+        // Emptied: the list goes, and the page comes back.
+        state.bible.lookup.clear();
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.4);
         assert!(state.bible.found.is_empty());
+        // `sp bible search` still lists verses for words without the field.
+        state.bible.search = "valley of the shadow".to_owned();
+        state.bible.find();
+        assert!(state.bible.found.iter().all(|found| found.bible == "KJV") && !state.bible.found.is_empty());
+        state.bible.found.clear();
         // In Scripture Lookup: Russian words that are no reference and no book's name.
         state.bible.focus_lookup = true;
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.5);
@@ -8336,6 +8376,8 @@ mod tests {
         let mut show = service_with_bible_places();
         let mut state = HomeState { library_search: Some(("jn 3:16-18".to_owned(), 0)), ..HomeState::default() };
         state.bible.slots = Some([2, 3]);
+        // The passage as slides (the page's own click is `a_click_on_a_verse_of_the_passage…`).
+        state.bible.view = BibleView::Slides;
         let enter = Event::Key {
             key: Key::Enter,
             physical_key: None,
@@ -8367,6 +8409,106 @@ mod tests {
         assert_eq!(commands, vec![Command::GoTo(second)], "the slide clicked goes on screen");
         assert_eq!(show.live(), Some(second));
         assert!(state.picked.is_none(), "the pick goes");
+    }
+
+    /// A click at the middle of something the last frame drew, by its id, then a frame for the
+    /// app to take what it asked for. Returns the commands the frames gave.
+    fn click_id(ctx: &egui::Context, show: &mut Show, state: &mut HomeState, id: egui::Id, time: f64) -> Vec<Command> {
+        let at = ctx.read_response(id).expect("drawn").rect.center();
+        let press = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut commands = frame_then_app(ctx, show, state, vec![Event::PointerMoved(at)], time);
+        commands.extend(frame_then_app(ctx, show, state, vec![press(true)], time + 0.05));
+        commands.extend(frame_then_app(ctx, show, state, vec![press(false)], time + 0.1));
+        commands.extend(frame_then_app(ctx, show, state, vec![], time + 0.15));
+        commands
+    }
+
+    /// The id of a verse's row on the Bible page.
+    fn page_verse(verse: u16) -> egui::Id {
+        egui::Id::unique(("bible page verse", verse))
+    }
+
+    #[test]
+    fn a_click_on_a_verse_of_the_passage_puts_it_on_and_another_verse_is_looked_up_and_picked() {
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { library_search: Some(("jn 3:16-18".to_owned(), 0)), ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        assert_eq!(state.bible.view, BibleView::Page, "the page is the Bible view's first look");
+        let enter = Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        frame_then_app(&ctx, &mut show, &mut state, vec![enter], 0.1);
+        for at in 0..3 {
+            frame_then_app(&ctx, &mut show, &mut state, vec![], 0.2 + f64::from(at) * 0.02);
+        }
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+        assert_eq!(show.presentations()[slot].slide_count(), 3, "John 3:16-18, a verse a slide");
+        assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 0 }));
+        // The whole chapter is on the page; a click on verse 17, of the passage, puts its slide
+        // on screen, as a click on the slide does, and the pick goes.
+        let commands = click_id(&ctx, &mut show, &mut state, page_verse(17), 0.5);
+        assert_eq!(commands, vec![Command::GoTo(SlideRef { presentation: slot, slide: 1 })]);
+        assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 1 }));
+        assert!(state.picked.is_none(), "the pick goes");
+        // A verse of the chapter outside the passage, in view: looked up and picked, nothing goes
+        // on screen (the verse on screen stays, in the other place).
+        let outside = (1..=36u16)
+            .filter(|verse| !(16..=18).contains(verse))
+            .find(|verse| ctx.read_response(page_verse(*verse)).is_some())
+            .expect("another verse is in view");
+        let commands = click_id(&ctx, &mut show, &mut state, page_verse(outside), 1.0);
+        assert!(!goes_on_screen(&commands), "{commands:?}");
+        assert_eq!(state.bible.lookup, format!("John 3:{outside}"), "named as typed, in English");
+        assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 1 }), "still on screen");
+        let now = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+        assert_ne!(now, slot, "the new passage went into the other place");
+        assert_eq!(state.pick(&show), Some(SlideRef { presentation: now, slide: 0 }));
+    }
+
+    #[test]
+    fn the_page_draws_only_the_verses_in_view_of_a_long_chapter() {
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { bible_open: true, ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        // The longest chapter: the Synodal's 118th psalm (the English 119th), 176 verses.
+        state.bible.open("Псалтирь 118".to_owned(), None);
+        for at in 0..3 {
+            frame_then_app(&ctx, &mut show, &mut state, vec![], 0.1 + f64::from(at) * 0.05);
+        }
+        let drawn = (1..=176u16).filter(|verse| ctx.read_response(page_verse(*verse)).is_some()).count();
+        assert!(drawn > 0 && drawn < 30, "{drawn} of 176 verses drawn");
+        // Laid out once: another frame with nothing changed lays out nothing again.
+        let made = format!("{:?}", state.bible.page);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.5);
+        assert_eq!(format!("{:?}", state.bible.page), made);
+    }
+
+    #[test]
+    fn page_or_slides_is_kept_between_starts() {
+        let mut state = HomeState::default();
+        assert_eq!(state.prefs().bible_view, "page");
+        state.bible.view = BibleView::Slides;
+        let prefs = state.prefs();
+        assert_eq!(prefs.bible_view, "slides");
+        let mut fresh = HomeState::default();
+        fresh.apply_prefs(&prefs);
+        assert_eq!(fresh.bible.view, BibleView::Slides);
+        // A preferences file from before the page: the page.
+        fresh.apply_prefs(&crate::service::Prefs::default());
+        assert_eq!(fresh.bible.view, BibleView::Page);
     }
 
     #[test]

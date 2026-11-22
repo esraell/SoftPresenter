@@ -237,7 +237,7 @@ feature changes, this page changes in the same commit.
   verse; a single verse, typed as a reference or found by its words, opens in its whole chapter
   with that verse picked, so Next goes on through the chapter after it, as a verse double-clicked
   in the lists does, unless the verses are made into one slide; Command-Return still keeps the
-  verse alone), and so does a passage looked up with Return in Scripture Lookup; in the Bible view ↑
+  verse alone), and so does a passage looked up with Return in the reference field; in the Bible view ↑
   and ↓ pick the verse before or after (from the verse on screen when none is picked). The slide
   picked has a 2-point ink ring, its strip in ink and a small ink key cap for Enter after its
   label (in words only or a table, its row has the chosen grey and a fine dim ring inside); never
@@ -491,37 +491,54 @@ feature changes, this page changes in the same commit.
 ![A stage screen: the slide on screen in English and Russian, the next slide, a sermon timer and the clock](images/stage.png)
 
 ## Bible
-- Scripture Lookup in English, Russian and Ukrainian (`John 3:16-18`, `jn 3:16`, `Psalm 23`,
-  `Пс 22:1-3`, `Ів 3:16`) and word search. A short form is read in the language of the first
-  translation first ("1 Цар" is 1 Samuel to a Russian Bible, 1 Kings to a Ukrainian one), and a
-  Ukrainian Bible shows its books' Ukrainian names.
+- The Bible page, in the design's look: on the left, in place of the playlist, **Books | History**
+  and Hide; in the middle a bar with the reference field, a verse longer at the start (‹) or the
+  end (›), **+ Add** (with ▾ for another playlist), **Page | Slides** and Options; under it the
+  translations line, the passage's title with the Bibles read, then the passage. The right
+  column is the same as in every view. Hide puts the left column away (the middle takes its
+  room) and Books, beside the reference field, brings it back; the choice is kept.
+- The reference field takes a reference in English, Russian and Ukrainian (`John 3:16-18`,
+  `jn 3:16`, `Psalm 23`, `Пс 22:1-3`, `Ів 3:16`) or words to find. A short form is read in the
+  language of the first translation first ("1 Цар" is 1 Samuel to a Russian Bible, 1 Kings to a
+  Ukrainian one), and a Ukrainian Bible shows its books' Ukrainian names.
+- **Page** (the first look) shows the passage's whole chapter to read: a verse to a row, its
+  number at the left, the words in a book face, the same verse in the second Bible under them;
+  the passage's verses bright, the rest of the chapter dimmer, the verse on screen tinted orange
+  and the verse picked for Enter in a well with a ring. A click on a verse of the passage puts
+  it on screen, as a click on its slide does; a click on another verse of the chapter looks
+  that verse up (Shift: the passage from the verse clicked before) and picks it, without putting
+  anything on screen. Only the verses in view are drawn, so the longest psalm costs no more than
+  a short chapter. **Slides** shows the passage's slides as the Bible theme draws them. Which of
+  the two is kept between starts.
 - **What the operator reads follows the language typed; what the screens show does not.** A
-  reference typed with an English book name (`gen 1 1`) is named back in English in Scripture
-  Lookup (`Genesis 1:1`), and in the find box quoted from the first English Bible in use; typed
-  in Russian (`Быт 1 1`), in Russian; in Ukrainian, in Ukrainian. A name spelt alike in Russian
-  and Ukrainian (`Пс`, `1 Кор`) stays with whichever of the two the operator was reading. A
-  language with no Bible in use falls back to the first translation. The slides are the same
-  whatever language the reference was typed in: which Bible goes in which box, and the
+  reference typed with an English book name (`gen 1 1`) is named back in English in the
+  reference field (`Genesis 1:1`), and in the find box quoted from the first English Bible in
+  use; typed in Russian (`Быт 1 1`), in Russian; in Ukrainian, in Ukrainian. A name spelt alike
+  in Russian and Ukrainian (`Пс`, `1 Кор`) stays with whichever of the two the operator was
+  reading. A language with no Bible in use falls back to the first translation. The slides are
+  the same whatever language the reference was typed in: which Bible goes in which box, and the
   reference on them, are as the translations are set. Chapter and verse numbers are always the
   first translation's, so with the Russian Synodal first, `Psalm 23` is its 23rd psalm (the
-  English 24th), named back as `Psalms 23:1-10`.
-- With nothing typed to go by (the Bible page opened fresh, a book or verse clicked in the
-  lists, a passage from History or a playlist), the operator reads in the language last typed
-  this session; at the start of a session, in the computer's: Russian if its first language is
-  Russian, Ukrainian if Ukrainian, otherwise English (falling back to the first translation when
-  that language has no Bible in use). There is no switch for it.
-- Search, on the Bible page, looks for the words in the Bibles in use written in their
-  alphabet (Cyrillic words in the Russian and the Ukrainian Bibles, the session's language
-  first; Latin letters in the English ones), or in the first translation when none is; each
-  verse found is named in its Bible's language and, when they come from more than one Bible,
-  says which. The verses are listed as the words are typed (from three letters, found on a
-  thread of their own so typing never waits, only the newest words answered), with no need for
-  Return; emptying the words brings the slides back. Words typed in Scripture Lookup that are no
-  reference and no book's name begun are searched for the same way.
-- The slides follow what is typed in Scripture Lookup a moment after typing stops, without
-  waiting for Return (nothing goes on screen until a slide is clicked, or picked and Enter
-  pressed). While a book's name is being typed, the books it could be are offered under the
-  field (arrows pick, Tab or Return takes one). Return looks the passage up, picks its first
+  English 24th), named back as `Psalms 23:1-10`. The page reads the operator's language first,
+  and the next Bible in use under it.
+- With nothing typed to go by (the Bible page opened fresh, a book or verse clicked, a passage
+  from History or a playlist), the operator reads in the language last typed this session; at
+  the start of a session, in the computer's: Russian if its first language is Russian,
+  Ukrainian if Ukrainian, otherwise English (falling back to the first translation when that
+  language has no Bible in use). There is no switch for it.
+- Words typed in the reference field that are no reference and no book's name begun are looked
+  for in the Bibles in use written in their alphabet (Cyrillic words in the Russian and the
+  Ukrainian Bibles, the session's language first; Latin letters in the English ones), or in the
+  first translation when none is; each verse found is named in its Bible's language and, when
+  they come from more than one Bible, says which. The verses are listed in place of the page as
+  the words are typed (from three letters, found on a thread of their own so typing never
+  waits, only the newest words answered), with no need for Return; a click opens a verse, Whole
+  chapter its chapter with the verse picked, and emptying the words brings the page back. (The
+  page's separate Search field is gone; `sp bible search` still lists verses for words.)
+- The page follows what is typed in the reference field a moment after typing stops, without
+  waiting for Return (nothing goes on screen until a verse or slide is clicked, or picked and
+  Enter pressed). While a book's name is being typed, the books it could be are offered under
+  the field (arrows pick, Tab or Return takes one). Return looks the passage up, picks its first
   verse and gives the keyboard back to the show, so Enter puts the verse on screen, Space and →
   go on to the next, ← back, and ↑ and ↓ pick another without putting it on (a reference not
   understood keeps the keyboard in the field instead). In the Bible view a letter or number
@@ -529,37 +546,38 @@ feature changes, this page changes in the same commit.
   typed after Return goes there); it never jumps the song on screen to a group, as letters do in
   the Show view. Command-2 or Command-B (Ctrl elsewhere), from anywhere, goes back to the field
   with its words selected, ready for the next reference.
-- History lists the passages that were on screen, newest first, with the time (or the day,
-  for earlier ones); one click brings a passage back. It is kept between starts, holds the last
-  hundred, and Clear History empties it.
+- History, the other side of the left column, lists the passages that were on screen, newest
+  first, named in the operator's language, with the time (or the day, for earlier ones); one
+  click brings a passage back. It is kept between starts, holds the last hundred, and Clear
+  history empties it.
 - Up to four translations on one slide, lined up by verse using the standard versification
-  tables; each row picks its Bible (or None) and the boxes its verse and reference go in. As
-  this is set once and seldom changed, it is folded into one line, TRANSLATIONS with each
-  Bible's short name (where it goes, on hover); Change opens the table and Done folds it
-  again, and the app remembers which.
+  tables. As this is set once and seldom changed, it is folded into one line, TRANSLATIONS with
+  each Bible's short name (where it goes, on hover); Change opens it as rows, each a Bible (or
+  None), the box its verse goes in and the box its reference goes in, with its licence and ×
+  to take it off; + Another translation adds one (up to four), Manage Bibles… opens the Bibles
+  window, and Done folds them again. The app remembers which.
 - Options opens a panel: what each slide shows (one verse, or the whole passage), verse numbers,
   the translation's name, where the reference goes (on every slide, the whole passage on every
   slide or the last, or none) and the theme, beside a preview of the first and last slides that
   changes as they are clicked (the passage showing, or two sample verses). Manage Bibles… opens
-  the Bibles window. ‹ Verse and Verse › make the passage a verse longer at either end; search
-  results open a verse or its whole chapter.
-- Book, chapter and verse lists beside the slides (the books named in the operator's
-  language, the chapters and verses as the first translation numbers them), each column with its heading, in one plain
-  shade so only the rows chosen stand out (Hide, at their top, puts them away and Books brings them back; the choice is kept). A click
-  on a book loads its first chapter; a click on a chapter loads that chapter; a click on a verse
-  then narrows the passage to that verse, Shift-click makes a passage from the verse clicked
-  before, and a double-click opens the chapter with that verse. What a click loads has its first
-  verse (or the verse double-clicked) picked, so Enter puts it on screen and Next goes on
-  through it; nothing goes on screen from the lists (a double-click on a verse used to put it on
-  screen at once). The passage showing is lit in them, however it was looked up. They are a
-  scrolling list of books, not yet the keypad of all the books the design has.
+  the Bibles window. ‹ and › make the passage a verse longer at either end.
+- Book, chapter and verse lists, side by side in the left column and each scrolling on its own,
+  opened on what is chosen: the books named in full in the operator's language under Old
+  Testament and New Testament (those the first translation lacks dimmed), the chapters and
+  verses as the first translation numbers them; the rows in the design's look (the chosen one a
+  well with a faint ring). A click on a book loads its first chapter; a click on a chapter
+  loads that chapter; a click on a verse then narrows the passage to that verse, Shift-click
+  makes a passage from the verse clicked before, and a double-click opens the chapter with that
+  verse. What a click loads has its first verse (or the verse double-clicked) picked, so Enter
+  puts it on screen and Next goes on through it; nothing goes on screen from the lists. The
+  passage showing is lit in them, however it was looked up.
 - Four Bibles ship with the app (King James, World English, Berean Standard, Russian Synodal)
   and sixteen more can be downloaded. Options › Bibles opens the Bibles window: a search box,
   the Bibles installed (each with Remove, but for the four built in), and every Bible that can
   be downloaded, grouped by language and written in it, with its terms and an Install button
   that shows the download going on.
-- One click keeps a passage: Add to "Sunday Morning" puts it in the playlist in front (the ▾
-  beside it picks another), to be brought back with the same settings.
+- One click keeps a passage: + Add puts it in the playlist in front (its tooltip names the
+  playlist; the ▾ beside it picks another), to be brought back with the same settings.
 
 ![The Bible page: John 3:16-18 in the Russian Synodal and the King James Version, beside the book, chapter and verse lists](images/bible.png)
 

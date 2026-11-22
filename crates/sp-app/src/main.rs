@@ -4,6 +4,7 @@ mod applog;
 mod audio;
 mod bible;
 mod bible_language;
+mod bible_page;
 mod bible_store;
 mod bin_pictures;
 mod bundle;

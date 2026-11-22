@@ -589,6 +589,15 @@ pub fn semibold(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(SEMIBOLD.into()))
 }
 
+/// The name of the face a page of the Bible is read in.
+const READING: &str = "reading";
+
+/// The face a page of the Bible is read in, at a size: a book face with serifs where the
+/// computer has one (Georgia, Times New Roman), otherwise the interface font.
+pub fn reading(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(READING.into()))
+}
+
 /// Uses the computer's own interface font, so the app looks at home on it, with a
 /// wide-coverage font behind it so song titles in any script show as letters. Without either
 /// the app still works with its built-in font.
@@ -612,6 +621,14 @@ fn load_fonts(ctx: &egui::Context) {
     ];
     const WIDE: [&str; 2] =
         ["/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "C:\\Windows\\Fonts\\arialuni.ttf"];
+    // The book face the Bible page is read in; each has Cyrillic as well as Latin letters.
+    const SERIF: [&str; 5] = [
+        "/System/Library/Fonts/Supplemental/Georgia.ttf",
+        "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
+        "C:\\Windows\\Fonts\\georgia.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+    ];
     // Apple's system font is one file that can be drawn at any weight, and in a cut made for
     // small sizes or one made for headlines. Left alone it uses the headline cut, which looks
     // cramped and thin at the size of a label; ask for the small-text cut, a touch heavier
@@ -648,6 +665,13 @@ fn load_fonts(ctx: &egui::Context) {
         fixed_heavy.insert(0, "fixed heavy".to_owned());
     }
     fonts.families.insert(FontFamily::Name(FIXED_SEMIBOLD.into()), fixed_heavy);
+    // Without a book face, the page is read in the interface font.
+    let mut book = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    if let Some(bytes) = SERIF.iter().find_map(|path| std::fs::read(path).ok()) {
+        fonts.font_data.insert(READING.to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
+        book.insert(0, READING.to_owned());
+    }
+    fonts.families.insert(FontFamily::Name(READING.into()), book);
     if let Some(bytes) = WIDE.iter().find_map(|path| std::fs::read(path).ok()) {
         fonts.font_data.insert("wide".to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
         for family in fonts.families.values_mut() {
@@ -4610,118 +4634,6 @@ fn sweep_media(
     } else if at.x > bin.max.x - edge {
         ui.scroll_with_delta(vec2(-10.0, 0.0));
         ui.ctx().request_repaint();
-    }
-}
-
-/// The right end of a slide area's heading: the three ways to lay slides out, and their size.
-pub fn view_controls(ui: &mut egui::Ui, state: &mut HomeState) {
-    ui.spacing_mut().item_spacing.x = 8.0;
-    // Further right is bigger, so fewer slides fit across.
-    let mut size = 7 - state.columns.clamp(2, 7);
-    ui.spacing_mut().slider_width = 96.0;
-    if ui.add(egui::Slider::new(&mut size, 0..=5).show_value(false)).on_hover_text("Slide size").changed() {
-        state.columns = 7 - size;
-    }
-    ui.add_space(4.0);
-    let views = [
-        (SlideView::Table, Icon::Rows, "Table View"),
-        (SlideView::Easy, Icon::Document, "Easy View: words only"),
-        (SlideView::Grid, Icon::Grid, "Grid View"),
-    ];
-    let (bar, _) = ui.allocate_exact_size(vec2(30.0 * 3.0 + 6.0, 30.0), Sense::hover());
-    ui.painter().rect_filled(bar, RADIUS + 1.0, PANEL);
-    // Laid out right to left, so the first here is the rightmost.
-    for (index, (view, icon, hint)) in views.into_iter().enumerate() {
-        let cell =
-            Rect::from_min_size(pos2(bar.max.x - 3.0 - 30.0 * (index as f32 + 1.0), bar.min.y + 3.0), vec2(30.0, 24.0));
-        let response = ui.interact(cell, ui.scope_id().with(("slide view", index)), Sense::click());
-        let on = state.slide_view == view;
-        if on {
-            ui.painter().rect_filled(cell, RADIUS - 2.0, CARD);
-        }
-        let ink = if on || response.hovered() { TEXT } else { TEXT_FAINT };
-        icons::paint(ui.painter(), icon, Rect::from_center_size(cell.center(), vec2(14.0, 14.0)), ink);
-        if response.on_hover_text(hint).clicked() {
-            state.slide_view = view;
-        }
-    }
-    // How one slide gives way to the next on the screens: Cut, Dissolve, or another chosen
-    // from the picker, which the label beside the buttons names ("Push: 0.6s").
-    use sp_model::TransitionKind as K;
-    let kind = state.transition.kind;
-    // Without room beside what is to their left (a narrow window), the transition buttons are
-    // left out rather than drawn over it. They need 216 points, and the label more.
-    let needed = if kind == K::Cut { 216.0 } else { 260.0 };
-    if ui.available_width() < needed {
-        // A narrow window: one button naming the transition, which opens the picker, rather
-        // than the transition being left out.
-        if ui.available_width() >= 110.0 {
-            ui.add_space(6.0);
-            let words = if kind == K::Cut {
-                "Cut ▾".to_owned()
-            } else {
-                format!("{} {:.1}s ▾", kind.name(), state.transition.seconds)
-            };
-            let button = ui
-                .add(egui::Button::new(egui::RichText::new(words).size(12.0).color(TEXT_DIM)))
-                .on_hover_text("How one slide gives way to the next");
-            egui::Popup::from_toggle_button_response(&button)
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .show(|ui| transition_picker(ui, &mut state.transition, "slides"));
-        }
-        return;
-    }
-    ui.add_space(10.0);
-    if kind != K::Cut {
-        // The time only: the transition's name is the button chosen beside it.
-        let label = ui
-            .add(
-                egui::Button::new(
-                    egui::RichText::new(format!("{:.1}s ▾", state.transition.seconds)).size(12.0).color(TEXT_DIM),
-                )
-                .frame(false),
-            )
-            .on_hover_text("How long it takes, and its direction");
-        egui::Popup::from_toggle_button_response(&label)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .show(|ui| transition_settings(ui, &mut state.transition, "slides"));
-    }
-    // Laid out right to left: the last cell here is the leftmost.
-    // The third button is Advanced; once one of its transitions is chosen, it shows that name.
-    let others =
-        if matches!(kind, K::Cut | K::Dissolve) { "Advanced ▾".to_owned() } else { format!("{} ▾", kind.name()) };
-    let (bar, _) = ui.allocate_exact_size(vec2(44.0 + 64.0 + 84.0 + 6.0, 30.0), Sense::hover());
-    ui.painter().rect_filled(bar, RADIUS + 1.0, PANEL);
-    let mut more = None;
-    for (index, label, width, x, hint) in [
-        (0, "Cut".to_owned(), 44.0, 3.0, "Slides switch at once"),
-        (1, "Dissolve".to_owned(), 64.0, 47.0, "Each slide fades into the next"),
-        (2, others, 84.0, 111.0, "Choose another transition"),
-    ] {
-        let cell = Rect::from_min_size(bar.min + vec2(x, 3.0), vec2(width, 24.0));
-        let response = ui.interact(cell, ui.scope_id().with(("transition", index)), Sense::click());
-        let on = match index {
-            0 => kind == K::Cut,
-            1 => kind == K::Dissolve,
-            _ => !matches!(kind, K::Cut | K::Dissolve),
-        };
-        if on {
-            ui.painter().rect_filled(cell, RADIUS - 2.0, CARD);
-        }
-        let ink = if on || response.hovered() { TEXT } else { TEXT_FAINT };
-        ui.painter().text(cell.center(), Align2::CENTER_CENTER, label.as_str(), FontId::proportional(12.0), ink);
-        let response = response.on_hover_text(hint);
-        match index {
-            0 if response.clicked() => state.transition = sp_model::Transition::of(K::Cut),
-            1 if response.clicked() && kind != K::Dissolve => state.transition = sp_model::Transition::of(K::Dissolve),
-            2 => more = Some(response),
-            _ => {}
-        }
-    }
-    if let Some(more) = more {
-        egui::Popup::from_toggle_button_response(&more)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .show(|ui| transition_picker(ui, &mut state.transition, "slides"));
     }
 }
 

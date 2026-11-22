@@ -456,6 +456,10 @@ pub struct Prefs {
     /// True when the Bible page's table of translations was left open.
     #[serde(default)]
     pub bible_rows_open: bool,
+    /// How the Bible page shows a passage: `page` (its chapter to read, the default) or
+    /// `slides`.
+    #[serde(default)]
+    pub bible_view: String,
     /// True when the left column was left listing a playlist, not a library's songs.
     #[serde(default)]
     pub playlist_in_front: bool,
@@ -523,6 +527,7 @@ impl Default for Prefs {
             setup_done: false,
             bible_lists_hidden: false,
             bible_rows_open: false,
+            bible_view: String::new(),
             playlist_in_front: false,
             song_order: "listed".to_owned(),
             keys_on_buttons: false,
