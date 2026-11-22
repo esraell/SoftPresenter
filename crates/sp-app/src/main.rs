@@ -9623,7 +9623,7 @@ mod tests {
         for key in [NamedKey::Space, NamedKey::ArrowRight, NamedKey::ArrowLeft] {
             assert!(!show_key_held_back(&state, &ctx, &Key::Named(key)), "{key:?} runs the show");
         }
-        assert!(!popup_takes_show_keys(&ctx), "and so does Enter");
+        assert!(enter_key_is_free(&state, &ctx), "and so does Enter");
     }
 
     fn args(list: &[&str]) -> Result<Option<Options>, String> {
