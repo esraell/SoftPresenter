@@ -55,7 +55,8 @@ pub struct Screen {
 
 /// How an audience screen shows the show: which layers (a lobby screen might show only the
 /// media), the colour where nothing is drawn, and how much of each edge to cover, for a screen
-/// whose edges are cut off.
+/// whose edges are cut off; whether it is see-through, for a video switcher to lay the words
+/// over a camera picture; or whether it shows another screen's key instead.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Look {
@@ -67,6 +68,33 @@ pub struct Look {
     pub color: Rgba,
     /// Left, top, right, bottom, in slide units.
     pub mask: [f32; 4],
+    /// See-through, and how a partly solid pixel's colour is sent; `None` is solid, as usual.
+    /// A see-through screen is clear wherever nothing is drawn, and leaves out what would
+    /// cover the whole picture: the media behind the words, every theme's background colour
+    /// and picture, and its own colour. Its covered edges are clear. What is placed on the
+    /// slides stays: the words, the layout's and the slide's own shapes and pictures, props,
+    /// messages, the copyright line and the announcements' words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub see_through: Option<Alpha>,
+    /// Shows another audience screen's key instead of the show, by that screen's id: how
+    /// solid each pixel of its picture is, as a grey (white where solid, black where clear,
+    /// greys at the soft edges), for a switcher that takes the words and their key as two
+    /// inputs. The key is made from the very picture that screen shows (see `window_fill`
+    /// and `ndi_fill` in output.rs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_of: Option<Uuid>,
+}
+
+/// How a see-through screen sends the colour of a pixel that is only partly solid, such as the
+/// soft edge of a letter. Video switchers and streaming software expect one or the other.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Alpha {
+    /// The colour as it is, with how solid it is beside it: NDI's own way, and the usual one.
+    #[default]
+    Straight,
+    /// The colour already multiplied by how solid it is, as if laid over black.
+    Premultiplied,
 }
 
 impl Default for Look {
@@ -79,6 +107,8 @@ impl Default for Look {
             announcements: true,
             color: Rgba::BLACK,
             mask: [0.0; 4],
+            see_through: None,
+            key_of: None,
         }
     }
 }
@@ -289,6 +319,36 @@ mod tests {
         let back: Screen = serde_json::from_str(&serde_json::to_string(&lobby).unwrap()).unwrap();
         assert_eq!(back, lobby);
         assert!(!back.look.slides && back.look.media);
+    }
+
+    #[test]
+    fn a_see_through_screen_and_a_key_survive_their_file_and_old_files_open_solid() {
+        // A file from before see-through screens: every screen solid, none a key.
+        let old = r#"{"format":"softpresenter-screens","version":1,"screens":[
+            {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e01","name":"Main","output":"window"},
+            {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e02","name":"Lobby","output":"off",
+             "look":{"slides":false,"media":true,"props":true,"messages":true,"announcements":true,
+                     "color":{"r":0,"g":0,"b":0,"a":255},"mask":[0.0,0.0,0.0,0.0]}}]}"#;
+        let screens = from_json(old).expect("an old file opens");
+        assert!(screens.iter().all(|s| s.look.see_through.is_none() && s.look.key_of.is_none()));
+        assert!(!screens[1].look.slides, "and keeps what it said");
+        // A solid screen writes nothing of either.
+        let plain = serde_json::to_string(&Screen::new("A".to_owned(), Output::Window)).unwrap();
+        assert!(!plain.contains("see_through") && !plain.contains("key_of"), "{plain}");
+        // A see-through screen and its key, there and back.
+        let stream = Screen {
+            look: Look { see_through: Some(Alpha::Premultiplied), media: false, ..Look::default() },
+            ..Screen::new("Stream".to_owned(), Output::Display("Switcher 1".to_owned()))
+        };
+        let key = Screen {
+            look: Look { key_of: Some(stream.id), ..Look::default() },
+            ..Screen::new("Stream key".to_owned(), Output::Display("Switcher 2".to_owned()))
+        };
+        let text = to_json(&[stream.clone(), key.clone()]);
+        assert!(text.contains("\"see_through\": \"premultiplied\""), "{text}");
+        assert_eq!(from_json(&text), Some(vec![stream.clone(), key.clone()]));
+        // Straight is the usual kind.
+        assert_eq!(Alpha::default(), Alpha::Straight);
     }
 
     fn displays(names: &[&str]) -> Vec<DisplayInfo> {

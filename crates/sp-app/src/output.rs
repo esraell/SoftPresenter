@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 use sp_model::{Slide, Theme, Uuid};
 use sp_ndi::NdiOutput;
 use sp_render::{
-    Fonts, Layers, MovingPicture, Painter, Picture, build_layers, read_pixels, target_texture, vello, wgpu,
+    Fonts, Layers, MovingPicture, Painter, Picture, Solid, SolidPass, build_layers, read_pixels,
+    see_through_transition, target_texture, vello, wgpu,
 };
 
 /// How often a playing video is looked at for a new picture: more often than any video's
@@ -152,6 +153,9 @@ impl NdiStatus {
 /// worked).
 struct NdiReadback {
     ids: Vec<Uuid>,
+    /// Those of `ids` that send its key (see `NdiGroup`); the rest send it as `sent` says.
+    keys: Vec<Uuid>,
+    sent: sp_ndi::Sent,
     /// Which picture of its drawing it is, from nought.
     place: usize,
     buffer: wgpu::Buffer,
@@ -413,12 +417,14 @@ impl NdiChange {
 
 /// One NDI source as a drawing finds it: whether a picture is wanted for it, and whether it
 /// shows the show its own way (a stage screen, one being identified, one with a look or a
-/// theme of its own) and so needs a picture of its own.
+/// theme of its own, one whose key another source sends) and so needs a picture of its own.
 #[derive(Clone, Copy, Debug)]
 struct NdiSeen {
     id: Uuid,
     wanted: bool,
     alone: bool,
+    /// The NDI source whose key this one sends, made from that source's own picture.
+    key_of: Option<Uuid>,
     /// NDI says nobody is watching it (which is one reason no picture is wanted).
     unwatched: bool,
     /// How many times receivers have come to it after a spell with none.
@@ -570,15 +576,38 @@ fn ndi_wanted(state: &sp_ndi::State, receivers: Option<u32>) -> bool {
     !matches!(state, sp_ndi::State::Failed(_)) && receivers != Some(0)
 }
 
+/// One picture to draw for NDI: the screen it is drawn for, the sources that send it as it is,
+/// and the sources that send its key. A key is made from the very pixels its fill sends, read
+/// back from the GPU once and handed to both together, so the two never send different moments.
+#[derive(Debug, PartialEq)]
+struct NdiGroup {
+    of: Uuid,
+    fills: Vec<Uuid>,
+    keys: Vec<Uuid>,
+}
+
 /// The pictures to draw for the NDI sources, each with the sources it goes to: one for each
-/// source that needs its own, then one shared by all the rest. Sources no picture is wanted
-/// for are in none, and a picture nobody wants is not there at all.
-fn ndi_groups(sources: &[NdiSeen]) -> Vec<Vec<Uuid>> {
-    let wanted = || sources.iter().filter(|source| source.wanted);
-    let mut groups: Vec<Vec<Uuid>> = wanted().filter(|source| source.alone).map(|source| vec![source.id]).collect();
-    let shared: Vec<Uuid> = wanted().filter(|source| !source.alone).map(|source| source.id).collect();
-    if !shared.is_empty() {
-        groups.push(shared);
+/// source that needs its own (with any sources that send its key), then one shared by all the
+/// rest. Sources no picture is wanted for are in none, and a picture nobody wants is not there
+/// at all; a picture whose key is wanted is drawn though nobody watches the picture itself.
+fn ndi_groups(sources: &[NdiSeen]) -> Vec<NdiGroup> {
+    let keys_of = |fill: Uuid| -> Vec<Uuid> {
+        sources.iter().filter(|source| source.wanted && source.key_of == Some(fill)).map(|source| source.id).collect()
+    };
+    let mut groups: Vec<NdiGroup> = sources
+        .iter()
+        .filter(|source| source.alone && source.key_of.is_none())
+        .map(|source| NdiGroup {
+            of: source.id,
+            fills: if source.wanted { vec![source.id] } else { Vec::new() },
+            keys: keys_of(source.id),
+        })
+        .filter(|group| !group.fills.is_empty() || !group.keys.is_empty())
+        .collect();
+    let shared: Vec<Uuid> =
+        sources.iter().filter(|source| source.wanted && !source.alone).map(|source| source.id).collect();
+    if let Some(first) = shared.first() {
+        groups.push(NdiGroup { of: *first, keys: Vec::new(), fills: shared });
     }
     groups
 }
@@ -730,6 +759,9 @@ struct Target {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     blitter: wgpu::util::TextureBlitter,
+    /// What a see-through screen's picture, or a key, is shown through in place of the
+    /// blitter: made the first time one is shown, and again if it must show another way.
+    pass: Option<SolidPass>,
     texture: wgpu::Texture,
     /// The picture now in the window in full, kept so the next one can fade in over it.
     shown: Option<vello::Scene>,
@@ -830,6 +862,9 @@ struct Output {
     /// The audience screens with a look of their own.
     looks: Vec<(Uuid, crate::screens::Look)>,
     themes: Vec<(Uuid, Arc<Theme>)>,
+    /// Themes without their background colour and picture, for see-through screens, each with
+    /// the theme it was made from (see `plain_theme`).
+    plain_themes: Vec<(Arc<Theme>, Arc<Theme>)>,
     /// The stage screens with the layout each is drawn with, and whether they are on.
     stage: Vec<(Uuid, Arc<Theme>)>,
     stage_on: bool,
@@ -932,6 +967,7 @@ fn run(
         stage_on: true,
         looks: Vec::new(),
         themes: Vec::new(),
+        plain_themes: Vec::new(),
         slide_on: Instant::now(),
         step_at: Instant::now(),
         overlay: Overlay::default(),
@@ -1251,6 +1287,7 @@ impl Output {
         self.targets.push(Target {
             id,
             blitter: wgpu::util::TextureBlitter::new(&self.device, format),
+            pass: None,
             texture: target_texture(&self.device, config.width, config.height),
             surface,
             config,
@@ -1377,6 +1414,42 @@ impl Output {
         self.looks.iter().find(|(have, _)| *have == id).map_or_else(crate::screens::Look::default, |(_, look)| *look)
     }
 
+    /// How a screen is see-through, if it is: an audience screen that asks to be, and is not a
+    /// key (a key shows nothing of its own).
+    fn see_through(&self, id: Uuid) -> Option<crate::screens::Alpha> {
+        let look = self.look_of(id);
+        look.see_through.filter(|_| look.key_of.is_none() && !self.is_stage(id))
+    }
+
+    /// The screen whose key this one shows, if it is a key (only an audience screen can be).
+    fn key_of(&self, id: Uuid) -> Option<Uuid> {
+        self.look_of(id).key_of.filter(|_| !self.is_stage(id))
+    }
+
+    /// The screen a key follows, when it can have a key: another audience screen that is not
+    /// a key itself. (While the key is being identified it shows its own name instead.)
+    fn fill_of(&self, key: Uuid) -> Option<Uuid> {
+        let fill = self.key_of(key)?;
+        let identified = self.identify.iter().any(|(have, ..)| *have == key);
+        (fill != key && !self.is_stage(fill) && self.key_of(fill).is_none() && !identified).then_some(fill)
+    }
+
+    /// For a key in a window, the window of its fill, whose picture it is made from: a key goes
+    /// out beside its fill only when both are in windows (or on displays), or both on NDI, so
+    /// that the two always show the same picture (see `screens::key_trouble`). Any other key
+    /// draws black, which keys nothing in.
+    fn window_fill(&self, key: Uuid) -> Option<usize> {
+        let fill = self.fill_of(key)?;
+        self.targets.iter().position(|target| target.id == fill)
+    }
+
+    /// For a key on NDI, its fill's NDI source, whose picture it is made from (see
+    /// `window_fill`).
+    fn ndi_fill(&self, key: Uuid) -> Option<Uuid> {
+        let fill = self.fill_of(key)?;
+        self.ndi.iter().any(|(id, _)| *id == fill).then_some(fill)
+    }
+
     /// Where the slide on screen is in its builds now.
     fn build_clock(&self) -> sp_model::BuildClock {
         let now = Instant::now();
@@ -1401,15 +1474,42 @@ impl Output {
 
     /// Builds what a screen shows now for a target of a size.
     fn scene_for(&mut self, id: Uuid, frame: &Frame, w: u32, h: u32) -> vello::Scene {
-        let (media, slide, overlay, theme, announcement) = self.content_for(id, frame);
         // While screens are identified, each is marked over what it shows.
         let identified =
             self.identify.iter().find(|(have, ..)| *have == id).map(|(_, name, color)| (name.clone(), *color));
+        // A key shows nothing of its own: its picture is made from its fill's, where that is
+        // painted (`present_keys_of`, `send_ndi`). One with no fill to follow is black, which
+        // keys nothing in, so a switcher shows its camera untouched.
+        let mut scene = if self.key_of(id).is_some() { black(w, h) } else { self.show_for(id, frame, w, h) };
+        // Its colour and border, then its name on top, clear of the colour.
+        if let Some((name, color)) = identified {
+            identify_marks(&mut scene, color, identify_strength(self.identify_since.elapsed().as_secs_f32()), w, h);
+            let label = sp_render::build_overlay(&mut self.fonts, &name, &self.identify_theme, w, h);
+            scene.append(&label, None);
+        }
+        scene
+    }
+
+    /// The show as a screen shows it, for a target of a size: its layers, its theme, its
+    /// colour and its covered edges; for a see-through screen, without what would cover the
+    /// whole picture (see `see_through_content`), clear where nothing is drawn.
+    fn show_for(&mut self, id: Uuid, frame: &Frame, w: u32, h: u32) -> vello::Scene {
+        let content = self.content_for(id, frame);
+        let see_through = self.see_through(id).is_some();
+        let (media, slide, overlay, theme, announcement) = if see_through {
+            let mut kept = std::mem::take(&mut self.plain_themes);
+            let content = see_through_content(content, |theme| plain_theme(&mut kept, theme));
+            self.plain_themes = kept;
+            content
+        } else {
+            content
+        };
         // Scrolling text moves on from when the slide was fully on screen.
         let time = Instant::now().checked_duration_since(self.slide_on).map_or(0.0, |since| since.as_secs_f32());
         // A stage screen keeps the plain look.
         let look = if self.is_stage(id) { crate::screens::Look::default() } else { self.look_of(id) };
-        let backdrop = (look.color != sp_model::Rgba::BLACK).then_some(look.color);
+        let backdrop =
+            if see_through { Some(CLEAR) } else { (look.color != sp_model::Rgba::BLACK).then_some(look.color) };
         let layers = Layers {
             media_fit: frame.media_fit,
             media: media.as_ref(),
@@ -1420,14 +1520,9 @@ impl Output {
             mask: look.mask,
             announcement: announcement.as_ref().map(|(slide, theme)| (&**slide, &**theme)),
         };
-        let mut scene = build_layers(&mut self.fonts, &layers, &theme, w, h).scene;
-        // Its colour and border, then its name on top, clear of the colour.
-        if let Some((name, color)) = identified {
-            identify_marks(&mut scene, color, identify_strength(self.identify_since.elapsed().as_secs_f32()), w, h);
-            let label = sp_render::build_overlay(&mut self.fonts, &name, &self.identify_theme, w, h);
-            scene.append(&label, None);
-        }
-        scene
+        let scene = build_layers(&mut self.fonts, &layers, &theme, w, h).scene;
+        // Covered with clear is not covered at all: a see-through screen's edges are cut away.
+        if see_through { cut_covered_edges(scene, look.mask, w, h) } else { scene }
     }
 
     /// True while the wash over identified screens is still breathing, so they are drawn at
@@ -1494,7 +1589,7 @@ impl Output {
             seen.iter().filter(|source| source.wanted).map(|source| (source.id, source.arrivals)).collect();
         let (w, h) = NDI_SIZE;
         let mut all_painted = true;
-        for (place, ids) in groups.into_iter().enumerate() {
+        for (place, group) in groups.into_iter().enumerate() {
             // Not asked for after a picture the GPU was too slow with: it waits for the next
             // try, and so do the pictures after it.
             if self.round.slow {
@@ -1502,10 +1597,13 @@ impl Output {
                 all_painted = false;
                 break;
             }
-            let scene = self.scene_for(ids[0], frame, w, h);
+            // A see-through screen's picture is painted on clear, and goes with its alpha; its
+            // keys are made from these same pixels, on their sources' own threads.
+            let see_through = self.see_through(group.of);
+            let scene = self.scene_for(group.of, frame, w, h);
             let target = self.ndi_target.get_or_insert_with(|| target_texture(&self.device, w, h)).clone();
             let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-            if let Err(e) = self.paint(&scene, &view, w, h) {
+            if let Err(e) = self.paint(&scene, &view, w, h, see_through.is_some()) {
                 let message = format!("The NDI picture could not be drawn: {e}");
                 if self.ndi_trouble.is_news(&message) {
                     crate::applog::problem("output", &message);
@@ -1548,7 +1646,9 @@ impl Output {
                     *flag = Some(result.is_ok());
                 }
             });
-            self.ndi_pending.push(NdiReadback { ids, place, buffer, padded_row, done });
+            let ids = group.fills.into_iter().chain(group.keys.iter().copied()).collect();
+            let sent = ndi_sent(see_through);
+            self.ndi_pending.push(NdiReadback { ids, keys: group.keys, sent, place, buffer, padded_row, done });
         }
         if !all_painted {
             return;
@@ -1564,6 +1664,9 @@ impl Output {
     fn ndi_seen(&self) -> Vec<NdiSeen> {
         // The show is drawn once for every source that shows it as it is; a screen being
         // identified, a stage screen or one with its own look gets its own picture.
+        // The NDI sources that send another's key, and whose.
+        let keys: Vec<(Uuid, Uuid)> =
+            self.ndi.iter().filter_map(|(id, _)| self.ndi_fill(*id).map(|fill| (*id, fill))).collect();
         self.ndi
             .iter()
             .map(|(id, ndi)| NdiSeen {
@@ -1575,7 +1678,9 @@ impl Output {
                 alone: self.identify.iter().any(|(have, ..)| have == id)
                     || self.is_stage(*id)
                     || self.looks.iter().any(|(have, _)| have == id)
-                    || self.themes.iter().any(|(have, _)| have == id),
+                    || self.themes.iter().any(|(have, _)| have == id)
+                    || keys.iter().any(|(_, fill)| fill == id),
+                key_of: keys.iter().find(|(key, _)| key == id).map(|(_, fill)| *fill),
                 unwatched: ndi.receivers() == Some(0),
                 stage: self.is_stage(*id),
             })
@@ -1647,10 +1752,12 @@ impl Output {
                     // The sources it is for that still want it. One that nobody is watching
                     // any more would only throw it away: it is told that the picture it had
                     // is out of date, which is all this one would have told it.
-                    let mut sources: Vec<&NdiOutput> = Vec::new();
-                    for (_, ndi) in self.ndi.iter().filter(|(id, _)| readback.ids.contains(id)) {
+                    let mut sources: Vec<(&NdiOutput, sp_ndi::Sent)> = Vec::new();
+                    for (id, ndi) in self.ndi.iter().filter(|(id, _)| readback.ids.contains(id)) {
                         if ndi_wanted(&ndi.state(), ndi.receivers()) {
-                            sources.push(ndi);
+                            // A key and its fill are handed these same pixels together.
+                            let sent = if readback.keys.contains(id) { sp_ndi::Sent::Key } else { readback.sent };
+                            sources.push((ndi, sent));
                         } else {
                             ndi.forget();
                         }
@@ -1670,8 +1777,8 @@ impl Output {
                             }
                             Arc::new(pixels)
                         };
-                        for ndi in sources {
-                            ndi.show_shared(w, h, pixels.clone(), sp_ndi::Sent::Opaque);
+                        for (ndi, sent) in sources {
+                            ndi.show_shared(w, h, pixels.clone(), sent);
                         }
                     }
                     readback.buffer.unmap();
@@ -1781,7 +1888,7 @@ impl Output {
         let (w, h) = LIVE_PREVIEW_SIZE;
         let back = 1 - self.live_preview.front.load(Acquire).min(1);
         let view = self.preview_targets[back].create_view(&wgpu::TextureViewDescriptor::default());
-        if let Err(e) = self.paint(scene, &view, w, h) {
+        if let Err(e) = self.paint(scene, &view, w, h, false) {
             self.preview_state.failed(&e);
             return false;
         }
@@ -1812,8 +1919,17 @@ impl Output {
                 let target = &self.targets[index];
                 (target.id, target.config.width, target.config.height)
             };
+            // A key in a window is shown when its fill's window is, from that picture, fade
+            // and all (see `present_keys_of`); it keeps nothing of its own.
+            if self.window_fill(id).is_some() {
+                let target = &mut self.targets[index];
+                (target.shown, target.fade) = (None, None);
+                continue;
+            }
             let scene = self.scene_for(id, &frame, w, h);
-            let stage = self.is_stage(id);
+            // Stage screens change at once: the people on stage need the words now. So does a
+            // key with no fill to follow, which is black.
+            let at_once = self.is_stage(id) || self.key_of(id).is_some();
             // What the next fade starts from: the last whole picture, or for a fade cut short,
             // one of its two whole pictures.
             let target = &mut self.targets[index];
@@ -1821,9 +1937,8 @@ impl Output {
                 Some((from, to)) => Some(fade_start(from, to, amount.unwrap_or(1.0), new_picture)),
                 None => target.shown.take(),
             };
-            // Stage screens change at once: the people on stage need the words now.
             match before {
-                Some(from) if new_picture && self.look.duration() > 0.0 && !stage => {
+                Some(from) if new_picture && self.look.duration() > 0.0 && !at_once => {
                     target.fade = Some((from, scene));
                     fading = true;
                 }
@@ -1844,16 +1959,17 @@ impl Output {
         self.end_round();
     }
 
-    /// Paints one picture of the drawing under way, and notes how it went. Callers ask first
-    /// whether the GPU has been too slow with a picture of this drawing (`round.slow`) and do
-    /// not ask for theirs then: a GPU that is stuck holds the thread for one wait, not for one
-    /// wait for every window.
+    /// Paints one picture of the drawing under way, on clear for a see-through screen (else on
+    /// black), and notes how it went. Callers ask first whether the GPU has been too slow with
+    /// a picture of this drawing (`round.slow`) and do not ask for theirs then: a GPU that is
+    /// stuck holds the thread for one wait, not for one wait for every window.
     fn paint(
         &mut self,
         scene: &vello::Scene,
         view: &wgpu::TextureView,
         w: u32,
         h: u32,
+        see_through: bool,
     ) -> Result<(), sp_render::PaintError> {
         // Testing aid: SOFTPRESENTER_GPU_TOO_SLOW (see `PretendSlow`).
         let pretending =
@@ -1861,7 +1977,11 @@ impl Output {
         if self.pretend_slow.is_some() {
             self.painter.wait_at_most(pretending.then_some(Duration::ZERO));
         }
-        let painted = self.painter.paint(&self.device, &self.queue, scene, view, w, h);
+        let painted = if see_through {
+            self.painter.paint_see_through(&self.device, &self.queue, scene, view, w, h)
+        } else {
+            self.painter.paint(&self.device, &self.queue, scene, view, w, h)
+        };
         // Only a picture that was given up counts: one drawn before is not waited for.
         if pretending
             && painted.as_ref().is_err_and(sp_render::PaintError::worth_trying_again)
@@ -2094,8 +2214,14 @@ impl Output {
                 let painted = self.present(index, &to);
                 self.targets[index].shown = Some(if painted { to } else { from });
             } else {
-                let (w, h) = (self.targets[index].config.width, self.targets[index].config.height);
-                let scene = sp_render::transition(look.kind, look.direction, &from, &to, amount, w, h);
+                let (id, w, h) =
+                    (self.targets[index].id, self.targets[index].config.width, self.targets[index].config.height);
+                // On a see-through screen, a true cross-fade (see `see_through_transition`).
+                let scene = if self.see_through(id).is_some() {
+                    see_through_transition(look.kind, &from, &to, amount, w, h)
+                } else {
+                    sp_render::transition(look.kind, look.direction, &from, &to, amount, w, h)
+                };
                 self.present(index, &scene);
                 self.targets[index].fade = Some((from, to));
             }
@@ -2165,7 +2291,7 @@ impl Output {
     /// of the drawing sets the screens to be drawn again.)
     fn present(&mut self, index: usize, scene: &vello::Scene) -> bool {
         let Some(target) = self.targets.get(index) else { return false };
-        let (w, h) = (target.config.width, target.config.height);
+        let (id, w, h) = (target.id, target.config.width, target.config.height);
         let view = target.texture.create_view(&wgpu::TextureViewDescriptor::default());
         // Not asked for after a picture the GPU was too slow with: it waits for the next try,
         // and nothing is said of it, since nothing went wrong with it.
@@ -2173,7 +2299,9 @@ impl Output {
             self.targets[index].state.skipped();
             return false;
         }
-        let painted = self.paint(scene, &view, w, h);
+        // A see-through screen is painted on clear, and shown solid as its alpha says.
+        let see_through = self.see_through(id);
+        let painted = self.paint(scene, &view, w, h, see_through.is_some());
         let Output { device, queue, targets, round, .. } = self;
         let target = &mut targets[index];
         if let Err(e) = painted {
@@ -2188,45 +2316,35 @@ impl Output {
         if let Some(more) = target.trouble.over() {
             crate::applog::event("output", &format!("The output draws again, after {more} more frames not drawn"));
         }
-        // A window whose surface isn't set up is set up first, or skipped this frame.
-        if !target.configured {
-            target.configured = configure(device, &target.surface, &target.config);
-            if !target.configured {
-                std::thread::sleep(Duration::from_millis(8));
-                return true;
-            }
+        if show_in_window(device, queue, target, &view, see_through.map(solid_fill)) {
+            round.presented = true;
         }
-        // A lost or outdated surface is set up again and tried once more; anything else
-        // (hidden window, timeout) skips this frame and the next message redraws.
-        for attempt in 0..2 {
-            let Some(next) = next_texture(&target.surface) else {
-                target.configured = false;
-                return true;
-            };
-            match next {
-                wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
-                    let surface_view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-                    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-                    target.blitter.copy(device, &mut encoder, &view, &surface_view);
-                    queue.submit([encoder.finish()]);
-                    queue.present(frame);
-                    round.presented = true;
-                    return true;
-                }
-                wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost if attempt == 0 => {
-                    target.configured = configure(device, &target.surface, &target.config);
-                    if !target.configured {
-                        return true;
-                    }
-                }
-                // A hidden window shows nothing; wait a moment so a fade does not spin.
-                _ => {
-                    std::thread::sleep(Duration::from_millis(8));
-                    return true;
-                }
-            }
-        }
+        // The keys of this picture, made from it now, so they never show another moment. (A
+        // picture not painted leaves its keys as they are, showing the picture before, as this
+        // window does.)
+        self.present_keys_of(index);
         true
+    }
+
+    /// Shows, in the windows of the screens that are its key, the key of the picture just
+    /// painted for the window at `fill`: how solid each of its pixels is, as a grey, made from
+    /// that very picture on the GPU (scaled, should their sizes differ).
+    fn present_keys_of(&mut self, fill: usize) {
+        let keys: Vec<usize> = (0..self.targets.len())
+            .filter(|key| *key != fill && self.window_fill(self.targets[*key].id) == Some(fill))
+            .collect();
+        if keys.is_empty() {
+            return;
+        }
+        let picture = self.targets[fill].texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let Output { device, queue, targets, round, .. } = self;
+        for key in keys {
+            let target = &mut targets[key];
+            target.state.painted();
+            if show_in_window(device, queue, target, &picture, Some(Solid::Key)) {
+                round.presented = true;
+            }
+        }
     }
 }
 
@@ -2272,6 +2390,148 @@ fn identify_marks(scene: &mut vello::Scene, color: sp_model::Rgba, strength: f32
     let border = (h / 1080.0 * 16.0).max(6.0);
     let half = border / 2.0;
     scene.stroke(&Stroke::new(border), Affine::IDENTITY, solid, None, &Rect::new(half, half, w - half, h - half));
+}
+
+/// Nothing: a see-through screen's colour where nothing is drawn.
+const CLEAR: sp_model::Rgba = sp_model::Rgba { r: 0, g: 0, b: 0, a: 0 };
+
+/// Black, filling a target of this size.
+fn black(w: u32, h: u32) -> vello::Scene {
+    use vello::kurbo::{Affine, Rect};
+    use vello::peniko::{Color, Fill};
+    let mut scene = vello::Scene::new();
+    scene.fill(Fill::NonZero, Affine::IDENTITY, Color::BLACK, None, &Rect::new(0.0, 0.0, f64::from(w), f64::from(h)));
+    scene
+}
+
+/// A see-through screen's covered edges are clear: what is drawn there is cut away, where a
+/// solid screen covers it with its colour.
+fn cut_covered_edges(scene: vello::Scene, mask: [f32; 4], w: u32, h: u32) -> vello::Scene {
+    use vello::kurbo::{Affine, Rect};
+    let [left, top, right, bottom] = mask.map(|edge| f64::from(edge.max(0.0)));
+    if left + top + right + bottom <= 0.0 {
+        return scene;
+    }
+    let (x, y, fitted, _) = sp_render::fit_rect(w, h);
+    let (slide_w, slide_h) = (f64::from(sp_model::SLIDE_WIDTH), f64::from(sp_model::SLIDE_HEIGHT));
+    let to_target = Affine::translate((x, y)) * Affine::scale(fitted / slide_w);
+    let mut cut = vello::Scene::new();
+    cut.push_clip_layer(
+        vello::peniko::Fill::NonZero,
+        to_target,
+        &Rect::new(left, top, slide_w - right, slide_h - bottom),
+    );
+    cut.append(&scene, None);
+    cut.pop_layer();
+    cut
+}
+
+/// A theme without its background colour and picture, for a see-through screen. Those made
+/// are kept in `kept` with the theme each was made from, so a theme is copied once rather than
+/// at every drawing (a few are kept: a theme changed is a new one); one with neither is itself.
+fn plain_theme(kept: &mut Vec<(Arc<Theme>, Arc<Theme>)>, theme: &Arc<Theme>) -> Arc<Theme> {
+    if theme.background.is_none() && theme.background_picture.is_none() {
+        return theme.clone();
+    }
+    if let Some((_, plain)) = kept.iter().find(|(of, _)| Arc::ptr_eq(of, theme)) {
+        return plain.clone();
+    }
+    let plain = Arc::new(Theme { background: None, background_picture: None, ..(**theme).clone() });
+    if kept.len() >= 8 {
+        kept.remove(0);
+    }
+    kept.push((theme.clone(), plain.clone()));
+    plain
+}
+
+/// What a see-through screen draws of what a screen shows. It leaves out what would cover the
+/// whole picture and hide the camera a switcher lays it over: the media behind the words, and
+/// the background colour and picture of the slides' theme and of the announcements' (`plain`
+/// gives a theme without them). Everything placed on a slide stays: the words, the layout's and
+/// the slide's own shapes and pictures (a lower third's bar, say), the props, the message, the
+/// copyright line, and the announcements' words. (A graphic meant to go over the camera belongs
+/// in a prop, which can hold a picture or a video with clear parts.)
+fn see_through_content(content: Content, mut plain: impl FnMut(&Arc<Theme>) -> Arc<Theme>) -> Content {
+    let (_media, slide, overlay, theme, announcement) = content;
+    let announcement = announcement.map(|(slide, own)| (slide, plain(&own)));
+    (None, slide, overlay, plain(&theme), announcement)
+}
+
+/// Shows a painted picture in a screen's window: through a solid pass when `solid` asks (a
+/// see-through picture, which a window shows solid, or a key), else as it is. True when it
+/// reached the window; false when the window could not take it this time (its surface is set
+/// up again, or it is hidden), and the next picture tries again.
+fn show_in_window(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    target: &mut Target,
+    picture: &wgpu::TextureView,
+    solid: Option<Solid>,
+) -> bool {
+    // A window whose surface isn't set up is set up first, or skipped this frame.
+    if !target.configured {
+        target.configured = configure(device, &target.surface, &target.config);
+        if !target.configured {
+            std::thread::sleep(Duration::from_millis(8));
+            return false;
+        }
+    }
+    if let Some(shown) = solid
+        && target.pass.as_ref().is_none_or(|pass| pass.shown() != shown || pass.format() != target.config.format)
+    {
+        target.pass = Some(SolidPass::new(device, target.config.format, shown));
+    }
+    // A lost or outdated surface is set up again and tried once more; anything else
+    // (hidden window, timeout) skips this frame and the next message redraws.
+    for attempt in 0..2 {
+        let Some(next) = next_texture(&target.surface) else {
+            target.configured = false;
+            return false;
+        };
+        match next {
+            wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
+                let surface_view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                match (solid, &target.pass) {
+                    (Some(_), Some(pass)) => pass.draw(device, &mut encoder, picture, &surface_view),
+                    _ => target.blitter.copy(device, &mut encoder, picture, &surface_view),
+                }
+                queue.submit([encoder.finish()]);
+                queue.present(frame);
+                return true;
+            }
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost if attempt == 0 => {
+                target.configured = configure(device, &target.surface, &target.config);
+                if !target.configured {
+                    return false;
+                }
+            }
+            // A hidden window shows nothing; wait a moment so a fade does not spin.
+            _ => {
+                std::thread::sleep(Duration::from_millis(8));
+                return false;
+            }
+        }
+    }
+    false
+}
+
+/// How a see-through picture of this alpha is shown in a window: solid, its colours straight
+/// or premultiplied.
+fn solid_fill(alpha: crate::screens::Alpha) -> Solid {
+    match alpha {
+        crate::screens::Alpha::Straight => Solid::Straight,
+        crate::screens::Alpha::Premultiplied => Solid::Premultiplied,
+    }
+}
+
+/// How a picture of a screen this see-through (or solid) is sent over NDI.
+fn ndi_sent(see_through: Option<crate::screens::Alpha>) -> sp_ndi::Sent {
+    match see_through {
+        None => sp_ndi::Sent::Opaque,
+        Some(crate::screens::Alpha::Straight) => sp_ndi::Sent::Straight,
+        Some(crate::screens::Alpha::Premultiplied) => sp_ndi::Sent::Premultiplied,
+    }
 }
 
 /// The theme a screen's slides are drawn with: its own, if it has one, or the one the slide
@@ -2442,7 +2702,76 @@ mod tests {
     }
 
     fn seen(wanted: bool, alone: bool) -> NdiSeen {
-        NdiSeen { id: Uuid::new_v4(), wanted, alone, unwatched: !wanted, stage: false, arrivals: 0 }
+        NdiSeen { id: Uuid::new_v4(), wanted, alone, key_of: None, unwatched: !wanted, stage: false, arrivals: 0 }
+    }
+
+    /// Who is sent each picture as it is, picture by picture.
+    fn fills(groups: &[NdiGroup]) -> Vec<Vec<Uuid>> {
+        groups.iter().map(|group| group.fills.clone()).collect()
+    }
+
+    #[test]
+    fn an_ndi_key_rides_with_its_fills_picture_whoever_is_watching() {
+        let (fill, other) = (seen(true, true), seen(true, false));
+        let key = NdiSeen { key_of: Some(fill.id), ..seen(true, true) };
+        // One picture for the fill, sent as it is to the fill and as a key to the key; the
+        // others share theirs. The key is never drawn on its own.
+        let groups = ndi_groups(&[key, other, fill]);
+        assert_eq!(
+            groups,
+            vec![
+                NdiGroup { of: fill.id, fills: vec![fill.id], keys: vec![key.id] },
+                NdiGroup { of: other.id, fills: vec![other.id], keys: vec![] },
+            ]
+        );
+        // Nobody watching the fill: its picture is still drawn, for the key alone.
+        let unwatched = NdiSeen { wanted: false, unwatched: true, ..fill };
+        assert_eq!(ndi_groups(&[unwatched, key]), vec![NdiGroup { of: fill.id, fills: vec![], keys: vec![key.id] }]);
+        // Nobody watching the key: the fill goes alone; nobody watching either: nothing.
+        let unwatched_key = NdiSeen { wanted: false, unwatched: true, ..key };
+        assert_eq!(fills(&ndi_groups(&[fill, unwatched_key])), vec![vec![fill.id]]);
+        assert!(ndi_groups(&[unwatched, unwatched_key]).is_empty());
+        // A key whose fill is not on NDI has its own picture (black, `scene_for` draws it).
+        let lone_key = NdiSeen { key_of: None, ..key };
+        assert_eq!(ndi_groups(&[lone_key]), vec![NdiGroup { of: key.id, fills: vec![key.id], keys: vec![] }]);
+    }
+
+    #[test]
+    fn a_see_through_screen_leaves_out_the_media_and_the_themes_backgrounds_and_keeps_the_rest() {
+        let mut theme = Theme::builtin();
+        theme.background = Some(sp_model::Rgba::rgb(0, 0, 90));
+        theme.background_picture = Some("hills.jpg".to_owned());
+        let theme = Arc::new(theme);
+        let mut own = Theme::builtin();
+        own.background = Some(sp_model::Rgba::rgb(90, 0, 0));
+        let own = Arc::new(own);
+        let words = Arc::new(Slide::new(vec![sp_model::Object::text(sp_model::Role::primary(), "Light rises")]));
+        let message = Arc::new(Slide::new(vec![sp_model::Object::text(sp_model::Role::primary(), "Welcome")]));
+        let media = Picture::from_rgba(1, 1, vec![9, 9, 9, 255]);
+        let content: Content =
+            (media, Some(words.clone()), Some(message.clone()), theme.clone(), Some((words.clone(), own.clone())));
+        let mut kept = Vec::new();
+        let (media, slide, over, plain, announcement) = see_through_content(content, |t| plain_theme(&mut kept, t));
+        assert!(media.is_none(), "the media behind the words would hide the camera");
+        assert!(plain.background.is_none() && plain.background_picture.is_none());
+        assert_eq!(plain.templates, theme.templates, "the theme lays the words out as it did");
+        let (announced, announced_theme) = announcement.expect("the announcements stay");
+        assert!(announced_theme.background.is_none(), "without the background that covers the screen");
+        assert!(Arc::ptr_eq(&announced, &words));
+        assert!(slide.is_some_and(|slide| Arc::ptr_eq(&slide, &words)), "the words stay");
+        assert!(over.is_some_and(|over| Arc::ptr_eq(&over, &message)), "the props and the message stay");
+        // Each theme is copied once and kept; one with no background is used as it is.
+        assert_eq!(kept.len(), 2);
+        assert!(Arc::ptr_eq(&plain_theme(&mut kept, &theme), &plain));
+        let bare = Arc::new(Theme::builtin());
+        assert!(Arc::ptr_eq(&plain_theme(&mut kept, &bare), &bare));
+        assert_eq!(kept.len(), 2);
+        for _ in 0..20 {
+            let mut changed = Theme::builtin();
+            changed.background = Some(sp_model::Rgba::BLACK);
+            plain_theme(&mut kept, &Arc::new(changed));
+        }
+        assert!(kept.len() <= 8, "only a few are kept");
     }
 
     #[test]
@@ -2595,14 +2924,14 @@ mod tests {
         // Two sources showing the show as it is share one picture; one with a look of its own
         // has its own, drawn first.
         let (one, two, lower) = (seen(true, false), seen(true, false), seen(true, true));
-        assert_eq!(ndi_groups(&[one, lower, two]), vec![vec![lower.id], vec![one.id, two.id]]);
+        assert_eq!(fills(&ndi_groups(&[one, lower, two])), vec![vec![lower.id], vec![one.id, two.id]]);
         // A source nobody is watching is in no picture's list...
         let unwatched = seen(false, false);
-        assert_eq!(ndi_groups(&[one, unwatched]), vec![vec![one.id]]);
+        assert_eq!(fills(&ndi_groups(&[one, unwatched])), vec![vec![one.id]]);
         // ...and a picture nobody is watching is not drawn at all: not the shared one, not a
         // source's own.
-        assert_eq!(ndi_groups(&[unwatched, seen(false, false), lower]), vec![vec![lower.id]]);
-        assert_eq!(ndi_groups(&[one, seen(false, true)]), vec![vec![one.id]]);
+        assert_eq!(fills(&ndi_groups(&[unwatched, seen(false, false), lower])), vec![vec![lower.id]]);
+        assert_eq!(fills(&ndi_groups(&[one, seen(false, true)])), vec![vec![one.id]]);
         assert!(ndi_groups(&[unwatched, seen(false, true)]).is_empty());
         assert!(ndi_groups(&[]).is_empty());
     }
