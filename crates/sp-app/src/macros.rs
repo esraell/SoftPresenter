@@ -35,6 +35,24 @@ impl Macro {
     pub fn duplicate(&self) -> Macro {
         Macro { id: Uuid::new_v4(), name: format!("{} copy", self.name), ..self.clone() }
     }
+
+    /// Puts `step` where the step at `at` (counting from 0) is, so it is done at the same point.
+    /// Returns the step it took the place of, or `None` when there is no step there.
+    pub fn replace_step(&mut self, at: usize, step: ShowAction) -> Option<ShowAction> {
+        self.actions.get_mut(at).map(|place| std::mem::replace(place, step))
+    }
+
+    /// Moves the step at `from` so that it becomes the step at `to` (both counting from 0); the
+    /// steps between close up. False when either is past the last step, or they are the same.
+    pub fn move_step(&mut self, from: usize, to: usize) -> bool {
+        let count = self.actions.len();
+        if from >= count || to >= count || from == to {
+            return false;
+        }
+        let step = self.actions.remove(from);
+        self.actions.insert(to, step);
+        true
+    }
 }
 
 /// What an action does, in words, given the names of what it names. Something it names that is
@@ -200,6 +218,32 @@ mod tests {
         assert_ne!(copy.id, start.id);
         let saved = vec![start, copy];
         assert_eq!(serde_json::from_str::<Vec<Macro>>(&serde_json::to_string(&saved).unwrap()).unwrap(), saved);
+    }
+
+    #[test]
+    fn a_step_changed_keeps_its_place_and_a_step_moved_takes_the_place_it_is_given() {
+        let steps = [ClearWhat::All, ClearWhat::Slide, ClearWhat::Media, ClearWhat::Props];
+        let mut made = Macro::new("Order".to_owned());
+        made.actions = steps.iter().map(|what| ShowAction::Clear { what: *what }).collect();
+        let off = ShowAction::Audience { on: false };
+        assert_eq!(made.replace_step(1, off.clone()), Some(ShowAction::Clear { what: ClearWhat::Slide }));
+        assert_eq!(made.actions[1], off);
+        assert_eq!(made.actions.len(), 4);
+        assert_eq!(made.replace_step(4, off.clone()), None, "no fifth step");
+        let clears = |made: &Macro| -> Vec<Option<ClearWhat>> {
+            made.actions
+                .iter()
+                .map(|step| if let ShowAction::Clear { what } = step { Some(*what) } else { None })
+                .collect()
+        };
+        // Down: the first step becomes the third.
+        assert!(made.move_step(0, 2));
+        assert_eq!(clears(&made), [None, Some(ClearWhat::Media), Some(ClearWhat::All), Some(ClearWhat::Props)]);
+        // Up: the last becomes the first.
+        assert!(made.move_step(3, 0));
+        assert_eq!(clears(&made), [Some(ClearWhat::Props), None, Some(ClearWhat::Media), Some(ClearWhat::All)]);
+        assert!(!made.move_step(1, 1), "to where it is already");
+        assert!(!made.move_step(0, 4) && !made.move_step(4, 0), "past the last step");
     }
 
     #[test]

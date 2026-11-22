@@ -354,13 +354,17 @@ with Continuous Playlist on; open it with `playlist go` to run through the playl
 | `timer set NAME countdown …\|to …\|up …\|overrun on\|off\|name NEW`, `timer delete NAME --yes` | Changes a timer, or deletes it |
 | `macro run NAME` | Runs a macro's steps in turn |
 | `macro new NAME`, `macro add NAME STEP [then STEP…]`, `macro remove NAME N`, `macro delete NAME --yes` | Makes a macro and gives it steps |
+| `macro step NAME N STEP` | Step N does STEP instead, at the same point among the steps (STEP in the words `macro add` takes; one step) |
+| `macro move NAME N to M` | Step N becomes step M; the steps between close up |
 | `macro startup NAME on\|off` | Runs the macro when SoftPresenter opens, or not (start-up is a macro: Settings has no start-up choice of its own) |
 | `announce SONG`, `announce media ITEM`, `announce media-playlist NAME`, `announce stop` | Plays something on the Announcements layer, going round until it is cleared: a song's slides in turn, a picture, a video (looping), or a media playlist's pictures and videos in turn; `stop` clears the layer |
 
 Macro steps: `clear all|slide|media|props|messages`, `show|hide message NAME`,
 `show|hide prop NAME`, `start|stop|reset timer NAME`, `audience on|off`, `song SONG`,
-`media ITEM`, `announce SONG|media ITEM|media-playlist NAME` (on the Announcements layer).
-Steps are parted by `then`, or by `;` inside one quoted argument. `sp macros` marks a macro
+`media ITEM`, `announce SONG|media ITEM|media-playlist NAME` (on the Announcements layer),
+`canva sync`. Steps are parted by `then`, or by `;` inside one quoted argument. A macro's name
+may hold a number or a step's word ("Macro 1", "Start service"); `macro step` takes the number
+just before the step as the step's. `sp macros` marks a macro
 that runs when SoftPresenter opens, and says what a step names that has gone, such as "Play on
 the Announcements Layer: (a song no longer in the library)" or "Show Prop: (a prop that has been
 deleted)".
@@ -392,6 +396,12 @@ deleted)".
     Opening: added Clear All; Show Prop: Logo; Start Timer: Sermon; Go to Song: Blessed Assurance.
     $ sp macro run opening
     Ran the macro Opening. On screen: Blessed Assurance, slide 1 of 7 (Verse 1).
+    $ sp macro step Opening 2 hide prop Logo
+    Opening: step 2 is now Hide Prop: Logo (it was Show Prop: Logo).
+    $ sp macro move Opening 4 to 1
+    Opening: Go to Song: Blessed Assurance is now step 1.
+    $ sp macro move Opening 1 to 7
+    Opening has 4 steps; there is no step 7.
 
 ## Audio
 
@@ -1210,8 +1220,7 @@ These need the window for now; some can be reached with `sp menu`.
 - Which boxes each Bible row's verse and reference go in (`bible rows` chooses the Bibles; the
   boxes follow the theme).
 - Removing a track from an audio playlist.
-- Editing a macro's steps in place (they can be added and removed), and a prop's contents
-  beyond its picture or name.
+- A prop's contents beyond its picture or name.
 
 ## How it works, and who can use it
 

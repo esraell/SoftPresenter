@@ -1033,7 +1033,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   [to M:SS]`, `timer set`, `timer delete`), messages (`message new`, `message set NAME text=…
   leaves=…`, `message delete`, and `message show --text WORDS` for words shown once), props
   (`prop new NAME [PICTURE]`, `prop delete`), macros (`macro new`, `macro add NAME STEP then
-  STEP…` in the slide-action words, `macro remove`, `macro delete`), audio (`audio add FILE…
+  STEP…` in the slide-action words, `macro step NAME N STEP` to change a step where it is,
+  `macro move NAME N to M`, `macro remove`, `macro delete`), audio (`audio add FILE…
   [to PLAYLIST]`, `audio playlist new|delete`, `audio next|previous`, `audio shuffle|through
   on|off`, `audio crossfade SECONDS`) and media playlists (`media-playlist new`, `add ITEM… to`,
   `remove ITEM… from`, `follow NAME FOLDER|off`, `delete`). `stage layouts` lists the stage

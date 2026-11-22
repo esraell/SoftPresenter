@@ -100,6 +100,62 @@ fn wants_yes(words: &[String]) -> (bool, Vec<String>) {
     (words.iter().any(|w| w == "--yes"), words.iter().filter(|w| *w != "--yes").cloned().collect())
 }
 
+/// The first words of the steps `macro add` and `macro step` take.
+const STEP_WORDS: [&str; 11] =
+    ["clear", "show", "hide", "start", "stop", "reset", "audience", "song", "media", "announce", "canva"];
+
+/// Where the steps begin in `macro add NAME STEP…`, or in `macro step NAME N STEP…` when
+/// `numbered` (N just before them): the place of the first step's first word. The name is at
+/// least one word, and may hold a step word or a number itself ("Start service", "Macro 1"): a
+/// place where the words before it are a macro's name (among `names`) is taken first, then the
+/// first place that fits.
+fn steps_start(words: &[String], names: &[String], numbered: bool) -> Option<usize> {
+    let before = usize::from(numbered);
+    let first_word = |at: usize| words[at].split_whitespace().next().unwrap_or_default().to_lowercase();
+    let fits = |at: &usize| {
+        *at > before
+            && STEP_WORDS.contains(&first_word(*at).as_str())
+            && (!numbered || words[*at - 1].parse::<usize>().is_ok())
+    };
+    let named = |at: &usize| {
+        let name = words[..*at - before].join(" ");
+        names.iter().any(|have| have.eq_ignore_ascii_case(name.trim()))
+    };
+    (0..words.len()).filter(fits).find(named).or_else(|| (0..words.len()).find(fits))
+}
+
+/// The steps in the words after a macro's name, each as its words: they are parted by ";" or by
+/// the word "then" (which needs no quoting in a terminal).
+fn step_texts(words: &[String]) -> Vec<String> {
+    let joined = words
+        .iter()
+        .map(|w| if w.eq_ignore_ascii_case("then") { ";" } else { w.as_str() })
+        .collect::<Vec<_>>()
+        .join(" ");
+    joined.split(';').map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect()
+}
+
+/// `macro move NAME N to M`: the macro's name, the step's number now and the number it is to
+/// have.
+fn parse_move(words: &[String]) -> Option<(String, usize, usize)> {
+    match words {
+        [name @ .., from, to, place] if !name.is_empty() && to.eq_ignore_ascii_case("to") => {
+            Some((name.join(" "), from.parse().ok()?, place.parse().ok()?))
+        }
+        _ => None,
+    }
+}
+
+/// The place (counting from 0) of step `number` (counting from 1) in a macro of `count` steps,
+/// or what to say when it has no such step.
+fn step_place(name: &str, count: usize, number: usize) -> Result<usize, String> {
+    if (1..=count).contains(&number) {
+        return Ok(number - 1);
+    }
+    let plural = if count == 1 { "" } else { "s" };
+    Err(format!("{name} has {count} step{plural}; there is no step {number}."))
+}
+
 impl crate::App {
     /// `timer new|set|delete …`; `None` for another word.
     pub(crate) fn ctl_timer_make(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
@@ -391,7 +447,7 @@ impl crate::App {
         Ok(Reply::done(format!("Made the prop {}, showing {said}.", name.trim())))
     }
 
-    /// `macro new|add|remove|delete …`; `None` for another word.
+    /// `macro new|add|step|move|startup|remove|delete …`; `None` for another word.
     pub(crate) fn ctl_macro_make(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
         let words = &args[2..];
@@ -414,6 +470,13 @@ impl crate::App {
             }
             // `macro add NAME STEP [; STEP…]`
             "add" => self.macro_add(words),
+            // `macro step NAME N STEP`: step N does this instead, at the same point.
+            "step" => self.macro_step(words),
+            // `macro move NAME N to M`: step N becomes step M.
+            "move" => match parse_move(words) {
+                Some((name, from, to)) => self.macro_move(&name, from, to),
+                None => Err("macro move NAME N to M".to_owned()),
+            },
             // `macro startup NAME on|off`: run it when SoftPresenter opens, or not.
             "startup" => match words {
                 [name @ .., on]
@@ -446,15 +509,8 @@ impl crate::App {
                             state.macros.iter().map(|m| m.name.clone()).collect()
                         })?;
                         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
-                        let steps = state.macros[at].actions.len();
-                        if !(1..=steps).contains(&number) {
-                            let plural = if steps == 1 { "" } else { "s" };
-                            return Err(format!(
-                                "{} has {steps} step{plural}; there is no step {number}.",
-                                state.macros[at].name
-                            ));
-                        }
-                        state.macros[at].actions.remove(number - 1);
+                        let place = step_place(&state.macros[at].name, state.macros[at].actions.len(), number)?;
+                        state.macros[at].actions.remove(place);
                         state.macros_changed = true;
                         Ok(Reply::done(format!("Took step {number} out of {}.", state.macros[at].name)))
                     })
@@ -480,28 +536,20 @@ impl crate::App {
         Some(result)
     }
 
+    /// The macros' names, in order.
+    fn macro_names(&self) -> Vec<String> {
+        self.running.as_ref().map(|r| r.home_state.macros.iter().map(|m| m.name.clone()).collect()).unwrap_or_default()
+    }
+
     fn macro_add(&mut self, words: &[String]) -> Result<Reply, String> {
         let usage = "macro add NAME STEP [then STEP…]   steps: clear all|slide|media|props|messages, show|hide message NAME, \
                      show|hide prop NAME, start|stop|reset timer NAME, audience on|off, song SONG, media ITEM, \
                      announce SONG|media ITEM|media-playlist NAME, canva sync";
-        // The macro's name is the words up to the first step's first word.
-        let starts = ["clear", "show", "hide", "start", "stop", "reset", "audience", "song", "media"];
-        let first_word = |w: &String| w.split_whitespace().next().unwrap_or_default().to_lowercase();
-        let at =
-            words.iter().position(|w| starts.contains(&first_word(w).as_str())).filter(|at| *at > 0).ok_or(usage)?;
-        let index = self.with_named("macro", &words[..at].join(" "), |state| {
-            state.macros.iter().map(|m| m.name.clone()).collect()
-        })?;
-        // Steps are parted by ";" or by the word "then" (which needs no quoting in a terminal).
-        let joined = words[at..]
-            .iter()
-            .map(|w| if w.eq_ignore_ascii_case("then") { ";" } else { w.as_str() })
-            .collect::<Vec<_>>()
-            .join(" ");
-        let mut actions = Vec::new();
-        for step in joined.split(';').map(str::trim).filter(|s| !s.is_empty()) {
-            actions.push(self.parse_step(step)?);
-        }
+        let names = self.macro_names();
+        let at = steps_start(words, &names, false).ok_or(usage)?;
+        let index = find("macro", &names, &words[..at].join(" "))?;
+        let actions =
+            step_texts(&words[at..]).iter().map(|step| self.parse_step(step)).collect::<Result<Vec<_>, _>>()?;
         if actions.is_empty() {
             return Err(usage.to_owned());
         }
@@ -510,6 +558,47 @@ impl crate::App {
         state.macros[index].actions.extend(actions);
         state.macros_changed = true;
         Ok(Reply::done(format!("{}: added {}.", state.macros[index].name, said.join("; "))))
+    }
+
+    /// `macro step NAME N STEP`: step N of the macro does STEP instead (in the words `macro add`
+    /// takes), at the same point among its steps.
+    fn macro_step(&mut self, words: &[String]) -> Result<Reply, String> {
+        let usage = "macro step NAME N STEP   (STEP in the words macro add takes)";
+        let names = self.macro_names();
+        let at = steps_start(words, &names, true).ok_or(usage)?;
+        let number = words[at - 1].parse::<usize>().map_err(|_| usage.to_owned())?;
+        let index = find("macro", &names, &words[..at - 1].join(" "))?;
+        let place = {
+            let made = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state.macros[index];
+            step_place(&made.name, made.actions.len(), number)?
+        };
+        let step = match step_texts(&words[at..]).as_slice() {
+            [step] => self.parse_step(step)?,
+            [] => return Err(usage.to_owned()),
+            _ => return Err("macro step changes one step; add more with macro add.".to_owned()),
+        };
+        let now = self.action_words(&step);
+        let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
+        let was = state.macros[index].replace_step(place, step).ok_or(usage)?;
+        state.macros_changed = true;
+        let name = state.macros[index].name.clone();
+        let was = self.action_words(&was);
+        Ok(Reply::done(format!("{name}: step {number} is now {now} (it was {was}).")))
+    }
+
+    /// `macro move NAME N to M`: step N of the macro becomes step M, the steps between closing up.
+    fn macro_move(&mut self, name: &str, from: usize, to: usize) -> Result<Reply, String> {
+        let index = find("macro", &self.macro_names(), name)?;
+        let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
+        let made = &mut state.macros[index];
+        let (count, name) = (made.actions.len(), made.name.clone());
+        let (place, target) = (step_place(&name, count, from)?, step_place(&name, count, to)?);
+        if !made.move_step(place, target) {
+            return Ok(Reply::done(format!("{name}: step {from} is there already.")));
+        }
+        state.macros_changed = true;
+        let step = state.macros[index].actions[target].clone();
+        Ok(Reply::done(format!("{name}: {} is now step {to}.", self.action_words(&step))))
     }
 
     /// One step of a macro, as words: the slide-action vocabulary.
@@ -863,6 +952,44 @@ impl crate::App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn words(text: &str) -> Vec<String> {
+        text.split(' ').map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn a_macros_name_is_told_from_its_steps() {
+        let names: Vec<String> = ["Macro 1", "Start service", "Before service"].map(str::to_owned).to_vec();
+        let at = |text: &str, numbered: bool| steps_start(&words(text), &names, numbered);
+        // macro add NAME STEP…
+        assert_eq!(at("Before service announce media-playlist Loop", false), Some(2));
+        assert_eq!(at("Opening canva sync", false), Some(1));
+        assert_eq!(at("Start service clear all then start timer Sermon", false), Some(2), "a step word in the name");
+        assert_eq!(at("Macro 1 show prop Logo", false), Some(2));
+        assert_eq!(at("clear all", false), None, "a name is needed");
+        // macro step NAME N STEP: the number just before the step.
+        assert_eq!(at("Macro 1 2 show prop Logo", true), Some(3), "a number in the name");
+        assert_eq!(at("Start service 1 hide message Phones", true), Some(3));
+        assert_eq!(at("Opening show prop Logo", true), None, "no step number");
+        assert_eq!(at("3 show prop Logo", true), None, "no name");
+        assert_eq!(step_texts(&words("clear all then start timer Sermon")), ["clear all", "start timer Sermon"]);
+        assert_eq!(
+            step_texts(&["audience off; song Amazing Grace".to_owned()]),
+            ["audience off", "song Amazing Grace"]
+        );
+    }
+
+    #[test]
+    fn macro_move_reads_which_step_and_where_it_goes() {
+        assert_eq!(parse_move(&words("Macro 1 3 to 1")), Some(("Macro 1".to_owned(), 3, 1)));
+        assert_eq!(parse_move(&words("Opening 1 TO 4")), Some(("Opening".to_owned(), 1, 4)));
+        assert_eq!(parse_move(&words("Opening 3 1")), None, "to is needed");
+        assert_eq!(parse_move(&words("3 to 1")), None, "a name is needed");
+        assert_eq!(parse_move(&words("Opening three to 1")), None);
+        assert_eq!(step_place("Opening", 3, 3), Ok(2));
+        assert_eq!(step_place("Opening", 3, 4), Err("Opening has 3 steps; there is no step 4.".to_owned()));
+        assert_eq!(step_place("Opening", 1, 0), Err("Opening has 1 step; there is no step 0.".to_owned()));
+    }
 
     #[test]
     fn lengths_and_times_of_day_are_read_as_people_write_them() {

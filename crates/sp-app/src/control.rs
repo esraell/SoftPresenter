@@ -903,7 +903,9 @@ Layers and controls
                                steps: clear all|slide|media|props|messages, show|hide message
                                NAME, show|hide prop NAME, start|stop|reset timer NAME,
                                audience on|off, song SONG, media ITEM, announce SONG|media
-                               ITEM|media-playlist NAME
+                               ITEM|media-playlist NAME, canva sync
+  macro step NAME N STEP       step N does STEP instead, at the same point
+  macro move NAME N to M       step N becomes step M
   macro startup NAME on|off    run it when SoftPresenter opens, or not
   macro run NAME
   announce SONG | announce media ITEM | announce media-playlist NAME | announce stop
