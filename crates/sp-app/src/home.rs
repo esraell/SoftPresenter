@@ -1819,8 +1819,11 @@ pub fn home_ui(
             }
             // The playlist's items picked (or the one open) are taken out of it at once: no
             // song is deleted, so nothing is asked, and Undo puts them back. Only while the
-            // playlist is listed.
-            Picking::Items if state.playlist_open => {
+            // keyboard is the left column's, as for ↑ and ↓ (the Show view, the search closed,
+            // the list of keys away), with the playlist listed and the chooser put away.
+            Picking::Items
+                if state.playlist_open && !state.chooser_open && crate::studio::list_keys_work(ui, state) =>
+            {
                 let places = crate::studio::items_to_take_out(state);
                 crate::studio::take_out_items(state, &places);
             }
@@ -9190,6 +9193,39 @@ mod tests {
         assert!(!state.services.front().items.iter().any(|item| item.title() == "Alpha"));
         assert!(matches!(state.services.front().items.first(), Some(Item::Song { title, .. }) if title == "Beta"));
         nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn delete_takes_no_item_out_while_the_keyboard_is_elsewhere() {
+        let (mut show, mut state) = picking_setting();
+        let (ctx, mut commands, mut time) = (egui::Context::default(), Vec::new(), 0.0);
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        click_holding(
+            &ctx,
+            (&mut show, &mut state),
+            drawn.left("Beta").center(),
+            Modifiers::NONE,
+            &mut time,
+            &mut commands,
+        );
+        assert_eq!((state.services.chosen, state.picking), (Some(1), Picking::Items), "Beta is open");
+        // On the Bible page, with the chooser open, or under the list of keys, Backspace and
+        // Delete leave the playlist alone.
+        let places: [fn(&mut HomeState, bool); 3] =
+            [|state, on| state.bible_open = on, |state, on| state.chooser_open = on, |state, on| state.key_sheet = on];
+        for (n, place) in places.into_iter().enumerate() {
+            place(&mut state, true);
+            for key in [Key::Backspace, Key::Delete] {
+                time += 0.1;
+                found_step(&ctx, &mut show, &mut state, pressed(key, Modifiers::NONE), time, &mut commands);
+                assert_eq!(state.services.front().items.len(), 5, "place {n}, {key:?}");
+            }
+            place(&mut state, false);
+        }
+        assert!(state.removed_items.is_empty());
+        // Back in the Show view with the playlist listed, Delete takes Beta out.
+        found_step(&ctx, &mut show, &mut state, pressed(Key::Delete, Modifiers::NONE), time + 0.1, &mut commands);
+        assert_eq!(state.services.front().items.len(), 4);
     }
 
     #[test]

@@ -260,7 +260,8 @@ feature changes, this page changes in the same commit.
   order; several playlist items dragged move together, in their order, to the one ink line, and
   stay picked. Delete (or Backspace) acts on the list last clicked: in a playlist it takes the
   items picked (or the one open) out of it at once, asking nothing, as no song is deleted; any
-  kind of item, the one on screen too, which stays on screen. A notice says what went
+  kind of item, the one on screen too, which stays on screen; only while the keyboard is the left
+  column's (in the Show view, not on the Bible page, with the chooser put away). A notice says what went
   ("Removed Harbour Lights from Sunday. ⌘Z puts it back.") and Undo (Command-Z) puts them back
   where they were, picked out again; Remove from Playlist in an item's menu does the same, for all
   the items picked when it is one of them. In a song list, a media strip or the slides, Delete

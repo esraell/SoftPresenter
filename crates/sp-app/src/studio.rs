@@ -3093,7 +3093,7 @@ fn picked_to_move(state: &mut HomeState, index: usize) {
 
 /// Whether ↑ and ↓ go through the song list or the playlist: in the Show view, with nothing
 /// being typed and the song search closed.
-fn list_keys_work(ui: &egui::Ui, state: &HomeState) -> bool {
+pub fn list_keys_work(ui: &egui::Ui, state: &HomeState) -> bool {
     // Not under an open menu, where the arrows move between its choices, nor under the list of
     // keys.
     !ui.ctx().text_edit_focused()
