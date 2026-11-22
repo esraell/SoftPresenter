@@ -604,7 +604,7 @@ fn song_alone(show: &Show, state: &HomeState, which: usize, bar: bool) -> Option
 
 /// The song each item of the playlist in front names, by its place among the songs, looked
 /// up again only when the songs or the items change.
-fn playlist_songs(show: &Show, state: &mut HomeState) -> Arc<Vec<Option<usize>>> {
+pub(super) fn playlist_songs(show: &Show, state: &mut HomeState) -> Arc<Vec<Option<usize>>> {
     let items = &state.services.front().items;
     let epoch = state.lists.songs.epoch();
     match state.lists.playlist_songs.get(|(made_in, made_of)| *made_in == epoch && made_of == items) {
@@ -826,7 +826,9 @@ pub fn slide_scroll(
             state.selected_slide = None;
         }
         start_slide_box(ui, state, &background);
-        scroll_while_dragging(ui);
+        if egui::DragAndDrop::has_payload_of_type::<SlideDrag>(ui.ctx()) {
+            scroll_while_dragging(ui);
+        }
         // Cut, Copy and Paste work on the song chosen, when it is one of those shown.
         let chosen = decks
             .iter()
@@ -1321,11 +1323,7 @@ fn draw_slides(
         let was_live = show.live().is_none() && here.is_some() && show.cursor() == here;
         // Numbered in the order sung, under an arrangement.
         let number = format!("{:02}", entry.step.unwrap_or(index) + 1);
-        let name = match slide.label.as_deref().filter(|label| !label.is_empty()) {
-            Some(label) if group.name.is_empty() => label.to_owned(),
-            Some(label) => format!("{} \u{b7} {label}", group.name),
-            None => group.name.clone(),
-        };
+        let name = strip_name(group, slide);
         // Slides the app makes (Bible passages, live captions) have an ink dot, as the Bible's
         // mark in the find box is ink; a group's colour is the church's own.
         let dot = if is_live {
@@ -1581,9 +1579,19 @@ fn draw_slides(
     }
 }
 
+/// What a slide's strip names it: its group, and its label after a dot when it has one (the
+/// label alone in a group with no name).
+pub(super) fn strip_name(group: &sp_model::Group, slide: &Slide) -> String {
+    match slide.label.as_deref().filter(|label| !label.is_empty()) {
+        Some(label) if group.name.is_empty() => label.to_owned(),
+        Some(label) => format!("{} \u{b7} {label}", group.name),
+        None => group.name.clone(),
+    }
+}
+
 /// The colour of a group's dot: the group's own, or a grey-blue when that is too dark to see
 /// on the panel (a Bible passage's groups have no colour of their own).
-fn dot_colour(colour: Rgba) -> Color32 {
+pub(super) fn dot_colour(colour: Rgba) -> Color32 {
     let light = 0.299 * f32::from(colour.r) + 0.587 * f32::from(colour.g) + 0.114 * f32::from(colour.b);
     if light < 60.0 { Color32::from_rgb(0x6b, 0x7f, 0x99) } else { color32(colour) }
 }

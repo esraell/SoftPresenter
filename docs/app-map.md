@@ -122,12 +122,12 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 
 ```
 ┌──────────────────┬─────────────────────────────────────────────┬───────────────────────────┐
-│ Song title       │ ruler ─────────────────────────────────────  │ [Shape] [Text] [Build]   │
-│ ┌──────────────┐ │  [Add Text] [Shapes ▾] [Media…] [Web Page]   │  (the open tab is light) │
-│ │ slide 1      │ │ ┌───────────────────────────────────────┐    │  font, size, colour,     │
-│ ├──────────────┤ │ │                                       │    │  outline, shadow, fill,  │
-│ │ slide 2      │ │ │         the slide, full size          │    │  gradient, spacing,      │
-│ └──────────────┘ │ │   drag to move, handles to resize     │    │  linked text, builds…    │
+│ SONG             │ ruler ─────────────────────────────────────  │ [Shape] [Text] [Build]   │
+│ ▤ Song title     │  [Add Text] [Shapes ▾] [Media…] [Web Page]   │  (the open tab is light) │
+│ SLIDES           │ ┌───────────────────────────────────────┐    │  font, size, colour,     │
+│ Add Copy Del ↑ ↓ │ │                                       │    │  outline, shadow, fill,  │
+│ ┌──────────────┐ │ │         the slide, full size          │    │  gradient, spacing,      │
+│ └01 ● VERSE 1──┘ │ │   drag to move, handles to resize     │    │  linked text, builds…    │
 │ Objects          │ └───────────────────────────────────────┘    │                          │
 │   T Main         │ X  Y  W  H                     Grid   Fit    │ [Slide Notes] [Live Edit]│
 │   ▢ photo        │                                              │                   [Show] │
@@ -135,14 +135,24 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 ```
 
 - **Left**: at the top a switch, Slides · Themes · Props · Stage, for what is edited. Under it,
-  for Slides the song's slides (click to edit another); for Themes the themes and the open
-  theme's templates. Props and Stage share one look (`studio::list_heading`, `list_keys` and
-  `list_picture`): PROPS or STAGE LAYOUTS, a row of keys acting on the one open (Add, Copy,
-  Delete…, ↑, ↓), then each as its picture with a strip under it (number and name); a click
-  opens one, a double click renames it in place, a right-click has its other choices (a
-  prop's: Clears Itself, Rename, Duplicate, Delete…; a layout's: Rename, Duplicate, Delete…).
-  Props is faint until there is one (make the first in the Props tab of the Show view). The
-  objects of what is open sit at the foot, front first (lock, hide, rename, drag to reorder).
+  for Themes the themes and the open theme's templates. Slides, Props and Stage share one look
+  (`studio::list_heading`, `list_keys` and `list_picture`): SLIDES, PROPS or STAGE LAYOUTS, a
+  row of keys acting on the one open (Add, Copy, Delete…, ↑, ↓), then each as its picture with
+  a strip under it (number and name); a click opens one, a double click renames it in place, a
+  right-click has its other choices (a prop's: Clears Itself, Rename, Duplicate, Delete…; a
+  layout's: Rename, Duplicate, Delete…). Props is faint until there is one (make the first in
+  the Props tab of the Show view). The objects of what is open sit at the foot, front first
+  (lock, hide, rename, drag to reorder).
+- **Slides** (`home::slide_list_head` and `slide_list`): SONG over the songs to choose from
+  (`studio::list_choice` rows: the playlist's songs, or the library's, and the song open;
+  click to edit another), then SLIDES and its keys, which act on the slides picked out or the
+  one open (Add a slide after it, Copy, Delete… which asks, ↑, ↓), then the slides in the order
+  written. A strip has the number, the group's dot and the group's name (and label); the
+  slide on screen has an orange strip, slides picked out a faint ring, a slide switched off is
+  dimmed. A double click (or Rename Group on the right-click menu, with Duplicate, Delete…,
+  Move Up and Move Down) retypes the group's name in the strip; dragging moves a slide (and
+  those picked out with it) to the ink line. The pictures are 224 wide, the props' and
+  layouts' 204: the design's slides view sits 10 in from the column's sides, not 20.
 - **Canvas**: Add Text, Shapes, Media… (a picture or a video, which plays in its box when the
   slide is on screen), Web Page (a box showing a live web page; its address is typed in the
   Shape tab); pictures and videos can be dropped on it from the Finder. Double-click a

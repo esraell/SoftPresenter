@@ -265,13 +265,11 @@ pub struct HomeState {
     /// a paste is of these slides only while the clipboard still holds those words.
     pub slide_clip: Vec<Slide>,
     pub slide_clip_text: String,
+    /// Scroll the playlist to this item, once (after ↑ or ↓).
+    pub playlist_scroll_to: Option<usize>,
     /// The Edit view's undo order, newest last: each step a change to the slide being edited
     /// (undone by the draft) or to the song's slides (moved, pasted, deleted; undone by the
     /// app); and the steps undone, to redo. The draft the slide's steps belong to.
-    /// Scroll the Edit view's list to the slide being edited, once (after ↑ or ↓).
-    pub edit_list_scroll: bool,
-    /// Scroll the playlist to this item, once (after ↑ or ↓).
-    pub playlist_scroll_to: Option<usize>,
     pub edit_steps: Vec<EditStep>,
     pub edit_redo: Vec<EditStep>,
     pub edit_steps_draft: u64,
@@ -1739,7 +1737,6 @@ impl Default for HomeState {
             picture_to_add: Vec::new(),
             slide_clip: Vec::new(),
             slide_clip_text: String::new(),
-            edit_list_scroll: false,
             playlist_scroll_to: None,
             edit_steps: Vec::new(),
             edit_redo: Vec::new(),
@@ -2102,12 +2099,6 @@ pub fn color32(c: Rgba) -> Color32 {
     Color32::from_rgba_unmultiplied(c.r, c.g, c.b, c.a)
 }
 
-/// Black or white, whichever reads better on the colour.
-fn text_on(c: Rgba) -> Color32 {
-    let luminance = 0.299 * f32::from(c.r) + 0.587 * f32::from(c.g) + 0.114 * f32::from(c.b);
-    if luminance > 150.0 { Color32::BLACK } else { Color32::WHITE }
-}
-
 /// True when a title matches what was typed in the filter box (case-insensitive, any part).
 pub fn matches_filter(title: &str, filter: &str) -> bool {
     let filter = filter.trim();
@@ -2344,7 +2335,6 @@ const EDIT_HEADER: Color32 = Color32::from_rgb(44, 44, 46);
 const EDIT_SURROUND: Color32 = Color32::from_rgb(54, 54, 56);
 const EDIT_STATUS: Color32 = crate::studio::PANEL;
 const EDIT_SELECTED: Color32 = crate::studio::SELECTED;
-const EDIT_OUTLINE: Color32 = Color32::from_rgb(230, 230, 234);
 /// Half the side of a resize handle, in screen points.
 const HANDLE: f32 = 4.5;
 /// How far from a handle's middle a press still grabs it, in screen points: more than the
@@ -2684,10 +2674,10 @@ fn edit_view(
         } else {
             None
         };
+        // The list brings the slide opened into sight by itself (see `list_picture`).
         if let Some(slide) = to {
             chosen = Some(SlideRef { slide, ..at });
             state.picked_slides.clear();
-            state.edit_list_scroll = true;
         }
     }
     let mut chosen_template = None;
@@ -2703,24 +2693,19 @@ fn edit_view(
     let left = left.show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         crate::studio::edit_kinds(ui, state);
-        // Props and stage layouts: a heading and the keys that act on the one open here; their
-        // pictures fill the room between these and the Objects shelf, further down.
+        // Slides, props and stage layouts: a heading and the keys that act on the one open here
+        // (for slides, the songs above them); their pictures fill the room between these and
+        // the Objects shelf, further down.
         if theme_mode {
             theme_column(ui, state);
         } else if prop_mode {
             prop_ask = prop_list_head(ui, state);
         } else if stage_mode {
             stage_request = crate::stage_editor::list_head(ui, state);
-        } else if let Some(presentation) = presentation {
-            ui.add_space(10.0);
-            Frame::new().fill(EDIT_HEADER).inner_margin(egui::Margin::symmetric(8, 5)).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(presentation.title.as_str()).strong().size(12.5).color(Color32::WHITE),
-                    );
-                    ui.add_space(ui.available_width());
-                });
-            });
+        } else if presentation.is_some()
+            && let Some(open) = slide_list_head(ui, show, state, at)
+        {
+            chosen = Some(open);
         }
 
         egui::Panel::bottom("edit objects").resizable(false).exact_size(200.0).frame(panel_frame(EDIT_PANEL, 0)).show(
@@ -2982,247 +2967,8 @@ fn edit_view(
         } else if stage_mode {
             let pictures = crate::live_tabs::StagePictures::of(show, state);
             stage_request = stage_request.take().or(crate::stage_editor::list(ui, state, &pictures, thumb));
-        } else {
-            egui::ScrollArea::vertical().id_salt("edit slide list").auto_shrink([false, false]).show(ui, |ui| {
-                let width = ui.available_width();
-                let image_size = vec2(width - 16.0, (width - 16.0) * 9.0 / 16.0);
-                let mut index = 0;
-                let groups = presentation.map(|p| p.groups.as_slice()).unwrap_or_default();
-                let movable = !state.app_made(at.presentation);
-                let moving = egui::DragAndDrop::payload::<SlideDrag>(ui.ctx())
-                    .filter(|drag| movable && drag.presentation == at.presentation);
-                scroll_while_dragging(ui);
-                for (group_index, group) in groups.iter().enumerate() {
-                    let (row, bar_response) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click());
-                    let bar = Rect::from_min_max(row.min + vec2(8.0, 6.0), row.max - vec2(8.0, 2.0));
-                    ui.painter().rect_filled(bar, 4.0, color32(group.color).gamma_multiply(0.8));
-                    // Slides dropped on a group's name go at its start.
-                    let first_here = index;
-                    if movable
-                        && let Some(dropped) = bar_response
-                            .dnd_release_payload::<SlideDrag>()
-                            .filter(|drag| drag.presentation == at.presentation && !drag.slides.contains(&first_here))
-                    {
-                        state.slide_request = Some((
-                            SlideRef { presentation: at.presentation, slide: dropped.slides[0] },
-                            SlideRequest::Move { slides: dropped.slides.clone(), to: first_here, after: false },
-                        ));
-                    }
-                    if movable && bar_response.dnd_hover_payload::<SlideDrag>().is_some() {
-                        ui.painter().rect_stroke(bar, 4.0, Stroke::new(2.0, DROP_LINE), StrokeKind::Outside);
-                    }
-                    let ink = text_on(group.color);
-                    icons::paint(
-                        ui.painter(),
-                        Icon::ChevronDown,
-                        Rect::from_center_size(bar.left_center() + vec2(9.0, 0.0), vec2(8.0, 8.0)),
-                        ink,
-                    );
-                    // The group's name; a click turns it into a field to retype it.
-                    let renaming = state.renaming_group.as_ref().is_some_and(|(at, _)| *at == group_index);
-                    if renaming && let Some((_, typed)) = state.renaming_group.as_mut() {
-                        let look = crate::studio::Lettering::plain(FontId::proportional(12.5), ink);
-                        let field = crate::studio::rename_field_at(
-                            ui,
-                            typed,
-                            &look,
-                            bar.left_center() + vec2(18.0, 0.0),
-                            bar.max.x - 4.0,
-                        );
-                        if std::mem::take(&mut state.rename_started) {
-                            field.request_focus();
-                        }
-                        let (enter, escape) = ui
-                            .input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
-                        if escape {
-                            state.renaming_group = None;
-                        } else if enter || field.lost_focus() {
-                            if typed.trim() != group.name {
-                                state.pending_group_name =
-                                    Some((at.presentation, group_index, typed.trim().to_owned()));
-                            }
-                            state.renaming_group = None;
-                        }
-                    } else {
-                        let name = if group.name.is_empty() { "No group" } else { group.name.as_str() };
-                        ui.painter().text(
-                            bar.left_center() + vec2(18.0, 0.0),
-                            Align2::LEFT_CENTER,
-                            name,
-                            FontId::proportional(12.5),
-                            ink,
-                        );
-                        if bar_response.on_hover_text("Click to rename this group").clicked() {
-                            state.renaming_group = Some((group_index, group.name.clone()));
-                            state.rename_started = true;
-                        }
-                    }
-
-                    // Each slide a card, as in the Show view: its picture, and under it a bar in
-                    // the group's colour with its number (and the group's name on its first
-                    // slide), apart from the next. A card dragged goes to another place.
-                    for (in_group, slide) in group.slides.iter().enumerate() {
-                        let here = SlideRef { presentation: at.presentation, slide: index };
-                        let (cell, response) = ui.allocate_exact_size(
-                            vec2(width, image_size.y + EDIT_CARD_BAR + EDIT_CARD_GAP),
-                            Sense::click_and_drag(),
-                        );
-                        let card = Rect::from_min_size(
-                            cell.min + vec2(8.0, EDIT_CARD_GAP / 2.0),
-                            vec2(image_size.x, image_size.y + EDIT_CARD_BAR),
-                        );
-                        let selected = here == at;
-                        let round = SLIDE_ROUND;
-                        if ui.is_rect_visible(cell) {
-                            let image = Rect::from_min_size(card.min, image_size);
-                            let top = egui::CornerRadius { nw: round, ne: round, sw: 0, se: 0 };
-                            ui.painter().rect_filled(image, top, Color32::BLACK);
-                            let of = if movable { ThumbOf::Slide(slide) } else { ThumbOf::BibleSlide(slide) };
-                            match thumb(of) {
-                                Some((texture, _)) => egui::Image::from_texture((texture, image_size))
-                                    .corner_radius(top)
-                                    .paint_at(ui, image),
-                                None => ui.ctx().request_repaint(),
-                            }
-                            let bar = Rect::from_min_max(pos2(card.min.x, image.max.y), card.max);
-                            let bottom = egui::CornerRadius { nw: 0, ne: 0, sw: round, se: round };
-                            ui.painter().rect_filled(bar, bottom, color32(group.color));
-                            let ink = text_on(group.color);
-                            let words = match (in_group, slide.label.as_deref()) {
-                                (_, Some(label)) => format!("{}  {label}", index + 1),
-                                (0, None) if !group.name.is_empty() => format!("{}  {}", index + 1, group.name),
-                                _ => (index + 1).to_string(),
-                            };
-                            ui.painter().with_clip_rect(bar.shrink(2.0)).text(
-                                bar.left_center() + vec2(8.0, 0.0),
-                                Align2::LEFT_CENTER,
-                                words,
-                                crate::studio::semibold(12.0),
-                                ink,
-                            );
-                            // A hairline round it, so a black slide does not melt into the column.
-                            ui.painter().rect_stroke(
-                                card,
-                                f32::from(round),
-                                Stroke::new(1.0, crate::studio::LINE),
-                                StrokeKind::Outside,
-                            );
-                            let outline = if selected {
-                                Some(Stroke::new(2.0, EDIT_OUTLINE))
-                            } else if state.picked_slides.contains(&here) {
-                                Some(Stroke::new(2.0, SELECTED_OUTLINE))
-                            } else if response.hovered() {
-                                Some(Stroke::new(1.0, crate::studio::TEXT_FAINT))
-                            } else {
-                                None
-                            };
-                            if let Some(stroke) = outline {
-                                ui.painter().rect_stroke(card, f32::from(round) + 1.0, stroke, StrokeKind::Outside);
-                            }
-                            if moving.as_ref().is_some_and(|drag| drag.slides.contains(&index)) {
-                                ui.painter().rect_filled(card, f32::from(round), Color32::from_black_alpha(150));
-                            }
-                        }
-                        if selected && std::mem::take(&mut state.edit_list_scroll) {
-                            response.scroll_to_me(Some(Align::Center));
-                        }
-                        if movable {
-                            // Dragged, it goes with the slides picked out with it.
-                            if response.dragged() {
-                                let mut picked: Vec<usize> = state
-                                    .picked_slides
-                                    .iter()
-                                    .filter(|p| p.presentation == at.presentation)
-                                    .map(|p| p.slide)
-                                    .collect();
-                                picked.sort_unstable();
-                                let slides = if picked.contains(&index) { picked } else { vec![index] };
-                                response.dnd_set_drag_payload(SlideDrag { presentation: at.presentation, slides });
-                            }
-                            let target = |drag: &SlideDrag| {
-                                drag.presentation == at.presentation && !drag.slides.contains(&index)
-                            };
-                            if response.dnd_hover_payload::<SlideDrag>().is_some_and(|drag| target(&drag)) {
-                                paint_drop_line(ui, card, drop_after(ui, card, true), true, EDIT_CARD_GAP);
-                            }
-                            if let Some(dropped) =
-                                response.dnd_release_payload::<SlideDrag>().filter(|drag| target(drag))
-                            {
-                                let after = drop_after(ui, card, true);
-                                state.slide_request = Some((
-                                    SlideRef { presentation: at.presentation, slide: dropped.slides[0] },
-                                    SlideRequest::Move { slides: dropped.slides.clone(), to: index, after },
-                                ));
-                            }
-                            // Or a step at a time, from its menu.
-                            let count = presentation.map_or(0, |song| song.slide_count());
-                            response.context_menu(|ui| {
-                                if ui.add_enabled(index > 0, egui::Button::new("Move Up")).clicked() {
-                                    state.slide_request = Some((
-                                        here,
-                                        SlideRequest::Move { slides: vec![index], to: index - 1, after: false },
-                                    ));
-                                    ui.close();
-                                }
-                                if ui.add_enabled(index + 1 < count, egui::Button::new("Move Down")).clicked() {
-                                    state.slide_request = Some((
-                                        here,
-                                        SlideRequest::Move { slides: vec![index], to: index + 1, after: true },
-                                    ));
-                                    ui.close();
-                                }
-                            });
-                        }
-                        if response.clicked() {
-                            let mods = ui.input(|input| input.modifiers);
-                            if (mods.command || mods.shift) && movable {
-                                // Picked out, to move, copy or delete several; the slide open
-                                // stays open, and is picked out with them.
-                                let total = presentation.map_or(0, |song| song.slide_count());
-                                let order: Vec<SlideRef> =
-                                    (0..total).map(|slide| SlideRef { presentation: at.presentation, slide }).collect();
-                                state.picked_slides.retain(|p| p.presentation == at.presentation);
-                                if state.picked_slides.is_empty() {
-                                    state.picked_slides.push(at);
-                                }
-                                pick_slide(&mut state.picked_slides, &order, here, mods, Some(at));
-                            } else {
-                                state.picked_slides.clear();
-                                if !selected {
-                                    chosen = Some(here);
-                                }
-                            }
-                        }
-                        index += 1;
-                    }
-                }
-                // One of the slides being dragged follows the pointer.
-                if let Some(drag) = &moving {
-                    let first =
-                        drag.slides.first().and_then(|at| presentation.and_then(|p| p.slide(*at))).map(|(_, s)| s);
-                    let texture = first.and_then(|slide| thumb(ThumbOf::Slide(slide)));
-                    paint_drag_ghost(ui, texture.map(|(texture, _)| texture), drag.slides.len());
-                }
-                // After the last slide: a blank tile with a plus. It adds a slide laid out
-                // like the one before it.
-                if !groups.is_empty() || presentation.is_some() {
-                    let (cell, response) = ui.allocate_exact_size(vec2(width, image_size.y + 22.0), Sense::click());
-                    let tile = Rect::from_min_size(cell.min + vec2(8.0, 8.0), image_size);
-                    let hovered = response.hovered();
-                    let line = if hovered { crate::studio::ACCENT } else { Color32::from_gray(90) };
-                    ui.painter().rect_filled(tile, 4.0, Color32::from_gray(if hovered { 34 } else { 24 }));
-                    ui.painter().rect_stroke(tile, 4.0, Stroke::new(1.0, line), StrokeKind::Inside);
-                    icons::paint(
-                        ui.painter(),
-                        Icon::Plus,
-                        Rect::from_center_size(tile.center(), vec2(18.0, 18.0)),
-                        line,
-                    );
-                    if response.on_hover_text("Add a slide, laid out like the one before it").clicked() {
-                        state.add_slide = Some(at.presentation);
-                    }
-                }
-            });
+        } else if let Some(open) = slide_list(ui, show, state, thumb, at) {
+            chosen = Some(open);
         }
     });
 
@@ -3829,6 +3575,362 @@ fn stage_tools(ui: &mut egui::Ui, state: &mut HomeState, inner: Rect, layout: us
     }
 }
 
+/// The most room the songs over the Edit view's slides take: four and a half rows, so half a
+/// row shows there are more to scroll to, and the slides keep their room.
+const EDIT_SONGS_TALL: f32 = 4.5 * crate::studio::PLAIN_ROW;
+
+/// The songs the Edit view offers over the slides: those of the playlist the Show view's left
+/// column lists, in its order and each once, or else the songs of the library it lists, as it
+/// lists them; and the song open, at the end, when they don't include it.
+fn songs_to_edit(show: &Show, state: &mut HomeState, open: usize) -> Vec<usize> {
+    let mut songs: Vec<usize> = if state.playlist_open {
+        let mut seen = std::collections::HashSet::new();
+        slides::playlist_songs(show, state).iter().flatten().copied().filter(|song| seen.insert(*song)).collect()
+    } else {
+        crate::studio::listed_songs(show, state).shown.clone()
+    };
+    if !songs.contains(&open) {
+        songs.push(open);
+    }
+    songs
+}
+
+/// The slides of the song open in the Edit view that its keys act on: those picked out, in
+/// order, or else the one open.
+fn slides_to_act_on(state: &HomeState, at: SlideRef) -> Vec<usize> {
+    let mut picked: Vec<usize> =
+        state.picked_slides.iter().filter(|p| p.presentation == at.presentation).map(|p| p.slide).collect();
+    picked.sort_unstable();
+    picked.dedup();
+    if picked.is_empty() {
+        picked.push(at.slide);
+    }
+    picked
+}
+
+/// The top of the slides' part of the Edit view's left column: the songs to choose from under
+/// their heading, then the slides' heading and the keys that act on the slides picked out (or
+/// the one open): Add (a slide after the one open), Copy, Delete (which asks first), ↑ and ↓.
+/// Returns the song to open, when another one is clicked.
+fn slide_list_head(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, at: SlideRef) -> Option<SlideRef> {
+    use crate::studio::PLAIN_ROW;
+    let songs = songs_to_edit(show, state, at.presentation);
+    let mut open = None;
+    Frame::new().inner_margin(egui::Margin::symmetric(10, 0)).show(ui, |ui| {
+        crate::studio::list_heading(ui, "Song");
+        // A long list scrolls; it is scrolled to the song open when that changes.
+        let mut area =
+            egui::ScrollArea::vertical().id_salt("edit songs").max_height(EDIT_SONGS_TALL).auto_shrink([false, true]);
+        let scrolled = egui::Id::unique("edit songs scrolled to");
+        if ui.data(|data| data.get_temp::<usize>(scrolled)) != Some(at.presentation) {
+            ui.data_mut(|data| data.insert_temp(scrolled, at.presentation));
+            if let Some(place) = songs.iter().position(|song| *song == at.presentation) {
+                area = area.vertical_scroll_offset((place as f32 - 1.0).max(0.0) * PLAIN_ROW);
+            }
+        }
+        area.show_rows(ui, PLAIN_ROW, songs.len(), |ui, shown| {
+            for song in &songs[shown] {
+                let title = show.presentations().get(*song).map_or("", |song| song.title.as_str());
+                let is_open = *song == at.presentation;
+                let look = crate::studio::PlainRow { icon: Icon::Document, name: Some(title), tag: None, on: is_open };
+                if crate::studio::plain_row(ui, &look).0.clicked() && !is_open {
+                    open = Some(SlideRef { presentation: *song, slide: 0 });
+                }
+            }
+        });
+        ui.add_space(4.0);
+        crate::studio::list_heading(ui, "Slides");
+        let count = show.presentations().get(at.presentation).map_or(0, |song| song.slide_count());
+        let movable = !state.app_made(at.presentation);
+        let these = slides_to_act_on(state, at);
+        let (first, last) = (these[0], these[these.len() - 1]);
+        let several = these.len() > 1;
+        let can = [movable, movable, movable && these.len() < count, movable && first > 0, movable && last + 1 < count];
+        let hints = [
+            "A new slide after this one, laid out like it",
+            if several { "Copies of the slides picked out, after them" } else { "A copy of this slide, after it" },
+            if several { "Delete the slides picked out; it asks first" } else { "Delete this slide; it asks first" },
+            if several { "Move the slides picked out up one place" } else { "Move this slide up one place" },
+            if several { "Move the slides picked out down one place" } else { "Move this slide down one place" },
+        ];
+        if let Some(key) = crate::studio::list_keys(ui, "slide keys", can, hints) {
+            act_on_slides(show, state, at, &these, key);
+        }
+    });
+    if open.is_some() {
+        state.picked_slides.clear();
+    }
+    open
+}
+
+/// Carries out one of the keys over the Edit view's slides, or the same choice from a slide's
+/// menu, on `these`, slides of the song open, in order: Add puts a new slide laid out like the
+/// one open just after it; Copy puts copies just after the last of them; Delete asks first; ↑
+/// and ↓ move them one place. The app makes the change after the frame; the slide open follows
+/// its slide, and Add and Copy open the first slide they made.
+fn act_on_slides(show: &Show, state: &mut HomeState, at: SlideRef, these: &[usize], key: crate::studio::ListKey) {
+    use crate::studio::ListKey;
+    let Some(song) = show.presentations().get(at.presentation) else { return };
+    let (Some(&first), Some(&last)) = (these.first(), these.last()) else { return };
+    // The slide open as the editor has it now; the others as the song has them.
+    let open = state.editing.as_ref().filter(|draft| draft.at == at).map(|draft| draft.slide.clone());
+    let slide = |index: usize| {
+        open.clone().filter(|_| index == at.slide).or_else(|| song.slide(index).map(|(_, slide)| slide.clone()))
+    };
+    let request = match key {
+        ListKey::Add => slide(at.slide).map(|open| (at, SlideRequest::AddAfter(vec![open.empty_copy()]))),
+        ListKey::Copy => {
+            let copies = these.iter().filter_map(|index| slide(*index)).collect();
+            Some((SlideRef { slide: last, ..at }, SlideRequest::AddAfter(copies)))
+        }
+        ListKey::Delete => {
+            state.confirm_delete_slides = these.iter().map(|slide| SlideRef { slide: *slide, ..at }).collect();
+            None
+        }
+        ListKey::Up if first > 0 => {
+            Some((at, SlideRequest::Move { slides: these.to_vec(), to: first - 1, after: false }))
+        }
+        ListKey::Down if last + 1 < song.slide_count() => {
+            Some((at, SlideRequest::Move { slides: these.to_vec(), to: last + 1, after: true }))
+        }
+        ListKey::Up | ListKey::Down => None,
+    };
+    if request.is_some() {
+        state.slide_request = request;
+    }
+}
+
+/// Where slides dragged in the Edit view's list go, as [`SlideRequest::Move`] takes it: the
+/// slide they go next to, and whether after it. The ink line is between two pictures (see
+/// `drop_slot`); with the pointer nearer the one above, they go after it, into its group, and
+/// otherwise before the one below, into its group. The slides being moved can't be the one
+/// they go next to, so the nearest other is taken. `None` when every slide is being moved.
+fn slide_drop(rows: &[Rect], moving: &[usize], y: f32) -> Option<(usize, bool)> {
+    let slot = crate::studio::drop_slot(rows, y);
+    let count = rows.len();
+    let after_above = match slot.checked_sub(1) {
+        None => false,
+        Some(_) if slot >= count => true,
+        Some(above) => y < (rows[above].max.y + rows[slot].min.y) / 2.0,
+    };
+    let still = |at: &usize| !moving.contains(at);
+    let above = (0..slot).rev().find(still).map(|to| (to, true));
+    let below = (slot..count).find(still).map(|to| (to, false));
+    if after_above { above.or(below) } else { below.or(above) }
+}
+
+/// What a slide's menu in the Edit view's list was asked for.
+enum SlideChoice {
+    RenameGroup,
+    Key(crate::studio::ListKey),
+}
+
+/// The song open's slides in the Edit view's left column, under their keys: each its picture,
+/// with its number, its group's dot and its group's name (and label) in the strip under it. The
+/// slide open is ringed, the one on screen has an orange strip, those picked out a faint ring,
+/// and one switched off is dimmed. A click opens a slide; Command and Shift pick out several, as
+/// in the Finder; a double click retypes its group's name in place; dragging moves it (with the
+/// others picked out with it) to where the ink line is; a right-click offers Rename Group,
+/// Duplicate, Delete…, Move Up and Move Down. Only the pictures in sight are drawn. Returns the
+/// slide to open, when another one is clicked.
+fn slide_list(
+    ui: &mut egui::Ui,
+    show: &Show,
+    state: &mut HomeState,
+    thumb: &mut crate::studio::Thumb,
+    at: SlideRef,
+) -> Option<SlideRef> {
+    use crate::studio::{LIST_PICTURE_CORNER, ListKey, ListPicture, PANEL, TALLY, TEXT, TEXT_FAINT};
+    let song = show.presentations().get(at.presentation)?;
+    let movable = !state.app_made(at.presentation);
+    let count = song.slide_count();
+    let live = show.live().filter(|live| live.presentation == at.presentation).map(|live| live.slide);
+    let mut picked: Vec<usize> =
+        state.picked_slides.iter().filter(|p| p.presentation == at.presentation).map(|p| p.slide).collect();
+    picked.sort_unstable();
+    // A group being renamed has its field on the slide open, when that is in the group, or else
+    // on the group's first slide.
+    let renaming_on = state.renaming_group.as_ref().and_then(|(group, _)| {
+        let first: usize = song.groups.iter().take(*group).map(|group| group.slides.len()).sum();
+        let slides = first..first + song.groups.get(*group)?.slides.len();
+        Some(if slides.contains(&at.slide) { at.slide } else { first })
+    });
+    let list = egui::Id::unique(("edit slide pictures", song.id));
+    let mut open = None;
+    egui::ScrollArea::vertical().id_salt(("edit slide list", song.id)).auto_shrink([false, false]).show(ui, |ui| {
+        // 10 in from the column's sides, as the design's slides view has it, and 4 further
+        // under the keys than the props' pictures are.
+        let side = egui::Margin { left: 10, right: 10, top: (crate::studio::LIST_TOP + 4.0) as i8, bottom: 12 };
+        Frame::new().inner_margin(side).show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, crate::studio::LIST_BETWEEN);
+            let mut rows: Vec<Rect> = Vec::with_capacity(count);
+            let (mut dragging, mut dropped) = (None, None);
+            let slides = song
+                .groups
+                .iter()
+                .enumerate()
+                .flat_map(|(at, group)| group.slides.iter().map(move |slide| (at, group, slide)));
+            for (index, (group_index, group, slide)) in slides.enumerate() {
+                let here = SlideRef { presentation: at.presentation, slide: index };
+                let name = slides::strip_name(group, slide);
+                let look = ListPicture {
+                    number: index + 1,
+                    name: &name,
+                    dot: Some(slides::dot_colour(group.color)),
+                    open: index == at.slide,
+                    live: live == Some(index),
+                    renaming: renaming_on == Some(index),
+                };
+                let (response, places) = crate::studio::list_picture(ui, list, index, &look);
+                rows.push(response.rect);
+                // Only the pictures in sight are drawn, or asked for.
+                if ui.is_rect_visible(places.picture) {
+                    ui.painter().rect_filled(places.picture, LIST_PICTURE_CORNER, Color32::BLACK);
+                    let of = if movable { ThumbOf::Slide(slide) } else { ThumbOf::BibleSlide(slide) };
+                    match thumb(of) {
+                        Some((texture, _)) => egui::Image::from_texture((texture, places.picture.size()))
+                            .corner_radius(LIST_PICTURE_CORNER)
+                            .paint_at(ui, places.picture),
+                        None => ui.ctx().request_repaint(),
+                    }
+                    // A slide switched off stays in the song but is stepped over: it is dimmed.
+                    if !slide.enabled {
+                        ui.painter().rect_filled(places.picture, LIST_PICTURE_CORNER, PANEL.gamma_multiply(0.65));
+                    }
+                }
+                if picked.contains(&index) && index != at.slide {
+                    ui.painter().rect_stroke(response.rect, 9.0, Stroke::new(1.5, TEXT_FAINT), StrokeKind::Inside);
+                }
+                // The group's name retyped in the strip, set as it is shown.
+                if look.renaming
+                    && let Some((_, typed)) = state.renaming_group.as_mut()
+                {
+                    let ink = if look.live { TALLY } else { TEXT };
+                    let look = crate::studio::list_name_look(ink);
+                    let field = crate::studio::rename_field_at(ui, typed, &look, places.name, places.name_right);
+                    if std::mem::take(&mut state.rename_started) {
+                        field.request_focus();
+                    }
+                    let (enter, escape) =
+                        ui.input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
+                    if escape {
+                        state.renaming_group = None;
+                    } else if enter || field.lost_focus() {
+                        let typed = typed.trim().to_owned();
+                        if typed != group.name {
+                            state.pending_group_name = Some((at.presentation, group_index, typed));
+                        }
+                        state.renaming_group = None;
+                    }
+                }
+                if !movable {
+                    if response.clicked() && index != at.slide {
+                        open = Some(here);
+                    }
+                    continue;
+                }
+                if response.dragged() {
+                    dragging = Some(index);
+                }
+                if crate::studio::drag_let_go(&response) {
+                    dropped = Some(index);
+                }
+                // The menu acts on the slides picked out when this is one of them.
+                let these = if picked.contains(&index) { picked.clone() } else { vec![index] };
+                let (first, last) = (these[0], these[these.len() - 1]);
+                let mut chose = None;
+                response.context_menu(|ui| {
+                    let mut item = |ui: &mut egui::Ui, words: &str, can: bool, choice: SlideChoice| {
+                        if ui.add_enabled(can, egui::Button::new(words)).clicked() {
+                            chose = Some(choice);
+                            ui.close();
+                        }
+                    };
+                    item(ui, "Rename Group", true, SlideChoice::RenameGroup);
+                    ui.separator();
+                    item(ui, "Duplicate", true, SlideChoice::Key(ListKey::Copy));
+                    item(ui, "Delete\u{2026}", these.len() < count, SlideChoice::Key(ListKey::Delete));
+                    ui.separator();
+                    item(ui, "Move Up", first > 0, SlideChoice::Key(ListKey::Up));
+                    item(ui, "Move Down", last + 1 < count, SlideChoice::Key(ListKey::Down));
+                });
+                match chose {
+                    // Its field is on this slide, which opens.
+                    Some(SlideChoice::RenameGroup) => {
+                        state.renaming_group = Some((group_index, group.name.clone()));
+                        state.rename_started = true;
+                        if index != at.slide {
+                            open = Some(here);
+                        }
+                    }
+                    Some(SlideChoice::Key(key)) => act_on_slides(show, state, at, &these, key),
+                    None => {}
+                }
+                if response.double_clicked() {
+                    state.renaming_group = Some((group_index, group.name.clone()));
+                    state.rename_started = true;
+                } else if response.clicked() {
+                    let mods = ui.input(|input| input.modifiers);
+                    if mods.command || mods.shift {
+                        // Picked out, to move, copy or delete several; the slide open stays open,
+                        // and is picked out with them.
+                        let order: Vec<SlideRef> =
+                            (0..count).map(|slide| SlideRef { presentation: at.presentation, slide }).collect();
+                        state.picked_slides.retain(|p| p.presentation == at.presentation);
+                        if state.picked_slides.is_empty() {
+                            state.picked_slides.push(at);
+                        }
+                        pick_slide(&mut state.picked_slides, &order, here, mods, Some(at));
+                    } else {
+                        state.picked_slides.clear();
+                        if index != at.slide {
+                            open = Some(here);
+                        }
+                    }
+                }
+            }
+            // A slide being dragged goes faint, with the others picked out with it; what it is
+            // follows the pointer, and an ink line shows where it goes. Let go over the list, it
+            // goes there; let go elsewhere (over the slide being edited), or stopped with Escape,
+            // it stays where it was.
+            let moving: Vec<usize> = match dragging.or(dropped) {
+                Some(held) if picked.len() > 1 && picked.contains(&held) => picked.clone(),
+                Some(held) => vec![held],
+                None => Vec::new(),
+            };
+            // The list is the pictures and the room either side of them, to the column's edges.
+            let over = rows.first().map(|row| row.x_range().expand(10.0));
+            let pointer = ui
+                .input(|input| input.pointer.interact_pos())
+                .filter(|pointer| over.is_some_and(|over| over.contains(pointer.x)));
+            if dragging.is_some() {
+                if let Some(pointer) = pointer {
+                    let slot = crate::studio::drop_slot(&rows, pointer.y);
+                    crate::studio::paint_rows_moving(ui.painter(), &rows, |at| moving.contains(&at), slot, PANEL);
+                }
+                let words = match moving.as_slice() {
+                    [one] => song
+                        .slide(*one)
+                        .map(|(group, slide)| format!("{:02} {}", one + 1, slides::strip_name(group, slide)))
+                        .unwrap_or_default(),
+                    many => format!("{} slides", many.len()),
+                };
+                crate::studio::paint_carried(ui.ctx(), words.trim());
+                scroll_while_dragging(ui);
+            }
+            if let (Some(_), Some(pointer)) = (dropped, pointer)
+                && let Some((to, after)) = slide_drop(&rows, &moving, pointer.y)
+            {
+                state.slide_request = Some((
+                    SlideRef { presentation: at.presentation, slide: moving[0] },
+                    SlideRequest::Move { slides: moving.clone(), to, after },
+                ));
+            }
+        });
+    });
+    open
+}
+
 /// What the list of props in the Edit view asked for: another prop opened, or something asked
 /// of the prop at a place (for Add, of none).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -4157,8 +4259,18 @@ pub enum SlideRequest {
     DeleteMany(Vec<usize>),
     /// Put these slides, in order, just after this one.
     PasteAfter(Vec<Slide>),
+    /// Put these slides, in order, just after this one, and open the first of them in the Edit
+    /// view: its Add and Copy.
+    AddAfter(Vec<Slide>),
     Group(String),
     Label(Option<String>),
+}
+
+/// Where the slide at `place` of a song is once `deleted` (places in the song, in any order)
+/// have gone: the slides before it that went are taken off. For a slide that went itself, the
+/// place of the first slide after it that stayed.
+pub fn place_after_deleting(place: usize, deleted: &[usize]) -> usize {
+    place - deleted.iter().filter(|gone| **gone < place).count()
 }
 
 /// A new song as the New Song sheet describes it: its title, its theme by its place (`None`
@@ -7339,9 +7451,6 @@ fn rulers(painter: &egui::Painter, area: Rect, ruler: f32, slide: Rect, scale: f
     }
 }
 
-/// The outline of a slide picked out in the Edit view's list.
-const SELECTED_OUTLINE: Color32 = crate::studio::ACCENT;
-
 /// The passage the Options panel previews when none is showing: two verses, so that one verse
 /// a slide, and the reference on the last slide only, can be seen to change it.
 const SAMPLE_PASSAGE: &str = "John 3:16-17";
@@ -7636,16 +7745,9 @@ fn slide_clipboard_keys(ui: &egui::Ui, show: &Show, which: usize, state: &mut Ho
     }
 }
 
-/// The Edit view's slide cards: the bar under each picture, and the room between cards.
-const EDIT_CARD_BAR: f32 = 22.0;
-const EDIT_CARD_GAP: f32 = 10.0;
-
 /// While slides are dragged near the top or bottom of a scrolling list of them, the list
-/// scrolls that way, faster nearer the edge.
+/// scrolls that way, faster nearer the edge. Its caller knows slides are being dragged.
 fn scroll_while_dragging(ui: &mut egui::Ui) {
-    if !egui::DragAndDrop::has_payload_of_type::<SlideDrag>(ui.ctx()) {
-        return;
-    }
     let Some(pointer) = ui.ctx().pointer_hover_pos() else { return };
     let area = ui.clip_rect();
     if !area.x_range().contains(pointer.x) {
@@ -8650,12 +8752,6 @@ mod tests {
         assert!(!matches_filter("Morning Song", "evening"));
     }
 
-    #[test]
-    fn group_bar_text_contrasts_with_its_colour() {
-        assert_eq!(text_on(Rgba::rgb(250, 240, 200)), Color32::BLACK);
-        assert_eq!(text_on(Rgba::rgb(20, 40, 120)), Color32::WHITE);
-    }
-
     /// Runs two frames and returns how many slide and media thumbnails the last one asked for.
     fn count_thumbs(ctx: &egui::Context, show: &Show, state: &mut HomeState) -> (usize, usize) {
         let (mut slides, mut media) = (0, 0);
@@ -8720,6 +8816,15 @@ mod tests {
         assert_eq!(slides, 3, "the slide list down the left shows the song's slides");
         assert_eq!(state.editing.as_ref().map(|d| d.at.slide), Some(1), "drawing must not leave the Edit view");
         assert!(state.pending_edit.is_none(), "nothing was typed, so nothing changed");
+    }
+
+    #[test]
+    fn a_long_songs_slides_in_the_edit_view_ask_only_for_the_pictures_in_sight() {
+        let show = show(40);
+        let editing = EditDraft::of(&show, SlideRef { presentation: 0, slide: 0 });
+        let mut state = HomeState { editing, ..HomeState::default() };
+        let (slides, _) = count_thumbs(&egui::Context::default(), &show, &mut state);
+        assert!((1..=4).contains(&slides), "{slides} of 40 pictures asked for");
     }
 
     /// Runs one frame of the home view with `state`, pressing `key` if given.
@@ -9285,6 +9390,252 @@ mod tests {
         let show = Show::new(vec![Arc::new(parse_song_text("Harbour", &text.join("\n")))]);
         let editing = EditDraft::of(&show, SlideRef { presentation: 0, slide: open });
         (show, HomeState { editing, ..HomeState::default() })
+    }
+
+    /// One frame, a twentieth of a second after the last, of the slides' part of the Edit view's
+    /// left column, as wide as the column and tall enough for every picture: what it drew, and
+    /// the slide it asked to open.
+    fn slide_column(
+        ctx: &egui::Context,
+        show: &Show,
+        state: &mut HomeState,
+        events: Vec<Event>,
+    ) -> (egui::FullOutput, Option<SlideRef>) {
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 2400.0))),
+            time: Some(ctx.input(|input| input.time) + 0.05),
+            events,
+            ..RawInput::default()
+        };
+        let at = state.editing.as_ref().map(|draft| draft.at).expect("a slide open");
+        let column = Rect::from_min_size(pos2(10.0, 0.0), vec2(crate::studio::LEFT_WIDTH, 2400.0));
+        let mut asked = None;
+        let output = ctx.run_ui(raw, |ui| {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(column), |ui| {
+                ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                let head = slide_list_head(ui, show, state, at);
+                let list = slide_list(ui, show, state, &mut |_| None, at);
+                asked = head.or(list);
+            });
+        });
+        (output, asked)
+    }
+
+    /// Where the slides' column draws `words`.
+    fn slide_column_place(ctx: &egui::Context, show: &Show, state: &mut HomeState, words: &str) -> egui::Pos2 {
+        let (output, _) = slide_column(ctx, show, state, vec![]);
+        let at = crate::studio::tests::place_of(&output, words).expect(words);
+        output.drop_without_applying_deltas();
+        at
+    }
+
+    /// Clicks where the slides' column draws `words`; returns the slide it asked to open.
+    fn click_slide_words(ctx: &egui::Context, show: &Show, state: &mut HomeState, words: &str) -> Option<SlideRef> {
+        let at = slide_column_place(ctx, show, state, words);
+        let mut asked = None;
+        for events in crate::studio::tests::click_frames(at, egui::PointerButton::Primary) {
+            let (output, now) = slide_column(ctx, show, state, events);
+            output.drop_without_applying_deltas();
+            asked = asked.or(now);
+        }
+        asked
+    }
+
+    /// Drags in the slides' column from one point to another and lets go there (or, with
+    /// `escape`, presses Escape first). Returns what the frame before letting go drew.
+    fn drag_slides(
+        ctx: &egui::Context,
+        show: &Show,
+        state: &mut HomeState,
+        from: egui::Pos2,
+        to: egui::Pos2,
+        escape: bool,
+    ) -> egui::FullOutput {
+        let button = |pos, pressed| Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let run = |state: &mut HomeState, events: Vec<Event>| slide_column(ctx, show, state, events).0;
+        run(state, vec![Event::PointerMoved(from)]).drop_without_applying_deltas();
+        run(state, vec![button(from, true)]).drop_without_applying_deltas();
+        for step in 1..=4 {
+            let at = from + (to - from) * (step as f32 / 4.0);
+            run(state, vec![Event::PointerMoved(at)]).drop_without_applying_deltas();
+        }
+        let held = run(state, vec![]);
+        if escape {
+            run(state, vec![crate::studio::tests::key(Key::Escape)]).drop_without_applying_deltas();
+        }
+        run(state, vec![button(to, false)]).drop_without_applying_deltas();
+        run(state, vec![]).drop_without_applying_deltas();
+        held
+    }
+
+    #[test]
+    fn slides_dragged_in_the_edit_view_go_where_the_ink_line_is() {
+        let ctx = crate::studio::tests::styled();
+        let (show, mut state) = song_open(&[("Verse 1", 2), ("Chorus", 2), ("Verse 2", 2)], 0);
+        let strip = |state: &mut HomeState, number: &str| slide_column_place(&ctx, &show, state, number);
+        // A picture's strip is its lower half; 110 points above the strip is its upper half.
+        let (first, third, fifth) = (strip(&mut state, "01"), strip(&mut state, "03"), strip(&mut state, "05"));
+        // The first, onto the lower half of the third: it goes after the third, in its group,
+        // and its name follows the pointer until it is let go.
+        let held = drag_slides(&ctx, &show, &mut state, first - vec2(0.0, 60.0), third, false);
+        assert!(crate::studio::tests::place_of(&held, "01 Verse 1").is_some(), "its name follows the pointer");
+        held.drop_without_applying_deltas();
+        let asked = state.slide_request.take().map(|(_, request)| request);
+        assert_eq!(asked, Some(SlideRequest::Move { slides: vec![0], to: 2, after: true }));
+        // Two picked out, one of them dragged: both go, before the fifth.
+        state.picked_slides = vec![SlideRef { presentation: 0, slide: 1 }, SlideRef { presentation: 0, slide: 0 }];
+        let second = strip(&mut state, "02");
+        let held = drag_slides(&ctx, &show, &mut state, second - vec2(0.0, 60.0), fifth - vec2(0.0, 110.0), false);
+        assert!(crate::studio::tests::place_of(&held, "2 slides").is_some());
+        held.drop_without_applying_deltas();
+        let asked = state.slide_request.take().map(|(_, request)| request);
+        assert_eq!(asked, Some(SlideRequest::Move { slides: vec![0, 1], to: 4, after: false }));
+        // Stopped with Escape, or let go away from the list, nothing moves.
+        state.picked_slides.clear();
+        drag_slides(&ctx, &show, &mut state, first - vec2(0.0, 60.0), third, true).drop_without_applying_deltas();
+        assert_eq!(state.slide_request, None, "Escape");
+        let away = pos2(600.0, third.y);
+        drag_slides(&ctx, &show, &mut state, first - vec2(0.0, 60.0), away, false).drop_without_applying_deltas();
+        assert_eq!(state.slide_request, None, "let go over the slide being edited");
+    }
+
+    #[test]
+    fn where_dragged_slides_go_by_the_pointer_between_two_pictures() {
+        // Three pictures 100 high with 6 between them.
+        let rows: Vec<Rect> =
+            (0..3).map(|n| Rect::from_min_size(pos2(0.0, n as f32 * 106.0), vec2(200.0, 100.0))).collect();
+        // Over the lower half of the second, or the room just under it: after the second.
+        assert_eq!(slide_drop(&rows, &[0], 180.0), Some((1, true)));
+        assert_eq!(slide_drop(&rows, &[0], 208.0), Some((1, true)));
+        // Just above the third, or over its upper half: before the third.
+        assert_eq!(slide_drop(&rows, &[0], 210.0), Some((2, false)));
+        assert_eq!(slide_drop(&rows, &[0], 230.0), Some((2, false)));
+        // Next to itself: the nearest slide not being moved instead.
+        assert_eq!(slide_drop(&rows, &[1], 180.0), Some((0, true)));
+        assert_eq!(slide_drop(&rows, &[1, 2], 300.0), Some((0, true)));
+        assert_eq!(slide_drop(&rows, &[0, 1], -10.0), Some((2, false)));
+        assert_eq!(slide_drop(&rows, &[0, 1, 2], 80.0), None, "nowhere to go");
+    }
+
+    #[test]
+    fn a_group_renamed_in_the_edit_views_slides_keeps_its_name_where_and_as_it_was() {
+        use crate::studio::tests::{key, letters, same_letters};
+        let ctx = crate::studio::tests::styled();
+        let (show, mut state) = song_open(&[("Verse 1", 1), ("Chorus", 1)], 1);
+        let before = letters(slide_column(&ctx, &show, &mut state, vec![]).0, "CHORUS");
+        state.renaming_group = Some((1, "Chorus".to_owned()));
+        state.rename_started = true;
+        slide_column(&ctx, &show, &mut state, vec![]).0.drop_without_applying_deltas();
+        let typing = letters(slide_column(&ctx, &show, &mut state, vec![]).0, "CHORUS");
+        same_letters(&before, &typing, "group");
+        slide_column(&ctx, &show, &mut state, vec![Event::Text(" two".to_owned())]).0.drop_without_applying_deltas();
+        slide_column(&ctx, &show, &mut state, vec![key(Key::Enter)]).0.drop_without_applying_deltas();
+        assert_eq!(state.pending_group_name, Some((0, 1, "Chorus two".to_owned())), "Return keeps what was typed");
+        assert!(state.renaming_group.is_none());
+        // A double click on a slide retypes its group's name; the first click opens the slide.
+        let at = slide_column_place(&ctx, &show, &mut state, "01");
+        let button = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut opened = None;
+        let presses = [true, false, true, false].map(|pressed| vec![button(pressed)]);
+        for events in std::iter::once(vec![Event::PointerMoved(at)]).chain(presses) {
+            let (output, asked) = slide_column(&ctx, &show, &mut state, events);
+            output.drop_without_applying_deltas();
+            opened = opened.or(asked);
+        }
+        assert_eq!(opened, Some(SlideRef { presentation: 0, slide: 0 }));
+        assert_eq!(state.renaming_group, Some((0, "Verse 1".to_owned())));
+    }
+
+    #[test]
+    fn the_keys_over_the_edit_views_slides_act_on_the_slides_picked_out() {
+        let ctx = crate::studio::tests::styled();
+        let (show, mut state) = song_open(&[("Verse 1", 3), ("Chorus", 2)], 1);
+        let words = |slides: &[Slide]| slides.iter().map(|slide| slide.texts()[0].1.clone()).collect::<Vec<_>>();
+        // The second and third picked out.
+        state.picked_slides = vec![SlideRef { presentation: 0, slide: 2 }, SlideRef { presentation: 0, slide: 1 }];
+        click_slide_words(&ctx, &show, &mut state, "Copy");
+        match state.slide_request.take() {
+            Some((at, SlideRequest::AddAfter(copies))) => {
+                assert_eq!(at.slide, 2, "after the last of them");
+                assert_eq!(words(&copies), ["Verse 1 line 1", "Verse 1 line 2"]);
+            }
+            other => panic!("Copy asked for {other:?}"),
+        }
+        click_slide_words(&ctx, &show, &mut state, "\u{2191}");
+        let asked = state.slide_request.take().map(|(_, request)| request);
+        assert_eq!(asked, Some(SlideRequest::Move { slides: vec![1, 2], to: 0, after: false }));
+        click_slide_words(&ctx, &show, &mut state, "\u{2193}");
+        let asked = state.slide_request.take().map(|(_, request)| request);
+        assert_eq!(asked, Some(SlideRequest::Move { slides: vec![1, 2], to: 3, after: true }));
+        click_slide_words(&ctx, &show, &mut state, "Delete");
+        let asked: Vec<usize> = state.confirm_delete_slides.iter().map(|at| at.slide).collect();
+        assert_eq!(asked, [1, 2], "asked about, not deleted yet");
+        assert!(state.alert_open());
+        state.confirm_delete_slides.clear();
+        // Add: one slide after the one open, laid out like it with no words.
+        click_slide_words(&ctx, &show, &mut state, "Add");
+        match state.slide_request.take() {
+            Some((at, SlideRequest::AddAfter(added))) => {
+                assert_eq!((at.slide, words(&added)), (1, vec![String::new()]));
+            }
+            other => panic!("Add asked for {other:?}"),
+        }
+        // Nothing picked out: Copy copies the slide open, as the editor has it now.
+        state.picked_slides.clear();
+        if let Some(draft) = state.editing.as_mut() {
+            draft.slide.set_words("Changed in the editor", "");
+        }
+        click_slide_words(&ctx, &show, &mut state, "Copy");
+        match state.slide_request.take() {
+            Some((at, SlideRequest::AddAfter(copies))) => {
+                assert_eq!((at.slide, words(&copies)), (1, vec!["Changed in the editor".to_owned()]));
+            }
+            other => panic!("Copy asked for {other:?}"),
+        }
+        // Every slide picked out: Delete would leave none, so it does nothing.
+        state.picked_slides = (0..5).map(|slide| SlideRef { presentation: 0, slide }).collect();
+        click_slide_words(&ctx, &show, &mut state, "Delete");
+        assert!(state.confirm_delete_slides.is_empty());
+    }
+
+    #[test]
+    fn a_slide_deleted_from_under_the_editor_hands_its_place_to_the_next_that_stayed() {
+        assert_eq!(place_after_deleting(4, &[1, 2]), 2);
+        assert_eq!(place_after_deleting(2, &[3, 1, 2]), 1, "gone: the first after it that stayed");
+        assert_eq!(place_after_deleting(0, &[0]), 0);
+    }
+
+    #[test]
+    fn the_edit_view_offers_the_playlists_songs_and_a_click_opens_one() {
+        let ctx = crate::studio::tests::styled();
+        let show = three_songs();
+        let mut state = HomeState::default();
+        // Three, One, and Three again; Two, open, isn't in it.
+        let current = state.services.current;
+        for at in [2, 0, 2] {
+            let song = &show.presentations()[at];
+            let item = crate::service::Item::Song { key: song.id.to_string(), title: song.title.clone(), show_with: None };
+            state.services.list[current].items.push(item);
+        }
+        state.playlist_open = true;
+        state.editing = EditDraft::of(&show, SlideRef { presentation: 1, slide: 0 });
+        let (output, _) = slide_column(&ctx, &show, &mut state, vec![]);
+        let place = |words: &str| crate::studio::tests::place_of(&output, words).map(|at| at.y);
+        let (three, one, two) = (place("Three"), place("One"), place("Two"));
+        output.drop_without_applying_deltas();
+        assert!(three.is_some() && one.is_some() && two.is_some(), "the playlist's songs, and the one open");
+        assert!(three < one && one < two, "in the playlist's order, each once, the one open after them");
+        assert_eq!(click_slide_words(&ctx, &show, &mut state, "Three"), Some(SlideRef { presentation: 2, slide: 0 }));
     }
 
     #[test]

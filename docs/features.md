@@ -486,13 +486,16 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **The Edit view** edits four kinds of thing, chosen by a switch at the top of its left
   column: a song's Slides, the Themes and their templates, the Props, and the Stage screens'
   layouts. View › Themes, Control-T and `sp view themes` open
-  it on the themes. Under Props and Stage the left column lists them the same way: a heading
-  (PROPS, STAGE LAYOUTS), a row of keys that act on the one open (Add, Copy, Delete, which asks
-  first, and ↑ and ↓ to move it up or down the list), then each as its picture with its
-  number and name under it, the one open on a lighter grey with a ring round it. A click opens
-  one, a double click retypes its name in place (the name keeps its look while it is
-  retyped), and a right-click opens its other choices; the objects of the one open stay at the
-  foot of the column.
+  it on the themes. Under Slides, Props and Stage the left column lists them the same way: a
+  heading (SLIDES, PROPS, STAGE LAYOUTS), a row of keys that act on the one open (Add, Copy,
+  Delete, which asks first, and ↑ and ↓ to move it up or down the list), then each as its
+  picture with its number and name under it, the one open on a lighter grey with a ring round
+  it. A click opens one, a double click retypes its name in place (the name keeps its look
+  while it is retyped), and a right-click opens its other choices; the objects of the one open
+  stay at the foot of the column. Under Slides, a SONG heading comes first, over the songs to
+  choose from as plain rows with a song's mark (those of the playlist the Show view lists, or
+  of the library it lists, and the song open), the open one lighter; a long list scrolls in
+  its own room.
 - **Looking at one screen**: with more than two screens, a small arrow in the preview block's
   head opens a menu of them (What the room sees, each audience screen, the stage screens). The
   preview then shows what that one screen shows, drawn as it draws it (its own theme, layers and
@@ -737,17 +740,26 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   faint, and the list scrolls when the drag nears its top or bottom. A press that barely moves
   is a click. Under an arrangement a slide moves only among its own group. Pick out
   several (Command or Shift) and drag one of them to move them all, in their order. In the Edit
-  view, a slide dropped on a group's name goes at its start, and its right-click menu has Move
-  Up and Move Down. The slide on screen stays on screen; Undo puts them back. A drag between
-  slides still draws a box to pick them out.
-- The Edit view lists the song's slides as cards, as the Show view does: each picture with a
-  bar in its group's colour under it, its number, and the group's name on its first slide.
-  ↑ and ↓ open the slide before or after (with no object selected). Shift-click picks out the
-  slides from the one open to the one clicked, Command-click picks one out or puts it back, as
-  in the Show view and the lists of songs and media; the slides picked out move together when
-  one is dragged, and Cmd-C copies them. While a question is open in the Edit view (whether to
-  delete slides, a prop, a stage layout or a template), Delete, the arrows and the other keys
-  wait for it and change nothing behind it.
+  view, what is dragged is named beside the pointer (its number and group, or how many), as
+  the playlist's items are; letting go away from the list, or Escape, leaves the slides where
+  they were. The slide on screen stays on screen; Undo puts them back. A drag between slides
+  still draws a box to pick them out.
+- The Edit view lists the song's slides in the order written, as pictures with a strip under
+  each: its number, a dot in its group's colour, and its group's name (and label). The slide
+  open has a ring round it, the one on screen an orange strip, slides picked out a faint ring,
+  and a slide switched off is dimmed. The keys over them act on the slides picked out, or the
+  one open: Add puts a new slide just after the one open, laid out like it with its boxes
+  empty, and opens it; Copy puts copies just after the last of them and opens the first copy;
+  Delete asks first (it is off when it would take every slide), and the slide after a deleted
+  one opens in its place; ↑ and ↓ move them one place, into the group they move into. A
+  double click on a slide, or Rename Group on its right-click menu, retypes its group's name
+  in its strip (a group's colour follows its name); the menu also has Duplicate, Delete…,
+  Move Up and Move Down. ↑ and ↓ open the slide before or after (with no object selected).
+  Shift-click picks out the slides from the one open to the one clicked, Command-click picks
+  one out or puts it back, as in the Show view and the lists of songs and media; the slides
+  picked out move together when one is dragged, and Cmd-C copies them. While a question is
+  open in the Edit view (whether to delete slides, a prop, a stage layout or a template),
+  Delete, the arrows and the other keys wait for it and change nothing behind it.
 - An editor for a song's slides: move, resize and restyle text boxes, with alignment guides
   and a safe-area edge, multi-select (Shift or Command, or drag a box around them), copy and
   paste, undo, renaming by clicking a name, font search, and typing straight on the slide.

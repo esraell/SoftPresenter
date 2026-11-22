@@ -3725,22 +3725,7 @@ impl App {
         let followed = state.editing.as_ref().map(|draft| (draft.at, draft.slide.id));
         self.undo_show(redo);
         // The slide being edited is found again where the change left it.
-        let Some((at, id)) = followed else { return };
-        let Some(running) = self.running.as_mut() else { return };
-        let song = self.show.presentations().get(at.presentation);
-        let found = song.and_then(|song| song.slides().position(|(_, slide)| slide.id == id));
-        match found {
-            Some(slide) => {
-                if let Some(draft) = running.home_state.editing.as_mut() {
-                    draft.at.slide = slide;
-                }
-            }
-            None => {
-                let count = song.map_or(0, |song| song.slide_count());
-                let slide = at.slide.min(count.saturating_sub(1));
-                running.home_state.editing = EditDraft::of(&self.show, sp_engine::SlideRef { slide, ..at });
-            }
-        }
+        self.follow_edited_slide(followed, followed.map_or(0, |(at, _)| at.slide));
     }
 
     /// A change of a song's slides made from the Edit view goes in its undo order.
@@ -7368,6 +7353,13 @@ impl App {
             }
             return;
         }
+        // The slide being edited in this song, if one is: where it is and which it is, so the
+        // editor stays on it wherever the change puts it.
+        let followed = self.running.as_ref().and_then(|running| {
+            let state = &running.home_state;
+            let draft = state.editing.as_ref().filter(|_| state.theme_edit.is_none())?;
+            (draft.at.presentation == at.presentation).then_some((draft.at, draft.slide.id))
+        });
         // Several slides: from the last to the first, so each place still names the same slide.
         if let SlideRequest::DeleteMany(slides) = &request {
             let mut slides = slides.clone();
@@ -7400,11 +7392,16 @@ impl App {
                 running.home_state.selected_slide = None;
                 running.home_window.request_redraw();
             }
+            // The slide being edited deleted: the one now in its place opens.
+            let instead = followed.map_or(0, |(open, _)| home::place_after_deleting(open.slide, &slides));
+            self.follow_edited_slide(followed, instead);
             return;
         }
         let (changed, shift) = match &request {
             SlideRequest::DeleteMany(_) | SlideRequest::Move { .. } => (None, None),
-            SlideRequest::PasteAfter(slides) => (song.with_slides_after(at.slide, slides), Some(true)),
+            SlideRequest::PasteAfter(slides) | SlideRequest::AddAfter(slides) => {
+                (song.with_slides_after(at.slide, slides), Some(true))
+            }
             SlideRequest::Group(name) => (song.with_group_starting(at.slide, name), None),
             SlideRequest::Label(label) => {
                 let slide = song.slide(at.slide).map(|(_, slide)| Slide { label: label.clone(), ..slide.clone() });
@@ -7416,7 +7413,10 @@ impl App {
         self.note_song_step();
         let mut changes = self.show.replace_presentation(at.presentation, Arc::new(changed));
         // As many places taken as slides were pasted.
-        let added = if let SlideRequest::PasteAfter(slides) = &request { slides.len() } else { 1 };
+        let added = match &request {
+            SlideRequest::PasteAfter(slides) | SlideRequest::AddAfter(slides) => slides.len(),
+            _ => 1,
+        };
         match shift {
             Some(false) => changes.slides |= self.show.slides_shifted(at.presentation, at.slide, false).slides,
             Some(true) => {
@@ -7436,6 +7436,36 @@ impl App {
         if let Some(running) = self.running.as_mut() {
             running.home_state.selected_slide = None;
             running.home_window.request_redraw();
+        }
+        match (&request, followed, self.running.as_mut()) {
+            // The Edit view's Add and Copy: the first slide made opens.
+            (SlideRequest::AddAfter(_), Some(_), Some(running)) => {
+                let made = sp_engine::SlideRef { slide: at.slide + 1, ..at };
+                running.home_state.editing = EditDraft::of(&self.show, made);
+                running.home_state.picked_slides.clear();
+            }
+            _ => self.follow_edited_slide(followed, followed.map_or(0, |(open, _)| open.slide)),
+        }
+    }
+
+    /// The slide being edited, found again by its id after its song's slides changed: `followed`
+    /// is where it was and which it is. Gone, the slide now at `instead` (or the last) opens.
+    fn follow_edited_slide(&mut self, followed: Option<(sp_engine::SlideRef, Uuid)>, instead: usize) {
+        let Some((at, id)) = followed else { return };
+        let Some(running) = self.running.as_mut() else { return };
+        let song = self.show.presentations().get(at.presentation);
+        let found = song.and_then(|song| song.slides().position(|(_, slide)| slide.id == id));
+        match found {
+            Some(slide) => {
+                if let Some(draft) = running.home_state.editing.as_mut() {
+                    draft.at.slide = slide;
+                }
+            }
+            None => {
+                let count = song.map_or(0, |song| song.slide_count());
+                let slide = instead.min(count.saturating_sub(1));
+                running.home_state.editing = EditDraft::of(&self.show, sp_engine::SlideRef { slide, ..at });
+            }
         }
     }
 

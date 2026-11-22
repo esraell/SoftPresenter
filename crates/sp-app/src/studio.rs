@@ -1299,7 +1299,8 @@ pub fn edit_kinds(ui: &mut egui::Ui, state: &mut HomeState) {
     }
 }
 
-// Every kind of the Edit view lists what it edits in the left column the same way: a heading in
+// Every kind of the Edit view lists what it edits in the left column the same way: what it is
+// picked from, when there is a choice (the songs), as plain rows with an icon; a heading in
 // small capitals, a row of keys (Add, Copy, Delete, ↑, ↓) that act on the one open, then each
 // one as a picture with a strip under it (its number and name), the one open on the well with a
 // ring round it. A picture's other choices are on its right-click menu. Its caller draws the
@@ -1325,6 +1326,9 @@ pub fn list_heading_with_add(ui: &mut egui::Ui, text: &str, hint: &str) -> egui:
     icon_button(ui, plus, ui.scope_id().with(("list heading add", text)), Icon::Plus, 0.6, false).on_hover_text(hint)
 }
 
+/// How tall a [`plain_row`] is.
+pub const PLAIN_ROW: f32 = 34.0;
+
 /// What a plain row of the Edit view's left column shows: an icon, a name (none while a field
 /// retypes it in its place), and a small word in faint capitals at the right (MAIN).
 pub struct PlainRow<'a> {
@@ -1339,7 +1343,7 @@ pub struct PlainRow<'a> {
 /// response, where its name starts (at the middle of its line) and how far right the name may
 /// reach, for a field that retypes it.
 pub fn plain_row(ui: &mut egui::Ui, look: &PlainRow) -> (egui::Response, egui::Pos2, f32) {
-    let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
+    let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), PLAIN_ROW), Sense::click());
     if look.on {
         ui.painter().rect_filled(row, RADIUS, CARD);
     } else if response.hovered() {
@@ -1469,7 +1473,13 @@ pub fn list_name_look(ink: Color32) -> Lettering {
 /// One picture of a list in the Edit view's left column, as wide as the room there is, 16 to 9
 /// with a strip under it: its number, its dot if it has one, its name. `list` names the list,
 /// and the picture is the `index`th of it. When another picture becomes the open one, the list
-/// scrolls it into sight. Returns what the pointer did on it, and where its parts are.
+/// scrolls it into sight. Returns what the pointer did on it, and where its parts are; the
+/// response's rect is the whole tile.
+///
+/// It takes clicks and drags. A list whose pictures can be dragged to another place moves them
+/// as the playlist's items are moved, with [`drag_let_go`], [`drop_slot`], [`paint_rows_moving`]
+/// and [`paint_carried`] over the tiles' rects (the slides of the Edit view do this). In a list
+/// that doesn't, a drag does nothing.
 pub fn list_picture(
     ui: &mut egui::Ui,
     list: egui::Id,
@@ -1480,7 +1490,7 @@ pub fn list_picture(
     let inner = width - 2.0 * LIST_PICTURE_INSET;
     let size = vec2(inner, inner * 9.0 / 16.0);
     let (tile, _) = ui.allocate_exact_size(vec2(width, LIST_PICTURE_INSET + size.y + LIST_STRIP), Sense::hover());
-    let response = ui.interact(tile, list.with(("picture", index)), Sense::click());
+    let response = ui.interact(tile, list.with(("picture", index)), Sense::click_and_drag());
     if look.open {
         ui.painter().rect_filled(tile, 9.0, CARD);
         ui.painter().rect_stroke(tile, 9.0, Stroke::new(2.0, SELECTED), StrokeKind::Outside);
@@ -2733,16 +2743,15 @@ impl SongAsks {
     }
 }
 
-/// The songs of the library chosen (or every song): a click opens a song, its "more" button
-/// (or a right-click) opens its menu, and it can be dragged onto a playlist or a library in
-/// the chooser, which shows while songs are carried.
-fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
+/// The songs the left column lists for the library chosen (or every song, with none chosen),
+/// in the order chosen and through the filter. A library chosen that has gone is let go. The
+/// list is made again only when the songs, the library shown, the filter or the order change,
+/// so a library of thousands of songs doesn't slow every frame.
+pub fn listed_songs(show: &Show, state: &mut HomeState) -> std::sync::Arc<crate::kept::SongList> {
     let library = state.library_shown.and_then(|id| state.libraries.iter().position(|library| library.id == id));
     if library.is_none() {
         state.library_shown = None;
     }
-    // The list is made again only when the songs, the library shown, the filter or the order
-    // change, so a library of thousands of songs doesn't slow every frame.
     let epoch = state.lists.songs.epoch();
     let songs_of =
         |at: Option<usize>| at.and_then(|at| state.libraries.get(at)).map(|library| library.songs.as_slice());
@@ -2750,16 +2759,23 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
     let kept = state.lists.song_list.get(|(made_in, made_of, filter, in_order)| {
         *made_in == epoch && made_of.as_deref() == songs_of(library) && *filter == state.filter && *in_order == order
     });
-    let list = match kept {
+    match kept {
         Some(list) => list,
         None => {
             let made = song_list(show, state, library.and_then(|at| state.libraries.get(at)));
             let made_of = songs_of(library).map(<[String]>::to_vec);
             state.lists.song_list.keep((epoch, made_of, state.filter.clone(), order), made)
         }
-    };
+    }
+}
+
+/// The songs of the library chosen (or every song): a click opens a song, its "more" button
+/// (or a right-click) opens its menu, and it can be dragged onto a playlist or a library in
+/// the chooser, which shows while songs are carried.
+fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
+    let list = listed_songs(show, state);
     let (total, shown) = (list.total, &list.shown);
-    let in_library = library.is_some();
+    let in_library = state.library_shown.is_some();
     let live_in = show.live().map(|at| at.presentation);
     let mut asks = SongAsks::default();
     let list = ui.available_rect_before_wrap();
