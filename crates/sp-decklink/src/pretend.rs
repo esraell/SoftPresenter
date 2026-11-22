@@ -114,7 +114,16 @@ impl crate::play::Opener for PretendOpener {
             .ok_or_else(|| format!("{} isn't connected.", wanted.device))?;
         let (mode, format) = choose(device, wanted)?;
         let layout = Layout { width: mode.width, height: mode.height, format, row_bytes: format.row_bytes(mode.width) };
-        Ok(Opened { card: SimCard::new(), device: device.name.clone(), mode, layout, keyed: wanted.keying })
+        let card = SimCard::new();
+        // Testing aid: SOFTPRESENTER_PRETEND_DECKLINK_STALL=<seconds> has each pretend card stop
+        // giving frames back that long after it starts, as a card taken away does, so the
+        // output's opening it again and the operator's warning can be seen.
+        card.sim().stall_after = std::env::var("SOFTPRESENTER_PRETEND_DECKLINK_STALL")
+            .ok()
+            .and_then(|seconds| seconds.trim().parse::<f64>().ok())
+            .filter(|seconds| *seconds > 0.0)
+            .map(Duration::from_secs_f64);
+        Ok(Opened { card, device: device.name.clone(), mode, layout, keyed: wanted.keying })
     }
 }
 
@@ -141,6 +150,8 @@ struct Sim {
     /// The last frame written: its length and first bytes.
     written: Option<(usize, Vec<u8>)>,
     stalled: bool,
+    /// How long after it starts the card stops giving frames back (the testing switch).
+    stall_after: Option<Duration>,
     profile: bool,
     closed: bool,
 }
@@ -250,7 +261,9 @@ impl Card for SimCard {
                 if std::mem::take(&mut sim.profile) {
                     return (Vec::new(), Halt { stopped: false, profile: true });
                 }
-                if let (Some(now), false) = (sim.clock(), sim.stalled) {
+                let stalled = sim.stalled
+                    || sim.stall_after.zip(sim.started).is_some_and(|(after, (since, _))| since.elapsed() >= after);
+                if let (Some(now), false) = (sim.clock(), stalled) {
                     let done: Vec<(usize, Finished)> = sim
                         .held
                         .iter()

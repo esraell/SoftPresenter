@@ -78,6 +78,7 @@ person:
 | `SOFTPRESENTER_NDI=<name>` | Also send over NDI under this name, this run only |
 | `SOFTPRESENTER_HIDE_DECKLINK=1` | Behave as on a computer without Desktop Video (the DeckLink driver) |
 | `SOFTPRESENTER_PRETEND_DECKLINK=1` | List made-up DeckLink devices ("Pretend DeckLink (1)"…) in place of real ones; what they are sent goes nowhere |
+| `SOFTPRESENTER_PRETEND_DECKLINK_STALL=<s>` | Each pretend DeckLink card stops taking frames that many seconds after it starts, as a card taken away does |
 
 There are more, each beside the code that reads it with a `// Testing aid:` comment. List them
 all with:
@@ -90,8 +91,8 @@ message.
 ## Rules
 
 - **`unsafe` code** is allowed only in `sp-video`'s two macOS modules (`mac` for videos and
-  pictures, `web_mac` for web pages) and `sp-ndi`'s `runtime` module, and every block says why
-  it is sound. `web_mac` also calls two web view settings outside Apple's published interface
+  pictures, `web_mac` for web pages), `sp-ndi`'s `runtime` module and `sp-decklink`'s `ffi`
+  module, and every block says why it is sound. `web_mac` also calls two web view settings outside Apple's published interface
   (window occlusion detection and the page background), only when the web view answers to them;
   the owner agreed to that on 2026-11-20. Anywhere else, find a safe way or ask the owner.
   The copy of Vello in `third_party/vello` is not a workspace crate and carries the one

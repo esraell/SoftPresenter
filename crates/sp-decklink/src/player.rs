@@ -88,6 +88,8 @@ struct Slot<F> {
     holds: Option<u64>,
     /// The card holds it: scheduled, and not yet given back.
     out: bool,
+    /// When it was last scheduled to be shown.
+    at: i64,
 }
 
 /// The pool of frames, the newest picture, and the card's timeline.
@@ -150,7 +152,7 @@ impl<F> Player<F> {
                         break;
                     }
                     let frame = card.new_frame()?;
-                    self.slots.push(Slot { frame, holds: None, out: false });
+                    self.slots.push(Slot { frame, holds: None, out: false, at: 0 });
                     self.slots.len() - 1
                 }
             };
@@ -161,6 +163,7 @@ impl<F> Player<F> {
             }
             card.schedule(&slot.frame, self.next_at, self.duration, self.scale)?;
             slot.out = true;
+            slot.at = self.next_at;
             self.next_at += self.duration;
         }
         if !self.started {
@@ -181,9 +184,19 @@ impl<F> Player<F> {
     /// scheduled are behind the card's clock (the computer stalled): the next ones are
     /// scheduled from just ahead of where the clock is now, or every one after would be late
     /// too.
+    ///
+    /// The card names the frame by the pointer it was made with. Should it ever name one this
+    /// player doesn't know, the frame scheduled earliest of those it holds is taken to be the
+    /// one (the card gives frames back in the order they are shown), so the pool never fills
+    /// up with frames it believes the card still holds.
     pub fn finished<C: Card<Frame = F>>(&mut self, key: usize, how: Finished, card: &mut C) {
-        if let Some(slot) = self.slots.iter_mut().find(|slot| C::key(&slot.frame) == key) {
-            slot.out = false;
+        let known = self.slots.iter().position(|slot| slot.out && C::key(&slot.frame) == key);
+        let earliest = || {
+            let held = self.slots.iter().enumerate().filter(|(_, slot)| slot.out);
+            held.min_by_key(|(_, slot)| slot.at).map(|(index, _)| index)
+        };
+        if let Some(index) = known.or_else(earliest) {
+            self.slots[index].out = false;
         }
         match how {
             Finished::Shown => self.counts.played += 1,
@@ -342,6 +355,26 @@ mod tests {
         player.top_up(&mut card).unwrap();
         assert_eq!(card.scheduled.last().map(|(_, at)| *at), Some(34 * D));
         assert_eq!(player.counts, Counts { played: 2, late: 2, dropped: 1 });
+    }
+
+    #[test]
+    fn a_frame_given_back_by_a_name_the_player_doesnt_know_frees_the_earliest_held() {
+        let mut card = Pretend::default();
+        let mut player: Player<usize> = Player::new(vec![0; 4], D, S);
+        player.top_up(&mut card).unwrap();
+        // Frames 0, 1, 2 are held, shown at 0, D and 2D. The card names one 99.
+        player.finished(99, Finished::Shown, &mut card);
+        assert_eq!(player.out(), 2);
+        player.top_up(&mut card).unwrap();
+        assert_eq!(card.scheduled.last(), Some(&(0, 3 * D)), "frame 0, the earliest, was taken to be it");
+        // However many come back so, the pool keeps going and never grows past its room.
+        for _ in 0..50 {
+            player.finished(99, Finished::Shown, &mut card);
+            player.top_up(&mut card).unwrap();
+        }
+        assert_eq!(player.out(), 3);
+        assert!(card.frames <= 5);
+        assert_eq!(player.counts.played, 51);
     }
 
     #[test]

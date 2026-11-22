@@ -6191,7 +6191,7 @@ impl App {
                 && decklink_playing.contains(&screen.id)
                 && !playing.contains(&screen.id)
             {
-                home_state.notice = Some(format!("{}: {doing}", screen.name));
+                home_state.notice = Some(format!("{}: {doing} Trying again.", screen.name));
             }
         }
         *decklink_playing = playing;
