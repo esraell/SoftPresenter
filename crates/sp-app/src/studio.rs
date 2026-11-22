@@ -724,18 +724,21 @@ pub fn rename_field_at(
     start: egui::Pos2,
     right: f32,
 ) -> egui::Response {
-    // As tall as the words laid out (which the name drawn is centred on), and at least a line
-    // of the face, as a field is; the words are centred in it, so they stay where they were.
+    // At least as tall as the words laid out (which the name drawn is centred on) and a line of
+    // the face, as a field is, and centred on the name's line; the words are centred in it, so
+    // they stay where they were. The toolkit puts a widget's edges on its grid, so the room
+    // reaches out to the grid line round the words rather than being moved onto it.
     let line = ui.fonts_mut(|fonts| fonts.row_height(&look.font));
-    let height = look.lay_out(ui, text).size().y.max(line);
-    let words =
-        Rect::from_min_max(pos2(start.x, start.y - height / 2.0), pos2(right.max(start.x), start.y + height / 2.0));
+    let tall = look.lay_out(ui, text).size().y.max(line);
+    let grid = egui::emath::GUI_ROUNDING;
+    let top = ((start.y - tall / 2.0) / grid).floor() * grid;
+    let words = Rect::from_min_max(pos2(start.x, top), pos2(right.max(start.x), 2.0 * start.y - top));
     // The edge goes round the words, in room of its own outside them.
     let frame = Frame::new()
         .inner_margin(egui::Margin::symmetric(3, 1))
         .stroke(Stroke::new(1.5, TEXT_FAINT))
         .corner_radius(RADIUS as u8);
-    let layout = Layout::left_to_right(Align::Center).with_main_justify(true);
+    let layout = Layout::left_to_right(Align::Center).with_main_justify(true).with_cross_justify(true);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(words + frame.total_margin()).layout(layout));
     // The theme gives fields a least height taller than a line of words; not here.
     child.spacing_mut().interact_size = egui::Vec2::ZERO;
@@ -5332,7 +5335,14 @@ pub mod tests {
         assert_eq!(shown.1.len(), typed.1.len(), "{what}: other letters");
         for ((was, at), (now, to)) in shown.1.iter().zip(&typed.1) {
             assert_eq!(was, now, "{what}");
-            assert!(at.distance(*to) < 0.001, "{what}: {was} moved from {at:?} to {to:?}");
+            assert!(
+                at.distance(*to) < 0.001,
+                "{what}: {was} moved from {:.5} {:.5} to {:.5} {:.5}",
+                at.x,
+                at.y,
+                to.x,
+                to.y
+            );
         }
     }
 
@@ -5341,50 +5351,72 @@ pub mod tests {
         Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }
     }
 
+    /// A context with only the toolkit's own fonts under the window's family names, as on a
+    /// computer that has none of the fonts the window looks for.
+    fn styled_without_the_computers_fonts() -> egui::Context {
+        let ctx = styled();
+        let mut fonts = egui::FontDefinitions::default();
+        let plain = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+        let fixed = fonts.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
+        fonts.families.insert(FontFamily::Name(SEMIBOLD.into()), plain);
+        fonts.families.insert(FontFamily::Name(FIXED_SEMIBOLD.into()), fixed);
+        ctx.set_fonts(fonts);
+        ctx.run_ui(RawInput::default(), |_| {}).drop_without_applying_deltas();
+        ctx
+    }
+
     #[test]
     fn a_name_retyped_in_place_keeps_its_letters_where_and_as_they_were_and_the_room_it_was_given() {
-        let ctx = styled();
-        let start = pos2(40.25, 30.5);
-        let looks = [
-            Lettering::plain(semibold(14.0), TEXT),
-            Lettering::plain(FontId::proportional(13.5), TEXT_DIM),
-            Lettering::plain(fixed(12.0), TEXT_FAINT),
-            Lettering::cap(TEXT_DIM),
-        ];
-        // The last has letters only the wide face has, where the computer has one.
-        let names = ["Sunday Morning", "Evening", "Kids 10:30", "Worship \u{793c}\u{62dd}"];
-        for (look, words) in looks.iter().zip(names) {
-            let shown = if look.capitals { words.to_uppercase() } else { words.to_owned() };
-            let label = drawn(&ctx, vec![], |ui| {
-                if look.capitals {
-                    cap(ui, start, Align2::LEFT_CENTER, words, look.ink);
-                } else {
-                    ui.painter().text(start, Align2::LEFT_CENTER, words, look.font.clone(), look.ink);
-                }
-            });
-            let shown_letters = letters(label, &shown);
-            let mut typed = words.to_owned();
-            let mut place = Rect::NOTHING;
-            let mut field = |ctx: &egui::Context| {
-                drawn(ctx, vec![], |ui| {
-                    let response = rename_field_at(ui, &mut typed, look, start, 300.0);
-                    response.request_focus();
-                    place = response.rect;
-                })
-            };
-            field(&ctx).drop_without_applying_deltas();
-            let typed_letters = letters(field(&ctx), &shown);
-            same_letters(&shown_letters, &typed_letters, words);
-            assert!(ctx.memory(|memory| memory.focused().is_some()), "it has the keyboard");
-            let height = ctx.fonts_mut(|fonts| {
-                fonts
-                    .layout_no_wrap(shown.clone(), look.font.clone(), look.ink)
-                    .size()
-                    .y
-                    .max(fonts.row_height(&look.font))
-            });
-            let room = Rect::from_min_max(pos2(start.x, start.y - height / 2.0), pos2(300.0, start.y + height / 2.0));
-            assert_eq!(place, room.expand2(vec2(4.5, 2.5)), "{words}: the edge goes round the room given");
+        // The faces and sizes the window's names are set in, the capitals of a heading, and a
+        // name with letters only the wide face has (where the computer has one).
+        let mut looks = vec![(Lettering::cap(TEXT_DIM), "Worship \u{793c}\u{62dd}")];
+        for size in [11.5, 12.0, 12.5, 13.0, 13.5, 14.0] {
+            looks.push((Lettering::plain(FontId::proportional(size), TEXT_DIM), "Evening"));
+            looks.push((Lettering::plain(semibold(size), TEXT), "Sunday Morning"));
+            looks.push((Lettering::plain(fixed(size), TEXT_FAINT), "Kids 10:30"));
+        }
+        // Where names start: the toolkit lays the window out on a grid of 1/32 of a point, and
+        // so does the field; a name starts on it wherever it is drawn.
+        let starts = [pos2(40.0, 30.0), pos2(40.25, 30.5), pos2(46.3125, 21.75), pos2(52.59375, 47.09375)];
+        let cases: Vec<_> = looks.iter().flat_map(|look| starts.map(|start| (start, look))).collect();
+        for ctx in [styled(), styled_without_the_computers_fonts()] {
+            for &(start, (look, words)) in &cases {
+                let what = format!("{words} in {:?} at {start:?}", look.font);
+                let shown = if look.capitals { words.to_uppercase() } else { (*words).to_owned() };
+                let label = drawn(&ctx, vec![], |ui| {
+                    if look.capitals {
+                        cap(ui, start, Align2::LEFT_CENTER, words, look.ink);
+                    } else {
+                        ui.painter().text(start, Align2::LEFT_CENTER, words, look.font.clone(), look.ink);
+                    }
+                });
+                let shown_letters = letters(label, &shown);
+                let mut typed = (*words).to_owned();
+                let mut place = Rect::NOTHING;
+                let mut field = |ctx: &egui::Context| {
+                    drawn(ctx, vec![], |ui| {
+                        let response = rename_field_at(ui, &mut typed, look, start, 300.0);
+                        response.request_focus();
+                        place = response.rect;
+                    })
+                };
+                field(&ctx).drop_without_applying_deltas();
+                let typed_letters = letters(field(&ctx), &shown);
+                same_letters(&shown_letters, &typed_letters, &what);
+                assert!(ctx.memory(|memory| memory.focused().is_some()), "{what}: it has the keyboard");
+                let height = ctx.fonts_mut(|fonts| {
+                    let laid = fonts.layout_no_wrap(shown.clone(), look.font.clone(), look.ink).size().y;
+                    laid.max(fonts.row_height(&look.font))
+                });
+                // The edge goes round the room given, 4.5 out at the sides and 2.5 above and
+                // below the line, centred on it (taller by at most the toolkit's grid).
+                let across = (place.min.x - (start.x - 4.5)).abs().max((place.max.x - 304.5).abs());
+                assert!(across < 0.001, "{what}: {place:?} is not the room given");
+                assert!((place.center().y - start.y).abs() < 0.001, "{what}: {place:?} is not centred on the line");
+                let extra = place.height() - 5.0 - height;
+                let grid = egui::emath::GUI_ROUNDING;
+                assert!((-0.001..=2.0 * grid + 0.001).contains(&extra), "{what}: {place:?} is {extra} taller");
+            }
         }
     }
 
