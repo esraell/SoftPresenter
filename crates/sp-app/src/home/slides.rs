@@ -1889,6 +1889,9 @@ fn item_bar(
             }
             crate::studio::version_section(ui, state, item);
             crate::studio::item_moves(ui, show, state, item, ask);
+            if let Some((at, _)) = song {
+                crate::studio::delete_song_from_library(ui, state, at);
+            }
         }
     };
     if let Some((at, song)) = song {

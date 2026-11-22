@@ -372,7 +372,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - A song's menu (its ⋯, or a right-click): Add to the playlist in front, Add to Playlist (any
   playlist, or a new one; for a song in a playlist, from its item or its title bar, the
   playlist it is in isn't offered), Libraries, Rename, Duplicate, Theme (a theme of its own, or
-  the songs theme), Reflow, and Delete (a song made in the app goes to the Trash).
+  the songs theme), Reflow, and Delete… (a song made in the app goes to the Trash). In a library,
+  Export… and Delete… take the songs picked out with it when it is one of them. From a playlist
+  (an item's menu, or its title bar over the slides) the menu acts on that song alone, and its
+  last choice, after Remove from Playlist, is **Delete Song from Library…**, which deletes the
+  song itself after asking. The question says "It's on the screens now; it comes off." when the
+  song is on screen ("One of them is on the screens now; it comes off." for several).
 - The tool tabs under Clear All in the right column, each a list of cards. A card's ⋯, or a
   right-click on it, opens what else it can do.
 - **Timers** count down, count down to a time of day, or count up. Each is a card with its

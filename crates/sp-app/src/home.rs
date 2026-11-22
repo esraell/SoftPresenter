@@ -5654,12 +5654,22 @@ fn confirm_delete_song(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
         },
         many => format!("Delete {} songs?", many.len()),
     };
-    let note = if songs.len() == 1 {
+    let mut note = if songs.len() == 1 {
         "A song made in SoftPresenter goes to the Trash. One opened from elsewhere stays where it is on your Mac."
     } else {
         "Songs made in SoftPresenter go to the Trash. Ones opened from elsewhere stay where they are on your Mac."
-    };
-    if let Some(delete) = confirm_delete(ui, &question, note) {
+    }
+    .to_owned();
+    // A song on the screens comes off them when it is deleted: say so first.
+    if show.live().is_some_and(|live| songs.contains(&live.presentation)) {
+        let on_screen = if songs.len() == 1 {
+            "It\u{2019}s on the screens now; it comes off."
+        } else {
+            "One of them is on the screens now; it comes off."
+        };
+        note = format!("{on_screen} {note}");
+    }
+    if let Some(delete) = confirm_delete(ui, &question, &note) {
         state.confirm_delete_songs.clear();
         if delete {
             state.picked_songs.clear();
@@ -12596,6 +12606,23 @@ mod tests {
             assert_eq!(state.screens, screens);
         }
         assert_eq!(output_label(&screens[2].output, &[]), "Gone   (disconnected)");
+    }
+
+    #[test]
+    fn deleting_a_song_on_the_screens_says_it_comes_off() {
+        let ctx = egui::Context::default();
+        let mut show = three_songs();
+        let note = |show: &Show, songs: Vec<usize>| {
+            let mut state = HomeState { confirm_delete_songs: songs, ..HomeState::default() };
+            frame_texts(&ctx, show, &mut state, vec![], 0.0);
+            let texts = frame_texts(&ctx, show, &mut state, vec![], 0.1);
+            texts.into_iter().map(|(text, _)| text).find(|text| text.contains("Trash")).expect("the question shows")
+        };
+        assert!(!note(&show, vec![1]).contains("screens"), "nothing on screen: nothing said");
+        show.apply(Command::GoTo(SlideRef { presentation: 1, slide: 0 }));
+        assert!(note(&show, vec![1]).starts_with("It\u{2019}s on the screens now; it comes off. "));
+        assert!(note(&show, vec![0, 1]).starts_with("One of them is on the screens now; it comes off. "));
+        assert!(!note(&show, vec![0, 2]).contains("screens"), "another song on screen: nothing said");
     }
 
     #[test]

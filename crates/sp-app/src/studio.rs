@@ -3211,8 +3211,17 @@ fn playlists_to_add_to(state: &HomeState, in_playlist: bool) -> Vec<usize> {
     (0..state.services.list.len()).filter(|at| !(in_playlist && *at == front)).collect()
 }
 
+/// The songs a song's menu acts on (Export…, Delete…): in a library, the songs picked out with
+/// it when it is one of them, else this song alone; from a playlist (an item or its title bar),
+/// this song alone, whatever was picked out in a library before.
+fn songs_menu_acts_on(state: &HomeState, index: usize, in_playlist: bool) -> Vec<usize> {
+    if !in_playlist && state.picked_songs.contains(&index) { state.picked_songs.clone() } else { vec![index] }
+}
+
 /// A song's right-click menu, in the library or (`in_playlist`) for an item of the playlist in
-/// front, which then isn't offered as a playlist to add it to.
+/// front, which then isn't offered as a playlist to add it to, and acts on this song alone. From
+/// a playlist its Delete is "Delete Song from Library…", at the foot of the item's menu (see
+/// [`delete_song_from_library`]), so it is never taken for Remove from Playlist.
 pub fn song_menu(
     ui: &mut egui::Ui,
     show: &Show,
@@ -3272,10 +3281,8 @@ pub fn song_menu(
         state.song_request = Some((index, crate::home::SongRequest::Duplicate));
         ui.close();
     }
-    // The songs picked out with it, when it is one of them; else this song alone.
     if ui.button("Export…").on_hover_text("Save as a song pack, to open on another computer").clicked() {
-        let songs = if state.picked_songs.contains(&index) { state.picked_songs.clone() } else { vec![index] };
-        state.export_request = Some(crate::home::ExportRequest::Songs(songs));
+        state.export_request = Some(crate::home::ExportRequest::Songs(songs_menu_acts_on(state, index, in_playlist)));
         ui.close();
     }
     // Next on the last slide goes back to the first.
@@ -3343,10 +3350,20 @@ pub fn song_menu(
         state.reflow = Some((index, sp_model::to_song_text(song)));
         ui.close();
     }
-    // Delete deletes every song picked out, when this is one of them.
-    if ui.button("Delete…").clicked() {
-        state.confirm_delete_songs =
-            if state.picked_songs.contains(&index) { state.picked_songs.clone() } else { vec![index] };
+    // In a library, Delete deletes every song picked out, when this is one of them.
+    if !in_playlist && ui.button("Delete…").clicked() {
+        state.confirm_delete_songs = songs_menu_acts_on(state, index, in_playlist);
+        ui.close();
+    }
+}
+
+/// The last choice of a playlist item's menu when the item is a song: deletes the song itself
+/// (from the library, every playlist and every library), after asking. After Remove from
+/// Playlist, which only takes the item out.
+pub fn delete_song_from_library(ui: &mut egui::Ui, state: &mut HomeState, song: usize) {
+    let hint = "Deletes the song itself, not just this item, after asking";
+    if ui.button("Delete Song from Library\u{2026}").on_hover_text(hint).clicked() {
+        state.confirm_delete_songs = songs_menu_acts_on(state, song, true);
         ui.close();
     }
 }
@@ -3464,6 +3481,9 @@ pub fn item_menu(
     }
     version_section(ui, state, index);
     item_moves(ui, show, state, index, ask);
+    if let Some(song) = song {
+        delete_song_from_library(ui, state, song);
+    }
 }
 
 /// A Version section in a playlist item's menu, once some theme has a version: every version,
@@ -5756,6 +5776,44 @@ pub mod tests {
         let offered = playlists_to_add_to(&state, true);
         assert!(!offered.contains(&front), "not the playlist the song is in");
         assert_eq!(offered.len(), all.len() - 1, "the others");
+    }
+
+    #[test]
+    fn a_songs_menu_from_a_playlist_acts_on_that_song_alone_and_deletes_it_last() {
+        use crate::service::Item;
+        // Songs Command-clicked in a library earlier are still picked out.
+        let mut state = HomeState { picked_songs: vec![0, 1, 2], ..HomeState::default() };
+        assert_eq!(songs_menu_acts_on(&state, 1, false), [0, 1, 2], "in the library, the songs picked with it");
+        assert_eq!(songs_menu_acts_on(&state, 4, false), [4], "or this one, when it isn't among them");
+        assert_eq!(songs_menu_acts_on(&state, 1, true), [1], "from a playlist, this song alone");
+        // The item's menu: Delete is the last choice, named for what it does.
+        fn words(shape: &egui::Shape, into: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => into.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| words(shape, into)),
+                _ => {}
+            }
+        }
+        let show = Show::new(vec![Arc::new(sp_model::parse_song_text("One", "Words\n"))]);
+        state.song_keys = vec!["one".to_owned()];
+        state.services.list[0].items = vec![Item::song("one", "One"), Item::song("two", "Two")];
+        let ctx = styled();
+        let mut drawn_words = Vec::new();
+        let output = drawn(&ctx, vec![], |ui| {
+            item_menu(ui, &show, &mut state, &mut Vec::new(), 0, &mut None, &mut SongAsks::default());
+        });
+        output.shapes.iter().for_each(|clipped| words(&clipped.shape, &mut drawn_words));
+        output.drop_without_applying_deltas();
+        let last: Vec<&str> = drawn_words.iter().rev().take(2).rev().map(String::as_str).collect();
+        assert_eq!(last, ["Remove from Playlist", "Delete Song from Library\u{2026}"]);
+        // The song's own part, from a playlist, has no Delete of its own.
+        let mut drawn_words = Vec::new();
+        let output = drawn(&ctx, vec![], |ui| {
+            song_menu(ui, &show, &mut state, &mut Vec::new(), 0, &mut SongAsks::default(), true);
+        });
+        output.shapes.iter().for_each(|clipped| words(&clipped.shape, &mut drawn_words));
+        output.drop_without_applying_deltas();
+        assert!(drawn_words.iter().all(|words| !words.starts_with("Delete")), "{drawn_words:?}");
     }
 
     fn press(at: egui::Pos2, pressed: bool) -> Event {
