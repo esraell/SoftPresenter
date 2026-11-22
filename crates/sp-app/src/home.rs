@@ -547,9 +547,6 @@ pub struct HomeState {
     pub version_asks: Vec<crate::versions::Ask>,
     /// The templates of the theme songs use, by id and name, for a slide's Template menu.
     pub song_templates: Vec<(sp_model::Uuid, String)>,
-    /// A slide whose template was just chosen from its menu (`None` lets the theme choose).
-    /// The app changes the slide and the screen.
-    pub pending_template: Option<(SlideRef, Option<sp_model::Uuid>)>,
     /// The template being renamed in the Theme Editor, and its name as typed so far.
     pub renaming_template: Option<(usize, String)>,
     /// Each theme's two layouts as boxes, for the pictures in the theme picker.
@@ -1848,7 +1845,6 @@ impl Default for HomeState {
             version_switch: crate::versions::Switch::default(),
             version_asks: Vec::new(),
             song_templates: Vec::new(),
-            pending_template: None,
             renaming_template: None,
             theme_layouts: Vec::new(),
             bible_layout: 0,
@@ -4339,11 +4335,7 @@ pub fn drop_slide_steps(steps: &mut Vec<EditStep>) -> bool {
 pub enum SlideRequest {
     /// Move these slides of the song, in their order, to just before the slide at `to` (or
     /// just after it, with `after`), into its group.
-    Move {
-        slides: Vec<usize>,
-        to: usize,
-        after: bool,
-    },
+    Move { slides: Vec<usize>, to: usize, after: bool },
     /// Delete these slides of the song at once (one step for Undo).
     DeleteMany(Vec<usize>),
     /// Put these slides, in order, just after this one.
@@ -4351,8 +4343,12 @@ pub enum SlideRequest {
     /// Put these slides, in order, just after this one, and open the first of them in the Edit
     /// view: its Add and Copy.
     AddAfter(Vec<Slide>),
-    Group(String),
-    Label(Option<String>),
+    /// Make these slides of the song a group of this name (one slide alone starts the group;
+    /// see `Presentation::with_group_over`).
+    Group(Vec<usize>, String),
+    /// Put these slides, changed, in their places (one step for Undo): what a slide's menu
+    /// changes for the slides picked with it (media, transition, label, hot key…).
+    Edit(Vec<(usize, Slide)>),
 }
 
 /// Where the slide at `place` of a song is once `deleted` (places in the song, in any order)

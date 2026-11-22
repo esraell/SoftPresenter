@@ -301,8 +301,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   column's (in the Show view, not on the Bible page, with the chooser put away). Nothing is said,
   as what went is there to see; Undo (Command-Z) puts them back where they were, picked out
   again; Remove from Playlist in an item's menu does the same, for all the items picked when it
-  is one of them. Slides picked go at once too, asking nothing, in one step Undo takes back
-  whole (they come back picked); only the slides picked in one song, the song of the slide
+  is one of them ("Remove 2 Items from Playlist"), and Move Up and Move Down move them all one
+  place, together, in their order, staying picked ("Move 2 Up", "Move 2 Down"). Slides picked go at once too, asking
+  nothing, in one step Undo takes back whole (they come back picked); only the slides picked in one song, the song of the slide
   picked last, never slides of another song. In a song list or a media strip, Delete asks
   first ("This can't be undone."), then deletes what is picked.
 - Pictures and videos dropped on the window, or added with the media bin's +, go into the media
@@ -396,6 +397,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   or Usual: the song's, else the one under the slides, named as "Usual (Dissolve, 0.4 s)"), Media (a picture or video, or None), Hot Key (a letter or digit that puts the slide on screen, shown on its
   picture; or None), Go to Next (after a number of seconds, shown on its picture; or None), Disable, Template (one of
   the theme's, or "Usual (the theme picks)").
+  With several slides of the song picked, the clicked one among them, Group, Media,
+  Transition, Go to Next, Hot Key, Label, Disable, Template, Paste Style, Cut, Copy,
+  Duplicate and Delete act on all of them, each in one step for Undo (Group makes just them the
+  group; Disable gives them all what it offers for the clicked one); never on slides picked in
+  another song.
   A song's menu has Loop to First Slide, for a loop of announcements. Undo and Redo (Command-Z, Shift-Command-Z) step back through
   these changes in the Show view and on the Bible page, and the audience stays on the same slide;
   what was deleted takes its turn in the same order.
@@ -416,8 +422,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   playlist it is in isn't offered; with no other playlist, **Add to New Playlist…** in its
   place), Libraries, Rename, Duplicate, Theme (a theme of its own, or
   the songs theme), Transition (its own, or Usual: the one under the slides, named), Edit Words, and Delete… (a song made in the app goes to the Trash). In a library,
-  Export… and Delete… take the songs picked out with it when it is one of them. From a playlist
-  (an item's menu, or its title bar over the slides) the menu acts on that song alone, and its
+  Export… and Delete… take the songs picked out with it when it is one of them, and so do Add to
+  the playlist in front and Add to Playlist ▸, as dragging them does. Add to Playlist ▸ marks a
+  playlist that has the song already ("Sunday · in it already"). From a playlist (an item's
+  menu, or its title bar over the slides), Add to Playlist ▸ adds the songs of every item picked
+  with it when it is one of several picked; the rest of the menu acts on that song alone, and its
   last choice, after Remove from Playlist, is **Delete Song from Library…**, which deletes the
   song itself after asking. The question says "It's on the screens now; it comes off." when the
   song is on screen ("One of them is on the screens now; it comes off." for several).

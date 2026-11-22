@@ -2752,48 +2752,94 @@ fn song_list(show: &Show, state: &HomeState, library: Option<&crate::libraries::
     crate::kept::SongList { total, shown }
 }
 
-/// What a song's menu asked for that changes a playlist: the song added to the playlist in
-/// front, or to another playlist (`None` for a new one).
+/// What a song's menu asked for that changes a playlist: songs (by their places among the
+/// songs: this one, or those picked with it) added to the playlist in front, or to another
+/// playlist (`None` for a new one).
 #[derive(Default)]
 pub struct SongAsks {
-    pub add: Option<usize>,
-    pub add_to: Option<(usize, Option<usize>)>,
+    pub add: Vec<usize>,
+    pub add_to: Option<(Vec<usize>, Option<usize>)>,
 }
 
 impl SongAsks {
-    /// Carries out what was asked.
+    /// Carries out what was asked, as every add does (see [`add_items`]).
     pub fn carry_out(self, show: &Show, state: &mut HomeState) {
         use crate::service::Item;
-        if let Some(index) = self.add
-            && let (Some(key), Some(song)) = (state.song_keys.get(index), show.presentations().get(index))
-        {
-            state.services.add(Item::song(key.clone(), song.title.clone()));
+        let items = |state: &HomeState, songs: &[usize]| -> Vec<Item> {
+            songs
+                .iter()
+                .filter_map(|at| {
+                    Some(Item::song(state.song_keys.get(*at)?.clone(), show.presentations().get(*at)?.title.clone()))
+                })
+                .collect()
+        };
+        if !self.add.is_empty() {
+            let made = items(state, &self.add);
+            add_items(state, state.services.front_at(), made);
         }
         // To the playlist chosen, or to a new one, which is then shown with its name ready to type.
-        if let Some((index, playlist)) = self.add_to
-            && let (Some(key), Some(song)) = (state.song_keys.get(index).cloned(), show.presentations().get(index))
-        {
-            let item = Item::song(key, song.title.clone());
+        if let Some((songs, playlist)) = self.add_to {
+            let made = items(state, &songs);
             match playlist {
                 Some(at) => {
-                    let name = state.services.list.get(at).map_or_else(String::new, |p| p.name.clone());
-                    state.notice = Some(if state.services.add_to(at, item) {
-                        format!("Added {} to {name}.", song.title)
-                    } else {
-                        format!("{} is already in {name}.", song.title)
-                    });
+                    add_items(state, at, made);
                 }
                 None => {
                     state.services.add_service();
-                    state.services.add(item);
+                    let at = state.services.front_at();
+                    state.services.put_in(at, None, made);
                     state.playlist_open = true;
                     state.chooser_open = true;
-                    state.renaming_service = Some((state.services.front_at(), state.services.front().name.clone()));
+                    state.renaming_service = Some((at, state.services.front().name.clone()));
                     state.rename_started = true;
                 }
             }
         }
     }
+}
+
+/// Whether a playlist (by its place) is in sight: the one in front, listed in the left column
+/// (not the chooser, not a library, not the Bible page).
+pub fn playlist_in_sight(state: &HomeState, playlist: usize) -> bool {
+    playlist == state.services.front_at() && state.playlist_open && !state.chooser_open && !state.bible_open
+}
+
+/// Adds items to a playlist (by its place), as every add does (a song's menu, the find box's
+/// Command-Return, the Bible page's Add): in the playlist in front just after the open item (or
+/// at the end, with none open), in their order, the last of them becoming the open one; in
+/// another playlist at its end. A song or passage the playlist has already isn't added again.
+/// A notice only when they went out of sight (another playlist, or the one in front while it
+/// isn't listed), or when one was there already. Returns how many went in.
+pub fn add_items(state: &mut HomeState, playlist: usize, items: Vec<crate::service::Item>) -> usize {
+    use crate::service::Item;
+    let Some(name) = state.services.list.get(playlist).map(|list| list.name.clone()) else { return 0 };
+    let front = playlist == state.services.front_at();
+    let count = state.services.front().items.len();
+    let after = front.then(|| state.services.chosen.or(count.checked_sub(1))).flatten();
+    let songs = items.iter().all(|item| matches!(item, Item::Song { .. }));
+    let titles: Vec<String> = items.iter().map(|item| item.title().to_owned()).collect();
+    let went = state.services.put_in(playlist, after, items);
+    // Into an empty playlist in front, the last one put in is the open one too.
+    if front && after.is_none() && went.contains(&true) {
+        state.services.chosen = state.services.front().items.len().checked_sub(1);
+    }
+    let added: Vec<&str> = titles.iter().zip(&went).filter(|(_, went)| **went).map(|(t, _)| t.as_str()).collect();
+    let already: Vec<&str> = titles.iter().zip(&went).filter(|(_, went)| !**went).map(|(t, _)| t.as_str()).collect();
+    let there = match already.as_slice() {
+        [] => None,
+        [one] => Some(format!("{one} is already in {name}.")),
+        many => Some(format!("{} of them are already in {name}.", many.len())),
+    };
+    let said = match added.as_slice() {
+        [] => there,
+        _ if playlist_in_sight(state, playlist) => there,
+        [one] => Some(format!("Added {one} to {name}.")),
+        many => Some(format!("Added {} {} to {name}.", many.len(), if songs { "songs" } else { "items" })),
+    };
+    if let Some(said) = said {
+        state.say(said);
+    }
+    added.len()
 }
 
 /// The songs the left column lists for the library chosen (or every song, with none chosen),
@@ -3260,6 +3306,33 @@ fn songs_menu_acts_on(state: &HomeState, index: usize, in_playlist: bool) -> Vec
     if !in_playlist && state.picked_songs.contains(&index) { state.picked_songs.clone() } else { vec![index] }
 }
 
+/// The songs a song's menu adds to a playlist (Add to the playlist in front, Add to Playlist ▸),
+/// as dragging them does: in a library, the songs picked out with it when it is one of them;
+/// from a playlist, the songs of the items picked out with its item when that is one of several
+/// picked, in the playlist's order; else this song alone.
+fn songs_menu_adds(show: &Show, state: &HomeState, index: usize, in_playlist: bool) -> Vec<usize> {
+    use crate::service::Item;
+    if !in_playlist {
+        return songs_menu_acts_on(state, index, false);
+    }
+    let items = &state.services.front().items;
+    let key = state.song_keys.get(index);
+    let place = items.iter().position(|item| matches!(item, Item::Song { key: have, .. } if Some(have) == key));
+    let picks = &state.item_picks;
+    if !place.is_some_and(|place| picks.several() && picks.places.contains(&place)) {
+        return vec![index];
+    }
+    let mut places = picks.places.clone();
+    places.sort_unstable();
+    places
+        .iter()
+        .filter_map(|at| match items.get(*at) {
+            Some(Item::Song { key, .. }) => playlist_song(show, state, key).filter(|song| !state.app_made(*song)),
+            _ => None,
+        })
+        .collect()
+}
+
 /// A song's right-click menu, in the library or (`in_playlist`) for an item of the playlist in
 /// front, which then isn't offered as a playlist to add it to, and acts on this song alone. From
 /// a playlist its Delete is "Delete Song from Library…", at the foot of the item's menu (see
@@ -3274,29 +3347,35 @@ pub fn song_menu(
     in_playlist: bool,
 ) {
     let front = state.services.front().name.clone();
+    // The songs an add takes: this one, or those picked with it, as a drag would carry them.
+    let adds = songs_menu_adds(show, state, index, in_playlist);
     if !in_playlist && ui.button(format!("Add to {front}")).clicked() {
-        asks.add = Some(index);
+        asks.add = adds.clone();
         ui.close();
     }
     // Another playlist, or a new one; with no other playlist to offer, a new one straight away.
     let others = playlists_to_add_to(state, in_playlist);
     if others.is_empty() {
         if ui.button("Add to New Playlist\u{2026}").on_hover_text("A new playlist with this song in it").clicked() {
-            asks.add_to = Some((index, None));
+            asks.add_to = Some((adds, None));
             ui.close();
         }
     } else {
+        // A playlist that has the song already says so.
+        let item = state.song_keys.get(index).map(|key| crate::service::Item::song(key.clone(), String::new()));
         ui.menu_button("Add to Playlist", |ui| {
             for at in others {
                 let Some(playlist) = state.services.list.get(at) else { continue };
-                if ui.button(playlist.name.as_str()).clicked() {
-                    asks.add_to = Some((index, Some(at)));
+                let has = item.as_ref().is_some_and(|item| state.services.place_of(at, item).is_some());
+                let label = if has { format!("{} \u{b7} in it already", playlist.name) } else { playlist.name.clone() };
+                if ui.button(label).clicked() {
+                    asks.add_to = Some((adds.clone(), Some(at)));
                     ui.close();
                 }
             }
             ui.separator();
             if ui.button("New Playlist\u{2026}").clicked() {
-                asks.add_to = Some((index, None));
+                asks.add_to = Some((adds.clone(), None));
                 ui.close();
             }
         });
@@ -3648,17 +3727,24 @@ fn item_moves(ui: &mut egui::Ui, show: &Show, state: &HomeState, index: usize, a
         }
         ui.separator();
     }
-    if ui.add_enabled(index > 0, egui::Button::new("Move Up")).clicked() {
+    // With several picked out, this one among them, they all move (one place each, together)
+    // and they all go.
+    let picks = &state.item_picks;
+    let these = items_acted_on(state, index);
+    let (first, last) = (these.first().copied().unwrap_or(index), these.last().copied().unwrap_or(index));
+    let (up, down) = match these.len() {
+        1 => ("Move Up".to_owned(), "Move Down".to_owned()),
+        many => (format!("Move {many} Up"), format!("Move {many} Down")),
+    };
+    if ui.add_enabled(first > 0, egui::Button::new(up)).clicked() {
         *ask = Some(ItemAsk::Earlier(index));
         ui.close();
     }
-    if ui.add_enabled(index + 1 < items.len(), egui::Button::new("Move Down")).clicked() {
+    if ui.add_enabled(last + 1 < items.len(), egui::Button::new(down)).clicked() {
         *ask = Some(ItemAsk::Later(index));
         ui.close();
     }
     ui.separator();
-    // With several picked out, this one among them, they all go.
-    let picks = &state.item_picks;
     let label = if picks.several() && picks.places.contains(&index) {
         format!("Remove {} Items from Playlist", picks.places.len())
     } else {
@@ -3729,20 +3815,33 @@ pub fn carry_out_item_ask(show: &Show, state: &mut HomeState, commands: &mut Vec
                 }
             }
         }
-        ItemAsk::Earlier(index) => {
-            state.services.nudge(index, true);
-        }
-        ItemAsk::Later(index) => {
-            state.services.nudge(index, false);
+        // With several picked out, this one among them, they all move together and stay picked.
+        ItemAsk::Earlier(index) | ItemAsk::Later(index) => {
+            let earlier = matches!(ask, ItemAsk::Earlier(_));
+            let these = items_acted_on(state, index);
+            if these.len() == 1 {
+                state.services.nudge(index, earlier);
+            } else if let Some(now) = state.services.nudge_many(&these, earlier) {
+                state.item_picks.places = now;
+                state.item_picks.made_in(&state.services);
+            }
         }
         // With several picked out, this one among them, they all go.
         ItemAsk::Remove(index) => {
-            let picks = &state.item_picks;
-            let places =
-                if picks.several() && picks.places.contains(&index) { picks.places.clone() } else { vec![index] };
+            let places = items_acted_on(state, index);
             state.take_out_items(state.services.current, &places);
         }
     }
+}
+
+/// The items of the playlist in front a menu opened on the item at `index` acts on: those
+/// picked out, in order, when it is one of several picked; else it alone.
+fn items_acted_on(state: &HomeState, index: usize) -> Vec<usize> {
+    let picks = &state.item_picks;
+    let mut places = if picks.several() && picks.places.contains(&index) { picks.places.clone() } else { vec![index] };
+    places.sort_unstable();
+    places.dedup();
+    places
 }
 
 /// A drag starting on a playlist row: on one of several picked out it moves them all; on any
@@ -6041,6 +6140,60 @@ pub mod tests {
         assert!(!media.iter().any(|words| words == "Add Slide" || words == "Song"));
         let header = drawn_words(&mut state, &show, 2);
         assert_eq!(header, ["Rename", "Move Up", "Move Down", "Remove from Playlist"]);
+        // With several picked, the clicked one among them, the menu acts on them all.
+        state.item_picks.places = vec![2, 1];
+        state.item_picks.made_in(&state.services);
+        let header = drawn_words(&mut state, &show, 2);
+        assert_eq!(header, ["Rename", "Move 2 Up", "Move 2 Down", "Remove 2 Items from Playlist"]);
+        let song = drawn_words(&mut state, &show, 0);
+        assert!(song.iter().any(|words| words == "Move Up"), "not among them: just it {song:?}");
+    }
+
+    #[test]
+    fn with_several_picked_move_and_add_act_on_them_all() {
+        use crate::service::Item;
+        let titles = ["One", "Two", "Three", "Four"];
+        let show =
+            Show::new(titles.iter().map(|title| Arc::new(sp_model::parse_song_text(title, "Words\n"))).collect());
+        let mut state = HomeState {
+            song_keys: titles.iter().map(|title| title.to_lowercase()).collect(),
+            playlist_open: true,
+            ..HomeState::default()
+        };
+        state.services.list[0].items = titles.iter().map(|title| Item::song(title.to_lowercase(), *title)).collect();
+        let names = |state: &HomeState, at: usize| -> Vec<String> {
+            state.services.list[at].items.iter().map(|item| item.title().to_owned()).collect()
+        };
+        // Two and Four picked: Move 2 Up takes both one place up, and they stay picked.
+        state.item_picks.places = vec![1, 3];
+        state.item_picks.made_in(&state.services);
+        carry_out_item_ask(&show, &mut state, &mut Vec::new(), ItemAsk::Earlier(3));
+        assert_eq!(names(&state, 0), ["Two", "One", "Four", "Three"]);
+        assert_eq!(state.item_picks.places, [0, 2]);
+        // Song ▸ Add to Playlist from one of them adds every picked song, in order.
+        state.services.list.push(crate::service::Service { name: "Evening".to_owned(), items: Vec::new() });
+        assert_eq!(songs_menu_adds(&show, &state, 3, true), [1, 3], "Two and Four");
+        assert_eq!(songs_menu_adds(&show, &state, 0, true), [0], "One isn't picked: just it");
+        SongAsks { add_to: Some((vec![1, 3], Some(1))), ..SongAsks::default() }.carry_out(&show, &mut state);
+        assert_eq!(names(&state, 1), ["Two", "Four"]);
+        let said = state.toast.take().map(|(words, _)| words);
+        assert_eq!(said.as_deref(), Some("Added 2 songs to Evening."), "out of sight, so it says where");
+        // In a library: the songs picked with the one clicked; Add to the playlist in front puts
+        // them after the open item, the last of them opened, and says nothing while it is listed.
+        state.picked_songs = vec![2, 0];
+        assert_eq!(songs_menu_adds(&show, &state, 2, false), [2, 0]);
+        state.services.list[1].items.clear();
+        state.services.show(1);
+        state.services.list[1].items = vec![Item::song("four", "Four"), Item::song("two", "Two")];
+        state.services.chosen = Some(0);
+        SongAsks { add: vec![2, 0], ..SongAsks::default() }.carry_out(&show, &mut state);
+        assert_eq!(names(&state, 1), ["Four", "Three", "One", "Two"]);
+        assert_eq!(state.services.chosen, Some(2));
+        assert!(state.toast.is_none(), "added where it is seen: nothing said");
+        // Out of sight (the library listed), it says where they went; one there already says so.
+        state.playlist_open = false;
+        SongAsks { add: vec![1], ..SongAsks::default() }.carry_out(&show, &mut state);
+        assert_eq!(state.toast.take().map(|(words, _)| words).as_deref(), Some("Two is already in Evening."));
     }
 
     fn press(at: egui::Pos2, pressed: bool) -> Event {

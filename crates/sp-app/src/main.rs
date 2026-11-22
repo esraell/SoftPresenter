@@ -731,29 +731,6 @@ fn already_here(
         .or_else(|| ids.contains(&song.id).then(|| songs.iter().position(|s| s.id == song.id)).flatten())
 }
 
-/// Puts items into playlist `at`, one after another in their order: after the item `after`
-/// names when it is the playlist in front, else at its end. A song already in it isn't added
-/// again.
-fn put_in_playlist(services: &mut service::Services, at: usize, after: Option<usize>, items: Vec<service::Item>) {
-    match after {
-        Some(after) if at == services.current => {
-            let mut slot = after + 1;
-            for item in items {
-                let before = services.front().items.len();
-                services.insert(slot, item);
-                if services.front().items.len() > before {
-                    slot += 1;
-                }
-            }
-        }
-        _ => {
-            for item in items {
-                services.add_to(at, item);
-            }
-        }
-    }
-}
-
 /// What an import did.
 #[derive(Default)]
 struct Imported {
@@ -5767,7 +5744,7 @@ impl App {
             services.list.iter().position(|playlist| playlist.name == spot.name)
         };
         let Some(at) = found.filter(|_| !items.is_empty()) else { return };
-        put_in_playlist(services, at, spot.after, items);
+        services.put_in(at, spot.after, items);
         done.playlist = Some(services.list[at].name.clone());
     }
 
@@ -7594,10 +7571,19 @@ impl App {
             SlideRequest::PasteAfter(slides) | SlideRequest::AddAfter(slides) => {
                 (song.with_slides_after(at.slide, slides), Some(true))
             }
-            SlideRequest::Group(name) => (song.with_group_starting(at.slide, name), None),
-            SlideRequest::Label(label) => {
-                let slide = song.slide(at.slide).map(|(_, slide)| Slide { label: label.clone(), ..slide.clone() });
-                (slide.and_then(|slide| song.with_slide(at.slide, slide)), None)
+            SlideRequest::Group(slides, name) => (song.with_group_over(slides, name), None),
+            SlideRequest::Edit(edits) => {
+                let mut changed = Some((*song).clone());
+                for (place, slide) in edits {
+                    changed = changed.and_then(|song| song.with_slide(*place, slide.clone()));
+                }
+                // Their pictures are made again.
+                if let Some(running) = self.running.as_mut() {
+                    for (_, slide) in edits {
+                        running.thumbs.forget(slide.id, &mut running.egui_renderer);
+                    }
+                }
+                (changed, None)
             }
         };
         let Some(changed) = changed else { return };
@@ -8839,18 +8825,6 @@ impl ApplicationHandler<AppEvent> for App {
                 self.handle_picture_request();
                 self.handle_bible_file_request();
                 self.handle_song_request();
-                // A template chosen from a slide's menu: the slide is changed and, if it is on
-                // screen, the screen too.
-                if let Some((at, template)) = self.running.as_mut().and_then(|r| r.home_state.pending_template.take())
-                    && let Some((_, slide)) =
-                        self.show.presentations().get(at.presentation).and_then(|p| p.slide(at.slide))
-                {
-                    let slide = Slide { template, ..slide.clone() };
-                    self.apply_edit(at, slide);
-                    if self.show.live() == Some(at) {
-                        self.refresh_output();
-                    }
-                }
                 // A Bible passage just looked up goes into its slot. It is never the slot on
                 // screen, so the output is untouched.
                 if let Some((slot, passage)) = self.running.as_mut().and_then(|r| r.home_state.bible.pending.take()) {
@@ -9852,8 +9826,8 @@ mod tests {
             service::Item::Header { name: "Sermon".to_owned() },
         ];
         services.list.push(service::Service { name: "Evening".to_owned(), items: Vec::new() });
-        put_in_playlist(&mut services, 0, Some(0), landed.iter().map(|&at| item(at)).collect());
-        put_in_playlist(&mut services, 1, Some(0), landed.iter().map(|&at| item(at)).collect());
+        services.put_in(0, Some(0), landed.iter().map(|&at| item(at)).collect());
+        services.put_in(1, Some(0), landed.iter().map(|&at| item(at)).collect());
         let names = |playlist: usize| -> Vec<String> {
             services.list[playlist].items.iter().map(|item| item.title().to_owned()).collect()
         };

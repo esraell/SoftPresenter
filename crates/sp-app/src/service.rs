@@ -286,6 +286,33 @@ impl Services {
         self.chosen = Some(at);
     }
 
+    /// Puts items into a playlist (by its place), one after another in their order: after the
+    /// item `after` when it is the playlist in front (the last one put in is chosen), else at
+    /// its end. A song or passage it has already isn't added again. Returns, for each, whether
+    /// it went in.
+    pub fn put_in(&mut self, playlist: usize, after: Option<usize>, items: Vec<Item>) -> Vec<bool> {
+        let front = playlist == self.front_at();
+        let mut slot = after.filter(|_| front).map(|after| after + 1);
+        let mut went = Vec::new();
+        for item in items {
+            if self.place_of(playlist, &item).is_some() {
+                went.push(false);
+                continue;
+            }
+            match slot.as_mut() {
+                Some(slot) => {
+                    let at = (*slot).min(self.front().items.len());
+                    self.front_mut().items.insert(at, item);
+                    self.chosen = Some(at);
+                    *slot = at + 1;
+                    went.push(true);
+                }
+                None => went.push(self.add_to(playlist, item)),
+            }
+        }
+        went
+    }
+
     /// Puts an item in a placeholder's place in the service in front, and chooses it. Returns
     /// false if the item there isn't a placeholder. A song already elsewhere in the service is
     /// moved here.
@@ -449,6 +476,37 @@ impl Services {
         {
             *have = name.trim().to_owned();
         }
+    }
+
+    /// Moves several items of the playlist in front one place earlier (or later) each, keeping
+    /// their order: as Move Up or Move Down does for the items picked. One already at that end,
+    /// or held there by another picked one, stays. The open item stays open where it goes.
+    /// Returns where each of them is now, in order, or `None` when none could move.
+    pub fn nudge_many(&mut self, places: &[usize], earlier: bool) -> Option<Vec<usize>> {
+        let count = self.front().items.len();
+        let mut now: Vec<usize> = places.iter().copied().filter(|at| *at < count).collect();
+        now.sort_unstable();
+        now.dedup();
+        let mut moved = false;
+        let order: Vec<usize> = if earlier { (0..now.len()).collect() } else { (0..now.len()).rev().collect() };
+        for which in order {
+            let at = now[which];
+            let to = if earlier { at.checked_sub(1) } else { Some(at + 1).filter(|to| *to < count) };
+            let Some(to) = to.filter(|to| !now.contains(to)) else { continue };
+            self.front_mut().items.swap(at, to);
+            self.chosen = self.chosen.map(|open| {
+                if open == at {
+                    to
+                } else if open == to {
+                    at
+                } else {
+                    open
+                }
+            });
+            now[which] = to;
+            moved = true;
+        }
+        moved.then_some(now)
     }
 
     pub fn nudge(&mut self, index: usize, earlier: bool) -> bool {
@@ -1090,6 +1148,49 @@ mod tests {
         assert_eq!(services.move_items(&[3, 4], 5), None);
         assert_eq!(services.move_items(&[9], 0), None);
         assert!(!services.changed);
+    }
+
+    #[test]
+    fn move_up_or_down_with_several_picked_moves_them_all_one_place() {
+        let mut services = Services::default();
+        for key in ["a", "b", "c", "d", "e"] {
+            services.add(song(key));
+        }
+        let titles = |services: &Services| -> Vec<String> {
+            services.front().items.iter().map(|item| item.title().to_owned()).collect()
+        };
+        services.chosen = Some(3);
+        // B and D up one place each, D still open.
+        assert_eq!(services.nudge_many(&[3, 1], true), Some(vec![0, 2]));
+        assert_eq!(titles(&services), ["B", "A", "D", "C", "E"]);
+        assert_eq!(services.chosen, Some(2));
+        // At the top, B stays, and D goes up to it, no further.
+        assert_eq!(services.nudge_many(&[0, 2], true), Some(vec![0, 1]));
+        assert_eq!(titles(&services), ["B", "D", "A", "C", "E"]);
+        // Both at the top: nothing moves.
+        assert_eq!(services.nudge_many(&[0, 1], true), None);
+        // Down, together, keeping their order.
+        assert_eq!(services.nudge_many(&[0, 1], false), Some(vec![1, 2]));
+        assert_eq!(titles(&services), ["A", "B", "D", "C", "E"]);
+    }
+
+    #[test]
+    fn items_put_in_go_after_the_open_one_in_order_and_once() {
+        let mut services = Services::default();
+        for key in ["a", "b", "c"] {
+            services.add(song(key));
+        }
+        let titles = |services: &Services, at: usize| -> Vec<String> {
+            services.list[at].items.iter().map(|item| item.title().to_owned()).collect()
+        };
+        let went = services.put_in(0, Some(0), vec![song("x"), song("c"), song("y")]);
+        assert_eq!(went, [true, false, true], "C is in it already");
+        assert_eq!(titles(&services, 0), ["A", "X", "Y", "B", "C"]);
+        assert_eq!(services.chosen, Some(2), "the last put in is the open one");
+        // Another playlist: at its end, the open item of the one in front left alone.
+        services.list.push(Service { name: "Evening".to_owned(), items: vec![song("a")] });
+        assert_eq!(services.put_in(1, Some(0), vec![song("b")]), [true]);
+        assert_eq!((titles(&services, 1), services.chosen), (vec!["A".to_owned(), "B".to_owned()], Some(2)));
     }
 
     #[test]
