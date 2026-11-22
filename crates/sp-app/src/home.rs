@@ -318,8 +318,10 @@ pub struct HomeState {
     /// Where the find box is in the bar along the top, when the window is wide enough for it:
     /// what a search finds is listed under it.
     pub find_rect: Option<Rect>,
-    /// The find box's Bible results, found on a thread of their own.
+    /// The find box's Bible results, and the Bible view's Search's verses as they are typed,
+    /// each found on a thread of its own.
     pub finder: crate::find::Finder,
+    pub page_finder: crate::find::Finder<crate::find::PageFound>,
     /// How the computer writes the time of day, for the clock in the bar along the top.
     pub clock: crate::clock::SystemClock,
     /// A change to the media bin asked for.
@@ -616,6 +618,10 @@ pub struct BiblePage {
     pub message: Option<String>,
     /// Verses found by the last search.
     pub found: Vec<crate::bible::FoundVerse>,
+    /// Search was typed in more lately than Scripture Lookup (its words are the ones searched
+    /// as they are typed), and the words whose verses are listed now from typing, if any.
+    pub search_last: bool,
+    pub live_words: Option<String>,
     /// When Scripture Lookup was last typed in: its passage is made a moment after typing
     /// stops, without waiting for Return.
     pub typed_at: Option<f64>,
@@ -681,6 +687,8 @@ impl Default for BiblePage {
             pending: None,
             message: None,
             found: Vec::new(),
+            search_last: false,
+            live_words: None,
             typed_at: None,
             focus_lookup: false,
             history: Vec::new(),
@@ -1096,50 +1104,28 @@ impl BiblePage {
     pub fn find(&mut self) {
         self.found.clear();
         self.message = None;
-        let (places, languages) = self.in_use();
-        let Some(&lead) = places.first() else { return };
-        let lead = match self.shelf.get(lead) {
-            Ok(lead) => lead,
-            Err(problem) => {
-                self.message = Some(problem);
-                return;
-            }
-        };
-        let order = crate::bible_language::search_order(&self.search, &self.session_language(), &languages)
-            .unwrap_or_else(|| vec![0]);
-        let mut searched = Vec::new();
-        for at in order {
-            if self.found.len() >= FOUND_LIMIT {
-                break;
-            }
-            let bible = match self.shelf.get(places[at]) {
-                Ok(bible) => bible,
-                Err(problem) => {
+        let (places, _) = self.in_use();
+        let mut bibles = Vec::new();
+        for (at, place) in places.into_iter().enumerate() {
+            match self.shelf.get(place) {
+                Ok(bible) => bibles.push((bible.info.short.clone(), bible)),
+                // The first numbers the verses: without it there is nothing to name them by.
+                Err(problem) if at == 0 => {
                     self.message = Some(problem);
-                    continue;
+                    return;
                 }
-            };
-            searched.push(bible.info.name.clone());
-            let language = &languages[at];
-            for (place, words) in bible.search(&self.search, FOUND_LIMIT - self.found.len()) {
-                // The verse as the first translation numbers it, which the slides follow.
-                let there = sp_bible::convert(place, bible.info.numbering, lead.info.numbering);
-                self.found.push(crate::bible::FoundVerse {
-                    reference: sp_bible::label_in(language, there, there),
-                    chapter: format!("{} {}", sp_bible::book_name(there.book, language), there.chapter),
-                    words: words.to_owned(),
-                    bible: bible.info.short.clone(),
-                    language: language.clone(),
-                    kept: lead.label(there, there),
-                    kept_chapter: format!("{} {}", lead.book_name(there.book), there.chapter),
-                });
+                Err(problem) => self.message = Some(problem),
             }
         }
-        if self.found.is_empty() && !self.search.trim().is_empty() && self.message.is_none() {
-            self.message = Some(match searched.as_slice() {
-                [one] => format!("Nothing in the {one} has those words."),
-                _ => "None of the Bibles in use has those words.".to_owned(),
-            });
+        let words = self.search.clone();
+        self.show_found(crate::find::search_page(&words, &bibles, &self.session_language()));
+    }
+
+    /// Lists verses Search found (in place of the slides), or says why there are none.
+    pub fn show_found(&mut self, found: crate::find::PageFound) {
+        self.found = found.verses;
+        if self.message.is_none() || !self.found.is_empty() {
+            self.message = found.message;
         }
     }
 
@@ -1332,6 +1318,7 @@ impl Default for HomeState {
             library_search: None,
             find_rect: None,
             finder: crate::find::Finder::default(),
+            page_finder: crate::find::Finder::new(crate::find::search_page),
             clock: crate::clock::SystemClock::default(),
             reflow: None,
             reflow_done: None,
@@ -5369,8 +5356,13 @@ fn bible_area(
                 let now = ui.input(|input| input.time);
                 if lookup.changed() && completion.accepted.is_none() {
                     state.bible.typed_at = Some(now);
+                    state.bible.search_last = false;
                 }
-                if entered(&lookup, ui) {
+                if entered(&lookup, ui) && lookup_words(&state.bible.lookup, &language).is_some() {
+                    // Words, not a reference: their verses are listed already (see
+                    // `bible_live_search`); the field keeps the keyboard.
+                    lookup.request_focus();
+                } else if entered(&lookup, ui) {
                     state.bible.look_up(live);
                     // Its first verse is picked and the keyboard goes back to the show, as from
                     // the find box: Enter puts the verse on screen, ↑ and ↓ pick another. A
@@ -5406,10 +5398,16 @@ fn bible_area(
                 let search = ui
                     .add(
                         egui::TextEdit::singleline(&mut state.bible.search)
+                            .id(bible_search_id())
                             .hint_text("Search")
                             .desired_width(search_width),
                     )
-                    .on_hover_text("Type words to find in the Bibles written in their alphabet, and press Return");
+                    .on_hover_text(
+                        "Type words to find in the Bibles written in their alphabet: the verses holding them are listed as you type",
+                    );
+                if search.changed() {
+                    state.bible.search_last = true;
+                }
                 if entered(&search, ui) {
                     state.bible.find();
                 }
@@ -5419,6 +5417,7 @@ fn bible_area(
                     });
                 }
             });
+            bible_live_search(ui.ctx(), state);
             // Too narrow for one row: the two fields share the first, and Books, History and the
             // actions go on a second, at its two ends.
             if !wide {
@@ -5644,7 +5643,11 @@ fn bible_area(
                     Layout::top_down(Align::Min),
                     |ui| {
                         ui.set_min_size(vec2(crate::bible::LISTS_WIDTH, height));
-                        crate::bible::lists(ui, &mut state.bible, live);
+                        // What a click there looks up has its first slide (or the verse
+                        // double-clicked) picked, for Enter.
+                        if let Some(slide) = crate::bible::lists(ui, &mut state.bible, live) {
+                            state.pick_made_verse(show, slide);
+                        }
                     },
                 );
                 ui.allocate_ui_with_layout(ui.available_size(), Layout::top_down(Align::Min), |ui| {
@@ -5723,9 +5726,17 @@ fn bible_results(
         });
         match picked {
             Some(None) => state.bible.found.clear(),
+            // The verse, or its chapter, with the verse picked for Enter.
             Some(Some((at, chapter))) => {
                 if let Some(found) = state.bible.found.get(at).cloned() {
                     state.bible.open_found(&found, chapter, live);
+                    let lead = state.bible.lead().and_then(|lead| state.bible.shelf.get(lead).ok());
+                    let place = lead.as_ref().and_then(|lead| {
+                        let verse = sp_bible::parse_reference_in(&found.kept, &lead.info.language).ok()?.start;
+                        Some(crate::bible::in_its_chapter(lead, verse).1)
+                    });
+                    let slide = place.filter(|_| chapter && state.bible.options.break_on_new_verse).unwrap_or(0);
+                    state.pick_made_verse(show, slide);
                 }
             }
             None => {}
@@ -5743,7 +5754,7 @@ fn bible_results(
                 ui.set_max_width((room.x - 48.0).clamp(160.0, 440.0));
                 let back = format!("{} goes to Scripture Lookup from anywhere.", crate::keys::hint_key("2"));
                 for line in [
-                    "Type a reference such as John 3:16-18 in Scripture Lookup.",
+                    "Type a reference such as John 3:16-18 in Scripture Lookup, or click a book.",
                     "Its verses appear here as slides as you type. Return picks the first, Enter puts it on screen.",
                     back.as_str(),
                 ] {
@@ -6031,9 +6042,6 @@ const SAMPLE_PASSAGE: &str = "John 3:16-17";
 /// How many passages the Bible history keeps.
 const HISTORY_LENGTH: usize = 100;
 
-/// How many verses the Bible page's Search lists.
-const FOUND_LIMIT: usize = 60;
-
 /// When a passage in the history was on screen: the time for today ("10:42 AM"), the day
 /// before that ("Sun 17 Nov").
 fn history_when(at: &str, today: chrono::NaiveDate) -> String {
@@ -6052,6 +6060,58 @@ const LOOKUP_PAUSE: f64 = 0.25;
 fn has_chapter(typed: &str) -> bool {
     let name_onwards = typed.trim().trim_start_matches(|c: char| c.is_ascii_digit() || c.is_whitespace());
     name_onwards.chars().any(|c| c.is_ascii_digit())
+}
+
+/// The id of the Bible view's Search field.
+fn bible_search_id() -> egui::Id {
+    egui::Id::unique("bible search field")
+}
+
+/// What is typed in Scripture Lookup when it is words to search for rather than a reference: at
+/// least three letters, no chapter number, and no book's name begun (`language` is the first
+/// translation's, which book names are read in first).
+fn lookup_words<'a>(typed: &'a str, language: &str) -> Option<&'a str> {
+    let trimmed = typed.trim();
+    let book = !sp_bible::suggest_books(trimmed, language, 1).is_empty();
+    (trimmed.chars().count() >= 3 && !has_chapter(trimmed) && !trimmed.contains(':') && !book).then_some(trimmed)
+}
+
+/// The Bible view's search as it is typed: the verses holding the words typed in Search (when
+/// it was typed in last), or in Scripture Lookup when they are words, not a reference, are
+/// listed in place of the slides as soon as they are found, on a thread of their own (only the
+/// newest words are answered). When the words go (cleared, or become a reference), so does the
+/// list they gave.
+fn bible_live_search(ctx: &egui::Context, state: &mut HomeState) {
+    for (id, bible) in state.page_finder.take_read() {
+        state.bible.shelf.keep(&id, bible);
+    }
+    let page = &state.bible;
+    let language =
+        page.lead().and_then(|at| page.shelf.bibles.get(at)).map_or_else(String::new, |b| b.language.clone());
+    let words = if page.search_last {
+        Some(page.search.trim()).filter(|words| words.chars().count() >= 3)
+    } else {
+        lookup_words(&page.lookup, &language)
+    };
+    let Some(words) = words.map(str::to_owned) else {
+        if state.bible.live_words.take().is_some() {
+            state.bible.found.clear();
+            state.bible.message = None;
+        }
+        return;
+    };
+    if state.bible.live_words.as_deref() == Some(words.as_str()) {
+        return;
+    }
+    let session = state.bible.session_language();
+    let (shelf, rows) = (&state.bible.shelf, &state.bible.rows);
+    let in_use: Vec<String> = rows.iter().filter_map(|row| Some(shelf.bibles.get(row.bible?)?.id.clone())).collect();
+    let readers = || rows.iter().filter_map(|row| shelf.reader(row.bible?)).collect();
+    if let Some(found) = state.page_finder.answer(&words, &in_use, &session, readers, ctx).cloned() {
+        state.bible.message = None;
+        state.bible.show_found(found);
+        state.bible.live_words = Some(words);
+    }
 }
 
 /// The books offered under Scripture Lookup for what is typed: only while a book's name is
@@ -6740,6 +6800,119 @@ mod tests {
         assert_ne!(first(&mut page), id);
     }
 
+    /// A click on a row of the Bible view's book, chapter or verse lists, then a frame for the
+    /// app to take what it looked up. Returns the commands the frames gave.
+    fn click_list_row(
+        ctx: &egui::Context,
+        show: &mut Show,
+        state: &mut HomeState,
+        row: impl std::hash::Hash + std::fmt::Debug,
+        time: f64,
+    ) -> Vec<Command> {
+        let at = ctx.read_response(crate::bible::list_row_id(row)).expect("the row is drawn").rect.center();
+        let press = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut commands = frame_then_app(ctx, show, state, vec![Event::PointerMoved(at)], time);
+        commands.extend(frame_then_app(ctx, show, state, vec![press(true)], time + 0.05));
+        commands.extend(frame_then_app(ctx, show, state, vec![press(false)], time + 0.1));
+        commands.extend(frame_then_app(ctx, show, state, vec![], time + 0.15));
+        commands
+    }
+
+    #[test]
+    fn a_book_click_loads_its_first_chapter_a_chapter_click_that_chapter_and_a_verse_click_that_verse() {
+        // The Russian Synodal first, the King James Version second, as the app starts.
+        for (computer, genesis_1, genesis_2, verse) in [
+            (None, "Genesis 1:1-31", "Genesis 2:1-25", "Genesis 2:3"),
+            (Some("ru-RU"), "Бытие 1:1-31", "Бытие 2:1-25", "Бытие 2:3"),
+        ] {
+            let ctx = egui::Context::default();
+            let mut show = service_with_bible_places();
+            let mut state = HomeState { bible_open: true, ..HomeState::default() };
+            state.bible.slots = Some([2, 3]);
+            if let Some(computer) = computer {
+                state.bible.system_language = crate::system_language::SystemLanguage::answered(computer);
+            }
+            frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+            frame_then_app(&ctx, &mut show, &mut state, vec![], 0.05);
+            let picked_first = |state: &HomeState, show: &Show| {
+                let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+                state.pick(show) == Some(SlideRef { presentation: slot, slide: 0 })
+            };
+            // A book: its first chapter, named as the operator reads, first verse picked.
+            let mut commands = click_list_row(&ctx, &mut show, &mut state, ("book", 0usize), 0.1);
+            assert_eq!(state.bible.lookup, genesis_1, "{computer:?}");
+            assert_eq!(state.bible.shown, "Бытие 1:1-31", "made as the first translation names it");
+            assert!(picked_first(&state, &show), "{computer:?}: the first verse picked");
+            // A chapter: that chapter.
+            commands.extend(click_list_row(&ctx, &mut show, &mut state, ("chapter", 2u16), 0.5));
+            assert_eq!(state.bible.lookup, genesis_2, "{computer:?}");
+            assert!(picked_first(&state, &show));
+            // A verse of it: that verse alone.
+            commands.extend(click_list_row(&ctx, &mut show, &mut state, ("verse", 3u16), 1.0));
+            assert_eq!(state.bible.lookup, verse, "{computer:?}");
+            let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+            assert_eq!(show.presentations()[slot].slide_count(), 1);
+            assert!(picked_first(&state, &show));
+            // Nothing went on screen; Enter puts the verse on.
+            assert!(!goes_on_screen(&commands), "{commands:?}");
+            assert!(state.bible.go_live.is_none());
+            assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "the song stays on screen");
+            press_enter(&mut show, &state);
+            assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 0 }));
+        }
+    }
+
+    #[test]
+    fn words_typed_in_search_or_scripture_lookup_list_their_verses_without_return() {
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { bible_open: true, ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        // In Search: English words, found in the King James Version as they are typed.
+        ctx.memory_mut(|memory| memory.request_focus(bible_search_id()));
+        let mut commands = frame_then_app(&ctx, &mut show, &mut state, vec![], 0.1);
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![Event::Text("valley of".to_owned())], 0.2));
+        assert!(!state.bible.found.is_empty(), "listed without Return");
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![Event::Text(" the shadow".to_owned())], 0.3));
+        assert!(state.bible.found.iter().all(|found| found.bible == "KJV"), "{:?}", state.bible.found);
+        assert!(state.bible.found[0].words.to_lowercase().contains("valley of the shadow"), "the newest words");
+        // Emptied: the list goes, and the slides come back.
+        state.bible.search.clear();
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.4);
+        assert!(state.bible.found.is_empty());
+        // In Scripture Lookup: Russian words that are no reference and no book's name.
+        state.bible.focus_lookup = true;
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.5);
+        commands.extend(frame_then_app(
+            &ctx,
+            &mut show,
+            &mut state,
+            vec![Event::Text("долиною смертной".to_owned())],
+            0.6,
+        ));
+        assert!(!state.bible.found.is_empty(), "listed without Return");
+        assert!(state.bible.found.iter().all(|found| found.bible == "SYN"));
+        // The words become a reference: the list gives way to the passage, a moment later.
+        state.bible.focus_lookup = true;
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.7);
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![Event::Text("jn 3:16".to_owned())], 0.8));
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![], 1.5));
+        assert!(state.bible.found.is_empty());
+        assert_eq!(state.bible.shown, "От Иоанна 3:16");
+        assert!(!goes_on_screen(&commands), "{commands:?}");
+        assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }));
+        // A book's name being typed is not searched for.
+        assert_eq!(lookup_words("Быт", "ru"), None);
+        assert_eq!(lookup_words("John", "ru"), None);
+        assert_eq!(lookup_words("love one another", "ru"), Some("love one another"));
+    }
+
     #[test]
     fn a_verse_in_the_lists_can_be_clicked_while_slides_are_showing() {
         // Slides showing beside the lists (the song's, standing in for a passage).
@@ -6790,7 +6963,7 @@ mod tests {
     }
 
     #[test]
-    fn a_double_click_in_the_lists_loads_the_chapter_and_puts_a_verse_on_screen() {
+    fn a_double_click_in_the_lists_loads_the_chapter_and_picks_a_verse_without_putting_it_on() {
         let mut state = HomeState { bible_open: true, ..HomeState::default() };
         state.bible.slots = Some([0, 1]);
         // A computer set to Russian: with nothing typed yet, the operator reads Russian.
@@ -6828,7 +7001,7 @@ mod tests {
         double_click(&mut run, &mut state, chapter);
         assert_eq!(state.bible.lookup, "От Иоанна 3:1-36");
         assert_eq!(state.bible.go_live, None, "nothing goes on screen");
-        // A verse: its chapter, and its slide put on screen once the app has the chapter. (A
+        // A verse: its chapter, with its slide picked for Enter; nothing goes on screen. (A
         // pause first, or the clicks would count on from the chapter's as a triple click.)
         state.bible.pending = None;
         for _ in 0..10 {
@@ -6838,7 +7011,9 @@ mod tests {
         double_click(&mut run, &mut state, verse);
         assert_eq!(state.bible.lookup, "От Иоанна 3:1-36");
         assert!(state.bible.pending.is_some());
-        assert_eq!(state.bible.go_live, Some(4), "the fifth slide, one verse a slide");
+        assert_eq!(state.bible.go_live, None, "nothing goes on screen");
+        let picked = state.picked.as_ref().map(|picked| picked.at.slide);
+        assert_eq!(picked, Some(4), "the fifth slide picked, one verse a slide");
     }
 
     /// Drags in the Show view's grid from one point to another, over a few frames.

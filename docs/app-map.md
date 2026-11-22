@@ -188,6 +188,11 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   the keyboard back; ↑ and ↓ pick the verse before or after (never putting it on screen); Enter
   puts the verse picked on screen; Space, → and ← then go verse by verse. The pick is
   `HomeState::picked` (`home.rs`), the rules for the keys `running.rs`.
+- The lists: a click on a book loads its first chapter, on a chapter that chapter, on a verse
+  that verse (Shift for a passage; a double-click opens the chapter with the verse), each with its
+  first verse (or that verse) picked; nothing goes on screen from them (`bible.rs`, `lists`).
+- Search, and words (not a reference) typed in Scripture Lookup, list the verses holding them as
+  they are typed, found on a thread of their own (`find.rs`, `search_page` and `Finder`).
 - What the operator reads (Scripture Lookup after a lookup, the books in the lists, Search's
   verses, the find box's passage) is in the language the reference was typed in, or with
   nothing typed the session's (at first the computer's); the slides follow the rows above

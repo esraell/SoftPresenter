@@ -1,5 +1,6 @@
 //! The Bible's part of the find box in the bar along the top: a passage when what is typed is a
-//! reference, and verses holding the words when it is not.
+//! reference, and verses holding the words when it is not; and the Bible view's Search, which
+//! lists verses holding the words as they are typed.
 //!
 //! Reading a Bible for the first time and searching all its verses take too long for the thread
 //! that draws the window, so both are done on a thread of the find box's own. The window asks
@@ -112,26 +113,87 @@ pub fn search_bibles(typed: &str, bibles: &[(String, Arc<Bible>)], session: &str
     rows
 }
 
+/// How many verses the Bible view's Search lists.
+pub const PAGE_VERSES: usize = 60;
+
+/// What the Bible view's Search finds for some words: the verses, and what to say when there
+/// are none.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PageFound {
+    pub verses: Vec<crate::bible::FoundVerse>,
+    pub message: Option<String>,
+}
+
+/// The verses holding the words typed in the Bible view (`bibles` in the translations' order,
+/// the first numbering the slides; `session` the language the operator reads in): in the Bibles
+/// in use written in the words' alphabet (the session's language first), or, with none, in the
+/// first translation, up to [`PAGE_VERSES`]. Each verse is named in the language of the Bible
+/// it was found in, with the first translation's numbers, as opening it names it.
+pub fn search_page(typed: &str, bibles: &[(String, Arc<Bible>)], session: &str) -> PageFound {
+    use crate::bible_language::{language_of, search_order};
+    let mut found = PageFound::default();
+    let typed = typed.trim();
+    let Some((_, lead)) = bibles.first() else { return found };
+    if typed.is_empty() {
+        return found;
+    }
+    let languages: Vec<String> = bibles.iter().map(|(_, bible)| language_of(&bible.info.language)).collect();
+    let order = search_order(typed, session, &languages).unwrap_or_else(|| vec![0]);
+    let mut searched = Vec::new();
+    for at in order {
+        if found.verses.len() >= PAGE_VERSES {
+            break;
+        }
+        let (_, bible) = &bibles[at];
+        searched.push(bible.info.name.clone());
+        let language = &languages[at];
+        for (place, words) in bible.search(typed, PAGE_VERSES - found.verses.len()) {
+            // The verse as the first translation numbers it, which the slides follow.
+            let there = sp_bible::convert(place, bible.info.numbering, lead.info.numbering);
+            found.verses.push(crate::bible::FoundVerse {
+                reference: sp_bible::label_in(language, there, there),
+                chapter: format!("{} {}", sp_bible::book_name(there.book, language), there.chapter),
+                words: words.to_owned(),
+                bible: bible.info.short.clone(),
+                language: language.clone(),
+                kept: lead.label(there, there),
+                kept_chapter: format!("{} {}", lead.book_name(there.book), there.chapter),
+            });
+        }
+    }
+    if found.verses.is_empty() {
+        found.message = Some(match searched.as_slice() {
+            [one] => format!("Nothing in the {one} has those words."),
+            _ => "None of the Bibles in use has those words.".to_owned(),
+        });
+    }
+    found
+}
+
 /// What was asked: the words typed, which Bibles (by their ids, in order), and the session's
 /// language.
 type Asked = (String, Vec<String>, String);
 
-/// An answer from the find box's thread.
-struct Answer {
+/// How a finder answers: what is typed, in the Bibles read, in the session's language.
+type Search<T> = fn(&str, &[(String, Arc<Bible>)], &str) -> T;
+
+/// An answer from a finder's thread.
+struct Answer<T> {
     asked: Asked,
-    rows: Vec<BibleRow>,
+    rows: T,
     /// Bibles read for the first time on the way, for the shelf to keep.
     read: Vec<(String, Arc<Bible>)>,
 }
 
-struct Job {
+struct Job<T> {
     asked: Asked,
     bibles: Vec<BibleReader>,
     wake: egui::Context,
+    search: Search<T>,
 }
 
 /// Reads the Bibles a job names and searches them.
-fn answer(job: Job) -> Answer {
+fn answer<T>(job: Job<T>) -> Answer<T> {
     let mut read = Vec::new();
     let mut bibles = Vec::new();
     for reader in job.bibles {
@@ -143,24 +205,30 @@ fn answer(job: Job) -> Answer {
             bibles.push((short, bible));
         }
     }
-    Answer { rows: search_bibles(&job.asked.0, &bibles, &job.asked.2), asked: job.asked, read }
+    Answer { rows: (job.search)(&job.asked.0, &bibles, &job.asked.2), asked: job.asked, read }
 }
 
-/// The find box's Bible results, asked for as the words change and taken when they come.
-#[derive(Default)]
-pub struct Finder {
+/// Bible results found on a thread of their own, asked for as the words change and taken when
+/// they come: the find box's (by default), or the Bible view's Search's (`Finder::new` with
+/// [`search_page`]).
+pub struct Finder<T = Vec<BibleRow>> {
     /// What was last asked for.
     asked: Option<Asked>,
     /// The latest answer, once the window has taken it.
-    have: Option<Answer>,
-    arrived: Arc<Mutex<Option<Answer>>>,
-    jobs: Option<Sender<Job>>,
+    have: Option<Answer<T>>,
+    arrived: Arc<Mutex<Option<Answer<T>>>>,
+    jobs: Option<Sender<Job<T>>>,
+    search: Search<T>,
+}
+
+impl Default for Finder {
+    fn default() -> Finder {
+        Finder::new(search_bibles)
+    }
 }
 
 impl Finder {
-    /// The Bible results for what is typed, or `None` while they are still being found. Asks
-    /// for them when the words, the Bibles in use or the session's language have changed
-    /// (`bibles` is called only then). Never waits.
+    /// The find box's Bible results for what is typed (see [`Finder::answer`]).
     pub fn rows(
         &mut self,
         typed: &str,
@@ -169,11 +237,32 @@ impl Finder {
         bibles: impl FnOnce() -> Vec<BibleReader>,
         wake: &egui::Context,
     ) -> Option<&[BibleRow]> {
+        self.answer(typed, in_use, session, bibles, wake).map(Vec::as_slice)
+    }
+}
+
+impl<T: Send + 'static> Finder<T> {
+    /// A finder that answers with `search`.
+    pub fn new(search: Search<T>) -> Finder<T> {
+        Finder { asked: None, have: None, arrived: Arc::new(Mutex::new(None)), jobs: None, search }
+    }
+
+    /// The results for what is typed, or `None` while they are still being found. Asks for
+    /// them when the words, the Bibles in use or the session's language have changed (`bibles`
+    /// is called only then). Never waits.
+    pub fn answer(
+        &mut self,
+        typed: &str,
+        in_use: &[String],
+        session: &str,
+        bibles: impl FnOnce() -> Vec<BibleReader>,
+        wake: &egui::Context,
+    ) -> Option<&T> {
         let current = |asked: &Asked| asked.0 == typed && asked.1 == in_use && asked.2 == session;
         if !self.asked.as_ref().is_some_and(current) {
             let asked: Asked = (typed.to_owned(), in_use.to_vec(), session.to_owned());
             self.asked = Some(asked.clone());
-            let job = Job { asked, bibles: bibles(), wake: wake.clone() };
+            let job = Job { asked, bibles: bibles(), wake: wake.clone(), search: self.search };
             if cfg!(test) {
                 // Tests have their answer at once, on their own thread.
                 self.have = Some(answer(job));
@@ -184,7 +273,7 @@ impl Finder {
         if let Some(answer) = self.arrived.lock().ok().and_then(|mut arrived| arrived.take()) {
             self.have = Some(answer);
         }
-        self.have.as_ref().filter(|answer| current(&answer.asked)).map(|answer| answer.rows.as_slice())
+        self.have.as_ref().filter(|answer| current(&answer.asked)).map(|answer| &answer.rows)
     }
 
     /// The Bibles read for the first time by the last answer, for the shelf to keep so they are
@@ -195,9 +284,9 @@ impl Finder {
 
     /// Hands a job to the thread, starting it the first time. The thread sleeps between jobs,
     /// answers only the newest of those waiting, and ends when the window does.
-    fn send(&mut self, job: Job) {
+    fn send(&mut self, job: Job<T>) {
         if self.jobs.is_none() {
-            let (jobs, waiting) = channel::<Job>();
+            let (jobs, waiting) = channel::<Job<T>>();
             let arrived = self.arrived.clone();
             let spawned = std::thread::Builder::new().name("find".to_owned()).spawn(move || {
                 while let Ok(mut job) = waiting.recv() {

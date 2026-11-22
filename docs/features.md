@@ -470,7 +470,10 @@ feature changes, this page changes in the same commit.
   alphabet (Cyrillic words in the Russian and the Ukrainian Bibles, the session's language
   first; Latin letters in the English ones), or in the first translation when none is; each
   verse found is named in its Bible's language and, when they come from more than one Bible,
-  says which.
+  says which. The verses are listed as the words are typed (from three letters, found on a
+  thread of their own so typing never waits, only the newest words answered), with no need for
+  Return; emptying the words brings the slides back. Words typed in Scripture Lookup that are no
+  reference and no book's name begun are searched for the same way.
 - The slides follow what is typed in Scripture Lookup a moment after typing stops, without
   waiting for Return (nothing goes on screen until a slide is clicked, or picked and Enter
   pressed). While a book's name is being typed, the books it could be are offered under the
@@ -496,11 +499,13 @@ feature changes, this page changes in the same commit.
 - Book, chapter and verse lists beside the slides (the books named in the operator's
   language, the chapters and verses as the first translation numbers them), each column with its heading, in one plain
   shade so only the rows chosen stand out (Hide, at their top, puts them away and Books brings them back; the choice is kept). A click
-  on a book opens it at chapter 1, a double-click looks that chapter up; a double-click on a
-  chapter looks the whole chapter up; a click on a verse looks it up at once, Shift-click makes
-  a passage from the verse before, and a double-click looks the chapter up and puts the verse on
-  screen, so Next goes on through the chapter. The passage showing is lit in them, however it
-  was looked up.
+  on a book loads its first chapter; a click on a chapter loads that chapter; a click on a verse
+  then narrows the passage to that verse, Shift-click makes a passage from the verse clicked
+  before, and a double-click opens the chapter with that verse. What a click loads has its first
+  verse (or the verse double-clicked) picked, so Enter puts it on screen and Next goes on
+  through it; nothing goes on screen from the lists (a double-click on a verse used to put it on
+  screen at once). The passage showing is lit in them, however it was looked up. They are a
+  scrolling list of books, not yet the keypad of all the books the design has.
 - Four Bibles ship with the app (King James, World English, Berean Standard, Russian Synodal)
   and sixteen more can be downloaded. Options › Bibles opens the Bibles window: a search box,
   the Bibles installed (each with Remove, but for the four built in), and every Bible that can

@@ -826,16 +826,19 @@ pub fn in_its_chapter(bible: &Bible, verse: VerseRef) -> (String, usize) {
 
 /// The book, chapter and verse lists beside the Bible page's slides: the books named in the
 /// operator's language (the session's), the chapters and verses as the first translation
-/// numbers them. A book opens its chapters, a chapter its verses; a verse is looked up at once
-/// (its slides appear beside the lists), Shift-click makes a passage from the verse before, and
-/// All takes the whole chapter. What is showing is lit, whichever way it was looked up. Nothing
-/// goes on screen until a slide is clicked.
-pub fn lists(ui: &mut egui::Ui, page: &mut crate::home::BiblePage, live: Option<usize>) {
+/// numbers them. A click on a book looks its first chapter up, and on a chapter that chapter
+/// (its slides appear beside the lists, and its verses in the third list); a click on a verse
+/// narrows the passage to that verse, Shift-click makes a passage from the verse clicked before,
+/// a double-click opens the whole chapter with that verse, and All takes the whole chapter.
+/// What is showing is lit, whichever way it was looked up. Nothing goes on screen from the
+/// lists: returns the slide to pick (see `HomeState::pick`) when something was looked up, for
+/// Enter to put on screen.
+pub fn lists(ui: &mut egui::Ui, page: &mut crate::home::BiblePage, live: Option<usize>) -> Option<usize> {
     let bible = page.lead().and_then(|lead| page.shelf.get(lead).ok());
     let Some(bible) = bible else {
         ui.add_space(12.0);
         nothing(ui, "Choose a Bible for the first row.");
-        return;
+        return None;
     };
     let names = page.names_language();
     let shown = parse_reference_in(&page.shown, &bible.info.language).ok();
@@ -849,7 +852,8 @@ pub fn lists(ui: &mut egui::Ui, page: &mut crate::home::BiblePage, live: Option<
     let scroll = std::mem::take(&mut page.list_scroll);
     let new_testament = sp_bible::BOOKS.iter().position(|book| book.code == "MAT").unwrap_or(39);
     let mut chosen: Option<String> = None;
-    let mut go_live: Option<usize> = None;
+    // The slide of what is chosen to pick: its first, or a verse double-clicked in its chapter.
+    let mut pick = 0;
     let shift = ui.input(|input| input.modifiers.shift);
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
     Frame::new().fill(LIST_COLUMNS[0].1).show(ui, |ui| {
@@ -890,7 +894,7 @@ pub fn lists(ui: &mut egui::Ui, page: &mut crate::home::BiblePage, live: Option<
         let columns_top = ui.cursor().min.y;
         let [(book_width, book_fill, _), (chapter_width, chapter_fill, _), (verse_width, verse_fill, _)] = LIST_COLUMNS;
         ui.horizontal_top(|ui| {
-            // Books: a click opens one at its first chapter, a double-click looks that chapter up.
+            // Books: a click looks one up at its first chapter.
             list_column(ui, "bible books", book_width, height, book_fill, |ui| {
                 for book in 0..sp_bible::BOOKS.len() {
                     let chapters = bible.chapter_count(book);
@@ -914,13 +918,11 @@ pub fn lists(ui: &mut egui::Ui, page: &mut crate::home::BiblePage, live: Option<
                         page.list_book = book;
                         page.list_chapter = 1;
                         page.list_from = None;
-                    }
-                    if row.double_clicked() {
                         chosen = Some(format!("{} 1", bible.book_name(book)));
                     }
                 }
             });
-            // Chapters of the book open: a double-click looks the whole chapter up.
+            // Chapters of the book open: a click looks the whole chapter up.
             let chapters = bible.chapter_count(page.list_book);
             list_column(ui, "bible chapters", chapter_width, height, chapter_fill, |ui| {
                 ui.add_space(6.0);
@@ -936,15 +938,14 @@ pub fn lists(ui: &mut egui::Ui, page: &mut crate::home::BiblePage, live: Option<
                     if row.clicked() {
                         page.list_chapter = chapter;
                         page.list_from = None;
-                    }
-                    if row.double_clicked() {
                         chosen = Some(format!("{} {chapter}", bible.book_name(page.list_book)));
                     }
                 }
             });
-            // Verses of the chapter open: a click looks the verse up, Shift-click a passage from
-            // the verse before, and a double-click looks the whole chapter up and puts the verse
-            // on screen, so Next goes on through the chapter.
+            // Verses of the chapter open: a click narrows the passage to the verse, Shift-click
+            // makes a passage from the verse clicked before, and a double-click looks the whole
+            // chapter up with the verse picked, so Next goes on through the chapter once Enter
+            // has put it on screen.
             list_column(ui, "bible verses", verse_width, height, verse_fill, |ui| {
                 ui.add_space(6.0);
                 let (book, chapter) = (page.list_book, page.list_chapter);
@@ -974,7 +975,7 @@ pub fn lists(ui: &mut egui::Ui, page: &mut crate::home::BiblePage, live: Option<
                     if row.double_clicked() {
                         let (whole, slide) = in_its_chapter(&bible, place(verse));
                         chosen = Some(whole);
-                        go_live = Some(if page.options.break_on_new_verse { slide } else { 0 });
+                        pick = if page.options.break_on_new_verse { slide } else { 0 };
                     } else if row.clicked() {
                         chosen = Some(match page.list_from.filter(|_| shift) {
                             Some(from) => bible.label(place(from.min(verse)), place(from.max(verse))),
@@ -994,13 +995,12 @@ pub fn lists(ui: &mut egui::Ui, page: &mut crate::home::BiblePage, live: Option<
             ui.painter().vline(x, columns_top - LISTS_BAR..=columns_top + height, Stroke::new(1.0, LIST_LINE));
         }
     });
-    if let Some(reference) = chosen {
-        // Named as the first translation names it; the field then says it in the operator's
-        // language.
-        page.open(reference, live);
-        // Put on screen once the chapter is made; nothing if it couldn't be.
-        page.go_live = go_live.filter(|_| page.pending.is_some());
-    }
+    let reference = chosen?;
+    // Named as the first translation names it; the field then says it in the operator's
+    // language. A search's verses listed give way to the passage.
+    page.found.clear();
+    page.open(reference, live);
+    page.pending.is_some().then_some(pick)
 }
 
 /// The book, chapter and verse columns: each one's width, its shade, and its heading. One
