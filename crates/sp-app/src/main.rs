@@ -3916,8 +3916,12 @@ impl App {
     /// as `sp undo` says it, or why it couldn't be; `None` when the next step isn't a delete.
     fn undo_removed(&mut self, redo: bool) -> Option<Result<String, String>> {
         let removed = self.history.step_removed(redo)?;
-        let state = &mut self.running.as_mut()?.home_state;
-        Some(if removed.redo(state, !redo) { Ok(removed.said(!redo)) } else { Err(removed.changed_since()) })
+        let done = if removed.in_a_theme() {
+            self.redo_theme_removed(&removed, !redo)
+        } else {
+            removed.redo(&mut self.running.as_mut()?.home_state, !redo)
+        };
+        Some(if done { Ok(removed.said(!redo)) } else { Err(removed.changed_since()) })
     }
 
     /// Turns a song's looping on or off, from its menu.
@@ -8101,7 +8105,6 @@ impl App {
                     state.settings_open = false;
                     state.identify = false;
                 } else if state.alert_open() {
-                    state.confirm_delete_template = None;
                     state.confirm_delete_theme = None;
                     state.confirm_delete_songs.clear();
                     state.confirm_delete_media.clear();

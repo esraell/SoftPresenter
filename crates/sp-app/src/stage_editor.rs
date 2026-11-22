@@ -87,13 +87,13 @@ pub fn apply(state: &mut HomeState, request: ListRequest) {
             state.stage_layouts_changed = true;
             index + 1
         }
+        // At once, asking nothing: Undo puts it back.
         ListRequest::Delete(index) => {
-            if state.stage_layouts.len() <= 1 || index >= state.stage_layouts.len() {
-                return;
+            if let Some(layout) = take_out(state, index) {
+                state.removed.push(crate::removed::Removed::StageLayout { at: index, layout });
+                state.note_deleted_in_editor();
             }
-            state.stage_layouts.remove(index);
-            state.stage_layouts_changed = true;
-            if open > index { open - 1 } else { open.min(state.stage_layouts.len() - 1) }
+            return;
         }
         ListRequest::MoveTo(from, to) => {
             if from >= state.stage_layouts.len() || to >= state.stage_layouts.len() {
@@ -136,15 +136,33 @@ pub fn apply(state: &mut HomeState, request: ListRequest) {
     state.editing = draft(state, to);
 }
 
+/// Takes a layout out of the list (never the last one; stage screens that use it show the first
+/// one), keeping Edit › Stage on a layout when it is open: the one open, wherever it went, or
+/// the one now in its place. Returns it.
+pub fn take_out(state: &mut HomeState, index: usize) -> Option<sp_model::ThemeTemplate> {
+    if state.stage_layouts.len() <= 1 || index >= state.stage_layouts.len() {
+        return None;
+    }
+    let open = open_layout(state);
+    let layout = state.stage_layouts.remove(index);
+    state.stage_layouts_changed = true;
+    if let Some(open) = open {
+        let to = if open > index { open - 1 } else { open.min(state.stage_layouts.len() - 1) };
+        state.stage_edit = (to, None);
+        state.editing = draft(state, to);
+    }
+    Some(layout)
+}
+
 /// The layout open in the editor, by its place in the list.
 fn open_layout(state: &HomeState) -> Option<usize> {
     state.editing.as_ref().filter(|draft| is_stage(draft)).map(|draft| draft.at.slide)
 }
 
 /// The top of the stage layouts' part of the Edit view's left column: the heading, and the keys
-/// that act on the layout open (Add, Duplicate, Delete, which asks first, and ↑ and ↓ to move
-/// it). `delete` is the Delete key pressed with nothing picked on the canvas: the Delete key
-/// here. Returns what was asked for.
+/// that act on the layout open (Add, Duplicate, Delete, at once, and ↑ and ↓ to move it).
+/// `delete` is the Delete key pressed with nothing picked on the canvas: the Delete key here.
+/// Returns what was asked for.
 pub fn list_head(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) -> Option<ListRequest> {
     let open = open_layout(state);
     let count = state.stage_layouts.len();
@@ -176,10 +194,7 @@ pub fn list_head(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) -> Opti
             Some(ListKey::Copy) => Some(ListRequest::Duplicate(at)),
             Some(ListKey::Up) => Some(ListRequest::Move(at, true)),
             Some(ListKey::Down) => Some(ListRequest::Move(at, false)),
-            Some(ListKey::Delete) => {
-                state.confirm_delete_layout = state.stage_layouts.get(at).map(|layout| layout.id);
-                None
-            }
+            Some(ListKey::Delete) => Some(ListRequest::Delete(at)),
             None => None,
         };
     });
@@ -250,7 +265,7 @@ pub fn list(
                 } else if chose == Some(Choice::Duplicate) {
                     asked = Some(ListRequest::Duplicate(index));
                 } else if chose == Some(Choice::Delete) {
-                    state.confirm_delete_layout = Some(layout.id);
+                    asked = Some(ListRequest::Delete(index));
                 } else if response.clicked() && open != Some(index) {
                     asked = Some(ListRequest::Open(index));
                 }
@@ -286,26 +301,6 @@ pub fn list(
     asked
 }
 
-/// The question asked before a stage layout is deleted, and the deleting once it is answered.
-/// Nothing happens unless Edit › Stage is still open.
-pub fn confirm_delete(state: &mut HomeState, answer: impl FnOnce(&str, &str) -> Option<bool>) {
-    let Some(id) = state.confirm_delete_layout else { return };
-    let index = state.stage_layouts.iter().position(|layout| layout.id == id);
-    let open = state.editing.as_ref().is_some_and(is_stage) && state.theme_edit.is_none();
-    let Some(index) = index.filter(|_| open && state.stage_layouts.len() > 1) else {
-        state.confirm_delete_layout = None;
-        return;
-    };
-    let question = format!("Delete \u{201c}{}\u{201d}?", state.stage_layouts[index].name);
-    let Some(delete) = answer(&question, "Stage screens that use it show the first layout.") else {
-        return;
-    };
-    state.confirm_delete_layout = None;
-    if delete {
-        apply(state, ListRequest::Delete(index));
-    }
-}
-
 /// What a layout's menu (a right-click on its picture) was asked for.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Choice {
@@ -314,7 +309,8 @@ enum Choice {
     Delete,
 }
 
-/// A layout's menu: Rename, Duplicate, Delete… (which asks first; not for the only layout).
+/// A layout's menu: Rename, Duplicate, Delete (at once, as Undo puts it back; not for the only
+/// layout).
 fn layout_menu(ui: &mut egui::Ui, only_one: bool) -> Option<Choice> {
     let mut chose = None;
     if ui.button("Rename").clicked() {
@@ -324,7 +320,7 @@ fn layout_menu(ui: &mut egui::Ui, only_one: bool) -> Option<Choice> {
         chose = Some(Choice::Duplicate);
     }
     let delete = ui
-        .add_enabled(!only_one, egui::Button::new("Delete\u{2026}"))
+        .add_enabled(!only_one, egui::Button::new("Delete"))
         .on_hover_text("Delete this layout; stage screens that use it show the first one");
     if delete.clicked() {
         chose = Some(Choice::Delete);
@@ -710,7 +706,7 @@ mod tests {
         button: egui::PointerButton,
     ) -> (Option<super::ListRequest>, egui::FullOutput) {
         let (output, _) = column(ctx, state, vec![]);
-        let at = crate::studio::tests::place_of(&output, words).expect(words);
+        let at = crate::studio::tests::place_on_top(&output, words).expect(words);
         output.drop_without_applying_deltas();
         let mut asked = None;
         let mut last = None;
@@ -751,11 +747,11 @@ mod tests {
         use egui::PointerButton::{Primary, Secondary};
         let ctx = crate::studio::tests::styled();
         let mut state = opened(0);
-        // Its picture's right-click menu: Rename, Duplicate, and Delete, which asks first.
+        // Its picture's right-click menu: Rename, Duplicate, and Delete, which goes at once.
         click(&ctx, &mut state, "WORDS ONLY", Secondary).1.drop_without_applying_deltas();
         // A menu is drawn from its second frame, once it knows its size.
         let (menu, _) = column(&ctx, &mut state, vec![]);
-        for offered in ["Rename", "Duplicate", "Delete\u{2026}"] {
+        for offered in ["Rename", "Duplicate", "Delete"] {
             assert!(crate::studio::tests::place_of(&menu, offered).is_some(), "{offered} is offered");
         }
         // The menu's Duplicate, not the key over the list.
@@ -771,14 +767,15 @@ mod tests {
         super::apply(&mut state, asked.expect("asked"));
         assert_eq!(state.stage_layouts[2].name, "Words Only copy");
         assert_eq!(state.editing.as_ref().map(|draft| draft.at.slide), Some(2), "the copy opens");
-        // Rename puts a field where the name is; Delete asks about that layout.
+        // Rename puts a field where the name is; Delete deletes that layout.
         click(&ctx, &mut state, "WORDS AND NEXT", Secondary).1.drop_without_applying_deltas();
         click(&ctx, &mut state, "Rename", Primary).1.drop_without_applying_deltas();
         assert_eq!(state.stage_rename, Some((0, "Words and Next".to_owned())));
         state.stage_rename = None;
         click(&ctx, &mut state, "WORDS AND NOTES", Secondary).1.drop_without_applying_deltas();
-        click(&ctx, &mut state, "Delete\u{2026}", Primary).1.drop_without_applying_deltas();
-        assert_eq!(state.confirm_delete_layout, Some(state.stage_layouts[3].id));
+        let (asked, output) = click(&ctx, &mut state, "Delete", Primary);
+        output.drop_without_applying_deltas();
+        assert_eq!(asked, Some(super::ListRequest::Delete(3)));
     }
 
     #[test]
@@ -807,32 +804,32 @@ mod tests {
         output.drop_without_applying_deltas();
         super::apply(&mut state, asked.expect("asked"));
         assert_eq!((state.stage_layouts[2].name.as_str(), open(&state)), ("Words Only copy", Some(2)));
-        // Delete asks first; once answered yes, the layout goes and the one after it opens.
+        // Delete goes at once, asking nothing: the layout goes and the one after it opens.
         let (asked, output) = click(&ctx, &mut state, "Delete", Primary);
         output.drop_without_applying_deltas();
-        assert_eq!(asked, None);
-        let copy = state.stage_layouts[2].id;
-        assert_eq!(state.confirm_delete_layout, Some(copy));
-        super::confirm_delete(&mut state, |_, _| None);
-        assert_eq!(state.confirm_delete_layout, Some(copy), "still asking");
-        super::confirm_delete(&mut state, |question, _| {
-            assert_eq!(question, "Delete \u{201c}Words Only copy\u{201d}?");
-            Some(true)
-        });
-        assert!(state.stage_layouts.iter().all(|layout| layout.id != copy));
+        let copy = state.stage_layouts[2].clone();
+        assert_eq!(asked, Some(super::ListRequest::Delete(2)));
+        super::apply(&mut state, asked.expect("asked"));
+        assert!(!state.alert_open());
+        assert!(state.stage_layouts.iter().all(|layout| layout.id != copy.id));
         assert_eq!((state.stage_layouts.len(), open(&state)), (4, Some(2)));
         assert_eq!(state.stage_layouts[2].name, "Words and Notes", "the one after it opens");
-        // Answered no, nothing goes.
-        state.confirm_delete_layout = Some(state.stage_layouts[0].id);
-        super::confirm_delete(&mut state, |_, _| Some(false));
-        assert_eq!((state.stage_layouts.len(), state.confirm_delete_layout), (4, None));
+        // Undo puts it back where it was, open again, and Command-Z in the editor asks for it.
+        let gone = state.removed.pop().expect("kept for Undo");
+        assert_eq!(gone, crate::removed::Removed::StageLayout { at: 2, layout: copy.clone() });
+        assert_eq!(state.edit_steps.last(), Some(&crate::home::EditStep::Deleted));
+        assert!(gone.redo(&mut state, true));
+        assert_eq!((state.stage_layouts[2].id, open(&state)), (copy.id, Some(2)));
+        // Redo deletes it again.
+        assert!(gone.redo(&mut state, false));
+        assert_eq!((state.stage_layouts.len(), open(&state)), (4, Some(2)));
         // The first can't go up, the last can't go down, and the only one can't go.
         let mut state = opened(0);
         state.stage_layouts.truncate(1);
         for key in ["\u{2191}", "\u{2193}", "Delete"] {
             let (asked, output) = click(&ctx, &mut state, key, Primary);
             output.drop_without_applying_deltas();
-            assert_eq!((asked, state.confirm_delete_layout), (None, None), "{key}");
+            assert_eq!(asked, None, "{key}");
         }
     }
 }

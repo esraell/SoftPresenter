@@ -267,12 +267,20 @@ impl crate::App {
                 self.versions_saved(&changed, None);
                 Ok(format!("Renamed the {old} version to {name}, in every theme that has it."))
             }
+            // At once, asking nothing: Undo puts it back, with its templates.
             Ask::Remove { theme, version } => {
                 let old = name_of(&self.themes, version).ok_or("No theme has that version now.")?;
                 let target = self.themes.get_mut(theme).ok_or("That theme is gone.")?;
                 let theme_name = target.name.clone();
-                if !target.remove_version(version) {
+                let place = target.versions.iter().position(|have| have.id == version);
+                let Some(gone) = place.map(|at| target.versions[at].clone()).filter(|_| target.remove_version(version))
+                else {
                     return Err(format!("{theme_name} has no {old} version."));
+                };
+                let removed =
+                    crate::removed::Removed::Version { theme: target.id, at: place.unwrap_or(0), version: gone };
+                if let Some(running) = self.running.as_mut() {
+                    running.home_state.removed.push(removed);
                 }
                 self.versions_saved(&[theme], Some((None, 0)));
                 let left = self.themes.iter().any(|theme| theme.has_version(version));
@@ -286,6 +294,25 @@ impl crate::App {
                 })
             }
         }
+    }
+
+    /// Puts back a template or a version deleted in the Theme Editor (`back`), where it was in
+    /// its theme and open there if the editor shows that theme, or deletes it again (a redo).
+    /// A version's last template comes back with its version. False, changing nothing, when the
+    /// theme is gone or has changed so much that it can't be.
+    pub(crate) fn redo_theme_removed(&mut self, removed: &crate::removed::Removed, back: bool) -> bool {
+        use crate::removed::Removed;
+        let (Removed::Template { theme, .. } | Removed::Version { theme, .. }) = removed else { return false };
+        let Some(index) = self.themes.iter().position(|have| have.id == *theme) else { return false };
+        let Some(show) = removed.redo_in_theme(&mut self.themes[index], back) else { return false };
+        // A template for Bible slides put back in the main theme takes the translations back.
+        let bible =
+            matches!(removed, Removed::Template { template, .. } if template.bible) && index == self.songs_theme;
+        self.versions_saved(&[index], Some(show));
+        if bible && let Some(running) = self.running.as_mut() {
+            running.home_state.bible.assign_boxes();
+        }
+        true
     }
 
     /// After versions changed in these themes (by their places): each is saved, the Theme
@@ -315,11 +342,11 @@ impl crate::App {
     }
 
     /// `version list | add NAME to THEME [from TEMPLATE…] | rename OLD NEW | remove NAME from
-    /// THEME --yes | use NAME [--keep] | off | keep on|off`.
+    /// THEME | use NAME [--keep] | off | keep on|off`.
     pub(crate) fn ctl_version(&mut self, args: &[String]) -> Result<crate::control::Reply, String> {
         use crate::control::{Reply, find};
         let usage = "version list | version add NAME to THEME [from TEMPLATE…] | version rename OLD NEW | \
-                     version remove NAME from THEME --yes | version use NAME [--keep] | version off | version keep on|off";
+                     version remove NAME from THEME | version use NAME [--keep] | version off | version keep on|off";
         let word = args.get(1).map(|w| w.to_lowercase()).unwrap_or_else(|| "list".to_owned());
         let words: Vec<String> = args.iter().skip(2).filter(|w| *w != "--yes" && *w != "--keep").cloned().collect();
         let flag = |name: &str| args.iter().any(|w| w == name);
@@ -400,20 +427,11 @@ impl crate::App {
             "remove" => {
                 let (name, theme_words) = match split_at(&words, "from") {
                     (name, Some(theme)) if !name.is_empty() && !theme.is_empty() => (name.join(" "), theme.join(" ")),
-                    _ => return Err("version remove NAME from THEME --yes".to_owned()),
+                    _ => return Err("version remove NAME from THEME".to_owned()),
                 };
                 let version = self.version_named(&name)?;
                 let theme = find("theme", &theme_names, &theme_words)?;
-                if !flag("--yes") {
-                    let count = self.themes[theme].set(Some(version.id)).len();
-                    return Err(format!(
-                        "This takes the {} version out of {}, with its {count} template{}; screens with the theme \
-                         keep the usual look while it is on. Add --yes to do it.",
-                        version.name,
-                        theme_names[theme],
-                        if count == 1 { "" } else { "s" }
-                    ));
-                }
+                // At once, as in the window: `sp undo` puts it back (an old --yes is let by).
                 self.version_ask(Ask::Remove { theme, version: version.id }).map(Reply::done)
             }
             "use" => {

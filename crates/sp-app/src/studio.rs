@@ -6214,16 +6214,24 @@ pub mod tests {
 
     /// Where a frame drew the line `words` (in a menu too), at its middle; `None` if it didn't.
     pub fn place_of(output: &egui::FullOutput, words: &str) -> Option<egui::Pos2> {
-        fn walk(shape: &egui::Shape, words: &str) -> Option<egui::Pos2> {
-            match shape {
-                egui::Shape::Text(text) if text.galley.job.text == words => {
-                    Some(text.pos + text.galley.rect.center().to_vec2())
-                }
-                egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| walk(shape, words)),
-                _ => None,
+        output.shapes.iter().find_map(|clipped| text_place(&clipped.shape, words))
+    }
+
+    /// Where a frame drew `words` last, on top of the rest (in an open menu, say, when the same
+    /// words are under it too); `None` if it didn't.
+    pub fn place_on_top(output: &egui::FullOutput, words: &str) -> Option<egui::Pos2> {
+        output.shapes.iter().rev().find_map(|clipped| text_place(&clipped.shape, words))
+    }
+
+    /// The middle of `words` in a shape, when it draws them.
+    fn text_place(shape: &egui::Shape, words: &str) -> Option<egui::Pos2> {
+        match shape {
+            egui::Shape::Text(text) if text.galley.job.text == words => {
+                Some(text.pos + text.galley.rect.center().to_vec2())
             }
+            egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| text_place(shape, words)),
+            _ => None,
         }
-        output.shapes.iter().find_map(|clipped| walk(&clipped.shape, words))
     }
 
     /// Where the last of `words` drawn was: in an open menu, which is drawn over what is under it,

@@ -186,8 +186,6 @@ pub struct HomeState {
     pub confirm_delete_theme: Option<usize>,
     /// The sheet that adds a version to the theme being edited, or renames one, while it is open.
     pub version_sheet: Option<VersionSheet>,
-    /// A version of the theme being edited about to be taken out of it, once confirmed.
-    pub confirm_remove_version: Option<sp_model::Uuid>,
     /// The open theme's name while it is being retyped in the list of themes.
     pub renaming_theme: Option<String>,
 
@@ -449,8 +447,6 @@ pub struct HomeState {
     pub props_live: Vec<(sp_model::Uuid, std::time::Instant)>,
     /// A prop being renamed, and its name as typed so far.
     pub prop_rename: Option<(sp_model::Uuid, String)>,
-    /// A prop to delete, asked about first (from the Edit view's list of props).
-    pub confirm_delete_prop: Option<sp_model::Uuid>,
     /// The macros, and true when they have changed and are to be saved.
     pub macros: Vec<crate::macros::Macro>,
     pub macros_changed: bool,
@@ -506,8 +502,6 @@ pub struct HomeState {
     /// only just begun (so its field takes the keyboard once).
     pub stage_rename: Option<(usize, String)>,
     pub stage_rename_started: bool,
-    /// A stage layout to delete, asked about first.
-    pub confirm_delete_layout: Option<sp_model::Uuid>,
     /// True when the Program preview shows what the stage screens show, not the audience's.
     pub preview_stage: bool,
     /// The one screen the Program preview looks at (the small arrow in its head), drawn as that
@@ -561,8 +555,6 @@ pub struct HomeState {
     pub pending_template: Option<(SlideRef, Option<sp_model::Uuid>)>,
     /// The template being renamed in the Theme Editor, and its name as typed so far.
     pub renaming_template: Option<(usize, String)>,
-    /// The template of the theme being edited that is about to be deleted, once confirmed.
-    pub confirm_delete_template: Option<usize>,
     /// Each theme's two layouts as boxes, for the pictures in the theme picker.
     pub theme_layouts: Vec<Vec<Vec<(sp_model::Role, SlideRect)>>>,
     /// Which layout of its theme Bible slides use.
@@ -1682,7 +1674,6 @@ impl Default for HomeState {
             pending_group_name: None,
             confirm_delete_theme: None,
             version_sheet: None,
-            confirm_remove_version: None,
             renaming_theme: None,
 
             add_slide: None,
@@ -1819,7 +1810,6 @@ impl Default for HomeState {
             actions_depth: 0,
             props_live: Vec::new(),
             prop_rename: None,
-            confirm_delete_prop: None,
             live_tab: 0,
             timers: Vec::new(),
             timers_changed: false,
@@ -1838,7 +1828,6 @@ impl Default for HomeState {
             props_editor_open: false,
             stage_rename: None,
             stage_rename_started: false,
-            confirm_delete_layout: None,
             preview_stage: false,
             preview_screen: None,
             message_clip: None,
@@ -1866,7 +1855,6 @@ impl Default for HomeState {
             song_templates: Vec::new(),
             pending_template: None,
             renaming_template: None,
-            confirm_delete_template: None,
             theme_layouts: Vec::new(),
             bible_layout: 0,
             theme_for_songs: 0,
@@ -2026,9 +2014,6 @@ impl HomeState {
             || !self.confirm_delete_media.is_empty()
             || !self.confirm_delete_slides.is_empty()
             || self.confirm_delete_theme.is_some()
-            || self.confirm_delete_template.is_some()
-            || self.confirm_delete_prop.is_some()
-            || self.confirm_delete_layout.is_some()
     }
 
     /// Whether an Escape pressed now belongs to something over the window (a menu, a question,
@@ -2250,10 +2235,7 @@ pub fn home_ui(
         }
     }
     confirm_delete_theme(ui, state);
-    confirm_delete_prop(ui, state);
-    crate::stage_editor::confirm_delete(state, |question, note| confirm_delete(ui, question, note));
     version_sheet(ui, state);
-    confirm_remove_version(ui, state);
     confirm_delete_song(ui, show, state);
     confirm_delete_media(ui, show, state);
     confirm_delete_slides(ui, show, state);
@@ -2712,11 +2694,13 @@ fn edit_view(
     }
     if let Some(draft) = state.editing.as_mut() {
         // Undo and Redo take the newest step, whichever it is: a change to this slide (its
-        // draft's own) or to the song's slides (moved, pasted, deleted: the app's).
+        // draft's own), or one the app takes back: to the song's slides (moved, pasted,
+        // deleted), or something deleted from the list (a template, prop, layout or version).
+        let apps = |step: Option<&EditStep>| matches!(step, Some(EditStep::Song | EditStep::Deleted));
         if undo && !keys_taken {
-            if state.edit_steps.last() == Some(&EditStep::Song) {
-                state.edit_steps.pop();
-                state.edit_redo.push(EditStep::Song);
+            if apps(state.edit_steps.last()) {
+                let step = state.edit_steps.pop().unwrap_or(EditStep::Song);
+                state.edit_redo.push(step);
                 state.song_undo = Some(false);
             } else if draft.undo() {
                 if state.edit_steps.last() == Some(&EditStep::Slide) {
@@ -2725,9 +2709,9 @@ fn edit_view(
                 state.edit_redo.push(EditStep::Slide);
             }
         } else if redo && !keys_taken {
-            if state.edit_redo.last() == Some(&EditStep::Song) {
-                state.edit_redo.pop();
-                state.edit_steps.push(EditStep::Song);
+            if apps(state.edit_redo.last()) {
+                let step = state.edit_redo.pop().unwrap_or(EditStep::Song);
+                state.edit_steps.push(step);
                 state.song_undo = Some(true);
             } else if draft.redo() {
                 if state.edit_redo.last() == Some(&EditStep::Slide) {
@@ -4186,8 +4170,9 @@ fn prop_list(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut crate::studio
 
 /// Carries out what the list of props in the Edit view asked for, once the frame's change to
 /// the prop open has gone back into it, and keeps the editor on the right prop: the one opened,
-/// made or copied, or else the one that was open, wherever it went. Delete asks first. With the
-/// last prop deleted, the editor goes on to the slides.
+/// made or copied, or else the one that was open, wherever it went. Delete goes at once (Undo
+/// puts it back); the one after it opens in its place, and with the last prop deleted, the
+/// editor goes on to the slides (see `HomeState::take_prop`).
 fn apply_prop_ask(state: &mut HomeState, ask: PropListAsk) {
     use crate::live_tabs::PropAsk;
     let (index, ask) = match ask {
@@ -4198,7 +4183,7 @@ fn apply_prop_ask(state: &mut HomeState, ask: PropListAsk) {
             return;
         }
         PropListAsk::Of(index, PropAsk::Delete) => {
-            state.confirm_delete_prop = state.props.get(index).map(|prop| prop.id);
+            state.delete_prop(index);
             return;
         }
         // Dragged to another place: the prop open stays open, in the same draft, wherever it went.
@@ -4231,49 +4216,6 @@ fn apply_prop_ask(state: &mut HomeState, ask: PropListAsk) {
         }
         Some(to) => state.editing = crate::studio::prop_draft(state, to),
         None => {}
-    }
-}
-
-/// The question asked before a prop is deleted from the Edit view, and the deleting once it is
-/// answered. The prop after it opens in its place (or the one before, if it was the last); with
-/// none left, the editor goes on to the slides.
-fn confirm_delete_prop(ui: &mut egui::Ui, state: &mut HomeState) {
-    let Some(id) = state.confirm_delete_prop else { return };
-    let Some(index) = state.props.iter().position(|prop| prop.id == id) else {
-        state.confirm_delete_prop = None;
-        return;
-    };
-    let question = format!("Delete \u{201c}{}\u{201d}?", state.props[index].name);
-    let note = "It comes off the screens if it is showing.";
-    let Some(delete) = confirm_delete(ui, &question, note) else { return };
-    state.confirm_delete_prop = None;
-    if delete {
-        delete_prop(state, index);
-        ui.ctx().request_repaint();
-    }
-}
-
-/// Deletes the prop at `index`, keeping the editor on a prop if one was open.
-fn delete_prop(state: &mut HomeState, index: usize) {
-    let editing_props = state.editing.as_ref().is_some_and(|draft| draft.at.presentation == crate::props::PROP_SLOT);
-    let open = state.editing.as_ref().filter(|_| editing_props).map(|draft| draft.at.slide);
-    let open_id = open.and_then(|at| state.props.get(at)).map(|prop| prop.id);
-    crate::live_tabs::carry_out_prop_ask(state, index, crate::live_tabs::PropAsk::Delete);
-    if !editing_props {
-        return;
-    }
-    if state.props.is_empty() {
-        state.editing = None;
-        state.props_editor_open = true;
-        return;
-    }
-    match open_id.and_then(|id| state.props.iter().position(|prop| prop.id == id)) {
-        Some(still) => {
-            if let Some(draft) = state.editing.as_mut() {
-                draft.at.slide = still;
-            }
-        }
-        None => state.editing = crate::studio::prop_draft(state, index.min(state.props.len() - 1)),
     }
 }
 
@@ -4373,21 +4315,25 @@ pub enum EditStep {
     Slide,
     /// A change to the song's slides (moved, pasted, deleted), which the app undoes.
     Song,
+    /// Something deleted from one of the Edit view's lists (a template, a prop, a stage layout,
+    /// a theme's version), which the app puts back from its one history (see `removed`).
+    Deleted,
 }
 
 /// When the slide being edited is left (another opened, or the editor closed), its own steps
 /// go with it. The song's steps stay, unless the slide was changed after one of them: undoing
 /// that step would bring the song back as it was before, losing the change, so they go too.
-/// True when they did, and the app should drop them.
+/// What was deleted from a list always stays. True when the song's steps went, and the app
+/// should drop them.
 pub fn drop_slide_steps(steps: &mut Vec<EditStep>) -> bool {
     let changed_after = steps
         .iter()
         .rposition(|step| *step == EditStep::Song)
         .is_some_and(|last| steps[last + 1..].contains(&EditStep::Slide));
     if changed_after {
-        steps.clear();
+        steps.retain(|step| *step == EditStep::Deleted);
     } else {
-        steps.retain(|step| *step == EditStep::Song);
+        steps.retain(|step| *step != EditStep::Slide);
     }
     changed_after
 }
@@ -5879,7 +5825,6 @@ fn confirm_delete_media(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
 }
 
 fn confirm_delete_theme(ui: &mut egui::Ui, state: &mut HomeState) {
-    confirm_delete_template(ui, state);
     let Some(index) = state.confirm_delete_theme else { return };
     let Some(name) = state.theme_names.get(index).cloned() else {
         state.confirm_delete_theme = None;
@@ -5898,33 +5843,23 @@ fn confirm_delete_theme(ui: &mut egui::Ui, state: &mut HomeState) {
     }
 }
 
-/// Asks before deleting one of the templates shown in the Theme Editor (the usual ones or a
-/// version's), and deletes it. A version's last template takes the version out of the theme.
-fn confirm_delete_template(ui: &mut egui::Ui, state: &mut HomeState) {
-    let Some(template) = state.confirm_delete_template else { return };
-    let Some(edit) = state.theme_edit.as_ref() else {
-        state.confirm_delete_template = None;
-        return;
-    };
-    let Some(doomed) = edit.templates().get(template) else {
-        state.confirm_delete_template = None;
-        return;
-    };
-    let version = edit.version.and_then(|id| edit.theme.versions.iter().find(|v| v.id == id));
-    let note = match version {
-        Some(version) if version.templates.len() == 1 => {
-            format!("It is the last template of the {} version here, so the version leaves this theme.", version.name)
-        }
-        _ if doomed.bible => "Bible slides use it; they will use the template that suits them best instead.".to_owned(),
-        _ => String::new(),
-    };
-    let question = format!("Delete the template \"{}\"?", doomed.name);
-    let Some(delete) = confirm_delete(ui, &question, &note) else { return };
-    state.confirm_delete_template = None;
-    if delete
-        && let Some(edit) = state.theme_edit.as_mut()
-        && edit.theme.remove_template_in(edit.version, template)
-    {
+/// Deletes one of the templates shown in the Theme Editor (the usual ones or a version's) at
+/// once, asking nothing: Undo puts it back. A version's last template takes the version out of
+/// the theme (and Undo puts the version back with it); Bible slides that used it use the
+/// template that suits them best instead.
+fn delete_template(state: &mut HomeState, template: usize) {
+    let Some(edit) = state.theme_edit.as_mut() else { return };
+    let Some(doomed) = edit.templates().get(template).cloned() else { return };
+    // The version, as it was, when this is its last template.
+    let version = edit.version.and_then(|id| {
+        let at = edit.theme.versions.iter().position(|have| have.id == id)?;
+        let version = &edit.theme.versions[at];
+        (version.templates.len() == 1).then(|| (at, version.clone()))
+    });
+    let (theme, set) = (edit.theme.id, edit.version);
+    if edit.theme.remove_template_in(edit.version, template) {
+        state.removed.push(crate::removed::Removed::Template { theme, set, at: template, template: doomed, version });
+        let Some(edit) = state.theme_edit.as_mut() else { return };
         edit.changed = true;
         // The template being edited stays open. If it was the one deleted, the one before it
         // (or the new first one) is opened in its place; with a version gone, the usual ones.
@@ -5938,6 +5873,7 @@ fn confirm_delete_template(ui: &mut egui::Ui, state: &mut HomeState) {
                 draft.at.slide = open;
             }
         }
+        state.note_deleted_in_editor();
     }
 }
 
@@ -6255,16 +6191,19 @@ fn version_line(ui: &mut egui::Ui, state: &mut HomeState) {
             }
         });
         ui.separator();
-        if ui.button(format!("Remove It From \u{201c}{theme_name}\u{201d}\u{2026}")).clicked() {
-            state.confirm_remove_version = Some(id);
+        // At once, asking nothing: Undo puts it back, with its templates.
+        let hint = "Its templates go with it; Undo puts them back";
+        if ui.button(format!("Remove It From \u{201c}{theme_name}\u{201d}")).on_hover_text(hint).clicked() {
+            state.version_asks.push(crate::versions::Ask::Remove { theme, version: id });
+            state.note_deleted_in_editor();
             ui.close();
         }
     });
 }
 
 /// The row of actions on the templates shown: Add (a new one with the open one's main box),
-/// Duplicate, Delete (asks first; also the Delete key, `delete`), and ↑ and ↓ to move the open
-/// one among them.
+/// Duplicate, Delete (at once, Undo putting it back; also the Delete key, `delete`), and ↑ and ↓
+/// to move the open one among them.
 fn template_actions(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) {
     let Some(edit) = state.theme_edit.as_ref() else { return };
     let (count, at, version) = (edit.templates().len(), edit.template, edit.version);
@@ -6280,7 +6219,7 @@ fn template_actions(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) {
     match crate::studio::list_keys(ui, "template keys", enabled, hints).or(list_delete_key(delete, enabled)) {
         Some(crate::studio::ListKey::Add) => add_template_shown(state, false),
         Some(crate::studio::ListKey::Copy) => add_template_shown(state, true),
-        Some(crate::studio::ListKey::Delete) => state.confirm_delete_template = Some(at),
+        Some(crate::studio::ListKey::Delete) => delete_template(state, at),
         Some(crate::studio::ListKey::Up) => move_template_shown(state, true),
         Some(crate::studio::ListKey::Down) => move_template_shown(state, false),
         None => {}
@@ -6440,7 +6379,7 @@ fn template_pictures(
                         duplicate = Some(index);
                         ui.close();
                     }
-                    if ui.add_enabled(can_delete, egui::Button::new("Delete\u{2026}")).clicked() {
+                    if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
                         ask_delete = Some(index);
                         ui.close();
                     }
@@ -6469,8 +6408,9 @@ fn template_pictures(
         }
         state.renaming_template = None;
     }
+    // A picture's Delete deletes that template at once (Undo puts it back).
     if let Some(template) = ask_delete {
-        state.confirm_delete_template = Some(template);
+        delete_template(state, template);
     }
     if let Some((index, songs, bible)) = used
         && let Some(edit) = state.theme_edit.as_mut()
@@ -6693,31 +6633,6 @@ fn version_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
         }
         Some(false) => state.version_sheet = None,
         None => {}
-    }
-}
-
-/// Asks before taking a version out of the theme being edited, with its templates, and asks the
-/// app to.
-fn confirm_remove_version(ui: &mut egui::Ui, state: &mut HomeState) {
-    let Some(version) = state.confirm_remove_version else { return };
-    let Some(edit) = state.theme_edit.as_ref() else {
-        state.confirm_remove_version = None;
-        return;
-    };
-    let Some(found) = edit.theme.versions.iter().find(|have| have.id == version) else {
-        state.confirm_remove_version = None;
-        return;
-    };
-    let count = found.templates.len();
-    let question = format!("Remove the {} version from \u{201c}{}\u{201d}?", found.name, edit.theme.name);
-    let templates = if count == 1 { "Its 1 template goes".to_owned() } else { format!("Its {count} templates go") };
-    let note = format!("{templates}. Screens using this theme keep the usual look while {} is on.", found.name);
-    let theme = edit.index;
-    if let Some(remove) = crate::studio::alert(ui.ctx(), "remove version", Icon::Theme, &question, &note, "Remove") {
-        state.confirm_remove_version = None;
-        if remove {
-            state.version_asks.push(crate::versions::Ask::Remove { theme, version });
-        }
     }
 }
 
@@ -9222,12 +9137,22 @@ mod tests {
         draft.select_only(draft.slide.objects.first().map(|o| o.id));
         let mut state =
             HomeState { theme_edit: Some(ThemeEdit::of(0, theme)), editing: Some(draft), ..HomeState::default() };
+        let templates = |state: &HomeState| state.theme_edit.as_ref().map_or(0, |edit| edit.theme.templates.len());
+        let before = templates(&state);
         frame_with(&ctx, &show, &mut state, Some(Key::Delete));
-        assert_eq!(state.confirm_delete_template, None, "the template isn't asked about");
+        assert_eq!(templates(&state), before, "the template stays");
         assert_eq!(state.editing.as_ref().map(|d| d.slide.objects.len()), Some(boxes - 1), "the box is gone");
-        // With nothing selected, Delete is for the template.
+        // With nothing selected, Delete is for the template: it goes at once, asking nothing,
+        // and is kept for Undo, which Command-Z in the editor asks of the app.
         frame_with(&ctx, &show, &mut state, Some(Key::Delete));
-        assert_eq!(state.confirm_delete_template, Some(0));
+        assert_eq!(templates(&state), before - 1);
+        assert!(!state.alert_open());
+        assert!(matches!(state.removed.as_slice(), [crate::removed::Removed::Template { at: 0, set: None, .. }]));
+        assert_eq!(state.edit_steps.last(), Some(&EditStep::Deleted));
+        let undo =
+            Event::Key { key: Key::Z, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND };
+        frame_events(&ctx, &show, &mut state, vec![undo], 1.0);
+        assert_eq!((state.song_undo, state.edit_redo.as_slice()), (Some(false), &[EditStep::Deleted][..]));
     }
 
     /// Runs one frame of the home view with these events, and returns each piece of text it drew,
@@ -9275,25 +9200,38 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_version_counts_its_templates_in_words() {
-        let ctx = egui::Context::default();
-        let show = three_songs();
-        for (templates, words) in [(&[0, 1][..], "Its 2 templates go."), (&[0][..], "Its 1 template goes.")] {
-            let mut theme = Theme::builtin();
-            let offering = sp_model::Version { id: sp_model::Uuid::from_u128(78), name: "Offering".to_owned() };
-            assert!(theme.add_version(&offering, templates));
-            let first = EditDraft::of_slide(theme.templates[0].as_slide(), 0);
-            let mut state = HomeState {
-                theme_edit: Some(ThemeEdit::of(0, theme)),
-                editing: Some(first),
-                confirm_remove_version: Some(offering.id),
-                ..HomeState::default()
-            };
-            frame_texts(&ctx, &show, &mut state, vec![], 0.0);
-            let texts = frame_texts(&ctx, &show, &mut state, vec![], 0.1);
-            let note = texts.iter().map(|(text, _)| text).find(|text| text.starts_with("Its ")).expect("the question");
-            assert!(note.starts_with(words), "{note}");
-        }
+    fn a_version_or_its_last_template_deleted_comes_back_with_undo() {
+        use crate::removed::Removed;
+        let (theme, offering) = offering_theme();
+        // A version taken out, with its two templates: Undo puts it back where it was, opened;
+        // Redo takes it out again.
+        let mut changed = theme.clone();
+        let gone = Removed::Version { theme: theme.id, at: 0, version: changed.versions[0].clone() };
+        assert!(changed.remove_version(offering.id));
+        assert_eq!(gone.redo_in_theme(&mut changed, true), Some((Some(offering.id), 0)));
+        assert_eq!(changed, theme);
+        assert_eq!(gone.redo_in_theme(&mut changed, true), None, "it is there already");
+        assert_eq!(gone.redo_in_theme(&mut changed, false), Some((None, 0)));
+        assert!(changed.versions.is_empty());
+        // The last template of a version deleted in the Theme Editor takes the version with it,
+        // and Undo brings both back.
+        let mut one = Theme::builtin();
+        assert!(one.add_version(&offering, &[0]));
+        let first = EditDraft::of_slide(one.templates[0].as_slide(), 0);
+        let mut state = HomeState { theme_edit: Some(ThemeEdit::of(0, one.clone())), ..HomeState::default() };
+        state.theme_edit.as_mut().expect("open").version = Some(offering.id);
+        state.editing = Some(first);
+        delete_template(&mut state, 0);
+        let edit = state.theme_edit.as_ref().expect("still open");
+        assert!(edit.theme.versions.is_empty() && edit.version.is_none(), "the version went with it");
+        let gone = state.removed.pop().expect("kept for Undo");
+        assert!(matches!(&gone, Removed::Template { version: Some((0, _)), set: Some(id), .. } if *id == offering.id));
+        let mut changed = edit.theme.clone();
+        assert_eq!(gone.redo_in_theme(&mut changed, true), Some((Some(offering.id), 0)));
+        assert_eq!(changed, one);
+        assert_eq!(gone.redo_in_theme(&mut changed, false), Some((None, 0)));
+        assert!(changed.versions.is_empty());
+        assert_eq!(gone.said(true), format!("Put the template {} back.", one.versions[0].templates[0].name));
     }
 
     #[test]
@@ -9333,10 +9271,11 @@ mod tests {
         let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), time + 0.1);
         assert!(drawn_at(&texts, "Built-in \u{b7} Offering \u{b7} Two languages").is_some(), "the canvas names it");
         assert!(drawn_at(&texts, "Used while the Offering version is on, on every screen with this theme.").is_some());
-        // Its templates can all be deleted (the last takes the version out); the usual can't.
-        state.confirm_delete_template = None;
+        // Its templates can all be deleted (the last takes the version out), at once.
         frame_with(&ctx, &show, &mut state, Some(Key::Delete));
-        assert_eq!(state.confirm_delete_template, Some(0));
+        let edit = state.theme_edit.as_ref().unwrap();
+        assert_eq!(edit.theme.versions[0].templates.len(), 1, "one of its two went");
+        assert!(matches!(state.removed.as_slice(), [crate::removed::Removed::Template { at: 0, .. }]));
     }
 
     #[test]
@@ -9406,7 +9345,7 @@ mod tests {
         };
         frame_with(&ctx, &show, &mut state, Some(Key::Delete));
         assert_eq!(state.confirm_delete_theme, Some(2));
-        assert_eq!(state.confirm_delete_template, None);
+        assert!(state.removed.is_empty(), "no template is deleted");
         assert_eq!(state.editing.as_ref().map(|d| d.slide.objects.len()), Some(boxes));
         // The built-in Bible theme, picked, is kept.
         let mut kept = HomeState {
@@ -9417,7 +9356,7 @@ mod tests {
             ..HomeState::default()
         };
         frame_with(&ctx, &show, &mut kept, Some(Key::Delete));
-        assert_eq!((kept.confirm_delete_theme, kept.confirm_delete_template), (None, None));
+        assert_eq!((kept.confirm_delete_theme, kept.removed.len()), (None, 0));
     }
 
     #[test]
@@ -9742,12 +9681,14 @@ mod tests {
     #[test]
     fn delete_with_nothing_picked_on_the_canvas_is_the_lists_delete_key() {
         let ctx = egui::Context::default();
-        // A prop open: Delete asks about it, as the list's Delete key does.
+        // A prop open: Delete deletes it at once, as the list's Delete key does (Undo puts it
+        // back).
         let show = three_songs();
         let mut state = props_open(&["Logo", "Name"], 1);
         frame_with(&ctx, &show, &mut state, None);
         frame_with(&ctx, &show, &mut state, Some(Key::Delete));
-        assert_eq!(state.confirm_delete_prop, Some(state.props[1].id));
+        assert_eq!(state.props.iter().map(|prop| prop.name.as_str()).collect::<Vec<_>>(), ["Logo"]);
+        assert!(matches!(state.removed.as_slice(), [crate::removed::Removed::Prop { at: 1, .. }]));
         // A song's slide open, nothing picked on the canvas: the slide.
         let (show, mut state) = song_open(&[("Verse 1", 2), ("Chorus", 1)], 1);
         frame_with(&ctx, &show, &mut state, None);
@@ -9769,8 +9710,10 @@ mod tests {
         let mut state = HomeState { edit_kind_request: Some(EditKind::Stage), ..HomeState::default() };
         frame_with(&ctx, &show, &mut state, None);
         frame_with(&ctx, &show, &mut state, None);
+        let first = state.stage_layouts[0].id;
         frame_with(&ctx, &show, &mut state, Some(Key::Delete));
-        assert_eq!(state.confirm_delete_layout, Some(state.stage_layouts[0].id));
+        assert!(state.stage_layouts.iter().all(|layout| layout.id != first), "deleted at once");
+        assert!(matches!(state.removed.as_slice(), [crate::removed::Removed::StageLayout { at: 0, .. }]));
     }
 
     #[test]
@@ -9833,7 +9776,7 @@ mod tests {
         button: egui::PointerButton,
     ) -> Option<PropListAsk> {
         let (output, _) = prop_column(ctx, state, vec![]);
-        let at = crate::studio::tests::place_of(&output, words).expect(words);
+        let at = crate::studio::tests::place_on_top(&output, words).expect(words);
         output.drop_without_applying_deltas();
         let mut asked = None;
         for events in crate::studio::tests::click_frames(at, button) {
@@ -9853,7 +9796,7 @@ mod tests {
         assert_eq!(click_prop_words(&ctx, &mut state, "NAME", Secondary), None);
         // A menu is drawn from its second frame, once it knows its size.
         let (menu, _) = prop_column(&ctx, &mut state, vec![]);
-        for offered in ["Clears Itself", "Rename", "Duplicate", "Delete\u{2026}"] {
+        for offered in ["Clears Itself", "Rename", "Duplicate", "Delete"] {
             assert!(crate::studio::tests::place_of(&menu, offered).is_some(), "{offered} is offered");
         }
         // It is open already: there is no Edit in the Editor.
@@ -9893,35 +9836,44 @@ mod tests {
         assert_eq!((open(&state), state.editing.as_ref().map(|draft| draft.serial)), (Some(3), serial));
         // The last can't go further down.
         assert_eq!(click_prop_words(&ctx, &mut state, "\u{2193}", Primary), None);
-        // Delete asks first; once answered, the prop goes and the one before it (it was the
-        // last) opens.
+        // Delete goes at once, asking nothing: the prop goes, off the screens, and the one
+        // before it (it was the last) opens.
+        let copy = state.props[3].clone();
+        state.props_live.push((copy.id, std::time::Instant::now()));
         let asked = click_prop_words(&ctx, &mut state, "Delete", Primary).expect("asked");
         apply_prop_ask(&mut state, asked);
-        let copy = state.props[3].id;
-        assert_eq!((state.confirm_delete_prop, state.props.len()), (Some(copy), 4), "asked, not yet deleted");
-        assert!(state.alert_open());
-        state.props_live.push((copy, std::time::Instant::now()));
-        delete_prop(&mut state, 3);
+        assert!(!state.alert_open());
         assert_eq!(names(&state), ["Logo", "Name", "Welcome"]);
         assert_eq!(open(&state), Some(2));
         assert!(state.props_live.is_empty(), "it comes off the screens");
+        // Undo puts it back where it was, open again; Command-Z in the editor asks for it.
+        assert_eq!(state.edit_steps.last(), Some(&EditStep::Deleted));
+        let gone = state.removed.pop().expect("kept for Undo");
+        assert_eq!(gone, crate::removed::Removed::Prop { at: 3, prop: copy.clone() });
+        assert!(gone.redo(&mut state, true));
+        assert_eq!((names(&state)[3].as_str(), open(&state)), ("Name copy", Some(3)));
+        assert!(gone.redo(&mut state, false));
+        assert_eq!(
+            (names(&state), open(&state)),
+            (vec!["Logo".to_owned(), "Name".to_owned(), "Welcome".to_owned()], Some(2))
+        );
         // Add: a new prop at the end, open, with its name ready to be typed over.
         let asked = click_prop_words(&ctx, &mut state, "Add", Primary).expect("asked");
         apply_prop_ask(&mut state, asked);
         assert_eq!((state.props.len(), open(&state)), (4, Some(3)));
         assert_eq!(state.prop_rename, Some((state.props[3].id, "Prop 1".to_owned())));
         // Deleting a prop before the open one keeps the open one open.
-        delete_prop(&mut state, 0);
+        state.delete_prop(0);
         assert_eq!((names(&state)[2].as_str(), open(&state)), ("Prop 1", Some(2)));
         // With the last prop deleted, the props' list stays, empty, with Add.
         let mut state = props_open(&["Logo"], 0);
-        delete_prop(&mut state, 0);
+        state.delete_prop(0);
         assert!(state.props.is_empty());
         assert_eq!((state.editing.is_none(), state.edit_kind()), (true, Some(EditKind::Props)));
     }
 
     #[test]
-    fn a_prop_or_layout_deleted_in_the_edit_view_is_asked_about_and_return_deletes_it() {
+    fn a_prop_or_layout_deleted_in_the_edit_view_goes_at_once_and_the_next_opens() {
         let (ctx, show) = (egui::Context::default(), three_songs());
         let mut state = HomeState::default();
         for name in ["Logo", "Name", "Welcome"] {
@@ -9930,47 +9882,44 @@ mod tests {
         state.edit_kind_request = Some(EditKind::Props);
         frame_events(&ctx, &show, &mut state, vec![], 0.0);
         assert_eq!(state.edit_kind(), Some(EditKind::Props));
-        // The second open, and asked to be deleted: the question waits for an answer.
+        // The second open, and deleted: it goes at once and the one after it opens.
         state.editing = crate::studio::prop_draft(&state, 1);
-        state.confirm_delete_prop = Some(state.props[1].id);
+        apply_prop_ask(&mut state, PropListAsk::Of(1, crate::live_tabs::PropAsk::Delete));
         frame_events(&ctx, &show, &mut state, vec![], 0.1);
-        assert_eq!((state.props.len(), state.alert_open()), (3, true));
-        // Return deletes it, and the one after it opens.
-        let said = frame_commands(&ctx, &show, &mut state, pressed(Key::Enter, Modifiers::NONE), 0.2);
-        assert!(said.is_empty(), "Return answers the question and nothing else: {said:?}");
+        assert!(!state.alert_open(), "nothing is asked");
         let names: Vec<&str> = state.props.iter().map(|prop| prop.name.as_str()).collect();
         assert_eq!(names, ["Logo", "Welcome"]);
         assert_eq!(
             state.editing.as_ref().map(|draft| (draft.at.presentation, draft.at.slide)),
             Some((crate::props::PROP_SLOT, 1))
         );
-        assert!(!state.alert_open());
-        // With the last one deleted, the Edit view goes on to the slides.
+        // With the last one deleted, the empty list stays, with Add; Undo opens the prop again.
         state.props.truncate(1);
         state.editing = crate::studio::prop_draft(&state, 0);
-        state.confirm_delete_prop = Some(state.props[0].id);
-        frame_events(&ctx, &show, &mut state, vec![], 0.3);
-        let said = frame_commands(&ctx, &show, &mut state, pressed(Key::Enter, Modifiers::NONE), 0.4);
-        assert!(said.is_empty(), "{said:?}");
+        state.removed.clear();
+        apply_prop_ask(&mut state, PropListAsk::Of(0, crate::live_tabs::PropAsk::Delete));
         frame_events(&ctx, &show, &mut state, vec![], 0.5);
         assert!(state.props.is_empty());
         assert_eq!(state.edit_kind(), Some(EditKind::Props), "the empty list, with Add");
-        // A stage layout the same way: Escape keeps it, Return deletes it.
+        let gone = state.removed.pop().expect("kept for Undo");
+        assert!(gone.redo(&mut state, true));
+        assert_eq!(
+            state.editing.as_ref().map(|draft| (draft.at.presentation, draft.at.slide)),
+            Some((crate::props::PROP_SLOT, 0))
+        );
+        assert!(!state.props_editor_open, "the prop open takes the empty list's place");
+        // A stage layout the same way.
         state.edit_kind_request = Some(EditKind::Stage);
         frame_events(&ctx, &show, &mut state, vec![], 0.6);
         frame_events(&ctx, &show, &mut state, vec![], 0.7);
         assert_eq!(state.edit_kind(), Some(EditKind::Stage));
         let second = state.stage_layouts[1].id;
-        state.confirm_delete_layout = Some(second);
+        crate::stage_editor::apply(&mut state, crate::stage_editor::ListRequest::Delete(1));
         frame_events(&ctx, &show, &mut state, vec![], 0.8);
-        frame_events(&ctx, &show, &mut state, pressed(Key::Escape, Modifiers::NONE), 0.9);
-        assert_eq!((state.stage_layouts.len(), state.confirm_delete_layout), (4, None));
-        state.confirm_delete_layout = Some(second);
-        frame_events(&ctx, &show, &mut state, vec![], 1.0);
-        frame_events(&ctx, &show, &mut state, pressed(Key::Enter, Modifiers::NONE), 1.1);
         assert_eq!(state.stage_layouts.len(), 3);
         assert!(state.stage_layouts.iter().all(|layout| layout.id != second));
         assert_eq!(state.edit_kind(), Some(EditKind::Stage));
+        assert!(!state.alert_open());
     }
 
     #[test]
@@ -10302,13 +10251,15 @@ mod tests {
     #[test]
     fn an_open_question_takes_delete_and_the_arrows_from_the_edit_view() {
         let (ctx, show) = (egui::Context::default(), three_songs());
-        // A prop open, its words picked, and asked whether to delete it.
+        // A prop open, its words picked, and a question open (whether to delete a theme, which
+        // Undo can't bring back).
         let mut state = props_open(&["Logo", "Name"], 0);
         if let Some(draft) = state.editing.as_mut() {
             draft.select_only(draft.slide.objects.first().map(|object| object.id));
         }
         let before = state.editing.as_ref().map(|draft| draft.slide.clone());
-        state.confirm_delete_prop = Some(state.props[0].id);
+        state.theme_names = vec!["Built-in".to_owned(), "Evening".to_owned()];
+        state.confirm_delete_theme = Some(1);
         for key in [Key::Delete, Key::Backspace, Key::ArrowRight, Key::ArrowDown] {
             frame_events(&ctx, &show, &mut state, pressed(key, Modifiers::NONE), 0.1);
         }
@@ -10320,15 +10271,16 @@ mod tests {
         state.confirm_delete_slides = vec![SlideRef { presentation: 0, slide: 0 }];
         frame_events(&ctx, &show, &mut state, pressed(Key::ArrowDown, Modifiers::NONE), 0.2);
         assert_eq!(state.editing.as_ref().map(|draft| draft.at.slide), Some(0));
-        // A template asked about, with a box picked: Delete doesn't take the box.
+        // A theme asked about, with a box of a template picked: Delete doesn't take the box.
         let theme = Theme::builtin();
         let mut draft = EditDraft::of_slide(theme.templates[0].as_slide(), 0);
         draft.select_only(draft.slide.objects.first().map(|object| object.id));
         let boxes = draft.slide.objects.len();
         let mut state = HomeState {
-            theme_edit: Some(ThemeEdit::of(0, theme)),
+            theme_edit: Some(ThemeEdit::of(1, theme)),
             editing: Some(draft),
-            confirm_delete_template: Some(0),
+            theme_names: vec!["Built-in".to_owned(), "Evening".to_owned()],
+            confirm_delete_theme: Some(1),
             ..HomeState::default()
         };
         frame_events(&ctx, &show, &mut state, pressed(Key::Delete, Modifiers::NONE), 0.3);

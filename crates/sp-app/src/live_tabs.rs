@@ -881,7 +881,7 @@ pub fn prop_menu(ui: &mut egui::Ui, auto_clear: Option<u32>, in_editor: bool) ->
         asked = Some(PropAsk::Duplicate);
     }
     ui.separator();
-    if ui.button(if in_editor { "Delete\u{2026}" } else { "Delete" }).clicked() {
+    if ui.button("Delete").clicked() {
         asked = Some(PropAsk::Delete);
     }
     asked

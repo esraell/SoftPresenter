@@ -392,9 +392,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   these changes in the Show view and on the Bible page, and the audience stays on the same slide;
   what was deleted takes its turn in the same order.
 - **Deleting, one rule:** what Undo can bring back goes at once, with no question and no
-  notice: items taken out of a playlist, playlists, libraries, audio playlists, and timer,
-  message, prop and macro cards (Cut on a message too). Undo puts it back where it was (a
-  playlist in front again, a library shown again, items picked again) and Redo deletes it again;
+  notice: items taken out of a playlist, playlists, libraries, audio playlists, timer,
+  message, prop and macro cards (Cut on a message too), and in the Edit view props, stage
+  layouts, theme templates and a theme's version. Undo puts it back where it was (a playlist in
+  front again, a library shown again, items picked again, a prop, layout or template open
+  again; Command-Z in the Edit view takes it back in turn with the changes made there) and Redo deletes it again;
   if what it was in has changed too much since, a notice says it can't be undone. What Undo
   can't bring back asks first, and the question always ends "This can't be undone.": songs
   deleted from the library, media bin items, a theme, a screen, and Disconnect for VoxLive and
@@ -431,10 +433,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   or Hide (the card is tinted orange while it shows), and ⋯ with Edit in the Editor (a
   double-click does the same), Clears Itself, Rename, Duplicate and Delete. The Props key (off
   a Mac, F4 too) takes them all off. In the Edit view, under Props, they are also made (Add), copied
-  (Duplicate), moved (↑ and ↓, or dragged) and deleted; a prop's right-click menu there has
-  Clears Itself, Rename, Duplicate and Delete…, and the strip under the picture of one that
-  shows is orange. With no props, Edit › Props shows the list empty, with Add to make the
-  first; with the last prop deleted there, the list stays, empty.
+  (Duplicate), moved (↑ and ↓, or dragged) and deleted (at once; Undo puts it back, open
+  again); a prop's right-click menu there has Clears Itself, Rename, Duplicate and Delete, and
+  the strip under the picture of one that shows is orange. With no props, Edit › Props shows
+  the list empty, with Add to make the first; with the last prop deleted there, the list stays,
+  empty.
 - **Macros**: steps done in turn, which clear layers (all, or the slide, the media, the props,
   the message, the audio or the announcements alone), show or hide messages and props, start,
   stop or reset timers, switch the audience screens, go to songs, show a picture from the
@@ -542,9 +545,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   layouts. View › Themes, Control-T and `sp view themes` open
   it on the themes. Under Slides, Props and Stage the left column lists them the same way: a
   heading (SLIDES, PROPS, STAGE LAYOUTS), a row of keys that act on the one open (Add,
-  Duplicate, Delete, which asks first, and ↑ and ↓ to move it up or down the list), then each
-  as its picture with its number and name under it, the one open on a lighter grey with a ring
-  round it. A click opens one, a double click retypes its name in place (the name keeps its
+  Duplicate, Delete (a prop or a layout goes at once, and Undo puts it back; slides ask first),
+  and ↑ and ↓ to move it up or down the list), then each as its picture with its number and
+  name under it, the one open on a lighter grey with a ring round it. A click opens one, a double click retypes its name in place (the name keeps its
   look while it is retyped), a drag moves it to where the ink line is (the one open stays
   open), and a right-click opens its other choices; the objects of the one open stay at the
   foot of the column. Delete with nothing picked on the canvas is the list's Delete key: it
@@ -592,8 +595,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   many lines of the notes. An item can be on a layout more than once. The layouts are listed on
   the left, each as a live picture of what the stage would show in it now (drawn again only
   when that changes, as in the Stage tab), under Add, Duplicate, Delete, ↑ and ↓; a right-click on
-  one offers Rename, Duplicate and Delete…, and a double click renames it. Delete asks first,
-  and is not offered for the only layout. With nothing picked the inspector names the layout
+  one offers Rename, Duplicate and Delete, and a double click renames it. Delete goes at once
+  (Undo puts it back, open again), and is not offered for the only layout. With nothing picked the inspector names the layout
   and the stage screens that use it. A layout saved by an earlier version opens and looks as it did,
   and keeps what it had (each item's look and place are still written where earlier versions
   read them).
@@ -931,9 +934,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     copies of which templates it starts from (the song templates, the Bible template); the
     first copy opens on the canvas. With a version picked, a line says it is used while that
     version is on, with ⋯ for Rename… (in every theme), Add a Copy Of ▸ and Remove It From the
-    theme (which asks). Add, Duplicate, Delete, ↑ and ↓ act on the templates shown; each is a picture
+    theme (at once, with its templates; Undo puts it back). Add, Duplicate, Delete (at once; Undo
+    puts it back, and the last template of a version takes the version with it, and back), ↑ and
+    ↓ act on the templates shown; each is a picture
     with a strip (its number, name and what it is for: Songs, Bible, Songs and Bible, or By
-    hand), and a right-click has Used For, Rename…, Duplicate and Delete…. The canvas is titled
+    hand), and a right-click has Used For, Rename…, Duplicate and Delete. The canvas is titled
     with the theme, the version and the template.
   - A song or a passage in a playlist can be set to show in a version, from the **version
     button** among its title-bar tools (the theme icon, in the lighter grey while one is set,

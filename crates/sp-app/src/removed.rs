@@ -4,6 +4,8 @@
 //! into its one history with the songs' changes (`ShowHistory` in main.rs), so Undo puts it back
 //! where it was, picked, and Redo deletes it again.
 
+use sp_model::{ThemeTemplate, ThemeVersion, Uuid};
+
 use crate::home::HomeState;
 use crate::service::{Item, Service};
 
@@ -20,13 +22,54 @@ pub struct RemovedItems {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Removed {
     Items(RemovedItems),
-    Playlist { at: usize, playlist: Service },
-    Library { at: usize, library: crate::libraries::Library },
-    AudioPlaylist { at: usize, playlist: crate::audio::Playlist },
-    Timer { at: usize, timer: crate::timers::Timer },
-    Message { at: usize, message: crate::messages::Message },
-    Prop { at: usize, prop: crate::props::Prop },
-    Macro { at: usize, made: crate::macros::Macro },
+    Playlist {
+        at: usize,
+        playlist: Service,
+    },
+    Library {
+        at: usize,
+        library: crate::libraries::Library,
+    },
+    AudioPlaylist {
+        at: usize,
+        playlist: crate::audio::Playlist,
+    },
+    Timer {
+        at: usize,
+        timer: crate::timers::Timer,
+    },
+    Message {
+        at: usize,
+        message: crate::messages::Message,
+    },
+    Prop {
+        at: usize,
+        prop: crate::props::Prop,
+    },
+    Macro {
+        at: usize,
+        made: crate::macros::Macro,
+    },
+    StageLayout {
+        at: usize,
+        layout: ThemeTemplate,
+    },
+    /// A template of a theme (by its id), from its usual templates (`set` `None`) or a version's.
+    /// The last template of a version takes the version out of the theme: `version` keeps it
+    /// then, with its place among the theme's versions, to put back with it.
+    Template {
+        theme: Uuid,
+        set: Option<Uuid>,
+        at: usize,
+        template: ThemeTemplate,
+        version: Option<(usize, ThemeVersion)>,
+    },
+    /// A version taken out of a theme (by its id), with its templates.
+    Version {
+        theme: Uuid,
+        at: usize,
+        version: ThemeVersion,
+    },
 }
 
 /// Puts `thing` back at `at` in `list` (at its end if the list has since grown shorter).
@@ -54,7 +97,16 @@ impl Removed {
             Removed::Message { message, .. } => ("message", &message.name),
             Removed::Prop { prop, .. } => ("prop", &prop.name),
             Removed::Macro { made, .. } => ("macro", &made.name),
+            Removed::StageLayout { layout, .. } => ("stage layout", &layout.name),
+            Removed::Template { template, .. } => ("template", &template.name),
+            Removed::Version { version, .. } => ("version", &version.name),
         }
+    }
+
+    /// Whether it was in a theme, which the app keeps: the app puts it back
+    /// (`App::redo_theme_removed`), not [`redo`](Self::redo).
+    pub fn in_a_theme(&self) -> bool {
+        matches!(self, Removed::Template { .. } | Removed::Version { .. })
     }
 
     /// What `sp undo` (or `sp redo`) says it did: put it back (`back`), or deleted it again. The
@@ -166,15 +218,21 @@ impl Removed {
                 done
             }
             Removed::Prop { at, prop } => {
-                let done = if back {
-                    put_back(&mut state.props, *at, prop);
+                if back {
+                    let at = put_back(&mut state.props, *at, prop);
+                    state.props_changed = true;
+                    // In the Edit view's props (or their empty list), it is the one open again.
+                    let props_open =
+                        state.editing.as_ref().is_some_and(|draft| draft.at.presentation == crate::props::PROP_SLOT);
+                    if props_open || (state.props_editor_open && state.editing.is_none()) {
+                        state.editing = crate::studio::prop_draft(state, at);
+                        state.props_editor_open = false;
+                    }
                     true
                 } else {
-                    state.props_live.retain(|(live, _)| *live != prop.id);
-                    take_again(&mut state.props, |have| have.id == prop.id).is_some()
-                };
-                state.props_changed |= done;
-                done
+                    let at = state.props.iter().position(|have| have.id == prop.id);
+                    at.and_then(|at| state.take_prop(at)).is_some()
+                }
             }
             Removed::Macro { at, made } => {
                 let done = if back {
@@ -186,7 +244,57 @@ impl Removed {
                 state.macros_changed |= done;
                 done
             }
+            Removed::StageLayout { at, layout } => {
+                if back {
+                    let at = put_back(&mut state.stage_layouts, *at, layout);
+                    state.stage_layouts_changed = true;
+                    // In Edit › Stage, it is the one open again.
+                    if state.editing.as_ref().is_some_and(crate::stage_editor::is_stage) {
+                        state.stage_edit = (at, None);
+                        state.editing = crate::stage_editor::draft(state, at);
+                    }
+                    true
+                } else {
+                    let at = state.stage_layouts.iter().position(|have| have.id == layout.id);
+                    at.and_then(|at| crate::stage_editor::take_out(state, at)).is_some()
+                }
+            }
+            // The app keeps the themes, and puts these back itself (see `redo_in_theme`).
+            Removed::Template { .. } | Removed::Version { .. } => false,
         }
+    }
+
+    /// For a template or a version: puts it back in its theme where it was (`back`; a version's
+    /// last template comes back with its version), or deletes it again. Returns the set and the
+    /// template the Theme Editor then shows, or `None`, changing nothing, when the theme has
+    /// changed so much that it can't be.
+    pub fn redo_in_theme(&self, theme: &mut sp_model::Theme, back: bool) -> Option<(Option<Uuid>, usize)> {
+        let has = |theme: &sp_model::Theme, id: Uuid| theme.versions.iter().any(|have| have.id == id);
+        Some(match (self, back) {
+            (Removed::Template { version: Some((place, version)), .. }, true) if !has(theme, version.id) => {
+                theme.versions.insert((*place).min(theme.versions.len()), version.clone());
+                (Some(version.id), 0)
+            }
+            (Removed::Template { set, at, template, .. }, true) => {
+                let templates = theme.set_mut(*set)?;
+                let at = (*at).min(templates.len());
+                templates.insert(at, template.clone());
+                (*set, at)
+            }
+            (Removed::Template { set, template, .. }, false) => {
+                let at = theme.set(*set).iter().position(|have| have.id == template.id)?;
+                if !theme.remove_template_in(*set, at) {
+                    return None;
+                }
+                (set.filter(|id| theme.has_version(*id)), at.saturating_sub(1))
+            }
+            (Removed::Version { at, version, .. }, true) if !has(theme, version.id) => {
+                theme.versions.insert((*at).min(theme.versions.len()), version.clone());
+                (Some(version.id), 0)
+            }
+            (Removed::Version { version, .. }, false) if theme.remove_version(version.id) => (None, 0),
+            _ => return None,
+        })
     }
 }
 
@@ -297,15 +405,56 @@ impl HomeState {
         })
     }
 
-    /// Deletes a prop, by its place; it comes off the screens if it is showing. Returns it.
+    /// Deletes a prop, by its place; it comes off the screens if it is showing, and the Edit
+    /// view stays on a prop (see `take_prop`). Returns it.
     pub fn delete_prop(&mut self, at: usize) -> Option<crate::props::Prop> {
-        (at < self.props.len()).then(|| {
-            let prop = self.props.remove(at);
-            self.props_live.retain(|(live, _)| *live != prop.id);
-            self.props_changed = true;
-            self.removed.push(Removed::Prop { at, prop: prop.clone() });
-            prop
-        })
+        let in_editor = self.editing.as_ref().is_some_and(|draft| draft.at.presentation == crate::props::PROP_SLOT);
+        let prop = self.take_prop(at)?;
+        self.removed.push(Removed::Prop { at, prop: prop.clone() });
+        if in_editor {
+            self.note_deleted_in_editor();
+        }
+        Some(prop)
+    }
+
+    /// Takes a prop out of the list (it comes off the screens), keeping the Edit view's props on
+    /// a prop when they are open: the one open, wherever it went, or the one now in its place
+    /// (the one before, for the last); with none left, the empty list of props stays open.
+    pub fn take_prop(&mut self, at: usize) -> Option<crate::props::Prop> {
+        if at >= self.props.len() {
+            return None;
+        }
+        let editing_props = self.editing.as_ref().is_some_and(|draft| draft.at.presentation == crate::props::PROP_SLOT);
+        let open = self.editing.as_ref().filter(|_| editing_props).map(|draft| draft.at.slide);
+        let open_id = open.and_then(|open| self.props.get(open)).map(|prop| prop.id);
+        let prop = self.props.remove(at);
+        self.props_live.retain(|(live, _)| *live != prop.id);
+        self.props_changed = true;
+        if editing_props {
+            if self.props.is_empty() {
+                self.editing = None;
+                self.props_editor_open = true;
+            } else {
+                match open_id.and_then(|id| self.props.iter().position(|prop| prop.id == id)) {
+                    Some(still) => {
+                        if let Some(draft) = self.editing.as_mut() {
+                            draft.at.slide = still;
+                        }
+                    }
+                    None => self.editing = crate::studio::prop_draft(self, at.min(self.props.len() - 1)),
+                }
+            }
+        }
+        Some(prop)
+    }
+
+    /// Something was just deleted from one of the Edit view's lists: it takes its turn in the
+    /// Edit view's undo order, so Command-Z there puts it back (from the app's history).
+    pub fn note_deleted_in_editor(&mut self) {
+        if self.editing.is_some() {
+            self.edit_steps.push(crate::home::EditStep::Deleted);
+            self.edit_redo.clear();
+        }
     }
 
     /// Deletes a macro, by its place. Returns it.

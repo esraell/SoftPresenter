@@ -1010,7 +1010,7 @@ Themes
                                give a theme a version, starting from copies of its templates
                                (its song templates if none are named); the name another theme's
                                version has makes it that version, so the screens switch together
-  version rename OLD NEW | version remove NAME from THEME --yes
+  version rename OLD NEW | version remove NAME from THEME
   version use NAME [--keep] | version off
                                every screen whose theme has it in that version, until the next
                                item goes on screen (with --keep, until switched back); off is

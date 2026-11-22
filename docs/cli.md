@@ -68,8 +68,8 @@ app.
 - **`--yes`** is needed by every command that deletes something Undo can't bring back (a song,
   a media bin item, a theme, a screen, a Bible, a connection), as the window asks about those.
   What Undo brings back goes at once, as in the window, and `sp undo` puts it back: playlists,
-  items taken out of a playlist, libraries, audio playlists, timers, messages, props and
-  macros. An old `--yes` on those is let by.
+  items taken out of a playlist, libraries, audio playlists, timers, messages, props,
+  macros and theme versions. An old `--yes` on those is let by.
 - **`--wait`** makes a command that runs in the background (a pack with videos, a large pack
   import, a Bible download) wait until it is done; see [jobs](#undo-jobs-and-the-menu-bar).
   `status --wait SECONDS` is something else: it waits for a change
@@ -784,7 +784,7 @@ and the copyright line keep their look.
 | `version list` (or `version`) | The versions, the themes that have each with their templates, and which is on |
 | `version add NAME to THEME [from TEMPLATE…]` | Gives a theme a version, starting from copies of the templates named (each one word, or quoted), or of its song templates. A name another theme's version has makes it that version, so the screens switch together |
 | `version rename OLD NEW` | Renames a version in every theme that has it (`version rename OLD to NEW` too) |
-| `version remove NAME from THEME --yes` | Takes a version out of a theme, with its templates. A version no theme has any more is gone, and playlist items set to it show in the usual look |
+| `version remove NAME from THEME` | Takes a version out of a theme, with its templates, at once (`sp undo` puts it back). A version no theme has any more is gone, and playlist items set to it show in the usual look |
 | `version use NAME [--keep]`, `version off` | Shows every screen whose theme has it in that version, until the next item goes on screen (with `--keep`, until switched back); `off` is the usual look. With nothing on screen, it waits for the next item |
 | `version keep on\|off` | The version on stays after the next item, or ends with it |
 | `playlist item N show-with NAME\|usual [--keep] [in PLAYLIST]` | A song or passage of a playlist brings that version when it goes on screen (and keeps it after, with `--keep`); it is the playlist's, the song itself doesn't change |
