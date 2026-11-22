@@ -3628,16 +3628,26 @@ fn slide_list_head(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, at: Sl
                 area = area.vertical_scroll_offset((place as f32 - 1.0).max(0.0) * PLAIN_ROW);
             }
         }
+        let mut empty = None;
         area.show_rows(ui, PLAIN_ROW, songs.len(), |ui, shown| {
             for song in &songs[shown] {
-                let title = show.presentations().get(*song).map_or("", |song| song.title.as_str());
+                let found = show.presentations().get(*song);
+                let title = found.map_or("", |song| song.title.as_str());
                 let is_open = *song == at.presentation;
                 let look = crate::studio::PlainRow { icon: Icon::Document, name: Some(title), tag: None, on: is_open };
                 if crate::studio::plain_row(ui, &look).0.clicked() && !is_open {
-                    open = Some(SlideRef { presentation: *song, slide: 0 });
+                    // A song with no slides has nothing to open: the Edit view stays as it is.
+                    if found.is_some_and(|song| song.slide_count() > 0) {
+                        open = Some(SlideRef { presentation: *song, slide: 0 });
+                    } else {
+                        empty = Some(title.to_owned());
+                    }
                 }
             }
         });
+        if let Some(title) = empty {
+            state.say(format!("\u{201c}{title}\u{201d} has no slides yet."));
+        }
         ui.add_space(4.0);
         crate::studio::list_heading(ui, "Slides");
         let count = show.presentations().get(at.presentation).map_or(0, |song| song.slide_count());
@@ -3898,11 +3908,13 @@ fn slide_list(
                 Some(held) => vec![held],
                 None => Vec::new(),
             };
-            // The list is the pictures and the room either side of them, to the column's edges.
-            let over = rows.first().map(|row| row.x_range().expand(10.0));
+            // The list is the pictures and the room either side of them, to the column's edges,
+            // as much of it as shows (not the keys above it or the objects under it).
+            let across = rows.first().map(|row| row.x_range().expand(10.0));
+            let down = ui.clip_rect().y_range();
             let pointer = ui
                 .input(|input| input.pointer.interact_pos())
-                .filter(|pointer| over.is_some_and(|over| over.contains(pointer.x)));
+                .filter(|pointer| across.is_some_and(|across| across.contains(pointer.x)) && down.contains(pointer.y));
             if dragging.is_some() {
                 if let Some(pointer) = pointer {
                     let slot = crate::studio::drop_slot(&rows, pointer.y);
@@ -4271,6 +4283,16 @@ pub enum SlideRequest {
 /// place of the first slide after it that stayed.
 pub fn place_after_deleting(place: usize, deleted: &[usize]) -> usize {
     place - deleted.iter().filter(|gone| **gone < place).count()
+}
+
+/// Where the slide being edited is once its song's slides have changed (`song`, as it is now):
+/// found again by its id (true), or, when it went, the slide now at `instead`, or the last
+/// (false). `None` when the song has no slides left.
+pub fn edited_slide_place(song: &sp_model::Presentation, id: sp_model::Uuid, instead: usize) -> Option<(usize, bool)> {
+    if let Some(found) = song.slides().position(|(_, slide)| slide.id == id) {
+        return Some((found, true));
+    }
+    song.slide_count().checked_sub(1).map(|last| (instead.min(last), false))
 }
 
 /// A new song as the New Song sheet describes it: its title, its theme by its place (`None`
@@ -9502,6 +9524,9 @@ mod tests {
         let away = pos2(600.0, third.y);
         drag_slides(&ctx, &show, &mut state, first - vec2(0.0, 60.0), away, false).drop_without_applying_deltas();
         assert_eq!(state.slide_request, None, "let go over the slide being edited");
+        let keys = slide_column_place(&ctx, &show, &mut state, "Copy");
+        drag_slides(&ctx, &show, &mut state, third - vec2(0.0, 60.0), keys, false).drop_without_applying_deltas();
+        assert_eq!(state.slide_request, None, "let go over the keys above the list");
     }
 
     #[test]
@@ -9616,6 +9641,50 @@ mod tests {
     }
 
     #[test]
+    fn the_slide_being_edited_is_found_again_wherever_a_change_of_its_song_puts_it() {
+        let (show, _) = song_open(&[("Verse 1", 3), ("Chorus", 2)], 2);
+        let song = &show.presentations()[0];
+        let slide = |song: &sp_model::Presentation, at: usize| song.slide(at).map(|(_, s)| s.texts()[0].1.clone());
+        let open = song.slide(2).map(|(_, s)| s.id).expect("the third slide");
+        // A slide before it deleted: it is one place higher, and is still the one open.
+        let fewer = song.without_slide(0).expect("deleted");
+        assert_eq!(edited_slide_place(&fewer, open, 2), Some((1, true)));
+        // Copies of the first two put in after the second: it is two places lower.
+        let copies: Vec<Slide> = (0..2).filter_map(|at| song.slide(at).map(|(_, s)| s.clone())).collect();
+        let more = song.with_slides_after(1, &copies).expect("copied");
+        assert_eq!(edited_slide_place(&more, open, 2), Some((4, true)));
+        assert_eq!(slide(&more, 2).as_deref(), Some("Verse 1 line 0"), "the first copy opens after Copy");
+        // It deleted itself: the slide now in its place opens, the Chorus's first.
+        let gone = song.without_slide(2).expect("deleted");
+        let place = edited_slide_place(&gone, open, place_after_deleting(2, &[2]));
+        assert_eq!(place, Some((2, false)));
+        assert_eq!(slide(&gone, 2).as_deref(), Some("Chorus line 0"));
+        // The last ones deleted, it among them: the slide that is now last.
+        let mut short = (**song).clone();
+        for at in [4, 3, 2] {
+            short = short.without_slide(at).expect("deleted");
+        }
+        assert_eq!(edited_slide_place(&short, open, place_after_deleting(2, &[2, 3, 4])), Some((1, false)));
+        // Every slide gone: nothing to edit.
+        let none = sp_model::Presentation { groups: Vec::new(), ..(**song).clone() };
+        assert_eq!(edited_slide_place(&none, open, 0), None);
+    }
+
+    #[test]
+    fn a_song_with_no_slides_offered_over_the_slides_opens_nothing() {
+        let ctx = crate::studio::tests::styled();
+        let (show, mut state) = song_open(&[("Verse 1", 2)], 0);
+        let empty = sp_model::Presentation {
+            title: "Empty".to_owned(),
+            groups: Vec::new(),
+            ..(*show.presentations()[0]).clone()
+        };
+        let show = Show::new(vec![show.presentations()[0].clone(), Arc::new(empty)]);
+        assert_eq!(click_slide_words(&ctx, &show, &mut state, "Empty"), None, "the Edit view stays");
+        assert!(state.toast.as_ref().is_some_and(|(words, _)| words.contains("no slides")));
+    }
+
+    #[test]
     fn the_edit_view_offers_the_playlists_songs_and_a_click_opens_one() {
         let ctx = crate::studio::tests::styled();
         let show = three_songs();
@@ -9624,7 +9693,8 @@ mod tests {
         let current = state.services.current;
         for at in [2, 0, 2] {
             let song = &show.presentations()[at];
-            let item = crate::service::Item::Song { key: song.id.to_string(), title: song.title.clone(), show_with: None };
+            let item =
+                crate::service::Item::Song { key: song.id.to_string(), title: song.title.clone(), show_with: None };
             state.services.list[current].items.push(item);
         }
         state.playlist_open = true;

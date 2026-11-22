@@ -7454,18 +7454,18 @@ impl App {
         let Some((at, id)) = followed else { return };
         let Some(running) = self.running.as_mut() else { return };
         let song = self.show.presentations().get(at.presentation);
-        let found = song.and_then(|song| song.slides().position(|(_, slide)| slide.id == id));
-        match found {
-            Some(slide) => {
+        match song.and_then(|song| home::edited_slide_place(song, id, instead)) {
+            // Still there: its draft goes with it, with the changes it can undo.
+            Some((slide, true)) => {
                 if let Some(draft) = running.home_state.editing.as_mut() {
                     draft.at.slide = slide;
                 }
             }
-            None => {
-                let count = song.map_or(0, |song| song.slide_count());
-                let slide = instead.min(count.saturating_sub(1));
+            Some((slide, false)) => {
                 running.home_state.editing = EditDraft::of(&self.show, sp_engine::SlideRef { slide, ..at });
             }
+            // No slides left (or no song): nothing to edit.
+            None => running.home_state.editing = None,
         }
     }
 
