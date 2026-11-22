@@ -69,41 +69,35 @@ fn checksum(bytes: &[u8]) -> String {
 }
 
 /// A file name made only from the Bible's short name's safe letters, so what a file says about
-/// itself can never choose where it is written.
+/// itself can never choose where it is written; never one Windows keeps for a device.
 fn file_name(id: &str) -> Option<String> {
     let safe: String = id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    let safe = if sp_bible::import::is_device_name(&safe) { format!("{safe}-bible") } else { safe };
     (!safe.is_empty() && safe.len() <= 40).then(|| format!("{safe}.spbible"))
 }
 
-/// Checks that the bytes are a whole Bible and keeps them in the folder. Returns where, and
-/// what the Bible says about itself. The error is a plain sentence.
-pub fn install_bytes(bytes: &[u8]) -> Result<(PathBuf, Info), String> {
-    let folder = folder().ok_or_else(|| "Could not find where to keep Bibles on this computer.".to_owned())?;
-    install_bytes_in(&folder, bytes)
-}
-
-fn install_bytes_in(folder: &Path, bytes: &[u8]) -> Result<(PathBuf, Info), String> {
+/// Checks that the bytes are a whole Bible and keeps them in the folder under its own short
+/// name for files; returns where, and what the Bible says about itself. With `trash_old`, a
+/// file already there under that name goes to the Trash first, as Remove puts it there, so the
+/// copy replaced can be put back.
+fn install_bytes_in(folder: &Path, bytes: &[u8], trash_old: bool) -> Result<(PathBuf, Info), String> {
     let bible = Bible::from_bytes(bytes)?;
     let name = file_name(&bible.info.id).ok_or_else(|| "This Bible file does not say which Bible it is.".to_owned())?;
     std::fs::create_dir_all(folder).map_err(|e| format!("Could not make the Bibles folder: {e}"))?;
     let path = folder.join(name);
     // Write beside it and rename, so a half-written file is never left under the real name.
     let partial = path.with_extension("spbible.part");
-    std::fs::write(&partial, bytes)
-        .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| format!("Could not save the Bible: {e}"))?;
+    std::fs::write(&partial, bytes).map_err(|e| format!("Could not save the Bible: {e}"))?;
+    if trash_old && path.is_file() {
+        crate::sweep::to_trash(&path).map_err(|e| {
+            let _ = std::fs::remove_file(&partial);
+            format!("Could not move the earlier copy to the Trash: {e}")
+        })?;
+    }
+    std::fs::rename(&partial, &path).map_err(|e| format!("Could not save the Bible: {e}"))?;
     // The same Bible kept before the rename is replaced, not left beside it.
     let _ = std::fs::remove_file(path.with_extension("pcbible"));
     Ok((path, bible.info))
-}
-
-/// Installs a Bible file the operator has, such as one dropped on the window.
-pub fn install_file(path: &Path) -> Result<(PathBuf, Info), String> {
-    let size = std::fs::metadata(path).map_err(|e| format!("Could not read that file: {e}"))?.len();
-    if size > LARGEST {
-        return Err("That file is too large to be a Bible.".to_owned());
-    }
-    install_bytes(&std::fs::read(path).map_err(|e| format!("Could not read that file: {e}"))?)
 }
 
 /// True for a SoftPresenter Bible file.
@@ -127,73 +121,211 @@ pub fn is_bible_file(path: &Path) -> bool {
     }
 }
 
+/// One Bible on the shelf, as an install from a file needs to know it.
+#[derive(Clone, Debug)]
+pub struct KnownBible {
+    pub id: String,
+    pub name: String,
+    pub short: String,
+    /// It comes with the app.
+    pub shipped: bool,
+}
+
+/// The Bibles on the shelf when an install from a file starts: it runs on a thread of its own,
+/// away from the shelf, and decides from this which short name for files is free and which
+/// earlier copy it replaces.
+#[derive(Clone, Debug, Default)]
+pub struct Known {
+    pub bibles: Vec<KnownBible>,
+}
+
+/// The Bible offered for download under this short name for files, in any case.
+fn offered(id: &str) -> Option<&'static crate::bible::Offered> {
+    crate::bible::OFFERED.iter().find(|bible| bible.id.eq_ignore_ascii_case(id))
+}
+
+impl Known {
+    /// True when the short name for files is in use, in any case (the Mac's disk doesn't tell
+    /// "ASV" from "asv"): by a Bible on the shelf, one offered, or a file in the folder.
+    fn taken(&self, folder: &Path, id: &str) -> bool {
+        self.bibles.iter().any(|bible| bible.id.eq_ignore_ascii_case(id))
+            || offered(id).is_some()
+            || file_name(id)
+                .is_some_and(|name| folder.join(&name).exists() || folder.join(name).with_extension("pcbible").exists())
+    }
+
+    /// A free short name for files, from `base`: itself, else `base-2`, `base-3`…
+    fn free(&self, folder: &Path, base: &str) -> Result<String, String> {
+        std::iter::once(base.to_owned())
+            .chain((2..1000).map(|n| format!("{base}-{n}")))
+            .find(|id| !self.taken(folder, id))
+            .ok_or_else(|| "Too many Bibles are installed under that name.".to_owned())
+    }
+
+    /// The Bible installed from a file before (never one built in or offered) under this short
+    /// name for files, in any case.
+    fn installed(&self, id: &str) -> Option<&KnownBible> {
+        self.bibles
+            .iter()
+            .find(|bible| !bible.shipped && offered(&bible.id).is_none() && bible.id.eq_ignore_ascii_case(id))
+    }
+
+    /// The same Bible installed from a file before: its name and short name alike.
+    fn again(&self, name: &str, short: &str) -> Option<&KnownBible> {
+        self.bibles
+            .iter()
+            .find(|bible| !bible.shipped && offered(&bible.id).is_none() && bible.name == name && bible.short == short)
+    }
+}
+
 /// How opening a Bible file the operator has went.
 #[derive(Debug)]
 pub enum Opened {
     /// It was installed: where it is kept, what it says about itself, and what to tell the
-    /// operator ("Installed … (66 books, 31,102 verses) …").
+    /// operator ("Installed … (66 books, 31,102 verses) …", or "Replaced your earlier …").
     Installed(PathBuf, Info, String),
     /// It was read, but doesn't say its name, short name or language: they are asked for, and
-    /// then [`install_imported`] installs it.
+    /// then [`Work::Install`] installs it.
     NeedsDetails(sp_bible::import::Imported),
 }
 
-/// Opens a Bible file the operator has (dropped on the window, chosen with Install from File…,
-/// or named to `sp bible install`): the app's own file is installed as it is; one in another
-/// program's format is read, made into the app's own and installed, with the details `given`
-/// in place of the file's. What is installed goes on the shelf with
+/// What a thread of its own does with a Bible file (see [`run`]).
+#[derive(Debug)]
+pub enum Work {
+    /// Read the file at a path and install it, with the details given in place of the file's.
+    /// With `ask`, one that doesn't say what it is comes back to be asked about; without (the
+    /// command line, where nothing can ask), it is refused naming the flags to add.
+    Open { path: PathBuf, given: sp_bible::import::About, ask: bool },
+    /// Install a Bible already read, under the details the operator gave.
+    Install { imported: Box<sp_bible::import::Imported>, details: sp_bible::import::About },
+}
+
+/// Only one install writes at a time, so two can't take the same free short name for files.
+static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Does a Bible file's work, away from the window: reading, converting and writing a whole
+/// Bible takes a moment, and a file may be made to take longer. `known` is the shelf as the
+/// work started. What is installed goes on the shelf with
 /// [`crate::bible::Shelf::put_installed`].
-pub fn open_file(path: &Path, given: &sp_bible::import::About, shelf: &crate::bible::Shelf) -> Result<Opened, String> {
-    if is_own_bible_file(path) {
-        let (kept, info) = install_file(path)?;
-        let said = format!("Installed the {}.", info.name);
-        return Ok(Opened::Installed(kept, info, said));
-    }
-    let imported = sp_bible::import::read_path(path, &sp_bible::import::Limits::NORMAL)?;
-    match imported.details(given) {
-        Some(details) => {
-            let (kept, info, said) = install_imported(&imported, &details, shelf)?;
-            Ok(Opened::Installed(kept, info, said))
+pub fn run(work: Work, known: &Known) -> Result<Opened, String> {
+    let folder = folder().ok_or_else(|| "Could not find where to keep Bibles on this computer.".to_owned())?;
+    run_in(&folder, work, known, true)
+}
+
+fn run_in(folder: &Path, work: Work, known: &Known, trash: bool) -> Result<Opened, String> {
+    match work {
+        Work::Open { path, given, ask } => {
+            if is_own_bible_file(&path) {
+                return install_own_file(folder, &path, known, trash);
+            }
+            let imported = sp_bible::import::read_path(&path, &sp_bible::import::Limits::NORMAL)?;
+            match imported.details(&given) {
+                Some(details) => install_imported(folder, &imported, &details, known, trash),
+                None if ask => Ok(Opened::NeedsDetails(imported)),
+                None => Err(missing_details(&imported, &given)),
+            }
         }
-        None => Ok(Opened::NeedsDetails(imported)),
+        Work::Install { imported, details } => install_imported(folder, &imported, &details, known, trash),
     }
+}
+
+/// What the command line says of a file that doesn't say what it is: the flags to add, with
+/// what would be offered.
+fn missing_details(imported: &sp_bible::import::Imported, given: &sp_bible::import::About) -> String {
+    let missing = imported.missing_flags(given);
+    let offered = imported.prefilled();
+    format!(
+        "{} doesn't say its {}. Give {} too, such as: --name \"{}\" --short {} --language {}",
+        imported.file_name,
+        missing.replace("--short", "short name").replace("--", ""),
+        missing,
+        offered.name,
+        if offered.short.is_empty() { "SHORT" } else { offered.short.as_str() },
+        if offered.language.is_empty() { "en" } else { offered.language.as_str() }
+    )
 }
 
 /// Installs a Bible read from another program's file, under the details given. The same Bible
-/// installed from a file before (its name and short name alike) is replaced; otherwise it gets
-/// a short name for its file no Bible installed or offered has (`rst`, else `rst-2`…), so it
-/// never stands in for one of them. Returns where, what it says about itself, and what to tell
-/// the operator.
-pub fn install_imported(
-    imported: &sp_bible::import::Imported,
-    details: &sp_bible::import::About,
-    shelf: &crate::bible::Shelf,
-) -> Result<(PathBuf, Info, String), String> {
-    let folder = folder().ok_or_else(|| "Could not find where to keep Bibles on this computer.".to_owned())?;
-    let offered = |id: &str| crate::bible::OFFERED.iter().any(|bible| bible.id == id);
-    let again = shelf.installed_as(&details.name, &details.short).filter(|id| !offered(id));
-    install_imported_in(&folder, imported, details, again, &|id| shelf.position(id).is_some() || offered(id))
-}
-
-fn install_imported_in(
+/// installed from a file before (its name and short name alike) is replaced, its earlier copy
+/// going to the Trash; otherwise it gets a short name for its file nothing has (`rst`, else
+/// `rst-2`…), so it never stands in for a Bible built in, offered or installed.
+fn install_imported(
     folder: &Path,
     imported: &sp_bible::import::Imported,
     details: &sp_bible::import::About,
-    again: Option<&str>,
-    taken: &dyn Fn(&str) -> bool,
-) -> Result<(PathBuf, Info, String), String> {
-    let base = sp_bible::import::id_from(&details.short, &details.name);
-    let id = match again {
-        Some(id) => id.to_owned(),
-        None => std::iter::once(base.clone())
-            .chain((2..1000).map(|n| format!("{base}-{n}")))
-            .find(|id| !taken(id))
-            .ok_or_else(|| "Too many Bibles are installed under that name.".to_owned())?,
+    known: &Known,
+    trash: bool,
+) -> Result<Opened, String> {
+    let _writing = WRITING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let again = known.again(&details.name, &details.short).map(|bible| bible.id.clone());
+    let id = match &again {
+        Some(id) => id.clone(),
+        None => known.free(folder, &sp_bible::import::id_from(&details.short, &details.name))?,
     };
     let bible = imported.bible(&id, details);
-    let (kept, info) = install_bytes_in(folder, &bible.to_bytes())?;
+    let (kept, info) = install_bytes_in(folder, &bible.to_bytes(), trash && again.is_some())?;
     let said = imported.summary(&info.name);
-    Ok((kept, info, said))
+    let said = match again {
+        // "Installed X (…)" says "Replaced your earlier X (…)" instead.
+        Some(_) => format!("Replaced your earlier {}", said.trim_start_matches("Installed ")),
+        None => said,
+    };
+    Ok(Opened::Installed(kept, info, said))
+}
+
+/// Installs a SoftPresenter Bible file the operator has. Its own short name for files is kept
+/// unless something else has it: the very file offered for download (its checksum the one the
+/// app expects) installs as that Bible; one that names a Bible built in or offered, or a file of
+/// another Bible, gets a free one instead, so a dropped file can never stand in for the checked
+/// download; one that names a Bible installed from a file before replaces it, the earlier copy
+/// going to the Trash.
+fn install_own_file(folder: &Path, path: &Path, known: &Known, trash: bool) -> Result<Opened, String> {
+    use std::io::Read;
+    let shown =
+        sp_bible::import::shown_name(&path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()));
+    let meta = std::fs::metadata(path).map_err(|e| format!("Could not read {shown}: {e}"))?;
+    // A pipe or device is never opened: opening one can wait for ever.
+    if !meta.is_file() {
+        return Err(format!("{shown} isn't a Bible file SoftPresenter can read."));
+    }
+    if meta.len() > LARGEST {
+        return Err("That file is too large to be a Bible.".to_owned());
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .and_then(|file| file.take(LARGEST + 1).read_to_end(&mut bytes))
+        .map_err(|e| format!("Could not read {shown}: {e}"))?;
+    if bytes.len() as u64 > LARGEST {
+        return Err("That file is too large to be a Bible.".to_owned());
+    }
+    let mut bible = Bible::from_bytes(&bytes)?;
+    let own = bible.info.id.clone();
+    let _writing = WRITING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let the_download = offered(&own).is_some_and(|offered| checksum(&bytes) == offered.checksum);
+    let earlier = known.installed(&own).map(|bible| bible.id.clone());
+    let (bytes, replacing) = if the_download {
+        (bytes, false)
+    } else if let Some(id) = &earlier {
+        if *id != own {
+            bible.info.id.clone_from(id);
+            (bible.to_bytes(), true)
+        } else {
+            (bytes, true)
+        }
+    } else if known.taken(folder, &own) || file_name(&own).is_none_or(|name| name != format!("{own}.spbible")) {
+        let base = sp_bible::import::id_from(&own, &bible.info.name);
+        bible.info.id = known.free(folder, &base)?;
+        (bible.to_bytes(), false)
+    } else {
+        (bytes, false)
+    };
+    let (kept, info) = install_bytes_in(folder, &bytes, trash && replacing)?;
+    let said = if replacing {
+        format!("Replaced your earlier {}.", info.name)
+    } else {
+        format!("Installed the {}.", info.name)
+    };
+    Ok(Opened::Installed(kept, info, said))
 }
 
 /// Downloads a Bible's file, trying once more if the first try fails or comes back short.
@@ -230,7 +362,7 @@ fn download_into(folder: &Path, address: &str, id: &str, expected_checksum: &str
     if Bible::read_info(&bytes)?.id != id {
         return Err("The downloaded file is a different Bible, so it was not installed.".to_owned());
     }
-    install_bytes_in(folder, &bytes)
+    install_bytes_in(folder, &bytes, false)
 }
 
 /// How a download ended: the Bible's short name for files, and the installed file or why not.
@@ -357,16 +489,115 @@ mod tests {
         let folder = empty_folder("imported");
         let zefania = "<XMLBIBLE biblename=\"Тестова Біблія\"><INFORMATION><identifier>НПУ</identifier><language>ukr</language></INFORMATION>\
 <BIBLEBOOK bnumber=\"43\"><CHAPTER cnumber=\"3\"><VERS vnumber=\"16\">Слова для перевірки.</VERS></CHAPTER></BIBLEBOOK></XMLBIBLE>";
-        let imported =
-            sp_bible::import::read_bytes(zefania.as_bytes(), "test.xml", &sp_bible::import::Limits::NORMAL).unwrap();
-        let details = imported.details(&sp_bible::import::About::default()).unwrap();
-        // "npu" is taken (as an installed or offered Bible's would be): the next is used.
-        let (path, info, said) = install_imported_in(&folder, &imported, &details, None, &|id| id == "npu").unwrap();
+        let file = folder.with_extension("xml");
+        std::fs::write(&file, zefania).unwrap();
+        let open = || Work::Open { path: file.clone(), given: sp_bible::import::About::default(), ask: true };
+        // "NPU" is on the shelf (in other letters: the Mac's disk doesn't tell them apart), so
+        // the next is used.
+        let known = Known {
+            bibles: vec![KnownBible {
+                id: "NPU".to_owned(),
+                name: "Other".to_owned(),
+                short: "O".to_owned(),
+                shipped: false,
+            }],
+        };
+        let Ok(Opened::Installed(path, info, said)) = run_in(&folder, open(), &known, false) else { panic!() };
         assert_eq!(path, folder.join("npu-2.spbible"));
         assert_eq!((info.id.as_str(), info.short.as_str(), info.language.as_str()), ("npu-2", "НПУ", "uk"));
         assert!(said.starts_with("Installed Тестова Біблія (1 book, 1 verse)"), "{said}");
-        let bible = Bible::from_bytes(&std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(bible.verse_count(), 1);
+        assert_eq!(Bible::from_bytes(&std::fs::read(&path).unwrap()).unwrap().verse_count(), 1);
+        // A file in the folder takes its name too, though nothing on the shelf has it.
+        let Ok(Opened::Installed(path, ..)) = run_in(&folder, open(), &known, false) else { panic!() };
+        assert_eq!(path, folder.join("npu-3.spbible"));
+        // The same Bible installed again replaces its earlier copy, and says so.
+        let known = Known {
+            bibles: vec![KnownBible {
+                id: "npu-2".to_owned(),
+                name: "Тестова Біблія".to_owned(),
+                short: "НПУ".to_owned(),
+                shipped: false,
+            }],
+        };
+        let Ok(Opened::Installed(path, _, said)) = run_in(&folder, open(), &known, false) else { panic!() };
+        assert_eq!(path, folder.join("npu-2.spbible"));
+        assert!(said.starts_with("Replaced your earlier Тестова Біблія (1 book"), "{said}");
+        // Without the details, the command line is told which flags to add; the window asks.
+        let tags = folder.with_extension("tags.xml");
+        std::fs::write(&tags, r#"<bible><b n="John"><c n="3"><v n="16">Words.</v></c></b></bible>"#).unwrap();
+        let given = sp_bible::import::About::default();
+        let refused =
+            run_in(&folder, Work::Open { path: tags.clone(), given: given.clone(), ask: false }, &known, false);
+        assert!(refused.unwrap_err().contains("Give --name, --short and --language too"));
+        let asked = run_in(&folder, Work::Open { path: tags.clone(), given, ask: true }, &known, false);
+        assert!(matches!(asked, Ok(Opened::NeedsDetails(_))));
+        let _ = std::fs::remove_dir_all(&folder);
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_file(&tags);
+    }
+
+    #[test]
+    fn a_dropped_bible_file_never_stands_in_for_a_built_in_or_offered_one() {
+        let folder = empty_folder("own");
+        let shelf = Known {
+            bibles: vec![
+                KnownBible {
+                    id: "kjv".to_owned(),
+                    name: "King James Version".to_owned(),
+                    short: "KJV".to_owned(),
+                    shipped: true,
+                },
+                KnownBible {
+                    id: "mine".to_owned(),
+                    name: "Test Bible".to_owned(),
+                    short: "TB".to_owned(),
+                    shipped: false,
+                },
+            ],
+        };
+        let install = |id: &str| {
+            let file = folder.with_extension(format!("{id}.spbible"));
+            std::fs::write(&file, small_bible(id)).unwrap();
+            let done =
+                run_in(&folder, Work::Open { path: file.clone(), given: Default::default(), ask: true }, &shelf, false);
+            let _ = std::fs::remove_file(&file);
+            match done {
+                Ok(Opened::Installed(path, info, said)) => (path, info.id, said),
+                other => panic!("{other:?}"),
+            }
+        };
+        // One that says it is the ASV (offered, checked by its checksum when downloaded) or the
+        // King James (built in) is kept under a name of its own.
+        let (path, id, said) = install("ASV");
+        assert_eq!((path, id.as_str()), (folder.join("asv-2.spbible"), "asv-2"));
+        assert_eq!(said, "Installed the Test Bible.");
+        assert_eq!(install("kjv").1, "kjv-2");
+        // One with a device's name is kept under another.
+        assert_eq!(install("con").1, "con-bible");
+        // One installed from a file before is replaced, and said so.
+        let (path, id, said) = install("MINE");
+        assert_eq!((path, id.as_str()), (folder.join("mine.spbible"), "mine"));
+        assert_eq!(said, "Replaced your earlier Test Bible.");
+        // A new one keeps its own name.
+        assert_eq!(install("fresh").1, "fresh");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pipe_named_like_a_bible_file_is_never_opened() {
+        let folder = empty_folder("pipe");
+        std::fs::create_dir_all(&folder).unwrap();
+        let pipe = folder.join("KJV.spbible");
+        assert!(std::process::Command::new("mkfifo").arg(&pipe).status().unwrap().success());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (at, path) = (folder.join("Bibles"), pipe.clone());
+        std::thread::spawn(move || {
+            let work = Work::Open { path, given: Default::default(), ask: true };
+            let _ = tx.send(run_in(&at, work, &Known::default(), false).map(|_| ()));
+        });
+        let done = rx.recv_timeout(std::time::Duration::from_secs(5)).expect("reading a pipe waited");
+        assert!(done.unwrap_err().contains("isn't a Bible file"));
         let _ = std::fs::remove_dir_all(&folder);
     }
 
@@ -395,13 +626,13 @@ mod tests {
     #[test]
     fn a_bible_is_installed_under_its_own_name_and_rubbish_is_refused() {
         let folder = empty_folder("install");
-        let (path, info) = install_bytes_in(&folder, &small_bible("tb")).unwrap();
+        let (path, info) = install_bytes_in(&folder, &small_bible("tb"), false).unwrap();
         assert_eq!(path, folder.join("tb.spbible"));
         assert_eq!(info.name, "Test Bible");
         assert!(Bible::from_bytes(&std::fs::read(&path).unwrap()).is_ok());
-        assert!(install_bytes_in(&folder, b"not a bible").is_err());
+        assert!(install_bytes_in(&folder, b"not a bible", false).is_err());
         // A file that names itself with a path still lands inside the folder.
-        let (path, _) = install_bytes_in(&folder, &small_bible("../escape")).unwrap();
+        let (path, _) = install_bytes_in(&folder, &small_bible("../escape"), false).unwrap();
         assert_eq!(path, folder.join("escape.spbible"));
         let _ = std::fs::remove_dir_all(&folder);
     }

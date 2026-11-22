@@ -41,7 +41,10 @@ pub enum Kind {
     Media,
     /// A presentation, PDF or folder of pictures, which becomes slides in the library shown.
     Slides,
-    /// A Bible, or anything else.
+    /// A Bible file: the app's own, or one in another program's format it can read.
+    Bible,
+    /// Anything else (one with an ending no Bible has may still turn out to be one, looked
+    /// into when it is dropped).
     Other,
     /// Never a file: a Bible passage or verse carried from the find box in the window, which a
     /// playlist takes and a library doesn't. (Songs carried in the window are `Song`, pictures
@@ -58,7 +61,7 @@ pub fn kind_of(path: &Path) -> Kind {
     // A Bible (the app's own file, or another program's told by what it holds: a book of USFM
     // may end in .txt, a folder of them is no folder of songs).
     if crate::bible_store::is_bible_file(path) {
-        return Kind::Other;
+        return Kind::Bible;
     }
     if crate::deck::is_pdf(path)
         || crate::deck::is_presentation_file(path)
@@ -299,6 +302,8 @@ pub struct Route {
     /// A playlist the pictures and videos go into too, and the item they go after.
     pub media_playlist: Option<(usize, Option<usize>)>,
     pub slides: Vec<PathBuf>,
+    /// Bibles, to install.
+    pub bibles: Vec<PathBuf>,
     pub other: Vec<PathBuf>,
 }
 
@@ -310,6 +315,7 @@ pub fn route(files: &[(PathBuf, Kind)], target: Option<&DropTarget>) -> Route {
             Kind::Song | Kind::Pack => route.songs.push(path.clone()),
             Kind::Media => route.media.push(path.clone()),
             Kind::Slides => route.slides.push(path.clone()),
+            Kind::Bible => route.bibles.push(path.clone()),
             Kind::Other | Kind::Passage => route.other.push(path.clone()),
         }
     }
@@ -382,7 +388,7 @@ mod tests {
             assert_eq!(kind_of(Path::new(media)), Kind::Media, "{media}");
         }
         assert_eq!(kind_of(Path::new("Talk.pdf")), Kind::Slides);
-        assert_eq!(kind_of(Path::new("KJV.spbible")), Kind::Other);
+        assert_eq!(kind_of(Path::new("KJV.spbible")), Kind::Bible);
         // Dropped on the media strip, a song still goes to the songs (into the library shown),
         // and only the picture goes into the bin.
         let files =

@@ -532,6 +532,8 @@ enum AppEvent {
     DeckDone,
     /// A song pack was written or read on its own thread.
     PackDone,
+    /// A Bible file was read (and installed, if it said what it is) on a thread of its own.
+    BibleRead,
     /// A media bin picture was read on a thread of its own.
     MediaRead,
     /// The followed folders were looked at on a thread of their own.
@@ -639,6 +641,13 @@ fn web_costs(url: &str) -> bool {
 struct PackMedia {
     came: HashMap<Uuid, Option<Uuid>>,
     added: usize,
+}
+
+/// A Bible file's work done on a thread of its own: the command line's job, if it started it,
+/// and what came of it.
+struct BibleWork {
+    job: Option<u64>,
+    result: Result<bible_store::Opened, String>,
 }
 
 /// A song pack written or read, or a song bundle read, on a thread of its own, for the app to
@@ -806,7 +815,7 @@ fn escape_closes_something(state: &home::HomeState, ctx: &egui::Context) -> bool
         || state.key_sheet
         || state.bible.options.open
         || state.bible.options.manage_open
-        || state.bible.options.details.is_some()
+        || !state.bible.options.details.is_empty()
         || state.setup.is_some()
         || state.library_search.is_some()
         || egui::Popup::is_any_open(ctx)
@@ -1261,6 +1270,9 @@ struct App {
     /// Song packs written or read on threads of their own report here.
     pack_tx: std::sync::mpsc::Sender<PackJob>,
     pack_rx: std::sync::mpsc::Receiver<PackJob>,
+    /// Bible files read and installed on threads of their own report here.
+    bible_tx: std::sync::mpsc::Sender<BibleWork>,
+    bible_rx: std::sync::mpsc::Receiver<BibleWork>,
     /// Song packs being written or read in the background, by number, with how each went once
     /// done (`sp job N`, and `--wait`); the number of the last one started.
     jobs: Vec<(u64, Option<Result<String, String>>)>,
@@ -3325,10 +3337,17 @@ impl App {
         }
         let paths = std::mem::take(&mut self.dropped);
         let pointer = self.drop_pointer.take();
+        // What each file is was found while it was held over the window; a file the system
+        // didn't say was coming is looked at now.
+        let seen: Vec<(PathBuf, file_drop::Kind)> =
+            self.running.as_ref().map(|running| running.home_state.file_drag.files.clone()).unwrap_or_default();
         let files: Vec<(PathBuf, file_drop::Kind)> = paths
             .into_iter()
             .map(|path| {
-                let kind = file_drop::kind_of(&path);
+                let kind = seen
+                    .iter()
+                    .find(|(have, _)| *have == path)
+                    .map_or_else(|| file_drop::kind_of(&path), |(_, kind)| *kind);
                 (path, kind)
             })
             .collect();
@@ -3347,6 +3366,9 @@ impl App {
         let mut media_to = route.media_playlist;
         for path in &route.media {
             self.add_dropped_media(path, &mut media_to);
+        }
+        for path in &route.bibles {
+            self.install_bible(path);
         }
         for path in &route.other {
             self.add_dropped_file(path);
@@ -3423,7 +3445,7 @@ impl App {
     fn add_dropped_file(&mut self, path: &std::path::Path) {
         // Whatever its ending: a file nothing else took is looked into (its first few
         // kilobytes) in case it is a Bible.
-        if bible_store::is_bible_file(path) || sp_bible::import::looks_like_bible(path) {
+        if sp_bible::import::looks_like_bible(path) {
             self.install_bible(path);
             return;
         }
@@ -3431,28 +3453,91 @@ impl App {
     }
 
     /// Installs a Bible file the operator has (dropped, or chosen with the Bibles window's
-    /// Install from File…), in the app's own format or another program's. One that doesn't say
-    /// its name, short name or language opens the sheet that asks for them.
+    /// Install from File…), in the app's own format or another program's, on a thread of its
+    /// own. One that doesn't say its name, short name or language opens the sheet that asks.
     fn install_bible(&mut self, path: &std::path::Path) {
-        let Some(running) = self.running.as_mut() else {
-            return;
+        let work =
+            bible_store::Work::Open { path: path.to_owned(), given: sp_bible::import::About::default(), ask: true };
+        self.start_bible_work(work, None);
+    }
+
+    /// Starts a Bible file's work (reading, converting, installing) on a thread of its own, so
+    /// the window never waits on it, however long a file makes it take: the notice says it is
+    /// under way, and [`App::finish_bible_work`] takes in what came of it. `job` is the command
+    /// line's, answered then. Returns what the notice says.
+    pub(crate) fn start_bible_work(&mut self, work: bible_store::Work, job: Option<u64>) -> String {
+        let shown = match &work {
+            bible_store::Work::Open { path, .. } => sp_bible::import::shown_name(
+                &path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+            ),
+            bible_store::Work::Install { imported, .. } => imported.file_name.clone(),
         };
-        let bible = &mut running.home_state.bible;
-        let opened = bible_store::open_file(path, &sp_bible::import::About::default(), &bible.shelf);
-        if let Err(problem) = &opened {
-            applog::event("bible", &format!("could not install {}: {problem}", path.display()));
-        }
-        match opened {
-            Ok(bible_store::Opened::Installed(kept, info, said)) => {
-                running.home_state.notice = Some(said);
-                bible.shelf.put_installed(kept, info);
+        let said = format!("Reading {shown}…");
+        let known = self.running.as_ref().map(|running| running.home_state.bible.shelf.known()).unwrap_or_default();
+        let (tx, waker) = (self.bible_tx.clone(), self.waker.clone());
+        let started = std::thread::Builder::new().name("bible file".to_owned()).spawn(move || {
+            // A panic in reading a file (ours, or a library's) ends this work, never the app.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bible_store::run(work, &known)))
+                .unwrap_or_else(|_| Err(format!("SoftPresenter couldn't read {shown}.")));
+            let _ = tx.send(BibleWork { job, result });
+            if let Some(waker) = waker {
+                let _ = waker.send_event(AppEvent::BibleRead);
             }
-            Ok(bible_store::Opened::NeedsDetails(imported)) => {
-                bible.options.details = Some(crate::bible::DetailsSheet::new(imported));
-            }
-            Err(message) => running.home_state.notice = Some(message),
+        });
+        if started.is_err() {
+            let problem = "Couldn't start reading the Bible file.".to_owned();
+            self.finish_job(job, Err(problem.clone()));
+            return problem;
         }
-        running.home_window.request_redraw();
+        if let Some(running) = self.running.as_mut() {
+            running.home_state.notice = Some(said.clone());
+            running.home_window.request_redraw();
+        }
+        said
+    }
+
+    /// Takes in the Bible files read on threads of their own since the last look: an installed
+    /// Bible goes on the shelf (in place of its earlier copy), one that doesn't say what it is
+    /// waits for the sheet to ask, and the notice (and the command line's job) says how it went.
+    fn finish_bible_work(&mut self) {
+        while let Ok(BibleWork { job, result }) = self.bible_rx.try_recv() {
+            let said = match result {
+                Ok(bible_store::Opened::Installed(kept, info, said)) => {
+                    if let Some(running) = self.running.as_mut() {
+                        running.home_state.bible.shelf.put_installed(kept, info);
+                    }
+                    Ok(said)
+                }
+                Ok(bible_store::Opened::NeedsDetails(imported)) => {
+                    let asked = format!("{} doesn't say all of what it is: the sheet asks.", imported.file_name);
+                    if let Some(running) = self.running.as_mut() {
+                        running.home_state.bible.options.details.push_back(crate::bible::DetailsSheet::new(imported));
+                    }
+                    Ok(asked)
+                }
+                Err(problem) => Err(problem),
+            };
+            applog::event("bible", said.as_ref().unwrap_or_else(|problem| problem));
+            if let Some(running) = self.running.as_mut() {
+                running.home_state.notice = Some(said.clone().unwrap_or_else(|problem| problem));
+                running.home_window.request_redraw();
+            }
+            self.finish_job(job, said);
+        }
+        // Bibles the sheet's Install asked for.
+        let asked = self.running.as_mut().map(|running| std::mem::take(&mut running.home_state.bible.options.installs));
+        for (imported, details) in asked.unwrap_or_default() {
+            self.start_bible_work(bible_store::Work::Install { imported: Box::new(imported), details }, None);
+        }
+    }
+
+    /// Keeps how a command line job went, for `job N` and `--wait`.
+    fn finish_job(&mut self, job: Option<u64>, result: Result<String, String>) {
+        if let Some(job) = job
+            && let Some((_, kept)) = self.jobs.iter_mut().find(|(have, _)| *have == job)
+        {
+            *kept = Some(result);
+        }
     }
 
     /// The Bibles window's Install from File…: the system's window for choosing a file, then
@@ -8297,6 +8382,10 @@ impl ApplicationHandler<AppEvent> for App {
                 self.handle_decks();
                 return;
             }
+            AppEvent::BibleRead => {
+                self.finish_bible_work();
+                return;
+            }
             AppEvent::PackDone => {
                 self.finish_packs();
                 return;
@@ -8706,6 +8795,7 @@ impl ApplicationHandler<AppEvent> for App {
                     }
                 }
                 self.finish_bible_jobs();
+                self.finish_bible_work();
                 // Reload or Keep mine, chosen in the bar for a file changed outside the app.
                 if let Some((what, reload)) = self.running.as_mut().and_then(|r| r.home_state.waiting_choice.take()) {
                     self.choose_outside(what, reload);
@@ -9054,11 +9144,14 @@ fn main() -> ExitCode {
         }
     }
     let (pack_tx, pack_rx) = std::sync::mpsc::channel();
+    let (bible_tx, bible_rx) = std::sync::mpsc::channel();
     let mut app = App {
         options,
         waker: Some(event_loop.create_proxy()),
         pack_tx,
         pack_rx,
+        bible_tx,
+        bible_rx,
         jobs: Vec::new(),
         last_job: None,
         import_library_override: None,

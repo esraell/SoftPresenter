@@ -246,12 +246,17 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 - The Bibles window (`bible.rs`, `manage_bibles`): a search box, Install from File… (the
   system's window for choosing a file, `handle_bible_file_request` in `main.rs`), Done; the
   Bibles installed, each with Remove (but for the four built in); those offered, by language,
-  with Install. A Bible file dropped on the window or chosen goes through
-  `bible_store::open_file`: the app's own `.spbible` as it is, another program's format read by
-  `sp_bible::import` and made into one (`install_imported`). One that doesn't say its name,
-  short name and language opens the sheet that asks (`bible::details_sheet`, a modal with
-  Name, Short name, Language, Cancel and Install). `sp bible install FILE --name --short
-  --language`.
+  with Install. A Bible file dropped on the window (`file_drop::Kind::Bible`, found while it
+  is held over the window; a file of any other ending is looked into when dropped) or chosen
+  is read on a thread of its own (`App::start_bible_work` in `main.rs`, running
+  `bible_store::run` with the shelf as it was, `Shelf::known`; `finish_bible_work` takes the
+  result in): the app's own `.spbible` as it is (under a name of its own if it names a Bible
+  built in or offered), another program's format read by `sp_bible::import` and made into one.
+  The same Bible installed again replaces its earlier copy, which goes to the Trash. One that
+  doesn't say its name, short name and language waits in the queue of sheets that ask
+  (`bible::details_sheet`, a modal with Name, Short name, Language, Cancel and Install; several
+  dropped together are asked about in turn), and its Install goes to a thread too.
+  `sp bible install FILE --name --short --language` waits for its job.
 - Add keeps the passage in a playlist, to open again with these settings.
 - Keys: Return in the reference field (or in the find box) picks the passage's first verse and
   gives the keyboard back; ↑ and ↓ pick the verse before or after (never putting it on screen;

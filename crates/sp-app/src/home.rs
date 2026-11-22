@@ -2194,20 +2194,17 @@ pub fn home_ui(
         if let Some(index) = bible.options.remove.take() {
             bible.remove_bible(index);
         }
-        // A Bible file that doesn't say what it is: asked, then installed.
-        let decided = bible.options.details.as_mut().and_then(|sheet| crate::bible::details_sheet(ui.ctx(), sheet));
+        // Bible files that don't say what they are: each asked about in turn, then installed on
+        // a thread of its own (`main.rs` starts it).
+        let waiting = bible.options.details.len().saturating_sub(1);
+        let decided =
+            bible.options.details.front_mut().and_then(|sheet| crate::bible::details_sheet(ui.ctx(), sheet, waiting));
         if let Some(install) = decided
-            && let Some(sheet) = bible.options.details.take()
+            && let Some(sheet) = bible.options.details.pop_front()
             && install
             && let Some(details) = sheet.imported.details(&sheet.about)
         {
-            match crate::bible_store::install_imported(&sheet.imported, &details, &bible.shelf) {
-                Ok((kept, info, said)) => {
-                    state.notice = Some(said);
-                    bible.shelf.put_installed(kept, info);
-                }
-                Err(problem) => state.notice = Some(problem),
-            }
+            bible.options.installs.push((sheet.imported, details));
         }
     }
     confirm_delete_theme(ui, state);
@@ -6602,7 +6599,7 @@ fn bible_pick_keys(ui: &egui::Ui, show: &Show, state: &mut HomeState, commands: 
         && !state.alert_open()
         && !state.bible.options.open
         && !state.bible.options.manage_open
-        && state.bible.options.details.is_none()
+        && state.bible.options.details.is_empty()
         && state.bible.found.is_empty()
         && !egui::Popup::is_any_open(ui.ctx());
     let (up, down) = ui.input(|input| (input.key_pressed(egui::Key::ArrowUp), input.key_pressed(egui::Key::ArrowDown)));
@@ -7511,7 +7508,7 @@ fn next_reference_typed(ui: &egui::Ui, state: &HomeState) -> Option<String> {
         && !state.alert_open()
         && !state.bible.options.open
         && !state.bible.options.manage_open
-        && state.bible.options.details.is_none()
+        && state.bible.options.details.is_empty()
         && !egui::Popup::is_any_open(ui.ctx());
     if !free {
         return None;

@@ -127,7 +127,7 @@ impl Shelf {
     /// same short name for files (never one built in) is replaced at its place, and read again
     /// when next asked for.
     pub fn put_installed(&mut self, path: std::path::PathBuf, info: sp_bible::Info) {
-        match self.bibles.iter_mut().find(|shelved| shelved.id == info.id && !shelved.shipped) {
+        match self.bibles.iter_mut().find(|shelved| shelved.id.eq_ignore_ascii_case(&info.id) && !shelved.shipped) {
             Some(shelved) => {
                 shelved.name = info.name;
                 shelved.short = info.short;
@@ -142,13 +142,21 @@ impl Shelf {
         }
     }
 
-    /// The short name for files of a Bible installed from a file (not one built in) with this
-    /// name and short name: the same Bible installed again replaces it.
-    pub fn installed_as(&self, name: &str, short: &str) -> Option<&str> {
-        self.bibles
-            .iter()
-            .find(|shelved| !shelved.shipped && shelved.name == name && shelved.short == short)
-            .map(|shelved| shelved.id.as_str())
+    /// What an install from a file, on a thread of its own, needs to know of the shelf: each
+    /// Bible's short name for files, name and short name, and whether it is built in.
+    pub fn known(&self) -> crate::bible_store::Known {
+        crate::bible_store::Known {
+            bibles: self
+                .bibles
+                .iter()
+                .map(|shelved| crate::bible_store::KnownBible {
+                    id: shelved.id.clone(),
+                    name: shelved.name.clone(),
+                    short: shelved.short.clone(),
+                    shipped: shelved.shipped,
+                })
+                .collect(),
+        }
     }
 
     /// Takes a downloaded Bible off the shelf and moves its file to the Trash. The Bibles that
@@ -647,8 +655,12 @@ pub struct BibleOptions {
     pub remove: Option<usize>,
     /// Install from File… was clicked: the window for choosing a file is to open.
     pub file_request: bool,
-    /// A Bible file read that doesn't say what it is: the sheet asking for its details.
-    pub details: Option<DetailsSheet>,
+    /// Bible files read that don't say what they are, as each is read: the sheet asks
+    /// about the first, then the next (several dropped together are each asked about).
+    pub details: std::collections::VecDeque<DetailsSheet>,
+    /// Bibles the sheet's Install asked for, with the details given, to be installed on a
+    /// thread of their own.
+    pub installs: Vec<(sp_bible::import::Imported, sp_bible::import::About)>,
 }
 
 /// The sheet that asks for a Bible file's name, short name and language when the file doesn't
@@ -670,8 +682,9 @@ impl DetailsSheet {
 
 /// The sheet asking what a Bible file is (see [`DetailsSheet`]): its name, the short name
 /// shown on slides and its language, then Install. `Some(true)` when Install is clicked (or
-/// Return pressed) with all three given, `Some(false)` for Cancel or Escape.
-pub fn details_sheet(ctx: &egui::Context, sheet: &mut DetailsSheet) -> Option<bool> {
+/// Return pressed) with all three given, `Some(false)` for Cancel or Escape. `waiting` is how
+/// many more files wait to be asked about after this one.
+pub fn details_sheet(ctx: &egui::Context, sheet: &mut DetailsSheet, waiting: usize) -> Option<bool> {
     let mut decided = None;
     // A modal, as the Bibles window is, so it comes over that window when opened from it.
     let frame = Frame::new()
@@ -685,7 +698,12 @@ pub fn details_sheet(ctx: &egui::Context, sheet: &mut DetailsSheet) -> Option<bo
     egui::Modal::new(id).area(area).backdrop_color(Color32::from_black_alpha(90)).frame(frame).show(ctx, |ui| {
         ui.set_width(440.0);
         ui.add_space(4.0);
-        ui.label(egui::RichText::new("Install a Bible").font(crate::studio::semibold(16.0)));
+        let title = match waiting {
+            0 => "Install a Bible".to_owned(),
+            1 => "Install a Bible (one more after this)".to_owned(),
+            more => format!("Install a Bible ({more} more after this)"),
+        };
+        ui.label(egui::RichText::new(title).font(crate::studio::semibold(16.0)));
         ui.add_space(4.0);
         let imported = &sheet.imported;
         let count = |n: usize, one: &str, many: &str| {
@@ -773,7 +791,8 @@ impl Default for BibleOptions {
             menu_was_open: false,
             remove: None,
             file_request: false,
-            details: None,
+            details: std::collections::VecDeque::new(),
+            installs: Vec::new(),
         }
     }
 }
@@ -1225,7 +1244,7 @@ pub fn manage_bibles(
         },
     );
     // Escape with the sheet asking what a Bible file is open closes only the sheet.
-    if close || (options.details.is_none() && ctx.input(|input| input.key_pressed(egui::Key::Escape))) {
+    if close || (options.details.is_empty() && ctx.input(|input| input.key_pressed(egui::Key::Escape))) {
         options.manage_open = false;
     }
 }
@@ -1545,9 +1564,10 @@ mod tests {
         let mut shelf = Shelf::shipped();
         let shipped = shelf.bibles.len();
         shelf.put_installed("a.spbible".into(), info("tb", "Test Bible"));
-        assert_eq!(shelf.installed_as("Test Bible", "TB"), Some("tb"));
-        assert_eq!(shelf.installed_as("King James Version", "KJV"), None, "a built-in Bible is never replaced");
-        shelf.put_installed("b.spbible".into(), info("tb", "Test Bible, corrected"));
+        let known = shelf.known();
+        assert!(known.bibles.iter().any(|bible| bible.id == "tb" && !bible.shipped));
+        assert!(known.bibles.iter().any(|bible| bible.id == "kjv" && bible.shipped));
+        shelf.put_installed("b.spbible".into(), info("TB", "Test Bible, corrected"));
         assert_eq!(shelf.bibles.len(), shipped + 1);
         assert_eq!(shelf.bibles[shipped].name, "Test Bible, corrected");
         shelf.put_installed("kjv.spbible".into(), info("kjv", "Not the King James"));

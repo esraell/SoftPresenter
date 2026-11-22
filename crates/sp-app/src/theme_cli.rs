@@ -287,27 +287,13 @@ impl crate::App {
             .iter()
             .any(|b| b.short.eq_ignore_ascii_case(typed) || b.id.eq_ignore_ascii_case(typed));
         if path.exists() && !offered_name {
-            let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
-            let opened = crate::bible_store::open_file(path, &given, &state.bible.shelf)?;
-            return match opened {
-                crate::bible_store::Opened::Installed(kept, info, said) => {
-                    state.bible.shelf.put_installed(kept, info);
-                    Ok(Reply::done(said))
-                }
-                crate::bible_store::Opened::NeedsDetails(imported) => {
-                    let missing = imported.missing_flags(&given);
-                    let offered = imported.prefilled();
-                    Err(format!(
-                        "{} doesn't say its {}. Give {} too, such as: --name \"{}\" --short {} --language {}",
-                        imported.file_name,
-                        missing.replace("--short", "short name").replace("--", ""),
-                        missing,
-                        offered.name,
-                        if offered.short.is_empty() { "SHORT" } else { offered.short.as_str() },
-                        if offered.language.is_empty() { "en" } else { offered.language.as_str() }
-                    ))
-                }
-            };
+            self.running.as_ref().ok_or("The app isn't ready.")?;
+            // Read on a thread of its own, as a dropped file is. The command line waits for the
+            // job (the reply asks it to), so it still answers with what came in.
+            let job = self.start_job();
+            let work = crate::bible_store::Work::Open { path: path.to_owned(), given, ask: false };
+            let said = self.start_bible_work(work, Some(job));
+            return Ok(Reply::with(said, serde_json::json!({"wait": true})));
         }
         let ctx = self.running.as_ref().ok_or("The app isn't ready.")?.egui_ctx.clone();
         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;

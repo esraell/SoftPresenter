@@ -419,14 +419,21 @@ pub fn run_client(args: Vec<String>) -> std::process::ExitCode {
     // `--wait`: a job the app does in the background (a song pack with videos) is waited for, and
     // its own reply printed.
     let reply = match reply.data.get("job").and_then(serde_json::Value::as_u64) {
-        Some(job) if wait && reply.ok => loop {
-            std::thread::sleep(Duration::from_millis(500));
-            match send(&["job".to_owned(), job.to_string()]) {
-                Ok(now) if now.data.get("done").and_then(serde_json::Value::as_bool) == Some(false) => {}
-                Ok(now) => break now,
-                Err(problem) => break Reply::failed(problem),
+        // A reply may ask to be waited for without --wait: a Bible file installed from the
+        // command line answers with what came in, as it did before it was read in the
+        // background.
+        Some(job)
+            if (wait || reply.data.get("wait").and_then(serde_json::Value::as_bool) == Some(true)) && reply.ok =>
+        {
+            loop {
+                std::thread::sleep(Duration::from_millis(500));
+                match send(&["job".to_owned(), job.to_string()]) {
+                    Ok(now) if now.data.get("done").and_then(serde_json::Value::as_bool) == Some(false) => {}
+                    Ok(now) => break now,
+                    Err(problem) => break Reply::failed(problem),
+                }
             }
-        },
+        }
         _ => reply,
     };
     // A command that did what it was asked always says so.

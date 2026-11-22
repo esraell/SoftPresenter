@@ -715,9 +715,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   doesn't say, a small sheet asks for them, filled in from the file's name and the alphabet of
   its words. A notice says what came in: "Installed King James (Authorized) Version (66 books,
   31,102 verses), numbered as English Bibles are, judged by its Psalms; 3 verses were empty."
-  The same Bible installed again replaces the copy installed before; one never takes the place
-  of a built-in or offered Bible. The files are read with limits (size, a zip's entries and
-  what they unpack to), and nothing a file declares or names is expanded or fetched.
+  The file is read on a thread of its own, so the window never waits on it ("Reading
+  bible.zip…" until it is in). The same Bible installed again replaces the copy installed
+  before, which goes to the Trash ("Replaced your earlier …"); one never takes the place of a
+  built-in or offered Bible, and neither does a `.spbible` file that names one (it is kept
+  under a name of its own, unless it is the very file offered, checksum and all). Several files
+  dropped together that don't say what they are are asked about one after another. The files
+  are read with limits (size, a zip's entries and what they unpack to, how long a verse or a
+  book's name may be; a zip whose files overlap is refused), only plain files and folders are
+  opened, and nothing a file declares or names is expanded or fetched.
 - One click keeps a passage: + Add puts it in the playlist in front (its tooltip names the
   playlist; the ▾ beside it picks another), to be brought back with the same settings: the
   passage asked for (John 3:16), never the chapter round it, named in the language it was typed
