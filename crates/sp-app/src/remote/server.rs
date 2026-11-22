@@ -1460,7 +1460,8 @@ async fn take_message(
     text: &str,
 ) -> Option<String> {
     // Every message counts, whatever it is, before anything else is done for it: a page sending
-    // too many is answered only with a refusal (a command's with its id), and nothing is locked.
+    // too many gets a refusal only for a command (with its id); anything else is not answered,
+    // and nothing is locked.
     let allowed = state.bucket.take();
     let Ok(message) = serde_json::from_str::<serde_json::Value>(text) else {
         return allowed.then(|| error_message("That isn't JSON."));
@@ -1471,7 +1472,7 @@ async fn take_message(
             (Some("command"), Some(id)) if id.is_number() || id.as_str().is_some_and(|id| id.len() <= 64) => {
                 Some(reply_message(id, &Reply::failed("Too many commands at once; slow down.")))
             }
-            _ => Some(error_message("Too many messages at once; slow down.")),
+            _ => None,
         };
     }
     match kind {

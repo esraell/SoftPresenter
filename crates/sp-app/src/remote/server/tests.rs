@@ -688,6 +688,10 @@ fn every_message_counts_against_a_pages_limit_even_ones_that_make_no_sense() {
         for _ in 0..100 {
             page.send(tungstenite::Message::text("not json")).await.expect("sent");
         }
+        // Messages that are JSON but make no sense are no more answered than the rest.
+        for _ in 0..20 {
+            page.send(tungstenite::Message::text(r#"{"type":"nonsense"}"#)).await.expect("sent");
+        }
         // Straight after, commands are refused with their ids, never reaching the app.
         for id in 0..5 {
             let command = serde_json::json!({"type": "command", "id": id, "args": ["next"]});

@@ -449,7 +449,7 @@ since), with Disconnect.
 | Sign-in body | 4 KB |
 | Pages (WebSockets) | 16 at once; 4 from one device |
 | A message from a page | 64 KB (more closes the socket) |
-| Messages from a page (any kind) | 20 a second, 40 in a burst; past that a command is refused, the rest unanswered |
+| Messages from a page (any kind) | 20 a second, 40 in a burst; past that a command is refused with its id, and every other message is left unanswered |
 | Commands | 4 waiting per page; 40 a second (80 in a burst) from all pages together; 15 s for an answer |
 | Connecting | 12 pages a minute per device (10 at once) |
 | Hello | within 10 s |
