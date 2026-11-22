@@ -5958,24 +5958,8 @@ fn theme_row_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, start_
         state.theme_request = Some(ThemeRequest::UseForSongs(index));
         ui.close();
     }
-    // Which audience screens draw with it: those set to it, and, for the main theme, those left
-    // on the main theme.
-    let id = state.theme_ids.get(index).copied();
-    let audience: Vec<usize> =
-        (0..state.screens.len()).filter(|at| state.screens[*at].kind == crate::screens::Kind::Audience).collect();
-    if !audience.is_empty() {
-        ui.menu_button("Use On", |ui| {
-            for at in audience {
-                let screen = &mut state.screens[at];
-                let mut on = screen.theme == id || (main && screen.theme.is_none());
-                if ui.checkbox(&mut on, screen.name.as_str()).clicked() {
-                    // On: this theme (the main one needs nothing of its own). Off: back to
-                    // the main theme.
-                    screen.theme = if on && !main { id } else { None };
-                    state.screens_changed = true;
-                }
-            }
-        });
+    if state.screens.iter().any(|screen| screen.kind == crate::screens::Kind::Audience) {
+        ui.menu_button("Use On", |ui| use_on_menu(ui, state, index));
     }
     ui.separator();
     if ui.button("Rename\u{2026}").clicked() {
@@ -5992,6 +5976,26 @@ fn theme_row_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, start_
     if delete.clicked() {
         state.confirm_delete_theme = Some(index);
         ui.close();
+    }
+}
+
+/// A theme's Use On menu: the audience screens that draw with it, ticked (those set to it, and
+/// for the main theme those left on the main theme). Ticking one sets it to the theme; unticking
+/// puts it back on the main theme. Under the main theme a ticked screen can't be unticked, since
+/// that means the main theme, this one: its tick is greyed, and says why.
+fn use_on_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize) {
+    let main = state.theme_for_songs == index;
+    let id = state.theme_ids.get(index).copied();
+    for screen in state.screens.iter_mut().filter(|screen| screen.kind == crate::screens::Kind::Audience) {
+        let mut on = screen.theme == id || (main && screen.theme.is_none());
+        let tick = ui
+            .add_enabled(!(main && on), egui::Checkbox::new(&mut on, screen.name.as_str()))
+            .on_disabled_hover_text("Follows the main theme");
+        if tick.clicked() {
+            // On: this theme (the main one needs nothing of its own). Off: back to the main theme.
+            screen.theme = if on && !main { id } else { None };
+            state.screens_changed = true;
+        }
     }
 }
 
@@ -12759,6 +12763,56 @@ mod tests {
         assert_eq!(state.notice.as_deref(), Some("Added John 3:16 to Playlist 1."));
         assert_eq!(state.renaming_service, Some((1, "Playlist 1".to_owned())));
         assert!(state.chooser_open && state.playlist_open && state.view_request == Some(0));
+    }
+
+    #[test]
+    fn use_on_for_the_main_theme_greys_the_ticks_that_cant_be_cleared() {
+        use crate::screens::{Output, Screen};
+        let (main_id, other_id) = (sp_model::Uuid::new_v4(), sp_model::Uuid::new_v4());
+        let mut state = HomeState { theme_ids: vec![main_id, other_id], theme_for_songs: 0, ..HomeState::default() };
+        state.screens = vec![
+            Screen::new("Left".to_owned(), Output::Off),
+            Screen { theme: Some(other_id), ..Screen::new("Lobby".to_owned(), Output::Off) },
+            Screen { theme: Some(main_id), ..Screen::new("Right".to_owned(), Output::Off) },
+        ];
+        let ctx = crate::studio::tests::styled();
+        let click_on = |state: &mut HomeState, theme: usize, name: &str| {
+            let mut at = None;
+            for (round, events) in [vec![], vec![]].into_iter().enumerate() {
+                let output = crate::studio::tests::drawn(&ctx, events, |ui| use_on_menu(ui, state, theme));
+                if round == 1 {
+                    at = crate::studio::tests::place_of(&output, name);
+                }
+                output.drop_without_applying_deltas();
+            }
+            let at = at.expect("the screen is listed");
+            let press = |pressed| Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            };
+            for events in [vec![Event::PointerMoved(at), press(true)], vec![press(false)]] {
+                crate::studio::tests::drawn(&ctx, events, |ui| use_on_menu(ui, state, theme))
+                    .drop_without_applying_deltas();
+            }
+        };
+        // The main theme: Left (no theme of its own) and Right (set to it) are ticked and greyed.
+        for name in ["Left", "Right"] {
+            click_on(&mut state, 0, name);
+        }
+        assert_eq!(state.screens[0].theme, None);
+        assert_eq!(state.screens[2].theme, Some(main_id));
+        assert!(!state.screens_changed, "a greyed tick changes nothing");
+        // Lobby, on another theme, can be ticked: it goes back to the main theme.
+        click_on(&mut state, 0, "Lobby");
+        assert_eq!(state.screens[1].theme, None);
+        assert!(state.screens_changed);
+        // Another theme's ticks come and go.
+        click_on(&mut state, 1, "Left");
+        assert_eq!(state.screens[0].theme, Some(other_id));
+        click_on(&mut state, 1, "Left");
+        assert_eq!(state.screens[0].theme, None);
     }
 
     #[test]

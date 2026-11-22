@@ -852,7 +852,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   theme of its own: the same words, laid out its way (a lower third for the stream, say), with
   that theme's Bible template for Bible slides. Set it in Settings › Screens › Theme, or
   right-click a theme › Use On, which ticks the screens that draw with it; the others use the
-  main theme (or a song's own).
+  main theme (or a song's own). Under the main theme, the screens that draw with it are ticked
+  and greyed, "Follows the main theme", since unticking one would leave it on the main theme;
+  one on another theme can be ticked, which puts it back on the main theme.
 - The built-in theme has a template for each: two languages and one for songs, and one for
   Bible slides (the Russian Synodal verse and its reference on top, the King James Version and
   its reference below, in Linux Biolinum on black; its settings live in
