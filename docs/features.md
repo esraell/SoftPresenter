@@ -745,7 +745,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   ↑ and ↓ open the slide before or after (with no object selected). Shift-click picks out the
   slides from the one open to the one clicked, Command-click picks one out or puts it back, as
   in the Show view and the lists of songs and media; the slides picked out move together when
-  one is dragged, and Cmd-C copies them.
+  one is dragged, and Cmd-C copies them. While a question is open in the Edit view (whether to
+  delete slides, a prop, a stage layout or a template), Delete, the arrows and the other keys
+  wait for it and change nothing behind it.
 - An editor for a song's slides: move, resize and restyle text boxes, with alignment guides
   and a safe-area edge, multi-select (Shift or Command, or drag a box around them), copy and
   paste, undo, renaming by clicking a name, font search, and typing straight on the slide.

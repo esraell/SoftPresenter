@@ -2392,13 +2392,16 @@ fn edit_view(
     let depth_before = state.editing.as_ref().map(EditDraft::undo_depth);
     let before = state.editing.as_ref().map(|draft| draft.slide.clone());
     let now = ui.input(|input| input.time);
-    let typing = ui.ctx().text_edit_focused();
+    // The keyboard is taken while a field is typed in, and while a question is open (whether to
+    // delete a prop, a stage layout, a template or slides): then Delete, the arrows and the
+    // other keys never reach the slide, its objects or the list behind the question.
+    let keys_taken = ui.ctx().text_edit_focused() || state.alert_open();
 
-    // Keys: undo and redo always; delete and nudging when not typing in a box.
+    // Keys: undo and redo, delete and nudging, each only when the keyboard isn't taken.
     let (undo, redo, delete, nudge) = ui.input(|input| {
         let undo = command_key(input, egui::Key::Z, false);
         let redo = command_key(input, egui::Key::Z, true);
-        let delete = !typing && (input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace));
+        let delete = !keys_taken && (input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace));
         // On a stage layout the arrows move 10 and Shift one pixel, as the new design has it;
         // on a slide, a template or a prop, still one, and Shift 10.
         let step = match (stage_mode, input.modifiers.shift) {
@@ -2406,7 +2409,7 @@ fn edit_view(
             (true, false) | (false, true) => 10.0,
         };
         let mut nudge = (0.0, 0.0);
-        if !typing {
+        if !keys_taken {
             for (key, by) in [
                 (egui::Key::ArrowLeft, (-step, 0.0)),
                 (egui::Key::ArrowRight, (step, 0.0)),
@@ -2421,7 +2424,7 @@ fn edit_view(
         (undo, redo, delete, nudge)
     });
     // Copy, paste, duplicate and select all act on objects unless a field is being typed in.
-    if !typing {
+    if !keys_taken {
         let (copy, cut, pasted, duplicate, all) = ui.input(|input| {
             let has = |wanted: fn(&egui::Event) -> bool| input.events.iter().any(wanted);
             let pasted = input.events.iter().find_map(|event| match event {
@@ -2493,7 +2496,7 @@ fn edit_view(
     }
     // In the editor (a song's or a theme's), a letter adds an object: T a text box, and each
     // shape its own key.
-    if !typing && !ui.ctx().text_edit_focused() && state.editing.is_some() && state.renaming_template.is_none() {
+    if !keys_taken && !ui.ctx().text_edit_focused() && state.editing.is_some() && state.renaming_template.is_none() {
         let pressed = ui.input(|input| {
             input.events.iter().find_map(|event| match event {
                 egui::Event::Text(text) if !input.modifiers.command && !input.modifiers.ctrl => {
@@ -2621,7 +2624,7 @@ fn edit_view(
     if let Some(draft) = state.editing.as_mut() {
         // Undo and Redo take the newest step, whichever it is: a change to this slide (its
         // draft's own) or to the song's slides (moved, pasted, deleted: the app's).
-        if undo && !typing {
+        if undo && !keys_taken {
             if state.edit_steps.last() == Some(&EditStep::Song) {
                 state.edit_steps.pop();
                 state.edit_redo.push(EditStep::Song);
@@ -2632,7 +2635,7 @@ fn edit_view(
                 }
                 state.edit_redo.push(EditStep::Slide);
             }
-        } else if redo && !typing {
+        } else if redo && !keys_taken {
             if state.edit_redo.last() == Some(&EditStep::Song) {
                 state.edit_redo.pop();
                 state.edit_steps.push(EditStep::Song);
@@ -2667,7 +2670,7 @@ fn edit_view(
     if !theme_mode
         && !prop_mode
         && !stage_mode
-        && !typing
+        && !keys_taken
         && let Some(draft) = state.editing.as_ref().filter(|draft| draft.selected.is_none())
     {
         let (up, down) =
@@ -9267,6 +9270,57 @@ mod tests {
         assert_eq!(state.props[1].name, "Speaker name two", "Return keeps what was typed");
         assert!(state.prop_rename.is_none());
         assert!(state.props_changed);
+    }
+
+    /// A song of these groups (a name and how many slides), open in the Edit view at slide
+    /// `open`. Each slide says its group's name and its place in it.
+    fn song_open(groups: &[(&str, usize)], open: usize) -> (Show, HomeState) {
+        let text: Vec<String> = groups
+            .iter()
+            .map(|(name, slides)| {
+                let lines: Vec<String> = (0..*slides).map(|n| format!("{name} line {n}\n")).collect();
+                format!("[{name}]\n{}", lines.join("\n"))
+            })
+            .collect();
+        let show = Show::new(vec![Arc::new(parse_song_text("Harbour", &text.join("\n")))]);
+        let editing = EditDraft::of(&show, SlideRef { presentation: 0, slide: open });
+        (show, HomeState { editing, ..HomeState::default() })
+    }
+
+    #[test]
+    fn an_open_question_takes_delete_and_the_arrows_from_the_edit_view() {
+        let (ctx, show) = (egui::Context::default(), three_songs());
+        // A prop open, its words picked, and asked whether to delete it.
+        let mut state = props_open(&["Logo", "Name"], 0);
+        if let Some(draft) = state.editing.as_mut() {
+            draft.select_only(draft.slide.objects.first().map(|object| object.id));
+        }
+        let before = state.editing.as_ref().map(|draft| draft.slide.clone());
+        state.confirm_delete_prop = Some(state.props[0].id);
+        for key in [Key::Delete, Key::Backspace, Key::ArrowRight, Key::ArrowDown] {
+            frame_events(&ctx, &show, &mut state, pressed(key, Modifiers::NONE), 0.1);
+        }
+        assert!(state.alert_open(), "still asking");
+        assert_eq!(state.editing.as_ref().map(|draft| draft.slide.clone()), before, "the words stay, unmoved");
+        assert_eq!(state.props.len(), 2);
+        // A song's slide, asked whether to delete it: ↓ doesn't open the next slide.
+        let (show, mut state) = song_open(&[("Verse 1", 3)], 0);
+        state.confirm_delete_slides = vec![SlideRef { presentation: 0, slide: 0 }];
+        frame_events(&ctx, &show, &mut state, pressed(Key::ArrowDown, Modifiers::NONE), 0.2);
+        assert_eq!(state.editing.as_ref().map(|draft| draft.at.slide), Some(0));
+        // A template asked about, with a box picked: Delete doesn't take the box.
+        let theme = Theme::builtin();
+        let mut draft = EditDraft::of_slide(theme.templates[0].as_slide(), 0);
+        draft.select_only(draft.slide.objects.first().map(|object| object.id));
+        let boxes = draft.slide.objects.len();
+        let mut state = HomeState {
+            theme_edit: Some(ThemeEdit::of(0, theme)),
+            editing: Some(draft),
+            confirm_delete_template: Some(0),
+            ..HomeState::default()
+        };
+        frame_events(&ctx, &show, &mut state, pressed(Key::Delete, Modifiers::NONE), 0.3);
+        assert_eq!(state.editing.as_ref().map(|draft| draft.slide.objects.len()), Some(boxes));
     }
 
     /// One frame of the window with these events, returning the commands it gave.
