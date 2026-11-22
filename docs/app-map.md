@@ -168,16 +168,16 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 ## The Bible view
 
 ```
-╭─────────────────────────╮ ╭─────────────────────────────────────────────────────────────╮
-│ [Books|History]  [Hide] │ │ (John 3:16    ) [‹][›]  [+ Add|▾] │ [Page|Slides] [Options] │
-│ BOOK              [⊞|≡] │ │ TRANSLATIONS [SYN] [KJV] [Change]                           │
-│ [Gen][Exo][Lev][Num]…   │ │ John 3  [KJV + SYN]                                         │
-│ [Mat][Mar][Luk][Joh]…   │ │  14  And as Moses lifted up the serpent…                    │
-│ JOHN · CHAPTER          │ │      И как Моисей вознес змию…                              │
-│ [1][2][3][4][5][6]…     │ │ [16  For God so loved the world…   (picked: well, ring)]    │
-│ VERSE · ⇧ FOR A PASSAGE │ │       Ибо так возлюбил Бог мир…                             │
-│ [1][2][3][4][5][6]…     │ │ MEDIA (All Media ▾)                       (Dissolve ▾) +    │
-╰─────────────────────────╯ ╰─────────────────────────────────────────────────────────────╯
+╭─────────────────────────╮ ╭───────────────────────────────────────────────────────────────────╮
+│ [Books|History]  [Hide] │ │ (John 3:16 ) [‹][›] [+ Add|▾] │ [Page|Slides] [Аа Auto] [Options] │
+│ BOOK              [⊞|≡] │ │ TRANSLATIONS [SYN] [KJV] [Change]                                 │
+│ [Gen][Exo][Lev][Num]…   │ │ John 3  [KJV + SYN]                                               │
+│ [Mat][Mar][Luk][Joh]…   │ │  14  And as Moses lifted up the serpent…                          │
+│ JOHN · CHAPTER          │ │      И как Моисей вознес змию…                                    │
+│ [1][2][3][4][5][6]…     │ │ [16  For God so loved the world…   (picked: well, ring)]          │
+│ VERSE · ⇧ FOR A PASSAGE │ │       Ибо так возлюбил Бог мир…                                   │
+│ [1][2][3][4][5][6]…     │ │ MEDIA (All Media ▾)                       (Dissolve ▾) +          │
+╰─────────────────────────╯ ╰───────────────────────────────────────────────────────────────────╯
 ```
 
 - The left column, in place of the playlist (`bible_page.rs`, `left_column`): Books | History
@@ -192,7 +192,8 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   Books, beside the reference field, brings it back (kept with the preferences).
 - The bar along the top (`home.rs`, `bible_bar`): the reference field (236 wide when there is
   room; a reference in English, Russian or Ukrainian, or words to find), ‹ and › (a verse longer
-  at the start or end), + Add (the playlist in front; ▾ for another), Page | Slides, Options. In
+  at the start or end), + Add (the playlist in front; ▾ for another), Page | Slides, Аа (the
+  language the page is read in: Auto, English, Русский, Українська; `bible_read_in`), Options. In
   a middle too narrow for one row, the right part takes a second.
 - The translations line: TRANSLATIONS and each Bible's short name, Change. Opened: a row per
   translation (up to four), each a Bible (None frees it for another row), the box its verse goes
@@ -219,12 +220,15 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 - Words (not a reference) typed in the reference field list the verses holding them as they are
   typed, in place of the page, found on a thread of their own (`find.rs`, `search_page` and
   `Finder`); `sp bible search` lists them too.
-- What the operator reads (the reference field after a lookup, the books in the lists, the page,
-  the verses found, the find box's passage) is in the language the reference was typed in, or
-  with nothing typed the session's (at first the computer's); the slides follow the rows above
-  whatever the language. Chapter and verse numbers are the first row's. The rule is in
-  `bible_language.rs`; the computer's language is read once at start in `system_language.rs`.
-- Command line: `bible REFERENCE [--show]`.
+- What the operator reads (the reference field after a lookup, the books in the keypad and the
+  lists, the page, the verses found, the find box's Bible rows) is in the language chosen with Аа
+  (kept with the preferences, `bible_language`), or on Auto in the language the reference was
+  typed in, or with nothing typed the session's (at first the computer's); the slides follow the
+  rows above whatever the language, and choosing one makes nothing again. Chapter and verse
+  numbers are the first row's. The rule is in `bible_language.rs` (`Reading`); the computer's
+  language is read once at start in `system_language.rs`.
+- Command line: `bible REFERENCE [--show]`, `bible view page|slides`, `bible books keypad|lists`,
+  `bible language auto|en|ru|uk`.
 
 ## Other windows
 

@@ -12,6 +12,10 @@
 //! words quoted, are the operator's. So a name written back in the field reads again as the
 //! same passage.
 //!
+//! A language can also be chosen on the Bible page (its Аа button, kept between starts): the
+//! operator then reads in it whatever is typed, while a Bible in use is in it (see [`Reading`]).
+//! It never changes the slides either.
+//!
 //! Each Bible's language is the `language` its file gives (every Bible offered says one: `en`,
 //! `ru`, `uk`, `de`…). A Bible that gives none is of no language: it is never chosen for one,
 //! and only the fallback to the first Bible reaches it.
@@ -55,6 +59,48 @@ pub fn typed_bible(typed: &[&str], session: &str, languages: &[String]) -> (usiz
     }
     let kept = if typed.contains(&session) { session } else { typed[0] };
     (0, Some(kept.to_owned()))
+}
+
+/// How the operator's language is decided: the session's (the language last typed, or the
+/// computer's), and a language chosen on the Bible page (its Аа button), if one is.
+///
+/// Auto (nothing chosen) is the rule above, unchanged. A language chosen holds while a Bible in
+/// use is in it: the operator reads in it whatever is typed; typing still finds the passage,
+/// and still moves the session's language on, so going back to Auto carries on from what was
+/// typed last. A language chosen with no Bible in use counts as Auto until one is.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Reading {
+    pub session: String,
+    pub chosen: Option<String>,
+}
+
+impl Reading {
+    /// Auto, in a session's language.
+    #[cfg(test)]
+    pub fn auto(session: &str) -> Reading {
+        Reading { session: session.to_owned(), chosen: None }
+    }
+
+    /// The place among the Bibles in use (by their languages) of the first in the language
+    /// chosen, when one is chosen and a Bible in use is in it.
+    pub fn chosen_in(&self, languages: &[String]) -> Option<usize> {
+        let chosen = self.chosen.as_deref()?;
+        languages.iter().position(|language| language == chosen)
+    }
+}
+
+/// The Bible the operator reads a typed reference in, and the language the session goes on in
+/// (see [`typed_bible`]): the language chosen, when there is one with a Bible in use; the
+/// session goes on in what was typed all the same.
+pub fn reading_typed(typed: &[&str], reading: &Reading, languages: &[String]) -> (usize, Option<String>) {
+    let (auto, goes_on) = typed_bible(typed, &reading.session, languages);
+    (reading.chosen_in(languages).unwrap_or(auto), goes_on)
+}
+
+/// The Bible the operator reads in when nothing typed says which (see [`session_bible`]): the
+/// language chosen, when there is one with a Bible in use.
+pub fn reading_untyped(reading: &Reading, languages: &[String]) -> usize {
+    reading.chosen_in(languages).unwrap_or_else(|| session_bible(&reading.session, languages))
 }
 
 /// The alphabets words and Bibles are written in, for searching the Bibles in the alphabet of
@@ -168,6 +214,32 @@ mod tests {
         assert_eq!(session_bible("uk", &in_use), 0, "no Ukrainian Bible: the first");
         assert_eq!(session_bible("en", &languages(&["uk", "ru"])), 0);
         assert_eq!(typed_bible(&[], "en", &in_use), (1, None));
+    }
+
+    #[test]
+    fn a_language_chosen_holds_whatever_is_typed_while_a_bible_is_in_it() {
+        let in_use = languages(&["ru", "en"]);
+        let russian = Reading { session: "en".to_owned(), chosen: Some("ru".to_owned()) };
+        // Typed in English: read in Russian, and the session goes on in English.
+        assert_eq!(reading_typed(&["en"], &russian, &in_use), (0, Some("en".to_owned())));
+        assert_eq!(reading_untyped(&russian, &in_use), 0);
+        let english = Reading { session: "ru".to_owned(), chosen: Some("en".to_owned()) };
+        assert_eq!(reading_typed(&["ru"], &english, &in_use), (1, Some("ru".to_owned())));
+        assert_eq!(reading_untyped(&english, &in_use), 1);
+        // Ukrainian chosen with no Ukrainian Bible in use: Auto until there is one.
+        let ukrainian = Reading { session: "en".to_owned(), chosen: Some("uk".to_owned()) };
+        assert_eq!(reading_typed(&["ru"], &ukrainian, &in_use), typed_bible(&["ru"], "en", &in_use));
+        assert_eq!(reading_untyped(&ukrainian, &in_use), session_bible("en", &in_use));
+        // Auto is the rule as it was.
+        for typed in [&["en"][..], &["ru"], &["uk"], &["ru", "uk"], &[]] {
+            for session in ["en", "ru", "uk"] {
+                assert_eq!(
+                    reading_typed(typed, &Reading::auto(session), &in_use),
+                    typed_bible(typed, session, &in_use)
+                );
+                assert_eq!(reading_untyped(&Reading::auto(session), &in_use), session_bible(session, &in_use));
+            }
+        }
     }
 
     #[test]

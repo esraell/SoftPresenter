@@ -743,6 +743,11 @@ pub struct BiblePage {
     pub view: BibleView,
     /// Keypad or lists for the books (kept between starts).
     pub books: BookPicker,
+    /// The language chosen with the page's Аа button (`en`, `ru`, `uk`), or `None` for Auto:
+    /// the language typed, else the session's. Kept between starts. See `Reading`.
+    pub read_in: Option<String>,
+    /// Open the Аа menu when the page is next drawn (a testing aid, for a picture of it).
+    pub open_read_in: bool,
     /// The page's chapter as laid out, and what was on screen when it was last drawn (to keep
     /// the verse on screen in sight as it changes).
     pub page: crate::bible_page::PageCache,
@@ -803,6 +808,8 @@ impl Default for BiblePage {
             side: BibleSide::Books,
             view: BibleView::Page,
             books: BookPicker::Keypad,
+            read_in: None,
+            open_read_in: false,
             page: crate::bible_page::PageCache::default(),
             page_live_seen: None,
         }
@@ -1047,13 +1054,55 @@ impl BiblePage {
         (places, languages)
     }
 
+    /// How the operator's language is decided now: the session's, and the language chosen with
+    /// the Аа button, if one is.
+    pub fn reading(&self) -> crate::bible_language::Reading {
+        crate::bible_language::Reading { session: self.session_language(), chosen: self.read_in.clone() }
+    }
+
     /// The language the operator reads in when nothing typed says, as a Bible in use has it:
-    /// the session's when one of the Bibles in use is in it, else the first Bible's. Books are
-    /// named in it in the lists.
+    /// the language chosen when a Bible in use is in it; else the session's when one of the
+    /// Bibles in use is in it, else the first Bible's. Books are named in it in the keypad and
+    /// the lists.
     pub fn names_language(&self) -> String {
+        let (_, languages) = self.in_use();
+        let reading = self.reading();
+        languages.get(crate::bible_language::reading_untyped(&reading, &languages)).cloned().unwrap_or(reading.session)
+    }
+
+    /// The language Auto would read in now, for the Аа menu's first choice.
+    pub fn auto_language(&self) -> String {
         let (_, languages) = self.in_use();
         let session = self.session_language();
         languages.get(crate::bible_language::session_bible(&session, &languages)).cloned().unwrap_or(session)
+    }
+
+    /// The languages of the Bibles in use, each once, as the Аа menu offers them.
+    pub fn languages_in_use(&self) -> Vec<String> {
+        let (_, languages) = self.in_use();
+        let mut each = Vec::new();
+        for language in languages {
+            if !language.is_empty() && !each.contains(&language) {
+                each.push(language);
+            }
+        }
+        each
+    }
+
+    /// Chooses the language the operator reads in (`None` for Auto). The passage showing is
+    /// named again in it, in the field too unless something else has been typed there; its
+    /// slides are not made again, so nothing on the screens changes.
+    pub fn set_read_in(&mut self, chosen: Option<String>) {
+        self.read_in = chosen;
+        if self.shown.is_empty() {
+            return;
+        }
+        let Some(lead) = self.lead().and_then(|lead| self.shelf.get(lead).ok()) else { return };
+        let renamed = crate::bible::name_for_operator(&self.shown, &lead, &self.names_language());
+        if self.lookup == self.reading {
+            self.lookup = renamed.clone();
+        }
+        self.reading = renamed;
     }
 
     /// The language a reference typed this way would be named back in, as `look_up` would
@@ -1064,7 +1113,7 @@ impl BiblePage {
         let lead =
             self.lead().and_then(|at| self.shelf.bibles.get(at)).map_or_else(String::new, |b| b.language.clone());
         let said = sp_bible::read_reference(typed, &lead).map(|reference| reference.languages).unwrap_or_default();
-        let (reader, _) = crate::bible_language::typed_bible(&said, &self.session_language(), &languages);
+        let (reader, _) = crate::bible_language::reading_typed(&said, &self.reading(), &languages);
         languages.get(reader).cloned().unwrap_or_default()
     }
 
@@ -1143,18 +1192,20 @@ impl BiblePage {
                 // none. Typing in a language makes it the session's.
                 let languages: Vec<String> =
                     rows.iter().map(|row| crate::bible_language::language_of(&row.bible.info.language)).collect();
-                let session = self.session_language();
+                // A language chosen with the Аа button holds, while a Bible in use is in it; the
+                // session still goes on in the language typed.
+                let reading = self.reading();
                 let reader = if typed {
                     let said = sp_bible::read_reference(&self.lookup, &rows[0].bible.info.language)
                         .map(|reference| reference.languages)
                         .unwrap_or_default();
-                    let (reader, goes_on) = crate::bible_language::typed_bible(&said, &session, &languages);
+                    let (reader, goes_on) = crate::bible_language::reading_typed(&said, &reading, &languages);
                     if goes_on.is_some() {
                         self.language = goes_on;
                     }
                     reader
                 } else {
-                    crate::bible_language::session_bible(&session, &languages)
+                    crate::bible_language::reading_untyped(&reading, &languages)
                 };
                 self.reading = crate::bible::name_for_operator(
                     &passage_name,
@@ -1222,7 +1273,7 @@ impl BiblePage {
             }
         }
         let words = self.search.clone();
-        self.show_found(crate::find::search_page(&words, &bibles, &self.session_language()));
+        self.show_found(crate::find::search_page(&words, &bibles, &self.reading()));
     }
 
     /// Lists verses Search found (in place of the slides), or says why there are none.
@@ -1676,6 +1727,7 @@ impl HomeState {
                 BookPicker::Lists => "lists",
             }
             .to_owned(),
+            bible_language: self.bible.read_in.clone().unwrap_or_else(|| "auto".to_owned()),
             playlist_in_front: self.playlist_open,
             song_order: self.song_order.name().to_owned(),
             keys_on_buttons: self.keys_on_buttons,
@@ -1711,6 +1763,10 @@ impl HomeState {
         self.bible.rows_open = prefs.bible_rows_open;
         self.bible.view = if prefs.bible_view == "slides" { BibleView::Slides } else { BibleView::Page };
         self.bible.books = if prefs.bible_books == "lists" { BookPicker::Lists } else { BookPicker::Keypad };
+        self.bible.read_in = match prefs.bible_language.as_str() {
+            language @ ("en" | "ru" | "uk") => Some(language.to_owned()),
+            _ => None,
+        };
         self.playlist_open = prefs.playlist_in_front;
         self.song_order = crate::kept::SongOrder::named(&prefs.song_order);
         self.keys_on_buttons = prefs.keys_on_buttons;
@@ -4137,8 +4193,9 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     // The Bibles' part is found on a thread of its own and comes when it is ready; until then
     // the songs are listed without it.
     let typed = query.trim();
-    // What the words say nothing of a language for is read in the session's.
-    let session = state.bible.session_language();
+    // What the words say nothing of a language for is read in the session's (or the language
+    // chosen on the Bible page).
+    let reading = state.bible.reading();
     let (shelf, rows) = (&state.bible.shelf, &state.bible.rows);
     let bible_rows = if typed.is_empty() {
         Some(&[][..])
@@ -4146,7 +4203,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         let in_use: Vec<String> =
             rows.iter().filter_map(|row| Some(shelf.bibles.get(row.bible?)?.id.clone())).collect();
         let readers = || rows.iter().filter_map(|row| shelf.reader(row.bible?)).collect();
-        state.finder.rows(typed, &in_use, &session, readers, ui.ctx())
+        state.finder.rows(typed, &in_use, &reading, readers, ui.ctx())
     };
     let answered = bible_rows.is_some();
     let bible_rows = bible_rows.unwrap_or(&[]);
@@ -5693,6 +5750,7 @@ fn bible_bar(
     const GAP: f32 = 12.0;
     const STEP: f32 = 34.0;
     const ARROW: f32 = 26.0;
+    const LANGUAGE: f32 = 76.0;
     let font = FontId::proportional(12.5);
     let width = ui.available_width();
     let look = bible_switch_look();
@@ -5703,7 +5761,7 @@ fn bible_bar(
     let add_width = flat_button_width(ui, &["Add"], &font, 13.0) + 18.0;
     let books_width = if state.bible.lists_open { 0.0 } else { flat_button_width(ui, &["Books"], &font, 13.0) + GAP };
     let left = books_width + GAP + STEP + 6.0 + STEP;
-    let right = add_width + 1.0 + ARROW + GAP + 1.0 + GAP + views_width + 8.0 + options_width;
+    let right = add_width + 1.0 + ARROW + GAP + 1.0 + GAP + views_width + 8.0 + LANGUAGE + 8.0 + options_width;
     let one_row = width - left - GAP - right;
     let two_rows = one_row < 170.0;
     let field_width = if two_rows { width - left } else { one_row }.clamp(120.0, 236.0);
@@ -5743,7 +5801,9 @@ fn bible_bar(
     // From the right: Options, Page | Slides, the divider, Add.
     let middle = if two_rows { bar.max.y - 15.0 } else { middle };
     let options = key(bar.max.x - options_width, options_width, middle);
-    let views_at = pos2(options.min.x - 8.0 - views_width, middle - (look.height + 2.0 * look.inset) / 2.0);
+    let language = key(options.min.x - 8.0 - LANGUAGE, LANGUAGE, middle);
+    bible_read_in(ui, state, language);
+    let views_at = pos2(language.min.x - 8.0 - views_width, middle - (look.height + 2.0 * look.inset) / 2.0);
     let divider = views_at.x - GAP - 0.5;
     ui.painter().vline(divider, middle - 10.0..=middle + 10.0, Stroke::new(1.0, crate::studio::LINE));
     let arrow = key(divider - 0.5 - GAP - ARROW, ARROW, middle);
@@ -5798,6 +5858,60 @@ fn bible_bar(
         if let Some(index) = state.bible.options.remove.take() {
             state.bible.remove_bible(index);
         }
+    }
+}
+
+/// The Аа button: the language the operator reads the Bible page in (book names, the reference,
+/// the page's first translation, the find box's Bible rows), Auto or one with a Bible in use.
+/// 76 wide whatever it says, so nothing moves. Its menu: Auto with the language it reads in
+/// now, then English, Русский and Українська (one with no Bible in use greyed). The slides on
+/// screen never change with it.
+fn bible_read_in(ui: &mut egui::Ui, state: &mut HomeState, rect: Rect) {
+    use crate::studio::{Flat, TEXT, TEXT_FAINT, paint_flat};
+    let response = ui.interact(rect, egui::Id::unique("bible read in"), Sense::click());
+    if std::mem::take(&mut state.bible.open_read_in) {
+        egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&response));
+    }
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&response));
+    paint_flat(ui.painter(), rect, 9.0, Flat::Plain, response.hovered() || open);
+    let in_use = state.bible.languages_in_use();
+    let chosen = state.bible.read_in.clone().filter(|language| in_use.contains(language));
+    let code = chosen.as_deref().map_or_else(|| "Auto".to_owned(), str::to_uppercase);
+    let mark = ui.painter().layout_no_wrap("Аа".to_owned(), crate::studio::semibold(12.0), TEXT_FAINT);
+    let words = ui.painter().layout_no_wrap(code, FontId::proportional(12.5), TEXT);
+    let left = rect.center().x - (mark.size().x + 6.0 + words.size().x) / 2.0;
+    let words_at = pos2(left + mark.size().x + 6.0, rect.center().y - words.size().y / 2.0);
+    ui.painter().galley(pos2(left, rect.center().y - mark.size().y / 2.0), mark, TEXT_FAINT);
+    ui.painter().galley(words_at, words, TEXT);
+    let response = response.on_hover_text(
+        "The language you read this page in: book names, the reference and the verse text. The slides on screen \
+         don't change; they keep the translations line.",
+    );
+    let mut picked: Option<Option<&str>> = None;
+    egui::Popup::menu(&response).show(|ui| {
+        ui.set_min_width(220.0);
+        ui.label(egui::RichText::new("Read the Bible page in").size(11.5).color(TEXT_FAINT));
+        let auto = crate::bible::language_name(&state.bible.auto_language());
+        if ui
+            .add(egui::Button::selectable(chosen.is_none(), format!("Auto \u{b7} {auto}")))
+            .on_hover_text("The language typed, else the last one typed, else the computer's")
+            .clicked()
+        {
+            picked = Some(None);
+        }
+        for language in ["en", "ru", "uk"] {
+            let name = crate::bible::language_name(language);
+            let has = in_use.iter().any(|have| have == language);
+            let words = if has { name.to_owned() } else { format!("{name} \u{b7} no Bible in use") };
+            if ui.add_enabled(has, egui::Button::selectable(chosen.as_deref() == Some(language), words)).clicked() {
+                picked = Some(Some(language));
+            }
+        }
+        ui.separator();
+        ui.label(egui::RichText::new("The slides on screen keep the translations line").size(11.5).color(TEXT_FAINT));
+    });
+    if let Some(choice) = picked {
+        state.bible.set_read_in(choice.map(str::to_owned));
     }
 }
 
@@ -6448,11 +6562,11 @@ fn bible_live_search(ctx: &egui::Context, state: &mut HomeState) {
     if state.bible.live_words.as_deref() == Some(words.as_str()) {
         return;
     }
-    let session = state.bible.session_language();
+    let reading = state.bible.reading();
     let (shelf, rows) = (&state.bible.shelf, &state.bible.rows);
     let in_use: Vec<String> = rows.iter().filter_map(|row| Some(shelf.bibles.get(row.bible?)?.id.clone())).collect();
     let readers = || rows.iter().filter_map(|row| shelf.reader(row.bible?)).collect();
-    if let Some(found) = state.page_finder.answer(&words, &in_use, &session, readers, ctx).cloned() {
+    if let Some(found) = state.page_finder.answer(&words, &in_use, &reading, readers, ctx).cloned() {
         state.bible.message = None;
         state.bible.show_found(found);
         state.bible.live_words = Some(words);
@@ -8647,6 +8761,105 @@ mod tests {
     }
 
     #[test]
+    fn a_language_chosen_names_the_books_and_reads_the_page_in_it_and_never_changes_the_slides() {
+        // The Russian Synodal first, the King James Version second, as the app starts.
+        let mut page = bible_page();
+        let syn = page.shelf.position("syn").unwrap();
+        let kjv = page.shelf.position("kjv").unwrap();
+        let (field, _, auto_slides) = typed(&mut page, "John 3:16");
+        assert_eq!(field, "John 3:16");
+        assert_eq!(crate::bible_page::page_bibles(&page), Some((kjv, Some(syn))), "English first, as typed");
+        // Russian chosen: the field, the books and the page's first Bible are Russian, and no
+        // slides are made again.
+        page.set_read_in(Some("ru".to_owned()));
+        assert_eq!(page.lookup, "От Иоанна 3:16");
+        assert_eq!(page.names_language(), "ru");
+        assert_eq!(crate::bible_page::page_bibles(&page), Some((syn, Some(kjv))));
+        assert!(page.pending.is_none(), "nothing made again");
+        // Typed in English while Russian is chosen: found, read in Russian, and the slides are
+        // the very slides Auto made (rule 2); the session still goes on in English.
+        let (field, session, slides) = typed(&mut page, "John 3:16");
+        assert_eq!((field.as_str(), session.as_str()), ("От Иоанна 3:16", "en"));
+        assert_eq!(slides, auto_slides, "the same slides whatever the language");
+        // English chosen, Russian typed: named in English with the first translation's numbers
+        // (the Synodal 22nd psalm is the English 23rd), the slides as Auto makes them.
+        page.set_read_in(Some("en".to_owned()));
+        let mut auto = bible_page();
+        let (_, _, auto_psalm) = typed(&mut auto, "Пс 22");
+        let (field, session, psalm) = typed(&mut page, "Пс 22");
+        assert_eq!((field.as_str(), session.as_str()), ("Psalms 22:1-6", "ru"));
+        assert_eq!(page.shown, "Псалтирь 22:1-6", "kept as the first translation names it");
+        assert_eq!(psalm, auto_psalm);
+        assert_eq!(crate::bible_page::page_bibles(&page), Some((kjv, Some(syn))));
+        // Back to Auto: the language typed last, as before.
+        page.set_read_in(None);
+        assert_eq!((page.lookup.as_str(), page.names_language().as_str()), ("Псалтирь 22:1-6", "ru"));
+        // Only languages with a Bible in use: Ukrainian chosen with none counts as Auto.
+        assert_eq!(page.languages_in_use(), ["ru", "en"]);
+        page.set_read_in(Some("uk".to_owned()));
+        assert_eq!(page.names_language(), "ru");
+        // Something else typed in the field is left as it is.
+        page.set_read_in(Some("en".to_owned()));
+        page.lookup = "ps 9".to_owned();
+        page.set_read_in(Some("ru".to_owned()));
+        assert_eq!((page.lookup.as_str(), page.reading.as_str()), ("ps 9", "Псалтирь 22:1-6"));
+    }
+
+    #[test]
+    fn choosing_a_language_puts_nothing_on_screen_and_the_find_box_reads_in_it() {
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { bible_open: true, ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        state.bible.lookup = "John 3:16-18".to_owned();
+        state.bible.look_up(None);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.1);
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+        show.apply(Command::GoTo(SlideRef { presentation: slot, slide: 1 }));
+        let on_screen = (show.live(), slides_as_shown(&show.presentations()[slot]));
+        let mut commands = Vec::new();
+        for (at, language) in [Some("ru"), Some("en"), None, Some("ru")].into_iter().enumerate() {
+            state.bible.set_read_in(language.map(str::to_owned));
+            commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![], 0.2 + at as f64 * 0.1));
+            assert!(state.bible.pending.is_none(), "{language:?}: nothing made again");
+        }
+        assert!(!goes_on_screen(&commands), "{commands:?}");
+        assert_eq!((show.live(), slides_as_shown(&show.presentations()[slot])), on_screen);
+        // The find box's Bible rows, in Russian: a passage typed in English, and verses found
+        // by English words (quoted from the Russian Bible, and tagged with it).
+        state.library_search = Some(("John 3:16".to_owned(), 0));
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 1.0);
+        let in_use: Vec<String> =
+            state.bible.rows.iter().filter_map(|row| Some(state.bible.shelf.bibles[row.bible?].id.clone())).collect();
+        let reading = state.bible.reading();
+        let passage = state.finder.rows("John 3:16", &in_use, &reading, Vec::new, &ctx).expect("answered").to_vec();
+        assert_eq!(passage[0].title, "От Иоанна 3:16");
+        assert!(passage[0].line.starts_with("Ибо так возлюбил"), "{}", passage[0].line);
+        state.library_search = Some(("valley of the shadow".to_owned(), 0));
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 1.1);
+        let verses = state.finder.rows("valley of the shadow", &in_use, &reading, Vec::new, &ctx).expect("answered");
+        assert!(!verses.is_empty() && verses.iter().all(|row| row.tag == "BIBLE \u{b7} SYN"), "{verses:?}");
+        assert!(verses.iter().any(|row| row.title == "Псалтирь 22:4"), "{verses:?}");
+    }
+
+    #[test]
+    fn the_language_chosen_is_kept_between_starts() {
+        let mut state = HomeState::default();
+        assert_eq!(state.prefs().bible_language, "auto");
+        state.bible.read_in = Some("ru".to_owned());
+        let prefs = state.prefs();
+        assert_eq!(prefs.bible_language, "ru");
+        let mut fresh = HomeState::default();
+        fresh.apply_prefs(&prefs);
+        assert_eq!(fresh.bible.read_in.as_deref(), Some("ru"));
+        for (saved, read) in [("auto", None), ("", None), ("de", None), ("uk", Some("uk")), ("en", Some("en"))] {
+            fresh.apply_prefs(&crate::service::Prefs { bible_language: saved.to_owned(), ..Default::default() });
+            assert_eq!(fresh.bible.read_in.as_deref(), read, "{saved:?}");
+        }
+    }
+
+    #[test]
     fn page_or_slides_is_kept_between_starts() {
         let mut state = HomeState::default();
         assert_eq!(state.prefs().bible_view, "page");
@@ -8729,8 +8942,8 @@ mod tests {
         assert_eq!(songs, vec![(0, 0, Some("The shepherd leads me on".to_owned()))]);
         let in_use: Vec<String> =
             state.bible.rows.iter().filter_map(|row| Some(state.bible.shelf.bibles[row.bible?].id.clone())).collect();
-        let session = state.bible.session_language();
-        let verses = state.finder.rows("shepherd", &in_use, &session, Vec::new, &ctx).expect("answered").to_vec();
+        let reading = state.bible.reading();
+        let verses = state.finder.rows("shepherd", &in_use, &reading, Vec::new, &ctx).expect("answered").to_vec();
         assert_eq!(verses.len(), crate::find::VERSES_LISTED);
         assert!(verses.iter().all(|verse| !verse.passage && verse.line.to_lowercase().contains("shepherd")));
         // The list is the song, then the verses. Down to the last verse; Command-Return adds it

@@ -464,6 +464,10 @@ pub struct Prefs {
     /// default) or `lists`.
     #[serde(default)]
     pub bible_books: String,
+    /// The language the Bible page is read in: `auto` (the default: the language typed, else
+    /// the last one typed, else the computer's), or `en`, `ru` or `uk`.
+    #[serde(default)]
+    pub bible_language: String,
     /// True when the left column was left listing a playlist, not a library's songs.
     #[serde(default)]
     pub playlist_in_front: bool,
@@ -533,6 +537,7 @@ impl Default for Prefs {
             bible_rows_open: false,
             bible_view: String::new(),
             bible_books: String::new(),
+            bible_language: String::new(),
             playlist_in_front: false,
             song_order: "listed".to_owned(),
             keys_on_buttons: false,

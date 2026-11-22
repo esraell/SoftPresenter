@@ -869,6 +869,9 @@ Layers and controls
   bible rows [BIBLE…]          the translations shown (KJV RST …), first to last
   bible options [verses=on|off break=on|off translation=on|off reference=verse|passage|last|none]
   bible history                the passages looked up
+  bible view [page|slides]     the chapter as a page to read, or the passage's slides
+  bible books [keypad|lists]   the books as a keypad, or as lists
+  bible language [auto|en|ru|uk]   the language the operator reads the page in (never the slides)
   bibles | bible install NAME|FILE | bible remove NAME --yes
 
 Songs, libraries and playlists

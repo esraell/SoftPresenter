@@ -412,6 +412,9 @@ Macro steps: `clear all|slide|media|props|messages`, `show|hide message NAME`,
 | `bible rows [BIBLE…]` | The translations shown, first to last; with names (short or whole), sets them |
 | `bible options [verses=on\|off break=on\|off translation=on\|off reference=verse\|passage\|last\|none]` | Verse numbers, a new slide for each verse, the translation's name, where the reference goes |
 | `bible history` | The passages looked up |
+| `bible view [page\|slides]` | How the Bible page shows a passage: its chapter as a page to read, or its slides; without a word, says which |
+| `bible books [keypad\|lists]` | How the page's left column offers the books: a key for every book, or the book, chapter and verse lists |
+| `bible language [auto\|en\|ru\|uk]` | The language the operator reads the page in (book names, the reference, the page, the find box's Bible rows): Auto, or one with a Bible in use; the slides on screen never change with it |
 | `bibles` | The Bibles installed, and those that can be downloaded |
 | `bible install NAME\|FILE`, `bible remove NAME --yes` | Downloads an offered Bible as a job (or installs a `.spbible` file); removes one (the four that come with the app stay) |
 
@@ -460,6 +463,13 @@ names the passage as it was typed, while the screens and the playlist follow the
     Looked up Psalms 23:1-10; it is on the Bible page.
     $ sp bible search valley of the shadow
       1. Psalms 22:4: Yea, though I walk through the valley of the shadow of death, …
+
+    $ sp bible language ru
+    The Bible page reads in Русский.
+    $ sp bible "John 3:16"               # found as typed, named in Russian; the slides are as before
+    Looked up От Иоанна 3:16; it is on the Bible page.
+    $ sp bible language auto
+    The Bible page reads in the language typed (Auto: English now).
 
 ## Songs
 

@@ -493,7 +493,8 @@ feature changes, this page changes in the same commit.
 ## Bible
 - The Bible page, in the design's look: on the left, in place of the playlist, **Books | History**
   and Hide; in the middle a bar with the reference field, a verse longer at the start (‹) or the
-  end (›), **+ Add** (with ▾ for another playlist), **Page | Slides** and Options; under it the
+  end (›), **+ Add** (with ▾ for another playlist), **Page | Slides**, **Аа** (the language the
+  page is read in) and Options; under it the
   translations line, the passage's title with the Bibles read, then the passage. The right
   column is the same as in every view. Hide puts the left column away (the middle takes its
   room) and Books, beside the reference field, brings it back; the choice is kept.
@@ -525,7 +526,20 @@ feature changes, this page changes in the same commit.
   from History or a playlist), the operator reads in the language last typed this session; at
   the start of a session, in the computer's: Russian if its first language is Russian,
   Ukrainian if Ukrainian, otherwise English (falling back to the first translation when that
-  language has no Bible in use). There is no switch for it.
+  language has no Bible in use).
+- **Аа**, between Page | Slides and Options (76 wide, saying Auto, EN, RU or UK, so nothing
+  moves), chooses the language the operator reads the Bible page in: Auto (the rule above, as it
+  was), English, Русский or Українська; a language with no Bible in use is greyed in its menu
+  ("no Bible in use"). A language chosen names the books (keypad and lists), the passage in the
+  reference field and the title, reads that language's Bible first on the page, and names and
+  quotes the find box's Bible rows and the verses words were found in (tagged with the Bible
+  quoted, such as `BIBLE · SYN`). Typing in another language still finds the passage, read in
+  the language chosen; the session still follows what is typed, so Auto carries on from the
+  language typed last. It never changes the slides: they follow the translations line, and
+  choosing a language makes nothing again and puts nothing on screen. Chapter and verse numbers
+  stay the first translation's (with the Russian Synodal first and English chosen, `Пс 22` reads
+  as `Psalms 22:1-6`, the English 23rd psalm). The choice is kept between starts; a language
+  chosen whose Bible is taken out of the translations counts as Auto until one is back.
 - Words typed in the reference field that are no reference and no book's name begun are looked
   for in the Bibles in use written in their alphabet (Cyrillic words in the Russian and the
   Ukrainian Bibles, the session's language first; Latin letters in the English ones), or in the

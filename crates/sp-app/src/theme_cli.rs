@@ -28,9 +28,67 @@ impl crate::App {
             "history" => self.bible_history(),
             "install" => self.bible_install(&words.join(" ")),
             "remove" => self.bible_remove(words),
+            "view" | "books" | "language" => self.bible_look(&word, words.first().map(String::as_str)),
             _ => return None,
         };
         Some(result)
+    }
+
+    /// `bible view [page|slides]`, `bible books [keypad|lists]`, `bible language
+    /// [auto|en|ru|uk]`: how the Bible page shows a passage, how it offers the books, and the
+    /// language the operator reads it in, as its switches set them (kept with the preferences).
+    /// Without a value, says which. None of them changes the slides on screen.
+    fn bible_look(&mut self, what: &str, value: Option<&str>) -> Result<Reply, String> {
+        use crate::home::{BibleView, BookPicker};
+        let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
+        let page = &mut state.bible;
+        let value = value.map(str::to_lowercase);
+        match (what, value.as_deref()) {
+            ("view", Some("page")) => page.view = BibleView::Page,
+            ("view", Some("slides")) => page.view = BibleView::Slides,
+            ("books", Some("keypad" | "keys")) => page.books = BookPicker::Keypad,
+            ("books", Some("lists" | "list")) => page.books = BookPicker::Lists,
+            ("language", Some(said)) => {
+                let chosen = match said {
+                    "auto" => None,
+                    "en" | "english" => Some("en"),
+                    "ru" | "russian" | "русский" => Some("ru"),
+                    "uk" | "ukrainian" | "українська" => Some("uk"),
+                    other => return Err(format!("The language is auto, en, ru or uk, not {other}.")),
+                };
+                if let Some(language) = chosen
+                    && !page.languages_in_use().iter().any(|have| have == language)
+                {
+                    let name = crate::bible::language_name(language);
+                    return Err(format!("No Bible in use is in {name}: add one to the translations first."));
+                }
+                page.set_read_in(chosen.map(str::to_owned));
+            }
+            ("view", Some(other)) => return Err(format!("The view is page or slides, not {other}.")),
+            ("books", Some(other)) => return Err(format!("The books are keypad or lists, not {other}.")),
+            _ => {}
+        }
+        let said = match what {
+            "view" => match page.view {
+                BibleView::Page => "The Bible page shows the chapter as a page.".to_owned(),
+                BibleView::Slides => "The Bible page shows the passage's slides.".to_owned(),
+            },
+            "books" => match page.books {
+                BookPicker::Keypad => "The books are a keypad.".to_owned(),
+                BookPicker::Lists => "The books are lists.".to_owned(),
+            },
+            _ => {
+                let in_use = page.languages_in_use();
+                match page.read_in.as_deref().filter(|language| in_use.iter().any(|have| have == language)) {
+                    Some(language) => format!("The Bible page reads in {}.", crate::bible::language_name(language)),
+                    None => format!(
+                        "The Bible page reads in the language typed (Auto: {} now).",
+                        crate::bible::language_name(&page.auto_language())
+                    ),
+                }
+            }
+        };
+        Ok(Reply::done(said))
     }
 
     fn bible_search(&mut self, words: &str) -> Result<Reply, String> {
