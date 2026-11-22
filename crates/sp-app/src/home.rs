@@ -903,6 +903,7 @@ impl BiblePage {
             Ok(()) => {
                 // A row that showed the Bible removed goes, and the rows close up (one always
                 // stays, showing the first Bible); the rest keep theirs.
+                let lost = self.rows.iter().any(|row| row.bible == Some(index));
                 self.rows.retain(|row| row.bible != Some(index));
                 for row in &mut self.rows {
                     if let Some(at) = row.bible
@@ -914,7 +915,13 @@ impl BiblePage {
                 if self.rows.is_empty() {
                     self.rows.push(BibleRow { bible: Some(0), verse: None, reference: None });
                 }
-                self.assign_boxes();
+                // Only when a row lost its Bible do the boxes move up with the rows; otherwise
+                // every translation keeps the boxes it was given.
+                if lost {
+                    self.assign_boxes();
+                } else {
+                    self.made_with.clear();
+                }
             }
             Err(problem) => self.options.problem = Some(problem),
         }
@@ -7908,6 +7915,42 @@ mod tests {
     use sp_model::parse_song_text;
 
     use super::*;
+
+    #[test]
+    fn removing_a_bible_no_row_shows_keeps_every_translations_boxes() {
+        let role = |name: &str| Some(sp_model::Role(name.to_owned()));
+        let mut page = BiblePage { shelf: crate::bible::Shelf::shipped(), ..BiblePage::default() };
+        // Two Bibles installed from files that are not there (so removing one moves nothing to
+        // the Trash): Extra, then Other.
+        let bytes = include_bytes!("../../../assets/bibles/web.spbible");
+        for id in ["extra", "other"] {
+            let mut info = sp_bible::Bible::read_info(bytes).unwrap();
+            info.id = id.to_owned();
+            page.shelf.add_file(format!("/nonexistent/softpresenter-test/{id}.spbible").into(), info);
+        }
+        let (kjv, extra, other) = (
+            page.shelf.position("kjv").unwrap(),
+            page.shelf.position("extra").unwrap(),
+            page.shelf.position("other").unwrap(),
+        );
+        // Not the usual boxes: the KJV in the translation box, Other in the main box.
+        page.rows = vec![
+            BibleRow { bible: Some(kjv), verse: role("translation"), reference: None },
+            BibleRow { bible: Some(other), verse: role("primary"), reference: role("reference") },
+        ];
+        let rows = page.rows.clone();
+        // Extra, which no row shows, goes: the rows keep their Bibles and their boxes.
+        page.remove_bible(extra);
+        assert!(page.options.problem.is_none(), "{:?}", page.options.problem);
+        assert_eq!(page.shelf.position("other"), Some(other - 1));
+        assert_eq!(page.rows[0], rows[0]);
+        assert_eq!(page.rows[1], BibleRow { bible: Some(other - 1), ..rows[1].clone() });
+        // Other, which a row shows, goes: that row goes and the boxes are given out again.
+        page.remove_bible(other - 1);
+        assert_eq!(page.rows.len(), 1);
+        assert_eq!(page.rows[0].bible, Some(kjv));
+        assert_eq!(page.rows[0].verse, Some(sp_model::Role::primary()), "the first translation in the main box");
+    }
 
     #[test]
     fn the_bible_pages_set_up_survives_being_saved_and_read_back() {

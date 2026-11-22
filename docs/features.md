@@ -703,7 +703,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   and sixteen more can be downloaded. Options › Bibles opens the Bibles window: a search box,
   the Bibles installed (each with Remove, but for the four built in), and every Bible that can
   be downloaded, grouped by language and written in it, with its terms and an Install button
-  that shows the download going on.
+  that shows the download going on. Removing a Bible a translation row shows takes that row
+  away and gives the boxes out again; removing one no row shows leaves every row's boxes as
+  they were.
 - **A Bible file the church has installs too**, in the formats other programs keep Bibles in:
   Zefania XML, OSIS XML, Beblia XML, XML marking books, chapters and verses with `<b>`, `<c>`
   and `<v>`, USFM (eBible.org's main format: a folder or zip of `.usfm`/`.SFM` books) and USX,
