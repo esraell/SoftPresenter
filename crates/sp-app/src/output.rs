@@ -895,6 +895,41 @@ pub(crate) fn next_texture(surface: &wgpu::Surface<'static>) -> Option<wgpu::Cur
     got
 }
 
+/// A screen's window's next picture to draw into, as [`next_texture`] gives it.
+fn next_screen_texture(surface: &wgpu::Surface<'static>) -> Option<wgpu::CurrentSurfaceTexture> {
+    hold_next_texture_once();
+    next_texture(surface)
+}
+
+/// Testing aid: SOFTPRESENTER_HOLD_WINDOW_PICTURE=MS@SECONDS has the first picture a screen's
+/// window asks for that many seconds after the start come MS milliseconds late, once, as when
+/// the window system is slow to give a window back a picture it has shown (on a Mac it can
+/// take a second). It works in a quiet run, whose windows are covered and otherwise answer at
+/// once. The operator's window is never held.
+fn hold_next_texture_once() {
+    static ASKED: std::sync::OnceLock<Option<(Duration, Instant)>> = std::sync::OnceLock::new();
+    static HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let asked = ASKED.get_or_init(|| {
+        let asked = std::env::var("SOFTPRESENTER_HOLD_WINDOW_PICTURE").ok()?;
+        held_picture(&asked).map(|(hold, after)| (hold, Instant::now() + after))
+    });
+    if let Some((hold, at)) = asked
+        && Instant::now() >= *at
+        && !HELD.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        std::thread::sleep(*hold);
+    }
+}
+
+/// What SOFTPRESENTER_HOLD_WINDOW_PICTURE asks for: how long to hold the picture, and from how
+/// long after the start. `None` for anything but milliseconds, and seconds from nought up.
+fn held_picture(asked: &str) -> Option<(Duration, Duration)> {
+    let (hold, after) = asked.split_once('@').unwrap_or((asked, "0"));
+    let hold = Duration::from_millis(hold.trim().parse().ok()?);
+    let after = Duration::try_from_secs_f32(after.trim().parse().ok()?).ok()?;
+    Some((hold, after))
+}
+
 /// Sets a window's surface up, saying whether that worked. A failure is caught here, not left to
 /// stop the thread: a screen that can't be drawn this moment is tried again next frame.
 pub(crate) fn configure(
@@ -2973,7 +3008,7 @@ fn show_in_window_timed(
     // (hidden window, timeout) skips this frame and the next message redraws.
     for attempt in 0..2 {
         let acquiring = Instant::now();
-        let next = next_texture(&target.surface);
+        let next = next_screen_texture(&target.surface);
         let after = held.since(Part::Acquire, window, acquiring);
         let Some(next) = next else {
             target.configured = false;
@@ -3573,6 +3608,12 @@ mod tests {
         assert_eq!(PretendSlow::parse(" 6 @ 1.5 "), slow(6, 1.5));
         for bad in ["", "x", "-1", "3@", "3@-1", "3@nan", "3@inf", "3@-inf", "3@1e40", "@2", "1@2@3", "4294967296"] {
             assert_eq!(PretendSlow::parse(bad), None, "{bad:?}");
+        }
+        let ms = Duration::from_millis;
+        assert_eq!(held_picture("1000"), Some((ms(1000), Duration::ZERO)));
+        assert_eq!(held_picture(" 1000 @ 90 "), Some((ms(1000), Duration::from_secs(90))));
+        for bad in ["", "x", "-5", "1000@", "1000@-1", "1000@nan", "@3", "1.5@3"] {
+            assert_eq!(held_picture(bad), None, "{bad:?}");
         }
         let room = output_room("20000").expect("room");
         assert_eq!((room.lines, room.seg_counts, room.segments), (20_000, 20_000, 20_000));
