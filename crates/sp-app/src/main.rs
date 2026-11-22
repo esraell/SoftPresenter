@@ -42,6 +42,7 @@ mod outside;
 mod pack;
 mod private_folder;
 mod props;
+mod remote;
 mod removed;
 mod renamed;
 mod running;
@@ -533,6 +534,9 @@ enum AppEvent {
     Menu(String),
     LivePreview,
     Control(control::Incoming),
+    /// Something Remote Control's server asks of the main thread: a command from a page (carried
+    /// out as `sp`'s are), a slide to draw, the state to publish.
+    Remote(remote::ToApp),
     /// A deck of slides finished on its own thread.
     DeckDone,
     /// A song pack was written or read on its own thread.
@@ -1242,6 +1246,9 @@ struct Running {
     displays_seen: Option<DisplaysSeen>,
     /// The live preview's two textures, as the window knows them.
     live_preview_ids: Vec<egui::TextureId>,
+    /// The same two textures, for Remote Control to read the newest back from (never the
+    /// output thread: it only draws into them).
+    live_textures: Vec<wgpu::Texture>,
 
     /// The preview picture before the last change, and when that change was, so the preview
     /// fades as the output does.
@@ -1303,6 +1310,12 @@ struct App {
     _control: Option<control::Listening>,
     /// `status --wait`s held until something changes or their time is up.
     waiting: Vec<control::Waiter>,
+    /// Remote Control: the web page other devices run the show from, while switched on.
+    remote: remote::Remote,
+    /// Whether Remote Control, left on, has been switched on again since the app opened.
+    remote_started: bool,
+    /// How many pages were connected when Settings and the status line were last told.
+    remote_pages_seen: usize,
     show: Show,
     /// The file each song came from, in the show's order; `None` for the bundled sample.
     sources: Vec<Option<PathBuf>>,
@@ -1548,7 +1561,7 @@ impl App {
                 egui_renderer.register_native_texture(&gpu.device, &view, wgpu::FilterMode::Linear)
             })
             .collect();
-        output.send(OutputMsg::PreviewTargets(live_textures));
+        output.send(OutputMsg::PreviewTargets(live_textures.clone()));
 
         Ok(Some(Running {
             home_window,
@@ -1587,6 +1600,7 @@ impl App {
             thumbs,
             preview,
             live_preview_ids,
+            live_textures,
             ndi_checked: None,
             displays_seen: None,
 
@@ -3072,6 +3086,35 @@ impl App {
             Some(running::Do::Start { item, last }) => self.start_item(item, last),
             Some(running::Do::Say(_)) | None => {}
         }
+    }
+
+    /// Carries out a command from `sp` or from a remote page (`from` names the page's device)
+    /// with the same handler, logs it unless it only reads, sends the reply, and brings the
+    /// screens up to date at once.
+    fn run_control(
+        &mut self,
+        el: &ActiveEventLoop,
+        args: &[String],
+        from: Option<&str>,
+        send: impl FnOnce(control::Reply),
+    ) {
+        let reply = self.control(el, args);
+        // What it deleted goes in the history now, before any later change.
+        self.keep_removed();
+        // A command that only reads (status, a list) changes nothing worth a line: a page
+        // asking every second or two would fill the log with them.
+        if !control::only_reads(args) {
+            let outcome = if reply.ok { "done" } else { "refused" };
+            match from {
+                Some(from) => applog::event("remote", &format!("{from}: {:?} -> {outcome}", control::shown_args(args))),
+                None => applog::event("control", &format!("{:?} -> {outcome}", control::shown_args(args))),
+            }
+        }
+        send(reply);
+        // A screen changed from the command line reaches the screens now, not at the window's
+        // next redraw (which an idle or hidden window may not have for a while).
+        self.sync_screens(el);
+        self.sync_panels(el);
     }
 
     /// Puts an item of the playlist in front on screen: a song or a Bible passage at its first
@@ -6243,6 +6286,10 @@ impl App {
         self.theme_for_bible = self.theme.clone();
         self.bible_layout = self.theme.bible_template_index();
         let (layouts, pinned) = (self.theme_layouts(), self.bible_template());
+        // Remote pages' slide pictures have new addresses now; the old ones are let go.
+        if let Some(shared) = self.remote.shared() {
+            shared.forget_pictures();
+        }
         if let Some(running) = self.running.as_mut() {
             running.thumbs.clear_except(&mut running.egui_renderer, |_| false);
             running.canvas_for = None;
@@ -8655,26 +8702,14 @@ impl ApplicationHandler<AppEvent> for App {
                 // A wait for a change, with nothing changed yet, is held and answered later
                 // (`answer_waiting`, from `about_to_wait`).
                 let Some(incoming) = self.hold_wait(incoming) else { return };
-                let reply = self.control(el, &incoming.request.args);
-                // What it deleted goes in the history now, before any later change.
-                self.keep_removed();
-                // A command that only reads (status, a list) changes nothing worth a line: a
-                // page asking every second or two would fill the log with them.
-                if !control::only_reads(&incoming.request.args) {
-                    applog::event(
-                        "control",
-                        &format!(
-                            "{:?} -> {}",
-                            control::shown_args(&incoming.request.args),
-                            if reply.ok { "done" } else { "refused" }
-                        ),
-                    );
-                }
-                let _ = incoming.reply.send(reply);
-                // A screen changed from the command line reaches the screens now, not at the
-                // window's next redraw (which an idle or hidden window may not have for a while).
-                self.sync_screens(el);
-                self.sync_panels(el);
+                let control::Incoming { request, reply } = incoming;
+                self.run_control(el, &request.args, None, |answer| {
+                    let _ = reply.send(answer);
+                });
+                return;
+            }
+            AppEvent::Remote(asked) => {
+                self.remote_event(el, asked);
                 return;
             }
             AppEvent::LivePreview => String::new(),
@@ -8722,6 +8757,11 @@ impl ApplicationHandler<AppEvent> for App {
             {
                 output.live_preview_woken();
                 running.home_window.request_redraw();
+                // Remote pages watching the preview are sent the new picture (read back on the
+                // server's own thread, at most ten a second).
+                if let Some(shared) = self.remote.shared() {
+                    shared.preview_drawn(output.live_preview().1);
+                }
                 // Testing aid: say once a second how many new previews the window was woken for.
                 if std::env::var_os("SOFTPRESENTER_TRACE_PREVIEW").is_some() {
                     static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -9157,6 +9197,9 @@ impl ApplicationHandler<AppEvent> for App {
         let save_at = self.unsaved_since.map(|since| since + SAVE_AFTER);
         // `status --wait`s held: answered now if anything changed, or their time is up.
         let waiting_at = self.answer_waiting();
+        // Remote Control: what Settings asked, the state for pages (at most twenty times a
+        // second, only while one is connected) and the slides they asked to see.
+        let remote_at = self.tick_remote();
         let Some(running) = self.running.as_mut() else {
             return;
         };
@@ -9193,6 +9236,7 @@ impl ApplicationHandler<AppEvent> for App {
             cycle_at,
             folders_at,
             waiting_at,
+            remote_at,
         ];
         match wake.into_iter().flatten().min() {
             Some(at) => {
@@ -9459,6 +9503,9 @@ fn main() -> ExitCode {
         drop_pointer: None,
         bible_jobs: Vec::new(),
         waiting: Vec::new(),
+        remote: remote::Remote::open(),
+        remote_started: false,
+        remote_pages_seen: 0,
         // Commands from `softpresenter ctl` come in on the control socket. Without it (another
         // copy has it, say) the app runs as usual.
         _control: {

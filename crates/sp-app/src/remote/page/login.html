@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>SoftPresenter Remote Control</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="login">
+<main class="card">
+  <h1>SoftPresenter</h1>
+  <p class="dim">Remote Control</p>
+  <form id="signin">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+    <button type="submit">Sign In</button>
+    <p id="said" class="said" role="status"></p>
+  </form>
+  <p class="dim small">This device is remembered after it signs in, until it is forgotten in
+  Settings › Remote Control on the computer.</p>
+</main>
+<script src="/login.js"></script>
+</body>
+</html>

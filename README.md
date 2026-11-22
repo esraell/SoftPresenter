@@ -82,6 +82,9 @@ SoftPresenter is built to be:
   `sp next`, `sp clear all`, and slides, media, messages, timers, macros, the Bible and every
   menu item. Install it from SoftPresenter › Install Command Line Tool…;
   [docs/cli.md](docs/cli.md) has the commands.
+- **Remote Control.** Run the show from a tablet or another computer on the church's network:
+  switched on in Settings, the app serves a page over HTTPS behind a password, and the page
+  sends the same commands as `sp` ([docs/remote-api.md](docs/remote-api.md)).
 
 The full list, area by area, is in [docs/features.md](docs/features.md).
 
@@ -262,8 +265,8 @@ SoftPresenter aims to be the presentation app a church never has to pay for and 
 complete enough for a large Sunday service, simple enough for a volunteer, light enough for an
 old laptop, and open to scripts and AI. First on the list: bringing playlists and media across
 from a church's existing software, and fixing a slide's words from the Show view. After that
-come a network API with a phone remote, the whole app in a browser, an MCP server for AI
-assistants, and tested Windows and Linux builds.
+come the whole app in a browser (on Remote Control's API) with a phone remote, an MCP server
+for AI assistants, and tested Windows and Linux builds.
 
 The full plan, about 170 features with their size and how much each matters on a Sunday, is in
 [docs/roadmap.md](docs/roadmap.md). Nothing in it is promised by a date.

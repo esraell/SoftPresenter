@@ -724,6 +724,12 @@ impl OutputHandle {
         self.live_preview.newest()
     }
 
+    /// The same, shared with another thread (Remote Control reads the newest picture back on
+    /// its own), costing the output thread nothing.
+    pub fn live_preview_shared(&self) -> Arc<LivePreview> {
+        self.live_preview.clone()
+    }
+
     /// Why a screen (a window or an NDI source) is not showing what it was last asked to show,
     /// if one is not: the operator should know that the audience sees the picture before.
     pub fn undrawn(&self) -> Option<Undrawn> {

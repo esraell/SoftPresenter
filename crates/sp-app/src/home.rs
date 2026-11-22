@@ -390,6 +390,8 @@ pub struct HomeState {
     pub voxlive: crate::voxlive::View,
     /// Canva Sync's page in Settings › Integrations, and what the top bar says of a sync.
     pub canva: crate::canva::View,
+    /// Settings › Remote Control, as the window shows it.
+    pub remote: crate::remote::View,
     /// Where the VoxLive item is among the presentations.
     pub voxlive_slot: Option<usize>,
     /// A VoxLive screen chosen in the VoxLive tab, by its slide in the VoxLive item, to put on
@@ -1700,6 +1702,7 @@ impl Default for HomeState {
             preferences_pane: 0,
             voxlive: Default::default(),
             canva: Default::default(),
+            remote: Default::default(),
             voxlive_slot: None,
             voxlive_go: None,
             copyright_show: crate::service::CopyrightShow::Never,
@@ -5175,7 +5178,7 @@ pub fn end_search(ctx: &egui::Context, state: &mut HomeState) {
 pub const SHAPE_KEYS: [char; 10] = ['O', 'R', 'E', 'G', 'L', 'H', 'P', 'S', 'D', 'A'];
 
 /// The Settings window's panes, in order (`preferences_pane` is a place in it).
-pub const PANES: [&str; 5] = ["General", "Screens", "Groups", "Key Mappings", "Integrations"];
+pub const PANES: [&str; 6] = ["General", "Screens", "Groups", "Key Mappings", "Integrations", "Remote Control"];
 
 /// The Settings window's contents: its panes down the left, the chosen one on the right.
 pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
@@ -5210,6 +5213,7 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
         ui.add_space(12.0);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match pane {
             "Integrations" => crate::integrations::pane(ui, &mut state.voxlive, &mut state.canva),
+            "Remote Control" => crate::remote::pane::pane(ui, &mut state.remote),
             "General" => {
                 crate::studio::caption(ui, "COPYRIGHT");
                 ui.label("Show a song's copyright line on the audience screens:");

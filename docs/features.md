@@ -1191,7 +1191,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - Each song's Artist, Author, Publisher, Year and CCLI Song # (the Info icon at the right of its header, beside Edit Words, Arrangement and Notes), and a
   copyright line on the screens on a song's first slide, last slide or every slide, with the
   church's CCLI licence number, chosen in Settings.
-- A Settings window (Cmd+,) with General, Screens, Groups, Key Mappings and Integrations panes.
+- A Settings window (Cmd+,) with General, Screens, Groups, Key Mappings, Integrations and
+  Remote Control panes.
 - **Integrations** (Settings): the services SoftPresenter works with, each with how it stands,
   opening a page to connect it. **VoxLive** (live translation captions) is connected with an
   API key made in VoxLive (Settings › API keys, with the screens permissions), pasted on its
@@ -1268,6 +1269,45 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   translation, is opened only on the real screens; thumbnails and the editor show its free test
   pattern. Once shown, it keeps running for 15 minutes after it leaves the screens, so going back
   to the captions from a verse is at once, with no reload.
+
+## Remote Control
+- **Run the show from another device** on the church's network: a computer, tablet or phone
+  opens the address Settings › Remote Control shows (`https://` the computer's address and the
+  port, 4316 unless changed; 1024 up) and signs in with a password. Off by default; switched
+  on, it stays on the next time the app opens. Off, nothing listens; switching it off closes
+  every page's connection at once. While on, the top bar's status line (when no timer runs and
+  Canva Sync has nothing to say) reads REMOTE ON · N CONNECTED, and a click opens its pane.
+- **The page** built in for now is small: whether it is connected, what is on screen with a
+  live picture of what the audience sees, the playlist in front, and Previous, Next and Clear
+  All. The full page comes from the design work and talks to the same API
+  ([remote-api.md](remote-api.md)).
+- **The same commands as `sp`**: the page sends `sp`'s commands, carried out on the app's main
+  thread by the same handler, and gets the same replies. Not those that reach the computer's
+  own files and folders (importing, exporting, adding media or audio, a picture or song text
+  from a file, following a folder, a Bible from a file), the services' keys and sign-ins, the
+  menu bar, or Remote Control itself: those are refused in words, and are done at the computer.
+- **The page keeps its own open item and picks**, so two computers never fight over the
+  window's: it names the item each time (`next --aim ITEM`, `go --aim ITEM SLIDE`), and the
+  window's open item, picks and chosen song stay as they are.
+- **What it is sent**: the whole state when it connects, then only what changed, at most twenty
+  times a second and nothing while nothing changes, each change with a version number, so a
+  page that reconnects is sent exactly what it missed. Times are sent as times of day (when a
+  timer started, when a video would have been at its start), never as a ticking count.
+  Pictures of slides are drawn by the window's own painter when a page asks for one, and kept
+  while the slide looks the same; the live preview is the window's own Program preview, read
+  back at most ten times a second and only while a page watches it.
+- **Secure**: HTTPS only, with a certificate made on this computer the first time it is
+  switched on (nobody else vouches for it, so a browser warns once; the pane shows its SHA-256
+  fingerprint to check against the browser's; Make a New Certificate replaces it). The
+  password is kept only as an argon2id hash; a device that signs in is remembered by a long
+  random token in a cookie only the page's own requests carry (Secure, HttpOnly,
+  SameSite=Strict), of which only a hash is kept. Wrong passwords from an address wait longer
+  each time (after three, 1 s, 2 s, 4 s… up to a minute), and ten in a row shut it out for 15
+  minutes. Only the computer's own address is answered (not another name pointed at it), and
+  only pages served from it may sign in or connect. The pane lists the pages connected (device,
+  address, since) with Disconnect, and the devices remembered (from their browser: "Safari on an
+  iPad"; first and last seen, address) with Forget and Forget All; Forget, and a new password,
+  close their pages at once. `sp remote` does the same from the command line.
 
 ## From the command line
 - Preparing a service from the command line, as the window does it: `playlist new|rename|delete|

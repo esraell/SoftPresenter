@@ -57,7 +57,7 @@ impl Reply {
         Reply { ok: true, text: text.into(), data }
     }
 
-    fn failed(text: impl Into<String>) -> Reply {
+    pub(crate) fn failed(text: impl Into<String>) -> Reply {
         Reply { ok: false, text: text.into(), data: serde_json::Value::Null }
     }
 }
@@ -373,6 +373,32 @@ pub fn run_client(args: Vec<String>) -> std::process::ExitCode {
         );
         return std::process::ExitCode::FAILURE;
     }
+    // `remote password` the same way: the new password on one line of the standard input,
+    // unshown when typed at a terminal.
+    let password =
+        args.len() >= 2 && args[0].eq_ignore_ascii_case("remote") && args[1].eq_ignore_ascii_case("password");
+    if password && args.len() > 2 {
+        say_err!("Give the password on the standard input, not as an argument: sp remote password");
+        return std::process::ExitCode::FAILURE;
+    }
+    let args = if password {
+        use std::io::{BufRead, IsTerminal};
+        let typed = if std::io::stdin().is_terminal() {
+            read_unshown("New Remote Control password (not shown): ")
+        } else {
+            None
+        };
+        let line = typed.unwrap_or_else(|| {
+            let mut line = String::new();
+            let _ = std::io::stdin().lock().read_line(&mut line);
+            line
+        });
+        let mut args = args;
+        args.push(line.trim_end_matches(['\r', '\n']).to_owned());
+        args
+    } else {
+        args
+    };
     let args = if connect || canva {
         use std::io::{BufRead, IsTerminal};
         let terminal = std::io::stdin().is_terminal();
@@ -623,6 +649,7 @@ pub fn only_reads(args: &[String]) -> bool {
         "audio" => alone || (args.len() == 2 && word(1) == "playlists"),
         "voxlive" => alone || (args.len() == 2 && word(1) == "screens"),
         "canva" => alone || (args.len() == 2 && word(1) == "status"),
+        "remote" => alone || (args.len() == 2 && word(1) == "status"),
         // `playlist [NAME]`, not `playlist add …`.
         "playlist" => alone || !PLAYLIST_CHANGES.contains(&word(1).as_str()),
         // `slide SONG N` and `slide item N SLIDE …`, not `slide text …`.
@@ -634,12 +661,14 @@ pub fn only_reads(args: &[String]) -> bool {
     }
 }
 
-/// A command's words as the log shows them: the key given to `voxlive connect`, and the client
-/// ID and secret given to `canva connect`, are left out.
+/// A command's words as the log shows them: the key given to `voxlive connect`, the client ID
+/// and secret given to `canva connect`, and the password given to `remote password`, are left
+/// out.
 pub fn shown_args(args: &[String]) -> Vec<String> {
     let secret = args.len() > 2
-        && (args[0].eq_ignore_ascii_case("voxlive") || args[0].eq_ignore_ascii_case("canva"))
-        && args[1].eq_ignore_ascii_case("connect");
+        && (((args[0].eq_ignore_ascii_case("voxlive") || args[0].eq_ignore_ascii_case("canva"))
+            && args[1].eq_ignore_ascii_case("connect"))
+            || (args[0].eq_ignore_ascii_case("remote") && args[1].eq_ignore_ascii_case("password")));
     if secret { vec![args[0].clone(), args[1].clone(), "…".to_owned()] } else { args.to_vec() }
 }
 
@@ -787,6 +816,7 @@ const COMMANDS: &[&str] = &[
     "theme",
     "version",
     "menu",
+    "remote",
 ];
 
 /// True when `word` starts a command.
@@ -1092,6 +1122,16 @@ Everything on the menu bar
   menu                         list the menu items
   menu ITEM                    choose one, as a click on it does
 
+Remote Control (a web page on the church's network that runs the show)
+  remote [status]              on or off, the address to open, the certificate's fingerprint,
+                               the pages connected and the devices remembered
+  remote on | remote off       listen, or stop (every page's connection closes)
+  remote password              set the password, read from the standard input (unshown when
+                               typed); every device remembered is forgotten
+  remote port N                the port (1024 up; 4316 unless changed)
+  remote forget ID|all         forget a device: it signs in again, and its pages close now
+  remote disconnect N          close page N's connection (its device stays remembered)
+
 Names can be typed in part (\"amazing\" finds \"Amazing Grace\"); a name that fits several
 things lists them instead of guessing. Numbers are as the lists show them, from 1. A song can
 also be named by its id, as song info and the JSON replies give it.
@@ -1317,6 +1357,7 @@ impl crate::App {
             "undo" => self.ctl_undo(el, false),
             "redo" => self.ctl_undo(el, true),
             "menu" => self.ctl_menu(el, args),
+            "remote" => self.ctl_remote(args),
             other => Err(format!("SoftPresenter doesn't know the command \u{201c}{other}\u{201d}. See: sp help")),
         };
         if let Some(running) = self.running.as_ref() {
@@ -1537,7 +1578,7 @@ impl crate::App {
         at.map(|at| (list.name.clone(), at + 1))
     }
 
-    fn ctl_status(&self) -> Reply {
+    pub(crate) fn ctl_status(&self) -> Reply {
         let live = self.show.live();
         let song = live.and_then(|at| self.show.presentations().get(at.presentation));
         let words = live.and_then(|at| song?.slide(at.slide)).map(|(_, slide)| {
@@ -1830,7 +1871,7 @@ impl crate::App {
 
     /// `messages`: each with its words (tokens such as {timer:Sermon} as written), and the one
     /// showing.
-    fn ctl_messages(&self) -> Reply {
+    pub(crate) fn ctl_messages(&self) -> Reply {
         let Some(state) = self.running.as_ref().map(|r| &r.home_state) else { return Reply::done("(none)") };
         let live = state.message_live.map(|(id, _)| id);
         let lines: Vec<String> = state
@@ -1854,7 +1895,7 @@ impl crate::App {
     }
 
     /// `props`: each, and whether it is on screen.
-    fn ctl_props(&self) -> Reply {
+    pub(crate) fn ctl_props(&self) -> Reply {
         let Some(state) = self.running.as_ref().map(|r| &r.home_state) else { return Reply::done("(none)") };
         let on = |id: sp_model::Uuid| state.props_live.iter().any(|(have, _)| *have == id);
         let lines: Vec<String> =
@@ -1868,7 +1909,7 @@ impl crate::App {
     }
 
     /// `macros`: each with what it does, step by step.
-    fn ctl_macros(&self) -> Reply {
+    pub(crate) fn ctl_macros(&self) -> Reply {
         let Some(state) = self.running.as_ref().map(|r| &r.home_state) else { return Reply::done("(none)") };
         let steps = |m: &crate::macros::Macro| -> Vec<String> {
             m.actions.iter().map(|action| self.action_words(action)).collect()
@@ -2042,7 +2083,7 @@ impl crate::App {
     /// Each screen, and what it is doing: filling a display, in a window, sending over NDI, or
     /// off and why; and a see-through screen's alpha, or whose key a key screen shows (and
     /// why it shows black, when it can't).
-    fn ctl_screens(&self) -> Reply {
+    pub(crate) fn ctl_screens(&self) -> Reply {
         let Some(state) = self.running.as_ref().map(|r| &r.home_state) else {
             return Reply::with("", serde_json::json!([]));
         };
@@ -2100,7 +2141,7 @@ impl crate::App {
         Reply::with(numbered(&lines), serde_json::json!(data))
     }
 
-    fn ctl_libraries(&self) -> Reply {
+    pub(crate) fn ctl_libraries(&self) -> Reply {
         let Some(state) = self.running.as_ref().map(|r| &r.home_state) else { return Reply::done("(none)") };
         // Each library's songs, and how many of them can't be found.
         let counts: Vec<(usize, usize)> = state

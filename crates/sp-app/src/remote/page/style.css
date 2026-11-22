@@ -1,0 +1,75 @@
+:root {
+  color-scheme: dark;
+  --bg: #16171a;
+  --panel: #202227;
+  --line: #33363d;
+  --text: #e9eaee;
+  --dim: #9a9ea8;
+  --go: #2f7d4f;
+  --stop: #8a2e2e;
+  --accent: #3d6fd6;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+h1, h2 { font-weight: 600; margin: 0 0 10px; }
+h2 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 16px;
+  padding: 16px;
+}
+@media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+#preview { width: 100%; height: auto; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; display: block; }
+.big { font-size: 17px; margin: 10px 0 4px; }
+.dim { color: var(--dim); }
+.small { font-size: 12px; }
+.pill { padding: 2px 10px; border-radius: 999px; background: var(--line); font-size: 12px; }
+.pill.on { background: var(--go); }
+.pill.off { background: var(--stop); }
+.keys { display: flex; gap: 10px; margin-top: 12px; }
+button {
+  flex: 1;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--line);
+  border: 0;
+  border-radius: 8px;
+  padding: 14px 10px;
+  cursor: pointer;
+}
+button.go { background: var(--go); }
+button.stop { background: var(--stop); }
+button:disabled { opacity: 0.4; cursor: default; }
+.said { min-height: 1.4em; color: var(--dim); }
+ol { margin: 0; padding-left: 26px; }
+li { padding: 5px 2px; border-bottom: 1px solid var(--line); }
+li.live { color: #fff; font-weight: 600; }
+li.live::marker { color: #e5484d; }
+li.header { color: var(--dim); list-style: none; margin-left: -26px; text-transform: uppercase; font-size: 12px; letter-spacing: 0.06em; }
+body.login { display: grid; place-items: center; min-height: 100vh; }
+.card { width: min(360px, 92vw); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+.card form { display: grid; gap: 10px; margin: 18px 0; }
+input {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}

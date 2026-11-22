@@ -1146,6 +1146,31 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
                     state.canva.open = true;
                 }
             }
+        } else if state.remote.on {
+            // Otherwise, while Remote Control is on, that it is and how many pages are connected.
+            // A click opens its page in Settings.
+            let words = match state.remote.pages.len() {
+                0 => "Remote on".to_owned(),
+                pages => format!("Remote on \u{b7} {pages} connected"),
+            };
+            let right = clock.min.x - 10.0;
+            let wide = (right - free_from).min(200.0);
+            if wide >= 60.0 {
+                let room = Rect::from_min_max(pos2(right - wide, bar.min.y), pos2(right, bar.max.y));
+                let galley = spaced(ui, &words.to_uppercase(), fixed(11.0), TEXT_DIM, 0.5);
+                let at = pos2((right - galley.size().x).max(room.min.x), middle - galley.size().y / 2.0);
+                let shown = ui.interact(room, ui.scope_id().with("remote control line"), Sense::click());
+                ui.painter().with_clip_rect(room).galley(at, galley, TEXT_DIM);
+                let hint = state.remote.address.as_ref().map_or_else(
+                    || "Settings › Remote Control".to_owned(),
+                    |address| format!("Open {address} on another device (Settings › Remote Control)"),
+                );
+                if shown.on_hover_text(hint).clicked() {
+                    state.preferences_open = true;
+                    state.preferences_pane =
+                        crate::home::PANES.iter().position(|pane| *pane == "Remote Control").unwrap_or(0);
+                }
+            }
         }
     });
 }

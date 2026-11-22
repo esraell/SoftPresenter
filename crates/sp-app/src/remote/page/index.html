@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>SoftPresenter Remote Control</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <strong>SoftPresenter</strong>
+  <span id="connection" class="pill">Connecting…</span>
+  <span id="you" class="dim small"></span>
+</header>
+<main class="grid">
+  <section>
+    <h2>On screen</h2>
+    <img id="preview" alt="What the audience sees" width="640" height="360">
+    <p id="live" class="big"></p>
+    <p id="words" class="dim"></p>
+    <div class="keys">
+      <button id="previous" type="button">Previous</button>
+      <button id="next" type="button" class="go">Next</button>
+      <button id="clear" type="button" class="stop">Clear All</button>
+    </div>
+    <p id="said" class="said" role="status"></p>
+  </section>
+  <section>
+    <h2 id="playlist-name">Playlist</h2>
+    <ol id="items"></ol>
+  </section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

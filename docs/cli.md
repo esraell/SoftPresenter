@@ -18,7 +18,7 @@ change, as everything else may (see the README).
   [the Bible](#the-bible) · [songs](#songs) · [changing a slide](#changing-a-slide) ·
   [playlists and libraries](#playlists-and-libraries) · [themes](#themes) ·
   [screens and settings](#screens-and-settings) ·
-  [undo, jobs and the menu bar](#undo-jobs-and-the-menu-bar)
+  [undo, jobs and the menu bar](#undo-jobs-and-the-menu-bar) · [Remote Control](#remote-control)
 - [Song text](#song-text) · [song files edited outside the app](#song-files-edited-outside-the-app) ·
   [song packs](#song-packs)
 - [Recipes](#recipes) · [replies as JSON](#replies-as-json) ·
@@ -1072,6 +1072,29 @@ instead of opening the browser.
 Any command that starts a job takes `--wait`, and then prints the job's result and exits with
 its code. Menu items that open a window or a file chooser open it on the Mac, as a click does.
 
+## Remote Control
+
+Remote Control is a web page other devices on the church's network run the show from, served
+by the app over HTTPS while switched on (Settings › Remote Control). These commands do from the
+command line what its pane does. None of them can be sent from a remote page. The page's API is
+in [remote-api.md](remote-api.md).
+
+| Command | Does |
+|---|---|
+| `remote`, `remote status` | On or off; the address to open on another device and the certificate's SHA-256 fingerprint (to check against the one the browser shows); whether a password is set; the pages connected (`--json`: id, device, name, address, since) and the devices remembered (id, name, first and last seen, address) |
+| `remote password` | Sets the password, read from the standard input (unshown when typed at a terminal; never an argument, which would stay in the shell's history); at least 8 long. Every device remembered is forgotten and its pages close: each signs in again |
+| `remote on`, `remote off` | Listens (on every network the computer is on; a quiet test copy on this computer only), or stops: every page's connection closes and the port is let go. Needs a password first. It stays on or off the next time the app opens |
+| `remote port N` | The port, 1024 up (4316 unless changed); with Remote Control on, it listens on the new one at once |
+| `remote forget ID\|all` | Forgets a device (its id from `remote --json`), or all: it must sign in again, and its open pages close now |
+| `remote disconnect N` | Closes page N's connection; its device stays remembered (the page built in doesn't reconnect by itself after this) |
+
+    $ echo "$PASSWORD" | sp remote password
+    The password is set; every device signs in again with it.
+    $ sp remote on
+    Remote Control is on: open https://192.168.1.20:4316
+    Certificate fingerprint (SHA-256): 3F:A2:…:9C
+    Pages connected: 0   Devices remembered: 0
+
 ## Song text
 
 The format `song new`, `song text` and the app's Edit Words use:
@@ -1245,7 +1268,7 @@ the command's facts where it has any:
 | `stage objects LAYOUT` | `[{"object": 7, "name": "Screen: HDMI main", "shows": "what HDMI main shows", "item": null, "screen": {"chosen": "HDMI main", "shows": "HDMI main", "fell_back": false}, "frame": {"x": 1240, "y": 130, "w": 640, "h": 360}, "hidden": false, "locked": false}]`; `item` is the role of what an item shows (`clock`, `now`…), `screen` is null for anything but a screen picture, and `fell_back` is true when the screen it chose has gone and it shows the main one |
 | `groups` | `[{"key": "C", "group": "Chorus", "names": ["chorus", "chorus 1"], "color": "#cc4eb4"}]` |
 | `menu` | `[{"id": "ClearAll", "label": "Clear All"}]` |
-| `slides [SONG]`, `slides item N` | `[{"slide": 1, "group": "Verse 1", "words": "…", "on_screen": false, "enabled": true, "label": null, "hot_key": null}]` |
+| `slides [SONG]`, `slides item N` | `[{"slide": 1, "group": "Verse 1", "words": "…", "on_screen": false, "enabled": true, "label": null, "hot_key": null, "id": "…", "thumb": "/thumb/…/usual/….jpg"}]` (`thumb`: where a remote page gets the slide's picture, drawn in the item's theme version if it has one; null for a passage made only to be listed) |
 | `slides … --full` | The same array, each slide also with what `slide SONG N` gives (`notes`, `transition`, `template`, `actions`, `advance`, `objects`), all but `song` |
 | `slide SONG N`, `slide item N SLIDE` | `song`, `slide`, `group`, `enabled`, `label`, `notes`, `hot_key`, `transition`, `template`, `actions`, `advance`, and `objects`: each with `object` (its number), `name`, `role`, `kind`, `text`, `frame` (`x`, `y`, `w`, `h`, and `own`), `style` (the settings the slide sets itself) and `look` (every setting, the theme's filled in) |
 | `song text SONG` | `{"song": "River Song", "text": "[Verse 1]\n…"}` |
@@ -1302,9 +1325,12 @@ These need the window for now; some can be reached with `sp menu`.
   sandboxed part of a browser is) is not kept out by anything the app sets. Windows keeps it
   out by itself: a test run on Windows shows such a program refused, beside one let into a
   socket marked for it.
-- Nothing listens on the network: no other computer, and no web page in a browser, can reach
-  it. A program running as the same user can, which is no more than that program could do by
-  changing the app's files.
+- Nothing listens on the network for the socket: no other computer, and no web page in a
+  browser, can reach it. A program running as the same user can, which is no more than that
+  program could do by changing the app's files. [Remote Control](#remote-control), off unless
+  switched on, is the one way in from the network: HTTPS only, behind a password, and the
+  commands that reach the computer's files, the services' keys, the menu bar and Remote Control
+  itself are refused there.
 - A request is one line of JSON, `{"v": 1, "args": ["go", "River Song", "2"]}`, at most 64 KB
   (`sp` refuses a longer one before sending it); the reply is one line of JSON. `v` is the
   protocol's version: a command line from a different build is told so.
@@ -1321,6 +1347,6 @@ These need the window for now; some can be reached with `sp menu`.
 
 ## Still to come
 
-An API over the network (HTTP and WebSocket, with passwords, switched on in Settings), the whole
-app in a browser, a stream of changes as they happen, and an MCP server so AI agents can use
-these commands as tools. All of them will run the same commands as `sp`.
+The whole app in a browser (the design work's page, on [Remote Control's API](remote-api.md)), a
+view-only password, and an MCP server so AI agents can use these commands as tools. All of them
+will run the same commands as `sp`.

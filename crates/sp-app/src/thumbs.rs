@@ -322,6 +322,17 @@ impl Thumbs {
         Some((id, overflow))
     }
 
+    /// Draws a picture as a thumbnail is drawn, with the same painter and fonts, into a texture of
+    /// its own that the window never shows and the cache never keeps: for Remote Control, which
+    /// reads it back on its own thread. `None` when it couldn't be drawn.
+    pub fn draw_alone(&mut self, gpu: &Gpu, layers: &Layers, theme: &Theme) -> Option<wgpu::Texture> {
+        let built = build_layers(&mut self.fonts, layers, theme, THUMB_W, THUMB_H);
+        let texture = target_texture(&gpu.device, THUMB_W, THUMB_H);
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.painter.paint(&gpu.device, &gpu.queue, &built.scene, &view, THUMB_W, THUMB_H).ok()?;
+        Some(texture)
+    }
+
     /// Forgets the thumbnails that show a web page box whose address `shows` says yes to, so
     /// they are drawn again (with the page's picture in place of the placeholder).
     pub fn forget_showing(&mut self, egui_renderer: &mut egui_wgpu::Renderer, shows: impl Fn(&str) -> bool) {

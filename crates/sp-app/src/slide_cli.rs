@@ -93,13 +93,19 @@ impl crate::App {
     pub(crate) fn ctl_slides(&mut self, args: &[String]) -> Result<Reply, String> {
         let full = args.iter().any(|w| w == "--full");
         let words: Vec<String> = args.iter().skip(1).filter(|w| *w != "--full" && *w != "--json").cloned().collect();
-        let read = match item_words(&words, false) {
+        let (read, version) = match item_words(&words, false) {
             Some(parsed) => {
                 let (item, _, list) = parsed?;
-                self.read_item(item, list.as_deref())?
+                let version = self.item_version(item, list.as_deref());
+                (self.read_item(item, list.as_deref())?, version)
             }
-            None => self.read_song(&words.join(" "))?,
+            None => (self.read_song(&words.join(" "))?, None),
         };
+        // Slides of the show's own (a song's, not a passage made only to be listed) have a
+        // picture a remote page can show, drawn in the item's theme version if it has one.
+        let pictured = read
+            .at
+            .filter(|at| self.show.presentations().get(*at).is_some_and(|song| Arc::ptr_eq(song, &read.presentation)));
         let mut lines = Vec::new();
         let mut blocks = Vec::new();
         let mut data = Vec::new();
@@ -127,9 +133,11 @@ impl crate::App {
                 marked,
                 if live { "   ← on screen" } else { "" }
             ));
+            let thumb = pictured.map(|at| self.thumb_address(at, slide, version));
             let mut entry = serde_json::json!({
                 "slide": index + 1, "group": group.name, "words": words, "on_screen": live,
                 "enabled": slide.enabled, "label": slide.label, "hot_key": slide.hot_key,
+                "id": slide.id, "thumb": thumb,
             });
             if full {
                 let (block, facts) = self.slide_facts(&read, index)?;
@@ -142,6 +150,16 @@ impl crate::App {
         }
         let text = if full { blocks.join("\n\n") } else { format!("{}\n{}", read.title, lines.join("\n")) };
         Ok(Reply::with(text, serde_json::json!(data)))
+    }
+
+    /// The theme version a playlist item is set to be shown in, if any.
+    fn item_version(&self, number: usize, list: Option<&str>) -> Option<sp_model::Uuid> {
+        let list = self.playlist_at_for_cli(list).ok()?;
+        let state = &self.running.as_ref()?.home_state;
+        match state.services.list.get(list)?.items.get(number.checked_sub(1)?)? {
+            crate::service::Item::Song { show_with: Some(with), .. } => Some(with.version),
+            _ => None,
+        }
     }
 
     /// The slides of the song a name, number or id stands for, or of the song shown in the
