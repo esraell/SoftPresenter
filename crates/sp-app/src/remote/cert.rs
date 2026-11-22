@@ -1,19 +1,17 @@
 //! Remote Control's certificate: made on this computer (an ECDSA P-256 key, signed by itself),
-//! kept in the private `remote` folder with the key readable by this user only, and made again
-//! on request, before it runs out, and when the computer's names change.
+//! kept in the private `remote` folder with the key readable by this user only.
 //!
-//! Nobody vouches for it, so a browser warns the first time it is opened. Its SHA-256
-//! fingerprint, shown in Settings › Remote Control, is what the operator checks against the one
-//! the browser shows: the same fingerprint means nobody is in between.
+//! Nobody vouches for it, so a browser warns the first time it is opened. What the operator
+//! checks is the fingerprint of the *key* (the SHA-256 of its public half, shown in Settings ›
+//! Remote Control): the key is kept when the certificate is made again, so a renewal changes
+//! nothing the operator has verified. Only a new key (Make a New Certificate) changes it.
 //!
 //! It is made as Apple's systems want a server's certificate to be, so an iPad or iPhone can
-//! take it: for at most 397 days (it is made again a month before it runs out), for serving
-//! (the server-authentication purpose), and naming the addresses it is opened at: `localhost`,
-//! 127.0.0.1, the computer's address on its network and its own name there (`church-mac.local`).
-//! When the address or the name changes, it is made again, and Settings shows the new
-//! fingerprint.
+//! take it: for 396 days, for serving (the server-authentication purpose), and naming only
+//! `localhost`, 127.0.0.1 and the computer's own name on its network (`church-mac.local`), never
+//! its address, which changes with a new lease, a cable instead of Wi-Fi or a VPN. It is made
+//! again a month before it runs out and when that name changes, and at no other time.
 
-use std::net::IpAddr;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -32,7 +30,7 @@ pub const RENEW_DAYS_BEFORE: u64 = 30;
 pub struct Cert {
     pub chain: Vec<CertificateDer<'static>>,
     pub key: PrivateKeyDer<'static>,
-    /// SHA-256 of the certificate, as browsers show it: "AB:CD:…".
+    /// SHA-256 of the key's public half (its DER `SubjectPublicKeyInfo`): "AB:CD:…".
     pub fingerprint: String,
 }
 
@@ -53,17 +51,21 @@ pub struct Names {
 }
 
 impl Names {
-    /// The names this computer has now: `localhost`, 127.0.0.1, its address on the network
-    /// (`lan`) and its own name there.
-    pub fn now(lan: Option<IpAddr>, own_name: Option<String>) -> Names {
+    /// The names this computer has now: `localhost`, 127.0.0.1 and its own name on the network.
+    /// Never its address: that changes without the computer's name changing.
+    pub fn now(own_name: Option<String>) -> Names {
         let mut names = vec!["localhost".to_owned(), "127.0.0.1".to_owned()];
-        if let Some(IpAddr::V4(v4)) = lan.filter(|ip| !ip.is_loopback() && !ip.is_unspecified()) {
-            names.push(v4.to_string());
-        }
-        if let Some(name) = own_name {
-            names.push(name);
-        }
+        names.extend(own_name);
         Names { names, until: 0 }
+    }
+
+    /// Whether a certificate made for `self` still serves the names wanted now: the same
+    /// names, or, when the computer's own name can't be read at the moment, the same names
+    /// otherwise (a failed look is no reason to change what devices have accepted).
+    fn serves(&self, wanted: &Names) -> bool {
+        self.names == wanted.names
+            || (wanted.local_name().is_none()
+                && self.names.iter().filter(|n| !n.ends_with(".local")).eq(wanted.names.iter()))
     }
 
     /// The computer's own name on the network, if the certificate names one (for the Host
@@ -97,11 +99,11 @@ pub fn own_name() -> Option<String> {
 
 /// The certificate kept in `folder` when it can be used as it is: there, whole, its key its
 /// own, made for these `names`, and not running out within a month. Otherwise a new one, made
-/// and kept; the flag says a new one was made.
+/// with the key kept (or a new key if there is none); the flag says a new certificate was made.
 pub fn load_or_make(folder: &Path, names: &Names) -> Result<(Cert, bool), String> {
     match load(folder, names) {
         Some(cert) => Ok((cert, false)),
-        None => make(folder, names).map(|cert| (cert, true)),
+        None => make(folder, names, false).map(|cert| (cert, true)),
     }
 }
 
@@ -114,26 +116,26 @@ fn load(folder: &Path, names: &Names) -> Option<Cert> {
     let cert = std::fs::read(folder.join(CERT_FILE)).ok()?;
     let key = std::fs::read(folder.join(KEY_FILE)).ok()?;
     let about: Names = serde_json::from_slice(&std::fs::read(folder.join(ABOUT_FILE)).ok()?).ok()?;
-    if cert.is_empty() || key.is_empty() || about.names != names.names {
+    if cert.is_empty() || key.is_empty() || !about.serves(names) {
         return None;
     }
     let renew_at = about.until.saturating_sub(RENEW_DAYS_BEFORE * 24 * 60 * 60);
     if crate::remote::auth::now_seconds() >= renew_at {
         return None;
     }
-    let cert = from_der(cert, key);
+    let cert = from_der(cert, key)?;
     // The key and the certificate must belong together (rustls checks): a half-written pair
     // from an earlier run is made again.
     usable(&cert).then_some(cert)
 }
 
-fn from_der(cert: Vec<u8>, key: Vec<u8>) -> Cert {
-    let fingerprint = fingerprint(&cert);
-    Cert {
+fn from_der(cert: Vec<u8>, key: Vec<u8>) -> Option<Cert> {
+    let fingerprint = key_fingerprint(&key)?;
+    Some(Cert {
         chain: vec![CertificateDer::from(cert)],
         key: PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key)),
         fingerprint,
-    }
+    })
 }
 
 /// Whether rustls takes the pair: the certificate's key is the key kept.
@@ -144,10 +146,20 @@ fn usable(cert: &Cert) -> bool {
         .is_ok()
 }
 
-/// Makes a new certificate and key for `names` and keeps them in `folder`, in place of any
-/// there: each written whole to a file of its own beside it, then put in place.
-pub fn make(folder: &Path, names: &Names) -> Result<Cert, String> {
-    let key = rcgen::KeyPair::generate().map_err(|e| format!("Could not make a key: {e}"))?;
+/// Makes a new certificate for `names` and keeps it in `folder`, in place of any there: each
+/// file written whole beside it, then put in place. The key kept there is used again unless
+/// `new_key` asks for another (or none is kept, or it can't be read), so the fingerprint to
+/// check stays the same.
+pub fn make(folder: &Path, names: &Names, new_key: bool) -> Result<Cert, String> {
+    let kept = if new_key {
+        None
+    } else {
+        std::fs::read(folder.join(KEY_FILE)).ok().and_then(|der| rcgen::KeyPair::try_from(der.as_slice()).ok())
+    };
+    let key = match kept {
+        Some(key) => key,
+        None => rcgen::KeyPair::generate().map_err(|e| format!("Could not make a key: {e}"))?,
+    };
     let mut params =
         rcgen::CertificateParams::new(names.names.clone()).map_err(|e| format!("Could not make a certificate: {e}"))?;
     let mut name = rcgen::DistinguishedName::new();
@@ -175,33 +187,43 @@ pub fn make(folder: &Path, names: &Names) -> Result<Cert, String> {
     crate::remote::auth::write_private(folder, KEY_FILE, &key)?;
     crate::remote::auth::write_private(folder, CERT_FILE, &cert)?;
     crate::remote::auth::write_private(folder, ABOUT_FILE, &about)?;
-    Ok(from_der(cert, key))
+    from_der(cert, key).ok_or_else(|| "Could not read the key it made.".to_owned())
 }
 
-/// The SHA-256 of a certificate, in pairs of capital hex figures with colons between.
-pub fn fingerprint(der: &[u8]) -> String {
-    let digest = ring::digest::digest(&ring::digest::SHA256, der);
-    digest.as_ref().iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":")
+/// The fingerprint of the key kept in a folder, if there is one.
+pub fn kept_fingerprint(folder: &Path) -> Option<String> {
+    key_fingerprint(&std::fs::read(folder.join(KEY_FILE)).ok()?)
+}
+
+/// The SHA-256 of a (PKCS#8) key's public half, as its DER `SubjectPublicKeyInfo`, in pairs of
+/// capital hex figures with colons between: what `openssl x509 -pubkey | openssl pkey -pubin
+/// -outform der | openssl dgst -sha256` gives for the certificate that carries it.
+fn key_fingerprint(key_der: &[u8]) -> Option<String> {
+    use rcgen::PublicKeyData;
+    let key = rcgen::KeyPair::try_from(key_der).ok()?;
+    let digest = ring::digest::digest(&ring::digest::SHA256, &key.subject_public_key_info());
+    Some(digest.as_ref().iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn names(lan: &str) -> Names {
-        Names::now(Some(lan.parse().unwrap()), Some("church-mac.local".to_owned()))
+    fn here() -> Names {
+        Names::now(Some("church-mac.local".to_owned()))
     }
 
     #[test]
-    fn a_certificate_is_made_once_kept_private_and_made_again_when_it_must_be() {
+    fn a_certificate_names_the_computer_not_its_address_and_keeps_its_key() {
         let folder = std::env::temp_dir().join(format!("sp-remote-cert-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
-        let here = names("192.168.1.20");
-        assert_eq!(here.names, ["localhost", "127.0.0.1", "192.168.1.20", "church-mac.local"]);
+        let here = here();
+        assert_eq!(here.names, ["localhost", "127.0.0.1", "church-mac.local"]);
         assert_eq!(here.local_name().as_deref(), Some("church-mac.local"));
         let (first, made) = load_or_make(&folder, &here).expect("made");
         assert!(made);
         assert_eq!(first.fingerprint.len(), 32 * 3 - 1);
+        assert_eq!(kept_fingerprint(&folder).as_deref(), Some(first.fingerprint.as_str()));
         let (again, made) = load_or_make(&folder, &here).expect("read");
         assert!(!made);
         assert_eq!(again.fingerprint, first.fingerprint, "the one kept is used again");
@@ -215,25 +237,33 @@ mod tests {
         let about: Names = serde_json::from_slice(&std::fs::read(folder.join(ABOUT_FILE)).unwrap()).unwrap();
         let days = about.until.saturating_sub(crate::remote::auth::now_seconds()) / 86_400;
         assert!((390..397).contains(&days), "{days} days");
-        // A new address on the network: made again.
-        assert!(needs_making(&folder, &names("192.168.1.21")));
-        let (moved, made) = load_or_make(&folder, &names("192.168.1.21")).expect("made again");
-        assert!(made && moved.fingerprint != first.fingerprint);
-        // Near its end: made again.
+        // Not being able to read the computer's name for a moment changes nothing.
+        let nameless = Names::now(None);
+        assert!(!needs_making(&folder, &nameless));
+        // A new name: made again, and the key is the same, so the fingerprint is too.
+        let renamed = Names::now(Some("hall-mac.local".to_owned()));
+        assert!(needs_making(&folder, &renamed));
+        let (moved, made) = load_or_make(&folder, &renamed).expect("made again");
+        assert!(made);
+        assert_ne!(moved.chain[0].as_ref(), first.chain[0].as_ref(), "a new certificate");
+        assert_eq!(moved.fingerprint, first.fingerprint, "the same key");
+        // Near its end: made again, with the same key.
         let mut near = about;
-        near.names = names("192.168.1.21").names;
+        near.names = renamed.names.clone();
         near.until = crate::remote::auth::now_seconds() + 5 * 86_400;
         crate::remote::auth::write_private(&folder, ABOUT_FILE, &serde_json::to_vec(&near).unwrap()).unwrap();
-        assert!(needs_making(&folder, &names("192.168.1.21")));
+        assert!(needs_making(&folder, &renamed));
+        let (renewed, made) = load_or_make(&folder, &renamed).expect("renewed");
+        assert!(made && renewed.fingerprint == first.fingerprint);
+        assert!(!needs_making(&folder, &renamed));
         // A key that isn't the certificate's (a pair cut short): made again.
-        let (_, _) = load_or_make(&folder, &names("192.168.1.21")).expect("made");
         let other = rcgen::KeyPair::generate().unwrap().serialize_der();
         crate::remote::auth::write_private(&folder, KEY_FILE, &other).unwrap();
-        assert!(needs_making(&folder, &names("192.168.1.21")));
-        // On request: a new one.
-        let new = make(&folder, &names("192.168.1.21")).expect("made again");
-        assert!(usable(&new));
-        assert_eq!(load_or_make(&folder, &names("192.168.1.21")).expect("read").0.fingerprint, new.fingerprint);
+        assert!(needs_making(&folder, &renamed));
+        // On request: a new key too, and so a new fingerprint.
+        let new = make(&folder, &renamed, true).expect("made again");
+        assert!(usable(&new) && new.fingerprint != first.fingerprint);
+        assert_eq!(load_or_make(&folder, &renamed).expect("read").0.fingerprint, new.fingerprint);
         let _ = std::fs::remove_dir_all(&folder);
     }
 

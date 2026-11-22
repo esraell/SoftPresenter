@@ -93,7 +93,7 @@ fn start_test(name: &str) -> Test {
     let _ = std::fs::remove_dir_all(&folder);
     let mut store = auth::Store::open(&folder);
     store.set_password(auth::hash_password(PASSWORD).expect("hashed")).expect("kept");
-    let cert = crate::remote::cert::make(&folder, &crate::remote::cert::Names::now(None, None)).expect("certificate");
+    let cert = crate::remote::cert::make(&folder, &crate::remote::cert::Names::now(None), false).expect("certificate");
     let fake = Arc::new(Fake::default());
     let shared = Shared::new(Arc::new(Mutex::new(store)), Box::new(FakeBackend(fake.clone()))).expect("shared");
     let config = Config { bind: IpAddr::from([127, 0, 0, 1]), port: 0, cert: cert.clone() };

@@ -29,32 +29,50 @@ Switched on in **Settings › Remote Control** (or `sp remote on`), the app list
 (4316 unless changed; 1024 up) on every network the computer is on, **HTTPS only**, and
 answers only devices on a local network (private and link-local addresses, and the shared
 100.64/10 range some networks and VPNs use): a connection from the internet is closed at once. The pane
-shows the address to open, such as `https://192.168.1.20:4316`. Nothing listens while it is
+shows the address to open, by the computer's own name (`https://church-mac.local:4316`), and
+under it the address as figures (`https://192.168.1.20:4316`), which works too but may warn
+again whenever the network gives the computer another address. Nothing listens while it is
 off, and switching it off closes every connection.
 
 The certificate is made on the computer itself the first time Remote Control is switched on:
-ECDSA P-256, for serving (the server-authentication purpose), for 396 days, naming the
-addresses it is opened at (`localhost`, 127.0.0.1, the computer's address on its network, and
-its own name there, such as `church-mac.local`). It is made again a month before it runs out,
-and when the computer's address or name changes (looked at when Remote Control is switched on,
-and every ten minutes while no page is connected); the operator is told, and Settings shows the
-new fingerprint. Nobody else vouches for it, so **the browser warns the first time**. Make a New
-Certificate replaces it on request (every device then sees a new fingerprint, and a warning
-again).
+ECDSA P-256, for serving (the server-authentication purpose), for 396 days, naming only
+`localhost`, 127.0.0.1 and the computer's own name on its network (`church-mac.local`, the
+Bonjour name), **never its address**: a new lease, Wi-Fi instead of Ethernet or a VPN doesn't
+touch it, and neither does being offline when it is looked at. (Opened by its address as
+figures, the connection works, as the `Host` check accepts the address it came in on, but the
+browser warns that the certificate is for another name.) It is made again a month before it
+runs out and when the computer's own name changes (looked at when Remote Control is switched on,
+and every ten minutes while no page is connected), and **with the same private key each
+time**. Nobody else vouches for it, so **the browser warns the first time**.
+
+What the operator verifies is the **key's fingerprint**: the SHA-256 of the key's public half
+(its DER `SubjectPublicKeyInfo`), shown in Settings › Remote Control and by `sp remote`, 32
+pairs. It does not change when the certificate is made again, so a renewal asks nothing of
+anyone. Only Make a New Certificate makes a new key (every device then sees a new fingerprint
+and a warning again, and the operator is told).
 
 ### How a new device trusts it
 
-1. Open the address Settings shows (`https://192.168.1.20:4316`, or `https://church-mac.local:4316`).
-2. The browser warns that the certificate isn't trusted. Open its details (Chrome: Advanced, or
-   the padlock › Certificate; Safari: Show Details › View the certificate) and compare the
-   SHA-256 fingerprint with the one in Settings › Remote Control, all 32 pairs.
-3. Only if they match, go on (Chrome: Proceed; Safari: visit this website). Sign in.
-4. A new certificate (Settings says so) means doing this once more on each device.
+1. Open the address Settings shows (`https://church-mac.local:4316`).
+2. The browser warns that the certificate isn't trusted. Browsers show the certificate's own
+   SHA-256 fingerprint, which changes at each renewal, not the key's; to check the key's, from
+   a computer on the network (or the browser's own certificate export):
+
+       openssl s_client -connect church-mac.local:4316 -servername church-mac.local </dev/null 2>/dev/null \
+         | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -hex
+
+   and compare with the one in Settings › Remote Control. On the computer itself, the same
+   command with `localhost` reads the same key. A browser alone doesn't show the key's
+   fingerprint; without a terminal the first visit rests on being on the computer's own network.
+3. Go on (Chrome: Proceed; Safari: visit this website). Sign in. A certificate made again later
+   with the same key (a month before it runs out) warns once more in some browsers; the key
+   fingerprint is still the same, and nothing needs checking again.
+4. A new key (Settings says so) means checking once more on each device.
 
 **Needs checking on an iPad or iPhone (step 1 hasn't been tried there):** Safari may not let the
 page's WebSocket connect to a certificate it only let through on a warning. The certificate is
 made the way Apple asks of server certificates (at most 397 days, the server purpose, the
-addresses and name it is opened at) so that, if need be, it can be installed and trusted on the
+names it is opened at) so that, if need be, it can be installed and trusted on the
 device instead (Settings › General › About › Certificate Trust Settings); whether that is
 needed, and works for a certificate that signs itself, is still to be tried.
 
@@ -97,7 +115,9 @@ are remembered at once.
 
 1. **Host.** The `Host` header must be the address the connection came in on, as figures with
    the port (`192.168.1.20:4316`; IPv6 in brackets), the computer's own name on the network
-   with the port (`church-mac.local:4316`), or `localhost:PORT` on the computer itself.
+   with the port (`church-mac.local:4316`), or `localhost:PORT` on the computer itself. (The
+   certificate names the computer's own name and `localhost`, not the figures, so a browser
+   warns about the figures once more each time the address changes.)
    Anything else is `421`. So a web page elsewhere that gets its own name pointed at the
    computer (DNS rebinding) is refused.
 2. **A signed-in device**, for everything except `/login`, `/login.js`, `/style.css` and
@@ -441,7 +461,7 @@ browser on the network (trusted with nothing).
 
 | Threat | How it is met |
 |---|---|
-| Someone on the network reads or changes the traffic, or steals a session | HTTPS only (rustls, TLS 1.2 and 1.3), with a certificate made on the computer; the operator checks its fingerprint once per device. The cookie is `Secure` |
+| Someone on the network reads or changes the traffic, or steals a session | HTTPS only (rustls, TLS 1.2 and 1.3), with a certificate made on the computer; the operator checks its key's fingerprint once per device (the key is kept when the certificate is made again). The cookie is `Secure` |
 | Guessing the password | argon2id (19 MiB, two passes), checked one at a time off the server's thread; per-address waits that grow, a 15-minute shutout, and a cap for everyone together; an address that must wait isn't checked at all. Settings asks for at least 10 characters; and past ten wrong passwords lately from everywhere, every sign-in waits (1 s, doubling every five more, up to 2 minutes) |
 | The password or tokens leaking from the computer | The password is kept only as an argon2id hash with a random salt, tokens only as SHA-256, in `remote/settings.json` in a folder only the user may enter (0700, files 0600); neither is ever logged (the log has sign-ins by device and address, wrong passwords by address, and the commands pages sent). The data folder may be in Documents, which a Mac can sync: the hashes and the certificate's key go with it (see residual risks) |
 | A stolen or old device | Forget (or a new password) revokes at once, closing its open pages |
@@ -470,13 +490,11 @@ Residual risks, known and accepted for step 1: someone on the network can hold c
 slots open (up to the limits above) and keep a new device from signing in for a while
 (remembered devices already connected carry on); the cap on wrong passwords from everywhere
 together means a flood of wrong ones holds up everyone's sign-in for that minute; the first
-visit trusts the certificate on the operator's word (the fingerprint check is theirs to do);
+visit trusts the certificate on the operator's word (the key fingerprint check is theirs to do);
 anyone with the password runs the show
 (as anyone at the computer can), including deleting songs (to the Trash) and changing screens;
 the data folder (and so the password's hash, the device hashes and the certificate's key) may
-be synced by the Mac with the rest of Documents; the `Host` check allows the computer's
-addresses as figures and `localhost` only, so a name such as `church-mac.local` is refused
-(open the page by its address).
+be synced by the Mac with the rest of Documents.
 
 ## Step 2 (designed, not built yet)
 

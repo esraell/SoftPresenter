@@ -153,6 +153,8 @@ pub struct Remote {
     /// The thread of a server switched off, while it lets its port go.
     stopping: Option<std::thread::JoinHandle<()>>,
     fingerprint: Option<String>,
+    /// The computer's own name on its network (`church-mac.local`), as the certificate names it.
+    local_name: Option<String>,
     /// What went wrong at the last switch, to show in Settings.
     pub problem: Option<String>,
     /// What a password being set came to, from its thread.
@@ -191,6 +193,7 @@ impl Remote {
             running: None,
             stopping: None,
             fingerprint: None,
+            local_name: None,
             problem: None,
             password_said: Arc::default(),
             hashing: false,
@@ -230,8 +233,20 @@ impl Remote {
         self.saved().map_or(auth::DEFAULT_PORT, |saved| saved.port)
     }
 
-    /// The address to open on another device, while on.
+    /// The address to open on another device, while on: by the computer's own name
+    /// (`https://church-mac.local:4316`) when it has one, which the certificate names and which
+    /// stays the same when the network gives the computer another address; otherwise by address.
     pub fn address(&self) -> Option<String> {
+        let running = self.running.as_ref()?;
+        match &self.local_name {
+            Some(name) => Some(format!("https://{name}:{}", running.local.port())),
+            None => self.address_by_ip(),
+        }
+    }
+
+    /// The address as figures, while on: it works too, but a browser warns about it, as the
+    /// certificate doesn't name it.
+    pub fn address_by_ip(&self) -> Option<String> {
         let running = self.running.as_ref()?;
         let ip = lan_address().unwrap_or(running.local.ip());
         Some(match ip {
@@ -273,23 +288,24 @@ impl Remote {
         if let Ok(mut store) = store.lock() {
             store.forget_unused(auth::now_seconds());
         }
-        let names = cert::Names::now(lan_address(), cert::own_name());
-        let had = self.fingerprint.clone().or_else(|| cert_kept(&folder));
+        let names = cert::Names::now(cert::own_name());
+        let had = self.fingerprint.clone().or_else(|| cert::kept_fingerprint(&folder));
         let (cert, made) = cert::load_or_make(&folder, &names)?;
         let fingerprint = cert.fingerprint.clone();
         if made {
-            crate::applog::event("remote", &format!("Made a new certificate, for {}.", names.names.join(", ")));
-            // A certificate there was before is replaced: every device sees a warning again,
-            // and the operator is told the new fingerprint to check it against.
+            crate::applog::event("remote", &format!("Made a certificate, for {}.", names.names.join(", ")));
+            // A certificate made again keeps its key, so what the operator checked still holds.
+            // Only a different key is news: each device must be checked again.
             if had.is_some_and(|had| had != fingerprint) {
                 self.cert_news = Some(
-                    "Remote Control has a new certificate (the computer's address or name changed, or the old one was running out). Each device warns once more: check the fingerprint it shows against Settings › Remote Control."
+                    "Remote Control has a new certificate key. Each device warns once more: check the key fingerprint it shows against Settings › Remote Control."
                         .to_owned(),
                 );
             }
         }
         let shared = server::Shared::new(store, Box::new(bridge()))?;
-        shared.set_local_name(names.local_name());
+        self.local_name = names.local_name();
+        shared.set_local_name(self.local_name.clone());
         let running = server::start(server::Config { bind: bind_address(), port, cert }, shared)?;
         crate::applog::event("remote", &format!("Switched on, on port {}.", running.local.port()));
         self.cert_checked = Some(Instant::now());
@@ -407,12 +423,13 @@ impl Remote {
         }
     }
 
-    /// Makes a new certificate; with Remote Control on, it listens again with it (pages
-    /// reconnect, and browsers warn again: the fingerprint is new).
+    /// Makes a new certificate with a new key; with Remote Control on, it listens again with it
+    /// (pages reconnect, and browsers warn again: the fingerprint is new).
     pub fn new_certificate(&mut self, bridge: impl FnOnce() -> Bridge) -> Result<(), String> {
         let folder =
             self.store.as_ref().and_then(|s| s.lock().ok().map(|s| s.folder().to_owned())).ok_or("No data folder.")?;
-        let cert = cert::make(&folder, &cert::Names::now(lan_address(), cert::own_name()))?;
+        // On request the key is new too: the operator asked for what an old key can't give.
+        let cert = cert::make(&folder, &cert::Names::now(cert::own_name()), true)?;
         self.fingerprint = Some(cert.fingerprint);
         crate::applog::event("remote", "Made a new certificate.");
         if self.running.is_some() {
@@ -538,13 +555,8 @@ pub fn reply_for_page(mut reply: Reply) -> Reply {
     reply
 }
 
-/// The fingerprint of the certificate kept in a folder, if there is one.
-fn cert_kept(folder: &std::path::Path) -> Option<String> {
-    std::fs::read(folder.join("cert.der")).ok().filter(|der| !der.is_empty()).map(|der| cert::fingerprint(&der))
-}
-
 /// How often it is looked, while Remote Control is on, whether its certificate must be made
-/// again (the computer's address or name changed, or it is running out).
+/// again (it is running out, or the computer's own name changed).
 const CERT_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// Switching off needs no bridge.
@@ -635,13 +647,17 @@ impl crate::App {
             .map(|d| serde_json::json!({"id": d.id, "name": d.name, "first_seen": d.first_seen, "last_seen": d.last_seen, "ip": d.ip}))
             .collect();
         let address = self.remote.address();
+        let address_ip = self.remote.address_by_ip().filter(|ip| address.as_ref() != Some(ip));
         let mut lines = vec![match (&address, said) {
             (_, Some(said)) => said,
             (Some(address), None) => format!("Remote Control is on: open {address}"),
             (None, None) => "Remote Control is off.".to_owned(),
         }];
+        if let Some(ip) = &address_ip {
+            lines.push(format!("By address: {ip} (the browser may warn again if the address changes)"));
+        }
         if let Some(fingerprint) = self.remote.fingerprint().filter(|_| self.remote.is_on()) {
-            lines.push(format!("Certificate fingerprint (SHA-256): {fingerprint}"));
+            lines.push(format!("Key fingerprint (SHA-256): {fingerprint}"));
         }
         if !self.remote.has_password() {
             lines.push("No password is set: echo \"$PASSWORD\" | sp remote password".to_owned());
@@ -653,6 +669,7 @@ impl crate::App {
                 "on": self.remote.is_on(),
                 "port": self.remote.port(),
                 "address": address,
+                "address_by_ip": address_ip,
                 "fingerprint": self.remote.fingerprint().filter(|_| self.remote.is_on()),
                 "password_set": self.remote.has_password(),
                 "pages": pages,
@@ -822,10 +839,11 @@ impl crate::App {
             || self.running.as_ref().is_some_and(|r| r.home_state.remote.wrong != wrong)
         {
             self.remote_pages_seen = pages;
-            let (on, port, address, fingerprint) = (
+            let (on, port, address, address_ip, fingerprint) = (
                 self.remote.is_on(),
                 self.remote.port(),
                 self.remote.address(),
+                self.remote.address_by_ip(),
                 self.remote.fingerprint().map(str::to_owned),
             );
             let (has_password, hashing, devices, pages) =
@@ -838,6 +856,7 @@ impl crate::App {
                 if view.port.is_empty() || changed {
                     view.port = port.to_string();
                 }
+                view.address_ip = address_ip.filter(|ip| address.as_ref() != Some(ip));
                 view.address = address;
                 view.fingerprint = fingerprint;
                 view.has_password = has_password;
@@ -858,7 +877,7 @@ impl crate::App {
             self.remote.cert_checked = Some(Instant::now());
             let folder = self.remote.store.as_ref().and_then(|s| s.lock().ok().map(|s| s.folder().to_owned()));
             if let Some(folder) = folder
-                && cert::needs_making(&folder, &cert::Names::now(lan_address(), cert::own_name()))
+                && cert::needs_making(&folder, &cert::Names::now(cert::own_name()))
             {
                 let bridge = self.remote_bridge();
                 let off = self.remote.switch(false, unreachable_bridge);
@@ -887,6 +906,8 @@ pub struct View {
     pub on: bool,
     pub port: String,
     pub address: Option<String>,
+    /// The address as figures, when the one above is by name.
+    pub address_ip: Option<String>,
     pub fingerprint: Option<String>,
     pub has_password: bool,
     pub hashing: bool,

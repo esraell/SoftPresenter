@@ -1303,10 +1303,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   while the slide looks the same; the live preview is the window's own Program preview, read
   back at most ten times a second and only while a page watches it.
 - **Secure**: HTTPS only, with a certificate made on this computer the first time it is
-  switched on, for 396 days and the addresses it is opened at (the computer's address and its
-  own name on the network), made again before it runs out or when they change, with a notice
-  (nobody else vouches for it, so a browser warns once; the pane shows its SHA-256 fingerprint
-  to check against the browser's; Make a New Certificate replaces it). The
+  switched on, for 396 days, naming the computer's own name on the network
+  (`church-mac.local`) and `localhost`, never its address, and made again a month before it runs
+  out or when that name changes, always with the same key (nobody else vouches for it, so a
+  browser warns once; the pane shows the SHA-256 fingerprint of the key, which a renewal doesn't
+  change; Make a New Certificate makes a new key and says so; the address to open is by name,
+  with the one as figures under it). The
   password is kept only as an argon2id hash; a device that signs in is remembered by a long
   random token in a cookie only the page's own requests carry (Secure, HttpOnly,
   SameSite=Strict), of which only a hash is kept. Wrong passwords from an address wait longer

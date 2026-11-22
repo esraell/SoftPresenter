@@ -65,9 +65,18 @@ pub fn pane(ui: &mut egui::Ui, view: &mut View) {
             }
         });
     }
+    if let Some(ip) = view.address_ip.clone() {
+        ui.label(
+            RichText::new(format!(
+                "By address: {ip}. The browser warns again if the computer's address changes; the name above doesn't."
+            ))
+            .size(11.5)
+            .color(TEXT_FAINT),
+        );
+    }
     if let Some(fingerprint) = &view.fingerprint {
         ui.add_space(4.0);
-        ui.label(RichText::new("Certificate fingerprint (SHA-256)").size(11.5).color(TEXT_DIM));
+        ui.label(RichText::new("Key fingerprint (SHA-256)").size(11.5).color(TEXT_DIM));
         // In two lines of sixteen pairs, as easy to read off against the browser's.
         let pairs: Vec<&str> = fingerprint.split(':').collect();
         let half = pairs.len().div_ceil(2);
@@ -77,14 +86,15 @@ pub fn pane(ui: &mut egui::Ui, view: &mut View) {
         ui.label(
             RichText::new(
                 "The browser warns the first time, as nobody but this computer vouches for its certificate. Check that \
-                 the fingerprint it shows is this one before going on.",
+                 the key fingerprint is this one before going on (docs/remote-api.md says how). A certificate made \
+                 again keeps the key, so this stays the same.",
             )
             .size(11.5)
             .color(TEXT_FAINT),
         );
         if ui
             .button("Make a New Certificate")
-            .on_hover_text("Devices see a new fingerprint and a warning again")
+            .on_hover_text("A new key too: devices see a new fingerprint and a warning again")
             .clicked()
         {
             view.request = Some(Request::NewCertificate);

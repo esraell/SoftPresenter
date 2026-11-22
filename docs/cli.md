@@ -1092,7 +1092,7 @@ in [remote-api.md](remote-api.md).
 
 | Command | Does |
 |---|---|
-| `remote`, `remote status` | On or off; the address to open on another device and the certificate's SHA-256 fingerprint (to check against the one the browser shows); whether a password is set; the pages connected (`--json`: id, device, name, address, since) and the devices remembered (id, name, first and last seen, address) |
+| `remote`, `remote status` | On or off; the address to open on another device (by the computer's name, and as figures) and the key's SHA-256 fingerprint (the one the certificate keeps when it is made again); whether a password is set; the pages connected (`--json`: id, device, name, address, since) and the devices remembered (id, name, first and last seen, address) |
 | `remote password` | Sets the password, read from the standard input (unshown when typed at a terminal; never an argument, which would stay in the shell's history); at least 10 long. Every device remembered is forgotten and its pages close: each signs in again |
 | `remote on`, `remote off` | Listens (on every network the computer is on; a quiet test copy on this computer only), or stops: every page's connection closes and the port is let go. Needs a password first. It stays on or off the next time the app opens |
 | `remote port N` | The port, 1024 up (4316 unless changed); with Remote Control on, it listens on the new one at once |
@@ -1102,8 +1102,9 @@ in [remote-api.md](remote-api.md).
     $ echo "$PASSWORD" | sp remote password
     The password is set; every device signs in again with it.
     $ sp remote on
-    Remote Control is on: open https://192.168.1.20:4316
-    Certificate fingerprint (SHA-256): 3F:A2:…:9C
+    Remote Control is on: open https://church-mac.local:4316
+    By address: https://192.168.1.20:4316 (the browser may warn again if the address changes)
+    Key fingerprint (SHA-256): 3F:A2:…:9C
     Pages connected: 0   Devices remembered: 0
 
 ## Song text
