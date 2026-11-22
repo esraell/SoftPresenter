@@ -77,6 +77,8 @@ pub struct Places {
     /// True when the API is a stand-in on this computer (a test copy's), where plain http is
     /// allowed.
     pub stand_in: bool,
+    /// True while a refresh is between being sent and its new tokens kept: quitting waits for it.
+    pub refreshing: Arc<AtomicBool>,
     /// The settings file (design, divider page, last video).
     pub settings: PathBuf,
     /// The folder the video goes in.
@@ -144,6 +146,7 @@ impl Places {
             // In the data folder, which every copy of the app using this library shares.
             lock: data.join(".canva-sync.lock"),
             stand_in: stand_in.is_some(),
+            refreshing: Arc::default(),
             staging: local,
             settings: data.join("canva-sync.json"),
             folder: data.join("Media").join(FOLDER),
@@ -551,7 +554,7 @@ fn access_token(
     }
     let refresh = current.refresh_token.clone();
     // From here until it is kept, quitting waits (see `Client::shut_down`).
-    let _refreshing = Refreshing::begin();
+    let _refreshing = Refreshing::begin(&places.refreshing);
     let reply = token_request(places, current, &[("grant_type", "refresh_token"), ("refresh_token", &refresh)])?;
     take_tokens(current, &reply)?;
     if let Err(why) = places.store.save(current) {
@@ -598,23 +601,27 @@ fn take_lock(path: &Path) -> Result<std::fs::File, String> {
     }
 }
 
-/// True while a refresh is between being sent and its new tokens kept: quitting waits for it.
-static REFRESHING: AtomicBool = AtomicBool::new(false);
-
 /// Marks a refresh in flight, until dropped (however the refresh ends).
-struct Refreshing;
+struct Refreshing(Arc<AtomicBool>);
 
 impl Refreshing {
-    fn begin() -> Refreshing {
-        REFRESHING.store(true, Ordering::SeqCst);
-        Refreshing
+    fn begin(flag: &Arc<AtomicBool>) -> Refreshing {
+        flag.store(true, Ordering::SeqCst);
+        Refreshing(flag.clone())
     }
 }
 
 impl Drop for Refreshing {
     fn drop(&mut self) {
-        REFRESHING.store(false, Ordering::SeqCst);
+        self.0.store(false, Ordering::SeqCst);
     }
+}
+
+/// Takes the shared lock if no other copy of the app holds it now, without waiting: for keeping
+/// a sign-in while quitting, which mustn't hold the window up.
+fn lock_now(path: &Path) -> Option<std::fs::File> {
+    let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path).ok()?;
+    file.try_lock().ok().map(|()| file)
 }
 
 /// One page of the design.
@@ -1159,6 +1166,8 @@ fn request_line(stream: &mut std::net::TcpStream) -> String {
 fn wait_for_answer(listener: std::net::TcpListener, state: &str, cancel: &AtomicBool) -> Result<String, String> {
     listener.set_nonblocking(true).map_err(|_| "The sign-in couldn't listen for Canva's answer.".to_owned())?;
     let until = Instant::now() + SIGN_IN_WAIT;
+    // Said in the log once a sign-in, however many such answers come.
+    let mut told_wrong_state = false;
     loop {
         if cancel.load(Ordering::Relaxed) {
             return Err("The sign-in was stopped.".to_owned());
@@ -1210,7 +1219,12 @@ fn wait_for_answer(listener: std::net::TcpListener, state: &str, cancel: &Atomic
                 "400 Bad Request",
                 "This answer isn't for SoftPresenter's sign-in. Nothing was changed.",
             );
-            crate::applog::problem("canva", "an answer to the sign-in came with the wrong state; it was passed over");
+            if !std::mem::replace(&mut told_wrong_state, true) {
+                crate::applog::problem(
+                    "canva",
+                    "an answer to the sign-in came with the wrong state; it was passed over",
+                );
+            }
             continue;
         }
         if let Some(error) = query_value(query, "error") {
@@ -1366,8 +1380,10 @@ fn for_terminal(path: &Path) -> String {
     quoted(&path.to_string_lossy())
 }
 
-/// How to switch the old script off, a line each, from what was found on this computer. A job
-/// whose label can't be read from its file is said so, not guessed from the file's name.
+/// How to switch the old script off, a line each, from what was found on this computer, to be
+/// pasted in the Terminal as one block: commands, and `#` comments with no quote in them, so
+/// nothing in one line can change how the next is read. A job whose label can't
+/// be read from its file is left to be unloaded by hand, not guessed from the file's name.
 pub fn switch_off_steps(places: &Places, jobs: &[OldJob]) -> Vec<String> {
     let mut steps = Vec::new();
     for job in jobs {
@@ -1382,22 +1398,19 @@ pub fn switch_off_steps(places: &Places, jobs: &[OldJob]) -> Vec<String> {
                 steps.push(format!("rm {file}"));
             }
             (OldKind::Daemon | OldKind::Agent, None) => {
-                steps.push(format!("(its label couldn't be read: unload it by hand before removing it) {file}"));
+                steps.push("# the label of the next job could not be read: unload it by hand first".to_owned());
+                steps.push(format!("# rm {file}").replace('\'', ""));
             }
             (OldKind::Plugin, _) => steps.push(format!("rm {file}")),
         }
     }
     if jobs.is_empty() {
-        steps.push(
-            "Switch off whatever starts the old sync script: its background job (a LaunchDaemon or \
-                    LaunchAgent) and any menu bar plugin that runs it."
-                .to_owned(),
-        );
+        steps.push("# switch off whatever starts the old sync script: its LaunchDaemon or LaunchAgent".to_owned());
+        steps.push("# and any menu bar plugin that runs it".to_owned());
     }
-    steps.push(format!(
-        "When Canva Sync has made a video, delete {} (it still holds the integration's secret).",
-        for_terminal(&places.old_script)
-    ));
+    steps.push("# when Canva Sync has made a video, delete the old script folder, which still holds".to_owned());
+    steps.push("# the secret of the integration:".to_owned());
+    steps.push(format!("# rm -r {}", for_terminal(&places.old_script)).replace('\'', ""));
     steps
 }
 
@@ -1843,6 +1856,10 @@ impl Client {
 
     /// Takes in what the threads found. Says when to look again.
     pub fn tick(&mut self) -> Option<Instant> {
+        // Whether the job's thread had ended before its words were taken in. Its last words are
+        // sent before it ends, so if none come now, it broke. (Looked at before taking them in, so
+        // a job that sends its result and ends just after is never taken for broken.)
+        let ended = self.phase.busy() && self.thread.as_ref().is_some_and(std::thread::JoinHandle::is_finished);
         while let Ok(event) = self.rx.try_recv() {
             self.version += 1;
             match event {
@@ -1908,14 +1925,9 @@ impl Client {
                         Err(why) => self.say(why, false),
                     }
                 }
-                Event::Broke => {
-                    self.thread = None;
-                    self.phase = Phase::Idle;
-                    self.say("Canva Sync stopped part way through; the video stays as it was. Try again.", false);
-                    if self.job.is_some() || self.sync_waiting {
-                        self.finished = Some(Err("Canva Sync stopped part way through.".to_owned()));
-                    }
-                }
+                // Only while a job runs: a late one never undoes a result already taken in.
+                Event::Broke if !self.phase.busy() => {}
+                Event::Broke => self.broke(),
                 Event::Pages(secrets, unsaved, listed) => {
                     self.thread = None;
                     self.phase = Phase::Idle;
@@ -1976,14 +1988,24 @@ impl Client {
         }
         // A job's thread that ended without a word (it couldn't even say it broke) frees Canva
         // Sync all the same.
-        if self.phase.busy() && self.thread.as_ref().is_some_and(std::thread::JoinHandle::is_finished) {
-            let _ = self.tx.send(Event::Broke);
-            return Some(Instant::now());
+        if ended && self.phase.busy() {
+            self.broke();
         }
         match self.phase {
             Phase::Idle => None,
             // The elapsed time is shown by the second.
             _ => Some(Instant::now() + Duration::from_millis(500)),
+        }
+    }
+
+    /// The job under way stopped without finishing (it panicked): Canva Sync is free again, and
+    /// a sync waited for is told so.
+    fn broke(&mut self) {
+        self.thread = None;
+        self.phase = Phase::Idle;
+        self.say("Canva Sync stopped part way through; the video stays as it was. Try again.", false);
+        if self.job.is_some() || self.sync_waiting {
+            self.finished = Some(Err("Canva Sync stopped part way through.".to_owned()));
         }
     }
 
@@ -2022,25 +2044,32 @@ impl Client {
         }
     }
 
-    /// Stops what is under way and waits for its thread, for quitting: a refresh of the sign-in
-    /// in flight is waited out (its new token must be kept; at most as long as a token request
-    /// may take), anything else is given a few seconds to stop. A sign-in held here that
-    /// couldn't be kept before is kept now.
+    /// Whether quitting may go on now (it began at `since`, and has stopped what was under way):
+    /// no job running; one that isn't refreshing the sign-in, after a few seconds to stop; or,
+    /// one refreshing it, once its new token is kept or as long as a token request may take has
+    /// passed. The app waits for this in its event loop, the window still answering.
+    pub fn may_close(&self, since: Instant) -> bool {
+        let Some(thread) = &self.thread else { return true };
+        let waited = since.elapsed();
+        thread.is_finished()
+            || waited > TOKEN_WAIT + Duration::from_secs(5)
+            || (!self.places.refreshing.load(Ordering::SeqCst) && waited > Duration::from_secs(5))
+    }
+
+    /// True while a refresh of the sign-in is between being sent and its new tokens kept.
+    pub fn refreshing(&self) -> bool {
+        self.places.refreshing.load(Ordering::SeqCst)
+    }
+
+    /// The last of quitting, once `may_close` says so: takes in what the job left, and keeps a
+    /// sign-in held here that couldn't be kept before (only if no other copy of the app holds the
+    /// lock this moment: quitting doesn't wait for it). Never waits.
     pub fn shut_down(&mut self) {
         self.stop();
-        if let Some(thread) = self.thread.take() {
-            let started = Instant::now();
-            while !thread.is_finished() {
-                let refreshing = REFRESHING.load(Ordering::SeqCst);
-                let waited = started.elapsed();
-                if waited > TOKEN_WAIT + Duration::from_secs(5) || (!refreshing && waited > Duration::from_secs(5)) {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            if thread.is_finished() {
-                let _ = thread.join();
-            }
+        if let Some(thread) = self.thread.take()
+            && thread.is_finished()
+        {
+            let _ = thread.join();
         }
         while let Ok(event) = self.rx.try_recv() {
             if let Event::Synced(secrets, unsaved, _) | Event::Pages(secrets, unsaved, _) = event {
@@ -2049,7 +2078,7 @@ impl Client {
         }
         if self.unsaved
             && let Some(secrets) = &self.secrets
-            && take_lock(&self.places.lock).and_then(|_lock| self.places.store.save(secrets)).is_ok()
+            && lock_now(&self.places.lock).is_some_and(|_lock| self.places.store.save(secrets).is_ok())
         {
             self.unsaved = false;
         }
@@ -2311,7 +2340,9 @@ impl crate::App {
     /// named by something that can play it later (a media bin item, a media playlist, a slide,
     /// a theme, a prop) is the church's now and is kept.
     pub(crate) fn remove_replaced_canva_videos(&mut self) {
-        if self.canva.old_files.is_empty() {
+        // Not before the window's state (props, media playlists) has been read: until then it
+        // can't be told what still names a file.
+        if self.canva.old_files.is_empty() || self.running.is_none() {
             return;
         }
         let mut playing: Vec<PathBuf> = Vec::new();
@@ -2367,7 +2398,8 @@ impl crate::App {
         if self.themes.iter().any(|theme| theme.templates.iter().any(|template| in_objects(&template.objects))) {
             return Some("a theme");
         }
-        let state = &self.running.as_ref()?.home_state;
+        let Some(running) = self.running.as_ref() else { return Some("the app, still starting") };
+        let state = &running.home_state;
         if state.media_playlists.iter().any(|playlist| playlist.has(path)) {
             return Some("a media playlist");
         }

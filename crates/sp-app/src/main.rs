@@ -1393,6 +1393,8 @@ struct App {
     /// How often and how long the operator window is drawn, and the last notice, for the log.
     home_timing: applog::Timing,
     notice_logged: Option<String>,
+    /// When quitting began, while it waits for Canva Sync to keep a sign-in it is refreshing.
+    quitting: Option<Instant>,
 }
 
 impl App {
@@ -7897,16 +7899,34 @@ impl App {
     }
 
     fn quit(&mut self, el: &ActiveEventLoop) {
-        self.save_unsaved();
-        self.keep_held_aside();
-        // A sync under way stops (a sign-in being refreshed is waited out, so it is kept).
-        self.canva.shut_down();
-        if let Some(output) = self.running.as_mut().and_then(|r| r.output.take()) {
-            output.shutdown();
+        if self.quitting.is_none() {
+            self.save_unsaved();
+            self.keep_held_aside();
+            // A sync under way is stopped, and the screens close first: nothing waits in front of
+            // the audience.
+            self.canva.stop();
+            if let Some(output) = self.running.as_mut().and_then(|r| r.output.take()) {
+                output.shutdown();
+            }
+            self.video = None;
+            self.announcing = None;
+            self.quitting = Some(Instant::now());
         }
+        // A refresh of the Canva sign-in in flight is waited for (its new token must be kept),
+        // here in the event loop, so the window still answers (and isn't taken for hung).
+        if !self.canva.may_close(self.quitting.unwrap_or_else(Instant::now)) {
+            const KEEPING: &str = "Keeping the Canva sign-in… SoftPresenter closes as soon as it is kept.";
+            if let Some(running) = self.running.as_mut()
+                && self.canva.refreshing()
+                && running.home_state.notice.as_deref() != Some(KEEPING)
+            {
+                running.home_state.notice = Some(KEEPING.to_owned());
+                running.home_window.request_redraw();
+            }
+            return;
+        }
+        self.canva.shut_down();
         // Canva videos replaced while they played go now that nothing plays them.
-        self.video = None;
-        self.announcing = None;
         self.remove_replaced_canva_videos();
         el.exit();
     }
@@ -8513,6 +8533,13 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        // Quitting, waiting for Canva Sync to keep a sign-in it is refreshing: looked at again
+        // shortly (its thread also wakes the loop when it is done), and nothing else is run.
+        if self.quitting.is_some() {
+            self.quit(el);
+            el.set_control_flow(ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(100)));
+            return;
+        }
         // Files dropped on the window, now that all of the drop have come.
         self.finish_drop();
         // What runs by the clock is done here too, not only when the operator window draws:
@@ -8935,6 +8962,7 @@ fn main() -> ExitCode {
         capture_done: false,
         home_timing: applog::Timing::new("operator window drawings"),
         notice_logged: None,
+        quitting: None,
     };
     // The pictures that were in the media bin last time, then any named on the command line.
     let saved = media::load_list();

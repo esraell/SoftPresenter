@@ -238,6 +238,7 @@ fn places(dir: &Path, port: u16) -> Places {
         staging: dir.join("staging"),
         lock: dir.join(".canva-sync.lock"),
         stand_in: true,
+        refreshing: Arc::default(),
         settings: dir.join("canva-sync.json"),
         folder: dir.join("Media").join(FOLDER),
         poll_every: Duration::from_millis(10),
@@ -871,6 +872,102 @@ fn small_safeguards_hold() {
         let meta = std::fs::symlink_metadata(&part).unwrap();
         assert!(meta.is_file() && meta.permissions().mode() & 0o777 == 0o600);
         assert_eq!(std::fs::read(&target).unwrap(), b"someone else's", "not written through the link");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_finished_sync_is_never_taken_for_a_broken_one() {
+    let dir = folder("broke-race");
+    let places = places(&dir, 1);
+    let mut client = Client::new(places.clone(), None);
+    while client.status == Status::Reading {
+        client.tick();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // A job that sends its result and ends before it is looked at: its result stands.
+    let synced = Synced { path: dir.join("new.mp4"), bytes: 1, others: Vec::new(), pages: 1 };
+    let (tx, made) = (client.tx.clone(), synced.clone());
+    client.phase = Phase::Starting;
+    client.job = Some(7);
+    client.thread = Some(std::thread::spawn(move || {
+        let _ = tx.send(Event::Synced(None, false, Ok(made)));
+    }));
+    while !client.thread.as_ref().unwrap().is_finished() {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    client.tick();
+    assert_eq!(client.finished.take(), Some(Ok(synced)));
+    // A "broke" coming in when nothing runs changes nothing.
+    let _ = client.tx.send(Event::Broke);
+    client.tick();
+    assert_eq!(client.finished, None);
+    assert!(client.said.as_ref().is_some_and(|(words, good, _)| *good && words.starts_with("Updated")));
+    // A job that ends without a word did break: Canva Sync is free again, and the job is told.
+    client.phase = Phase::Starting;
+    client.thread = Some(std::thread::spawn(|| {}));
+    while !client.thread.as_ref().unwrap().is_finished() {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    client.tick();
+    assert!(!client.phase.busy());
+    assert!(matches!(client.finished, Some(Err(_))));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn quitting_waits_only_for_a_refresh_in_flight() {
+    let dir = folder("may-close");
+    let places = places(&dir, 1);
+    let mut client = Client::new(places.clone(), None);
+    assert!(client.may_close(Instant::now()), "nothing running");
+    let stop = Arc::new(AtomicBool::new(false));
+    let running = stop.clone();
+    client.thread = Some(std::thread::spawn(move || {
+        while !running.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }));
+    let a_while_ago = |seconds| Instant::now() - Duration::from_secs(seconds);
+    assert!(!client.may_close(Instant::now()), "a job is given a few seconds to stop");
+    assert!(client.may_close(a_while_ago(6)), "one not refreshing isn't waited for past them");
+    places.refreshing.store(true, Ordering::SeqCst);
+    assert!(!client.may_close(a_while_ago(6)), "one refreshing is waited for");
+    assert!(client.may_close(a_while_ago(100)), "but not past as long as a token request may take");
+    places.refreshing.store(false, Ordering::SeqCst);
+    stop.store(true, Ordering::Relaxed);
+    while !client.thread.as_ref().unwrap().is_finished() {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(client.may_close(Instant::now()), "a finished job");
+    client.shut_down();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_switch_off_lines_paste_as_one_block() {
+    let dir = folder("paste");
+    let mut places = places(&dir, 1);
+    places.old_script = dir.join("o'brien").join("canva-sync");
+    let jobs = vec![
+        OldJob { kind: OldKind::Daemon, path: dir.join("it's.plist"), label: Some("org.example.sync".to_owned()) },
+        OldJob { kind: OldKind::Agent, path: dir.join("agent.plist"), label: None },
+        OldJob { kind: OldKind::Plugin, path: dir.join("o'clock.5s.py"), label: None },
+    ];
+    for steps in [switch_off_steps(&places, &jobs), switch_off_steps(&places, &[])] {
+        for step in &steps {
+            if step.starts_with('#') {
+                assert!(!step.contains('\'') && !step.contains('"'), "a comment with a quote: {step}");
+            } else {
+                // Every quote opened is closed on its line (a quote inside is written '\'').
+                let outside = step.replace("'\\''", "");
+                assert!(outside.matches('\'').count() % 2 == 0, "an open quote: {step}");
+            }
+        }
+        assert!(steps.iter().all(|step| step.starts_with('#')
+            || step.starts_with("sudo ")
+            || step.starts_with("rm ")
+            || step.starts_with("launchctl ")));
     }
     let _ = std::fs::remove_dir_all(dir);
 }

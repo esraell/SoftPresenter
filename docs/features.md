@@ -945,8 +945,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   without it), and the access token is kept with its expiry and refreshed only when due; a
   sign-in Canva no longer takes stops the asking until the operator signs in again, and a
   refresh Canva answered in a way that can't be read is said to be in doubt ("sign in again if
-  the next sync fails"). Quitting waits for a refresh under way, and keeps a sign-in that
-  couldn't be kept before. Disconnect forgets it on this computer.
+  the next sync fails"). Quitting closes the screens at once; a refresh under way is then waited
+  for with the window still answering ("Keeping the Canva sign-in…"), at most as long as a token
+  request may take, and a sign-in that couldn't be kept before is kept. Disconnect forgets it on
+  this computer.
   The presentation is chosen by pasting its link; its pages show with their pictures, and a click
   makes one the **divider page**: only the pages above it go in the video (Canva can't tell an
   app which slides are hidden, so volunteers drag old slides below it). If the divider is gone

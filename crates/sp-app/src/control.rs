@@ -379,14 +379,18 @@ pub fn run_client(args: Vec<String>) -> std::process::ExitCode {
         let mut line = String::new();
         if canva && terminal {
             // Typed at a terminal: the ID, then the secret, which isn't shown as it is typed.
-            let (mut id, mut secret) = (String::new(), String::new());
+            let mut id = String::new();
             eprint!("Client ID: ");
             let _ = std::io::stdin().lock().read_line(&mut id);
-            let hidden = NoEcho::start();
-            eprint!("{}", if hidden.0 { "Client secret (not shown): " } else { "Client secret: " });
-            let _ = std::io::stdin().lock().read_line(&mut secret);
-            drop(hidden);
-            eprintln!();
+            let secret = match read_unshown("Client secret (not shown): ") {
+                Some(secret) => secret,
+                None => {
+                    eprint!("Client secret: ");
+                    let mut secret = String::new();
+                    let _ = std::io::stdin().lock().read_line(&mut secret);
+                    secret
+                }
+            };
             line = format!("{} {}", id.trim(), secret.trim());
         } else {
             if terminal {
@@ -438,28 +442,29 @@ pub fn run_client(args: Vec<String>) -> std::process::ExitCode {
     if reply.ok { std::process::ExitCode::SUCCESS } else { std::process::ExitCode::from(1) }
 }
 
-/// The terminal's echo, off while this is held (where `stty` can turn it off), so a secret
-/// typed isn't shown. True when it was turned off.
-struct NoEcho(bool);
-
-impl NoEcho {
-    fn start() -> NoEcho {
-        let off = cfg!(unix)
-            && std::process::Command::new("stty")
-                .arg("-echo")
-                .stdin(std::process::Stdio::inherit())
-                .status()
-                .is_ok_and(|status| status.success());
-        NoEcho(off)
+/// Reads a line typed at the terminal without showing it, through the system's shell: it turns
+/// the terminal's echo off for the line and back on afterwards, and on Ctrl-C, Ctrl-Z or a hang-up
+/// too (its own trap; nothing needs installing here). The line comes back through a pipe, never
+/// as an argument. `None` where there is no such shell (the caller then reads it shown).
+fn read_unshown(prompt: &str) -> Option<String> {
+    if !cfg!(unix) {
+        return None;
     }
-}
-
-impl Drop for NoEcho {
-    fn drop(&mut self) {
-        if self.0 {
-            let _ = std::process::Command::new("stty").arg("echo").stdin(std::process::Stdio::inherit()).status();
-        }
+    const READ: &str = "trap 'stty echo 2>/dev/null; echo >&2; exit 130' INT TSTP TERM HUP; \
+                        stty -echo 2>/dev/null; IFS= read -r line; status=$?; stty echo 2>/dev/null; echo >&2; \
+                        printf '%s' \"$line\"; exit $status";
+    eprint!("{prompt}");
+    let read = std::process::Command::new("/bin/sh")
+        .args(["-c", READ])
+        .stdin(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .output()
+        .ok()?;
+    // Stopped by Ctrl-C: the terminal is as it was, and so is everything else.
+    if !read.status.success() {
+        std::process::exit(130);
     }
+    Some(String::from_utf8_lossy(&read.stdout).into_owned())
 }
 
 /// Whether the program was started through a link (`sp`), not by its own path or as an app.
