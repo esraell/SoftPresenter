@@ -118,6 +118,10 @@ pub enum OutputMsg {
     /// Show each screen's own name on it, so the operator can tell them apart; an empty list
     /// goes back to the show.
     Identify(Vec<(Uuid, String, sp_model::Rgba)>),
+    /// The operator's live preview looks at one audience screen, drawn as that screen draws it
+    /// (its own theme and layers), or with `None` at what the room sees. Only the preview is
+    /// drawn again: it is the same one picture, drawn for another screen.
+    PreviewScreen(Option<Uuid>),
     Shutdown,
 }
 
@@ -910,6 +914,8 @@ struct Output {
     /// The live preview's whole picture, and a fade under way in it: from, to.
     preview_shown: Option<vello::Scene>,
     preview_fade: Option<(vello::Scene, vello::Scene)>,
+    /// The audience screen the live preview is drawn as, when the operator looks at one.
+    preview_screen: Option<Uuid>,
 }
 
 fn run(
@@ -990,6 +996,7 @@ fn run(
         video_moved_at: Instant::now(),
         preview_shown: None,
         preview_fade: None,
+        preview_screen: None,
         device,
         queue,
     };
@@ -1146,8 +1153,10 @@ fn run(
         let mut new_picture = false;
         // Whether NDI receivers came or went, and whether that is all these messages say.
         let (mut receivers_changed, mut nothing_else) = (false, true);
+        // Whether the live preview now looks at another screen.
+        let mut preview_again = false;
         while let Some(msg) = next {
-            nothing_else &= matches!(msg, OutputMsg::NdiReceivers);
+            nothing_else &= matches!(msg, OutputMsg::NdiReceivers | OutputMsg::PreviewScreen(_));
             match msg {
                 OutputMsg::Show(frame) => {
                     let now = Instant::now();
@@ -1240,6 +1249,12 @@ fn run(
                         target.shown = None;
                     }
                 }
+                OutputMsg::PreviewScreen(screen) => {
+                    if output.preview_screen != screen {
+                        output.preview_screen = screen;
+                        preview_again = true;
+                    }
+                }
                 OutputMsg::Shutdown => return,
             }
             next = rx.try_recv().ok();
@@ -1247,6 +1262,13 @@ fn run(
         // The Screens window says how many are watching each source: it looks again.
         if receivers_changed && let Some(wake) = &output.waker {
             wake();
+        }
+        if nothing_else && preview_again {
+            // Only the preview is drawn, at once, for the screen it now looks at.
+            let frame = output.frame.clone();
+            output.preview_fade = None;
+            output.preview_shown = None;
+            output.draw_live_preview(&frame, true);
         }
         if nothing_else {
             // Only the NDI pictures are drawn, and only if the change of count asks for it.
@@ -1839,7 +1861,7 @@ impl Output {
             return;
         }
         let (w, h) = LIVE_PREVIEW_SIZE;
-        let scene = self.scene_for(Uuid::nil(), frame, w, h);
+        let scene = self.scene_for(self.preview_screen.unwrap_or(Uuid::nil()), frame, w, h);
         // A video's new picture during a fade: the fade goes on, towards the newer picture.
         if !new_picture && let Some((from, _)) = self.preview_fade.take() {
             self.preview_fade = Some((from, scene));

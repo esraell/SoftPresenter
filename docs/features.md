@@ -336,6 +336,14 @@ feature changes, this page changes in the same commit.
   column: a song's Slides, the Themes and their templates, the Props, and the Stage screens'
   layouts. View › Themes, Control-T and `sp view themes` open
   it on the themes.
+- **Looking at one screen**: with more than two screens, a small arrow in the preview block's
+  head opens a menu of them (What the room sees, each audience screen, the stage screens). The
+  preview then shows what that one screen shows, drawn as it draws it (its own theme, layers and
+  colour, or a stage screen's own layout), and the readout's second line says "Looking at"
+  its name; a screen switched off or whose display is not connected says so over the picture.
+  Audience or Stage goes back. The screens' thread draws the same one preview picture as
+  before, for the screen chosen, so nothing it does costs more. The readout no longer names
+  the video playing (the row under it has the video's keys).
 - **The right column**: the preview block, six layer keys (Slide, Media, Props, Messages, Audio,
   Announce: each is lit while its layer shows, and pressing it clears that layer alone), Clear
   All (orange while anything shows, grey when nothing does), and under it the tool tabs, or in

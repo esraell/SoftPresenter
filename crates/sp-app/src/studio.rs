@@ -3197,7 +3197,7 @@ fn preview_block(
     } else {
         ui.painter().circle_filled(light, 3.5, Color32::from_rgb(0x3a, 0x3a, 0x3a));
     }
-    let (_, picked) = pill_switch(
+    let (switch, picked) = pill_switch(
         ui,
         "preview of",
         pos2(inner.min.x + 18.0, head - 10.5),
@@ -3206,8 +3206,28 @@ fn preview_block(
         Some(usize::from(state.preview_stage)),
         &SwitchLook::small_capitals(),
     );
+    // Audience or Stage goes back to what all of them see.
     if let Some(picked) = picked {
         state.preview_stage = picked == 1;
+        state.preview_screen = None;
+    }
+    // A screen looked at that has gone from the list: back to what all see.
+    if state.preview_screen.is_some_and(|id| !state.screens.iter().any(|screen| screen.id == id)) {
+        state.preview_screen = None;
+    }
+    // With more than two screens, a small arrow opens a menu to look at one of them.
+    if state.screens.len() > 2 {
+        let arrow = Rect::from_center_size(pos2(switch.max.x + 6.0 + 14.0, head), vec2(28.0, 28.0));
+        let response = ui.interact(arrow, ui.scope_id().with("look at one screen"), Sense::click());
+        let lit = state.preview_screen.is_some();
+        let back = Rect::from_center_size(arrow.center(), vec2(22.0, 22.0));
+        if lit || response.hovered() {
+            ui.painter().rect_filled(back, 6.0, if lit { SELECTED } else { Color32::from_rgb(0x26, 0x26, 0x26) });
+        }
+        let ink = if lit || response.hovered() { TEXT } else { SCREEN_DIM };
+        icons::paint(ui.painter(), Icon::ChevronDown, Rect::from_center_size(arrow.center(), vec2(12.0, 12.0)), ink);
+        let response = response.on_hover_text("Look at one screen, as it draws the show");
+        egui::Popup::menu(&response).show(|ui| look_at_menu(ui, state));
     }
     // Set from the right, so the longer wording takes its room to the left and nothing moves.
     let (words, ink) = match (on, on_screen) {
@@ -3247,6 +3267,8 @@ fn preview_block(
         // A screen that could not draw what is live shows the picture before it, whatever the
         // preview shows: the operator must know.
         over_picture(ui, undrawn.in_words(), CARE);
+    } else if let Some(said) = looked_at(state).and_then(|screen| screen_not_showing(state, screen)) {
+        over_picture(ui, &said, TEXT_DIM);
     } else if !on && !state.preview_stage {
         over_picture(ui, "Audience output is off", TEXT_DIM);
     }
@@ -3281,8 +3303,14 @@ fn preview_block(
     ui.painter().galley(pos2(readout.min.x, readout.center().y - number.size().y / 2.0), number, TEXT);
     ui.painter().galley(pos2(readout.min.x + number_wide, base - of_tall + 1.0), of, SCREEN_DIM);
     let words = Rect::from_min_max(pos2(readout.min.x + figures.max(kept) + 10.0, readout.min.y), readout.max);
-    // The second line is there only when there is something to say: the video that is playing.
-    let second = state.video_live.as_ref().map(|video| video.name.as_str());
+    // The second line is there only when there is something to say: the one screen looked at,
+    // or how far the slide's click builds have got.
+    let builds = show.live_slide().map_or(0, |(_, slide)| slide.click_steps().len());
+    let second = match looked_at(state) {
+        Some(screen) => Some(format!("LOOKING AT {}", screen.name.to_uppercase())),
+        None if builds > 0 => Some(format!("BUILD {}/{builds}", show.build_step())),
+        None => None,
+    };
     let first_y = if second.is_some() { words.center().y - 8.0 } else { words.center().y };
     let painter = ui.painter().with_clip_rect(words);
     let label = fixed(12.0);
@@ -3303,7 +3331,7 @@ fn preview_block(
         }
     }
     if let Some(second) = second {
-        let line = spaced(ui, second, label, TEXT_FAINT, 0.3);
+        let line = spaced(ui, &second, label, SCREEN_DIM, 0.7);
         painter.galley(pos2(words.min.x, words.center().y + 9.0 - line.size().y / 2.0), line, TEXT_FAINT);
     }
 
@@ -3325,6 +3353,63 @@ fn preview_block(
         if playing_line(ui, row, "Test pattern:", name, "Off", "Take the test pattern off the audience screens") {
             state.test_pattern = None;
         }
+    }
+}
+
+/// The one screen the preview looks at, if it looks at one.
+fn looked_at(state: &HomeState) -> Option<&crate::screens::Screen> {
+    let id = state.preview_screen?;
+    state.screens.iter().find(|screen| screen.id == id)
+}
+
+/// Why a screen shows nothing in the room, if it doesn't: switched off, or its display not
+/// connected.
+fn screen_not_showing(state: &HomeState, screen: &crate::screens::Screen) -> Option<String> {
+    use crate::screens::Output;
+    match &screen.output {
+        Output::Off => Some(format!("{} is switched off", screen.name)),
+        Output::Display(name) if !state.displays.iter().any(|display| &display.name == name) => {
+            Some(format!("{} is not connected", screen.name))
+        }
+        _ => None,
+    }
+}
+
+/// The menu of screens to look at in the preview: what the room sees, each audience screen, then
+/// the stage screens. A screen that shows nothing says so beside its name.
+fn look_at_menu(ui: &mut egui::Ui, state: &mut HomeState) {
+    use crate::screens::Kind;
+    ui.set_min_width(232.0);
+    let mut chosen: Option<(Option<sp_model::Uuid>, bool)> = None;
+    let heading = |ui: &mut egui::Ui, words: &str| {
+        ui.label(egui::RichText::new(words).size(11.5).color(TEXT_FAINT));
+    };
+    heading(ui, "Audience");
+    let everyone = state.preview_screen.is_none() && !state.preview_stage;
+    if ui.add(egui::Button::selectable(everyone, "What the room sees")).clicked() {
+        chosen = Some((None, false));
+    }
+    for stage in [false, true] {
+        if stage {
+            ui.separator();
+            heading(ui, "Stage");
+        }
+        for screen in state.screens.iter().filter(|screen| (screen.kind == Kind::Stage) == stage) {
+            let words = match screen_not_showing(state, screen) {
+                Some(_) if screen.output == crate::screens::Output::Off => format!("{} \u{b7} off", screen.name),
+                Some(_) => format!("{} \u{b7} not connected", screen.name),
+                None => screen.name.clone(),
+            };
+            let on = state.preview_screen == Some(screen.id);
+            if ui.add(egui::Button::selectable(on, words)).clicked() {
+                chosen = Some((Some(screen.id), stage));
+            }
+        }
+    }
+    if let Some((screen, stage)) = chosen {
+        state.preview_screen = screen;
+        state.preview_stage = stage;
+        ui.close();
     }
 }
 

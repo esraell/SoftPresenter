@@ -436,6 +436,9 @@ pub struct HomeState {
     pub stage_edit: (usize, Option<usize>),
     /// True when the Program preview shows what the stage screens show, not the audience's.
     pub preview_stage: bool,
+    /// The one screen the Program preview looks at (the small arrow in its head), drawn as that
+    /// screen draws it; `None` for what the room (or the stage) sees.
+    pub preview_screen: Option<sp_model::Uuid>,
     /// A message cut or copied, to paste; and one being renamed in its row, with its name so far.
     pub message_clip: Option<crate::messages::Message>,
     pub message_rename: Option<(sp_model::Uuid, String)>,
@@ -1357,6 +1360,7 @@ impl Default for HomeState {
             stage_editor_open: false,
             stage_edit: (0, None),
             preview_stage: false,
+            preview_screen: None,
             message_clip: None,
             message_rename: None,
             message_live: None,

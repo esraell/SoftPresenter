@@ -950,6 +950,8 @@ struct Running {
     preview_changed: Instant,
     /// True when the Program preview last drew the stage picture, and when it did.
     preview_shows_stage: bool,
+    /// The one screen the Program preview was last told to look at.
+    preview_screen_shown: Option<Uuid>,
     stage_preview_at: Instant,
     home_state: HomeState,
     next_repaint: Option<Instant>,
@@ -1262,6 +1264,7 @@ impl App {
             preview_before: None,
             preview_changed: Instant::now(),
             preview_shows_stage: false,
+            preview_screen_shown: None,
             stage_preview_at: Instant::now(),
             home_state: HomeState {
                 fonts: Arc::new(sp_render::Fonts::new().family_names()),
@@ -2763,9 +2766,13 @@ impl App {
                 song.slide(at.slide).map(|(_, slide)| slide.clone())
             });
             let overlay = running.overlay_sent.clone().unwrap_or_default();
-            // The layout of the first stage screen, as the people on stage see it.
-            let wanted =
-                state.screens.iter().find(|screen| screen.kind == screens::Kind::Stage).and_then(|s| s.stage_layout);
+            // The layout of the stage screen looked at, or of the first, as the people on stage
+            // see it.
+            let stage_screens = || state.screens.iter().filter(|screen| screen.kind == screens::Kind::Stage);
+            let wanted = stage_screens()
+                .find(|screen| Some(screen.id) == state.preview_screen)
+                .or_else(|| stage_screens().next())
+                .and_then(|s| s.stage_layout);
             let template = stage::layout_for(&state.stage_layouts, wanted);
             let picture = stage::slide(slide.as_deref(), next.as_ref(), &overlay, &about, &template);
             let layers = Layers {
@@ -5975,6 +5982,16 @@ impl App {
                 let presentation = self.show.selected();
                 commands.push(Command::GoToStep { presentation, step: step.saturating_sub(1) });
             }
+            // Testing aid: SOFTPRESENTER_LOOK_AT=NAME has the Program preview look at the screen of
+            // that name, as its menu does.
+            if running.frames == GO_LIVE_AT + 2
+                && let Ok(name) = std::env::var("SOFTPRESENTER_LOOK_AT")
+                && let Some(screen) = running.home_state.screens.iter().find(|screen| screen.name == name)
+            {
+                let (id, stage) = (screen.id, screen.kind == screens::Kind::Stage);
+                running.home_state.preview_screen = Some(id);
+                running.home_state.preview_stage = stage;
+            }
             // Testing aid: SOFTPRESENTER_START_TIMER=1 starts the first timer, for a picture of a
             // running timer in the top bar.
             if running.frames == GO_LIVE_AT + 2
@@ -6594,9 +6611,22 @@ impl App {
             let soon = Instant::now() + Duration::from_millis(500);
             running.next_repaint = Some(running.next_repaint.map_or(soon, |at| at.min(soon)));
         }
+        // Looking at one screen: an audience screen's picture is drawn by the output thread, as
+        // that screen draws it; a stage screen's, as all stage pictures, by the window.
+        let mut looked_again = false;
+        if running.preview_screen_shown != state.preview_screen {
+            running.preview_screen_shown = state.preview_screen;
+            let audience = state.preview_screen.filter(|id| {
+                state.screens.iter().any(|screen| screen.id == *id && screen.kind != screens::Kind::Stage)
+            });
+            if let Some(output) = &running.output {
+                output.send(OutputMsg::PreviewScreen(audience));
+            }
+            looked_again = true;
+        }
         // The stage picture in the Program preview shows the time, so it is redrawn each second;
         // switching between the audience and the stage redraws it straight away.
-        let switched = running.preview_shows_stage != state.preview_stage;
+        let switched = running.preview_shows_stage != state.preview_stage || looked_again;
         let ticking = state.preview_stage || links_tick;
         let stage_tick = ticking && running.stage_preview_at.elapsed() >= Duration::from_secs(1);
         if ticking {
