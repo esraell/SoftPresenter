@@ -772,6 +772,9 @@ pub struct Announcement {
     pub slide: Arc<Slide>,
     pub theme: Arc<Theme>,
     pub video: Option<(String, sp_video::Frames)>,
+    /// False once a slide has gone on screen: the screens that show slides leave the layer out
+    /// (a lobby screen showing announcements and no slides keeps it) until it is started again.
+    pub on_slide_screens: bool,
 }
 
 impl Announcement {
@@ -1490,7 +1493,8 @@ impl Output {
             Arc::new(crate::links::fill(&built, &values).into_owned())
         });
         let media = self.video_picture.clone().or_else(|| frame.media.clone());
-        let announcement = self.announcement.clone().filter(|_| look.announcements);
+        let announcement =
+            self.announcement.clone().filter(|shown| look.announcements && (shown.on_slide_screens || !look.slides));
         (media.filter(|_| look.media), slide, over, theme, announcement)
     }
 
@@ -2963,7 +2967,7 @@ mod tests {
         let words = Arc::new(Slide::new(vec![sp_model::Object::text(sp_model::Role::primary(), "Light rises")]));
         let message = Arc::new(Slide::new(vec![sp_model::Object::text(sp_model::Role::primary(), "Welcome")]));
         let media = Picture::from_rgba(1, 1, vec![9, 9, 9, 255]);
-        let shown = Announcement { slide: words.clone(), theme: own.clone(), video: None };
+        let shown = Announcement { slide: words.clone(), theme: own.clone(), video: None, on_slide_screens: true };
         let content: Content = (media, Some(words.clone()), Some(message.clone()), theme.clone(), Some(shown));
         let mut kept = Vec::new();
         let (media, slide, over, plain, announcement) = see_through_content(content, |t| plain_theme(&mut kept, t));

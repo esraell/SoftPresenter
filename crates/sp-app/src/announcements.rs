@@ -1,5 +1,6 @@
 //! The Announcements layer: something that goes round by itself over the slides and media, and
-//! under props and messages, until it is cleared. Anything that loops can be on it:
+//! under props and messages, until it is cleared or a slide goes on screen. Anything that loops
+//! can be on it:
 //!
 //! - a song, its slides in turn (each for its Go to Next time, or 8 seconds), round to the first;
 //! - a picture from the media bin, which stays;
@@ -10,6 +11,13 @@
 //! A picture or a video is a slide of one box filling the screen, drawn as its media bin item
 //! is set to fill it (on black, which covers what is under the layer). A video's pictures are
 //! shown in its box as they come, as a video in a box on a slide is.
+//!
+//! A slide going on screen (a song's, a Bible verse, a playlist item's: by a click, a key, Enter,
+//! `sp`, a macro or a slide's action) takes the announcements off every screen that shows
+//! slides, and they stay off until someone starts them again (Announce, a macro step,
+//! `sp announce`): clearing the slide doesn't bring them back. A lobby screen showing
+//! announcements and no slides keeps them; with none, the layer stops. A picture or video on
+//! the media layer, a prop, a message or a timer leaves them on.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -44,6 +52,8 @@ pub struct Announcing {
     pub shown: Announcement,
     /// The video playing, when the item shown is one.
     pub video: Option<sp_video::Player>,
+    /// False once a slide has gone on screen (see the module's notes).
+    pub on_slide_screens: bool,
 }
 
 impl Announcing {
@@ -55,6 +65,21 @@ impl Announcing {
         }
     }
 }
+
+/// True when a screen that is in use shows announcements and no slides (a lobby screen), so
+/// the layer goes on for it after a slide goes on screen.
+pub fn lobby_screen(screens: &[crate::screens::Screen]) -> bool {
+    screens.iter().any(|screen| {
+        screen.kind == crate::screens::Kind::Audience
+            && screen.output != crate::screens::Output::Off
+            && screen.look.announcements
+            && !screen.look.slides
+            && screen.look.key_of.is_none()
+    })
+}
+
+/// Said once a run, the first time a slide takes the announcements off.
+static OFF_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The theme pictures and videos are drawn with on the layer: black behind them, so a picture
 /// fitted inside the screen has black bars, not the slides showing through.
@@ -139,7 +164,8 @@ impl crate::App {
             return;
         };
         let theme = self.theme_of(song).clone();
-        let shown = Announcement { slide: Arc::new(shown.clone()), theme, video: None };
+        let on_slide_screens = self.still_on_slide_screens(Announce::Song(song));
+        let shown = Announcement { slide: Arc::new(shown.clone()), theme, video: None, on_slide_screens };
         let title = self.show.presentations().get(song).map_or_else(String::new, |s| s.title.clone());
         if self.announcing.as_ref().is_none_or(|was| was.what != Announce::Song(song)) {
             crate::applog::event("announcements", &format!("playing {title}"));
@@ -152,6 +178,7 @@ impl crate::App {
             since: Instant::now(),
             shown,
             video: None,
+            on_slide_screens,
         });
         self.refresh_preview(false);
     }
@@ -189,19 +216,66 @@ impl crate::App {
             // A picture is read for the screens at once, so it goes on as soon as it can.
             sp_render::read_ahead(&slide);
         }
+        let on_slide_screens = self.still_on_slide_screens(what);
         let shown = Announcement {
             slide,
             theme: media_theme(),
             video: video.as_ref().map(|player: &sp_video::Player| (name.clone(), player.frames())),
+            on_slide_screens,
         };
         let title = self.media_announcement_title(what, &item.name);
         if self.announcing.as_ref().is_none_or(|was| was.what != what) {
             crate::applog::event("announcements", &format!("playing {title}"));
         }
         self.send_announcement(what, &shown, title);
-        self.announcing = Some(Announcing { what, at, item: Some(item.id), since: Instant::now(), shown, video });
+        self.announcing =
+            Some(Announcing { what, at, item: Some(item.id), since: Instant::now(), shown, video, on_slide_screens });
         self.refresh_preview(false);
         self.read_ahead_on_layer();
+    }
+
+    /// Whether what goes on round on the layer is still on the screens that show slides: a
+    /// fresh start is; the same thing going on to its next slide or item keeps what it had.
+    fn still_on_slide_screens(&self, what: Announce) -> bool {
+        self.announcing.as_ref().filter(|on| on.what == what).is_none_or(|on| on.on_slide_screens)
+    }
+
+    /// A slide has gone on screen: the announcements go off every screen that shows slides, and
+    /// stay off until started again. A lobby screen (announcements, no slides) keeps them; with
+    /// none, the layer stops. Said once a run.
+    pub(crate) fn announcements_off_for_slide(&mut self) {
+        if !self.announcing.as_ref().is_some_and(|on| on.on_slide_screens) {
+            return;
+        }
+        let lobby = self.running.as_ref().is_some_and(|running| lobby_screen(&running.home_state.screens));
+        if lobby {
+            let Some(on) = self.announcing.as_mut() else { return };
+            on.on_slide_screens = false;
+            on.shown.on_slide_screens = false;
+            let shown = on.shown.clone();
+            if let Some(output) = self.running.as_ref().and_then(|running| running.output.as_ref()) {
+                output.send(OutputMsg::Announcement(Some(shown)));
+            }
+            crate::applog::event("announcements", "a slide went on screen: off the screens that show slides");
+        } else {
+            self.announcing = None;
+            if let Some(running) = self.running.as_mut() {
+                running.home_state.announcement_live = None;
+                if let Some(output) = &running.output {
+                    output.send(OutputMsg::Announcement(None));
+                }
+            }
+            crate::applog::event("announcements", "a slide went on screen: the announcements stopped");
+        }
+        if !OFF_SAID.swap(true, std::sync::atomic::Ordering::Relaxed)
+            && let Some(running) = self.running.as_mut()
+        {
+            running.home_state.notice =
+                Some("Announcements are off while a slide is on screen. Announce starts them again.".to_owned());
+        }
+        if let Some(running) = self.running.as_ref() {
+            running.home_window.request_redraw();
+        }
     }
 
     /// What the window calls a picture or video on the layer: its name, after its media
@@ -462,6 +536,9 @@ impl crate::App {
                 .and_then(|running| running.home_state.announcement_live.as_ref())
                 .map(|(_, title)| title.clone()),
         }
+        .map(|words| {
+            if on.on_slide_screens { words } else { format!("{words} (lobby screens only: a slide went on screen)") }
+        })
     }
 }
 
@@ -484,5 +561,27 @@ mod tests {
         ));
         assert!(object.fill.is_none() && object.stroke.is_none(), "nothing drawn around it");
         assert_eq!(media_theme().background, Some(sp_model::Rgba::BLACK), "black covers what is under the layer");
+    }
+
+    #[test]
+    fn only_a_screen_in_use_showing_announcements_and_no_slides_keeps_them_when_a_slide_goes_up() {
+        use crate::screens::{Kind, Look, Output, Screen};
+        let screen = |look: Look, output: Output, kind: Kind| Screen {
+            look,
+            output,
+            kind,
+            ..Screen::new("S".to_owned(), Output::Window)
+        };
+        let usual = screen(Look::default(), Output::Window, Kind::Audience);
+        let lobby_look = Look { slides: false, ..Look::default() };
+        assert!(!lobby_screen(std::slice::from_ref(&usual)), "screens that show slides take them off");
+        assert!(
+            lobby_screen(&[usual.clone(), screen(lobby_look, Output::Window, Kind::Audience)]),
+            "a lobby keeps them"
+        );
+        assert!(!lobby_screen(&[screen(lobby_look, Output::Off, Kind::Audience)]), "one switched off doesn't count");
+        assert!(!lobby_screen(&[screen(lobby_look, Output::Window, Kind::Stage)]), "nor a stage screen");
+        let no_announcements = Look { slides: false, announcements: false, ..Look::default() };
+        assert!(!lobby_screen(&[screen(no_announcements, Output::Window, Kind::Audience)]), "nor one without them");
     }
 }

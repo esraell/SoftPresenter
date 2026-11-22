@@ -340,7 +340,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   show or hide the layer (a lobby screen can show only announcements); the Announce key (lit
   while it plays), Presentation › Clear Announcements and Clear All take it off; while it
   plays, the preview block's row names it with a Clear key beside it, and the same menu item
-  reads Stop Announcements.
+  reads Stop Announcements. **A slide going on screen** (a song's, a Bible verse, a playlist
+  item's: by a click, a key, Enter, `sp`, a macro or a slide's action) takes the announcements
+  off every screen that shows slides, and they stay off until someone starts them again
+  (Announce, a macro step, `sp announce`): clearing the slide doesn't bring them back. A lobby
+  screen showing announcements and no slides keeps them going; with none, the layer stops. A
+  picture or video on the media layer, a prop, a message or a timer leaves them on. The first
+  time in a run, a notice says so. So a start-up macro's loop plays before the service and goes
+  the moment the first song slide goes up.
 - **Media slides**: drag a media item onto a slide to have that slide show it when it goes on
   screen (an ink outline shows it will), or onto a song's bar in the slides, or the space under
   a song shown by itself, to add a slide of its own; also
@@ -388,7 +395,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   has a start-up choice of its own: the first start of this version turns what an earlier
   version's Settings › Screens › When SoftPresenter Opens played into a macro "When
   SoftPresenter opens" that plays it on the Announcements layer (a media playlist chosen there
-  played on the media layer, behind the slides; the layer is over them), and says so once.
+  played on the media layer, behind the slides; the layer covers the screen until a slide goes
+  on screen), and says so once.
 - **Audio**: playlists of tracks such as walk-in music, chosen at the tab's head (its ⋯
   renames, makes or deletes one; + makes one). First the player: whether it plays and the
   track's name, a line to drag through the track with the time gone and left, Previous (the

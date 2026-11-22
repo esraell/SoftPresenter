@@ -1634,6 +1634,12 @@ impl App {
 
             any |= changes.slides || changes.media || changes.output_enabled || changes.selection || changes.builds;
         }
+        // A slide going on screen takes the announcements off every screen that shows slides, until
+        // they are started again (told to the screens before the slide, so it comes with the
+        // slide's own transition).
+        if self.show.live().is_some() && self.show.live() != live_before {
+            self.announcements_off_for_slide();
+        }
         if output_changed {
             self.refresh_output();
         }
@@ -3103,7 +3109,8 @@ impl App {
     /// it fade from the last picture as the screens do; a clock's tick doesn't fade.
     fn refresh_preview(&mut self, fade: bool) {
         let media_fit = self.live_media_fit();
-        let announcement = self.announcing.as_ref().map(|a| a.shown.clone());
+        // The preview shows a screen that shows slides: without announcements a slide took off.
+        let announcement = self.announcing.as_ref().filter(|a| a.shown.on_slide_screens).map(|a| a.shown.clone());
         let theme = self.show.live().map_or(&self.theme, |at| self.theme_of(at.presentation)).clone();
         let about = self.stage_about();
         let Some(running) = self.running.as_mut() else {
@@ -7937,8 +7944,9 @@ impl ApplicationHandler<AppEvent> for App {
                          with Run When SoftPresenter Opens ticked. It plays {what} on the Announcements layer.",
                         macros::OPENING_MACRO
                     );
+                    said.push_str(" It goes off when a slide goes on screen, until it is started again.");
                     if matches!(opening, service::StartWith::MediaPlaylist { .. }) {
-                        said.push_str(" That layer is over the slides, where the media playlist played behind them.");
+                        said.push_str(" (The media playlist used to play behind the slides.)");
                     }
                     if let Err(problem) = saved {
                         said.push_str(&format!(" {problem}"));
