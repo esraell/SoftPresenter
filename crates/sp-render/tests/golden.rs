@@ -1624,3 +1624,161 @@ fn a_painter_has_not_rested_while_the_gpu_holds_memory_a_picture_gave_back() {
     easel.rest();
     assert!(easel.painter.rest(&easel.device, &easel.queue), "and then it has rested");
 }
+
+impl Easel {
+    /// Paints a scene on clear, as a see-through screen is, and reads it back.
+    fn paint_see_through(&mut self, scene: &sp_render::vello::Scene, w: u32, h: u32) -> (wgpu::Texture, Vec<u8>) {
+        let texture = target_texture(&self.device, w, h);
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.painter.paint_see_through(&self.device, &self.queue, scene, &view, w, h).expect("paint");
+        let pixels = read_pixels(&self.device, &self.queue, &texture).expect("read back");
+        (texture, pixels)
+    }
+
+    /// A picture painted see-through, as a window shows it through a solid pass: drawn into a
+    /// texture of a window's format (here RGBA, as the screens' windows may be) and read back.
+    fn shown_solid(&self, picture: &wgpu::Texture, shown: sp_render::Solid) -> Vec<u8> {
+        let (w, h) = (picture.width(), picture.height());
+        let window = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("a window's picture"),
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let pass = sp_render::SolidPass::new(&self.device, wgpu::TextureFormat::Rgba8Unorm, shown);
+        assert_eq!((pass.shown(), pass.format()), (shown, wgpu::TextureFormat::Rgba8Unorm));
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        let source = picture.create_view(&wgpu::TextureViewDescriptor::default());
+        let target = window.create_view(&wgpu::TextureViewDescriptor::default());
+        pass.draw(&self.device, &mut encoder, &source, &target);
+        self.queue.submit([encoder.finish()]);
+        read_pixels(&self.device, &self.queue, &window).expect("read back")
+    }
+}
+
+/// A see-through screen is painted on clear. The renderer works with premultiplied colours but
+/// writes each pixel's colour as it is, with its alpha beside it (straight): a half-solid white
+/// comes back white, half solid, not grey. Where nothing is drawn it is clear. So a picture
+/// sent straight (NDI's own way) needs no change, and only premultiplied does.
+#[test]
+fn painting_on_clear_leaves_straight_colours_and_clear_where_nothing_is_drawn() {
+    use sp_render::vello::kurbo::{Affine, Rect};
+    use sp_render::vello::peniko::{Color, Fill};
+    let (w, h) = (64, 36);
+    let mut scene = sp_render::vello::Scene::new();
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        Color::from_rgba8(255, 255, 255, 128),
+        None,
+        &Rect::new(0.0, 0.0, 32.0, 36.0),
+    );
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        Color::from_rgba8(200, 100, 50, 255),
+        None,
+        &Rect::new(32.0, 0.0, 48.0, 36.0),
+    );
+    let mut easel = Easel::new();
+    let (_, pixels) = easel.paint_see_through(&scene, w, h);
+    let half = pixel(&pixels, w, 10, 18);
+    assert!(half[..3].iter().all(|c| *c >= 254) && half[3].abs_diff(128) <= 1, "half-solid white: {half:?}");
+    assert_eq!(pixel(&pixels, w, 40, 18), [200, 100, 50, 255], "solid is as drawn");
+    assert_eq!(pixel(&pixels, w, 56, 18), [0, 0, 0, 0], "nothing drawn is clear");
+    // The same scene painted the usual way is on black, solid everywhere.
+    let solid = easel.paint(&scene, w, h).expect("paint");
+    assert_eq!(pixel(&solid, w, 56, 18), [0, 0, 0, 255]);
+    assert!(pixel(&solid, w, 10, 18)[0].abs_diff(128) <= 1, "half white over black is grey");
+}
+
+/// A see-through screen's slide: the words, solid, with soft edges, and clear everywhere else.
+/// Shown in a window, its fill is solid (straight: the colours as they are; premultiplied: as
+/// over black), and its key is how solid each pixel of that same picture is, as a grey.
+#[test]
+fn a_see_through_screen_and_its_key_come_from_one_picture() {
+    use sp_model::Rgba;
+    use sp_render::Solid;
+    let (w, h) = (480, 270);
+    // As a see-through screen draws it: nothing where nothing is drawn (the screen's colour
+    // clear), and the theme without its background (the built-in has none).
+    let words = slide("Light rises over the quiet hills", None);
+    let layers = sp_render::Layers {
+        slide: Some(&words),
+        backdrop: Some(Rgba { r: 0, g: 0, b: 0, a: 0 }),
+        ..Default::default()
+    };
+    let scene = sp_render::build_layers(&mut Fonts::new(), &layers, &Theme::builtin(), w, h).scene;
+    let mut easel = Easel::new();
+    let (picture, fill) = easel.paint_see_through(&scene, w, h);
+    let alphas: Vec<u8> = fill.chunks(4).map(|p| p[3]).collect();
+    let clear = alphas.iter().filter(|a| **a == 0).count();
+    let solid = alphas.iter().filter(|a| **a == 255).count();
+    let between = alphas.len() - clear - solid;
+    assert_eq!(pixel(&fill, w, 2, 2), [0, 0, 0, 0], "the corner is clear");
+    assert!(clear > alphas.len() / 2, "mostly clear: {clear} of {}", alphas.len());
+    assert!(solid > 500, "the words are solid: {solid}");
+    assert!(between > 100, "with soft edges: {between}");
+    // The key: each pixel's alpha as a grey, solid.
+    let key = easel.shown_solid(&picture, Solid::Key);
+    let (straight, premultiplied) =
+        (easel.shown_solid(&picture, Solid::Straight), easel.shown_solid(&picture, Solid::Premultiplied));
+    for ((fill, key), (straight, premultiplied)) in
+        fill.chunks(4).zip(key.chunks(4)).zip(straight.chunks(4).zip(premultiplied.chunks(4)))
+    {
+        assert!(key[..3].iter().all(|grey| grey.abs_diff(fill[3]) <= 1) && key[3] == 255, "key {key:?} of {fill:?}");
+        assert!(straight[..3].iter().zip(&fill[..3]).all(|(a, b)| a.abs_diff(*b) <= 1) && straight[3] == 255);
+        let times = |colour: u8| (f32::from(colour) * f32::from(fill[3]) / 255.0).round() as u8;
+        assert!(
+            premultiplied[..3].iter().zip(&fill[..3]).all(|(a, b)| a.abs_diff(times(*b)) <= 1)
+                && premultiplied[3] == 255,
+            "premultiplied {premultiplied:?} of {fill:?}"
+        );
+    }
+    // How the key and the fill look, for an eye to check.
+    let shown: Vec<u8> = fill.chunks(4).flat_map(|p| [p[0], p[1], p[2], p[3]]).collect();
+    assert_matches_golden("see_through_fill", &shown, w, h);
+    assert_matches_golden("see_through_key", &key, w, h);
+}
+
+/// Half-way through a transition on a see-through screen, a pixel clear in both pictures is
+/// still clear and one solid in both is still solid; one only in the old, or only in the new,
+/// is half solid. (On a solid screen a dissolve lays the new over the old, which on clear would
+/// leave the old words at full strength until the end.) A fade through black goes through
+/// clear: the camera alone.
+#[test]
+fn a_see_through_transition_cross_fades_clear_and_solid_truly() {
+    use sp_model::TransitionKind;
+    use sp_render::vello::kurbo::{Affine, Rect};
+    use sp_render::vello::peniko::{Color, Fill};
+    let (w, h) = (64, 36);
+    // The old: white on the left and in the middle; the new: white in the middle and on the right.
+    let boxes = |rects: &[(f64, f64)]| {
+        let mut scene = sp_render::vello::Scene::new();
+        for (left, right) in rects {
+            scene.fill(Fill::NonZero, Affine::IDENTITY, Color::WHITE, None, &Rect::new(*left, 0.0, *right, 36.0));
+        }
+        scene
+    };
+    let from = boxes(&[(0.0, 16.0), (24.0, 40.0)]);
+    let to = boxes(&[(24.0, 40.0), (48.0, 64.0)]);
+    let mut easel = Easel::new();
+    let mut alpha_at = |kind: TransitionKind, amount: f32| {
+        let scene = sp_render::see_through_transition(kind, &from, &to, amount, w, h);
+        let (_, pixels) = easel.paint_see_through(&scene, w, h);
+        [8, 20, 32, 56].map(|x| pixel(&pixels, w, x, 18)[3])
+    };
+    for kind in [TransitionKind::Dissolve, TransitionKind::Push, TransitionKind::Wipe, TransitionKind::Fade] {
+        let [old, neither, both, new] = alpha_at(kind, 0.5);
+        assert!(old.abs_diff(128) <= 2 && new.abs_diff(128) <= 2, "{kind:?}: half and half: {old} {new}");
+        assert_eq!((neither, both), (0, 255), "{kind:?}: clear stays clear, solid stays solid");
+        assert_eq!(alpha_at(kind, 0.0), [255, 0, 255, 0], "{kind:?} starts on the old");
+        assert_eq!(alpha_at(kind, 1.0), [0, 0, 255, 255], "{kind:?} ends on the new");
+    }
+    assert_eq!(alpha_at(TransitionKind::FadeBlack, 0.5), [0, 0, 0, 0], "through clear, not black");
+    assert_eq!(alpha_at(TransitionKind::Cut, 0.3), [0, 0, 255, 255]);
+}

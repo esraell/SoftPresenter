@@ -253,9 +253,38 @@ impl Painter {
         w: u32,
         h: u32,
     ) -> Result<(), PaintError> {
+        self.paint_on(device, queue, scene, target, w, h, Color::BLACK)
+    }
+
+    /// Paints as [`Painter::paint`] does, on clear rather than black: where the scene draws
+    /// nothing the texture is left clear, for a see-through screen. The texture then holds each
+    /// pixel's colour as it is with how solid it is beside it (straight alpha: the renderer
+    /// works premultiplied, and divides the colours by the alpha as it writes them).
+    pub fn paint_see_through(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        scene: &Scene,
+        target: &wgpu::TextureView,
+        w: u32,
+        h: u32,
+    ) -> Result<(), PaintError> {
+        self.paint_on(device, queue, scene, target, w, h, Color::TRANSPARENT)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn paint_on(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        scene: &Scene,
+        target: &wgpu::TextureView,
+        w: u32,
+        h: u32,
+        base_color: Color,
+    ) -> Result<(), PaintError> {
         self.paints += 1;
-        let params =
-            RenderParams { base_color: Color::BLACK, width: w, height: h, antialiasing_method: AaConfig::Area };
+        let params = RenderParams { base_color, width: w, height: h, antialiasing_method: AaConfig::Area };
         // A scene of plain colour fills only (no text, gradient or picture) makes vello 0.12 take
         // a shortcut that throws its picture atlas away while still counting the pictures in it
         // as uploaded, so the next picture drawn from it comes out black. Such a scene is given a
