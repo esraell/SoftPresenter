@@ -223,8 +223,10 @@ feature changes, this page changes in the same commit.
   in the lists does, unless the verses are made into one slide; Command-Return still keeps the
   verse alone), and so does a passage looked up with Return in Scripture Lookup; in the Bible view ↑
   and ↓ pick the verse before or after (from the verse on screen when none is picked). The slide
-  picked is ringed as slides picked out are (never in orange, which is only for what is on
-  screen), brought into view, and the keyboard is the show's again. Enter puts it on screen;
+  picked has a 2-point ink ring, its strip in ink and a small ink key cap for Enter after its
+  label (in words only or a table, its row has the chosen grey and a fine dim ring inside); never
+  orange, which is only for what is on screen, nor the blue of slides picked out to change several;
+  it is brought into view, and the keyboard is the show's again. Enter puts it on screen;
   then Space, → and ← go on from it as from any slide. With nothing on screen, Space puts the
   picked slide on too, and → and ← move the pick to the next or previous slide (in the order
   sung) without putting anything on, so a reading can be looked up and the right verse picked

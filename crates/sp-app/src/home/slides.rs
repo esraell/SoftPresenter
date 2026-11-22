@@ -51,6 +51,8 @@ const SPOTLIGHT_FOR: f64 = 1.8;
 const LEFT_OUT_HEAD: f32 = 34.0;
 /// The ring round slides picked out to change several at once.
 const PICKED: Color32 = Color32::from_rgb(0x6a, 0xa5, 0xff);
+/// The key cap after the label of the slide that waits for Enter (the cue).
+const CUE_KEY: egui::Vec2 = egui::Vec2::new(20.0, 18.0);
 /// The narrowest a slide in the grid gets, in points, before fewer go across.
 const SMALLEST_SLIDE: f32 = 150.0;
 /// How rounded a tile's picture is.
@@ -1276,11 +1278,11 @@ fn draw_slides(
             response.clone().on_hover_text(format!("{} (key {key})", group.name));
         }
         let is_live = live_at == Some(at);
-        let picked = here.is_some_and(|here| {
-            state.selected_slide == Some(here)
-                || state.picked_slides.contains(&here)
-                || (cue == Some(here) && !entry.again)
-        });
+        // The slide that waits for Enter: in ink, never orange, and not the blue of slides
+        // picked out to change several at once.
+        let cued = !is_live && !entry.again && here.is_some() && cue == here;
+        let picked =
+            !cued && here.is_some_and(|here| state.selected_slide == Some(here) || state.picked_slides.contains(&here));
         // The slide that was on screen before it was cleared: Next goes on from it.
         let was_live = show.live().is_none() && here.is_some() && show.cursor() == here;
         // Numbered in the order sung, under an arrangement.
@@ -1340,6 +1342,8 @@ fn draw_slides(
                 }
                 if is_live {
                     ui.painter().rect_stroke(picture, ROUND, Stroke::new(3.0, TALLY), StrokeKind::Outside);
+                } else if cued {
+                    ui.painter().rect_stroke(picture, ROUND, Stroke::new(2.0, TEXT), StrokeKind::Outside);
                 } else if picked {
                     ui.painter().rect_stroke(picture, ROUND, Stroke::new(3.0, PICKED), StrokeKind::Outside);
                 } else if was_live {
@@ -1382,22 +1386,32 @@ fn draw_slides(
                 }
                 let (font, ink) = if is_live {
                     (if first { fixed_semibold(12.0) } else { fixed(12.0) }, TALLY)
-                } else if first {
+                } else if first || cued {
                     (fixed_semibold(12.0), TEXT)
                 } else {
                     (fixed(12.0), TEXT_FAINT)
                 };
-                let label = Rect::from_min_max(pos2(drawn.max.x + 22.0, rect.max.y - STRIP), pos2(right, rect.max.y));
+                // The cue has a small ink key cap for Enter after its label, kept room for.
+                let room = if cued { CUE_KEY.x + 6.0 } else { 0.0 };
+                let label =
+                    Rect::from_min_max(pos2(drawn.max.x + 22.0, rect.max.y - STRIP), pos2(right - room, rect.max.y));
                 let galley = crate::studio::spaced(ui, &name.to_uppercase(), font, ink, 0.5);
+                let wide = galley.size().x;
                 ui.painter().with_clip_rect(label).galley(
                     pos2(label.min.x, middle - galley.size().y / 2.0),
                     galley,
                     ink,
                 );
+                if cued {
+                    let x = (label.min.x + wide).min(label.max.x) + 6.0;
+                    paint_enter_key(ui, Rect::from_min_size(pos2(x, middle - CUE_KEY.y / 2.0), CUE_KEY));
+                }
             }
             SlideView::Easy | SlideView::Table => {
                 let fill = if is_live {
                     Some(TALLY.gamma_multiply(0.2))
+                } else if cued {
+                    Some(CARD)
                 } else if picked {
                     Some(PICKED.gamma_multiply(0.2))
                 } else if near {
@@ -1407,6 +1421,10 @@ fn draw_slides(
                 };
                 if let Some(fill) = fill {
                     ui.painter().rect_filled(rect, ROUND, fill);
+                }
+                // The row that waits for Enter: the well, with a fine dim ring inside.
+                if cued {
+                    ui.painter().rect_stroke(rect, ROUND, Stroke::new(1.5, TEXT_DIM), StrokeKind::Inside);
                 }
                 let columns = &sheet.columns;
                 let middle = rect.center().y;
@@ -1526,6 +1544,17 @@ fn draw_slides(
 fn dot_colour(colour: Rgba) -> Color32 {
     let light = 0.299 * f32::from(colour.r) + 0.587 * f32::from(colour.g) + 0.114 * f32::from(colour.b);
     if light < 60.0 { Color32::from_rgb(0x6b, 0x7f, 0x99) } else { color32(colour) }
+}
+
+/// The key cap that says Enter puts this slide on screen: ink, with the return mark drawn in
+/// near-black (lines, so it shows whatever fonts the computer has).
+fn paint_enter_key(ui: &egui::Ui, cap: Rect) {
+    let painter = ui.painter();
+    painter.rect_filled(cap, 5.0, TEXT);
+    let at = |x: f32, y: f32| pos2(cap.min.x + x * cap.width(), cap.min.y + y * cap.height());
+    let stroke = Stroke::new(1.4, Color32::from_rgb(0x11, 0x11, 0x11));
+    painter.line(vec![at(0.7, 0.26), at(0.7, 0.62), at(0.3, 0.62)], stroke);
+    painter.line(vec![at(0.42, 0.46), at(0.3, 0.62), at(0.42, 0.78)], stroke);
 }
 
 /// The small tags in a slide's strip for what the slide does: its hot key (true: drawn as a

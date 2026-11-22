@@ -9257,6 +9257,49 @@ mod tests {
     }
 
     #[test]
+    fn the_slide_waiting_for_enter_is_drawn_in_ink_never_blue_or_orange() {
+        use crate::studio::{CARD, TALLY, TEXT, TEXT_DIM};
+        let blue = Color32::from_rgb(0x6a, 0xa5, 0xff);
+        // Each outline and fill drawn in the slides, with its width.
+        let drawn = |state: &mut HomeState, show: &Show| -> Vec<(f32, Color32, Color32)> {
+            fn walk(shape: &egui::Shape, into: &mut Vec<(f32, Color32, Color32)>) {
+                match shape {
+                    egui::Shape::Rect(rect) => into.push((rect.stroke.width, rect.stroke.color, rect.fill)),
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                    _ => {}
+                }
+            }
+            let ctx = egui::Context::default();
+            let mut rects = Vec::new();
+            for frame in 0..2 {
+                let raw = RawInput { time: Some(f64::from(frame) * 0.1), ..input(None) };
+                let output = ctx.run_ui(raw, |ui| {
+                    home_ui(ui, show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+                });
+                rects.clear();
+                output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut rects));
+                output.drop_without_applying_deltas();
+            }
+            rects
+        };
+        let show = show(3);
+        let mut state = HomeState::default();
+        state.set_pick(&show, SlideRef { presentation: 0, slide: 1 }, false);
+        let grid = drawn(&mut state, &show);
+        assert!(grid.iter().any(|(width, ink, _)| *width == 2.0 && *ink == TEXT), "a 2-point ink ring round the tile");
+        assert!(!grid.iter().any(|(_, ink, fill)| [*ink, *fill].iter().any(|c| *c == blue || *c == TALLY)));
+        // As words only, or a table: the well, with a fine dim ring inside.
+        for view in [SlideView::Easy, SlideView::Table] {
+            let mut state = HomeState { slide_view: view, ..HomeState::default() };
+            state.set_pick(&show, SlideRef { presentation: 0, slide: 1 }, false);
+            let rows = drawn(&mut state, &show);
+            assert!(rows.iter().any(|(_, _, fill)| *fill == CARD), "{view:?}: the well");
+            assert!(rows.iter().any(|(width, ink, _)| *width == 1.5 && *ink == TEXT_DIM), "{view:?}: the dim ring");
+            assert!(!rows.iter().any(|(_, ink, fill)| *ink == blue || *fill == blue.gamma_multiply(0.2)));
+        }
+    }
+
+    #[test]
     fn a_press_on_a_result_that_barely_moves_still_opens_it() {
         let (mut show, mut state) = find_drag_setting();
         let ctx = egui::Context::default();
