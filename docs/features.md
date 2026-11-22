@@ -390,13 +390,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   name, how many steps, a Run key (the only thing that runs it), a chevron that opens its steps
   (each with Earlier and Remove, then Add a step…), and ⋯ with Edit Steps…, Colour, Run When
   SoftPresenter Opens, Rename, Duplicate and Delete.
-- **Start-up is a macro**: a macro with Run When SoftPresenter Opens ticked runs when the app
-  opens, such as one that plays the announcement loop before the service. Settings no longer
-  has a start-up choice of its own: the first start of this version turns what an earlier
-  version's Settings › Screens › When SoftPresenter Opens played into a macro "When
-  SoftPresenter opens" that plays it on the Announcements layer (a media playlist chosen there
-  played on the media layer, behind the slides; the layer covers the screen until a slide goes
-  on screen), and says so once.
+- **Start-up is a macro**: a macro with Run When SoftPresenter Opens switched on (a switch at
+  the top of the opened macro, and in its menu) runs when the app opens, such as one that plays
+  the announcement loop before the service. Its step Audience Screens Off takes effect before
+  any screen draws, so the audience screens never flash on. Settings no longer has start-up
+  choices of its own: the first start of this version turns what an earlier version's
+  Settings › Screens › When SoftPresenter Opens played into a macro "When SoftPresenter opens"
+  that plays it on the Announcements layer (a media playlist chosen there played on the media
+  layer, behind the slides; the layer goes off when a slide goes on screen), and its Start with
+  the Audience Screens Off into that macro's first step, Audience Screens Off, and says so once.
 - **Audio**: playlists of tracks such as walk-in music, chosen at the tab's head (its ⋯
   renames, makes or deletes one; + makes one). First the player: whether it plays and the
   track's name, a line to drag through the track with the time gone and left, Previous (the
@@ -995,8 +997,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   NAME|window|ndi NAME|automatic]`, `screen set SCREEN key=value…` (name, output, kind, layers,
   colour, edges, theme, stage layout, background solid or see-through, alpha, key of another
   screen), `screen delete SCREEN --yes`; `settings` and `settings set
-  key=value…` (transitions, the copyright line and CCLI licence, the audience screens at start,
-  what starts with the app, the continuous playlist, the slide view and size); `view reflow
+  key=value…` (transitions, the copyright line and CCLI licence, the continuous playlist, the
+  slide view and size; what happens at start is a macro's, `macro startup NAME on`); `view reflow
   [SONG]`; and `help COMMAND` for one command's help, without the app running. Bible downloads
   started from the command line have a job number, for `--wait` and `sp job N`.
 - `sp …` (full name `softpresenter`), installed from SoftPresenter › Install Command Line Tool…,

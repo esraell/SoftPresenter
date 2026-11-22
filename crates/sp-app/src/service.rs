@@ -442,7 +442,9 @@ pub struct Prefs {
     pub copyright_show: CopyrightShow,
     /// The church's CCLI licence number, for the copyright line.
     pub ccli_licence: String,
-    /// True to start with the audience screens off; false to turn them on at launch.
+    /// From before start-up was a macro: true to start with the audience screens off. Read once,
+    /// to put the step in the start-up macro (`macros::from_audience_off`); no longer written.
+    #[serde(skip_serializing)]
     pub start_audience_off: bool,
     /// Next at the end of a song goes on to the next song in the service.
     pub continuous: bool,

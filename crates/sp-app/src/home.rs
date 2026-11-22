@@ -421,8 +421,6 @@ pub struct HomeState {
     /// When a song's copyright line is shown, and the church's CCLI licence number.
     pub copyright_show: crate::service::CopyrightShow,
     pub ccli_licence: String,
-    /// True to start with the audience screens off.
-    pub start_audience_off: bool,
     /// Lists worked out from the songs, kept from one frame to the next.
     pub lists: crate::kept::Lists,
     /// The media playlist playing item after item on the media layer, if one is.
@@ -1414,7 +1412,6 @@ impl Default for HomeState {
             voxlive_go: None,
             copyright_show: crate::service::CopyrightShow::Never,
             ccli_licence: String::new(),
-            start_audience_off: false,
             lists: crate::kept::Lists::default(),
             media_playing: None,
             copyright_request: None,
@@ -1706,7 +1703,7 @@ impl HomeState {
             continuous: self.continuous,
             copyright_show: self.copyright_show,
             ccli_licence: self.ccli_licence.clone(),
-            start_audience_off: self.start_audience_off,
+            start_audience_off: false,
             stage_off: !self.stage_on,
             setup_done: self.setup_done,
             bible_lists_hidden: !self.bible.lists_open,
@@ -1749,7 +1746,6 @@ impl HomeState {
         self.continuous = prefs.continuous;
         self.copyright_show = prefs.copyright_show;
         self.ccli_licence = prefs.ccli_licence.clone();
-        self.start_audience_off = prefs.start_audience_off;
         self.stage_on = !prefs.stage_off;
         self.setup_done = prefs.setup_done;
         self.bible.lists_open = !prefs.bible_lists_hidden;
@@ -4579,8 +4575,6 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
                     state.settings_open = true;
                 }
                 ui.add_space(14.0);
-                ui.checkbox(&mut state.start_audience_off, "Start with the audience screens off")
-                    .on_hover_text("When SoftPresenter opens, nothing is shown until Audience is switched on");
                 ui.checkbox(&mut state.stage_on, "Stage screens on");
             }
             "Groups" => {
@@ -4650,7 +4644,7 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
     });
 }
 
-fn switch(ui: &mut egui::Ui, on: bool, hint: &str) -> bool {
+pub(crate) fn switch(ui: &mut egui::Ui, on: bool, hint: &str) -> bool {
     let (rect, response) = ui.allocate_exact_size(vec2(34.0, 20.0), Sense::click());
     let how_far = ui.ctx().animate_bool(response.id, on);
     let track = Color32::from_gray(70).lerp_to_gamma(ON, how_far);

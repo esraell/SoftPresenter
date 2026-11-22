@@ -491,7 +491,7 @@ impl crate::App {
     /// `settings`, and `settings set key=value…`: the choices kept between runs.
     pub(crate) fn ctl_settings(&mut self, args: &[String]) -> Result<Reply, String> {
         let usage = "settings | settings set transition=KIND[:SECONDS] media_transition=… copyright=never|first|last|every \
-                     ccli_licence=NUMBER start_audience=on|off continuous=on|off view=grid|easy|table columns=1-12";
+                     ccli_licence=NUMBER continuous=on|off view=grid|easy|table columns=1-12";
         let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
         if args.get(1).is_none() {
             let prefs = state.prefs();
@@ -503,7 +503,14 @@ impl crate::App {
                 format!("media transition: {}", transition(prefs.media_transition)),
                 format!("copyright line: {}", prefs.copyright_show.name()),
                 format!("CCLI licence: {}", if prefs.ccli_licence.is_empty() { "(none)" } else { &prefs.ccli_licence }),
-                format!("audience screens at start: {}", if prefs.start_audience_off { "off" } else { "on" }),
+                format!(
+                    "audience screens at start: {}",
+                    if crate::macros::starts_with_audience_off(&state.macros) {
+                        "off (a macro run when SoftPresenter opens switches them off)"
+                    } else {
+                        "on"
+                    }
+                ),
                 format!("continuous playlist: {}", if prefs.continuous { "on" } else { "off" }),
                 format!("slides: {} view, {} across", prefs.slide_view, prefs.columns),
             ];
@@ -557,9 +564,9 @@ impl crate::App {
                     changes.push(Box::new(move |state| state.ccli_licence = value));
                 }
                 "start_audience" => {
-                    let on = on_off(key, value)?;
-                    said.push(format!("audience screens {} at start", if on { "on" } else { "off" }));
-                    changes.push(Box::new(move |state| state.start_audience_off = !on));
+                    return Err("Starting with the audience screens off is a macro step now: macro new NAME, macro \
+                                add NAME audience off, then macro startup NAME on."
+                        .to_owned());
                 }
                 "continuous" => {
                     let on = on_off(key, value)?;

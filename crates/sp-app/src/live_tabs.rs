@@ -1373,6 +1373,34 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
             if !open {
                 return;
             }
+            // Whether it runs as SoftPresenter opens, in plain view (also in its menu).
+            ui.add_space(6.0);
+            let width_here = ui.available_width();
+            ui.allocate_ui_with_layout(
+                vec2(width_here, 22.0),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    let hint = "Run this macro's steps as SoftPresenter opens";
+                    if crate::home::switch(ui, made.on_startup, hint) {
+                        asked = Some((index, MacroAsk::Startup));
+                    }
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new("Run when SoftPresenter opens")
+                                .font(FontId::proportional(12.5))
+                                .color(TEXT),
+                        );
+                    });
+                },
+            );
+            ui.label(
+                egui::RichText::new(
+                    "Audience Screens Off here takes effect before any screen draws, so the audience screens never \
+                     flash on.",
+                )
+                .font(FontId::proportional(11.5))
+                .color(TEXT_FAINT),
+            );
             // Its steps, in the order they are done, each with Earlier and Remove; then a menu
             // of steps to add.
             ui.add_space(6.0);

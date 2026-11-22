@@ -99,6 +99,33 @@ pub fn from_opening_choice(macros: &mut Vec<Macro>, choice: &crate::service::Sta
     Some(step)
 }
 
+/// True when a macro run as SoftPresenter opens switches the audience screens off. The app does
+/// that before any screen draws, so they never show anything first.
+pub fn starts_with_audience_off(macros: &[Macro]) -> bool {
+    macros.iter().any(|made| made.on_startup && made.actions.contains(&ShowAction::Audience { on: false }))
+}
+
+/// Start-up belongs in macros: an earlier version's Settings › Screens › Start with the
+/// Audience Screens Off becomes the step Audience Screens Off, first in the macro run as
+/// SoftPresenter opens (the one made from what it played, or a new one). True when the step was
+/// added; nothing changes when the setting was off or a start-up macro already has the step.
+pub fn from_audience_off(macros: &mut Vec<Macro>, off: bool) -> bool {
+    if !off || starts_with_audience_off(macros) {
+        return false;
+    }
+    let step = ShowAction::Audience { on: false };
+    match macros.iter_mut().find(|made| made.on_startup && made.name == OPENING_MACRO) {
+        Some(made) => made.actions.insert(0, step),
+        None => {
+            let mut made = Macro::new(OPENING_MACRO.to_owned());
+            made.actions = vec![step];
+            made.on_startup = true;
+            macros.push(made);
+        }
+    }
+    true
+}
+
 fn file() -> Option<std::path::PathBuf> {
     crate::bible_store::data_dir().map(|dir| dir.join("macros.json"))
 }
@@ -172,5 +199,29 @@ mod tests {
         // A song on the Announcements layer, by its key.
         let step = from_opening_choice(&mut macros, &StartWith::Announcements { song: "41".to_owned() });
         assert_eq!(step, Some(ShowAction::Announce { what: Announced::Song { key: "41".to_owned() } }));
+    }
+
+    #[test]
+    fn starting_with_the_audience_screens_off_becomes_the_first_step_of_the_start_up_macro() {
+        use crate::service::StartWith;
+        let off = ShowAction::Audience { on: false };
+        // Off, with nothing played at start: a start-up macro of its own.
+        let mut macros = Vec::new();
+        assert!(!from_audience_off(&mut macros, false), "nothing when the setting was off");
+        assert!(from_audience_off(&mut macros, true));
+        assert_eq!((macros.len(), macros[0].on_startup, macros[0].actions.clone()), (1, true, vec![off.clone()]));
+        assert!(starts_with_audience_off(&macros));
+        assert!(!from_audience_off(&mut macros, true), "never added twice");
+        // Off, with a media playlist played at start: first in that macro, before it plays.
+        let mut macros = Vec::new();
+        let playlist = Uuid::new_v4();
+        from_opening_choice(&mut macros, &StartWith::MediaPlaylist { id: playlist });
+        assert!(from_audience_off(&mut macros, true));
+        assert_eq!(macros.len(), 1);
+        assert_eq!(macros[0].actions[0], off);
+        // A macro that isn't run at start doesn't count.
+        let mut plain = Macro::new("Off".to_owned());
+        plain.actions = vec![off];
+        assert!(!starts_with_audience_off(&[plain]));
     }
 }

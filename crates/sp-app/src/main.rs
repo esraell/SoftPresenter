@@ -7910,8 +7910,9 @@ impl ApplicationHandler<AppEvent> for App {
                 if (!prefs.setup_done && !self.quiet()) || std::env::var_os("SOFTPRESENTER_SETUP").is_some() {
                     running.home_state.setup = Some(setup::Setup::new());
                 }
-                // The audience screens start off when Settings says so.
-                let start_off = prefs.start_audience_off;
+                // From before start-up was a macro: whether Settings said to start with the
+                // audience screens off (moved into the start-up macro below).
+                let audience_off_before = prefs.start_audience_off;
                 // The screens, as they were left. The first start after screens could be
                 // listed makes the list from how the output was set up before: one screen
                 // placed automatically, and one sent over NDI if NDI was on.
@@ -7954,6 +7955,24 @@ impl ApplicationHandler<AppEvent> for App {
                     applog::event("macros", &said);
                     running.home_state.notice = Some(said);
                 }
+                if macros::from_audience_off(&mut running.home_state.macros, audience_off_before) {
+                    let mut said = format!(
+                        "Starting with the audience screens off is now the step Audience Screens Off in the \
+                         macro \u{201c}{}\u{201d} in the Macros tab, run when SoftPresenter opens.",
+                        macros::OPENING_MACRO
+                    );
+                    if let Err(problem) = macros::save(&running.home_state.macros) {
+                        said.push_str(&format!(" {problem}"));
+                    }
+                    applog::event("macros", &said);
+                    running.home_state.notice = Some(match running.home_state.notice.take() {
+                        Some(before) => format!("{before} {said}"),
+                        None => said,
+                    });
+                }
+                // A start-up macro that switches the audience screens off does that before any
+                // screen draws (below), so they never show anything first.
+                let start_off = macros::starts_with_audience_off(&running.home_state.macros);
                 // Macros set to run when SoftPresenter starts.
                 let startup: Vec<sp_model::ShowAction> = running
                     .home_state
