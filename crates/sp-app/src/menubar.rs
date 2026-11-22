@@ -14,8 +14,14 @@ pub enum Action {
     SetUp,
     Quit,
     NewSong,
+    /// Import Songs › Song Files…: song documents, ChordPro and lyric files, songbooks.
     ImportSongs,
+    /// Import Songs › A Library Folder…: each folder in it becomes a library.
     ImportLibraryFolder,
+    /// Import Songs › A Song Bundle…: songs with the pictures and videos they show.
+    ImportBundle,
+    /// Import Songs › Words from Text…: text, rich-text and Word files, a song each.
+    ImportWords,
     ImportSlides,
     NewSlide,
     CloseWindow,
@@ -156,9 +162,20 @@ pub enum Entry {
     Do(Action, &'static str, Option<Shortcut>),
     /// The same, with a tick beside it when it is on.
     Check(Action, &'static str, Option<Shortcut>),
+    /// A group of choices that opens beside it.
+    Sub(&'static str, &'static [Entry]),
     System(System),
     Line,
 }
+
+/// The choices of File › Import Songs, by kind of file; the import button over the left column
+/// offers the same.
+pub const IMPORT_SONGS: &[Entry] = &[
+    Do(Action::ImportLibraryFolder, "A Library Folder\u{2026}", None),
+    Do(Action::ImportBundle, "A Song Bundle\u{2026}", None),
+    Do(Action::ImportSongs, "Song Files\u{2026}", None),
+    Do(Action::ImportWords, "Words from Text\u{2026}", None),
+];
 
 use Entry::{Check, Do, Line};
 
@@ -187,8 +204,7 @@ pub const MENUS: &[(&str, &[Entry])] = &[
         &[
             Do(Action::NewSong, "New Song", cmd('N')),
             Do(Action::NewSlide, "Add Slide", shift_cmd('N')),
-            Do(Action::ImportSongs, "Import Songs…", None),
-            Do(Action::ImportLibraryFolder, "Import from ProPresenter…", None),
+            Entry::Sub("Import Songs", IMPORT_SONGS),
             Do(Action::ImportSlides, "Import Slides (PowerPoint, Keynote, PDF or Pictures)…", None),
             Line,
             Do(Action::ExportSongs, "Export Songs…", None),
@@ -360,12 +376,28 @@ pub const MENUS: &[(&str, &[Entry])] = &[
     ),
 ];
 
+/// Every line of the menus, with its menu, in menu order; a group's choices follow it.
+fn every_entry() -> Vec<(&'static str, &'static Entry)> {
+    fn add(menu: &'static str, entries: &'static [Entry], into: &mut Vec<(&'static str, &'static Entry)>) {
+        for entry in entries {
+            into.push((menu, entry));
+            if let Entry::Sub(_, inside) = entry {
+                add(menu, inside, into);
+            }
+        }
+    }
+    let mut every = Vec::new();
+    for (menu, entries) in MENUS {
+        add(menu, entries, &mut every);
+    }
+    every
+}
+
 /// Every item that does something, with the words on it, in menu order.
 pub fn labelled_items() -> Vec<(Action, String)> {
-    MENUS
-        .iter()
-        .flat_map(|(_, entries)| entries.iter())
-        .filter_map(|entry| match entry {
+    every_entry()
+        .into_iter()
+        .filter_map(|(_, entry)| match entry {
             Do(action, label, _) | Check(action, label, _) => Some((*action, (*label).to_owned())),
             _ => None,
         })
@@ -374,7 +406,7 @@ pub fn labelled_items() -> Vec<(Action, String)> {
 
 /// Every item that does something, with its shortcut.
 fn items() -> impl Iterator<Item = (Action, Option<Shortcut>)> {
-    MENUS.iter().flat_map(|(_, entries)| entries.iter()).filter_map(|entry| match entry {
+    every_entry().into_iter().filter_map(|(_, entry)| match entry {
         Do(action, _, shortcut) | Check(action, _, shortcut) => Some((*action, *shortcut)),
         _ => None,
     })
@@ -396,9 +428,8 @@ impl Shortcut {
 
 /// Every menu item that has a shortcut, with its menu, its name and the shortcut, in menu order.
 pub fn shortcuts() -> Vec<(&'static str, &'static str, String)> {
-    MENUS
-        .iter()
-        .flat_map(|(menu, entries)| entries.iter().map(move |entry| (*menu, entry)))
+    every_entry()
+        .into_iter()
         .filter_map(|(menu, entry)| match entry {
             Entry::Do(_, label, Some(shortcut)) | Entry::Check(_, label, Some(shortcut)) => {
                 Some((menu, *label, shortcut.text()))
@@ -533,6 +564,59 @@ mod mac {
 
     use super::{Action, Entry, MENUS, Shortcut, System, id_of};
 
+    /// What a menu's lines are built into, and what the menu bar keeps of them.
+    struct Built {
+        checks: Vec<(Action, CheckMenuItem, bool)>,
+        editor_items: Vec<(MenuItem, bool)>,
+    }
+
+    /// Builds one line of a menu (a group of choices with its own lines).
+    fn item(entry: &Entry, built: &mut Built) -> Result<Box<dyn IsMenuItem>, String> {
+        Ok(match entry {
+            Entry::Do(action, label, shortcut) => {
+                let item = MenuItem::with_id(id_of(*action), *label, true, accelerator(*shortcut));
+                if super::needs_editor(*action) {
+                    built.editor_items.push((item.clone(), true));
+                }
+                Box::new(item)
+            }
+            Entry::Check(action, label, shortcut) => {
+                let item = CheckMenuItem::with_id(id_of(*action), *label, true, false, accelerator(*shortcut));
+                built.checks.push((*action, item.clone(), false));
+                Box::new(item)
+            }
+            Entry::Sub(title, entries) => {
+                let submenu = Submenu::new(*title, true);
+                for entry in *entries {
+                    let inside = item(entry, built)?;
+                    submenu.append(inside.as_ref()).map_err(|e| format!("Could not build the menu bar: {e}"))?;
+                }
+                Box::new(submenu)
+            }
+            Entry::Line => Box::new(PredefinedMenuItem::separator()),
+            Entry::System(system) => Box::new(match system {
+                System::About => PredefinedMenuItem::about(
+                    Some("About SoftPresenter"),
+                    Some(AboutMetadata {
+                        name: Some("SoftPresenter".to_owned()),
+                        version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+                        comments: Some("A free, open-source presentation app for church services.".to_owned()),
+                        website: Some("https://github.com/esraell/SoftPresenter".to_owned()),
+                        ..AboutMetadata::default()
+                    }),
+                ),
+                System::Services => PredefinedMenuItem::services(None),
+                System::Hide => PredefinedMenuItem::hide(Some("Hide SoftPresenter")),
+                System::HideOthers => PredefinedMenuItem::hide_others(None),
+                System::ShowAll => PredefinedMenuItem::show_all(None),
+                System::Minimize => PredefinedMenuItem::minimize(None),
+                System::Zoom => PredefinedMenuItem::maximize(Some("Zoom")),
+                System::FullScreen => PredefinedMenuItem::fullscreen(None),
+                System::BringAllToFront => PredefinedMenuItem::bring_all_to_front(None),
+            }),
+        })
+    }
+
     fn code(key: char) -> Option<Code> {
         const LETTERS: [Code; 26] = [
             Code::KeyA,
@@ -618,49 +702,11 @@ mod mac {
         /// Builds the menus and puts them in the menu bar. Call once the app has started.
         pub fn install() -> Result<MenuBar, String> {
             let menu = Menu::new();
-            let mut checks = Vec::new();
-            let mut editor_items = Vec::new();
+            let mut built = Built { checks: Vec::new(), editor_items: Vec::new() };
             for (title, entries) in MENUS {
                 let submenu = Submenu::new(*title, true);
                 for entry in *entries {
-                    let item: Box<dyn IsMenuItem> = match entry {
-                        Entry::Do(action, label, shortcut) => {
-                            let item = MenuItem::with_id(id_of(*action), *label, true, accelerator(*shortcut));
-                            if super::needs_editor(*action) {
-                                editor_items.push((item.clone(), true));
-                            }
-                            Box::new(item)
-                        }
-                        Entry::Check(action, label, shortcut) => {
-                            let item =
-                                CheckMenuItem::with_id(id_of(*action), *label, true, false, accelerator(*shortcut));
-                            checks.push((*action, item.clone(), false));
-                            Box::new(item)
-                        }
-                        Entry::Line => Box::new(PredefinedMenuItem::separator()),
-                        Entry::System(system) => Box::new(match system {
-                            System::About => PredefinedMenuItem::about(
-                                Some("About SoftPresenter"),
-                                Some(AboutMetadata {
-                                    name: Some("SoftPresenter".to_owned()),
-                                    version: Some(env!("CARGO_PKG_VERSION").to_owned()),
-                                    comments: Some(
-                                        "A free, open-source presentation app for church services.".to_owned(),
-                                    ),
-                                    website: Some("https://github.com/esraell/SoftPresenter".to_owned()),
-                                    ..AboutMetadata::default()
-                                }),
-                            ),
-                            System::Services => PredefinedMenuItem::services(None),
-                            System::Hide => PredefinedMenuItem::hide(Some("Hide SoftPresenter")),
-                            System::HideOthers => PredefinedMenuItem::hide_others(None),
-                            System::ShowAll => PredefinedMenuItem::show_all(None),
-                            System::Minimize => PredefinedMenuItem::minimize(None),
-                            System::Zoom => PredefinedMenuItem::maximize(Some("Zoom")),
-                            System::FullScreen => PredefinedMenuItem::fullscreen(None),
-                            System::BringAllToFront => PredefinedMenuItem::bring_all_to_front(None),
-                        }),
-                    };
+                    let item = item(entry, &mut built)?;
                     submenu.append(item.as_ref()).map_err(|e| format!("Could not build the menu bar: {e}"))?;
                 }
                 menu.append(&submenu).map_err(|e| format!("Could not build the menu bar: {e}"))?;
@@ -671,7 +717,7 @@ mod mac {
                 }
             }
             menu.init_for_nsapp();
-            Ok(MenuBar { _menu: menu, checks, editor_items })
+            Ok(MenuBar { _menu: menu, checks: built.checks, editor_items: built.editor_items })
         }
 
         /// Greys out the items that only work in the editor while it is not open.
@@ -727,8 +773,30 @@ mod tests {
     }
 
     #[test]
+    fn import_songs_offers_each_kind_of_file() {
+        let file = MENUS.iter().find(|(menu, _)| *menu == "File").expect("a File menu").1;
+        let inside = file.iter().find_map(|entry| match entry {
+            Entry::Sub("Import Songs", inside) => Some(*inside),
+            _ => None,
+        });
+        let words: Vec<&str> = inside
+            .expect("File › Import Songs")
+            .iter()
+            .filter_map(|entry| if let Do(_, label, _) = entry { Some(*label) } else { None })
+            .collect();
+        assert_eq!(
+            words,
+            ["A Library Folder\u{2026}", "A Song Bundle\u{2026}", "Song Files\u{2026}", "Words from Text\u{2026}"]
+        );
+        // Each is found by its id, as `sp menu` and the import button over the left column find it.
+        assert_eq!(action_of("ImportBundle"), Some(Action::ImportBundle));
+        assert_eq!(action_of("ImportWords"), Some(Action::ImportWords));
+        assert_eq!(action_of("ImportLibraryFolder"), Some(Action::ImportLibraryFolder));
+    }
+
+    #[test]
     fn no_menu_has_two_dividers_together_or_one_at_an_end() {
-        for (menu, entries) in MENUS {
+        for (menu, entries) in MENUS.iter().copied().chain([("Import Songs", IMPORT_SONGS)]) {
             assert!(!matches!(entries.first(), Some(Entry::Line)), "{menu} starts with a divider");
             assert!(!matches!(entries.last(), Some(Entry::Line)), "{menu} ends with a divider");
             for pair in entries.windows(2) {

@@ -48,7 +48,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   FILE.sppack [--no-videos]` makes one: the songs (or a playlist with its songs), the themes
   they set for themselves, and their pictures and videos (offered with their size, and left out
   on request). No path or user name from the computer goes in. Opening one (drop it on the
-  window, File › Import Songs…, or `sp song import FILE.sppack`) brings the songs into the library,
+  window, File › Import Songs › A Song Bundle…, or `sp song import FILE.sppack`) brings the songs into the library,
   their pictures into Images and videos into Media, the themes they need as new themes (a song
   using the main theme takes on this computer's), and the playlist as a new playlist, with its
   pictures and videos (into the media bin) and its media playlists (with theirs; one this
@@ -96,8 +96,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - New Song (Command-N, or + over the song list) asks for the song's title and theme, and takes
   its words pasted in (a line in square brackets starts a group, a blank line a new slide; a
   lyric file pasted in whole gives its sections and details, as an import does).
-- **Importing songs.** File › Import Songs…, dropping files on the window, `sp song import
-  FILE…`, or song files named on the command line. It reads plain text in any common encoding
+- **Importing songs.** File › Import Songs offers them by kind of file (and so does the import
+  button over the left column): **A Library Folder…** (each folder in it becomes a library),
+  **A Song Bundle…** (`.proBundle` bundles and SoftPresenter's song packs, with their pictures
+  and videos), **Song Files…** (songs SoftPresenter saved, `.pro` documents, ChordPro and lyric
+  files, songbooks) and **Words from Text…** (plain text, rich text, Word and OpenDocument
+  files, a song from each). Dropping files on the window, `sp song import FILE…`, or song
+  files named on the command line take any of them. It reads plain text in any common encoding
   (UTF-8, UTF-16, and the older Windows ones for Russian, Ukrainian and Western European
   languages), the lyric files song services give (title, sections, and a footer whose song
   number, writers and copyright go into the song's details; a church's own licence number is
@@ -116,12 +121,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   background, so the window and keys go on working; a 60-page deck takes about ten seconds.
   With no program that opens the file, it says what to install, or to export a PDF.
 - **Bringing songs across from SoftProjector.** Its database (`spData.sqlite`) or an exported
-  songbook (`.sps`), dropped on the window or chosen in File › Import Songs…: each songbook
+  songbook (`.sps`), dropped on the window or chosen in File › Import Songs › Song Files…: each songbook
   becomes a library of its name, each song keeps its number before its title (so "123" still
   finds it), its lyricist and composer, its verses, choruses and other parts as groups (a
   "&Куплет" part as more slides of its verse), and an arrangement, "As sung", that repeats the
   chorus after every verse as SoftProjector does. Read with macOS's own SQLite tool, read-only.
-- **Bringing a library across from ProPresenter 7.** File › Import from ProPresenter… opens
+- **Bringing a library across from ProPresenter 7.** File › Import Songs › A Library Folder… opens
   its Libraries folder; choose song documents, one library, or the folder of all of them. Each folder becomes a
   library of the same name. Each song keeps its groups, slides, arrangements (and the one
   chosen), slide labels and notes, slides switched off, and its copyright details. A slide's
@@ -130,8 +135,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   `sp song import`. Documents with pictures or videos but no words are listed as not imported
   for now. A library of 4,372 songs comes across in about a third of a second.
 - **Song bundles from ProPresenter 7** (`.proBundle`, one song or several, with their pictures
-  and videos) come in wherever a `.pro` document does: File › Import Songs…, Import from
-  ProPresenter…, a folder of them, dropping them on the window, or `sp song import`. Every
+  and videos) come in wherever a `.pro` document does: File › Import Songs › A Song Bundle… or
+  A Library Folder…, a folder of them, dropping them on the window, or `sp song import`. Every
   song in a bundle comes across as a `.pro` document does, in the
   order of the bundle's entries (a bundle records no order of its own; the ones seen list their
   songs by name); each picture or video a slide shows is copied into the library's Media folder
@@ -1242,7 +1247,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   week, never while a song pack is being opened, and it stops if a song or setting is saved while
   it works. A half-saved file stays if it may be the only copy of what was being saved. The log
   names every file moved; the window says how many went, only when some did.
-- A menu bar with the usual menus and shortcuts (New Song, Import Songs…, Undo, Cut/Copy/Paste, the views,
+- A menu bar with the usual menus and shortcuts (New Song, Import Songs by kind of file, Undo, Cut/Copy/Paste, the views,
   Clear, Audience Screens and Stage Screens on/off with Shift-Cmd-1 and Shift-Cmd-2, Configure Screens), showing
   only what works: what acts on objects in the editor (Edit › Duplicate, the Format, Arrange and
   Insert items) is greyed outside it.

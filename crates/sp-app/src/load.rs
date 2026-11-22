@@ -147,16 +147,41 @@ pub fn files_to_import(paths: &[PathBuf]) -> Vec<(PathBuf, Option<String>)> {
 /// for a system whose dialogs tell the two apart.
 pub const PRO_BUNDLE_ENDINGS: [&str; 2] = ["proBundle", BUNDLE_ENDING];
 
-/// Every ending a song can be imported from, its own song files included, for file dialogs.
-pub fn import_endings() -> Vec<&'static str> {
-    let mut endings = vec![SONG_EXTENSION, OLD_SONG_EXTENSION];
-    endings.extend(TEXT_ENDINGS);
-    endings.extend(DOCUMENT_ENDINGS);
-    endings.extend([RICH_TEXT_ENDING, PRO_ENDING]);
-    endings.extend(PRO_BUNDLE_ENDINGS);
+/// File › Import Songs › Song Files…: songs saved by SoftPresenter, song documents, ChordPro and
+/// lyric files, and songbooks.
+pub fn song_file_endings() -> Vec<&'static str> {
+    let mut endings = vec![SONG_EXTENSION, OLD_SONG_EXTENSION, PRO_ENDING];
+    endings.extend(TEXT_ENDINGS.iter().filter(|ending| !matches!(**ending, "txt" | "text")));
     endings.extend(SONGBOOK_ENDINGS);
+    endings
+}
+
+/// File › Import Songs › A Song Bundle…: song bundles and song packs, songs with the pictures and
+/// videos they show.
+pub fn bundle_endings() -> Vec<&'static str> {
+    let mut endings = PRO_BUNDLE_ENDINGS.to_vec();
     endings.push(crate::pack::ENDING);
     endings
+}
+
+/// File › Import Songs › Words from Text…: plain text, rich text, and Word and OpenDocument files.
+pub fn words_endings() -> Vec<&'static str> {
+    let mut endings = vec!["txt", "text", RICH_TEXT_ENDING];
+    endings.extend(DOCUMENT_ENDINGS);
+    endings
+}
+
+/// A file window's filter: the kind of file, and its endings ("Song files (.pro, .cho)"). An
+/// ending that differs only in its capitals is named once.
+pub fn filter_name(kind: &str, endings: &[&str]) -> String {
+    let mut named: Vec<&str> = Vec::new();
+    for ending in endings {
+        if !named.iter().any(|have| have.eq_ignore_ascii_case(ending)) {
+            named.push(ending);
+        }
+    }
+    let listed: Vec<String> = named.iter().map(|ending| format!(".{ending}")).collect();
+    format!("{kind} ({})", listed.join(", "))
 }
 
 /// Reads a song from a file to import: text in any common encoding, a lyric file, ChordPro,
@@ -168,7 +193,7 @@ pub fn import_file(path: &Path) -> Result<Presentation, String> {
     let size = std::fs::metadata(path).map_err(|e| format!("{name} could not be read ({e})."))?.len();
     if is_songbook(path) {
         return Err(format!(
-            "{name} holds many songs: import it with File › Import Songs… or by dropping it on the window."
+            "{name} holds many songs: import it with File › Import Songs › Song Files… or by dropping it on the window."
         ));
     }
     // Only the kinds of file songs come in: a sound, a picture or anything else is not read as
@@ -421,8 +446,8 @@ mod tests {
         for name in ["Song.proBundle", "Song.probundle", "Song.PROBUNDLE", "Song.pro"] {
             assert!(is_importable(Path::new(name)), "{name}");
         }
-        let endings = import_endings();
-        assert!(endings.contains(&"proBundle") && endings.contains(&"probundle") && endings.contains(&"pro"));
+        let (bundles, files) = (bundle_endings(), song_file_endings());
+        assert!(bundles.contains(&"proBundle") && bundles.contains(&"probundle") && files.contains(&"pro"));
         // In a folder chosen or dropped, a bundle is one of its songs.
         let dir = TempDir::new("bundles");
         dir.write("Harbour Lights.proBundle", b"PK");
@@ -430,6 +455,24 @@ mod tests {
         let files = files_to_import(std::slice::from_ref(&dir.0));
         assert_eq!(files.len(), 1);
         assert!(files[0].0.ends_with("Harbour Lights.proBundle"));
+    }
+
+    #[test]
+    fn import_songs_kinds_of_file_take_every_ending_a_song_comes_in_once() {
+        let mut every = vec![SONG_EXTENSION, OLD_SONG_EXTENSION, RICH_TEXT_ENDING, PRO_ENDING, crate::pack::ENDING];
+        every.extend(TEXT_ENDINGS);
+        every.extend(DOCUMENT_ENDINGS);
+        every.extend(PRO_BUNDLE_ENDINGS);
+        every.extend(SONGBOOK_ENDINGS);
+        let kinds = [song_file_endings(), bundle_endings(), words_endings()];
+        for ending in &every {
+            let found = kinds.iter().filter(|kind| kind.contains(ending)).count();
+            assert_eq!(found, 1, "{ending} is in one kind of file");
+        }
+        assert_eq!(kinds.iter().map(Vec::len).sum::<usize>(), every.len(), "and nothing else");
+        // Words from Text… is text, rich text and Word; a song bundle's ending is named once.
+        assert_eq!(words_endings(), ["txt", "text", "rtf", "doc", "docx", "odt"]);
+        assert_eq!(filter_name("Song bundles", &bundle_endings()), "Song bundles (.proBundle, .sppack)");
     }
 
     #[test]

@@ -2106,27 +2106,29 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             .on_hover_text("Import songs or slides");
         egui::Popup::menu(&import).show(|ui| {
             use crate::menubar::Action;
-            for (action, words, hint) in [
-                (
-                    Action::ImportSongs,
-                    "Songs\u{2026}",
-                    "Text, lyric, ChordPro, rich-text and Word files, and song packs",
-                ),
-                (
-                    Action::ImportLibraryFolder,
-                    "A Library Folder\u{2026}",
-                    "A folder of songs; each folder in it becomes a library",
-                ),
-                (
-                    Action::ImportSlides,
-                    "Slides\u{2026}",
-                    "A presentation, a PDF or a folder of pictures, as picture slides",
-                ),
-            ] {
+            // Songs by kind of file, as File › Import Songs has them; then slides.
+            crate::live_tabs::menu_heading(ui, "Import Songs");
+            for entry in crate::menubar::IMPORT_SONGS {
+                let crate::menubar::Entry::Do(action, words, _) = *entry else { continue };
+                let hint = match action {
+                    Action::ImportLibraryFolder => "A folder of song documents; each folder in it becomes a library",
+                    Action::ImportBundle => "Song bundles and song packs: songs with the pictures and videos they show",
+                    Action::ImportWords => "Text, rich-text and Word files: a song from each",
+                    _ => "Song documents, ChordPro and lyric files, and songbooks",
+                };
                 if ui.button(words).on_hover_text(hint).clicked() {
                     state.menu_asked = Some(action);
                     ui.close();
                 }
+            }
+            ui.separator();
+            if ui
+                .button("Slides\u{2026}")
+                .on_hover_text("A presentation, a PDF or a folder of pictures, as picture slides")
+                .clicked()
+            {
+                state.menu_asked = Some(Action::ImportSlides);
+                ui.close();
             }
         });
         // The name of what is listed: a click opens the chooser, or puts it away.

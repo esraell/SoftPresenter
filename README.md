@@ -117,9 +117,10 @@ The full list, area by area, is in [docs/features.md](docs/features.md).
 2. **Bring in the songs.** New Song (Command-N) asks for a title and a theme and takes the words
    pasted in: a line in square brackets starts a group, a blank line starts a new slide, and a
    line with only `--` separates the main language from the translation. Songs you already have
-   come in with File › Import Songs…, or by dropping their files on the window: text (see
+   come in with File › Import Songs, which offers them by kind of file (A Library Folder…, A Song
+   Bundle…, Song Files…, Words from Text…), or by dropping their files on the window: text (see
    [the format](#song-text-files)), ChordPro, rich text, Word and lyric-service files. A whole
-   library from other presentation software comes across too, from the File menu or the
+   library from other presentation software comes across too, with A Library Folder… or the
    first-run setup, keeping each song's groups and arrangements.
 3. **Build the running order.** Make a playlist with the + beside PLAYLISTS (say "Sunday
    Morning"), drag songs into it in order, and add headers to group them. Sermon and notice

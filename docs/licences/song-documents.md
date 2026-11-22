@@ -1,7 +1,7 @@
 # Reading song documents saved by ProPresenter 7
 
 SoftPresenter can import songs from the `.pro` documents ProPresenter 7 saves, so a church can
-bring its library across (File › Import from ProPresenter…, or dropping the files or their
+bring its library across (File › Import Songs › A Library Folder… or A Song Bundle…, or dropping the files or their
 folders on the window), and from the `.proBundle` bundles songs are exported in with their
 pictures and videos. It only ever reads them; it never writes either format.
 

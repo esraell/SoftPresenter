@@ -510,7 +510,7 @@ names the passage as it was typed, while the screens and the playlist follow the
 | Command | Does |
 |---|---|
 | `song new TITLE [FILE.txt] [--library NAME\|none]` | A new song, with its words from a [song text](#song-text) file, or one empty slide |
-| `song import FILE… \| FOLDER… [--library NAME\|none]` | Imports songs, as File › Import Songs… does (formats below). A folder becomes a library of its name (and each folder in it another), unless `--library` says where its songs go. A song already in the library is skipped |
+| `song import FILE… \| FOLDER… [--library NAME\|none]` | Imports songs, as File › Import Songs does (any of its kinds of file; formats below). A folder becomes a library of its name (and each folder in it another), unless `--library` says where its songs go. A song already in the library is skipped |
 | `song text SONG` | Prints the song as song text |
 | `song text SONG FILE` | Replaces the song's words from a song text file, keeping the song (its id, theme, playlist places) and its slides' looks, labels and notes where they still match |
 | `song rename SONG to TITLE`, `song duplicate SONG [as TITLE]` | Renames or copies a song |

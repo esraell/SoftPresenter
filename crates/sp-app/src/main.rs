@@ -5880,27 +5880,43 @@ impl App {
         }
     }
 
-    /// Asks which song files to import, and imports them.
+    /// Import Songs › Song Files…: asks which song files to import (songs saved by SoftPresenter,
+    /// song documents, ChordPro and lyric files, songbooks), and imports them.
     fn choose_songs_to_import(&mut self) {
-        let endings = load::import_endings();
-        let Some(paths) = rfd::FileDialog::new()
-            .set_title("Import Songs")
-            .add_filter("Songs (text, lyric, ChordPro, rich-text, Word and song documents)", &endings)
-            .pick_files()
+        self.choose_to_import("Import Song Files", "Song files", &load::song_file_endings());
+    }
+
+    /// Import Songs › A Song Bundle…: asks for song bundles and song packs (songs with the
+    /// pictures and videos they show), and imports them.
+    fn choose_bundles_to_import(&mut self) {
+        self.choose_to_import("Import a Song Bundle", "Song bundles and song packs", &load::bundle_endings());
+    }
+
+    /// Import Songs › Words from Text…: asks for text, rich-text and Word files, and makes a song
+    /// of each one's words.
+    fn choose_words_to_import(&mut self) {
+        self.choose_to_import("Import Words from Text", "Text, rich-text and Word files", &load::words_endings());
+    }
+
+    /// Asks for files with these endings, under a window title and the kind of file the filter
+    /// names (with the endings after it), and imports them.
+    fn choose_to_import(&mut self, title: &str, kind: &str, endings: &[&str]) {
+        let Some(paths) =
+            rfd::FileDialog::new().set_title(title).add_filter(load::filter_name(kind, endings), endings).pick_files()
         else {
             return;
         };
         self.import_songs(&paths);
     }
 
-    /// Asks for song documents, a library folder, or the folder of libraries, and imports them,
-    /// each folder becoming a library. Opens where ProPresenter keeps its libraries, when that
-    /// folder is there.
+    /// Import Songs › A Library Folder…: asks for a library folder or the folder of libraries
+    /// (on a Mac, song documents and bundles too), and imports them, each folder becoming a
+    /// library. Opens at the usual place for such libraries, when that folder is there.
     fn choose_library_folder_to_import(&mut self) {
-        let mut dialog = rfd::FileDialog::new().set_title("Choose Songs or a Library Folder").add_filter(
-            "ProPresenter songs (.pro, .proBundle)",
-            &[load::PRO_ENDING, load::PRO_BUNDLE_ENDINGS[0], load::PRO_BUNDLE_ENDINGS[1]],
-        );
+        let documents = [load::PRO_ENDING, load::PRO_BUNDLE_ENDINGS[0], load::PRO_BUNDLE_ENDINGS[1]];
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Import a Library Folder")
+            .add_filter(load::filter_name("Song documents and bundles", &documents), &documents);
         if let Some(home) = std::env::var_os("HOME") {
             let libraries = PathBuf::from(home).join("Documents").join("ProPresenter").join("Libraries");
             if libraries.is_dir() {
@@ -7846,6 +7862,12 @@ impl App {
         if action == A::ImportLibraryFolder {
             return self.choose_library_folder_to_import();
         }
+        if action == A::ImportBundle {
+            return self.choose_bundles_to_import();
+        }
+        if action == A::ImportWords {
+            return self.choose_words_to_import();
+        }
         if action == A::ImportSlides {
             return self.choose_slides_to_import();
         }
@@ -7999,7 +8021,13 @@ impl App {
             A::StageLayouts => state.edit_kind_request = Some(home::EditKind::Stage),
             A::NewSong => state.new_song = true,
             // Handled above, before the window's state is borrowed.
-            A::ImportSongs | A::ImportLibraryFolder | A::ImportSlides | A::ReloadSongs | A::ExportSongs => {}
+            A::ImportSongs
+            | A::ImportLibraryFolder
+            | A::ImportBundle
+            | A::ImportWords
+            | A::ImportSlides
+            | A::ReloadSongs
+            | A::ExportSongs => {}
             A::NewSlide => {
                 let song = match (&state.editing, &state.theme_edit) {
                     (Some(draft), None) => draft.at.presentation,
