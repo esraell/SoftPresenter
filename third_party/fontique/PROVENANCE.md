@@ -22,7 +22,7 @@ file that another program cuts short, or writes over in place, while it is mappe
 process with a bus error (SIGBUS) the next time a page past the file's new end is read. Safe code
 can neither prevent that nor catch it.
 
-That happened to SoftPresenter in use: a font manager rewrote an installed font file, shorter,
+That happened to SoftPresenter in use: another program rewrote an installed font file, shorter,
 while the app had it mapped, and some minutes later the app was killed in the middle of shaping
 a slide's text (in pair kerning, reading a part of the font not read before). A presentation
 app is often left running for a whole service with fonts in use, while font managers, system

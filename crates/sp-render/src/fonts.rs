@@ -15,7 +15,9 @@
 //! (see [`draw_kept_only`](crate::draw_kept_only)). A font it doesn't have yet is read by a
 //! loader thread of its own, and the screens are told to draw again once it is there.
 //! Meanwhile they draw the words in the fonts they do have; with none that suits, the words
-//! are left out until the font is there, which is a few milliseconds.
+//! are left out until the font is there. Measured on a Mac with the file in the disk cache,
+//! that took 1 to 6 ms for ordinary font files (up to 4 MB) and about 20 ms for the 188 MB
+//! emoji font; from a cold disk it takes longer.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -528,6 +530,65 @@ mod tests {
         assert!(first != expected, "the screens drew the font before anything read it");
         assert!(fitted_then > 0 && forgotten, "the size fitted without the font was kept");
         assert!(second == expected, "drawn differently on the screens once the font was there");
+    }
+
+    /// Run by the test below in a process of its own, where nothing has looked for the fonts.
+    #[test]
+    fn screens_first_helper() {
+        let Some(family) = std::env::var_os("SP_TEST_SCREENS_FIRST") else { return };
+        let family = family.to_string_lossy().into_owned();
+        let text = "Words on the screens";
+        let screens = {
+            let family = family.clone();
+            std::thread::spawn(move || {
+                let (tx, rx) = channel();
+                let tx = Mutex::new(tx);
+                read_fonts_elsewhere(Arc::new(move || {
+                    let _ = tx.lock().map(|tx| tx.send(()));
+                }));
+                let mut fonts = Fonts::new();
+                let there_at_first = FOUND.get().is_some() || fonts.found || !fonts.family_names().is_empty();
+                let empty_at_first = glyphs(&mut fonts, &family, text).is_empty() && !fonts.found;
+                // Each time the loader says something is there, again: first the fonts are
+                // found, then the family's file is read.
+                let mut laid_out = Vec::new();
+                for _ in 0..5 {
+                    if rx.recv_timeout(Duration::from_secs(10)).is_err() {
+                        break;
+                    }
+                    laid_out = glyphs(&mut fonts, &family, text);
+                    if !laid_out.is_empty() {
+                        break;
+                    }
+                }
+                (there_at_first, empty_at_first, laid_out)
+            })
+        };
+        let (there_at_first, empty_at_first, laid_out) = screens.join().expect("the screens' thread");
+        assert!(!there_at_first, "the fonts were there before anything looked for them");
+        assert!(empty_at_first, "the screens' thread looked for the fonts itself");
+        assert!(!laid_out.is_empty(), "never laid out once the fonts were found");
+        assert_eq!(laid_out, glyphs(&mut Fonts::new(), &family, text), "laid out differently on the screens");
+        println!("helper: the fonts were found and read for the screens' thread");
+    }
+
+    /// The screens' thread never looks for the computer's fonts itself, even when it is the
+    /// first to want them: the loader thread looks, then reads the font, and the screens draw
+    /// again each time.
+    #[test]
+    fn the_screens_thread_never_looks_for_the_fonts_itself() {
+        let Some(font) = fonts_to_copy().into_iter().next() else { return };
+        let folder = copy_into("screens-first", &font);
+        let family = family_in(&folder);
+        let _ = std::fs::remove_dir_all(&folder);
+        let program = std::env::current_exe().expect("this test program");
+        let ran = std::process::Command::new(&program)
+            .args(["fonts::tests::screens_first_helper", "--exact", "--nocapture", "--test-threads=1"])
+            .env("SP_TEST_SCREENS_FIRST", &family)
+            .output()
+            .expect("the helper ran");
+        let said = format!("{}\n{}", String::from_utf8_lossy(&ran.stdout), String::from_utf8_lossy(&ran.stderr));
+        assert!(ran.status.success() && said.contains("helper: "), "the helper ended with {:?}:\n{said}", ran.status);
     }
 
     /// A font not read yet asks only for itself: the fonts the shaper falls back on meanwhile

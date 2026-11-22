@@ -530,9 +530,9 @@ feature changes, this page changes in the same commit.
   font manager, an update or an installer changes or removes while SoftPresenter runs changes
   nothing until the next start (it could once crash the app in the middle of a song). The
   screens never read a font file themselves: one not read yet (normally the slide thumbnails
-  have read it already) is read meanwhile and the slide drawn again once it is there, a few
-  thousandths of a second later; until then its words are drawn in fonts already read, or
-  left out.
+  have read it already) is read meanwhile and the slide drawn again once it is there, within a
+  few thousandths of a second for an ordinary font and a few hundredths for a very large one,
+  such as the emoji font; until then its words are drawn in fonts already read, or left out.
 
 <img src="images/screens.png" alt="The Screens window" width="620">
 
