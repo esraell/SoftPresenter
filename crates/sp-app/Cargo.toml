@@ -46,5 +46,9 @@ security-framework = "3"
 # doesn't offer on Windows yet.
 uds_windows = "1.2"
 
+[dev-dependencies]
+# `.pro` documents written for tests, to put in the song bundles the tests make.
+sp-model = { workspace = true, features = ["test-documents"] }
+
 [lints]
 workspace = true

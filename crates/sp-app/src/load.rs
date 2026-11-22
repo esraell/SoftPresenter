@@ -31,6 +31,9 @@ pub const DOCUMENT_ENDINGS: [&str; 3] = ["doc", "docx", "odt"];
 pub const RICH_TEXT_ENDING: &str = "rtf";
 /// The documents ProPresenter 7 saves songs in.
 pub const PRO_ENDING: &str = "pro";
+/// The bundles it exports a song in, with the pictures and videos the song shows (see
+/// `bundle.rs`).
+pub const BUNDLE_ENDING: &str = crate::bundle::ENDING;
 /// SoftProjector's songbooks: its own database, or a songbook exported from it. Both are
 /// SQLite files holding many songs.
 pub const SONGBOOK_ENDINGS: [&str; 2] = ["sps", "sqlite"];
@@ -42,7 +45,7 @@ pub fn is_importable(path: &Path) -> bool {
     TEXT_ENDINGS
         .iter()
         .chain(&DOCUMENT_ENDINGS)
-        .chain(&[RICH_TEXT_ENDING, PRO_ENDING])
+        .chain(&[RICH_TEXT_ENDING, PRO_ENDING, BUNDLE_ENDING])
         .chain(&SONGBOOK_ENDINGS)
         .any(|ending| has_extension(path, ending))
 }
@@ -140,21 +143,26 @@ pub fn files_to_import(paths: &[PathBuf]) -> Vec<(PathBuf, Option<String>)> {
     files
 }
 
+/// A bundle's ending as file dialogs are given it: as the program writes it, and in lower case,
+/// for a system whose dialogs tell the two apart.
+pub const PRO_BUNDLE_ENDINGS: [&str; 2] = ["proBundle", BUNDLE_ENDING];
+
 /// Every ending a song can be imported from, its own song files included, for file dialogs.
 pub fn import_endings() -> Vec<&'static str> {
     let mut endings = vec![SONG_EXTENSION, OLD_SONG_EXTENSION];
     endings.extend(TEXT_ENDINGS);
     endings.extend(DOCUMENT_ENDINGS);
     endings.extend([RICH_TEXT_ENDING, PRO_ENDING]);
+    endings.extend(PRO_BUNDLE_ENDINGS);
     endings.extend(SONGBOOK_ENDINGS);
     endings.push(crate::pack::ENDING);
     endings
 }
 
 /// Reads a song from a file to import: text in any common encoding, a lyric file, ChordPro,
-/// rich text, a song document saved by ProPresenter 7, or (on macOS) a Word or OpenDocument
-/// file. The error is a plain
-/// sentence for the operator.
+/// rich text, a song document or bundle saved by ProPresenter 7 (a bundle's words only: the
+/// import brings its pictures and videos, see `bundle.rs`), or (on macOS) a Word or
+/// OpenDocument file. The error is a plain sentence for the operator.
 pub fn import_file(path: &Path) -> Result<Presentation, String> {
     let name = path.file_name().map_or_else(|| "The file".into(), |n| n.to_string_lossy().into_owned());
     let size = std::fs::metadata(path).map_err(|e| format!("{name} could not be read ({e})."))?.len();
@@ -171,9 +179,12 @@ pub fn import_file(path: &Path) -> Result<Presentation, String> {
         }
         return Err(format!(
             "{name} isn't a kind of file songs come in. Songs come from text, lyric and ChordPro files, rich text, \
-             Word and OpenDocument files, .pro files, .sps and .sqlite songbooks and SoftPresenter songs; PDFs, \
+             Word and OpenDocument files, .pro and .proBundle files, .sps and .sqlite songbooks and SoftPresenter songs; PDFs, \
              PowerPoint and Keynote files and folders of pictures come in as slides."
         ));
+    }
+    if crate::bundle::is_bundle(path) {
+        return crate::bundle::read_words(path);
     }
     let pro = has_extension(path, PRO_ENDING);
     let largest = if pro { LARGEST_PRO_FILE as u64 } else { LARGEST_SONG_FILE };
@@ -403,6 +414,22 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn a_song_bundle_is_imported_wherever_a_song_document_is() {
+        for name in ["Song.proBundle", "Song.probundle", "Song.PROBUNDLE", "Song.pro"] {
+            assert!(is_importable(Path::new(name)), "{name}");
+        }
+        let endings = import_endings();
+        assert!(endings.contains(&"proBundle") && endings.contains(&"probundle") && endings.contains(&"pro"));
+        // In a folder chosen or dropped, a bundle is one of its songs.
+        let dir = TempDir::new("bundles");
+        dir.write("Harbour Lights.proBundle", b"PK");
+        dir.write("Notes.md", b"not a song");
+        let files = files_to_import(std::slice::from_ref(&dir.0));
+        assert_eq!(files.len(), 1);
+        assert!(files[0].0.ends_with("Harbour Lights.proBundle"));
     }
 
     #[test]

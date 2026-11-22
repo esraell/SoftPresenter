@@ -19,7 +19,10 @@ pub use build::{Build, BuildClock, BuildEffect};
 pub use format::{FORMAT_VERSION, from_json, to_json};
 pub use import::{decode_text, import_song_text};
 pub use link::TextLink;
-pub use pro_file::{LARGEST_PRO_FILE, read_pro_file};
+#[cfg(any(test, feature = "test-documents"))]
+#[doc(hidden)]
+pub use pro_file::example as pro_example;
+pub use pro_file::{LARGEST_PRO_FILE, ProDocument, ProMedia, read_pro_document, read_pro_file};
 pub use rtf::rtf_to_text;
 pub use softprojector::from_softprojector;
 pub use song_text::{

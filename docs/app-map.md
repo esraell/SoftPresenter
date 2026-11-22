@@ -109,8 +109,8 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | ? | Every key, as a list |
 | Holding Command | A small amber tag beside everything that has a key |
 | SoftPresenter › Set Up SoftPresenter… | The setup a fresh install starts with: screens, songs, Bibles, permissions |
-| File › Import Songs… (or drop song files on the window) | Import songs from text, lyric, ChordPro, rich-text or Word files |
-| File › Import from ProPresenter… (or drop a folder) | Bring a library folder across; each folder becomes a library |
+| File › Import Songs… (or drop song files on the window) | Import songs from text, lyric, ChordPro, rich-text or Word files, `.pro` documents and `.proBundle` bundles (whose pictures and videos go into the media bin, `bundle.rs`) |
+| File › Import from ProPresenter… (or drop a folder) | Bring a library folder across; each folder becomes a library; song documents and bundles can be chosen too |
 | File › Import Slides (PowerPoint, Keynote, PDF or Pictures)… (or drop one, or a folder of pictures) | A presentation of picture slides, one per slide, page or picture |
 | Command-L | Back to the song on screen |
 

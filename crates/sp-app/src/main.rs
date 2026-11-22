@@ -6,6 +6,7 @@ mod bible;
 mod bible_language;
 mod bible_store;
 mod bin_pictures;
+mod bundle;
 mod clock;
 mod control;
 mod convert;
@@ -531,10 +532,81 @@ struct PackMedia {
     added: usize,
 }
 
-/// A song pack written or read on a thread of its own, for the app to finish.
+/// A song pack written or read, or a song bundle read, on a thread of its own, for the app to
+/// finish. A bundle carries where its song goes, and the library named after the folder it was
+/// in, if any.
 enum PackJob {
-    Wrote { job: u64, result: Result<String, String> },
-    Opened { job: u64, result: Box<Result<pack::Opened, String>>, same: Option<pack::Same>, library: Option<Uuid> },
+    Wrote {
+        job: u64,
+        result: Result<String, String>,
+    },
+    Opened {
+        job: u64,
+        result: Box<Result<pack::Opened, String>>,
+        same: Option<pack::Same>,
+        library: Option<Uuid>,
+    },
+    Bundle {
+        job: u64,
+        result: Box<Result<bundle::Opened, String>>,
+        path: PathBuf,
+        to: SongsTo,
+        library: Option<String>,
+    },
+}
+
+/// Where songs being imported go, besides the Songs folder: by default, the library shown (or,
+/// for a folder's songs, the library named after it).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SongsTo {
+    /// The library they go into instead: `Some(None)` for none (All Songs only).
+    pub library: Option<Option<Uuid>>,
+    /// A playlist they are added to as well.
+    pub playlist: Option<PlaylistSpot>,
+}
+
+/// A place in a playlist: the playlist, by its place in the list and its name (to find it again
+/// if the list has changed), and the item that what is added goes after (`None`: at its end).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaylistSpot {
+    pub index: usize,
+    pub name: String,
+    pub after: Option<usize>,
+}
+
+/// A song read for an import, from `path`: the library named after its folder (or songbook),
+/// and for a bundle, what it brought (its pictures and videos are brought in with the song).
+struct SongRead {
+    song: Result<sp_model::Presentation, String>,
+    path: PathBuf,
+    library: Option<String>,
+    bundle: Option<bundle::Opened>,
+}
+
+/// What an import did.
+#[derive(Default)]
+struct Imported {
+    /// The titles of the songs imported.
+    titles: Vec<String>,
+    /// A sentence for each file or song that didn't come in (one here already among them).
+    problems: Vec<String>,
+    /// Presentations being made into slides, and song packs being opened.
+    decks: Vec<String>,
+    /// Song bundles being read on a thread of their own.
+    opening: Vec<String>,
+    /// What a bundle's song came without (pictures or videos missing or left out).
+    notes: Vec<String>,
+    /// The libraries named after folders the songs went into.
+    libraries_used: Vec<String>,
+    /// The first song imported (or found here already), whose slides are shown.
+    first: Option<usize>,
+    /// Every song imported or found here already, by its place, in order.
+    landed: Vec<usize>,
+    /// The playlist they were added to.
+    playlist: Option<String>,
+    /// Pictures and videos brought into the media bin from bundles.
+    pictures: usize,
+    videos: usize,
 }
 
 /// A song pack is read at once (the reply waits for it) when its file is no bigger than this;
@@ -4234,6 +4306,16 @@ impl App {
                     Ok(opened) => (job, self.apply_pack(opened, same, library)),
                     Err(problem) => (job, Err(problem)),
                 },
+                PackJob::Bundle { job, result, path, to, library } => match *result {
+                    Ok(opened) => {
+                        let mut done = Imported::default();
+                        let song = Ok(opened.song.clone());
+                        self.take_songs(vec![SongRead { song, path, library, bundle: Some(opened) }], &to, &mut done);
+                        let said = self.say_imported(&done);
+                        (job, if done.landed.is_empty() { Err(said) } else { Ok(said) })
+                    }
+                    Err(problem) => (job, Err(problem)),
+                },
             };
             let said = result.clone().unwrap_or_else(|problem| problem);
             if let Some((_, kept)) = self.jobs.iter_mut().find(|(have, _)| *have == job) {
@@ -4721,46 +4803,161 @@ impl App {
         self.add_song(song, true);
     }
 
+    /// Imports songs from files and folders, as the File menu and the import button do (see
+    /// [`App::import_songs_to`]). Returns the titles imported, a plain sentence for each file
+    /// that wasn't, and what is being made into slides or opened in the background.
+    fn import_songs(&mut self, paths: &[PathBuf]) -> (Vec<String>, Vec<String>, Vec<String>) {
+        let done = self.import_songs_to(paths, &SongsTo::default());
+        (done.titles, done.problems, done.decks)
+    }
+
     /// Imports songs from files and folders, as the File menu, a drop on the window and
     /// `sp song import` do. Each song goes into the Songs folder; a folder's songs go into a
     /// library named after it (made if there isn't one), and other songs into the library
-    /// shown, if any. The first song's slides are shown. A song the library already has, word
-    /// for word under the same title, isn't added again. Returns the titles imported and a
-    /// plain sentence for each file that wasn't.
-    fn import_songs(&mut self, paths: &[PathBuf]) -> (Vec<String>, Vec<String>, Vec<String>) {
+    /// shown, if any, unless `to` names the library; `to` may also name a playlist they are
+    /// added to. A song bundle's pictures and videos come into the library's Media folder and
+    /// the media bin; a large bundle is read on a thread of its own, and its song comes in when
+    /// it has been. The first song's slides are shown. A song the library already has, word
+    /// for word under the same title, isn't added again (it still goes into the library or
+    /// playlist named). The window's notice says what happened.
+    fn import_songs_to(&mut self, paths: &[PathBuf], to: &SongsTo) -> Imported {
         let started = Instant::now();
-        let mut imported = Vec::new();
-        let mut problems = Vec::new();
-        let mut first = None;
+        let mut done = Imported::default();
         // PDFs, presentation files and folders of pictures become slides, made on threads of
         // their own. A presentation file needs a program on this Mac that opens it.
-        let mut decks = Vec::new();
         let mut songs = Vec::new();
         for path in paths {
             if pack::is_pack(path) {
-                let library = self.running.as_ref().and_then(|r| r.home_state.library_shown);
-                match self.open_pack(path.clone(), None, library, false) {
-                    Ok(said) => decks.push(said),
-                    Err(problem) => problems.push(problem),
+                match self.open_pack(path.clone(), None, self.library_for(to), false) {
+                    Ok(said) => done.decks.push(said),
+                    Err(problem) => done.problems.push(problem),
                 }
             } else if deck::is_presentation_file(path) {
                 match convert::program_for(path) {
                     Some(program) => {
                         let source = deck::Source::File(path.clone());
-                        decks.push(format!("{} (with {})", source.name(), program.name()));
+                        done.decks.push(format!("{} (with {})", source.name(), program.name()));
                         self.start_deck(source);
                     }
-                    None => problems.push(convert::none_installed(path)),
+                    None => done.problems.push(convert::none_installed(path)),
                 }
             } else if deck::is_pdf(path) || (path.is_dir() && deck::pictures_in(path).is_some()) {
                 let source = deck::Source::File(path.clone());
-                decks.push(source.name());
+                done.decks.push(source.name());
                 self.start_deck(source);
             } else {
                 songs.push(path.clone());
             }
         }
         let files = load::files_to_import(&songs);
+        // Each file is one song, but a songbook (SoftProjector's) is many, each going into a
+        // library named after its songbook.
+        let mut read: Vec<SongRead> = Vec::new();
+        for (path, library) in &files {
+            let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            if load::is_songbook(path) {
+                match load::import_songbook(path) {
+                    Ok(book) => read.extend(book.into_iter().map(|(song, book)| SongRead {
+                        song: Ok(song),
+                        path: path.clone(),
+                        library: book.or_else(|| library.clone()),
+                        bundle: None,
+                    })),
+                    Err(problem) => {
+                        read.push(SongRead { song: Err(problem), path: path.clone(), library: None, bundle: None });
+                    }
+                }
+                continue;
+            }
+            if bundle::is_bundle(path) {
+                if let Some(opened) = self.open_bundle(path, to, library.clone(), &mut done) {
+                    read.push(opened);
+                }
+                continue;
+            }
+            let song = if load::is_song_file(path) {
+                load::read_song_file(path).map_err(|reason| format!("{name}: {reason}"))
+            } else {
+                load::import_file(path)
+            };
+            read.push(SongRead { song, path: path.clone(), library: library.clone(), bundle: None });
+        }
+        self.take_songs(read, to, &mut done);
+        applog::event(
+            "songs",
+            &format!(
+                "imported {} of {} files in {} ms ({} not imported)",
+                done.titles.len(),
+                files.len(),
+                started.elapsed().as_millis(),
+                done.problems.len()
+            ),
+        );
+        self.say_imported(&done);
+        done
+    }
+
+    /// The library songs imported go into, by what `to` says: the one it names (or none), else
+    /// the library shown.
+    fn library_for(&self, to: &SongsTo) -> Option<Uuid> {
+        match to.library {
+            Some(chosen) => chosen,
+            None => self.running.as_ref().and_then(|r| r.home_state.library_shown),
+        }
+    }
+
+    /// Opens a song bundle to import: at once when it is small (and returns it, to be taken in
+    /// with the other songs), else on a thread of its own, whose song comes in when it has been
+    /// read (see [`App::finish_packs`]).
+    fn open_bundle(
+        &mut self,
+        path: &std::path::Path,
+        to: &SongsTo,
+        library: Option<String>,
+        done: &mut Imported,
+    ) -> Option<SongRead> {
+        let Some(dir) = bible_store::data_dir() else {
+            done.problems.push("Could not find the library folder.".to_owned());
+            return None;
+        };
+        // Beside the song packs being opened, so a folder left by a crash is tidied with theirs.
+        let staging = dir.join(format!(".opening-pack-{}", Uuid::new_v4()));
+        let small = std::fs::metadata(path).is_ok_and(|meta| meta.len() <= PACK_READ_AT_ONCE);
+        if small || self.running.is_none() {
+            return match bundle::open(path, &staging) {
+                Ok(opened) => Some(SongRead {
+                    song: Ok(opened.song.clone()),
+                    path: path.to_owned(),
+                    library,
+                    bundle: Some(opened),
+                }),
+                Err(problem) => {
+                    let _ = std::fs::remove_dir_all(&staging);
+                    done.problems.push(problem);
+                    None
+                }
+            };
+        }
+        let (tx, waker) = (self.pack_tx.clone(), self.waker.clone());
+        let job = self.start_job();
+        let (path, to) = (path.to_owned(), to.clone());
+        done.opening.push(path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()));
+        std::thread::spawn(move || {
+            let result = bundle::open(&path, &staging);
+            if result.is_err() {
+                let _ = std::fs::remove_dir_all(&staging);
+            }
+            let _ = tx.send(PackJob::Bundle { job, result: Box::new(result), path, to, library });
+            if let Some(waker) = waker {
+                let _ = waker.send_event(AppEvent::PackDone);
+            }
+        });
+        None
+    }
+
+    /// Takes in the songs read for an import (see [`App::import_songs_to`]), noting in `done`
+    /// what came in, what was here already and what couldn't come.
+    fn take_songs(&mut self, read: Vec<SongRead>, to: &SongsTo, done: &mut Imported) {
         // What the library has, looked up once rather than song by song.
         let mut ids: std::collections::HashSet<Uuid> = self.show.presentations().iter().map(|s| s.id).collect();
         // A song deleted in the app (or a Bible page) isn't "already here": its file can be
@@ -4774,142 +4971,261 @@ impl App {
             .filter(|(at, _)| !removed.contains(at) && !self.app_made(*at))
             .map(|(at, s)| ((s.title.trim().to_lowercase(), sp_model::to_song_text(s)), at))
             .collect();
-        let mut libraries_used: Vec<String> = Vec::new();
-        // Each file is one song, but a songbook (SoftProjector's) is many, each going into a
-        // library named after its songbook.
-        let mut songs_read: Vec<(Result<sp_model::Presentation, String>, PathBuf, Option<String>)> = Vec::new();
-        for (path, library) in &files {
-            let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-            if load::is_songbook(path) {
-                match load::import_songbook(path) {
-                    Ok(book) => songs_read.extend(
-                        book.into_iter().map(|(song, book)| (Ok(song), path.clone(), book.or_else(|| library.clone()))),
-                    ),
-                    Err(problem) => songs_read.push((Err(problem), path.clone(), None)),
-                }
-                continue;
-            }
-            let read = if load::is_song_file(path) {
-                load::read_song_file(path).map_err(|reason| format!("{name}: {reason}"))
-            } else {
-                load::import_file(path)
-            };
-            songs_read.push((read, path.clone(), library.clone()));
-        }
-        for (read, path, library) in songs_read {
+        let chosen_library = to.library.or(self.import_library_override);
+        for SongRead { song, path, library, bundle } in read {
             let (path, library) = (&path, &library);
-            let mut song = match read {
-                Ok(song) => song,
+            // A bundle's own folder goes once its song is in (or isn't coming).
+            let staging = bundle.as_ref().map(|opened| opened.staging.clone());
+            let song = match song {
+                Ok(song) => Some(song),
                 Err(problem) => {
-                    problems.push(problem);
-                    continue;
+                    done.problems.push(problem);
+                    None
                 }
             };
-            let look = (song.title.trim().to_lowercase(), sp_model::to_song_text(&song));
-            let already = have.get(&look).copied().or_else(|| {
-                ids.contains(&song.id).then(|| self.show.presentations().iter().position(|s| s.id == song.id)).flatten()
-            });
-            if let Some(at) = already {
-                problems.push(format!("{} is already in the library.", song.title));
-                first.get_or_insert(at);
-                // A song in two of the folders imported goes into both their libraries.
-                if let (Some(name), Some(running)) = (library, self.running.as_mut()) {
-                    let state = &mut running.home_state;
-                    if let Some(key) = state.song_keys.get(at).cloned()
-                        && let Some(into) = state.libraries.iter_mut().find(|l| l.name == *name)
+            if let Some(song) = song {
+                self.take_song(song, path, library, bundle.as_ref(), chosen_library, &mut have, &mut ids, done);
+            }
+            if let Some(staging) = staging {
+                let _ = std::fs::remove_dir_all(staging);
+            }
+        }
+        if let Some(at) = done.first {
+            self.apply(vec![Command::Select(at)]);
+        }
+        self.add_imported_to_playlist(to, done);
+        if let Some(running) = self.running.as_mut()
+            && !done.titles.is_empty()
+        {
+            running.home_state.editing = None;
+            running.home_state.bible_open = false;
+        }
+    }
+
+    /// Takes in one song read for an import: skipped when the library has it already (but put
+    /// into the library named), else stored, with a bundle's pictures and videos brought in,
+    /// and put into its library.
+    #[allow(clippy::too_many_arguments)]
+    fn take_song(
+        &mut self,
+        mut song: sp_model::Presentation,
+        path: &std::path::Path,
+        library: &Option<String>,
+        bundle: Option<&bundle::Opened>,
+        chosen_library: Option<Option<Uuid>>,
+        have: &mut std::collections::HashMap<(String, String), usize>,
+        ids: &mut std::collections::HashSet<Uuid>,
+        done: &mut Imported,
+    ) {
+        let look = (song.title.trim().to_lowercase(), sp_model::to_song_text(&song));
+        let already = have.get(&look).copied().or_else(|| {
+            ids.contains(&song.id).then(|| self.show.presentations().iter().position(|s| s.id == song.id)).flatten()
+        });
+        if let Some(at) = already {
+            done.problems.push(format!("{} is already in the library.", song.title));
+            done.first.get_or_insert(at);
+            done.landed.push(at);
+            // A song in two of the folders imported goes into both their libraries; one dropped
+            // on a library goes into it.
+            if let Some(running) = self.running.as_mut() {
+                let state = &mut running.home_state;
+                if let Some(key) = state.song_keys.get(at).cloned() {
+                    let into = state.libraries.iter_mut().find(|l| match chosen_library {
+                        Some(chosen) => Some(l.id) == chosen,
+                        None => library.as_ref().is_some_and(|name| l.name == *name),
+                    });
+                    if let Some(into) = into
                         && !into.has(&key)
                     {
                         into.songs.push(key);
                         state.libraries_changed = true;
                     }
                 }
-                continue;
             }
-            // A song made from another file gets an id of its own, so the two are never mixed up.
-            if !load::is_song_file(path) {
-                song.id = Uuid::new_v4();
-            }
-            imported.push(song.title.clone());
-            ids.insert(song.id);
-            let (index, key) = self.store_song(song);
-            have.insert(look, index);
-            first.get_or_insert(index);
-            if let Some(running) = self.running.as_mut() {
-                let state = &mut running.home_state;
-                let into = match (library, self.import_library_override) {
-                    // `--library NAME|none` on the command line decides for a folder's songs too.
-                    (_, Some(chosen)) => chosen.and_then(|id| state.libraries.iter().position(|l| l.id == id)),
-                    (Some(name), None) => {
-                        if !libraries_used.contains(name) {
-                            libraries_used.push(name.clone());
-                        }
-                        let at = match state.libraries.iter().position(|l| l.name == *name) {
-                            Some(at) => at,
-                            None => {
-                                state.libraries.push(libraries::Library::new(name.clone()));
-                                state.libraries.len() - 1
-                            }
-                        };
-                        Some(at)
+            return;
+        }
+        // A song made from another file gets an id of its own, so the two are never mixed up.
+        if !load::is_song_file(path) {
+            song.id = Uuid::new_v4();
+        }
+        // A bundle's pictures and videos come into the library, and its slides show them.
+        if let Some(opened) = bundle {
+            self.bring_bundle_media(&mut song, opened, done);
+        }
+        done.titles.push(song.title.clone());
+        ids.insert(song.id);
+        let (index, key) = self.store_song(song);
+        have.insert(look, index);
+        done.first.get_or_insert(index);
+        done.landed.push(index);
+        if let Some(running) = self.running.as_mut() {
+            let state = &mut running.home_state;
+            let into = match (library, chosen_library) {
+                // `--library NAME|none` on the command line, or a drop on a library, decides for a
+                // folder's songs too.
+                (_, Some(chosen)) => chosen.and_then(|id| state.libraries.iter().position(|l| l.id == id)),
+                (Some(name), None) => {
+                    if !done.libraries_used.contains(name) {
+                        done.libraries_used.push(name.clone());
                     }
-                    (None, None) => state.library_shown.and_then(|id| state.libraries.iter().position(|l| l.id == id)),
-                };
-                if let Some(at) = into {
-                    state.libraries[at].songs.push(key);
-                    state.libraries_changed = true;
+                    let at = match state.libraries.iter().position(|l| l.name == *name) {
+                        Some(at) => at,
+                        None => {
+                            state.libraries.push(libraries::Library::new(name.clone()));
+                            state.libraries.len() - 1
+                        }
+                    };
+                    Some(at)
+                }
+                (None, None) => state.library_shown.and_then(|id| state.libraries.iter().position(|l| l.id == id)),
+            };
+            if let Some(at) = into {
+                state.libraries[at].songs.push(key);
+                state.libraries_changed = true;
+            }
+        }
+    }
+
+    /// Brings an imported bundle's pictures and videos into the library's Media folder and the
+    /// media bin (the bin's own item when it has the same file already), and has the song's
+    /// slides show them. What didn't come is noted in `done`, by file name.
+    fn bring_bundle_media(&mut self, song: &mut sp_model::Presentation, opened: &bundle::Opened, done: &mut Imported) {
+        let title = song.title.clone();
+        let mut lost = opened.left_out.clone();
+        if let Some(dir) = bible_store::data_dir() {
+            let mut brought = pack::Brought::default();
+            // Items added to the bin, pictures and videos.
+            let mut added = (0, 0);
+            let (show, pictures) = (&mut self.show, &mut self.bin_pictures);
+            let failed = bundle::bring(song, opened, &dir, &mut brought, |path, staged| {
+                if let Some(have) = show.media().iter().find(|item| item.path == path) {
+                    return Some(have.id);
+                }
+                let (picture, whole) = media::load_small(path).ok()?;
+                let mut item = MediaItem::new(staged.name.clone(), path.to_owned());
+                item.looping = staged.looping;
+                let id = item.id;
+                pictures.set_small(id, picture, whole);
+                show.add_media(item);
+                if staged.video {
+                    added.1 += 1;
+                } else {
+                    added.0 += 1;
+                }
+                Some(id)
+            });
+            if added != (0, 0) {
+                self.save_media_list();
+            }
+            lost.extend(failed.into_iter().map(|name| format!("{name} (couldn't be read)")));
+            done.pictures += added.0;
+            done.videos += added.1;
+        }
+        if !opened.missing.is_empty() {
+            done.notes.push(format!("{title}: not in the bundle: {}.", opened.missing.join(", ")));
+        }
+        if !lost.is_empty() {
+            done.notes.push(format!("{title}: left out of the bundle: {}.", lost.join(", ")));
+        }
+    }
+
+    /// Adds the songs an import brought in (or found here already) to the playlist `to` names,
+    /// if any: after the item it names in the playlist in front, else at the playlist's end. The
+    /// playlist is found again by its name if the list has changed since the drop.
+    fn add_imported_to_playlist(&mut self, to: &SongsTo, done: &mut Imported) {
+        let Some(spot) = &to.playlist else { return };
+        let Some(running) = self.running.as_mut() else { return };
+        let state = &mut running.home_state;
+        let songs = self.show.presentations();
+        let items: Vec<service::Item> = done
+            .landed
+            .iter()
+            .filter_map(|&at| {
+                Some(service::Item::Song { key: state.song_keys.get(at)?.clone(), title: songs.get(at)?.title.clone() })
+            })
+            .collect();
+        let services = &mut state.services;
+        let found = if services.list.get(spot.index).is_some_and(|playlist| playlist.name == spot.name) {
+            Some(spot.index)
+        } else {
+            services.list.iter().position(|playlist| playlist.name == spot.name)
+        };
+        let Some(at) = found.filter(|_| !items.is_empty()) else { return };
+        match spot.after {
+            Some(after) if at == services.current => {
+                let mut slot = after + 1;
+                for item in items {
+                    let before = services.front().items.len();
+                    services.insert(slot, item);
+                    if services.front().items.len() > before {
+                        slot += 1;
+                    }
+                }
+            }
+            _ => {
+                for item in items {
+                    services.add_to(at, item);
                 }
             }
         }
-        applog::event(
-            "songs",
-            &format!(
-                "imported {} of {} files in {} ms ({} not imported)",
-                imported.len(),
-                files.len(),
-                started.elapsed().as_millis(),
-                problems.len()
-            ),
-        );
-        if let Some(at) = first {
-            self.apply(vec![Command::Select(at)]);
+        done.playlist = Some(services.list[at].name.clone());
+    }
+
+    /// Says in the window's notice what an import did, and returns the words.
+    fn say_imported(&mut self, done: &Imported) -> String {
+        for problem in &done.problems {
+            applog::event("songs", &format!("not imported: {problem}"));
         }
+        let into = match done.libraries_used.as_slice() {
+            [] => String::new(),
+            [one] => format!(" into the library {one}"),
+            many => format!(" into {} libraries", many.len()),
+        };
+        let busy = !done.decks.is_empty() || !done.opening.is_empty();
+        let said = match (done.titles.as_slice(), done.problems.as_slice()) {
+            ([], []) if busy => None,
+            ([], []) => Some("There were no songs to import there.".to_owned()),
+            ([one], []) => Some(format!("Imported {one}{into}.")),
+            (many, []) => Some(format!("Imported {} songs{into}.", many.len())),
+            ([], [problem]) => Some(problem.clone()),
+            ([], rest) => Some(format!("No songs imported. {}", rest[0])),
+            (imported, rest) => Some(format!(
+                "Imported {} of {} songs{into}. {}{}",
+                imported.len(),
+                imported.len() + rest.len(),
+                rest[0],
+                if rest.len() > 1 { format!(" (and {} more; see the log)", rest.len() - 1) } else { String::new() }
+            )),
+        };
+        let mut words: Vec<String> = said.into_iter().collect();
+        let things: Vec<String> = [(done.pictures, "picture"), (done.videos, "video")]
+            .into_iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, what)| format!("{n} {what}{}", if n == 1 { "" } else { "s" }))
+            .collect();
+        if !things.is_empty() {
+            words.push(format!("Brought {} into the media bin.", things.join(" and ")));
+        }
+        words.extend(done.notes.iter().cloned());
+        if let Some(name) = &done.playlist {
+            words.push(format!("Added to the playlist {name}."));
+        }
+        if !done.decks.is_empty() {
+            words.push(format!("Making slides from {}\u{2026}", done.decks.join(", ")));
+        }
+        if !done.opening.is_empty() {
+            words.push(format!(
+                "Opening {}; the window says when {} in.",
+                done.opening.join(", "),
+                if done.opening.len() == 1 { "its song is" } else { "their songs are" }
+            ));
+        }
+        let text = words.join(" ");
         if let Some(running) = self.running.as_mut() {
-            let state = &mut running.home_state;
-            if !imported.is_empty() {
-                state.editing = None;
-                state.bible_open = false;
-            }
-            let into = match libraries_used.as_slice() {
-                [] => String::new(),
-                [one] => format!(" into the library {one}"),
-                many => format!(" into {} libraries", many.len()),
-            };
-            let said = match (imported.as_slice(), problems.as_slice()) {
-                ([], []) if !decks.is_empty() => None,
-                ([], []) => Some("There were no songs to import there.".to_owned()),
-                ([one], []) => Some(format!("Imported {one}{into}.")),
-                (many, []) => Some(format!("Imported {} songs{into}.", many.len())),
-                ([], [problem]) => Some(problem.clone()),
-                ([], rest) => Some(format!("No songs imported. {}", rest[0])),
-                (done, rest) => Some(format!(
-                    "Imported {} of {} songs{into}. {}{}",
-                    done.len(),
-                    done.len() + rest.len(),
-                    rest[0],
-                    if rest.len() > 1 { format!(" (and {} more; see the log)", rest.len() - 1) } else { String::new() }
-                )),
-            };
-            for problem in &problems {
-                applog::event("songs", &format!("not imported: {problem}"));
-            }
-            let making = (!decks.is_empty()).then(|| format!("Making slides from {}…", decks.join(", ")));
-            state.notice = match (said, making) {
-                (Some(said), Some(making)) => Some(format!("{said} {making}")),
-                (said, making) => said.or(making),
-            };
+            running.home_state.notice = Some(text.clone()).filter(|text| !text.is_empty());
             running.home_window.request_redraw();
         }
-        (imported, problems, decks)
+        text
     }
 
     /// Starts making slides from a PDF or pictures, on a thread of its own; the presentation
@@ -5017,9 +5333,10 @@ impl App {
     /// each folder becoming a library. Opens where ProPresenter keeps its libraries, when that
     /// folder is there.
     fn choose_library_folder_to_import(&mut self) {
-        let mut dialog = rfd::FileDialog::new()
-            .set_title("Choose Songs or a Library Folder")
-            .add_filter("Song documents", &[load::PRO_ENDING]);
+        let mut dialog = rfd::FileDialog::new().set_title("Choose Songs or a Library Folder").add_filter(
+            "ProPresenter songs (.pro, .proBundle)",
+            &[load::PRO_ENDING, load::PRO_BUNDLE_ENDINGS[0], load::PRO_BUNDLE_ENDINGS[1]],
+        );
         if let Some(home) = std::env::var_os("HOME") {
             let libraries = PathBuf::from(home).join("Documents").join("ProPresenter").join("Libraries");
             if libraries.is_dir() {

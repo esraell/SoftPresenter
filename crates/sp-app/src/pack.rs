@@ -43,11 +43,11 @@ pub const MEDIA_PREFIX: &str = "Media/";
 /// picture, it may hold.
 const MOST_ENTRIES: usize = 20_000;
 const LARGEST_TEXT: u64 = 5 * 1024 * 1024;
-const LARGEST_PICTURE: u64 = 100 * 1024 * 1024;
+pub(crate) const LARGEST_PICTURE: u64 = 100 * 1024 * 1024;
 /// The most the songs, themes, manifest and playlist of one pack may come to, read.
 const MOST_WORDS: u64 = 256 * 1024 * 1024;
-/// Room left free on the disk after a pack is opened.
-const KEEP_FREE: u64 = 200 * 1024 * 1024;
+/// Room left free on the disk after a pack (or a song bundle) is opened.
+pub(crate) const KEEP_FREE: u64 = 200 * 1024 * 1024;
 
 pub fn is_pack(path: &Path) -> bool {
     path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case(ENDING))
@@ -427,7 +427,7 @@ fn classify(name: &str) -> Option<Entry> {
 }
 
 /// A name from a pack as it may be shown: no control characters, not too long.
-fn shown(name: &str) -> String {
+pub(crate) fn shown(name: &str) -> String {
     let clean: String = name.chars().filter(|c| !c.is_control()).take(80).collect();
     if clean.is_empty() { "(an entry with no name)".to_owned() } else { clean }
 }
@@ -604,7 +604,7 @@ fn read_words(entry: &mut impl Read) -> Result<String, String> {
 
 /// Copies a picture or video out of the pack into `into`: at most `cap` bytes, whatever the
 /// entry says. Returns its size.
-fn put_file(entry: &mut impl Read, into: &Path, cap: u64) -> Result<u64, String> {
+pub(crate) fn put_file(entry: &mut impl Read, into: &Path, cap: u64) -> Result<u64, String> {
     let mut out = std::fs::File::create(into).map_err(|e| e.to_string())?;
     let copied = std::io::copy(&mut entry.take(cap.saturating_add(1)), &mut out);
     match copied {
@@ -621,7 +621,7 @@ fn put_file(entry: &mut impl Read, into: &Path, cap: u64) -> Result<u64, String>
 }
 
 /// The free space on the disk holding `folder`, on any system.
-fn free_space(folder: &Path) -> Option<u64> {
+pub(crate) fn free_space(folder: &Path) -> Option<u64> {
     fs4::available_space(folder).ok()
 }
 
@@ -705,7 +705,7 @@ pub fn bring_file(file: &str, opened: &Opened, library: &Path, brought: &mut Bro
 
 /// Puts a picture or video from the pack in `dir`: the file there with the same contents if
 /// there is one, else a copy under a new name. Returns its name there.
-fn place(from: &Path, label: &str, dir: &Path, brought: &mut Brought, video: bool) -> Option<String> {
+pub(crate) fn place(from: &Path, label: &str, dir: &Path, brought: &mut Brought, video: bool) -> Option<String> {
     if let Some(same) = same_file_in(dir, from) {
         brought.already += 1;
         return Some(same);

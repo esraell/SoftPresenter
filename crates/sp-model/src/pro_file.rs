@@ -6,7 +6,9 @@
 //! see docs/licences/), which their author worked out as a user of the program; nothing here
 //! comes from the program itself. Only what a song needs is read: its name, its groups and
 //! their slides' words, slide labels, notes and which slides are switched off, its
-//! arrangements, and its copyright details. Everything else in the document is passed over.
+//! arrangements, and its copyright details; and, for a bundle that carries them, the picture or
+//! video each slide shows (where the document says its file is). Everything else in the
+//! document is passed over.
 //!
 //! A slide's text boxes are told apart by what they hold, since their names are whatever a
 //! church typed: the box set in the largest type across the song is the main words, the next
@@ -123,7 +125,8 @@ fn first_text(message: &[u8], field: u64) -> Result<String, &'static str> {
     Ok(String::new())
 }
 
-/// A slide as read: its text boxes' words, label, notes, and whether it is switched on.
+/// A slide as read: its text boxes' words, label, notes, whether it is switched on, and the
+/// picture or video it shows.
 #[derive(Default)]
 struct Cue {
     /// Each text box's words, and the largest type in it (in half points), in the slide's order.
@@ -132,18 +135,51 @@ struct Cue {
     notes: Option<String>,
     /// `None` when the document doesn't say.
     enabled: Option<bool>,
+    media: Option<ProMedia>,
+}
+
+/// A picture or video a slide of a `.pro` document shows, as the document names its file.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProMedia {
+    /// The ways the document names the file, each possibly empty: its address (a `file://`
+    /// address on the computer it was made on, or a bare file name in a bundle), its path from
+    /// a known folder there, and a path relative to the document.
+    pub names: Vec<String>,
+    pub video: bool,
+    /// A video set to play again from the start when it ends.
+    pub looping: bool,
+}
+
+/// A song read from a `.pro` document, with the picture or video each of its slides shows (by
+/// the slide's id), for a bundle that carries those files.
+#[derive(Debug)]
+pub struct ProDocument {
+    pub song: Presentation,
+    pub media: Vec<(Uuid, ProMedia)>,
 }
 
 /// Reads a song from a `.pro` document. `fallback` is the title used when the document has
-/// none (its file name, say).
+/// none (its file name, say). A document with pictures or videos but no words is refused, as
+/// its slides would come across empty.
 pub fn read_pro_file(bytes: &[u8], fallback: &str) -> Result<Presentation, String> {
+    let document = read_pro_document(bytes, fallback)?;
+    let has_words = |slide: &Slide| slide.objects.iter().any(|o| o.as_text().is_some_and(|t| !t.trim().is_empty()));
+    if !document.song.groups.iter().flat_map(|g| &g.slides).any(has_words) {
+        return Err("it has pictures or videos but no words, and those don't come across yet".to_owned());
+    }
+    Ok(document.song)
+}
+
+/// Reads a song from a `.pro` document with the pictures and videos its slides show, for a
+/// bundle that carries their files. A document with neither words nor pictures is refused.
+pub fn read_pro_document(bytes: &[u8], fallback: &str) -> Result<ProDocument, String> {
     if bytes.len() > LARGEST_PRO_FILE {
         return Err("the file is too large to be a song".to_owned());
     }
     read(bytes, fallback).map_err(str::to_owned)
 }
 
-fn read(bytes: &[u8], fallback: &str) -> Result<Presentation, &'static str> {
+fn read(bytes: &[u8], fallback: &str) -> Result<ProDocument, &'static str> {
     let mut name = String::new();
     let mut selected = String::new();
     let mut arrangements: Vec<(String, String, Vec<String>)> = Vec::new();
@@ -217,15 +253,19 @@ fn read(bytes: &[u8], fallback: &str) -> Result<Presentation, &'static str> {
     let mut placed: std::collections::HashSet<String> = std::collections::HashSet::new();
     let ranking = rank_positions(cues.values());
     let main_cyrillic = main_script(cues.values(), &ranking);
-    let make_slide = |cue: &Cue| {
+    let mut media = Vec::new();
+    let mut make_slide = |cue: &Cue| {
         let mut slide = Slide::new(slide_objects(&cue.words, &ranking, main_cyrillic));
         slide.label = cue.label.clone();
         slide.notes = cue.notes.clone();
         slide.enabled = !says || cue.enabled.unwrap_or(false);
+        if let Some(shown) = &cue.media {
+            media.push((slide.id, shown.clone()));
+        }
         slide
     };
     for (id, group_name, cue_ids) in &groups {
-        let slides: Vec<Slide> = cue_ids.iter().filter_map(|cue| cues.get(cue)).map(make_slide).collect();
+        let slides: Vec<Slide> = cue_ids.iter().filter_map(|cue| cues.get(cue)).map(&mut make_slide).collect();
         placed.extend(cue_ids.iter().cloned());
         if slides.is_empty() {
             continue;
@@ -235,8 +275,12 @@ fn read(bytes: &[u8], fallback: &str) -> Result<Presentation, &'static str> {
         song_groups.push(group);
     }
     // Slides in no group, if a document has any, come last.
-    let loose: Vec<Slide> =
-        cue_order.iter().filter(|id| !placed.contains(*id)).filter_map(|id| cues.get(id)).map(make_slide).collect();
+    let loose: Vec<Slide> = cue_order
+        .iter()
+        .filter(|id| !placed.contains(*id))
+        .filter_map(|id| cues.get(id))
+        .map(&mut make_slide)
+        .collect();
     if !loose.is_empty() {
         song_groups.push(Group { id: Uuid::new_v4(), name: String::new(), color: group_color(""), slides: loose });
     }
@@ -257,11 +301,11 @@ fn read(bytes: &[u8], fallback: &str) -> Result<Presentation, &'static str> {
         return Err("it has no slides in it, or isn't a song document");
     }
     let has_words = |slide: &Slide| slide.objects.iter().any(|o| o.as_text().is_some_and(|t| !t.trim().is_empty()));
-    if !song_groups.iter().flat_map(|g| &g.slides).any(has_words) {
-        return Err("it has pictures or videos but no words, and those don't come across yet");
+    if media.is_empty() && !song_groups.iter().flat_map(|g| &g.slides).any(has_words) {
+        return Err("it has no words or pictures in it, or isn't a song document");
     }
     let title = [name.trim(), ccli_title.trim(), fallback].into_iter().find(|t| !t.is_empty()).unwrap_or("Untitled");
-    Ok(Presentation {
+    let song = Presentation {
         id: Uuid::new_v4(),
         title: title.to_owned(),
         groups: song_groups,
@@ -271,7 +315,8 @@ fn read(bytes: &[u8], fallback: &str) -> Result<Presentation, &'static str> {
         arrangement: chosen,
         loops: false,
         transition: None,
-    })
+    };
+    Ok(ProDocument { song, media })
 }
 
 /// The positions of a song's text boxes, main words first. Each position is ranked by the size
@@ -402,9 +447,9 @@ fn read_cue(message: &[u8]) -> Result<(String, Cue), &'static str> {
     Ok((id, cue))
 }
 
-/// The parts of a cue's action that make a slide: the slide's words and notes, and its label.
-/// Only a slide's own label is kept: a picture's or a video's action is labelled with its file
-/// name.
+/// The parts of a cue's action that make a slide: the slide's words and notes, and its label,
+/// or the picture or video it shows (the first, if it has several). Only a slide's own label
+/// is kept: a picture's or a video's action is labelled with its file name.
 fn read_action(message: &[u8], cue: &mut Cue) -> Result<(), &'static str> {
     let mut label = String::new();
     let mut is_slide = false;
@@ -420,6 +465,7 @@ fn read_action(message: &[u8], cue: &mut Cue) -> Result<(), &'static str> {
                     }
                 }
             }
+            (20, media) if cue.media.is_none() => cue.media = read_media(bytes_of(&media))?,
             _ => {}
         }
     }
@@ -427,6 +473,55 @@ fn read_action(message: &[u8], cue: &mut Cue) -> Result<(), &'static str> {
         cue.label = Some(label.trim().to_owned());
     }
     Ok(())
+}
+
+/// A media action's picture or video: where its file is, and whether a video plays again when
+/// it ends. `None` for a sound, a live camera or anything else.
+fn read_media(message: &[u8]) -> Result<Option<ProMedia>, &'static str> {
+    let (mut names, mut kind) = (Vec::new(), None);
+    for read in Fields::of(message) {
+        match read? {
+            // The file: its address, by every name the document gives it.
+            (5, element) => {
+                for read in Fields::of(bytes_of(&element)) {
+                    if let (2, url) = read? {
+                        names = url_names(bytes_of(&url))?;
+                    }
+                }
+            }
+            (6, _) => kind = Some((false, false)),
+            (7, video) => {
+                let mut looping = false;
+                for read in Fields::of(bytes_of(&video)) {
+                    if let (1, behaviour) = read? {
+                        looping = number_of(&behaviour) == 1;
+                    }
+                }
+                kind = Some((true, looping));
+            }
+            _ => {}
+        }
+    }
+    Ok(kind.filter(|_| names.iter().any(|name| !name.trim().is_empty())).map(|(video, looping)| ProMedia {
+        names,
+        video,
+        looping,
+    }))
+}
+
+/// The names an address gives its file: the address itself, its path from a known folder,
+/// and a path relative to the document, in that order (any may be empty).
+fn url_names(message: &[u8]) -> Result<Vec<String>, &'static str> {
+    let (mut address, mut local, mut relative) = (String::new(), String::new(), String::new());
+    for read in Fields::of(message) {
+        match read? {
+            (1, value) => address = text_of(&value),
+            (2, value) => relative = text_of(&value),
+            (4, value) => local = first_text(bytes_of(&value), 2)?,
+            _ => {}
+        }
+    }
+    Ok(vec![address, local, relative])
 }
 
 fn read_presentation_slide(message: &[u8], cue: &mut Cue) -> Result<(), &'static str> {
@@ -483,12 +578,13 @@ fn first_bytes(message: &[u8], field: u64) -> Result<&[u8], &'static str> {
     Ok(&[])
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
+/// `.pro` documents written for tests, with text written for them: only the fields the reader
+/// reads, laid out as the reader expects. Not part of the app.
+#[cfg(any(test, feature = "test-documents"))]
+#[doc(hidden)]
+pub mod example {
     /// Writes Protocol Buffers messages, for documents made up in the tests.
-    fn varint(mut n: u64, out: &mut Vec<u8>) {
+    pub fn varint(mut n: u64, out: &mut Vec<u8>) {
         loop {
             let byte = (n & 0x7F) as u8;
             n >>= 7;
@@ -500,7 +596,7 @@ mod tests {
         }
     }
 
-    fn field(number: u64, bytes: &[u8]) -> Vec<u8> {
+    pub fn field(number: u64, bytes: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         varint(number << 3 | 2, &mut out);
         varint(bytes.len() as u64, &mut out);
@@ -508,23 +604,23 @@ mod tests {
         out
     }
 
-    fn number(number: u64, value: u64) -> Vec<u8> {
+    pub fn number(number: u64, value: u64) -> Vec<u8> {
         let mut out = Vec::new();
         varint(number << 3, &mut out);
         varint(value, &mut out);
         out
     }
 
-    fn uuid(id: &str) -> Vec<u8> {
+    pub fn uuid(id: &str) -> Vec<u8> {
         field(1, id.as_bytes())
     }
 
-    fn text_box(rtf: &str) -> Vec<u8> {
+    pub fn text_box(rtf: &str) -> Vec<u8> {
         let graphics = [field(2, b"Box"), field(13, &field(5, rtf.as_bytes()))].concat();
         field(1, &field(1, &graphics))
     }
 
-    fn cue(id: &str, boxes: &[&str], label: &str, enabled: bool) -> Vec<u8> {
+    pub fn cue(id: &str, boxes: &[&str], label: &str, enabled: bool) -> Vec<u8> {
         let base: Vec<u8> = boxes.iter().flat_map(|b| text_box(b)).collect();
         let presentation_slide = [field(1, &base), field(2, &field(1, br"{\rtf1 Wait for the band}"))].concat();
         let action =
@@ -532,7 +628,7 @@ mod tests {
         [field(1, &uuid(id)), field(10, &action), if enabled { number(12, 1) } else { Vec::new() }].concat()
     }
 
-    fn group(id: &str, name: &str, cues: &[&str]) -> Vec<u8> {
+    pub fn group(id: &str, name: &str, cues: &[&str]) -> Vec<u8> {
         let mut out = field(1, &[field(1, &uuid(id)), field(2, name.as_bytes())].concat());
         for cue in cues {
             out.extend(field(2, &uuid(cue)));
@@ -542,7 +638,7 @@ mod tests {
 
     /// A song made up for this test: two groups, one two-language slide, one switched off,
     /// an arrangement chosen, and its details.
-    fn document() -> Vec<u8> {
+    pub fn document() -> Vec<u8> {
         let arrangement = [
             field(1, &uuid("arr")),
             field(2, b"Short"),
@@ -577,6 +673,54 @@ mod tests {
         ]
         .concat()
     }
+
+    /// A media action showing a picture, or a video (looping or not), at an address (and a
+    /// path from a known folder, when not empty), labelled with the file's name as documents
+    /// label them.
+    pub fn media_action(address: &str, local: &str, video: Option<bool>) -> Vec<u8> {
+        let mut url = field(1, address.as_bytes());
+        if !local.is_empty() {
+            url.extend(field(4, &[number(1, 12), field(2, local.as_bytes())].concat()));
+        }
+        let element = [field(1, &uuid("media")), field(2, &url)].concat();
+        let kind = match video {
+            None => field(6, &[]),
+            Some(looping) => field(7, &number(1, u64::from(looping))),
+        };
+        let name = address.rsplit('/').next().unwrap_or(address);
+        let media = [field(5, &element), kind].concat();
+        [field(3, &field(2, name.as_bytes())), number(9, 2), field(20, &media)].concat()
+    }
+
+    /// A slide with words and, after its slide action, the extra actions given.
+    pub fn cue_showing(id: &str, words: &str, actions: &[Vec<u8>]) -> Vec<u8> {
+        let mut out = cue(id, &[words], "", true);
+        for action in actions {
+            out.extend(field(10, action));
+        }
+        out
+    }
+
+    /// "Harbour Lights", made up for tests: one verse whose slides each show one of the
+    /// pictures or videos given (an address, a path from a known folder, and `None` for a
+    /// picture or whether a video loops), then a slide showing nothing.
+    pub fn song_showing(media: &[(&str, &str, Option<bool>)]) -> Vec<u8> {
+        let ids: Vec<String> = (0..=media.len()).map(|n| format!("s{n}")).collect();
+        let names: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let mut out = [field(3, b"Harbour Lights"), field(12, &group("g", "Verse 1", &names))].concat();
+        for (at, (address, local, video)) in media.iter().enumerate() {
+            let words = format!(r"{{\rtf1 Lamp number {at}}}");
+            out.extend(field(13, &cue_showing(&ids[at], &words, &[media_action(address, local, *video)])));
+        }
+        out.extend(field(13, &cue_showing(&ids[media.len()], r"{\rtf1 The harbour sleeps}", &[])));
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::example::*;
+    use super::*;
 
     #[test]
     fn a_song_comes_with_its_groups_words_translation_labels_and_details() {
@@ -693,6 +837,58 @@ mod tests {
         assert_eq!(read_pro_file(&doc, "x").unwrap().groups[0].slides[0].label, None);
         let empty = [field(12, &group("g", "", &["b"])), field(13, &cue("b", &[r"{\rtf1 }"], "", true))].concat();
         assert!(read_pro_file(&empty, "x").unwrap_err().contains("no words"));
+    }
+
+    #[test]
+    fn each_slides_picture_or_video_is_read_with_every_name_its_file_has() {
+        let doc = song_showing(&[
+            ("file:///Volumes/Church/Backgrounds/Sky%20Blue.jpg", "Backgrounds/Sky Blue.jpg", None),
+            ("Waves.mov", "Waves.mov", Some(true)),
+            ("file:///Volumes/Church/Clips/Count.mp4", "", Some(false)),
+        ]);
+        let document = read_pro_document(&doc, "x").unwrap();
+        let slides: Vec<&Slide> = document.song.groups[0].slides.iter().collect();
+        assert_eq!(slides.len(), 4);
+        assert_eq!(document.media.len(), 3, "the last slide shows nothing");
+        let (first, picture) = &document.media[0];
+        assert_eq!(*first, slides[0].id);
+        assert_eq!(picture.names[0], "file:///Volumes/Church/Backgrounds/Sky%20Blue.jpg");
+        assert_eq!(picture.names[1], "Backgrounds/Sky Blue.jpg");
+        assert!(!picture.video);
+        assert_eq!(
+            document.media[1],
+            (
+                slides[1].id,
+                ProMedia {
+                    names: vec!["Waves.mov".into(), "Waves.mov".into(), String::new()],
+                    video: true,
+                    looping: true
+                }
+            )
+        );
+        assert!(document.media[2].1.video && !document.media[2].1.looping);
+        // The file's name the media action is labelled with is not kept as the slide's label.
+        assert!(slides.iter().all(|slide| slide.label.is_none()));
+        // Read for its words alone, the same document is the same song.
+        let words = read_pro_file(&doc, "x").unwrap();
+        assert_eq!(words.slide_count(), 4);
+    }
+
+    #[test]
+    fn a_document_of_pictures_alone_comes_with_them_but_is_refused_for_its_words() {
+        let doc = [
+            field(12, &group("g", "", &["a"])),
+            field(13, &cue_showing("a", r"{\rtf1 }", &[media_action("Sky.png", "Sky.png", None)])),
+        ]
+        .concat();
+        assert_eq!(read_pro_document(&doc, "x").unwrap().media.len(), 1);
+        assert!(read_pro_file(&doc, "x").unwrap_err().contains("no words"));
+        // A sound is not a picture: a slide that plays one shows nothing.
+        let element = [field(1, &uuid("m")), field(2, &field(1, b"Bell.mp3"))].concat();
+        let sound = [number(9, 2), field(20, &[field(5, &element), field(8, &[])].concat())].concat();
+        let doc =
+            [field(12, &group("g", "", &["a"])), field(13, &cue_showing("a", r"{\rtf1 Words}", &[sound]))].concat();
+        assert!(read_pro_document(&doc, "x").unwrap().media.is_empty());
     }
 
     #[test]

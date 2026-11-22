@@ -2,7 +2,8 @@
 
 SoftPresenter can import songs from the `.pro` documents ProPresenter 7 saves, so a church can
 bring its library across (File › Import from ProPresenter…, or dropping the files or their
-folders on the window). It only ever reads them; it never writes that format.
+folders on the window), and from the `.proBundle` bundles it exports a song in with its pictures
+and videos. It only ever reads them; it never writes either format.
 
 ## Where the format comes from
 
@@ -14,6 +15,24 @@ which their author worked out as a user of the program. Nothing in SoftPresenter
 decompiling ProPresenter or from its own files. The definitions themselves are not copied into
 this repository: the reader is SoftPresenter's own code and reads only the few fields a song
 needs.
+
+For a bundle's song, the reader also reads which picture or video each slide shows and where
+its file is (the media action, its media element and that element's address), from the same
+definitions.
+
+## Bundles
+
+A `.proBundle` is an ordinary zip file holding one `.pro` document and the pictures and videos it
+uses. That much, and the two ways the files inside are named (the whole path the file had on the
+computer it came from, for a bundle the program exports; a bare file name, for one other tools
+write), and that exported archives give the place of their ZIP64 end record wrongly, come from
+public descriptions by people who read the files as users: the prose format notes of the
+MIT-licensed propresenter7-php-lib project, and an open-source presentation program's notes
+that it unpacks bundles as zip files. No code was copied from either, and no bundle from the
+program was taken apart to learn it: the tests make their own bundles in both layouts.
+SoftPresenter's reader (`crates/sp-app/src/bundle.rs`) reads the zip file with the same zip
+library song packs use, takes out only the song and the pictures and videos it shows, and puts
+the one wrong number right as it reads.
 
 ProPresenter is a trademark of Renewed Vision, LLC. SoftPresenter is not affiliated with or
 endorsed by Renewed Vision, and names ProPresenter only to say which documents it can read.
@@ -28,7 +47,8 @@ the work. It is reproduced in [NOTICE.md](../../NOTICE.md).
 [AGENTS.md](../../AGENTS.md) otherwise forbids file formats taken from other products. The
 owner agreed this one exception on 2026-11-19, for reading a church's own songs only, through
 the definitions above. It does not extend to writing the format, to other files of that
-program, or to any other product.
+program, or to any other product. Reading the bundles a song is exported in (the same song
+document in a zip file, with its pictures and videos) was asked for by the owner on 2026-11-21.
 
 ## SoftProjector song databases and songbooks
 

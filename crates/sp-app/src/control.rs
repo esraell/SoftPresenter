@@ -872,8 +872,8 @@ Layers and controls
 
 Songs, libraries and playlists
   song new TITLE [FILE.txt]    a new song, its words from a song text file
-  song import FILE… | FOLDER…  import songs (text, lyric, ChordPro, rich text, Word, .pro); a
-                               folder becomes a library of its name
+  song import FILE… | FOLDER…  import songs (text, lyric, ChordPro, rich text, Word, .pro,
+                               .proBundle); a folder becomes a library of its name
   libraries                    the libraries, with how many songs each has
   library NAME                 list a library's songs
   library open NAME | all      show a library's songs, or all songs
@@ -2668,17 +2668,35 @@ impl crate::App {
                     let text = said_packs.join("\n");
                     return if any_in { Ok(Reply::done(text)) } else { Err(text) };
                 }
-                let (imported, problems, decks) = self.import_songs(&paths);
-                let making = (!decks.is_empty()).then(|| {
-                    format!("Making slides from {}; each appears in the song list when it is done.", decks.join(", "))
+                let done = self.import_songs_to(&paths, &crate::SongsTo::default());
+                let (imported, problems, decks) = (&done.titles, &done.problems, &done.decks);
+                let mut busy: Vec<String> = Vec::new();
+                if !decks.is_empty() {
+                    busy.push(format!(
+                        "Making slides from {}; each appears in the song list when it is done.",
+                        decks.join(", ")
+                    ));
+                }
+                // A large song bundle is read in the background; `sp job` says when it is in.
+                if !done.opening.is_empty() {
+                    busy.push(format!(
+                        "Opening {}; its song comes in when it has been read.",
+                        done.opening.join(", ")
+                    ));
+                }
+                let data = serde_json::json!({
+                    "imported": imported,
+                    "problems": problems,
+                    "making": decks,
+                    "opening": done.opening,
+                    "notes": done.notes,
                 });
                 if imported.is_empty() {
-                    if let Some(making) = making {
-                        let mut text = making;
+                    if !busy.is_empty() {
+                        let mut text = busy.join("\n");
                         for problem in problems.iter().take(10) {
                             text.push_str(&format!("\n{problem}"));
                         }
-                        let data = serde_json::json!({"imported": imported, "problems": problems, "making": decks});
                         return Ok(Reply::with(text, data));
                     }
                     return Err(if problems.is_empty() {
@@ -2701,16 +2719,20 @@ impl crate::App {
                         many.len() - NAMED
                     ),
                 };
+                // What a bundle's song came without: pictures or videos missing or left out.
+                for note in &done.notes {
+                    text.push_str(&format!("\n{note}"));
+                }
                 for problem in problems.iter().take(NAMED) {
                     text.push_str(&format!("\n{problem}"));
                 }
                 if problems.len() > NAMED {
                     text.push_str(&format!("\n…and {} more not imported (see the log).", problems.len() - NAMED));
                 }
-                if let Some(making) = making {
-                    text.push_str(&format!("\n{making}"));
+                for line in busy {
+                    text.push_str(&format!("\n{line}"));
                 }
-                Ok(Reply::with(text, serde_json::json!({"imported": imported, "problems": problems, "making": decks})))
+                Ok(Reply::with(text, data))
             }
             _ => Err("song new TITLE [FILE.txt], song import FILE…, song text SONG [FILE], song reload [SONG], song keep SONG, or song delete SONG --yes"
                 .to_owned()),

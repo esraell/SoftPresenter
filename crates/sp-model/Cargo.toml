@@ -12,3 +12,7 @@ serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+# `.pro` documents written for tests (`pro_file::example`), for other crates' tests.
+test-documents = []
