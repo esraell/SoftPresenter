@@ -32,16 +32,19 @@ use objc2_web_kit::{
     WKWebsiteDataStore, WKWindowFeatures,
 };
 
-use crate::web::{Loading, WebFrames, loopback};
+use crate::web::{Loading, WebFrames, may_go, on_this_computer};
 
 /// A picture asked for and not back after this long is given up on, so a page that hangs
 /// doesn't stop the pictures for good.
 const GIVE_UP: Duration = Duration::from_secs(2);
 
-/// How far the page has got, kept by its delegate: 0 loading, 1 loaded, 2 failed.
+/// How far the page has got, kept by its delegate: 0 loading, 1 loaded, 2 failed; and whether
+/// it was opened at an address of this computer's own (a test's stand-in), the only kind that
+/// may go on to plain http here.
 #[derive(Default)]
 struct State {
     loading: Cell<u8>,
+    opened_here: Cell<bool>,
 }
 
 define_class!(
@@ -78,7 +81,8 @@ define_class!(
                     action.shouldPerformDownload(),
                 )
             };
-            let go = !new_window && !download && url.is_some_and(|url| goes(&url, main));
+            let here = self.ivars().opened_here.get();
+            let go = !new_window && !download && url.is_some_and(|url| goes(&url, main, here));
             decision.call((if go { WKNavigationActionPolicy::Allow } else { WKNavigationActionPolicy::Cancel },));
         }
 
@@ -159,18 +163,12 @@ impl Guard {
     }
 }
 
-/// True for a place a frame may go: an allowed address (see `web::allowed`); a frame inside the
-/// page may also be blank, or made by the page itself (`about:`, `data:`, `blob:`).
-fn goes(url: &NSURL, main: bool) -> bool {
-    let scheme = url.scheme().map(|scheme| scheme.to_string().to_ascii_lowercase()).unwrap_or_default();
+/// True for a place a frame may go (see `web::may_go`): https anywhere, plain http on this
+/// computer only for a page opened here.
+fn goes(url: &NSURL, main: bool, opened_here: bool) -> bool {
+    let scheme = url.scheme().map(|scheme| scheme.to_string()).unwrap_or_default();
     let host = url.host().map(|host| host.to_string()).unwrap_or_default();
-    match scheme.as_str() {
-        "https" => !host.is_empty(),
-        "http" => loopback(&host),
-        "about" => true,
-        "data" | "blob" => !main,
-        _ => false,
-    }
+    may_go(&scheme, &host, main, opened_here)
 }
 
 /// A page in its off-screen window.
@@ -237,6 +235,7 @@ impl Page {
             )
         };
         let guard = Guard::new(mtm);
+        guard.ivars().opened_here.set(on_this_computer(address));
         // SAFETY: the delegates are weak references; `guard` is kept by `Page` for as long as
         // the view.
         unsafe {

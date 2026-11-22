@@ -103,6 +103,31 @@ pub fn allowed(address: &str) -> bool {
     }
 }
 
+/// Whether a page may be opened at an address of this computer's own (plain `http` on
+/// 127.0.0.1, localhost or [::1]): a test's stand-in. Only such a page may then go on to this
+/// computer's other addresses (see [`may_go`]).
+pub fn on_this_computer(address: &str) -> bool {
+    let Some((scheme, rest)) = address.split_once("://") else { return false };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    scheme.eq_ignore_ascii_case("http") && allowed(address) && loopback(authority)
+}
+
+/// Whether a page, or a frame in it, may go to a place, by the place's scheme and host as the
+/// web view reads them: `https` anywhere; plain `http` on this computer only when the page was
+/// opened at such an address (`opened_here`), so an https page can't redirect, post or frame
+/// its way to a service on this computer and show what it says on the screens; and a frame
+/// inside the page may also be blank or made by the page itself (`about:`, `data:`, `blob:`).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn may_go(scheme: &str, host: &str, main: bool, opened_here: bool) -> bool {
+    match scheme.to_ascii_lowercase().as_str() {
+        "https" => !host.is_empty(),
+        "http" => opened_here && loopback(host),
+        "about" => true,
+        "data" | "blob" => !main,
+        _ => false,
+    }
+}
+
 /// True for this computer's own address, with or without a port.
 pub(crate) fn loopback(authority: &str) -> bool {
     let host = match authority.strip_prefix('[') {
@@ -243,6 +268,28 @@ mod tests {
         ] {
             assert!(!allowed(bad), "{bad}");
         }
+    }
+
+    #[test]
+    fn an_https_page_can_never_go_on_to_this_computers_own_services() {
+        // An https page redirecting, posting or framing its way to http on this computer is
+        // stopped, in the main frame and in a frame inside it.
+        for host in ["127.0.0.1", "localhost", "::1"] {
+            assert!(!may_go("http", host, true, false), "{host}");
+            assert!(!may_go("http", host, false, false), "{host}");
+        }
+        assert!(!may_go("http", "example.com", true, false));
+        assert!(may_go("https", "example.com", true, false));
+        assert!(!may_go("file", "", true, false));
+        assert!(!may_go("data", "", true, false), "the page itself never becomes data:");
+        assert!(may_go("data", "", false, false));
+        // A test's stand-in, opened on this computer, may go on within it, and nowhere plain.
+        assert!(may_go("http", "127.0.0.1", true, true));
+        assert!(!may_go("http", "example.com", true, true));
+        assert!(on_this_computer("http://127.0.0.1:8000/page.html"));
+        assert!(on_this_computer("HTTP://localhost/test"));
+        assert!(!on_this_computer("https://127.0.0.1/"));
+        assert!(!on_this_computer("http://127.0.0.1.evil.com/"));
     }
 
     #[test]
