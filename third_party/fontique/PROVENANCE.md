@@ -58,21 +58,29 @@ Everything is marked `SoftPresenter:` in the source. Removed from the published 
   (a cross, ✝) led the shaper on to STHeiti Medium (54 MB), each kept until the app quit. A map
   costs only the pages used, and the system can drop those again. Two cases are mapped:
   - On macOS, a file on the system volume the computer started from: `fstatfs` on the open
-    descriptor must say read-only, local, the root file system and a snapshot. That volume is
-    the signed system volume (macOS 11 and later), a read-only snapshot that nothing can write
-    to and that can't be unmounted while the system runs; the large fallback fonts are on it.
-    A read-only disk image or share lacks some of those flags (it could be ejected beneath the
-    map), and is never mapped in place.
-  - On macOS and Linux, a private copy: the file is copied with `std::fs::copy` (which clones on
-    APFS, `fclonefileat`, and lets Linux reflink on Btrfs or XFS, `copy_file_range`) under a name
-    no copy has had, into a folder the caller keeps to its user; the copy is opened, its name
-    removed, and mapped only if it then has no name anywhere (`st_nlink` 0, so no program can
-    open it) and is on a disk of this computer (macOS: `MNT_LOCAL`; Linux: ext2 to ext4, Btrfs,
-    XFS, F2FS, bcachefs or ZFS, not tmpfs, which would save nothing, nor a network file system).
-    A clone shares the original's blocks until either changes; whatever then happens to the
-    original (cut short, written over, replaced, deleted) leaves the copy as it was. Nothing is
-    left in the folder unless the process ends between the copy and the removal of its name;
-    such copies end in `COPY_SUFFIX`, for the caller to clear.
+    descriptor must say read-only, local, the root file system and a snapshot (`MNT_RDONLY`,
+    `MNT_LOCAL`, `MNT_ROOTFS`, `MNT_SNAPSHOT`). Apple documents a read-only system volume since
+    macOS 10.15 and the signed system volume, built on APFS snapshots, since macOS 11; that the
+    running system is mounted from such a snapshot with all four flags was seen on the Mac this
+    was written on (`mount` says `sealed, local, read-only`), and the check rests on the flags
+    themselves, not on the version. A read-only snapshot can't be written to, and the root
+    can't be unmounted while the system runs; the large fallback fonts are on it. A read-only
+    disk image or share lacks some of those flags (it could be ejected beneath the map; tried
+    with a read-only HFS+ disk image), and is never mapped in place.
+  - On macOS and Linux, a private copy: the file is copied with `std::fs::copy` under a name no
+    copy has had, into a folder the caller keeps to its user. On macOS `std::fs::copy` tries
+    `fclonefileat` first (an APFS clone, which clonefile(2) says shares the data blocks, writes
+    to either staying private to it) and falls back to `fcopyfile`; on Linux it uses
+    `copy_file_range`, which its manual says lets a file system use copy-on-write sharing (a
+    reflink) where it can. The copy is opened, its name removed, and mapped only if it then has
+    no name anywhere (`st_nlink` 0, so no program can open it) and is on a disk of this computer
+    (macOS: `MNT_LOCAL`; Linux: ext2 to ext4, Btrfs, XFS or F2FS by statfs(2)'s numbers, not
+    tmpfs, which would save nothing, nor a network file system). Whatever then happens to the
+    original (cut short, written over, replaced, deleted) leaves the copy as it was. A file
+    locked with `chflags` (or in the Finder) is not copied: macOS gives the copy the same lock,
+    and it could never lose its name. Nothing is left in the folder unless the process ends
+    between the copy and the removal of its name; such copies end in `COPY_SUFFIX`, for the
+    caller to clear.
   Windows is not mapped at all: Microsoft's documentation says a file with a mapping can't be
   cut short (`SetEndOfFile`), and a handle opened without `FILE_SHARE_WRITE` and
   `FILE_SHARE_DELETE` keeps any other program from opening it to write, delete or rename it, so

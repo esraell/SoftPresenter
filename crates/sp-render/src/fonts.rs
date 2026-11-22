@@ -702,6 +702,15 @@ mod tests {
         let copied = map_unchanging(&file, Some(&copies));
         let left = std::fs::read_dir(&copies).expect("the folder for copies").count();
         let whole = std::fs::read(&file).expect("the font");
+        // A Mac's copy takes on a lock put on the file (in the Finder, or with chflags), and
+        // could then never lose its name: a locked file is not copied at all.
+        let chflags = |how: &str| std::process::Command::new("/usr/bin/chflags").arg(how).arg(&file).status();
+        let locked = cfg!(target_os = "macos").then(|| {
+            chflags("uchg").expect("locked");
+            let mapped = map_unchanging(&file, Some(&copies)).is_some();
+            chflags("nouchg").expect("unlocked");
+            (mapped, std::fs::read_dir(&copies).expect("the folder for copies").count())
+        });
         let _ = std::fs::remove_dir_all(&folder);
         assert!(in_place.is_none(), "a font file anybody may change was mapped where it is");
         assert_eq!(left, 0, "a copy was left with a name");
@@ -713,15 +722,30 @@ mod tests {
             None if cfg!(target_os = "macos") => panic!("no private copy was mapped"),
             None => eprintln!("NOTHING LEARNT: no private copy is mapped on this computer"),
         }
+        assert_eq!(locked.unwrap_or_default(), (false, 0), "a locked font file was copied, or its copy left");
         if cfg!(target_os = "macos") {
             for system in ["/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Helvetica.ttc"] {
                 let system = Path::new(system);
-                if system.is_file() {
-                    let mapped = map_unchanging(system, None).map(|(_, from)| from);
+                if !system.is_file() {
+                    continue;
+                }
+                let mapped = map_unchanging(system, None).map(|(_, from)| from);
+                if root_is_a_sealed_snapshot() {
                     assert_eq!(mapped, Some(MappedFrom::SystemVolume), "{system:?}");
+                } else {
+                    eprintln!("NOTHING LEARNT: this Mac's system volume isn't a sealed snapshot ({mapped:?})");
                 }
             }
         }
+    }
+
+    /// Whether `mount` says the system volume this Mac started from is sealed and read-only, as
+    /// it is on macOS 11 and later unless its protection was turned off.
+    fn root_is_a_sealed_snapshot() -> bool {
+        let Ok(said) = std::process::Command::new("/sbin/mount").output() else { return false };
+        String::from_utf8_lossy(&said.stdout)
+            .lines()
+            .any(|line| line.contains(" on / (") && line.contains("sealed") && line.contains("read-only"))
     }
 
     #[test]

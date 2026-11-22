@@ -9,14 +9,15 @@
 //! costs only the pages used, and the system can drop those again. So a font file is mapped
 //! here, but only when nothing another program does can change what is mapped:
 //!
-//! - on macOS, a file on the system volume the computer started from, which is a read-only
-//!   snapshot that can be neither written to nor unmounted while the system runs (the signed
+//! - on macOS, a file on the system volume the computer started from, mounted as a read-only
+//!   snapshot, which can be neither written to nor unmounted while the system runs (the signed
 //!   system volume of macOS 11 and later, where the large fallback fonts are); or
 //! - on macOS and Linux, a private copy of the file, made in a folder the application keeps to
 //!   its user, opened and then left with no name at all, so that no program can open it to
-//!   change it; the copy's data stays the copy's whatever then happens to the original (where
-//!   the disk can, the copy is a clone: an APFS clone, or a reflink on Btrfs or XFS, made at
-//!   once and sharing the original's blocks until either changes).
+//!   change it; the copy's data stays the copy's whatever then happens to the original. On
+//!   APFS the copy is a clone, made at once and sharing the original's blocks until either
+//!   changes; on Linux `copy_file_range` lets a file system that can share blocks (a reflink)
+//!   do the same.
 //!
 //! Anything else (Windows, a copy that can't be made, a disk elsewhere on a network) is left
 //! to the caller, which reads the file whole as before.
@@ -58,7 +59,7 @@ pub fn map_unchanging(path: &Path, copies: Option<&Path>) -> Option<(Blob<u8>, M
         return map(&file).map(|blob| (blob, MappedFrom::SystemVolume));
     }
     // Elsewhere a file can't be left without a name while it is open.
-    if !cfg!(unix) {
+    if !cfg!(unix) || copy_would_keep_its_name(&file) {
         return None;
     }
     let copy = copies?.join(copy_name(path));
@@ -93,6 +94,23 @@ fn copy_name(path: &Path) -> String {
     let name = path.file_name().map(|name| name.to_string_lossy()).unwrap_or_default();
     let name: String = name.chars().filter(|c| c.is_alphanumeric() || "-_.".contains(*c)).take(64).collect();
     std::format!("{}-{count}-{unguessable:016x}-{name}{COPY_SUFFIX}", std::process::id())
+}
+
+/// Whether a copy of an open file would keep its name: on macOS a clone or copy takes on the
+/// file's flags, and a file locked against changes or removal (in the Finder or with `chflags`)
+/// would give a copy that can't be removed from the folder, nor ever be mapped.
+#[cfg(target_os = "macos")]
+fn copy_would_keep_its_name(file: &File) -> bool {
+    use std::os::macos::fs::MetadataExt;
+    // From `<sys/stat.h>`: UF_IMMUTABLE, UF_APPEND, SF_IMMUTABLE, SF_APPEND, SF_RESTRICTED and
+    // SF_NOUNLINK.
+    const STAYS: u32 = 0x0000_0002 | 0x0000_0004 | 0x0002_0000 | 0x0004_0000 | 0x0008_0000 | 0x0010_0000;
+    file.metadata().map_or(true, |meta| meta.st_flags() & STAYS != 0)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn copy_would_keep_its_name(_file: &File) -> bool {
+    false
 }
 
 /// Maps the whole of an open file, read-only.
@@ -156,12 +174,12 @@ fn on_local_disk(file: &File) -> bool {
     rustix::fs::fstatfs(file).is_ok_and(|fs| fs.f_flags & mount::LOCAL != 0)
 }
 
-/// On Linux, only the usual disk file systems count: ext2 to ext4, Btrfs, XFS, F2FS, bcachefs
-/// and ZFS (the numbers `statfs` gives for each). A copy kept in memory (tmpfs) would save
-/// nothing, and one on a network file system could change beneath the map.
+/// On Linux, only the usual disk file systems count: ext2 to ext4, Btrfs, XFS and F2FS (the
+/// numbers statfs(2) gives for each). Any other is left to be read whole: a copy kept in memory
+/// (tmpfs) would save nothing, and one on a network file system could change beneath the map.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn on_local_disk(file: &File) -> bool {
-    const LOCAL: [u32; 6] = [0xEF53, 0x9123_683E, 0x5846_5342, 0xF2F5_2010, 0xCA45_1A4E, 0x2FC1_2FC1];
+    const LOCAL: [u32; 4] = [0xEF53, 0x9123_683E, 0x5846_5342, 0xF2F5_2010];
     rustix::fs::fstatfs(file).is_ok_and(|fs| LOCAL.contains(&(fs.f_type as u32)))
 }
 
