@@ -1799,7 +1799,7 @@ impl App {
         if items.len() < 2 {
             return;
         }
-        let next = items[(cycle.at + 1) % items.len()];
+        let next = items[media::next_in_cycle(&items, cycle.at, cycle.shown)];
         if let Some(item) = self.show.media().get(next) {
             self.bin_pictures.read_ahead(item.id, &item.path);
         }
@@ -1814,11 +1814,11 @@ impl App {
         }
     }
 
-    /// The media bin places of a media playlist's files, in its order.
+    /// The media bin places of a media playlist's files, in its order (as its view shows them).
     fn playlist_media(&self, id: Uuid) -> Vec<usize> {
         let Some(running) = self.running.as_ref() else { return Vec::new() };
         let Some(playlist) = running.home_state.media_playlists.iter().find(|p| p.id == id) else { return Vec::new() };
-        playlist.files.iter().filter_map(|file| self.show.media().iter().position(|item| &item.path == file)).collect()
+        media::playlist_places(&playlist.files, self.show.media())
     }
 
     /// Moves a playing media playlist on: a picture after 8 seconds, a video when it ends. It
@@ -1839,7 +1839,9 @@ impl App {
             since.elapsed() >= Duration::from_secs_f32(PICTURE_SECONDS)
         };
         if done && items.len() > 1 {
-            let next_at = (at + 1) % items.len();
+            // After the one on screen, wherever it is now: its playlist may have been reordered,
+            // or had things taken out, while it played.
+            let next_at = media::next_in_cycle(&items, at, shown);
             let next = items[next_at];
             self.media_cycle = Some(MediaCycle { playlist: id, at: next_at, since: Instant::now(), shown: next });
             self.apply(vec![Command::ShowMedia(next)]);

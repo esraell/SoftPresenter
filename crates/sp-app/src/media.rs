@@ -87,6 +87,12 @@ impl Playlist {
         self.files.iter().any(|have| have == path)
     }
 
+    /// Its order can be changed and files taken out of it here: not while it follows a folder,
+    /// whose files (in name order) are what it holds.
+    pub fn arranged_by_hand(&self) -> bool {
+        self.folder.is_none()
+    }
+
     /// Puts a file in, or takes it out if it is in.
     pub fn toggle(&mut self, path: &Path) {
         if self.has(path) {
@@ -94,6 +100,40 @@ impl Playlist {
         } else {
             self.files.push(path.to_owned());
         }
+    }
+}
+
+/// The media bin places of a media playlist's files, in the playlist's order: the order it plays
+/// in, and the order its own view in the media strip shows. Files no longer in the bin are left
+/// out.
+pub fn playlist_places(files: &[PathBuf], bin: &[sp_model::MediaItem]) -> Vec<usize> {
+    files.iter().filter_map(|file| bin.iter().position(|item| &item.path == file)).collect()
+}
+
+/// A media playlist's files once `moving` (some of `shown`, the files its view shows, in order)
+/// have been dragged to `slot` among `shown` (how many shown files are before the ink line).
+/// They go there together, in the order they had; files not shown stay at the end.
+pub fn moved_files(files: &[PathBuf], shown: &[PathBuf], moving: &[PathBuf], slot: usize) -> Vec<PathBuf> {
+    let slot = slot.min(shown.len());
+    let before = shown[..slot].iter().filter(|file| moving.contains(file)).count();
+    let mut order: Vec<PathBuf> = shown.iter().filter(|file| !moving.contains(file)).cloned().collect();
+    let carried: Vec<PathBuf> = shown.iter().filter(|file| moving.contains(file)).cloned().collect();
+    let at = slot - before;
+    order.splice(at..at, carried);
+    order.extend(files.iter().filter(|file| !shown.contains(file)).cloned());
+    order
+}
+
+/// Where a playing media playlist goes next, as a place among `items` (its bin places in its
+/// order): after `shown`, the one on screen, wherever it is now; if it has been taken out, the
+/// one that took its place (`at`, where it was).
+pub fn next_in_cycle(items: &[usize], at: usize, shown: usize) -> usize {
+    if items.is_empty() {
+        return 0;
+    }
+    match items.iter().position(|item| *item == shown) {
+        Some(now) => (now + 1) % items.len(),
+        None => at % items.len(),
     }
 }
 
@@ -374,6 +414,40 @@ mod tests {
 
     fn write_png(path: &Path, width: u32, height: u32) {
         image::RgbaImage::from_pixel(width, height, image::Rgba([10, 200, 30, 255])).save(path).unwrap();
+    }
+
+    #[test]
+    fn a_media_playlist_is_shown_and_played_in_its_own_order_and_dragged_to_another() {
+        let bin: Vec<sp_model::MediaItem> = ["/a/one.png", "/a/two.png", "/a/three.png", "/a/four.png"]
+            .iter()
+            .map(|path| sp_model::MediaItem::new(path.to_string(), PathBuf::from(path)))
+            .collect();
+        let path = |name: &str| PathBuf::from(format!("/a/{name}.png"));
+        // Added three, then one, with a file the bin no longer has between them.
+        let files = vec![path("three"), path("gone"), path("one"), path("four")];
+        assert_eq!(playlist_places(&files, &bin), [2, 0, 3], "in the order added, not the bin's");
+        let shown = vec![path("three"), path("one"), path("four")];
+        // Four dragged to the front; three and one dragged after four.
+        let moved = moved_files(&files, &shown, &[path("four")], 0);
+        assert_eq!(moved, [path("four"), path("three"), path("one"), path("gone")]);
+        let moved = moved_files(&files, &shown, &[path("three"), path("one")], 3);
+        assert_eq!(moved, [path("four"), path("three"), path("one"), path("gone")]);
+        // Let go where it was: nothing moves (but the missing file goes to the end).
+        assert_eq!(
+            moved_files(&files, &shown, &[path("one")], 1),
+            [path("three"), path("one"), path("four"), path("gone")]
+        );
+    }
+
+    #[test]
+    fn a_playing_media_playlist_goes_on_from_the_one_on_screen_after_a_change() {
+        // Playing bin item 2, the first of [2, 0, 3].
+        assert_eq!(next_in_cycle(&[2, 0, 3], 0, 2), 1, "the next as it was");
+        // Reordered to [0, 3, 2] while 2 is on screen: round to the first.
+        assert_eq!(next_in_cycle(&[0, 3, 2], 0, 2), 0);
+        // 2 taken out of [2, 0, 3]: the one that took its place, 0, is next.
+        assert_eq!(next_in_cycle(&[0, 3], 0, 2), 0);
+        assert_eq!(next_in_cycle(&[], 0, 2), 0);
     }
 
     #[test]

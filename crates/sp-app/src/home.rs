@@ -2295,9 +2295,21 @@ pub fn home_ui(
                     })
                     .collect();
             }
+            // In a media playlist's own view, the items picked are taken out of it at once (one
+            // that follows a folder says why it can't be); otherwise deleted from the bin, after
+            // asking.
             Picking::Media => {
-                state.confirm_delete_media =
+                let picked: Vec<usize> =
                     state.picked_media.iter().copied().filter(|at| *at < show.media().len()).collect();
+                let shown = state.media_playlist_shown.and_then(|id| state.media_playlists.iter().find(|p| p.id == id));
+                match shown.map(|playlist| (playlist.arranged_by_hand(), playlist.name.clone())) {
+                    Some(_) if picked.is_empty() => {}
+                    Some((true, _)) => crate::studio::remove_from_media_playlist(show, state, &picked),
+                    Some((false, name)) => {
+                        state.say(format!("\u{201c}{name}\u{201d} follows a folder: take the file out of the folder."));
+                    }
+                    None => state.confirm_delete_media = picked,
+                }
             }
             Picking::Slides => {
                 let from_bible = |at: &SlideRef| state.app_made(at.presentation);
@@ -9228,6 +9240,40 @@ mod tests {
         assert!(state.confirm_delete_media.is_empty());
         assert!(state.media_request.is_none(), "Escape deletes nothing");
         assert_eq!(state.picked_media, vec![0, 1]);
+    }
+
+    #[test]
+    fn delete_in_a_media_playlists_view_takes_the_items_out_of_it_alone() {
+        let (ctx, show) = (egui::Context::default(), show_with_media());
+        let mut playlist = crate::media::Playlist::new("Loop".to_owned());
+        playlist.files = vec!["b.png".into(), "a.png".into()];
+        let id = playlist.id;
+        let mut other = crate::media::Playlist::new("Other".to_owned());
+        other.files = vec!["a.png".into()];
+        let mut state = HomeState {
+            media_playlists: vec![playlist, other],
+            media_playlist_shown: Some(id),
+            picked_media: vec![0],
+            picking: Picking::Media,
+            ..HomeState::default()
+        };
+        frame_with(&ctx, &show, &mut state, Some(Key::Delete));
+        assert!(!state.alert_open(), "nothing is asked");
+        assert!(state.confirm_delete_media.is_empty() && state.media_request.is_none(), "nothing leaves the bin");
+        assert_eq!(state.media_playlists[0].files, [std::path::PathBuf::from("b.png")]);
+        assert_eq!(state.media_playlists[1].files, [std::path::PathBuf::from("a.png")], "another keeps it");
+        assert!(state.media_playlists_changed);
+        // One that follows a folder keeps what the folder has, and says so.
+        state.media_playlists[0].folder = Some("/a".into());
+        state.picked_media = vec![1];
+        frame_with(&ctx, &show, &mut state, Some(Key::Delete));
+        assert_eq!(state.media_playlists[0].files.len(), 1);
+        let said = state.toast.as_ref().map(|(words, _)| words.as_str());
+        assert!(said.is_some_and(|said| said.contains("follows a folder")), "{said:?}");
+        // In All Media, Delete still asks before deleting from the bin.
+        state.media_playlist_shown = None;
+        frame_with(&ctx, &show, &mut state, Some(Key::Delete));
+        assert_eq!(state.confirm_delete_media, vec![1]);
     }
 
     #[test]

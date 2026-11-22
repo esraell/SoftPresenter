@@ -2068,19 +2068,57 @@ pub fn paint_rows_moving(
     slot: usize,
     ground: Color32,
 ) {
+    paint_moving(painter, rows, moving, slot, ground, false);
+}
+
+/// Where among tiles side by side (left to right) one dragged with the pointer at `x` would go:
+/// how many tiles are left of that place, by which half of a tile the pointer is over.
+pub fn drop_slot_across(tiles: &[Rect], x: f32) -> usize {
+    tiles.iter().filter(|tile| tile.center().x < x).count()
+}
+
+/// As [`paint_rows_moving`], for tiles side by side (the media strip's): the ink line stands
+/// upright, midway between two tiles (`slot`, from [`drop_slot_across`]).
+pub fn paint_tiles_moving(
+    painter: &egui::Painter,
+    tiles: &[Rect],
+    moving: impl Fn(usize) -> bool,
+    slot: usize,
+    ground: Color32,
+) {
+    paint_moving(painter, tiles, moving, slot, ground, true);
+}
+
+/// The things being moved go faint, and the ink line goes between the two either side of `slot`:
+/// across a list, or (`across`) upright between tiles side by side.
+fn paint_moving(
+    painter: &egui::Painter,
+    rows: &[Rect],
+    moving: impl Fn(usize) -> bool,
+    slot: usize,
+    ground: Color32,
+    across: bool,
+) {
     for (at, row) in rows.iter().enumerate() {
         if moving(at) {
             painter.rect_filled(*row, RADIUS, ground.gamma_multiply(0.6));
         }
     }
-    let y = match (slot.checked_sub(1).and_then(|above| rows.get(above)), rows.get(slot)) {
-        (Some(above), Some(below)) => (above.max.y + below.min.y) / 2.0,
-        (None, Some(below)) => below.min.y,
-        (Some(above), None) => above.max.y,
+    let start = |row: &Rect| if across { row.min.x } else { row.min.y };
+    let end = |row: &Rect| if across { row.max.x } else { row.max.y };
+    let at = match (slot.checked_sub(1).and_then(|before| rows.get(before)), rows.get(slot)) {
+        (Some(before), Some(after)) => (end(before) + start(after)) / 2.0,
+        (None, Some(after)) => start(after),
+        (Some(before), None) => end(before),
         (None, None) => return,
     };
-    let (left, right) = rows.first().map_or((0.0, 0.0), |row| (row.min.x, row.max.x));
-    painter.line_segment([pos2(left + 4.0, y), pos2(right - 4.0, y)], Stroke::new(2.0, TEXT));
+    let stroke = Stroke::new(2.0, TEXT);
+    let Some(first) = rows.first() else { return };
+    if across {
+        painter.line_segment([pos2(at, first.min.y + 4.0), pos2(at, first.max.y - 4.0)], stroke);
+    } else {
+        painter.line_segment([pos2(first.min.x + 4.0, at), pos2(first.max.x - 4.0, at)], stroke);
+    }
 }
 
 /// The left column: a small label saying whether a playlist or a library is listed, the name
@@ -5052,18 +5090,17 @@ pub fn media_strip(
                     carried: false,
                 });
             }
-            // A media playlist shows only its own files.
+            // A media playlist shows only its own files, in the order it plays them; one put
+            // together by hand (not following a folder) is reordered by dragging them.
             let shown = state
                 .media_playlist_shown
                 .and_then(|id| state.media_playlists.iter().find(|playlist| playlist.id == id))
                 .cloned();
-            let order: Vec<usize> = show
-                .media()
-                .iter()
-                .enumerate()
-                .filter(|(_, item)| shown.as_ref().is_none_or(|playlist| playlist.has(&item.path)))
-                .map(|(index, _)| index)
-                .collect();
+            let order: Vec<usize> = match &shown {
+                Some(playlist) => crate::media::playlist_places(&playlist.files, show.media()),
+                None => (0..show.media().len()).collect(),
+            };
+            let reorders = shown.as_ref().is_some_and(crate::media::Playlist::arranged_by_hand);
             state.picked_media.retain(|at| order.contains(at));
             let scroll = egui::scroll_area::ScrollSource::MOUSE_WHEEL | egui::scroll_area::ScrollSource::SCROLL_BAR;
             egui::ScrollArea::horizontal().id_salt("media row").scroll_source(scroll).auto_shrink([false, false]).show(
@@ -5077,10 +5114,7 @@ pub fn media_strip(
                         ui.add_space(3.0);
                         ui.spacing_mut().item_spacing.x = 10.0;
                         let several = state.picked_media.len() > 1;
-                        for (index, item) in show.media().iter().enumerate() {
-                            if !order.contains(&index) {
-                                continue;
-                            }
+                        for (index, item) in order.iter().map(|at| (*at, &show.media()[*at])) {
                             let (rect, response) =
                                 ui.allocate_exact_size(image_size + vec2(0.0, 22.2), Sense::click_and_drag());
                             placed.push((index, rect));
@@ -5090,8 +5124,9 @@ pub fn media_strip(
                                 commands.push(Command::ShowMedia(index));
                             }
                             // A drag starting on an item picks out the items it passes over while it
-                            // stays in the bin; dragged out onto a slide it becomes what the slide
-                            // shows, onto the space under the slides a slide of its own.
+                            // stays in the bin (in a media playlist's own view, moves it there);
+                            // dragged out onto a slide it becomes what the slide shows, onto the
+                            // space under the slides a slide of its own.
                             if response.drag_started()
                                 && let Some(start) = pointer
                             {
@@ -5175,9 +5210,9 @@ pub fn media_strip(
                             );
                             ui.painter().rect_filled(place, 6.0, Color32::from_black_alpha(178));
                             let more = more_button(ui, place, ui.scope_id().with(("media more", index)), near);
-                            egui::Popup::menu(&more).show(|ui| media_item_menu(ui, state, index, item));
+                            egui::Popup::menu(&more).show(|ui| media_item_menu(ui, show, state, index, item));
                             response.on_hover_text(item.name.as_str()).context_menu(|ui| {
-                                media_item_menu(ui, state, index, item);
+                                media_item_menu(ui, show, state, index, item);
                             });
                         }
                     });
@@ -5186,7 +5221,7 @@ pub fn media_strip(
                             crate::keys::number_badge(ui.painter(), *rect, place + 1);
                         }
                     }
-                    sweep_media(ui, state, &placed, bin, pointer, down);
+                    sweep_media(ui, state, (&placed, show), bin, pointer, down, reorders);
                 },
             );
         }
@@ -5224,17 +5259,33 @@ fn dashed_rect(painter: &egui::Painter, rect: Rect, stroke: Stroke) {
 /// Carries on a drag across the media bin (see `Sweep`): while the pointer is in the bin, a box
 /// from where it started to the pointer picks out every item it touches, and the row scrolls
 /// at its ends; once a drag that started on an item leaves the bin, that item is carried to be
-/// dropped on a slide.
+/// dropped on a slide. With `reorders` (a media playlist put together by hand is shown), a drag
+/// that started on an item moves it instead, with the others picked out with it: they go faint,
+/// an ink line shows where they would go, and letting go in the strip puts them there.
 fn sweep_media(
     ui: &mut egui::Ui,
     state: &mut HomeState,
-    placed: &[(usize, Rect)],
+    (placed, show): (&[(usize, Rect)], &Show),
     bin: Rect,
     pointer: Option<egui::Pos2>,
     down: bool,
+    reorders: bool,
 ) {
     let Some(mut sweep) = state.sweep.filter(|sweep| sweep.list == crate::home::Picking::Media) else { return };
+    let moving = sweep.from.filter(|_| reorders).map(|from| {
+        let several = state.picked_media.len() > 1 && state.picked_media.contains(&from);
+        let picked = |index: &usize| if several { state.picked_media.contains(index) } else { *index == from };
+        placed.iter().map(|(index, _)| *index).filter(picked).collect::<Vec<usize>>()
+    });
+    let tiles: Vec<Rect> = placed.iter().map(|(_, rect)| *rect).collect();
+    let moved = |at: egui::Pos2| !sweep.carried && bin.contains(at) && at.distance(sweep.start) >= 3.0;
     if !down {
+        if let (Some(moving), Some(at)) = (moving, pointer)
+            && moved(at)
+        {
+            let slot = drop_slot_across(&tiles, at.x);
+            move_in_media_playlist(state, show, placed, &moving, slot);
+        }
         state.sweep = None;
         return;
     }
@@ -5250,6 +5301,19 @@ fn sweep_media(
         }
         return;
     }
+    if let Some(moving) = moving {
+        if moved(at) {
+            let slot = drop_slot_across(&tiles, at.x);
+            paint_tiles_moving(ui.painter(), &tiles, |place| moving.contains(&placed[place].0), slot, SHELF);
+            let words = match moving.as_slice() {
+                [one] => show.media().get(*one).map(|item| item.name.clone()).unwrap_or_default(),
+                many => format!("{} items", many.len()),
+            };
+            paint_carried(ui.ctx(), &words);
+            scroll_strip_at_ends(ui, bin, at);
+        }
+        return;
+    }
     if sweep.keeps || at.distance(sweep.start) < 3.0 {
         return;
     }
@@ -5258,6 +5322,29 @@ fn sweep_media(
     let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, ui.scope_id().with("media band")));
     painter.rect_filled(band, 2.0, ACCENT.gamma_multiply(0.12));
     painter.rect_stroke(band, 2.0, Stroke::new(1.0, ACCENT.gamma_multiply(0.8)), StrokeKind::Inside);
+    scroll_strip_at_ends(ui, bin, at);
+}
+
+/// Puts `moving` (bin places, in the order shown) at `slot` among the items the media playlist
+/// shown has in the strip (`placed`, in its order), and keeps the change.
+fn move_in_media_playlist(state: &mut HomeState, show: &Show, placed: &[(usize, Rect)], moving: &[usize], slot: usize) {
+    let path = |index: &usize| show.media().get(*index).map(|item| item.path.clone());
+    let shown: Vec<std::path::PathBuf> = placed.iter().filter_map(|(index, _)| path(index)).collect();
+    let carried: Vec<std::path::PathBuf> = moving.iter().filter_map(path).collect();
+    let Some(playlist) =
+        state.media_playlist_shown.and_then(|id| state.media_playlists.iter_mut().find(|playlist| playlist.id == id))
+    else {
+        return;
+    };
+    let files = crate::media::moved_files(&playlist.files, &shown, &carried, slot);
+    if files != playlist.files {
+        playlist.files = files;
+        state.media_playlists_changed = true;
+    }
+}
+
+/// While something is dragged in the media strip, it scrolls when the pointer is near its ends.
+fn scroll_strip_at_ends(ui: &mut egui::Ui, bin: Rect, at: egui::Pos2) {
     let edge = 30.0;
     if at.x < bin.min.x + edge {
         ui.scroll_with_delta(vec2(10.0, 0.0));
@@ -5513,8 +5600,9 @@ fn media_playlist_menu(state: &mut HomeState, picker: &egui::Response) {
 }
 
 /// A media item's right-click menu: how it fills the screen, whether a video loops, the media
-/// playlists it is in, and Remove.
-fn media_item_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, item: &sp_model::MediaItem) {
+/// playlists it is in, and last Delete… (from the media bin, after asking); in a media
+/// playlist's own view, Remove from that playlist instead, at once.
+fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index: usize, item: &sp_model::MediaItem) {
     use crate::home::MediaRequest;
     ui.menu_button("Scaling", |ui| {
         for (fit, name, hint) in [
@@ -5574,11 +5662,57 @@ fn media_item_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, item:
         }
     });
     ui.separator();
-    // Delete…: every item picked out, when this is one of them.
-    if ui.button("Delete…").clicked() {
-        state.confirm_delete_media =
-            if state.picked_media.contains(&index) { state.picked_media.clone() } else { vec![index] };
-        ui.close();
+    // Every item picked out, when this is one of them.
+    let these = if state.picked_media.contains(&index) { state.picked_media.clone() } else { vec![index] };
+    let shown = state.media_playlist_shown.and_then(|id| state.media_playlists.iter().find(|p| p.id == id));
+    match shown {
+        Some(playlist) => {
+            let words = remove_words(&these, &playlist.name);
+            if !playlist.arranged_by_hand() {
+                ui.add_enabled(false, egui::Button::new(words)).on_disabled_hover_text(FOLLOWS_A_FOLDER);
+            } else if ui.button(words).on_hover_text("Taken out of this media playlist only").clicked() {
+                remove_from_media_playlist(show, state, &these);
+                ui.close();
+            }
+        }
+        None => {
+            if ui.button("Delete…").clicked() {
+                state.confirm_delete_media = these;
+                ui.close();
+            }
+        }
+    }
+}
+
+/// Why nothing is taken out of, or moved in, a media playlist that follows a folder.
+const FOLLOWS_A_FOLDER: &str = "It follows a folder: what is in the folder is in it, by name";
+
+/// What taking items out of a media playlist is called: "Remove from “Loop”", or with several
+/// "Remove 2 Items from “Loop”".
+fn remove_words(these: &[usize], playlist: &str) -> String {
+    match these.len() {
+        1 => format!("Remove from \u{201c}{playlist}\u{201d}"),
+        many => format!("Remove {many} Items from \u{201c}{playlist}\u{201d}"),
+    }
+}
+
+/// Takes media bin items (by place) out of the media playlist shown, at once: they stay in the
+/// bin and in any other playlist. Nothing is taken out of one that follows a folder.
+pub fn remove_from_media_playlist(show: &Show, state: &mut HomeState, these: &[usize]) {
+    let paths: Vec<&std::path::Path> =
+        these.iter().filter_map(|at| show.media().get(*at)).map(|item| item.path.as_path()).collect();
+    let Some(playlist) = state
+        .media_playlist_shown
+        .and_then(|id| state.media_playlists.iter_mut().find(|p| p.id == id))
+        .filter(|playlist| playlist.arranged_by_hand())
+    else {
+        return;
+    };
+    let before = playlist.files.len();
+    playlist.files.retain(|file| !paths.contains(&file.as_path()));
+    if playlist.files.len() != before {
+        state.media_playlists_changed = true;
+        state.picked_media.retain(|at| !these.contains(at));
     }
 }
 
@@ -5941,6 +6075,96 @@ pub mod tests {
         assert_eq!(click(95.0), Some(VideoRequest::Seek(15.0)));
         assert_eq!(click(293.0), Some(VideoRequest::Looping(true)));
         assert_eq!(click(323.0), Some(VideoRequest::Muted(true)));
+    }
+
+    /// The media strip, with three pictures in the bin, and a media playlist of them in its own
+    /// order, shown.
+    fn strip_with_a_playlist(files: &[&str]) -> (Show, HomeState) {
+        let mut show = Show::new(vec![Arc::new(sp_model::parse_song_text("Song", "Words\n"))]);
+        for name in ["a.png", "b.png", "c.png"] {
+            show.add_media(sp_model::MediaItem::new(name.into(), name.into()));
+        }
+        let mut playlist = crate::media::Playlist::new("Loop".to_owned());
+        playlist.files = files.iter().map(std::path::PathBuf::from).collect();
+        let state = HomeState {
+            media_playlist_shown: Some(playlist.id),
+            media_playlists: vec![playlist],
+            ..HomeState::default()
+        };
+        (show, state)
+    }
+
+    /// Where the strip drew each item's name, left to right.
+    fn names_in_strip(show: &Show, state: &mut HomeState) -> Vec<(String, egui::Pos2)> {
+        fn walk(shape: &egui::Shape, into: &mut Vec<(String, egui::Pos2)>) {
+            match shape {
+                egui::Shape::Text(text) => into.push((text.galley.text().to_owned(), text.pos)),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        let mut names = Vec::new();
+        for n in 0..2 {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+                time: Some(f64::from(n) * 0.1),
+                ..RawInput::default()
+            };
+            let output = ctx.run_ui(input, |ui| media_strip(ui, show, state, &mut |_| None, &mut Vec::new()));
+            names.clear();
+            output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut names));
+            output.drop_without_applying_deltas();
+        }
+        let mut names: Vec<(String, egui::Pos2)> =
+            names.into_iter().filter(|(text, _)| text.ends_with(".PNG")).collect();
+        names.sort_by(|a, b| a.1.x.total_cmp(&b.1.x));
+        names
+    }
+
+    #[test]
+    fn a_media_playlists_view_shows_its_items_in_the_order_they_play() {
+        let (show, mut state) = strip_with_a_playlist(&["c.png", "a.png"]);
+        let names: Vec<String> = names_in_strip(&show, &mut state).into_iter().map(|(name, _)| name).collect();
+        assert_eq!(names, ["C.PNG", "A.PNG"], "the playlist's order, not the bin's");
+        state.media_playlist_shown = None;
+        let names: Vec<String> = names_in_strip(&show, &mut state).into_iter().map(|(name, _)| name).collect();
+        assert_eq!(names, ["A.PNG", "B.PNG", "C.PNG"], "All Media is the bin's order");
+        // What the menu offers there in place of Delete…, for one or several picked.
+        assert_eq!(remove_words(&[2], "Loop"), "Remove from \u{201c}Loop\u{201d}");
+        assert_eq!(remove_words(&[2, 0], "Loop"), "Remove 2 Items from \u{201c}Loop\u{201d}");
+    }
+
+    #[test]
+    fn an_item_dragged_in_a_media_playlists_view_moves_there() {
+        let (show, mut state) = strip_with_a_playlist(&["a.png", "b.png", "c.png"]);
+        let names = names_in_strip(&show, &mut state);
+        // From the middle of the first item's picture to the right half of the last.
+        let from = names[0].1 + vec2(40.0, -40.0);
+        let to = names[2].1 + vec2(110.0, -40.0);
+        let frames = vec![
+            vec![Event::PointerMoved(from)],
+            vec![press(from, true)],
+            vec![Event::PointerMoved(from + vec2(20.0, 0.0))],
+            vec![Event::PointerMoved(to)],
+            vec![Event::PointerMoved(to)],
+            vec![press(to, false)],
+            vec![],
+        ];
+        media_frames(&show, &mut state, &frames);
+        let files: Vec<&str> = state.media_playlists[0].files.iter().filter_map(|file| file.to_str()).collect();
+        assert_eq!(files, ["b.png", "c.png", "a.png"]);
+        assert!(state.media_playlists_changed);
+        // In All Media a drag from an item picks; nothing moves.
+        let (show, mut state) = strip_with_a_playlist(&["a.png", "b.png", "c.png"]);
+        state.media_playlist_shown = None;
+        media_frames(&show, &mut state, &frames);
+        assert!(!state.media_playlists_changed);
+        // A playlist that follows a folder keeps the folder's order.
+        let (show, mut state) = strip_with_a_playlist(&["a.png", "b.png", "c.png"]);
+        state.media_playlists[0].folder = Some("/a".into());
+        media_frames(&show, &mut state, &frames);
+        assert!(!state.media_playlists_changed);
     }
 
     #[test]

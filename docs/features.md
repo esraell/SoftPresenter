@@ -320,7 +320,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   tab that goes on below what shows fades out at
   its foot. An item's
   right-click menu sets its Scaling (Scale to Fill, Scale to Fit, Stretch to Fill), whether a
-  video loops, and the media playlists it is in; the menu beside MEDIA shows All Media or one
+  video loops, and the media playlists it is in, and last Delete… (from the bin, after asking).
+  A media playlist's own view shows its items in the order it plays them; there an item's menu
+  has **Remove from “<playlist>”** (Remove 2 Items from … with several picked) in place of
+  Delete…, and Delete does the same: taken out of that playlist only, at once, staying in the
+  bin and any other playlist. Items are dragged into another order there, with the others
+  picked out with them, an ink line showing where they go (dragged out of the strip they still
+  go onto a slide). A playlist that follows a folder keeps the folder's files in name order, so
+  nothing is moved or taken out of it there. The menu beside MEDIA shows All Media or one
   media playlist, and makes (New Media Playlist…, shown at once with its name ready to type),
   renames and deletes them. ("Playlist" alone is the running order.)
 
