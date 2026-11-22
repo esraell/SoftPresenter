@@ -89,3 +89,20 @@ fn english_verses_land_on_different_russian_verses() {
     println!("English verses sharing a Russian verse: {shared:?}");
     assert!(shared.len() <= 12, "{} English verses share a Russian verse: {shared:?}", shared.len());
 }
+
+/// The numbering judged from each shipped Bible's chapter lengths, as an imported Bible's is
+/// judged, is the one its file names, and none is a loose fit.
+#[test]
+fn each_shipped_bibles_numbering_is_judged_from_its_chapters() {
+    for id in ["kjv", "web", "bsb", "syn"] {
+        let bible = load(id);
+        let mut chapters = std::collections::BTreeMap::new();
+        for (verse, _) in bible.all() {
+            let last = chapters.entry((verse.book, verse.chapter)).or_insert(0);
+            *last = verse.verse.max(*last);
+        }
+        let fit = sp_bible::fit(&chapters);
+        assert_eq!((fit.numbering, fit.loose), (bible.info.numbering, false), "{id}: {fit:?}");
+        assert!(fit.by_psalms, "{id}");
+    }
+}

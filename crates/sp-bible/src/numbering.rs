@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use crate::VerseRef;
-use crate::books::book_by_code;
+use crate::books::{BOOKS, book_by_standard_code};
 
 /// A way of numbering verses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,21 +52,7 @@ struct Table {
 
 /// The tables name books by their standard codes; a few differ from the codes in Bible files.
 fn book_of(code: &str) -> Option<usize> {
-    let ours = match code {
-        "SNG" => "SOL",
-        "EZK" => "EZE",
-        "JOL" => "JOE",
-        "NAM" => "NAH",
-        "MRK" => "MAR",
-        "JHN" => "JOH",
-        "PHP" => "PHI",
-        "JAS" => "JAM",
-        "1JN" => "1JO",
-        "2JN" => "2JO",
-        "3JN" => "3JO",
-        other => other,
-    };
-    book_by_code(ours)
+    book_by_standard_code(code)
 }
 
 /// Reads `3:1-8` into chapter 3, verses 1 to 8.
@@ -123,12 +109,102 @@ pub fn convert(verse: VerseRef, from: Numbering, to: Numbering) -> VerseRef {
     VerseRef { verse: there.verse.max(1), ..there }
 }
 
+/// How many verses each chapter has under one way of numbering, from the lists at the top of
+/// its table (`PSA 1:6 2:12 3:8 …`, a chapter and its last verse).
+fn chapter_lengths(table: &str) -> HashMap<(usize, u16), u16> {
+    let mut lengths = HashMap::new();
+    for line in table.lines() {
+        let line = line.split('#').next().unwrap_or_default();
+        if line.contains('=') {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let Some(book) = parts.next().and_then(book_of) else { continue };
+        for part in parts {
+            if let Some((chapter, last)) = part.split_once(':')
+                && let (Ok(chapter), Ok(last)) = (chapter.parse(), last.parse())
+            {
+                lengths.insert((book, chapter), last);
+            }
+        }
+    }
+    lengths
+}
+
+type Lengths = HashMap<(usize, u16), u16>;
+
+fn lengths(numbering: Numbering) -> &'static Lengths {
+    static ENGLISH: OnceLock<Lengths> = OnceLock::new();
+    static SYNODAL: OnceLock<Lengths> = OnceLock::new();
+    static ORIGINAL: OnceLock<Lengths> = OnceLock::new();
+    match numbering {
+        Numbering::English => ENGLISH.get_or_init(|| chapter_lengths(include_str!("../data/eng.vrs"))),
+        Numbering::Synodal => SYNODAL.get_or_init(|| chapter_lengths(include_str!("../data/rsc.vrs"))),
+        Numbering::Original => ORIGINAL.get_or_init(|| chapter_lengths(include_str!("../data/org.vrs"))),
+    }
+}
+
+/// The way a Bible numbers its verses, as judged from how long its chapters are.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fit {
+    pub numbering: Numbering,
+    /// True when more than one chapter in fifty is longer or shorter than that numbering has
+    /// it, so that beside another Bible a verse here and there may be one off. A few differ in
+    /// nearly every Bible (the King James ends 3 John at verse 14, where the table has 15), and
+    /// those only add or leave out a verse at a chapter's end.
+    pub loose: bool,
+    /// How many of its chapters differ in length from that numbering.
+    pub differ: usize,
+    /// How many of its chapters tell the ways of numbering apart (their length differs between
+    /// them). With none there was nothing to judge by, and English is taken.
+    pub telling: usize,
+    /// True when its Psalms alone would have decided the same: they tell the Synodal numbering
+    /// from the others.
+    pub by_psalms: bool,
+}
+
+/// Judges the way a Bible numbers its verses from each chapter's last verse number (`chapters`:
+/// book and chapter, and the last verse): the way of numbering fewest of its chapters differ
+/// from. With nothing to tell them apart, or a tie, English is taken (then the Synodal, then the
+/// original's).
+pub fn fit(chapters: &std::collections::BTreeMap<(usize, u16), u16>) -> Fit {
+    const ALL: [Numbering; 3] = [Numbering::English, Numbering::Synodal, Numbering::Original];
+    let telling = |place: &(usize, u16)| {
+        let [english, synodal, original] = ALL.map(|numbering| lengths(numbering).get(place));
+        english != synodal || english != original
+    };
+    let psalm = |place: &(usize, u16)| BOOKS[place.0].code == "PSA";
+    let differ = |numbering: Numbering, psalms_only: bool| {
+        let table = lengths(numbering);
+        chapters
+            .iter()
+            .filter(|(place, _)| !psalms_only || psalm(place))
+            .filter(|(place, last)| table.get(*place) != Some(*last))
+            .count()
+    };
+    // `min_by_key` keeps the first of equals, so a tie goes to the earlier in `ALL`.
+    let best = |psalms_only: bool| {
+        ALL.into_iter().min_by_key(|numbering| differ(*numbering, psalms_only)).unwrap_or(Numbering::English)
+    };
+    let telling_chapters = chapters.keys().filter(|place| telling(place)).count();
+    let numbering = if telling_chapters == 0 { Numbering::English } else { best(false) };
+    let telling_psalms = chapters.keys().filter(|place| psalm(place) && telling(place)).count();
+    let differ_count = differ(numbering, false);
+    Fit {
+        numbering,
+        loose: differ_count * 50 > chapters.len(),
+        differ: differ_count,
+        telling: telling_chapters,
+        by_psalms: telling_psalms > 0 && best(true) == numbering,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn at(code: &str, chapter: u16, verse: u16) -> VerseRef {
-        VerseRef { book: book_by_code(code).unwrap(), chapter, verse }
+        VerseRef { book: crate::books::book_by_code(code).unwrap(), chapter, verse }
     }
 
     fn both_ways(code: &str, english: (u16, u16), synodal: (u16, u16)) {

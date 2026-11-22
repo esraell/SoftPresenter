@@ -310,6 +310,71 @@ pub fn book_by_code(code: &str) -> Option<usize> {
     BOOKS.iter().position(|book| book.code == code)
 }
 
+/// A book's place in [`BOOKS`] from its standard three-letter code (as USFM, USX and the
+/// numbering tables write it, in any case), or from the code our own files use where the two
+/// differ.
+pub fn book_by_standard_code(code: &str) -> Option<usize> {
+    let code = code.trim().to_ascii_uppercase();
+    let ours = match code.as_str() {
+        "SNG" => "SOL",
+        "EZK" => "EZE",
+        "JOL" => "JOE",
+        "NAM" => "NAH",
+        "MRK" => "MAR",
+        "JHN" => "JOH",
+        "PHP" => "PHI",
+        "JAS" => "JAM",
+        "1JN" => "1JO",
+        "2JN" => "2JO",
+        "3JN" => "3JO",
+        other => other,
+    };
+    book_by_code(ours)
+}
+
+/// The sixty-six books' names in OSIS files (`Gen`, `Exod`… `Rev`), in the order of [`BOOKS`].
+const OSIS_NAMES: [&str; 66] = [
+    "Gen", "Exod", "Lev", "Num", "Deut", "Josh", "Judg", "Ruth", "1Sam", "2Sam", "1Kgs", "2Kgs", "1Chr", "2Chr",
+    "Ezra", "Neh", "Esth", "Job", "Ps", "Prov", "Eccl", "Song", "Isa", "Jer", "Lam", "Ezek", "Dan", "Hos", "Joel",
+    "Amos", "Obad", "Jonah", "Mic", "Nah", "Hab", "Zeph", "Hag", "Zech", "Mal", "Matt", "Mark", "Luke", "John", "Acts",
+    "Rom", "1Cor", "2Cor", "Gal", "Eph", "Phil", "Col", "1Thess", "2Thess", "1Tim", "2Tim", "Titus", "Phlm", "Heb",
+    "Jas", "1Pet", "2Pet", "1John", "2John", "3John", "Jude", "Rev",
+];
+
+/// A book's place in [`BOOKS`] from its name in an OSIS file (`Gen`, `Ps`, `1John`), in any case.
+pub fn book_by_osis(name: &str) -> Option<usize> {
+    OSIS_NAMES.iter().position(|osis| osis.eq_ignore_ascii_case(name.trim()))
+}
+
+/// A book's place in [`BOOKS`] from its number in the usual order, 1 (Genesis) to 66
+/// (Revelation). Numbers past 66 are the books some Bibles add, which the app leaves out.
+pub fn book_by_number(number: u32) -> Option<usize> {
+    (1..=66).contains(&number).then(|| number as usize - 1)
+}
+
+/// A book's place in [`BOOKS`] from its name as a Bible file writes it, in English, Russian or
+/// Ukrainian: a name, short form or code exactly; else the most words at its start that are
+/// one ("Revelation of John", "Деяния апостолов"). Books some Bibles add ("Judith") find none.
+pub fn book_by_written_name(name: &str) -> Option<usize> {
+    let exactly = |typed: &str| {
+        BOOKS.iter().position(|book| {
+            [book.english, book.russian, book.ukrainian].iter().any(|n| plain(n) == typed)
+                || book.english_short.iter().chain(book.russian_short).chain(book.ukrainian_short).any(|s| *s == typed)
+                || book.code.eq_ignore_ascii_case(typed)
+        })
+    };
+    let mut words: Vec<String> = name.split([' ', '.', '\u{a0}']).map(plain).filter(|w| !w.is_empty()).collect();
+    // "II Kings" is 2 Kings.
+    let several = words.len() > 1;
+    if let Some(first) = words.first_mut()
+        && let Some(number) = ["i", "ii", "iii"].iter().position(|roman| first == roman)
+        && several
+    {
+        *first = (number + 1).to_string();
+    }
+    (1..=words.len()).rev().find_map(|count| exactly(&words[..count].concat()))
+}
+
 #[cfg(test)]
 mod tests {
 

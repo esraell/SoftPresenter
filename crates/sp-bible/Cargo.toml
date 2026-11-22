@@ -7,6 +7,11 @@ license.workspace = true
 
 [dependencies]
 flate2 = "1"
+# Bibles in other programs' formats: XML ones, zipped ones, and text in older encodings
+# (`sp_model::decode_text`).
+quick-xml.workspace = true
+zip.workspace = true
+sp-model.workspace = true
 
 [lints]
 workspace = true

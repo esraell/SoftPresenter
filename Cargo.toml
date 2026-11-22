@@ -39,6 +39,9 @@ trash = "5"
 # compression formats, no native libraries).
 zip = { version = "9.5", default-features = false, features = ["deflate-flate2"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# Reading Bibles in other programs' XML formats: a streaming reader that never expands a
+# document's own entities or fetches anything it names.
+quick-xml = { version = "0.41", default-features = false }
 # The free space on a disk, on every system, before a song pack is opened.
 fs4 = { version = "0.13", default-features = false, features = ["sync"] }
 # The macOS menu bar.

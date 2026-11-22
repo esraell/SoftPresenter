@@ -3441,6 +3441,9 @@ name = "sp-bible"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "quick-xml",
+ "sp-model",
+ "zip",
 ]
 
 [[package]]

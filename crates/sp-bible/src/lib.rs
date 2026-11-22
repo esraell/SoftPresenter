@@ -4,16 +4,21 @@
 //! A Bible file (`.spbible`, or `.pcbible` from before the project was renamed) is gzip-compressed text: a first line naming the format, then
 //! `key: value` lines about the Bible, a blank line, and one verse per line as
 //! `GEN 1:1 In the beginning...`. The words are kept exactly as their publisher gives them.
+//!
+//! Bibles in other programs' formats (Zefania, OSIS, USFM and others) are read into one by
+//! [`import`].
 
 mod books;
+pub mod import;
 mod numbering;
 
 use std::io::{Read, Write};
 
 pub use books::{
-    BOOKS, Book, book_by_code, book_name, find_book, find_book_in, find_book_typed, reading_book_name, suggest_books,
+    BOOKS, Book, book_by_code, book_by_number, book_by_osis, book_by_standard_code, book_by_written_name, book_name,
+    find_book, find_book_in, find_book_typed, reading_book_name, suggest_books,
 };
-pub use numbering::{Numbering, convert};
+pub use numbering::{Fit, Numbering, convert, fit};
 
 const FIRST_LINE: &str = "softpresenter-bible 1";
 /// The first line of Bible files made before the project was renamed (the shipped ones and the
@@ -176,29 +181,41 @@ impl Bible {
         bible
     }
 
+    /// Makes a Bible from verses already in order, each with its words as they are kept.
+    pub(crate) fn from_verses<'a>(info: Info, verses: impl Iterator<Item = (VerseRef, &'a str)>) -> Bible {
+        let mut bible = Bible { info, text: String::new(), index: Vec::new() };
+        for (place, words) in verses {
+            bible.push(place, words);
+        }
+        bible.index.sort_by_key(|(place, _, _)| *place);
+        bible
+    }
+
     fn push(&mut self, place: VerseRef, words: &str) {
         let start = self.text.len() as u32;
         self.text.push_str(words);
         self.index.push((place, start, self.text.len() as u32));
     }
 
-    /// Writes the Bible as a file.
+    /// Writes the Bible as a file. A line break in what it says about itself or in a verse is
+    /// written as a space, so no value can start a line of its own.
     pub fn to_bytes(&self) -> Vec<u8> {
         let i = &self.info;
+        let line = |text: &str| text.replace(['\n', '\r'], " ");
         let mut out = format!(
             "{FIRST_LINE}\nid: {}\nname: {}\nshort: {}\nlanguage: {}\nterms: {}\ncredit: {}\nsource: {}\nnumbering: {}\nnumbering-fit: {}\n\n",
-            i.id,
-            i.name,
-            i.short,
-            i.language,
-            i.terms,
-            i.credit,
-            i.source,
+            line(&i.id),
+            line(&i.name),
+            line(&i.short),
+            line(&i.language),
+            line(&i.terms),
+            line(&i.credit),
+            line(&i.source),
             i.numbering.name(),
             if i.loose { "loose" } else { "exact" }
         );
         for (place, words) in self.all() {
-            out.push_str(&format!("{} {}:{} {words}\n", BOOKS[place.book].code, place.chapter, place.verse));
+            out.push_str(&format!("{} {}:{} {}\n", BOOKS[place.book].code, place.chapter, place.verse, line(words)));
         }
         let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
         // Writing into memory cannot fail.
