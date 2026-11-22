@@ -2601,10 +2601,12 @@ fn slide_menu(
         ui.close();
     }
     ui.separator();
-    // Where a group starts: this slide and the rest of its group take the name.
+    // Where a group starts: this slide and the rest of its group take the name. The group it is
+    // in now is ticked.
+    let group_now = presentation.slide(index).map(|(group, _)| group.name.clone()).unwrap_or_default();
     ui.menu_button("Group", |ui| {
         for name in GROUP_NAMES {
-            if ui.button(name).clicked() {
+            if ui.add(egui::Button::selectable(group_now.eq_ignore_ascii_case(name), name)).clicked() {
                 state.slide_request = Some((here, SlideRequest::Group(name.to_owned())));
                 ui.close();
             }

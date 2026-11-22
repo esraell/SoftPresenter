@@ -2541,6 +2541,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
                 state.export_request = Some(crate::home::ExportRequest::Playlist(index));
                 ui.close();
             }
+            ui.separator();
             if ui.add_enabled(several, egui::Button::new("Delete Playlist")).clicked() {
                 delete = Some(index);
                 ui.close();
@@ -2655,6 +2656,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
                 state.rename_started = true;
                 ui.close();
             }
+            ui.separator();
             if ui.button("Delete Library").on_hover_text("The songs stay in All Songs").clicked() {
                 delete = Some(id);
                 ui.close();

@@ -248,7 +248,6 @@ pub const MENUS: &[(&str, &[Entry])] = &[
             Do(Action::SendBackward, "Send Backward", option_shift_cmd('B')),
             Do(Action::SendToBack, "Send to Back", shift_cmd('B')),
             Line,
-            Line,
             Do(Action::AlignObjects(0), "Align Left", None),
             Do(Action::AlignObjects(1), "Align Centre", None),
             Do(Action::AlignObjects(2), "Align Right", None),
@@ -483,7 +482,8 @@ pub fn needs_editor(action: Action) -> bool {
     use Action as A;
     matches!(
         action,
-        A::DeselectAll
+        A::Duplicate
+            | A::DeselectAll
             | A::Bold
             | A::Italic
             | A::Underline
@@ -731,6 +731,17 @@ mod tests {
     }
 
     #[test]
+    fn no_menu_has_two_dividers_together_or_one_at_an_end() {
+        for (menu, entries) in MENUS {
+            assert!(!matches!(entries.first(), Some(Entry::Line)), "{menu} starts with a divider");
+            assert!(!matches!(entries.last(), Some(Entry::Line)), "{menu} ends with a divider");
+            for pair in entries.windows(2) {
+                assert!(!matches!(pair, [Entry::Line, Entry::Line]), "{menu} has two dividers together");
+            }
+        }
+    }
+
+    #[test]
     fn every_item_is_found_again_by_its_id_and_appears_once() {
         let actions: Vec<Action> = items().map(|(action, _)| action).collect();
         for (at, action) in actions.iter().enumerate() {
@@ -772,6 +783,9 @@ mod tests {
         let command = ModifiersState::SUPER;
         assert!(claims(KeyCode::KeyB, command, true), "Bold in the editor");
         assert!(!claims(KeyCode::KeyB, command, false), "the Bible page elsewhere");
+        // Duplicate only works on objects in the editor: elsewhere it is greyed.
+        assert!(needs_editor(Action::Duplicate));
+        assert!(claims(KeyCode::KeyD, command, true) && !claims(KeyCode::KeyD, command, false));
         assert!(claims(KeyCode::KeyZ, command, false), "Undo is everywhere");
     }
 }

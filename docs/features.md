@@ -361,7 +361,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Add to Song as Slide on the item's right-click menu, and Media on a slide's. The slide's
   thumbnail shows the media behind its words.
 - A slide's right-click menu: Edit, Cut, Copy, Paste (each with its key), Duplicate, Delete…, Move Up, Move Down, Group (mark where a verse, chorus
-  or bridge starts), Copy and Paste Text Style, Label (Blank Slide, Instrumental, Repeat, Spoken Word), Transition (its own,
+  or bridge starts; the group the slide is in is ticked), Copy and Paste Text Style, Label (Blank Slide, Instrumental, Repeat, Spoken Word), Transition (its own,
   or as all slides), Hot Key (a letter or digit that puts the slide on screen, shown on its
   picture), Go to Next (after a number of seconds, shown on its picture), Disable, Template.
   A song's menu has Loop to First Slide, for a loop of announcements. Undo and Redo (Command-Z, Shift-Command-Z) step back through
@@ -1221,4 +1221,5 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   names every file moved; the window says how many went, only when some did.
 - A menu bar with the usual menus and shortcuts (New Song, Import Songs…, Undo, Cut/Copy/Paste, the views,
   Clear, Audience and Stage Output on/off with Cmd+1 and Cmd+2, Configure Screens), showing
-  only what works.
+  only what works: what acts on objects in the editor (Edit › Duplicate, the Format, Arrange and
+  Insert items) is greyed outside it.

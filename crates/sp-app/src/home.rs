@@ -6545,11 +6545,8 @@ fn confirm_remove_version(ui: &mut egui::Ui, state: &mut HomeState) {
     };
     let count = found.templates.len();
     let question = format!("Remove the {} version from \u{201c}{}\u{201d}?", found.name, edit.theme.name);
-    let note = format!(
-        "Its {count} template{} go. Screens using this theme keep the usual look while {} is on.",
-        if count == 1 { "" } else { "s" },
-        found.name
-    );
+    let templates = if count == 1 { "Its 1 template goes".to_owned() } else { format!("Its {count} templates go") };
+    let note = format!("{templates}. Screens using this theme keep the usual look while {} is on.", found.name);
     let theme = edit.index;
     if let Some(remove) = crate::studio::alert(ui.ctx(), "remove version", Icon::Theme, &question, &note, "Remove") {
         state.confirm_remove_version = None;
@@ -7473,17 +7470,17 @@ fn bible_row_extras(
     shelved: Option<&crate::bible::Shelved>,
     remove: &mut Option<usize>,
 ) {
-    let (mark, license) = ui.allocate_exact_size(vec2(26.0, 30.0), Sense::click());
-    let ink = if license.hovered() { Color32::WHITE } else { DIM };
+    let (mark, licence) = ui.allocate_exact_size(vec2(26.0, 30.0), Sense::click());
+    let ink = if licence.hovered() { Color32::WHITE } else { DIM };
     ui.painter().circle_stroke(mark.center(), 8.0, Stroke::new(1.2, ink));
     ui.painter().text(mark.center(), Align2::CENTER_CENTER, "i", crate::studio::semibold(11.5), ink);
-    let license = license.on_hover_text("License: who holds the rights to this translation, and its terms");
-    egui::Popup::from_toggle_button_response(&license)
+    let licence = licence.on_hover_text("Licence: who holds the rights to this translation, and its terms");
+    egui::Popup::from_toggle_button_response(&licence)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.set_width(300.0);
             if let Some(bible) = shelved {
-                egui::Grid::new(("license", index)).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+                egui::Grid::new(("licence", index)).num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                     for (label, value) in [
                         ("Bible", bible.name.as_str()),
                         ("Abbreviation", bible.short.as_str()),
@@ -9052,6 +9049,28 @@ mod tests {
         let offering = sp_model::Version { id: sp_model::Uuid::from_u128(77), name: "Offering".to_owned() };
         assert!(theme.add_version(&offering, &[0, 1]));
         (theme, offering)
+    }
+
+    #[test]
+    fn removing_a_version_counts_its_templates_in_words() {
+        let ctx = egui::Context::default();
+        let show = three_songs();
+        for (templates, words) in [(&[0, 1][..], "Its 2 templates go."), (&[0][..], "Its 1 template goes.")] {
+            let mut theme = Theme::builtin();
+            let offering = sp_model::Version { id: sp_model::Uuid::from_u128(78), name: "Offering".to_owned() };
+            assert!(theme.add_version(&offering, templates));
+            let first = EditDraft::of_slide(theme.templates[0].as_slide(), 0);
+            let mut state = HomeState {
+                theme_edit: Some(ThemeEdit::of(0, theme)),
+                editing: Some(first),
+                confirm_remove_version: Some(offering.id),
+                ..HomeState::default()
+            };
+            frame_texts(&ctx, &show, &mut state, vec![], 0.0);
+            let texts = frame_texts(&ctx, &show, &mut state, vec![], 0.1);
+            let note = texts.iter().map(|(text, _)| text).find(|text| text.starts_with("Its ")).expect("the question");
+            assert!(note.starts_with(words), "{note}");
+        }
     }
 
     #[test]
