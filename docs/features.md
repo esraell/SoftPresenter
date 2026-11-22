@@ -194,7 +194,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   menu (for a song, the song's own menu is under Song). Headers are small capital lines. Items
   can be dragged into a new order. A click on a row only **opens** the item: it becomes the
   open one and the slides scroll to it; the screens don't change, and a Bible passage no longer
-  takes the window to the Bible page (Open on the Bible Page, in its menu, does). A click on a
+  takes the window to the Bible page (Open on the Bible Page, in its menu, does, opening it as the
+  page opens any passage). A passage kept in a playlist runs as its own slides, so Next goes on
+  into the next item after its last. A click on a
   header scrolls the slides to it. **Add to playlist**, at the foot, adds a song, a header, a
   placeholder, a picture or video, a media playlist or (once VoxLive is connected) the VoxLive
   item after the open item, and opens the Bible page for a passage; under it is the filter.
@@ -237,11 +239,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   that goes on by itself goes on into the next song or passage only with Continuous on.
 - **A slide picked waits for Enter.** What the find box opens with Return has a slide picked
   (a song's first slide as sung, or the slide whose words were found; a Bible passage's first
-  verse; a single verse, typed as a reference or found by its words, opens in its whole chapter
-  with that verse picked, so Next goes on through the chapter after it, as a verse double-clicked
-  in the lists does, unless the verses are made into one slide; Command-Return still keeps the
-  verse alone), and so does a passage looked up with Return in the reference field; in the Bible view ↑
-  and ↓ pick the verse before or after (from the verse on screen when none is picked). The slide
+  verse: a single verse, typed as a reference or found by its words, is the passage, and with a
+  slide a verse its slides are its whole chapter's, so after Enter Next goes on through the
+  chapter after it; Command-Return keeps the verse alone), and so does a passage looked up with
+  Return in the reference field; in the Bible view ↑ and ↓ pick the verse before or after (from
+  the verse on screen when none is picked, or the passage's first when neither is). The slide
   picked has a 2-point ink ring, its strip in ink and a small ink key cap for Enter after its
   label (in words only or a table, its row has the chosen grey and a fine dim ring inside); never
   orange, which is only for what is on screen, nor the blue of slides picked out to change several;
@@ -532,15 +534,24 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   `jn 3:16`, `Psalm 23`, `Пс 22:1-3`, `Ів 3:16`) or words to find. A short form is read in the
   language of the first translation first ("1 Цар" is 1 Samuel to a Russian Bible, 1 Kings to a
   Ukrainian one), and a Ukrainian Bible shows its books' Ukrainian names.
+- **The passage is what was asked for**, however it was looked up (the reference field, the
+  find box, a verse key or row, History): John 3:16 is John 3:16. The title names it (a whole
+  chapter by its number alone, `John 3`), + Add keeps exactly it, and only its verses are lit on
+  the page and on the verse keys. With a slide a verse (Options), a passage within one chapter
+  has its whole chapter's slides, so any verse of the chapter can be put on screen and, after
+  Enter, Space and → go on through the chapter after the passage (← back the same way); its
+  first verse is the one picked. Made into one slide, or running across two chapters, a passage
+  has only its own slides.
 - **Page** (the first look) shows the passage's whole chapter to read: a verse to a row, its
   number at the left, the words in a book face, the same verse in the second Bible under them;
   the passage's verses bright, the rest of the chapter dimmer, the verse on screen tinted orange
-  and the verse picked for Enter in a well with a ring. A click on a verse of the passage puts
-  it on screen, as a click on its slide does; a click on another verse of the chapter looks
-  that verse up (Shift: the passage from the verse clicked before) and picks it, without putting
-  anything on screen. Only the verses in view are drawn, so the longest psalm costs no more than
-  a short chapter. **Slides** shows the passage's slides as the Bible theme draws them. Which of
-  the two is kept between starts.
+  and the verse picked for Enter in a well with a ring. A click on a verse that has a slide (any
+  verse of the chapter, with a slide a verse; the passage, made into one slide) puts that slide
+  on screen, as a click on the slide does, and the passage stays as it is; a click on a verse
+  with none looks that verse up (Shift: the passage from the verse clicked before) and picks it,
+  without putting anything on screen. Only the verses in view are drawn, so the longest psalm
+  costs no more than a short chapter. **Slides** shows the passage's slides as the Bible theme
+  draws them. Which of the two is kept between starts.
 - **What the operator reads follows the language typed; what the screens show does not.** A
   reference typed with an English book name (`gen 1 1`) is named back in English in the
   reference field (`Genesis 1:1`), and in the find box quoted from the first English Bible in
@@ -591,8 +602,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the Show view. Command-2 or Command-B (Ctrl elsewhere), from anywhere, goes back to the field
   with its words selected, ready for the next reference.
 - History, the other side of the left column, lists the passages that were on screen, newest
-  first, named in the operator's language, with the time (or the day, for earlier ones); one
-  click brings a passage back. It is kept between starts, holds the last hundred, and Clear
+  first, named in the operator's language, with the time (or the day, for earlier ones): the
+  passage asked for, not the chapter its slides were made from. One click brings a passage back,
+  its first verse picked. It is kept between starts, holds the last hundred, and Clear
   history empties it.
 - Up to four translations on one slide, lined up by verse using the standard versification
   tables. As this is set once and seldom changed, it is folded into one line, TRANSLATIONS with
@@ -603,7 +615,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - Options opens a panel: what each slide shows (one verse, or the whole passage), verse numbers,
   the translation's name, where the reference goes (on every slide, the whole passage on every
   slide or the last, or none) and the theme, beside a preview of the first and last slides that
-  changes as they are clicked (the passage showing, or two sample verses). Manage Bibles… opens
+  changes as they are clicked (the passage showing, its own slides, or two sample verses). Manage Bibles… opens
   the Bibles window. ‹ and › make the passage a verse longer at either end.
 - The books, two ways, chosen with a small switch at the right of the Book heading (a grid of
   keys, or lines), kept between starts. The **keypad**, the first look: all 66 books as small
@@ -615,11 +627,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   faint inner edge. The **lists**: book, chapter and
   verse side by side, each scrolling on its own and opened on what is chosen, the books named in
   full under Old Testament and New Testament (a long name ends in an ellipsis), the chosen row a
-  well with a faint ring. Both do the same: a click on a book loads its first chapter; a click on
-  a chapter loads that chapter; a click on a verse then narrows the passage to that verse,
-  Shift-click makes a passage from the verse clicked before, and a double-click opens the chapter
-  with that verse. What a click loads has its first verse (or the verse double-clicked) picked,
-  so Enter puts it on screen and Next goes on through it; nothing goes on screen from them. The
+  well with a faint ring. Both do the same: a click on a book loads its first chapter, and a
+  single click on a chapter that chapter, the whole chapter being the passage; a click on a verse
+  then makes that verse alone the passage, Shift-click makes a passage from the verse clicked
+  before, and a double-click opens the whole chapter with that verse picked. What a click loads
+  has its first verse (or the verse double-clicked) picked, so Enter puts it on screen and Next
+  goes on through its chapter; nothing goes on screen from them. The
   passage showing is lit, however it was looked up. Chapters and verses are numbered as the first
   translation numbers them.
 - Four Bibles ship with the app (King James, World English, Berean Standard, Russian Synodal)
@@ -628,7 +641,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   be downloaded, grouped by language and written in it, with its terms and an Install button
   that shows the download going on.
 - One click keeps a passage: + Add puts it in the playlist in front (its tooltip names the
-  playlist; the ▾ beside it picks another), to be brought back with the same settings.
+  playlist; the ▾ beside it picks another), to be brought back with the same settings: the
+  passage asked for (John 3:16), never the chapter round it.
 
 ![The Bible page: John 3 to read, verses 16 to 18 in the King James Version with the Russian Synodal under them, verse 16 picked, beside the keypad of the books](images/bible.png)
 

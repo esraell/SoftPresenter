@@ -1,10 +1,10 @@
 //! The Bible view's own parts: the left column (the books, chapters and verses to click, or the
 //! passages that were on screen) and the page that reads the passage's chapter.
 //!
-//! Nothing here puts anything on screen but a click on a verse of the passage on the page, as a
-//! click on one of its slides does. A book, chapter or verse clicked in the left column, or a
-//! verse of the chapter outside the passage clicked on the page, is looked up and its first
-//! verse picked, for Enter.
+//! Nothing here puts anything on screen but a click on a verse on the page that has a slide (any
+//! verse of the chapter, with a slide a verse; the passage, made into one slide), as a click on
+//! the slide does. A book, chapter or verse clicked in the left column, or a verse on the page
+//! with no slide, is looked up and its first verse picked, for Enter.
 
 use std::sync::Arc;
 
@@ -35,11 +35,13 @@ pub enum Choice {
 }
 
 /// Looks up what was chosen, named as the first translation names it (the field then says it
-/// in the operator's language), and returns the slide to pick for Enter when a passage was made.
-/// Nothing goes on screen.
+/// in the operator's language), and returns the slide to pick for Enter when a passage was made:
+/// the passage's first verse, or the verse double-clicked. A book or chapter is the whole
+/// chapter; a verse is that verse alone (its slides its chapter's, with a slide a verse). Nothing
+/// goes on screen.
 pub fn choose(page: &mut BiblePage, choice: Choice, live: Option<usize>) -> Option<usize> {
     let bible = page.lead().and_then(|lead| page.shelf.get(lead).ok())?;
-    let mut pick = 0;
+    let mut pick = None;
     let reference = match choice {
         Choice::Book(book) => {
             page.list_book = book;
@@ -57,7 +59,7 @@ pub fn choose(page: &mut BiblePage, choice: Choice, live: Option<usize>) -> Opti
             let place = |verse| VerseRef { book, chapter, verse };
             if double {
                 let (whole, slide) = crate::bible::in_its_chapter(&bible, place(verse));
-                pick = if page.options.break_on_new_verse { slide } else { 0 };
+                pick = Some(if page.options.break_on_new_verse { slide } else { 0 });
                 whole
             } else {
                 let from = page.list_from.filter(|_| shift);
@@ -74,7 +76,7 @@ pub fn choose(page: &mut BiblePage, choice: Choice, live: Option<usize>) -> Opti
     // A search's verses listed give way to the passage.
     page.found.clear();
     page.open(reference, live);
-    page.pending.is_some().then_some(pick)
+    page.pending.is_some().then(|| pick.unwrap_or(page.passage_slides().start))
 }
 
 /// The passage now shown, as the first translation reads it.
@@ -127,10 +129,7 @@ pub fn left_column(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
         }
         let picked = match state.bible.side {
             BibleSide::Books => books(ui, &mut state.bible, live),
-            BibleSide::History => {
-                history(ui, &mut state.bible, live);
-                None
-            }
+            BibleSide::History => history(ui, &mut state.bible, live),
         };
         if let Some(slide) = picked {
             state.pick_made_verse(show, slide);
@@ -584,8 +583,9 @@ fn numbers_column(ui: &mut egui::Ui, id: &str, rect: Rect, heading: &str, add: i
 }
 
 /// The History side: the passages that were on screen, newest first, each named in the
-/// operator's language; a click looks one up again (its first verse picked).
-fn history(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) {
+/// operator's language; a click looks one up again, as the page makes any passage. Returns the
+/// slide to pick (its first verse) when one was looked up.
+fn history(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) -> Option<usize> {
     ui.add_space(14.0);
     if page.history.is_empty() {
         ui.add(
@@ -596,7 +596,7 @@ fn history(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) {
             )
             .wrap(),
         );
-        return;
+        return None;
     }
     let lead = page.lead().and_then(|lead| page.shelf.get(lead).ok());
     let language = page.names_language();
@@ -655,11 +655,11 @@ fn history(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) {
         page.history.clear();
         page.history_changed = true;
     }
-    if let Some(passage) = chosen {
-        // Kept as it was on screen; the field says it in the operator's language.
-        page.found.clear();
-        page.open(passage, live);
-    }
+    let passage = chosen?;
+    // Kept as it was on screen; the field says it in the operator's language.
+    page.found.clear();
+    page.open(passage, live);
+    page.pending.is_some().then(|| page.passage_slides().start)
 }
 
 /// One verse of the chapter on the page: its words, where it stands and how tall it is. Its
@@ -674,15 +674,19 @@ struct Line {
     words_height: f32,
     top: f32,
     height: f32,
-    /// Its slide, when it is part of the passage shown: the place of its verse among those the
-    /// passage was made from (the first slide, when the passage is one slide).
+    /// Its slide, when the slides made for the passage have one: the place of its verse among
+    /// those they were made from (its chapter's, with a slide a verse), or the passage's one
+    /// slide when the passage is one slide.
     slide: Option<usize>,
+    /// Part of the passage asked for: lit.
+    asked: bool,
 }
 
 /// What the page was laid out from, so it is laid out again only when one of them changes.
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Made {
     shown: String,
+    deck: String,
     choices: String,
     bibles: (usize, Option<usize>),
     width: i32,
@@ -699,9 +703,21 @@ pub struct PageCache {
     height: f32,
     /// The chapter, as the first translation numbers it.
     chapter: Option<(usize, u16)>,
-    /// How many slides the passage was made into, as the page worked them out: a slide index is
-    /// put on screen only while the passage held has that many.
+    /// How many slides were made for the passage, as the page worked them out: a slide index is
+    /// put on screen only while the place holds that many.
     slides: usize,
+    /// Every verse of the chapter has a slide (made a slide a verse).
+    every_verse: bool,
+}
+
+#[cfg(test)]
+impl PageCache {
+    /// The verses lit as the passage, and those with a slide, as last laid out.
+    pub fn verses(&self) -> (Vec<u16>, Vec<u16>) {
+        let lit = self.lines.iter().filter(|line| line.asked).map(|line| line.verse.verse).collect();
+        let with_slides = self.lines.iter().filter(|line| line.slide.is_some()).map(|line| line.verse.verse).collect();
+        (lit, with_slides)
+    }
 }
 
 impl std::fmt::Debug for PageCache {
@@ -735,8 +751,10 @@ fn lay_out(ui: &egui::Ui, page: &mut BiblePage, width: f32) {
         return;
     };
     let pixels_per_point = (ui.ctx().pixels_per_point() * 100.0).round() as i32;
+    let held = page.held[page.showing].clone();
     let made = Made {
         shown: page.shown.clone(),
+        deck: held.deck.clone(),
         choices: page.choices(),
         bibles,
         width: width.round() as i32,
@@ -758,8 +776,13 @@ fn lay_out(ui: &egui::Ui, page: &mut BiblePage, width: f32) {
             start: VerseRef { book, chapter: number, verse: 1 },
             end: VerseRef { book, chapter: number, verse: sp_bible::LAST },
         };
-        // The verses the passage's slides were made from, as `build_passage` makes them.
-        let places: Vec<VerseRef> = lead.verses(range).into_iter().map(|(place, _)| place).collect();
+        // The verses the slides were made from, as `build_passage` makes them: the chapter's
+        // round the passage (see `bible::page_deck`), or the passage's own.
+        let deck = Some(&held)
+            .filter(|held| held.passage == page.shown)
+            .and_then(|held| sp_bible::parse_reference_in(&held.deck, &lead.info.language).ok())
+            .unwrap_or(range);
+        let places: Vec<VerseRef> = lead.verses(deck).into_iter().map(|(place, _)| place).collect();
         slides = if break_on { places.len() } else { usize::from(!places.is_empty()) };
         let text_width = page_text_width(width);
         let number = ui.fonts_mut(|fonts| fonts.layout_no_wrap("0".to_owned(), fixed_semibold(12.0), TEXT)).size().y;
@@ -779,11 +802,13 @@ fn lay_out(ui: &egui::Ui, page: &mut BiblePage, width: f32) {
             } else {
                 places.contains(&verse).then_some(0)
             };
-            lines.push(Line { verse, words, under, words_height, top, height, slide });
+            let asked = range.start <= verse && verse <= range.end;
+            lines.push(Line { verse, words, under, words_height, top, height, slide, asked });
             top += height;
         }
     }
-    page.page = PageCache { made: Some(made), lines, height: top, chapter, slides };
+    let every_verse = break_on && !lines.is_empty() && lines.iter().all(|line| line.slide.is_some());
+    page.page = PageCache { made: Some(made), lines, height: top, chapter, slides, every_verse };
 }
 
 /// How wide a verse's words are on a page `width` wide.
@@ -808,27 +833,28 @@ fn page_text(ui: &egui::Ui, text: &str, under: bool, width: f32) -> Arc<Galley> 
     ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
-/// The words at the foot of the page.
-const PAGE_NOTE: &str = "Click a verse of the passage to put it on screen; a verse outside it is looked up instead. \
-     Space and the arrows go on through the passage.";
+/// The words at the foot of the page: with a slide for every verse of the chapter, or not.
+const PAGE_NOTE: &str = "Click a verse to put it on screen. Space and the arrows go on through the chapter.";
+const PASSAGE_NOTE: &str = "Click the passage to put it on screen; a verse outside it is looked up instead.";
 
 /// The page: the passage's chapter to read, a verse to a row with the same verse in the second
 /// Bible under it, the passage's verses brighter. The verse on screen is tinted orange, the one
-/// picked for Enter has a well and a ring. A click on a verse of the passage puts its slide on
-/// screen, as a click on the slide does; a click on another verse of the chapter looks it up,
-/// with Shift the passage from the verse clicked before, and picks it. Only the verses in view
-/// are drawn.
+/// picked for Enter has a well and a ring. A click on a verse with a slide (any verse of the
+/// chapter, with a slide a verse; the passage, made into one slide) puts that slide on screen,
+/// as a click on the slide does; a click on a verse with none looks it up, with Shift the
+/// passage from the verse clicked before, and picks it. Only the verses in view are drawn.
 pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
     let live = show.live().map(|at| at.presentation);
     let width = ui.available_width();
     lay_out(ui, &mut state.bible, width);
     let slot = state.bible.slots.map(|slots| slots[state.bible.showing]);
-    // The slides are there to put on screen only once the show holds the passage, made as the
-    // page worked it out (so an index can never put up another verse).
+    // The slides are there to put on screen only once the show holds those made for the
+    // passage, as the page worked them out (so an index can never put up another verse).
     let slides = state.bible.page.slides;
+    let deck = &state.bible.held[state.bible.showing].deck;
     let held = slot.filter(|slot| {
         show.presentations().get(*slot).is_some_and(|passage| {
-            passage.title == state.bible.shown && passage.slide_count() > 0 && passage.slide_count() == slides
+            passage.title == *deck && passage.slide_count() > 0 && passage.slide_count() == slides
         })
     });
     let picked = state.pick(show).filter(|at| Some(at.presentation) == held).map(|at| at.slide);
@@ -856,7 +882,7 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
             }
             let rect = row_rect(line);
             let response = ui.interact(rect, egui::Id::unique(("bible page verse", line.verse.verse)), Sense::click());
-            let in_passage = line.slide.is_some();
+            let in_passage = line.asked;
             let is_live = on_screen.is_some_and(|range| range.start <= line.verse && line.verse <= range.end);
             let is_picked = picked.is_some() && line.slide.is_some() && line.slide == picked;
             if is_live {
@@ -899,8 +925,8 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
         // The verse picked (after a lookup, ↑ or ↓) or the verse on screen kept in sight.
         let target = |want: &dyn Fn(&Line) -> bool| cache.lines.iter().find(|line| want(line)).map(row_rect);
         if follow_pick
-            && let Some(rect) = target(&|line| picked.is_some() && line.slide == picked)
-                .or_else(|| target(&|line| line.slide.is_some()))
+            && let Some(rect) =
+                target(&|line| picked.is_some() && line.slide == picked).or_else(|| target(&|line| line.asked))
         {
             ui.scroll_to_rect_animation(rect, Some(Align::Center), egui::style::ScrollAnimation::none());
             followed = true;
@@ -913,8 +939,9 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
         }
         if !cache.lines.is_empty() {
             let note = Rect::from_min_size(origin + vec2(PAD_X, cache.height + 18.0), vec2(width - 2.0 * PAD_X, 40.0));
+            let words = if cache.every_verse { PAGE_NOTE } else { PASSAGE_NOTE };
             let galley = ui.fonts_mut(|fonts| {
-                fonts.layout(PAGE_NOTE.to_owned(), FontId::proportional(13.0), TEXT_FAINT, note.width())
+                fonts.layout(words.to_owned(), FontId::proportional(13.0), TEXT_FAINT, note.width())
             });
             painter.galley(note.min, galley, TEXT_FAINT);
         }
@@ -927,12 +954,13 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
     }
     let Some((verse, slide)) = clicked else { return };
     match (slide, held) {
-        // A verse of the passage: its slide on screen, as a click on the slide does.
+        // A verse with a slide: its slide on screen, as a click on the slide does. The passage
+        // stays as it is.
         (Some(slide), Some(slot)) => {
             state.picked = None;
             commands.push(Command::GoTo(SlideRef { presentation: slot, slide }));
         }
-        // Another verse of the chapter: looked up, and picked for Enter.
+        // A verse with none: looked up, and picked for Enter.
         _ => {
             if let Some((book, number)) = chapter {
                 (state.bible.list_book, state.bible.list_chapter) = (book, number);
@@ -964,14 +992,17 @@ fn verses_named(name: &str) -> &str {
     }
 }
 
-/// The title over the page or the slides: the chapter (on the page) or the passage (over its
-/// slides), in the operator's language, and the short names of the Bibles read.
-pub fn title(page: &mut BiblePage, slides: bool) -> Option<(String, String)> {
-    let (_, range) = shown_range(page)?;
-    let words = if slides {
-        page.reading.clone()
-    } else {
+/// The title over the page or the slides: the passage asked for, in the operator's language (a
+/// whole chapter by its number alone, "John 3"), and the short names of the Bibles read.
+pub fn title(page: &mut BiblePage) -> Option<(String, String)> {
+    let (lead, range) = shown_range(page)?;
+    let whole = range.start.verse == 1
+        && (range.start.book, range.start.chapter) == (range.end.book, range.end.chapter)
+        && range.end.verse >= lead.last_verse(range.end.book, range.end.chapter);
+    let words = if whole {
         format!("{} {}", sp_bible::book_name(range.start.book, &page.names_language()), range.start.chapter)
+    } else {
+        page.reading.clone()
     };
     let (reader, second) = page_bibles(page)?;
     let short = |at: usize| page.shelf.bibles.get(at).map_or(String::new(), |bible| bible.short.clone());
@@ -1077,8 +1108,17 @@ pub fn found_list(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
                     let verse = sp_bible::parse_reference_in(&found.kept, &lead.info.language).ok()?.start;
                     Some(crate::bible::in_its_chapter(lead, verse).1)
                 });
-                let slide = place.filter(|_| chapter && state.bible.options.break_on_new_verse).unwrap_or(0);
-                state.pick_made_verse(show, slide);
+                // The verse alone is the passage, its first verse picked; its whole chapter, the
+                // verse picked in it.
+                match place.filter(|_| chapter) {
+                    Some(place) => {
+                        let slide = if state.bible.options.break_on_new_verse { place } else { 0 };
+                        state.pick_made_verse(show, slide);
+                    }
+                    None => {
+                        state.pick_passage(show);
+                    }
+                }
             }
         }
         None => {}

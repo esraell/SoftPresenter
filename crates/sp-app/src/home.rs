@@ -660,6 +660,28 @@ pub enum BibleView {
     Slides,
 }
 
+/// What one of the Bible page's two places was given: the title of the slides made (what they
+/// were made from: the passage, or the whole chapter round it), the passage asked for (as the
+/// first translation names it: what a playlist keeps and the history notes), and the place of
+/// the passage's slides among them. See `bible::page_deck`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Held {
+    pub deck: String,
+    pub passage: String,
+    pub slides: std::ops::Range<usize>,
+}
+
+/// How a passage kept in a playlist is made into slides when it is opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlidesOf {
+    /// Its own slides, as the playlist shows them: for running the playlist, whose tiles and
+    /// keys count its slides and go on into the next item after its last.
+    Passage,
+    /// As the page makes any passage (its whole chapter, with a slide a verse): for opening it
+    /// on the Bible page to read round it.
+    Page,
+}
+
 /// The Bible page: what is typed, the translations chosen, and the passage being shown.
 #[derive(Debug)]
 pub struct BiblePage {
@@ -684,10 +706,15 @@ pub struct BiblePage {
     pub slots: Option<[usize; 2]>,
     /// Which of the two the page is showing.
     pub showing: usize,
-    /// The passage now shown, named as the first translation names it (its slides' title: what
-    /// a playlist keeps), and the choices it was made with.
+    /// The passage now shown: what was asked for (John 3:16), named as the first translation
+    /// names it. The title names it, Add keeps it, and only it is lit as the passage on the page
+    /// and the keys. Its slides may be its whole chapter's (see `held`). And the choices it was
+    /// made with.
     pub shown: String,
     pub made_with: String,
+    /// What each of the two places was last given, by place (as `slots`): the slides' title,
+    /// the passage asked for and its slides among them.
+    pub held: [Held; 2],
     /// The passage now shown as the operator reads it: the book named in the operator's
     /// language (the language it was typed in, or the session's), the numbers the first
     /// translation's. What Scripture Lookup says after a lookup.
@@ -778,6 +805,7 @@ impl Default for BiblePage {
             showing: 0,
             shown: String::new(),
             made_with: String::new(),
+            held: Default::default(),
             reading: String::new(),
             language: None,
             system_language: crate::system_language::SystemLanguage::default(),
@@ -911,11 +939,14 @@ impl BiblePage {
     }
 
     /// Brings a saved passage back: its translations and options are set as they were, and
-    /// it is looked up (named for the operator in the session's language). A translation that
-    /// is no longer installed is left out, and said so.
-    pub fn open_saved(&mut self, saved: &crate::service::SavedPassage, live: Option<usize>) {
+    /// it is looked up (named for the operator in the session's language), made into its own
+    /// slides or as the page makes a passage (`slides`). A translation that is no longer
+    /// installed is left out, and said so.
+    pub fn open_saved(&mut self, saved: &crate::service::SavedPassage, live: Option<usize>, slides: SlidesOf) {
         let missing = self.apply_settings(saved);
-        self.open(saved.lookup.clone(), live);
+        self.typed_at = None;
+        self.lookup = saved.lookup.clone();
+        self.make(live, false, false, slides == SlidesOf::Page);
         if !missing.is_empty() && self.message.is_none() {
             self.message = Some(format!("Not installed, so left out: {}.", missing.join(", ")));
         }
@@ -1005,13 +1036,13 @@ impl BiblePage {
     /// in, and the session goes on in that language.
     pub fn look_up(&mut self, live: Option<usize>) {
         self.typed_at = None;
-        self.make(live, false, true);
+        self.make(live, false, true, true);
     }
 
     /// The same while typing: the slides follow what is typed, but the field is left as
     /// typed and a reference not yet finished says nothing.
     pub fn preview(&mut self, live: Option<usize>) {
-        self.make(live, true, true);
+        self.make(live, true, true, true);
     }
 
     /// Looks up a passage the operator did not type (a book or verse clicked in the lists, a
@@ -1021,7 +1052,24 @@ impl BiblePage {
     pub fn open(&mut self, kept: String, live: Option<usize>) {
         self.typed_at = None;
         self.lookup = kept;
-        self.make(live, false, false);
+        self.make(live, false, false, true);
+    }
+
+    /// The place of the passage shown's slides among the slides made for it: its verses among
+    /// its chapter's, or all of them.
+    pub fn passage_slides(&self) -> std::ops::Range<usize> {
+        self.held[self.showing].slides.clone()
+    }
+
+    /// The passage a slide of one of the page's places stands for, when it is on screen: the
+    /// passage asked for whose slides the place holds (the presentation titled `title`), or
+    /// the slides' own title when the place holds something else.
+    pub fn passage_held(&self, presentation: usize, title: &str) -> String {
+        let place = self.slots.and_then(|slots| slots.iter().position(|slot| *slot == presentation));
+        match place.map(|place| &self.held[place]) {
+            Some(held) if held.deck == title && !held.passage.is_empty() => held.passage.clone(),
+            _ => title.to_owned(),
+        }
     }
 
     /// The language the operator reads in when nothing typed says: the one a reference was
@@ -1146,10 +1194,11 @@ impl BiblePage {
     }
 
     /// Makes the passage `lookup` names and readies it for the app. The slides are made from
-    /// the translations chosen whatever the language typed. What the operator reads is named
-    /// in the language it was typed in (`typed`), or the session's, and the field then says it
-    /// (unless `quiet`, while typing).
-    fn make(&mut self, live: Option<usize>, quiet: bool, typed: bool) {
+    /// the translations chosen whatever the language typed; with `around`, as the page makes a
+    /// passage (its whole chapter, with a slide a verse: see `bible::page_deck`), else the
+    /// passage's own. What the operator reads is named in the language it was typed in
+    /// (`typed`), or the session's, and the field then says it (unless `quiet`, while typing).
+    fn make(&mut self, live: Option<usize>, quiet: bool, typed: bool, around: bool) {
         let Some(slots) = self.slots else { return };
         let rows = match self.row_choices() {
             Ok(rows) => rows,
@@ -1161,12 +1210,19 @@ impl BiblePage {
             }
         };
         match crate::bible::build_passage(&self.lookup, &rows, &self.options, self.template) {
-            Ok(passage) => {
-                let passage_name = passage.title.clone();
+            Ok(asked) => {
+                let passage_name = asked.title.clone();
+                let (passage, slides) = if around {
+                    crate::bible::page_deck(asked, &rows, &self.options, self.template)
+                } else {
+                    let count = asked.slide_count();
+                    (asked, 0..count)
+                };
                 // Leave a passage that is on screen alone: use the other slot.
                 if live == Some(slots[self.showing]) {
                     self.showing = 1 - self.showing;
                 }
+                self.held[self.showing] = Held { deck: passage.title.clone(), passage: passage_name.clone(), slides };
                 self.pending = Some((slots[self.showing], passage));
                 // The lists open on the passage, wherever it came from.
                 if let Some(range) = self
@@ -1644,6 +1700,13 @@ impl HomeState {
         let passage = bible.then(|| self.bible.shown.clone());
         self.picked = Some(Picked { at, passage, live_then: show.live() });
         self.pick_scroll = 12;
+    }
+
+    /// Picks the first verse of the passage the Bible view has just looked up (among its
+    /// chapter's slides, when it was made into them), if it made one. Returns whether it did.
+    pub fn pick_passage(&mut self, show: &Show) -> bool {
+        let first = self.bible.passage_slides().start;
+        self.pick_made_verse(show, first)
     }
 
     /// Picks a slide (by its place, its first when it hasn't that many) of the passage the Bible
@@ -4412,16 +4475,16 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     enum Do {
         /// A song, and the slide found in it.
         Song(usize, usize, bool),
-        /// What to look up (as the first Bible names it), the language the operator reads it in,
-        /// and for a single verse its chapter and its place there.
-        Passage(String, Option<String>, Option<(String, usize)>),
+        /// What to look up (as the first Bible names it), and the language the operator reads it
+        /// in.
+        Passage(String, Option<String>),
     }
     let chosen = clicked.map(|place| (place, false)).or((enter && total > 0).then_some((picked, command)));
     let chosen = chosen.and_then(|(place, add)| {
         Some((
             match at(place)? {
                 Pick::Song(index, slide, by_title) => Do::Song(index, slide, by_title),
-                Pick::Bible(row) => Do::Passage(row.lookup.clone(), row.language.clone(), row.chapter.clone()),
+                Pick::Bible(row) => Do::Passage(row.lookup.clone(), row.language.clone()),
             },
             add,
         ))
@@ -4467,27 +4530,19 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         }
         // The Bible view opens on the passage, named in the language the operator found it in,
         // which the session goes on in. It is made in the place that is not on screen, so the
-        // screens keep what they show. Its first verse is picked: Enter puts it on screen. A
-        // single verse opens in its whole chapter, with the verse picked, so Next goes on through
-        // the chapter after it, as a verse double-clicked in the lists does (not when the verses
-        // are made into one slide, which a chapter would overfill).
-        Some((Do::Passage(lookup, language, chapter), false)) => {
+        // screens keep what they show. The passage is what was found (a single verse, alone),
+        // and its first verse is picked: Enter puts it on screen. With a slide a verse its slides
+        // are its whole chapter's, so Space goes on through the chapter after it (see
+        // `bible::page_deck`).
+        Some((Do::Passage(lookup, language), false)) => {
             state.view_request = Some(2);
             state.reflow = None;
             if language.is_some() {
                 state.bible.language = language;
             }
             let live = show.live().map(|at| at.presentation);
-            match chapter.filter(|_| state.bible.options.break_on_new_verse) {
-                Some((whole, slide)) => {
-                    state.bible.open(whole, live);
-                    state.pick_made_verse(show, slide);
-                }
-                None => {
-                    state.bible.open(lookup, live);
-                    state.pick_made_verse(show, 0);
-                }
-            }
+            state.bible.open(lookup, live);
+            state.pick_passage(show);
         }
         None => {}
     }
@@ -5555,7 +5610,13 @@ fn bible_pick_keys(ui: &egui::Ui, show: &Show, state: &mut HomeState) {
     let count = show.presentations().get(slot).map_or(0, |passage| passage.slide_count());
     let picked = state.pick(show).filter(|at| at.presentation == slot).map(|at| at.slide);
     let live = show.live().filter(|at| at.presentation == slot).map(|at| at.slide);
-    match crate::running::move_pick(count, picked, live, down) {
+    // With neither, the passage's first verse, among its chapter's slides when they were made.
+    let first = state.bible.passage_slides().start;
+    let moved = match (picked, live) {
+        (None, None) if first < count => Ok(first),
+        _ => crate::running::move_pick(count, picked, live, down),
+    };
+    match moved {
         Ok(slide) => state.set_pick(show, SlideRef { presentation: slot, slide }, true),
         Err(words) => state.say(words),
     }
@@ -5613,7 +5674,7 @@ fn bible_area(
             .filter(|_| !state.bible.shown.is_empty());
         if state.bible.found.is_empty()
             && showing.is_some()
-            && let Some((words, pill)) = crate::bible_page::title(&mut state.bible, slides)
+            && let Some((words, pill)) = crate::bible_page::title(&mut state.bible)
         {
             Frame::new().inner_margin(side(40, 0)).show(ui, |ui| crate::bible_page::paint_title(ui, &words, &pill));
         }
@@ -5894,7 +5955,7 @@ fn bible_add(ui: &mut egui::Ui, state: &mut HomeState, add: Rect, arrow: Rect) {
     if response.clicked()
         && let Some(saved) = saved.clone()
     {
-        state.notice = Some(format!("Added {} to {front}.", saved.lookup));
+        state.notice = Some(format!("Added {reading} to {front}."));
         state.services.add(crate::service::Item::Passage(saved));
     }
     let open_arrow = open_arrow.on_hover_text("Add it to another playlist");
@@ -5906,7 +5967,7 @@ fn bible_add(ui: &mut egui::Ui, state: &mut HomeState, add: Rect, arrow: Rect) {
             for (at, name) in names.iter().enumerate() {
                 if ui.button(format!("Add to \u{201c}{name}\u{201d}")).clicked() {
                     state.services.add_to(at, crate::service::Item::Passage(saved.clone()));
-                    state.notice = Some(format!("Added {} to {name}.", saved.lookup));
+                    state.notice = Some(format!("Added {reading} to {name}."));
                     ui.close();
                 }
             }
@@ -5972,7 +6033,7 @@ fn bible_field(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, rect: Rect
         // Its first verse is picked and the keyboard goes back to the show, as from the find
         // box: Enter puts the verse on screen, ↑ and ↓ pick another. A reference not understood
         // keeps the keyboard, its words selected, to be put right.
-        if !state.pick_made_verse(show, 0) {
+        if !state.pick_passage(show) {
             lookup.request_focus();
             select_all_text(ui.ctx(), lookup_id, &state.bible.lookup);
         }
@@ -6276,13 +6337,19 @@ fn bible_preview(
             translations,
         };
     };
-    let slides: Vec<&sp_model::Slide> = passage.slides().map(|(_, slide)| slide).collect();
+    let mut slides: Vec<&sp_model::Slide> = passage.slides().map(|(_, slide)| slide).collect();
+    // The passage's own slides, when they are among its chapter's.
+    let own = page.passage_slides();
+    if !sample && own.end <= slides.len() && !own.is_empty() {
+        slides = slides[own].to_vec();
+    }
     let mut picture = |slide: Option<&&sp_model::Slide>| {
         slide.and_then(|slide| thumb(ThumbOf::BibleSlide(slide))).map(|(texture, _)| texture)
     };
     let first = picture(slides.first());
     let last = if slides.len() > 1 { picture(slides.last()) } else { None };
-    crate::bible::SlidesPreview { first, last, count: slides.len(), name: passage.title.clone(), sample, translations }
+    let name = if sample { passage.title.clone() } else { page.shown.clone() };
+    crate::bible::SlidesPreview { first, last, count: slides.len(), name, sample, translations }
 }
 
 /// The right end of a translation's row: its licence (a small (i) that opens the Bible's name,
@@ -6946,7 +7013,8 @@ mod tests {
         state.bible.typed_at = Some(0.0);
         bible_frames(&mut state, 3);
         let (_, passage) = state.bible.pending.as_ref().expect("the passage is made");
-        assert_eq!(passage.title, "От Иоанна 3:16", "made in the first translation (Russian Synodal)");
+        assert_eq!(state.bible.shown, "От Иоанна 3:16", "made in the first translation (Russian Synodal)");
+        assert_eq!(passage.title, "От Иоанна 3:1-36", "its slides its chapter's, a slide a verse");
         assert_eq!(state.bible.lookup, "jn 3:16");
         assert_eq!(state.bible.message, None);
     }
@@ -7080,7 +7148,7 @@ mod tests {
         assert_eq!((again, same), (field.clone(), slides.clone()));
         let saved = page.saved().expect("a passage is showing");
         assert_eq!(saved.lookup, shown, "a playlist keeps it as the first translation names it");
-        page.open_saved(&saved, None);
+        page.open_saved(&saved, None, SlidesOf::Page);
         assert_eq!(page.lookup, field);
         // New choices make it again, still named in English.
         page.options.show_verse_numbers = true;
@@ -7156,7 +7224,10 @@ mod tests {
         assert_eq!((psalm.chapter.as_str(), psalm.kept_chapter.as_str()), ("Psalms 22", "Псалтирь 22"));
         page.open_found(&psalm, false, None);
         let (_, passage) = page.pending.take().expect("made");
-        let english = passage.slide(0).and_then(|(_, slide)| slide.text_for(&sp_model::Role::translation()));
+        assert_eq!(page.shown, "Псалтирь 22:4", "the verse is the passage");
+        let verse = page.passage_slides().start;
+        assert_eq!(verse, 3, "among its chapter's slides");
+        let english = passage.slide(verse).and_then(|(_, slide)| slide.text_for(&sp_model::Role::translation()));
         assert!(english.is_some_and(|words| words.contains("shadow of death")));
         assert_eq!((page.lookup.as_str(), page.session_language().as_str()), ("Psalms 22:4", "en"));
         // Russian words, in the Russian Bible.
@@ -7257,27 +7328,33 @@ mod tests {
                 let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
                 state.pick(show) == Some(SlideRef { presentation: slot, slide: 0 })
             };
-            // A book: its first chapter, named as the operator reads, first verse picked.
+            // A book: its first chapter, the whole chapter the passage (so Add keeps it), named as
+            // the operator reads, first verse picked.
             let mut commands = click_list_row(&ctx, &mut show, &mut state, ("book", 0usize), 0.1);
             assert_eq!(state.bible.lookup, genesis_1, "{computer:?}");
             assert_eq!(state.bible.shown, "Бытие 1:1-31", "made as the first translation names it");
+            assert_eq!(state.bible.saved().map(|saved| saved.lookup).as_deref(), Some("Бытие 1:1-31"));
             assert!(picked_first(&state, &show), "{computer:?}: the first verse picked");
-            // A chapter: that chapter.
+            // A chapter, with one click: that chapter, all of it the passage.
             commands.extend(click_list_row(&ctx, &mut show, &mut state, ("chapter", 2u16), 0.5));
             assert_eq!(state.bible.lookup, genesis_2, "{computer:?}");
+            assert_eq!(state.bible.saved().map(|saved| saved.lookup).as_deref(), Some("Бытие 2:1-25"));
+            assert_eq!(state.bible.passage_slides(), 0..25);
             assert!(picked_first(&state, &show));
-            // A verse of it: that verse alone.
+            // A verse of it: that verse alone is the passage, its slides the chapter's, the
+            // verse picked among them.
             commands.extend(click_list_row(&ctx, &mut show, &mut state, ("verse", 3u16), 1.0));
             assert_eq!(state.bible.lookup, verse, "{computer:?}");
+            assert_eq!(state.bible.saved().map(|saved| saved.lookup).as_deref(), Some("Бытие 2:3"));
             let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
-            assert_eq!(show.presentations()[slot].slide_count(), 1);
-            assert!(picked_first(&state, &show));
+            assert_eq!(show.presentations()[slot].slide_count(), 25);
+            assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 2 }), "{computer:?}");
             // Nothing went on screen; Enter puts the verse on.
             assert!(!goes_on_screen(&commands), "{commands:?}");
             assert!(state.bible.go_live.is_none());
             assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "the song stays on screen");
             press_enter(&mut show, &state);
-            assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 0 }));
+            assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 2 }));
         }
     }
 
@@ -7369,7 +7446,7 @@ mod tests {
         // Looked up from the Russian Synodal's lists, named in the session's language (English,
         // with nothing typed and no computer's language in a test).
         assert_eq!(state.bible.lookup, "John 3:5", "the click looked the verse up");
-        assert_eq!(state.bible.pending.as_ref().map(|(_, p)| p.title.as_str()), Some("От Иоанна 3:5"));
+        assert_eq!(state.bible.shown, "От Иоанна 3:5");
         assert_eq!(state.bible.language, None, "a click says nothing of a language");
 
         // Hide, at the top of the lists, puts them away.
@@ -8024,7 +8101,8 @@ mod tests {
         assert_eq!(range.end.verse, 18);
         // Typed in English: the operator reads it in English, the slides are as the translations say.
         assert_eq!(state.bible.lookup, "John 3:16-18");
-        assert_eq!(state.bible.pending.as_ref().map(|(_, p)| p.title.as_str()), Some("От Иоанна 3:16-18"));
+        assert_eq!(state.bible.shown, "От Иоанна 3:16-18");
+        assert_eq!(state.bible.pending.as_ref().map(|(_, p)| p.title.as_str()), Some("От Иоанна 3:1-36"));
         commands.extend(frame_commands(&ctx, &show, &mut state, vec![], 0.2));
         assert!(state.bible_open && !ctx.text_edit_focused(), "the Bible view opens, and the keys are free");
         assert!(commands.is_empty(), "nothing is put on the screens: {commands:?}");
@@ -8166,24 +8244,31 @@ mod tests {
         assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "the song stays on screen");
         assert!(state.bible_open, "the Bible view is open");
         let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).expect("a place for passages");
-        assert_eq!(show.presentations()[slot].slide_count(), 3, "John 3:16-18, a slide a verse");
-        assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 0 }), "its first verse is picked");
+        assert_eq!(show.presentations()[slot].slide_count(), 36, "John 3, a slide a verse, round the passage");
+        assert_eq!(state.bible.passage_slides(), 15..18, "John 3:16-18");
+        let verse = |slide: usize| Some(SlideRef { presentation: slot, slide });
+        assert_eq!(state.pick(&show), verse(15), "its first verse is picked");
         assert!(state.library_search.is_none() && !ctx.text_edit_focused(), "the search has ended");
         assert!(ctx.memory(|memory| memory.focused().is_none()), "the keyboard is back with the window");
         // Enter puts the picked verse on screen; the pick has done its work.
         press_enter(&mut show, &state);
-        assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 0 }));
+        assert_eq!(show.live(), verse(15));
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.4);
         assert!(state.picked.is_none(), "let go once on screen");
-        // Space goes on to the next verse, ← back.
+        // Space goes on to the next verse, ← back; past the passage's last, on into the chapter.
         assert_eq!(press_step(&mut show, &state, true), None);
-        assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 1 }));
+        assert_eq!(show.live(), verse(16));
         assert_eq!(press_step(&mut show, &state, false), None);
-        assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 0 }));
+        assert_eq!(show.live(), verse(15));
+        for _ in 0..3 {
+            assert_eq!(press_step(&mut show, &state, true), None);
+        }
+        assert_eq!(show.live(), verse(18), "John 3:19");
+        assert_eq!(state.bible.shown, "От Иоанна 3:16-18", "the passage is still the one asked for");
     }
 
     #[test]
-    fn a_single_verse_from_the_find_box_opens_in_its_chapter_picked_so_space_goes_on_through_it() {
+    fn a_single_verse_from_the_find_box_stays_the_passage_picked_among_its_chapters_slides() {
         let ctx = egui::Context::default();
         let enter = |modifiers| {
             vec![
@@ -8206,8 +8291,9 @@ mod tests {
         commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![], 0.2));
         assert!(!goes_on_screen(&commands), "{commands:?}");
         let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
-        assert_eq!(show.presentations()[slot].slide_count(), 31, "all of Genesis 1");
-        assert_eq!(state.bible.lookup, "Genesis 1:1-31", "the field names the chapter");
+        assert_eq!(show.presentations()[slot].slide_count(), 31, "all of Genesis 1, a slide a verse");
+        assert_eq!(state.bible.lookup, "Genesis 1:4", "the field names the verse");
+        assert_eq!(state.bible.saved().map(|saved| saved.lookup).as_deref(), Some("Genesis 1:4"));
         let verse = |slide: usize| SlideRef { presentation: slot, slide };
         assert_eq!(state.pick(&show), Some(verse(3)), "verse 4 picked");
         let words = |show: &Show, at: SlideRef| {
@@ -8247,6 +8333,153 @@ mod tests {
         let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
         assert_eq!((state.bible.lookup.as_str(), show.presentations()[slot].slide_count()), ("Genesis 1:4", 1));
         assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 0 }));
+    }
+
+    /// The King James Version alone, so the slides' names are easy to read in a test.
+    fn english_only(state: &mut HomeState) {
+        let kjv = state.bible.shelf.position("kjv");
+        state.bible.rows.truncate(1);
+        state.bible.rows[0].bible = kjv;
+    }
+
+    /// The name of the slide on screen (a Bible slide is named by its verse).
+    fn live_name(show: &Show) -> Option<String> {
+        let at = show.live()?;
+        show.presentations()[at.presentation].slide(at.slide).map(|(group, _)| group.name.clone())
+    }
+
+    #[test]
+    fn a_single_verse_looked_up_stays_the_passage_add_keeps_it_and_space_after_enter_goes_on() {
+        let key =
+            |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        // Typed in the reference field, or in the find box (`/` or Command-F).
+        for find_box in [false, true] {
+            let ctx = egui::Context::default();
+            let mut show = service_with_bible_places();
+            let mut state = HomeState { bible_open: true, ..HomeState::default() };
+            state.bible.slots = Some([2, 3]);
+            english_only(&mut state);
+            if find_box {
+                state.library_search = Some(("jn 3:16".to_owned(), 0));
+                frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+            } else {
+                state.bible.focus_lookup = true;
+                frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+                frame_then_app(&ctx, &mut show, &mut state, vec![Event::Text("John 3:16".to_owned())], 0.05);
+            }
+            let commands = frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::Enter)], 0.1);
+            assert!(!goes_on_screen(&commands), "{commands:?}");
+            for at in 0..3 {
+                frame_then_app(&ctx, &mut show, &mut state, vec![], 0.2 + f64::from(at) * 0.02);
+            }
+            let how = if find_box { "find box" } else { "reference field" };
+            // The passage is the verse asked for: the field, the title and Add say so.
+            assert_eq!(state.bible.shown, "John 3:16", "{how}");
+            assert_eq!(state.bible.lookup, "John 3:16", "{how}");
+            let title = crate::bible_page::title(&mut state.bible).map(|(words, _)| words);
+            assert_eq!(title.as_deref(), Some("John 3:16"), "{how}");
+            // Only it is lit, on the page and on the verse keys; the chapter is there to read
+            // and click, every verse with its slide.
+            let (lit, with_slides) = state.bible.page.verses();
+            assert_eq!(lit, [16], "{how}");
+            assert_eq!(with_slides, (1..=36).collect::<Vec<u16>>(), "{how}");
+            drawn_frame(&ctx, &mut show, &mut state, 0.3);
+            let (rects, _) = drawn_frame(&ctx, &mut show, &mut state, 0.31);
+            let key_of = |verse: u16| ctx.read_response(crate::bible::list_row_id(("verse", verse))).map(|r| r.rect);
+            let lit_key = |verse: u16| {
+                let rect = key_of(verse).expect("the verse key is drawn");
+                rects.iter().any(|(at, fill, _)| *at == rect && *fill == crate::studio::SELECTED)
+            };
+            assert!(lit_key(16) && !lit_key(15) && !lit_key(17), "{how}: only verse 16's key is lit");
+            // Its slides are the chapter's, the verse picked among them.
+            let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+            let verse = |slide: usize| Some(SlideRef { presentation: slot, slide });
+            assert_eq!(show.presentations()[slot].slide_count(), 36, "{how}");
+            assert_eq!(state.pick(&show), verse(15), "{how}");
+            // + Add keeps exactly the verse.
+            click_id(&ctx, &mut show, &mut state, egui::Id::unique("bible add"), 0.5);
+            let added = state.services.front().items.last().cloned();
+            assert!(
+                matches!(&added, Some(crate::service::Item::Passage(saved)) if saved.lookup == "John 3:16"),
+                "{how}: {added:?}"
+            );
+            let front = state.services.front().name.clone();
+            assert_eq!(state.notice, Some(format!("Added John 3:16 to {front}.")), "{how}");
+            // Enter puts it on screen; Space goes on to John 3:17, ← back.
+            press_enter(&mut show, &state);
+            assert_eq!(live_name(&show).as_deref(), Some("John 3:16"), "{how}");
+            frame_then_app(&ctx, &mut show, &mut state, vec![], 0.7);
+            assert_eq!(press_step(&mut show, &state, true), None);
+            assert_eq!(live_name(&show).as_deref(), Some("John 3:17"), "{how}: Space");
+            assert_eq!(press_step(&mut show, &state, false), None);
+            assert_eq!(live_name(&show).as_deref(), Some("John 3:16"), "{how}: \u{2190}");
+            // The history notes the verse asked for, not the chapter its slides were made from.
+            let title = show.presentations()[slot].title.clone();
+            assert_eq!(title, "John 3:1-36");
+            assert_eq!(state.bible.passage_held(slot, &title), "John 3:16", "{how}");
+            assert_eq!(state.bible.passage_held(slot, "Something else"), "Something else");
+            // New choices make it again: still the verse, among the chapter's slides.
+            state.bible.options.show_verse_numbers = true;
+            frame_then_app(&ctx, &mut show, &mut state, vec![], 0.8);
+            assert_eq!((state.bible.shown.as_str(), state.bible.passage_slides()), ("John 3:16", 15..16), "{how}");
+        }
+    }
+
+    #[test]
+    fn a_passage_of_verses_and_a_whole_chapter_are_the_passage_add_keeps() {
+        for (typed, shown, title, slides) in [
+            ("John 3:16-18", "John 3:16-18", "John 3:16-18", 15..18),
+            ("John 3", "John 3:1-36", "John 3", 0..36),
+            ("John 3:35-4:2", "John 3:35-4:2", "John 3:35-4:2", 0..4),
+        ] {
+            let mut page = bible_page();
+            page.rows.truncate(1);
+            page.rows[0].bible = page.shelf.position("kjv");
+            page.lookup = typed.to_owned();
+            page.look_up(None);
+            assert_eq!(page.shown, shown, "{typed}");
+            assert_eq!(page.saved().map(|saved| saved.lookup).as_deref(), Some(shown), "{typed}");
+            assert_eq!(crate::bible_page::title(&mut page).map(|(words, _)| words).as_deref(), Some(title));
+            assert_eq!(page.passage_slides(), slides, "{typed}");
+        }
+    }
+
+    #[test]
+    fn a_passage_from_history_is_looked_up_as_the_page_makes_any_and_its_first_verse_picked() {
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { bible_open: true, ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        english_only(&mut state);
+        state.bible.side = BibleSide::History;
+        let at = chrono::NaiveDate::from_ymd_opt(2026, 11, 19).unwrap().and_hms_opt(9, 0, 0).unwrap();
+        state.bible.note_shown("John 3:16", at);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        let commands = click_id(&ctx, &mut show, &mut state, egui::Id::unique(("bible history row", 0usize)), 0.2);
+        assert!(!goes_on_screen(&commands), "{commands:?}");
+        assert_eq!(state.bible.shown, "John 3:16");
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+        assert_eq!(show.presentations()[slot].slide_count(), 36, "its slides its chapter's");
+        assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 15 }), "the verse picked");
+    }
+
+    #[test]
+    fn a_playlists_passage_runs_as_its_own_slides_and_opens_on_the_page_as_any_passage() {
+        let mut page = bible_page();
+        page.rows.truncate(1);
+        page.rows[0].bible = page.shelf.position("kjv");
+        let saved = crate::service::SavedPassage { lookup: "John 3:16".to_owned(), ..page.settings() };
+        // Run from the playlist (a click on its tile, Next going into it): its own one slide, so
+        // the playlist counts its slides and goes on into the next item after it.
+        page.open_saved(&saved, None, SlidesOf::Passage);
+        let (_, passage) = page.pending.take().expect("made");
+        assert_eq!((passage.title.as_str(), passage.slide_count()), ("John 3:16", 1));
+        assert_eq!(page.passage_slides(), 0..1);
+        // Open on the Bible Page: as the page makes any passage, the verse among its chapter's.
+        page.open_saved(&saved, None, SlidesOf::Page);
+        let (_, passage) = page.pending.take().expect("made");
+        assert_eq!((passage.title.as_str(), passage.slide_count()), ("John 3:1-36", 36));
+        assert_eq!((page.shown.as_str(), page.passage_slides()), ("John 3:16", 15..16));
     }
 
     #[test]
@@ -8292,26 +8525,37 @@ mod tests {
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
         frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::Enter)], 0.1);
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.2);
+        // The passage's slides are its chapter's: ↑ and ↓ go on through the chapter.
         let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
         let verse = |slide: usize| Some(SlideRef { presentation: slot, slide });
+        assert_eq!(state.pick(&show), verse(15), "John 3:16");
+        // With no verse picked and none on screen, ↓ (or ↑) picks the passage's first.
+        state.picked = None;
+        frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowUp)], 0.25);
+        assert_eq!(state.pick(&show), verse(15), "John 3:16 again");
         let mut commands = Vec::new();
         commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.3));
-        assert_eq!(state.pick(&show), verse(1));
+        assert_eq!(state.pick(&show), verse(16));
         commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.4));
-        assert_eq!(state.pick(&show), verse(2));
+        assert_eq!(state.pick(&show), verse(17));
         commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.5));
-        assert_eq!(state.pick(&show), verse(2), "the last verse stays picked");
-        assert_eq!(state.toast.as_ref().map(|(words, _)| words.as_str()), Some("That is the last verse."));
+        assert_eq!(state.pick(&show), verse(18), "on past the passage, into the chapter");
         commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowUp)], 0.6));
-        assert_eq!(state.pick(&show), verse(1));
+        assert_eq!(state.pick(&show), verse(17));
         assert!(!goes_on_screen(&commands), "{commands:?}");
         assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "the song stays on screen");
         // Enter puts the verse picked on; then ↓ picks the verse after it, still not on screen.
         press_enter(&mut show, &state);
-        assert_eq!(show.live(), verse(1));
+        assert_eq!(show.live(), verse(17));
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.7);
         frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.8);
-        assert_eq!((state.pick(&show), show.live()), (verse(2), verse(1)));
+        assert_eq!((state.pick(&show), show.live()), (verse(18), verse(17)));
+        // At the chapter's last verse the pick stays, and says so.
+        for at in 0..20 {
+            frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.9 + f64::from(at) * 0.01);
+        }
+        assert_eq!(state.pick(&show), verse(35), "the last verse stays picked");
+        assert_eq!(state.toast.as_ref().map(|(words, _)| words.as_str()), Some("That is the last verse."));
     }
 
     #[test]
@@ -8330,7 +8574,7 @@ mod tests {
         commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![], 0.3));
         assert!(!goes_on_screen(&commands), "{commands:?}");
         let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
-        assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 0 }));
+        assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 15 }), "John 3:16");
         assert!(ctx.memory(|memory| memory.focused().is_none()), "the keyboard is back with the window");
         // Typing again with no field taking the keyboard starts the next reference in the field
         // (the app keeps letters from the show in the Bible view): nothing goes on screen.
@@ -8475,10 +8719,14 @@ mod tests {
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
         frame_then_app(&ctx, &mut show, &mut state, vec![enter], 0.1);
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.2);
+        // The slides follow the pick into view (among the chapter's), and settle.
+        for at in 0..12 {
+            frame_then_app(&ctx, &mut show, &mut state, vec![], 0.21 + f64::from(at) * 0.005);
+        }
         let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
         assert!(state.pick(&show).is_some());
-        // The second verse, which is in view.
-        let second = SlideRef { presentation: slot, slide: 1 };
+        // The passage's second verse, which is in view.
+        let second = SlideRef { presentation: slot, slide: state.bible.passage_slides().start + 1 };
         let at =
             state.slide_rects.iter().find(|(here, _)| *here == second).map(|(_, rect)| rect.center()).expect("drawn");
         let button = |pressed| Event::PointerButton {
@@ -8524,38 +8772,10 @@ mod tests {
         egui::Id::unique(("bible page verse", verse))
     }
 
-    #[test]
-    fn a_click_on_a_verse_of_the_passage_puts_it_on_and_another_verse_is_looked_up_and_picked() {
-        let ctx = egui::Context::default();
-        let mut show = service_with_bible_places();
-        let mut state = HomeState { library_search: Some(("jn 3:16-18".to_owned(), 0)), ..HomeState::default() };
-        state.bible.slots = Some([2, 3]);
-        assert_eq!(state.bible.view, BibleView::Page, "the page is the Bible view's first look");
-        let enter = Event::Key {
-            key: Key::Enter,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: Modifiers::NONE,
-        };
-        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
-        frame_then_app(&ctx, &mut show, &mut state, vec![enter], 0.1);
-        for at in 0..3 {
-            frame_then_app(&ctx, &mut show, &mut state, vec![], 0.2 + f64::from(at) * 0.02);
-        }
-        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
-        assert_eq!(show.presentations()[slot].slide_count(), 3, "John 3:16-18, a verse a slide");
-        assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 0 }));
-        // The whole chapter is on the page; a click on verse 17, of the passage, puts its slide
-        // on screen, as a click on the slide does, and the pick goes.
-        let commands = click_id(&ctx, &mut show, &mut state, page_verse(17), 0.5);
-        assert_eq!(commands, vec![Command::GoTo(SlideRef { presentation: slot, slide: 1 })]);
-        assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 1 }));
-        assert!(state.picked.is_none(), "the pick goes");
-        // A verse of the chapter outside the passage, in view: looked up and picked, nothing goes
-        // on screen (the verse on screen stays, in the other place). The page is scrolled back a
-        // little first, as the operator would, to the verses before.
-        let page = ctx.read_response(page_verse(17)).expect("drawn").interact_rect.center();
+    /// Scrolls the Bible page back a little, as the operator would, to the verses before the
+    /// one in view, and returns a verse in view that is not one of `not`.
+    fn scroll_page_back(ctx: &egui::Context, show: &mut Show, state: &mut HomeState, from: u16, not: &[u16]) -> u16 {
+        let page = ctx.read_response(page_verse(from)).expect("drawn").interact_rect.center();
         let wheel = Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
             delta: vec2(0.0, 300.0),
@@ -8563,18 +8783,71 @@ mod tests {
             phase: egui::TouchPhase::Move,
             source: egui::MouseWheelSource::Wheel,
         };
-        frame_then_app(&ctx, &mut show, &mut state, vec![Event::PointerMoved(page), wheel], 0.8);
+        frame_then_app(ctx, show, state, vec![Event::PointerMoved(page), wheel], 0.8);
         for at in 1..8 {
-            frame_then_app(&ctx, &mut show, &mut state, vec![], 0.8 + f64::from(at) * 0.02);
+            frame_then_app(ctx, show, state, vec![], 0.8 + f64::from(at) * 0.02);
         }
-        let outside = (1..=36u16)
-            .filter(|verse| !(16..=18).contains(verse))
+        (1..=36u16)
+            .filter(|verse| !not.contains(verse))
             .find(|verse| ctx.read_response(page_verse(*verse)).is_some_and(|row| row.interact_rect.height() > 20.0))
-            .expect("another verse is in view");
+            .expect("another verse is in view")
+    }
+
+    #[test]
+    fn a_click_on_a_verse_with_a_slide_puts_it_on_and_a_verse_with_none_is_looked_up_and_picked() {
+        let enter = Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        let looked_up = |ctx: &egui::Context, one_a_verse: bool| {
+            let mut show = service_with_bible_places();
+            let mut state = HomeState { library_search: Some(("jn 3:16-18".to_owned(), 0)), ..HomeState::default() };
+            state.bible.slots = Some([2, 3]);
+            state.bible.options.break_on_new_verse = one_a_verse;
+            assert_eq!(state.bible.view, BibleView::Page, "the page is the Bible view's first look");
+            frame_then_app(ctx, &mut show, &mut state, vec![], 0.0);
+            frame_then_app(ctx, &mut show, &mut state, vec![enter.clone()], 0.1);
+            for at in 0..3 {
+                frame_then_app(ctx, &mut show, &mut state, vec![], 0.2 + f64::from(at) * 0.02);
+            }
+            (show, state)
+        };
+
+        // A slide a verse: the slides are the chapter's, so any verse of the page puts its slide
+        // on screen, as a click on the slide does; the pick goes, the passage stays.
+        let ctx = egui::Context::default();
+        let (mut show, mut state) = looked_up(&ctx, true);
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+        assert_eq!(show.presentations()[slot].slide_count(), 36, "John 3, a verse a slide");
+        assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 15 }), "John 3:16 picked");
+        let commands = click_id(&ctx, &mut show, &mut state, page_verse(17), 0.5);
+        assert_eq!(commands, vec![Command::GoTo(SlideRef { presentation: slot, slide: 16 })]);
+        assert!(state.picked.is_none(), "the pick goes");
+        let outside = scroll_page_back(&ctx, &mut show, &mut state, 17, &[16, 17, 18]);
+        let commands = click_id(&ctx, &mut show, &mut state, page_verse(outside), 1.0);
+        let slide = usize::from(outside) - 1;
+        assert_eq!(commands, vec![Command::GoTo(SlideRef { presentation: slot, slide })], "John 3:{outside}");
+        assert_eq!(state.bible.shown, "От Иоанна 3:16-18", "the passage is still the one asked for");
+        assert!(state.bible.pending.is_none(), "nothing was looked up");
+
+        // Made into one slide: the passage's verses put it up; another verse is looked up and
+        // picked, nothing going on screen (the passage on screen stays, in the other place).
+        let ctx = egui::Context::default();
+        let (mut show, mut state) = looked_up(&ctx, false);
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+        assert_eq!(show.presentations()[slot].slide_count(), 1, "John 3:16-18 as one slide");
+        assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 0 }));
+        let commands = click_id(&ctx, &mut show, &mut state, page_verse(17), 0.5);
+        assert_eq!(commands, vec![Command::GoTo(SlideRef { presentation: slot, slide: 0 })]);
+        assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 0 }));
+        let outside = scroll_page_back(&ctx, &mut show, &mut state, 17, &[16, 17, 18]);
         let commands = click_id(&ctx, &mut show, &mut state, page_verse(outside), 1.0);
         assert!(!goes_on_screen(&commands), "{commands:?}");
         assert_eq!(state.bible.lookup, format!("John 3:{outside}"), "named as typed, in English");
-        assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 1 }), "still on screen");
+        assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 0 }), "still on screen");
         let now = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
         assert_ne!(now, slot, "the new passage went into the other place");
         assert_eq!(state.pick(&show), Some(SlideRef { presentation: now, slide: 0 }));
@@ -8682,7 +8955,8 @@ mod tests {
     }
 
     /// What one frame of the window draws: each rectangle (where, its fill, its outline) and
-    /// each run of words (and the size of its letters). The app carries out the frame after.
+    /// each run of words (and the size of its letters). The window is tall, so the keypad's
+    /// verses are in view under a book's chapters. The app carries out the frame after.
     type Painted = (Vec<(Rect, Color32, Stroke)>, Vec<(String, f32)>);
     fn drawn_frame(ctx: &egui::Context, show: &mut Show, state: &mut HomeState, time: f64) -> Painted {
         fn walk(shape: &egui::Shape, drawn: &mut Painted) {
@@ -8697,7 +8971,7 @@ mod tests {
             }
         }
         let raw = RawInput {
-            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 1400.0))),
             time: Some(time),
             ..RawInput::default()
         };
@@ -8981,7 +9255,7 @@ mod tests {
             modifiers: Modifiers::NONE,
         };
         let commands = frame_commands(&ctx, &show, &mut state, vec![enter], 0.1);
-        // The verse opens in its chapter, picked there.
+        // The verse is the passage, its slides its chapter's, picked there.
         let (slot, passage) = state.bible.pending.as_ref().expect("the verse is made");
         let picked = state.picked.as_ref().map(|picked| picked.at);
         assert_eq!(picked, Some(SlideRef { presentation: *slot, slide: 3 }), "the fourth verse of the chapter");
@@ -8991,7 +9265,7 @@ mod tests {
         assert!(english.contains("valley of the shadow of death"), "{english}");
         assert!(russian.contains("долиною смертной тени"), "{russian}");
         // Named in English, with the first translation's numbers, and the session goes on in English.
-        assert_eq!(state.bible.lookup, "Psalms 22:1-6");
+        assert_eq!(state.bible.lookup, "Psalms 22:4");
         assert_eq!(state.bible.language.as_deref(), Some("en"));
         assert!(commands.is_empty(), "nothing is put on the screens");
     }

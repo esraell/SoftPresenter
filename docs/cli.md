@@ -416,7 +416,7 @@ that runs when SoftPresenter opens.
 | Command | Does |
 |---|---|
 | `bible REFERENCE` | Looks a passage up on the Bible page, with the translations and options chosen there |
-| `bible REFERENCE --show` | The same, and puts its first verse on screen; `next` and `previous` then go verse by verse |
+| `bible REFERENCE --show` | The same, and puts its first verse on screen; `next` and `previous` then go verse by verse (with a slide a verse, on through the passage's chapter) |
 | `bible REFERENCE --add [to PLAYLIST]` | Looks it up and keeps it in a playlist, as the page's Add to button does |
 | `bible search WORDS` | Verses with those words, in the Bibles in use written in their alphabet (in the first translation when none is), each named in its Bible's language with the first translation's numbers; each line names its Bible when more than one has them |
 | `bible rows [BIBLE…]` | The translations shown, first to last; with names (short or whole), sets them |
@@ -439,7 +439,7 @@ keeps the passage as the first translation names it.
     $ sp bible "John 3:16-18"
     Looked up John 3:16-18; it is on the Bible page.
     $ sp bible "jn 3:16" --show
-    John 3:16: On screen: John 3:16, slide 1 of 1 (John 3:16).
+    John 3:16: On screen: John 3:1-36, slide 16 of 36 (John 3:16).
     $ sp bible "John 3:16-18" --add to sunday
     Added John 3:16-18 to Sunday.
     $ sp bible "John 99:1"
@@ -463,7 +463,7 @@ names the passage as it was typed, while the screens and the playlist follow the
     $ sp bible "Ів 3:16"                 # no Ukrainian Bible in use: the first translation's
     Looked up От Иоанна 3:16; it is on the Bible page.
     $ sp bible "jn 3:16" --show
-    John 3:16: On screen: От Иоанна 3:16, slide 1 of 1 (От Иоанна 3:16).
+    John 3:16: On screen: От Иоанна 3:1-36, slide 16 of 36 (От Иоанна 3:16).
     $ sp bible "gen 1 1-2" --add
     Added Genesis 1:1-2 to Service.
     $ sp playlist

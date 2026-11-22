@@ -57,7 +57,7 @@ impl crate::App {
             state.playlist_open = true;
             if let crate::service::Item::Passage(saved) = &chosen {
                 state.bible_open = true;
-                state.bible.open_saved(saved, live);
+                state.bible.open_saved(saved, live, crate::home::SlidesOf::Passage);
             } else {
                 state.bible_open = false;
             }

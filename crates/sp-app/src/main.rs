@@ -1678,10 +1678,13 @@ impl App {
         if self.show.live() != live_before
             && let Some(at) = self.show.live()
             && self.bible_slots.contains(&at.presentation)
-            && let Some(passage) = self.show.presentations().get(at.presentation).map(|song| song.title.clone())
+            && let Some(title) = self.show.presentations().get(at.presentation).map(|song| song.title.clone())
             && let Some(running) = self.running.as_mut()
         {
-            running.home_state.bible.note_shown(&passage, chrono::Local::now().naive_local());
+            // The passage asked for, not the chapter its slides were made from.
+            let bible = &mut running.home_state.bible;
+            let passage = bible.passage_held(at.presentation, &title);
+            bible.note_shown(&passage, chrono::Local::now().naive_local());
         }
         if self.show.live() != live_before
             && let Some((_, slide)) = self.show.live_slide()
@@ -3040,7 +3043,7 @@ impl App {
         let running = self.running.as_mut()?;
         let state = &mut running.home_state;
         let service::Item::Passage(saved) = state.services.front().items.get(item)?.clone() else { return None };
-        state.bible.open_saved(&saved, live);
+        state.bible.open_saved(&saved, live, home::SlidesOf::Passage);
         state.bible.go_live = None;
         let (slot, passage) = state.bible.pending.take()?;
         let count = passage.slide_count();
@@ -6888,6 +6891,7 @@ impl App {
                 if let Ok(reference) = std::env::var("SOFTPRESENTER_BIBLE_LOOKUP") {
                     running.home_state.bible.lookup = reference;
                     running.home_state.bible.look_up(None);
+                    running.home_state.pick_passage(&self.show);
                 }
                 // Testing aid: as if this had just been typed in Scripture Lookup, without Return.
                 if let Ok(typed) = std::env::var("SOFTPRESENTER_BIBLE_TYPING") {

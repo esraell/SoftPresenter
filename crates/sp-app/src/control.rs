@@ -2746,7 +2746,7 @@ impl crate::App {
                 }
             }
         }
-        let (found, message, title) = {
+        let (found, message, title, first) = {
             let running = self.running.as_mut().ok_or("The app isn't ready.")?;
             let state = &mut running.home_state;
             state.bible_open = true;
@@ -2754,8 +2754,10 @@ impl crate::App {
             state.bible.lookup = reference.clone();
             state.bible.look_up(live);
             // Said back as the Bible page names it to the operator, in the language typed; the
-            // slides are made from the translations chosen there, as before.
-            (state.bible.pending.take(), state.bible.message.clone(), state.bible.reading.clone())
+            // slides are made from the translations chosen there, as before. The passage's first
+            // verse is what goes on screen, among its chapter's slides when they were made.
+            let first = state.bible.passage_slides().start;
+            (state.bible.pending.take(), state.bible.message.clone(), state.bible.reading.clone(), first)
         };
         let Some((slot, passage)) = found else {
             return Err(message.unwrap_or_else(|| format!("Could not look up {reference}.")));
@@ -2768,12 +2770,12 @@ impl crate::App {
             let name = state.services.list[list].name.clone();
             state.services.add_to(list, crate::service::Item::Passage(saved));
             if show_it {
-                self.apply(vec![Command::Select(slot), Command::GoTo(SlideRef { presentation: slot, slide: 0 })]);
+                self.apply(vec![Command::Select(slot), Command::GoTo(SlideRef { presentation: slot, slide: first })]);
             }
             return Ok(Reply::done(format!("Added {title} to {name}.")));
         }
         if show_it {
-            self.apply(vec![Command::Select(slot), Command::GoTo(SlideRef { presentation: slot, slide: 0 })]);
+            self.apply(vec![Command::Select(slot), Command::GoTo(SlideRef { presentation: slot, slide: first })]);
             return Ok(Reply::done(format!("{title}: {}", self.live_words())));
         }
         Ok(Reply::done(format!("Looked up {title}; it is on the Bible page.")))

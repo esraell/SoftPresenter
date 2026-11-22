@@ -3247,7 +3247,7 @@ pub fn carry_out_item_ask(show: &Show, state: &mut HomeState, commands: &mut Vec
             if let Some(Item::Passage(saved)) = state.services.front().items.get(index).cloned() {
                 state.services.chosen = Some(index);
                 state.bible_open = true;
-                state.bible.open_saved(&saved, show.live().map(|at| at.presentation));
+                state.bible.open_saved(&saved, show.live().map(|at| at.presentation), crate::home::SlidesOf::Page);
             }
         }
         ItemAsk::Fill(index, song) => {

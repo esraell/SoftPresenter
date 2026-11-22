@@ -807,6 +807,36 @@ fn slides_preview(ui: &mut egui::Ui, preview: &SlidesPreview) {
     }
 }
 
+/// The slides the Bible page makes for a passage, from the passage's own (`passage`, made by
+/// [`build_passage`] from what was asked and titled as the first translation names it): with a
+/// slide a verse and the passage all in one chapter, the whole chapter, so any verse of it can
+/// be put on screen and Space goes on through the chapter after the passage; otherwise the
+/// passage's own. Returns the slides and the place of the passage's among them.
+pub fn page_deck(
+    passage: Presentation,
+    rows: &[RowChoice],
+    options: &BibleOptions,
+    template: Option<Uuid>,
+) -> (Presentation, std::ops::Range<usize>) {
+    let count = passage.slide_count();
+    let Some(lead) = rows.first() else { return (passage, 0..count) };
+    let Ok(range) = parse_reference_in(&passage.title, &lead.bible.info.language) else { return (passage, 0..count) };
+    let one_chapter = (range.start.book, range.start.chapter) == (range.end.book, range.end.chapter);
+    let whole = sp_bible::Range {
+        start: VerseRef { verse: 1, ..range.start },
+        end: VerseRef { verse: sp_bible::LAST, ..range.start },
+    };
+    // Already the whole chapter, or made into one slide (a chapter would overfill it).
+    if !options.break_on_new_verse || !one_chapter || lead.bible.verses(whole).len() == count {
+        return (passage, 0..count);
+    }
+    let (chapter, first) = in_its_chapter(&lead.bible, range.start);
+    match build_passage(&chapter, rows, options, template) {
+        Ok(slides) if first + count <= slides.slide_count() => (slides, first..first + count),
+        _ => (passage, 0..count),
+    }
+}
+
 /// A verse's whole chapter, as this Bible names it for a lookup (`Genesis 1`), and the place of
 /// the verse's slide among the chapter's when they are made one a verse (the verses before it
 /// that the Bible has). The Bible is the first translation, which numbers the slides.
@@ -1089,6 +1119,29 @@ mod tests {
 
     fn texts(slide: &Slide) -> Vec<&str> {
         slide.objects.iter().filter_map(Object::as_text).collect()
+    }
+
+    #[test]
+    fn the_page_makes_a_passage_in_one_chapter_into_the_chapters_slides_with_its_own_among_them() {
+        let mut shelf = Shelf::shipped();
+        let rows = rows(&mut shelf, &[("kjv", main(), reference())]);
+        let deck = |asked: &str, options: &BibleOptions| {
+            let passage = build_passage(asked, &rows, options, None).unwrap();
+            let (slides, among) = page_deck(passage, &rows, options, None);
+            (slides.title.clone(), slides.slide_count(), among)
+        };
+        let one_a_verse = BibleOptions::default();
+        assert!(one_a_verse.break_on_new_verse);
+        // A verse, or verses, of one chapter: the chapter, the passage's slides picked out.
+        assert_eq!(deck("John 3:16", &one_a_verse), ("John 3:1-36".to_owned(), 36, 15..16));
+        assert_eq!(deck("John 3:16-18", &one_a_verse), ("John 3:1-36".to_owned(), 36, 15..18));
+        // The whole chapter is its own; a passage across two chapters keeps its own.
+        assert_eq!(deck("John 3", &one_a_verse), ("John 3:1-36".to_owned(), 36, 0..36));
+        assert_eq!(deck("John 3:35-4:2", &one_a_verse), ("John 3:35-4:2".to_owned(), 4, 0..4));
+        // Made into one slide: the passage's one slide.
+        let one_slide = BibleOptions { break_on_new_verse: false, ..BibleOptions::default() };
+        assert_eq!(deck("John 3:16", &one_slide), ("John 3:16".to_owned(), 1, 0..1));
+        assert_eq!(deck("John 3:16-18", &one_slide), ("John 3:16-18".to_owned(), 1, 0..1));
     }
 
     #[test]

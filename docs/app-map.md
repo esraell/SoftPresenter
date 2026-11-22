@@ -34,7 +34,7 @@ sources) drawn by their own thread.
 | Part | Does | Command line |
 |---|---|---|
 | Show / Bible / Edit | Switches the view. Edit has four kinds, chosen at the top of its left column: Slides, Themes, Props and Stage | `view show\|edit\|bible`; `view themes` opens Edit on the themes |
-| Find box | Finds as you type, listed under it: a Bible passage first when the words are a reference (`John 3:16`, `Ин 3:16-18`, `ps 23`), named and quoted in the language it was typed in; then songs: by title, then each slide whose words have them (tagged with its group, `SONG · CHORUS`, the line found under it; picking one brings the view to that slide and rings it in ink for a moment); then verses that hold the words, from the Bibles in use written in their alphabet (each tagged with its Bible, `BIBLE · KJV`). Each result has a mark at its left, so songs and the Bible read apart: a note in the libraries' lilac for a song or a slide of one, its tag lilac too (`SONG_TINT`), an open book in ink for the Bible, its tag dim (`found_look` in `studio.rs`; slides the app makes, Bible passages and live captions, have an ink dot); the titles stay in ink, the words grey. Return or a click opens the one picked (a song in the Show view, a passage or verse in the Bible view; nothing goes on the screens) with its first slide or verse picked (a single verse opens in its whole chapter, that verse picked), drawn in ink with a small key cap for Enter (`paint_enter_key` in `home/slides.rs`), and the keyboard back with the show, so Enter puts it on screen; Command-Return (Ctrl on other computers) adds it to the playlist in front, Escape or a click elsewhere ends the search. A result can be dragged (the chooser shows above the left column's list while it is carried): onto the open playlist's items, where the ink line shows (or onto a placeholder); onto a playlist in the chooser, at its end; a song onto a library (row or song list); a passage or verse never into a library. A dropped result ends the search and is opened in the playlist listed; nothing goes on screen (`library_search` in `home.rs`; the drops in `studio.rs`, `Carried`). `/` goes to it, and so does Command-F. It does not search playlists or media (`find.rs`) | |
+| Find box | Finds as you type, listed under it: a Bible passage first when the words are a reference (`John 3:16`, `Ин 3:16-18`, `ps 23`), named and quoted in the language it was typed in; then songs: by title, then each slide whose words have them (tagged with its group, `SONG · CHORUS`, the line found under it; picking one brings the view to that slide and rings it in ink for a moment); then verses that hold the words, from the Bibles in use written in their alphabet (each tagged with its Bible, `BIBLE · KJV`). Each result has a mark at its left, so songs and the Bible read apart: a note in the libraries' lilac for a song or a slide of one, its tag lilac too (`SONG_TINT`), an open book in ink for the Bible, its tag dim (`found_look` in `studio.rs`; slides the app makes, Bible passages and live captions, have an ink dot); the titles stay in ink, the words grey. Return or a click opens the one picked (a song in the Show view, a passage or verse in the Bible view; nothing goes on the screens) with its first slide or verse picked (a single verse is the passage, its slides its chapter's with a slide a verse), drawn in ink with a small key cap for Enter (`paint_enter_key` in `home/slides.rs`), and the keyboard back with the show, so Enter puts it on screen; Command-Return (Ctrl on other computers) adds it to the playlist in front, Escape or a click elsewhere ends the search. A result can be dragged (the chooser shows above the left column's list while it is carried): onto the open playlist's items, where the ink line shows (or onto a placeholder); onto a playlist in the chooser, at its end; a song onto a library (row or song list); a passage or verse never into a library. A dropped result ends the search and is opened in the playlist listed; nothing goes on screen (`library_search` in `home.rs`; the drops in `studio.rs`, `Carried`). `/` goes to it, and so does Command-F. It does not search playlists or media (`find.rs`) | |
 | Running timer | Just before the clock while a timer runs: its name and time, in green. It takes only room nothing else uses, so nothing moves when it starts or stops | `timers` |
 | Canva Sync line | In the same room while no timer runs: what a sync is doing (exporting with the time so far, downloading with how far), a video just put in place, or Canva: failed (pointing at it says why; a click opens Canva Sync's page) | `canva` |
 | Clock | The time of day, on a 12-hour or a 24-hour clock as the computer is set (`clock.rs`) | |
@@ -200,11 +200,18 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   translation (up to four), each a Bible (None frees it for another row), the box its verse goes
   in, the box its reference goes in, its licence (i) and ×; + Another translation, Manage
   Bibles…, Done.
+- The passage (`BiblePage::shown`) is what was asked for: the title, Add and the lit verses
+  and keys follow it. Its slides (`BiblePage::held`, one for each of the two places, with the
+  passage's place among them) are, with a slide a verse and the passage in one chapter, the whole
+  chapter's (`bible::page_deck`), so Space goes on through the chapter; otherwise its own. A
+  playlist's passage runs as its own slides (`SlidesOf::Passage`); Open on the Bible Page opens
+  it as the page opens any (`SlidesOf::Page`). The history notes the passage asked for
+  (`passage_held`).
 - Page (`bible_page.rs`, `page_view`): the passage's whole chapter, a verse to a row with the
   same verse in the next Bible under it; the passage's verses bright, the verse on screen tinted
-  orange, the verse picked in a well with a ring. A click on a verse of the passage puts its slide
-  on screen (its slide is its place among the verses `build_passage` made the passage from);
-  a click on another verse of the chapter looks it up and picks it. Laid out once per passage,
+  orange, the verse picked in a well with a ring. A click on a verse with a slide puts that slide
+  on screen (its slide is its place among the verses the slides were made from); a click on a
+  verse with none looks it up and picks it. Laid out once per passage,
   Bibles and width; only the verses in view are drawn. Slides: the passage's slides as tiles
   drawn by the Bible theme (`slide_grid`). Which is kept with the preferences.
 - Options: how verses become slides, the theme and layout for Bible slides, and the Bibles
@@ -215,9 +222,10 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   Enter puts the verse picked on screen (so does Space with nothing on screen, while → and ← move
   the pick); Space, → and ← then go verse by verse. The pick is `HomeState::picked` (`home.rs`),
   the rules for the keys `running.rs`.
-- The lists: a click on a book loads its first chapter, on a chapter that chapter, on a verse
-  that verse (Shift for a passage; a double-click opens the chapter with the verse), each with its
-  first verse (or that verse) picked; nothing goes on screen from them (`bible_page.rs`, `choose`).
+- The lists: a click on a book loads its first chapter, on a chapter that chapter (the whole
+  chapter the passage), on a verse that verse alone (Shift for a passage; a double-click opens the
+  whole chapter with the verse picked), each with its first verse (or that verse) picked; nothing
+  goes on screen from them (`bible_page.rs`, `choose`).
 - Words (not a reference) typed in the reference field list the verses holding them as they are
   typed, in place of the page, found on a thread of their own (`find.rs`, `search_page` and
   `Finder`); `sp bible search` lists them too.

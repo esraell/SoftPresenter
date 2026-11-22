@@ -479,7 +479,7 @@ impl SlideDeck {
         match (self.slide_ref(slide), &self.passage) {
             (Some(here), _) => commands.push(Command::GoTo(here)),
             (None, Some(saved)) => {
-                state.bible.open_saved(saved, show.live().map(|at| at.presentation));
+                state.bible.open_saved(saved, show.live().map(|at| at.presentation), crate::home::SlidesOf::Passage);
                 // Only if the passage was made: a slide kept waiting would go on screen with
                 // the next passage anyone looks up.
                 state.bible.go_live = state.bible.pending.is_some().then_some(slide);
