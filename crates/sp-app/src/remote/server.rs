@@ -481,6 +481,11 @@ async fn serve(
             tokio::time::sleep(Duration::from_millis(50)).await;
             continue;
         };
+        // Only the local network: a computer reached from the internet (a forwarded port, a
+        // public address) answers nobody out there.
+        if !local_network(peer.ip()) {
+            continue;
+        }
         let Some(slot) = Slot::take(&shared, peer.ip()) else { continue };
         let Ok(local) = tcp.local_addr() else { continue };
         let _ = tcp.set_nodelay(true);
@@ -565,6 +570,28 @@ fn gate(shared: &Shared, parts: &Parts) -> Result<Gate, Box<Response<Body>>> {
         Some(device)
     });
     Ok(Gate { host, ip, device })
+}
+
+/// Whether an address is on a local network: this computer, the private ranges (10/8,
+/// 172.16/12, 192.168/16), link-local (169.254/16), and the shared range some networks and
+/// VPNs hand out (100.64/10); for IPv6, this computer, unique local (fc00::/7) and link-local
+/// (fe80::/10). Anything else is the internet.
+pub fn local_network(ip: IpAddr) -> bool {
+    let v4 = match ip {
+        IpAddr::V4(v4) => Some(v4),
+        IpAddr::V6(v6) => v6.to_ipv4_mapped(),
+    };
+    match (v4, ip) {
+        (Some(v4), _) => {
+            let [a, b, ..] = v4.octets();
+            v4.is_loopback() || v4.is_private() || v4.is_link_local() || (a == 100 && (64..128).contains(&b))
+        }
+        (None, IpAddr::V6(v6)) => {
+            let first = v6.segments()[0];
+            v6.is_loopback() || (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
+        }
+        (None, IpAddr::V4(_)) => false,
+    }
 }
 
 /// Whether a `Host` is the address a connection came in on, with the server's port: the
@@ -1302,11 +1329,19 @@ async fn take_message(
     };
     match message.get("type").and_then(serde_json::Value::as_str) {
         Some("hello") => {
+            // Counted as a command is, so a page saying hello over and over can't keep the app
+            // busy.
+            if !state.bucket.take() {
+                return Some(error_message("Too many messages at once; slow down."));
+            }
             if let Some(on) = message.get("preview").and_then(serde_json::Value::as_bool) {
                 registered.watch(on);
             }
-            // The app publishes the state as it is now, so the snapshot is fresh.
-            let _ = tokio::time::timeout(Duration::from_secs(2), shared.backend.refresh()).await;
+            // The app publishes the state as it is now, so the first snapshot is fresh; a hello
+            // after that is answered from what was published (it is never more than a moment old).
+            if state.version.is_none() {
+                let _ = tokio::time::timeout(Duration::from_secs(2), shared.backend.refresh()).await;
+            }
             let resume = message
                 .get("resume")
                 .and_then(|resume| Some((resume.get("epoch")?.as_str()?.to_owned(), resume.get("version")?.as_u64()?)));
@@ -1320,6 +1355,9 @@ async fn take_message(
             Some(out)
         }
         Some("preview") => {
+            if !state.bucket.take() {
+                return Some(error_message("Too many messages at once; slow down."));
+            }
             registered.watch(message.get("on").and_then(serde_json::Value::as_bool).unwrap_or(false));
             None
         }
@@ -1340,6 +1378,17 @@ async fn take_message(
             let Some(args) = args else {
                 return Some(reply_message(&id, &Reply::failed("A command's args are a list of words.")));
             };
+            // The device is still remembered (it is closed as soon as it is forgotten; this is
+            // the check at the moment it counts).
+            let remembered = shared
+                .store
+                .lock()
+                .ok()
+                .is_some_and(|store| store.saved.devices.iter().any(|device| device.id == caller.device));
+            if !remembered {
+                shared.sign_out(&caller.device);
+                return Some(reply_message(&id, &Reply::failed("This device has been signed out.")));
+            }
             if let Some(refused) = policy::refusal(caller.role, &args) {
                 return Some(reply_message(&id, &Reply::failed(refused)));
             }

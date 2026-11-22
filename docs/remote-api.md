@@ -26,7 +26,9 @@ slide pictures come from plain URLs; the live preview comes over the WebSocket a
 ## Connecting
 
 Switched on in **Settings › Remote Control** (or `sp remote on`), the app listens on one port
-(4316 unless changed; 1024 up) on every network the computer is on, **HTTPS only**. The pane
+(4316 unless changed; 1024 up) on every network the computer is on, **HTTPS only**, and
+answers only devices on a local network (private and link-local addresses, and the shared
+100.64/10 range some networks and VPNs use): a connection from the internet is closed at once. The pane
 shows the address to open, such as `https://192.168.1.20:4316`. Nothing listens while it is
 off, and switching it off closes every connection.
 
@@ -177,7 +179,8 @@ app's own words for why (show it as the cue chip), such as "That is the last sli
 Song has 6 slides; there is no slide 9.". Every command gets exactly one reply, within 15
 seconds ("SoftPresenter did not answer in time." otherwise).
 
-Refused before they reach the app, with words saying so:
+Refused before they reach the app, with words saying so (read as the app would read them:
+`song --library NAME import FILE` is an import):
 
 - commands that reach the **computer's files or folders**: `song import`, `song export`,
   `media add`, `audio add`, `media-playlist follow FOLDER`, `bible install FILE` (a Bible
@@ -374,7 +377,7 @@ since), with Disconnect.
 | Sign-in body | 4 KB |
 | Pages (WebSockets) | 16 at once; 4 from one device |
 | A message from a page | 64 KB (more closes the socket) |
-| Commands | 4 waiting, 20 a second (40 in a burst) per page; 15 s for an answer |
+| Commands (and hellos, and preview switches) | 4 waiting, 20 a second (40 in a burst) per page; 15 s for an answer |
 | Hello | within 10 s |
 | Silence | 45 s, then closed |
 | Writing to a slow page | 10 s, then closed (it reconnects and catches up) |
@@ -396,6 +399,7 @@ browser on the network (trusted with nothing).
 | A stolen or old device | Forget (or a new password) revokes at once, closing its open pages |
 | Another site's page using a signed-in browser (cross-site requests, cross-site WebSocket) | SameSite=Strict, HttpOnly cookie; `Origin` checked on the WebSocket and every POST; sign-in needs JSON |
 | DNS rebinding | `Host` must be the address the connection came in on |
+| Someone on the internet, if the computer is reachable from it (a forwarded port) | Only local-network addresses are answered |
 | Reading or writing the computer's files through the page | No path from a request is ever served; commands that name files or folders are refused for pages (by their words, never by looking at the disk); pictures are found by id |
 | Reaching the computer's own web services | `slide web` with anything but https is refused for pages |
 | Keys, sign-ins, the menu bar (Quit, Install Command Line Tool), Remote Control's own settings | Closed to pages |

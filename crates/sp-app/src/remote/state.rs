@@ -134,7 +134,7 @@ impl crate::App {
         Some(Drawn {
             look,
             read: Box::new(move || {
-                let pixels = sp_render::read_pixels(&device, &queue, &texture).ok()?;
+                let pixels = sp_render::read_pixels_gently(&device, &queue, &texture, Duration::from_secs(2)).ok()?;
                 Some(Rgba { width: texture.width(), height: texture.height(), pixels })
             }),
         })

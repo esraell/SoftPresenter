@@ -542,7 +542,8 @@ impl crate::App {
                 return None;
             }
             let texture = textures.get(front)?;
-            let pixels = sp_render::read_pixels(&device, &queue, texture).ok()?;
+            let pixels =
+                sp_render::read_pixels_gently(&device, &queue, texture, std::time::Duration::from_secs(1)).ok()?;
             Some(server::Rgba { width: texture.width(), height: texture.height(), pixels })
         })));
     }

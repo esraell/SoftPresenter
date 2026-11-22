@@ -395,6 +395,28 @@ pub fn target_texture(device: &wgpu::Device, w: u32, h: u32) -> wgpu::Texture {
 
 /// Reads a texture back from the GPU as tightly packed RGBA rows. Blocks until done.
 pub fn read_pixels(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) -> Result<Vec<u8>, String> {
+    read_back(device, queue, texture, None)
+}
+
+/// Reads a texture back as `read_pixels` does, for a thread that shares the device with others
+/// drawing on it (Remote Control's): it never waits inside the device, which would hold up the
+/// other threads' work meanwhile, but looks every millisecond whether the copy has come, for at
+/// most `within`.
+pub fn read_pixels_gently(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    within: std::time::Duration,
+) -> Result<Vec<u8>, String> {
+    read_back(device, queue, texture, Some(within))
+}
+
+fn read_back(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    gently: Option<std::time::Duration>,
+) -> Result<Vec<u8>, String> {
     let (w, h) = (texture.width(), texture.height());
     let row = w as usize * 4;
     // The GPU requires each row of a copy to start on a 256-byte boundary.
@@ -426,8 +448,28 @@ pub fn read_pixels(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::T
     slice.map_async(wgpu::MapMode::Read, move |result| {
         let _ = tx.send(result);
     });
-    device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| e.to_string())?;
-    rx.recv().map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+    match gently {
+        None => {
+            device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| e.to_string())?;
+            rx.recv().map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+        }
+        Some(within) => {
+            let until = std::time::Instant::now() + within;
+            loop {
+                device.poll(wgpu::PollType::Poll).map_err(|e| e.to_string())?;
+                match rx.try_recv() {
+                    Ok(mapped) => break mapped.map_err(|e| e.to_string())?,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => return Err("The copy was lost.".to_owned()),
+                    Err(std::sync::mpsc::TryRecvError::Empty) if std::time::Instant::now() >= until => {
+                        return Err("The GPU took too long to give the picture back.".to_owned());
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        std::thread::sleep(std::time::Duration::from_millis(1))
+                    }
+                }
+            }
+        }
+    }
     let mapped = slice.get_mapped_range().map_err(|e| e.to_string())?;
     let mut pixels = Vec::with_capacity(row * h as usize);
     for padded in mapped.chunks(padded_row) {

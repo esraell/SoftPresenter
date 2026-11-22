@@ -589,6 +589,29 @@ fn limits_hold() {
 }
 
 #[test]
+fn only_the_local_network_is_answered() {
+    for local in [
+        "127.0.0.1",
+        "10.1.2.3",
+        "172.16.0.9",
+        "172.31.255.1",
+        "192.168.1.20",
+        "169.254.3.4",
+        "100.64.0.1",
+        "100.127.9.9",
+        "::1",
+        "fd12::5",
+        "fe80::1",
+        "::ffff:192.168.0.2",
+    ] {
+        assert!(local_network(local.parse().unwrap()), "{local}");
+    }
+    for public in ["8.8.8.8", "172.32.0.1", "100.128.0.1", "1.1.1.1", "2001:db8::1", "::ffff:8.8.4.4"] {
+        assert!(!local_network(public.parse().unwrap()), "{public}");
+    }
+}
+
+#[test]
 fn hosts_are_the_connections_own_address() {
     let local: SocketAddr = "192.168.1.5:4316".parse().unwrap();
     assert!(host_allowed("192.168.1.5:4316", local));

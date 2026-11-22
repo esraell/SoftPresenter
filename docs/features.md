@@ -1273,7 +1273,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 ## Remote Control
 - **Run the show from another device** on the church's network: a computer, tablet or phone
   opens the address Settings › Remote Control shows (`https://` the computer's address and the
-  port, 4316 unless changed; 1024 up) and signs in with a password. Off by default; switched
+  port, 4316 unless changed; 1024 up) and signs in with a password. Only devices on a local
+  network are answered. Off by default; switched
   on, it stays on the next time the app opens. Off, nothing listens; switching it off closes
   every page's connection at once. While on, the top bar's status line (when no timer runs and
   Canva Sync has nothing to say) reads REMOTE ON · N CONNECTED, and a click opens its pane.

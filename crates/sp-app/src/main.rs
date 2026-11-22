@@ -7233,6 +7233,10 @@ impl App {
                         running.home_state.preferences_pane = 4;
                         running.home_state.canva.open = true;
                     }
+                    "remote" => {
+                        running.home_state.preferences_pane =
+                            home::PANES.iter().position(|pane| *pane == "Remote Control").unwrap_or(0);
+                    }
                     _ => {}
                 }
             }

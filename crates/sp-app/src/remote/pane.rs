@@ -68,7 +68,12 @@ pub fn pane(ui: &mut egui::Ui, view: &mut View) {
     if let Some(fingerprint) = &view.fingerprint {
         ui.add_space(4.0);
         ui.label(RichText::new("Certificate fingerprint (SHA-256)").size(11.5).color(TEXT_DIM));
-        ui.label(RichText::new(fingerprint).monospace().size(11.0).color(TEXT));
+        // In two lines of sixteen pairs, as easy to read off against the browser's.
+        let pairs: Vec<&str> = fingerprint.split(':').collect();
+        let half = pairs.len().div_ceil(2);
+        for line in pairs.chunks(half.max(1)) {
+            ui.label(RichText::new(line.join(":")).monospace().size(11.0).color(TEXT));
+        }
         ui.label(
             RichText::new(
                 "The browser warns the first time, as nobody but this computer vouches for its certificate. Check that \

@@ -94,9 +94,24 @@ pub const CLOSED: &[&str] = &["remote"];
 
 /// Why a page in this role may not send this command, in words to show it; `None` when it may.
 pub fn refusal(role: Role, args: &[String]) -> Option<String> {
+    let args = as_carried_out(args);
     match role {
-        Role::Control => control_refusal(args),
+        Role::Control => control_refusal(&args),
     }
+}
+
+/// A command's words as its handler goes on to read them, where a handler takes words out
+/// before it looks at the rest: `song … --library NAME …` is carried out as `song …` without
+/// that pair (as many times as it is there), so `song --library X import FILE` is an import.
+fn as_carried_out(args: &[String]) -> Vec<String> {
+    let mut args = args.to_vec();
+    if args.first().is_some_and(|w| w.eq_ignore_ascii_case("song")) {
+        while let Some(at) = args.iter().position(|w| w == "--library") {
+            let end = (at + 2).min(args.len());
+            args.drain(at..end);
+        }
+    }
+    args
 }
 
 fn control_refusal(args: &[String]) -> Option<String> {
@@ -216,6 +231,10 @@ mod tests {
     fn files_keys_the_menu_and_waits_are_closed() {
         for line in [
             "song import /etc/hosts",
+            "song --library Hymns import /etc/hosts",
+            "song --library Hymns --library none export Amazing --to /tmp/x.sppack",
+            "song new Title --library Hymns /etc/hosts",
+            "SONG IMPORT /etc/hosts",
             "song export Amazing --to /tmp/x.sppack",
             "song new Title /etc/hosts",
             "song new Two words",
@@ -242,6 +261,29 @@ mod tests {
         ] {
             assert!(refused(line), "{line} should be refused");
         }
+    }
+
+    /// `song --library NAME` is the one command whose handler takes words out and reads the
+    /// rest again; the policy reads it the same way. A handler that starts doing so too must be
+    /// mirrored in `as_carried_out`.
+    #[test]
+    fn the_only_handler_that_reads_its_words_again_is_mirrored() {
+        let mut found = Vec::new();
+        for (name, source) in [
+            ("control.rs", include_str!("../control.rs")),
+            ("make_cli.rs", include_str!("../make_cli.rs")),
+            ("service_cli.rs", include_str!("../service_cli.rs")),
+            ("show_cli.rs", include_str!("../show_cli.rs")),
+            ("slide_cli.rs", include_str!("../slide_cli.rs")),
+            ("screen_cli.rs", include_str!("../screen_cli.rs")),
+            ("theme_cli.rs", include_str!("../theme_cli.rs")),
+        ] {
+            for line in source.lines().filter(|line| line.contains("self.ctl_") && line.contains("(&rest)")) {
+                found.push(format!("{name}: {}", line.trim()));
+            }
+        }
+        assert_eq!(found, ["control.rs: let result = self.ctl_song(&rest);"]);
+        assert!(refusal(Role::Control, &words("song --library Hymns new Title")).is_none());
     }
 
     #[test]
