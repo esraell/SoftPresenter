@@ -2904,8 +2904,8 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
             // The "more" button opens what a right-click on the row does.
             let near = response.hovered() || ui.rect_contains_pointer(more);
             let button = more_button(ui, more, ui.scope_id().with(("song more", index)), near);
-            egui::Popup::menu(&button).show(|ui| song_menu(ui, show, state, commands, index, &mut asks));
-            response.context_menu(|ui| song_menu(ui, show, state, commands, index, &mut asks));
+            egui::Popup::menu(&button).show(|ui| song_menu(ui, show, state, commands, index, &mut asks, false));
+            response.context_menu(|ui| song_menu(ui, show, state, commands, index, &mut asks, false));
         }
         let ctx = ui.ctx().clone();
         sweep_rows(ui, state, crate::home::Picking::Songs, &rows, shown, list, pointer, down, |picked| {
@@ -3193,7 +3193,15 @@ fn sweep_rows(
     }
 }
 
-/// A song's right-click menu in the library.
+/// The playlists a song's menu offers to add it to, by their places: all of them, except the
+/// playlist in front when the menu is for one of its items (the song is in it already).
+fn playlists_to_add_to(state: &HomeState, in_playlist: bool) -> Vec<usize> {
+    let front = state.services.front_at();
+    (0..state.services.list.len()).filter(|at| !(in_playlist && *at == front)).collect()
+}
+
+/// A song's right-click menu, in the library or (`in_playlist`) for an item of the playlist in
+/// front, which then isn't offered as a playlist to add it to.
 pub fn song_menu(
     ui: &mut egui::Ui,
     show: &Show,
@@ -3201,15 +3209,17 @@ pub fn song_menu(
     commands: &mut Vec<Command>,
     index: usize,
     asks: &mut SongAsks,
+    in_playlist: bool,
 ) {
     let front = state.services.front().name.clone();
-    if ui.button(format!("Add to {front}")).clicked() {
+    if !in_playlist && ui.button(format!("Add to {front}")).clicked() {
         asks.add = Some(index);
         ui.close();
     }
     // Another playlist, or a new one.
     ui.menu_button("Add to Playlist", |ui| {
-        for (at, playlist) in state.services.list.iter().enumerate() {
+        for at in playlists_to_add_to(state, in_playlist) {
+            let Some(playlist) = state.services.list.get(at) else { continue };
             if ui.button(playlist.name.as_str()).clicked() {
                 asks.add_to = Some((index, Some(at)));
                 ui.close();
@@ -3429,7 +3439,7 @@ pub fn item_menu(
         _ => None,
     };
     if let Some(song) = song {
-        ui.menu_button("Song", |ui| song_menu(ui, show, state, commands, song, asks));
+        ui.menu_button("Song", |ui| song_menu(ui, show, state, commands, song, asks, true));
         ui.separator();
     }
     let announced = match state.services.front().items.get(index) {
@@ -5709,6 +5719,19 @@ pub mod tests {
         }
         assert!(clicked, "the row under the right edge took the click");
         assert!(width >= 299.0, "the rows have the list's whole width, {width}");
+    }
+
+    #[test]
+    fn a_songs_menu_for_a_playlists_item_doesnt_offer_that_playlist() {
+        let mut state = HomeState::default();
+        state.services.add_service();
+        state.services.add_service();
+        let front = state.services.front_at();
+        let all: Vec<usize> = (0..state.services.list.len()).collect();
+        assert_eq!(playlists_to_add_to(&state, false), all, "from the library, every playlist");
+        let offered = playlists_to_add_to(&state, true);
+        assert!(!offered.contains(&front), "not the playlist the song is in");
+        assert_eq!(offered.len(), all.len() - 1, "the others");
     }
 
     fn press(at: egui::Pos2, pressed: bool) -> Event {

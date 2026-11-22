@@ -369,7 +369,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   `sp undo` and `sp redo` do the same from the command line whatever the window shows, and say
   which song and slides changed.
 - A song's menu (its ⋯, or a right-click): Add to the playlist in front, Add to Playlist (any
-  playlist, or a new one), Libraries, Rename, Duplicate, Theme (a theme of its own, or
+  playlist, or a new one; for a song in a playlist, from its item or its title bar, the
+  playlist it is in isn't offered), Libraries, Rename, Duplicate, Theme (a theme of its own, or
   the songs theme), Reflow, and Delete (a song made in the app goes to the Trash).
 - The tool tabs under Clear All in the right column, each a list of cards. A card's ⋯, or a
   right-click on it, opens what else it can do.

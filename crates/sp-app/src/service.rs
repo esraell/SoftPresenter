@@ -192,6 +192,11 @@ struct File {
 }
 
 impl Services {
+    /// The place of the service in front among the list.
+    pub fn front_at(&self) -> usize {
+        self.current.min(self.list.len() - 1)
+    }
+
     /// The service in front. There is always one.
     pub fn front(&self) -> &Service {
         &self.list[self.current.min(self.list.len() - 1)]

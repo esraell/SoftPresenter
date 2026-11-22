@@ -1902,7 +1902,7 @@ fn item_bar(
                 ui.close();
             }
             ui.separator();
-            crate::studio::song_menu(ui, show, state, commands, at, asks);
+            crate::studio::song_menu(ui, show, state, commands, at, asks, item.is_some());
         }
         if let Some(item) = item {
             if song.is_some() {
