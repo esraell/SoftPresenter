@@ -840,8 +840,7 @@ impl Theme {
     pub fn template_for(&self, slide: &Slide) -> Option<&ThemeTemplate> {
         if let Some(id) = slide.template {
             // A slide shown in a version names that version's template (see `slide_in_version`).
-            let mut named = self.templates.iter().chain(self.versions.iter().flat_map(|v| &v.templates));
-            if let Some(named) = named.find(|t| t.id == id) {
+            if let Some(named) = self.all_templates().find(|t| t.id == id) {
                 return Some(named);
             }
         }
@@ -877,6 +876,17 @@ impl Theme {
         shown.template = Some(template.id);
         shown.objects.retain(|object| object.role.as_ref().is_none_or(|role| template.style_for(role).is_some()));
         Some(shown)
+    }
+
+    /// Every template of the theme, the usual ones and each version's, for what must see all of
+    /// them (the pictures they show, the fonts they use).
+    pub fn all_templates(&self) -> impl Iterator<Item = &ThemeTemplate> {
+        self.templates.iter().chain(self.versions.iter().flat_map(|version| &version.templates))
+    }
+
+    /// Every template of the theme, to change: the usual ones and each version's.
+    pub fn all_templates_mut(&mut self) -> impl Iterator<Item = &mut ThemeTemplate> {
+        self.templates.iter_mut().chain(self.versions.iter_mut().flat_map(|version| &mut version.templates))
     }
 
     /// Whether the theme has a version: templates kept for it.
@@ -1253,12 +1263,17 @@ impl TextStyle {
 pub fn fonts_used(presentation: &crate::Presentation, theme: &Theme) -> Vec<String> {
     let mut families: Vec<String> = Vec::new();
     for (_, slide) in presentation.slides() {
-        for object in &slide.objects {
-            let crate::ObjectKind::Text { style, .. } = &object.kind else { continue };
-            if let Some(drawn) = theme.text_style_on(slide, object.role.as_ref(), style)
-                && !families.contains(&drawn.font_family)
-            {
-                families.push(drawn.font_family);
+        // As the usual look draws it, and as each of the theme's versions does.
+        let in_versions = theme.versions.iter().filter_map(|version| theme.slide_in_version(slide, version.id));
+        for shown in std::iter::once(std::borrow::Cow::Borrowed(slide)).chain(in_versions.map(std::borrow::Cow::Owned))
+        {
+            for object in &shown.objects {
+                let crate::ObjectKind::Text { style, .. } = &object.kind else { continue };
+                if let Some(drawn) = theme.text_style_on(&shown, object.role.as_ref(), style)
+                    && !families.contains(&drawn.font_family)
+                {
+                    families.push(drawn.font_family);
+                }
             }
         }
     }
@@ -1468,6 +1483,16 @@ mod tests {
         assert_eq!(lower.add_template_in(Some(offering), 0), Some(1));
         assert_eq!(lower.set(Some(offering)).len(), 3);
         assert!(lower.set(Some(Uuid::from_u128(99))).is_empty());
+        // What must see every template (pictures, fonts) sees the versions' too.
+        let all = lower.templates.len() + lower.versions.iter().map(|v| v.templates.len()).sum::<usize>();
+        assert_eq!(lower.all_templates().count(), all);
+        assert_eq!(lower.all_templates_mut().count(), all);
+        let (mut fonts, _) = with_offering();
+        for template in &mut fonts.versions[0].templates {
+            template.boxes.iter_mut().for_each(|look| look.font_family = "Georgia".to_owned());
+        }
+        let used = fonts_used(&crate::parse_song_text("S", "A\n"), &fonts);
+        assert!(used.iter().any(|font| font == "Georgia"), "the version's font is used too: {used:?}");
     }
 
     #[test]

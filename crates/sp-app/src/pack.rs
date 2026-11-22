@@ -166,7 +166,7 @@ impl Export {
                 && let Some(theme) = themes.iter().find(|theme| theme.id == id)
             {
                 let mut theme = theme.clone();
-                for template in &mut theme.templates {
+                for template in theme.all_templates_mut() {
                     for object in &mut template.objects {
                         if let ObjectKind::Image { file, .. } = &mut object.kind {
                             *file = export.name_file(file, &mut named);
@@ -794,7 +794,7 @@ pub fn bring_song_files(song: &mut Presentation, opened: &Opened, library: &Path
 
 /// The same for a theme from a pack.
 pub fn bring_theme_files(theme: &mut Theme, opened: &Opened, library: &Path, brought: &mut Brought) {
-    for template in &mut theme.templates {
+    for template in theme.all_templates_mut() {
         bring_objects(&mut template.objects, opened, library, brought);
     }
     theme.background_picture =

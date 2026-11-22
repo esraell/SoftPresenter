@@ -854,6 +854,23 @@ mod tests {
     }
 
     #[test]
+    fn a_picture_only_a_themes_version_shows_stays() {
+        let library = library("version");
+        // The giving picture is in the Offering version's template, nowhere else.
+        let mut theme = sp_model::Theme::builtin();
+        theme.id = sp_model::Uuid::new_v4();
+        let offering = sp_model::Version { id: sp_model::Uuid::new_v4(), name: "Offering".to_owned() };
+        assert!(theme.add_version(&offering, &[0]));
+        let picture = sp_model::Object::image(format!("{USED}.png"), "Give".to_owned(), 64, 64);
+        theme.versions[0].templates[0].objects.push(picture);
+        write(&library.join(format!("Themes/{}.sptheme", theme.id)), &theme.to_json());
+        write(&library.join(format!("Images/{USED}.png")), "picture");
+        write(&library.join(format!("Images/{UNUSED}.png")), "picture");
+        let (outcome, moved) = tidy(&library, month_on());
+        assert_eq!(moved, [format!("{UNUSED}.png")], "{outcome:?}");
+    }
+
+    #[test]
     fn a_file_changed_in_the_last_week_stays() {
         let library = library("recent");
         write(&library.join(format!("Images/{UNUSED}.png")), "picture");

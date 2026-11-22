@@ -2395,7 +2395,7 @@ impl crate::App {
         if self.show.presentations().iter().any(|song| song.slides().any(|(_, slide)| in_objects(&slide.objects))) {
             return Some("a slide");
         }
-        if self.themes.iter().any(|theme| theme.templates.iter().any(|template| in_objects(&template.objects))) {
+        if self.themes.iter().any(|theme| theme.all_templates().any(|template| in_objects(&template.objects))) {
             return Some("a theme");
         }
         let Some(running) = self.running.as_ref() else { return Some("the app, still starting") };
