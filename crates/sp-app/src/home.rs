@@ -8515,28 +8515,34 @@ mod tests {
         }
         let tiles: Vec<usize> = state.slide_rects.iter().map(|(at, _)| at.slide).collect();
         assert!(tiles.contains(&14) && tiles.contains(&19), "the chapter's slides round the passage: {tiles:?}");
-        // A slide outside the passage (the one before it, in the row in view) goes on screen
-        // with a click, as any slide does (back in the usual window, settled).
+        // Back in the usual window, settled: the pick was brought into sight with the passage's
+        // last slide, so John 3:18 can be clicked as well as 3:15, before the passage. Either goes
+        // on screen with a click, as any slide does, and the passage stays.
         for at in 0..20 {
             frame_then_app(&ctx, &mut show, &mut state, vec![], 0.5 + f64::from(at) * 0.005);
         }
-        let (outside, rect) = state
-            .slide_rects
-            .iter()
-            .find(|(at, _)| at.slide == 14)
-            .map(|(at, rect)| (*at, *rect))
-            .expect("John 3:15, before the passage, is in view");
-        let press = |pressed| Event::PointerButton {
-            pos: rect.center(),
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: Modifiers::NONE,
-        };
-        let mut commands = frame_then_app(&ctx, &mut show, &mut state, vec![Event::PointerMoved(rect.center())], 0.6);
-        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![press(true)], 0.65));
-        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![press(false)], 0.7));
-        assert_eq!(commands, vec![Command::GoTo(outside)]);
-        assert_eq!(state.bible.shown, "John 3:16-18", "the passage stays");
+        let mut time = 0.6;
+        for slide in [17, 14] {
+            let rect = state
+                .slide_rects
+                .iter()
+                .find(|(at, _)| at.slide == slide)
+                .map(|(_, rect)| *rect)
+                .unwrap_or_else(|| panic!("John 3:{} is laid out", slide + 1));
+            let press = |pressed| Event::PointerButton {
+                pos: rect.center(),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            };
+            let mut commands =
+                frame_then_app(&ctx, &mut show, &mut state, vec![Event::PointerMoved(rect.center())], time);
+            commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![press(true)], time + 0.05));
+            commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![press(false)], time + 0.1));
+            assert_eq!(commands, vec![Command::GoTo(SlideRef { presentation: slot, slide })], "John 3:{}", slide + 1);
+            assert_eq!(state.bible.shown, "John 3:16-18", "the passage stays");
+            time += 0.5;
+        }
 
         // Made into one slide: that slide alone, and nothing ringed.
         let ctx = egui::Context::default();

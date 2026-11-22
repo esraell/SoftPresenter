@@ -197,6 +197,16 @@ pub fn follow_offset(offset: f32, height: f32, slide: egui::Rangef) -> Option<f3
     ((wanted - offset).abs() > 0.5).then_some(wanted)
 }
 
+/// What to bring into sight for a slide picked (`picked`, its top and bottom in the scroll): the
+/// slide, and with it the last slide of the passage it begins (`end`) when both fit in a view
+/// `height` high clear of the bar and the fade.
+pub fn with_passage_end(picked: egui::Rangef, end: Option<egui::Rangef>, height: f32) -> egui::Rangef {
+    match end.map(|end| picked.union(end)) {
+        Some(wider) if wider.span() <= height - CLEAR_ABOVE - CLEAR_BELOW => wider,
+        _ => picked,
+    }
+}
+
 /// Bible passages kept in playlists, made into slides once and kept: making one reads its
 /// Bibles and lays out every verse, and each making gives its slides new ids, which the
 /// thumbnails are kept by.
@@ -879,12 +889,19 @@ pub fn slide_scroll(
         // as the slide on screen is, once its song or passage is shown.
         if state.pick_scroll > 0 {
             state.pick_scroll -= 1;
-            let rect = state
-                .pick(show)
-                .and_then(|picked| state.slide_rects.iter().find(|(at, _)| *at == picked).map(|(_, rect)| *rect));
-            match rect {
+            let picked = state.pick(show);
+            let rect_of = |at: SlideRef| state.slide_rects.iter().find(|(here, _)| *here == at).map(|(_, rect)| *rect);
+            // On the Bible page, the passage's last slide among its chapter's comes into sight
+            // with the verse picked, when the two fit.
+            let passage_end = picked.and_then(|picked| {
+                let deck = show.presentations().get(picked.presentation)?;
+                let ringed = state.bible.ringed(picked.presentation, deck)?;
+                rect_of(SlideRef { presentation: picked.presentation, slide: ringed.end.checked_sub(1)? })
+            });
+            match picked.and_then(rect_of) {
                 Some(rect) => {
-                    let range = egui::Rangef::new(rect.min.y - origin.y, rect.max.y - origin.y);
+                    let span = |rect: Rect| egui::Rangef::new(rect.min.y - origin.y, rect.max.y - origin.y);
+                    let range = with_passage_end(span(rect), passage_end.map(span), viewport.height());
                     if let Some(to) = follow_offset(viewport.min.y, viewport.height(), range) {
                         ui.scroll_with_delta_animation(vec2(0.0, viewport.min.y - to), ScrollAnimation::none());
                     }
@@ -2793,6 +2810,15 @@ mod tests {
         assert_eq!(follow_offset(0.0, 600.0, slide(5000.0)), Some(5160.0 - 600.0 + CLEAR_BELOW));
         // At the very top of the scroll there is nowhere further up to go.
         assert_eq!(follow_offset(0.0, 600.0, slide(10.0)), None);
+        // A verse picked on the Bible page brings the rest of its passage with it, when it fits.
+        let (picked, end) = (slide(1420.0), slide(1600.0));
+        assert_eq!(with_passage_end(picked, Some(end), 600.0), egui::Rangef::new(1420.0, 1760.0));
+        assert_eq!(
+            follow_offset(1000.0, 600.0, with_passage_end(picked, Some(end), 600.0)),
+            Some(1760.0 - 600.0 + CLEAR_BELOW)
+        );
+        assert_eq!(with_passage_end(picked, Some(slide(2000.0)), 600.0), picked, "too far to fit");
+        assert_eq!(with_passage_end(picked, None, 600.0), picked);
     }
 
     #[test]
