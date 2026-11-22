@@ -8979,6 +8979,10 @@ mod tests {
         let (_, rows) = state.bible.page.rows();
         let third = rows.iter().find(|(number, ..)| *number == 3).expect("verse 3");
         assert_eq!(third.2.as_deref(), Some("Psalm 51:1"));
+        // Its verses 1 and 2 (the title, the King James heading of its verse 1) carry no second
+        // line: Psalm 51:1 is under verse 3 only, once.
+        let under_51_1 = rows.iter().filter(|(.., note)| note.as_deref() == Some("Psalm 51:1")).count();
+        assert_eq!(under_51_1, 1);
         // Read in English: the King James numbers, the Synodal line with its own.
         state.bible.set_read_in(Some("en".to_owned()));
         settle(&ctx, &mut show, &mut state);

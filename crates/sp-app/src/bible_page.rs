@@ -864,6 +864,11 @@ fn lay_out(ui: &egui::Ui, page: &mut BiblePage, width: f32) {
                 .as_ref()
                 .and_then(|second| {
                     let there = sp_bible::convert(verse, numbered_by.info.numbering, second.info.numbering);
+                    // Where two verses meet one (the Synodal's two title verses and the King
+                    // James's first), it goes under the one that is its own counterpart, once.
+                    if sp_bible::convert(there, second.info.numbering, numbered_by.info.numbering) != verse {
+                        return None;
+                    }
                     let words = second.verse(there)?.to_owned();
                     let language = crate::bible_language::language_of(&second.info.language);
                     let note = ((there.chapter, there.verse) != (verse.chapter, verse.verse))
