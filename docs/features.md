@@ -1058,6 +1058,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   50 and 100 ms and the pictures the windows showed and didn't; screens' windows being covered
   and uncovered, the displays changing and a slow try at opening a DeckLink device are logged
   too. All of it costs a few readings of the clock.
+- **A screen's window the computer is slow with doesn't hold up the others.** The system lends
+  each window the pictures it draws into, and on a Mac can take about a second to give one back
+  when it isn't showing the window for a moment. The screens wait for one a twentieth of a
+  second at most: that window keeps its picture until its next comes, and NDI, the stage
+  screens, DeckLink and the operator's preview go on moving. The log says when it happens and
+  for how long.
 
 <img src="images/screens.png" alt="The Screens window" width="620">
 

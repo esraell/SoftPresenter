@@ -11,8 +11,10 @@ use sp_ndi::NdiOutput;
 
 mod decklink;
 mod held;
+mod next_picture;
 pub use decklink::DeckLinkStatus;
 use held::{For, Held, Part, Totals};
+use next_picture::{Next, NextPicture};
 use sp_render::{
     Fonts, Layers, MovingPicture, Painter, Picture, Solid, SolidPass, build_layers, read_pixels,
     see_through_transition, target_texture, vello, wgpu,
@@ -803,7 +805,9 @@ struct Target {
     id: Uuid,
     /// The screen's name when its window opened, for the log.
     name: String,
-    surface: wgpu::Surface<'static>,
+    /// The window's surface, and its next picture to draw into, asked for on a thread of its
+    /// own (see `output/next_picture.rs`).
+    next: NextPicture,
     config: wgpu::SurfaceConfiguration,
     blitter: wgpu::util::TextureBlitter,
     /// What a see-through screen's picture, or a key, is shown through in place of the
@@ -822,6 +826,9 @@ struct Target {
     trouble: crate::applog::Lasting,
     /// Whether the window shows what it was last asked to.
     state: Shown,
+    /// Since when the window has been passed over, its next picture not having come in time
+    /// (see `output/next_picture.rs`).
+    passed_over: Option<Instant>,
 }
 
 /// A copy of the picture a video lends, to draw: its pixels as they are, in whichever order
@@ -1593,6 +1600,7 @@ impl Output {
             view_formats: vec![],
         };
         let configured = configure(&self.device, &surface, &config);
+        let next = NextPicture::new(Arc::new(surface));
         // A screen has one window: a new one takes the old one's place.
         self.targets.retain(|target| target.id != id);
         self.targets.push(Target {
@@ -1601,13 +1609,14 @@ impl Output {
             blitter: wgpu::util::TextureBlitter::new(&self.device, format),
             pass: None,
             texture: target_texture(&self.device, config.width, config.height),
-            surface,
+            next,
             config,
             shown: None,
             fade: None,
             configured,
             trouble: crate::applog::Lasting::default(),
             state: Shown::default(),
+            passed_over: None,
         });
     }
 
@@ -1619,7 +1628,9 @@ impl Output {
         }
         target.config.width = w;
         target.config.height = h;
-        target.configured = configure(&self.device, &target.surface, &target.config);
+        // Not while a picture asked for is still to come: setting the surface up would wait for
+        // it. It is set up before the next picture is shown, once that one has come.
+        target.configured = !target.next.waiting() && configure(&self.device, target.next.surface(), &target.config);
         target.texture = target_texture(&self.device, w, h);
         // Pictures built for the old size cannot be faded at the new one.
         target.shown = None;
@@ -2986,10 +2997,20 @@ fn show_in_window_timed(
     held: &mut Held,
 ) -> bool {
     let window = For::Window(target.id);
-    // A window whose surface isn't set up is set up first, or skipped this frame.
+    // A window whose surface isn't set up is set up first, or skipped this frame. One resized
+    // while its next picture was still to come is set up once that has come: the picture is
+    // of the old size, and is let go.
     if !target.configured {
+        if target.next.waiting() {
+            let acquiring = Instant::now();
+            let came = target.next.take(next_picture::STILL_WAIT);
+            held.since(Part::Acquire, window, acquiring);
+            if matches!(came, Next::NotYet) {
+                return false;
+            }
+        }
         let setting_up = Instant::now();
-        target.configured = configure(device, &target.surface, &target.config);
+        target.configured = configure(device, target.next.surface(), &target.config);
         let pausing = held.since(Part::Setup, window, setting_up);
         if !target.configured {
             std::thread::sleep(Duration::from_millis(8));
@@ -3007,9 +3028,45 @@ fn show_in_window_timed(
     // A lost or outdated surface is set up again and tried once more; anything else
     // (hidden window, timeout) skips this frame and the next message redraws.
     for attempt in 0..2 {
+        // The window's next picture comes from its own thread, waited for a short while at
+        // most: one that doesn't come (the window system isn't taking the window's pictures
+        // back for the moment) is looked for again, briefly, at the next drawing, and the
+        // window keeps the picture it shows meanwhile.
+        let wait = if target.next.waiting() { next_picture::STILL_WAIT } else { next_picture::ASKED_WAIT };
         let acquiring = Instant::now();
-        let next = next_screen_texture(&target.surface);
+        let came = target.next.take(wait);
         let after = held.since(Part::Acquire, window, acquiring);
+        let next = match came {
+            Next::Came(next) => {
+                // Said in the log, so a window that stood still says for how long.
+                if let Some(since) = target.passed_over.take() {
+                    crate::applog::event(
+                        "output",
+                        &format!(
+                            "The window of \"{}\" was given its next picture after {:.0} ms.",
+                            target.name,
+                            since.elapsed().as_secs_f64() * 1000.0
+                        ),
+                    );
+                }
+                next
+            }
+            Next::NotYet => {
+                if target.passed_over.is_none() {
+                    target.passed_over = Some(acquiring);
+                    crate::applog::event(
+                        "output",
+                        &format!(
+                            "The window of \"{}\" was not given its next picture by the system within {} ms. \
+                             The other screens go on; it keeps the picture it shows until the next comes.",
+                            target.name,
+                            next_picture::ASKED_WAIT.as_millis()
+                        ),
+                    );
+                }
+                return false;
+            }
+        };
         let Some(next) = next else {
             target.configured = false;
             return false;
@@ -3029,7 +3086,7 @@ fn show_in_window_timed(
                 return true;
             }
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost if attempt == 0 => {
-                target.configured = configure(device, &target.surface, &target.config);
+                target.configured = configure(device, target.next.surface(), &target.config);
                 held.since(Part::Setup, window, after);
                 if !target.configured {
                     return false;

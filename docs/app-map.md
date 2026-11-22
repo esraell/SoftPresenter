@@ -361,6 +361,17 @@ none), how late the thread woke when that was 50 ms or more, and an NDI send of 
 A DeckLink output's thread says when opening its device took 100 ms or more, and the window
 says when a screen's window is covered or uncovered and when the displays change (`[screens]`).
 
+A screen window's next picture to draw into is asked for on a thread of the window's own
+(`output/next_picture.rs`). The window system lends a window a few pictures and takes each back
+once shown; when it isn't showing the window for a moment, asking for the next one can wait
+about a second on a Mac. The screens' thread waits 50 ms at most, then passes the window over (it
+keeps the picture it shows) and looks again for 8 ms at each drawing, so NDI, the stage,
+DeckLink and the preview go on. The log says when a window was passed over and when its next
+picture came:
+
+    [output] The window of "TV" was not given its next picture by the system within 50 ms. The other screens go on; it keeps the picture it shows until the next comes.
+    [output] The window of "TV" was given its next picture after 1004 ms.
+
 ## How the code is laid out
 
 | Crate | Holds |
