@@ -1,0 +1,575 @@
+//! Notices: one system for everything the window has to tell the operator (the owner's choice,
+//! 22 November 2026: "it saves on real estate and has all messages in one place").
+//!
+//! A status button in the top bar opens the list (`studio::notices_button`). Three kinds of
+//! entry go in it:
+//! - **trouble**, counted in amber: the app stopped answering, an output stopped, a file that
+//!   couldn't be read or written;
+//! - **questions**, counted in amber with "?" until answered (today a song or theme changed
+//!   outside SoftPresenter, with Reload and Keep mine); they never open the list by themselves;
+//! - **information** about what happened out of sight (added to another playlist, a file read
+//!   or written, a Bible installed), with a quiet dot.
+//!
+//! A **refusal** (why nothing happened: "That is the last slide") is not an entry. It is a cue
+//! under the place of action for a moment, and never kept. A confirmation of what the
+//! operator just did and can see is never said at all.
+//!
+//! The list is plain data ([`Notice`]: kind, text, time, seen, actions), so it can be sent as it
+//! is to a web page. Every entry and every refusal goes in the log as well.
+
+use crate::outside::Waiting;
+use crate::studio::{CARD, CARE, LINE, TEXT, TEXT_DIM, TEXT_FAINT};
+use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
+use serde::Serialize;
+
+/// How many entries the list keeps, besides questions waiting for an answer (which stay until
+/// answered).
+pub const KEPT: usize = 40;
+
+/// The answers a question about a file changed outside SoftPresenter offers.
+pub const RELOAD: &str = "reload";
+pub const KEEP_MINE: &str = "keep";
+
+/// What kind of entry a notice is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    /// Something that happened out of sight: a quiet dot on the button.
+    Info,
+    /// Something went wrong: counted in amber on the button.
+    Trouble,
+    /// Something waits for an answer: amber, with "?", until answered.
+    Question,
+}
+
+/// A button on an entry, which answers it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Action {
+    /// What the answer is called where it is carried out ([`RELOAD`], [`KEEP_MINE`]).
+    pub id: String,
+    /// The words on the button.
+    pub label: String,
+}
+
+/// One entry in the list.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Notice {
+    /// Its own number, never used again in a run: what an answer names it by.
+    pub id: u64,
+    pub kind: Kind,
+    /// The whole text, never cut short.
+    pub text: String,
+    /// When it was said, in seconds since 1970 (UTC).
+    pub time: i64,
+    /// Seen once the list it was in has been closed. A question is never seen: it waits.
+    pub seen: bool,
+    /// The buttons that answer it (a question's).
+    pub actions: Vec<Action>,
+    /// What a question is about: the answer goes there.
+    #[serde(skip)]
+    pub about: Option<Waiting>,
+}
+
+/// How the status button looks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Look {
+    /// Nothing new: a quiet list icon.
+    Quiet,
+    /// New information: a small grey dot.
+    New,
+    /// Trouble not yet seen, or questions with it: amber, with how many.
+    Trouble(usize),
+    /// Only questions: amber, with "?".
+    Question,
+}
+
+/// The list of notices, newest first.
+#[derive(Debug, Default)]
+pub struct Notices {
+    list: Vec<Notice>,
+    next: u64,
+    /// The list was open when last drawn: closing it marks everything seen.
+    pub was_open: bool,
+}
+
+impl Notices {
+    /// Something that happened out of sight: in the list, with a quiet dot.
+    pub fn info(&mut self, text: impl Into<String>) {
+        self.push(Kind::Info, text.into(), None, Vec::new());
+    }
+
+    /// Something that went wrong: in the list, counted in amber.
+    pub fn trouble(&mut self, text: impl Into<String>) {
+        self.push(Kind::Trouble, text.into(), None, Vec::new());
+    }
+
+    /// How a piece of work went: information when it went well, trouble when it didn't.
+    pub fn outcome(&mut self, result: Result<String, String>) {
+        match result {
+            Ok(said) => self.info(said),
+            Err(problem) => self.trouble(problem),
+        }
+    }
+
+    /// Asks whether to take a file's version of something changed outside SoftPresenter
+    /// (Reload) or to write SoftPresenter's over it (Keep mine). It waits at the head of the
+    /// list, and the button stays amber, until answered; it never opens the list. Asked once
+    /// however often it comes up.
+    pub fn ask(&mut self, about: Waiting, text: impl Into<String>) {
+        if self.asks_about(about) {
+            return;
+        }
+        let actions = vec![
+            Action { id: RELOAD.to_owned(), label: "Reload".to_owned() },
+            Action { id: KEEP_MINE.to_owned(), label: "Keep mine".to_owned() },
+        ];
+        self.push(Kind::Question, text.into(), Some(about), actions);
+    }
+
+    /// Whether a question about this waits for an answer.
+    pub fn asks_about(&self, about: Waiting) -> bool {
+        self.list.iter().any(|notice| notice.about == Some(about))
+    }
+
+    /// The question about this goes, with nothing said (it was settled some other way, or its
+    /// answer is said by whoever carried it out).
+    pub fn settle(&mut self, about: Waiting) {
+        self.list.retain(|notice| notice.about != Some(about));
+    }
+
+    /// What an answer to an entry asks for: the thing it is about, and true for Reload. `None`
+    /// when there is no such question or answer.
+    pub fn answer(&self, id: u64, action: &str) -> Option<(Waiting, bool)> {
+        let notice = self.list.iter().find(|notice| notice.id == id)?;
+        let about = notice.about?;
+        notice.actions.iter().any(|offered| offered.id == action).then_some((about, action == RELOAD))
+    }
+
+    /// Clear All: the list empties, except for questions, which stay until answered.
+    pub fn clear_all(&mut self) {
+        self.list.retain(|notice| notice.kind == Kind::Question);
+    }
+
+    /// Whether Clear All has anything to take away.
+    pub fn clearable(&self) -> bool {
+        self.list.iter().any(|notice| notice.kind != Kind::Question)
+    }
+
+    /// Everything in the list has been seen (it was closed).
+    pub fn mark_seen(&mut self) {
+        for notice in &mut self.list {
+            notice.seen = notice.kind != Kind::Question;
+        }
+    }
+
+    /// The entries as the list shows them: questions first, then the rest, newest first.
+    pub fn entries(&self) -> impl Iterator<Item = &Notice> {
+        let questions = self.list.iter().filter(|notice| notice.kind == Kind::Question);
+        questions.chain(self.list.iter().filter(|notice| notice.kind != Kind::Question))
+    }
+
+    /// The whole list as it is shown, to send as it is (to a web page, say).
+    #[cfg_attr(not(test), allow(dead_code))] // For the web page, which takes the list as it is.
+    pub fn to_vec(&self) -> Vec<Notice> {
+        self.entries().cloned().collect()
+    }
+
+    /// How the status button looks now.
+    pub fn look(&self) -> Look {
+        let unseen = || self.list.iter().filter(|notice| !notice.seen);
+        let questions = self.list.iter().filter(|notice| notice.kind == Kind::Question).count();
+        let trouble = unseen().filter(|notice| notice.kind == Kind::Trouble).count();
+        match (questions, trouble) {
+            (0, 0) if unseen().next().is_some() => Look::New,
+            (0, 0) => Look::Quiet,
+            (_, 0) => Look::Question,
+            (questions, trouble) => Look::Trouble(questions + trouble),
+        }
+    }
+
+    /// Puts an entry at the head of the list. The same words as the newest entry, not yet seen,
+    /// add nothing; seen, they come back as new. Past [`KEPT`], the oldest go (never a question).
+    fn push(&mut self, kind: Kind, text: String, about: Option<Waiting>, actions: Vec<Action>) {
+        let text = text.trim().to_owned();
+        if text.is_empty() {
+            return;
+        }
+        let time = chrono::Utc::now().timestamp();
+        if let Some(newest) = self.list.iter_mut().find(|notice| notice.kind != Kind::Question)
+            && kind != Kind::Question
+            && newest.kind == kind
+            && newest.text == text
+        {
+            if newest.seen {
+                newest.seen = false;
+                newest.time = time;
+                crate::applog::event("notice", &text);
+            }
+            return;
+        }
+        crate::applog::event(if kind == Kind::Question { "question" } else { "notice" }, &text);
+        self.next += 1;
+        self.list.insert(0, Notice { id: self.next, kind, text, time, seen: false, actions, about });
+        let mut kept = 0;
+        self.list.retain(|notice| {
+            if notice.kind == Kind::Question {
+                return true;
+            }
+            kept += 1;
+            kept <= KEPT
+        });
+    }
+}
+
+/// When a notice was said, for the list: hours and minutes on the window's clock (12-hour or
+/// 24-hour as the computer is set).
+pub fn time_of_day(time: i64, form: &crate::clock::TimeForm) -> String {
+    use chrono::{TimeZone, Timelike};
+    let Some(local) = chrono::Local.timestamp_opt(time, 0).single() else { return String::new() };
+    form.hours_minutes(local.hour(), local.minute())
+}
+
+/// The status button's size, in points: it never changes size or place.
+pub const BUTTON: egui::Vec2 = egui::vec2(52.0, 30.0);
+
+/// How wide the list is, and how tall it grows before it scrolls.
+const LIST_WIDE: f32 = 380.0;
+const LIST_HIGH: f32 = 460.0;
+/// The list's own grey, a step above the columns.
+const LIST_FILL: Color32 = Color32::from_rgb(0x1f, 0x1f, 0x1f);
+/// The line between two entries.
+const ROW_LINE: Color32 = Color32::from_rgb(0x2a, 0x2a, 0x2a);
+/// The amber mixed 20% into a card's grey (the button with trouble), a little more under the
+/// pointer; and 9% into the list's grey (a question's row).
+const AMBER_WELL: Color32 = Color32::from_rgb(0x4f, 0x43, 0x1c);
+const AMBER_WELL_HOVER: Color32 = Color32::from_rgb(0x5a, 0x4c, 0x1d);
+const AMBER_ROW: Color32 = Color32::from_rgb(0x33, 0x2e, 0x1c);
+/// The dark words on amber, and the grey of an information mark.
+const ON_AMBER: Color32 = Color32::from_rgb(0x11, 0x11, 0x11);
+const INFO_MARK: Color32 = Color32::from_rgb(0x5a, 0x5a, 0x56);
+
+/// The status button's id.
+pub fn button_id() -> egui::Id {
+    egui::Id::unique("notices button")
+}
+
+/// The list's id: it is a pop-up kept open in egui's memory, so Escape closes it (and only it)
+/// as it closes any pop-up, before it can clear the screens.
+pub fn list_id() -> egui::Id {
+    button_id().with("list")
+}
+
+/// Whether the list is open.
+pub fn list_open(ctx: &egui::Context) -> bool {
+    egui::Popup::is_id_open(ctx, list_id())
+}
+
+/// The status button in the top bar's slot, `rect` ([`BUTTON`] in size), and the list it
+/// opens. Drawn with the painter only, it takes no room in any layout, and nothing on it moves
+/// or asks for the window to be drawn again. Closing the list (the button again, a click
+/// elsewhere, or Escape) marks everything seen.
+pub fn button(ui: &mut egui::Ui, state: &mut crate::home::HomeState, rect: Rect, form: &crate::clock::TimeForm) {
+    let response = ui.interact(rect, button_id(), Sense::click());
+    // Escape closes the list, and it is taken here, so nothing drawn after (the playlist
+    // chooser, the Reflow editor) closes on the same press.
+    if list_open(ui.ctx()) && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        egui::Popup::close_id(ui.ctx(), list_id());
+    }
+    let open = list_open(ui.ctx());
+    let look = state.notices.look();
+    let lit = open || response.hovered();
+    let (fill, ink) = match look {
+        Look::Trouble(_) | Look::Question => (if lit { AMBER_WELL_HOVER } else { AMBER_WELL }, CARE),
+        _ if lit => (CARD, TEXT),
+        _ => (Color32::TRANSPARENT, TEXT_FAINT),
+    };
+    let painter = ui.painter();
+    painter.rect_filled(rect, rect.height() / 2.0, fill);
+    // The icon and what goes with it (a dot, or a badge), side by side in the middle.
+    let badge = match look {
+        Look::Trouble(count) => Some(count.min(99).to_string()),
+        Look::Question => Some("?".to_owned()),
+        _ => None,
+    };
+    let badge = badge.map(|words| painter.layout_no_wrap(words, crate::studio::fixed_semibold(11.5), ON_AMBER));
+    let beside = match (&badge, look) {
+        (Some(galley), _) => (galley.size().x + 8.0).max(18.0),
+        (None, Look::New) => 7.0,
+        _ => 0.0,
+    };
+    let icon = 15.0;
+    let wide = icon + if beside > 0.0 { 5.0 + beside } else { 0.0 };
+    let left = rect.center().x - wide / 2.0;
+    let icon_rect = Rect::from_center_size(pos2(left + icon / 2.0, rect.center().y), egui::Vec2::splat(icon));
+    crate::icons::paint(painter, crate::icons::Icon::Notices, icon_rect, ink);
+    let beside_at = pos2(icon_rect.max.x + 5.0, rect.center().y);
+    if let Some(galley) = badge {
+        let pill = Rect::from_min_size(pos2(beside_at.x, beside_at.y - 9.0), vec2(beside, 18.0));
+        painter.rect_filled(pill, 9.0, CARE);
+        painter.galley(pill.center() - galley.size() / 2.0, galley, ON_AMBER);
+    } else if look == Look::New {
+        painter.circle_filled(pos2(beside_at.x + 3.5, beside_at.y), 3.5, TEXT_DIM);
+    }
+    let hint = match look {
+        Look::Question => "A question is waiting: click to answer it",
+        Look::Trouble(_) => "Something went wrong: click to see",
+        Look::New => "New notices",
+        Look::Quiet => "Notices",
+    };
+    let response = if open { response } else { response.on_hover_text(hint) };
+    let frame = egui::Frame::new()
+        .fill(LIST_FILL)
+        .corner_radius(14.0)
+        .stroke(Stroke::new(1.0, LINE))
+        .shadow(egui::Shadow { offset: [0, 24], blur: 60, spread: 0, color: Color32::from_black_alpha(150) });
+    egui::Popup::from_toggle_button_response(&response)
+        .id(list_id())
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .align(egui::RectAlign::BOTTOM)
+        .gap(8.0)
+        .width(LIST_WIDE)
+        .frame(frame)
+        .show(|ui| list(ui, state, form));
+    let open = list_open(ui.ctx());
+    if state.notices.was_open && !open {
+        state.notices.mark_seen();
+    }
+    state.notices.was_open = open;
+}
+
+/// The list: "Notices" and Clear All, then every entry, questions first, then newest first,
+/// each with its mark, its whole text, its time and its buttons.
+fn list(ui: &mut egui::Ui, state: &mut crate::home::HomeState, form: &crate::clock::TimeForm) {
+    ui.set_width(LIST_WIDE);
+    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+    let (head, _) = ui.allocate_exact_size(vec2(LIST_WIDE, 46.0), Sense::hover());
+    ui.painter().text(
+        pos2(head.min.x + 14.0, head.center().y),
+        Align2::LEFT_CENTER,
+        "Notices",
+        crate::studio::semibold(14.0),
+        TEXT,
+    );
+    let font = FontId::proportional(12.0);
+    let wide = crate::studio::flat_button_width(ui, &["Clear All"], &font, 10.0);
+    let clear = Rect::from_min_size(pos2(head.max.x - 14.0 - wide, head.center().y - 12.0), vec2(wide, 24.0));
+    let clearable = state.notices.clearable();
+    let flat = crate::studio::Flat::Plain;
+    if crate::studio::flat_button(ui, clear, list_id().with("clear"), "Clear All", font, flat, clearable)
+        .on_hover_text("Empty the list (a question stays until it is answered)")
+        .clicked()
+    {
+        state.notices.clear_all();
+    }
+    ui.painter().hline(head.x_range(), head.max.y - 0.5, Stroke::new(1.0, LINE));
+    let entries: Vec<Notice> = state.notices.entries().cloned().collect();
+    let mut answered = None;
+    egui::ScrollArea::vertical().max_height(LIST_HIGH - head.height()).auto_shrink([false, true]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        if entries.is_empty() {
+            let words = "Nothing to tell you. Trouble, questions, and what happens out of sight (added to another \
+                         playlist, a file read or written) come here.";
+            let galley =
+                ui.painter().layout(words.to_owned(), FontId::proportional(12.5), TEXT_FAINT, LIST_WIDE - 28.0);
+            let (room, _) = ui.allocate_exact_size(vec2(LIST_WIDE, galley.size().y + 28.0), Sense::hover());
+            ui.painter().galley(room.min + vec2(14.0, 14.0), galley, TEXT_FAINT);
+        }
+        for (place, notice) in entries.iter().enumerate() {
+            if let Some(action) = row(ui, notice, place > 0, form) {
+                answered = Some((notice.id, action));
+            }
+        }
+        ui.add_space(4.0);
+    });
+    if let Some((id, action)) = answered
+        && let Some(choice) = state.notices.answer(id, &action)
+    {
+        state.waiting_choice = Some(choice);
+    }
+}
+
+/// One entry of the list. Returns the answer clicked, if one was.
+fn row(ui: &mut egui::Ui, notice: &Notice, line_above: bool, form: &crate::clock::TimeForm) -> Option<String> {
+    const SIDE: f32 = 14.0;
+    const MARK: f32 = 16.0;
+    const BETWEEN: f32 = 10.0;
+    const BUTTON_HIGH: f32 = 24.0;
+    let time_font = crate::studio::fixed(11.0);
+    let time = time_of_day(notice.time, form);
+    let time_wide = ui.painter().layout_no_wrap("00:00".to_owned(), time_font.clone(), TEXT_FAINT).size().x;
+    let text_wide = LIST_WIDE - 2.0 * SIDE - MARK - 2.0 * BETWEEN - time_wide;
+    let ink = match (notice.kind, notice.seen) {
+        (_, true) => TEXT_FAINT,
+        (Kind::Info, false) => TEXT_DIM,
+        _ => TEXT,
+    };
+    let mut job = egui::text::LayoutJob::simple(notice.text.clone(), FontId::proportional(13.0), ink, text_wide);
+    if let Some(section) = job.sections.first_mut() {
+        section.format.line_height = Some(13.0 * 1.45);
+    }
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    let buttons = if notice.actions.is_empty() { 0.0 } else { 8.0 + BUTTON_HIGH };
+    let high = 10.0 + galley.size().y.max(MARK) + buttons + 10.0;
+    let (rect, _) = ui.allocate_exact_size(vec2(LIST_WIDE, high), Sense::hover());
+    let painter = ui.painter();
+    if notice.kind == Kind::Question {
+        painter.rect_filled(rect, 0.0, AMBER_ROW);
+    }
+    if line_above {
+        painter.hline(rect.x_range(), rect.min.y + 0.5, Stroke::new(1.0, ROW_LINE));
+    }
+    let top = rect.min.y + 10.0;
+    let mark_x = rect.min.x + SIDE + MARK / 2.0;
+    paint_mark(painter, pos2(mark_x, top + 9.5), notice.kind);
+    let text_at = pos2(rect.min.x + SIDE + MARK + BETWEEN, top);
+    let text_high = galley.size().y;
+    painter.galley(text_at, galley, ink);
+    painter.text(pos2(rect.max.x - SIDE, top + 2.0), Align2::RIGHT_TOP, time, time_font, TEXT_FAINT);
+    let mut clicked = None;
+    let mut x = text_at.x;
+    let y = top + text_high.max(MARK) + 8.0;
+    for (place, action) in notice.actions.iter().enumerate() {
+        let font = FontId::proportional(12.0);
+        let wide = crate::studio::flat_button_width(ui, &[action.label.as_str()], &font, 10.0);
+        let at = Rect::from_min_size(pos2(x, y), vec2(wide, BUTTON_HIGH));
+        // The first answer is the main one (Reload): the ink, with dark words.
+        let look = if place == 0 { crate::studio::Flat::Main } else { crate::studio::Flat::Plain };
+        let id = list_id().with((notice.id, place));
+        if crate::studio::flat_button(ui, at, id, &action.label, font, look, true).clicked() {
+            clicked = Some(action.id.clone());
+        }
+        x += wide + 8.0;
+    }
+    clicked
+}
+
+/// An entry's mark, centred on `at`: an amber dot for trouble, a grey one for information, and
+/// an amber disc with "?" for a question.
+fn paint_mark(painter: &egui::Painter, at: egui::Pos2, kind: Kind) {
+    match kind {
+        Kind::Question => {
+            painter.circle_filled(at, 8.0, CARE);
+            painter.text(at, Align2::CENTER_CENTER, "?", crate::studio::fixed_semibold(10.0), ON_AMBER);
+        }
+        Kind::Trouble => {
+            painter.circle_filled(at, 5.0, CARE);
+        }
+        Kind::Info => {
+            painter.circle_filled(at, 5.0, INFO_MARK);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_button_is_quiet_then_dotted_then_amber_then_asks() {
+        let mut notices = Notices::default();
+        assert_eq!(notices.look(), Look::Quiet, "nothing new: a quiet list icon");
+        notices.info("Reading Ukrainian.xml\u{2026}");
+        assert_eq!(notices.look(), Look::New, "new information: a small grey dot");
+        notices.trouble("Couldn't save the playlists.");
+        notices.trouble("The output has stopped.");
+        assert_eq!(notices.look(), Look::Trouble(2), "trouble: amber, counted");
+        notices.mark_seen();
+        assert_eq!(notices.look(), Look::Quiet, "all seen: quiet again");
+        notices.ask(Waiting::Song(1), "Harbour Lights was changed outside SoftPresenter.");
+        assert_eq!(notices.look(), Look::Question, "a question alone: ?");
+        notices.mark_seen();
+        assert_eq!(notices.look(), Look::Question, "a question is never seen: it waits for its answer");
+        notices.trouble("Couldn't read Hymns.xml.");
+        assert_eq!(notices.look(), Look::Trouble(2), "with trouble too, both are counted");
+    }
+
+    #[test]
+    fn the_list_is_newest_first_with_questions_at_its_head() {
+        let mut notices = Notices::default();
+        notices.info("first");
+        notices.ask(Waiting::Theme(0), "a question");
+        notices.trouble("second");
+        notices.info("third");
+        let texts: Vec<&str> = notices.entries().map(|notice| notice.text.as_str()).collect();
+        assert_eq!(texts, ["a question", "third", "second", "first"]);
+        let question = notices.entries().next().unwrap();
+        assert_eq!(question.actions.iter().map(|a| a.label.as_str()).collect::<Vec<_>>(), ["Reload", "Keep mine"]);
+        assert_eq!(notices.answer(question.id, RELOAD), Some((Waiting::Theme(0), true)));
+        assert_eq!(notices.answer(question.id, KEEP_MINE), Some((Waiting::Theme(0), false)));
+        assert_eq!(notices.answer(question.id, "other"), None);
+    }
+
+    #[test]
+    fn closing_marks_all_seen_and_clear_all_keeps_questions() {
+        let mut notices = Notices::default();
+        notices.info("Added Harbour Lights to Evening.");
+        notices.trouble("Couldn't save the timers.");
+        notices.ask(Waiting::Song(3), "Steady Ground was changed outside SoftPresenter.");
+        notices.mark_seen();
+        assert!(notices.entries().filter(|n| n.kind != Kind::Question).all(|n| n.seen));
+        assert!(notices.entries().filter(|n| n.kind == Kind::Question).all(|n| !n.seen));
+        assert!(notices.clearable());
+        notices.clear_all();
+        assert_eq!(notices.entries().count(), 1, "only the question stays");
+        assert!(notices.asks_about(Waiting::Song(3)));
+        assert!(!notices.clearable(), "Clear All has nothing more to take");
+        notices.settle(Waiting::Song(3));
+        assert!(notices.entries().next().is_none() && notices.look() == Look::Quiet);
+    }
+
+    #[test]
+    fn the_list_keeps_the_last_forty_and_every_question() {
+        let mut notices = Notices::default();
+        notices.ask(Waiting::Song(0), "an old question");
+        for n in 0..45 {
+            notices.info(format!("notice {n}"));
+        }
+        let kept: Vec<&Notice> = notices.entries().collect();
+        assert_eq!(kept.len(), KEPT + 1, "forty entries and the question");
+        assert_eq!(kept[0].text, "an old question", "the question outlives the cap");
+        assert_eq!(kept[1].text, "notice 44");
+        assert_eq!(kept[KEPT].text, "notice 5", "the oldest five went");
+    }
+
+    #[test]
+    fn a_question_is_asked_once_and_the_same_words_twice_are_one_entry() {
+        let mut notices = Notices::default();
+        notices.ask(Waiting::Song(2), "changed");
+        notices.ask(Waiting::Song(2), "changed");
+        notices.trouble("Couldn't save the screens.");
+        notices.trouble("Couldn't save the screens.");
+        assert_eq!(notices.entries().count(), 2);
+        assert!(notices.asks_about(Waiting::Song(2)) && !notices.asks_about(Waiting::Song(1)));
+        // Seen, the same trouble again is new again.
+        notices.mark_seen();
+        notices.trouble("Couldn't save the screens.");
+        assert_eq!(notices.entries().count(), 2);
+        assert_eq!(notices.look(), Look::Trouble(2));
+    }
+
+    #[test]
+    fn the_list_is_plain_data_to_send_as_it_is() {
+        let mut notices = Notices::default();
+        notices.ask(Waiting::Song(0), "Harbour Lights was changed outside SoftPresenter.");
+        notices.info("Installed Ukrainian Ogienko");
+        let sent = serde_json::to_value(notices.to_vec()).unwrap();
+        assert_eq!(sent[0]["kind"], "question");
+        assert_eq!(sent[0]["actions"][0]["label"], "Reload");
+        assert_eq!(sent[1]["kind"], "info");
+        assert_eq!(sent[1]["text"], "Installed Ukrainian Ogienko");
+        assert_eq!(sent[1]["seen"], false);
+        assert!(sent[1]["time"].as_i64().is_some_and(|time| time > 0));
+        assert!(sent[0].get("about").is_none());
+    }
+
+    #[test]
+    fn the_time_is_hours_and_minutes_on_the_window_clock() {
+        use chrono::TimeZone;
+        let time = chrono::Local.with_ymd_and_hms(2026, 11, 22, 15, 4, 0).unwrap().timestamp();
+        let mut form = crate::clock::TimeForm::default();
+        assert_eq!(time_of_day(time, &form), "15:04");
+        form.twelve = true;
+        form.pad_hour = false;
+        assert_eq!(time_of_day(time, &form), "3:04");
+    }
+}

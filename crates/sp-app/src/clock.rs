@@ -55,6 +55,12 @@ impl TimeForm {
             format!("{hour}{sep}{minute:02}{sep}{second:02}")
         }
     }
+
+    /// The hours and minutes alone: `15:04`, or `3:04` on a 12-hour clock.
+    pub fn hours_minutes(&self, hour: u32, minute: u32) -> String {
+        let figures = self.figures(hour, minute, 0);
+        figures.rsplit_once(self.separator.as_str()).map_or(figures.clone(), |(kept, _)| kept.to_owned())
+    }
 }
 
 /// One time as the computer wrote it, taken apart: the words before its figures, the figures

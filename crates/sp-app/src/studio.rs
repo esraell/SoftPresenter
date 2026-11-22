@@ -889,45 +889,6 @@ pub fn block_button(ui: &mut egui::Ui, size: egui::Vec2, text: &str, key: &str, 
     response
 }
 
-/// A bar under the toolbar, on every view, while a song or theme changed outside SoftPresenter
-/// waits on a choice: Reload takes the file's version, Keep mine writes SoftPresenter's over it.
-pub fn changed_outside_bar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
-    let Some(&first) = state.waiting.first() else { return };
-    let name = match first {
-        crate::outside::Waiting::Song(index) => show
-            .presentations()
-            .get(index)
-            .map_or_else(|| "A song".to_owned(), |song| format!("\u{201c}{}\u{201d}", song.title)),
-        crate::outside::Waiting::Theme(index) => state
-            .theme_names
-            .get(index)
-            .map_or_else(|| "A theme".to_owned(), |theme| format!("The theme \u{201c}{theme}\u{201d}")),
-    };
-    let more = state.waiting.len() - 1;
-    let frame = Frame::new().fill(Color32::from_rgb(74, 52, 26)).inner_margin(egui::Margin::symmetric(14, 7));
-    egui::Panel::top("changed outside").resizable(false).frame(frame).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            let mut words = format!("{name} was changed outside SoftPresenter.");
-            if more > 0 {
-                words.push_str(&format!(" ({more} more after it.)"));
-            }
-            ui.label(egui::RichText::new(words).size(13.0).color(Color32::from_rgb(255, 214, 160)));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Keep mine").on_hover_text("Save SoftPresenter's version over the file").clicked() {
-                    state.waiting_choice = Some((first, false));
-                }
-                if ui
-                    .button("Reload")
-                    .on_hover_text("Take the file's version (SoftPresenter's changes to it go)")
-                    .clicked()
-                {
-                    state.waiting_choice = Some((first, true));
-                }
-            });
-        });
-    });
-}
-
 /// The find box in the bar along the top: its id, so that Find can hand it the keyboard and a
 /// search that ends can take the keyboard away again.
 /// How long a notice said with `HomeState::say` stays, in seconds.
@@ -1140,7 +1101,7 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         let (hour, minute, second) =
             (chrono::Timelike::hour(&now), chrono::Timelike::minute(&now), chrono::Timelike::second(&now));
         let in_front = ui.input(|input| input.focused);
-        let form = state.clock.form(in_front);
+        let form = state.clock.form(in_front).clone();
         let font = fixed(14.0);
         let figures = spaced(ui, &form.figures(hour, minute, second), font.clone(), TEXT, 0.6);
         let figures_wide = spaced(ui, &form.figures(0, 0, 0).replace('1', "0"), font.clone(), TEXT, 0.6)
@@ -1159,8 +1120,12 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         let into_second = u64::from(chrono::Timelike::nanosecond(&now) % 1_000_000_000);
         ui.ctx().request_repaint_after(std::time::Duration::from_nanos(1_000_000_000 - into_second));
 
-        // The find box takes the room between the views and the clock, up to its full width.
-        let room = clock.min.x - 14.0 - (switch.max.x + 14.0);
+        // The find box takes the room between the views and the clock, up to its full width,
+        // less the notices' status button's, which comes after it (or after the views, when
+        // there is no room for the find box). The button is always there, the same size,
+        // whatever it shows, so nothing moves when a notice comes or goes.
+        let button = crate::notices::BUTTON;
+        let room = clock.min.x - 14.0 - (switch.max.x + 14.0) - (12.0 + button.x);
         let mut free_from = switch.max.x + 14.0;
         if room >= 140.0 {
             let find = Rect::from_min_size(pos2(switch.max.x + 14.0, middle - 17.0), vec2(room.min(300.0), 34.0));
@@ -1168,6 +1133,11 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             free_from = find.max.x + 12.0;
         } else {
             state.find_rect = None;
+        }
+        let place = Rect::from_min_size(pos2(free_from, middle - button.y / 2.0), button);
+        if place.max.x <= clock.min.x - 10.0 {
+            crate::notices::button(ui, state, place, &form);
+            free_from = place.max.x + 10.0;
         }
         // A running timer, just before the clock: it takes only room nobody else uses, so
         // nothing moves when one starts or stops, and none is kept for it while none runs.

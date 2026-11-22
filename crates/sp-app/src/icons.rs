@@ -72,11 +72,13 @@ pub enum Icon {
     Film,
     /// Pictures one behind another: a media playlist.
     Stack,
+    /// Three lines, the last shorter: the notices' status button.
+    Notices,
 }
 
 /// Every icon, so a test can draw them all.
 #[cfg(test)]
-pub const ALL: [Icon; 56] = [
+pub const ALL: [Icon; 57] = [
     Icon::Search,
     Icon::Theme,
     Icon::Play,
@@ -133,6 +135,7 @@ pub const ALL: [Icon; 56] = [
     Icon::Table,
     Icon::Film,
     Icon::Stack,
+    Icon::Notices,
 ];
 
 /// Draws inside a square using coordinates from 0 to 1.
@@ -455,6 +458,11 @@ pub fn paint(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             p.rect(0.1, 0.34, 0.74, 0.86, 0.06);
             p.line(&[(0.26, 0.24), (0.84, 0.24), (0.84, 0.7)]);
             p.line(&[(0.4, 0.14), (0.92, 0.14), (0.92, 0.58)]);
+        }
+        Icon::Notices => {
+            p.line(&[(0.2, 0.3), (0.8, 0.3)]);
+            p.line(&[(0.2, 0.5), (0.8, 0.5)]);
+            p.line(&[(0.2, 0.7), (0.6, 0.7)]);
         }
     }
 }

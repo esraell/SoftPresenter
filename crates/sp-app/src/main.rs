@@ -36,6 +36,7 @@ mod make_cli;
 mod media;
 mod menubar;
 mod messages;
+mod notices;
 mod output;
 mod outside;
 mod pack;
@@ -798,6 +799,11 @@ fn escape_closes_something(state: &home::HomeState, ctx: &egui::Context) -> bool
 /// Whether something is open over the window: a pop-up, the Settings window, the Bible page's
 /// Options or Bibles window, the sheet asking what a Bible file is, the setup.
 fn something_over_the_window(state: &home::HomeState, ctx: &egui::Context) -> bool {
+    window_over_the_window(state) || egui::Popup::is_any_open(ctx)
+}
+
+/// Whether a window or a sheet is open over the window (not a pop-up).
+fn window_over_the_window(state: &home::HomeState) -> bool {
     state.settings_open
         || state.key_sheet
         || state.bible.options.open
@@ -805,7 +811,13 @@ fn something_over_the_window(state: &home::HomeState, ctx: &egui::Context) -> bo
         || !state.bible.options.details.is_empty()
         || state.setup.is_some()
         || state.library_search.is_some()
-        || egui::Popup::is_any_open(ctx)
+}
+
+/// Whether a pop-up open now takes the keys that run the show (a menu moves with the arrows and
+/// chooses with Space and Enter). The notices' list takes none of them: the show runs on while
+/// it is open, and only Escape is the list's (it closes it).
+fn popup_takes_show_keys(ctx: &egui::Context) -> bool {
+    egui::Popup::is_any_open(ctx) && !notices::list_open(ctx)
 }
 
 /// The keys that run the show. They are read straight from the window, before the interface
@@ -861,7 +873,7 @@ fn show_key_held_back(state: &home::HomeState, ctx: &egui::Context, key: &Key) -
     if state.numbers.is_some() && (digit || matches!(key, Key::Named(NamedKey::Escape))) {
         return true;
     }
-    egui::Popup::is_any_open(ctx)
+    popup_takes_show_keys(ctx)
         && matches!(key, Key::Named(NamedKey::ArrowLeft | NamedKey::ArrowRight | NamedKey::Space | NamedKey::Enter))
 }
 
@@ -883,7 +895,8 @@ fn enter_key_is_free(state: &home::HomeState, ctx: &egui::Context) -> bool {
     !ctx.text_edit_focused()
         && ctx.memory(|memory| memory.focused().is_none())
         && state.edit_kind().is_none()
-        && !something_over_the_window(state, ctx)
+        && !window_over_the_window(state)
+        && !popup_takes_show_keys(ctx)
         && state.new_song_sheet.is_none()
         && !state.alert_open()
 }
@@ -4325,19 +4338,38 @@ impl App {
         }
     }
 
-    /// Puts a song or theme in the bar that offers Reload and Keep mine.
+    /// Asks about a song or theme changed outside SoftPresenter: Reload or Keep mine. The
+    /// question waits at the head of the notices (and, for a song, under its title bar) until
+    /// it is answered; it never opens the list by itself.
     fn wait_on(&mut self, what: outside::Waiting) {
+        let name = match what {
+            outside::Waiting::Song(index) => self
+                .show
+                .presentations()
+                .get(index)
+                .map_or_else(|| "A song".to_owned(), |song| format!("\u{201c}{}\u{201d}", song.title)),
+            outside::Waiting::Theme(index) => self
+                .themes
+                .get(index)
+                .map_or_else(|| "A theme".to_owned(), |theme| format!("The theme \u{201c}{}\u{201d}", theme.name)),
+        };
         if let Some(running) = self.running.as_mut()
-            && !running.home_state.waiting.contains(&what)
+            && !running.home_state.notices.asks_about(what)
         {
-            running.home_state.waiting.push(what);
+            running.home_state.notices.ask(
+                what,
+                format!(
+                    "{name} was changed outside SoftPresenter. Read it again from its file, or keep SoftPresenter's \
+                     version and write it over the file?"
+                ),
+            );
             running.home_window.request_redraw();
         }
     }
 
     fn stop_waiting(&mut self, what: outside::Waiting) {
         if let Some(running) = self.running.as_mut() {
-            running.home_state.waiting.retain(|have| *have != what);
+            running.home_state.notices.settle(what);
             running.home_window.request_redraw();
         }
     }
@@ -4421,7 +4453,7 @@ impl App {
             if let Some(have) = state.song_keys.get_mut(index) {
                 *have = key;
             }
-            state.waiting.retain(|have| *have != outside::Waiting::Song(index));
+            state.notices.settle(outside::Waiting::Song(index));
             // The editor on the song starts again from the file's version.
             let open = state.editing.as_ref().map(|draft| draft.at).filter(|at| at.presentation == index);
             if let Some(open) = open {
@@ -4503,14 +4535,16 @@ impl App {
             (outside::Waiting::Theme(index), true) => self.reload_theme(index),
             (outside::Waiting::Theme(index), false) => self.keep_theme(index),
         };
+        // The answer is noted in the list (a problem with it too, and the question stays).
         let said = match result {
-            Ok(name) if reload => format!("Read {name} again from its file."),
-            Ok(name) => format!("Saved SoftPresenter's version of {name}."),
-            Err(problem) => problem,
+            Ok(name) if reload => Ok(format!("Read {name} again from its file.")),
+            Ok(name) => Ok(format!("Saved SoftPresenter's version of {name}.")),
+            Err(problem) => Err(problem),
         };
-        applog::event("outside", &said);
+        applog::event("outside", said.as_ref().unwrap_or_else(|problem| problem));
         if let Some(running) = self.running.as_mut() {
-            running.home_state.notice = Some(said);
+            running.home_state.notices.outcome(said);
+            running.home_window.request_redraw();
         }
     }
 
@@ -4579,7 +4613,7 @@ impl App {
             } else if self
                 .running
                 .as_ref()
-                .is_some_and(|r| r.home_state.waiting.contains(&outside::Waiting::Song(index)))
+                .is_some_and(|r| r.home_state.notices.asks_about(outside::Waiting::Song(index)))
             {
                 done.waiting.push(title);
             }
@@ -7740,7 +7774,7 @@ impl App {
                     if let Some(running) = self.running.as_mut() {
                         let state = &mut running.home_state;
                         state.removed_songs.push(index);
-                        state.waiting.retain(|have| *have != outside::Waiting::Song(index));
+                        state.notices.settle(outside::Waiting::Song(index));
                         // Nor is it in any library any more.
                         if let Some(key) = state.song_keys.get(index).cloned() {
                             for library in &mut state.libraries {
@@ -9491,6 +9525,45 @@ mod tests {
         assert!(!show_key_held_back(&state, &ctx, &Key::Named(NamedKey::Escape)), "and Escape clears");
         state.bible_open = false;
         assert!(!show_key_held_back(&state, &ctx, &s), "the Show view keeps its group letters");
+    }
+
+    #[test]
+    fn with_the_notices_open_escape_closes_them_and_the_show_keys_still_run() {
+        let ctx = egui::Context::default();
+        let show = Show::new(vec![Arc::new(sp_model::parse_song_text("One", "Words\n"))]);
+        let mut state = home::HomeState::default();
+        state.notices.trouble("Couldn't save the screens.");
+        let mut frame = |events: Vec<egui::Event>, time: f64| {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))),
+                time: Some(time),
+                events,
+                ..egui::RawInput::default()
+            };
+            let theme = sp_model::Theme::builtin();
+            let output = ctx.run_ui(raw, |ui| {
+                home::home_ui(ui, &show, &mut state, &theme, &mut |_| None, home::Preview::default(), None);
+            });
+            output.drop_without_applying_deltas();
+        };
+        frame(Vec::new(), 0.1);
+        let at = ctx.read_response(notices::button_id()).expect("the status button").rect.center();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(vec![egui::Event::PointerMoved(at)], 0.2);
+        frame(vec![press(true)], 0.3);
+        frame(vec![press(false)], 0.4);
+        assert!(notices::list_open(&ctx));
+        let state = home::HomeState::default();
+        assert!(escape_closes_something(&state, &ctx), "Escape closes the list instead of clearing the screens");
+        for key in [NamedKey::Space, NamedKey::ArrowRight, NamedKey::ArrowLeft] {
+            assert!(!show_key_held_back(&state, &ctx, &Key::Named(key)), "{key:?} runs the show");
+        }
+        assert!(!popup_takes_show_keys(&ctx), "and so does Enter");
     }
 
     fn args(list: &[&str]) -> Result<Option<Options>, String> {

@@ -215,9 +215,12 @@ pub struct HomeState {
     /// A short message for the operator, shown in the media bin (a file that could not be
     /// added, a song that could not be saved).
     pub notice: Option<String>,
-    /// Songs and themes changed outside SoftPresenter that wait on Reload or Keep mine, and the
-    /// choice made in the bar that offers them (true for Reload).
-    pub waiting: Vec<crate::outside::Waiting>,
+    /// Everything the window tells the operator: the list behind the status button in the top
+    /// bar, with the questions waiting for an answer (a song or theme changed outside
+    /// SoftPresenter), and the cue of the last refusal (see `notices`).
+    pub notices: crate::notices::Notices,
+    /// Reload (true) or Keep mine, chosen for something changed outside SoftPresenter, in the
+    /// list or in the strip under the song's title bar.
     pub waiting_choice: Option<(crate::outside::Waiting, bool)>,
     /// Export…, chosen on a song's or a playlist's right-click menu.
     pub export_request: Option<ExportRequest>,
@@ -1684,7 +1687,7 @@ impl Default for HomeState {
             drop_hover: false,
             file_drag: crate::file_drop::FileDrag::default(),
             notice: None,
-            waiting: Vec::new(),
+            notices: crate::notices::Notices::default(),
             waiting_choice: None,
             export_request: None,
             editing: None,
@@ -2203,7 +2206,6 @@ pub fn home_ui(
     // A press that ends on a slider or a menu leaves the keyboard to the show again.
     release_focus(ui.ctx());
     crate::studio::toolbar(ui, show, state, &mut commands);
-    crate::studio::changed_outside_bar(ui, show, state);
     crate::setup::setup_ui(ui.ctx(), show, state, &mut commands);
     if ui.input(|input| command_key(input, egui::Key::Comma, false)) {
         state.preferences_open = true;
@@ -13503,6 +13505,112 @@ mod tests {
             assert!(state.reflow_done.is_none(), "typing {typing}: without rebuilding the slides");
             assert!(commands.is_empty(), "typing {typing}: and clears nothing: {commands:?}");
         }
+    }
+
+    /// Where the notices' status button was drawn last.
+    fn notices_button(ctx: &egui::Context) -> Rect {
+        ctx.read_response(crate::notices::button_id()).expect("the status button is drawn").rect
+    }
+
+    /// The words drawn inside a place, in the order drawn.
+    fn texts_in(texts: &[(String, Rect)], room: Rect) -> Vec<String> {
+        texts.iter().filter(|(_, at)| room.contains_rect(*at)).map(|(words, _)| words.clone()).collect()
+    }
+
+    #[test]
+    fn the_status_button_sits_after_the_find_box_and_shows_what_waits() {
+        use crate::notices::Look;
+        let show = three_songs();
+        let (ctx, mut state) = (egui::Context::default(), HomeState::default());
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), 0.1);
+        let button = notices_button(&ctx);
+        assert_eq!(button.size(), crate::notices::BUTTON, "52 by 30, whatever it shows");
+        let find = state.find_rect.expect("the find box is there");
+        assert!(button.min.x >= find.max.x && button.min.x - find.max.x <= 14.0, "{button:?} after {find:?}");
+        assert_eq!(state.notices.look(), Look::Quiet);
+        assert!(texts_in(&texts, button).is_empty(), "nothing new: only the icon");
+        state.notices.info("Added Two to Evening.");
+        frame_texts(&ctx, &show, &mut state, Vec::new(), 0.2);
+        assert_eq!(state.notices.look(), Look::New);
+        assert_eq!(notices_button(&ctx), button, "it never moves or changes size");
+        state.notices.trouble("Couldn't save the playlists.");
+        state.notices.trouble("Couldn't save the timers.");
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), 0.3);
+        assert_eq!(texts_in(&texts, button), ["2"], "trouble: the count in its badge");
+        assert_eq!(notices_button(&ctx), button);
+        state.notices.mark_seen();
+        state.notices.ask(crate::outside::Waiting::Song(1), "Two was changed outside SoftPresenter.");
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), 0.4);
+        assert_eq!(texts_in(&texts, button), ["?"], "a question: ? in its badge");
+        assert_eq!(notices_button(&ctx), button);
+    }
+
+    #[test]
+    fn the_list_opens_on_a_click_and_closing_it_marks_everything_seen() {
+        use crate::notices::Look;
+        let show = three_songs();
+        let (ctx, mut state, mut time) = (egui::Context::default(), HomeState::default(), 0.0);
+        state.notices.info("Reading Hymns.xml\u{2026}");
+        state.notices.trouble("SoftPresenter couldn't read Hymns.xml: it isn't a song file this app knows.");
+        state.notices.ask(crate::outside::Waiting::Song(1), "Two was changed outside SoftPresenter.");
+        state.notices.info("Added One to Evening.");
+        frame_events(&ctx, &show, &mut state, Vec::new(), time);
+        assert!(!crate::notices::list_open(&ctx), "a question never opens the list by itself");
+        for _ in 0..3 {
+            time += 0.5;
+            frame_events(&ctx, &show, &mut state, Vec::new(), time);
+        }
+        assert!(!crate::notices::list_open(&ctx), "nor later");
+        click_at(&ctx, &show, &mut state, notices_button(&ctx).center(), &mut time);
+        assert!(crate::notices::list_open(&ctx), "a click on the button opens the list");
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), time + 0.1);
+        let head = texts.iter().position(|(drawn, _)| drawn == "Notices").expect("the list's heading");
+        let place = |words: &str| texts.iter().skip(head).position(|(drawn, _)| drawn.starts_with(words));
+        let order =
+            ["Notices", "Clear All", "Two was changed", "Reload", "Added One", "SoftPresenter couldn't", "Reading"];
+        let places: Vec<Option<usize>> = order.iter().map(|words| place(words)).collect();
+        assert!(places.iter().all(Option::is_some), "{places:?} in {texts:?}");
+        assert!(places.windows(2).all(|pair| pair[0] < pair[1]), "questions first, then newest first: {places:?}");
+        let (_, whole) = texts.iter().find(|(drawn, _)| drawn.starts_with("SoftPresenter couldn't")).unwrap();
+        assert!(whole.height() > 20.0, "the whole text, wrapped, never cut short: {whole:?}");
+        assert!(!state.notices.entries().any(|notice| notice.seen), "open, nothing is seen yet");
+        // A click elsewhere closes it, and everything in it is seen, save the question.
+        time += 0.2;
+        click_at(&ctx, &show, &mut state, pos2(640.0, 500.0), &mut time);
+        assert!(!crate::notices::list_open(&ctx));
+        assert_eq!(state.notices.look(), Look::Question, "the question still waits");
+        assert!(state.notices.entries().filter(|n| n.about.is_none()).all(|notice| notice.seen));
+        // Clear All empties the list but keeps the question.
+        click_at(&ctx, &show, &mut state, notices_button(&ctx).center(), &mut time);
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), time + 0.1);
+        let head = texts.iter().position(|(drawn, _)| drawn == "Notices").expect("the list's heading");
+        let (_, clear) = texts.iter().skip(head).find(|(drawn, _)| drawn == "Clear All").unwrap();
+        click_at(&ctx, &show, &mut state, clear.center(), &mut time);
+        assert_eq!(state.notices.entries().count(), 1, "only the question is left");
+        assert!(crate::notices::list_open(&ctx), "Clear All is in the list: it stays open");
+        // Its Reload answers it.
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), time + 0.1);
+        let (_, reload) = texts.iter().find(|(drawn, _)| drawn == "Reload").unwrap();
+        click_at(&ctx, &show, &mut state, reload.center(), &mut time);
+        assert_eq!(state.waiting_choice, Some((crate::outside::Waiting::Song(1), true)));
+    }
+
+    #[test]
+    fn escape_closes_the_list_and_nothing_else() {
+        let show = three_songs();
+        let (ctx, mut state, mut time) = (egui::Context::default(), HomeState::default(), 0.0);
+        state.notices.trouble("Couldn't save the screens.");
+        frame_events(&ctx, &show, &mut state, Vec::new(), time);
+        click_at(&ctx, &show, &mut state, notices_button(&ctx).center(), &mut time);
+        assert!(crate::notices::list_open(&ctx));
+        assert!(state.escape_taken_above(&ctx), "Escape is the list's while it is open");
+        // The playlist chooser open under it: Escape would close that, were it not the list's.
+        state.chooser_open = true;
+        let commands = frame_commands(&ctx, &show, &mut state, pressed(Key::Escape, Modifiers::NONE), time + 0.1);
+        assert!(!crate::notices::list_open(&ctx), "Escape closes the list");
+        assert!(commands.is_empty(), "and clears nothing: {commands:?}");
+        assert!(state.chooser_open, "nor closes what is under it");
+        assert_eq!(state.notices.look(), crate::notices::Look::Quiet, "closed: seen");
     }
 
     #[test]

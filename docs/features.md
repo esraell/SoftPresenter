@@ -12,6 +12,19 @@ No list, page or menu in the app shows a scroll bar: everything scrolls by the t
 mouse wheel (with Shift for sideways) or the keys, and the whole width is the content's.
 
 ## Running a service
+- **Notices** come in one place: a status button in the top bar, between the find box and the
+  clock, which never changes size or moves anything. With nothing new it is a quiet list icon;
+  new information adds a small grey dot; trouble turns it amber with a count; a question shows
+  "?". A click opens the list under it: "Notices" with Clear All, then each entry with its mark
+  (an amber dot for trouble, a grey one for information, an amber "?" for a question), its
+  whole text, its time and its buttons, questions first, then newest first. Closing it (the
+  button, a click elsewhere, or Escape, which then clears nothing and closes nothing else)
+  marks everything seen. Clear All keeps a question that waits for its answer; the list keeps
+  the last 40. Only trouble (a file that couldn't be read or saved, an output or a player that
+  stopped), questions, and what happened out of sight (added to another playlist, a file read,
+  a Bible installed, written files) earn an entry, and every one goes in the log too; what the
+  operator just did and can see is never said. The show keys (← → Space Enter) still run the
+  show while the list is open.
 - Songs shown as a grid of slides, a words-only view or a table (number, group, words, notes),
   with a size slider. Click a slide, or use the [keys](../README.md#keys), to put it on the
   audience screen. A slide in the grid is its picture with a strip under it: its number, its
@@ -33,10 +46,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   renamed from its own name. Return or a click elsewhere keeps it; Escape puts the old name back.
 - **Songs changed outside the app** (in a text editor, by a script or an agent) come in when the
   song is next opened: chosen in the list or a playlist, opened in the editor, or named in an
-  `sp` command. The app never saves over a song or theme file changed since it read it: a bar
-  under the toolbar offers **Reload** (the file's version) or **Keep mine** (SoftPresenter's
-  written over it). A song on screen, being edited, or holding changes not saved is never swapped
-  unasked; the bar offers it instead. File › Reload Songs from Their Files (`sp song reload`) reads
+  `sp` command. The app never saves over a song or theme file changed since it read it: it asks,
+  with **Reload** (the file's version) or **Keep mine** (SoftPresenter's written over it), as a
+  question in the notices (the status button turns amber with "?"; the list never opens by
+  itself). A song on screen, being edited, or holding changes not saved is never swapped
+  unasked; the question offers it instead, and the answer is noted in the list. File › Reload Songs from Their Files (`sp song reload`) reads
   every changed song and theme again and adds song files put in the Songs folder (a copy of one
   already there gets an id of its own). `sp song reload SONG [--now]` and `sp song keep SONG` do
   the same for one song, and `sp songs` marks a song whose file changed. Quitting with a change

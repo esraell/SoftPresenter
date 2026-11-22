@@ -1425,7 +1425,7 @@ impl crate::App {
             return Ok(Reply::done(format!("Read {title} again from its file.")));
         }
         let waiting =
-            self.running.as_ref().is_some_and(|r| r.home_state.waiting.contains(&crate::outside::Waiting::Song(at)));
+            self.running.as_ref().is_some_and(|r| r.home_state.notices.asks_about(crate::outside::Waiting::Song(at)));
         if waiting {
             return Err(format!(
                 "{title} is on screen, being edited, holds changes not saved, or its file is gone, so it wasn't read again; the window offers Reload. \
@@ -1857,7 +1857,7 @@ impl crate::App {
                 || self
                     .running
                     .as_ref()
-                    .is_some_and(|r| r.home_state.waiting.contains(&crate::outside::Waiting::Song(at)))
+                    .is_some_and(|r| r.home_state.notices.asks_about(crate::outside::Waiting::Song(at)))
         };
         let names: Vec<String> = self
             .listed_songs()
@@ -2940,7 +2940,7 @@ impl crate::App {
                 let at = self.find_song_as_is(&rest(args, 2))?;
                 let waiting = self.held_songs.contains(&at)
                     || self.running.as_ref().is_some_and(|r| {
-                        r.home_state.waiting.contains(&crate::outside::Waiting::Song(at))
+                        r.home_state.notices.asks_about(crate::outside::Waiting::Song(at))
                     });
                 let title = self.show.presentations().get(at).map(|s| s.title.clone()).unwrap_or_default();
                 if !waiting {
