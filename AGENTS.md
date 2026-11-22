@@ -62,7 +62,9 @@ person:
 | `SOFTPRESENTER_GO_LIVE=1` | Start with the first slide on screen and the first media item behind it |
 | `SOFTPRESENTER_OPEN_ITEM=<n>` | Open the nth item of the playlist in front, as a click does |
 | `SOFTPRESENTER_PICK=songs:0,2` | Pick out songs or media items by place, as Command-clicks do |
-| `SOFTPRESENTER_DROP=<file>` | Drop a file on the window, as dragging from the Finder does |
+| `SOFTPRESENTER_DROP=<files>` | Drop files on the window (several separated as in PATH), as dragging from the Finder does |
+| `SOFTPRESENTER_DROP_AT=X,Y` | Where in the window (points) the dropped files land |
+| `SOFTPRESENTER_HOVER=<files>` | Files held over the window, so the place they would land lights up |
 | `SOFTPRESENTER_MENU=<ids>` | Choose menu bar items by id, one every few frames |
 | `SOFTPRESENTER_WINDOW_SIZE=1100x700` | Open the window at another size |
 | `SOFTPRESENTER_STRESS=1` | Redraw continuously, to check memory stays flat |
@@ -106,8 +108,10 @@ message.
   interface, file formats, commit messages, the README, issues and pull requests. Nothing comes
   from decompiling another product or from file formats extracted from one. One exception,
   agreed by the owner: the song importer reads ProPresenter 7 `.pro` documents using
-  greyshirtguy's MIT-licensed definitions, may name ProPresenter as a plain fact where it says
-  what it reads, and never writes that format
+  greyshirtguy's MIT-licensed definitions, and (asked for by the owner on 2026-11-21)
+  `.proBundle` files, a ZIP of one `.pro` and the pictures and videos it shows, whose layout was
+  learnt from the MIT-licensed propresenter7-php-lib's notes; it may name ProPresenter as a
+  plain fact where it says what it reads, and never writes those formats
   ([docs/licences/song-documents.md](docs/licences/song-documents.md)). A second, the same way:
   the song importer reads SoftProjector's song databases and songbooks, whose layout was
   learnt from SoftProjector's GPL-3.0 source (table and column names, how a song's text is
