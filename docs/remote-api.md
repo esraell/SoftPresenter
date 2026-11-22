@@ -419,7 +419,10 @@ objects, its theme, the version, the media behind it): when any of it changes, t
 
 - An address whose look is current: `Cache-Control: private, max-age=31536000, immutable`, an
   `ETag`, and `304` to `If-None-Match`.
-- An address with an older look still gets the picture as it is now, with `no-cache`.
+- An address whose look isn't the current one (an old look, or one made up) draws nothing: the
+  app compares first, and answers `307` to the address with the current look (`no-store`). So
+  only the look a slide really has can make the app draw, and a stored picture is never served
+  under another look.
 - `404` for a slide that isn't there (a Bible passage only listed, not opened, has no pictures
   yet; see step 2), and for a media bin item whose picture hasn't been read yet (the `bin` part
   gives it a new `poster` address once it has); `503` when the app is busy (try again).

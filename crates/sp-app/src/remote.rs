@@ -42,7 +42,9 @@ pub enum ToApp {
     Thumb {
         slide: Uuid,
         version: Option<Uuid>,
-        reply: oneshot::Sender<Option<server::Drawn>>,
+        /// The look the address asked for: drawn only when it is the current one.
+        look: String,
+        reply: oneshot::Sender<server::Thumbed>,
     },
     Refresh {
         reply: oneshot::Sender<()>,
@@ -69,9 +71,9 @@ impl server::Backend for Bridge {
         answer
     }
 
-    fn thumb(&self, slide: Uuid, version: Option<Uuid>) -> oneshot::Receiver<Option<server::Drawn>> {
+    fn thumb(&self, slide: Uuid, version: Option<Uuid>, look: String) -> oneshot::Receiver<server::Thumbed> {
         let (reply, answer) = oneshot::channel();
-        (self.send)(ToApp::Thumb { slide, version, reply });
+        (self.send)(ToApp::Thumb { slide, version, look, reply });
         answer
     }
 
@@ -161,7 +163,7 @@ pub struct Remote {
     password_said: Arc<Mutex<Option<Result<String, String>>>>,
     hashing: bool,
     /// Slides waiting to be drawn for pages, a few at a time.
-    pub(crate) thumbs_waiting: VecDeque<(Uuid, Option<Uuid>, oneshot::Sender<Option<server::Drawn>>)>,
+    pub(crate) thumbs_waiting: VecDeque<(Uuid, Option<Uuid>, String, oneshot::Sender<server::Thumbed>)>,
     /// When the state was last published, and its seldom-changing parts.
     pub(crate) published: Option<Instant>,
     pub(crate) published_slow: Option<Instant>,
@@ -740,11 +742,11 @@ impl crate::App {
                     }
                 }
             }
-            ToApp::Thumb { slide, version, reply } => {
+            ToApp::Thumb { slide, version, look, reply } => {
                 if self.remote.thumbs_waiting.len() >= MOST_WAITING_THUMBS {
-                    let _ = reply.send(None);
+                    let _ = reply.send(server::Thumbed::Missing);
                 } else {
-                    self.remote.thumbs_waiting.push_back((slide, version, reply));
+                    self.remote.thumbs_waiting.push_back((slide, version, look, reply));
                 }
             }
             ToApp::Refresh { reply } => {

@@ -119,11 +119,21 @@ pub struct Rgba {
     pub pixels: Vec<u8>,
 }
 
-/// A slide drawn for a page: its look (what its picture's address carries) and how to read it
-/// back, which blocks and so is done on a thread of the server's own.
+/// A slide drawn for a page: how to read it back, which blocks and so is done on a thread of
+/// the server's own.
 pub struct Drawn {
-    pub look: String,
     pub read: Box<dyn FnOnce() -> Option<Rgba> + Send>,
+}
+
+/// What the app says to a request for a slide's picture.
+pub enum Thumbed {
+    /// Drawn: the look asked for is the current one.
+    Drawn(Drawn),
+    /// The slide looks different now: its current look, for the address to go to instead. Nothing
+    /// was drawn.
+    Moved(String),
+    /// There is no such slide.
+    Missing,
 }
 
 /// Reads the newest live preview back (blocks; done on a thread of the server's own).
@@ -144,8 +154,9 @@ pub trait Backend: Send + Sync + 'static {
     /// Carries a command out as `sp`'s are, and replies.
     fn command(&self, caller: Caller, args: Vec<String>) -> oneshot::Receiver<Reply>;
     /// Draws a slide (by id, in a theme version or the usual look) as the window's thumbnails
-    /// are drawn; `None` when there is no such slide.
-    fn thumb(&self, slide: Uuid, version: Option<Uuid>) -> oneshot::Receiver<Option<Drawn>>;
+    /// are drawn, but only when `look` is the look it has now: the app compares first, so an
+    /// address with a made-up look draws nothing.
+    fn thumb(&self, slide: Uuid, version: Option<Uuid>, look: String) -> oneshot::Receiver<Thumbed>;
     /// Publishes the state now (a page has just connected); answers once it has.
     fn refresh(&self) -> oneshot::Receiver<()>;
     /// A page connected or went: Settings and the status line show how many.
@@ -997,20 +1008,29 @@ async fn thumb(State(shared): State<Arc<Shared>>, request: Request) -> Response<
     let key = (slide, version);
     let kept = shared.thumbs.lock().ok().and_then(|mut thumbs| thumbs.get(&key, &look));
     if let Some(jpeg) = kept {
-        return picture(&parts, host, &look, &look, jpeg);
+        return picture(&parts, host, &look, jpeg);
     }
     let Ok(Ok(permit)) = tokio::time::timeout(Duration::from_secs(10), shared.drawing.acquire()).await else {
         return plain(StatusCode::SERVICE_UNAVAILABLE, host, "Busy; try again in a moment.");
     };
-    let drawn = match tokio::time::timeout(Duration::from_secs(10), shared.backend.thumb(slide, version)).await {
-        Ok(Ok(Some(drawn))) => drawn,
-        Ok(Ok(None)) => return plain(StatusCode::NOT_FOUND, host, "No such slide."),
-        _ => return plain(StatusCode::SERVICE_UNAVAILABLE, host, "SoftPresenter did not answer in time."),
-    };
-    let now_look = drawn.look.clone();
-    if let Some(jpeg) = shared.thumbs.lock().ok().and_then(|mut thumbs| thumbs.get(&key, &now_look)) {
-        return picture(&parts, host, &look, &now_look, jpeg);
-    }
+    let drawn =
+        match tokio::time::timeout(Duration::from_secs(10), shared.backend.thumb(slide, version, look.clone())).await {
+            Ok(Ok(Thumbed::Drawn(drawn))) => drawn,
+            Ok(Ok(Thumbed::Moved(current))) => {
+                // The slide looks different now: on to the address of the picture it has, which
+                // costs nothing to say (the app drew nothing for this one).
+                let version = version.map_or_else(|| "usual".to_owned(), |v| v.to_string());
+                let to = format!("/thumb/{slide}/{version}/{current}.jpg");
+                let response = Response::builder()
+                    .status(StatusCode::TEMPORARY_REDIRECT)
+                    .header(header::LOCATION, to)
+                    .header(header::CACHE_CONTROL, "no-store")
+                    .body(Body::empty());
+                return finish(response.unwrap_or_default(), host);
+            }
+            Ok(Ok(Thumbed::Missing)) => return plain(StatusCode::NOT_FOUND, host, "No such slide."),
+            _ => return plain(StatusCode::SERVICE_UNAVAILABLE, host, "SoftPresenter did not answer in time."),
+        };
     let read = drawn.read;
     let jpeg = tokio::task::spawn_blocking(move || read().and_then(|rgba| jpeg(&rgba, 82))).await.ok().flatten();
     drop(permit);
@@ -1018,9 +1038,9 @@ async fn thumb(State(shared): State<Arc<Shared>>, request: Request) -> Response<
         return plain(StatusCode::SERVICE_UNAVAILABLE, host, "The slide couldn't be drawn.");
     };
     if let Ok(mut thumbs) = shared.thumbs.lock() {
-        thumbs.put(key, now_look.clone(), jpeg.clone());
+        thumbs.put(key, look.clone(), jpeg.clone());
     }
-    picture(&parts, host, &look, &now_look, jpeg)
+    picture(&parts, host, &look, jpeg)
 }
 
 /// A slide picture's address: its slide, its version (`usual` for none) and its look.
@@ -1038,13 +1058,13 @@ fn thumb_path(path: &str) -> Option<(Uuid, Option<Uuid>, String)> {
     Some((slide, version, look.to_ascii_lowercase()))
 }
 
-/// A slide picture: kept by the browser for good when its look is the one asked for, looked at
-/// again each time otherwise.
-fn picture(parts: &Parts, host: &str, asked: &str, look: &str, jpeg: Bytes) -> Response<Body> {
+/// A slide picture, kept by the browser for good: its address carries its look.
+fn picture(parts: &Parts, host: &str, look: &str, jpeg: Bytes) -> Response<Body> {
     let tag = format!("\"{look}\"");
     let fresh = parts.headers.get(header::IF_NONE_MATCH).and_then(|value| value.to_str().ok()) == Some(tag.as_str());
-    let cache = if asked == look { "private, max-age=31536000, immutable" } else { "private, no-cache" };
-    let builder = Response::builder().header(header::ETAG, tag).header(header::CACHE_CONTROL, cache);
+    let builder = Response::builder()
+        .header(header::ETAG, tag)
+        .header(header::CACHE_CONTROL, "private, max-age=31536000, immutable");
     let response = if fresh {
         builder.status(StatusCode::NOT_MODIFIED).body(Body::empty())
     } else {

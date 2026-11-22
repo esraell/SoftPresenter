@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use sp_model::{Slide, Theme, Uuid};
 
-use super::server::{Drawn, Rgba};
+use super::server::{Drawn, Rgba, Thumbed};
 
 /// The state is published at most this often while pages are connected.
 pub const PUBLISH_EVERY: Duration = Duration::from_millis(50);
@@ -98,26 +98,42 @@ impl crate::App {
 
     /// Draws a slide (or a media bin item's picture), by id, as the window's thumbnails are drawn,
     /// with the window's own painter, into a texture of its own; how to read it back goes to the
-    /// server, which does so on its own thread.
-    pub(crate) fn remote_draw(&mut self, id: Uuid, version: Option<Uuid>) -> Option<Drawn> {
+    /// server, which does so on its own thread. Only when `asked` is the look it has now: any
+    /// other look (an old one, or one made up) is answered with the current look and nothing is
+    /// drawn, so an address can't make the window's thread work.
+    pub(crate) fn remote_draw(&mut self, id: Uuid, version: Option<Uuid>, asked: &str) -> Thumbed {
         let found = self.show.presentations().iter().enumerate().find_map(|(at, song)| {
             song.slides().find(|(_, slide)| slide.id == id).map(|(_, slide)| (at, slide.clone()))
         });
-        let (look, theme, shown, media) = match &found {
+        let look = match &found {
+            Some((at, slide)) => self.slide_look(*at, slide, version),
+            None if self.show.media().iter().any(|item| item.id == id) => self.media_look(id),
+            None => return Thumbed::Missing,
+        };
+        if look != asked {
+            return Thumbed::Moved(look);
+        }
+        match self.draw_for_page(id, version, found) {
+            Some(drawn) => Thumbed::Drawn(drawn),
+            None => Thumbed::Missing,
+        }
+    }
+
+    /// The drawing of [`App::remote_draw`], for a look already known to be the current one.
+    fn draw_for_page(&mut self, id: Uuid, version: Option<Uuid>, found: Option<(usize, Slide)>) -> Option<Drawn> {
+        let (theme, shown, media) = match &found {
             Some((at, slide)) => {
-                let look = self.slide_look(*at, slide, version);
                 let theme = self.theme_of(*at).clone();
                 let shown = version.and_then(|v| theme.slide_in_version(slide, v)).unwrap_or_else(|| slide.clone());
                 let media = crate::home::media_of(slide).and_then(|media| {
                     let item = self.show.media().iter().find(|item| item.id == media)?;
                     Some((media, item.fit))
                 });
-                (look, theme, Some(shown), media)
+                (theme, Some(shown), media)
             }
             None => {
-                self.show.media().iter().find(|item| item.id == id)?;
                 self.bin_pictures.small(id)?;
-                (self.media_look(id), self.theme.clone(), None, Some((id, sp_model::ImageFit::Fill)))
+                (self.theme.clone(), None, Some((id, sp_model::ImageFit::Fill)))
             }
         };
         let running = self.running.as_mut()?;
@@ -135,7 +151,6 @@ impl crate::App {
         let texture = running.thumbs.draw_alone(&running.gpu, &layers, &theme)?;
         let (device, queue) = (running.gpu.device.clone(), running.gpu.queue.clone());
         Some(Drawn {
-            look,
             read: Box::new(move || {
                 let pixels = sp_render::read_pixels_gently(&device, &queue, &texture, Duration::from_secs(2)).ok()?;
                 Some(Rgba { width: texture.width(), height: texture.height(), pixels })
@@ -428,9 +443,8 @@ impl crate::App {
         let mut wake = None;
         // Slides waiting to be drawn: a few each time round, so the window never waits long.
         for _ in 0..super::DRAW_AT_ONCE {
-            let Some((slide, version, reply)) = self.remote.thumbs_waiting.pop_front() else { break };
-            let drawn = self.remote_draw(slide, version);
-            let _ = reply.send(drawn);
+            let Some((slide, version, look, reply)) = self.remote.thumbs_waiting.pop_front() else { break };
+            let _ = reply.send(self.remote_draw(slide, version, &look));
         }
         if !self.remote.thumbs_waiting.is_empty() {
             wake = Some(now + Duration::from_millis(5));

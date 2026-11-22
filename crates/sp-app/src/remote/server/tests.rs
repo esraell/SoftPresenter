@@ -41,19 +41,24 @@ impl Backend for FakeBackend {
         answer
     }
 
-    fn thumb(&self, slide: Uuid, version: Option<Uuid>) -> oneshot::Receiver<Option<Drawn>> {
+    fn thumb(&self, slide: Uuid, version: Option<Uuid>, look: String) -> oneshot::Receiver<Thumbed> {
         if let Ok(mut asked) = self.0.versions_asked.lock() {
             asked.push(version);
         }
         let (reply, answer) = oneshot::channel();
-        let drawn = (!slide.is_nil()).then(|| {
+        // The app's look for every slide here; any other look draws nothing.
+        const NOW: &str = "00ff00ff00ff00ff";
+        let answer_is = if slide.is_nil() {
+            Thumbed::Missing
+        } else if look != NOW {
+            Thumbed::Moved(NOW.to_owned())
+        } else {
             self.0.drawn.fetch_add(1, Ordering::AcqRel);
-            Drawn {
-                look: "00ff00ff00ff00ff".to_owned(),
+            Thumbed::Drawn(Drawn {
                 read: Box::new(|| Some(Rgba { width: 16, height: 9, pixels: vec![128; 16 * 9 * 4] })),
-            }
-        });
-        let _ = reply.send(drawn);
+            })
+        };
+        let _ = reply.send(answer_is);
         answer
     }
 
@@ -423,10 +428,17 @@ fn a_slide_picture_is_drawn_once_and_kept_with_its_look() {
     let again = test.get(path, Some(&token));
     assert_eq!(again.body, first.body);
     assert_eq!(test.fake.drawn.load(Ordering::Acquire), 1, "drawn once, then kept");
-    // An address with an old look still gets the picture as it is now, not to be kept.
-    let stale = test.get("/thumb/7f6a1c2e-0000-4000-8000-000000000001/usual/0000000000000001.jpg", Some(&token));
-    assert_eq!(stale.status, 200);
-    assert!(stale.header("cache-control").is_some_and(|c| c.contains("no-cache")));
+    // An address with an old or made-up look draws nothing: it is sent on to the current one.
+    for made_up in ["0000000000000001", "ffffffffffffffffffffffffffffffff", "a"] {
+        let stale = test.get(&format!("/thumb/7f6a1c2e-0000-4000-8000-000000000001/usual/{made_up}.jpg"), Some(&token));
+        assert_eq!(stale.status, 307, "{made_up}");
+        assert_eq!(
+            stale.header("location"),
+            Some("/thumb/7f6a1c2e-0000-4000-8000-000000000001/usual/00ff00ff00ff00ff.jpg")
+        );
+        assert_eq!(stale.header("cache-control"), Some("no-store"));
+    }
+    assert_eq!(test.fake.drawn.load(Ordering::Acquire), 1, "nothing drawn for a look that isn't current");
     // No such slide.
     assert_eq!(test.get("/thumb/00000000-0000-0000-0000-000000000000/usual/00ff.jpg", Some(&token)).status, 404);
 }
