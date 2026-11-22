@@ -1671,7 +1671,7 @@ impl Output {
                             Arc::new(pixels)
                         };
                         for ndi in sources {
-                            ndi.show_shared(w, h, pixels.clone());
+                            ndi.show_shared(w, h, pixels.clone(), sp_ndi::Sent::Opaque);
                         }
                     }
                     readback.buffer.unmap();

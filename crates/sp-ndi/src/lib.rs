@@ -83,11 +83,83 @@ const RESEND_EVERY: Duration = Duration::from_millis(1000);
 /// nobody was watching gets its first picture within about this time.
 const COUNT_EVERY: Duration = Duration::from_millis(1000);
 
-/// One picture to send: tightly packed RGBA rows, which other sources may be sending too.
+/// How a source sends the pictures it is handed. A picture is handed over as the screens'
+/// renderer leaves it: tightly packed RGBA rows whose fourth byte says how solid each pixel is,
+/// with the colours as they are (not multiplied by it), which is how NDI's own documentation
+/// says its RGBA pictures are: "not pre-multiplied". Any change is made on the source's own
+/// thread, once for each new picture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sent {
+    /// Solid: the fourth byte is not looked at (NDI's RGBX). Sent as it is.
+    Opaque,
+    /// See-through, the colours as they are (NDI's RGBA). Sent as it is.
+    Straight,
+    /// See-through, each colour multiplied by how solid its pixel is first (NDI's RGBA), for a
+    /// receiver that expects that.
+    Premultiplied,
+    /// How solid each pixel is, as a grey: white where solid, black where clear, the shades
+    /// between at soft edges (NDI's RGBX). The key of a see-through picture, for a video
+    /// switcher that takes it apart from the colours.
+    Key,
+}
+
+impl Sent {
+    /// True when the picture goes with its fourth byte as alpha.
+    fn alpha(self) -> bool {
+        matches!(self, Sent::Straight | Sent::Premultiplied)
+    }
+}
+
+/// Each colour multiplied by how solid its pixel is, rounded to the nearest: what a receiver
+/// that expects premultiplied colours wants. A clear pixel becomes black and clear; a solid one
+/// is left as it is.
+pub fn premultiplied(rgba: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(rgba.len());
+    for &[red, green, blue, alpha] in rgba.as_chunks::<4>().0 {
+        // (c × a + 127) / 255 rounds c × a / 255 to the nearest: with 255 odd, it is never half-way.
+        let times = |colour: u8| ((u16::from(colour) * u16::from(alpha) + 127) / 255) as u8;
+        out.extend_from_slice(&[times(red), times(green), times(blue), alpha]);
+    }
+    out
+}
+
+/// How solid each pixel is, as a solid grey: the key of a see-through picture.
+pub fn key(rgba: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(rgba.len());
+    for &[.., alpha] in rgba.as_chunks::<4>().0 {
+        out.extend_from_slice(&[alpha, alpha, alpha, 255]);
+    }
+    out
+}
+
+/// One picture to send: tightly packed RGBA rows, which other sources may be sending too, and
+/// how this source sends it.
 struct Picture {
     width: u32,
     height: u32,
     rgba: Arc<Vec<u8>>,
+    sent: Sent,
+    /// True once `rgba` is as it is sent: any change `sent` asks for has been made.
+    ready: bool,
+}
+
+impl Picture {
+    fn new(width: u32, height: u32, rgba: Arc<Vec<u8>>, sent: Sent) -> Picture {
+        Picture { width, height, rgba, sent, ready: matches!(sent, Sent::Opaque | Sent::Straight) }
+    }
+
+    /// Makes the change `sent` asks for, once: into a copy of its own, so other sources
+    /// sending the same picture are not touched.
+    fn prepare(&mut self) {
+        if std::mem::replace(&mut self.ready, true) {
+            return;
+        }
+        self.rgba = Arc::new(match self.sent {
+            Sent::Premultiplied => premultiplied(&self.rgba),
+            Sent::Key => key(&self.rgba),
+            Sent::Opaque | Sent::Straight => return,
+        });
+    }
 }
 
 /// What a source's thread is told by whoever draws its pictures.
@@ -223,24 +295,26 @@ impl NdiOutput {
         Watch(self.shared.clone())
     }
 
-    /// Hands over the picture to send from now on. Never blocks, and never copies the pixels.
-    /// A picture whose size and pixel count disagree is ignored, and so is one handed over
-    /// while nobody is watching.
-    pub fn show(&self, width: u32, height: u32, rgba: Vec<u8>) {
-        self.show_shared(width, height, Arc::new(rgba));
+    /// Hands over the picture to send from now on, sent as `sent` says. Never blocks, and
+    /// never copies the pixels here (a change `sent` asks for is made on the source's own
+    /// thread). A picture whose size and pixel count disagree is ignored, and so is one handed
+    /// over while nobody is watching.
+    pub fn show(&self, width: u32, height: u32, rgba: Vec<u8>, sent: Sent) {
+        self.show_shared(width, height, Arc::new(rgba), sent);
     }
 
     /// Hands over the picture to send from now on, as `show` does, for a picture that several
-    /// sources send: each is handed the same pixels, and none copies them. Never blocks. A
+    /// sources send: each is handed the same pixels, and none copies them unless it sends them
+    /// changed (premultiplied, or as a key), which it does on its own thread. Never blocks. A
     /// picture whose size and pixel count disagree is ignored, and so is one handed over
     /// while nobody is watching.
-    pub fn show_shared(&self, width: u32, height: u32, rgba: Arc<Vec<u8>>) {
+    pub fn show_shared(&self, width: u32, height: u32, rgba: Arc<Vec<u8>>, sent: Sent) {
         if width == 0 || height == 0 || rgba.len() != width as usize * height as usize * 4 {
             return;
         }
         self.forgotten.store(false, Ordering::Relaxed);
         if let Some(tx) = &self.tx {
-            let _ = tx.send(Told::Picture(Picture { width, height, rgba }));
+            let _ = tx.send(Told::Picture(Picture::new(width, height, rgba, sent)));
         }
     }
 
@@ -283,8 +357,9 @@ pub fn installed() -> bool {
 trait Sink {
     /// How many receivers are connected, or `None` when that can't be known. Never waits.
     fn receivers(&self) -> Option<u32>;
-    /// Sends one picture; may wait until it is time for the next.
-    fn send(&self, width: u32, height: u32, rgba: &[u8]);
+    /// Sends one picture, see-through with `alpha` (else solid); may wait until it is time for
+    /// the next.
+    fn send(&self, width: u32, height: u32, rgba: &[u8], alpha: bool);
 }
 
 impl Sink for runtime::Source {
@@ -292,8 +367,8 @@ impl Sink for runtime::Source {
         runtime::Source::receivers(self)
     }
 
-    fn send(&self, width: u32, height: u32, rgba: &[u8]) {
-        runtime::Source::send(self, width, height, rgba);
+    fn send(&self, width: u32, height: u32, rgba: &[u8], alpha: bool) {
+        runtime::Source::send(self, width, height, rgba, alpha);
     }
 }
 
@@ -384,11 +459,15 @@ fn serve(sink: &impl Sink, rx: &Receiver<Told>, shared: &Shared, wake: &mut impl
         if gate.count_due(Instant::now()) {
             count(&mut gate);
         }
-        if let Some((width, height)) = gate.blank_due() {
-            sink.send(width, height, &vec![0; width as usize * height as usize * 4]);
+        // Black for a solid source; for a see-through one, all clear (zeros sent as RGBA), so
+        // that a video switcher shows its camera rather than black where the words were.
+        if let Some((width, height, alpha)) = gate.blank_due() {
+            sink.send(width, height, &vec![0; width as usize * height as usize * 4], alpha);
         }
         if let Some(picture) = gate.picture_due(Instant::now()) {
-            sink.send(picture.width, picture.height, &picture.rgba);
+            // Changed once, the first time it is sent, then sent again as it is each second.
+            picture.prepare();
+            sink.send(picture.width, picture.height, &picture.rgba, picture.sent.alpha());
         }
     }
 }
@@ -403,9 +482,10 @@ struct Gate {
     receivers: Option<u32>,
     /// The current picture is new, and still to be sent at once.
     fresh: bool,
-    /// The size of the last picture sent, while NDI still has it to give to a receiver the
-    /// moment one connects; `None` before any is sent and once a black one has taken its place.
-    given: Option<(u32, u32)>,
+    /// The size of the last picture sent, and whether it was see-through, while NDI still has
+    /// it to give to a receiver the moment one connects; `None` before any is sent and once a
+    /// black (or clear) one has taken its place.
+    given: Option<(u32, u32, bool)>,
     /// That picture is out of date: a newer one was dropped or never drawn, nobody watching.
     stale: bool,
     next_count: Instant,
@@ -483,13 +563,14 @@ impl Gate {
         self.stale = true;
     }
 
-    /// The size of the black picture to send now, if one is due: when nobody is watching and
-    /// the last picture sent is out of date. NDI gives a receiver the last picture a source
-    /// sent the moment it connects, before the source can know of it; this puts black in the
-    /// place of a slide that has gone, once. While someone is watching none is due: they
-    /// were given the picture when it was the newest, and a new one is on its way to them.
+    /// The size of the black picture to send now, if one is due, and whether it goes
+    /// see-through (all clear) as the picture it covers did: when nobody is watching and the
+    /// last picture sent is out of date. NDI gives a receiver the last picture a source sent
+    /// the moment it connects, before the source can know of it; this puts black (or nothing)
+    /// in the place of a slide that has gone, once. While someone is watching none is due:
+    /// they were given the picture when it was the newest, and a new one is on its way to them.
     /// Should they leave before it comes (it could not be drawn, say), black is due then.
-    fn blank_due(&mut self) -> Option<(u32, u32)> {
+    fn blank_due(&mut self) -> Option<(u32, u32, bool)> {
         if !self.stale || self.watched() {
             return None;
         }
@@ -519,14 +600,14 @@ impl Gate {
 
     /// The picture to send now, if any: a fresh one at once, the current one again when it is
     /// time, and nothing while nobody is watching.
-    fn picture_due(&mut self, now: Instant) -> Option<&Picture> {
+    fn picture_due(&mut self, now: Instant) -> Option<&mut Picture> {
         if !self.watched() || !(self.fresh || now >= self.next_resend) {
             return None;
         }
-        let picture = self.current.as_ref()?;
+        let picture = self.current.as_mut()?;
         self.fresh = false;
         self.next_resend = now + RESEND_EVERY;
-        self.given = Some((picture.width, picture.height));
+        self.given = Some((picture.width, picture.height, picture.sent.alpha()));
         Some(picture)
     }
 }
@@ -540,12 +621,87 @@ mod tests {
     const PATIENCE: Duration = Duration::from_secs(5);
 
     fn picture(width: u32) -> Picture {
-        Picture { width, height: 1, rgba: Arc::new(vec![9; width as usize * 4]) }
+        Picture::new(width, 1, Arc::new(vec![9; width as usize * 4]), Sent::Opaque)
     }
 
     /// The width of the picture the gate sends now, which tells the tests' pictures apart.
     fn sent(gate: &mut Gate, now: Instant) -> Option<u32> {
         gate.picture_due(now).map(|picture| picture.width)
+    }
+
+    #[test]
+    fn colours_are_multiplied_by_how_solid_they_are_rounded_to_the_nearest() {
+        // Clear is black and clear; solid is left as it is, whatever the colour.
+        assert_eq!(premultiplied(&[200, 100, 7, 0]), [0, 0, 0, 0]);
+        assert_eq!(premultiplied(&[255, 128, 1, 255]), [255, 128, 1, 255]);
+        assert_eq!(premultiplied(&[0, 0, 0, 255]), [0, 0, 0, 255]);
+        // White half solid: 255 × 128 / 255 is 128 exactly.
+        assert_eq!(premultiplied(&[255, 255, 255, 128]), [128, 128, 128, 128]);
+        // Rounded, not cut short: 100 × 128 / 255 = 50.2 → 50; 101 × 128 / 255 = 50.7 → 51;
+        // 1 × 128 / 255 = 0.502 → 1; 1 × 127 / 255 = 0.498 → 0.
+        assert_eq!(premultiplied(&[100, 101, 1, 128]), [50, 51, 1, 128]);
+        assert_eq!(premultiplied(&[1, 1, 1, 127]), [0, 0, 0, 127]);
+        // Every colour and alpha against the exact sum: never more than half a step out, and
+        // the alpha never changed.
+        for alpha in 0..=255u8 {
+            for colour in 0..=255u8 {
+                let out = premultiplied(&[colour, 0, 255, alpha]);
+                let exact = f64::from(colour) * f64::from(alpha) / 255.0;
+                assert!((f64::from(out[0]) - exact).abs() <= 0.5, "{colour} at {alpha}: {} for {exact}", out[0]);
+                assert_eq!((out[1], out[2], out[3]), (0, alpha, alpha));
+            }
+        }
+        // Several pixels, each on its own.
+        assert_eq!(premultiplied(&[255, 0, 0, 255, 0, 255, 0, 0]), [255, 0, 0, 255, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_key_is_how_solid_each_pixel_is_as_a_solid_grey() {
+        // Clear is black, solid is white, a soft edge a grey, whatever the colour was.
+        assert_eq!(key(&[200, 100, 7, 0]), [0, 0, 0, 255]);
+        assert_eq!(key(&[0, 0, 0, 255]), [255, 255, 255, 255]);
+        assert_eq!(key(&[255, 255, 255, 255, 30, 60, 90, 77]), [255, 255, 255, 255, 77, 77, 77, 255]);
+    }
+
+    #[test]
+    fn a_picture_is_changed_once_into_its_own_copy_and_only_when_it_must_be() {
+        let shared = Arc::new(vec![255, 255, 255, 128]);
+        // Solid and straight pictures go as they are, the same pixels as every other source.
+        for sent in [Sent::Opaque, Sent::Straight] {
+            let mut picture = Picture::new(1, 1, shared.clone(), sent);
+            picture.prepare();
+            assert!(Arc::ptr_eq(&picture.rgba, &shared), "{sent:?}");
+        }
+        assert!(!Sent::Opaque.alpha() && Sent::Straight.alpha() && Sent::Premultiplied.alpha() && !Sent::Key.alpha());
+        // Premultiplied and a key are made into a copy of their own, once, leaving the shared one.
+        let mut premultiplied = Picture::new(1, 1, shared.clone(), Sent::Premultiplied);
+        premultiplied.prepare();
+        assert_eq!(*premultiplied.rgba, [128, 128, 128, 128]);
+        premultiplied.prepare();
+        assert_eq!(*premultiplied.rgba, [128, 128, 128, 128], "not multiplied again when sent again");
+        let mut key = Picture::new(1, 1, shared.clone(), Sent::Key);
+        key.prepare();
+        assert_eq!((*key.rgba).clone(), [128, 128, 128, 255]);
+        assert_eq!(*shared, [255, 255, 255, 128]);
+    }
+
+    #[test]
+    fn a_see_through_picture_gone_out_of_date_is_covered_with_clear_not_black() {
+        let t = Instant::now();
+        let mut gate = Gate::new(t);
+        gate.counted(t, Some(1));
+        gate.picture(Picture::new(3, 1, Arc::new(vec![9; 12]), Sent::Straight));
+        assert_eq!(sent(&mut gate, t), Some(3));
+        gate.counted(t + SECOND, Some(0));
+        gate.forget();
+        assert_eq!(gate.blank_due(), Some((3, 1, true)), "all clear, so a switcher shows its camera");
+        // A key covers with black, which keys nothing in.
+        gate.counted(t + 2 * SECOND, Some(1));
+        gate.picture(Picture::new(4, 1, Arc::new(vec![9; 16]), Sent::Key));
+        assert_eq!(sent(&mut gate, t + 2 * SECOND), Some(4));
+        gate.counted(t + 3 * SECOND, Some(0));
+        gate.forget();
+        assert_eq!(gate.blank_due(), Some((4, 1, false)));
     }
 
     #[test]
@@ -595,7 +751,7 @@ mod tests {
         assert_eq!(sent(&mut gate, t + SECOND), Some(2), "and again each second");
         // It is marked out of date: black, if they leave before a newer one comes.
         gate.counted(t + 2 * SECOND, Some(0));
-        assert_eq!(gate.blank_due(), Some((2, 1)));
+        assert_eq!(gate.blank_due(), Some((2, 1, false)));
         // Nobody was watching: the picture was handed over, then the next was not drawn. A
         // receiver has come since (counted again, as the thread does): the picture is from
         // before it came, and is not sent to it.
@@ -623,7 +779,7 @@ mod tests {
         assert_eq!(gate.blank_due(), None, "the last receiver leaving puts nothing out of date");
         // The slide changes and is not drawn, nobody watching: black, the size of that picture.
         gate.forget();
-        assert_eq!(gate.blank_due(), Some((3, 1)));
+        assert_eq!(gate.blank_due(), Some((3, 1, false)));
         gate.forget();
         assert_eq!(gate.blank_due(), None, "once: NDI has the black one now");
         // A receiver comes and is drawn a picture, leaves, and the slide changes again.
@@ -632,7 +788,7 @@ mod tests {
         assert_eq!(sent(&mut gate, t + 2 * SECOND), Some(4));
         gate.counted(t + 3 * SECOND, Some(0));
         gate.forget();
-        assert_eq!(gate.blank_due(), Some((4, 1)));
+        assert_eq!(gate.blank_due(), Some((4, 1, false)));
         // A picture handed over for nobody is dropped, which puts the last one sent out of
         // date as well.
         let mut gate = Gate::new(t);
@@ -641,7 +797,7 @@ mod tests {
         assert_eq!(sent(&mut gate, t), Some(2));
         gate.counted(t + SECOND, Some(0));
         gate.picture(picture(5));
-        assert_eq!(gate.blank_due(), Some((2, 1)));
+        assert_eq!(gate.blank_due(), Some((2, 1, false)));
         assert_eq!(sent(&mut gate, t + SECOND), None);
         // So does a picture handed over while someone watched that was still to be sent when
         // the last receiver was found gone.
@@ -651,7 +807,7 @@ mod tests {
         assert_eq!(sent(&mut gate, t), Some(2));
         gate.picture(picture(6));
         gate.counted(t + SECOND, Some(0));
-        assert_eq!(gate.blank_due(), Some((2, 1)));
+        assert_eq!(gate.blank_due(), Some((2, 1, false)));
         assert_eq!(sent(&mut gate, t + SECOND), None);
         // A source that never sent a picture has nothing to cover.
         let mut gate = Gate::new(t);
@@ -688,7 +844,7 @@ mod tests {
         assert_eq!(gate.blank_due(), None);
         assert_eq!(sent(&mut gate, t + 5 * SECOND), Some(3), "what they are looking at is still sent each second");
         gate.counted(t + 5 * SECOND, Some(0));
-        assert_eq!(gate.blank_due(), Some((3, 1)));
+        assert_eq!(gate.blank_due(), Some((3, 1, false)));
         assert_eq!(gate.blank_due(), None);
         // With the count unknown, someone may always be watching.
         let mut gate = Gate::new(t);
@@ -851,6 +1007,8 @@ mod tests {
         receivers: Arc<AtomicU32>,
         sent: Sender<(u32, usize)>,
         black: Sender<u32>,
+        /// Every picture's bytes and whether it went see-through.
+        bytes: Sender<(Vec<u8>, bool)>,
     }
 
     impl Sink for Stand {
@@ -861,7 +1019,8 @@ mod tests {
             }
         }
 
-        fn send(&self, width: u32, _height: u32, rgba: &[u8]) {
+        fn send(&self, width: u32, _height: u32, rgba: &[u8], alpha: bool) {
+            let _ = self.bytes.send((rgba.to_vec(), alpha));
             if rgba.iter().all(|byte| *byte == 0) {
                 let _ = self.black.send(width);
             } else {
@@ -871,21 +1030,44 @@ mod tests {
     }
 
     /// An output sending to a stand-in, with the count it gives and what it sent: each
-    /// picture's width and where its pixels are, and each black picture's width.
+    /// picture's width and where its pixels are, each black picture's width, and every
+    /// picture's bytes with whether it went see-through.
     struct Standing {
         output: NdiOutput,
         receivers: Arc<AtomicU32>,
         sent: Receiver<(u32, usize)>,
         black: Receiver<u32>,
+        bytes: Receiver<(Vec<u8>, bool)>,
     }
 
     fn standing(receivers: u32, wake: impl FnMut() + Send + 'static) -> Standing {
         let receivers = Arc::new(AtomicU32::new(receivers));
-        let ((sent_tx, sent), (black_tx, black)) = (channel(), channel());
+        let ((sent_tx, sent), (black_tx, black), (bytes_tx, bytes)) = (channel(), channel(), channel());
         let theirs = receivers.clone();
-        let open = move |_: &str| Ok(Stand { receivers: theirs, sent: sent_tx, black: black_tx });
+        let open = move |_: &str| Ok(Stand { receivers: theirs, sent: sent_tx, black: black_tx, bytes: bytes_tx });
         let output = spawn("SoftPresenter test", open, wake).unwrap();
-        Standing { output, receivers, sent, black }
+        Standing { output, receivers, sent, black, bytes }
+    }
+
+    #[test]
+    fn one_picture_goes_to_a_fill_and_its_key_each_as_it_asks_on_their_own_threads() {
+        // The screens hand the same pixels to a see-through source and to the source that is
+        // its key: one sends them as they are with their alpha, the other as greys, solid.
+        let (fill, key, premultiplied) = (standing(1, || {}), standing(1, || {}), standing(1, || {}));
+        let pixels = Arc::new(vec![255, 255, 255, 255, 200, 100, 50, 128, 9, 9, 9, 0]);
+        fill.output.show_shared(3, 1, pixels.clone(), Sent::Straight);
+        key.output.show_shared(3, 1, pixels.clone(), Sent::Key);
+        premultiplied.output.show_shared(3, 1, pixels.clone(), Sent::Premultiplied);
+        assert_eq!(fill.bytes.recv_timeout(PATIENCE).unwrap(), ((*pixels).clone(), true));
+        assert_eq!(
+            key.bytes.recv_timeout(PATIENCE).unwrap(),
+            (vec![255, 255, 255, 255, 128, 128, 128, 255, 0, 0, 0, 255], false)
+        );
+        assert_eq!(
+            premultiplied.bytes.recv_timeout(PATIENCE).unwrap(),
+            (vec![255, 255, 255, 255, 100, 50, 25, 128, 0, 0, 0, 0], true)
+        );
+        assert_eq!(fill.sent.recv_timeout(PATIENCE).unwrap().1, pixels.as_ptr().addr(), "straight is not copied");
     }
 
     #[test]
@@ -893,8 +1075,8 @@ mod tests {
         let (one, two) = (standing(UNKNOWN, || {}), standing(1, || {}));
         let pixels = Arc::new(vec![9; 4 * 2 * 4]);
         let at = pixels.as_ptr().addr();
-        one.output.show_shared(4, 2, pixels.clone());
-        two.output.show_shared(4, 2, pixels.clone());
+        one.output.show_shared(4, 2, pixels.clone(), Sent::Opaque);
+        two.output.show_shared(4, 2, pixels.clone(), Sent::Opaque);
         assert_eq!(one.sent.recv_timeout(PATIENCE).unwrap(), (4, at));
         assert_eq!(two.sent.recv_timeout(PATIENCE).unwrap(), (4, at));
     }
@@ -904,16 +1086,16 @@ mod tests {
         let source = standing(UNKNOWN, || {});
         let pixels = vec![9; 2 * 2 * 4];
         let at = pixels.as_ptr().addr();
-        source.output.show(2, 2, pixels);
+        source.output.show(2, 2, pixels, Sent::Opaque);
         assert_eq!(source.sent.recv_timeout(PATIENCE).unwrap(), (2, at));
     }
 
     #[test]
     fn a_picture_whose_size_and_pixels_disagree_is_ignored() {
         let source = standing(UNKNOWN, || {});
-        source.output.show_shared(3, 2, Arc::new(vec![9; 5]));
-        source.output.show(0, 2, Vec::new());
-        source.output.show(1, 1, vec![9; 4]);
+        source.output.show_shared(3, 2, Arc::new(vec![9; 5]), Sent::Opaque);
+        source.output.show(0, 2, Vec::new(), Sent::Opaque);
+        source.output.show(1, 1, vec![9; 4], Sent::Opaque);
         assert_eq!(source.sent.recv_timeout(PATIENCE).unwrap().0, 1, "only the good picture goes");
     }
 
@@ -925,13 +1107,13 @@ mod tests {
         });
         woken.recv_timeout(PATIENCE).unwrap();
         assert_eq!(source.output.receivers(), Some(1), "woken for the first count, which can be read");
-        source.output.show(1, 1, vec![9; 4]);
+        source.output.show(1, 1, vec![9; 4], Sent::Opaque);
         assert_eq!(source.sent.recv_timeout(PATIENCE).unwrap().0, 1);
         source.receivers.store(0, Ordering::Relaxed);
         woken.recv_timeout(PATIENCE).unwrap();
         while source.sent.try_recv().is_ok() {}
         // A picture handed over for nobody is dropped; the black one says that it has been.
-        source.output.show(2, 1, vec![9; 8]);
+        source.output.show(2, 1, vec![9; 8], Sent::Opaque);
         assert_eq!(source.black.recv_timeout(PATIENCE).unwrap(), 1);
         // How soon is the gate tests' to say; a busy computer may take longer here.
         source.receivers.store(1, Ordering::Relaxed);
@@ -940,7 +1122,7 @@ mod tests {
         assert_eq!(source.output.arrivals(), 1, "and that receivers have come after none");
         // Whoever was woken hands over a fresh picture. Had either picture from before been
         // kept, the thread would have sent it as it woke us, ahead of this one.
-        source.output.show(3, 1, vec![9; 12]);
+        source.output.show(3, 1, vec![9; 12], Sent::Opaque);
         assert_eq!(source.sent.recv_timeout(PATIENCE).unwrap().0, 3, "the fresh picture, and nothing before it");
     }
 
@@ -954,7 +1136,7 @@ mod tests {
         // A receiver connects, and before the source next counts it is handed a picture: it
         // counts there and then, and the picture goes.
         source.receivers.store(1, Ordering::Relaxed);
-        source.output.show(2, 1, vec![9; 8]);
+        source.output.show(2, 1, vec![9; 8], Sent::Opaque);
         assert_eq!(source.sent.recv_timeout(PATIENCE).unwrap().0, 2);
         woken.recv_timeout(PATIENCE).unwrap();
         assert!(source.black.try_recv().is_err());
@@ -967,7 +1149,7 @@ mod tests {
             let _ = woken_tx.send(());
         });
         woken.recv_timeout(PATIENCE).unwrap();
-        source.output.show(1, 1, vec![9; 4]);
+        source.output.show(1, 1, vec![9; 4], Sent::Opaque);
         assert_eq!(source.sent.recv_timeout(PATIENCE).unwrap().0, 1);
         for receivers in [2, 0] {
             source.receivers.store(receivers, Ordering::Relaxed);
@@ -980,7 +1162,7 @@ mod tests {
         while source.sent.try_recv().is_ok() {}
         source.receivers.store(1, Ordering::Relaxed);
         woken.recv_timeout(PATIENCE).unwrap();
-        source.output.show(2, 1, vec![9; 8]);
+        source.output.show(2, 1, vec![9; 8], Sent::Opaque);
         assert_eq!(source.sent.recv_timeout(PATIENCE).unwrap().0, 2, "only the picture drawn for the newcomer");
     }
 
@@ -991,7 +1173,7 @@ mod tests {
             let _ = woken_tx.send(());
         });
         woken.recv_timeout(PATIENCE).unwrap();
-        source.output.show(2, 1, vec![9; 8]);
+        source.output.show(2, 1, vec![9; 8], Sent::Opaque);
         assert_eq!(source.sent.recv_timeout(PATIENCE).unwrap().0, 2);
         source.receivers.store(0, Ordering::Relaxed);
         woken.recv_timeout(PATIENCE).unwrap();
@@ -1005,7 +1187,7 @@ mod tests {
         while source.sent.try_recv().is_ok() {}
         source.receivers.store(1, Ordering::Relaxed);
         woken.recv_timeout(PATIENCE).unwrap();
-        source.output.show(3, 1, vec![9; 12]);
+        source.output.show(3, 1, vec![9; 12], Sent::Opaque);
         assert_eq!(source.sent.recv_timeout(PATIENCE).unwrap().0, 3);
         assert!(source.black.try_recv().is_err(), "black went once");
         // After a picture, forgetting is said and done anew.
@@ -1022,7 +1204,7 @@ mod tests {
             let _ = woken_tx.send(());
         });
         woken.recv_timeout(PATIENCE).unwrap();
-        source.output.show(2, 1, vec![9; 8]);
+        source.output.show(2, 1, vec![9; 8], Sent::Opaque);
         assert_eq!(source.sent.recv_timeout(PATIENCE).unwrap().0, 2);
         source.receivers.store(0, Ordering::Relaxed);
         woken.recv_timeout(PATIENCE).unwrap();
@@ -1033,7 +1215,7 @@ mod tests {
         source.output.forget();
         woken.recv_timeout(PATIENCE).unwrap();
         assert_eq!(source.output.receivers(), Some(1));
-        source.output.show(3, 1, vec![9; 12]);
+        source.output.show(3, 1, vec![9; 12], Sent::Opaque);
         assert_eq!(source.sent.recv_timeout(PATIENCE).unwrap().0, 3, "the fresh picture, and not the old one");
         assert!(source.black.try_recv().is_err());
     }

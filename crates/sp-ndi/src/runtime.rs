@@ -57,6 +57,9 @@ struct VideoFrame {
 
 /// `NDI_LIB_FOURCC('R', 'G', 'B', 'X')`: 8-bit red, green, blue and an ignored fourth byte.
 const FOUR_CC_RGBX: u32 = u32::from_le_bytes(*b"RGBX");
+/// `NDI_LIB_FOURCC('R', 'G', 'B', 'A')`: 8-bit red, green, blue and alpha. NDI's SDK
+/// documentation says of it, as of RGBX: "This data is not pre-multiplied."
+const FOUR_CC_RGBA: u32 = u32::from_le_bytes(*b"RGBA");
 /// `NDIlib_frame_format_type_progressive`.
 const PROGRESSIVE: c_int = 1;
 /// `NDIlib_send_timecode_synthesize`: NDI makes the timecode.
@@ -230,10 +233,10 @@ impl Source {
         u32::try_from(receivers).ok()
     }
 
-    /// Sends one opaque picture of tightly packed RGBA rows (the fourth byte is ignored). Waits,
-    /// when NDI paces the source, until it is time for the next picture: call it only from the
-    /// source's own thread.
-    pub fn send(&self, width: u32, height: u32, rgba: &[u8]) {
+    /// Sends one picture of tightly packed RGBA rows: opaque (the fourth byte is ignored), or
+    /// with `alpha`, the fourth byte saying how solid each pixel is. Waits, when NDI paces the
+    /// source, until it is time for the next picture: call it only from the source's own thread.
+    pub fn send(&self, width: u32, height: u32, rgba: &[u8], alpha: bool) {
         let (Ok(w), Ok(h)) = (c_int::try_from(width), c_int::try_from(height)) else { return };
         if rgba.len() != width as usize * height as usize * 4 {
             return;
@@ -241,7 +244,7 @@ impl Source {
         let frame = VideoFrame {
             xres: w,
             yres: h,
-            four_cc: FOUR_CC_RGBX,
+            four_cc: if alpha { FOUR_CC_RGBA } else { FOUR_CC_RGBX },
             frame_rate_n: 30,
             frame_rate_d: 1,
             picture_aspect_ratio: 0.0,
@@ -301,9 +304,10 @@ mod tests {
     }
 
     #[test]
-    fn the_rgbx_code_is_ndis() {
+    fn the_rgbx_and_rgba_codes_are_ndis() {
         // NDI_LIB_FOURCC('R','G','B','X'): the first letter in the lowest byte.
-        let code = u32::from(b'R') | u32::from(b'G') << 8 | u32::from(b'B') << 16 | u32::from(b'X') << 24;
-        assert_eq!(FOUR_CC_RGBX, code);
+        let code = |last: u8| u32::from(b'R') | u32::from(b'G') << 8 | u32::from(b'B') << 16 | u32::from(last) << 24;
+        assert_eq!(FOUR_CC_RGBX, code(b'X'));
+        assert_eq!(FOUR_CC_RGBA, code(b'A'));
     }
 }

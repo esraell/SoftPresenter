@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
 
-use sp_ndi::{NdiOutput, State};
+use sp_ndi::{NdiOutput, Sent, State};
 
 const NAME: &str = "SoftPresenter NDI check";
 const WIDTH: u32 = 1920;
@@ -49,7 +49,7 @@ fn main() {
     let mut ever_counted = false;
     // How many times receivers had come after none when a picture was last drawn for them.
     let mut drawn_for = output.arrivals();
-    output.show_shared(WIDTH, HEIGHT, pattern(tick));
+    output.show_shared(WIDTH, HEIGHT, pattern(tick), Sent::Opaque);
     while tick < seconds {
         let next = started + Duration::from_secs(tick + 1);
         match joined.recv_timeout(next.saturating_duration_since(Instant::now())) {
@@ -65,7 +65,7 @@ fn main() {
                 if output.arrivals() != drawn_for {
                     drawn_for = output.arrivals();
                     println!("{:>4} s  receivers have come after none: a fresh picture is drawn for them", at());
-                    output.show_shared(WIDTH, HEIGHT, pattern(tick));
+                    output.show_shared(WIDTH, HEIGHT, pattern(tick), Sent::Opaque);
                 }
                 continue;
             }
@@ -83,7 +83,7 @@ fn main() {
             // of date, and a receiver that connects is shown black until a fresh one is drawn.
             output.forget();
         } else {
-            output.show_shared(WIDTH, HEIGHT, pattern(tick));
+            output.show_shared(WIDTH, HEIGHT, pattern(tick), Sent::Opaque);
         }
         match receivers {
             Some(count) => println!("{tick:>4} s  receivers: {count}"),
