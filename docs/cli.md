@@ -811,7 +811,7 @@ the usual ones.
 | `screen add audience\|stage NAME [on display NAME\|window\|ndi NAME\|decklink NAME\|automatic]` | A new screen (in a window unless told); a DeckLink output by its name or its number in `sp decklink` |
 | `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|decklink:NAME\|automatic\|off`, `mode=FORMAT` (a DeckLink screen's format: `1080i59.94`, `720p50`…), `keyer=off\|external\|internal` (a DeckLink card's keyer: fill and key on two connectors, or over the card's input), `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT`; for an audience screen `background=solid\|see-through`, `alpha=straight\|premultiplied` (how a see-through screen sends its soft edges; straight unless told), `key=SCREEN\|none` (shows that screen's key) |
 | `screen delete SCREEN --yes` | Deletes a screen (there is always one) |
-| `settings set key=value…` | `transition=KIND[:SECONDS]`, `media_transition=…`, `copyright=never\|first\|last\|every`, `ccli_licence=DIGITS`, `continuous=on\|off`, `view=grid\|easy\|table`, `columns=1-12` |
+| `settings set key=value…` | `transition=KIND[:SECONDS]`, `media_transition=…`, `copyright=never\|first\|last\|every`, `ccli_licence=DIGITS`, `continuous=on\|off`, `view=grid\|words\|table` (Words Only; `easy` too), `columns=1-12` |
 
     $ sp screen add stage Band
     Added the stage screen Band, on a window.
@@ -823,8 +823,8 @@ the usual ones.
     The screen Band: stage layout Words Only.
     $ sp screen set Lobby layers=media color=#336699
     The screen Lobby: shows media, colour #336699.
-    $ sp settings set copyright=last ccli_licence=1234567 view=easy columns=4
-    Settings: copyright line on a song's last slide, CCLI licence 1234567, easy view, 4 slides across.
+    $ sp settings set copyright=last ccli_licence=1234567 view=words columns=4
+    Settings: copyright line on a song's last slide, CCLI licence 1234567, Words Only, 4 slides across.
     $ sp settings set columns=40
     columns is 1 to 12.
 

@@ -1075,7 +1075,7 @@ Screens and settings
   settings set key=value…      transition=KIND[:SECONDS] media_transition=… copyright=never|first|
                                last|every ccli_licence=N start_audience=on|off continuous=on|off
                                start_with=nothing|media-playlist:NAME|announcements:SONG
-                               view=grid|easy|table columns=1-12
+                               view=grid|words|table columns=1-12
   view words [SONG]            Edit Words: a song's words as text to change (view reflow too)
   help COMMAND                 the help for one command
 

@@ -943,7 +943,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   was a setup) opens a short setup: which display the congregation sees (by name, never the
   main display; the screen goes there at once, and Identify shows each screen's name) and an
   optional stage display, or a window or NDI on a Mac with one display; bringing songs in (one
-  click for a ProPresenter library found on the Mac, or song files); which Bible goes on top
+  click for a library of `.pro` song documents found on the Mac, "Look for a Song Library", or
+  song files); which Bible goes on top
   and which below; and what macOS will ask permission for and why. SoftPresenter › Set Up
   SoftPresenter… opens it again.
 

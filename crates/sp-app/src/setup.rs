@@ -361,12 +361,12 @@ fn songs(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState) {
     if !setup.looked {
         say(
             ui,
-            "SoftPresenter can look in your Documents folder for a ProPresenter library to bring across. macOS may ask \
-             whether SoftPresenter can use the Documents folder: choose OK.",
+            "SoftPresenter can look in your Documents folder for a library of song documents (.pro files) to bring \
+             across. macOS may ask whether SoftPresenter can use the Documents folder: choose OK.",
         );
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            if button(ui, "Look for a ProPresenter Library", true).clicked() {
+            if button(ui, "Look for a Song Library", true).clicked() {
                 setup.library_found = library_found();
                 setup.looked = true;
             }
@@ -389,7 +389,7 @@ fn songs(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState) {
         say(
             ui,
             &format!(
-                "A ProPresenter library was found on this Mac: {songs} songs in {libraries} {}. Each library comes across \
+                "A library of song documents was found on this Mac: {songs} songs in {libraries} {}. Each library comes across \
                  as a library of the same name, with its groups, arrangements and both languages.",
                 if *libraries == 1 { "library" } else { "libraries" }
             ),
@@ -402,8 +402,8 @@ fn songs(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState) {
     } else {
         say(
             ui,
-            "No ProPresenter library was found in the Documents folder. Song files from anywhere come in: text, lyric files \
-             from song services, ChordPro, Word, and ProPresenter documents.",
+            "No library of song documents was found in the Documents folder. Song files from anywhere come in: text, lyric \
+             files from song services, ChordPro, Word, and .pro song documents.",
         );
         ui.add_space(10.0);
     }
@@ -489,7 +489,7 @@ fn permissions(ui: &mut egui::Ui) {
         ),
         (
             "Files in your Documents folder",
-            "When SoftPresenter looks for a ProPresenter library or opens songs, pictures and videos kept there.",
+            "When SoftPresenter looks for a library of song documents or opens songs, pictures and videos kept there.",
         ),
         (
             "Control Keynote or PowerPoint",

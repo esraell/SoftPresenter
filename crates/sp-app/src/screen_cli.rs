@@ -491,7 +491,7 @@ impl crate::App {
     /// `settings`, and `settings set key=value…`: the choices kept between runs.
     pub(crate) fn ctl_settings(&mut self, args: &[String]) -> Result<Reply, String> {
         let usage = "settings | settings set transition=KIND[:SECONDS] media_transition=… copyright=never|first|last|every \
-                     ccli_licence=NUMBER continuous=on|off view=grid|easy|table columns=1-12";
+                     ccli_licence=NUMBER continuous=on|off view=grid|words|table columns=1-12";
         let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
         if args.get(1).is_none() {
             let prefs = state.prefs();
@@ -512,7 +512,7 @@ impl crate::App {
                     }
                 ),
                 format!("continuous: {}", if prefs.continuous { "on" } else { "off" }),
-                format!("slides: {} view, {} across", prefs.slide_view, prefs.columns),
+                format!("slides: {}, {} across", view_words(&prefs.slide_view), prefs.columns),
             ];
             let data = serde_json::to_value(&prefs).unwrap_or_default();
             return Ok(Reply::with(lines.join("\n"), data));
@@ -580,13 +580,14 @@ impl crate::App {
                         .to_owned());
                 }
                 "view" => {
-                    let view = match value.to_lowercase().as_str() {
-                        "grid" => crate::home::SlideView::Grid,
-                        "easy" => crate::home::SlideView::Easy,
-                        "table" => crate::home::SlideView::Table,
-                        other => return Err(format!("view is grid, easy or table, not {other}.")),
+                    // `easy` is the old word for Words Only, kept for scripts.
+                    let (view, word) = match value.to_lowercase().as_str() {
+                        "grid" => (crate::home::SlideView::Grid, "grid"),
+                        "words" | "easy" => (crate::home::SlideView::Easy, "easy"),
+                        "table" => (crate::home::SlideView::Table, "table"),
+                        other => return Err(format!("view is grid, words or table, not {other}.")),
                     };
-                    said.push(format!("{value} view"));
+                    said.push(view_words(word).to_owned());
                     changes.push(Box::new(move |state| state.slide_view = view));
                 }
                 "columns" => {
@@ -614,5 +615,15 @@ impl crate::App {
         let text = sp_model::to_song_text(&song);
         self.with_state(|state| state.reflow = Some((at, text)));
         Ok(Reply::done(format!("Editing the words of {}.", song.title)))
+    }
+}
+
+/// How the slides' view is said, by the word the settings keep it by: "grid view", "Words
+/// Only", "table view".
+fn view_words(kept: &str) -> &'static str {
+    match kept {
+        "easy" => "Words Only",
+        "table" => "table view",
+        _ => "grid view",
     }
 }

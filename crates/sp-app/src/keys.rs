@@ -451,7 +451,7 @@ fn every_key_on(f_keys: bool) -> Vec<(&'static str, Vec<Row>)> {
                 (
                     one("Delete"),
                     format!(
-                        "Delete what is picked: playlist items go at once ({} puts them back); songs in a library, slides and media ask first",
+                        "Delete what is picked: playlist items go at once ({} puts them back), and so do items in a media playlist's view; songs in a library, slides and media ask first",
                         m("Z")
                     ),
                 ),

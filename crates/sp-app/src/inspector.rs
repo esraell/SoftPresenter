@@ -1101,7 +1101,7 @@ fn text_look(
                 .show(|ui| spacing_popup(ui, wanted));
         });
     });
-    labelled(ui, "Capitalization", |ui, width| {
+    labelled(ui, "Capitalisation", |ui, width| {
         let options = [
             (Caps::None, "None"),
             (Caps::AllCaps, "All Caps"),
