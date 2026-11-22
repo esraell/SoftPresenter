@@ -268,8 +268,8 @@ pub fn name_for_operator(kept: &str, bibles: &[&Bible], language: &str) -> Strin
 /// A verse found by the Bible page's Search.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FoundVerse {
-    /// The verse and its chapter as the operator reads them: the book named in the language of
-    /// the Bible it was found in, the numbers the first translation's.
+    /// The verse and its chapter as the operator reads them: named in the language of the
+    /// Bible it was found in (or the language chosen), numbered as the Bible quoted numbers.
     pub reference: String,
     pub chapter: String,
     pub words: String,

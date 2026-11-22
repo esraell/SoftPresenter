@@ -2857,13 +2857,11 @@ impl App {
         let state = &running.home_state;
         let holds: Vec<usize> = if self.bible_slots.contains(&cursor.presentation) {
             let title = self.show.presentations().get(cursor.presentation).map(|p| p.title.as_str());
-            // The passage as its place keeps it (named as it was kept), or the slides' title.
-            let kept = title.map(|title| state.bible.passage_held(cursor.presentation, title).0);
             let items = &state.services.front().items;
             (0..items.len())
                 .filter(|at| {
                     matches!(&items[*at], service::Item::Passage(saved)
-                        if Some(saved.lookup.as_str()) == title || Some(&saved.lookup) == kept.as_ref())
+                        if title.is_some_and(|title| state.bible.holds_kept(cursor.presentation, title, &saved.lookup)))
                 })
                 .collect()
         } else {

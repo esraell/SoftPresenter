@@ -56,8 +56,9 @@ fn names_a_passage(typed: &str) -> bool {
 /// the language chosen on the Bible page.
 ///
 /// A reference gives its passage, read as the Bible view reads it (so it is the passage its
-/// slides will be), named in the language it was typed in and quoted from the first Bible in
-/// use of that language (the first Bible when that language has none). Anything else of three
+/// slides will be: its numbers in the numbering of the language typed), named in the language
+/// it was typed in, numbered as it numbers, and quoted from the first Bible in use of that
+/// language (the first Bible when that language has none). Anything else of three
 /// letters or more is searched for as words in the Bibles written in their alphabet (all of
 /// them, in order, when none is): the first verses holding them, from the first Bible that has
 /// any, then the next, up to [`VERSES_LISTED`] in all. With a language chosen, each row is
@@ -107,7 +108,7 @@ pub fn search_bibles(typed: &str, bibles: &[(String, Arc<Bible>)], reading: &Rea
     for at in order {
         let (short, bible) = &bibles[at];
         for (place, words) in bible.search(typed, VERSES_LISTED - rows.len()) {
-            // Named and opened as the first Bible numbers it, which the slides follow.
+            // Opened as the first Bible numbers it, which the slides follow.
             let there = sp_bible::convert(place, bible.info.numbering, lead.info.numbering);
             let (quoted, (short, line)) = in_chosen(reading, &languages, bibles, there, at, (short, words));
             // Named as the Bible quoted numbers it; kept as the Bible it was found in has it.
@@ -165,8 +166,8 @@ fn in_chosen<'a>(
 /// the first numbering the slides; `reading` how the operator's language is decided): in the Bibles
 /// in use written in the words' alphabet (the session's language first), or, with none, in the
 /// first translation, up to [`PAGE_VERSES`]. Each verse is named in the language of the Bible
-/// it was found in (or in the language chosen, quoted from its Bible), with the first
-/// translation's numbers, as opening it names it.
+/// it was found in (or in the language chosen, quoted from its Bible), with the numbers of the
+/// Bible quoted; it is opened as the first translation numbers it.
 pub fn search_page(typed: &str, bibles: &[(String, Arc<Bible>)], reading: &Reading) -> PageFound {
     use crate::bible_language::{language_of, search_order};
     let session = reading.session.as_str();

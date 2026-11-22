@@ -736,9 +736,9 @@ pub struct BiblePage {
     pub held: [Held; 2],
     /// How the passage shown is kept, for when it is made again or a verse longer.
     pub keep: Keep,
-    /// The passage now shown as the operator reads it: the book named in the operator's
-    /// language (the language it was typed in, or the session's), the numbers the first
-    /// translation's. What Scripture Lookup says after a lookup.
+    /// The passage now shown as the operator reads it: named in the operator's language (the
+    /// language chosen, or the one it was typed in, or the session's) and numbered as that
+    /// language numbers (see `bible::numbering_of`). What Scripture Lookup says after a lookup.
     pub reading: String,
     /// The language a reference was last typed in this session (`en`, `ru`, `uk`): what the
     /// operator reads in when nothing typed says. See `session_language`.
@@ -1161,6 +1161,14 @@ impl BiblePage {
         (held.deck == deck.title && held.slides.end <= count && held.slides.len() < count).then(|| held.slides.clone())
     }
 
+    /// Whether the presentation at `presentation`, titled `title`, holds a playlist's passage
+    /// kept as `lookup`: its slides were made from it (their title is it, or the place keeps it
+    /// so, named in another language or numbering). How the playlist knows its passage is on
+    /// screen.
+    pub fn holds_kept(&self, presentation: usize, title: &str, lookup: &str) -> bool {
+        lookup == title || self.passage_held(presentation, title).0 == lookup
+    }
+
     /// The passage a slide of one of the page's places stands for, when it is on screen, and
     /// the numbering it is named in: the passage asked for whose slides the place holds (the
     /// presentation titled `title`), as it is kept; or the slides' own title (in the first
@@ -1458,8 +1466,8 @@ impl BiblePage {
 
     /// Finds verses holding the words typed in Search: in the Bibles in use written in the
     /// words' alphabet (the session's language first), or, with none, in the first translation
-    /// as before. Each verse is named in the language of the Bible it was found in, with the
-    /// first translation's numbers, as opening it names it.
+    /// as before. Each verse is named in the language of the Bible it was found in, with that
+    /// Bible's numbers, and opened as the first translation numbers it.
     pub fn find(&mut self) {
         self.found.clear();
         self.message = None;
@@ -7368,6 +7376,13 @@ mod tests {
         page.pending = None;
         assert_eq!((page.lookup.as_str(), page.shown.as_str()), ("Псалом 22:1-6", "Псалтирь 22:1-6"));
         assert_eq!(page.saved().map(|saved| saved.lookup).as_deref(), Some("Psalms 23:1-6"), "kept as typed");
+        // The playlist knows its passage is on screen by the place's record, though the slides'
+        // title is the Synodal's.
+        let slot = page.slots.map(|slots| slots[page.showing]).unwrap();
+        assert!(page.holds_kept(slot, "Псалтирь 22:1-6", "Psalms 23:1-6"));
+        assert!(page.holds_kept(slot, "Псалтирь 22:1-6", "Псалтирь 22:1-6"));
+        assert!(!page.holds_kept(slot, "Псалтирь 22:1-6", "Psalms 24:1-10"));
+        assert!(!page.holds_kept(slot, "Псалтирь 23:1-10", "Psalms 23:1-6"), "another passage there now");
         page.set_read_in(None);
         // A psalm the traditions split: the English 116th is the Synodal 114th and 115th.
         page.lookup = "Psalm 116".to_owned();
@@ -9653,7 +9668,7 @@ mod tests {
         let russian = slide.text_for(&sp_model::Role::primary()).unwrap_or_default();
         assert!(english.contains("valley of the shadow of death"), "{english}");
         assert!(russian.contains("долиною смертной тени"), "{russian}");
-        // Named in English, with the first translation's numbers, and the session goes on in English.
+        // Named in English with the English numbers, and the session goes on in English.
         assert_eq!(state.bible.lookup, "Psalm 23:4", "the King James Version's numbers");
         assert_eq!(state.bible.language.as_deref(), Some("en"));
         assert!(commands.is_empty(), "nothing is put on the screens");

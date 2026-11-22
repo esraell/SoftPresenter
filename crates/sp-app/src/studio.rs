@@ -3340,10 +3340,14 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         }
     };
     let live_in = show.live().map(|at| at.presentation);
-    let live_passage = live_in
-        .filter(|at| hidden.contains(at))
-        .and_then(|at| show.presentations().get(at))
-        .map(|passage| passage.title.clone());
+    // The passage on screen, by its slides' title and as its place keeps it (see `holds_kept`).
+    let live_passage = live_in.filter(|at| hidden.contains(at)).and_then(|at| {
+        let title = show.presentations().get(at)?.title.clone();
+        let kept = state.bible.passage_held(at, &title).0;
+        Some((title, kept))
+    });
+    let shows_passage =
+        |lookup: &str| live_passage.as_ref().is_some_and(|(title, kept)| lookup == title || lookup == kept);
     let filtering = !state.filter.trim().is_empty();
     // Items picked out let go once the playlist has changed under them.
     state.item_picks.check(&state.services);
@@ -3365,7 +3369,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     // The row of the item on screen is brought into view when another item goes on screen.
     let on_screen = items.iter().enumerate().position(|(index, item)| match item {
         Item::Song { .. } => live_in.is_some() && looked_up.get(index).and_then(|(found, _)| *found) == live_in,
-        Item::Passage(saved) => live_passage.as_deref() == Some(saved.lookup.as_str()),
+        Item::Passage(saved) => shows_passage(&saved.lookup),
         Item::Media { id, .. } => show.live_media().and_then(|at| show.media().get(at)).is_some_and(|m| m.id == *id),
         Item::MediaPlaylist { id, .. } => state.media_playing == Some(*id),
         Item::Header { .. } | Item::Placeholder { .. } => false,
@@ -3448,7 +3452,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                     (None, song.is_none(), live, "This song is not open in the library")
                 }
                 Item::Passage(saved) => {
-                    let live = live_passage.as_deref() == Some(saved.lookup.as_str());
+                    let live = shows_passage(&saved.lookup);
                     (Some(Icon::Book), false, live, "")
                 }
                 Item::Media { id, .. } => {

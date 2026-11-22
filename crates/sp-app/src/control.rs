@@ -1420,7 +1420,10 @@ impl crate::App {
         let title = self.show.presentations().get(live).map(|song| song.title.as_str());
         let is_live = |item: &Item| match item {
             Item::Song { key, .. } => crate::studio::playlist_song(&self.show, state, key) == Some(live),
-            Item::Passage(saved) => self.bible_slots.contains(&live) && title == Some(saved.lookup.as_str()),
+            Item::Passage(saved) => {
+                self.bible_slots.contains(&live)
+                    && title.is_some_and(|title| state.bible.holds_kept(live, title, &saved.lookup))
+            }
             _ => false,
         };
         let at = if list.items.get(chosen).is_some_and(is_live) {
