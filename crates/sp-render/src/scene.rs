@@ -204,7 +204,10 @@ fn draw_objects(
                 Some(look) if look.scaling == Scaling::ContainerUpOrDown => fitted_container(fonts, text, &look, rect),
                 _ => rect,
             },
-            ObjectKind::Shape { .. } | ObjectKind::Image { .. } | ObjectKind::Web { .. } => rect,
+            ObjectKind::Shape { .. }
+            | ObjectKind::Image { .. }
+            | ObjectKind::Web { .. }
+            | ObjectKind::Screen { .. } => rect,
         };
         // Turn the object about its own centre.
         let centre = (f64::from(rect.x + rect.w / 2.0), f64::from(rect.y + rect.h / 2.0));
@@ -220,7 +223,12 @@ fn draw_objects(
         // The object's outline: its shape, or the box a text object sits in.
         let outline = match &object.kind {
             ObjectKind::Shape { shape } => shape_path(*shape, rect),
-            ObjectKind::Text { .. } | ObjectKind::Image { .. } | ObjectKind::Web { .. } => {
+            ObjectKind::Screen { corner, .. } if *corner > 0.0 => {
+                let (x, y) = (f64::from(rect.x), f64::from(rect.y));
+                let radius = f64::from(corner.min(rect.w.min(rect.h) / 2.0));
+                RoundedRect::new(x, y, x + f64::from(rect.w), y + f64::from(rect.h), radius).to_path(0.1)
+            }
+            ObjectKind::Text { .. } | ObjectKind::Image { .. } | ObjectKind::Web { .. } | ObjectKind::Screen { .. } => {
                 let (x, y) = (f64::from(rect.x), f64::from(rect.y));
                 Rect::new(x, y, x + f64::from(rect.w), y + f64::from(rect.h)).to_path(0.1)
             }
@@ -261,6 +269,12 @@ fn draw_objects(
         if let ObjectKind::Web { .. } = &object.kind {
             draw_web(scene, placed, object_web_url(object), rect, &outline);
         }
+        if let ObjectKind::Screen { screen, label, .. } = &object.kind {
+            draw_screen(scene, placed, *screen, rect, &outline);
+            if !label.trim().is_empty() {
+                draw_screen_label(scene, fonts, placed, label, template, rect, &outline);
+            }
+        }
         if let ObjectKind::Text { text, style } = &object.kind {
             // The theme's style for the object's role, with the object's own settings over it.
             let Some(style) = template.text_style(object.role.as_ref(), style) else { continue };
@@ -276,6 +290,121 @@ fn draw_objects(
 thread_local! {
     /// Whether a web page box with no picture yet is drawn as a placeholder, on this thread.
     static PLACEHOLDERS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The screens' pictures a screen-picture object may show while a scene is built, on this
+    /// thread (see [`with_screen_pictures`]).
+    static SCREEN_PICTURES: std::cell::RefCell<Vec<ScreenPicture>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// What one screen shows, for a screen-picture object to show too: the very scene that screen
+/// is drawn with, for a target of `width` by `height` pixels.
+pub struct ScreenPicture {
+    pub screen: sp_model::Uuid,
+    pub scene: Scene,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Builds a scene (whatever `build` does) with these screens' pictures at hand: each
+/// screen-picture object that names one of them shows its scene, scaled into its place. Any
+/// other screen-picture object shows nothing (a stand-in in the operator's window). The
+/// pictures are let go when `build` returns.
+pub fn with_screen_pictures<R>(pictures: Vec<ScreenPicture>, build: impl FnOnce() -> R) -> R {
+    let earlier = SCREEN_PICTURES.with(|kept| std::mem::replace(&mut *kept.borrow_mut(), pictures));
+    let built = build();
+    SCREEN_PICTURES.with(|kept| *kept.borrow_mut() = earlier);
+    built
+}
+
+/// A screen-picture object: the screen's own scene, fitted into the object's place keeping its
+/// shape and clipped to the object's outline. Without it, nothing on the screens, and a dark
+/// panel with a screen drawn in it in the operator's window.
+fn draw_screen(scene: &mut Scene, placed: Affine, screen: Option<sp_model::Uuid>, rect: SlideRect, outline: &BezPath) {
+    let drawn = screen.is_some_and(|wanted| {
+        SCREEN_PICTURES.with(|pictures| {
+            let pictures = pictures.borrow();
+            let Some(picture) = pictures.iter().find(|picture| picture.screen == wanted) else { return false };
+            let (w, h) = (f64::from(picture.width.max(1)), f64::from(picture.height.max(1)));
+            let scale = (f64::from(rect.w) / w).min(f64::from(rect.h) / h);
+            let offset = (
+                f64::from(rect.x) + (f64::from(rect.w) - w * scale) / 2.0,
+                f64::from(rect.y) + (f64::from(rect.h) - h * scale) / 2.0,
+            );
+            // Black where a screen of another shape leaves room, as a screen is.
+            scene.fill(Fill::NonZero, placed, Color::BLACK, None, outline);
+            scene.push_clip_layer(Fill::NonZero, placed, outline);
+            scene.append(&picture.scene, Some(placed * Affine::translate(offset) * Affine::scale(scale)));
+            scene.pop_layer();
+            true
+        })
+    });
+    if drawn || !PLACEHOLDERS.with(std::cell::Cell::get) {
+        return;
+    }
+    let (x, y, w, h) = (f64::from(rect.x), f64::from(rect.y), f64::from(rect.w), f64::from(rect.h));
+    scene.fill(Fill::NonZero, placed, Color::from_rgba8(28, 30, 34, 255), None, outline);
+    scene.stroke(&Stroke::new(3.0), placed, Color::from_rgba8(90, 94, 102, 255), None, outline);
+    // A screen on its stand, in the middle.
+    let side = (w.min(h * 16.0 / 9.0) * 0.32).clamp(24.0, 360.0);
+    let (sw, sh) = (side, side * 9.0 / 16.0);
+    let (cx, cy) = (x + w / 2.0, y + h / 2.0 - sh * 0.1);
+    let ink = Color::from_rgba8(130, 136, 146, 255);
+    let line = Stroke::new((side / 28.0).max(2.0)).with_join(Join::Round);
+    let face = RoundedRect::new(cx - sw / 2.0, cy - sh / 2.0, cx + sw / 2.0, cy + sh / 2.0, side / 30.0);
+    scene.stroke(&line, placed, ink, None, &face);
+    let mut stand = BezPath::new();
+    stand.move_to((cx, cy + sh / 2.0));
+    stand.line_to((cx, cy + sh / 2.0 + sh * 0.18));
+    stand.move_to((cx - sw * 0.18, cy + sh / 2.0 + sh * 0.18));
+    stand.line_to((cx + sw * 0.18, cy + sh / 2.0 + sh * 0.18));
+    scene.stroke(&line, placed, ink, None, &stand);
+}
+
+/// A screen-picture object's label: its words, small and white, in a dark band across the top
+/// of the picture, inside its outline.
+fn draw_screen_label(
+    scene: &mut Scene,
+    fonts: &mut Fonts,
+    placed: Affine,
+    label: &str,
+    template: &sp_model::ThemeTemplate,
+    rect: SlideRect,
+    outline: &BezPath,
+) {
+    let Some(base) = template.box_for(None) else { return };
+    let size = (rect.h * 0.075).clamp(20.0, 72.0);
+    let band = SlideRect { h: (size * 1.6).min(rect.h), ..rect };
+    let look = BoxStyle {
+        size,
+        min_size: size * 0.5,
+        weight: 600,
+        italic: false,
+        fill: Rgba::WHITE,
+        align: sp_model::Align::Left,
+        valign: VAlign::Middle,
+        outline_width: 0.0,
+        shadow: false,
+        caps: sp_model::Caps::None,
+        underline: false,
+        strike: false,
+        scaling: Scaling::TextDown,
+        line_transform: sp_model::LineTransform::None,
+        letter_spacing: 0.0,
+        margins: [size * 0.6, 0.0, size * 0.6, 0.0],
+        line_fill: sp_model::LineFill::default(),
+        list: sp_model::ListStyle::None,
+        scroll: sp_model::Scroll::None,
+        paragraph_spacing: 0.0,
+        baseline: 0.0,
+        gradient: sp_model::Gradient::default(),
+        ..base.clone()
+    };
+    let (x, y) = (f64::from(band.x), f64::from(band.y));
+    scene.push_clip_layer(Fill::NonZero, placed, outline);
+    let strip = Rect::new(x, y, x + f64::from(band.w), y + f64::from(band.h));
+    scene.fill(Fill::NonZero, placed, Color::from_rgba8(0, 0, 0, 170), None, &strip);
+    let words = label.lines().next().unwrap_or_default();
+    draw_text_box(scene, fonts, placed, words, &look, band, 0.0, None);
+    scene.pop_layer();
 }
 
 /// Says whether this thread draws a placeholder for a web page box whose page has no picture
@@ -1317,5 +1446,41 @@ mod tests {
         for (_, s) in p.slides() {
             assert!(!build_scene(&mut fonts, Some(s), &Theme::builtin(), 480, 270).overflow);
         }
+    }
+
+    #[test]
+    fn a_screen_picture_shows_the_scene_it_is_given_and_nothing_else() {
+        let mut fonts = Fonts::new();
+        let screen = sp_model::Uuid::new_v4();
+        let with = |object: Object| Slide::new(vec![object]);
+        let paths = |built: &Built| built.scene.encoding().n_paths;
+        // What the screen shows: here, three squares.
+        let mut source = Scene::new();
+        for at in [0.0, 100.0, 200.0] {
+            source.fill(Fill::NonZero, Affine::IDENTITY, Color::WHITE, None, &Rect::new(at, 0.0, at + 50.0, 50.0));
+        }
+        let picture = || vec![ScreenPicture { screen, scene: source.clone(), width: 1920, height: 1080 }];
+        let theme = Theme::builtin();
+        let empty = paths(&build_scene(&mut fonts, Some(&with(Object::shape(Shape::Rectangle))), &theme, 960, 540));
+        let alone = build_scene(&mut fonts, Some(&with(Object::screen(Some(screen)))), &theme, 960, 540);
+        let shown = with_screen_pictures(picture(), || {
+            build_scene(&mut fonts, Some(&with(Object::screen(Some(screen)))), &theme, 960, 540)
+        });
+        // Without its picture it draws nothing (no stand-in on the screens' thread); with it,
+        // the three squares, clipped to its place.
+        assert!(paths(&alone) < empty, "a rectangle draws its fill; a bare screen picture nothing");
+        assert!(paths(&shown) >= paths(&alone) + 3, "{} and {}", paths(&shown), paths(&alone));
+        // A picture of another screen, or one given only while another scene was built, is not shown.
+        let other = with_screen_pictures(picture(), || {
+            build_scene(&mut fonts, Some(&with(Object::screen(Some(sp_model::Uuid::new_v4())))), &theme, 960, 540)
+        });
+        assert_eq!(paths(&other), paths(&alone));
+        let after = build_scene(&mut fonts, Some(&with(Object::screen(Some(screen)))), &theme, 960, 540);
+        assert_eq!(paths(&after), paths(&alone));
+        // In the operator's window it has a stand-in, so it can be seen and moved.
+        show_placeholders(true);
+        let stand_in = build_scene(&mut fonts, Some(&with(Object::screen(Some(screen)))), &theme, 960, 540);
+        show_placeholders(false);
+        assert!(paths(&stand_in) > paths(&alone));
     }
 }

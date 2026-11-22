@@ -231,6 +231,28 @@ fn layout_menu(ui: &mut egui::Ui, only_one: bool) -> Option<Choice> {
     chose
 }
 
+/// The audience screens a screen picture can show, by id and name, the first (the main one)
+/// first. A stage screen is never one of them: no screen shows itself.
+pub fn audience_screens(state: &HomeState) -> Vec<(sp_model::Uuid, String)> {
+    state
+        .screens
+        .iter()
+        .filter(|screen| screen.kind == crate::screens::Kind::Audience)
+        .map(|screen| (screen.id, screen.name.clone()))
+        .collect()
+}
+
+/// What the main audience screen is called in a screen picture's choice.
+pub const MAIN_SCREEN: &str = "Audience screens (main)";
+
+/// The name a screen picture is given in the Objects list for what it shows.
+pub fn screen_object_name(screen: Option<sp_model::Uuid>, screens: &[(sp_model::Uuid, String)]) -> String {
+    match screen.and_then(|id| screens.iter().find(|(have, _)| *have == id)) {
+        Some((_, name)) => format!("Screen: {name}"),
+        None => "Screen: main audience".to_owned(),
+    }
+}
+
 /// A new object showing one of the stage's items, in the middle of the stage, with the plain
 /// stage look at 72 points.
 pub fn item_object(role: &str) -> Object {
@@ -246,9 +268,9 @@ pub fn item_object(role: &str) -> Object {
 }
 
 /// The canvas's Add menu on a stage layout: words of its own, a shape, a picture or video, a
-/// web page; then each item the stage can show live. Returns true when the menu asked for a
-/// picture or video from a file.
-pub fn add_menu(ui: &mut egui::Ui, draft: &mut EditDraft) -> bool {
+/// web page; then each item the stage can show live, and a picture of an audience screen.
+/// Returns true when the menu asked for a picture or video from a file.
+pub fn add_menu(ui: &mut egui::Ui, draft: &mut EditDraft, screens: &[(sp_model::Uuid, String)]) -> bool {
     let mut wants_picture = false;
     if ui.add(egui::Button::new("Text").shortcut_text("T")).clicked() {
         draft.add_text();
@@ -278,6 +300,18 @@ pub fn add_menu(ui: &mut egui::Ui, draft: &mut EditDraft) -> bool {
             ui.close();
         }
     }
+    ui.menu_button("Screen Picture", |ui| {
+        let mut choices = vec![(None, MAIN_SCREEN.to_owned())];
+        choices.extend(screens.iter().map(|(id, name)| (Some(*id), name.clone())));
+        for (screen, name) in choices {
+            if ui.button(name).on_hover_text("What this screen shows, live, in a box on the stage").clicked() {
+                let mut object = Object::screen(screen);
+                object.name = screen_object_name(screen, screens);
+                draft.add(object);
+                ui.close();
+            }
+        }
+    });
     wants_picture
 }
 
@@ -307,7 +341,8 @@ pub fn layout_panel(ui: &mut egui::Ui, state: &mut HomeState) {
     });
     ui.add_space(8.0);
     let about = "Each object shows something live: the words on screen, the next slide, the clock, a timer, \
-                 the notes or the stage message. Add more from Add above the stage. Click one to change it.";
+                 the notes, the stage message, or what an audience screen shows. Add more from Add above the \
+                 stage. Click one to change it.";
     ui.label(egui::RichText::new(about).size(12.0).color(TEXT_FAINT));
     ui.add_space(8.0);
     let screens = if using.is_empty() {
@@ -392,6 +427,83 @@ pub fn item_settings(ui: &mut egui::Ui, object: &mut Object, timers: &[(sp_model
         }
     }
     ui.add_space(4.0);
+}
+
+/// A screen picture's settings, at the head of the inspector's Shape tab: which screen it shows
+/// (the main audience screen, or one by name, kept by its id), its corners and its label.
+pub fn screen_settings(ui: &mut egui::Ui, object: &mut Object, screens: &[crate::screens::Screen]) {
+    let listed: Vec<(sp_model::Uuid, String)> = screens
+        .iter()
+        .filter(|screen| screen.kind == crate::screens::Kind::Audience)
+        .map(|screen| (screen.id, screen.name.clone()))
+        .collect();
+    let auto_name = |screen: Option<sp_model::Uuid>| screen_object_name(screen, &listed);
+    let name_before = object.name.clone();
+    let ObjectKind::Screen { screen, corner, label } = &mut object.kind else { return };
+    let was = *screen;
+    let (_, fell_back) = crate::stage::source_screen(*screen, screens);
+    let shown = match screen.and_then(|id| listed.iter().find(|(have, _)| *have == id)) {
+        Some((_, name)) => name.clone(),
+        None => MAIN_SCREEN.to_owned(),
+    };
+    ui.label(egui::RichText::new("SCREEN").font(crate::studio::fixed_semibold(11.0)).color(TEXT_FAINT));
+    egui::ComboBox::from_id_salt("screen picture source").selected_text(shown).width(ui.available_width()).show_ui(
+        ui,
+        |ui| {
+            if ui.add(egui::Button::selectable(screen.is_none(), MAIN_SCREEN)).clicked() {
+                *screen = None;
+            }
+            for (id, name) in &listed {
+                if ui.add(egui::Button::selectable(*screen == Some(*id), name.as_str())).clicked() {
+                    *screen = Some(*id);
+                }
+            }
+        },
+    );
+    let main_name = listed.first().map(|(_, name)| name.as_str());
+    let said = match (fell_back, main_name) {
+        (true, Some(main)) => {
+            let gone = screens.iter().all(|have| Some(have.id) != was);
+            let why = if gone {
+                "The screen it showed has been removed"
+            } else {
+                "The screen it showed is now a stage screen"
+            };
+            egui::RichText::new(format!("{why}, so it shows the main audience screen ({main}). Choose another above."))
+                .color(crate::studio::CARE)
+        }
+        (true, None) | (false, None) => {
+            egui::RichText::new("There is no audience screen to show. Add one in Settings › Screens.")
+                .color(crate::studio::CARE)
+        }
+        (false, Some(main)) if was.is_none() => {
+            egui::RichText::new(format!("Shows the first audience screen, now {main}, whichever that is."))
+                .color(TEXT_FAINT)
+        }
+        (false, Some(_)) => {
+            egui::RichText::new("Shows live what that screen shows, in its own theme.").color(TEXT_FAINT)
+        }
+    };
+    ui.label(said.size(11.5));
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("Corners").size(12.5).color(TEXT_DIM));
+        ui.add(egui::DragValue::new(corner).range(0.0..=200.0).speed(0.5).max_decimals(0));
+        ui.add_space(12.0);
+        ui.label(egui::RichText::new("Label").size(12.5).color(TEXT_DIM));
+        ui.add(egui::TextEdit::singleline(label).hint_text("None").desired_width(f32::INFINITY));
+    });
+    // A name that said which screen it showed follows the new choice.
+    if *screen != was && name_before == auto_name(was) {
+        object.name = auto_name(object_screen(object));
+    }
+}
+
+fn object_screen(object: &Object) -> Option<sp_model::Uuid> {
+    match &object.kind {
+        ObjectKind::Screen { screen, .. } => *screen,
+        _ => None,
+    }
 }
 
 /// The two lines at the foot of the stage's canvas: that the keyboard edits here, and how.

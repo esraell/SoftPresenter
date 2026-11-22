@@ -324,6 +324,45 @@ pub fn copy_of(layout: &ThemeTemplate, name: String) -> ThemeTemplate {
     ThemeTemplate { id: Uuid::new_v4(), name, objects, bible: false, ..layout.clone() }
 }
 
+/// Which audience screen a screen picture shows: the one it names while that is still an
+/// audience screen, otherwise the first audience screen. The second part is true when it
+/// names a screen it cannot show (gone, or now a stage screen) and shows the first instead.
+/// `None` when there is no audience screen at all.
+pub fn source_screen(wanted: Option<Uuid>, screens: &[crate::screens::Screen]) -> (Option<Uuid>, bool) {
+    let audience = |screen: &&crate::screens::Screen| screen.kind == crate::screens::Kind::Audience;
+    match wanted {
+        Some(id) if screens.iter().filter(audience).any(|screen| screen.id == id) => (Some(id), false),
+        wanted => (screens.iter().find(audience).map(|screen| screen.id), wanted.is_some()),
+    }
+}
+
+/// The layout with each screen picture naming the audience screen it shows now (see
+/// [`source_screen`]), for the screens' thread, which knows no screen's order or kind. With no
+/// audience screen it names none of them (`Uuid::nil()`), which is drawn as the audience
+/// picture with no look of its own.
+pub fn with_sources(layout: &ThemeTemplate, screens: &[crate::screens::Screen]) -> ThemeTemplate {
+    let mut layout = normalized(layout);
+    for object in &mut layout.objects {
+        if let ObjectKind::Screen { screen, .. } = &mut object.kind {
+            *screen = Some(source_screen(*screen, screens).0.unwrap_or(Uuid::nil()));
+        }
+    }
+    layout
+}
+
+/// The screens a layout's screen pictures show, each once, as [`with_sources`] left them.
+pub fn sources(layout: &ThemeTemplate) -> Vec<Uuid> {
+    let mut found = Vec::new();
+    for object in layout.objects.iter().filter(|object| !object.hidden) {
+        if let ObjectKind::Screen { screen: Some(id), .. } = &object.kind
+            && !found.contains(id)
+        {
+            found.push(*id);
+        }
+    }
+    found
+}
+
 fn file() -> Option<std::path::PathBuf> {
     crate::bible_store::data_dir().map(|dir| dir.join("stage-layouts.json"))
 }
@@ -564,6 +603,88 @@ mod tests {
         png.write_header().and_then(|mut writer| writer.write_image_data(&pixels)).expect("png");
     }
 
+    /// How long the screens' thread takes to draw a stage screen, with and without a picture of
+    /// the audience screen on it, as it draws them: the stage's scene built (the audience's
+    /// scene taken from its window, as a copy), painted at 1920 × 1080, and waited for until the
+    /// GPU has finished. Prints the figures. Run by hand:
+    /// `cargo test -p sp-app stage_drawing_time -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "needs a GPU, and is for measuring"]
+    fn stage_drawing_time() {
+        use sp_render::vello::util::RenderContext;
+        use sp_render::{Fonts, Layers, Painter, build_layers, target_texture, wgpu};
+        let song = sp_model::parse_song_text(
+            "S",
+            "We lift our voices, we lift our hands\nWe sing together across the lands\n--\nМы поднимаем голоса и руки\nМы поём вместе по всей земле\n\nOne song, one heart\n--\nОдна песня, одно сердце\n",
+        );
+        let (now, next) = (song.slide(0).map(|(_, s)| s), song.slide(1).map(|(_, s)| s));
+        let (w, h) = (1920, 1080);
+        let mut cx = RenderContext::new();
+        let id = pollster::block_on(cx.device(None)).expect("a GPU");
+        let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+        let mut painter = Painter::new(device).expect("painter");
+        let mut fonts = Fonts::new();
+        let texture = target_texture(device, w, h);
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // The audience screen: the song's slide over a photograph-like picture, as its window
+        // holds it.
+        let pixels: Vec<u8> =
+            (0..w * h).flat_map(|i| [(i % 251) as u8, (i % 241) as u8, (i % 239) as u8, 255]).collect();
+        let media = sp_render::Picture::from_rgba(w, h, pixels).expect("a picture");
+        let audience_theme = Theme::builtin();
+        let audience = build_layers(
+            &mut fonts,
+            &Layers { media: Some(&media), slide: now, ..Default::default() },
+            &audience_theme,
+            w,
+            h,
+        )
+        .scene;
+        let screen = Uuid::from_u128(1);
+        let plain = builtin_layouts().remove(0);
+        let mut with_picture = plain.clone();
+        let mut object = Object::screen(Some(screen));
+        object.frame = Some(SlideRect { x: 1240.0, y: 130.0, w: 640.0, h: 360.0 });
+        with_picture.objects.push(object);
+        let overlay = crate::output::Overlay::default();
+        let mut draw = |layout: &ThemeTemplate, picture: bool| {
+            let started = std::time::Instant::now();
+            let stage = slide(now, next, &overlay, &About::default(), layout);
+            let theme = theme_for(layout);
+            let pictures = if picture {
+                vec![sp_render::ScreenPicture { screen, scene: audience.clone(), width: w, height: h }]
+            } else {
+                Vec::new()
+            };
+            let layers = Layers { slide: Some(&stage), ..Default::default() };
+            let scene =
+                sp_render::with_screen_pictures(pictures, || build_layers(&mut fonts, &layers, &theme, w, h)).scene;
+            let built = started.elapsed();
+            painter.paint(device, queue, &scene, &view, w, h).expect("paint");
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            (built, started.elapsed())
+        };
+        // Taken in turns, so a busy computer slows both alike.
+        let rounds = 300;
+        let mut sums = [(std::time::Duration::ZERO, std::time::Duration::ZERO); 2];
+        for round in 0..rounds + 20 {
+            for (at, (layout, picture)) in [(&plain, false), (&with_picture, true)].into_iter().enumerate() {
+                let (built, total) = draw(layout, picture);
+                if round >= 20 {
+                    sums[at].0 += built;
+                    sums[at].1 += total;
+                }
+            }
+        }
+        for (name, (built, total)) in ["without", "with"].into_iter().zip(sums) {
+            println!(
+                "stage screen {name} a screen picture: {:.2} ms each ({:.2} ms building the scene), over {rounds}",
+                total.as_secs_f64() * 1000.0 / f64::from(rounds),
+                built.as_secs_f64() * 1000.0 / f64::from(rounds)
+            );
+        }
+    }
+
     #[test]
     fn a_stage_screen_shows_the_time_the_words_now_and_the_next_words() {
         let song = sp_model::parse_song_text("S", "One\n--\nОдин\n\nTwo\n");
@@ -664,6 +785,7 @@ mod tests {
 mod object_tests {
     use super::*;
     use crate::editor::EditDraft;
+    use crate::screens::{Output, Screen};
 
     /// The stage layouts as the app saved them before items were objects (the four built in
     /// and one changed by hand, with a shape behind and the stage message moved to the back of
@@ -912,5 +1034,47 @@ Band: clock=TIME/None | timer=Some("Sermon  TIMER")/None | stage-message=Some("W
         let read: ThemeTemplate = serde_json::from_str(&serde_json::to_string(&layout).unwrap()).unwrap();
         assert_eq!(read, layout);
         assert!(!serde_json::to_string(&builtin_layouts()).unwrap().contains("\"shows\""));
+    }
+
+    #[test]
+    fn a_screen_picture_shows_an_audience_screen_and_falls_back_to_the_first() {
+        let main = Screen::new("Main".to_owned(), Output::Automatic);
+        let hdmi = Screen::new("HDMI main".to_owned(), Output::Window);
+        let band = Screen::stage("Band".to_owned(), Output::Window);
+        let screens = vec![band.clone(), main.clone(), hdmi.clone()];
+        // The main one is the first audience screen, wherever it is in the list.
+        assert_eq!(source_screen(None, &screens), (Some(main.id), false));
+        assert_eq!(source_screen(Some(hdmi.id), &screens), (Some(hdmi.id), false));
+        // A screen that has gone, or is now a stage screen, falls back to the main one, and says so.
+        assert_eq!(source_screen(Some(sp_model::Uuid::new_v4()), &screens), (Some(main.id), true));
+        assert_eq!(source_screen(Some(band.id), &screens), (Some(main.id), true));
+        let mut changed = screens.clone();
+        changed[2].kind = crate::screens::Kind::Stage;
+        assert_eq!(source_screen(Some(hdmi.id), &changed), (Some(main.id), true));
+        // Renamed, it is still the one shown: it is kept by its id.
+        let mut renamed = screens.clone();
+        renamed[2].name = "Projector".to_owned();
+        assert_eq!(source_screen(Some(hdmi.id), &renamed), (Some(hdmi.id), false));
+        // With no audience screen at all there is nothing to show.
+        assert_eq!(source_screen(None, std::slice::from_ref(&band)), (None, false));
+        // The screens' thread is told the screen each picture shows, never a stage screen.
+        let mut layout = builtin_layouts().remove(0);
+        for wanted in [None, Some(hdmi.id), Some(band.id), Some(sp_model::Uuid::new_v4())] {
+            layout.objects.push(Object::screen(wanted));
+        }
+        let sent = with_sources(&layout, &screens);
+        assert_eq!(sources(&sent), [main.id, hdmi.id]);
+        assert!(!sources(&with_sources(&layout, &changed)).contains(&hdmi.id));
+        assert_eq!(sources(&with_sources(&layout, std::slice::from_ref(&band))), [sp_model::Uuid::nil()]);
+        // The layout keeps what was chosen: only the copy sent is told.
+        assert!(matches!(layout.objects.last().unwrap().kind, ObjectKind::Screen { screen: Some(_), .. }));
+        assert!(matches!(layout.objects[layout.objects.len() - 4].kind, ObjectKind::Screen { screen: None, .. }));
+        // On the stage it is drawn where it is in the layout, in front of what comes before it.
+        let shown = slide(None, None, &crate::output::Overlay::default(), &About::default(), &sent);
+        assert!(matches!(shown.objects.last().unwrap().kind, ObjectKind::Screen { .. }));
+        // The editor's Add menu offers only audience screens.
+        let state = crate::home::HomeState { screens, ..Default::default() };
+        let offered = crate::stage_editor::audience_screens(&state);
+        assert_eq!(offered.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [main.id, hdmi.id]);
     }
 }

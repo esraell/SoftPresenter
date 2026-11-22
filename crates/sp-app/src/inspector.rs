@@ -393,6 +393,15 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
             );
         } else {
             let tab_names = [InspectorTab::Shape, InspectorTab::Text, InspectorTab::Build];
+            // A screen picture on a stage layout has no words: its settings are on the Shape tab.
+            let picture = state
+                .editing
+                .as_ref()
+                .and_then(|draft| draft.selected_object())
+                .is_some_and(|object| matches!(object.kind, ObjectKind::Screen { .. }));
+            if stage && picture && state.inspector.tab == InspectorTab::Text {
+                state.inspector.tab = InspectorTab::Shape;
+            }
             let tabs = crate::studio::Tabs::plain(&["Shape", "Text", "Build"]);
             let width = ui.available_width();
             let (place, _) =
@@ -611,12 +620,18 @@ fn web_address(ui: &mut egui::Ui, object: sp_model::Uuid, url: &mut String) {
 fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let stage = state.editing.as_ref().is_some_and(crate::stage_editor::is_stage) && state.theme_edit.is_none();
     let for_theme = state.theme_edit.is_some() || stage;
+    let screens = if stage { state.screens.clone() } else { Vec::new() };
     let lock_shape = &mut state.inspector.lock_shape;
     let Some(draft) = state.editing.as_mut() else { return };
     let themed = draft.selected_object().map(|object| object_frame(&draft.slide, object, theme));
     let (Some(frame), Some(object)) = (themed, draft.selected_object_mut()) else {
         return nothing_selected(ui);
     };
+    // A screen picture: which screen it shows, its corners and its label.
+    if stage && matches!(object.kind, ObjectKind::Screen { .. }) {
+        crate::stage_editor::screen_settings(ui, object, &screens);
+        rule(ui);
+    }
     let mut edited = frame;
     // Spreading the selected objects out evenly is done once this object is let go of.
     let mut spread: Option<bool> = None;

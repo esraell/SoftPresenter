@@ -916,6 +916,10 @@ struct Output {
     preview_fade: Option<(vello::Scene, vello::Scene)>,
     /// The audience screen the live preview is drawn as, when the operator looks at one.
     preview_screen: Option<Uuid>,
+    /// True in a drawing of every screen until the windows other than the stage's are drawn:
+    /// meanwhile a stage screen's picture of one of them is made from the frame, not taken from
+    /// the window, which still holds the last drawing's.
+    windows_behind: bool,
 }
 
 fn run(
@@ -997,6 +1001,7 @@ fn run(
         preview_shown: None,
         preview_fade: None,
         preview_screen: None,
+        windows_behind: false,
         device,
         queue,
     };
@@ -1542,7 +1547,10 @@ impl Output {
             mask: look.mask,
             announcement: announcement.as_ref().map(|(slide, theme)| (&**slide, &**theme)),
         };
-        let scene = build_layers(&mut self.fonts, &layers, &theme, w, h).scene;
+        // A stage screen's screen pictures show those screens' own pictures of this moment.
+        let pictures = self.screen_pictures(id, frame);
+        let fonts = &mut self.fonts;
+        let scene = sp_render::with_screen_pictures(pictures, || build_layers(fonts, &layers, &theme, w, h)).scene;
         // Covered with clear is not covered at all: a see-through screen's edges are cut away.
         if see_through { cut_covered_edges(scene, look.mask, w, h) } else { scene }
     }
@@ -1932,16 +1940,27 @@ impl Output {
         self.round.begin();
         // Cheap copies: the picture and the slide are shared, not duplicated.
         let frame = self.frame.clone();
+        self.windows_behind = true;
         self.send_ndi(&frame, NdiChange::Any);
         self.capture(&frame);
         // How far a fade already under way has got, before the clock is started again.
         let amount = self.fading.map(|(started, look)| fade_amount(started, look.duration()));
         let mut fading = false;
-        for index in 0..self.targets.len() {
+        // The stage screens are drawn after the others, with the fade's clock started: a stage
+        // screen may show another screen's picture, which is then the one of this drawing.
+        let mut order: Vec<usize> = (0..self.targets.len()).collect();
+        order.sort_by_key(|&index| self.is_stage(self.targets[index].id));
+        let mut clock_started = false;
+        for index in order {
             let (id, w, h) = {
                 let target = &self.targets[index];
                 (target.id, target.config.width, target.config.height)
             };
+            if !clock_started && self.is_stage(id) {
+                self.fading = fading.then(|| (Instant::now(), self.look));
+                self.windows_behind = false;
+                clock_started = true;
+            }
             // A key in a window is shown when its fill's window is, from that picture, fade
             // and all (see `present_keys_of`); it keeps nothing of its own.
             if self.window_fill(id).is_some() {
@@ -1973,7 +1992,10 @@ impl Output {
                 }
             }
         }
-        self.fading = fading.then(|| (Instant::now(), self.look));
+        if !clock_started {
+            self.fading = fading.then(|| (Instant::now(), self.look));
+        }
+        self.windows_behind = false;
         // The preview follows, fading if the screens do.
         self.draw_live_preview(&frame, new_picture);
         if fading {
@@ -2062,8 +2084,15 @@ impl Output {
         }
         let (w, h) = NDI_SIZE;
         // The first screen's picture, as its window shows it (its look, its identify marks).
-        let id = self.targets.first().map_or(Uuid::nil(), |target| target.id);
+        // Testing aid: SOFTPRESENTER_CAPTURE_OUTPUT_STAGE=1 takes the first stage screen's, with
+        // its pictures of other screens as their windows hold them.
+        let stage = std::env::var_os("SOFTPRESENTER_CAPTURE_OUTPUT_STAGE").is_some();
+        let first = self.targets.iter().find(|target| !stage || self.is_stage(target.id));
+        let id = first.map_or(Uuid::nil(), |target| target.id);
+        let behind = self.windows_behind;
+        self.windows_behind = behind && !stage;
         let scene = self.scene_for(id, frame, w, h);
+        self.windows_behind = behind;
         let target = target_texture(&self.device, w, h);
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
         let saved = self
@@ -2168,6 +2197,64 @@ impl Output {
         self.stage.iter().any(|(have, _)| *have == id)
     }
 
+    /// For a stage screen, what each screen its layout's screen pictures show is showing now:
+    /// that screen's window's own picture (in a fade, the mix it shows), or, for a screen with
+    /// no window (on NDI only, or off) or whose window this drawing has still to draw, its
+    /// picture made from the frame. Never a stage screen's: no screen shows itself.
+    fn screen_pictures(&mut self, id: Uuid, frame: &Frame) -> Vec<sp_render::ScreenPicture> {
+        let Some(template) = self.stage.iter().find(|(have, _)| *have == id).and_then(|(_, l)| l.templates.first())
+        else {
+            return Vec::new();
+        };
+        if !self.stage_on {
+            return Vec::new();
+        }
+        let mut pictures = Vec::new();
+        for screen in crate::stage::sources(template) {
+            if self.is_stage(screen) {
+                continue;
+            }
+            let window = self.targets.iter().find(|target| target.id == screen).filter(|_| !self.windows_behind);
+            let shown = window.and_then(|target| {
+                let (w, h) = (target.config.width, target.config.height);
+                let scene = match (&target.fade, self.fading) {
+                    (Some((from, to)), Some((started, look))) => {
+                        let amount = fade_amount(started, look.duration());
+                        sp_render::transition(look.kind, look.direction, from, to, amount, w, h)
+                    }
+                    (Some((from, _)), None) => from.clone(),
+                    (None, _) => target.shown.clone()?,
+                };
+                Some((scene, w, h))
+            });
+            let (scene, width, height) = match shown {
+                Some(shown) => shown,
+                None => {
+                    let (w, h) = NDI_SIZE;
+                    (self.scene_for(screen, frame, w, h), w, h)
+                }
+            };
+            pictures.push(sp_render::ScreenPicture { screen, scene, width, height });
+        }
+        pictures
+    }
+
+    /// The stage screens' windows whose layouts show a picture of a screen that is fading.
+    fn stage_following_fades(&self) -> Vec<usize> {
+        if !self.stage_on {
+            return Vec::new();
+        }
+        let fading = |screen: &Uuid| self.targets.iter().any(|target| target.id == *screen && target.fade.is_some());
+        (0..self.targets.len())
+            .filter(|&index| {
+                let layout = self.stage.iter().find(|(have, _)| *have == self.targets[index].id);
+                layout
+                    .and_then(|(_, layout)| layout.templates.first())
+                    .is_some_and(|template| crate::stage::sources(template).iter().any(fading))
+            })
+            .collect()
+    }
+
     /// True when there is a stage screen to keep the time on.
     fn has_stage(&self) -> bool {
         self.stage_on
@@ -2229,6 +2316,8 @@ impl Output {
                 }
             }
         }
+        // Stage screens showing a picture of a screen that is fading are drawn again with it.
+        let following = self.stage_following_fades();
         for index in 0..self.targets.len() {
             let Some((from, to)) = self.targets[index].fade.take() else { continue };
             if amount >= 1.0 {
@@ -2247,6 +2336,17 @@ impl Output {
                 };
                 self.present(index, &scene);
                 self.targets[index].fade = Some((from, to));
+            }
+        }
+        for index in following {
+            let (id, w, h) = {
+                let target = &self.targets[index];
+                (target.id, target.config.width, target.config.height)
+            };
+            let frame = self.frame.clone();
+            let scene = self.scene_for(id, &frame, w, h);
+            if self.present(index, &scene) {
+                self.targets[index].shown = Some(scene);
             }
         }
         self.step_live_preview(Some(amount));

@@ -2135,12 +2135,18 @@ fn edit_view(
                         // A hidden object's row is greyed.
                         let ink = if object.hidden { Color32::from_gray(120) } else { Color32::from_gray(230) };
                         // T for text, a diamond for a shape, a globe for a web page.
+                        // A screen picture: a screen.
                         let mark = match object.kind {
                             sp_model::ObjectKind::Text { .. } => "T",
                             sp_model::ObjectKind::Image { .. } => "▣",
                             sp_model::ObjectKind::Shape { .. } => "◆",
                             sp_model::ObjectKind::Web { .. } => "🌐",
+                            sp_model::ObjectKind::Screen { .. } => "",
                         };
+                        if mark.is_empty() {
+                            let spot = Rect::from_center_size(row.left_center() + vec2(17.0, 0.0), vec2(13.0, 13.0));
+                            icons::paint(ui.painter(), Icon::Stage, spot, ink);
+                        }
                         ui.painter().text(
                             row.left_center() + vec2(12.0, 0.0),
                             Align2::LEFT_CENTER,
@@ -3295,15 +3301,16 @@ fn stage_tools(ui: &mut egui::Ui, state: &mut HomeState, inner: Rect, layout: us
         let at = pos2(title.max.x + 8.0, y + 1.0);
         crate::studio::cap(ui, at, Align2::LEFT_CENTER, "Stage layout", crate::studio::TEXT_FAINT);
     }
+    let screens = crate::stage_editor::audience_screens(state);
     let add = ui.interact(add_bar, ui.scope_id().with("stage add"), Sense::click());
     crate::studio::paint_button(ui.painter(), add_bar, add.hovered());
     let font = crate::studio::semibold(12.5);
     ui.painter().text(add_bar.center(), Align2::CENTER_CENTER, "Add ▾", font.clone(), crate::studio::TEXT);
-    let add = add.on_hover_text("Add words, a shape, a picture, or something the stage shows live");
+    let add = add.on_hover_text("Add words, a shape, a picture, something the stage shows live, or a screen's picture");
     let mut wants_picture = false;
     egui::Popup::menu(&add).show(|ui| {
         if let Some(draft) = state.editing.as_mut() {
-            wants_picture = crate::stage_editor::add_menu(ui, draft);
+            wants_picture = crate::stage_editor::add_menu(ui, draft, &screens);
         }
     });
     if wants_picture {

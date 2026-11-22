@@ -5616,7 +5616,11 @@ impl App {
         let stage = (
             list.iter()
                 .filter(|screen| screen.kind == screens::Kind::Stage)
-                .map(|screen| (screen.id, stage::layout_for(&home_state.stage_layouts, screen.stage_layout)))
+                .map(|screen| {
+                    // Each screen picture names the audience screen it shows now.
+                    let layout = stage::layout_for(&home_state.stage_layouts, screen.stage_layout);
+                    (screen.id, stage::with_sources(&layout, &list))
+                })
                 .collect::<Vec<_>>(),
             home_state.stage_on,
         );

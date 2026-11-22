@@ -612,7 +612,9 @@ impl EditDraft {
         }
         self.record();
         let mut ids = Vec::new();
-        for object in objects {
+        // A screen picture belongs on a stage layout: anywhere else it would show nothing.
+        let fits = |object: &&Object| self.keeps_roles || !matches!(object.kind, ObjectKind::Screen { .. });
+        for object in objects.iter().filter(fits) {
             let mut copy = object.clone();
             copy.id = Uuid::new_v4();
             // A copy belongs to no theme box: two boxes with one role would fight over it.

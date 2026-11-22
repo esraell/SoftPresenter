@@ -85,6 +85,22 @@ pub enum ObjectKind {
     /// A live web page in the object's place, laid out at the object's size. `url` is an
     /// `https` address (the app opens nothing else).
     Web { url: String },
+    /// On a stage layout: what one of the audience screens shows, live, scaled into the
+    /// object's place. Drawn only on a stage screen (anywhere else it shows nothing, or a
+    /// stand-in in the operator's window).
+    Screen {
+        /// The screen, by its id, so renaming it changes nothing. `None` is the first audience
+        /// screen, whichever that is; so is a screen that has gone, or is no longer an audience
+        /// screen.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        screen: Option<Uuid>,
+        /// How round its corners are, in slide units.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        corner: f32,
+        /// Words in a band across the top of the picture; none when empty.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        label: String,
+    },
 }
 
 /// How an item on a stage layout shows what it shows: which timer, the clock's form, how many
@@ -398,11 +414,27 @@ impl Object {
         }
     }
 
+    /// A picture of what an audience screen shows, for a stage layout: the first audience
+    /// screen's, a third of the stage wide, in its top right corner.
+    pub fn screen(screen: Option<Uuid>) -> Object {
+        let (w, h) = (640.0, 360.0);
+        Object {
+            name: "Screen".to_owned(),
+            frame: Some(SlideRect { x: crate::SLIDE_WIDTH - w - 40.0, y: 130.0, w, h }),
+            fill: None,
+            kind: ObjectKind::Screen { screen, corner: 0.0, label: String::new() },
+            ..Object::shape(Shape::Rectangle)
+        }
+    }
+
     /// The object's own text settings, over its theme box.
     pub fn text_style(&self) -> Option<&crate::TextStyle> {
         match &self.kind {
             ObjectKind::Text { style, .. } => Some(style),
-            ObjectKind::Shape { .. } | ObjectKind::Image { .. } | ObjectKind::Web { .. } => None,
+            ObjectKind::Shape { .. }
+            | ObjectKind::Image { .. }
+            | ObjectKind::Web { .. }
+            | ObjectKind::Screen { .. } => None,
         }
     }
 
@@ -410,14 +442,20 @@ impl Object {
     pub fn text_style_mut(&mut self) -> Option<&mut crate::TextStyle> {
         match &mut self.kind {
             ObjectKind::Text { style, .. } => Some(style),
-            ObjectKind::Shape { .. } | ObjectKind::Image { .. } | ObjectKind::Web { .. } => None,
+            ObjectKind::Shape { .. }
+            | ObjectKind::Image { .. }
+            | ObjectKind::Web { .. }
+            | ObjectKind::Screen { .. } => None,
         }
     }
 
     pub fn as_text(&self) -> Option<&str> {
         match &self.kind {
             ObjectKind::Text { text, .. } => Some(text),
-            ObjectKind::Shape { .. } | ObjectKind::Image { .. } | ObjectKind::Web { .. } => None,
+            ObjectKind::Shape { .. }
+            | ObjectKind::Image { .. }
+            | ObjectKind::Web { .. }
+            | ObjectKind::Screen { .. } => None,
         }
     }
 }
@@ -995,9 +1033,10 @@ impl Presentation {
                             ObjectKind::Text { style, .. } => {
                                 ObjectKind::Text { text: String::new(), style: style.clone() }
                             }
-                            other @ (ObjectKind::Shape { .. } | ObjectKind::Image { .. } | ObjectKind::Web { .. }) => {
-                                other.clone()
-                            }
+                            other @ (ObjectKind::Shape { .. }
+                            | ObjectKind::Image { .. }
+                            | ObjectKind::Web { .. }
+                            | ObjectKind::Screen { .. }) => other.clone(),
                         };
                         Object { id: Uuid::new_v4(), kind, ..object.clone() }
                     })
