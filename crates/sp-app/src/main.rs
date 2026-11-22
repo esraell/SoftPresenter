@@ -8064,19 +8064,6 @@ impl App {
             A::StageTab => state.live_tab = 4,
             A::AudioTab => state.live_tab = 5,
             A::MediaBin => state.media_hidden = !state.media_hidden,
-            A::NextBackground | A::PreviousBackground => {
-                // The next (or last) picture in the media bin, round to the start (or end).
-                let count = self.show.media().len();
-                if count > 0 {
-                    let at = match (self.show.live_media(), action == A::NextBackground) {
-                        (Some(live), true) => (live + 1) % count,
-                        (Some(live), false) => (live + count - 1) % count,
-                        (None, true) => 0,
-                        (None, false) => count - 1,
-                    };
-                    commands.push(Command::ShowMedia(at));
-                }
-            }
             A::ShowLiveSong => {
                 // The song on screen, chosen in the Show view.
                 if let Some(live) = self.show.live() {
