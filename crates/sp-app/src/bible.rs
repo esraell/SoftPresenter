@@ -815,6 +815,15 @@ pub const LISTS_WIDTH: f32 = 300.0;
 /// How tall the bar along the top of the lists is, with Hide in it.
 const LISTS_BAR: f32 = 28.0;
 
+/// A verse's whole chapter, as this Bible names it for a lookup (`Genesis 1`), and the place of
+/// the verse's slide among the chapter's when they are made one a verse (the verses before it
+/// that the Bible has). The Bible is the first translation, which numbers the slides.
+pub fn in_its_chapter(bible: &Bible, verse: VerseRef) -> (String, usize) {
+    let first = VerseRef { verse: 1, ..verse };
+    let before = bible.verses(sp_bible::Range { start: first, end: verse }).len();
+    (format!("{} {}", bible.book_name(verse.book), verse.chapter), before.saturating_sub(1))
+}
+
 /// The book, chapter and verse lists beside the Bible page's slides: the books named in the
 /// operator's language (the session's), the chapters and verses as the first translation
 /// numbers them. A book opens its chapters, a chapter its verses; a verse is looked up at once
@@ -963,10 +972,9 @@ pub fn lists(ui: &mut egui::Ui, page: &mut crate::home::BiblePage, live: Option<
                     }
                     let place = |verse| VerseRef { book, chapter, verse };
                     if row.double_clicked() {
-                        chosen = Some(format!("{name} {chapter}"));
-                        // Its slide in the chapter: the verses before it, with one a slide.
-                        let before = bible.verses(sp_bible::Range { start: place(1), end: place(verse) }).len();
-                        go_live = Some(if page.options.break_on_new_verse { before.saturating_sub(1) } else { 0 });
+                        let (whole, slide) = in_its_chapter(&bible, place(verse));
+                        chosen = Some(whole);
+                        go_live = Some(if page.options.break_on_new_verse { slide } else { 0 });
                     } else if row.clicked() {
                         chosen = Some(match page.list_from.filter(|_| shift) {
                             Some(from) => bible.label(place(from.min(verse)), place(from.max(verse))),

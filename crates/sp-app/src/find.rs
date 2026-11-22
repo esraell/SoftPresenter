@@ -36,6 +36,11 @@ pub struct BibleRow {
     pub language: Option<String>,
     /// A passage named by a reference, not a verse found by its words.
     pub passage: bool,
+    /// For a single verse: its whole chapter, as the first Bible names it for a lookup, and the
+    /// place of the verse's slide among the chapter's made one a verse (see
+    /// `bible::in_its_chapter`), so the Bible view can open the chapter with the verse picked and
+    /// Next go on through it.
+    pub chapter: Option<(String, usize)>,
 }
 
 /// True when what is typed could name a passage: a book, then a number. (`1 John` alone is a
@@ -77,6 +82,7 @@ pub fn search_bibles(typed: &str, bibles: &[(String, Arc<Bible>)], session: &str
             lookup: lead.label(*first, *last),
             language,
             passage: true,
+            chapter: (first == last).then(|| crate::bible::in_its_chapter(lead, *first)),
         }];
     }
     let mut rows = Vec::new();
@@ -96,6 +102,7 @@ pub fn search_bibles(typed: &str, bibles: &[(String, Arc<Bible>)], session: &str
                 lookup: lead.label(there, there),
                 language: Some(languages[at].clone()).filter(|language| !language.is_empty()),
                 passage: false,
+                chapter: Some(crate::bible::in_its_chapter(lead, there)),
             });
         }
         if rows.len() >= VERSES_LISTED {
@@ -277,6 +284,23 @@ mod tests {
         // A book alone, or a book that is a number and a name, is not offered whole.
         assert!(search_bibles("john", &bibles, "en").iter().all(|row| !row.passage));
         assert!(search_bibles("1 john", &bibles, "en").iter().all(|row| !row.passage));
+    }
+
+    #[test]
+    fn a_single_verse_carries_its_chapter_and_its_place_there_and_a_passage_does_not() {
+        let bibles = these(&["KJV", "SYN"]);
+        let verse = &search_bibles("gen 1 4", &bibles, "en")[0];
+        assert_eq!((verse.lookup.as_str(), verse.chapter.clone()), ("Genesis 1:4", Some(("Genesis 1".to_owned(), 3))));
+        assert!(search_bibles("jn 3:16-18", &bibles, "en")[0].chapter.is_none(), "a passage opens as it is");
+        assert!(search_bibles("ps 23", &bibles, "en")[0].chapter.is_none(), "a chapter is already whole");
+        // A verse found by its words: its chapter as the first Bible numbers it.
+        let found = search_bibles("valley of the shadow of death", &bibles, "en");
+        let psalm = found.iter().find(|row| row.lookup == "Psalms 23:4").expect("Psalm 23:4");
+        assert_eq!(psalm.chapter, Some(("Psalms 23".to_owned(), 3)));
+        // With the Synodal first, its numbers and names.
+        let russian_first = these(&["SYN", "KJV"]);
+        let verse = &search_bibles("Быт 1 4", &russian_first, "ru")[0];
+        assert_eq!(verse.chapter, Some(("Бытие 1".to_owned(), 3)));
     }
 
     #[test]

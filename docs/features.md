@@ -218,7 +218,10 @@ feature changes, this page changes in the same commit.
   that goes on by itself goes on into the next song or passage only with Continuous on.
 - **A slide picked waits for Enter.** What the find box opens with Return has a slide picked
   (a song's first slide as sung, or the slide whose words were found; a Bible passage's first
-  verse), and so does a passage looked up with Return in Scripture Lookup; in the Bible view ↑
+  verse; a single verse, typed as a reference or found by its words, opens in its whole chapter
+  with that verse picked, so Next goes on through the chapter after it, as a verse double-clicked
+  in the lists does, unless the verses are made into one slide; Command-Return still keeps the
+  verse alone), and so does a passage looked up with Return in Scripture Lookup; in the Bible view ↑
   and ↓ pick the verse before or after (from the verse on screen when none is picked). The slide
   picked is ringed as slides picked out are (never in orange, which is only for what is on
   screen), brought into view, and the keyboard is the show's again. Only Enter puts it on
