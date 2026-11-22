@@ -472,6 +472,8 @@ pub struct HomeState {
     pub props_live: Vec<(sp_model::Uuid, std::time::Instant)>,
     /// A prop being renamed, and its name as typed so far.
     pub prop_rename: Option<(sp_model::Uuid, String)>,
+    /// A prop to delete, asked about first (from the Edit view's list of props).
+    pub confirm_delete_prop: Option<sp_model::Uuid>,
     /// The macros, and true when they have changed and are to be saved.
     pub macros: Vec<crate::macros::Macro>,
     pub macros_changed: bool,
@@ -524,6 +526,8 @@ pub struct HomeState {
     /// only just begun (so its field takes the keyboard once).
     pub stage_rename: Option<(usize, String)>,
     pub stage_rename_started: bool,
+    /// A stage layout to delete, asked about first.
+    pub confirm_delete_layout: Option<sp_model::Uuid>,
     /// True when the Program preview shows what the stage screens show, not the audience's.
     pub preview_stage: bool,
     /// The one screen the Program preview looks at (the small arrow in its head), drawn as that
@@ -1788,6 +1792,7 @@ impl Default for HomeState {
             actions_depth: 0,
             props_live: Vec::new(),
             prop_rename: None,
+            confirm_delete_prop: None,
             live_tab: 0,
             timers: Vec::new(),
             timers_changed: false,
@@ -1805,6 +1810,7 @@ impl Default for HomeState {
             stage_edit: (0, None),
             stage_rename: None,
             stage_rename_started: false,
+            confirm_delete_layout: None,
             preview_stage: false,
             preview_screen: None,
             message_clip: None,
@@ -1961,6 +1967,8 @@ impl HomeState {
             || !self.confirm_delete_slides.is_empty()
             || self.confirm_delete_theme.is_some()
             || self.confirm_delete_template.is_some()
+            || self.confirm_delete_prop.is_some()
+            || self.confirm_delete_layout.is_some()
     }
 
     /// The small choices kept between runs, as they are now.
@@ -2152,6 +2160,8 @@ pub fn home_ui(
         }
     }
     confirm_delete_theme(ui, state);
+    confirm_delete_prop(ui, state);
+    crate::stage_editor::confirm_delete(state, |question, note| confirm_delete(ui, question, note));
     confirm_delete_song(ui, show, state);
     confirm_delete_media(ui, show, state);
     confirm_delete_slides(ui, show, state);
@@ -2616,7 +2626,7 @@ fn edit_view(
         }
     }
     let mut chosen_template = None;
-    let mut open_prop = None;
+    let mut prop_ask = None;
     let mut stage_request = None;
     // The left column, as wide here as in every other view.
     use crate::studio::Column;
@@ -2628,14 +2638,17 @@ fn edit_view(
     let left = left.show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         crate::studio::edit_kinds(ui, state);
-        ui.add_space(10.0);
+        // Props and stage layouts: a heading and the keys that act on the one open here; their
+        // pictures fill the room between these and the Objects shelf, further down.
         if theme_mode {
+            ui.add_space(10.0);
             theme_list(ui, state);
         } else if prop_mode {
-            open_prop = prop_list(ui, state);
+            prop_ask = prop_list_head(ui, state);
         } else if stage_mode {
-            stage_request = crate::stage_editor::list(ui, state);
+            stage_request = crate::stage_editor::list_head(ui, state);
         } else if let Some(presentation) = presentation {
+            ui.add_space(10.0);
             Frame::new().fill(EDIT_HEADER).inner_margin(egui::Margin::symmetric(8, 5)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
@@ -3094,6 +3107,11 @@ fn edit_view(
                     }
                 }
             }
+        } else if prop_mode {
+            prop_ask = prop_ask.or(prop_list(ui, state, thumb));
+        } else if stage_mode {
+            let pictures = crate::live_tabs::StagePictures::of(show, state);
+            stage_request = stage_request.take().or(crate::stage_editor::list(ui, state, &pictures, thumb));
         } else {
             egui::ScrollArea::vertical().id_salt("edit slide list").auto_shrink([false, false]).show(ui, |ui| {
                 let width = ui.available_width();
@@ -3830,10 +3848,8 @@ fn edit_view(
         state.stage_editor_open = false;
     } else if let Some(here) = chosen {
         state.editing = EditDraft::of(show, here);
-    } else if let Some(prop) = open_prop
-        && let Some(draft) = crate::studio::prop_draft(state, prop)
-    {
-        state.editing = Some(draft);
+    } else if let Some(ask) = prop_ask {
+        apply_prop_ask(state, ask);
     } else if let Some(request) = stage_request {
         crate::stage_editor::apply(state, request);
     }
@@ -3897,51 +3913,200 @@ fn stage_tools(ui: &mut egui::Ui, state: &mut HomeState, inner: Rect, layout: us
     }
 }
 
-/// The props, in the Edit view's left column while a prop is edited: a click opens another.
-/// Returns the one clicked. (Props are made, renamed and deleted in the Props tab.)
-fn prop_list(ui: &mut egui::Ui, state: &HomeState) -> Option<usize> {
+/// What the list of props in the Edit view asked for: another prop opened, or something asked
+/// of the prop at a place (for Add, of none).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PropListAsk {
+    Open(usize),
+    Of(usize, crate::live_tabs::PropAsk),
+}
+
+/// The top of the props' part of the Edit view's left column: the heading, and the keys that
+/// act on the prop open (Add, Copy, Delete, which asks first, and ↑ and ↓ to move it).
+fn prop_list_head(ui: &mut egui::Ui, state: &mut HomeState) -> Option<PropListAsk> {
+    use crate::live_tabs::PropAsk;
+    use crate::studio::ListKey;
+    let open = state.editing.as_ref().map(|draft| draft.at.slide).filter(|at| *at < state.props.len());
+    let count = state.props.len();
+    let mut asked = None;
+    Frame::new().inner_margin(egui::Margin::symmetric(10, 0)).show(ui, |ui| {
+        crate::studio::list_heading(ui, "Props");
+        let can = [
+            true,
+            open.is_some(),
+            open.is_some(),
+            open.is_some_and(|at| at > 0),
+            open.is_some_and(|at| at + 1 < count),
+        ];
+        let hints = [
+            "A new prop",
+            "A copy of this prop",
+            "Delete this prop; it comes off the screens if it is showing",
+            "Move this prop up the list",
+            "Move this prop down the list",
+        ];
+        let pressed = crate::studio::list_keys(ui, "prop keys", can, hints);
+        asked = match (pressed, open) {
+            (Some(ListKey::Add), _) => Some(PropListAsk::Of(open.unwrap_or(0), PropAsk::New)),
+            (Some(ListKey::Copy), Some(at)) => Some(PropListAsk::Of(at, PropAsk::Duplicate)),
+            (Some(ListKey::Delete), Some(at)) => Some(PropListAsk::Of(at, PropAsk::Delete)),
+            (Some(ListKey::Up), Some(at)) => Some(PropListAsk::Of(at, PropAsk::Move(true))),
+            (Some(ListKey::Down), Some(at)) => Some(PropListAsk::Of(at, PropAsk::Move(false))),
+            _ => None,
+        };
+    });
+    asked
+}
+
+/// The props, under their heading and keys: each its picture, with its number and name under
+/// it. A click opens one, a double click retypes its name in place, and a right-click offers
+/// what the Props tab's ⋯ does (but Edit in the Editor). Returns what was asked for.
+fn prop_list(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut crate::studio::Thumb) -> Option<PropListAsk> {
+    use crate::studio::{ListPicture, TEXT};
     let open = state.editing.as_ref().map(|draft| draft.at.slide);
-    let mut clicked = None;
-    Frame::new().inner_margin(egui::Margin { left: 10, right: 10, top: 4, bottom: 8 }).show(ui, |ui| {
-        let (heading, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
-        crate::studio::paint_spaced(
-            ui,
-            heading.left_center() + vec2(8.0, 0.0),
-            Align2::LEFT_CENTER,
-            "PROPS",
-            crate::studio::fixed_semibold(11.5),
-            crate::studio::TEXT_DIM,
-            0.6,
-        );
-        egui::ScrollArea::vertical().id_salt("edit props").max_height(170.0).show(ui, |ui| {
+    let mut asked = None;
+    let list = egui::Id::unique("prop pictures");
+    egui::ScrollArea::vertical().id_salt("edit props").auto_shrink([false, false]).show(ui, |ui| {
+        let side = egui::Margin { left: 20, right: 20, top: crate::studio::LIST_TOP as i8, bottom: 12 };
+        Frame::new().inner_margin(side).show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, crate::studio::LIST_BETWEEN);
+            let mut renamed: Option<Option<(sp_model::Uuid, String)>> = None;
+            let mut rename_started = std::mem::take(&mut state.rename_started);
             for (index, prop) in state.props.iter().enumerate() {
-                let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
-                let chosen = open == Some(index);
-                if chosen {
-                    ui.painter().rect_filled(row, crate::studio::RADIUS, crate::studio::CARD);
-                } else if response.hovered() {
-                    ui.painter().rect_filled(row, crate::studio::RADIUS, Color32::from_rgb(0x1f, 0x1f, 0x1f));
-                }
-                let (ink, font) = if chosen {
-                    (crate::studio::TEXT, crate::studio::semibold(13.5))
-                } else {
-                    (crate::studio::TEXT_DIM, FontId::proportional(13.5))
+                let renaming = state.prop_rename.as_ref().is_some_and(|(id, _)| *id == prop.id);
+                let look = ListPicture {
+                    number: index + 1,
+                    name: &prop.name,
+                    dot: None,
+                    open: open == Some(index),
+                    live: state.props_live.iter().any(|(live, _)| *live == prop.id),
+                    renaming,
                 };
-                let words = Rect::from_min_max(row.min + vec2(10.0, 0.0), row.max - vec2(10.0, 0.0));
-                ui.painter().with_clip_rect(words).text(
-                    words.left_center(),
-                    Align2::LEFT_CENTER,
-                    &prop.name,
-                    font,
-                    ink,
-                );
-                if response.clicked() && !chosen {
-                    clicked = Some(index);
+                let (response, places) = crate::studio::list_picture(ui, list, index, &look);
+                crate::live_tabs::prop_picture(ui, thumb, places.picture, crate::studio::LIST_PICTURE_CORNER, prop);
+                if renaming && let Some((_, typed)) = state.prop_rename.as_mut() {
+                    let look = crate::studio::list_name_look(if look.live { crate::studio::TALLY } else { TEXT });
+                    let field = crate::studio::rename_field_at(ui, typed, &look, places.name, places.name_right);
+                    if std::mem::take(&mut rename_started) {
+                        field.request_focus();
+                    }
+                    let (enter, escape) =
+                        ui.input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
+                    if escape {
+                        renamed = Some(None);
+                    } else if enter || field.lost_focus() {
+                        renamed = Some(Some((prop.id, typed.clone())));
+                    }
                 }
+                let auto_clear = prop.auto_clear;
+                let mut chose = None;
+                response.context_menu(|ui| chose = crate::live_tabs::prop_menu(ui, auto_clear, true).or(chose));
+                if response.double_clicked() {
+                    chose = Some(crate::live_tabs::PropAsk::Rename);
+                }
+                if let Some(ask) = chose {
+                    asked = Some(PropListAsk::Of(index, ask));
+                } else if response.clicked() && open != Some(index) {
+                    asked = Some(PropListAsk::Open(index));
+                }
+            }
+            state.rename_started = rename_started;
+            match renamed {
+                Some(Some((id, name))) => {
+                    if let Some(prop) = state.props.iter_mut().find(|prop| prop.id == id)
+                        && !name.trim().is_empty()
+                        && prop.name != name.trim()
+                    {
+                        prop.name = name.trim().to_owned();
+                        state.props_changed = true;
+                    }
+                    state.prop_rename = None;
+                }
+                Some(None) => state.prop_rename = None,
+                None => {}
             }
         });
     });
-    clicked
+    asked
+}
+
+/// Carries out what the list of props in the Edit view asked for, once the frame's change to
+/// the prop open has gone back into it, and keeps the editor on the right prop: the one opened,
+/// made or copied, or else the one that was open, wherever it went. Delete asks first. With the
+/// last prop deleted, the editor goes on to the slides.
+fn apply_prop_ask(state: &mut HomeState, ask: PropListAsk) {
+    use crate::live_tabs::PropAsk;
+    let (index, ask) = match ask {
+        PropListAsk::Open(index) => {
+            if let Some(draft) = crate::studio::prop_draft(state, index) {
+                state.editing = Some(draft);
+            }
+            return;
+        }
+        PropListAsk::Of(index, PropAsk::Delete) => {
+            state.confirm_delete_prop = state.props.get(index).map(|prop| prop.id);
+            return;
+        }
+        PropListAsk::Of(index, ask) => (index, ask),
+    };
+    let open = state.editing.as_ref().filter(|draft| draft.at.presentation == crate::props::PROP_SLOT);
+    let open_id = open.and_then(|draft| state.props.get(draft.at.slide)).map(|prop| prop.id);
+    let made = crate::live_tabs::carry_out_prop_ask(state, index, ask);
+    let kept = open_id.and_then(|id| state.props.iter().position(|prop| prop.id == id));
+    let to = if matches!(ask, PropAsk::New | PropAsk::Duplicate) { made } else { kept };
+    match to {
+        // The prop open, wherever it went: its draft goes with it, with the changes it can undo.
+        Some(to) if Some(to) == kept => {
+            if let Some(draft) = state.editing.as_mut() {
+                draft.at.slide = to;
+            }
+        }
+        Some(to) => state.editing = crate::studio::prop_draft(state, to),
+        None => {}
+    }
+}
+
+/// The question asked before a prop is deleted from the Edit view, and the deleting once it is
+/// answered. The prop after it opens in its place (or the one before, if it was the last); with
+/// none left, the editor goes on to the slides.
+fn confirm_delete_prop(ui: &mut egui::Ui, state: &mut HomeState) {
+    let Some(id) = state.confirm_delete_prop else { return };
+    let Some(index) = state.props.iter().position(|prop| prop.id == id) else {
+        state.confirm_delete_prop = None;
+        return;
+    };
+    let question = format!("Delete \u{201c}{}\u{201d}?", state.props[index].name);
+    let note = "It comes off the screens if it is showing. You can\u{2019}t undo this.";
+    let Some(delete) = confirm_delete(ui, &question, note) else { return };
+    state.confirm_delete_prop = None;
+    if delete {
+        delete_prop(state, index);
+        ui.ctx().request_repaint();
+    }
+}
+
+/// Deletes the prop at `index`, keeping the editor on a prop if one was open.
+fn delete_prop(state: &mut HomeState, index: usize) {
+    let editing_props = state.editing.as_ref().is_some_and(|draft| draft.at.presentation == crate::props::PROP_SLOT);
+    let open = state.editing.as_ref().filter(|_| editing_props).map(|draft| draft.at.slide);
+    let open_id = open.and_then(|at| state.props.get(at)).map(|prop| prop.id);
+    crate::live_tabs::carry_out_prop_ask(state, index, crate::live_tabs::PropAsk::Delete);
+    if !editing_props {
+        return;
+    }
+    if state.props.is_empty() {
+        state.editing = None;
+        state.edit_kind_request = Some(EditKind::Slides);
+        return;
+    }
+    match open_id.and_then(|id| state.props.iter().position(|prop| prop.id == id)) {
+        Some(still) => {
+            if let Some(draft) = state.editing.as_mut() {
+                draft.at.slide = still;
+            }
+        }
+        None => state.editing = crate::studio::prop_draft(state, index.min(state.props.len() - 1)),
+    }
 }
 
 /// What an output is called in the Screens window's menus.
@@ -8339,6 +8504,146 @@ mod tests {
             stayed += usize::from(state.edit_kind() == Some(EditKind::Props));
         }
         assert!(stayed > 8, "some of the clicks were on Edit, and elsewhere in the bar: {stayed}");
+    }
+
+    /// Props with these names, the one at `open` open in the editor.
+    fn props_open(names: &[&str], open: usize) -> HomeState {
+        let mut state = HomeState::default();
+        state.props = names.iter().map(|name| crate::props::Prop::new((*name).to_owned())).collect();
+        state.editing = crate::studio::prop_draft(&state, open);
+        state
+    }
+
+    /// One frame of the props' part of the Edit view's left column, as wide as the column: what
+    /// it drew, and what it asked for.
+    fn prop_column(
+        ctx: &egui::Context,
+        state: &mut HomeState,
+        events: Vec<Event>,
+    ) -> (egui::FullOutput, Option<PropListAsk>) {
+        let mut asked = None;
+        let column = Rect::from_min_size(pos2(10.0, 0.0), vec2(crate::studio::LEFT_WIDTH, 800.0));
+        let output = crate::studio::tests::drawn(ctx, events, |ui| {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(column), |ui| {
+                ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                let head = prop_list_head(ui, state);
+                let list = prop_list(ui, state, &mut |_| None);
+                asked = head.or(list);
+            });
+        });
+        (output, asked)
+    }
+
+    /// Clicks `words` where the props' column draws them, and returns what was asked for.
+    fn click_prop_words(
+        ctx: &egui::Context,
+        state: &mut HomeState,
+        words: &str,
+        button: egui::PointerButton,
+    ) -> Option<PropListAsk> {
+        let (output, _) = prop_column(ctx, state, vec![]);
+        let at = crate::studio::tests::place_of(&output, words).expect(words);
+        output.drop_without_applying_deltas();
+        let mut asked = None;
+        for events in crate::studio::tests::click_frames(at, button) {
+            let (output, now) = prop_column(ctx, state, events);
+            output.drop_without_applying_deltas();
+            asked = asked.or(now);
+        }
+        asked
+    }
+
+    #[test]
+    fn a_props_right_click_menu_offers_what_its_more_button_in_the_props_tab_does() {
+        use crate::live_tabs::PropAsk;
+        use egui::PointerButton::{Primary, Secondary};
+        let ctx = crate::studio::tests::styled();
+        let mut state = props_open(&["Logo", "Name", "Welcome"], 0);
+        assert_eq!(click_prop_words(&ctx, &mut state, "NAME", Secondary), None);
+        // A menu is drawn from its second frame, once it knows its size.
+        let (menu, _) = prop_column(&ctx, &mut state, vec![]);
+        for offered in ["Clears Itself", "Rename", "Duplicate", "Delete\u{2026}"] {
+            assert!(crate::studio::tests::place_of(&menu, offered).is_some(), "{offered} is offered");
+        }
+        // It is open already: there is no Edit in the Editor.
+        assert!(crate::studio::tests::place_of(&menu, "Edit in the Editor").is_none());
+        menu.drop_without_applying_deltas();
+        let asked = click_prop_words(&ctx, &mut state, "Rename", Primary);
+        assert_eq!(asked, Some(PropListAsk::Of(1, PropAsk::Rename)));
+        apply_prop_ask(&mut state, asked.expect("asked"));
+        assert_eq!(state.prop_rename, Some((state.props[1].id, "Name".to_owned())));
+        assert_eq!(state.editing.as_ref().map(|draft| draft.at.slide), Some(0), "the open prop stays open");
+        // A click on another opens it.
+        state.prop_rename = None;
+        let asked = click_prop_words(&ctx, &mut state, "WELCOME", Primary);
+        assert_eq!(asked, Some(PropListAsk::Open(2)));
+        apply_prop_ask(&mut state, asked.expect("asked"));
+        assert_eq!(state.editing.as_ref().map(|draft| draft.at.slide), Some(2));
+    }
+
+    #[test]
+    fn the_keys_over_the_props_act_on_the_one_open() {
+        use egui::PointerButton::Primary;
+        let ctx = crate::studio::tests::styled();
+        let mut state = props_open(&["Logo", "Name", "Welcome"], 1);
+        let open = |state: &HomeState| state.editing.as_ref().map(|draft| draft.at.slide);
+        let names = |state: &HomeState| state.props.iter().map(|prop| prop.name.clone()).collect::<Vec<_>>();
+        // Copy: a copy of the open prop just after it, and it opens.
+        let asked = click_prop_words(&ctx, &mut state, "Copy", Primary).expect("asked");
+        apply_prop_ask(&mut state, asked);
+        assert_eq!(names(&state), ["Logo", "Name", "Name copy", "Welcome"]);
+        assert_eq!(open(&state), Some(2));
+        assert!(state.props_changed);
+        // Down: it goes one place down, and stays open in the same draft.
+        let serial = state.editing.as_ref().map(|draft| draft.serial);
+        let asked = click_prop_words(&ctx, &mut state, "\u{2193}", Primary).expect("asked");
+        apply_prop_ask(&mut state, asked);
+        assert_eq!(names(&state), ["Logo", "Name", "Welcome", "Name copy"]);
+        assert_eq!((open(&state), state.editing.as_ref().map(|draft| draft.serial)), (Some(3), serial));
+        // The last can't go further down.
+        assert_eq!(click_prop_words(&ctx, &mut state, "\u{2193}", Primary), None);
+        // Delete asks first; once answered, the prop goes and the one before it (it was the
+        // last) opens.
+        let asked = click_prop_words(&ctx, &mut state, "Delete", Primary).expect("asked");
+        apply_prop_ask(&mut state, asked);
+        let copy = state.props[3].id;
+        assert_eq!((state.confirm_delete_prop, state.props.len()), (Some(copy), 4), "asked, not yet deleted");
+        assert!(state.alert_open());
+        state.props_live.push((copy, std::time::Instant::now()));
+        delete_prop(&mut state, 3);
+        assert_eq!(names(&state), ["Logo", "Name", "Welcome"]);
+        assert_eq!(open(&state), Some(2));
+        assert!(state.props_live.is_empty(), "it comes off the screens");
+        // Add: a new prop at the end, open, with its name ready to be typed over.
+        let asked = click_prop_words(&ctx, &mut state, "Add", Primary).expect("asked");
+        apply_prop_ask(&mut state, asked);
+        assert_eq!((state.props.len(), open(&state)), (4, Some(3)));
+        assert_eq!(state.prop_rename, Some((state.props[3].id, "Prop 1".to_owned())));
+        // Deleting a prop before the open one keeps the open one open.
+        delete_prop(&mut state, 0);
+        assert_eq!((names(&state)[2].as_str(), open(&state)), ("Prop 1", Some(2)));
+        // With the last prop deleted, the editor goes on to the slides.
+        let mut state = props_open(&["Logo"], 0);
+        delete_prop(&mut state, 0);
+        assert!(state.props.is_empty());
+        assert_eq!((state.editing.is_none(), state.edit_kind_request), (true, Some(EditKind::Slides)));
+    }
+
+    #[test]
+    fn a_prop_renamed_in_the_edit_views_list_keeps_its_name_where_and_as_it_was() {
+        use crate::studio::tests::{key, letters, same_letters};
+        let ctx = crate::studio::tests::styled();
+        let mut state = props_open(&["Logo", "Speaker name"], 0);
+        let before = letters(prop_column(&ctx, &mut state, vec![]).0, "SPEAKER NAME");
+        state.prop_rename = Some((state.props[1].id, "Speaker name".to_owned()));
+        state.rename_started = true;
+        prop_column(&ctx, &mut state, vec![]).0.drop_without_applying_deltas();
+        same_letters(&before, &letters(prop_column(&ctx, &mut state, vec![]).0, "SPEAKER NAME"), "prop");
+        prop_column(&ctx, &mut state, vec![Event::Text(" two".to_owned())]).0.drop_without_applying_deltas();
+        prop_column(&ctx, &mut state, vec![key(Key::Enter)]).0.drop_without_applying_deltas();
+        assert_eq!(state.props[1].name, "Speaker name two", "Return keeps what was typed");
+        assert!(state.prop_rename.is_none());
+        assert!(state.props_changed);
     }
 
     /// One frame of the window with these events, returning the commands it gave.

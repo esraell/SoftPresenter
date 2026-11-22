@@ -3,13 +3,14 @@
 //! layouts down the left, the Add menu over the canvas, and the inspector's parts for a layout
 //! and for what a stage object shows.
 
-use egui::{Align2, FontId, Rect, Sense, pos2, vec2};
+use egui::{FontId, vec2};
 use sp_model::{Object, ObjectKind, Role, SlideRect, TextStyle};
 
 use crate::editor::EditDraft;
 use crate::home::HomeState;
+use crate::live_tabs::StagePictures;
 use crate::stage::{ITEMS, STAGE_SLOT};
-use crate::studio::{CARD, ROW_HOVER, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::studio::{ListKey, ListPicture, TEXT, TEXT_DIM, TEXT_FAINT, Thumb};
 
 /// What the list of layouts asked for. It is carried out once the frame's change to the open
 /// layout has gone back into it, so a layout added or deleted in front of it never takes it.
@@ -19,6 +20,8 @@ pub enum ListRequest {
     New,
     Duplicate(usize),
     Delete(usize),
+    /// The layout one place up the list (true) or down; the one open stays open.
+    Move(usize, bool),
 }
 
 /// The editor's draft of a layout, by its place in the list.
@@ -90,83 +93,126 @@ pub fn apply(state: &mut HomeState, request: ListRequest) {
             state.stage_layouts_changed = true;
             if open > index { open - 1 } else { open.min(state.stage_layouts.len() - 1) }
         }
+        ListRequest::Move(index, up) => {
+            let Some(to) = (if up { index.checked_sub(1) } else { Some(index + 1) }) else { return };
+            if to >= state.stage_layouts.len() {
+                return;
+            }
+            state.stage_layouts.swap(index, to);
+            state.stage_layouts_changed = true;
+            // The open layout keeps its draft, and the changes it can undo, wherever it went.
+            let now = if open == index {
+                to
+            } else if open == to {
+                index
+            } else {
+                open
+            };
+            state.stage_edit = (now, None);
+            if let Some(draft) = state.editing.as_mut().filter(|draft| is_stage(draft)) {
+                draft.at.slide = now;
+            }
+            return;
+        }
     };
     state.stage_edit = (to, None);
     state.editing = draft(state, to);
 }
 
-/// The stage layouts, under the Edit view's switch: a heading with + (a new layout), and a row
-/// for each layout (click to edit it; ⋯ or a right-click to rename, duplicate or delete it).
+/// The layout open in the editor, by its place in the list.
+fn open_layout(state: &HomeState) -> Option<usize> {
+    state.editing.as_ref().filter(|draft| is_stage(draft)).map(|draft| draft.at.slide)
+}
+
+/// The top of the stage layouts' part of the Edit view's left column: the heading, and the keys
+/// that act on the layout open (Add, Copy, Delete, which asks first, and ↑ and ↓ to move it).
 /// Returns what was asked for.
-pub fn list(ui: &mut egui::Ui, state: &mut HomeState) -> Option<ListRequest> {
-    let open = state.editing.as_ref().filter(|draft| is_stage(draft)).map(|draft| draft.at.slide);
+pub fn list_head(ui: &mut egui::Ui, state: &mut HomeState) -> Option<ListRequest> {
+    let open = open_layout(state);
+    let count = state.stage_layouts.len();
     let mut asked = None;
-    let side = egui::Margin { left: 10, right: 10, top: 4, bottom: 8 };
-    egui::Frame::new().inner_margin(side).show(ui, |ui| {
-        let (heading, _) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::hover());
-        crate::studio::cap(ui, heading.left_center() + vec2(8.0, -4.0), Align2::LEFT_CENTER, "Stage layouts", TEXT_DIM);
-        let plus = Rect::from_min_size(pos2(heading.max.x - 36.0, heading.min.y), vec2(28.0, 28.0));
-        let id = ui.scope_id().with("new stage layout");
-        let add = crate::studio::icon_button(ui, plus, id, crate::icons::Icon::Plus, 1.0, false);
-        if add.on_hover_text("A new stage layout").clicked() {
-            asked = Some(ListRequest::New);
-        }
-        // The list scrolls when it is long, leaving the Objects shelf its room.
-        let room = (ui.available_height() - 220.0).max(80.0);
-        egui::ScrollArea::vertical().id_salt("stage layouts").max_height(room).show(ui, |ui| {
+    egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 0)).show(ui, |ui| {
+        crate::studio::list_heading(ui, "Stage layouts");
+        let can = [
+            true,
+            open.is_some(),
+            open.is_some() && count > 1,
+            open.is_some_and(|at| at > 0),
+            open.is_some_and(|at| at + 1 < count),
+        ];
+        let hints = [
+            "A new stage layout",
+            "A copy of this layout",
+            "Delete this layout; stage screens that use it show the first one",
+            "Move this layout up the list",
+            "Move this layout down the list",
+        ];
+        let pressed = crate::studio::list_keys(ui, "stage layout keys", can, hints);
+        let Some(at) = open else {
+            asked = (pressed == Some(ListKey::Add)).then_some(ListRequest::New);
+            return;
+        };
+        asked = match pressed {
+            Some(ListKey::Add) => Some(ListRequest::New),
+            Some(ListKey::Copy) => Some(ListRequest::Duplicate(at)),
+            Some(ListKey::Up) => Some(ListRequest::Move(at, true)),
+            Some(ListKey::Down) => Some(ListRequest::Move(at, false)),
+            Some(ListKey::Delete) => {
+                state.confirm_delete_layout = state.stage_layouts.get(at).map(|layout| layout.id);
+                None
+            }
+            None => None,
+        };
+    });
+    asked
+}
+
+/// The stage layouts, under their heading and keys: each a picture of what the stage would show
+/// in it now, with its number and name under it. A click opens one, a double click retypes its
+/// name in place, and a right-click offers Rename, Duplicate and Delete. Returns what was asked
+/// for.
+pub fn list(
+    ui: &mut egui::Ui,
+    state: &mut HomeState,
+    pictures: &StagePictures,
+    thumb: &mut Thumb,
+) -> Option<ListRequest> {
+    let open = open_layout(state);
+    let mut asked = None;
+    let list = egui::Id::unique("stage layout pictures");
+    egui::ScrollArea::vertical().id_salt("stage layouts").auto_shrink([false, false]).show(ui, |ui| {
+        let side = egui::Margin { left: 20, right: 20, top: crate::studio::LIST_TOP as i8, bottom: 12 };
+        egui::Frame::new().inner_margin(side).show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, crate::studio::LIST_BETWEEN);
             let only_one = state.stage_layouts.len() <= 1;
             let mut renamed = None;
             for (index, layout) in state.stage_layouts.iter().enumerate() {
-                let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
-                let chosen = open == Some(index);
-                let near = response.hovered() || ui.rect_contains_pointer(row);
-                if chosen {
-                    ui.painter().rect_filled(row, crate::studio::RADIUS, CARD);
-                } else if near {
-                    ui.painter().rect_filled(row, crate::studio::RADIUS, ROW_HOVER);
-                }
-                let mark = Rect::from_center_size(row.left_center() + vec2(16.0, 0.0), vec2(16.0, 16.0));
-                crate::icons::paint(
-                    ui.painter(),
-                    crate::icons::Icon::Stage,
-                    mark,
-                    if chosen { TEXT } else { TEXT_DIM },
-                );
-                let more = Rect::from_min_size(pos2(row.max.x - 28.0, row.center().y - 14.0), vec2(28.0, 28.0));
-                let name_area =
-                    Rect::from_min_max(pos2(row.min.x + 34.0, row.min.y), pos2(more.min.x - 4.0, row.max.y));
                 let renaming = state.stage_rename.as_ref().is_some_and(|(at, _)| *at == index);
-                if renaming {
-                    if let Some((_, typed)) = state.stage_rename.as_mut() {
-                        let look = crate::studio::Lettering::plain(
-                            crate::studio::semibold(14.0),
-                            if chosen { TEXT } else { TEXT_DIM },
-                        );
-                        let field =
-                            crate::studio::rename_field_at(ui, typed, &look, name_area.left_center(), name_area.max.x);
-                        if std::mem::take(&mut state.stage_rename_started) {
-                            field.request_focus();
-                        }
-                        let (enter, escape) = ui
-                            .input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
-                        if escape {
-                            renamed = Some(None);
-                        } else if enter || field.lost_focus() {
-                            renamed = Some(Some((index, typed.clone())));
-                        }
+                let look = ListPicture {
+                    number: index + 1,
+                    name: &layout.name,
+                    dot: None,
+                    open: open == Some(index),
+                    live: false,
+                    renaming,
+                };
+                let (response, places) = crate::studio::list_picture(ui, list, index, &look);
+                pictures.paint(ui, thumb, places.picture, crate::studio::LIST_PICTURE_CORNER, layout);
+                if renaming && let Some((_, typed)) = state.stage_rename.as_mut() {
+                    let look = crate::studio::list_name_look(TEXT);
+                    let field = crate::studio::rename_field_at(ui, typed, &look, places.name, places.name_right);
+                    if std::mem::take(&mut state.stage_rename_started) {
+                        field.request_focus();
                     }
-                } else {
-                    ui.painter().with_clip_rect(name_area).text(
-                        name_area.left_center(),
-                        Align2::LEFT_CENTER,
-                        layout.name.as_str(),
-                        crate::studio::semibold(14.0),
-                        if chosen { TEXT } else { TEXT_DIM },
-                    );
+                    let (enter, escape) =
+                        ui.input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
+                    if escape {
+                        renamed = Some(None);
+                    } else if enter || field.lost_focus() {
+                        renamed = Some(Some((index, typed.clone())));
+                    }
                 }
                 let mut chose = None;
-                let dots = crate::studio::more_button(ui, more, ui.scope_id().with(("stage layout more", index)), near);
-                egui::Popup::menu(&dots).show(|ui| chose = layout_menu(ui, only_one).or(chose));
                 response.context_menu(|ui| chose = layout_menu(ui, only_one).or(chose));
                 if response.double_clicked() || chose == Some(Choice::Rename) {
                     state.stage_rename = Some((index, layout.name.clone()));
@@ -174,8 +220,8 @@ pub fn list(ui: &mut egui::Ui, state: &mut HomeState) -> Option<ListRequest> {
                 } else if chose == Some(Choice::Duplicate) {
                     asked = Some(ListRequest::Duplicate(index));
                 } else if chose == Some(Choice::Delete) {
-                    asked = Some(ListRequest::Delete(index));
-                } else if response.clicked() && !chosen {
+                    state.confirm_delete_layout = Some(layout.id);
+                } else if response.clicked() && open != Some(index) {
                     asked = Some(ListRequest::Open(index));
                 }
             }
@@ -199,7 +245,29 @@ pub fn list(ui: &mut egui::Ui, state: &mut HomeState) -> Option<ListRequest> {
     asked
 }
 
-/// What a layout's menu (its ⋯, or a right-click on its row) was asked for.
+/// The question asked before a stage layout is deleted, and the deleting once it is answered.
+/// Nothing happens unless Edit › Stage is still open.
+pub fn confirm_delete(state: &mut HomeState, answer: impl FnOnce(&str, &str) -> Option<bool>) {
+    let Some(id) = state.confirm_delete_layout else { return };
+    let index = state.stage_layouts.iter().position(|layout| layout.id == id);
+    let open = state.editing.as_ref().is_some_and(is_stage) && state.theme_edit.is_none();
+    let Some(index) = index.filter(|_| open && state.stage_layouts.len() > 1) else {
+        state.confirm_delete_layout = None;
+        return;
+    };
+    let question = format!("Delete \u{201c}{}\u{201d}?", state.stage_layouts[index].name);
+    let Some(delete) =
+        answer(&question, "Stage screens that use it show the first layout. You can\u{2019}t undo this.")
+    else {
+        return;
+    };
+    state.confirm_delete_layout = None;
+    if delete {
+        apply(state, ListRequest::Delete(index));
+    }
+}
+
+/// What a layout's menu (a right-click on its picture) was asked for.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Choice {
     Rename,
@@ -207,7 +275,7 @@ enum Choice {
     Delete,
 }
 
-/// A layout's menu: Rename, Duplicate, Delete (not for the only layout).
+/// A layout's menu: Rename, Duplicate, Delete… (which asks first; not for the only layout).
 fn layout_menu(ui: &mut egui::Ui, only_one: bool) -> Option<Choice> {
     let mut chose = None;
     if ui.button("Rename").clicked() {
@@ -217,7 +285,7 @@ fn layout_menu(ui: &mut egui::Ui, only_one: bool) -> Option<Choice> {
         chose = Some(Choice::Duplicate);
     }
     let delete = ui
-        .add_enabled(!only_one, egui::Button::new("Delete"))
+        .add_enabled(!only_one, egui::Button::new("Delete\u{2026}"))
         .on_hover_text("Delete this layout; stage screens that use it show the first one");
     if delete.clicked() {
         chose = Some(Choice::Delete);
@@ -549,17 +617,155 @@ mod tests {
         let name = state.stage_layouts[0].name.clone();
         let list = |state: &mut crate::home::HomeState, events: Vec<Event>| {
             drawn(&ctx, events, |ui| {
-                super::list(ui, state);
+                super::list(ui, state, &super::StagePictures::default(), &mut |_| None);
             })
         };
-        let before = letters(list(&mut state, vec![]), &name);
+        // The strip under the picture shows the name in capitals, and so does the field.
+        let shown = name.to_uppercase();
+        let before = letters(list(&mut state, vec![]), &shown);
         state.stage_rename = Some((0, name.clone()));
         state.stage_rename_started = true;
         list(&mut state, vec![]).drop_without_applying_deltas();
-        same_letters(&before, &letters(list(&mut state, vec![]), &name), "stage layout");
+        same_letters(&before, &letters(list(&mut state, vec![]), &shown), "stage layout");
         list(&mut state, vec![Event::Text(" Two".to_owned())]).drop_without_applying_deltas();
         list(&mut state, vec![key(egui::Key::Enter)]).drop_without_applying_deltas();
         assert_eq!(state.stage_layouts[0].name, format!("{name} Two"), "Return keeps what was typed");
         assert!(state.stage_rename.is_none());
+    }
+
+    /// The built-in layouts, the one at `open` open in the editor.
+    fn opened(open: usize) -> crate::home::HomeState {
+        let mut state = crate::home::HomeState { stage_layouts: crate::stage::builtin_layouts(), ..Default::default() };
+        state.stage_editor_open = true;
+        state.editing = super::draft(&state, open);
+        state
+    }
+
+    /// One frame of the layouts' part of the left column, as the Edit view draws it: what it
+    /// drew, and what it asked for.
+    fn column(
+        ctx: &egui::Context,
+        state: &mut crate::home::HomeState,
+        events: Vec<egui::Event>,
+    ) -> (egui::FullOutput, Option<super::ListRequest>) {
+        let mut asked = None;
+        // As wide as the left column, and as tall as the window.
+        let column = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(crate::studio::LEFT_WIDTH, 800.0));
+        let output = crate::studio::tests::drawn(ctx, events, |ui| {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(column), |ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+                let head = super::list_head(ui, state);
+                let list = super::list(ui, state, &super::StagePictures::default(), &mut |_| None);
+                asked = head.or(list);
+            });
+        });
+        (output, asked)
+    }
+
+    /// Clicks `words` where the column draws them (with the right button for its menu), and
+    /// returns what was asked for on the way, and what the last frame drew.
+    fn click(
+        ctx: &egui::Context,
+        state: &mut crate::home::HomeState,
+        words: &str,
+        button: egui::PointerButton,
+    ) -> (Option<super::ListRequest>, egui::FullOutput) {
+        let (output, _) = column(ctx, state, vec![]);
+        let at = crate::studio::tests::place_of(&output, words).expect(words);
+        output.drop_without_applying_deltas();
+        let mut asked = None;
+        let mut last = None;
+        for events in crate::studio::tests::click_frames(at, button) {
+            let (output, now) = column(ctx, state, events);
+            asked = asked.or(now);
+            if let Some(old) = last.replace(output) {
+                egui::FullOutput::drop_without_applying_deltas(old);
+            }
+        }
+        (asked, last.expect("drawn"))
+    }
+
+    #[test]
+    fn a_stage_layouts_right_click_menu_offers_what_its_more_button_did() {
+        use egui::PointerButton::{Primary, Secondary};
+        let ctx = crate::studio::tests::styled();
+        let mut state = opened(0);
+        // Its picture's right-click menu: Rename, Duplicate, and Delete, which asks first.
+        click(&ctx, &mut state, "WORDS ONLY", Secondary).1.drop_without_applying_deltas();
+        // A menu is drawn from its second frame, once it knows its size.
+        let (menu, _) = column(&ctx, &mut state, vec![]);
+        for offered in ["Rename", "Duplicate", "Delete\u{2026}"] {
+            assert!(crate::studio::tests::place_of(&menu, offered).is_some(), "{offered} is offered");
+        }
+        menu.drop_without_applying_deltas();
+        let (asked, output) = click(&ctx, &mut state, "Duplicate", Primary);
+        output.drop_without_applying_deltas();
+        assert_eq!(asked, Some(super::ListRequest::Duplicate(1)));
+        super::apply(&mut state, asked.expect("asked"));
+        assert_eq!(state.stage_layouts[2].name, "Words Only copy");
+        assert_eq!(state.editing.as_ref().map(|draft| draft.at.slide), Some(2), "the copy opens");
+        // Rename puts a field where the name is; Delete asks about that layout.
+        click(&ctx, &mut state, "WORDS AND NEXT", Secondary).1.drop_without_applying_deltas();
+        click(&ctx, &mut state, "Rename", Primary).1.drop_without_applying_deltas();
+        assert_eq!(state.stage_rename, Some((0, "Words and Next".to_owned())));
+        state.stage_rename = None;
+        click(&ctx, &mut state, "WORDS AND NOTES", Secondary).1.drop_without_applying_deltas();
+        click(&ctx, &mut state, "Delete\u{2026}", Primary).1.drop_without_applying_deltas();
+        assert_eq!(state.confirm_delete_layout, Some(state.stage_layouts[3].id));
+    }
+
+    #[test]
+    fn the_keys_over_the_stage_layouts_act_on_the_one_open() {
+        use egui::PointerButton::Primary;
+        let ctx = crate::studio::tests::styled();
+        let mut state = opened(1);
+        let open = |state: &crate::home::HomeState| state.editing.as_ref().map(|draft| draft.at.slide);
+        // Copy: a copy of the open layout, just after it, and it opens.
+        let (asked, output) = click(&ctx, &mut state, "Copy", Primary);
+        output.drop_without_applying_deltas();
+        assert_eq!(asked, Some(super::ListRequest::Duplicate(1)));
+        super::apply(&mut state, asked.expect("asked"));
+        assert_eq!((state.stage_layouts[2].name.as_str(), open(&state)), ("Words Only copy", Some(2)));
+        // Up: it goes one place up, and stays open in the same draft.
+        let serial = state.editing.as_ref().map(|draft| draft.serial);
+        let (asked, output) = click(&ctx, &mut state, "\u{2191}", Primary);
+        output.drop_without_applying_deltas();
+        assert_eq!(asked, Some(super::ListRequest::Move(2, true)));
+        super::apply(&mut state, asked.expect("asked"));
+        assert_eq!((state.stage_layouts[1].name.as_str(), open(&state)), ("Words Only copy", Some(1)));
+        assert_eq!(state.editing.as_ref().map(|draft| draft.serial), serial, "the same draft");
+        assert!(state.stage_layouts_changed);
+        // Down takes it back.
+        let (asked, output) = click(&ctx, &mut state, "\u{2193}", Primary);
+        output.drop_without_applying_deltas();
+        super::apply(&mut state, asked.expect("asked"));
+        assert_eq!((state.stage_layouts[2].name.as_str(), open(&state)), ("Words Only copy", Some(2)));
+        // Delete asks first; once answered yes, the layout goes and the one after it opens.
+        let (asked, output) = click(&ctx, &mut state, "Delete", Primary);
+        output.drop_without_applying_deltas();
+        assert_eq!(asked, None);
+        let copy = state.stage_layouts[2].id;
+        assert_eq!(state.confirm_delete_layout, Some(copy));
+        super::confirm_delete(&mut state, |_, _| None);
+        assert_eq!(state.confirm_delete_layout, Some(copy), "still asking");
+        super::confirm_delete(&mut state, |question, _| {
+            assert_eq!(question, "Delete \u{201c}Words Only copy\u{201d}?");
+            Some(true)
+        });
+        assert!(state.stage_layouts.iter().all(|layout| layout.id != copy));
+        assert_eq!((state.stage_layouts.len(), open(&state)), (4, Some(2)));
+        assert_eq!(state.stage_layouts[2].name, "Words and Notes", "the one after it opens");
+        // Answered no, nothing goes.
+        state.confirm_delete_layout = Some(state.stage_layouts[0].id);
+        super::confirm_delete(&mut state, |_, _| Some(false));
+        assert_eq!((state.stage_layouts.len(), state.confirm_delete_layout), (4, None));
+        // The first can't go up, the last can't go down, and the only one can't go.
+        let mut state = opened(0);
+        state.stage_layouts.truncate(1);
+        for key in ["\u{2191}", "\u{2193}", "Delete"] {
+            let (asked, output) = click(&ctx, &mut state, key, Primary);
+            output.drop_without_applying_deltas();
+            assert_eq!((asked, state.confirm_delete_layout), (None, None), "{key}");
+        }
     }
 }

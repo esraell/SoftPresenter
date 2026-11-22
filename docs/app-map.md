@@ -136,10 +136,13 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
 
 - **Left**: at the top a switch, Slides · Themes · Props · Stage, for what is edited. Under it,
   for Slides the song's slides (click to edit another); for Themes the themes and the open
-  theme's templates; for Props the props (click to edit another; props are made, renamed and
-  deleted in the Props tab of the Show view, and Props is faint until there is one); for Stage
-  the stage layouts, with +, − and Duplicate at the foot. For a slide, a template or a prop, the
-  objects come next, front first (lock, hide, rename, drag to reorder).
+  theme's templates. Props and Stage share one look (`studio::list_heading`, `list_keys` and
+  `list_picture`): PROPS or STAGE LAYOUTS, a row of keys acting on the one open (Add, Copy,
+  Delete…, ↑, ↓), then each as its picture with a strip under it (number and name); a click
+  opens one, a double click renames it in place, a right-click has its other choices (a
+  prop's: Clears Itself, Rename, Duplicate, Delete…; a layout's: Rename, Duplicate, Delete…).
+  Props is faint until there is one (make the first in the Props tab of the Show view). The
+  objects of what is open sit at the foot, front first (lock, hide, rename, drag to reorder).
 - **Canvas**: Add Text, Shapes, Media… (a picture or a video, which plays in its box when the
   slide is on screen), Web Page (a box showing a live web page; its address is typed in the
   Shape tab); pictures and videos can be dropped on it from the Finder. Double-click a
@@ -151,8 +154,9 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   as they are made), Done.
 - **Stage** (Edit › Stage; Screens › Edit Stage Layouts… and the Stage tab's Edit Layouts… open
   it): the layouts for the stage screens, edited with the same canvas, Objects list and
-  inspector as a slide. Left: STAGE LAYOUTS with + (a new layout) and a row for each, ⋯ on it
-  for Rename, Duplicate, Delete. Over the canvas: the layout's name, Add ▾ (Text, a shape, a
+  inspector as a slide. Left: STAGE LAYOUTS, Add, Copy, Delete…, ↑ and ↓, and each layout as
+  a live picture of the stage in it (shared with the Stage tab, `live_tabs::StagePictures`),
+  its right-click menu for Rename, Duplicate, Delete…. Over the canvas: the layout's name, Add ▾ (Text, a shape, a
   picture or video, a web page, then what the stage shows live: Current Slide, Next Slide, Next
   Label, Clock, Timer, Slide Notes, Song Title, Group, Stage Message, and Screen Picture with
   the audience screens), Undo and Redo; under it two lines saying the keyboard edits here. The

@@ -1299,6 +1299,214 @@ pub fn edit_kinds(ui: &mut egui::Ui, state: &mut HomeState) {
     }
 }
 
+// Every kind of the Edit view lists what it edits in the left column the same way: a heading in
+// small capitals, a row of keys (Add, Copy, Delete, ↑, ↓) that act on the one open, then each
+// one as a picture with a strip under it (its number and name), the one open on the well with a
+// ring round it. A picture's other choices are on its right-click menu. Its caller draws the
+// picture itself, and the menu.
+
+/// The heading of a list in the Edit view's left column, in small capitals: 14 under what is
+/// above it and 8 in, with 8 under it.
+pub fn list_heading(ui: &mut egui::Ui, text: &str) {
+    const ABOVE: f32 = 14.0;
+    const TALL: f32 = 15.5;
+    let (place, _) = ui.allocate_exact_size(vec2(ui.available_width(), ABOVE + TALL + 8.0), Sense::hover());
+    cap(ui, pos2(place.min.x + 8.0, place.min.y + ABOVE + TALL / 2.0), Align2::LEFT_CENTER, text, TEXT_DIM);
+}
+
+/// One of the keys over a list of pictures in the Edit view's left column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ListKey {
+    Add,
+    Copy,
+    Delete,
+    Up,
+    Down,
+}
+
+impl ListKey {
+    /// The five, in the order they stand.
+    pub const ALL: [ListKey; 5] = [ListKey::Add, ListKey::Copy, ListKey::Delete, ListKey::Up, ListKey::Down];
+
+    fn words(self) -> &'static str {
+        match self {
+            ListKey::Add => "Add",
+            ListKey::Copy => "Copy",
+            ListKey::Delete => "Delete",
+            ListKey::Up => "\u{2191}",
+            ListKey::Down => "\u{2193}",
+        }
+    }
+}
+
+/// How much room the row of [`list_keys`] leaves under its keys. The list of pictures under it
+/// starts with [`LIST_TOP`] of its own, room for the ring of the one open, which would be cut
+/// off at the top of the list's scrolling area.
+const LIST_KEYS_UNDER: f32 = 10.0;
+pub const LIST_TOP: f32 = 2.0;
+
+/// The row of keys under a list's heading: Add, Copy and Delete, then ↑ and ↓ to move the one
+/// open, 30 high and 8 in from each side. The arrows are 30 wide; Add and Copy share what is
+/// left, and Delete a fifth more than each. `can` says which of the five can be pressed (in
+/// that order), `hints` what each does. Returns the one pressed.
+pub fn list_keys(ui: &mut egui::Ui, salt: &str, can: [bool; 5], hints: [&str; 5]) -> Option<ListKey> {
+    const TALL: f32 = 30.0;
+    const ARROW: f32 = 30.0;
+    const BETWEEN: f32 = 6.0;
+    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), TALL + LIST_KEYS_UNDER), Sense::hover());
+    let share = (row.width() - 16.0 - 2.0 * ARROW - 4.0 * BETWEEN) / 3.2;
+    let widths = [share, share, 1.2 * share, ARROW, ARROW];
+    let mut left = row.min.x + 8.0;
+    let mut pressed = None;
+    for (at, key) in ListKey::ALL.into_iter().enumerate() {
+        let rect = Rect::from_min_size(pos2(left, row.min.y), vec2(widths[at], TALL));
+        let id = ui.scope_id().with((salt, at));
+        let response = flat_button(ui, rect, id, key.words(), FontId::proportional(12.5), Flat::Plain, can[at]);
+        if response.on_hover_text(hints[at]).clicked() {
+            pressed = Some(key);
+        }
+        left = rect.max.x + BETWEEN;
+    }
+    pressed
+}
+
+/// What one picture of a list in the Edit view's left column says in the strip under it.
+pub struct ListPicture<'a> {
+    /// Its place in the list, from 1, shown as two figures.
+    pub number: usize,
+    pub name: &'a str,
+    /// A dot between the number and the name, in this colour (a slide's group).
+    pub dot: Option<Color32>,
+    /// The one open: on the well, with a ring round it.
+    pub open: bool,
+    /// On the screens now: its strip is orange.
+    pub live: bool,
+    /// Its name is being retyped: the caller puts a field where the name was (see
+    /// [`ListPlaces`]), so the name isn't drawn.
+    pub renaming: bool,
+}
+
+/// Where a picture of the list was drawn: the picture's room, for the caller to paint it in
+/// (black, with corners of [`LIST_PICTURE_CORNER`]); and where its name starts, at the middle
+/// of its line, and how far it may reach, for [`rename_field_at`] with [`list_name_look`].
+pub struct ListPlaces {
+    pub picture: Rect,
+    pub name: egui::Pos2,
+    pub name_right: f32,
+}
+
+/// The corners of a list's pictures.
+pub const LIST_PICTURE_CORNER: f32 = 7.0;
+/// The room round a list's picture, at its sides and top, inside the well of the one open.
+const LIST_PICTURE_INSET: f32 = 5.0;
+/// How tall the strip under a list's picture is.
+const LIST_STRIP: f32 = 24.0;
+/// Between one picture of the list and the next.
+pub const LIST_BETWEEN: f32 = 6.0;
+
+/// How a list picture's name is set: the fixed-width face, heavier, in capitals, with half a
+/// point between the letters, as a slide tile's strip is set.
+pub fn list_name_look(ink: Color32) -> Lettering {
+    Lettering { font: fixed_semibold(12.0), ink, spacing: 0.5, capitals: true }
+}
+
+/// One picture of a list in the Edit view's left column, as wide as the room there is, 16 to 9
+/// with a strip under it: its number, its dot if it has one, its name. `list` names the list,
+/// and the picture is the `index`th of it. When another picture becomes the open one, the list
+/// scrolls it into sight. Returns what the pointer did on it, and where its parts are.
+pub fn list_picture(
+    ui: &mut egui::Ui,
+    list: egui::Id,
+    index: usize,
+    look: &ListPicture,
+) -> (egui::Response, ListPlaces) {
+    let width = ui.available_width();
+    let inner = width - 2.0 * LIST_PICTURE_INSET;
+    let size = vec2(inner, inner * 9.0 / 16.0);
+    let (tile, _) = ui.allocate_exact_size(vec2(width, LIST_PICTURE_INSET + size.y + LIST_STRIP), Sense::hover());
+    let response = ui.interact(tile, list.with(("picture", index)), Sense::click());
+    if look.open {
+        ui.painter().rect_filled(tile, 9.0, CARD);
+        ui.painter().rect_stroke(tile, 9.0, Stroke::new(2.0, SELECTED), StrokeKind::Outside);
+    } else if response.hovered() {
+        ui.painter().rect_filled(tile, 9.0, ROW_HOVER);
+    }
+    let picture = Rect::from_min_size(tile.min + vec2(LIST_PICTURE_INSET, LIST_PICTURE_INSET), size);
+    let middle = picture.max.y + LIST_STRIP / 2.0;
+    let ink = if look.live { TALLY } else { TEXT };
+    let number = format!("{:02}", look.number);
+    let drawn = paint_spaced(
+        ui,
+        pos2(picture.min.x + 3.0, middle),
+        Align2::LEFT_CENTER,
+        &number,
+        fixed_semibold(12.0),
+        ink,
+        0.5,
+    );
+    let mut start = drawn.max.x + 7.0;
+    if let Some(dot) = look.dot {
+        ui.painter().circle_filled(pos2(start + 4.0, middle), 4.0, dot);
+        start += 8.0 + 7.0;
+    }
+    let right = picture.max.x - 3.0;
+    if !look.renaming {
+        let words = list_name_look(ink).lay_out(ui, look.name);
+        let room = Rect::from_min_max(pos2(start, picture.max.y), pos2(right, tile.max.y));
+        ui.painter().with_clip_rect(room).galley(pos2(start, middle - words.size().y / 2.0), words, ink);
+    }
+    // The open one is brought into sight when it changes (added, copied, moved, opened).
+    let shown = list.with("open");
+    if look.open && ui.data(|data| data.get_temp::<usize>(shown)) != Some(index) {
+        ui.data_mut(|data| data.insert_temp(shown, index));
+        response.scroll_to_me(None);
+    }
+    (response, ListPlaces { picture, name: pos2(start, middle), name_right: right })
+}
+
+/// Asks for a picture of a slide; see [`ThumbOf`].
+pub type Thumb<'t> = dyn FnMut(ThumbOf) -> Option<(TextureId, bool)> + 't;
+
+/// A number that changes when any of `parts` does, to tell when a picture must be drawn again.
+pub fn signature(parts: &[&str]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    parts.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// A small picture of a slide drawn with a theme of its own, in `rect` with round corners: a
+/// prop's, or a stage layout's. `key` keeps it apart from other pictures of the same slide;
+/// it is drawn again only when `said` (a [`signature`] of what it shows) is not what it was
+/// when it was last drawn, and is black until it is ready.
+#[allow(clippy::too_many_arguments)]
+pub fn own_picture(
+    ui: &egui::Ui,
+    thumb: &mut Thumb,
+    rect: Rect,
+    corner: f32,
+    key: sp_model::Uuid,
+    slide: &sp_model::Slide,
+    theme: &sp_model::Theme,
+    said: u64,
+) {
+    let drawn = egui::Id::unique(("own picture drawn", key));
+    let again = ui.data(|data| data.get_temp::<u64>(drawn)) != Some(said);
+    let kept = sp_model::Slide { id: key, ..slide.clone() };
+    ui.painter().rect_filled(rect, corner, Color32::BLACK);
+    match thumb(ThumbOf::Own(&kept, theme, again)) {
+        Some((texture, _)) => {
+            ui.data_mut(|data| data.insert_temp(drawn, said));
+            egui::Image::from_texture((texture, rect.size())).corner_radius(corner).paint_at(ui, rect);
+        }
+        None => {
+            // Forgotten already: the next frame draws it from fresh.
+            ui.data_mut(|data| data.insert_temp(drawn, said));
+            ui.ctx().request_repaint();
+        }
+    }
+}
+
 /// The find box: typing in it searches the song library (titles first, then the words of the
 /// songs) and the Bibles in use (a reference gives its passage, words give verses), with what
 /// it finds listed under it by `library_search` in `home.rs`. It holds the
@@ -5433,6 +5641,27 @@ pub mod tests {
         let row = &text.galley.rows[0];
         let places = row.row.glyphs.iter().map(|glyph| (glyph.chr, text.pos + row.pos.to_vec2() + glyph.pos.to_vec2()));
         ((format.font_id.clone(), format.extra_letter_spacing, format.color), places.collect())
+    }
+
+    /// Where a frame drew the line `words` (in a menu too), at its middle; `None` if it didn't.
+    pub fn place_of(output: &egui::FullOutput, words: &str) -> Option<egui::Pos2> {
+        fn walk(shape: &egui::Shape, words: &str) -> Option<egui::Pos2> {
+            match shape {
+                egui::Shape::Text(text) if text.galley.job.text == words => {
+                    Some(text.pos + text.galley.rect.center().to_vec2())
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| walk(shape, words)),
+                _ => None,
+            }
+        }
+        output.shapes.iter().find_map(|clipped| walk(&clipped.shape, words))
+    }
+
+    /// The frames of a click at `at` with a button: the pointer goes there, presses, lets go,
+    /// and one frame more for what the click opens.
+    pub fn click_frames(at: egui::Pos2, button: PointerButton) -> [Vec<Event>; 4] {
+        let press = |pressed| Event::PointerButton { pos: at, button, pressed, modifiers: Modifiers::NONE };
+        [vec![Event::PointerMoved(at)], vec![press(true)], vec![press(false)], Vec::new()]
     }
 
     /// Two lines' letters are set the same way, each on the same spot.

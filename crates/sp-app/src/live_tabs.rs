@@ -11,14 +11,14 @@ use std::time::{Duration, Instant};
 
 use egui::{Align2, Color32, FontId, Rect, Sense, pos2, vec2};
 
-use crate::home::{HomeState, ThumbOf};
+use crate::home::HomeState;
 use crate::icons::Icon;
 use crate::messages::Message;
 use crate::screens::Kind;
 use crate::studio::{
-    CARD, CARD_RUNNING, CARD_SHOWN, Flat, PANEL, RADIUS_CARD, READY, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, Tabs, fixed,
-    fixed_semibold, flat_button, flat_button_width, icon_key, paint_spaced, quiet_icon, semibold, spaced, tab_switch,
-    tab_switch_height,
+    CARD, CARD_RUNNING, CARD_SHOWN, Flat, PANEL, RADIUS_CARD, READY, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, Tabs, Thumb,
+    fixed, fixed_semibold, flat_button, flat_button_width, icon_key, own_picture, paint_spaced, quiet_icon, semibold,
+    signature, spaced, tab_switch, tab_switch_height,
 };
 use crate::timers::{self, Timer};
 
@@ -803,47 +803,12 @@ fn message_settings(ui: &mut egui::Ui, message: &mut Message, timer_names: &[Str
     changed
 }
 
-/// Asks for a picture of a slide; see [`ThumbOf`].
-type Thumb<'t> = dyn FnMut(ThumbOf) -> Option<(egui::TextureId, bool)> + 't;
-
-/// A number that changes when any of `parts` does, to tell when a picture must be drawn again.
-fn signature(parts: &[&str]) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    parts.hash(&mut hasher);
-    hasher.finish()
-}
-
-/// A small picture of a slide drawn with a theme of its own, in `rect` with round corners: a
-/// prop's, or a stage layout's. `key` keeps it apart from other pictures of the same slide;
-/// it is drawn again only when `said` (a [`signature`] of what it shows) is not what it was
-/// when it was last drawn, and is black until it is ready.
-#[allow(clippy::too_many_arguments)]
-fn own_picture(
-    ui: &egui::Ui,
-    thumb: &mut Thumb,
-    rect: Rect,
-    corner: f32,
-    key: sp_model::Uuid,
-    slide: &sp_model::Slide,
-    theme: &sp_model::Theme,
-    said: u64,
-) {
-    let drawn = egui::Id::unique(("own picture drawn", key));
-    let again = ui.data(|data| data.get_temp::<u64>(drawn)) != Some(said);
-    let kept = sp_model::Slide { id: key, ..slide.clone() };
-    ui.painter().rect_filled(rect, corner, Color32::BLACK);
-    match thumb(ThumbOf::Own(&kept, theme, again)) {
-        Some((texture, _)) => {
-            ui.data_mut(|data| data.insert_temp(drawn, said));
-            egui::Image::from_texture((texture, rect.size())).corner_radius(corner).paint_at(ui, rect);
-        }
-        None => {
-            // Forgotten already: the next frame draws it from fresh.
-            ui.data_mut(|data| data.insert_temp(drawn, said));
-            ui.ctx().request_repaint();
-        }
-    }
+/// A prop's picture in `rect`, drawn with the props' theme, again only when the prop changes.
+/// The Props tab and the Edit view's list of props draw it the same way, and share it.
+pub fn prop_picture(ui: &egui::Ui, thumb: &mut Thumb, rect: Rect, corner: f32, prop: &crate::props::Prop) {
+    let key = sp_model::Uuid::from_u128(prop.id.as_u128() ^ 0x7072_6f70_7069_6374_7572_6500_0000_0000);
+    let said = signature(&[&serde_json::to_string(&prop.slide).unwrap_or_default()]);
+    own_picture(ui, thumb, rect, corner, key, &prop.slide, prop_theme(), said);
 }
 
 /// The theme a prop's picture is drawn with: the built-in one's boxes on black, as a prop lies
@@ -859,20 +824,28 @@ fn prop_theme() -> &'static sp_model::Theme {
     })
 }
 
-/// Something asked of a prop from its card.
-enum PropAsk {
+/// Something asked of a prop: from its card in the Props tab, or from the list of props in the
+/// Edit view.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PropAsk {
     Toggle,
     Edit,
     Rename,
     Duplicate,
     AutoClear(Option<u32>),
     Delete,
+    /// A new prop, at the end of the list, with its name ready to be typed over.
+    New,
+    /// One place up the list (true) or down.
+    Move(bool),
 }
 
-/// A prop's menu, behind its ⋯ and a right-click on its card.
-fn prop_menu(ui: &mut egui::Ui, auto_clear: Option<u32>) -> Option<PropAsk> {
+/// A prop's menu: behind its ⋯ and a right-click on its card in the Props tab, and a
+/// right-click on its picture in the Edit view (`in_editor`), where it is open already, so
+/// Edit in the Editor isn't offered, and where Delete asks first.
+pub fn prop_menu(ui: &mut egui::Ui, auto_clear: Option<u32>, in_editor: bool) -> Option<PropAsk> {
     let mut asked = None;
-    if ui.button("Edit in the Editor").clicked() {
+    if !in_editor && ui.button("Edit in the Editor").clicked() {
         asked = Some(PropAsk::Edit);
     }
     ui.menu_button("Clears Itself", |ui| {
@@ -891,23 +864,77 @@ fn prop_menu(ui: &mut egui::Ui, auto_clear: Option<u32>) -> Option<PropAsk> {
         asked = Some(PropAsk::Duplicate);
     }
     ui.separator();
-    if ui.button("Delete").clicked() {
+    if ui.button(if in_editor { "Delete\u{2026}" } else { "Delete" }).clicked() {
         asked = Some(PropAsk::Delete);
     }
     asked
 }
 
-fn props_tab(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut Thumb) {
-    use crate::props::Prop;
-    let (_, add) = heading(ui, "Props", Some("New prop"));
-    if add {
+/// Carries out what was asked of the prop at `index` (for New, of none). Returns where the prop
+/// it made (New, Duplicate) or moved (Move) now is.
+pub fn carry_out_prop_ask(state: &mut HomeState, index: usize, ask: PropAsk) -> Option<usize> {
+    if ask == PropAsk::New {
         let taken = |name: &str| state.props.iter().any(|prop| prop.name == name);
         let name = (1..).map(|n| format!("Prop {n}")).find(|name| !taken(name)).unwrap_or_default();
-        let prop = Prop::new(name.clone());
+        let prop = crate::props::Prop::new(name.clone());
         state.prop_rename = Some((prop.id, name));
         state.rename_started = true;
         state.props.push(prop);
         state.props_changed = true;
+        return Some(state.props.len() - 1);
+    }
+    let id = state.props.get(index)?.id;
+    match ask {
+        PropAsk::Toggle => {
+            if state.props_live.iter().any(|(live, _)| *live == id) {
+                state.props_live.retain(|(live, _)| *live != id);
+            } else {
+                state.props_live.push((id, Instant::now()));
+            }
+        }
+        PropAsk::Edit => {
+            // The prop opens in the editor, as a slide of its own.
+            state.editing = crate::studio::prop_draft(state, index);
+            state.bible_open = false;
+            state.reflow = None;
+        }
+        PropAsk::Rename => {
+            state.prop_rename = Some((id, state.props[index].name.clone()));
+            state.rename_started = true;
+        }
+        PropAsk::Duplicate => {
+            let copy = state.props[index].duplicate();
+            state.props.insert(index + 1, copy);
+            state.props_changed = true;
+            return Some(index + 1);
+        }
+        PropAsk::AutoClear(choice) => {
+            state.props[index].auto_clear = choice;
+            state.props_changed = true;
+        }
+        PropAsk::Delete => {
+            state.props.remove(index);
+            state.props_live.retain(|(live, _)| *live != id);
+            state.props_changed = true;
+        }
+        PropAsk::Move(up) => {
+            let to = if up { index.checked_sub(1)? } else { index + 1 };
+            if to >= state.props.len() {
+                return None;
+            }
+            state.props.swap(index, to);
+            state.props_changed = true;
+            return Some(to);
+        }
+        PropAsk::New => {}
+    }
+    None
+}
+
+fn props_tab(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut Thumb) {
+    let (_, add) = heading(ui, "Props", Some("New prop"));
+    if add {
+        carry_out_prop_ask(state, 0, PropAsk::New);
     }
     if state.props.is_empty() {
         empty_note(ui, "No props. A prop stays over the slides until it is taken off, such as a name in a corner.");
@@ -941,9 +968,7 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut Thumb) {
             }
             let y = row.center().y;
             let place = Rect::from_min_size(pos2(row.min.x, y - picture.y / 2.0), picture);
-            let key = sp_model::Uuid::from_u128(prop.id.as_u128() ^ 0x7072_6f70_7069_6374_7572_6500_0000_0000);
-            let said = signature(&[&serde_json::to_string(&prop.slide).unwrap_or_default()]);
-            own_picture(ui, thumb, place, 4.0, key, &prop.slide, prop_theme(), said);
+            prop_picture(ui, thumb, place, 4.0, prop);
             let left = place.max.x + CARD_GAP;
             let top = y - block / 2.0;
             let (name_tall, first_line) = (name.size().y, name.rows.first().map_or(15.0, |row| row.height()));
@@ -983,7 +1008,7 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut Thumb) {
             let auto_clear = prop.auto_clear;
             let more = more_key(ui, more, egui::Id::unique(("prop more", id)));
             egui::Popup::menu(&more).show(|ui| {
-                if let Some(ask) = prop_menu(ui, auto_clear) {
+                if let Some(ask) = prop_menu(ui, auto_clear, false) {
                     asked = Some((index, ask));
                 }
             });
@@ -991,7 +1016,7 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut Thumb) {
                 asked = Some((index, PropAsk::Edit));
             }
             back.on_hover_text("Double-click to change it in the editor").context_menu(|ui| {
-                if let Some(ask) = prop_menu(ui, auto_clear) {
+                if let Some(ask) = prop_menu(ui, auto_clear, false) {
                     asked = Some((index, ask));
                 }
             });
@@ -1011,40 +1036,8 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut Thumb) {
         Some(None) => state.prop_rename = None,
         None => {}
     }
-    let Some((index, ask)) = asked else { return };
-    let id = state.props[index].id;
-    match ask {
-        PropAsk::Toggle => {
-            if state.props_live.iter().any(|(live, _)| *live == id) {
-                state.props_live.retain(|(live, _)| *live != id);
-            } else {
-                state.props_live.push((id, Instant::now()));
-            }
-        }
-        PropAsk::Edit => {
-            // The prop opens in the editor, as a slide of its own.
-            state.editing = crate::studio::prop_draft(state, index);
-            state.bible_open = false;
-            state.reflow = None;
-        }
-        PropAsk::Rename => {
-            state.prop_rename = Some((id, state.props[index].name.clone()));
-            state.rename_started = true;
-        }
-        PropAsk::Duplicate => {
-            let copy = state.props[index].duplicate();
-            state.props.insert(index + 1, copy);
-            state.props_changed = true;
-        }
-        PropAsk::AutoClear(choice) => {
-            state.props[index].auto_clear = choice;
-            state.props_changed = true;
-        }
-        PropAsk::Delete => {
-            state.props.remove(index);
-            state.props_live.retain(|(live, _)| *live != id);
-            state.props_changed = true;
-        }
+    if let Some((index, ask)) = asked {
+        carry_out_prop_ask(state, index, ask);
     }
 }
 
@@ -2403,6 +2396,61 @@ fn paint_tick(painter: &egui::Painter, rect: Rect, ink: Color32) {
 /// The role of the timer's box in a stage layout.
 const STAGE_TIMER: &str = "timer";
 
+/// What the stage would show now, to draw a picture of each stage layout with: the slide on
+/// screen and the next, the song's title and the group, the stage message and a timer that
+/// runs. The Stage tab and the Edit view's list of layouts draw them the same way, and share
+/// them.
+#[derive(Default)]
+pub struct StagePictures<'a> {
+    now: Option<&'a sp_model::Slide>,
+    next: Option<&'a sp_model::Slide>,
+    about: crate::stage::About,
+    overlay: crate::output::Overlay,
+}
+
+impl<'a> StagePictures<'a> {
+    pub fn of(show: &'a sp_engine::Show, state: &HomeState) -> StagePictures<'a> {
+        let now = show.live_slide().map(|(_, slide)| slide);
+        let next = show.live().and(show.upcoming()).and_then(|at| {
+            let song = show.presentations().get(at.presentation)?;
+            song.slide(at.slide).map(|(_, slide)| slide)
+        });
+        let about = match show.live_slide() {
+            Some((song, _)) => crate::stage::About {
+                title: Some(song.title.clone()),
+                group: show.live().and_then(|at| song.slide(at.slide)).map(|(group, _)| group.name.clone()),
+            },
+            None => crate::stage::About::default(),
+        };
+        let overlay = crate::output::Overlay {
+            stage_message: state.stage_message_live.then(|| state.stage_message.clone()),
+            timers: state.timers.iter().filter(|timer| timer.running()).take(1).cloned().collect(),
+            ..Default::default()
+        };
+        StagePictures { now, next, about, overlay }
+    }
+
+    /// The stage's picture in `layout`, in `rect` with corners of `corner`, drawn again when
+    /// what it shows changes: a new slide, the stage message, the clock's minute, the layout
+    /// itself. A running timer is named but its time is left out, so the pictures are not drawn
+    /// again every second.
+    pub fn paint(&self, ui: &egui::Ui, thumb: &mut Thumb, rect: Rect, corner: f32, layout: &sp_model::ThemeTemplate) {
+        let mut stage = crate::stage::slide(self.now, self.next, &self.overlay, &self.about, layout);
+        let timer_name = self.overlay.timers.first().map(|timer| timer.name.clone());
+        for object in &mut stage.objects {
+            if object.role.as_ref().is_some_and(|role| role.0 == STAGE_TIMER)
+                && let Some(name) = &timer_name
+            {
+                *object = sp_model::Object::text(sp_model::Role(STAGE_TIMER.to_owned()), name.clone());
+            }
+        }
+        let texts = format!("{:?}", stage.texts());
+        let said = signature(&[&texts, &serde_json::to_string(layout).unwrap_or_default()]);
+        let key = sp_model::Uuid::from_u128(layout.id.as_u128() ^ 0x7374_6167_6570_6963_7475_7265_0000_0000);
+        own_picture(ui, thumb, rect, corner, key, &stage, &crate::stage::theme_for(layout), said);
+    }
+}
+
 fn stage_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, thumb: &mut Thumb) {
     let stages: Vec<usize> =
         state.screens.iter().enumerate().filter(|(_, screen)| screen.kind == Kind::Stage).map(|(at, _)| at).collect();
@@ -2483,23 +2531,7 @@ fn stage_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, t
     if state.stage_layouts.is_empty() {
         state.stage_layouts = crate::stage::builtin_layouts();
     }
-    let now = show.live_slide().map(|(_, slide)| slide);
-    let next = show.live().and(show.upcoming()).and_then(|at| {
-        let song = show.presentations().get(at.presentation)?;
-        song.slide(at.slide).map(|(_, slide)| slide)
-    });
-    let about = match show.live_slide() {
-        Some((song, _)) => crate::stage::About {
-            title: Some(song.title.clone()),
-            group: show.live().and_then(|at| song.slide(at.slide)).map(|(group, _)| group.name.clone()),
-        },
-        None => crate::stage::About::default(),
-    };
-    let overlay = crate::output::Overlay {
-        stage_message: state.stage_message_live.then(|| state.stage_message.clone()),
-        timers: state.timers.iter().filter(|timer| timer.running()).take(1).cloned().collect(),
-        ..Default::default()
-    };
+    let pictures = StagePictures::of(show, state);
     let width = ui.available_width();
     let tile_wide = (width - 8.0) / 2.0;
     let picture = vec2(tile_wide - 12.0, (tile_wide - 12.0) * 9.0 / 16.0);
@@ -2525,23 +2557,8 @@ fn stage_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, t
             let edge = egui::Stroke::new(2.0, crate::studio::SELECTED);
             ui.painter().rect_stroke(tile, 10.0, edge, egui::StrokeKind::Inside);
         }
-        // The stage's picture in this layout, drawn again when what it shows changes: a new
-        // slide, the stage message, the clock's minute. A running timer is named but its time
-        // is left out, so the pictures are not drawn again every second.
-        let mut stage = crate::stage::slide(now, next, &overlay, &about, layout);
-        let timer_name = overlay.timers.first().map(|timer| timer.name.clone());
-        for object in &mut stage.objects {
-            if object.role.as_ref().is_some_and(|role| role.0 == STAGE_TIMER)
-                && let Some(name) = &timer_name
-            {
-                *object = sp_model::Object::text(sp_model::Role(STAGE_TIMER.to_owned()), name.clone());
-            }
-        }
-        let texts = format!("{:?}", stage.texts());
-        let said = signature(&[&texts, &serde_json::to_string(layout).unwrap_or_default()]);
-        let key = sp_model::Uuid::from_u128(layout.id.as_u128() ^ 0x7374_6167_6570_6963_7475_7265_0000_0000);
         let shot = Rect::from_min_size(tile.min + vec2(6.0, 6.0), picture);
-        own_picture(ui, thumb, shot, 5.0, key, &stage, &crate::stage::theme_for(layout), said);
+        pictures.paint(ui, thumb, shot, 5.0, layout);
         let name_y = shot.max.y + 6.0 + 8.5;
         let mut left = tile.min.x + 9.0;
         if on {

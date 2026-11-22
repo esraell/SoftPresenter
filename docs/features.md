@@ -386,7 +386,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   optional time to clear themselves. Each is a card with a small picture of it, its name, Show
   or Hide (the card is tinted orange while it shows), and ⋯ with Edit in the Editor (a
   double-click does the same), Clears Itself, Rename, Duplicate and Delete. F4 or the Props key
-  takes them all off.
+  takes them all off. In the Edit view, under Props, they are also made (Add), copied, moved up
+  and down and deleted; a prop's right-click menu there has Clears Itself, Rename, Duplicate
+  and Delete…, and the strip under the picture of one that shows is orange. With the last prop
+  deleted there, the Edit view goes on to the slides.
 - **Macros**: steps done in turn, which clear layers, show or hide messages and props, start,
   stop or reset timers, switch the audience screens, go to songs, show a picture from the
   media bin, play a media playlist, a picture, a video or a song on the Announcements layer, and
@@ -482,7 +485,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **The Edit view** edits four kinds of thing, chosen by a switch at the top of its left
   column: a song's Slides, the Themes and their templates, the Props, and the Stage screens'
   layouts. View › Themes, Control-T and `sp view themes` open
-  it on the themes.
+  it on the themes. Under Props and Stage the left column lists them the same way: a heading
+  (PROPS, STAGE LAYOUTS), a row of keys that act on the one open (Add, Copy, Delete, which asks
+  first, and ↑ and ↓ to move it up or down the list), then each as its picture with its
+  number and name under it, the one open on a lighter grey with a ring round it. A click opens
+  one, a double click retypes its name in place (the name keeps its look while it is
+  retyped), and a right-click opens its other choices; the objects of the one open stay at the
+  foot of the column.
 - **Looking at one screen**: with more than two screens, a small arrow in the preview block's
   head opens a menu of them (What the room sees, each audience screen, the stage screens). The
   preview then shows what that one screen shows, drawn as it draws it (its own theme, layers and
@@ -519,9 +528,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   text look, and each item's own settings: which timer (the first one running, or one chosen by
   name, running or not), the clock on a 12- or 24-hour clock and with or without seconds, how
   many lines of the notes. An item can be on a layout more than once. The layouts are listed on
-  the left with + for a new one and, on each, ⋯ (or a right-click, or a double click to rename)
-  for Rename, Duplicate and Delete; with nothing picked the inspector names the layout and the
-  stage screens that use it. A layout saved by an earlier version opens and looks as it did,
+  the left, each as a live picture of what the stage would show in it now (drawn again only
+  when that changes, as in the Stage tab), under Add, Copy, Delete, ↑ and ↓; a right-click on
+  one offers Rename, Duplicate and Delete…, and a double click renames it. Delete asks first,
+  and is not offered for the only layout. With nothing picked the inspector names the layout
+  and the stage screens that use it. A layout saved by an earlier version opens and looks as it did,
   and keeps what it had (each item's look and place are still written where earlier versions
   read them).
 - **Screen pictures on stage**: a stage layout can show, live, what an audience screen shows
