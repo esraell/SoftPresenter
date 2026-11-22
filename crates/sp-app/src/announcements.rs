@@ -186,7 +186,7 @@ impl crate::App {
     /// Puts a picture or a video from the media bin (the item at `index`) on the Announcements
     /// layer, for `what` (the item itself, or a media playlist at its place `at`). A video
     /// plays, looping unless a media playlist of several items goes on after it.
-    fn show_media_announcement(&mut self, what: Announce, at: usize, index: usize) {
+    pub(crate) fn show_media_announcement(&mut self, what: Announce, at: usize, index: usize) {
         let Some(item) = self.show.media().get(index).cloned() else {
             self.announcing = None;
             return;
@@ -207,7 +207,11 @@ impl crate::App {
                 Ok(player) => video = Some(player),
                 Err(problem) => {
                     crate::applog::problem("announcements", &problem);
-                    if let Some(running) = self.running.as_mut() {
+                    // A file just taken out of a followed folder: the layer goes on to what is
+                    // left (see `followed`), with nothing to tell the operator.
+                    if !self.gone_from_followed_folder(&item.path)
+                        && let Some(running) = self.running.as_mut()
+                    {
                         running.home_state.notice = Some(problem);
                     }
                 }
@@ -280,7 +284,7 @@ impl crate::App {
 
     /// What the window calls a picture or video on the layer: its name, after its media
     /// playlist's when it plays from one.
-    fn media_announcement_title(&self, what: Announce, name: &str) -> String {
+    pub(crate) fn media_announcement_title(&self, what: Announce, name: &str) -> String {
         match what {
             Announce::MediaPlaylist(id) => {
                 let playlist = self.running.as_ref().and_then(|running| {
@@ -382,11 +386,18 @@ impl crate::App {
             }
             Announce::MediaPlaylist(id) => {
                 let items = self.playlist_media(id);
+                let index = item.and_then(|item| self.show.media().iter().position(|have| have.id == item));
+                // The file on screen has left the folder the playlist follows: what goes on next,
+                // and when, is worked out with the folder's files (`tick_followed`), which holds
+                // the last picture rather than clearing while a new file may be on its way.
+                if index.is_some_and(|index| !items.contains(&index)) && self.follows_folder(id) {
+                    let soon = Instant::now() + Duration::from_millis(250);
+                    return Some(self.tick_announcement_video().map_or(soon, |at| at.min(soon)));
+                }
                 if items.is_empty() {
                     self.apply(vec![sp_engine::Command::Clear(sp_engine::Layer::Announcements)]);
                     return None;
                 }
-                let index = item.and_then(|item| self.show.media().iter().position(|have| have.id == item));
                 let is_video = index
                     .and_then(|index| self.show.media().get(index))
                     .is_some_and(|i| crate::media::is_video(&i.path));
@@ -432,11 +443,13 @@ impl crate::App {
                     "announcements",
                     &format!("{} took over at the end of the pass", crate::file_name(&path)),
                 );
-                // The window names the new file (its media bin item has its name now).
                 let item = self.announcing.as_ref().and_then(|on| on.item);
-                if let Some(name) =
-                    item.and_then(|id| self.show.media().iter().find(|i| i.id == id)).map(|i| i.name.clone())
-                {
+                let item = item.and_then(|id| self.show.media().iter().find(|i| i.id == id));
+                if item.is_some_and(|item| item.path != path) {
+                    // Another item, from a followed folder: it is the one on screen now.
+                    self.followed_took_over(crate::followed::OnLayer::Announcements, &path);
+                } else if let Some(name) = item.map(|i| i.name.clone()) {
+                    // The window names the new file (its media bin item has its name now).
                     let title = self.media_announcement_title(what, &name);
                     if let Some(running) = self.running.as_mut() {
                         running.home_state.announcement_live = Some((what, title));
@@ -506,7 +519,7 @@ impl crate::App {
     }
 
     /// How many items the media playlist on the layer has (none for anything else).
-    fn announcing_items(&self) -> usize {
+    pub(crate) fn announcing_items(&self) -> usize {
         match self.announcing.as_ref().map(|on| on.what) {
             Some(Announce::MediaPlaylist(id)) => self.playlist_media(id).len(),
             _ => 0,

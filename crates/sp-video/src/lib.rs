@@ -399,6 +399,11 @@ impl Player {
         self.engine.duration()
     }
 
+    /// Whether it starts again at its end.
+    pub fn looping(&self) -> bool {
+        self.looping
+    }
+
     pub fn set_looping(&mut self, looping: bool) {
         self.looping = looping;
         self.engine.set_looping(looping);

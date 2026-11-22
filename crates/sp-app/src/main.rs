@@ -18,6 +18,7 @@ mod displays;
 mod editor;
 mod file_drop;
 mod find;
+mod followed;
 mod home;
 mod icons;
 mod images;
@@ -1390,6 +1391,9 @@ struct App {
     look_again: bool,
     /// The media bin items a followed folder brought in (not added by hand).
     followed_items: std::collections::HashSet<Uuid>,
+    /// What the media layer, and the Announcements layer, playing from a followed folder
+    /// remember between looks (see `followed`).
+    following: [followed::Following; 2],
     /// The media playlists read at the start, handed to the window's state once it is made.
     media_playlists: Vec<media::Playlist>,
     unsaved_since: Option<Instant>,
@@ -1851,10 +1855,11 @@ impl App {
     }
 
     /// Keeps the media playlists that follow folders up to date: has the folders looked at, on
-    /// a thread of its own, every few seconds, or at once when `now`. `finish_folder_look` takes
-    /// in what was found.
+    /// a thread of its own, every few seconds (every second while a layer waits for a new file,
+    /// see `folder_look_every`), or at once when `now`. `finish_folder_look` takes in what was
+    /// found.
     fn check_folders(&mut self, now: bool) {
-        if !now && self.folders_checked.elapsed() < Duration::from_secs(5) {
+        if !now && self.folders_checked.elapsed() < self.folder_look_every() {
             return;
         }
         self.folders_checked = Instant::now();
@@ -2118,7 +2123,13 @@ impl App {
             }
             Err(problem) => {
                 applog::event("video", &format!("could not open {}: {problem}", item.path.display()));
-                running.home_state.notice = Some(problem);
+                // A file just taken out of a followed folder: the layer goes on to what is left
+                // (see `followed`), with nothing to tell the operator.
+                if !self.gone_from_followed_folder(&item.path)
+                    && let Some(running) = self.running.as_mut()
+                {
+                    running.home_state.notice = Some(problem);
+                }
             }
         }
     }
@@ -2640,12 +2651,19 @@ impl App {
         match handed {
             Some(Ok(path)) => {
                 applog::event("video", &format!("{} took over at the end of the pass", file_name(&path)));
-                // The row under the preview names the new file (its media bin item has its name now).
-                let name = self.show.media().iter().find(|item| item.id == id).map(|item| item.name.clone());
-                if let (Some(name), Some(live)) =
-                    (name, self.running.as_mut().and_then(|running| running.home_state.video_live.as_mut()))
-                {
-                    live.name = name;
+                let item = self.show.media().iter().find(|item| item.id == id);
+                if item.is_some_and(|item| item.path != path) {
+                    // Another item, from a followed folder: it is the one on screen now.
+                    self.followed_took_over(followed::OnLayer::Media, &path);
+                } else {
+                    // The row under the preview names the new file (its media bin item has its
+                    // name now).
+                    let name = item.map(|item| item.name.clone());
+                    if let (Some(name), Some(live)) =
+                        (name, self.running.as_mut().and_then(|running| running.home_state.video_live.as_mut()))
+                    {
+                        live.name = name;
+                    }
                 }
             }
             Some(Err(problem)) => applog::problem("video", &format!("the new file couldn't take over: {problem}")),
@@ -8922,6 +8940,9 @@ impl ApplicationHandler<AppEvent> for App {
         self.run_actions();
         self.tick_advance();
         self.sync_overlay();
+        // What plays from a followed folder is kept going as its files come and go, before the
+        // layers' own clocks move them on.
+        let followed_at = self.tick_followed();
         let video_at = self.tick_video();
         let box_video_at = self.tick_slide_video();
         let web_at = self.tick_web();
@@ -8935,7 +8956,7 @@ impl ApplicationHandler<AppEvent> for App {
             .running
             .as_ref()
             .filter(|r| r.home_state.media_playlists.iter().any(|p| p.folder.is_some()))
-            .map(|_| self.folders_checked + Duration::from_secs(5));
+            .map(|_| self.folders_checked + self.folder_look_every());
         // Songs changed in the Edit view are written once typing has paused for a second.
         const SAVE_AFTER: Duration = Duration::from_secs(1);
         let save_at = self.unsaved_since.map(|since| since + SAVE_AFTER);
@@ -8970,6 +8991,7 @@ impl ApplicationHandler<AppEvent> for App {
             panel_at,
             thumbs_rest_at,
             save_at,
+            followed_at,
             video_at,
             box_video_at,
             web_at,
@@ -9316,6 +9338,7 @@ fn main() -> ExitCode {
         folder_look: None,
         look_again: false,
         followed_items: std::collections::HashSet::new(),
+        following: Default::default(),
         unsaved_since: None,
         was_editing: false,
         theme: Arc::new(themes[songs_theme].clone()),

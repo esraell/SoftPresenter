@@ -342,7 +342,17 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   one of several in a media playlist going round plays the new file next time round). One that
   leaves the folder leaves the playlist, and the bin too if the folder brought it in and nothing
   else uses it (another media playlist, a slide, a playlist of the service, a macro, or the
-  screens, until it is taken off them); one added to the bin by hand stays. A file that can't be
+  screens, until it is taken off them); one added to the bin by hand stays. **A video swapped
+  for one with another name** (a script putting the new one in and deleting the old, in either
+  order) never leaves the screens blank, whether the playlist goes round on the media layer or
+  the Announcements layer, or a video the folder brought in is shown on its own: a new file
+  joins the playlist and plays when its turn comes (a video that was the playlist's only item
+  gives way to it at the end of its pass), and when the file on screen leaves the folder the
+  next item goes on, at the end of the pass if the video is still playing (through the same
+  pictures, as above), otherwise at once. With nothing left, the last picture stays up for 8
+  seconds while the folder is looked at every second, and a new file that comes in that time
+  takes over; only if none comes does the layer stop, and a notice says why. A file taken out
+  just before its turn is passed over without a notice. A file that can't be
   read is tried again only once it changes, and a folder that can't be read (a drive not
   plugged in) leaves the playlist as it was. The folder is looked at every few seconds on a
   thread of its own. **Play This Playlist** shows its items in turn on the
