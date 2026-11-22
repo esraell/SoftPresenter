@@ -843,7 +843,7 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         if ui.add(small("Bring Forward")).on_hover_text("Move in front of the next object").clicked() {
             draft.restack(true);
         }
-        if ui.add(small("Send Back")).on_hover_text("Move behind the previous object").clicked() {
+        if ui.add(small("Send Backward")).on_hover_text("Move behind the previous object").clicked() {
             draft.restack(false);
         }
         if ui.add(small("Delete")).on_hover_text("Remove this object from the slide (Delete)").clicked() {
@@ -1114,7 +1114,7 @@ fn text_look(
     rule(ui);
 
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Text Color").size(13.0).color(INK));
+        ui.label(egui::RichText::new("Text Colour").size(13.0).color(INK));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| colour(ui, &mut wanted.fill, "Text colour"));
     });
     ui.add_space(4.0);

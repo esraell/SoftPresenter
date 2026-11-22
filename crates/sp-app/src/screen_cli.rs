@@ -1,5 +1,5 @@
 //! Command-line commands for screens (adding, changing, deleting), the settings kept between
-//! runs, and the Reflow view. Each changes the window's own state, which is saved as the
+//! runs, and Edit Words. Each changes the window's own state, which is saved as the
 //! window saves it, and says what it did.
 
 use crate::control::{Reply, find};
@@ -511,7 +511,7 @@ impl crate::App {
                         "on"
                     }
                 ),
-                format!("continuous playlist: {}", if prefs.continuous { "on" } else { "off" }),
+                format!("continuous: {}", if prefs.continuous { "on" } else { "off" }),
                 format!("slides: {} view, {} across", prefs.slide_view, prefs.columns),
             ];
             let data = serde_json::to_value(&prefs).unwrap_or_default();
@@ -570,7 +570,7 @@ impl crate::App {
                 }
                 "continuous" => {
                     let on = on_off(key, value)?;
-                    said.push(format!("continuous playlist {}", if on { "on" } else { "off" }));
+                    said.push(format!("continuous {}", if on { "on" } else { "off" }));
                     changes.push(Box::new(move |state| state.continuous = on));
                 }
                 "start_with" => {
@@ -607,12 +607,12 @@ impl crate::App {
         Ok(Reply::done(format!("Settings: {}.", said.join(", "))))
     }
 
-    /// `view reflow [SONG]`: the Reflow view, the song's words as text to edit.
-    pub(crate) fn view_reflow(&mut self, typed: &str) -> Result<Reply, String> {
+    /// `view words [SONG]` (or `view reflow`): Edit Words, the song's words as text to change.
+    pub(crate) fn view_words(&mut self, typed: &str) -> Result<Reply, String> {
         let at = if typed.trim().is_empty() { self.show.selected() } else { self.find_song(typed)? };
         let song = self.show.presentations().get(at).cloned().ok_or("That song is gone.")?;
         let text = sp_model::to_song_text(&song);
         self.with_state(|state| state.reflow = Some((at, text)));
-        Ok(Reply::done(format!("Showing {} in the Reflow view.", song.title)))
+        Ok(Reply::done(format!("Editing the words of {}.", song.title)))
     }
 }

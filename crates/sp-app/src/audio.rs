@@ -201,11 +201,12 @@ impl Library {
         }
     }
 
-    /// A name no audio playlist has.
+    /// A name no audio playlist has: "New Audio Playlist", "New Audio Playlist 2", and so on
+    /// ("Playlist" alone is the running order).
     pub fn new_name(&self) -> String {
         let taken = |name: &str| self.playlists.iter().any(|playlist| playlist.name == name);
-        std::iter::once("New Playlist".to_owned())
-            .chain((2..).map(|n| format!("New Playlist {n}")))
+        std::iter::once("New Audio Playlist".to_owned())
+            .chain((2..).map(|n| format!("New Audio Playlist {n}")))
             .find(|name| !taken(name))
             .unwrap_or_default()
     }
@@ -431,7 +432,7 @@ mod tests {
             tracks: vec![Track::of(PathBuf::from("/m/Solo.mp3"))],
             ..Playlist::new(library.new_name())
         });
-        assert_eq!(library.playlists[1].name, "New Playlist");
+        assert_eq!(library.playlists[1].name, "New Audio Playlist");
         let solo = library.playlists[1].tracks[0].id;
         assert!(library.after(solo, |_| 0).is_none(), "a playlist of one has nothing after");
         assert_eq!(Library::from_json(&serde_json::to_string(&library).unwrap()), Some(library));

@@ -130,7 +130,7 @@ mistake impossible:
 
 | Command | Gives |
 |---|---|
-| `sp` or `status` | What is on screen (song, slide, words), the next slide, the media, any message and props, the announcements layer, a media playlist playing, running timers, the audio, the playlist in front, the theme version on (once any theme has one), whether the screens, Continuous Playlist and Identify are on, and the main theme |
+| `sp` or `status` | What is on screen (song, slide, words), the next slide, the media, any message and props, the announcements layer, a media playlist playing, running timers, the audio, the playlist in front, the theme version on (once any theme has one), whether the screens, Continuous and Identify are on, and the main theme |
 | `status --wait SECONDS [--since TOKEN]` | The same, once something has changed since TOKEN (or, with no TOKEN, from now), or when SECONDS (0 to 30) are up; see [waiting for a change](#waiting-for-a-change) |
 | `songs` | Every song in the library, numbered; saved Bible passages and slides made from presentations too. A song whose file changed outside the app is marked |
 | `slides [SONG]` | A song's slides: number, group, words (lines joined with " / ", main language first), which is on screen, and marks for a slide that is off, labelled or has a hot key |
@@ -156,7 +156,7 @@ mistake impossible:
     Announcements: Harbour Lights, slide 1
     Timers running: Timer 00:05:00
     Playlist in front: Sunday (listed in the left column); item last opened from it: Blessed Assurance
-    Continuous playlist: off   Identify screens: off   Main theme: Built-in
+    Continuous: off   Identify screens: off   Main theme: Built-in
 
     $ sp screens
       1. Screen 1: In a window
@@ -260,12 +260,12 @@ each time with the token the last reply gave.
 | Command | Does |
 |---|---|
 | `go SONG [SLIDE]` | Puts a slide on screen (the first if SLIDE is left out), opening the song from the library |
-| `playlist go ITEM [SLIDE] [in PLAYLIST]` | Opens a playlist item as a click does: a song, or a passage on the Bible page, and with SLIDE puts that slide on screen. Continuous Playlist then follows the playlist. A picture or video, or a media playlist, has one thing to show: `1` shows it (or plays the media playlist round and round); without it, it is only opened |
+| `playlist go ITEM [SLIDE] [in PLAYLIST]` | Opens a playlist item as a click does: a song, or a passage on the Bible page, and with SLIDE puts that slide on screen. Continuous then follows the playlist. A picture or video, or a media playlist, has one thing to show: `1` shows it (or plays the media playlist round and round); without it, it is only opened |
 | `next`, `previous` (or `back`), `first`, `last` | As the arrow keys, Home and End; a switched-off slide is passed over and an arrangement is followed. Like the keys, `next` and `previous` act on the open item: with another item of the playlist opened (`sp playlist go ITEM` without a slide, a click on its row), they start it at its first slide; at the end of a song, with Continuous on, they go on into the next song or Bible passage (or back into the item before); at either end of the playlist, or with Continuous off, the reply starts with why nothing changed. While a slide picked in the window waits for Enter (what the find box or Scripture Lookup opened), they go on with what is on screen, and with nothing on screen they put nothing on and reply "Press Enter to put the picked verse on screen." (or slide) |
 | `group NAME\|LETTER [in SONG]` | A group's first slide on screen: `group chorus`, `group c`, `group "verse 2"` |
 | `hotkey KEY` | The slide with that hot key, in the song on screen (or shown) |
 | `select SONG` | Shows a song's slides in the window without putting anything on screen |
-| `continuous on\|off` | Continuous Playlist: after a song's last slide, Next goes on to the playlist's next item |
+| `continuous on\|off` | Continuous: after a song's last slide, Next goes on to the playlist's next item |
 | `clear [LAYER]` | Clears `slide`, `media`, `props`, `messages`, `audio`, `announcements`, or `all` (the default) |
 | `audience on\|off`, `stage on\|off` | The audience or stage screens (off closes their windows; NDI sends black, or all clear for a see-through screen) |
 | `identify on\|off` | Identify Screens |
@@ -275,7 +275,7 @@ each time with the token the last reply gave.
 | `stage picture LAYOUT main\|SCREEN\|off` | A picture of what an audience screen shows, live, on a stage layout: the layout's screen picture shows `main` (the first audience screen, whichever that is) or the audience screen named, kept by its id so renaming it changes nothing; a layout with none gets one at the top right. `off` takes the layout's screen pictures away. A stage screen is never shown |
 | `stage frame LAYOUT OBJECT x= y= w= h=` | Where one of a stage layout's objects sits, in the stage's pixels (1920 × 1080). OBJECT is its number in `stage objects` or its name |
 | `test bars\|grid\|white\|off` | A test pattern on the audience screens |
-| `view show\|edit\|bible\|themes`, `view reflow [SONG]` | Switches the window's view (`themes` is the Edit view on the themes; `edit` is the Edit view on a song's slides) |
+| `view show\|edit\|bible\|themes`, `view words [SONG]` | Switches the window's view (`themes` is the Edit view on the themes; `edit` is the Edit view on a song's slides); `view words` opens Edit Words, the song's words as text (`view reflow`, its old word, still works) |
 
     $ sp go "River Song"
     On screen: River Song, slide 1 of 3 (Verse 1).
@@ -294,7 +294,7 @@ each time with the token the last reply gave.
     $ sp group zzz
     Blessed Assurance has no group zzz. Its groups: Verse 1, Chorus, Verse 2, Verse 3.
     $ sp continuous on
-    Continuous playlist on: after a song's last slide, Next goes on to the playlist's next item.
+    Continuous on: after a song's last slide, Next goes on to the playlist's next item.
     $ sp clear bogus
     Clear what? “bogus” isn't a layer.
     $ sp stage message "Two minutes\nthen the sermon"
@@ -310,7 +310,7 @@ each time with the token the last reply gave.
     Colour bars on the audience screens.
 
 A song put on screen with `go` is opened from the library, so Next stops at its last slide even
-with Continuous Playlist on; open it with `playlist go` to run through the playlist.
+with Continuous on; open it with `playlist go` to run through the playlist.
 
 ## Media and video
 
@@ -1068,7 +1068,7 @@ its code. Menu items that open a window or a file chooser open it on the Mac, as
 
 ## Song text
 
-The format `song new`, `song text` and the app's Reflow use:
+The format `song new`, `song text` and the app's Edit Words use:
 
     [Verse 1]
     Down by the river the morning is new

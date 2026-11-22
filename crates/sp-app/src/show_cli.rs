@@ -199,7 +199,7 @@ impl crate::App {
         let on = on_off(args.get(1))?;
         self.with_state(|state| state.continuous = on);
         Ok(Reply::done(format!(
-            "Continuous playlist {}: {}.",
+            "Continuous {}: {}.",
             if on { "on" } else { "off" },
             if on {
                 "after a song's last slide, Next goes on to the playlist's next item"

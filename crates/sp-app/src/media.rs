@@ -97,11 +97,12 @@ impl Playlist {
     }
 }
 
-/// A name no media playlist has: "New Playlist", "New Playlist 2", and so on.
+/// A name no media playlist has: "New Media Playlist", "New Media Playlist 2", and so on
+/// ("Playlist" alone is the running order).
 pub fn new_playlist_name(playlists: &[Playlist]) -> String {
     let taken = |name: &str| playlists.iter().any(|playlist| playlist.name == name);
-    std::iter::once("New Playlist".to_owned())
-        .chain((2..).map(|n| format!("New Playlist {n}")))
+    std::iter::once("New Media Playlist".to_owned())
+        .chain((2..).map(|n| format!("New Media Playlist {n}")))
         .find(|name| !taken(name))
         .unwrap_or_default()
 }
@@ -382,7 +383,7 @@ mod tests {
         assert!(old.entries.iter().all(|entry| entry.fit == sp_model::ImageFit::Fill && entry.looping));
         let mut backgrounds = Playlist::new(new_playlist_name(&[]));
         backgrounds.toggle(Path::new("/a/sky.png"));
-        assert_eq!(new_playlist_name(std::slice::from_ref(&backgrounds)), "New Playlist 2");
+        assert_eq!(new_playlist_name(std::slice::from_ref(&backgrounds)), "New Media Playlist 2");
         let list = List {
             entries: vec![
                 Entry {

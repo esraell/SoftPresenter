@@ -3251,10 +3251,16 @@ fn edit_view(
                     item(ui, "Send Backward", A::SendBackward);
                     item(ui, "Send to Back", A::SendToBack);
                     ui.separator();
-                    ui.menu_button("Align to Slide", |ui| {
-                        for (label, edge) in
-                            [("Left", 0), ("Centre", 1), ("Right", 2), ("Top", 3), ("Middle", 4), ("Bottom", 5)]
-                        {
+                    // Named as the Arrange menu names them.
+                    ui.menu_button("Align", |ui| {
+                        for (label, edge) in [
+                            ("Align Left Edges", 0),
+                            ("Align Centres", 1),
+                            ("Align Right Edges", 2),
+                            ("Align Tops", 3),
+                            ("Align Middles", 4),
+                            ("Align Bottoms", 5),
+                        ] {
                             item(ui, label, A::AlignObjects(edge));
                         }
                     });
@@ -4526,7 +4532,7 @@ fn reflow_editor(ui: &mut egui::Ui, title: &str, state: &mut HomeState) {
     egui::Panel::top("reflow header").resizable(false).frame(heading).show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new(format!("Reflow  ·  {title}"))
+                egui::RichText::new(format!("Edit Words  ·  {title}"))
                     .font(crate::studio::semibold(18.0))
                     .color(crate::studio::TEXT),
             );
@@ -6270,13 +6276,15 @@ fn template_pictures(
                 }
                 response.context_menu(|ui| {
                     ui.menu_button("Used For", |ui| {
-                        for (words, wanted, hint) in [
-                            ("Songs", (true, false), "A song's slide uses, of these, the one that suits it"),
-                            ("Bible", (false, true), "Bible slides are drawn with it, in this set"),
-                            ("Both", (true, true), "Songs pick among it, and Bible slides use it"),
-                            ("Nothing by Itself", (false, false), "Only slides that name it use it"),
+                        // Named as the strip under each picture names them.
+                        for (wanted, hint) in [
+                            ((true, false), "A song's slide uses, of these, the one that suits it"),
+                            ((false, true), "Bible slides are drawn with it, in this set"),
+                            ((true, true), "Songs pick among it, and Bible slides use it"),
+                            ((false, false), "Only slides that name it use it"),
                         ] {
                             let on = (*songs, *bible) == wanted;
+                            let words = used_for(wanted.0, wanted.1);
                             if ui.add(egui::Button::selectable(on, words)).on_hover_text(hint).clicked() {
                                 used = Some((index, wanted.0, wanted.1));
                                 ui.close();

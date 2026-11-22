@@ -1937,9 +1937,9 @@ fn item_bar(
             });
         // Control-R is the Mac menu bar's key for it.
         let words_hint = if cfg!(target_os = "macos") {
-            "Words as text: edit the song's words as text (Control-R)"
+            "Edit Words: the song's words as text, to change (Control-R)"
         } else {
-            "Words as text: edit the song's words as text"
+            "Edit Words: the song's words as text, to change"
         };
         let words = icon_button(ui, place(), id.with("words"), Icon::Reflow, strength, false).on_hover_text(words_hint);
         if words.clicked() {
@@ -2615,7 +2615,7 @@ fn slide_menu(
     // The media the slide puts behind its words when it goes on screen.
     ui.menu_button("Media", |ui| {
         let own = media_of(slide);
-        if ui.add(egui::Button::selectable(own.is_none(), "No Media")).clicked() {
+        if ui.add(egui::Button::selectable(own.is_none(), "None")).clicked() {
             state.pending_edit = Some((here, slide_with_media(slide, None)));
             ui.close();
         }
@@ -2631,7 +2631,9 @@ fn slide_menu(
         }
     });
     ui.menu_button("Transition", |ui| {
-        if ui.add(egui::Button::selectable(slide.transition.is_none(), "As All Slides")).clicked() {
+        // Usual: the song's own transition, or else the one under the slides, named.
+        let usual = crate::studio::usual_transition(presentation.transition.unwrap_or(state.transition));
+        if ui.add(egui::Button::selectable(slide.transition.is_none(), usual)).clicked() {
             state.pending_edit = Some((here, Slide { transition: None, ..slide.clone() }));
             ui.close();
         }
@@ -2670,7 +2672,7 @@ fn slide_menu(
     });
     // Going on to the next slide by itself, after a time.
     ui.menu_button("Go to Next", |ui| {
-        if ui.add(egui::Button::selectable(slide.advance.is_none(), "Off")).clicked() {
+        if ui.add(egui::Button::selectable(slide.advance.is_none(), "None")).clicked() {
             state.pending_edit = Some((here, Slide { advance: None, ..slide.clone() }));
             ui.close();
         }
@@ -2706,12 +2708,12 @@ fn slide_menu(
         });
     });
     // The look of the slide's text, to give another slide.
-    if ui.button("Copy Text Style").clicked() {
+    if ui.button("Copy Style").clicked() {
         state.inspector.copied_style = slide.objects.iter().find_map(|object| object.text_style().cloned());
         ui.close();
     }
     if ui
-        .add_enabled(state.inspector.copied_style.is_some(), egui::Button::new("Paste Text Style"))
+        .add_enabled(state.inspector.copied_style.is_some(), egui::Button::new("Paste Style"))
         .on_hover_text("Give every text box on this slide the look that was copied")
         .clicked()
         && let Some(copied) = state.inspector.copied_style.clone()
@@ -2745,12 +2747,12 @@ fn slide_menu(
         state.pending_edit = Some((here, Slide { enabled: !slide.enabled, ..slide.clone() }));
         ui.close();
     }
-    // Which of the theme's templates the slide is drawn with. Automatic lets the theme pick
-    // the one that suits what is on the slide.
+    // Which of the theme's templates the slide is drawn with. Usual lets the theme pick the
+    // one that suits what is on the slide.
     if !state.song_templates.is_empty() {
         ui.menu_button("Template", |ui| {
             let current = slide.template.filter(|id| state.song_templates.iter().any(|(t, _)| t == id));
-            if ui.add(egui::Button::selectable(current.is_none(), "Automatic")).clicked() {
+            if ui.add(egui::Button::selectable(current.is_none(), "Usual (the theme picks)")).clicked() {
                 state.pending_template = Some((here, None));
                 ui.close();
             }

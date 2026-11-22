@@ -186,7 +186,7 @@ pub const MENUS: &[(&str, &[Entry])] = &[
         "File",
         &[
             Do(Action::NewSong, "New Song", cmd('N')),
-            Do(Action::NewSlide, "New Slide", shift_cmd('N')),
+            Do(Action::NewSlide, "Add Slide", shift_cmd('N')),
             Do(Action::ImportSongs, "Import Songs…", None),
             Do(Action::ImportLibraryFolder, "Import from ProPresenter…", None),
             Do(Action::ImportSlides, "Import Slides (PowerPoint, Keynote, PDF or Pictures)…", None),
@@ -212,7 +212,7 @@ pub const MENUS: &[(&str, &[Entry])] = &[
             Do(Action::SelectAll, "Select All", cmd('A')),
             Do(Action::DeselectAll, "Deselect All", shift_cmd('A')),
             Line,
-            Do(Action::Find, "Find in Library…", cmd('F')),
+            Do(Action::Find, "Find…", cmd('F')),
         ],
     ),
     (
@@ -225,14 +225,14 @@ pub const MENUS: &[(&str, &[Entry])] = &[
             Do(Action::Bigger, "Bigger", cmd('=')),
             Do(Action::Smaller, "Smaller", cmd('-')),
             Line,
-            Do(Action::AlignLeft, "Align Left", shift_cmd('[')),
-            Do(Action::AlignCenter, "Center", shift_cmd('\\')),
-            Do(Action::AlignRight, "Align Right", shift_cmd(']')),
+            Do(Action::AlignLeft, "Text Left", shift_cmd('[')),
+            Do(Action::AlignCenter, "Text Centre", shift_cmd('\\')),
+            Do(Action::AlignRight, "Text Right", shift_cmd(']')),
             Do(Action::Justify, "Justify", option_shift_cmd('\\')),
             Line,
             Do(Action::UpperCase, "Make Upper Case", None),
             Do(Action::LowerCase, "Make Lower Case", None),
-            Do(Action::Capitalize, "Capitalize", None),
+            Do(Action::Capitalize, "Capitalise", None),
             Line,
             Do(Action::CopyStyle, "Copy Style", option_cmd('C')),
             Do(Action::PasteStyle, "Paste Style", option_cmd('V')),
@@ -246,12 +246,12 @@ pub const MENUS: &[(&str, &[Entry])] = &[
             Do(Action::SendBackward, "Send Backward", option_shift_cmd('B')),
             Do(Action::SendToBack, "Send to Back", shift_cmd('B')),
             Line,
-            Do(Action::AlignObjects(0), "Align Left", None),
-            Do(Action::AlignObjects(1), "Align Centre", None),
-            Do(Action::AlignObjects(2), "Align Right", None),
-            Do(Action::AlignObjects(3), "Align Top", None),
-            Do(Action::AlignObjects(4), "Align Middle", None),
-            Do(Action::AlignObjects(5), "Align Bottom", None),
+            Do(Action::AlignObjects(0), "Align Left Edges", None),
+            Do(Action::AlignObjects(1), "Align Centres", None),
+            Do(Action::AlignObjects(2), "Align Right Edges", None),
+            Do(Action::AlignObjects(3), "Align Tops", None),
+            Do(Action::AlignObjects(4), "Align Middles", None),
+            Do(Action::AlignObjects(5), "Align Bottoms", None),
             Line,
             Do(Action::Flip(true), "Flip Horizontally", None),
             Do(Action::Flip(false), "Flip Vertically", None),
@@ -285,7 +285,7 @@ pub const MENUS: &[(&str, &[Entry])] = &[
             Check(Action::BibleView, "Bible", cmd('2')),
             Check(Action::EditView, "Edit", cmd('3')),
             Check(Action::ThemesView, "Themes", ctrl('T')),
-            Do(Action::ReflowView, "Reflow Editor", ctrl('R')),
+            Do(Action::ReflowView, "Edit Words", ctrl('R')),
             Line,
             Check(Action::TimersTab, "Timers", ctrl('C')),
             Check(Action::MessagesTab, "Messages", ctrl('M')),
@@ -295,10 +295,10 @@ pub const MENUS: &[(&str, &[Entry])] = &[
             Check(Action::AudioTab, "Audio", ctrl('A')),
             Check(Action::MediaBin, "Media Bin", ctrl('V')),
             Line,
-            Check(Action::Continuous, "Continuous Playlist", None),
+            Check(Action::Continuous, "Continuous", None),
             Line,
             Check(Action::GridView, "Grid View", None),
-            Check(Action::EasyView, "Easy View", None),
+            Check(Action::EasyView, "Words Only", None),
             Check(Action::TableView, "Table View", None),
             Line,
             Entry::System(System::FullScreen),
@@ -318,17 +318,17 @@ pub const MENUS: &[(&str, &[Entry])] = &[
             Do(Action::ClearAudio, "Clear Audio", None),
             Do(Action::ClearAnnouncements, "Clear Announcements", None),
             Line,
-            Do(Action::ShowLiveSong, "Show Live Song", cmd('L')),
+            Do(Action::ShowLiveSong, "Go to the Slide on Screen", cmd('L')),
         ],
     ),
     (
         "Screens",
         &[
-            Check(Action::Audience, "Audience Output", shift_cmd('1')),
-            Check(Action::Stage, "Stage Output", shift_cmd('2')),
+            Check(Action::Audience, "Audience Screens", shift_cmd('1')),
+            Check(Action::Stage, "Stage Screens", shift_cmd('2')),
             Check(Action::IdentifyScreens, "Identify Screens", None),
             Line,
-            Check(Action::TestBars, "Test Pattern: Color Bars", None),
+            Check(Action::TestBars, "Test Pattern: Colour Bars", None),
             Check(Action::TestGrid, "Test Pattern: Grid", None),
             Check(Action::TestWhite, "Test Pattern: White", None),
             Line,
@@ -772,6 +772,39 @@ mod tests {
         assert!(!claims(KeyCode::Digit1, ModifiersState::ALT));
         assert!(claims(KeyCode::Digit1, command | ModifiersState::SHIFT));
         assert!(claims(KeyCode::Digit2, command | ModifiersState::SHIFT));
+    }
+
+    #[test]
+    fn each_action_has_its_one_name_in_british_spelling() {
+        let items = labelled_items();
+        for (action, label) in &items {
+            for american in ["Color", "Center", "Capitaliz"] {
+                assert!(!label.contains(american), "{action:?}: {label}");
+            }
+        }
+        let label = |action: Action| items.iter().find(|(have, _)| *have == action).map(|(_, label)| label.as_str());
+        for (action, name) in [
+            (Action::ReflowView, "Edit Words"),
+            (Action::NewSlide, "Add Slide"),
+            (Action::EasyView, "Words Only"),
+            (Action::Continuous, "Continuous"),
+            (Action::Find, "Find\u{2026}"),
+            (Action::Audience, "Audience Screens"),
+            (Action::Stage, "Stage Screens"),
+            (Action::ShowLiveSong, "Go to the Slide on Screen"),
+            (Action::AlignLeft, "Text Left"),
+            (Action::AlignCenter, "Text Centre"),
+            (Action::AlignRight, "Text Right"),
+            (Action::Justify, "Justify"),
+            (Action::AlignObjects(0), "Align Left Edges"),
+            (Action::AlignObjects(1), "Align Centres"),
+            (Action::AlignObjects(5), "Align Bottoms"),
+            (Action::SendBackward, "Send Backward"),
+            (Action::CopyStyle, "Copy Style"),
+            (Action::Capitalize, "Capitalise"),
+        ] {
+            assert_eq!(label(action), Some(name), "{action:?}");
+        }
     }
 
     #[test]

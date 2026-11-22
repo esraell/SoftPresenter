@@ -3291,7 +3291,7 @@ pub fn song_menu(
     let own_transition = show.presentations().get(index).and_then(|song| song.transition);
     ui.menu_button("Transition", |ui| {
         if ui
-            .add(egui::Button::selectable(own_transition.is_none(), "As All Slides"))
+            .add(egui::Button::selectable(own_transition.is_none(), usual_transition(state.transition)))
             .on_hover_text("The transition chosen under the slides")
             .clicked()
         {
@@ -3326,7 +3326,7 @@ pub fn song_menu(
             }
         }
     });
-    if ui.button("Reflow").clicked()
+    if ui.button("Edit Words").clicked()
         && let Some(song) = show.presentations().get(index)
     {
         commands.push(Command::Select(index));
@@ -4370,7 +4370,7 @@ fn preview_block(
     } else if let Some(said) = looked_at(state).and_then(|screen| screen_not_showing(state, screen)) {
         over_picture(ui, &said, TEXT_DIM);
     } else if !on && !state.preview_stage {
-        over_picture(ui, "Audience output is off", TEXT_DIM);
+        over_picture(ui, "The audience screens are off", TEXT_DIM);
     }
     let ring = if on_screen { Stroke::new(2.0, TALLY) } else { Stroke::new(1.0, Color32::from_rgb(0x2a, 0x2a, 0x2a)) };
     ui.painter().rect_stroke(picture, CORNER, ring, StrokeKind::Outside);
@@ -4786,7 +4786,7 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
         ui.painter().rect_filled(views, 15.1, CARD);
         for (index, (view, icon, hint)) in [
             (SlideView::Grid, Icon::Grid, "Grid"),
-            (SlideView::Easy, Icon::Rows, "Words only"),
+            (SlideView::Easy, Icon::Rows, "Words Only"),
             (SlideView::Table, Icon::Table, "Table"),
         ]
         .into_iter()
@@ -5266,6 +5266,16 @@ fn sweep_media(
     }
 }
 
+/// The choice in a Transition menu that follows what is set above it, naming what that is:
+/// "Usual (Dissolve, 0.4 s)", or "Usual (Cut)".
+pub fn usual_transition(look: sp_model::Transition) -> String {
+    if look.kind == sp_model::TransitionKind::Cut {
+        format!("Usual ({})", look.kind.name())
+    } else {
+        format!("Usual ({}, {:.1} s)", look.kind.name(), look.seconds)
+    }
+}
+
 /// The transition picker: every transition, in its group, with the
 /// chosen one's settings under them.
 pub fn transition_picker(ui: &mut egui::Ui, look: &mut sp_model::Transition, id: &str) {
@@ -5395,11 +5405,19 @@ fn media_playlist_menu(state: &mut HomeState, picker: &egui::Response) {
                 }
             }
             ui.separator();
-            if ui.button("New Playlist").on_hover_text("Add media to it from an item's right-click menu").clicked() {
+            // A new one is shown, with its name ready to type in the Name field under.
+            let name_field = egui::Id::unique("media playlist name");
+            let ask_name = egui::Id::unique("media playlist name asked");
+            if ui
+                .button("New Media Playlist\u{2026}")
+                .on_hover_text("Add media to it from an item's right-click menu")
+                .clicked()
+            {
                 let made = crate::media::Playlist::new(crate::media::new_playlist_name(&state.media_playlists));
                 state.media_playlist_shown = Some(made.id);
                 state.media_playlists.push(made);
                 state.media_playlists_changed = true;
+                ui.data_mut(|data| data.insert_temp(ask_name, true));
             }
             if let Some(at) =
                 state.media_playlist_shown.and_then(|id| state.media_playlists.iter().position(|p| p.id == id))
@@ -5463,9 +5481,24 @@ fn media_playlist_menu(state: &mut HomeState, picker: &egui::Response) {
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Name").color(TEXT_DIM));
-                    let field =
-                        ui.add(egui::TextEdit::singleline(&mut state.media_playlists[at].name).desired_width(140.0));
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut state.media_playlists[at].name)
+                            .id(name_field)
+                            .desired_width(140.0),
+                    );
                     state.media_playlists_changed |= field.changed();
+                    // Just made: the name takes the keyboard, all of it picked so typing replaces it.
+                    if ui.data_mut(|data| data.remove_temp::<bool>(ask_name)).unwrap_or(false) {
+                        field.request_focus();
+                        if let Some(mut edit) = egui::text_edit::TextEditState::load(ui.ctx(), name_field) {
+                            let all = state.media_playlists[at].name.chars().count();
+                            edit.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                                egui::text::CCursor::new(0),
+                                egui::text::CCursor::new(all),
+                            )));
+                            edit.store(ui.ctx(), name_field);
+                        }
+                    }
                 });
                 if ui.button("Delete Playlist").on_hover_text("The media stays in All Media").clicked() {
                     state.media_playlists.remove(at);
@@ -5563,6 +5596,15 @@ pub mod tests {
     /// Every row of the list the tests' rows are in, in order.
     fn order() -> Vec<usize> {
         rows().iter().map(|(index, _)| *index).collect()
+    }
+
+    #[test]
+    fn usual_in_a_transition_menu_names_what_it_follows() {
+        let dissolve =
+            sp_model::Transition { seconds: 0.4, ..sp_model::Transition::of(sp_model::TransitionKind::Dissolve) };
+        assert_eq!(usual_transition(dissolve), "Usual (Dissolve, 0.4 s)");
+        let cut = sp_model::Transition::of(sp_model::TransitionKind::Cut);
+        assert_eq!(usual_transition(cut), "Usual (Cut)");
     }
 
     #[test]

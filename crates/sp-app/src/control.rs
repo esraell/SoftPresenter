@@ -1076,7 +1076,7 @@ Screens and settings
                                last|every ccli_licence=N start_audience=on|off continuous=on|off
                                start_with=nothing|media-playlist:NAME|announcements:SONG
                                view=grid|easy|table columns=1-12
-  view reflow [SONG]           a song's words as text to edit
+  view words [SONG]            Edit Words: a song's words as text to change (view reflow too)
   help COMMAND                 the help for one command
 
 Undo
@@ -1238,7 +1238,12 @@ impl crate::App {
                 self.with_state(|state| state.identify = on);
                 Reply::done(if on { "Identifying the screens." } else { "Stopped identifying the screens." })
             }),
-            "view" if args.get(1).is_some_and(|w| w.eq_ignore_ascii_case("reflow")) => self.view_reflow(&rest(args, 2)),
+            // `view reflow` is the old word for it, kept for scripts.
+            "view"
+                if args.get(1).is_some_and(|w| w.eq_ignore_ascii_case("words") || w.eq_ignore_ascii_case("reflow")) =>
+            {
+                self.view_words(&rest(args, 2))
+            }
             "view" => self.ctl_view(args.get(1).map(String::as_str).unwrap_or("")),
             "message" => self.ctl_message(args),
             "prop" => self.ctl_prop(args),
@@ -1585,7 +1590,7 @@ impl crate::App {
         }
         let theme = self.themes.get(self.songs_theme).map(|t| t.name.clone());
         lines.push(format!(
-            "Continuous playlist: {}   Identify screens: {}   Main theme: {}",
+            "Continuous: {}   Identify screens: {}   Main theme: {}",
             if state.is_some_and(|s| s.continuous) { "on" } else { "off" },
             if state.is_some_and(|s| s.identify) { "on" } else { "off" },
             theme.clone().unwrap_or_default()

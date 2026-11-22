@@ -142,7 +142,7 @@ The full list, area by area, is in [docs/features.md](docs/features.md).
    Next, Words Only, Words and Notes, Clock and Timer, or one you design.
 7. **Run it.** In the Show view (Command-1), open the playlist and click the first slide, or press
    Space. The right arrow and Space go forward, the left arrow goes back, and letters jump to a
-   group (A for Verse 1, C for the chorus). With View, Continuous Playlist on, the last slide of
+   group (A for Verse 1, C for the chorus). With View › Continuous on, the last slide of
    a song leads into the next song. Escape clears everything, walk-in music and announcements
    included; the layer keys under the preview clear one layer at a time (on Windows and Linux,
    F2 to F6 do too). Timers, messages and macros sit in the tabs

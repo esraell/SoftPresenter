@@ -1892,18 +1892,23 @@ fn track_menu(ui: &mut egui::Ui, first: bool, last: bool) -> Option<TrackAsk> {
 }
 
 /// The Audio tab's heading: the playlist shown, chosen from a drop-down, its ⋯ (Rename, New
-/// Playlist, Delete) and + for a new playlist.
+/// Audio Playlist…, Delete) and + for a new audio playlist. A new one is shown with its name
+/// ready to type where the drop-down was.
 fn audio_heading(ui: &mut egui::Ui, state: &mut HomeState) {
-    let (row, add) = heading(ui, "Audio", Some("New audio playlist"));
-    if add {
-        let made = crate::audio::Playlist::new(state.audio.new_name());
-        state.audio.playlists.push(made);
-        state.audio.current = state.audio.playlists.len() - 1;
-        state.audio_changed = true;
-    }
+    let (row, add) = heading(ui, "Audio", Some("New Audio Playlist\u{2026}"));
     let more = Rect::from_min_size(pos2(row.max.x - 28.0 - 8.0 - 28.0, row.min.y), vec2(28.0, 28.0));
     let select = Rect::from_min_size(pos2(more.min.x - 8.0 - 140.0, row.center().y - 12.0), vec2(140.0, 24.0));
     let renaming_id = egui::Id::unique("audio playlist renaming");
+    let new_playlist = |ui: &egui::Ui, state: &mut HomeState| {
+        let made = crate::audio::Playlist::new(state.audio.new_name());
+        ui.data_mut(|data| data.insert_temp(renaming_id, made.name.clone()));
+        state.audio.playlists.push(made);
+        state.audio.current = state.audio.playlists.len() - 1;
+        state.audio_changed = true;
+    };
+    if add {
+        new_playlist(ui, state);
+    }
     let renaming = ui.data(|data| data.get_temp::<String>(renaming_id));
     let name = state.audio.shown().name.clone();
     match renaming {
@@ -1952,11 +1957,8 @@ fn audio_heading(ui: &mut egui::Ui, state: &mut HomeState) {
         if ui.button("Rename").clicked() {
             ui.data_mut(|data| data.insert_temp(renaming_id, name.clone()));
         }
-        if ui.button("New Playlist").clicked() {
-            let made = crate::audio::Playlist::new(state.audio.new_name());
-            state.audio.playlists.push(made);
-            state.audio.current = state.audio.playlists.len() - 1;
-            state.audio_changed = true;
+        if ui.button("New Audio Playlist\u{2026}").clicked() {
+            new_playlist(ui, state);
         }
         ui.separator();
         if ui.add_enabled(many, egui::Button::new("Delete…")).clicked() {

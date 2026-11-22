@@ -37,15 +37,15 @@ rather than a feature, but no church on Windows can use the app without them.
 
 - **Clear buttons of your own.** Each clears a chosen set of layers (for example words and props, keeping the background), and can be used from keys, macros and remotes. (started: a clear button for each layer, Clear All, a macro's Clear steps for every layer, and F1–F6 off a Mac) · M · Medium
 - **Slides shown on the stage screens only.** A key or a slide action sends the slides that follow to the stage screens only, while the audience keeps its picture (band notes, sermon notes). · M · Medium
-- **Fixing a slide's words from the Show view.** A small pop-up for a typo spotted mid-service, without opening the editor. (started: the editor, Reflow and Live Edit) · S–M · Medium
+- **Fixing a slide's words from the Show view.** A small pop-up for a typo spotted mid-service, without opening the editor. (started: the editor, Edit Words and Live Edit) · S–M · Medium
 - **A whole song that moves on by itself.** One setting in the song's header moves every slide on after 5, 10, 15 or 20 seconds or a time of your own, for announcement loops. (started: Go to Next on each slide, set one by one from fixed times of 3 to 60 seconds, and Loop to First Slide) · S · Medium
-- **Text format pop-over.** Change the font, size, colour, capitals, alignment, outline and shadow of the selected slides or songs at once. (started: styling per box in the editor, and Copy and Paste Text Style) · M · Medium
+- **Text format pop-over.** Change the font, size, colour, capitals, alignment, outline and shadow of the selected slides or songs at once. (started: styling per box in the editor, and Copy Style and Paste Style) · M · Medium
 - **Notes for a whole song.** One line of operator notes kept with the song and shown in its header. (started: the notes strip shows the notes of the slide on screen) · S · Low
 - **Timeline.** Record slide timings and play a song's slides, media and audio together, with a loop; it can follow incoming timecode. (started: Go to Next on each slide, and Loop to First Slide) · L · Low
 - **A song that always plays on the Announcements layer.** A setting kept with the song, so it need not be chosen each time. (started: Play on Announcements Layer in the song's menu) · S · Low
 - **Transport for any layer.** Choose whether the transport drives slide media, announcements or audio; a scrub bar; a jump to 10, 30, 60 or 90 seconds before the end. (started: pause, seek, loop and mute under the Program preview; in the Audio tab a line to drag through the track, skip 15 seconds either way, previous, next and mute) · S · Low
-- **More show shortcuts.** F7 to clear announcements off a Mac (a Mac's F keys are the system's), ⇧⌘L to show the live announcement, ⌥⌘L to find a song in its library, a key for the stage editor (⌘1 to ⌘7 are the tool tabs now), holding ~ to peek at Easy view, and Option-click to load a video paused. (started: Presentation › Clear Announcements is there without a key) · S · Low
-- **Slide view settings.** Font, size, colour and truncation in Easy view, a notes column in Table view, slides shown by group, and background colours. (started: the three views and the size slider) · S · Low
+- **More show shortcuts.** F7 to clear announcements off a Mac (a Mac's F keys are the system's), ⇧⌘L to show the live announcement, ⌥⌘L to find a song in its library, a key for the stage editor (⌘1 to ⌘7 are the tool tabs now), holding ~ to peek at Words Only, and Option-click to load a video paused. (started: Presentation › Clear Announcements is there without a key) · S · Low
+- **Slide view settings.** Font, size, colour and truncation in Words Only, a notes column in Table view, slides shown by group, and background colours. (started: the three views and the size slider) · S · Low
 - **Audio level meter by the Program preview.** · S · Low
 - **Warnings for missing things.** A badge on macros whose target has gone and on media playlists whose folder is missing. (started: a badge on slides whose text overflows, missing songs dimmed in playlists, and a macro step whose target has gone saying so in amber) · S · Low
 - **Removing actions from several slides at once.** (started: removing actions from one slide) · S · Low
@@ -60,7 +60,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Transition picker extras.** Favourite and recent transitions, a filter box and previews on hover. (started: categories, and a reset to the default settings) · S · Low
 - **Song settings panel.** A background colour, slide size, album and artwork for each song, and whether it shows the copyright line. (started: Artist, Author, Publisher, Year and CCLI Song # in the Info pop-over, and the song's transition in its menu) · S–M · Low
 - **Background colour for one slide**, and a setting to ignore slide background colours. (started: a background colour and picture for a whole theme) · S · Low
-- **A text style applied to all slides at once.** (started: Copy and Paste Text Style) · S · Low
+- **A text style applied to all slides at once.** (started: Copy Style and Paste Style) · S · Low
 - **More fills.** Text as a cut-out, a media fill, background invert or blur; shapes filled with a picture, a video, a web page, a live camera, a background effect or another object on the slide. (started: colour, and linear and radial gradients) · M–L · Low
 - **Custom shapes and shape settings.** Draw shapes of your own with a pen; set a star's points and a polygon's sides; Option-drag to duplicate; Shift keeps proportions. (started: ten fixed shapes, and ⌘D duplicates) · M · Low
 - **Showing a slide from the editor.** Send the slide being edited to the screens. (started: Live Edit sends edits to the screens; Show in the editor goes back to the Show view) · S · Low
@@ -70,7 +70,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Feathering.** · S · Low
 - **Objects shown only under conditions.** An object shows only when all, any or none of some conditions hold (a timer running, a video countdown, another object). · M · Low
 - **Richer builds.** Any transition as a build, builds chained one after another, a build order you drag, fill-in-the-blank words, and text that comes on by letter, word or line. (started: Dissolve, Fly, Zoom and By Paragraph) · M · Low
-- **Reflow with live slides beside the text.** (started: Reflow rebuilds the slides on Done) · S–M · Low
+- **Edit Words with live slides beside the text.** (started: Edit Words rebuilds the slides on Done) · S–M · Low
 - **Editor view switches and menus.** Checkerboard, snapping, rulers and guides on and off; zoom to actual size or to fit, with ⌘0; tighter or looser spacing, ligatures, and raising or lowering the baseline; ⌘T for fonts; ⌥Return for a slide break. (started: rulers, guides and snapping always on, a Grid switch, zoom in the status bar, and the same values under the gear) · S · Low
 - **Undo that names what it undoes.** · S · Low
 - **New-song sheet with size, library and playlist.** (started: title and theme; the song goes into the library shown) · S · Low
@@ -192,7 +192,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Song menu extras.** Hiding an item, moving a song, copying and pasting songs between libraries, and showing a song in its library. (started: dragging to a library, and Duplicate) · S · Low
 - **Playlist menu extras and folders.** Duplicating, exporting and printing a playlist; folders for playlists and libraries in the sidebar; coloured headers. · S–M · Low
 - **Search extras.** A result previewed as text or slides. (started: ⌘F searches titles and words; Return opens a result and ⌘Return adds it to the playlist; a result is dragged to a place in the playlist, a playlist or a library) · S–M · Low
-- **File menu items.** New Playlist, New Library, Import, Export and Print. (started: New Song and New Slide; the + buttons make playlists and libraries) · S · Low
+- **File menu items.** New Playlist, New Library, Import, Export and Print. (started: New Song and Add Slide; the + buttons make playlists and libraries) · S · Low
 - **MultiTracks, and Amazing's APlay.** APlay brings children's-ministry curriculum playlists in, ready to run. · L · Low
 - **Keynote import.** · L · Low
 - **Moving to another computer, workspaces and cloud sync.** (started: one data folder, which `SOFTPRESENTER_DATA` can point elsewhere) · M–L · Low

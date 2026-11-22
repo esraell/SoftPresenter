@@ -216,7 +216,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - While the left column lists a playlist, the middle shows **the whole playlist as one scroll**,
   item after item, each under a bar with its name that stays at the top while its slides
   scroll under it. The open item's bar has a dot; a song's bar carries its tools (details,
-  words as text, arrangement, the theme version button once a theme has a version, notes, and
+  Edit Words, arrangement, the theme version button once a theme has a version, notes, and
   ⋯ for the song's menu, Add Slide and its place in the playlist), and a song played in an arrangement has a row of pills under its bar and its
   slides in the order sung (see Arrangements above). Other items say what they are in a small label. A **Bible passage** kept
   in the playlist is shown as its slides, drawn by the Bible theme as the Bible page draws
@@ -250,7 +250,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   → and ↑ as ←: with nothing on screen they move the pick to the verse after or before
   (brought into sight; the passage's first when none is picked), putting nothing on; with
   something on screen they go on with it, as → and ← do, and Enter takes the pick. The slide
-  picked has a 2-point ink ring and its strip in ink (in words only or a table, its row has the chosen grey and a fine dim ring inside); never
+  picked has a 2-point ink ring and its strip in ink (in Words Only or a table, its row has the chosen grey and a fine dim ring inside); never
   orange, which is only for what is on screen, nor the blue of slides picked out to change several;
   it is brought into view, and the keyboard is the show's again. Enter puts it on screen;
   then Space, → and ← go on from it as from any slide. With nothing on screen, Space puts the
@@ -316,7 +316,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   its foot. An item's
   right-click menu sets its Scaling (Scale to Fill, Scale to Fit, Stretch to Fill), whether a
   video loops, and the media playlists it is in; the menu beside MEDIA shows All Media or one
-  playlist, and makes, renames and deletes them.
+  media playlist, and makes (New Media Playlist…, shown at once with its name ready to type),
+  renames and deletes them. ("Playlist" alone is the running order.)
 
 ![The media bin: three pictures and a video, the picture on screen outlined in red](images/media.png)
 
@@ -361,9 +362,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Add to Song as Slide on the item's right-click menu, and Media on a slide's. The slide's
   thumbnail shows the media behind its words.
 - A slide's right-click menu: Edit, Cut, Copy, Paste (each with its key), Duplicate, Delete…, Move Up, Move Down, Group (mark where a verse, chorus
-  or bridge starts; the group the slide is in is ticked), Copy and Paste Text Style, Label (Blank Slide, Instrumental, Repeat, Spoken Word), Transition (its own,
-  or as all slides), Hot Key (a letter or digit that puts the slide on screen, shown on its
-  picture), Go to Next (after a number of seconds, shown on its picture), Disable, Template.
+  or bridge starts; the group the slide is in is ticked), Copy Style and Paste Style, Label (Blank Slide, Instrumental, Repeat, Spoken Word), Transition (its own,
+  or Usual: the song's, else the one under the slides, named as "Usual (Dissolve, 0.4 s)"), Media (a picture or video, or None), Hot Key (a letter or digit that puts the slide on screen, shown on its
+  picture; or None), Go to Next (after a number of seconds, shown on its picture; or None), Disable, Template (one of
+  the theme's, or "Usual (the theme picks)").
   A song's menu has Loop to First Slide, for a loop of announcements. Undo and Redo (Command-Z, Shift-Command-Z) step back through
   these changes in the Show view and on the Bible page, and the audience stays on the same slide;
   items taken out of a playlist take their turn in the same order.
@@ -372,7 +374,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - A song's menu (its ⋯, or a right-click): Add to the playlist in front, Add to Playlist (any
   playlist, or a new one; for a song in a playlist, from its item or its title bar, the
   playlist it is in isn't offered), Libraries, Rename, Duplicate, Theme (a theme of its own, or
-  the songs theme), Reflow, and Delete… (a song made in the app goes to the Trash). In a library,
+  the songs theme), Transition (its own, or Usual: the one under the slides, named), Edit Words, and Delete… (a song made in the app goes to the Trash). In a library,
   Export… and Delete… take the songs picked out with it when it is one of them. From a playlist
   (an item's menu, or its title bar over the slides) the menu acts on that song alone, and its
   last choice, after Remove from Playlist, is **Delete Song from Library…**, which deletes the
@@ -431,8 +433,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   that plays it on the Announcements layer (a media playlist chosen there played on the media
   layer, behind the slides; the layer goes off when a slide goes on screen), and its Start with
   the Audience Screens Off into that macro's first step, Audience Screens Off, and says so once.
-- **Audio**: playlists of tracks such as walk-in music, chosen at the tab's head (its ⋯
-  renames, makes or deletes one; + makes one). First the player: whether it plays and the
+- **Audio**: audio playlists of tracks such as walk-in music, chosen at the tab's head (its ⋯
+  has Rename, New Audio Playlist… and Delete…; + makes one too, and a new one is shown with its
+  name, "New Audio Playlist", ready to type where the choice was). First the player: whether it plays and the
   track's name, a line to drag through the track with the time gone and left, Previous (the
   start of the track first, then the one before), back 15 seconds, Play or Pause, forward 15
   seconds and Next, the volume (up to 150%) with Mute and the level in numbers, then Play
@@ -840,7 +843,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - In the Edit view: rulers numbered in the slide's pixels, showing the selected object's
   extent; Zoom (Fit, 25% to 200%, or pinch) with two-finger scrolling around a zoomed slide; and
   Grid, which shows a grid that boxes snap to.
-- **Reflow** (Control-R, or Reflow beside a song's title): the song's words as text, to type
+- **Edit Words** (Control-R, View › Edit Words, Edit Words in a song's menu, or its button beside a song's title): the song's words as text, to type
   into; the slides are rebuilt from them and keep their looks, labels and notes. Cancel, or
   Escape, closes it without keeping what was typed, and clears nothing on the screens.
 - **Cmd+N** makes a new song.
@@ -1074,7 +1077,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 <img src="images/screens.png" alt="The Screens window" width="620">
 
 ## Copyright and settings
-- Each song's Artist, Author, Publisher, Year and CCLI Song # (the Info icon at the right of its header, beside Reflow, Arrangement and Notes), and a
+- Each song's Artist, Author, Publisher, Year and CCLI Song # (the Info icon at the right of its header, beside Edit Words, Arrangement and Notes), and a
   copyright line on the screens on a song's first slide, last slide or every slide, with the
   church's CCLI licence number, chosen in Settings.
 - A Settings window (Cmd+,) with General, Screens, Groups, Key Mappings and Integrations panes.
@@ -1162,7 +1165,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   WORDS`. Song and slide changes can be undone (`sp undo`) and are saved; each reply says what
   changed, and something that wasn't done exits 1.
 - Running the show from the command line: `playlist go ITEM [SLIDE]` (opens an item as a click
-  does, so the continuous playlist follows on), `group NAME|LETTER [in SONG]`, `hotkey KEY`,
+  does, so Continuous follows on), `group NAME|LETTER [in SONG]`, `hotkey KEY`,
   `continuous on|off`, `video play|pause|restart|seek|loop|mute`, `media next|previous`, `media
   set ITEM scaling=… loop=…`, `stage message TEXT|clear`, `stage layout SCREEN LAYOUT`, `stage
   objects LAYOUT`, `stage picture LAYOUT main|SCREEN|off` (a picture of an audience screen on a
@@ -1199,9 +1202,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   NAME|window|ndi NAME|automatic]`, `screen set SCREEN key=value…` (name, output, kind, layers,
   colour, edges, theme, stage layout, background solid or see-through, alpha, key of another
   screen), `screen delete SCREEN --yes`; `settings` and `settings set
-  key=value…` (transitions, the copyright line and CCLI licence, the continuous playlist, the
-  slide view and size; what happens at start is a macro's, `macro startup NAME on`); `view reflow
-  [SONG]`; and `help COMMAND` for one command's help, without the app running. Bible downloads
+  key=value…` (transitions, the copyright line and CCLI licence, Continuous, the
+  slide view and size; what happens at start is a macro's, `macro startup NAME on`); `view words
+  [SONG]` (Edit Words; `view reflow` too); and `help COMMAND` for one command's help, without the app running. Bible downloads
   started from the command line have a job number, for `--wait` and `sp job N`.
 - `sp …` (full name `softpresenter`), installed from SoftPresenter › Install Command Line Tool…,
   controls the running app from a terminal, a script or an AI agent (`sp status`, `sp next`):
@@ -1240,6 +1243,6 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   it works. A half-saved file stays if it may be the only copy of what was being saved. The log
   names every file moved; the window says how many went, only when some did.
 - A menu bar with the usual menus and shortcuts (New Song, Import Songs…, Undo, Cut/Copy/Paste, the views,
-  Clear, Audience and Stage Output on/off with Cmd+1 and Cmd+2, Configure Screens), showing
+  Clear, Audience Screens and Stage Screens on/off with Shift-Cmd-1 and Shift-Cmd-2, Configure Screens), showing
   only what works: what acts on objects in the editor (Edit › Duplicate, the Format, Arrange and
   Insert items) is greyed outside it.
