@@ -6011,15 +6011,14 @@ fn bible_field(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, rect: Rect
         .frame(Frame::new().fill(crate::studio::CARD).corner_radius(17).inner_margin(egui::Margin::symmetric(14, 0)))
         .min_size(rect.size())
         .desired_width(rect.width() - 28.0);
-    let completion = ui
-        .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-            egui::CompletionPopup::new(lookup_id)
-                .word_boundary(|_| false)
-                .align(egui::RectAlign::BOTTOM_START)
-                .max_height(240.0)
-                .show(ui, field, |query| book_suggestions(query.text, &language))
-        })
-        .inner;
+    // In a place of its own in the bar, which leaves the bar's room as it was laid out (the bar
+    // may be two rows high).
+    let mut place = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(Layout::left_to_right(Align::Center)));
+    let completion = egui::CompletionPopup::new(lookup_id)
+        .word_boundary(|_| false)
+        .align(egui::RectAlign::BOTTOM_START)
+        .max_height(240.0)
+        .show(&mut place, field, |query| book_suggestions(query.text, &language));
     let lookup = completion.text_edit.response.response.clone().on_hover_text(format!(
         "Type a reference, such as John 3:16, or words to find. Return picks its first verse, Enter puts it on \
          screen, \u{2191} and \u{2193} pick another ({} comes here)",
@@ -8577,7 +8576,11 @@ mod tests {
     /// A click at the middle of something the last frame drew, by its id, then a frame for the
     /// app to take what it asked for. Returns the commands the frames gave.
     fn click_id(ctx: &egui::Context, show: &mut Show, state: &mut HomeState, id: egui::Id, time: f64) -> Vec<Command> {
-        let at = ctx.read_response(id).expect("drawn").rect.center();
+        // Two frames first, so a scroll asked for in the last (to keep the verse on screen in
+        // sight) has happened and is what is read back; then the middle of what can be seen of it.
+        frame_then_app(ctx, show, state, vec![], time - 0.02);
+        frame_then_app(ctx, show, state, vec![], time - 0.01);
+        let at = ctx.read_response(id).expect("drawn").interact_rect.center();
         let press = |pressed| Event::PointerButton {
             pos: at,
             button: egui::PointerButton::Primary,
@@ -8625,10 +8628,23 @@ mod tests {
         assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 1 }));
         assert!(state.picked.is_none(), "the pick goes");
         // A verse of the chapter outside the passage, in view: looked up and picked, nothing goes
-        // on screen (the verse on screen stays, in the other place).
+        // on screen (the verse on screen stays, in the other place). The page is scrolled back a
+        // little first, as the operator would, to the verses before.
+        let page = ctx.read_response(page_verse(17)).expect("drawn").interact_rect.center();
+        let wheel = Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, 300.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+        };
+        frame_then_app(&ctx, &mut show, &mut state, vec![Event::PointerMoved(page), wheel], 0.8);
+        for at in 1..8 {
+            frame_then_app(&ctx, &mut show, &mut state, vec![], 0.8 + f64::from(at) * 0.02);
+        }
         let outside = (1..=36u16)
             .filter(|verse| !(16..=18).contains(verse))
-            .find(|verse| ctx.read_response(page_verse(*verse)).is_some())
+            .find(|verse| ctx.read_response(page_verse(*verse)).is_some_and(|row| row.interact_rect.height() > 20.0))
             .expect("another verse is in view");
         let commands = click_id(&ctx, &mut show, &mut state, page_verse(outside), 1.0);
         assert!(!goes_on_screen(&commands), "{commands:?}");
@@ -8857,6 +8873,23 @@ mod tests {
             fresh.apply_prefs(&crate::service::Prefs { bible_language: saved.to_owned(), ..Default::default() });
             assert_eq!(fresh.bible.read_in.as_deref(), read, "{saved:?}");
         }
+    }
+
+    #[test]
+    fn in_a_narrow_middle_the_bar_takes_two_rows_and_nothing_overlaps_it() {
+        // At 1280 wide the middle has room for the field, but not for everything beside it.
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { bible_open: true, ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.05);
+        let rect = |id: &str| ctx.read_response(egui::Id::unique(id)).unwrap_or_else(|| panic!("{id}")).rect;
+        let (field, options, change) =
+            (rect("bible scripture lookup"), rect("bible options button"), rect("bible translations change"));
+        assert!(options.min.y > field.max.y, "Options on a second row: {options:?} under {field:?}");
+        assert!(change.min.y > options.max.y, "the translations line under both rows: {change:?}");
+        assert!(field.width() >= 120.0 && field.width() <= 236.0, "{field:?}");
     }
 
     #[test]

@@ -225,17 +225,22 @@ fn list_row(ui: &egui::Ui, id: egui::Id, rect: Rect, row: Row) -> egui::Response
     } else {
         // A name too long for the row ends in an ellipsis (its tooltip has it whole).
         let font = if row.chosen { semibold(13.0) } else { FontId::proportional(13.0) };
-        let mut job = LayoutJob::single_section(row.text.to_owned(), TextFormat::simple(font, ink));
-        job.wrap = egui::text::TextWrapping {
-            max_width: rect.width() - 16.0,
-            max_rows: 1,
-            break_anywhere: true,
-            overflow_character: Some('\u{2026}'),
-        };
-        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        let galley = one_line(ui, row.text, font, ink, rect.width() - 16.0);
         painter.galley(pos2(rect.min.x + 8.0, rect.center().y - galley.size().y / 2.0), galley, ink);
     }
     response
+}
+
+/// Words on one line no wider than `width`, ending in an ellipsis when they are longer.
+fn one_line(ui: &egui::Ui, text: &str, font: FontId, ink: Color32, width: f32) -> Arc<Galley> {
+    let mut job = LayoutJob::single_section(text.to_owned(), TextFormat::simple(font, ink));
+    job.wrap = egui::text::TextWrapping {
+        max_width: width.max(0.0),
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('\u{2026}'),
+    };
+    ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
 /// A small heading in the lists: "Old Testament", "Ch".
@@ -617,15 +622,9 @@ fn history(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) {
                 || entry.passage.clone(),
                 |lead| crate::bible::name_for_operator(&entry.passage, lead, &language),
             );
-            let clip = Rect::from_min_max(pos2(rect.min.x + 10.0, rect.min.y), pos2(when.min.x - 8.0, rect.max.y));
             let ink = if response.hovered() { TEXT } else { TEXT_DIM };
-            ui.painter().with_clip_rect(clip).text(
-                pos2(clip.min.x, rect.center().y),
-                Align2::LEFT_CENTER,
-                name,
-                FontId::proportional(13.5),
-                ink,
-            );
+            let galley = one_line(ui, &name, FontId::proportional(13.5), ink, when.min.x - 8.0 - rect.min.x - 10.0);
+            ui.painter().galley(pos2(rect.min.x + 10.0, rect.center().y - galley.size().y / 2.0), galley, ink);
             if response.clicked() {
                 chosen = Some(entry.passage.clone());
             }

@@ -6872,13 +6872,16 @@ impl App {
                     running.home_state.bible.typed_at = Some(0.0);
                     running.home_state.bible.focus_lookup = true;
                 }
-                // Testing aid: open the Options pop-up, or with "bibles" the Bibles window, or with
-                // "language" the Аа menu of the language the page is read in.
+                // Testing aid: open the Options pop-up, or with "bibles" the Bibles window, with
+                // "language" the Аа menu of the language the page is read in, or with "history"
+                // the History side of the left column.
                 if let Ok(pane) = std::env::var("SOFTPRESENTER_BIBLE_OPTIONS") {
                     if pane == "bibles" {
                         running.home_state.bible.options.manage_open = true;
                     } else if pane == "language" {
                         running.home_state.bible.open_read_in = true;
+                    } else if pane == "history" {
+                        running.home_state.bible.side = home::BibleSide::History;
                     } else {
                         running.home_state.bible.options.open = true;
                     }
