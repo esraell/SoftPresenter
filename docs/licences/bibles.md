@@ -58,12 +58,47 @@ has bought one of these elsewhere cannot get it through SoftPresenter.
 
 ## Not decided
 
-- **Огієнко (Ukrainian).** Widely copied as public domain, but no statement from a rights holder
-  was found. Left out until one is.
+- **Огієнко (Ukrainian, 1962).** Widely copied as public domain, but no statement from a rights
+  holder was found, again on 2026-11-22: the Ukrainian Bible Society's pages give no terms for
+  it, YouVersion's listing names "British and Foreign Bible Society 1962" with no licence
+  (bible.com/versions/186), and neither eBible nor Door43 carries it. Ohienko died in 1972, so
+  under Ukraine's life-plus-seventy rule his work is protected until 2042. Left out until a
+  rights holder's own terms allow it.
 - **Almeida (Portuguese)** and the **Bible in Basic English**: public-domain status unclear outside
   the United States.
 - **Incomplete or draft texts** that are free but not ready to project from: Open English Bible
-  (CC0, not all books), Biblica's open Ukrainian New Testament (CC BY-SA), Библия свободы (draft).
+  (CC0, not all books), Библия свободы (Russian Freedom Bible, eBible `rusfb`: public domain and
+  now all sixty-six books, but its page still calls it "черновой вариант перевода", a draft,
+  read 2026-11-22).
+
+## Checked on 2026-11-22 and not offered
+
+For Russian, Ukrainian and English first: every translation eBible lists in those languages,
+and Door43's Russian and Ukrainian Bibles.
+
+- **Russian.** Besides the Synodal, the Russian Open Bible (below, now offered) is the only
+  finished, openly licensed whole Bible. Not offered: Библия свободы (a draft, above); Door43's
+  Russian Unlocked Literal Bible (`ru_ulb`, CC BY-SA 4.0, the New Testament only; free, and
+  could be added); Door43's other Russian texts, which are unfinished translators' aids
+  (`ru_rlob` 31 books, `ru_rsob` 26, `ru_ust` 16, `ru_rost` 15 files though listed as 66) or
+  not Russian at all (`ru_glt` holds the English unfoldingWord Literal Text); the New Russian
+  Translation and the Central Asian Russian Scriptures ("All rights reserved", Biblica and
+  IMB-ERTP, as Bible Gateway lists them).
+- **Ukrainian.** Огієнко (above). Біблія свободи (eBible `ukrfb`, public domain): the Kulish
+  and Puluj text with a few changes (31,052 of its 31,082 verses are the same as the offered
+  UKR1905), so nothing new. The 1996 Bob Jones University Bible (`ukr1996`): copyright, never
+  offered. Door43 has no Ukrainian Bible.
+- **English**, free but not added: the World Messianic Bible (public domain; the World English
+  Bible with Hebrew names), the Orthodox Jewish Bible (CC BY 4.0, Artists for Israel
+  International; a Messianic Jewish wording), the Translation for Translators (CC BY-SA 4.0,
+  Ellis W. Deibler; made for Bible translators, it writes out what the text implies), Tyndale's
+  New Testament of 1534 (public domain; New Testament only, in its first spelling) and the
+  Jewish translations of the Old Testament alone (JPS 1917, Leeser, the Masoretic English
+  Tanakh; public domain). Any of these could be added.
+- **English, turned down:** the English Majority Text Version (CC BY-NC-ND 4.0: non-commercial,
+  no changes) and the Text-Critical English New Testament (CC BY 4.0, but its name may not be
+  used once the translation or its footnotes are changed in any way, and the app leaves its
+  footnotes out). The NET Bible, as before.
 
 ## Where the text comes from
 
@@ -117,9 +152,19 @@ has bought one of these elsewhere cannot get it through SoftPresenter.
   the original (54 chapters differ). Those three are marked as a loose fit, and the Bible page
   says that beside another Bible a verse here and there may be one off.
 - **Brackets.** Several of these texts mark words the translators added with square brackets.
-  They are shown as published; only the King James has them removed.
+  They are shown as published; only the King James has them removed. eBible's one-verse-per-line
+  text writes the USFM mark for added words as brackets; a Bible converted from USFM (with
+  `cargo run -p sp-bible --example import`, as the app installs a file) keeps those words
+  without brackets, as the King James has them. Brackets that are part of a translation's own
+  text stay.
 
 ## Still to work out
 
 - Exact tables for the three loosely fitting Bibles (Geneva, Kulish, Louis Segond).
 - Books beyond the sixty-six.
+- The Open New Ukrainian Translation's file (`ukronpu`, as published in `bibles-3`) lost the
+  end of seven verses in its conversion from eBible's one-verse-per-line text: "Амінь і амінь!"
+  after Psalms 40:14, 71:19 and 88:53, and the last lines of Revelation 1:7, 2:27, 4:8 and
+  5:13. Converted from its USFM they are whole (found by comparing the two, 2026-11-22), but
+  its added words then lose the brackets the published file shows. A corrected file needs the
+  owner's choice of the two; until then the published one is offered unchanged.
