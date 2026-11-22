@@ -375,18 +375,25 @@ pub fn run_client(args: Vec<String>) -> std::process::ExitCode {
     }
     let args = if connect || canva {
         use std::io::{BufRead, IsTerminal};
-        if std::io::stdin().is_terminal() {
-            eprint!(
-                "{}",
-                if canva {
-                    "Paste the client ID, a space and the client secret, then press Return: "
-                } else {
-                    "Paste the VoxLive API key, then press Return: "
-                }
-            );
-        }
+        let terminal = std::io::stdin().is_terminal();
         let mut line = String::new();
-        let _ = std::io::stdin().lock().read_line(&mut line);
+        if canva && terminal {
+            // Typed at a terminal: the ID, then the secret, which isn't shown as it is typed.
+            let (mut id, mut secret) = (String::new(), String::new());
+            eprint!("Client ID: ");
+            let _ = std::io::stdin().lock().read_line(&mut id);
+            let hidden = NoEcho::start();
+            eprint!("{}", if hidden.0 { "Client secret (not shown): " } else { "Client secret: " });
+            let _ = std::io::stdin().lock().read_line(&mut secret);
+            drop(hidden);
+            eprintln!();
+            line = format!("{} {}", id.trim(), secret.trim());
+        } else {
+            if terminal {
+                eprint!("Paste the VoxLive API key, then press Return: ");
+            }
+            let _ = std::io::stdin().lock().read_line(&mut line);
+        }
         let mut args = args;
         args.push(line.trim().to_owned());
         args
@@ -429,6 +436,30 @@ pub fn run_client(args: Vec<String>) -> std::process::ExitCode {
         say_err!("{}", reply.text);
     }
     if reply.ok { std::process::ExitCode::SUCCESS } else { std::process::ExitCode::from(1) }
+}
+
+/// The terminal's echo, off while this is held (where `stty` can turn it off), so a secret
+/// typed isn't shown. True when it was turned off.
+struct NoEcho(bool);
+
+impl NoEcho {
+    fn start() -> NoEcho {
+        let off = cfg!(unix)
+            && std::process::Command::new("stty")
+                .arg("-echo")
+                .stdin(std::process::Stdio::inherit())
+                .status()
+                .is_ok_and(|status| status.success());
+        NoEcho(off)
+    }
+}
+
+impl Drop for NoEcho {
+    fn drop(&mut self) {
+        if self.0 {
+            let _ = std::process::Command::new("stty").arg("echo").stdin(std::process::Stdio::inherit()).status();
+        }
+    }
 }
 
 /// Whether the program was started through a link (`sp`), not by its own path or as an app.
@@ -2159,7 +2190,7 @@ impl crate::App {
             Status::Connected => {
                 format!("Canva Sync: signed in (integration {}).", canva.client_hint().unwrap_or_default())
             }
-            Status::Refused(why) => format!("Canva Sync: {why}"),
+            Status::Doubtful(why) | Status::Refused(why) => format!("Canva Sync: {why}"),
         }];
         lines.push(match (&settings.design, settings.divider_number) {
             (Some(design), Some(number)) if settings.divider.is_some() => {

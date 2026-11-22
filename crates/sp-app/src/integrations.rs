@@ -200,6 +200,7 @@ fn canva_state(view: &crate::canva::View) -> (Color32, String) {
         S::Reading => (TEXT_FAINT, "…".to_owned()),
         S::NotConnected => (TEXT_FAINT, "Not connected".to_owned()),
         S::Refused(_) => (crate::studio::TALLY, "Sign-in refused".to_owned()),
+        S::Doubtful(_) => (Color32::from_rgb(230, 170, 60), "Sign-in in doubt".to_owned()),
         S::Connected if view.phase.busy() => (Color32::from_rgb(230, 170, 60), "Syncing".to_owned()),
         S::Connected if view.settings.design.is_none() || view.settings.divider.is_none() => {
             (GOOD, "Connected: choose the design".to_owned())
@@ -254,7 +255,11 @@ fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
             ui.label(egui::RichText::new("Reading the sign-in kept on this computer…").color(TEXT_FAINT));
         }
         S::NotConnected | S::Refused(_) => canva_connect(ui, view, &mut request),
-        S::Connected => {
+        S::Connected | S::Doubtful(_) => {
+            if let S::Doubtful(why) = &view.status {
+                ui.label(egui::RichText::new(why.as_str()).color(Color32::from_rgb(230, 170, 60)));
+                ui.add_space(4.0);
+            }
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("Signed in").color(TEXT_DIM));
                 if let Some(hint) = &view.client_hint {
@@ -281,7 +286,8 @@ fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
             ui.add_space(12.0);
             crate::studio::caption(ui, "SYNC");
             ui.horizontal(|ui| {
-                let ready = view.settings.design.is_some() && view.settings.divider.is_some();
+                let ready =
+                    view.settings.design.is_some() && view.settings.divider.is_some() && !view.settings.hold_syncs;
                 if ui.add_enabled(ready && !view.phase.busy(), egui::Button::new("Sync Now")).clicked() {
                     request = Some(R::SyncNow);
                 }
@@ -387,14 +393,16 @@ fn canva_connect(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut
 /// The old script must go now that its sign-in is here: what to type to switch it off.
 fn old_script_warning(ui: &mut egui::Ui, view: &crate::canva::View, request: &mut Option<crate::canva::Request>) {
     egui::Frame::new().fill(Color32::from_rgb(60, 32, 30)).corner_radius(8.0).inner_margin(10.0).show(ui, |ui| {
-        ui.label(
-            egui::RichText::new(
-                "Switch the old sync script off now. It and SoftPresenter can't both use the sign-in: whichever \
-                 refreshes it next breaks the other's. Its token file is gone, so it can't refresh any more, but it \
-                 should not be left running. In Terminal on this Mac:",
-            )
-            .color(TEXT),
-        );
+        let words = if view.settings.hold_syncs {
+            "Switch the old sync script off now. It and SoftPresenter can't both use the sign-in: whichever \
+             refreshes it next breaks the other's. Its token file couldn't be taken away, so it could still refresh \
+             it: nothing is synced until you click It's Switched Off. In Terminal on this Mac:"
+        } else {
+            "Switch the old sync script off now. It and SoftPresenter can't both use the sign-in: whichever \
+             refreshes it next breaks the other's. Its token file is gone, so it can't refresh any more, but it \
+             should not be left running. In Terminal on this Mac:"
+        };
+        ui.label(egui::RichText::new(words).color(TEXT));
         ui.add_space(4.0);
         for step in &view.old_steps {
             ui.label(egui::RichText::new(step.as_str()).monospace().size(12.0).color(TEXT));

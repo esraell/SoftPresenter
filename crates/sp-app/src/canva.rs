@@ -72,8 +72,11 @@ pub struct Places {
     pub old_jobs: Vec<(OldKind, PathBuf)>,
     /// Where a download is put while it comes, outside the library.
     pub staging: PathBuf,
-    /// The file two copies of the app lock while one refreshes the sign-in.
+    /// The file two copies of the app lock while one refreshes or keeps the sign-in.
     pub lock: PathBuf,
+    /// True when the API is a stand-in on this computer (a test copy's), where plain http is
+    /// allowed.
+    pub stand_in: bool,
     /// The settings file (design, divider page, last video).
     pub settings: PathBuf,
     /// The folder the video goes in.
@@ -84,21 +87,25 @@ pub struct Places {
 
 impl Places {
     /// Canva's own, for the app. A test copy (one started with `SOFTPRESENTER_DATA`) keeps
-    /// everything in its own folder. Testing aid: `SOFTPRESENTER_CANVA_API` points at a stand-in
-    /// for Canva on this computer (plain http to 127.0.0.1 only, so nothing secret can go
-    /// elsewhere); the stand-in serves the API under `/rest/v1` and the sign-in page at
-    /// `/api/oauth/authorize`.
+    /// everything in its own folder. Testing aid: in a test copy only, `SOFTPRESENTER_CANVA_API`
+    /// points at a stand-in for Canva on this computer (plain http to 127.0.0.1 only, so nothing
+    /// secret can go elsewhere); the stand-in serves the API under `/rest/v1` and the sign-in page
+    /// at `/api/oauth/authorize`. The owner's app never takes it, so it can't reach the Keychain
+    /// item or the old script's real folder.
     pub fn for_app() -> Places {
         let data = crate::bible_store::data_dir().unwrap_or_else(std::env::temp_dir);
-        let test = std::env::var_os("SOFTPRESENTER_DATA").is_some();
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-        let (api, authorize) = match std::env::var("SOFTPRESENTER_CANVA_API") {
-            Ok(base) if is_stand_in(&base) => {
-                let base = base.trim().trim_end_matches('/').to_owned();
+        let test = std::env::var_os("SOFTPRESENTER_DATA").is_some_and(|folder| !folder.is_empty());
+        let stand_in = std::env::var("SOFTPRESENTER_CANVA_API").ok().filter(|base| test && is_stand_in(base));
+        let (api, authorize) = match &stand_in {
+            Some(base) => {
+                let base = base.trim().trim_end_matches('/');
                 (format!("{base}/rest/v1"), format!("{base}/api/oauth/authorize"))
             }
-            _ => (LIVE_API.to_owned(), LIVE_AUTHORIZE.to_owned()),
+            None => (LIVE_API.to_owned(), LIVE_AUTHORIZE.to_owned()),
         };
+        // The account's home folder from the system's records, not from `HOME`; without it the
+        // old script isn't looked for.
+        let home = sp_video::home_folder();
         let (store, old_script, old_jobs, local) = if test {
             let jobs = data.join("old-canva-sync-jobs");
             (
@@ -112,16 +119,20 @@ impl Places {
                 data.join("Canva staging"),
             )
         } else {
-            (
-                Store::Keychain,
-                home.join("Library/Application Support/canva-sync"),
-                vec![
-                    (OldKind::Daemon, PathBuf::from("/Library/LaunchDaemons")),
-                    (OldKind::Agent, home.join("Library/LaunchAgents")),
-                    (OldKind::Plugin, home.join("Library/Application Support/SwiftBar/Plugins")),
-                ],
-                local_cache(&home),
-            )
+            let local = local_cache(home.as_deref(), &data);
+            match &home {
+                Some(home) => (
+                    Store::Keychain,
+                    home.join("Library/Application Support/canva-sync"),
+                    vec![
+                        (OldKind::Daemon, PathBuf::from("/Library/LaunchDaemons")),
+                        (OldKind::Agent, home.join("Library/LaunchAgents")),
+                        (OldKind::Plugin, home.join("Library/Application Support/SwiftBar/Plugins")),
+                    ],
+                    local,
+                ),
+                None => (Store::Keychain, PathBuf::new(), Vec::new(), local),
+            }
         };
         Places {
             api,
@@ -130,7 +141,9 @@ impl Places {
             store,
             old_script,
             old_jobs,
-            lock: local.join("sign-in.lock"),
+            // In the data folder, which every copy of the app using this library shares.
+            lock: data.join(".canva-sync.lock"),
+            stand_in: stand_in.is_some(),
             staging: local,
             settings: data.join("canva-sync.json"),
             folder: data.join("Media").join(FOLDER),
@@ -139,40 +152,37 @@ impl Places {
         }
     }
 
-    /// True when the API is a stand-in on this computer (tests), where plain http is allowed.
-    fn on_this_computer(&self) -> bool {
-        is_stand_in(&self.api)
-    }
-
     /// The address the sign-in's answer comes back to.
     pub fn redirect(&self, port: u16) -> String {
         format!("http://127.0.0.1:{port}{REDIRECT_PATH}")
     }
 }
 
-/// True for plain http to 127.0.0.1, the only place a stand-in may be.
+/// True for plain http to 127.0.0.1 and a port, the only place a stand-in may be: after the
+/// colon, one to five digits, then the end or a `/` (nothing that could make it another host).
 fn is_stand_in(base: &str) -> bool {
-    base.trim()
-        .strip_prefix("http://127.0.0.1:")
-        .is_some_and(|rest| rest.chars().next().is_some_and(|c| c.is_ascii_digit()))
+    let Some(rest) = base.trim().strip_prefix("http://127.0.0.1:") else { return false };
+    let port = rest.split_once('/').map_or(rest, |(port, _)| port);
+    (1..=5).contains(&port.len())
+        && port.bytes().all(|b| b.is_ascii_digit())
+        && port.parse::<u32>().is_ok_and(|port| (1..=65535).contains(&port))
 }
 
 /// A folder of the computer's own (not the library, which may be synced to the cloud) for a
-/// download while it comes, on the same disk as the library as a rule.
-fn local_cache(home: &Path) -> PathBuf {
-    if cfg!(target_os = "macos") {
+/// download while it comes, on the same disk as the library as a rule; the library's own hidden
+/// folder where there is no such place.
+fn local_cache(home: Option<&Path>, data: &Path) -> PathBuf {
+    if cfg!(target_os = "macos")
+        && let Some(home) = home
+    {
         return home.join("Library/Caches/SoftPresenter/Canva Sync");
     }
     if cfg!(windows)
-        && let Some(local) = std::env::var_os("LOCALAPPDATA")
+        && let Some(local) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).filter(|local| local.is_absolute())
     {
-        return PathBuf::from(local).join("SoftPresenter").join("Canva Sync");
+        return local.join("SoftPresenter").join("Canva Sync");
     }
-    std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".cache"))
-        .join("SoftPresenter")
-        .join("Canva Sync")
+    data.join(".canva-staging")
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -300,10 +310,15 @@ impl Store {
     }
 }
 
-/// Writes a file only its owner may read.
+/// Writes a new file only its owner may read. Anything left at that name (a half-written file,
+/// a link) is removed first, and the file is made new, so it is never written through.
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
     let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -328,11 +343,22 @@ pub struct Settings {
     pub updated_file: Option<String>,
     /// True from bringing in the old sync script's sign-in until the operator says it is off.
     pub old_script_warning: bool,
+    /// True when the old script's token file couldn't be taken away, so it could still refresh
+    /// the sign-in: nothing is synced until the operator says it is off.
+    pub hold_syncs: bool,
+    /// The videos Canva Sync put in its folder, by name: the only files it ever deletes there.
+    pub made: Vec<String>,
 }
 
 impl Settings {
+    /// The settings as kept. The design's id is checked as a typed one is (it goes into an
+    /// address), and only plain file names are taken as videos the app made.
     pub fn load(path: &Path) -> Settings {
-        std::fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
+        let mut settings: Settings =
+            std::fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
+        settings.design = settings.design.and_then(|design| design_id(&design).filter(|id| *id == design));
+        settings.made.retain(|name| is_plain_name(name));
+        settings
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
@@ -354,6 +380,8 @@ impl Settings {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Failure {
     SignInGone(String),
+    /// Canva answered a refresh but its answer couldn't be read: the sign-in may be used up.
+    Doubtful(String),
     Cancelled,
     Other(String),
 }
@@ -361,11 +389,15 @@ pub enum Failure {
 impl Failure {
     pub fn words(&self) -> String {
         match self {
-            Failure::SignInGone(why) | Failure::Other(why) => why.clone(),
+            Failure::SignInGone(why) | Failure::Doubtful(why) | Failure::Other(why) => why.clone(),
             Failure::Cancelled => "Stopped.".to_owned(),
         }
     }
 }
+
+/// What a refresh answered but couldn't be read says.
+const MAYBE_USED_UP: &str =
+    "Canva may have used up the sign-in (its answer couldn't be read): sign in again if the next sync fails.";
 
 fn other(words: impl Into<String>) -> Failure {
     Failure::Other(words.into())
@@ -389,7 +421,7 @@ fn api_agent(places: &Places, timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
         .http_status_as_error(false)
         .max_redirects(0)
-        .https_only(!places.on_this_computer())
+        .https_only(!places.stand_in)
         .timeout_global(Some(timeout))
         .build()
         .into()
@@ -416,7 +448,12 @@ fn call(
     };
     let mut response = sent.map_err(|e| other(format!("Canva couldn't be asked: {}.", plain(&e))))?;
     let status = response.status().as_u16();
-    let text = response.body_mut().with_config().limit(LARGEST_REPLY).read_to_string().unwrap_or_default();
+    let text = response
+        .body_mut()
+        .with_config()
+        .limit(LARGEST_REPLY)
+        .read_to_string()
+        .map_err(|_| other("Canva's answer broke off; the video stays as it was."))?;
     Ok((status, serde_json::from_str(&text).unwrap_or_default()))
 }
 
@@ -428,7 +465,8 @@ fn canva_code(reply: &serde_json::Value) -> &str {
 /// The token endpoint, with the integration's ID and secret as HTTP Basic: the new tokens, or
 /// why not.
 fn token_request(places: &Places, secrets: &Secrets, form: &[(&str, &str)]) -> Result<serde_json::Value, Failure> {
-    let agent = api_agent(places, Duration::from_secs(30));
+    // Longer than other calls: a refresh given up on here may have used the token up there.
+    let agent = api_agent(places, TOKEN_WAIT);
     let basic =
         format!("Basic {}", base64(format!("{}:{}", secrets.client_id, secrets.client_secret).as_bytes(), STANDARD));
     let sent = agent
@@ -437,8 +475,18 @@ fn token_request(places: &Places, secrets: &Secrets, form: &[(&str, &str)]) -> R
         .send_form(form.iter().copied());
     let mut response = sent.map_err(|e| other(format!("Canva's sign-in couldn't be reached: {}.", plain(&e))))?;
     let status = response.status().as_u16();
-    let text = response.body_mut().with_config().limit(LARGEST_REPLY).read_to_string().unwrap_or_default();
-    let reply: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+    let text = response.body_mut().with_config().limit(LARGEST_REPLY).read_to_string();
+    // A refresh Canva answered may have used the token up: an answer that can't be read isn't a
+    // passing problem.
+    let reply: serde_json::Value = match (&text, status) {
+        (Ok(text), _) => match serde_json::from_str(text) {
+            Ok(reply) => reply,
+            Err(_) if status == 200 => return Err(Failure::Doubtful(MAYBE_USED_UP.to_owned())),
+            Err(_) => serde_json::Value::Null,
+        },
+        (Err(_), 200) => return Err(Failure::Doubtful(MAYBE_USED_UP.to_owned())),
+        (Err(_), code) => return Err(other(format!("Canva's sign-in answer broke off ({code})."))),
+    };
     match (status, canva_code(&reply)) {
         (200, _) => Ok(reply),
         (_, "invalid_grant") => Err(Failure::SignInGone(
@@ -460,7 +508,7 @@ fn token_request(places: &Places, secrets: &Secrets, form: &[(&str, &str)]) -> R
 fn take_tokens(secrets: &mut Secrets, reply: &serde_json::Value) -> Result<(), Failure> {
     let field = |name: &str| reply.get(name).and_then(serde_json::Value::as_str).filter(|v| !v.is_empty());
     let (Some(access), Some(refresh)) = (field("access_token"), field("refresh_token")) else {
-        return Err(other("Canva's sign-in answer had no tokens in it."));
+        return Err(Failure::Doubtful(MAYBE_USED_UP.to_owned()));
     };
     let lasts = reply.get("expires_in").and_then(serde_json::Value::as_i64).unwrap_or(4 * 60 * 60);
     secrets.access_token = Some(access.to_owned());
@@ -482,11 +530,7 @@ fn access_token(
     unsaved: &mut bool,
     force: bool,
 ) -> Result<String, Failure> {
-    let _ = std::fs::create_dir_all(&places.staging);
-    let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&places.lock).ok();
-    if let Some(lock) = &lock {
-        let _ = lock.lock();
-    }
+    let lock = take_lock(&places.lock).map_err(other)?;
     // A sign-in this copy couldn't store before is stored first; otherwise the kept one is newest.
     if *unsaved && let Some(mine) = secrets.as_ref() {
         places
@@ -506,6 +550,8 @@ fn access_token(
         return Ok(access.to_owned());
     }
     let refresh = current.refresh_token.clone();
+    // From here until it is kept, quitting waits (see `Client::shut_down`).
+    let _refreshing = Refreshing::begin();
     let reply = token_request(places, current, &[("grant_type", "refresh_token"), ("refresh_token", &refresh)])?;
     take_tokens(current, &reply)?;
     if let Err(why) = places.store.save(current) {
@@ -521,13 +567,70 @@ fn access_token(
     Ok(access)
 }
 
+/// How long a token request may take: longer than other calls, since a refresh given up on here
+/// may have used the token up at Canva's end.
+const TOKEN_WAIT: Duration = Duration::from_secs(90);
+
+/// Takes the lock two copies of the app share for refreshing and keeping the sign-in, waiting a
+/// while for another copy that holds it. The error is a sentence: nothing is refreshed or kept
+/// without the lock.
+fn take_lock(path: &Path) -> Result<std::fs::File, String> {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let file =
+        std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path).map_err(|_| {
+            "Canva Sync's lock in the library folder couldn't be opened, so nothing was done.".to_owned()
+        })?;
+    let until = Instant::now() + Duration::from_secs(60);
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) if Instant::now() < until => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(_) => {
+                return Err(
+                    "Another copy of SoftPresenter is using the Canva sign-in; try again in a moment.".to_owned()
+                );
+            }
+        }
+    }
+}
+
+/// True while a refresh is between being sent and its new tokens kept: quitting waits for it.
+static REFRESHING: AtomicBool = AtomicBool::new(false);
+
+/// Marks a refresh in flight, until dropped (however the refresh ends).
+struct Refreshing;
+
+impl Refreshing {
+    fn begin() -> Refreshing {
+        REFRESHING.store(true, Ordering::SeqCst);
+        Refreshing
+    }
+}
+
+impl Drop for Refreshing {
+    fn drop(&mut self) {
+        REFRESHING.store(false, Ordering::SeqCst);
+    }
+}
+
 /// One page of the design.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Page {
     pub number: u32,
     pub id: Option<String>,
-    /// Its small picture's address (signed for a few minutes: never logged).
+    /// Its small picture's address (signed for a few minutes: never logged or printed).
     pub thumbnail: Option<String>,
+}
+
+impl std::fmt::Debug for Page {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let picture = if self.thumbnail.is_some() { "…" } else { "none" };
+        write!(f, "Page {{ number: {}, id: {:?}, thumbnail: {picture} }}", self.number, self.id)
+    }
 }
 
 /// Every page of the design, in order.
@@ -663,7 +766,7 @@ fn download(
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .max_redirects(5)
-        .https_only(!places.on_this_computer())
+        .https_only(!places.stand_in)
         .timeout_connect(Some(Duration::from_secs(30)))
         .timeout_recv_response(Some(Duration::from_secs(60)))
         // A download that stalls for a minute has failed; a slow one has up to an hour.
@@ -678,7 +781,12 @@ fn download(
     }
     let total = response.body().content_length();
     let mut reader = response.body_mut().with_config().limit(LARGEST_VIDEO).reader();
-    let mut file = std::fs::File::create(into).map_err(|e| other(format!("The video couldn't be saved ({e}).")))?;
+    // A new file (never through something already at that name).
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(into)
+        .map_err(|e| other(format!("The video couldn't be saved ({e}).")))?;
     let (mut done, mut buffer) = (0u64, vec![0u8; 256 * 1024]);
     progress(0, total);
     loop {
@@ -728,8 +836,15 @@ fn put_in_place(from: &Path, folder: &Path, name: &str) -> Result<PathBuf, Strin
     if std::fs::rename(from, &to).is_ok() {
         return Ok(to);
     }
-    let hidden = folder.join(".canva-sync-download.part");
-    std::fs::copy(from, &hidden).and_then(|_| std::fs::rename(&hidden, &to)).map_err(|e| {
+    // On another disk: copied into a new hidden file there (a name of its own, made new, so
+    // nothing already there is written through), then renamed.
+    let hidden = folder.join(format!(".canva-sync-{}.part", base64(&random_bytes(9), URL_SAFE)));
+    let copied = std::fs::File::open(from).and_then(|mut source| {
+        let mut made = std::fs::OpenOptions::new().write(true).create_new(true).open(&hidden)?;
+        std::io::copy(&mut source, &mut made)?;
+        made.sync_all()
+    });
+    copied.and_then(|()| std::fs::rename(&hidden, &to)).map_err(|e| {
         let _ = std::fs::remove_file(&hidden);
         format!("The new video couldn't be put in the Canva Sync folder ({e}).")
     })?;
@@ -737,16 +852,26 @@ fn put_in_place(from: &Path, folder: &Path, name: &str) -> Result<PathBuf, Strin
     Ok(to)
 }
 
-/// The other videos in the folder (not hidden), which the new one replaces.
-fn others_in(folder: &Path, kept: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(folder) else { return Vec::new() };
-    let mut others: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path != kept && crate::media::is_video(path))
-        .filter(|path| path.file_name().is_some_and(|name| !name.to_string_lossy().starts_with('.')))
+/// True for a plain file name: no folder in it, not hidden, nothing odd.
+fn is_plain_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('.')
+        && !name.contains(['/', '\\'])
+        && !name.chars().any(char::is_control)
+        && Path::new(name).file_name().is_some_and(|only| only == name)
+}
+
+/// The videos Canva Sync made before (by the names it kept) that are still in the folder, which
+/// the new one replaces. A file anyone else put there is never one of them.
+fn others_in(folder: &Path, kept: &Path, made: &[String]) -> Vec<PathBuf> {
+    let mut others: Vec<PathBuf> = made
+        .iter()
+        .filter(|name| is_plain_name(name))
+        .map(|name| folder.join(name))
+        .filter(|path| path != kept && path.is_file())
         .collect();
     others.sort();
+    others.dedup();
     others
 }
 
@@ -813,6 +938,8 @@ struct SyncJob {
     unsaved: bool,
     design: String,
     divider: String,
+    /// The videos the app made before, by name (see `Settings::made`).
+    made: Vec<String>,
     cancel: Arc<AtomicBool>,
     progress: Sender<Event>,
     wake: Option<Arc<dyn Fn() + Send + Sync>>,
@@ -848,7 +975,7 @@ fn sync_steps(job: &mut SyncJob) -> Result<Synced, Failure> {
     }
     say(job, Phase::Exporting { since: Instant::now() });
     let url = export(&job.places, &token, &job.design, &above, &job.cancel)?;
-    let staging = job.places.staging.join("download.mp4.part");
+    let staging = job.places.staging.join(format!("{DOWNLOADING}{}.mp4.part", base64(&random_bytes(9), URL_SAFE)));
     std::fs::create_dir_all(&job.places.staging).map_err(|e| other(format!("No room for the download ({e}).")))?;
     let mut last_said = Instant::now() - Duration::from_secs(1);
     let mut progress = |done: u64, total: Option<u64>| {
@@ -871,8 +998,22 @@ fn sync_steps(job: &mut SyncJob) -> Result<Synced, Failure> {
         let _ = std::fs::remove_file(&staging);
         other(why)
     })?;
-    let others = others_in(&job.places.folder, &path);
+    let others = others_in(&job.places.folder, &path, &job.made);
     Ok(Synced { path, bytes, others, pages: above.len() })
+}
+
+/// How a download in the staging folder is named, before its random part.
+const DOWNLOADING: &str = "download-";
+
+/// Removes downloads left in the staging folder (by a quit or a crash part way through).
+fn clear_staging(staging: &Path) {
+    let Ok(entries) = std::fs::read_dir(staging) else { return };
+    for entry in entries.filter_map(Result::ok) {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(DOWNLOADING) && name.ends_with(".part") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -995,10 +1136,26 @@ fn query_value(query: &str, name: &str) -> Option<String> {
     })
 }
 
+/// The first line of a request (up to its line end), read in as many pieces as it comes in,
+/// within a few seconds and 8 KB.
+fn request_line(stream: &mut std::net::TcpStream) -> String {
+    let _ = stream.set_nonblocking(false);
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let (until, mut head, mut piece) = (Instant::now() + Duration::from_secs(5), Vec::new(), [0u8; 1024]);
+    while head.len() < 8192 && Instant::now() < until && !head.windows(2).any(|two| two == b"\r\n") {
+        match stream.read(&mut piece) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => head.extend_from_slice(&piece[..read]),
+        }
+    }
+    let line_end = head.windows(2).position(|two| two == b"\r\n").unwrap_or(head.len());
+    String::from_utf8_lossy(&head[..line_end]).into_owned()
+}
+
 /// Waits for the browser to come back with the sign-in's answer: the one request to the
-/// redirect path carrying our `state` (one without it, or with another, ends the sign-in, as
-/// Canva asks). Anything else asked of the listener is told it isn't there. The listener is let
-/// go when this returns. The code, if the operator agreed.
+/// redirect path carrying our `state`. One with another state, or none, is told so and passed
+/// over (it can't end the sign-in for anyone else); anything else asked of the listener is told
+/// it isn't there. The listener is let go when this returns. The code, if the operator agreed.
 fn wait_for_answer(listener: std::net::TcpListener, state: &str, cancel: &AtomicBool) -> Result<String, String> {
     listener.set_nonblocking(true).map_err(|_| "The sign-in couldn't listen for Canva's answer.".to_owned())?;
     let until = Instant::now() + SIGN_IN_WAIT;
@@ -1015,18 +1172,17 @@ fn wait_for_answer(listener: std::net::TcpListener, state: &str, cancel: &Atomic
                 std::thread::sleep(Duration::from_millis(50));
                 continue;
             }
-            Err(_) => continue,
+            // Out of files, say: a pause, not a spin.
+            Err(_) => {
+                std::thread::sleep(Duration::from_millis(250));
+                continue;
+            }
         };
         if !from.ip().is_loopback() {
             continue;
         }
-        let _ = stream.set_nonblocking(false);
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-        let mut head = [0u8; 8192];
-        let read = stream.read(&mut head).unwrap_or(0);
-        let text = String::from_utf8_lossy(&head[..read]);
-        let line = text.lines().next().unwrap_or("");
-        let Some(query) = query_for(line, REDIRECT_PATH) else {
+        let line = request_line(&mut stream);
+        let Some(query) = query_for(&line, REDIRECT_PATH) else {
             let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
             continue;
         };
@@ -1054,9 +1210,8 @@ fn wait_for_answer(listener: std::net::TcpListener, state: &str, cancel: &Atomic
                 "400 Bad Request",
                 "This answer isn't for SoftPresenter's sign-in. Nothing was changed.",
             );
-            return Err("An answer came that didn't belong to this sign-in, so it was stopped; nothing was changed. \
-                        Try Sign In again."
-                .to_owned());
+            crate::applog::problem("canva", "an answer to the sign-in came with the wrong state; it was passed over");
+            continue;
         }
         if let Some(error) = query_value(query, "error") {
             reply(&mut stream, "200 OK", "Canva Sync wasn't signed in. You can close this tab.");
@@ -1136,6 +1291,7 @@ fn sign_in(
     )
     .map_err(|failure| failure.words())?;
     take_tokens(&mut secrets, &reply).map_err(|failure| failure.words())?;
+    let _lock = take_lock(&places.lock)?;
     places.store.save(&secrets)?;
     crate::applog::event("canva", "signed in, and the sign-in was kept");
     Ok(secrets)
@@ -1155,11 +1311,24 @@ pub enum OldKind {
     Plugin,
 }
 
-/// One of the old script's jobs or plugins found on this computer.
+/// One of the old script's jobs or plugins found on this computer, and a background job's
+/// label as its file gives it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OldJob {
     pub kind: OldKind,
     pub path: PathBuf,
+    pub label: Option<String>,
+}
+
+/// A background job's label, as its property list gives it (`<key>Label</key><string>…`), if
+/// it is one launchd takes: letters, digits, dots, dashes and underscores.
+fn plist_label(bytes: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let after = &text[text.find("<key>Label</key>")? + "<key>Label</key>".len()..];
+    let value = after.trim_start().strip_prefix("<string>")?;
+    let label = value[..value.find("</string>")?].trim();
+    (!label.is_empty() && label.chars().all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c)))
+        .then(|| label.to_owned())
 }
 
 /// True when the old sync script's sign-in is on this computer.
@@ -1176,44 +1345,46 @@ pub fn old_jobs(places: &Places) -> Vec<OldJob> {
         paths.sort();
         for path in paths {
             let small = std::fs::metadata(&path).is_ok_and(|meta| meta.is_file() && meta.len() < 256 * 1024);
-            let names_it = small
-                && std::fs::read(&path).is_ok_and(|bytes| {
-                    bytes.windows(10).any(|w| w == b"canva_sync") || bytes.windows(10).any(|w| w == b"canva-sync")
-                });
-            if names_it {
-                found.push(OldJob { kind: *kind, path });
+            let Some(bytes) = std::fs::read(&path).ok().filter(|_| small) else { continue };
+            if bytes.windows(10).any(|w| w == b"canva_sync" || w == b"canva-sync") {
+                let label = if *kind == OldKind::Plugin { None } else { plist_label(&bytes) };
+                found.push(OldJob { kind: *kind, path, label });
             }
         }
     }
     found
 }
 
-/// A path as the Terminal takes it, with the home folder as `~` and spaces escaped.
-fn for_terminal(path: &Path) -> String {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let shown = match home.as_deref().and_then(|home| path.strip_prefix(home).ok()) {
-        Some(rest) => format!("~/{}", rest.display()),
-        None => path.display().to_string(),
-    };
-    shown.replace(' ', "\\ ")
+/// A word as the Terminal takes it whatever is in it: in single quotes, a quote in it written
+/// `'\''`. (These lines are pasted with sudo.)
+fn quoted(word: &str) -> String {
+    format!("'{}'", word.replace('\'', "'\\''"))
 }
 
-/// How to switch the old script off, a line each, from what was found on this computer.
+/// A path for a line to paste in the Terminal: whole, and quoted.
+fn for_terminal(path: &Path) -> String {
+    quoted(&path.to_string_lossy())
+}
+
+/// How to switch the old script off, a line each, from what was found on this computer. A job
+/// whose label can't be read from its file is said so, not guessed from the file's name.
 pub fn switch_off_steps(places: &Places, jobs: &[OldJob]) -> Vec<String> {
     let mut steps = Vec::new();
     for job in jobs {
-        let label = job.path.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
         let file = for_terminal(&job.path);
-        match job.kind {
-            OldKind::Daemon => {
-                steps.push(format!("sudo launchctl bootout system/{label}"));
+        match (job.kind, &job.label) {
+            (OldKind::Daemon, Some(label)) => {
+                steps.push(format!("sudo launchctl bootout {}", quoted(&format!("system/{label}"))));
                 steps.push(format!("sudo rm {file}"));
             }
-            OldKind::Agent => {
-                steps.push(format!("launchctl bootout gui/$(id -u)/{label}"));
+            (OldKind::Agent, Some(label)) => {
+                steps.push(format!("launchctl bootout \"gui/$(id -u)/\"{}", quoted(label)));
                 steps.push(format!("rm {file}"));
             }
-            OldKind::Plugin => steps.push(format!("rm {file}")),
+            (OldKind::Daemon | OldKind::Agent, None) => {
+                steps.push(format!("(its label couldn't be read: unload it by hand before removing it) {file}"));
+            }
+            (OldKind::Plugin, _) => steps.push(format!("rm {file}")),
         }
     }
     if jobs.is_empty() {
@@ -1230,15 +1401,46 @@ pub fn switch_off_steps(places: &Places, jobs: &[OldJob]) -> Vec<String> {
     steps
 }
 
+/// What bringing in the old script's sign-in did.
+pub struct Imported {
+    pub secrets: Secrets,
+    /// True when its token file couldn't be taken away: the old script could still refresh the
+    /// sign-in, so nothing is synced until it is switched off.
+    pub token_file_left: bool,
+    /// Anything the operator should know, in words.
+    pub notes: Vec<String>,
+}
+
 /// Brings in the old sync script's sign-in: read here (nobody pastes it anywhere), kept and read
 /// back, and only then its token file taken away, so the old script can't refresh the token
-/// (which would break this one's). The client ID and secret file is left for the operator.
-fn import_old(places: &Places) -> Result<Secrets, String> {
-    // The old script holds this lock while it runs: its tokens may be about to change.
-    if let Ok(lock) = std::fs::OpenOptions::new().write(true).open(places.old_script.join("lock"))
-        && lock.try_lock().is_err()
-    {
+/// (which would break this one's). All of it is done holding the lock the old script takes while
+/// it runs (as the same user), so it can't refresh meanwhile. The client ID and secret file is
+/// left for the operator.
+fn import_old(places: &Places) -> Result<Imported, String> {
+    // The old script locks this file (making it if need be) for as long as it runs. It is made
+    // here if it isn't there, so the script can't start part way through.
+    let lock_path = places.old_script.join("lock");
+    let opened = if lock_path.exists() {
+        std::fs::OpenOptions::new().read(true).open(&lock_path)
+    } else {
+        std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&lock_path)
+    };
+    let script_lock = opened.map_err(|_| {
+        "The old sync script's lock couldn't be opened, so its sign-in wasn't brought in (the script may be \
+         running): try again in a few minutes."
+            .to_owned()
+    })?;
+    if script_lock.try_lock().is_err() {
         return Err("The old sync script is running right now; try again in a few minutes.".to_owned());
+    }
+    let mut notes = Vec::new();
+    // A file it was writing when it stopped is left alone (its token may be the one that works).
+    if places.old_script.join("tokens.json.tmp").exists() {
+        notes.push(
+            "The old script left a half-saved tokens.json.tmp behind; it was left alone. If Canva refuses the \
+             sign-in, sign in again."
+                .to_owned(),
+        );
     }
     let creds = std::fs::read_to_string(places.old_script.join("creds.env"))
         .map_err(|_| "The old script's creds.env couldn't be read.".to_owned())?;
@@ -1263,12 +1465,25 @@ fn import_old(places: &Places) -> Result<Secrets, String> {
         return Err("The old script's creds.env doesn't have a client ID and secret.".to_owned());
     }
     let secrets = Secrets { client_id, client_secret, refresh_token: refresh.to_owned(), ..Secrets::default() };
-    places.store.save(&secrets)?;
-    if std::fs::remove_file(places.old_script.join("tokens.json")).is_err() {
-        crate::applog::problem("canva", "the old script's token file couldn't be taken away");
+    {
+        let _lock = take_lock(&places.lock)?;
+        places.store.save(&secrets)?;
     }
+    let token_file_left = match std::fs::remove_file(places.old_script.join("tokens.json")) {
+        Ok(()) => false,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => {
+            crate::applog::problem("canva", &format!("the old script's token file couldn't be taken away ({e})"));
+            notes.push(format!(
+                "Its token file couldn't be taken away ({e}), so the old script could still refresh the sign-in: \
+                 nothing is synced until you switch it off and click It's Switched Off."
+            ));
+            true
+        }
+    };
+    drop(script_lock);
     crate::applog::event("canva", "brought in the old sync script's sign-in, and kept it");
-    Ok(secrets)
+    Ok(Imported { secrets, token_file_left, notes })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1301,7 +1516,9 @@ enum Event {
     SecretsRead(Result<Option<Secrets>, String>),
     OldScript(bool, Vec<OldJob>),
     SignedIn(Result<Secrets, String>),
-    Imported(Result<Secrets, String>),
+    Imported(Result<Imported, String>),
+    /// A job's thread stopped without finishing (it panicked).
+    Broke,
     Pages(Option<Secrets>, bool, Result<Vec<PageView>, Failure>),
     Progress(Phase),
     Synced(Option<Secrets>, bool, Result<Synced, Failure>),
@@ -1315,6 +1532,9 @@ pub enum Status {
     Reading,
     NotConnected,
     Connected,
+    /// Canva answered a refresh in a way that couldn't be read: the sign-in may be used up. Syncs
+    /// are still tried; one that works puts it back to Connected, one Canva refuses to Refused.
+    Doubtful(String),
     /// Canva no longer takes the sign-in; nothing is asked until the operator signs in again.
     Refused(String),
 }
@@ -1359,6 +1579,15 @@ impl Client {
         let settings = Settings::load(&places.settings);
         let (reader, store, look) = (tx.clone(), places.store.clone(), places.clone());
         let wake_reader = wake.clone();
+        // Videos it made that a quit or a crash left behind beside the newest go once nothing
+        // uses them (see `remove_replaced_canva_videos`).
+        let old_files = settings
+            .made
+            .iter()
+            .filter(|name| Some(*name) != settings.updated_file.as_ref())
+            .map(|name| places.folder.join(name))
+            .filter(|path| path.is_file())
+            .collect();
         let _ = std::thread::Builder::new().name("canva sign-in".to_owned()).spawn(move || {
             let _ = reader.send(Event::SecretsRead(store.load()));
             let _ = reader.send(Event::OldScript(old_script_here(&look), old_jobs(&look)));
@@ -1380,7 +1609,7 @@ impl Client {
             sync_waiting: false,
             finished: None,
             job: None,
-            old_files: Vec::new(),
+            old_files,
             version: 0,
             cancel: Arc::new(AtomicBool::new(false)),
             thread: None,
@@ -1423,7 +1652,11 @@ impl Client {
         self.cancel = Arc::new(AtomicBool::new(false));
         let (tx, cancel, wake) = (self.tx.clone(), self.cancel.clone(), self.wake.clone());
         let started = std::thread::Builder::new().name("canva sync".to_owned()).spawn(move || {
-            work(tx, cancel);
+            // A job that panics still ends: Canva Sync isn't left busy for good.
+            let broke = tx.clone();
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(tx, cancel))).is_err() {
+                let _ = broke.send(Event::Broke);
+            }
             if let Some(wake) = wake {
                 wake();
             }
@@ -1453,7 +1686,7 @@ impl Client {
         // Testing aid: SOFTPRESENTER_CANVA_BROWSER=fetch, with a stand-in for Canva on this
         // computer, has the app follow the sign-in page itself, as a browser would, so a test copy
         // signs in without opening the computer's browser.
-        let fetch = places.on_this_computer() && std::env::var("SOFTPRESENTER_CANVA_BROWSER").as_deref() == Ok("fetch");
+        let fetch = places.stand_in && std::env::var("SOFTPRESENTER_CANVA_BROWSER").as_deref() == Ok("fetch");
         self.start(Phase::SigningIn, move |tx, cancel| {
             let signed = if fetch {
                 sign_in(&places, &id, &secret, follow_like_a_browser, &cancel)
@@ -1492,9 +1725,11 @@ impl Client {
         Ok(())
     }
 
-    /// The operator says the old script is switched off: the warning goes.
+    /// The operator says the old script is switched off: the warning goes, and syncs held back
+    /// because its token file couldn't be taken away may run.
     pub fn old_script_off(&mut self) {
         self.settings.old_script_warning = false;
+        self.settings.hold_syncs = false;
         let _ = self.settings.save(&self.places.settings);
         self.version += 1;
     }
@@ -1517,7 +1752,7 @@ impl Client {
         let design = self.settings.design.clone().ok_or("Give the design's link first.")?;
         self.signed_in()?;
         let (places, mut secrets, mut unsaved) = (self.places.clone(), self.secrets.clone(), self.unsaved);
-        self.start(Phase::ReadingPages, move |tx, _| {
+        self.start(Phase::ReadingPages, move |tx, cancel| {
             let listed = access_token(&places, &mut secrets, &mut unsaved, false)
                 .and_then(|token| pages(&places, &token, &design))
                 .and_then(|pages| {
@@ -1526,14 +1761,19 @@ impl Client {
                             "Canva doesn't give this design's pages ids, so a divider page can't be kept track of.",
                         ));
                     }
-                    Ok(pages
-                        .into_iter()
-                        .map(|page| PageView {
+                    // Stopped (quitting, say) between two pictures, it stops there.
+                    let mut views = Vec::with_capacity(pages.len());
+                    for page in pages {
+                        if cancel.load(Ordering::Relaxed) {
+                            return Err(Failure::Cancelled);
+                        }
+                        views.push(PageView {
                             number: page.number,
                             id: page.id.clone(),
                             picture: thumbnail(&places, &page),
-                        })
-                        .collect())
+                        });
+                    }
+                    Ok(views)
                 });
             let _ = tx.send(Event::Pages(secrets, unsaved, listed));
         })
@@ -1550,10 +1790,18 @@ impl Client {
         Ok(())
     }
 
-    /// The error when not signed in, or the sign-in was refused.
+    /// The error when not signed in, or the sign-in was refused, or syncs are held back until
+    /// the old script is switched off.
     fn signed_in(&self) -> Result<(), String> {
+        if self.settings.hold_syncs {
+            return Err(
+                "The old sync script could still refresh the sign-in (its token file couldn't be taken away): \
+                        switch it off, then click It's Switched Off in Settings › Integrations › Canva Sync."
+                    .to_owned(),
+            );
+        }
         match &self.status {
-            Status::Connected => Ok(()),
+            Status::Connected | Status::Doubtful(_) => Ok(()),
             Status::Refused(why) => Err(why.clone()),
             Status::Reading => Err("Canva Sync's sign-in is still being read.".to_owned()),
             Status::NotConnected => Err("Canva Sync isn't signed in: Settings › Integrations › Canva Sync.".to_owned()),
@@ -1579,6 +1827,7 @@ impl Client {
             unsaved: self.unsaved,
             design,
             divider,
+            made: self.settings.made.clone(),
             cancel: Arc::new(AtomicBool::new(false)),
             progress: self.tx.clone(),
             wake: self.wake.clone(),
@@ -1598,7 +1847,10 @@ impl Client {
             self.version += 1;
             match event {
                 Event::SecretsRead(read) => {
+                    // Taken only while nothing newer is held: a sign-in made or refreshed meanwhile
+                    // is never replaced by the older one read.
                     match read {
+                        _ if self.secrets.is_some() => {}
                         Ok(Some(secrets)) => {
                             self.secrets = Some(secrets);
                             self.status = Status::Connected;
@@ -1637,16 +1889,31 @@ impl Client {
                     self.thread = None;
                     self.phase = Phase::Idle;
                     match result {
-                        Ok(secrets) => {
-                            self.secrets = Some(secrets);
+                        Ok(imported) => {
+                            self.secrets = Some(imported.secrets);
                             self.unsaved = false;
                             self.status = Status::Connected;
                             self.old_here = false;
                             self.settings.old_script_warning = true;
+                            self.settings.hold_syncs = imported.token_file_left;
                             let _ = self.settings.save(&self.places.settings);
-                            self.say("Brought in the old sync script's sign-in. Switch the old script off now.", true);
+                            let mut said =
+                                "Brought in the old sync script's sign-in. Switch the old script off now.".to_owned();
+                            for note in &imported.notes {
+                                said.push(' ');
+                                said.push_str(note);
+                            }
+                            self.say(said, !imported.token_file_left);
                         }
                         Err(why) => self.say(why, false),
+                    }
+                }
+                Event::Broke => {
+                    self.thread = None;
+                    self.phase = Phase::Idle;
+                    self.say("Canva Sync stopped part way through; the video stays as it was. Try again.", false);
+                    if self.job.is_some() || self.sync_waiting {
+                        self.finished = Some(Err("Canva Sync stopped part way through.".to_owned()));
                     }
                 }
                 Event::Pages(secrets, unsaved, listed) => {
@@ -1655,6 +1922,7 @@ impl Client {
                     self.take_secrets(secrets, unsaved);
                     match listed {
                         Ok(pages) => {
+                            self.signed_in_again();
                             self.pages = pages;
                             // The divider's number follows the page as it moves.
                             if let Some(page) = self.pages.iter().find(|p| p.id == self.settings.divider) {
@@ -1676,9 +1944,16 @@ impl Client {
                     self.take_secrets(secrets, unsaved);
                     match outcome {
                         Ok(synced) => {
+                            self.signed_in_again();
                             let name = crate::file_name(&synced.path);
                             self.settings.updated_at = Some(chrono::Local::now().to_rfc3339());
                             self.settings.updated_file = Some(name.clone());
+                            // Only the videos it made are ever deleted from its folder.
+                            let folder = self.places.folder.clone();
+                            self.settings.made.retain(|made| folder.join(made).is_file());
+                            if !self.settings.made.contains(&name) {
+                                self.settings.made.push(name.clone());
+                            }
                             let _ = self.settings.save(&self.places.settings);
                             self.say(
                                 format!(
@@ -1699,10 +1974,32 @@ impl Client {
                 }
             }
         }
+        // A job's thread that ended without a word (it couldn't even say it broke) frees Canva
+        // Sync all the same.
+        if self.phase.busy() && self.thread.as_ref().is_some_and(std::thread::JoinHandle::is_finished) {
+            let _ = self.tx.send(Event::Broke);
+            return Some(Instant::now());
+        }
         match self.phase {
             Phase::Idle => None,
             // The elapsed time is shown by the second.
             _ => Some(Instant::now() + Duration::from_millis(500)),
+        }
+    }
+
+    /// A sign-in in doubt that has just worked is trusted again.
+    fn signed_in_again(&mut self) {
+        if matches!(self.status, Status::Doubtful(_)) {
+            self.status = Status::Connected;
+        }
+    }
+
+    /// A video it made has been deleted: it is no longer one of its own.
+    pub fn forget_made(&mut self, name: &str) {
+        let before = self.settings.made.len();
+        self.settings.made.retain(|made| made != name);
+        if self.settings.made.len() != before {
+            let _ = self.settings.save(&self.places.settings);
         }
     }
 
@@ -1715,22 +2012,30 @@ impl Client {
     }
 
     fn failed(&mut self, failure: Failure) {
-        if let Failure::SignInGone(why) = &failure {
-            self.status = Status::Refused(why.clone());
+        match &failure {
+            Failure::SignInGone(why) => self.status = Status::Refused(why.clone()),
+            Failure::Doubtful(why) => self.status = Status::Doubtful(why.clone()),
+            Failure::Cancelled | Failure::Other(_) => {}
         }
         if failure != Failure::Cancelled {
             self.say(failure.words(), false);
         }
     }
 
-    /// Stops what is under way and waits for its thread, for quitting: a sign-in's refresh in
-    /// flight is waited out (its new token must be kept), anything else stops at once. At most
-    /// a little over the longest request.
+    /// Stops what is under way and waits for its thread, for quitting: a refresh of the sign-in
+    /// in flight is waited out (its new token must be kept; at most as long as a token request
+    /// may take), anything else is given a few seconds to stop. A sign-in held here that
+    /// couldn't be kept before is kept now.
     pub fn shut_down(&mut self) {
         self.stop();
         if let Some(thread) = self.thread.take() {
-            let until = Instant::now() + Duration::from_secs(35);
-            while !thread.is_finished() && Instant::now() < until {
+            let started = Instant::now();
+            while !thread.is_finished() {
+                let refreshing = REFRESHING.load(Ordering::SeqCst);
+                let waited = started.elapsed();
+                if waited > TOKEN_WAIT + Duration::from_secs(5) || (!refreshing && waited > Duration::from_secs(5)) {
+                    break;
+                }
                 std::thread::sleep(Duration::from_millis(20));
             }
             if thread.is_finished() {
@@ -1738,11 +2043,17 @@ impl Client {
             }
         }
         while let Ok(event) = self.rx.try_recv() {
-            if let Event::Synced(Some(secrets), true, _) | Event::Pages(Some(secrets), true, _) = event {
-                let _ = self.places.store.save(&secrets);
+            if let Event::Synced(secrets, unsaved, _) | Event::Pages(secrets, unsaved, _) = event {
+                self.take_secrets(secrets, unsaved);
             }
         }
-        let _ = std::fs::remove_file(self.places.staging.join("download.mp4.part"));
+        if self.unsaved
+            && let Some(secrets) = &self.secrets
+            && take_lock(&self.places.lock).and_then(|_lock| self.places.store.save(secrets)).is_ok()
+        {
+            self.unsaved = false;
+        }
+        clear_staging(&self.places.staging);
     }
 
     /// One line for the window's top bar, while it says something: what a sync is doing, a
@@ -1764,18 +2075,25 @@ impl Client {
 /// address is its own key). Small, so the list of pages costs little.
 fn thumbnail(places: &Places, page: &Page) -> Option<Arc<sp_video::Frame>> {
     let url = page.thumbnail.as_deref()?;
-    if !(url.starts_with("https://") || places.on_this_computer()) {
+    if !(url.starts_with("https://") || places.stand_in) {
         return None;
     }
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .max_redirects(3)
-        .https_only(!places.on_this_computer())
+        .https_only(!places.stand_in)
         .timeout_global(Some(Duration::from_secs(15)))
         .build()
         .into();
     let mut response = agent.get(url).call().ok()?;
     let bytes = response.body_mut().with_config().limit(8 * 1024 * 1024).read_to_vec().ok()?;
-    let picture = image::load_from_memory(&bytes).ok()?;
+    // A picture claiming to be huge isn't decoded: a page's picture is a few hundred pixels.
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(4096);
+    limits.max_image_height = Some(4096);
+    limits.max_alloc = Some(64 * 1024 * 1024);
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
+    reader.limits(limits);
+    let picture = reader.decode().ok()?;
     let picture = if picture.width() > 320 || picture.height() > 180 { picture.thumbnail(320, 180) } else { picture };
     let picture = picture.to_rgba8();
     let (width, height) = picture.dimensions();
@@ -1987,35 +2305,76 @@ impl crate::App {
         self.check_folders(true);
     }
 
-    /// Deletes the Canva videos a new one replaced, once nothing plays them (a video playing
-    /// takes the new one over at the end of its pass first).
+    /// Deletes the Canva videos a new one replaced (only videos Canva Sync made), once nothing
+    /// plays them: every player (the media layer, the Announcements layer, videos in boxes on the
+    /// slide and on the stage screens, and a file lined up to follow in any of them). One still
+    /// named by something that can play it later (a media bin item, a media playlist, a slide,
+    /// a theme, a prop) is the church's now and is kept.
     pub(crate) fn remove_replaced_canva_videos(&mut self) {
         if self.canva.old_files.is_empty() {
             return;
         }
         let mut playing: Vec<PathBuf> = Vec::new();
-        playing.extend(self.video.as_ref().map(|(_, player)| player.path().to_owned()));
-        playing
-            .extend(self.announcing.as_ref().and_then(|on| on.video.as_ref()).map(|player| player.path().to_owned()));
-        playing.extend(self.slide_videos.iter().map(|(_, player)| player.path().to_owned()));
+        let players = self
+            .video
+            .iter()
+            .map(|(_, player)| player)
+            .chain(self.announcing.as_ref().and_then(|on| on.video.as_ref()))
+            .chain(self.slide_videos.iter().map(|(_, player)| player));
+        for player in players {
+            playing.push(player.path().to_owned());
+            playing.extend(player.next_file().map(Path::to_path_buf));
+        }
         let old = std::mem::take(&mut self.canva.old_files);
         for path in old {
             if playing.contains(&path) {
                 self.canva.old_files.push(path);
                 continue;
             }
+            let name = crate::file_name(&path);
+            if let Some(user) = self.canva_video_named(&path) {
+                crate::applog::event("canva", &format!("kept the old video {name}: {user} still names it"));
+                self.canva.forget_made(&name);
+                continue;
+            }
             match std::fs::remove_file(&path) {
-                Ok(()) => crate::applog::event("canva", &format!("removed the old video {}", crate::file_name(&path))),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Ok(()) => {
+                    crate::applog::event("canva", &format!("removed the old video {name}"));
+                    self.canva.forget_made(&name);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => self.canva.forget_made(&name),
                 Err(e) => crate::applog::problem(
                     "canva",
-                    &format!(
-                        "the old video {} couldn't be removed ({e}); the next sync tries again",
-                        crate::file_name(&path)
-                    ),
+                    &format!("the old video {name} couldn't be removed ({e}); it is tried again at the next start"),
                 ),
             }
         }
+    }
+
+    /// What still names a file and could play it later, in words, if anything does: a media bin
+    /// item, a media playlist, a picture or video box on a slide, a theme's layout or a prop.
+    fn canva_video_named(&self, path: &Path) -> Option<&'static str> {
+        let names = |file: &str| crate::images::resolve(file).is_some_and(|resolved| resolved == path);
+        let in_objects = |objects: &[sp_model::Object]| {
+            objects.iter().any(|object| matches!(&object.kind, sp_model::ObjectKind::Image { file, .. } if names(file)))
+        };
+        if self.show.media().iter().any(|item| item.path == path) {
+            return Some("a media bin item");
+        }
+        if self.show.presentations().iter().any(|song| song.slides().any(|(_, slide)| in_objects(&slide.objects))) {
+            return Some("a slide");
+        }
+        if self.themes.iter().any(|theme| theme.templates.iter().any(|template| in_objects(&template.objects))) {
+            return Some("a theme");
+        }
+        let state = &self.running.as_ref()?.home_state;
+        if state.media_playlists.iter().any(|playlist| playlist.has(path)) {
+            return Some("a media playlist");
+        }
+        if state.props.iter().any(|prop| in_objects(&prop.slide.objects)) {
+            return Some("a prop");
+        }
+        None
     }
 }
 

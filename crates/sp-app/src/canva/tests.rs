@@ -35,6 +35,8 @@ struct Canva {
     store: Option<PathBuf>,
     kept_before_next_call: Vec<bool>,
     seen: Vec<String>,
+    /// A refresh answered 200 with something that isn't tokens.
+    token_garbage: bool,
 }
 
 struct Fake {
@@ -151,6 +153,9 @@ fn answer(mut stream: TcpStream, port: u16, shared: &Mutex<Canva>) {
                         json(&mut stream, 400, serde_json::json!({"code": "invalid_grant", "message": "SENTINEL"}));
                     }
                 }
+                Some("refresh_token") if canva.token_garbage => {
+                    respond(&mut stream, 200, b"<html>SENTINEL</html>", "text/html");
+                }
                 Some("refresh_token")
                     if form_value(&body, "refresh_token").as_deref() == Some(canva.refresh.as_str()) =>
                 {
@@ -231,7 +236,8 @@ fn places(dir: &Path, port: u16) -> Places {
             (OldKind::Plugin, jobs.join("Plugins")),
         ],
         staging: dir.join("staging"),
-        lock: dir.join("staging").join("sign-in.lock"),
+        lock: dir.join(".canva-sync.lock"),
+        stand_in: true,
         settings: dir.join("canva-sync.json"),
         folder: dir.join("Media").join(FOLDER),
         poll_every: Duration::from_millis(10),
@@ -258,6 +264,15 @@ fn signed_in(refresh: &str) -> Secrets {
 
 fn page_list(numbers: &[(u32, &str)]) -> Vec<(u32, Option<String>)> {
     numbers.iter().map(|(n, id)| (*n, Some((*id).to_owned()))).collect()
+}
+
+/// True when no download is left in the staging folder.
+fn nothing_staged(places: &Places) -> bool {
+    std::fs::read_dir(&places.staging)
+        .map(|entries| {
+            entries.filter_map(Result::ok).all(|e| !e.file_name().to_string_lossy().starts_with(DOWNLOADING))
+        })
+        .unwrap_or(true)
 }
 
 fn no_sentinel(words: &str) {
@@ -365,30 +380,58 @@ fn signing_in_takes_one_answer_on_this_computer_with_the_right_state_and_keeps_t
 }
 
 #[test]
-fn an_answer_with_another_state_ends_the_sign_in_and_keeps_nothing() {
+fn an_answer_with_another_state_is_passed_over_and_the_right_one_still_signs_in() {
     let canva = fake(Canva::default());
     let dir = folder("wrong-state");
     let places = places(&dir, canva.port);
-    let browser = |url: &str| -> Result<(), String> {
-        let redirect = query_value(url.split_once('?').unwrap().1, "redirect_uri").unwrap();
+    let shared = canva.canva.clone();
+    let answers: Arc<Mutex<Vec<String>>> = Arc::default();
+    let said = answers.clone();
+    let browser = move |url: &str| -> Result<(), String> {
+        let query = url.split_once('?').unwrap().1;
+        let (redirect, state) = (query_value(query, "redirect_uri").unwrap(), query_value(query, "state").unwrap());
+        {
+            let mut canva = shared.lock().unwrap();
+            canva.challenge = query_value(query, "code_challenge");
+            canva.code = Some("CODE-SENTINEL".to_owned());
+        }
         std::thread::spawn(move || {
             let port = redirect.trim_start_matches("http://127.0.0.1:").split('/').next().unwrap().to_owned();
-            let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
-            write!(stream, "GET {REDIRECT_PATH}?code=CODE-SENTINEL&state=someone-else HTTP/1.1\r\n\r\n").unwrap();
-            let _ = stream.read_to_string(&mut String::new());
+            let get = |pieces: &[String]| {
+                let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+                for piece in pieces {
+                    stream.write_all(piece.as_bytes()).unwrap();
+                    std::thread::sleep(Duration::from_millis(30));
+                }
+                let mut reply = String::new();
+                let _ = stream.read_to_string(&mut reply);
+                reply.lines().next().unwrap_or("").to_owned()
+            };
+            let mut said = said.lock().unwrap();
+            // Someone else's answer, and one with no state: told so, and the sign-in goes on.
+            said.push(get(&[format!("GET {REDIRECT_PATH}?code=CODE-SENTINEL&state=someone-else HTTP/1.1\r\n\r\n")]));
+            said.push(get(&[format!("GET {REDIRECT_PATH}?code=CODE-SENTINEL HTTP/1.1\r\n\r\n")]));
+            // The right one, its first line in two pieces.
+            let first = format!("GET {REDIRECT_PATH}?code=CODE-SENTI");
+            said.push(get(&[first, format!("NEL&state={state} HTTP/1.1\r\n\r\n")]));
         });
         Ok(())
     };
-    let why = sign_in(&places, CLIENT_ID, CLIENT_SECRET, browser, &AtomicBool::new(false)).unwrap_err();
-    assert!(why.contains("didn't belong to this sign-in"), "{why}");
-    no_sentinel(&why);
-    assert_eq!(places.store.load().unwrap(), None);
+    let secrets = sign_in(&places, CLIENT_ID, CLIENT_SECRET, browser, &AtomicBool::new(false)).expect("signed in");
+    std::thread::sleep(Duration::from_millis(200));
+    let answers = answers.lock().unwrap().clone();
+    assert!(answers[0].contains("400") && answers[1].contains("400"), "{answers:?}");
+    assert!(answers[2].contains("200"), "{answers:?}");
+    assert_eq!(places.store.load().unwrap(), Some(secrets));
     // A sign-in stopped while it waits ends at once.
     let stopped = AtomicBool::new(true);
     let why = sign_in(&places, CLIENT_ID, CLIENT_SECRET, |_| Ok(()), &stopped).unwrap_err();
     assert!(why.contains("stopped"), "{why}");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// The name of the video the app made before, in these tests.
+const OLD_VIDEO: &str = "Sunday 6.00 AM - Announcements 11-15-26.mp4";
 
 /// A sync's job against the stand-in, with the sign-in kept as given.
 fn job(places: &Places, kept: Option<Secrets>) -> SyncJob {
@@ -401,6 +444,7 @@ fn job(places: &Places, kept: Option<Secrets>) -> SyncJob {
         unsaved: false,
         design: DESIGN.to_owned(),
         divider: "divider".to_owned(),
+        made: vec![OLD_VIDEO.to_owned(), "../outside.mp4".to_owned()],
         cancel: Arc::new(AtomicBool::new(false)),
         progress: channel().0,
         wake: None,
@@ -425,8 +469,14 @@ fn a_sync_keeps_the_rotated_token_before_anything_else_and_puts_the_video_in_pla
     let canva = fake(Canva { store: Some(dir.join("sign-in.json")), ..usual() });
     let places = places(&dir, canva.port);
     std::fs::create_dir_all(&places.folder).unwrap();
-    let old = places.folder.join("Sunday 6.00 AM - Announcements 11-15-26.mp4");
+    let old = places.folder.join(OLD_VIDEO);
     std::fs::write(&old, mp4()).unwrap();
+    // A video the church put there itself, and one named as the app names its own: neither is
+    // the app's to delete.
+    let theirs = places.folder.join("Welcome loop.mp4");
+    std::fs::write(&theirs, mp4()).unwrap();
+    std::fs::write(places.folder.join("Friday 6.00 AM - Announcements 11-13-26.mp4"), mp4()).unwrap();
+    std::fs::write(dir.join("Media").join("outside.mp4"), mp4()).unwrap();
     let (secrets, unsaved, outcome) = run_sync(job(&places, Some(signed_in("REFRESH-SENTINEL-0"))));
     let synced = outcome.expect("synced");
     let seen = canva.canva.lock().unwrap();
@@ -442,9 +492,9 @@ fn a_sync_keeps_the_rotated_token_before_anything_else_and_puts_the_video_in_pla
     let name = crate::file_name(&synced.path);
     assert!(name.ends_with(".mp4") && name.contains(" - Announcements "), "{name}");
     assert_eq!(std::fs::read(&synced.path).unwrap(), mp4());
-    assert_eq!(synced.others, vec![old.clone()], "the old one, to go once nothing plays it");
+    assert_eq!(synced.others, vec![old.clone()], "only the one the app made, to go once nothing plays it");
     assert!(old.exists(), "the old one stays until then");
-    assert!(!places.staging.join("download.mp4.part").exists(), "nothing left half-downloaded");
+    assert!(nothing_staged(&places), "nothing left half-downloaded");
     drop(seen);
     // A second sync uses the access token kept, without refreshing.
     let (_, _, again) = run_sync(job(&places, Some(kept)));
@@ -477,6 +527,7 @@ fn every_failure_keeps_the_video_there_as_it_was_and_names_no_secret() {
             "no longer takes",
         ),
         ("export-too-long", Box::new(|c: &mut Canva| c.polls_before_done = 10_000), "didn't finish in time"),
+        ("answer-unreadable", Box::new(|c: &mut Canva| c.token_garbage = true), "may have used up the sign-in"),
     ];
     for (name, change, said) in cases {
         let dir = folder(name);
@@ -486,7 +537,7 @@ fn every_failure_keeps_the_video_there_as_it_was_and_names_no_secret() {
         let mut places = places(&dir, canva.port);
         places.export_for = Duration::from_millis(300);
         std::fs::create_dir_all(&places.folder).unwrap();
-        let old = places.folder.join("Sunday 6.00 AM - Announcements 11-15-26.mp4");
+        let old = places.folder.join(OLD_VIDEO);
         std::fs::write(&old, b"the video on screen").unwrap();
         let (_, _, outcome) = run_sync(job(&places, Some(signed_in("REFRESH-SENTINEL-0"))));
         let failure = outcome.expect_err(name);
@@ -496,9 +547,12 @@ fn every_failure_keeps_the_video_there_as_it_was_and_names_no_secret() {
         let left: Vec<PathBuf> = std::fs::read_dir(&places.folder).unwrap().map(|e| e.unwrap().path()).collect();
         assert_eq!(left, vec![old.clone()], "{name}: the folder holds the old video alone");
         assert_eq!(std::fs::read(&old).unwrap(), b"the video on screen", "{name}: untouched");
-        assert!(!places.staging.join("download.mp4.part").exists(), "{name}: nothing half-downloaded left");
+        assert!(nothing_staged(&places), "{name}: nothing half-downloaded left");
         if name == "sign-in-gone" {
             assert!(matches!(failure, Failure::SignInGone(_)), "a refused sign-in stops the asking");
+        }
+        if name == "answer-unreadable" {
+            assert!(matches!(failure, Failure::Doubtful(_)), "a refresh answered but unreadable is in doubt");
         }
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -571,16 +625,22 @@ fn the_old_scripts_sign_in_is_brought_in_and_its_token_file_taken_away() {
     let plugins = dir.join("jobs").join("Plugins");
     std::fs::create_dir_all(&daemons).unwrap();
     std::fs::create_dir_all(&plugins).unwrap();
-    std::fs::write(daemons.join("org.example.canva-sync.plist"), "<string>/scripts/canva_sync.py</string>").unwrap();
+    std::fs::write(
+        daemons.join("org.example.canva-sync.plist"),
+        "<dict>\n<key>Label</key>\n  <string>org.example.canva-sync</string>\n<string>/scripts/canva_sync.py</string>",
+    )
+    .unwrap();
     std::fs::write(daemons.join("org.example.other.plist"), "<string>/scripts/other.sh</string>").unwrap();
     std::fs::write(plugins.join("sync.5s.py"), "STATUS = 'canva-sync/status.json'").unwrap();
     let jobs = old_jobs(&places);
     assert_eq!(jobs.len(), 2, "{jobs:?}");
     let steps = switch_off_steps(&places, &jobs);
-    assert!(steps.contains(&"sudo launchctl bootout system/org.example.canva-sync".to_owned()), "{steps:?}");
-    assert!(steps.iter().any(|step| step.starts_with("rm ") && step.ends_with("sync.5s.py")), "{steps:?}");
+    assert!(steps.contains(&"sudo launchctl bootout 'system/org.example.canva-sync'".to_owned()), "{steps:?}");
+    assert!(steps.iter().any(|step| step.starts_with("rm '") && step.ends_with("sync.5s.py'")), "{steps:?}");
     assert!(steps.last().unwrap().contains("old-script"), "{steps:?}");
-    let secrets = import_old(&places).expect("brought in");
+    let imported = import_old(&places).expect("brought in");
+    assert!(!imported.token_file_left && imported.notes.is_empty());
+    let secrets = imported.secrets;
     assert_eq!((secrets.client_id.as_str(), secrets.refresh_token.as_str()), (CLIENT_ID, "REFRESH-SENTINEL-old"));
     assert_eq!(secrets.access_token, None, "its access token isn't trusted: it is refreshed when needed");
     assert_eq!(places.store.load().unwrap(), Some(secrets), "kept, and read back");
@@ -645,5 +705,172 @@ fn the_connection_ends_a_sync_it_cant_start_and_wont_forget_a_sign_in_being_kept
     client.disconnect().expect("forgotten once stopped");
     assert_eq!(places.store.load().unwrap(), None, "and it stays forgotten");
     assert_eq!(client.status, Status::NotConnected);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn only_plain_http_to_127_0_0_1_and_a_port_is_a_stand_in() {
+    for good in ["http://127.0.0.1:8977", "http://127.0.0.1:8977/", " http://127.0.0.1:1/api "] {
+        assert!(is_stand_in(good), "{good}");
+    }
+    for bad in [
+        "http://127.0.0.1:1@evil.com",
+        "http://127.0.0.1:80.evil.com",
+        "http://127.0.0.1:8080@x",
+        "http://127.0.0.1.evil.com:1",
+        "http://127.0.0.1:1?x@evil.com",
+        "http://127.0.0.1:",
+        "http://127.0.0.1:0",
+        "http://127.0.0.1:123456",
+        "http://127.0.0.1:99999",
+        "https://127.0.0.1:443",
+        "http://localhost:80",
+    ] {
+        assert!(!is_stand_in(bad), "{bad}");
+    }
+}
+
+/// The old script's folder with its sign-in in it.
+fn old_script(places: &Places) {
+    std::fs::create_dir_all(&places.old_script).unwrap();
+    std::fs::write(
+        places.old_script.join("creds.env"),
+        format!("CANVA_CLIENT_ID={CLIENT_ID}\nCANVA_CLIENT_SECRET={CLIENT_SECRET}\n"),
+    )
+    .unwrap();
+    std::fs::write(places.old_script.join("tokens.json"), r#"{"refresh_token": "REFRESH-SENTINEL-old"}"#).unwrap();
+}
+
+#[test]
+fn the_import_holds_the_old_scripts_lock_and_refuses_while_it_runs() {
+    let dir = folder("old-lock");
+    let places = places(&dir, 1);
+    old_script(&places);
+    // The script running holds its lock: nothing is read or kept.
+    let held = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(places.old_script.join("lock"))
+        .unwrap();
+    held.lock().unwrap();
+    let why = import_old(&places).err().expect("refused while the script runs");
+    assert!(why.contains("running right now"), "{why}");
+    assert_eq!(places.store.load().unwrap(), None);
+    drop(held);
+    // A lock that can't be opened is a refusal too.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(places.old_script.join("lock"), std::fs::Permissions::from_mode(0o000)).unwrap();
+        let why = import_old(&places).err().expect("refused");
+        assert!(why.contains("couldn't be opened"), "{why}");
+        std::fs::set_permissions(places.old_script.join("lock"), std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    // A half-saved token file is left alone, and said.
+    std::fs::write(places.old_script.join("tokens.json.tmp"), r#"{"refresh_token": "REFRESH-SENTINEL-newer"}"#)
+        .unwrap();
+    let imported = import_old(&places).expect("brought in");
+    assert_eq!(imported.secrets.refresh_token, "REFRESH-SENTINEL-old", "the half-saved file isn't read");
+    assert!(imported.notes.iter().any(|note| note.contains("tokens.json.tmp")), "{:?}", imported.notes);
+    assert!(places.old_script.join("tokens.json.tmp").exists());
+    for note in &imported.notes {
+        no_sentinel(note);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_token_file_that_cant_be_taken_away_holds_syncs_until_the_script_is_switched_off() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = folder("old-left");
+    let mut places = places(&dir, 1);
+    places.settings = dir.join("canva-sync.json");
+    old_script(&places);
+    std::fs::write(places.old_script.join("lock"), b"").unwrap();
+    // The folder can't be changed, so its token file can't be removed.
+    std::fs::set_permissions(&places.old_script, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let imported = import_old(&places);
+    std::fs::set_permissions(&places.old_script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let imported = imported.expect("brought in all the same");
+    assert!(imported.token_file_left);
+    assert!(imported.notes.iter().any(|note| note.contains("couldn't be taken away")), "{:?}", imported.notes);
+    assert!(places.old_script.join("tokens.json").exists());
+    // The connection then syncs nothing until It's Switched Off.
+    Settings { design: Some(DESIGN.to_owned()), divider: Some("divider".to_owned()), ..Settings::default() }
+        .save(&places.settings)
+        .unwrap();
+    let mut client = Client::new(places.clone(), None);
+    let _ = client.tx.send(Event::Imported(Ok(imported)));
+    while client.status == Status::Reading || client.phase.busy() || !client.settings.old_script_warning {
+        client.tick();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(client.settings.hold_syncs);
+    assert!(client.sync_now().unwrap_err().contains("couldn't be taken away"));
+    assert!(client.read_pages().is_err());
+    client.old_script_off();
+    assert!(!client.settings.hold_syncs);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_held_sign_in_is_kept_at_quitting_and_a_late_read_never_replaces_a_newer_one() {
+    let dir = folder("shut-down");
+    let places = places(&dir, 1);
+    let mut client = Client::new(places.clone(), None);
+    while client.status == Status::Reading {
+        client.tick();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // A sign-in newer than the kept one, which couldn't be kept: kept at quitting.
+    client.secrets = Some(signed_in("REFRESH-SENTINEL-newest"));
+    client.unsaved = true;
+    client.status = Status::Connected;
+    // An older read of the store coming in late changes nothing.
+    let _ = client.tx.send(Event::SecretsRead(Ok(Some(signed_in("REFRESH-SENTINEL-older")))));
+    client.tick();
+    assert_eq!(client.secrets.as_ref().map(|s| s.refresh_token.as_str()), Some("REFRESH-SENTINEL-newest"));
+    client.shut_down();
+    assert_eq!(places.store.load().unwrap().map(|s| s.refresh_token), Some("REFRESH-SENTINEL-newest".to_owned()));
+    assert!(!client.unsaved);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn small_safeguards_hold() {
+    // Lines for the Terminal quote everything, a quote too.
+    assert_eq!(quoted("/Users/o'brien/Library/x y.plist"), r#"'/Users/o'\''brien/Library/x y.plist'"#);
+    assert_eq!(
+        plist_label(b"<key>Label</key>\n\t<string>org.example.job</string>"),
+        Some("org.example.job".to_owned())
+    );
+    assert_eq!(plist_label(b"<key>Label</key><string>bad; rm -rf /</string>"), None);
+    assert_eq!(plist_label(b"<string>no label</string>"), None);
+    // A page's signed picture address is never printed.
+    let page = Page { number: 3, id: Some("p3".to_owned()), thumbnail: Some("https://x/?sig=SENTINEL".to_owned()) };
+    no_sentinel(&format!("{page:?}"));
+    // A design id kept is checked as a typed one is.
+    let dir = folder("safeguards");
+    let file = dir.join("canva-sync.json");
+    std::fs::write(&file, r#"{"design": "DA../../x?y", "made": ["ok.mp4", "../up.mp4", ".hidden.mp4", "a/b.mp4"]}"#)
+        .unwrap();
+    let settings = Settings::load(&file);
+    assert_eq!(settings.design, None);
+    assert_eq!(settings.made, ["ok.mp4"]);
+    // The sign-in file is new and private, whatever was left at its name.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let target = dir.join("elsewhere");
+        std::fs::write(&target, b"someone else's").unwrap();
+        let part = dir.join("sign-in.json.part");
+        std::os::unix::fs::symlink(&target, &part).unwrap();
+        write_private(&part, b"{}").unwrap();
+        let meta = std::fs::symlink_metadata(&part).unwrap();
+        assert!(meta.is_file() && meta.permissions().mode() & 0o777 == 0o600);
+        assert_eq!(std::fs::read(&target).unwrap(), b"someone else's", "not written through the link");
+    }
     let _ = std::fs::remove_dir_all(dir);
 }

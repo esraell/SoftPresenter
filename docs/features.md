@@ -886,16 +886,22 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   and secret are typed on its page, and the sign-in happens once in the computer's browser (OAuth
   with PKCE, its answer taken on 127.0.0.1 only, at a fixed redirect URL the page shows to add
   to the integration). Or, on a computer where the old Canva sync script ran, **Use the Sign-in
-  from the Old Sync Script** takes over its sign-in: read from its folder by the app itself,
-  kept in the Keychain, and its token file taken away so it can't refresh it; the page then says
-  to switch the old script off, with the Terminal lines for the background jobs and menu bar
-  plugin it finds that run it (it never removes them itself), until It's Switched Off is
-  clicked. The secret and tokens are one item in the Mac's Keychain, sent only to Canva, never
+  from the Old Sync Script** takes over its sign-in: read from its folder by the app itself
+  while holding the lock the old script takes when it runs (so it can't refresh meanwhile;
+  while it runs, the import waits to be tried again), kept in the Keychain, and its token file
+  taken away so it can't refresh it; the page then says to switch the old script off, with the
+  Terminal lines (every path quoted, each job's label read from its file) for the background
+  jobs and menu bar plugin it finds that run it (it never removes them itself), until It's
+  Switched Off is clicked. If the token file can't be taken away, the page says so and nothing
+  is synced until It's Switched Off. The secret and tokens are one item in the Mac's Keychain, sent only to Canva, never
   in a file, the log, a notice or a command's reply. Canva's refresh tokens work once: each new
-  one is stored and read back before anything else is asked of Canva, under a lock so two copies
-  of the app never refresh the same one, and the access token is kept with its expiry and
-  refreshed only when due; a sign-in Canva no longer takes stops the asking until the operator
-  signs in again. Disconnect forgets it on this computer.
+  one is stored and read back before anything else is asked of Canva, under a lock in the
+  library folder so two copies of the app never refresh the same one (nothing is refreshed
+  without it), and the access token is kept with its expiry and refreshed only when due; a
+  sign-in Canva no longer takes stops the asking until the operator signs in again, and a
+  refresh Canva answered in a way that can't be read is said to be in doubt ("sign in again if
+  the next sync fails"). Quitting waits for a refresh under way, and keeps a sign-in that
+  couldn't be kept before. Disconnect forgets it on this computer.
   The presentation is chosen by pasting its link; its pages show with their pictures, and a click
   makes one the **divider page**: only the pages above it go in the video (Canva can't tell an
   app which slides are hidden, so volunteers drag old slides below it). If the divider is gone
@@ -908,7 +914,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   made to follow that folder when the divider is chosen, brings it into the media bin. The new
   video takes the old one's place in the bin (the same item, so playlists, macros and the
   screens keep finding it), a video playing takes it over at the end of its pass, and the old
-  file is deleted once nothing plays it. Anything that goes wrong leaves the video as it was and
+  file is deleted once no player has it open (or lined up). Only videos Canva Sync made are ever
+  deleted (it keeps their names): one the church put in the folder stays, and so does one a
+  media bin item, a media playlist, a slide, a theme or a prop still names. Anything that goes wrong leaves the video as it was and
   says why on the page, in the top bar (Canva: failed, with why when pointed at) and in the log.
   One sync runs at a time, a sync goes on while the window is used, and quitting stops it
   cleanly (a refresh of the sign-in under way is waited out, so its new token is kept). Nothing

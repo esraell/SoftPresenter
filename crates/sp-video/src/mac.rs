@@ -489,6 +489,15 @@ fn draw_page(page: &CGPDFPage, max_width: u32, max_height: u32, space: &CGColorS
     Some(Frame { width: width as u32, height: height as u32, rgba })
 }
 
+/// The home folder of the account the app runs as, from the system's own records of the
+/// account (not the `HOME` variable, which whatever started the app may have set).
+pub fn home_folder() -> Option<std::path::PathBuf> {
+    let user = objc2_foundation::NSUserName();
+    let home = objc2_foundation::NSHomeDirectoryForUser(Some(&user))?.to_string();
+    let home = std::path::PathBuf::from(home);
+    (home.is_absolute() && home.is_dir()).then_some(home)
+}
+
 /// The names macOS gives the connected displays ("HP 27f", "3DTV"), as System Settings shows
 /// them, each with its display id. Only the main thread may ask; elsewhere there are none.
 pub fn display_names() -> Vec<(u32, String)> {

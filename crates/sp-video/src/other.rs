@@ -18,6 +18,11 @@ pub fn pdf_pages(
     Err("PDF files can be turned into slides on macOS only, for now. Export the slides as pictures instead.".to_owned())
 }
 
+/// The account's home folder from the system's own records: on macOS only, for now.
+pub fn home_folder() -> Option<std::path::PathBuf> {
+    None
+}
+
 /// Display names come from the window system on other systems.
 pub fn display_names() -> Vec<(u32, String)> {
     Vec::new()

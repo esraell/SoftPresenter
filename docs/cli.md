@@ -951,7 +951,7 @@ developer portal with the scope `design:content:read` and the redirect URL
 |---|---|
 | `canva`, `canva status` | Whether Canva Sync is signed in (the integration's first characters), the presentation and its divider page, a sync under way, the last video made and the last problem; after the old script's sign-in was taken over, how to switch the old script off |
 | `canva sync` | Fetches a fresh video now, in the background (a job: `sp job N`, or add `--wait`, which takes minutes while Canva renders). Only one sync runs at a time; anything that goes wrong leaves the video in the media bin as it was |
-| `canva connect` | Signs in with the integration's client ID and secret, read on one line from the standard input (never as arguments): Canva's sign-in page opens in the browser, and `canva` says how it went |
+| `canva connect` | Signs in with the integration's client ID and secret, read from the standard input (never as arguments): typed at a terminal, the ID and then the secret, which isn't shown; piped, both on one line. Canva's sign-in page opens in the browser, and `canva` says how it went |
 | `canva import` | Takes over the old sync script's sign-in, when it is on this computer: kept in the Keychain, and its token file taken away so the old script can't refresh it |
 | `canva presentation LINK` | The presentation, by its link or id; its pages are read |
 | `canva pages`, `canva divider N` | The pages read, and which one is the divider (the pages above it go in the video) |
@@ -974,9 +974,10 @@ The client secret and the tokens are kept in the Mac's Keychain, never in a file
 reply. Canva's refresh tokens work once, so each new one is stored before anything else is
 asked, and two copies of the app never refresh at once. A test copy keeps its sign-in in its own
 folder, reads the old script's from `old-canva-sync` there, and never touches the owner's;
-`SOFTPRESENTER_CANVA_API` points it at a stand-in for Canva on this computer (plain http to
-127.0.0.1 only), and with it `SOFTPRESENTER_CANVA_BROWSER=fetch` has the app follow the
-stand-in's sign-in page itself instead of opening the browser.
+`SOFTPRESENTER_CANVA_API` points a test copy (only one: the owner's app ignores it) at a
+stand-in for Canva on this computer (plain http to 127.0.0.1 and a port, nothing else), and with
+it `SOFTPRESENTER_CANVA_BROWSER=fetch` has the app follow the stand-in's sign-in page itself
+instead of opening the browser.
 
 ## Undo, jobs and the menu bar
 
