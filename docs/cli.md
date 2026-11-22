@@ -182,8 +182,8 @@ mistake impossible:
     No song called “Psalms 117:1-2”.
     $ sp slides item 4 in friday
     Psalms 117:1-2
-      1. [Psalms 117:1] O praise the LORD, all ye nations: praise him, all ye people. / Praise the LORD, all you nations! Extol him, all you peoples! / Psalms 117:1 / Psalms 117:1
-      2. [Psalms 117:2] For his merciful kindness is great toward us: and the truth of the LORD endureth for ever. Praise ye the LORD. / For his loving kindness is great toward us. The LORD’s faithfulness endures forever. Praise the LORD! / Psalms 117:2 / Psalms 117:2
+      1. [Psalms 117:1] O praise the LORD, all ye nations: praise him, all ye people. / Praise the LORD, all you nations! Extol him, all you peoples! / Psalm 117:1 / Psalm 117:1
+      2. [Psalms 117:2] For his merciful kindness is great toward us: and the truth of the LORD endureth for ever. Praise ye the LORD. / For his loving kindness is great toward us. The LORD’s faithfulness endures forever. Praise the LORD! / Psalm 117:2 / Psalm 117:2
     $ sp slides item 5 in friday
     media.png is a picture, not slides (sp playlist go 5 1 in Friday shows it).
     $ sp slides item 6 in friday
@@ -470,9 +470,9 @@ names the passage as it was typed, while the screens and the playlist follow the
     Service
       1. Бытие 1:1-2
     $ sp bible "Psalm 23"                # the Synodal 23rd psalm (the English 24th)
-    Looked up Psalms 23:1-10; it is on the Bible page.
+    Looked up Psalm 23:1-10; it is on the Bible page.
     $ sp bible search valley of the shadow
-      1. Psalms 22:4: Yea, though I walk through the valley of the shadow of death, …
+      1. Psalm 22:4: Yea, though I walk through the valley of the shadow of death, …
 
     $ sp bible language ru
     The Bible page reads in Русский.
@@ -601,10 +601,10 @@ it in an editor that has it open, and shows at once on a slide that is on screen
      2. Translation: "For his loving kindness is great toward us. The LORD’s faithfulness endures forever. Praise the LORD!"
         at x=65 y=540 w=1790 h=378 (the theme's)
         font Linux Biolinum, size 96, weight 400, italic off, colour #ffffff, align Left, scaling TextUpOrDown
-     3. Reference: "Psalms 117:2"
+     3. Reference: "Psalm 117:2"
         at x=65 y=429 w=1790 h=110 (the theme's)
         font Linux Biolinum, size 44, weight 700, italic off, colour #ffffff, align Right, scaling TextUpOrDown
-     4. Translation reference: "Psalms 117:2"
+     4. Translation reference: "Psalm 117:2"
         at x=65 y=951 w=1790 h=110 (the theme's)
         font Linux Biolinum, size 44, weight 700, italic off, colour #ffffff, align Right, scaling TextUpOrDown
 

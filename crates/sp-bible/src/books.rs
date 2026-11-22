@@ -285,6 +285,26 @@ pub fn book_name(book: usize, language: &str) -> &'static str {
     }
 }
 
+/// A book's name as people read it in a reference to part of it, in a language (`en`, `ru`,
+/// `uk`; English for any other): the Psalms named as one psalm when the reference is all in one
+/// ("Psalm 23", "Псалом 22"), and as psalms when it runs across several ("Psalms 23–24"; in
+/// Ukrainian "Псалми"; Russian keeps the book's name, "Псалтирь"); any other book as
+/// [`book_name`] has it. Each of these names reads back as the same book. For what people read
+/// (a title, the reference on a slide); what is kept and read back again is named by
+/// `label_in`, with the books' own names.
+pub fn reading_book_name(book: usize, language: &str, one_chapter: bool) -> &'static str {
+    if BOOKS[book.min(BOOKS.len() - 1)].code != "PSA" {
+        return book_name(book, language);
+    }
+    match (language, one_chapter) {
+        ("ru", true) => "Псалом",
+        ("uk", false) => "Псалми",
+        ("ru" | "uk", _) => book_name(book, language),
+        (_, true) => "Psalm",
+        _ => book_name(book, language),
+    }
+}
+
 /// A book's place in [`BOOKS`] from its code in a Bible file.
 pub fn book_by_code(code: &str) -> Option<usize> {
     BOOKS.iter().position(|book| book.code == code)

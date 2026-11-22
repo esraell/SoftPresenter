@@ -10,7 +10,9 @@ mod numbering;
 
 use std::io::{Read, Write};
 
-pub use books::{BOOKS, Book, book_by_code, book_name, find_book, find_book_in, find_book_typed, suggest_books};
+pub use books::{
+    BOOKS, Book, book_by_code, book_name, find_book, find_book_in, find_book_typed, reading_book_name, suggest_books,
+};
 pub use numbering::{Numbering, convert};
 
 const FIRST_LINE: &str = "softpresenter-bible 1";
@@ -337,7 +339,20 @@ impl Bible {
 /// Bible of that language names it: "John 3:16-18", "От Иоанна 3:16-18". The numbers are used
 /// as they are given; nothing is converted.
 pub fn label_in(language: &str, first: VerseRef, last: VerseRef) -> String {
-    let book = book_name(first.book, language);
+    label_with(book_name(first.book, language), first, last)
+}
+
+/// How a run of verses reads to people in a language: as [`label_in`] names it, with the book
+/// named as [`reading_book_name`] has it ("Psalm 23:1-6", "Псалом 22:1", "Psalms 23:1-24:6").
+/// It reads back as the same verses. For what people read (a title, the reference field, the
+/// reference on a slide); what is kept is named by [`label_in`].
+pub fn reading_label(language: &str, first: VerseRef, last: VerseRef) -> String {
+    let one_chapter = (first.book, first.chapter) == (last.book, last.chapter);
+    label_with(reading_book_name(first.book, language, one_chapter), first, last)
+}
+
+/// A run of verses named with the book's name given.
+fn label_with(book: &str, first: VerseRef, last: VerseRef) -> String {
     if first == last {
         format!("{book} {}:{}", first.chapter, first.verse)
     } else if first.chapter == last.chapter {
@@ -559,6 +574,34 @@ mod tests {
         assert_eq!(label_in("uk", at(3, 16), at(4, 2)), "Від Івана 3:16-4:2");
         assert_eq!(label_in("de", at(3, 16), at(3, 16)), "John 3:16");
         assert_eq!(small().label(at(3, 16), at(3, 17)), label_in("en", at(3, 16), at(3, 17)));
+    }
+
+    #[test]
+    fn a_psalm_reads_as_one_and_psalms_as_several_and_each_reads_back_as_the_same_verses() {
+        let psalms = book_by_code("PSA").unwrap();
+        let at = |chapter, verse| VerseRef { book: psalms, chapter, verse };
+        let john = |chapter, verse| VerseRef { book: book_by_code("JOH").unwrap(), chapter, verse };
+        for (language, first, last, read) in [
+            ("en", at(23, 1), at(23, 6), "Psalm 23:1-6"),
+            ("en", at(23, 4), at(23, 4), "Psalm 23:4"),
+            ("en", at(23, 1), at(24, 10), "Psalms 23:1-24:10"),
+            ("ru", at(22, 1), at(22, 6), "Псалом 22:1-6"),
+            ("ru", at(22, 1), at(23, 6), "Псалтирь 22:1-23:6"),
+            ("uk", at(22, 1), at(22, 6), "Псалом 22:1-6"),
+            ("uk", at(22, 1), at(23, 6), "Псалми 22:1-23:6"),
+            ("en", john(3, 16), john(3, 16), "John 3:16"),
+            ("ru", john(3, 16), john(3, 18), "От Иоанна 3:16-18"),
+        ] {
+            assert_eq!(reading_label(language, first, last), read, "{language}");
+            // Read back in any of the languages, it is the same verses.
+            for reader in ["en", "ru", "uk", ""] {
+                let range = parse_reference_in(read, reader).map(|range| (range.start, range.end));
+                assert_eq!(range, Ok((first, last)), "{read} read in {reader:?}");
+            }
+        }
+        // What is kept keeps the books' own names.
+        assert_eq!(label_in("en", at(23, 1), at(23, 6)), "Psalms 23:1-6");
+        assert_eq!(label_in("ru", at(22, 1), at(22, 6)), "Псалтирь 22:1-6");
     }
 
     #[test]

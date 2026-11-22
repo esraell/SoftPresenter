@@ -7112,7 +7112,7 @@ mod tests {
         for (english, russian, ukrainian, names) in [
             ("gen 1 1", "Быт 1 1", "Бут 1 1", ["Genesis 1:1", "Бытие 1:1"]),
             ("John 3:16-18", "Ин 3:16-18", "Ів 3:16-18", ["John 3:16-18", "От Иоанна 3:16-18"]),
-            ("ps 23", "Пс 23", "Псалом 23", ["Psalms 23:1-10", "Псалтирь 23:1-10"]),
+            ("ps 23", "Пс 23", "Псалом 23", ["Psalm 23:1-10", "Псалом 23:1-10"]),
         ] {
             let mut page = bible_page();
             let (in_english, english_session, english_slides) = typed(&mut page, english);
@@ -7137,7 +7137,7 @@ mod tests {
         // psalm (the English 24th), named back in English as the operator typed it.
         let mut page = bible_page();
         let (field, _, slides) = typed(&mut page, "Psalm 23");
-        assert_eq!(field, "Psalms 23:1-10");
+        assert_eq!(field, "Psalm 23:1-10");
         let shown = page.shown.clone();
         assert_eq!(shown, "Псалтирь 23:1-10");
         // Return again on what the field says: the same passage, again and again.
@@ -7233,8 +7233,8 @@ mod tests {
         let psalm =
             page.found.iter().find(|found| found.words.contains("shadow of death")).cloned().expect("Psalm 23:4");
         // Named in English with the Synodal numbers the slides follow.
-        assert_eq!((psalm.reference.as_str(), psalm.kept.as_str()), ("Psalms 22:4", "Псалтирь 22:4"));
-        assert_eq!((psalm.chapter.as_str(), psalm.kept_chapter.as_str()), ("Psalms 22", "Псалтирь 22"));
+        assert_eq!((psalm.reference.as_str(), psalm.kept.as_str()), ("Psalm 22:4", "Псалтирь 22:4"));
+        assert_eq!((psalm.chapter.as_str(), psalm.kept_chapter.as_str()), ("Psalm 22", "Псалтирь 22"));
         page.open_found(&psalm, false, None);
         let (_, passage) = page.pending.take().expect("made");
         assert_eq!(page.shown, "Псалтирь 22:4", "the verse is the passage");
@@ -7242,12 +7242,15 @@ mod tests {
         assert_eq!(verse, 3, "among its chapter's slides");
         let english = passage.slide(verse).and_then(|(_, slide)| slide.text_for(&sp_model::Role::translation()));
         assert!(english.is_some_and(|words| words.contains("shadow of death")));
-        assert_eq!((page.lookup.as_str(), page.session_language().as_str()), ("Psalms 22:4", "en"));
+        assert_eq!((page.lookup.as_str(), page.session_language().as_str()), ("Psalm 22:4", "en"));
         // Russian words, in the Russian Bible.
         page.search = "долиною смертной тени".to_owned();
         page.find();
         assert!(!page.found.is_empty() && page.found.iter().all(|found| found.bible == "SYN"));
-        assert_eq!(page.found[0].reference, page.found[0].kept);
+        // Named as its own Bible reads it ("Псалом 22:4" for what is kept as "Псалтирь 22:4"): the
+        // same verse.
+        let read = |name: &str| sp_bible::parse_reference_in(name, "ru").ok();
+        assert_eq!(read(&page.found[0].reference), read(&page.found[0].kept));
         // No Bible in use in that alphabet: the first Bible, as before.
         page.search = "λόγος".to_owned();
         page.find();
@@ -8546,6 +8549,47 @@ mod tests {
     }
 
     #[test]
+    fn a_psalm_is_titled_psalm_and_psalms_across_several_in_each_language() {
+        // The King James Version alone: English.
+        let mut page = bible_page();
+        page.rows.truncate(1);
+        page.rows[0].bible = page.shelf.position("kjv");
+        let title = |page: &mut BiblePage, typed: &str| {
+            page.lookup = typed.to_owned();
+            page.look_up(None);
+            let words = crate::bible_page::title(page).map(|(words, _)| words).unwrap_or_default();
+            (words, page.lookup.clone(), page.shown.clone())
+        };
+        let field_reads_back = |page: &BiblePage| {
+            let lead = page.shelf.bibles[page.lead().unwrap()].language.clone();
+            let read = |name: &str| sp_bible::parse_reference_in(name, &lead).map(|range| (range.start, range.end));
+            assert_eq!(read(&page.lookup), read(&page.shown), "{} reads back as {}", page.lookup, page.shown);
+        };
+        for (typed, words, field, kept) in [
+            ("ps 23", "Psalm 23", "Psalm 23:1-6", "Psalms 23:1-6"),
+            ("ps 23:1-3", "Psalm 23:1-3", "Psalm 23:1-3", "Psalms 23:1-3"),
+            ("ps 23-24", "Psalms 23\u{2013}24", "Psalms 23:1-24:10", "Psalms 23:1-24:10"),
+            ("ps 23:6-24:1", "Psalms 23:6-24:1", "Psalms 23:6-24:1", "Psalms 23:6-24:1"),
+            ("John 3", "John 3", "John 3:1-36", "John 3:1-36"),
+        ] {
+            assert_eq!(title(&mut page, typed), (words.to_owned(), field.to_owned(), kept.to_owned()), "{typed}");
+            field_reads_back(&page);
+        }
+        // The Russian Synodal first, read in Russian: one psalm is "Псалом", several keep the
+        // book's name, "Псалтирь"; what is kept is as the Synodal names it.
+        let mut page = bible_page();
+        page.read_in = Some("ru".to_owned());
+        for (typed, words, field, kept) in [
+            ("Пс 22", "Псалом 22", "Псалом 22:1-6", "Псалтирь 22:1-6"),
+            ("Пс 22:1-3", "Псалом 22:1-3", "Псалом 22:1-3", "Псалтирь 22:1-3"),
+            ("Пс 22-23", "Псалтирь 22\u{2013}23", "Псалтирь 22:1-23:10", "Псалтирь 22:1-23:10"),
+        ] {
+            assert_eq!(title(&mut page, typed), (words.to_owned(), field.to_owned(), kept.to_owned()), "{typed}");
+            field_reads_back(&page);
+        }
+    }
+
+    #[test]
     fn a_passage_from_history_is_looked_up_as_the_page_makes_any_and_its_first_verse_picked() {
         let ctx = egui::Context::default();
         let mut show = service_with_bible_places();
@@ -9183,13 +9227,13 @@ mod tests {
         let mut auto = bible_page();
         let (_, _, auto_psalm) = typed(&mut auto, "Пс 22");
         let (field, session, psalm) = typed(&mut page, "Пс 22");
-        assert_eq!((field.as_str(), session.as_str()), ("Psalms 22:1-6", "ru"));
+        assert_eq!((field.as_str(), session.as_str()), ("Psalm 22:1-6", "ru"));
         assert_eq!(page.shown, "Псалтирь 22:1-6", "kept as the first translation names it");
         assert_eq!(psalm, auto_psalm);
         assert_eq!(crate::bible_page::page_bibles(&page), Some((kjv, Some(syn))));
         // Back to Auto: the language typed last, as before.
         page.set_read_in(None);
-        assert_eq!((page.lookup.as_str(), page.names_language().as_str()), ("Псалтирь 22:1-6", "ru"));
+        assert_eq!((page.lookup.as_str(), page.names_language().as_str()), ("Псалом 22:1-6", "ru"));
         // Only languages with a Bible in use: Ukrainian chosen with none counts as Auto.
         assert_eq!(page.languages_in_use(), ["ru", "en"]);
         page.set_read_in(Some("uk".to_owned()));
@@ -9198,7 +9242,7 @@ mod tests {
         page.set_read_in(Some("en".to_owned()));
         page.lookup = "ps 9".to_owned();
         page.set_read_in(Some("ru".to_owned()));
-        assert_eq!((page.lookup.as_str(), page.reading.as_str()), ("ps 9", "Псалтирь 22:1-6"));
+        assert_eq!((page.lookup.as_str(), page.reading.as_str()), ("ps 9", "Псалом 22:1-6"));
     }
 
     #[test]
@@ -9236,7 +9280,7 @@ mod tests {
         frame_then_app(&ctx, &mut show, &mut state, vec![], 1.1);
         let verses = state.finder.rows("valley of the shadow", &in_use, &reading, Vec::new, &ctx).expect("answered");
         assert!(!verses.is_empty() && verses.iter().all(|row| row.tag == "BIBLE \u{b7} SYN"), "{verses:?}");
-        assert!(verses.iter().any(|row| row.title == "Псалтирь 22:4"), "{verses:?}");
+        assert!(verses.iter().any(|row| row.title == "Псалом 22:4"), "{verses:?}");
     }
 
     #[test]
@@ -9261,11 +9305,11 @@ mod tests {
         frame_then_app(&ctx, &mut show, &mut state, vec![Event::Text("valley of the shadow".to_owned())], 0.1);
         let psalm = |state: &HomeState| state.bible.found.iter().find(|found| found.kept == "Псалтирь 22:4").cloned();
         let english = psalm(&state).expect("found in the King James Version");
-        assert_eq!((english.reference.as_str(), english.bible.as_str()), ("Psalms 22:4", "KJV"));
+        assert_eq!((english.reference.as_str(), english.bible.as_str()), ("Psalm 22:4", "KJV"));
         state.bible.set_read_in(Some("ru".to_owned()));
         let commands = frame_then_app(&ctx, &mut show, &mut state, vec![], 0.2);
         let russian = psalm(&state).expect("still listed");
-        assert_eq!((russian.reference.as_str(), russian.bible.as_str()), ("Псалтирь 22:4", "SYN"));
+        assert_eq!((russian.reference.as_str(), russian.bible.as_str()), ("Псалом 22:4", "SYN"));
         assert!(russian.words.contains("долиною смертной тени"), "{}", russian.words);
         assert!(!goes_on_screen(&commands) && state.bible.pending.is_none());
     }
@@ -9334,8 +9378,8 @@ mod tests {
         };
         let (english, english_session, english_slides) = found("Ps 23:1-2");
         let (russian, russian_session, russian_slides) = found("Пс 23:1-2");
-        assert_eq!((english.as_str(), english_session.as_str()), ("Psalms 23:1-2", "en"));
-        assert_eq!((russian.as_str(), russian_session.as_str()), ("Псалтирь 23:1-2", "ru"));
+        assert_eq!((english.as_str(), english_session.as_str()), ("Psalm 23:1-2", "en"));
+        assert_eq!((russian.as_str(), russian_session.as_str()), ("Псалом 23:1-2", "ru"));
         assert_eq!(english_slides, russian_slides, "the screens get the same slides");
     }
 
@@ -9366,7 +9410,7 @@ mod tests {
         assert!(english.contains("valley of the shadow of death"), "{english}");
         assert!(russian.contains("долиною смертной тени"), "{russian}");
         // Named in English, with the first translation's numbers, and the session goes on in English.
-        assert_eq!(state.bible.lookup, "Psalms 22:4");
+        assert_eq!(state.bible.lookup, "Psalm 22:4");
         assert_eq!(state.bible.language.as_deref(), Some("en"));
         assert!(commands.is_empty(), "nothing is put on the screens");
     }

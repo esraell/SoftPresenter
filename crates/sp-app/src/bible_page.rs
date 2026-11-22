@@ -992,17 +992,21 @@ fn verses_named(name: &str) -> &str {
     }
 }
 
-/// The title over the page or the slides: the passage asked for, in the operator's language (a
-/// whole chapter by its number alone, "John 3"), and the short names of the Bibles read.
+/// The title over the page or the slides: the passage asked for, in the operator's language,
+/// whole chapters by their numbers alone ("John 3", "Psalm 23", "Psalms 23–24"), and the short
+/// names of the Bibles read.
 pub fn title(page: &mut BiblePage) -> Option<(String, String)> {
     let (lead, range) = shown_range(page)?;
     let whole = range.start.verse == 1
-        && (range.start.book, range.start.chapter) == (range.end.book, range.end.chapter)
+        && range.start.book == range.end.book
         && range.end.verse >= lead.last_verse(range.end.book, range.end.chapter);
-    let words = if whole {
-        format!("{} {}", sp_bible::book_name(range.start.book, &page.names_language()), range.start.chapter)
-    } else {
-        page.reading.clone()
+    let (book, from, to) = (range.start.book, range.start.chapter, range.end.chapter);
+    let words = match (whole, from == to) {
+        (true, true) => format!("{} {from}", sp_bible::reading_book_name(book, &page.names_language(), true)),
+        (true, false) => {
+            format!("{} {from}\u{2013}{to}", sp_bible::reading_book_name(book, &page.names_language(), false))
+        }
+        (false, _) => page.reading.clone(),
     };
     let (reader, second) = page_bibles(page)?;
     let short = |at: usize| page.shelf.bibles.get(at).map_or(String::new(), |bible| bible.short.clone());

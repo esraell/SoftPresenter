@@ -76,7 +76,7 @@ pub fn search_bibles(typed: &str, bibles: &[(String, Arc<Bible>)], reading: &Rea
         let there = sp_bible::convert(*first, lead.info.numbering, reader_bible.info.numbering);
         let line = reader_bible.verse(there).unwrap_or(words);
         return vec![BibleRow {
-            title: sp_bible::label_in(&languages[reader], *first, *last),
+            title: sp_bible::reading_label(&languages[reader], *first, *last),
             tag: "BIBLE".to_owned(),
             line: line.to_owned(),
             lookup: lead.label(*first, *last),
@@ -96,7 +96,7 @@ pub fn search_bibles(typed: &str, bibles: &[(String, Arc<Bible>)], reading: &Rea
             let there = sp_bible::convert(place, bible.info.numbering, lead.info.numbering);
             let (quoted, (short, line)) = in_chosen(reading, &languages, bibles, there, at, (short, words));
             rows.push(BibleRow {
-                title: sp_bible::label_in(&languages[quoted], there, there),
+                title: sp_bible::reading_label(&languages[quoted], there, there),
                 tag: format!("BIBLE \u{b7} {}", short.to_uppercase()),
                 line: line.to_owned(),
                 lookup: lead.label(there, there),
@@ -174,8 +174,8 @@ pub fn search_page(typed: &str, bibles: &[(String, Arc<Bible>)], reading: &Readi
             let (quoted, (short, words)) = in_chosen(reading, &languages, bibles, there, at, as_found);
             let named = &languages[quoted];
             found.verses.push(crate::bible::FoundVerse {
-                reference: sp_bible::label_in(named, there, there),
-                chapter: format!("{} {}", sp_bible::book_name(there.book, named), there.chapter),
+                reference: sp_bible::reading_label(named, there, there),
+                chapter: format!("{} {}", sp_bible::reading_book_name(there.book, named, true), there.chapter),
                 words: words.to_owned(),
                 bible: short.to_owned(),
                 language: language.clone(),
@@ -427,7 +427,7 @@ mod tests {
         // "Psalm 23" is the Synodal 23rd psalm, the English 24th, and the operator is shown its
         // English words, as the slides will have them.
         let psalm = search_bibles("Psalm 23:1", &bibles, &Reading::auto("en"));
-        assert_eq!((psalm[0].title.as_str(), psalm[0].lookup.as_str()), ("Psalms 23:1", "Псалтирь 23:1"));
+        assert_eq!((psalm[0].title.as_str(), psalm[0].lookup.as_str()), ("Psalm 23:1", "Псалтирь 23:1"));
         assert!(psalm[0].line.contains("The earth is the LORD"), "{}", psalm[0].line);
     }
 
@@ -440,7 +440,7 @@ mod tests {
         assert!(search_bibles("Пс 23:1", &bibles, &Reading::auto("ru"))[0].line.contains("русского"));
         // Neither: the first in the translations; named in its language.
         let row = &search_bibles("Пс 23:1", &bibles, &Reading::auto("en"))[0];
-        assert_eq!((row.title.as_str(), row.language.as_deref()), ("Псалтирь 23:1", Some("ru")));
+        assert_eq!((row.title.as_str(), row.language.as_deref()), ("Псалом 23:1", Some("ru")));
         // Clearly Ukrainian: the Ukrainian Bible, whatever the session.
         let row = &search_bibles("Ів 3:16", &bibles, &Reading::auto("ru"))[0];
         assert_eq!((row.title.as_str(), row.line.as_str()), ("Від Івана 3:16", "Український тест"));
@@ -458,7 +458,7 @@ mod tests {
         // Named in English with the first Bible's numbers, and opened as the first Bible names
         // it: the English 23rd psalm is the Synodal 22nd.
         let psalm = rows.iter().find(|row| row.line.contains("valley of the shadow of death")).expect("Psalm 23:4");
-        assert_eq!((psalm.title.as_str(), psalm.lookup.as_str()), ("Psalms 22:4", "Псалтирь 22:4"));
+        assert_eq!((psalm.title.as_str(), psalm.lookup.as_str()), ("Psalm 22:4", "Псалтирь 22:4"));
         assert_eq!(psalm.language.as_deref(), Some("en"));
         // Russian words, in the Russian Bible.
         let russian = search_bibles("долиною смертной тени", &bibles, &Reading::auto("en"));
@@ -492,20 +492,20 @@ mod tests {
         let english = Reading { session: "ru".to_owned(), chosen: Some("en".to_owned()) };
         // A reference typed in Russian, read in English with the first Bible's numbers.
         let psalm = &search_bibles("Пс 22:1", &bibles, &english)[0];
-        assert_eq!((psalm.title.as_str(), psalm.lookup.as_str()), ("Psalms 22:1", "Псалтирь 22:1"));
+        assert_eq!((psalm.title.as_str(), psalm.lookup.as_str()), ("Psalm 22:1", "Псалтирь 22:1"));
         assert!(psalm.line.contains("The LORD is my shepherd"), "{}", psalm.line);
         assert_eq!(psalm.language.as_deref(), Some("ru"), "the session goes on in what was typed");
         // Verses found by Russian words: named and quoted in English, tagged with the KJV.
         let rows = search_bibles("долиною смертной тени", &bibles, &english);
         assert!(!rows.is_empty() && rows.iter().all(|row| row.tag == "BIBLE \u{b7} KJV"), "{rows:?}");
         let found = rows.iter().find(|row| row.lookup == "Псалтирь 22:4").expect("the 22nd psalm's fourth verse");
-        assert_eq!(found.title, "Psalms 22:4");
+        assert_eq!(found.title, "Psalm 22:4");
         assert!(found.line.contains("valley of the shadow of death"), "{}", found.line);
         // The Bible page's own list, the same way.
         let page = search_page("долиною смертной тени", &bibles, &english);
         let verse = page.verses.iter().find(|verse| verse.kept == "Псалтирь 22:4").expect("found");
-        assert_eq!((verse.reference.as_str(), verse.bible.as_str()), ("Psalms 22:4", "KJV"));
-        assert_eq!(verse.chapter, "Psalms 22");
+        assert_eq!((verse.reference.as_str(), verse.bible.as_str()), ("Psalm 22:4", "KJV"));
+        assert_eq!(verse.chapter, "Psalm 22");
         assert!(verse.words.contains("valley of the shadow of death"));
         // Auto as before.
         assert_eq!(search_page("долиною смертной тени", &bibles, &Reading::auto("en")).verses[0].bible, "SYN");

@@ -542,6 +542,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Enter, Space and → go on through the chapter after the passage (← back the same way); its
   first verse is the one picked. Made into one slide, or running across two chapters, a passage
   has only its own slides.
+- **A psalm reads as one psalm.** The title, the reference field, History, the find box's Bible
+  rows, the verses found and the reference on the slides name one psalm `Psalm 23` (`Psalm 23:1-6`;
+  in Russian and in Ukrainian `Псалом 22`), and a run across psalms `Psalms 23–24` (Ukrainian
+  `Псалми`; Russian keeps the book's own name, `Псалтирь`). What a playlist keeps and each
+  slide's name stay as the Bible names the book (`Psalms 23:1-6`, `Псалтирь 22:1-6`); every one
+  of these names reads back as the same psalm.
 - **Page** (the first look) shows the passage's whole chapter to read: a verse to a row, its
   number at the left, the words in a book face, the same verse in the second Bible under them;
   the passage's verses bright, the rest of the chapter dimmer, the verse on screen tinted orange
@@ -564,7 +570,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the same whatever language the reference was typed in: which Bible goes in which box, and the
   reference on them, are as the translations are set. Chapter and verse numbers are always the
   first translation's, so with the Russian Synodal first, `Psalm 23` is its 23rd psalm (the
-  English 24th), named back as `Psalms 23:1-10`. The page reads the operator's language first,
+  English 24th), named back as `Psalm 23:1-10`. The page reads the operator's language first,
   and the next Bible in use under it.
 - With nothing typed to go by (the Bible page opened fresh, a book or verse clicked, a passage
   from History or a playlist), the operator reads in the language last typed this session; at
@@ -582,7 +588,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   language typed last. It never changes the slides: they follow the translations line, and
   choosing a language makes nothing again and puts nothing on screen. Chapter and verse numbers
   stay the first translation's (with the Russian Synodal first and English chosen, `Пс 22` reads
-  as `Psalms 22:1-6`, the English 23rd psalm). The choice is kept between starts; a language
+  as `Psalm 22:1-6`, the English 23rd psalm). The choice is kept between starts; a language
   chosen whose Bible is taken out of the translations counts as Auto until one is back.
 - Words typed in the reference field that are no reference and no book's name begun are looked
   for in the Bibles in use written in their alphabet (Cyrillic words in the Russian and the

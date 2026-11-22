@@ -183,11 +183,12 @@ impl Shelf {
 }
 
 /// A passage named as the first translation names it (as `build_passage` titles its slides),
-/// named again for the operator: the book in `language` (`en`, `ru`, `uk`), the numbers as they
-/// are, so the name reads back as the same passage. The name as it was when it can't be read.
+/// named again for the operator: the book in `language` (`en`, `ru`, `uk`) as people read it
+/// (one psalm is "Psalm 23", see `sp_bible::reading_label`), the numbers as they are, so the
+/// name reads back as the same passage. The name as it was when it can't be read.
 pub fn name_for_operator(kept: &str, lead: &Bible, language: &str) -> String {
     match parse_reference_in(kept, &lead.info.language) {
-        Ok(range) => sp_bible::label_in(language, range.start, range.end),
+        Ok(range) => sp_bible::reading_label(language, range.start, range.end),
         Err(_) => kept.to_owned(),
     }
 }
@@ -259,8 +260,12 @@ pub fn build_passage(
         return Err(format!("The {} has no such verses.", lead.bible.info.name));
     };
     let in_row = |row: &RowChoice, place: VerseRef| convert(place, lead.bible.info.numbering, row.bible.info.numbering);
-    let label = |row: &RowChoice, from: VerseRef, to: VerseRef| {
-        let text = row.bible.label(in_row(row, from), in_row(row, to));
+    // As the Bible names it (each slide's name, read back to find the verse on screen), or as
+    // people read it (the reference on the slide: "Psalm 23:1").
+    let label = |row: &RowChoice, from: VerseRef, to: VerseRef, read: bool| {
+        let (from, to) = (in_row(row, from), in_row(row, to));
+        let text =
+            if read { sp_bible::reading_label(&row.bible.info.language, from, to) } else { row.bible.label(from, to) };
         if options.display_translation { format!("{text} ({})", row.bible.info.short) } else { text }
     };
 
@@ -294,8 +299,8 @@ pub fn build_passage(
             ReferenceStyle::VerseReferences | ReferenceStyle::PassageEach => true,
         };
         let reference_of = |row: &RowChoice| match options.reference {
-            ReferenceStyle::VerseReferences => label(row, from, to),
-            _ => label(row, first, last),
+            ReferenceStyle::VerseReferences => label(row, from, to, true),
+            _ => label(row, first, last, true),
         };
         // What goes in each box, in the order the boxes are first named: every translation's
         // words first, then the references.
@@ -338,7 +343,7 @@ pub fn build_passage(
         // every slide says where it is from.
         groups.push(Group {
             id: Uuid::new_v4(),
-            name: label(lead, from, to),
+            name: label(lead, from, to, false),
             // A Bible slide's bar is white on black.
             color: Rgba::rgb(0, 0, 0),
             slides: vec![Slide { template, ..Slide::new(objects) }],
@@ -1167,7 +1172,17 @@ mod tests {
         let passage = build_passage("Psalm 23:1", &english_first, &BibleOptions::default(), None).unwrap();
         let shown = texts(passage.slide(0).unwrap().1).join(" | ");
         assert!(shown.contains("The LORD is my shepherd") && shown.contains("Пастырь мой"), "{shown}");
-        assert!(shown.contains("Psalms 23:1  ·  Псалтирь 22:1"), "{shown}");
+        // Each reference reads as one psalm, as people write it ("Psalm 23:1", "Псалом 22:1"),
+        // while the slide's name stays as the Bible names it.
+        assert!(shown.contains("Psalm 23:1  ·  Псалом 22:1"), "{shown}");
+        assert_eq!(passage.groups[0].name, "Psalms 23:1");
+        // Across two psalms, psalms.
+        let across = build_passage("Psalm 23:6-24:1", &english_first, &BibleOptions::default(), None).unwrap();
+        let options = BibleOptions { reference: ReferenceStyle::PassageEach, ..BibleOptions::default() };
+        let whole = build_passage("Psalm 23:6-24:1", &english_first, &options, None).unwrap();
+        assert!(texts(across.slide(1).unwrap().1).join(" | ").contains("Psalm 24:1  ·  Псалом 23:1"));
+        let shown = texts(whole.slide(0).unwrap().1).join(" | ");
+        assert!(shown.contains("Psalms 23:6-24:1  ·  Псалтирь 22:6-23:1"), "{shown}");
         // Typed the Russian way with the Russian Bible first, it is the same psalm.
         let russian_first = rows(&mut shelf, &[("syn", main(), None), ("kjv", translation(), None)]);
         let passage = build_passage("Пс 22:1", &russian_first, &BibleOptions::default(), None).unwrap();
