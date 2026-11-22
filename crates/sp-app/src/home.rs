@@ -5833,10 +5833,11 @@ fn bible_pick_keys(ui: &egui::Ui, show: &Show, state: &mut HomeState, commands: 
     if !free || !(up || down) {
         return;
     }
+    // With something on screen, ↓ and ↑ go on and back with it on the page and under Slides
+    // alike, as → and ← do (the owner's rule); otherwise they move the pick.
     let showing = show.live().is_some();
-    if state.bible.view == BibleView::Page
-        && crate::running::pick_key(false, down, up, state.pick(show).is_some(), showing, false)
-            == crate::running::PickKey::Pass
+    if crate::running::pick_key(false, down, up, state.pick(show).is_some(), showing, false)
+        == crate::running::PickKey::Pass
         && showing
     {
         commands.push(if down { Command::Next } else { Command::Previous });
@@ -9100,13 +9101,13 @@ mod tests {
     }
 
     #[test]
-    fn up_and_down_under_slides_move_the_pick_and_put_nothing_on_screen() {
+    fn up_and_down_under_slides_follow_the_owners_rules_as_on_the_page() {
         let ctx = egui::Context::default();
         let mut show = service_with_bible_places();
+        // Nothing on screen.
+        show.apply(Command::ClearAll);
         let mut state = HomeState { library_search: Some(("jn 3:16-18".to_owned(), 0)), ..HomeState::default() };
         state.bible.slots = Some([2, 3]);
-        // Under Slides; on the page they follow the owner's rules for → and ← (see
-        // `on_the_page_the_arrows_go_the_way_they_point…`).
         state.bible.view = BibleView::Slides;
         let key =
             |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
@@ -9121,6 +9122,7 @@ mod tests {
         state.picked = None;
         frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowUp)], 0.25);
         assert_eq!(state.pick(&show), verse(15), "John 3:16 again");
+        // Nothing on screen: ↓ and ↑ move the pick, putting nothing on.
         let mut commands = Vec::new();
         commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.3));
         assert_eq!(state.pick(&show), verse(16));
@@ -9131,15 +9133,18 @@ mod tests {
         commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowUp)], 0.6));
         assert_eq!(state.pick(&show), verse(17));
         assert!(!goes_on_screen(&commands), "{commands:?}");
-        assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "the song stays on screen");
-        // Enter puts the verse picked on; then ↓ picks the verse after it, still not on screen.
+        assert!(show.live().is_none(), "nothing on screen");
+        // Enter puts the verse picked on; then ↓ goes on to the verse after it, as → does.
         press_enter(&mut show, &state);
         assert_eq!(show.live(), verse(17));
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.7);
-        frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.8);
-        assert_eq!((state.pick(&show), show.live()), (verse(18), verse(17)));
-        // At the chapter's last verse the pick stays, and says so.
-        for at in 0..20 {
+        let commands = frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.8);
+        assert_eq!(commands, vec![Command::Next]);
+        assert_eq!(show.live(), verse(18), "the next verse on screen");
+        // With the screen cleared, ↓ picks again from the passage's first verse, and the pick
+        // stays at the chapter's last verse, and says so.
+        show.apply(Command::ClearAll);
+        for at in 0..25 {
             frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.9 + f64::from(at) * 0.01);
         }
         assert_eq!(state.pick(&show), verse(35), "the last verse stays picked");
@@ -9201,12 +9206,12 @@ mod tests {
         assert_eq!((show.live(), state.pick(&show)), (song(1), verse(20)));
         press_enter(&mut show, &state);
         assert_eq!(show.live(), verse(20), "Enter takes the pick");
-        // Under Slides, ↓ still picks the verse after without putting it on screen.
+        // Under Slides the same: with a verse on screen and none picked, ↓ goes on to the next.
         state.bible.view = BibleView::Slides;
         frame_then_app(&ctx, &mut show, &mut state, vec![], 1.1);
         let commands = frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 1.2);
-        assert!(!goes_on_screen(&commands));
-        assert_eq!((show.live(), state.pick(&show)), (verse(20), verse(21)));
+        assert_eq!(commands, vec![Command::Next]);
+        assert_eq!(show.live(), verse(21), "the next verse on screen under Slides too");
     }
 
     #[test]

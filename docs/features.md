@@ -242,12 +242,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   verse: a single verse, typed as a reference or found by its words, is the passage, and with a
   slide a verse its slides are its whole chapter's, so after Enter Next goes on through the
   chapter after it; Command-Return keeps the verse alone), and so does a passage looked up with
-  Return in the reference field; in the Bible view ↑ and ↓ pick the verse before or after (from
-  the verse on screen when none is picked, or the passage's first when neither is). On the
-  Bible page, where the verses run down, ↓ is as → and ↑ as ←: with a verse picked and nothing
-  on screen they move the pick to the verse below or above (brought into sight), putting nothing
-  on; with something on screen they go on with it, as → and ← do, and Enter takes the pick;
-  under Slides ↑ and ↓ always move the pick. The slide
+  Return in the reference field. In the Bible view, on the page and under Slides alike, ↓ is as
+  → and ↑ as ←: with nothing on screen they move the pick to the verse after or before
+  (brought into sight; the passage's first when none is picked), putting nothing on; with
+  something on screen they go on with it, as → and ← do, and Enter takes the pick. The slide
   picked has a 2-point ink ring, its strip in ink and a small ink key cap for Enter after its
   label (in words only or a table, its row has the chosen grey and a fine dim ring inside); never
   orange, which is only for what is on screen, nor the blue of slides picked out to change several;
