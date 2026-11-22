@@ -344,7 +344,7 @@ fn timers_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 if let Some(name) = renamed
                     && let Err(problem) = state.rename_timer(index, &name)
                 {
-                    state.say(problem);
+                    state.notices.refuse(problem);
                 }
                 ui.add_space(6.0);
                 let done = Rect::from_min_size(ui.cursor().min, vec2(64.0, 24.0));
@@ -2801,10 +2801,7 @@ mod tests {
         // Another timer's name is refused, and says so.
         typing(&mut state, "walk-in", egui::Key::Enter);
         assert_eq!(state.timers[0].name, "Preaching");
-        assert_eq!(
-            state.toast.as_ref().map(|(words, _)| words.as_str()),
-            Some("There is a timer called walk-in already.")
-        );
+        assert_eq!(state.notices.refused(), Some("There is a timer called walk-in already."));
     }
 
     /// The middle of where `words` were drawn last (in a menu, when it is open).

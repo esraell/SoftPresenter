@@ -26,6 +26,14 @@ use serde::Serialize;
 /// answered).
 pub const KEPT: usize = 40;
 
+/// How long a refusal's cue stays, in seconds, and how long it takes to come and to go.
+pub const CUE_FOR: f64 = 2.4;
+pub const CUE_FADE: f64 = 0.12;
+
+/// How soon after a click a refusal counts as that click's, in seconds: its cue then goes under
+/// what was clicked, else under the preview's readout (a key was pressed).
+pub const CLICK_NEAR: f64 = 0.6;
+
 /// The answers a question about a file changed outside SoftPresenter offers.
 pub const RELOAD: &str = "reload";
 pub const KEEP_MINE: &str = "keep";
@@ -70,6 +78,16 @@ pub struct Notice {
     pub about: Option<Waiting>,
 }
 
+/// A refusal's cue: a small dark chip under the place of action, for [`CUE_FOR`] seconds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cue {
+    pub text: String,
+    /// When it was first drawn (on the window's clock), once it has been.
+    pub since: Option<f64>,
+    /// What it goes under, chosen when it is first drawn.
+    pub under: Option<Rect>,
+}
+
 /// How the status button looks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Look {
@@ -83,13 +101,19 @@ pub enum Look {
     Question,
 }
 
-/// The list of notices, newest first.
+/// The list of notices, newest first, and the cue of the last refusal.
 #[derive(Debug, Default)]
 pub struct Notices {
     list: Vec<Notice>,
     next: u64,
     /// The list was open when last drawn: closing it marks everything seen.
     pub was_open: bool,
+    /// The last refusal's cue, while it shows.
+    pub cue: Option<Cue>,
+    /// What the pointer last clicked (where it is, and when, on the window's clock), and where
+    /// the preview's readout is this frame: where a refusal's cue goes.
+    pub clicked: Option<(Rect, f64)>,
+    pub readout: Option<Rect>,
 }
 
 impl Notices {
@@ -143,6 +167,40 @@ impl Notices {
         let notice = self.list.iter().find(|notice| notice.id == id)?;
         let about = notice.about?;
         notice.actions.iter().any(|offered| offered.id == action).then_some((about, action == RELOAD))
+    }
+
+    /// Why nothing happened ("That is the last slide."), said at the place of action for a
+    /// moment and never kept: under what was clicked, or under the preview's readout when it was
+    /// a key. Better still is a control greyed so nothing is refused.
+    pub fn refuse(&mut self, text: impl Into<String>) {
+        let text = text.into();
+        crate::applog::event("refused", &text);
+        self.cue = Some(Cue { text, since: None, under: None });
+    }
+
+    /// The words of the refusal showing now, if one is.
+    #[cfg(test)]
+    pub fn refused(&self) -> Option<&str> {
+        self.cue.as_ref().map(|cue| cue.text.as_str())
+    }
+
+    /// The refusal showing now, let go of (for tests).
+    #[cfg(test)]
+    pub fn take_refused(&mut self) -> Option<String> {
+        self.cue.take().map(|cue| cue.text)
+    }
+
+    /// The newest entry's words, not a question's.
+    #[cfg(test)]
+    pub fn newest(&self) -> Option<&str> {
+        self.list.iter().find(|notice| notice.kind != Kind::Question).map(|notice| notice.text.as_str())
+    }
+
+    /// The newest entry, not a question, taken out of the list (for tests).
+    #[cfg(test)]
+    pub fn take_newest(&mut self) -> Option<String> {
+        let at = self.list.iter().position(|notice| notice.kind != Kind::Question)?;
+        Some(self.list.remove(at).text)
     }
 
     /// Clear All: the list empties, except for questions, which stay until answered.
@@ -443,6 +501,66 @@ fn row(ui: &mut egui::Ui, notice: &Notice, line_above: bool, form: &crate::clock
     clicked
 }
 
+/// At the end of every frame of the main window: notes what was clicked (or where something was
+/// dropped), then draws the last refusal's cue, a small dark chip under the place of action:
+/// under what was clicked when the refusal came within [`CLICK_NEAR`] of the click, else under
+/// the preview's readout (a key was pressed), else under the top bar. It shows for [`CUE_FOR`]
+/// seconds; the window is drawn again only while it comes and goes, and once when it is to fade.
+pub fn paint_cue(ctx: &egui::Context, notices: &mut Notices) {
+    let now = ctx.input(|input| input.time);
+    let (clicked, dropped) = ctx.interaction_snapshot(|snapshot| (snapshot.clicked, snapshot.drag_stopped));
+    if let Some(rect) = clicked.and_then(|id| ctx.read_response(id)).map(|response| response.rect) {
+        notices.clicked = Some((rect, now));
+    } else if dropped.is_some()
+        && let Some(at) = ctx.input(|input| input.pointer.latest_pos())
+    {
+        notices.clicked = Some((Rect::from_center_size(at, vec2(1.0, 18.0)), now));
+    }
+    let readout = notices.readout.take();
+    let Some(cue) = notices.cue.as_mut() else { return };
+    let since = *cue.since.get_or_insert(now);
+    let under = *cue.under.get_or_insert_with(|| {
+        let recent = notices.clicked.filter(|(_, at)| now - at <= CLICK_NEAR).map(|(rect, _)| rect);
+        recent.or(readout).unwrap_or_else(|| {
+            let screen = ctx.content_rect();
+            Rect::from_center_size(pos2(screen.center().x, crate::studio::TOP_BAR), vec2(0.0, 0.0))
+        })
+    });
+    let age = now - since;
+    if age >= CUE_FOR {
+        notices.cue = None;
+        return;
+    }
+    let shown = (age / CUE_FADE).min((CUE_FOR - age) / CUE_FADE).clamp(0.0, 1.0) as f32;
+    if shown < 1.0 {
+        ctx.request_repaint();
+    } else {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(CUE_FOR - CUE_FADE - age));
+    }
+    let screen = ctx.content_rect();
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("refusal cue")));
+    let wide = 360.0_f32.min(screen.width() - 20.0);
+    let galley = painter.layout(cue.text.clone(), FontId::proportional(12.5), Color32::PLACEHOLDER, wide - 24.0);
+    let size = galley.size() + vec2(24.0, 14.0);
+    let left = if under.width() < 1.0 { under.center().x - size.x / 2.0 } else { under.min.x };
+    let left = left.clamp(screen.min.x + 10.0, (screen.max.x - size.x - 10.0).max(screen.min.x + 10.0));
+    // It slides down a little as it comes.
+    let top = (under.max.y + 6.0).min(screen.max.y - size.y - 10.0) - 4.0 * (1.0 - shown);
+    let chip = Rect::from_min_size(pos2(left, top), size);
+    painter.rect_filled(
+        chip.expand(6.0).translate(vec2(0.0, 6.0)),
+        15.0,
+        Color32::from_black_alpha(60).gamma_multiply(shown),
+    );
+    painter.rect_filled(chip, 9.0, CUE_FILL.gamma_multiply(shown));
+    painter.rect_stroke(chip, 9.0, Stroke::new(1.0, CUE_EDGE.gamma_multiply(shown)), egui::StrokeKind::Inside);
+    painter.galley(chip.min + vec2(12.0, 7.0), galley, TEXT.gamma_multiply(shown));
+}
+
+/// A refusal's chip, and its edge.
+const CUE_FILL: Color32 = Color32::from_rgb(0x2a, 0x2a, 0x2a);
+const CUE_EDGE: Color32 = Color32::from_rgb(0x3a, 0x3a, 0x3a);
+
 /// An entry's mark, centred on `at`: an amber dot for trouble, a grey one for information, and
 /// an amber disc with "?" for a question.
 fn paint_mark(painter: &egui::Painter, at: egui::Pos2, kind: Kind) {
@@ -545,6 +663,15 @@ mod tests {
         notices.trouble("Couldn't save the screens.");
         assert_eq!(notices.entries().count(), 2);
         assert_eq!(notices.look(), Look::Trouble(2));
+    }
+
+    #[test]
+    fn a_refusal_makes_no_entry() {
+        let mut notices = Notices::default();
+        notices.refuse("That is the last slide.");
+        assert_eq!(notices.entries().count(), 0, "a refusal is a cue, never an entry");
+        assert_eq!(notices.look(), Look::Quiet);
+        assert_eq!(notices.refused(), Some("That is the last slide."));
     }
 
     #[test]

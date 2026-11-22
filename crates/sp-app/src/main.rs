@@ -2981,7 +2981,7 @@ impl App {
             running::Do::Start { item, last } => self.start_item(item, last),
             running::Do::Say(words) => {
                 if let Some(running) = self.running.as_mut() {
-                    running.home_state.say(words.clone());
+                    running.home_state.notices.refuse(words.clone());
                     running.home_window.request_redraw();
                 }
                 return Some(words);
@@ -3025,7 +3025,10 @@ impl App {
                 sp_engine::SlideRef { presentation: at.presentation, slide },
                 bible,
             ),
-            None => running.home_state.say(format!("That is the {} {word}.", if forward { "last" } else { "first" })),
+            None => running
+                .home_state
+                .notices
+                .refuse(format!("That is the {} {word}.", if forward { "last" } else { "first" })),
         }
         running.home_window.request_redraw();
         true
@@ -3899,7 +3902,7 @@ impl App {
             let done = self.undo_removed(redo);
             if let Some(running) = self.running.as_mut() {
                 if let Some(Err(why)) = done {
-                    running.home_state.say(why);
+                    running.home_state.notices.refuse(why);
                 }
                 running.home_window.request_redraw();
             }

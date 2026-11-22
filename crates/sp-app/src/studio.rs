@@ -891,34 +891,6 @@ pub fn block_button(ui: &mut egui::Ui, size: egui::Vec2, text: &str, key: &str, 
 
 /// The find box in the bar along the top: its id, so that Find can hand it the keyboard and a
 /// search that ends can take the keyboard away again.
-/// How long a notice said with `HomeState::say` stays, in seconds.
-const TOAST_FOR: f64 = 2.4;
-
-/// A notice that comes and goes: a dark grey pill with a thin edge, under the top bar in the
-/// middle, never over the media strip. The window is drawn once more when it is to go, and
-/// for nothing else on its account.
-pub fn toast(ctx: &egui::Context, state: &mut HomeState) {
-    let Some((words, since)) = state.toast.as_mut() else { return };
-    let now = ctx.input(|input| input.time);
-    let since = *since.get_or_insert(now);
-    let left = TOAST_FOR - (now - since);
-    if left <= 0.0 {
-        state.toast = None;
-        return;
-    }
-    ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
-    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("toast")));
-    let screen = ctx.content_rect();
-    let galley = painter.layout(words.clone(), semibold(13.0), TEXT, (screen.width() - 80.0).max(200.0));
-    let size = galley.size() + vec2(32.0, 18.0);
-    let rect = Rect::from_min_size(pos2(screen.center().x - size.x / 2.0, TOP_BAR + 10.0), size);
-    let corner = (size.y / 2.0).min(18.0);
-    painter.rect_filled(rect.expand(8.0).translate(vec2(0.0, 6.0)), corner + 8.0, Color32::from_black_alpha(70));
-    painter.rect_filled(rect, corner, Color32::from_rgb(0x2e, 0x2e, 0x2e));
-    painter.rect_stroke(rect, corner, Stroke::new(1.0, Color32::from_rgb(0x4a, 0x4a, 0x4a)), StrokeKind::Inside);
-    painter.galley(rect.min + vec2(16.0, 9.0), galley, TEXT);
-}
-
 pub fn find_box_id() -> egui::Id {
     egui::Id::unique("find box")
 }
@@ -1201,7 +1173,7 @@ fn open_edit_kind(show: &Show, state: &mut HomeState) {
         // Never nothing: a song that can be edited (see `song_to_edit`), or a word on why not.
         EditKind::Slides => match song_to_edit(show, state).and_then(|at| EditDraft::of(show, at)) {
             Some(draft) => state.editing = Some(draft),
-            None => state.say(format!(
+            None => state.notices.refuse(format!(
                 "There is no song to edit yet. Make one with New Song ({}), or import some.",
                 crate::keys::hint_key("N")
             )),
@@ -1996,21 +1968,25 @@ fn found_added_to_playlist(
             carry_out_item_ask(show, state, commands, ItemAsk::Open(place));
         }
         if !added {
-            state.say(format!("{name} is already in {playlist_name}."));
+            state.notices.refuse(format!("{name} is already in {playlist_name}."));
         }
     } else if added {
-        state.say(format!("Added {name} to {playlist_name}."));
+        state.notices.info(format!("Added {name} to {playlist_name}."));
     } else {
-        state.say(format!("{name} is already in {playlist_name}."));
+        state.notices.refuse(format!("{name} is already in {playlist_name}."));
     }
 }
 
 /// A song found with the find box has been dropped on a library (`added` to it, or there
-/// already): the search ends, and a notice says so.
+/// already): the search ends, and the notices say where it went (or a cue that it was there).
 fn found_added_to_library(ctx: &egui::Context, state: &mut HomeState, id: sp_model::Uuid, added: bool, name: &str) {
     crate::home::end_search(ctx, state);
     let library = state.libraries.iter().find(|library| library.id == id).map_or_else(String::new, |l| l.name.clone());
-    state.say(if added { format!("Added {name} to {library}.") } else { format!("{name} is already in {library}.") });
+    if added {
+        state.notices.info(format!("Added {name} to {library}."));
+    } else {
+        state.notices.refuse(format!("{name} is already in {library}."));
+    }
 }
 
 /// What is carried beside the pointer while it is dragged: its name (or how many), on a small
@@ -2783,7 +2759,8 @@ pub fn playlist_in_sight(state: &HomeState, playlist: usize) -> bool {
 /// at the end, with none open), in their order, the last of them becoming the open one; in
 /// another playlist at its end. A song or passage the playlist has already isn't added again.
 /// A notice only when they went out of sight (another playlist, or the one in front while it
-/// isn't listed), or when one was there already. Returns how many went in.
+/// isn't listed); when one was there already, a refusal's cue says so. Returns how many went
+/// in.
 pub fn add_items(state: &mut HomeState, playlist: usize, items: Vec<crate::service::Item>) -> usize {
     use crate::service::Item;
     let Some(name) = state.services.list.get(playlist).map(|list| list.name.clone()) else { return 0 };
@@ -2804,14 +2781,16 @@ pub fn add_items(state: &mut HomeState, playlist: usize, items: Vec<crate::servi
         [one] => Some(format!("{one} is already in {name}.")),
         many => Some(format!("{} of them are already in {name}.", many.len())),
     };
-    let said = match added.as_slice() {
-        [] => there,
-        _ if playlist_in_sight(state, playlist) => there,
+    let out_of_sight = match added.as_slice() {
+        [] => None,
+        _ if playlist_in_sight(state, playlist) => None,
         [one] => Some(format!("Added {one} to {name}.")),
         many => Some(format!("Added {} {} to {name}.", many.len(), if songs { "songs" } else { "items" })),
     };
-    if let Some(said) = said {
-        state.say(said);
+    match (out_of_sight, there) {
+        (Some(said), _) => state.notices.info(said),
+        (None, Some(there)) => state.notices.refuse(there),
+        (None, None) => {}
     }
     added.len()
 }
@@ -2878,7 +2857,11 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
             _ => None,
         };
         if next.is_none() && (up || down) {
-            state.say(if down { "That is the last song in the list." } else { "That is the first song in the list." });
+            state.notices.refuse(if down {
+                "That is the last song in the list."
+            } else {
+                "That is the first song in the list."
+            });
         }
         if let Some(next) = next {
             let song = shown[next];
@@ -3821,7 +3804,7 @@ pub fn carry_out_item_ask(show: &Show, state: &mut HomeState, commands: &mut Vec
 pub fn fill_placeholder(state: &mut HomeState, index: usize, item: crate::service::Item) -> bool {
     let front = state.services.front_at();
     if state.services.place_of(front, &item).is_some_and(|was| was != index) {
-        state.say(format!("{} is already in {}.", item.title(), state.services.front().name));
+        state.notices.refuse(format!("{} is already in {}.", item.title(), state.services.front().name));
         return false;
     }
     state.services.fill(index, item)
@@ -4206,7 +4189,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 crate::home::end_search(ui.ctx(), state);
                 let refused = onto.is_none() && state.services.front().items.len() == count;
                 if refused {
-                    state.say(format!("{} is already in {}.", found.name, state.services.front().name));
+                    state.notices.refuse(format!("{} is already in {}.", found.name, state.services.front().name));
                 }
                 ask = state.services.chosen.map(ItemAsk::Open);
             }
@@ -4290,7 +4273,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                     }
                     picks.made_in(&state.services);
                 }
-                None => state.say(crate::running::no_item_beyond(down)),
+                None => state.notices.refuse(crate::running::no_item_beyond(down)),
             }
         }
     }
@@ -4506,6 +4489,8 @@ fn preview_block(
     // The readout: where the song is, large, then the slide's group and the song.
     let readout =
         Rect::from_min_max(pos2(inner.min.x + 3.0, room.max.y + 10.0), pos2(inner.max.x - 3.0, room.max.y + 44.0));
+    // A key refused is said under the readout (see `notices::paint_cue`).
+    state.notices.readout = Some(readout);
     let at = show.live();
     let song = at.and_then(|at| show.presentations().get(at.presentation));
     // The place in the song's play order, which an arrangement can make longer.
@@ -6186,7 +6171,7 @@ pub mod tests {
         carry_out_item_ask(&show, &mut state, &mut Vec::new(), ItemAsk::Fill(1, 1));
         assert_eq!(state.services.front().items[0], Item::song("two", "Two"));
         assert!(matches!(state.services.front().items[1], Item::Placeholder { .. }));
-        assert_eq!(state.toast.take().map(|(words, _)| words).as_deref(), Some("Two is already in Service."));
+        assert_eq!(state.notices.take_refused().as_deref(), Some("Two is already in Service."));
         // Another song fills it, and is opened.
         let mut commands = Vec::new();
         carry_out_item_ask(&show, &mut state, &mut commands, ItemAsk::Fill(1, 2));
@@ -6255,7 +6240,7 @@ pub mod tests {
         assert_eq!(songs_menu_adds(&show, &state, 0, Some(1)), [0], "One isn't picked: just it");
         SongAsks { add_to: Some((vec![1, 3], Some(1))), ..SongAsks::default() }.carry_out(&show, &mut state);
         assert_eq!(names(&state, 1), ["Two", "Four"]);
-        let said = state.toast.take().map(|(words, _)| words);
+        let said = state.notices.take_newest();
         assert_eq!(said.as_deref(), Some("Added 2 songs to Evening."), "out of sight, so it says where");
         // In a library: the songs picked with the one clicked; Add to the playlist in front puts
         // them after the open item, the last of them opened, and says nothing while it is listed.
@@ -6268,11 +6253,14 @@ pub mod tests {
         SongAsks { add: vec![2, 0], ..SongAsks::default() }.carry_out(&show, &mut state);
         assert_eq!(names(&state, 1), ["Four", "Three", "One", "Two"]);
         assert_eq!(state.services.chosen, Some(2));
-        assert!(state.toast.is_none(), "added where it is seen: nothing said");
+        assert!(
+            state.notices.refused().is_none() && state.notices.newest().is_none(),
+            "added where it is seen: nothing said"
+        );
         // Out of sight (the library listed), it says where they went; one there already says so.
         state.playlist_open = false;
         SongAsks { add: vec![1], ..SongAsks::default() }.carry_out(&show, &mut state);
-        assert_eq!(state.toast.take().map(|(words, _)| words).as_deref(), Some("Two is already in Evening."));
+        assert_eq!(state.notices.take_refused().as_deref(), Some("Two is already in Evening."));
     }
 
     fn press(at: egui::Pos2, pressed: bool) -> Event {

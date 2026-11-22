@@ -25,6 +25,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   a Bible installed, written files) earn an entry, and every one goes in the log too; what the
   operator just did and can see is never said. The show keys (← → Space Enter) still run the
   show while the list is open.
+- **A refusal is a brief cue, not a notice.** When nothing happens and the operator should know
+  why ("That is the last slide of the playlist.", "Two is already in Sunday.", "There is no
+  song to edit yet…"), a small dark chip says so for about 2.4 seconds under the place of
+  action: under what was clicked, or under the preview's readout when it was a key. It never
+  goes in the list (the log keeps it).
 - Songs shown as a grid of slides, a words-only view or a table (number, group, words, notes),
   with a size slider. Click a slide, or use the [keys](../README.md#keys), to put it on the
   audience screen. A slide in the grid is its picture with a strip under it: its number, its
@@ -233,8 +238,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   open item (at the end with none open), and it becomes the open item; another playlist takes
   it at its end. A playlist has a song (or a passage) once: a song's pickers mark the songs it
   has already ("In this playlist" at the right of the song, in Add to playlist ▸ A Song and Fill
-  with Song), and adding one again changes nothing but says so ("Two is already in Sunday.").
-  Nothing is said for what was added where it is seen; a notice says where it went only when
+  with Song), and adding one again changes nothing but a brief cue says so ("Two is already in Sunday.").
+  Nothing is said for what was added where it is seen; an entry in the notices says where it went only when
   that is out of sight (another playlist, or the playlist in front while a library, the
   chooser or the Bible page is showing): "Added Harbour Lights to Evening.", "Added 2 songs to
   Evening.".
@@ -273,7 +278,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   under the slides), Next at the end of a song goes on into the next song or **Bible
   passage**, passing over headers, placeholders, pictures and videos, and Previous at a song's
   first slide goes back into the last slide of the one before; at either end of the playlist,
-  or with Continuous off, nothing changes and a notice under the top bar says why. The menu
+  or with Continuous off, nothing changes and a brief cue under the preview's readout says why. The menu
   bar's Next Slide and Previous Slide, and `sp next` and `sp previous`, do the same; a slide
   that goes on by itself goes on into the next song or passage only with Continuous on.
 - **A slide picked waits for Enter.** What the find box opens with Return has a slide picked
@@ -306,7 +311,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   it), and Continuous passes over them. A placeholder is filled with a song chosen from a list (its tile's
   Choose a Song…, or Fill with Song in its right-click menu), or with a picture or video dropped
   on it. A song the playlist has elsewhere already isn't moved into it: it stays where it is,
-  and the notice says it is there already. One whose picture, video or media playlist has gone is kept and shown faint. A playlist
+  and a brief cue says it is there already. One whose picture, video or media playlist has gone is kept and shown faint. A playlist
   holding any of these is saved as version 3 of the services file; one without is still written
   as version 2, which older SoftPresenters open.
 - Songs, a playlist's items, slides and media items are picked out as in the Finder (Ctrl in
@@ -437,7 +442,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   layouts, theme templates and a theme's version. Undo puts it back where it was (a playlist in
   front again, a library shown again, items picked again, a prop, layout or template open
   again; Command-Z in the Edit view takes it back in turn with the changes made there) and Redo deletes it again;
-  if what it was in has changed too much since, a notice says it can't be undone. What Undo
+  if what it was in has changed too much since, a brief cue says it can't be undone. What Undo
   can't bring back asks first, and the question always ends "This can't be undone.": songs
   deleted from the library, media bin items, a theme, a screen, and Disconnect for VoxLive and
   Canva Sync.
@@ -466,7 +471,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   countdown to a time of day says when it ends until it is started), Reset, Start or Stop, and
   ⋯ with Edit… (its name, what it counts, whether it runs over) and Delete. A new name is kept
   on Return or leaving the field (Escape puts the old one back; a name another timer has is
-  refused, with a notice), and every message that shows the timer takes the new name with it,
+  refused, with a cue saying why), and every message that shows the timer takes the new name with it,
   so a message on the screens goes on showing its time; `sp timer rename OLD to NEW` and
   `timer set NAME name NEW` do the same.
 - **Messages** shown over the slides, with the time or a timer in them, an optional time to
@@ -852,7 +857,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the song chosen in the Show view (at the slide picked out, or the slide on screen when it is in
   that song). When that song can't be edited (it has no slides, or it is a Bible passage or the
   VoxLive item, which the app makes), Edit opens the song on screen, then the first song of the
-  playlist in front, then the first song there is; with no song at all a notice says how to make
+  playlist in front, then the first song there is; with no song at all a brief cue says how to make
   one. On a Mac, Command-3 had stopped reaching the menu bar's Edit; it does again.
 - **Moving slides.** Drag a slide to another place in its song, in the Show view's grid or the
   Edit view's list; an ink line shows where it will go (before or after the slide it is dropped

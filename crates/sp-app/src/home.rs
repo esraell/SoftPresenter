@@ -325,8 +325,6 @@ pub struct HomeState {
     /// and for how many more frames the view may still be brought to it.
     pub picked: Option<Picked>,
     pub pick_scroll: u8,
-    /// A notice that comes and goes under the top bar (see `say`), and when it was first shown.
-    pub toast: Option<(String, Option<f64>)>,
     /// The numbers on the open tool tab's cards or the media strip's pictures, after
     /// modifier-1 to 7 or Shift-modifier-M (see `keys`).
     pub numbers: Option<crate::keys::Numbers>,
@@ -1775,7 +1773,6 @@ impl Default for HomeState {
             song_order: crate::kept::SongOrder::Listed,
             live_row_seen: None,
             live_item: None,
-            toast: None,
             spotlight: None,
             spotlight_scroll: 0,
             picked: None,
@@ -2020,12 +2017,6 @@ impl HomeState {
         Ok(was)
     }
 
-    /// Says something for a moment, under the top bar (that the playlist has ended, say). It
-    /// changes nothing.
-    pub fn say(&mut self, words: impl Into<String>) {
-        self.toast = Some((words.into(), None));
-    }
-
     /// True while a question asking whether to delete something is open: then no key reaches
     /// the show (Space, the arrows and Escape answer it or wait).
     pub fn alert_open(&self) -> bool {
@@ -2175,6 +2166,22 @@ pub fn home_ui(
     preview: Preview,
     canvas: Option<TextureId>,
 ) -> Vec<Command> {
+    let commands = home_view(ui, show, state, theme, thumb, preview, canvas);
+    // A refusal's cue, last, over whichever view is open.
+    crate::notices::paint_cue(ui.ctx(), &mut state.notices);
+    commands
+}
+
+/// The view open (Show, Bible, or one of Edit's kinds) and the parts every view has.
+fn home_view(
+    ui: &mut egui::Ui,
+    show: &Show,
+    state: &mut HomeState,
+    theme: &Theme,
+    thumb: &mut dyn FnMut(ThumbOf) -> Option<(TextureId, bool)>,
+    preview: Preview,
+    canvas: Option<TextureId>,
+) -> Vec<Command> {
     let mut commands = Vec::new();
     // The window's own colour behind everything, the gaps between the three columns and round
     // their corners included: the margins a column's frame leaves are not painted by it, and
@@ -2194,13 +2201,13 @@ pub fn home_ui(
         Some(crate::keys::Ask::Audience) => commands.push(Command::SetOutputEnabled(!show.output_enabled())),
         // A Bible verse or VoxLive's captions, which the app makes, have no menu: it says so.
         Some(crate::keys::Ask::LiveMenu) if show.live().is_some_and(|at| state.app_made(at.presentation)) => {
-            state.say("The verse or caption on screen has no menu.");
+            state.notices.refuse("The verse or caption on screen has no menu.");
         }
         // The menu of the slide on screen: its slide is brought into view, and its menu opened.
         Some(crate::keys::Ask::LiveMenu) if show.live().is_some() && !state.bible_open => {
             state.live_menu = Some(ui.ctx().cumulative_frame_nr());
         }
-        Some(crate::keys::Ask::LiveMenu) => state.say("Put a slide on screen to open its menu."),
+        Some(crate::keys::Ask::LiveMenu) => state.notices.refuse("Put a slide on screen to open its menu."),
         None => {}
     }
     // A press that ends on a slider or a menu leaves the keyboard to the show again.
@@ -2288,7 +2295,9 @@ pub fn home_ui(
                     Some(_) if picked.is_empty() => {}
                     Some((true, _)) => crate::studio::remove_from_media_playlist(show, state, &picked),
                     Some((false, name)) => {
-                        state.say(format!("\u{201c}{name}\u{201d} follows a folder: take the file out of the folder."));
+                        state.notices.refuse(format!(
+                            "\u{201c}{name}\u{201d} follows a folder: take the file out of the folder."
+                        ));
                     }
                     None => state.confirm_delete_media = picked,
                 }
@@ -2370,7 +2379,6 @@ pub fn home_ui(
     }
     crate::studio::round_corners(ui, middle);
     crate::keys::key_sheet(ui.ctx(), state);
-    crate::studio::toast(ui.ctx(), state);
     crate::file_drop::paint(ui.ctx(), state);
     commands
 }
@@ -3766,7 +3774,7 @@ fn slide_list_head(
             }
         });
         if let Some(title) = empty {
-            state.say(format!("\u{201c}{title}\u{201d} has no slides yet."));
+            state.notices.refuse(format!("\u{201c}{title}\u{201d} has no slides yet."));
         }
         ui.add_space(4.0);
         crate::studio::list_heading(ui, "Slides");
@@ -6779,7 +6787,7 @@ fn bible_pick_keys(ui: &egui::Ui, show: &Show, state: &mut HomeState, commands: 
     };
     match moved {
         Ok(slide) => state.set_pick(show, SlideRef { presentation: slot, slide }, true),
-        Err(words) => state.say(words),
+        Err(words) => state.notices.refuse(words),
     }
 }
 
@@ -7120,7 +7128,7 @@ fn bible_add(ui: &mut egui::Ui, state: &mut HomeState, add: Rect, arrow: Rect) {
         && let Some(saved) = saved.clone()
     {
         let front = state.services.front_at();
-        add_passage(state, Some(front), saved, &reading);
+        add_passage(state, Some(front), saved);
     }
     // The other playlists (Add already adds to the one in front), then a new one.
     let open_arrow = open_arrow.on_hover_text("Add it to another playlist");
@@ -7150,7 +7158,7 @@ fn bible_add(ui: &mut egui::Ui, state: &mut HomeState, add: Rect, arrow: Rect) {
                 chosen = Some(None);
             }
             if let Some(playlist) = chosen {
-                add_passage(state, playlist, saved, &reading);
+                add_passage(state, playlist, saved);
                 ui.close();
             }
         });
@@ -7162,14 +7170,13 @@ fn bible_add(ui: &mut egui::Ui, state: &mut HomeState, add: Rect, arrow: Rect) {
 /// The same passage in the same translations goes in once: then the notice says it is there
 /// already. With no playlist given, a new one is made with the passage in it and comes to the
 /// front, its name ready to type in the chooser of the Show view, as a song's New Playlist…
-/// does.
-fn add_passage(state: &mut HomeState, playlist: Option<usize>, saved: crate::service::SavedPassage, reading: &str) {
+/// does (there to see, so nothing is said).
+fn add_passage(state: &mut HomeState, playlist: Option<usize>, saved: crate::service::SavedPassage) {
     let item = crate::service::Item::Passage(saved);
     let Some(at) = playlist else {
         state.services.add_service();
         state.services.add(item);
         let name = state.services.front().name.clone();
-        state.say(format!("Added {reading} to {name}."));
         state.playlist_open = true;
         state.chooser_open = true;
         state.renaming_service = Some((state.services.front_at(), name));
@@ -9428,7 +9435,7 @@ mod tests {
         state.picked_media = vec![1];
         frame_with(&ctx, &show, &mut state, Some(Key::Delete));
         assert_eq!(state.media_playlists[0].files.len(), 1);
-        let said = state.toast.as_ref().map(|(words, _)| words.as_str());
+        let said = state.notices.refused();
         assert!(said.is_some_and(|said| said.contains("follows a folder")), "{said:?}");
         // In All Media, Delete still asks before deleting from the bin.
         state.media_playlist_shown = None;
@@ -10239,7 +10246,7 @@ mod tests {
         };
         let show = Show::new(vec![show.presentations()[0].clone(), Arc::new(empty)]);
         assert_eq!(click_slide_words(&ctx, &show, &mut state, "Empty"), None, "the Edit view stays");
-        assert!(state.toast.as_ref().is_some_and(|(words, _)| words.contains("no slides")));
+        assert!(state.notices.refused().is_some_and(|words| words.contains("no slides")));
     }
 
     #[test]
@@ -10716,7 +10723,7 @@ mod tests {
                 "{how}: {added:?}"
             );
             let front = state.services.front().name.clone();
-            let said = state.toast.take().map(|(words, _)| words);
+            let said = state.notices.take_newest();
             assert_eq!(said, Some(format!("Added John 3:16 to {front}.")), "{how}");
             // Enter puts it on screen; Space goes on to John 3:17, ← back.
             press_enter(&mut show, &state);
@@ -11128,7 +11135,7 @@ mod tests {
             frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.9 + f64::from(at) * 0.01);
         }
         assert_eq!(state.pick(&show), verse(35), "the last verse stays picked");
-        assert_eq!(state.toast.as_ref().map(|(words, _)| words.as_str()), Some("That is the last verse."));
+        assert_eq!(state.notices.refused(), Some("That is the last verse."));
     }
 
     #[test]
@@ -11333,7 +11340,7 @@ mod tests {
         let mut state = HomeState::default();
         state.bible.slots = Some([2, 3]);
         assert_eq!(press_edit_key(&ctx, &show, &mut state), None);
-        let said = state.toast.as_ref().map(|(words, _)| words.clone()).unwrap_or_default();
+        let said = state.notices.refused().unwrap_or_default().to_owned();
         assert!(said.starts_with("There is no song to edit yet"), "{said}");
     }
 
@@ -12448,7 +12455,7 @@ mod tests {
         assert_eq!(state.services.list[1].items, [Item::song("gamma".to_owned(), "Gamma".to_owned())]);
         assert_eq!(state.services.front().items.len(), 2, "the playlist in front is as it was");
         assert!(state.library_search.is_none());
-        assert!(state.toast.as_ref().is_some_and(|(words, _)| words == "Added Gamma to Evening."), "{:?}", state.toast);
+        assert_eq!(state.notices.newest(), Some("Added Gamma to Evening."), "out of sight: an entry says where");
         nothing_went_live(&show, &commands);
         // On the playlist in front's own row: at its end, and opened.
         let (mut show, mut state) = find_drag_setting();
@@ -12700,7 +12707,10 @@ mod tests {
             assert_eq!(titles(&state), ["Alpha", "Gamma", "Epsilon"], "{key:?}");
             assert!(state.confirm_delete_songs.is_empty() && !state.alert_open(), "nothing is asked");
             assert!(state.songs_to_delete.is_empty(), "no song is deleted");
-            assert!(state.toast.is_none(), "and nothing is said: Undo is the way back");
+            assert!(
+                state.notices.refused().is_none() && state.notices.newest().is_none(),
+                "and nothing is said: Undo is the way back"
+            );
             // The app keeps what went in its one history; Undo puts it back in place, picked out
             // again, and Redo takes it out again.
             let removed = state.removed.pop().expect("kept for Undo");
@@ -13235,27 +13245,29 @@ mod tests {
             reference_style: String::new(),
             show_with: None,
         };
-        // On the Bible page, which shows no playlist: the notice says where it went.
+        // On the Bible page, which shows no playlist: an entry in the notices says where it went;
+        // there already, a refusal's cue says so.
         let mut state = HomeState { bible_open: true, ..HomeState::default() };
         state.services.list[0].name = "Sunday".to_owned();
-        let said = |state: &mut HomeState| state.toast.take().map(|(words, _)| words);
-        add_passage(&mut state, Some(0), saved(&["kjv"]), "John 3:16");
-        assert_eq!(said(&mut state).as_deref(), Some("Added John 3:16 to Sunday."));
-        add_passage(&mut state, Some(0), saved(&["kjv"]), "John 3:16");
-        assert_eq!(said(&mut state).as_deref(), Some("John 3:16 is already in Sunday."));
+        add_passage(&mut state, Some(0), saved(&["kjv"]));
+        assert_eq!(state.notices.take_newest().as_deref(), Some("Added John 3:16 to Sunday."));
+        add_passage(&mut state, Some(0), saved(&["kjv"]));
+        assert_eq!(state.notices.take_refused().as_deref(), Some("John 3:16 is already in Sunday."));
+        assert_eq!(state.notices.newest(), None, "a refusal is no entry");
         assert_eq!(state.services.front().items.len(), 1);
         // In other translations it goes in again, after the open item (the first passage).
         state.services.list[0].items.push(crate::service::Item::Header { name: "Sermon".to_owned() });
-        add_passage(&mut state, Some(0), saved(&["kjv", "asv"]), "John 3:16");
-        assert_eq!(said(&mut state).as_deref(), Some("Added John 3:16 to Sunday."));
+        add_passage(&mut state, Some(0), saved(&["kjv", "asv"]));
+        assert_eq!(state.notices.take_newest().as_deref(), Some("Added John 3:16 to Sunday."));
         assert_eq!(state.services.front().items.len(), 3);
         assert!(matches!(&state.services.front().items[1], crate::service::Item::Passage(_)), "after the open one");
         assert_eq!(state.services.chosen, Some(1), "and opened");
-        // New Playlist…: a playlist of its own, in front, its name ready to type in the Show view.
-        add_passage(&mut state, None, saved(&["kjv"]), "John 3:16");
+        // New Playlist…: a playlist of its own, in front, its name ready to type in the Show view,
+        // there to see, so nothing is said.
+        add_passage(&mut state, None, saved(&["kjv"]));
         assert_eq!(state.services.list.len(), 2);
         assert_eq!((state.services.front_at(), state.services.front().items.len()), (1, 1));
-        assert_eq!(said(&mut state).as_deref(), Some("Added John 3:16 to Playlist 1."));
+        assert_eq!(state.notices.newest(), None);
         assert_eq!(state.renaming_service, Some((1, "Playlist 1".to_owned())));
         assert!(state.chooser_open && state.playlist_open && state.view_request == Some(0));
     }
@@ -13403,10 +13415,7 @@ mod tests {
         ];
         frame_texts(&ctx, &show, &mut state, command_o, 3.1);
         assert!(state.live_menu.is_none());
-        assert_eq!(
-            state.toast.as_ref().map(|(words, _)| words.as_str()),
-            Some("The verse or caption on screen has no menu.")
-        );
+        assert_eq!(state.notices.refused(), Some("The verse or caption on screen has no menu."));
     }
 
     #[test]
@@ -13593,6 +13602,35 @@ mod tests {
         let (_, reload) = texts.iter().find(|(drawn, _)| drawn == "Reload").unwrap();
         click_at(&ctx, &show, &mut state, reload.center(), &mut time);
         assert_eq!(state.waiting_choice, Some((crate::outside::Waiting::Song(1), true)));
+    }
+
+    #[test]
+    fn a_refusal_is_a_cue_under_the_readout_or_the_click_and_makes_no_entry() {
+        let show = three_songs();
+        let (ctx, mut state) = (egui::Context::default(), HomeState::default());
+        frame_events(&ctx, &show, &mut state, Vec::new(), 1.0);
+        // A key refused: under the preview's readout, in the right column.
+        state.notices.refuse("That is the last slide of the playlist.");
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), 1.1);
+        let (_, chip) = texts.iter().find(|(words, _)| words == "That is the last slide of the playlist.").unwrap();
+        let under = state.notices.cue.as_ref().and_then(|cue| cue.under).expect("placed when first drawn");
+        assert!(under.min.x > 1280.0 - crate::studio::RIGHT_WIDTH, "the readout is in the right column: {under:?}");
+        assert!(chip.min.y > under.max.y, "the cue is under it: {chip:?}");
+        assert_eq!(state.notices.entries().count(), 0, "a refusal is never an entry");
+        assert_eq!(state.notices.look(), crate::notices::Look::Quiet, "nor lights the button");
+        // Still there a moment later, gone after its 2.4 seconds.
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), 3.0);
+        assert!(texts.iter().any(|(words, _)| words.starts_with("That is the last slide")));
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), 3.6);
+        assert!(!texts.iter().any(|(words, _)| words.starts_with("That is the last slide")));
+        assert!(state.notices.cue.is_none());
+        // Refused just after a click: under what was clicked.
+        let mut time = 4.0;
+        let button = notices_button(&ctx);
+        click_at(&ctx, &show, &mut state, button.center(), &mut time);
+        state.notices.refuse("Two is already in Service.");
+        frame_events(&ctx, &show, &mut state, Vec::new(), time + 0.05);
+        assert_eq!(state.notices.cue.as_ref().and_then(|cue| cue.under), Some(button));
     }
 
     #[test]
