@@ -18,7 +18,7 @@ change, as everything else may (see the README).
   [the Bible](#the-bible) · [songs](#songs) · [changing a slide](#changing-a-slide) ·
   [playlists and libraries](#playlists-and-libraries) · [themes](#themes) ·
   [screens and settings](#screens-and-settings) ·
-  [undo, jobs and the menu bar](#undo-jobs-and-the-menu-bar) · [Remote Control](#remote-control)
+  [undo, jobs and the menu bar](#undo-jobs-and-the-menu-bar) · [notices](#notices) · [Remote Control](#remote-control)
 - [Song text](#song-text) · [song files edited outside the app](#song-files-edited-outside-the-app) ·
   [song packs](#song-packs)
 - [Recipes](#recipes) · [replies as JSON](#replies-as-json) ·
@@ -1048,6 +1048,17 @@ folder, reads the old script's from `old-canva-sync` there, and never touches th
 stand-in for Canva on this computer (plain http to 127.0.0.1 and a port, nothing else), and with
 it `SOFTPRESENTER_CANVA_BROWSER=fetch` has the app follow the stand-in's sign-in page itself
 instead of opening the browser.
+
+## Notices
+
+The list under the status button (≡) after the find box: information, trouble and questions.
+
+| Command | Does |
+|---|---|
+| `notices` | The entries, questions first, then newest first: each with its number, kind (`info`, `trouble`, `ask`), words, whether it is new, and a question's answers (`--json`: id, kind, text, time in seconds since 1970, seen, actions with id and label) |
+| `notices answer N ANSWER` | Answers question N with one of its own answers (`outside:reload` reads the file again, `outside:keep` keeps SoftPresenter's version), as its button does; the reply is what the list then says |
+| `notices seen` | Marks every entry seen, as closing the list does (a question stays new until answered) |
+| `notices clear` | Clear All: the list empties but for questions |
 
 ## Undo, jobs and the menu bar
 

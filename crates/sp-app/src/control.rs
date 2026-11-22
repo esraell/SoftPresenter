@@ -650,6 +650,7 @@ pub fn only_reads(args: &[String]) -> bool {
         "voxlive" => alone || (args.len() == 2 && word(1) == "screens"),
         "canva" => alone || (args.len() == 2 && word(1) == "status"),
         "remote" => alone || (args.len() == 2 && word(1) == "status"),
+        "notices" => alone,
         // `playlist [NAME]`, not `playlist add …`.
         "playlist" => alone || !PLAYLIST_CHANGES.contains(&word(1).as_str()),
         // `slide SONG N` and `slide item N SLIDE …`, not `slide text …`.
@@ -817,6 +818,7 @@ const COMMANDS: &[&str] = &[
     "version",
     "menu",
     "remote",
+    "notices",
 ];
 
 /// True when `word` starts a command.
@@ -1122,6 +1124,14 @@ Everything on the menu bar
   menu                         list the menu items
   menu ITEM                    choose one, as a click on it does
 
+Notices (the list under the status button)
+  notices                      the entries: information, trouble and questions, each with its
+                               number, time and, for a question, the answers it takes
+  notices answer N ANSWER      answer question N with one of its answers (outside:reload,
+                               outside:keep), as its button does
+  notices seen | notices clear mark every entry seen, as closing the list does | Clear All
+                               (a question stays until it is answered)
+
 Remote Control (a web page on the church's network that runs the show)
   remote [status]              on or off, the address to open, the certificate's fingerprint,
                                the pages connected and the devices remembered
@@ -1358,6 +1368,7 @@ impl crate::App {
             "redo" => self.ctl_undo(el, true),
             "menu" => self.ctl_menu(el, args),
             "remote" => self.ctl_remote(args),
+            "notices" => self.ctl_notices(args),
             other => Err(format!("SoftPresenter doesn't know the command \u{201c}{other}\u{201d}. See: sp help")),
         };
         if let Some(running) = self.running.as_ref() {
@@ -2039,6 +2050,68 @@ impl crate::App {
             _ => self.start_item_as(item, false, false),
         }
         Ok(Reply::done(self.live_words()))
+    }
+
+    /// `notices`, `notices seen`, `notices clear`, `notices answer N ANSWER`: the list under the
+    /// status button, as the window has it (`notices.rs`). An answer is one the question itself
+    /// offers, carried out as its button carries it out.
+    fn ctl_notices(&mut self, args: &[String]) -> Result<Reply, String> {
+        let usage = "notices | notices seen | notices clear | notices answer N ANSWER";
+        match args.get(1).map(|w| w.to_lowercase()).as_deref() {
+            None => {
+                let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
+                let entries = state.notices.to_vec();
+                let lines: Vec<String> = entries
+                    .iter()
+                    .map(|notice| {
+                        let kind = serde_json::to_value(notice.kind)
+                            .ok()
+                            .and_then(|k| k.as_str().map(str::to_owned))
+                            .unwrap_or_default();
+                        let answers: Vec<&str> = notice.actions.iter().map(|action| action.id.as_str()).collect();
+                        let answers = if answers.is_empty() {
+                            String::new()
+                        } else {
+                            format!("   (answer: {})", answers.join(", "))
+                        };
+                        format!(
+                            "{:>3}. [{kind}] {}{}{answers}",
+                            notice.id,
+                            notice.text,
+                            if notice.seen { "" } else { "  (new)" }
+                        )
+                    })
+                    .collect();
+                let text = if lines.is_empty() { "No notices.".to_owned() } else { lines.join("\n") };
+                Ok(Reply::with(text, serde_json::to_value(&entries).unwrap_or_default()))
+            }
+            Some("seen") => {
+                self.with_state(|state| state.notices.mark_seen());
+                Ok(Reply::done("Every notice is marked seen."))
+            }
+            Some("clear") => {
+                self.with_state(|state| state.notices.clear_all());
+                Ok(Reply::done("Cleared the notices (questions stay until they are answered)."))
+            }
+            Some("answer") => {
+                let (Some(id), Some(answer), None) =
+                    (args.get(2).and_then(|n| n.parse::<u64>().ok()), args.get(3), args.get(4))
+                else {
+                    return Err(usage.to_owned());
+                };
+                let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
+                let (what, reload) = state
+                    .notices
+                    .answer(id, answer)
+                    .ok_or_else(|| format!("Notice {id} isn't a question that takes the answer {answer}."))?;
+                let mark = state.notices.mark();
+                self.choose_outside(what, reload);
+                let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
+                let said = state.notices.said_since(mark).unwrap_or("Answered.").to_owned();
+                Ok(Reply::done(said))
+            }
+            Some(_) => Err(usage.to_owned()),
+        }
     }
 
     fn ctl_select(&mut self, typed: &str) -> Result<Reply, String> {

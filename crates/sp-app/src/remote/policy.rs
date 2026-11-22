@@ -87,6 +87,7 @@ pub const OPEN: &[&str] = &[
     "undo",
     "redo",
     "menu",
+    "notices",
 ];
 
 /// Commands never open to a page: Remote Control's own (switching it, its password).
@@ -119,6 +120,9 @@ pub const OPEN_SUBCOMMANDS: &[(&str, &[&str])] = &[
         ],
     ),
     ("media", &["", "show", "delete", "next", "previous", "prev", "back", "set"]),
+    // The page's status button mirrors the app's: the list, seen, Clear All, and a question's
+    // own answers (which the app checks against the question).
+    ("notices", &["", "seen", "clear", "answer"]),
 ];
 
 /// The sub-commands of those that are closed on purpose, with why (for the test that checks
@@ -281,6 +285,10 @@ mod tests {
             "settings set continuous=on",
             "media next",
             "voxlive show 1",
+            "notices",
+            "notices seen",
+            "notices clear",
+            "notices answer 3 outside:reload",
             "menu",
             "voxlive",
             "canva sync",
@@ -329,6 +337,7 @@ mod tests {
             "song frobnicate x",
             "media import x",
             "settings reset",
+            "notices forget 3",
             "remote off",
             "remote password",
             "install-cli",

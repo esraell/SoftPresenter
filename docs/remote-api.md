@@ -156,7 +156,7 @@ page last had. The answer is a snapshot, or (resuming) a change with exactly wha
      "you": {"client": 3, "device": "Safari on an iPad", "role": "control"},
      "parts": {"live": {…}, "playlist": {…}, "playlists": […], "library": {…}, "bin": {…},
                "media": {…}, "audio": {…}, "timers": […], "messages": […], "props": […],
-               "macros": […], "screens": {…}, "notices": {…}, "versions": {…}}}
+               "macros": […], "screens": {…}, "notices": […], "versions": {…}}}
 
 `now` is the server's clock in milliseconds since 1970 when it was sent ([times](#times)).
 `you` is who this page is ([roles](#roles-and-who-you-are)).
@@ -333,9 +333,13 @@ demand: `["playlist", "NAME"]`.
 **`screens`** — `{"screens": [ … as sp screens --json, each with "tone": "good|trouble" ],
 "audience_on", "stage_on", "identify"}`. `doing` is the screen's status in words.
 
-**`notices`** — `{"notice": "…", "toast": "…", "questions": [{"kind", "text", "actions":
-[{"label", "args"}]}]}`. A question's actions are commands: send `args` as a command to answer
-it (for a song changed outside the app: `song reload SONG --now` or `song keep SONG`).
+**`notices`** — the list under the app's status button, as the app keeps it (`notices.rs`):
+`[{"id", "kind": "info|trouble|ask", "text", "time" (seconds since 1970), "seen", "actions":
+[{"id", "label"}]}]`, questions first, then newest first. A page's own button mirrors it with
+the same commands as `sp`: `["notices", "answer", "ID", "ACTION_ID"]` answers a question with one
+of its own actions (`outside:reload`, `outside:keep`; any other is refused), `["notices",
+"seen"]` marks every entry seen (as closing the list does), `["notices", "clear"]` is Clear All
+(a question stays until answered).
 
 **`versions`** — `{"versions": [{"id", "name"}], "on": {"id", "keep", "waiting"}}`.
 
@@ -500,14 +504,14 @@ them.
 **7. Uploads.** `POST /api/upload?kind=media|song|bundle|bible|audio` with the file as the body
 (Origin checked; size capped per kind; streamed to a private staging folder, never to a path
 from the request), answered with a job number; progress and the result come as notices
-(`notices.jobs: [{"job", "kind", "name", "done", "of", "result"}]`). Each file goes through the
+(entries in the `notices` list, with the job's progress). Each file goes through the
 same importer, with the same limits, as a file dropped on the window (Bible files as the Bible
 importer reads untrusted files).
 
 **8. Undo for everything the page changes.** Every edit a page makes goes through the app's own
 Undo, app-wide (`["undo"]`, `["redo"]`, with what was undone in the reply): playlist items,
 songs and slides, renames, screens, settings, macro steps, and lastly the Edit page's objects.
-The `notices` part gains `undo: {"can": true, "what": "…"}, redo: {…}`.
+An `undo` part gives `{"can": true, "what": "…"}` and the same for redo.
 
 **9. Reliability, further.** A command may carry `"expect": VERSION`: refused if the state moved
 on since (for edits more than for Next).
