@@ -216,6 +216,18 @@ feature changes, this page changes in the same commit.
   or with Continuous off, nothing changes and a notice under the top bar says why. The menu
   bar's Next Slide and Previous Slide, and `sp next` and `sp previous`, do the same; a slide
   that goes on by itself goes on into the next song or passage only with Continuous on.
+- **A slide picked waits for Enter.** What the find box opens with Return has a slide picked
+  (a song's first slide as sung, or the slide whose words were found; a Bible passage's first
+  verse), and so does a passage looked up with Return in Scripture Lookup; in the Bible view ↑
+  and ↓ pick the verse before or after (from the verse on screen when none is picked). The slide
+  picked is ringed as slides picked out are (never in orange, which is only for what is on
+  screen), brought into view, and the keyboard is the show's again. Only Enter puts it on
+  screen; then Space, → and ← go on from it as from any slide. While one waits, Space, → and ←
+  go on with whatever is on screen (a song can be run to its end with the reading picked), and
+  with nothing on screen they put nothing on and say "Press Enter to put the picked verse on
+  screen." A click on a slide takes over from the pick, and the pick goes once a slide of its
+  passage or song goes on screen, or another song, passage or view is opened. In the Bible
+  view, Enter with nothing picked does nothing.
 - A playlist also holds **pictures and videos** from the media bin (the countdown video),
   **media playlists** (the announcement loop) and **placeholders** (a place kept for the sermon
   slides). A picture or video goes in from its right-click menu (Add to Playlist "Sunday"), by
@@ -345,7 +357,8 @@ feature changes, this page changes in the same commit.
   have what is typed, with its number and group, a slide picked being brought into view and
   ringed in ink for a moment, a Bible passage when a reference is typed (named and quoted in the language it was
   typed in), and verses that hold the words, from the Bibles in use written in the words'
-  alphabet, each saying which Bible it is from; Return opens what is picked without putting anything on the screens, and
+  alphabet, each saying which Bible it is from; Return opens what is picked without putting anything on the screens,
+  with its first slide or verse picked for Enter (see "A slide picked waits for Enter"), and
   Command-Return adds it to the playlist in front; it does not search playlists or media), a
   running timer's name and time just before the clock (in room nothing else uses, so nothing
   moves when it starts or stops), the clock (on a 12-hour or a
@@ -454,10 +467,13 @@ feature changes, this page changes in the same commit.
   verse found is named in its Bible's language and, when they come from more than one Bible,
   says which.
 - The slides follow what is typed in Scripture Lookup a moment after typing stops, without
-  waiting for Return (nothing goes on screen until a slide is clicked). While a book's name is
-  being typed, the books it could be are offered under the field (arrows pick, Tab or Return
-  takes one). Control-B, from anywhere, goes to the Bible page with the field's words selected,
-  ready for the next reference.
+  waiting for Return (nothing goes on screen until a slide is clicked, or picked and Enter
+  pressed). While a book's name is being typed, the books it could be are offered under the
+  field (arrows pick, Tab or Return takes one). Return looks the passage up, picks its first
+  verse and gives the keyboard back to the show, so Enter puts the verse on screen, Space and →
+  go on to the next, ← back, and ↑ and ↓ pick another without putting it on (a reference not
+  understood keeps the keyboard in the field instead). Command-2 or Command-B (Ctrl elsewhere),
+  from anywhere, goes back to the field with its words selected, ready for the next reference.
 - History lists the passages that were on screen, newest first, with the time (or the day,
   for earlier ones); one click brings a passage back. It is kept between starts, holds the last
   hundred, and Clear History empties it.

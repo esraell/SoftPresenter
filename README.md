@@ -193,10 +193,10 @@ status` instead of `sp status`.
 
 | Key | Does |
 |---|---|
-| Right arrow, Space | next slide; with another playlist item opened, start that item |
+| Right arrow, Space | next slide; with another playlist item opened, start that item (a slide picked waits for Enter) |
 | Left arrow | previous slide; with another playlist item opened, start that item |
-| Up / Down arrow | open the playlist item above / below |
-| Enter | put the open item on screen from its first slide |
+| Up / Down arrow | open the playlist item above / below; in the Bible view, pick the verse before / after |
+| Enter | put the picked slide on screen (the first verse or slide of what the find box or Scripture Lookup just opened, or the verse picked); otherwise the open item from its first slide |
 | Home / End | first / last slide of the song |
 | Escape (or F1) | clear everything, audio and announcements included |
 | F2 / F3 / F4 / F5 / F6 | clear the slide / the media / the props / the audio / the message |

@@ -42,6 +42,16 @@ pub enum Picking {
     Themes,
 }
 
+/// A slide picked to go on screen next by Enter (see [`HomeState::pick`]): where it is; in the
+/// Bible view, the passage it is in, as the page names what it shows; and the slide on screen
+/// when it was picked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Picked {
+    pub at: SlideRef,
+    pub passage: Option<String>,
+    pub live_then: Option<SlideRef>,
+}
+
 /// A drag across a list that picks out what it passes over. It starts on an item (or, in the
 /// media bin, between items); while the pointer stays in the list it picks out everything
 /// from where it started to where it is; once the pointer leaves the list, what was picked
@@ -275,6 +285,10 @@ pub struct HomeState {
     /// first have to be shown).
     pub spotlight: Option<(SlideRef, Option<f64>)>,
     pub spotlight_scroll: u8,
+    /// The slide picked to go on screen next by Enter (see `running` and [`HomeState::pick`]),
+    /// and for how many more frames the view may still be brought to it.
+    pub picked: Option<Picked>,
+    pub pick_scroll: u8,
     /// A notice that comes and goes under the top bar (see `say`), and when it was first shown.
     pub toast: Option<(String, Option<f64>)>,
     /// The numbers on the open tool tab's cards or the media strip's pictures, after
@@ -1334,6 +1348,8 @@ impl Default for HomeState {
             toast: None,
             spotlight: None,
             spotlight_scroll: 0,
+            picked: None,
+            pick_scroll: 0,
             numbers: None,
             key_tags: false,
             modifier_since: None,
@@ -1443,6 +1459,75 @@ impl HomeState {
     pub fn hidden_slots(&self) -> [usize; 3] {
         let [first, second] = self.bible.slots.unwrap_or([usize::MAX; 2]);
         [first, second, self.voxlive_slot.unwrap_or(usize::MAX)]
+    }
+
+    /// Whether the Bible view is open, or asked for this frame (the switch comes in the next).
+    fn bible_view_now(&self) -> bool {
+        match self.view_request {
+            Some(view) => view == 2,
+            None => self.bible_open,
+        }
+    }
+
+    /// The slide picked to go on screen next by Enter, while it still can be: in the view open
+    /// now (in the Bible view, in the passage shown; in the Show view, in the song chosen), there
+    /// and switched on, and not on screen. A slide of its passage or song gone on screen since
+    /// it was picked (by Enter, a click or a key) has taken its place.
+    pub fn pick(&self, show: &Show) -> Option<SlideRef> {
+        let picked = self.picked.as_ref()?;
+        let at = picked.at;
+        let editing = self.view_request.is_none() && self.edit_kind().is_some();
+        let in_view = !editing
+            && match &picked.passage {
+                Some(passage) => {
+                    self.bible_view_now()
+                        && *passage == self.bible.shown
+                        && self.bible.slots.map(|slots| slots[self.bible.showing]) == Some(at.presentation)
+                }
+                None => !self.bible_view_now() && show.selected() == at.presentation,
+            };
+        let there = show.presentations().get(at.presentation).and_then(|p| p.slide(at.slide));
+        let moved_on = show
+            .live()
+            .filter(|live| live.presentation == at.presentation)
+            .is_some_and(|live| Some(live) != picked.live_then);
+        (in_view && there.is_some_and(|(_, slide)| slide.enabled) && !moved_on && show.live() != Some(at)).then_some(at)
+    }
+
+    /// What the slide picked is, for the notice that says Enter puts it on screen.
+    pub fn picked_word(&self, show: &Show) -> Option<&'static str> {
+        self.pick(show)?;
+        Some(if self.picked.as_ref().is_some_and(|picked| picked.passage.is_some()) { "verse" } else { "slide" })
+    }
+
+    /// Picks a slide to go on screen next by Enter, and brings it into view: a verse of the
+    /// passage the Bible view shows (`bible`), or a slide of the song chosen.
+    pub fn set_pick(&mut self, show: &Show, at: SlideRef, bible: bool) {
+        let passage = bible.then(|| self.bible.shown.clone());
+        self.picked = Some(Picked { at, passage, live_then: show.live() });
+        self.pick_scroll = 12;
+    }
+
+    /// Picks the first verse of the passage the Bible view has just looked up, if it made one.
+    /// Returns whether it did.
+    pub fn pick_first_verse(&mut self, show: &Show) -> bool {
+        let made = self.bible.pending.as_ref().map(|(slot, _)| *slot);
+        let showing = self.bible.slots.map(|slots| slots[self.bible.showing]);
+        match made.filter(|slot| Some(*slot) == showing) {
+            Some(slot) => {
+                self.set_pick(show, SlideRef { presentation: slot, slide: 0 }, true);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Lets the slide picked go once it can no longer be put on screen (see [`HomeState::pick`]),
+    /// so it never comes back later to be put on by surprise.
+    fn let_go_of_old_pick(&mut self, show: &Show) {
+        if self.picked.is_some() && self.pick(show).is_none() {
+            self.picked = None;
+        }
     }
 
     /// Says something for a moment, under the top bar (that the playlist has ended, say). It
@@ -1674,6 +1759,15 @@ pub fn home_ui(
             // Themes are deleted in the Theme Editor, where the list is.
             Picking::Themes => {}
         }
+    }
+    // After the view asked for has opened, and before the find box can pick something new.
+    state.let_go_of_old_pick(show);
+    // Testing aid (see `find_return_words`): the words typed, once.
+    static FIND_TYPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if let Some(words) = find_return_words()
+        && !FIND_TYPED.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        state.library_search = Some((words.to_owned(), 0));
     }
     library_search(ui, show, state, &mut commands);
     // Edit › Stage edits the open layout as a draft, as the other kinds do.
@@ -3773,6 +3867,15 @@ fn search_songs(show: &Show, listed: impl Fn(usize) -> bool, query: &str) -> Vec
 /// How many songs the find box lists.
 const SONGS_LISTED: usize = 6;
 
+/// Testing aid: SOFTPRESENTER_FIND_RETURN=WORDS types the words in the find box when the window
+/// first draws, and presses Return once something is listed and the Bibles have answered, as an
+/// operator would after `/`; for a quiet copy, which takes no keyboard, in any run (not only a
+/// capture run), so `sp` can be tried on what it opens.
+fn find_return_words() -> Option<&'static str> {
+    static WORDS: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    WORDS.get_or_init(|| std::env::var("SOFTPRESENTER_FIND_RETURN").ok().filter(|words| !words.is_empty())).as_deref()
+}
+
 /// What the find box in the top bar finds for the words typed in it, listed under it: a Bible
 /// passage first, when the words are a reference; then songs (titles first, then lines of their
 /// words); then Bible verses that hold the words. Return, or a click, opens the one picked: a
@@ -3829,6 +3932,13 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             input.key_pressed(egui::Key::Escape),
         )
     });
+    // Testing aid (see `find_return_words`): Return, once, when something is listed.
+    static RETURNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let test_return = answered
+        && total > 0
+        && find_return_words().is_some()
+        && !RETURNED.swap(true, std::sync::atomic::Ordering::Relaxed);
+    let enter = enter || test_return;
     if up {
         *picked = picked.saturating_sub(1);
     }
@@ -3836,9 +3946,10 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         *picked += 1;
     }
     let picked = *picked;
-    // What a place in the list holds.
+    // What a place in the list holds: a song by its place and the slide found (and whether it
+    // was found by its title), or a Bible passage or verse.
     enum Pick<'a> {
-        Song(usize, usize),
+        Song(usize, usize, bool),
         Bible(&'a crate::find::BibleRow),
     }
     let at = |place: usize| -> Option<Pick<'_>> {
@@ -3846,8 +3957,8 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             return Some(Pick::Bible(row));
         }
         let place = place - passage.len();
-        if let Some((index, slide, _)) = songs.get(place) {
-            return Some(Pick::Song(*index, *slide));
+        if let Some((index, slide, line)) = songs.get(place) {
+            return Some(Pick::Song(*index, *slide, line.is_none()));
         }
         verses.get(place - songs.len()).map(Pick::Bible)
     };
@@ -3958,7 +4069,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     // by what to look up; and whether to add it to the playlist in front instead of opening it.
     enum Do {
         /// A song, and the slide found in it.
-        Song(usize, usize),
+        Song(usize, usize, bool),
         /// What to look up (as the first Bible names it), and the language the operator reads it in.
         Passage(String, Option<String>),
     }
@@ -3966,7 +4077,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     let chosen = chosen.and_then(|(place, add)| {
         Some((
             match at(place)? {
-                Pick::Song(index, slide) => Do::Song(index, slide),
+                Pick::Song(index, slide, by_title) => Do::Song(index, slide, by_title),
                 Pick::Bible(row) => Do::Passage(row.lookup.clone(), row.language.clone()),
             },
             add,
@@ -3981,20 +4092,29 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     }) == Some(true);
     let ended = chosen.is_some() || escape || pressed_outside;
     match chosen {
-        Some((Do::Song(index, _), true)) => {
+        Some((Do::Song(index, ..), true)) => {
             if let (Some(key), Some(song)) = (state.song_keys.get(index), show.presentations().get(index)) {
                 state.services.add(crate::service::Item::Song { key: key.clone(), title: song.title.clone() });
             }
         }
         // The song, with the view brought to the slide found, lit for a moment; nothing goes on
-        // the screens.
-        Some((Do::Song(index, slide), false)) => {
+        // the screens. The slide found by its words is picked, or for a song found by its title
+        // its first slide as sung: Enter puts it on screen.
+        Some((Do::Song(index, slide, by_title), false)) => {
             commands.push(Command::Select(index));
             state.editing = None;
             state.bible_open = false;
             state.reflow = None;
             state.spotlight = Some((SlideRef { presentation: index, slide }, None));
             state.spotlight_scroll = 12;
+            let first = |song: &sp_model::Presentation| {
+                song.order().into_iter().find(|at| song.slide(*at).is_some_and(|(_, one)| one.enabled))
+            };
+            let slide =
+                if by_title { show.presentations().get(index).and_then(|song| first(song)) } else { Some(slide) };
+            if let Some(slide) = slide {
+                state.set_pick(show, SlideRef { presentation: index, slide }, false);
+            }
         }
         // Kept in the playlist with the translations and choices the Bible view has now, as its
         // own Add does.
@@ -4004,7 +4124,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         }
         // The Bible view opens on the passage, named in the language the operator found it in,
         // which the session goes on in. It is made in the place that is not on screen, so the
-        // screens keep what they show.
+        // screens keep what they show. Its first verse is picked: Enter puts it on screen.
         Some((Do::Passage(lookup, language), false)) => {
             state.view_request = Some(2);
             state.reflow = None;
@@ -4012,6 +4132,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 state.bible.language = language;
             }
             state.bible.open(lookup, show.live().map(|at| at.presentation));
+            state.pick_first_verse(show);
         }
         None => {}
     }
@@ -4122,6 +4243,8 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
                     let show_keys = [
                         ("Show", "Next slide", "→ or Space"),
                         ("Show", "Previous slide", "←"),
+                        ("Show", "Put the slide picked on screen", "Enter"),
+                        ("Bible", "Pick the verse before / after", "↑ / ↓"),
                         ("Show", "First / last slide", "Home / End"),
                         ("Show", "Clear All", "Esc or F1"),
                         ("Show", "Clear Slide", "F2"),
@@ -5104,6 +5227,33 @@ fn target_menu(
     });
 }
 
+/// ↑ and ↓ in the Bible view pick the verse before or after (see `running::move_pick`); they
+/// never put it on screen, Enter does. Not while something is typed, under a menu, the Options
+/// or the list of keys, or with a search's verses listed in place of the slides.
+fn bible_pick_keys(ui: &egui::Ui, show: &Show, state: &mut HomeState) {
+    let free = !ui.ctx().text_edit_focused()
+        && state.library_search.is_none()
+        && state.edit_kind().is_none()
+        && !state.key_sheet
+        && !state.alert_open()
+        && !state.bible.options.open
+        && !state.bible.options.manage_open
+        && state.bible.found.is_empty()
+        && !egui::Popup::is_any_open(ui.ctx());
+    let (up, down) = ui.input(|input| (input.key_pressed(egui::Key::ArrowUp), input.key_pressed(egui::Key::ArrowDown)));
+    if !free || !(up || down) {
+        return;
+    }
+    let Some(slot) = state.bible.slots.map(|slots| slots[state.bible.showing]) else { return };
+    let count = show.presentations().get(slot).map_or(0, |passage| passage.slide_count());
+    let picked = state.pick(show).filter(|at| at.presentation == slot).map(|at| at.slide);
+    let live = show.live().filter(|at| at.presentation == slot).map(|at| at.slide);
+    match crate::running::move_pick(count, picked, live, down) {
+        Ok(slide) => state.set_pick(show, SlideRef { presentation: slot, slide }, true),
+        Err(words) => state.say(words),
+    }
+}
+
 /// The Bible page, in place of the slide grid: a field for a reference, a search field, a row
 /// for each translation saying where its verse and its reference go on the slide, the book,
 /// chapter and verse lists, and the passage's slides.
@@ -5115,6 +5265,7 @@ fn bible_area(
     commands: &mut Vec<Command>,
 ) {
     let live = show.live().map(|at| at.presentation);
+    bible_pick_keys(ui, show, state);
     egui::CentralPanel::default().frame(panel_frame(CANVAS, 0)).show(ui, |ui| {
         egui::Panel::bottom("bible bar").resizable(false).frame(panel_frame(BAR, 6)).show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -5185,21 +5336,25 @@ fn bible_area(
                             .desired_width(lookup_width),
                         |query| book_suggestions(query.text, &language),
                     );
-                let lookup = completion
-                    .text_edit
-                    .response
-                    .response
-                    .clone()
-                    .on_hover_text("Type a reference, such as John 3:16 (Control-B comes here)");
+                let lookup = completion.text_edit.response.response.clone().on_hover_text(format!(
+                    "Type a reference, such as John 3:16. Return picks its first verse, Enter puts it on screen, \
+                         \u{2191} and \u{2193} pick another ({} comes here)",
+                    crate::keys::hint_key("2")
+                ));
                 let now = ui.input(|input| input.time);
                 if lookup.changed() && completion.accepted.is_none() {
                     state.bible.typed_at = Some(now);
                 }
                 if entered(&lookup, ui) {
                     state.bible.look_up(live);
-                    // The field keeps the keyboard with its words selected, ready for the next one.
-                    lookup.request_focus();
-                    select_all_text(ui.ctx(), lookup_id, &state.bible.lookup);
+                    // Its first verse is picked and the keyboard goes back to the show, as from
+                    // the find box: Enter puts the verse on screen, ↑ and ↓ pick another. A
+                    // reference not understood keeps the keyboard, its words selected, to be put
+                    // right.
+                    if !state.pick_first_verse(show) {
+                        lookup.request_focus();
+                        select_all_text(ui.ctx(), lookup_id, &state.bible.lookup);
+                    }
                 } else if let Some(at) = state.bible.typed_at {
                     // A moment after typing stops, the slides show what is typed. Nothing goes on
                     // screen until a slide is clicked.
@@ -5561,10 +5716,11 @@ fn bible_results(
             ui.add_space((room.y * 0.38).max(20.0));
             ui.vertical_centered(|ui| {
                 ui.set_max_width((room.x - 48.0).clamp(160.0, 440.0));
+                let back = format!("{} goes to Scripture Lookup from anywhere.", crate::keys::hint_key("2"));
                 for line in [
                     "Type a reference such as John 3:16-18 in Scripture Lookup.",
-                    "Its verses appear here as slides as you type; click one to show it.",
-                    "Control-B goes to Scripture Lookup from anywhere.",
+                    "Its verses appear here as slides as you type. Return picks the first, Enter puts it on screen.",
+                    back.as_str(),
                 ] {
                     ui.add(egui::Label::new(egui::RichText::new(line).color(DIM)).wrap().halign(Align::Center));
                 }
@@ -7247,6 +7403,325 @@ mod tests {
         commands.extend(frame_commands(&ctx, &show, &mut state, vec![], 0.2));
         assert!(state.bible_open && !ctx.text_edit_focused(), "the Bible view opens, and the keys are free");
         assert!(commands.is_empty(), "nothing is put on the screens: {commands:?}");
+    }
+
+    /// Two songs with three slides each, then the Bible view's two places, as the app lays the
+    /// show out; the first song's first slide on screen, as during a service.
+    fn service_with_bible_places() -> Show {
+        let words = |first: &str| format!("[Verse 1]\n{first}\n\n[Verse 2]\nSecond lines\n\n[Chorus]\nThird lines\n");
+        let mut all = vec![
+            Arc::new(parse_song_text("Alpha", &words("Morning lines"))),
+            Arc::new(parse_song_text("Beta", &words("Evening lines"))),
+        ];
+        for _ in 0..2 {
+            all.push(Arc::new(sp_model::Presentation {
+                id: sp_model::Uuid::new_v4(),
+                title: "Bible".to_owned(),
+                groups: Vec::new(),
+                ..(*all[0]).clone()
+            }));
+        }
+        let mut show = Show::new(all);
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        show
+    }
+
+    /// What the app does after drawing a frame: carries out its commands, and puts a passage
+    /// just looked up into its place (and on screen, if a verse was double-clicked).
+    fn as_the_app_does(show: &mut Show, state: &mut HomeState, commands: Vec<Command>) {
+        for command in commands {
+            show.apply(command);
+        }
+        if let Some((slot, passage)) = state.bible.pending.take() {
+            show.replace_presentation(slot, Arc::new(passage));
+            if let Some(slide) = state.bible.go_live.take() {
+                show.apply(Command::GoTo(SlideRef { presentation: slot, slide }));
+            }
+        }
+    }
+
+    /// One frame of the window with these events, then what the app does after it. Returns
+    /// the commands the frame gave.
+    fn frame_then_app(
+        ctx: &egui::Context,
+        show: &mut Show,
+        state: &mut HomeState,
+        events: Vec<Event>,
+        time: f64,
+    ) -> Vec<Command> {
+        let commands = frame_commands(ctx, show, state, events, time);
+        as_the_app_does(show, state, commands.clone());
+        commands
+    }
+
+    /// Whether any of these commands changes what is on the slide or media layer.
+    fn goes_on_screen(commands: &[Command]) -> bool {
+        commands.iter().any(|command| {
+            matches!(
+                command,
+                Command::GoTo(_)
+                    | Command::GoToStep { .. }
+                    | Command::Next
+                    | Command::Previous
+                    | Command::First
+                    | Command::Last
+                    | Command::ShowMedia(_)
+            )
+        })
+    }
+
+    /// Enter, as the app carries it out once its key is free (see `enter_key` in `main.rs`).
+    fn press_enter(show: &mut Show, state: &HomeState) {
+        let listed = if state.bible_open {
+            crate::running::Listed::Bible
+        } else if state.playlist_open {
+            crate::running::Listed::Playlist(state.services.chosen)
+        } else {
+            crate::running::Listed::Library
+        };
+        if let Some(crate::running::Do::Show(command)) = crate::running::enter(&[], listed, state.pick(show)) {
+            show.apply(command);
+        }
+    }
+
+    /// Space (`forward`) or ←, on the Bible page or with a library listed, as the app carries it
+    /// out (see `step_keys` in `main.rs`). Returns what was said instead, if anything.
+    fn press_step(show: &mut Show, state: &HomeState, forward: bool) -> Option<String> {
+        let picked = state.picked_word(show);
+        let showing = show.live().is_some();
+        let command = if forward { Command::Next } else { Command::Previous };
+        let decided = if state.bible_open {
+            crate::running::held_for_enter(picked, showing).unwrap_or(crate::running::Do::Show(command))
+        } else {
+            let here =
+                if show.cursor().is_some() { crate::running::Here::Elsewhere } else { crate::running::Here::Nothing };
+            crate::running::step(
+                &crate::running::Situation {
+                    stops: &[],
+                    titles: &[],
+                    open: None,
+                    here,
+                    at_end: show.cursor().is_some() && show.upcoming().is_none(),
+                    at_start: show.cursor().is_some() && show.preceding().is_none(),
+                    continuous: false,
+                    picked,
+                    showing,
+                },
+                forward,
+            )
+        };
+        match decided {
+            crate::running::Do::Show(command) => {
+                show.apply(command);
+                None
+            }
+            crate::running::Do::Say(words) => Some(words),
+            crate::running::Do::Start { .. } => panic!("nothing in a playlist is started here"),
+        }
+    }
+
+    #[test]
+    fn slash_a_reference_and_return_pick_its_first_verse_and_enter_then_space_and_left_run_it() {
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState::default();
+        state.bible.slots = Some([2, 3]);
+        let key =
+            |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        // `/` opens the find box empty (the app does this before the window sees the key).
+        state.library_search = Some((String::new(), 0));
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        frame_then_app(&ctx, &mut show, &mut state, vec![Event::Text("jn 3:16-18".to_owned())], 0.1);
+        assert!(ctx.text_edit_focused(), "typed in the find box");
+        // Return on the passage, the first thing listed.
+        let mut commands = frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::Enter)], 0.2);
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![], 0.3));
+        assert!(!goes_on_screen(&commands), "Return puts nothing on screen: {commands:?}");
+        assert!(state.bible.go_live.is_none());
+        assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "the song stays on screen");
+        assert!(state.bible_open, "the Bible view is open");
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).expect("a place for passages");
+        assert_eq!(show.presentations()[slot].slide_count(), 3, "John 3:16-18, a slide a verse");
+        assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 0 }), "its first verse is picked");
+        assert!(state.library_search.is_none() && !ctx.text_edit_focused(), "the search has ended");
+        assert!(ctx.memory(|memory| memory.focused().is_none()), "the keyboard is back with the window");
+        // Enter puts the picked verse on screen; the pick has done its work.
+        press_enter(&mut show, &state);
+        assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 0 }));
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.4);
+        assert!(state.picked.is_none(), "let go once on screen");
+        // Space goes on to the next verse, ← back.
+        assert_eq!(press_step(&mut show, &state, true), None);
+        assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 1 }));
+        assert_eq!(press_step(&mut show, &state, false), None);
+        assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 0 }));
+    }
+
+    #[test]
+    fn while_a_verse_is_picked_space_runs_the_song_on_and_with_nothing_on_screen_says_to_press_enter() {
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { library_search: Some(("jn 3:16-18".to_owned(), 0)), ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        let enter = vec![Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }];
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        frame_then_app(&ctx, &mut show, &mut state, enter, 0.1);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.2);
+        let picked = state.pick(&show).expect("a verse picked");
+        // The song on screen goes on with Space; the verse waits for Enter.
+        assert_eq!(press_step(&mut show, &state, true), None);
+        assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 1 }));
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.3);
+        assert_eq!(state.pick(&show), Some(picked), "still picked");
+        // Cleared: Space and ← put nothing on (not the verse, not the song), and say so.
+        show.apply(Command::ClearAll);
+        let said = press_step(&mut show, &state, true);
+        assert_eq!(said.as_deref(), Some("Press Enter to put the picked verse on screen."));
+        assert_eq!(press_step(&mut show, &state, false), said);
+        assert_eq!(show.live(), None);
+        press_enter(&mut show, &state);
+        assert_eq!(show.live(), Some(picked));
+    }
+
+    #[test]
+    fn up_and_down_in_the_bible_view_move_the_pick_and_put_nothing_on_screen() {
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { library_search: Some(("jn 3:16-18".to_owned(), 0)), ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        let key =
+            |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::Enter)], 0.1);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.2);
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+        let verse = |slide: usize| Some(SlideRef { presentation: slot, slide });
+        let mut commands = Vec::new();
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.3));
+        assert_eq!(state.pick(&show), verse(1));
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.4));
+        assert_eq!(state.pick(&show), verse(2));
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.5));
+        assert_eq!(state.pick(&show), verse(2), "the last verse stays picked");
+        assert_eq!(state.toast.as_ref().map(|(words, _)| words.as_str()), Some("That is the last verse."));
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowUp)], 0.6));
+        assert_eq!(state.pick(&show), verse(1));
+        assert!(!goes_on_screen(&commands), "{commands:?}");
+        assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "the song stays on screen");
+        // Enter puts the verse picked on; then ↓ picks the verse after it, still not on screen.
+        press_enter(&mut show, &state);
+        assert_eq!(show.live(), verse(1));
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.7);
+        frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.8);
+        assert_eq!((state.pick(&show), show.live()), (verse(2), verse(1)));
+    }
+
+    #[test]
+    fn return_in_scripture_lookup_picks_the_first_verse_and_gives_the_keyboard_back() {
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { bible_open: true, ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        state.bible.focus_lookup = true;
+        let key =
+            |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        frame_then_app(&ctx, &mut show, &mut state, vec![Event::Text("jn 3:16-18".to_owned())], 0.1);
+        assert!(ctx.text_edit_focused(), "typed in Scripture Lookup");
+        let mut commands = frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::Enter)], 0.2);
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![], 0.3));
+        assert!(!goes_on_screen(&commands), "{commands:?}");
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+        assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 0 }));
+        assert!(ctx.memory(|memory| memory.focused().is_none()), "the keyboard is back with the window");
+        // A reference not understood keeps the keyboard, to be put right.
+        state.bible.focus_lookup = true;
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.4);
+        frame_then_app(&ctx, &mut show, &mut state, vec![Event::Text("nosuchbook 9".to_owned())], 0.5);
+        frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::Enter)], 0.6);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.7);
+        assert!(ctx.text_edit_focused(), "still in Scripture Lookup");
+    }
+
+    #[test]
+    fn a_song_found_by_its_title_or_its_words_is_picked_and_enter_then_space_and_left_run_it() {
+        let ctx = egui::Context::default();
+        let key =
+            |key: Key| Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        // By its title: its first slide; by a line of its words: that slide.
+        for (typed, picked) in [("beta", 0), ("evening lines", 0), ("third lines", 2)] {
+            let mut show = service_with_bible_places();
+            let mut state = HomeState { library_search: Some((typed.to_owned(), 0)), ..HomeState::default() };
+            state.bible.slots = Some([2, 3]);
+            state.song_keys = vec!["alpha".to_owned(), "beta".to_owned()];
+            frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+            // "third lines" is in both songs: down to Beta's.
+            if typed == "third lines" {
+                frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.05);
+            }
+            let mut commands = frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::Enter)], 0.1);
+            commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![], 0.2));
+            assert!(!goes_on_screen(&commands), "{typed}: {commands:?}");
+            assert_eq!(show.selected(), 1, "{typed}: Beta is open");
+            assert_eq!(state.pick(&show), Some(SlideRef { presentation: 1, slide: picked }), "{typed}");
+            assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "{typed}: Alpha stays on screen");
+            assert!(ctx.memory(|memory| memory.focused().is_none()), "{typed}: the keyboard is back");
+            press_enter(&mut show, &state);
+            assert_eq!(show.live(), Some(SlideRef { presentation: 1, slide: picked }), "{typed}");
+            frame_then_app(&ctx, &mut show, &mut state, vec![], 0.3);
+            if picked < 2 {
+                assert_eq!(press_step(&mut show, &state, true), None);
+                assert_eq!(show.live(), Some(SlideRef { presentation: 1, slide: picked + 1 }), "{typed}: Space");
+            }
+            assert_eq!(press_step(&mut show, &state, false), None);
+            let back = if picked < 2 { picked } else { 1 };
+            assert_eq!(show.live(), Some(SlideRef { presentation: 1, slide: back }), "{typed}: \u{2190}");
+        }
+    }
+
+    #[test]
+    fn a_click_on_a_slide_puts_it_on_screen_as_before_and_the_pick_goes() {
+        let ctx = egui::Context::default();
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { library_search: Some(("jn 3:16-18".to_owned(), 0)), ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        let enter = Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        frame_then_app(&ctx, &mut show, &mut state, vec![enter], 0.1);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.2);
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+        assert!(state.pick(&show).is_some());
+        // The second verse, which is in view.
+        let second = SlideRef { presentation: slot, slide: 1 };
+        let at =
+            state.slide_rects.iter().find(|(here, _)| *here == second).map(|(_, rect)| rect.center()).expect("drawn");
+        let button = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut commands = Vec::new();
+        for (time, events) in
+            [(0.3, vec![Event::PointerMoved(at)]), (0.4, vec![button(true)]), (0.5, vec![button(false)])]
+        {
+            commands.extend(frame_then_app(&ctx, &mut show, &mut state, events, time));
+        }
+        assert_eq!(commands, vec![Command::GoTo(second)], "the slide clicked goes on screen");
+        assert_eq!(show.live(), Some(second));
+        assert!(state.picked.is_none(), "the pick goes");
     }
 
     #[test]

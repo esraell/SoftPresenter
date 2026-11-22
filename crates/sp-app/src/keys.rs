@@ -99,6 +99,11 @@ pub fn media_key() -> String {
     with_shift("M")
 }
 
+/// A key with the modifier, in words: "Command-2" on a Mac, "Ctrl+2" elsewhere.
+pub fn hint_key(key: &str) -> String {
+    if cfg!(target_os = "macos") { format!("Command-{key}") } else { format!("Ctrl+{key}") }
+}
+
 /// A key said in a tooltip: "Show (Command-S)" on a Mac, "Show (Ctrl+S)" elsewhere.
 pub fn hint(what: &str, key: &str, shift: bool) -> String {
     let mac = cfg!(target_os = "macos");
@@ -355,9 +360,12 @@ pub fn every_key() -> Vec<(&'static str, Vec<Row>)> {
                 (one("\u{2190}"), "Previous slide"),
                 (
                     vec!["\u{2191}".to_owned(), "\u{2193}".to_owned()],
-                    "The item above or below; in Bible, the verse before or after",
+                    "The item above or below; in Bible, pick the verse before or after",
                 ),
-                (one("Enter"), "The open item goes on screen, from its first slide"),
+                (
+                    one("Enter"),
+                    "The slide picked goes on screen (found with / or looked up, or picked in Bible); else the open item, from its first slide",
+                ),
                 (vec!["Home".to_owned(), "End".to_owned()], "First or last slide of the song"),
                 (one("A letter"), "Jump to a group (C for the chorus), or a slide\u{2019}s own hot key"),
             ],

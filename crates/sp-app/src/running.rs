@@ -8,10 +8,16 @@
 //! into the last slide of the item before. At either end of the playlist, or with Continuous
 //! off, nothing changes and a notice says why.
 //!
+//! A slide can be picked to go on screen next: what the find box opens (a passage's first verse,
+//! or a song's first slide or the slide found), the passage Scripture Lookup looks up, and in the
+//! Bible view the verse ↑ or ↓ moves to. Only Enter puts a picked slide on screen. While one
+//! waits, Next and Previous go on with what is on screen (a song runs on to its end while the
+//! reading waits), and with nothing on screen they say so and start nothing.
+//!
 //! Nothing here knows about the window: the app says what the playlist holds and where the
 //! show is, and carries out what comes back.
 
-use sp_engine::Command;
+use sp_engine::{Command, SlideRef};
 
 /// One item of the playlist in front, as the keys see it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +72,10 @@ pub struct Situation<'a> {
     pub at_end: bool,
     pub at_start: bool,
     pub continuous: bool,
+    /// A slide picked and waiting for Enter, by what it is (`verse` or `slide`).
+    pub picked: Option<&'static str>,
+    /// A slide is on screen now (not cleared).
+    pub showing: bool,
 }
 
 /// What to do.
@@ -80,13 +90,26 @@ pub enum Do {
     Say(String),
 }
 
+/// What Next or Previous does while a slide picked waits for Enter (`picked` says what it is):
+/// with nothing on screen they put nothing on (not the picked slide, nor the song chosen) and
+/// say how; with something on screen, `None`: they go on with it.
+pub fn held_for_enter(picked: Option<&str>, showing: bool) -> Option<Do> {
+    let what = picked.filter(|_| !showing)?;
+    Some(Do::Say(format!("Press Enter to put the picked {what} on screen.")))
+}
+
 /// What Next (`forward`) or Previous does.
 pub fn step(situation: &Situation, forward: bool) -> Do {
     let command = if forward { Command::Next } else { Command::Previous };
+    if let Some(said) = held_for_enter(situation.picked, situation.showing) {
+        return said;
+    }
     let stops = situation.stops;
     let startable = |item: Option<usize>| item.filter(|at| stops.get(*at).is_some_and(|stop| stop.startable()));
+    // A slide picked waits for Enter: the open item is not started over it.
+    let open = situation.open.filter(|_| situation.picked.is_none());
     // The open item is not where the show is: it is started instead.
-    match (situation.here, startable(situation.open)) {
+    match (situation.here, startable(open)) {
         (Here::Item(here), Some(open)) if here != open => return Do::Start { item: open, last: false },
         (Here::Nothing, Some(open)) => return Do::Start { item: open, last: false },
         _ => {}
@@ -133,10 +156,48 @@ fn next_stop(stops: &[Stop], here: usize, forward: bool) -> Option<usize> {
     }
 }
 
-/// What Enter does: the open item goes on screen from its first slide.
-pub fn enter(stops: &[Stop], open: Option<usize>) -> Option<Do> {
-    let open = open?;
-    stops.get(open).filter(|stop| stop.startable()).map(|_| Do::Start { item: open, last: false })
+/// Where Enter is pressed, as it matters to what it does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Listed {
+    /// The Show view, with the playlist in front listed, and its open item.
+    Playlist(Option<usize>),
+    /// The Show view, with a library listed.
+    Library,
+    /// The Bible view.
+    Bible,
+}
+
+/// What Enter does: a slide picked goes on screen. Otherwise, in the Show view, the open item
+/// goes on screen from its first slide (with a library listed, the song chosen); in the Bible
+/// view nothing does until a verse is picked.
+pub fn enter(stops: &[Stop], listed: Listed, picked: Option<SlideRef>) -> Option<Do> {
+    if let Some(slide) = picked {
+        return Some(Do::Show(Command::GoTo(slide)));
+    }
+    match listed {
+        Listed::Playlist(open) => {
+            let open = open?;
+            stops.get(open).filter(|stop| stop.startable()).map(|_| Do::Start { item: open, last: false })
+        }
+        Listed::Library => Some(Do::Show(Command::First)),
+        Listed::Bible => None,
+    }
+}
+
+/// Where ↑ (`down` false) or ↓ moves the pick in the Bible view's passage of `count` slides: to
+/// the verse before or after the one picked, or with none picked the one on screen (`live`, by
+/// its place in the passage), or with neither to the first (↓) or the last (↑). At either end
+/// it stays, and says so.
+pub fn move_pick(count: usize, picked: Option<usize>, live: Option<usize>, down: bool) -> Result<usize, &'static str> {
+    if count == 0 {
+        return Err("Look a passage up first.");
+    }
+    match picked.or(live).filter(|at| *at < count) {
+        Some(at) if down => (at + 1 < count).then_some(at + 1).ok_or("That is the last verse."),
+        Some(at) => at.checked_sub(1).ok_or("That is the first verse."),
+        None if down => Ok(0),
+        None => Ok(count - 1),
+    }
 }
 
 /// What ↑ or ↓ says when there is no item above or below to open.
@@ -175,7 +236,7 @@ mod tests {
         at_end: bool,
         at_start: bool,
     ) -> Situation<'a> {
-        Situation { stops, titles, open, here, at_end, at_start, continuous: true }
+        Situation { stops, titles, open, here, at_end, at_start, continuous: true, picked: None, showing: true }
     }
 
     #[test]
@@ -295,9 +356,69 @@ mod tests {
     #[test]
     fn enter_puts_the_open_item_on_screen() {
         let (stops, _) = service();
-        assert_eq!(enter(&stops, Some(3)), Some(Do::Start { item: 3, last: false }));
-        assert_eq!(enter(&stops, Some(0)), Some(Do::Start { item: 0, last: false }), "a video is shown");
-        assert_eq!(enter(&stops, Some(6)), None, "a placeholder has nothing");
-        assert_eq!(enter(&stops, None), None);
+        let playlist = |open| enter(&stops, Listed::Playlist(open), None);
+        assert_eq!(playlist(Some(3)), Some(Do::Start { item: 3, last: false }));
+        assert_eq!(playlist(Some(0)), Some(Do::Start { item: 0, last: false }), "a video is shown");
+        assert_eq!(playlist(Some(6)), None, "a placeholder has nothing");
+        assert_eq!(playlist(None), None);
+        assert_eq!(enter(&stops, Listed::Library, None), Some(Do::Show(Command::First)), "the song chosen");
+        assert_eq!(enter(&stops, Listed::Bible, None), None, "in the Bible view, nothing until a verse is picked");
+    }
+
+    #[test]
+    fn enter_puts_a_picked_slide_on_screen_wherever_it_is_pressed() {
+        let (stops, _) = service();
+        let picked = SlideRef { presentation: 9, slide: 3 };
+        for listed in [Listed::Playlist(Some(3)), Listed::Playlist(None), Listed::Library, Listed::Bible] {
+            assert_eq!(enter(&stops, listed, Some(picked)), Some(Do::Show(Command::GoTo(picked))), "{listed:?}");
+        }
+    }
+
+    #[test]
+    fn while_a_slide_is_picked_next_and_previous_go_on_with_what_is_on_screen() {
+        // Alpha on screen, Beta opened from the find box with a slide of it picked: the keys
+        // run Alpha on, and leave Beta for Enter.
+        let playlist = service();
+        let mut s = situation(&playlist, Here::Item(2), Some(3), false, false);
+        s.picked = Some("slide");
+        assert_eq!(step(&s, true), Do::Show(Command::Next));
+        assert_eq!(step(&s, false), Do::Show(Command::Previous));
+        s.at_end = true;
+        assert_eq!(step(&s, true), Do::Start { item: 3, last: false }, "Continuous goes on into the next song");
+        // A song from a library on screen: it goes on as ever.
+        let mut s = situation(&playlist, Here::Elsewhere, None, false, false);
+        s.picked = Some("verse");
+        assert_eq!(step(&s, true), Do::Show(Command::Next));
+    }
+
+    #[test]
+    fn while_a_slide_is_picked_with_nothing_on_screen_next_puts_nothing_on() {
+        let said = Do::Say("Press Enter to put the picked verse on screen.".to_owned());
+        let playlist = service();
+        for (here, open) in [(Here::Nothing, Some(3)), (Here::Nothing, None), (Here::Item(2), Some(3))] {
+            let mut s = situation(&playlist, here, open, false, false);
+            (s.picked, s.showing) = (Some("verse"), false);
+            assert_eq!(step(&s, true), said, "{here:?}");
+            assert_eq!(step(&s, false), said, "{here:?}");
+        }
+        assert_eq!(held_for_enter(Some("verse"), false), Some(said));
+        assert_eq!(held_for_enter(Some("verse"), true), None, "something on screen goes on");
+        assert_eq!(held_for_enter(None, false), None, "nothing picked: as ever");
+    }
+
+    #[test]
+    fn up_and_down_move_the_pick_through_the_passage_and_stay_at_its_ends() {
+        // Five verses. From the one picked.
+        assert_eq!(move_pick(5, Some(1), None, true), Ok(2));
+        assert_eq!(move_pick(5, Some(1), None, false), Ok(0));
+        assert_eq!(move_pick(5, Some(4), Some(0), true), Err("That is the last verse."));
+        assert_eq!(move_pick(5, Some(0), None, false), Err("That is the first verse."));
+        // None picked: from the verse on screen.
+        assert_eq!(move_pick(5, None, Some(2), true), Ok(3));
+        assert_eq!(move_pick(5, None, Some(2), false), Ok(1));
+        // Neither: the first, or the last.
+        assert_eq!(move_pick(5, None, None, true), Ok(0));
+        assert_eq!(move_pick(5, None, None, false), Ok(4));
+        assert!(move_pick(0, None, None, true).is_err(), "no passage");
     }
 }

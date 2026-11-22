@@ -707,6 +707,18 @@ fn find_key_is_free(state: &home::HomeState, ctx: &egui::Context) -> bool {
         && !egui::Popup::is_any_open(ctx)
 }
 
+/// Whether Enter is free to run the show (in the Show view and the Bible view alike): no
+/// control has the keyboard, the Edit view is not open, and no sheet, question, menu or Options
+/// is open over the window.
+fn enter_key_is_free(state: &home::HomeState, ctx: &egui::Context) -> bool {
+    !ctx.text_edit_focused()
+        && ctx.memory(|memory| memory.focused().is_none())
+        && state.edit_kind().is_none()
+        && !escape_closes_something(state, ctx)
+        && state.new_song_sheet.is_none()
+        && !state.alert_open()
+}
+
 /// True for the key that opens the find box in the bar along the top: `/`.
 fn opens_find(key: &Key) -> bool {
     matches!(key, Key::Character(typed) if typed == "/")
@@ -2661,31 +2673,40 @@ impl App {
     }
 
     /// Next (`forward`) or Previous, from a key, the menu or the command line: the keys act on
-    /// the open item (see `running`). Returns what was said instead, if anything was.
+    /// the open item, and leave a slide picked for Enter (see `running`). Returns what was said
+    /// instead, if anything was.
     fn step_keys(&mut self, forward: bool) -> Option<String> {
         let command = if forward { Command::Next } else { Command::Previous };
         let running = self.running.as_ref()?;
         let state = &running.home_state;
-        // On the Bible page and in the editors the show steps as it always has.
-        if state.bible_open || state.edit_kind().is_some() {
-            self.apply(vec![command]);
-            return None;
-        }
-        let open = if state.playlist_open { state.services.chosen } else { None };
-        let continuous = state.continuous;
-        let (stops, titles) = self.playlist_stops();
-        let here = self.cursor_item(&stops);
-        let builds_back = self.show.live().is_some() && self.show.build_step() > 0;
-        let situation = running::Situation {
-            stops: &stops,
-            titles: &titles,
-            open,
-            here,
-            at_end: self.show.cursor().is_some() && self.show.upcoming().is_none() && !self.show.builds_left(),
-            at_start: self.show.cursor().is_some() && self.show.preceding().is_none() && !builds_back,
-            continuous,
+        let picked = state.picked_word(&self.show);
+        let showing = self.show.live().is_some();
+        // In the editors the show steps as it always has; on the Bible page too, unless a verse
+        // picked waits for Enter with nothing on screen.
+        let decided = if state.edit_kind().is_some() {
+            running::Do::Show(command)
+        } else if state.bible_open {
+            running::held_for_enter(picked, showing).unwrap_or(running::Do::Show(command))
+        } else {
+            let open = if state.playlist_open { state.services.chosen } else { None };
+            let continuous = state.continuous;
+            let (stops, titles) = self.playlist_stops();
+            let here = self.cursor_item(&stops);
+            let builds_back = self.show.live().is_some() && self.show.build_step() > 0;
+            let situation = running::Situation {
+                stops: &stops,
+                titles: &titles,
+                open,
+                here,
+                at_end: self.show.cursor().is_some() && self.show.upcoming().is_none() && !self.show.builds_left(),
+                at_start: self.show.cursor().is_some() && self.show.preceding().is_none() && !builds_back,
+                continuous,
+                picked,
+                showing,
+            };
+            running::step(&situation, forward)
         };
-        match running::step(&situation, forward) {
+        match decided {
             running::Do::Show(command) => self.apply(vec![command]),
             running::Do::Start { item, last } => self.start_item(item, last),
             running::Do::Say(words) => {
@@ -2699,17 +2720,27 @@ impl App {
         None
     }
 
-    /// Enter: the open item of the playlist goes on screen from its first slide; with a library
-    /// listed, the song chosen.
+    /// Enter: the slide picked goes on screen; otherwise the open item of the playlist from its
+    /// first slide, with a library listed the song chosen, and in the Bible view nothing (see
+    /// `running::enter`).
     fn enter_key(&mut self) {
-        if self.running.as_ref().is_some_and(|r| !r.home_state.playlist_open) {
-            self.apply(vec![Command::First]);
-            return;
-        }
-        let Some(open) = self.running.as_ref().and_then(|r| r.home_state.services.chosen) else { return };
-        let (stops, _) = self.playlist_stops();
-        if let Some(running::Do::Start { item, last }) = running::enter(&stops, Some(open)) {
-            self.start_item(item, last);
+        let Some(state) = self.running.as_ref().map(|r| &r.home_state) else { return };
+        let picked = state.pick(&self.show);
+        let listed = if state.bible_open {
+            running::Listed::Bible
+        } else if state.playlist_open {
+            running::Listed::Playlist(state.services.chosen)
+        } else {
+            running::Listed::Library
+        };
+        let stops = match listed {
+            running::Listed::Playlist(Some(_)) if picked.is_none() => self.playlist_stops().0,
+            _ => Vec::new(),
+        };
+        match running::enter(&stops, listed, picked) {
+            Some(running::Do::Show(command)) => self.apply(vec![command]),
+            Some(running::Do::Start { item, last }) => self.start_item(item, last),
+            Some(running::Do::Say(_)) | None => {}
         }
     }
 
@@ -7920,19 +7951,14 @@ impl ApplicationHandler<AppEvent> for App {
                 return;
             }
         }
-        // Enter puts the open item of the playlist on screen from its first slide, when no
-        // control has the keyboard and nothing is open over the window.
+        // Enter puts the slide picked on screen, or the open item of the playlist from its first
+        // slide, when no control has the keyboard and nothing is open over the window. Not when
+        // held down, so a Return held in the find box can't go on to put what it opened on screen.
         if let WindowEvent::KeyboardInput { event: key, .. } = &event
             && key.state == ElementState::Pressed
             && matches!(key.logical_key, Key::Named(NamedKey::Enter))
             && !key.repeat
-            && !running.egui_ctx.text_edit_focused()
-            && running.egui_ctx.memory(|memory| memory.focused().is_none())
-            && running.home_state.edit_kind().is_none()
-            && !running.home_state.bible_open
-            && !escape_closes_something(&running.home_state, &running.egui_ctx)
-            && running.home_state.new_song_sheet.is_none()
-            && !running.home_state.alert_open()
+            && enter_key_is_free(&running.home_state, &running.egui_ctx)
             && !self.held.super_key()
             && !self.held.control_key()
             && !self.held.alt_key()
@@ -8619,6 +8645,37 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn enter_is_free_in_the_bible_view_too_but_not_while_typing_editing_or_under_the_key_list() {
+        let ctx = egui::Context::default();
+        let frame = |focus: bool| {
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                let mut words = String::new();
+                let field = ui.text_edit_singleline(&mut words);
+                if focus {
+                    field.request_focus();
+                }
+            })
+            .drop_without_applying_deltas();
+        };
+        let mut state = home::HomeState { bible_open: true, ..home::HomeState::default() };
+        frame(false);
+        assert!(enter_key_is_free(&state, &ctx), "the Bible view, nothing with the keyboard");
+        state.bible_open = false;
+        assert!(enter_key_is_free(&state, &ctx), "the Show view");
+        frame(true);
+        frame(true);
+        assert!(!enter_key_is_free(&state, &ctx), "a field has the keyboard (the find box, Scripture Lookup)");
+        ctx.memory_mut(|memory| memory.stop_text_input());
+        frame(false);
+        assert!(enter_key_is_free(&state, &ctx));
+        state.stage_editor_open = true;
+        assert!(!enter_key_is_free(&state, &ctx), "the Edit view");
+        state.stage_editor_open = false;
+        state.key_sheet = true;
+        assert!(!enter_key_is_free(&state, &ctx), "the list of keys");
+    }
 
     fn args(list: &[&str]) -> Result<Option<Options>, String> {
         parse_args(list.iter().map(|s| (*s).to_owned()))

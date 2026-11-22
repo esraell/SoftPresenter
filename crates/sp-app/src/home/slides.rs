@@ -866,6 +866,24 @@ pub fn slide_scroll(
                 ui.ctx().request_repaint();
             }
         }
+        // A slide just picked (by the find box, Scripture Lookup, ↑ or ↓) is brought into sight
+        // as the slide on screen is, once its song or passage is shown.
+        if state.pick_scroll > 0 {
+            state.pick_scroll -= 1;
+            let rect = state
+                .pick(show)
+                .and_then(|picked| state.slide_rects.iter().find(|(at, _)| *at == picked).map(|(_, rect)| *rect));
+            match rect {
+                Some(rect) => {
+                    let range = egui::Rangef::new(rect.min.y - origin.y, rect.max.y - origin.y);
+                    if let Some(to) = follow_offset(viewport.min.y, viewport.height(), range) {
+                        ui.scroll_with_delta_animation(vec2(0.0, viewport.min.y - to), ScrollAnimation::none());
+                    }
+                    state.pick_scroll = 0;
+                }
+                None => ui.ctx().request_repaint(),
+            }
+        }
         let live_now = show.live().map(|live| (live, show.position().map(|(step, _)| step)));
         // The menu of the slide on screen asked for (modifier-O): its slide is brought into view
         // too, without making its item the open one again.
@@ -1109,6 +1127,8 @@ fn draw_slides(
         }
     }
     let live = deck.live_slide(show, state);
+    // The slide picked to go on screen next by Enter: drawn picked out, never orange.
+    let cue = state.pick(show);
     // The tiles in the order they stand: as written, or in the order sung.
     let order = entries(song);
     let arranged = song.active_arrangement().is_some();
@@ -1205,6 +1225,10 @@ fn draw_slides(
                         state.pending_edit = Some((here, slide_with_media(slide, Some(item.id))));
                     }
                 }
+                // A click on a slide takes over from one picked by the keys.
+                if response.clicked() {
+                    state.picked = None;
+                }
                 if response.clicked() && (mods.command || mods.shift) {
                     // Picked out without going on screen, to change several at once.
                     state.picking = Picking::Slides;
@@ -1235,6 +1259,7 @@ fn draw_slides(
             // A playlist's Bible passage: a click puts the slide on screen, and that is all.
             None => {
                 if response.clicked() {
+                    state.picked = None;
                     state.selected_slide = None;
                     state.picked_slides.clear();
                     state.picking = Picking::Nothing;
@@ -1251,7 +1276,11 @@ fn draw_slides(
             response.clone().on_hover_text(format!("{} (key {key})", group.name));
         }
         let is_live = live_at == Some(at);
-        let picked = here.is_some_and(|here| state.selected_slide == Some(here) || state.picked_slides.contains(&here));
+        let picked = here.is_some_and(|here| {
+            state.selected_slide == Some(here)
+                || state.picked_slides.contains(&here)
+                || (cue == Some(here) && !entry.again)
+        });
         // The slide that was on screen before it was cleared: Next goes on from it.
         let was_live = show.live().is_none() && here.is_some() && show.cursor() == here;
         // Numbered in the order sung, under an arrangement.
