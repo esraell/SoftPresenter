@@ -40,6 +40,39 @@ pub enum Picking {
     Slides,
     /// A theme in the Theme Editor's list.
     Themes,
+    /// Items of the playlist in front, picked out with Command or Shift (see [`ItemPicks`]).
+    /// Delete doesn't take them out: their menu's Remove from Playlist does.
+    Items,
+}
+
+/// The items of the playlist in front picked out, as songs are in a library: by their places,
+/// with the one a Shift-click counts from, and the playlist as it was when they were picked.
+/// When the playlist changes (another comes to the front, or items are added, moved or taken
+/// out) the places no longer name the same items, and they are let go.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ItemPicks {
+    pub places: Vec<usize>,
+    pub anchor: Option<usize>,
+    of: Option<(usize, Vec<crate::service::Item>)>,
+}
+
+impl ItemPicks {
+    /// Lets the picks go if the playlist in front is not the one they were made in, as it was.
+    pub fn check(&mut self, services: &crate::service::Services) {
+        if self.of.as_ref().is_some_and(|(at, items)| *at != services.current || *items != services.front().items) {
+            *self = ItemPicks::default();
+        }
+    }
+
+    /// Notes that the picks are of the playlist in front as it is now.
+    pub fn made_in(&mut self, services: &crate::service::Services) {
+        self.of = Some((services.current, services.front().items.clone()));
+    }
+
+    /// Whether several are picked, so that they are lit together and move together.
+    pub fn several(&self) -> bool {
+        self.places.len() > 1
+    }
 }
 
 /// A slide picked to go on screen next by Enter (see [`HomeState::pick`]): where it is; in the
@@ -264,6 +297,8 @@ pub struct HomeState {
     pub song_anchor: Option<usize>,
     pub picked_media: Vec<usize>,
     pub media_anchor: Option<usize>,
+    /// The items of the playlist in front picked out (several with Command or Shift).
+    pub item_picks: ItemPicks,
     pub picking: Picking,
     /// A drag across a list picking things out, while it lasts.
     pub sweep: Option<Sweep>,
@@ -1309,6 +1344,7 @@ impl Default for HomeState {
             song_anchor: None,
             picked_media: Vec::new(),
             media_anchor: None,
+            item_picks: ItemPicks::default(),
             picking: Picking::Nothing,
             sweep: None,
             slides_jump_to: None,
@@ -1626,7 +1662,7 @@ pub fn matches_filter(title: &str, filter: &str) -> bool {
 /// True when this frame has a press of `key` with Command (and Shift, exactly when `shift`).
 /// It is judged by the key press itself, not by the keys held now, so a shortcut chosen from
 /// the menu bar, which arrives with no key held, counts as well.
-fn command_key(input: &egui::InputState, key: egui::Key, shift: bool) -> bool {
+pub fn command_key(input: &egui::InputState, key: egui::Key, shift: bool) -> bool {
     input.events.iter().any(|event| {
         matches!(event, egui::Event::Key { key: pressed_key, pressed: true, modifiers, .. }
             if *pressed_key == key && modifiers.command && modifiers.shift == shift)
@@ -1751,8 +1787,9 @@ pub fn home_ui(
                 let from_bible = |at: SlideRef| state.app_made(at.presentation);
                 state.confirm_delete_slides = state.selected_slide.filter(|at| !from_bible(*at)).into_iter().collect();
             }
-            // Themes are deleted in the Theme Editor, where the list is.
-            Picking::Themes => {}
+            // Themes are deleted in the Theme Editor, where the list is; playlist items are
+            // taken out with their menu's Remove from Playlist, never deleted as songs.
+            Picking::Themes | Picking::Items => {}
         }
     }
     // After the view asked for has opened, and before the find box can pick something new.
@@ -8722,6 +8759,19 @@ mod tests {
         time: f64,
         commands: &mut Vec<Command>,
     ) -> Drawn {
+        step_holding(ctx, show, state, events, Modifiers::NONE, time, commands)
+    }
+
+    /// `found_step`, with these modifier keys held.
+    fn step_holding(
+        ctx: &egui::Context,
+        show: &mut Show,
+        state: &mut HomeState,
+        events: Vec<Event>,
+        modifiers: Modifiers,
+        time: f64,
+        commands: &mut Vec<Command>,
+    ) -> Drawn {
         fn walk(shape: &egui::Shape, into: &mut Vec<(String, Rect)>) {
             match shape {
                 egui::Shape::Text(text) => into.push((text.galley.text().to_owned(), text.visual_bounding_rect())),
@@ -8729,6 +8779,7 @@ mod tests {
                 _ => {}
             }
         }
+        let events = std::iter::once(Event::ModifiersChanged(modifiers)).chain(events).collect();
         let raw = RawInput { time: Some(time), events, ..input(None) };
         let mut asked = Vec::new();
         let output = ctx.run_ui(raw, |ui| {
@@ -8894,6 +8945,157 @@ mod tests {
         let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
         assert_eq!(titles, ["Alpha", "Gamma", "Beta"]);
         assert!(state.library_search.is_none());
+        nothing_went_live(&show, &commands);
+    }
+
+    /// Five songs, Alpha to Epsilon, all in the playlist in front, which is listed; and the
+    /// Bible view's two places; nothing on screen yet but Alpha's first slide.
+    fn picking_setting() -> (Show, HomeState) {
+        use crate::service::Item;
+        let titles = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon"];
+        let mut all: Vec<Arc<sp_model::Presentation>> =
+            titles.iter().map(|title| Arc::new(parse_song_text(title, "Words written for a test\n"))).collect();
+        for _ in 0..2 {
+            all.push(Arc::new(sp_model::Presentation {
+                id: sp_model::Uuid::new_v4(),
+                title: "Bible".to_owned(),
+                groups: Vec::new(),
+                ..(*all[0]).clone()
+            }));
+        }
+        let mut show = Show::new(all);
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        let mut state = HomeState { playlist_open: true, ..HomeState::default() };
+        state.bible.slots = Some([5, 6]);
+        state.song_keys = titles.iter().map(|title| title.to_lowercase()).collect();
+        state.song_keys.extend(["bible-a".to_owned(), "bible-b".to_owned()]);
+        for title in titles {
+            state.services.add(Item::Song { key: title.to_lowercase(), title: title.to_owned() });
+        }
+        state.services.chosen = None;
+        (show, state)
+    }
+
+    /// Clicks in the window with these modifier keys held, as a hand does: moved there, pressed
+    /// and let go. Returns what the frame after drew.
+    fn click_holding(
+        ctx: &egui::Context,
+        (show, state): (&mut Show, &mut HomeState),
+        at: egui::Pos2,
+        modifiers: Modifiers,
+        time: &mut f64,
+        commands: &mut Vec<Command>,
+    ) -> Drawn {
+        let button =
+            |pressed| Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers };
+        let mut drawn = None;
+        for events in [vec![Event::PointerMoved(at)], vec![button(true)], vec![button(false)], vec![]] {
+            *time += 0.1;
+            drawn = Some(step_holding(ctx, show, state, events, modifiers, *time, commands));
+        }
+        drawn.expect("frames ran")
+    }
+
+    #[test]
+    fn playlist_items_are_picked_as_in_the_finder() {
+        let (mut show, mut state) = picking_setting();
+        let (ctx, mut commands, mut time) = (egui::Context::default(), Vec::new(), 0.0);
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        let row = |title: &str| drawn.left(title).center();
+        let (command, shift) = (Modifiers::COMMAND, Modifiers::SHIFT);
+        let mut click = |state: &mut HomeState, title: &str, mods: Modifiers| {
+            click_holding(&ctx, (&mut show, state), row(title), mods, &mut time, &mut commands);
+        };
+        // A click picks one, and opens it.
+        click(&mut state, "Beta", Modifiers::NONE);
+        assert_eq!((state.item_picks.places.clone(), state.services.chosen), (vec![1], Some(1)));
+        // Shift-click: every row from Beta to the one clicked, down and then up.
+        click(&mut state, "Delta", shift);
+        assert_eq!(state.item_picks.places, [1, 2, 3]);
+        click(&mut state, "Alpha", shift);
+        assert_eq!(state.item_picks.places, [0, 1], "from Beta up to Alpha, in place of the run down");
+        assert_eq!(state.services.chosen, Some(1), "Shift only picks: Beta stays open");
+        // Command-click adds one or takes it away, and counts from there after.
+        click(&mut state, "Delta", command);
+        assert_eq!(state.item_picks.places, [0, 1, 3]);
+        click(&mut state, "Alpha", command);
+        assert_eq!(state.item_picks.places, [1, 3]);
+        click(&mut state, "Delta", command);
+        click(&mut state, "Delta", command);
+        assert_eq!(state.item_picks.anchor, Some(3));
+        click(&mut state, "Epsilon", shift);
+        assert_eq!(state.item_picks.places, [3, 4], "Shift after Command counts from the row Command-clicked");
+        // Command-A picks them all; a plain click on one picked lets the others go and opens it.
+        time += 0.1;
+        frame_commands(&ctx, &show, &mut state, pressed(Key::A, Modifiers::COMMAND), time);
+        assert_eq!(state.item_picks.places, [0, 1, 2, 3, 4]);
+        click_holding(&ctx, (&mut show, &mut state), row("Gamma"), Modifiers::NONE, &mut time, &mut commands);
+        assert_eq!((state.item_picks.places.clone(), state.services.chosen), (vec![2], Some(2)));
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn several_playlist_items_picked_move_together_in_their_order() {
+        use crate::service::Item;
+        let (mut show, mut state) = picking_setting();
+        let (ctx, mut commands, mut time) = (egui::Context::default(), Vec::new(), 0.0);
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        let (gamma, alpha, epsilon) =
+            (drawn.left("Gamma").center(), drawn.left("Alpha").center(), drawn.left("Epsilon"));
+        // Gamma, then Alpha, picked with Command: dragged by Gamma below Epsilon, both go, Alpha first.
+        click_holding(&ctx, (&mut show, &mut state), gamma, Modifiers::COMMAND, &mut time, &mut commands);
+        click_holding(&ctx, (&mut show, &mut state), alpha, Modifiers::COMMAND, &mut time, &mut commands);
+        assert_eq!(state.item_picks.places, [2, 0]);
+        let press = |at: egui::Pos2, pressed: bool| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let below = pos2(epsilon.center().x, epsilon.center().y + 10.0);
+        let frames = [
+            vec![Event::PointerMoved(gamma)],
+            vec![press(gamma, true)],
+            vec![Event::PointerMoved(gamma + vec2(0.0, 12.0))],
+            vec![Event::PointerMoved(below)],
+            vec![press(below, false)],
+            vec![],
+        ];
+        for events in frames {
+            time += 0.1;
+            found_step(&ctx, &mut show, &mut state, events, time, &mut commands);
+        }
+        let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
+        assert_eq!(titles, ["Beta", "Delta", "Epsilon", "Alpha", "Gamma"]);
+        assert_eq!(state.item_picks.places, [4, 3], "still picked out where they went");
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn songs_in_a_library_are_picked_as_in_the_finder() {
+        let (mut show, mut state) = picking_setting();
+        state.playlist_open = false;
+        let (ctx, mut commands, mut time) = (egui::Context::default(), Vec::new(), 0.0);
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        let row = |title: &str| drawn.left(title).center();
+        let mut click = |state: &mut HomeState, title: &str, mods: Modifiers| {
+            click_holding(&ctx, (&mut show, state), row(title), mods, &mut time, &mut commands);
+        };
+        click(&mut state, "Beta", Modifiers::NONE);
+        click(&mut state, "Delta", Modifiers::SHIFT);
+        assert_eq!(state.picked_songs, [1, 2, 3]);
+        click(&mut state, "Alpha", Modifiers::SHIFT);
+        assert_eq!(state.picked_songs, [0, 1]);
+        click(&mut state, "Epsilon", Modifiers::COMMAND);
+        click(&mut state, "Alpha", Modifiers::COMMAND);
+        assert_eq!(state.picked_songs, [1, 4]);
+        click(&mut state, "Gamma", Modifiers::SHIFT);
+        assert_eq!(state.picked_songs, [0, 1, 2], "counting from Alpha, Command-clicked last");
+        time += 0.1;
+        frame_commands(&ctx, &show, &mut state, pressed(Key::A, Modifiers::COMMAND), time);
+        assert_eq!(state.picked_songs.len(), 5, "Command-A picks every song listed");
+        click_holding(&ctx, (&mut show, &mut state), row("Delta"), Modifiers::NONE, &mut time, &mut commands);
+        assert_eq!((state.picked_songs.clone(), show.selected()), (vec![3], 3));
         nothing_went_live(&show, &commands);
     }
 

@@ -61,7 +61,7 @@ person:
 | `SOFTPRESENTER_CAPTURE_*` | Capture a particular view or window instead (`_BIBLE`, `_EDITOR` (`=props` for the props), `_THEMES`, `_SETTINGS`, `_STAGE_LAYOUTS`, `_OUTPUT`…) |
 | `SOFTPRESENTER_GO_LIVE=1` | Start with the first slide on screen and the first media item behind it |
 | `SOFTPRESENTER_OPEN_ITEM=<n>` | Open the nth item of the playlist in front, as a click does |
-| `SOFTPRESENTER_PICK=songs:0,2` | Pick out songs or media items by place, as Command-clicks do |
+| `SOFTPRESENTER_PICK=songs:0,2` | Pick out songs, media items (`media:0,1`) or the playlist's items (`items:1,3`) by place, as Command-clicks do |
 | `SOFTPRESENTER_DROP=<files>` | Drop files on the window (several separated as in PATH), as dragging from the Finder does |
 | `SOFTPRESENTER_DROP_AT=X,Y` | Where in the window (points) the dropped files land |
 | `SOFTPRESENTER_HOVER=<files>` | Files held over the window, so the place they would land lights up |

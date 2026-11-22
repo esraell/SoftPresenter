@@ -245,11 +245,19 @@ feature changes, this page changes in the same commit.
   on it. One whose picture, video or media playlist has gone is kept and shown faint. A playlist
   holding any of these is saved as version 3 of the services file; one without is still written
   as version 2, which older SoftPresenters open.
-- Songs, slides and media items are picked out as in the Finder: Command-click adds or takes
-  away one, Shift-click picks a run, and dragging across the song list, or a box across the
-  slides or between media items, picks everything it touches (picking a slide never puts it on
-  screen). Picked songs dragged out of the list go into a playlist or library together. Delete
-  asks first, then deletes what is picked in the list last clicked; picked slides go in one
+- Songs, a playlist's items, slides and media items are picked out as in the Finder (Ctrl in
+  place of Command on other computers): a click picks one (and opens it); Command-click adds or
+  takes away one and is counted from after; Shift-click picks every row from the one last
+  clicked to it, in place of what was picked, and Shift-↑ or Shift-↓ go on picking in the left
+  column; Command-A picks everything the left column lists, with nothing being typed; dragging
+  across the song list, or a box across the slides or between media items, picks everything it
+  touches (picking a slide never puts it on screen). Picked rows have the lighter grey of what
+  is chosen, never orange; the open item keeps its heavier name. A plain click on one of several
+  picked lets the others go when the button comes up, so they can still be dragged together.
+  Picked songs dragged out of the list go into a playlist or library together, in the list's
+  order; several playlist items dragged move together, in their order, to the one ink line, and
+  stay picked. Delete asks first, then deletes what is picked in the list last clicked (songs,
+  media items or slides; playlist items are taken out from their menu); picked slides go in one
   step that Undo brings back.
 - Pictures and videos dropped on the window, or added with the media bin's +, go into the media
   bin, are kept between runs, and can be shown behind the words; Delete, or Delete… on an item's

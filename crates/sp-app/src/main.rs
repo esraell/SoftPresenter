@@ -6555,8 +6555,9 @@ impl App {
             {
                 running.home_state.announcement_request = Some(Some(song));
             }
-            // Testing aid: pick out songs or media items by their places ("songs:0,2" or
-            // "media:0,1"), as Command-clicks on them do; then the Delete menu item (or key) asks.
+            // Testing aid: pick out songs, media items or the playlist in front's items by their
+            // places ("songs:0,2", "media:0,1" or "items:1,3"), as Command-clicks on them do; then
+            // the Delete menu item (or key) asks.
             if running.frames == 2
                 && let Ok(pick) = std::env::var("SOFTPRESENTER_PICK")
                 && let Some((list, places)) = pick.split_once(':')
@@ -6566,6 +6567,11 @@ impl App {
                 if list == "media" {
                     state.picked_media = places;
                     state.picking = home::Picking::Media;
+                } else if list == "items" {
+                    state.item_picks.anchor = places.last().copied();
+                    state.item_picks.places = places;
+                    state.item_picks.made_in(&state.services);
+                    state.picking = home::Picking::Items;
                 } else {
                     state.picked_songs = places;
                     state.picking = home::Picking::Songs;

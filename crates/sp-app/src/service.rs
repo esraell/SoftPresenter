@@ -243,6 +243,35 @@ impl Services {
         true
     }
 
+    /// Moves several items of the service in front together to a place in the list (`slot`,
+    /// how many items are above it now), keeping the order they are in. The open item stays
+    /// open, wherever it goes. Returns the place each item is at now, by its place before (so
+    /// what was picked out can be found again), or `None` when nothing moved.
+    pub fn move_items(&mut self, places: &[usize], slot: usize) -> Option<Vec<usize>> {
+        let count = self.front().items.len();
+        let mut moving: Vec<usize> = places.iter().copied().filter(|at| *at < count).collect();
+        moving.sort_unstable();
+        moving.dedup();
+        if moving.is_empty() {
+            return None;
+        }
+        let staying: Vec<usize> = (0..count).filter(|at| moving.binary_search(at).is_err()).collect();
+        // Where they go among the items left: after those that were above the slot.
+        let to = staying.iter().filter(|at| **at < slot).count();
+        let order: Vec<usize> = staying[..to].iter().chain(&moving).chain(&staying[to..]).copied().collect();
+        if order.iter().copied().eq(0..count) {
+            return None;
+        }
+        let items = std::mem::take(&mut self.front_mut().items);
+        self.front_mut().items = order.iter().map(|at| items[*at].clone()).collect();
+        let mut now = vec![0; count];
+        for (place, was) in order.iter().enumerate() {
+            now[*was] = place;
+        }
+        self.chosen = self.chosen.and_then(|at| now.get(at).copied());
+        Some(now)
+    }
+
     /// Renames a header or a placeholder in the service shown.
     pub fn rename_header(&mut self, index: usize, name: &str) {
         if let Some(Item::Header { name: have } | Item::Placeholder { name: have }) =
@@ -732,6 +761,35 @@ mod tests {
         assert!(!services.move_item(0, 0));
         let again = Services::from_json(&services.to_json()).unwrap();
         assert_eq!(again.front().items[0], Item::Header { name: "Sermon".to_owned() });
+    }
+
+    #[test]
+    fn several_items_move_together_in_their_order() {
+        let mut services = Services::default();
+        for key in ["a", "b", "c", "d", "e"] {
+            services.add(song(key));
+        }
+        let titles = |services: &Services| -> Vec<String> {
+            services.front().items.iter().map(|item| item.title().to_owned()).collect()
+        };
+        services.chosen = Some(3);
+        // B and D (picked in either order) to the top: in their order, D still open.
+        let now = services.move_items(&[3, 1], 0).expect("moved");
+        assert_eq!(titles(&services), ["B", "D", "A", "C", "E"]);
+        assert_eq!(now, [2, 0, 3, 1, 4]);
+        assert_eq!(services.chosen, Some(1));
+        // A and E to between C and the end... after C: the slot counts the items above it.
+        services.move_items(&[2, 4], 4).expect("moved");
+        assert_eq!(titles(&services), ["B", "D", "C", "A", "E"]);
+        // Down past themselves: B and D to the end.
+        services.move_items(&[0, 1], 5).expect("moved");
+        assert_eq!(titles(&services), ["C", "A", "E", "B", "D"]);
+        // Dropped where they are, or nothing to move: nothing changes.
+        services.changed = false;
+        assert_eq!(services.move_items(&[3, 4], 4), None);
+        assert_eq!(services.move_items(&[3, 4], 5), None);
+        assert_eq!(services.move_items(&[9], 0), None);
+        assert!(!services.changed);
     }
 
     #[test]

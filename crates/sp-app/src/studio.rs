@@ -1299,6 +1299,9 @@ struct ListRow<'a> {
     tag: Option<&'a str>,
     /// The open item or song: the lighter row, its title heavier.
     chosen: bool,
+    /// One of several picked out: the lighter row of what is chosen (never orange), the title
+    /// as it was.
+    lit: bool,
     /// On the screens now: its number is orange and the tally dot shows.
     live: bool,
     /// What it names has gone, or it is a place kept for something to come.
@@ -1321,7 +1324,7 @@ fn list_row(ui: &mut egui::Ui, look: &ListRow) -> (egui::Response, Rect) {
         return (response, more);
     }
     let painter = ui.painter();
-    if look.chosen {
+    if look.chosen || look.lit {
         painter.rect_filled(row, RADIUS, CARD);
     } else if response.hovered() {
         painter.rect_filled(row, RADIUS, ROW_HOVER);
@@ -2275,6 +2278,11 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
             scroll_to = Some(next);
         }
     }
+    // Command-A (Ctrl elsewhere) picks every song listed, with nothing being typed.
+    if list_keys_work(ui, state) && ui.input(|input| crate::home::command_key(input, egui::Key::A, false)) {
+        state.picked_songs = shown.clone();
+        state.picking = crate::home::Picking::Songs;
+    }
     // Only the rows in view are laid out, so thousands of songs cost no more to draw than a few.
     let mut scroll = egui::ScrollArea::vertical().id_salt("song list").auto_shrink([false, false]);
     // The song gone to by ↑ or ↓ is kept in sight.
@@ -2605,7 +2613,9 @@ fn sweep_rows(
         let picked = if state.picked_songs.is_empty() || which != crate::home::Picking::Songs {
             sweep.from.into_iter().collect()
         } else {
-            state.picked_songs.clone()
+            // In the list's order, whatever order they were picked in.
+            let picked: std::collections::HashSet<usize> = state.picked_songs.iter().copied().collect();
+            order.iter().copied().filter(|at| picked.contains(at)).collect()
         };
         carry(picked);
         sweep.carried = true;
@@ -2992,6 +3002,16 @@ pub fn carry_out_item_ask(show: &Show, state: &mut HomeState, commands: &mut Vec
     }
 }
 
+/// A drag starting on a playlist row: on one of several picked out it moves them all; on any
+/// other row it picks that row alone, as the Finder does.
+fn picked_to_move(state: &mut HomeState, index: usize) {
+    if !state.item_picks.places.contains(&index) {
+        state.item_picks.places = vec![index];
+        state.item_picks.anchor = Some(index);
+        state.item_picks.made_in(&state.services);
+    }
+}
+
 /// Whether ↑ and ↓ go through the song list or the playlist: in the Show view, with nothing
 /// being typed and the song search closed.
 fn list_keys_work(ui: &egui::Ui, state: &HomeState) -> bool {
@@ -3052,6 +3072,9 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         .and_then(|at| show.presentations().get(at))
         .map(|passage| passage.title.clone());
     let filtering = !state.filter.trim().is_empty();
+    // Items picked out let go once the playlist has changed under them.
+    state.item_picks.check(&state.services);
+    let mods = ui.input(|input| input.modifiers);
 
     // What a click on a row asks for, carried out after the list is drawn.
     let mut ask: Option<ItemAsk> = None;
@@ -3062,6 +3085,8 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     let mut row_items: Vec<usize> = Vec::new();
     let mut dragging = None;
     let mut dropped = None;
+    // The row clicked, picked out once every row is known (a Shift-click picks a run of them).
+    let mut clicked = None;
     let mut renamed: Option<Option<(usize, String)>> = None;
     let mut rename_started = std::mem::take(&mut state.rename_started);
     // The row of the item on screen is brought into view when another item goes on screen.
@@ -3110,6 +3135,9 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 34.5), Sense::click_and_drag());
                 rows.push(row);
                 row_items.push(index);
+                if state.item_picks.several() && state.item_picks.places.contains(&index) {
+                    ui.painter().rect_filled(row, RADIUS, CARD);
+                }
                 let at = pos2(row.min.x + 10.0, row.min.y + 21.75);
                 match state.renaming_header.as_mut().filter(|(at, _)| *at == index) {
                     Some((_, typed)) => {
@@ -3122,6 +3150,9 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                         cap(ui, at, Align2::LEFT_CENTER, name, TEXT_DIM);
                     }
                 }
+                if response.drag_started() && !filtering {
+                    picked_to_move(state, index);
+                }
                 if response.dragged() && !filtering {
                     dragging = Some(index);
                 }
@@ -3131,8 +3162,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 if response.double_clicked() {
                     ask = Some(ItemAsk::Rename(index));
                 } else if response.clicked() {
-                    // A header opens nothing: the slides go to it.
-                    state.slides_jump_to = Some(index);
+                    clicked = Some(index);
                 }
                 response.context_menu(|ui| menu(ui, state, &mut ask, &mut asks));
                 continue;
@@ -3172,6 +3202,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 number: Some(number),
                 title: if renaming { "" } else { item.title() },
                 chosen,
+                lit: state.item_picks.several() && state.item_picks.places.contains(&index),
                 live,
                 faint: missing,
                 icon,
@@ -3189,6 +3220,9 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             }
             rows.push(response.rect);
             row_items.push(index);
+            if response.drag_started() && !filtering {
+                picked_to_move(state, index);
+            }
             if response.dragged() && !filtering {
                 dragging = Some(index);
             }
@@ -3212,7 +3246,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 ask = Some(ItemAsk::Rename(index));
             }
             if response.clicked() {
-                ask = Some(ItemAsk::Open(index));
+                clicked = Some(index);
             }
             // Gone to with ↑ or ↓, or just gone on screen: kept in sight, at once.
             if state.playlist_scroll_to == Some(index) || follow == Some(index) {
@@ -3228,6 +3262,35 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         }
     });
     asks.carry_out(show, state);
+    // Picked out as in the Finder: a click picks the item alone, and opens it (a header opens
+    // nothing; the slides go to it); Command-click adds or takes away one, Shift-click picks
+    // every row from the one last clicked to it. With Command or Shift, only the picking
+    // changes, unless one item is left picked. (A click comes when the button is let go, so a
+    // drag of several picked items keeps them all.)
+    if let Some(index) = clicked {
+        let picks = &mut state.item_picks;
+        if picks.anchor.is_none() {
+            picks.anchor = state.services.chosen;
+        }
+        crate::home::pick(&mut picks.places, &mut picks.anchor, &row_items, index, mods);
+        picks.made_in(&state.services);
+        let several = mods.command || mods.shift;
+        let open = if several { (picks.places.len() == 1).then(|| picks.places[0]) } else { Some(index) };
+        match open {
+            Some(open) if matches!(items.get(open), Some(Item::Header { .. })) => state.slides_jump_to = Some(open),
+            Some(open) => ask = Some(ItemAsk::Open(open)),
+            None => {}
+        }
+        if several {
+            state.picking = crate::home::Picking::Items;
+        }
+    }
+    // Command-A (Ctrl elsewhere) picks every item listed, with nothing being typed.
+    if list_keys_work(ui, state) && ui.input(|input| crate::home::command_key(input, egui::Key::A, false)) {
+        state.item_picks.places = row_items.clone();
+        state.item_picks.made_in(&state.services);
+        state.picking = crate::home::Picking::Items;
+    }
     // Files dragged from the Finder: into the playlist, after the item under the pointer.
     let (area, current) = (list.inner_rect, state.services.current);
     let target = |after| crate::file_drop::DropTarget::Playlist { index: current, after };
@@ -3293,17 +3356,42 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             }
         }
     }
-    if let (Some(moving), Some(slot)) = (dragging, slot) {
-        // The row being moved goes faint where it is.
-        if let Some(at) = row_items.iter().position(|item| *item == moving) {
-            ui.painter().rect_filled(rows[at], RADIUS, PANEL.gamma_multiply(0.6));
+    // A row dragged by itself moves alone; one of several picked out moves them all, in their
+    // order, to the one line.
+    let moving: Vec<usize> = match dragging.or(dropped) {
+        Some(held) if state.item_picks.several() && state.item_picks.places.contains(&held) => {
+            let mut picked = state.item_picks.places.clone();
+            picked.sort_unstable();
+            picked
+        }
+        Some(held) => vec![held],
+        None => Vec::new(),
+    };
+    if let (Some(_), Some(slot)) = (dragging, slot) {
+        // The rows being moved go faint where they are.
+        for (row, item) in rows.iter().zip(&row_items) {
+            if moving.contains(item) {
+                ui.painter().rect_filled(*row, RADIUS, PANEL.gamma_multiply(0.6));
+            }
         }
         let y = rows.get(slot).map_or_else(|| rows.last().map_or(0.0, |row| row.max.y), |row| row.min.y);
         let (left, right) = rows.first().map_or((0.0, 0.0), |row| (row.min.x, row.max.x));
         ui.painter().line_segment([pos2(left + 4.0, y), pos2(right - 4.0, y)], Stroke::new(2.0, TEXT));
     }
     if let (Some(index), Some(slot)) = (dropped, slot) {
-        state.services.move_item(index, slot);
+        if let [_, _, ..] = moving.as_slice() {
+            // Still picked out where they have gone.
+            if let Some(now) = state.services.move_items(&moving, slot) {
+                let picks = &mut state.item_picks;
+                picks.places = picks.places.iter().filter_map(|at| now.get(*at).copied()).collect();
+                picks.anchor = picks.anchor.and_then(|at| now.get(at).copied());
+                picks.made_in(&state.services);
+            }
+        } else if state.services.move_item(index, slot) {
+            state.item_picks.places = state.services.chosen.into_iter().collect();
+            state.item_picks.anchor = state.services.chosen;
+            state.item_picks.made_in(&state.services);
+        }
     }
     state.rename_started = rename_started;
     match renamed {
@@ -3316,8 +3404,9 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     }
     // ↑ and ↓ open the item above or below, passing over headers (and items the filter hides).
     if ask.is_none() && list_keys_work(ui, state) {
-        let (up, down) =
-            ui.input(|input| (input.key_pressed(egui::Key::ArrowUp), input.key_pressed(egui::Key::ArrowDown)));
+        let (up, down, shift) = ui.input(|input| {
+            (input.key_pressed(egui::Key::ArrowUp), input.key_pressed(egui::Key::ArrowDown), input.modifiers.shift)
+        });
         let openable: Vec<usize> = items
             .iter()
             .enumerate()
@@ -3339,6 +3428,19 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 Some(next) => {
                     ask = Some(ItemAsk::Open(openable[next]));
                     state.playlist_scroll_to = Some(openable[next]);
+                    // With Shift, the items on the way are picked out too, as in the Finder.
+                    let picks = &mut state.item_picks;
+                    if shift {
+                        if picks.anchor.is_none() {
+                            picks.anchor = state.services.chosen;
+                        }
+                        let mods = egui::Modifiers::SHIFT;
+                        crate::home::pick(&mut picks.places, &mut picks.anchor, &row_items, openable[next], mods);
+                    } else {
+                        picks.places = vec![openable[next]];
+                        picks.anchor = Some(openable[next]);
+                    }
+                    picks.made_in(&state.services);
                 }
                 None => state.say(crate::running::no_item_beyond(down)),
             }
@@ -4870,7 +4972,7 @@ mod tests {
     fn a_drag_on_one_of_several_picked_songs_carries_them_all_without_repicking() {
         let list = Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 300.0));
         let mut state = HomeState {
-            picked_songs: vec![5, 7],
+            picked_songs: vec![7, 5],
             sweep: Some(Sweep {
                 list: Picking::Songs,
                 from: Some(7),
@@ -4883,7 +4985,7 @@ mod tests {
         let mut carried = None;
         in_frame(|ui| {
             sweep_rows(ui, &mut state, Picking::Songs, &rows(), &order(), list, Some(pos2(10.0, 20.0)), true, |_| {});
-            assert_eq!(state.picked_songs, vec![5, 7]);
+            assert_eq!(state.picked_songs, vec![7, 5]);
             sweep_rows(
                 ui,
                 &mut state,
@@ -4898,7 +5000,7 @@ mod tests {
                 },
             );
         });
-        assert_eq!(carried, Some(vec![5, 7]));
+        assert_eq!(carried, Some(vec![5, 7]), "in the list's order, not the order picked");
     }
 
     /// Draws the media bin alone in a 1280 × 800 window for each frame of pointer events, as the
