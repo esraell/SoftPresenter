@@ -371,10 +371,10 @@ feature changes, this page changes in the same commit.
 - **The window** is three round panels on a dark window: the left column, the middle, and a
   right column that is the same in every view. Along the top: the views (Show, Bible, Edit), a
   find box (press `/`, or Command-F: it finds songs by title and then each slide whose words
-  have what is typed, with its number and group, a slide picked being brought into view and
+  have what is typed, tagged with its group ("Song · Chorus"), a slide picked being brought into view and
   ringed in ink for a moment, a Bible passage when a reference is typed (named and quoted in the language it was
   typed in), and verses that hold the words, from the Bibles in use written in the words'
-  alphabet, each saying which Bible it is from; Return opens what is picked without putting anything on the screens,
+  alphabet, each saying which Bible it is from ("Bible · KJV"); each result has a small mark at its left and its tag in the same tint, so songs and the Bible read apart at a glance: a note in the libraries' lilac for songs, an open book in sea green for the Bible, whose slides have a sea-green dot too; Return opens what is picked without putting anything on the screens,
   with its first slide or verse picked for Enter (see "A slide picked waits for Enter"), and
   Command-Return adds it to the playlist in front. Any result can also be **dragged** (a press
   that barely moves is still a click): its name follows the pointer, its row goes faint and

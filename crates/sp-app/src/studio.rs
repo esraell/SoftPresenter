@@ -1181,6 +1181,19 @@ fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
 /// these colours.
 const PLAYLIST_TINT: Color32 = Color32::from_rgb(0x8f, 0xb4, 0xff);
 const LIBRARY_TINT: Color32 = Color32::from_rgb(0xc3, 0xa6, 0xff);
+/// Songs and the Bible told apart at a glance where both are listed (the find box): songs in
+/// the libraries' tint, as songs live in libraries; the Bible (scripture) in a quiet sea green
+/// of its own, also the dot on Bible slides. Neither is a colour that means something else
+/// (orange on screen, amber a key or take care, green on, blue the playlist), and both read at
+/// 11 points on the list, on a picked row and under the pointer (contrast 7:1 or more).
+pub const SONG_TINT: Color32 = LIBRARY_TINT;
+pub const SCRIPTURE_TINT: Color32 = Color32::from_rgb(0x6d, 0xd3, 0xc8);
+
+/// The mark and tint of a result in the find box: an open book in the scripture tint for the
+/// Bible, a note in the songs' for a song (or a slide of one).
+pub fn found_look(bible: bool) -> (Icon, Color32) {
+    if bible { (Icon::Book, SCRIPTURE_TINT) } else { (Icon::Note, SONG_TINT) }
+}
 /// A row under the pointer: a little lighter than the panel, darker than a chosen row.
 pub const ROW_HOVER: Color32 = Color32::from_rgb(0x1f, 0x1f, 0x1f);
 /// The side of a button that is only its icon, and of the "more" button at the end of a row.

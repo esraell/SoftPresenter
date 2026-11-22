@@ -4147,7 +4147,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     });
     let mut list = None;
     if !typed.is_empty() {
-        use crate::studio::{CARD, LINE, PANEL, TEXT, TEXT_DIM, TEXT_FAINT};
+        use crate::studio::{CARD, LINE, PANEL, TEXT, TEXT_FAINT};
         let area = egui::Area::new(egui::Id::unique("library search"))
             .order(egui::Order::Foreground)
             .fade_in(false)
@@ -4162,74 +4162,79 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             frame.show(ui, |ui| {
                 ui.set_width(wide - 12.0);
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                // One result: its name, what it is at the right, and a line of its words under.
-                let mut row =
-                    |ui: &mut egui::Ui, place: usize, title: &str, tag: &str, line: Option<&str>, faint: bool| {
-                        let height = if line.is_some() { 48.0 } else { 34.0 };
-                        let size = vec2(ui.available_width(), height);
-                        // A press that barely moves is a click, as everywhere else.
-                        let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
-                        rects.push(rect);
-                        if place == picked || response.hovered() {
-                            ui.painter().rect_filled(rect, 9.0, CARD);
-                        }
-                        let first = if line.is_some() { rect.min.y + 16.0 } else { rect.center().y };
-                        let tag_at = pos2(rect.max.x - 10.0, first);
-                        let font = crate::studio::fixed(11.0);
-                        let tagged =
-                            crate::studio::paint_spaced(ui, tag_at, Align2::RIGHT_CENTER, tag, font, TEXT_DIM, 0.6);
-                        let words = Rect::from_min_max(
-                            pos2(rect.min.x + 10.0, rect.min.y),
-                            pos2(tagged.min.x - 10.0, rect.max.y),
-                        );
-                        ui.painter().with_clip_rect(words).text(
-                            pos2(words.min.x, first),
+                // One result: the mark of its kind (a song or the Bible), its name, what it is
+                // at the right in its kind's tint, and a line of its words under.
+                let mut row = |ui: &mut egui::Ui,
+                               place: usize,
+                               bible: bool,
+                               title: &str,
+                               tag: &str,
+                               line: Option<&str>,
+                               faint: bool| {
+                    let height = if line.is_some() { 48.0 } else { 34.0 };
+                    let size = vec2(ui.available_width(), height);
+                    // A press that barely moves is a click, as everywhere else.
+                    let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
+                    rects.push(rect);
+                    if place == picked || response.hovered() {
+                        ui.painter().rect_filled(rect, 9.0, CARD);
+                    }
+                    let first = if line.is_some() { rect.min.y + 16.0 } else { rect.center().y };
+                    let (icon, tint) = crate::studio::found_look(bible);
+                    let mark = Rect::from_center_size(pos2(rect.min.x + 19.0, rect.center().y), vec2(16.0, 16.0));
+                    crate::icons::paint(ui.painter(), icon, mark, tint);
+                    let left = mark.max.x + 12.0;
+                    let tag_at = pos2(rect.max.x - 10.0, first);
+                    let font = crate::studio::fixed(11.0);
+                    let tagged = crate::studio::paint_spaced(ui, tag_at, Align2::RIGHT_CENTER, tag, font, tint, 0.6);
+                    let words = Rect::from_min_max(pos2(left, rect.min.y), pos2(tagged.min.x - 10.0, rect.max.y));
+                    ui.painter().with_clip_rect(words).text(
+                        pos2(words.min.x, first),
+                        Align2::LEFT_CENTER,
+                        title,
+                        crate::studio::semibold(13.0),
+                        TEXT,
+                    );
+                    if let Some(line) = line {
+                        let under = Rect::from_min_max(pos2(left, rect.min.y), rect.max - vec2(10.0, 0.0));
+                        ui.painter().with_clip_rect(under).text(
+                            pos2(under.min.x, rect.min.y + 34.0),
                             Align2::LEFT_CENTER,
-                            title,
-                            crate::studio::semibold(13.0),
-                            TEXT,
+                            line,
+                            FontId::proportional(12.0),
+                            TEXT_FAINT,
                         );
-                        if let Some(line) = line {
-                            let under =
-                                Rect::from_min_max(pos2(rect.min.x + 10.0, rect.min.y), rect.max - vec2(10.0, 0.0));
-                            ui.painter().with_clip_rect(under).text(
-                                pos2(under.min.x, rect.min.y + 34.0),
-                                Align2::LEFT_CENTER,
-                                line,
-                                FontId::proportional(12.0),
-                                TEXT_FAINT,
-                            );
-                        }
-                        if faint {
-                            ui.painter().rect_filled(rect, 9.0, PANEL.gamma_multiply(0.6));
-                        }
-                        if response.clicked() {
-                            clicked = Some(place);
-                        }
-                        if response.drag_started() {
-                            dragged = Some(place);
-                        }
-                    };
+                    }
+                    if faint {
+                        ui.painter().rect_filled(rect, 9.0, PANEL.gamma_multiply(0.6));
+                    }
+                    if response.clicked() {
+                        clicked = Some(place);
+                    }
+                    if response.drag_started() {
+                        dragged = Some(place);
+                    }
+                };
                 let faint = |found: Found| carried.as_ref() == Some(&found);
                 for (place, found) in passage.iter().enumerate() {
                     let faint = faint(Found::Bible(found.lookup.clone()));
-                    row(ui, place, &found.title, &found.tag, Some(&found.line), faint);
+                    row(ui, place, true, &found.title, &found.tag, Some(&found.line), faint);
                 }
-                // A song found by its title, or each slide found by its words: its number and
-                // group at the right, the line found under.
+                // A song found by its title, or each slide found by its words: its group at the
+                // right ("SONG · CHORUS"), the line found under.
                 for (place, (index, slide, line)) in songs.iter().enumerate() {
                     let Some(song) = show.presentations().get(*index) else { continue };
                     let tag = match (line, song.slide(*slide)) {
-                        (Some(_), Some((group, _))) => format!("{:02} {}", slide + 1, group.name.to_uppercase()),
+                        (Some(_), Some((group, _))) => format!("SONG \u{b7} {}", group.name.to_uppercase()),
                         _ => "SONG".to_owned(),
                     };
                     let faint = faint(Found::Song(*index, *slide));
-                    row(ui, passage.len() + place, &song.title, &tag, line.as_deref(), faint);
+                    row(ui, passage.len() + place, false, &song.title, &tag, line.as_deref(), faint);
                 }
                 for (place, found) in verses.iter().enumerate() {
                     let (place, faint) =
                         (passage.len() + songs.len() + place, faint(Found::Bible(found.lookup.clone())));
-                    row(ui, place, &found.title, &found.tag, Some(&found.line), faint);
+                    row(ui, place, true, &found.title, &found.tag, Some(&found.line), faint);
                 }
                 if total == 0 {
                     let words = if answered { "Nothing found" } else { "Looking in the Bibles…" };
@@ -9201,6 +9206,54 @@ mod tests {
         assert!(state.songs_to_delete.is_empty(), "and deletes nothing until told to");
         assert_eq!(state.services.front().items.len(), 5, "the playlist is as it was");
         nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn songs_and_the_bible_in_the_find_box_each_have_their_mark_and_tint() {
+        use crate::studio::{SCRIPTURE_TINT, SONG_TINT};
+        assert_eq!(crate::studio::found_look(false), (crate::icons::Icon::Note, SONG_TINT));
+        assert_eq!(crate::studio::found_look(true), (crate::icons::Icon::Book, SCRIPTURE_TINT));
+        // Drawn: each tag in its kind's tint, and the marks (drawn in lines) in the same tints.
+        let ctx = egui::Context::default();
+        let show = Show::new(vec![
+            Arc::new(parse_song_text("Shepherd Song", "[Verse 1]\nWords for a test\n")),
+            Arc::new(parse_song_text("Hills", "[Chorus]\nThe shepherd leads me on\n")),
+        ]);
+        let mut state = HomeState { library_search: Some(("shepherd".to_owned(), 0)), ..HomeState::default() };
+        let mut tags = Vec::new();
+        let mut marks = Vec::new();
+        for frame in 0..2 {
+            let raw = RawInput { time: Some(f64::from(frame) * 0.1), ..input(None) };
+            let output = ctx.run_ui(raw, |ui| {
+                home_ui(ui, &show, &mut state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+            });
+            fn walk(shape: &egui::Shape, tags: &mut Vec<(String, Color32)>, marks: &mut Vec<Color32>) {
+                match shape {
+                    egui::Shape::Text(text) => tags.push((text.galley.text().to_owned(), text.fallback_color)),
+                    egui::Shape::Path(path) => {
+                        if let egui::epaint::ColorMode::Solid(colour) = path.stroke.color {
+                            marks.push(colour);
+                        }
+                    }
+                    egui::Shape::LineSegment { stroke, .. } => marks.push(stroke.color),
+                    egui::Shape::Circle(circle) => marks.push(circle.fill),
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, tags, marks)),
+                    _ => {}
+                }
+            }
+            tags.clear();
+            marks.clear();
+            output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut tags, &mut marks));
+            output.drop_without_applying_deltas();
+        }
+        let tint_of = |words: &str| tags.iter().find(|(text, _)| text == words).map(|(_, tint)| *tint);
+        assert_eq!(tint_of("SONG"), Some(SONG_TINT), "a song found by its title");
+        assert_eq!(tint_of("SONG \u{b7} CHORUS"), Some(SONG_TINT), "a slide found by its words, as its song");
+        let verse = tags.iter().find(|(text, _)| text.starts_with("BIBLE \u{b7} ")).expect("a verse is found");
+        assert_eq!(verse.1, SCRIPTURE_TINT);
+        assert!(marks.contains(&SONG_TINT) && marks.contains(&SCRIPTURE_TINT), "each kind has its mark");
+        // The titles stay in ink.
+        assert_eq!(tint_of("Shepherd Song"), Some(crate::studio::TEXT));
     }
 
     #[test]

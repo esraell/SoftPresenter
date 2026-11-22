@@ -1290,7 +1290,14 @@ fn draw_slides(
             Some(label) => format!("{} \u{b7} {label}", group.name),
             None => group.name.clone(),
         };
-        let dot = if is_live { TALLY } else { dot_colour(group.color) };
+        // Bible slides have the scripture tint, as the Bible has in the find box.
+        let dot = if is_live {
+            TALLY
+        } else if deck.bible {
+            crate::studio::SCRIPTURE_TINT
+        } else {
+            dot_colour(group.color)
+        };
         // The "more" button and, on a song's slide, the pencil: where they go.
         let (more, pencil) = if list {
             let more =
