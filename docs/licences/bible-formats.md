@@ -30,8 +30,10 @@ translations' own publishers give out; nothing comes from another program's code
 - **USFM** and **USX**: the Unified Standard Format Markers and its XML form, documented by the
   United Bible Societies (ubsicap.github.io/usfm and ubsicap.github.io/usx). Checked against the
   USFM files eBible.org publishes for the twenty Bibles SoftPresenter offers or carries: read
-  this way, all but 68 of their 525,000 verses match the text those Bibles were made from. The
-  rest: words the World English Bible has corrected since, the speakers' names in its Song of
+  this way, all but 68 of their 525,000 verses match the text those Bibles were made from, once
+  square brackets and pilcrows are set aside (eBible's one-verse-per-line text writes the
+  translators' added words in brackets, which a Bible read from USFM gives without them, as
+  the King James has them). The rest: words the World English Bible has corrected since, the speakers' names in its Song of
   Songs (headings, now left out), the American Standard Version's Hebrew letters in Psalm 119
   (marked in its source as lines of the text, so kept), and seven verses of the Open New
   Ukrainian Translation whose last lines the earlier conversion lost.

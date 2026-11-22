@@ -120,7 +120,7 @@ pub fn is_bible_file(path: &Path) -> bool {
     }
     let ending = path.extension().map(|ext| ext.to_string_lossy().to_ascii_lowercase());
     match ending.as_deref() {
-        None | Some("xml" | "zip" | "usfm" | "sfm" | "usx" | "osis" | "zef" | "txt" | "bible") => {
+        None | Some("xml" | "xmm" | "zip" | "usfm" | "sfm" | "usx" | "osis" | "zef" | "txt" | "bible") => {
             sp_bible::import::looks_like_bible(path)
         }
         _ => false,
@@ -385,6 +385,10 @@ mod tests {
         std::fs::write(&movie, "\\id GEN\n\\c 1\n\\v 1 Words.\n").unwrap();
         assert!(!is_bible_file(&movie));
         assert!(is_bible_file(Path::new("missing/KJV.spbible")));
+        // A Bible module ending in .xmm is looked into too.
+        let module = folder.join("KJV.xmm");
+        std::fs::write(&module, r#"<bible><b n="John"><c n="3"><v n="16">Words.</v></c></b></bible>"#).unwrap();
+        assert!(is_bible_file(&module));
         let _ = std::fs::remove_dir_all(&folder);
     }
 

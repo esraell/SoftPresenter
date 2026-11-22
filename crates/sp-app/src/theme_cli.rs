@@ -281,10 +281,12 @@ impl crate::App {
             );
         }
         let path = std::path::Path::new(typed);
-        if path.exists() {
-            if !crate::bible_store::is_bible_file(path) {
-                return Err(format!("{typed} isn't a Bible file SoftPresenter can read."));
-            }
+        // A Bible offered, named exactly, is meant even if a file of that name happens to be
+        // there; any other path that is there is read by what it holds, whatever its ending.
+        let offered_name = crate::bible::OFFERED
+            .iter()
+            .any(|b| b.short.eq_ignore_ascii_case(typed) || b.id.eq_ignore_ascii_case(typed));
+        if path.exists() && !offered_name {
             let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
             let opened = crate::bible_store::open_file(path, &given, &state.bible.shelf)?;
             return match opened {

@@ -28,21 +28,60 @@ impl Limits {
         Limits { file: 64 * 1024 * 1024, entry: 64 * 1024 * 1024, unpacked: 128 * 1024 * 1024, entries: 2_000 };
 }
 
-/// File endings that may hold a Bible or what is said about one; a file with no ending is read
-/// too, as the content decides. Anything else in a zip or folder (pictures, style sheets,
-/// signatures) is passed over.
+/// Whether a file in a zip or folder is read: any file whatever its ending (what it holds
+/// decides), but for hidden ones and those that are surely something else (pictures, sound,
+/// video, fonts, style sheets, scripts, signatures, documents, web pages but eBible's
+/// copyright page). The limits bound what is read all the same.
 fn worth_reading(name: &str) -> bool {
     let file = name.rsplit(['/', '\\']).next().unwrap_or(name).to_ascii_lowercase();
-    if file.starts_with('.') || name.contains("__MACOSX") {
+    if file.is_empty() || file.starts_with('.') || name.contains("__MACOSX") {
         return false;
     }
-    if matches!(file.as_str(), "copr.htm" | "manifest.yaml") {
+    if file == "copr.htm" {
         return true;
     }
-    match file.rsplit_once('.') {
-        None => true,
-        Some((_, ending)) => matches!(ending, "xml" | "usfm" | "sfm" | "usx" | "osis" | "zef" | "txt" | "bible"),
-    }
+    let Some((_, ending)) = file.rsplit_once('.') else { return true };
+    !matches!(
+        ending,
+        "jpg"
+            | "jpeg"
+            | "png"
+            | "gif"
+            | "webp"
+            | "svg"
+            | "ico"
+            | "bmp"
+            | "tif"
+            | "tiff"
+            | "mp3"
+            | "m4a"
+            | "wav"
+            | "ogg"
+            | "mp4"
+            | "mov"
+            | "m4v"
+            | "webm"
+            | "ttf"
+            | "otf"
+            | "woff"
+            | "woff2"
+            | "css"
+            | "js"
+            | "asc"
+            | "sig"
+            | "pdf"
+            | "epub"
+            | "doc"
+            | "docx"
+            | "htm"
+            | "html"
+            | "exe"
+            | "dll"
+            | "so"
+            | "dylib"
+            | "db"
+            | "sqlite"
+    )
 }
 
 fn too_large(name: &str) -> String {

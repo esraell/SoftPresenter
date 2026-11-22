@@ -3356,7 +3356,9 @@ impl App {
     /// Any other file dropped on the window: a Bible is installed; anything else is offered to
     /// the media bin, which says why it can't take it.
     fn add_dropped_file(&mut self, path: &std::path::Path) {
-        if bible_store::is_bible_file(path) {
+        // Whatever its ending: a file nothing else took is looked into (its first few
+        // kilobytes) in case it is a Bible.
+        if bible_store::is_bible_file(path) || sp_bible::import::looks_like_bible(path) {
             self.install_bible(path);
             return;
         }

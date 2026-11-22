@@ -311,7 +311,7 @@ fn deep_nesting_and_files_that_are_not_bibles_are_refused_in_plain_words() {
     let refused = read_bytes(deep.as_bytes(), "deep.xml", &Limits::NORMAL).unwrap_err();
     assert!(refused.contains("nested too deeply"), "{refused}");
     for (text, name) in [
-        ("Amazing grace\n\nHow sweet", "song.txt"),
+        ("Words of a song\n\nThe next slide", "song.txt"),
         ("<song><title>A song</title></song>", "song.xml"),
         ("<XMLBIBLE><BIBLEBOOK bnumber=\"1\"><CHAPTER cnumber=\"1\"><VERS vnumber=\"1\">broken", "broken.xml"),
         ("<XMLBIBLE biblename=\"Empty\"></XMLBIBLE>", "empty.xml"),
@@ -383,13 +383,13 @@ fn files_are_told_apart_by_what_they_hold() {
     assert!(looks_like_bible(&write("bible.txt", GENESIS_USFM.as_bytes())));
     assert!(looks_like_bible(&write("bible.zip", &zipped(&[("02-GENtest.usfm", GENESIS_USFM.as_bytes())]))));
     assert!(looks_like_bible(&write("named.zip", &zipped(&[("bible", ZEFANIA.as_bytes())]))));
+    let tags = br#"<bible><b n="John"><c n="3"><v n="16">Words for a test.</v></c></b></bible>"#;
+    assert!(looks_like_bible(&write("bible.xmm", tags)));
+    assert!(looks_like_bible(&write("odd.zip", &zipped(&[("Bible.module", tags.as_slice()), ("a.jpg", b"picture")]))));
     std::fs::write(folder.join("books/GEN.SFM"), GENESIS_USFM).unwrap();
     assert!(looks_like_bible(&folder.join("books")));
-    assert!(!looks_like_bible(&write("song.txt", b"Amazing grace\n\nHow sweet the sound")));
-    assert!(!looks_like_bible(&write(
-        "song.xml",
-        b"<song xmlns=\"http://openlyrics.info/namespace/2009/song\"><properties/></song>"
-    )));
+    assert!(!looks_like_bible(&write("song.txt", b"Words of a song\n\nThe next slide")));
+    assert!(!looks_like_bible(&write("song.xml", b"<song><title>A song</title><lyrics/></song>")));
     assert!(!looks_like_bible(&write("other.zip", &zipped(&[("a.jpg", b"picture")]))));
     assert!(!looks_like_bible(&folder.join("missing.xml")));
     let _ = std::fs::remove_dir_all(&folder);

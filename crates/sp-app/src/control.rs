@@ -653,10 +653,15 @@ fn with_full_paths(args: Vec<String>) -> Vec<String> {
         }
         return args;
     }
-    // `bible install FILE [--name …]`: only the file is made whole, never a name given after it.
+    // `bible install FILE [--name …]`: only the file is made whole, never a name given after it,
+    // nor the name of a Bible offered (a folder called "rob" in the terminal's folder is not
+    // the Russian Open Bible).
     if first("bible") && second(&["install"]) {
         let mut args = args;
         if let Some(word) = args.get(2)
+            && !crate::bible::OFFERED
+                .iter()
+                .any(|b| b.short.eq_ignore_ascii_case(word) || b.id.eq_ignore_ascii_case(word))
             && Path::new(word).exists()
             && let Ok(full) = Path::new(word).canonicalize()
         {
