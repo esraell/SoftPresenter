@@ -1817,6 +1817,7 @@ fn item_bar(
         Deck::Heading { name, .. } => (name.as_str(), None, false),
     };
     // The name; for the song chosen a double click turns it into a field to retype it.
+    let mut name_response = None;
     let font = semibold(14.0);
     let renaming = state.renaming_song.is_some() && song.is_some_and(|(at, _)| at == show.selected());
     if renaming && let (Some(typed), Some((at, song))) = (state.renaming_song.as_mut(), song) {
@@ -1860,6 +1861,8 @@ fn item_bar(
             if name.clicked() && item.is_some() {
                 state.services.chosen = item;
             }
+            // A right-click on the name opens the bar's menu, as anywhere else on the bar.
+            name_response = Some(name);
         }
         x = drawn.max.x;
     }
@@ -1875,26 +1878,19 @@ fn item_bar(
         x = rect.max.x;
         version_button(ui, show, state, rect.intersect(bar), id.with("version"), item, if near { 1.0 } else { 0.6 });
     }
-    // What the "more" button and a right-click on the bar open.
-    let mut menu = |ui: &mut egui::Ui, state: &mut HomeState| {
-        if let Some((at, _)) = song {
+    // What the "more" button and a right-click on the bar open: a playlist item's one menu, as
+    // its row has it; for a song shown by itself (from a library), Add Slide and its menu.
+    let mut menu = |ui: &mut egui::Ui, state: &mut HomeState| match (item, song) {
+        (Some(item), _) => crate::studio::item_menu(ui, show, state, commands, item, ask, asks),
+        (None, Some((at, _))) => {
             if ui.button("Add Slide").on_hover_text("Add a slide laid out like the last one").clicked() {
                 state.add_slide = Some(at);
                 ui.close();
             }
             ui.separator();
-            crate::studio::song_menu(ui, show, state, commands, at, asks, item.is_some());
+            crate::studio::song_menu(ui, show, state, commands, at, asks, false);
         }
-        if let Some(item) = item {
-            if song.is_some() {
-                ui.separator();
-            }
-            crate::studio::version_section(ui, state, item);
-            crate::studio::item_moves(ui, show, state, item, ask);
-            if let Some((at, _)) = song {
-                crate::studio::delete_song_from_library(ui, state, at);
-            }
-        }
+        (None, None) => {}
     };
     if let Some((at, song)) = song {
         // The song's tools: at part strength until the pointer is on the bar.
@@ -1994,6 +1990,9 @@ fn item_bar(
         state.services.chosen = item;
     }
     response.context_menu(|ui| menu(ui, state));
+    if let Some(name) = name_response {
+        name.context_menu(|ui| menu(ui, state));
+    }
 }
 
 /// The version button among a playlist item's title-bar tools, once a theme has a version: the

@@ -198,7 +198,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - A playlist lists its items in running order: each with its number, its title, a small mark
   for a Bible passage, a picture or video, a media playlist or a placeholder, an orange number on
   the one on screen (whose row is brought into view when it goes on screen), and ⋯ for its
-  menu (for a song, the song's own menu is under Song). Headers are small capital lines. Items
+  menu. Headers are small capital lines, with a ⋯ too. An item has **one menu**, the same from
+  its row's ⋯, a right-click on the row, and the ⋯ (or a right-click) on its title bar over the
+  slides: Add Slide and Song ▸ (the song's own menu) for a song; Play on Announcements Layer
+  for a picture, a video or a media playlist; Fill with Song for a placeholder, Open on the
+  Bible Page for a passage, Rename for a header or a placeholder; the Version section once a
+  theme has a version; Move Up, Move Down and Remove from Playlist; and for a song, Delete Song
+  from Library… last. Items
   can be dragged into a new order; Escape stops a drag, leaving them where they were. A click
   on a row only **opens** the item: it becomes the open one and the slides scroll to it; the
   screens don't change, and a Bible passage no longer
@@ -407,7 +413,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   which song and slides changed.
 - A song's menu (its ⋯, or a right-click): Add to the playlist in front, Add to Playlist (any
   playlist, or a new one; for a song in a playlist, from its item or its title bar, the
-  playlist it is in isn't offered), Libraries, Rename, Duplicate, Theme (a theme of its own, or
+  playlist it is in isn't offered; with no other playlist, **Add to New Playlist…** in its
+  place), Libraries, Rename, Duplicate, Theme (a theme of its own, or
   the songs theme), Transition (its own, or Usual: the one under the slides, named), Edit Words, and Delete… (a song made in the app goes to the Trash). In a library,
   Export… and Delete… take the songs picked out with it when it is one of them. From a playlist
   (an item's menu, or its title bar over the slides) the menu acts on that song alone, and its

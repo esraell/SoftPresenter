@@ -3278,21 +3278,29 @@ pub fn song_menu(
         asks.add = Some(index);
         ui.close();
     }
-    // Another playlist, or a new one.
-    ui.menu_button("Add to Playlist", |ui| {
-        for at in playlists_to_add_to(state, in_playlist) {
-            let Some(playlist) = state.services.list.get(at) else { continue };
-            if ui.button(playlist.name.as_str()).clicked() {
-                asks.add_to = Some((index, Some(at)));
-                ui.close();
-            }
-        }
-        ui.separator();
-        if ui.button("New Playlist\u{2026}").clicked() {
+    // Another playlist, or a new one; with no other playlist to offer, a new one straight away.
+    let others = playlists_to_add_to(state, in_playlist);
+    if others.is_empty() {
+        if ui.button("Add to New Playlist\u{2026}").on_hover_text("A new playlist with this song in it").clicked() {
             asks.add_to = Some((index, None));
             ui.close();
         }
-    });
+    } else {
+        ui.menu_button("Add to Playlist", |ui| {
+            for at in others {
+                let Some(playlist) = state.services.list.get(at) else { continue };
+                if ui.button(playlist.name.as_str()).clicked() {
+                    asks.add_to = Some((index, Some(at)));
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui.button("New Playlist\u{2026}").clicked() {
+                asks.add_to = Some((index, None));
+                ui.close();
+            }
+        });
+    }
     // The libraries the song is in.
     if let Some(key) = state.song_keys.get(index).cloned() {
         ui.menu_button("Libraries", |ui| {
@@ -3402,7 +3410,7 @@ pub fn song_menu(
 /// The last choice of a playlist item's menu when the item is a song: deletes the song itself
 /// (from the library, every playlist and every library), after asking. After Remove from
 /// Playlist, which only takes the item out.
-pub fn delete_song_from_library(ui: &mut egui::Ui, state: &mut HomeState, song: usize) {
+fn delete_song_from_library(ui: &mut egui::Ui, state: &mut HomeState, song: usize) {
     let hint = "Deletes the song itself, not just this item, after asking";
     if ui.button("Delete Song from Library\u{2026}").on_hover_text(hint).clicked() {
         state.confirm_delete_songs = songs_menu_acts_on(state, song, true);
@@ -3491,8 +3499,11 @@ pub enum ItemAsk {
     Bible(usize),
 }
 
-/// A playlist item's menu, from its "more" button or a right-click: for a song, the song's
-/// own menu under Song; then what [`item_moves`] offers.
+/// A playlist item's one menu, wherever it is opened: its row's ⋯ or a right-click on the row
+/// (a header's too), and the ⋯ or a right-click on its title bar over the slides. For a song,
+/// Add Slide and the song's own menu under Song; Play on Announcements Layer for a picture, a
+/// video or a media playlist; the Version section; then what [`item_moves`] offers (filling a
+/// placeholder, renaming, the moves, Remove); for a song, Delete Song from Library… last.
 #[allow(clippy::too_many_arguments)]
 pub fn item_menu(
     ui: &mut egui::Ui,
@@ -3509,6 +3520,10 @@ pub fn item_menu(
         _ => None,
     };
     if let Some(song) = song {
+        if ui.button("Add Slide").on_hover_text("Add a slide laid out like the last one").clicked() {
+            state.add_slide = Some(song);
+            ui.close();
+        }
         ui.menu_button("Song", |ui| song_menu(ui, show, state, commands, song, asks, true));
         ui.separator();
     }
@@ -3603,7 +3618,7 @@ pub fn announce_button(ui: &mut egui::Ui, state: &mut HomeState, what: crate::an
 
 /// The part of a playlist item's menu that is about its place in the playlist: filling a
 /// placeholder, renaming a header or a placeholder, moving it up or down, taking it out.
-pub fn item_moves(ui: &mut egui::Ui, show: &Show, state: &HomeState, index: usize, ask: &mut Option<ItemAsk>) {
+fn item_moves(ui: &mut egui::Ui, show: &Show, state: &HomeState, index: usize, ask: &mut Option<ItemAsk>) {
     use crate::service::Item;
     let items = &state.services.front().items;
     let item = items.get(index);
@@ -3871,11 +3886,16 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                     ui.painter().rect_filled(row, RADIUS, CARD);
                 }
                 let at = pos2(row.min.x + 10.0, row.min.y + 21.75);
+                // Its ⋯ at the right, as every other row has, level with its name.
+                let more = Rect::from_center_size(
+                    pos2(row.max.x - 10.0 - MORE_BUTTON / 2.0, at.y),
+                    egui::Vec2::splat(MORE_BUTTON),
+                );
                 match state.renaming_header.as_mut().filter(|(at, _)| *at == index) {
                     Some((_, typed)) => {
                         let focus = std::mem::take(&mut rename_started);
                         let look = Lettering::cap(TEXT_DIM);
-                        if let Some(done) = rename_in_row(ui, typed, &look, at, row.max.x - 4.0, focus) {
+                        if let Some(done) = rename_in_row(ui, typed, &look, at, more.min.x - 8.0, focus) {
                             renamed = Some(done.map(|name| (index, name)));
                         }
                     }
@@ -3897,6 +3917,9 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 } else if response.clicked() {
                     clicked = Some(index);
                 }
+                let near = response.hovered() || ui.rect_contains_pointer(more);
+                let button = more_button(ui, more, ui.scope_id().with(("item more", index)), near);
+                egui::Popup::menu(&button).show(|ui| menu(ui, state, &mut ask, &mut asks));
                 response.context_menu(|ui| menu(ui, state, &mut ask, &mut asks));
                 continue;
             }
@@ -5969,6 +5992,55 @@ pub mod tests {
         output.shapes.iter().for_each(|clipped| words(&clipped.shape, &mut drawn_words));
         output.drop_without_applying_deltas();
         assert!(drawn_words.iter().all(|words| !words.starts_with("Delete")), "{drawn_words:?}");
+        // With no other playlist to add it to, a new one is offered straight away, not a
+        // submenu with only New Playlist… in it.
+        assert!(drawn_words.iter().any(|words| words == "Add to New Playlist\u{2026}"), "{drawn_words:?}");
+        assert!(!drawn_words.iter().any(|words| words == "Add to Playlist"), "{drawn_words:?}");
+        state.services.add_service();
+        state.services.show(0);
+        let mut drawn_words = Vec::new();
+        let output = drawn(&ctx, vec![], |ui| {
+            song_menu(ui, &show, &mut state, &mut Vec::new(), 0, &mut SongAsks::default(), true);
+        });
+        output.shapes.iter().for_each(|clipped| words(&clipped.shape, &mut drawn_words));
+        output.drop_without_applying_deltas();
+        assert!(drawn_words.iter().any(|words| words == "Add to Playlist"), "another playlist: {drawn_words:?}");
+    }
+
+    #[test]
+    fn a_playlist_items_one_menu_offers_what_its_kind_has() {
+        use crate::service::Item;
+        let drawn_words = |state: &mut HomeState, show: &Show, index: usize| {
+            fn words(shape: &egui::Shape, into: &mut Vec<String>) {
+                match shape {
+                    egui::Shape::Text(text) => into.push(text.galley.text().to_owned()),
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| words(shape, into)),
+                    _ => {}
+                }
+            }
+            let mut said = Vec::new();
+            let output = drawn(&styled(), vec![], |ui| {
+                item_menu(ui, show, state, &mut Vec::new(), index, &mut None, &mut SongAsks::default());
+            });
+            output.shapes.iter().for_each(|clipped| words(&clipped.shape, &mut said));
+            output.drop_without_applying_deltas();
+            said
+        };
+        let show = Show::new(vec![Arc::new(sp_model::parse_song_text("One", "Words\n"))]);
+        let mut state = HomeState { song_keys: vec!["one".to_owned()], ..HomeState::default() };
+        let picture = sp_model::Uuid::new_v4();
+        state.services.list[0].items = vec![
+            Item::song("one", "One"),
+            Item::Media { id: picture, name: "Welcome.png".to_owned() },
+            Item::Header { name: "Worship".to_owned() },
+        ];
+        let song = drawn_words(&mut state, &show, 0);
+        assert_eq!(song[..2], ["Add Slide", "Song"], "a song: Add Slide, then Song ▸");
+        let media = drawn_words(&mut state, &show, 1);
+        assert_eq!(media[0], "Play on Announcements Layer");
+        assert!(!media.iter().any(|words| words == "Add Slide" || words == "Song"));
+        let header = drawn_words(&mut state, &show, 2);
+        assert_eq!(header, ["Rename", "Move Up", "Move Down", "Remove from Playlist"]);
     }
 
     fn press(at: egui::Pos2, pressed: bool) -> Event {

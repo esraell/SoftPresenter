@@ -12704,6 +12704,51 @@ mod tests {
     }
 
     #[test]
+    fn an_items_row_its_title_bar_and_a_header_open_the_one_item_menu() {
+        use crate::service::Item;
+        let (mut show, mut state) = picking_setting();
+        state.services.insert(1, Item::Header { name: "Worship".to_owned() });
+        state.services.chosen = None;
+        let (ctx, mut commands, mut time) = (crate::studio::tests::styled(), Vec::new(), 0.0);
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        let words = |drawn: &Drawn| drawn.texts.iter().map(|(text, _)| text.clone()).collect::<Vec<_>>();
+        // The header's ⋯, at the right of its row, as every row has one.
+        let header = drawn.texts.iter().find(|(text, _)| text.eq_ignore_ascii_case("Worship")).expect("drawn").1;
+        let more = pos2(crate::studio::LEFT_WIDTH - 10.0 - crate::studio::MORE_BUTTON / 2.0, header.center().y);
+        let drawn = click_holding(&ctx, (&mut show, &mut state), more, Modifiers::NONE, &mut time, &mut commands);
+        let menu = words(&drawn);
+        for offered in ["Rename", "Move Up", "Move Down", "Remove from Playlist"] {
+            assert!(menu.iter().any(|words| words == offered), "{offered} in {menu:?}");
+        }
+        // A song's title bar over the slides, right-clicked: the same menu as its row's.
+        let escape = pressed(Key::Escape, Modifiers::NONE);
+        time += 0.1;
+        let drawn = found_step(&ctx, &mut show, &mut state, escape, time, &mut commands);
+        let bar = drawn
+            .texts
+            .iter()
+            .find(|(text, rect)| text == "Beta" && rect.min.x > crate::studio::LEFT_WIDTH + 20.0)
+            .expect("Beta's title bar")
+            .1
+            .center();
+        let right = |pressed| Event::PointerButton {
+            pos: bar,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut menu = Vec::new();
+        for events in [vec![Event::PointerMoved(bar)], vec![right(true)], vec![right(false)], vec![], vec![]] {
+            time += 0.1;
+            menu = words(&found_step(&ctx, &mut show, &mut state, events, time, &mut commands));
+        }
+        for offered in ["Add Slide", "Song", "Move Up", "Remove from Playlist", "Delete Song from Library\u{2026}"] {
+            assert!(menu.iter().any(|words| words == offered), "{offered} in {menu:?}");
+        }
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
     fn delete_takes_no_item_out_while_the_keyboard_is_elsewhere() {
         let (mut show, mut state) = picking_setting();
         let (ctx, mut commands, mut time) = (egui::Context::default(), Vec::new(), 0.0);
