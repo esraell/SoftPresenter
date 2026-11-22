@@ -589,7 +589,7 @@ struct PackMedia {
 }
 
 /// A song pack written or read, or a song bundle read, on a thread of its own, for the app to
-/// finish. A bundle carries where its song goes, and the library named after the folder it was
+/// finish. A bundle carries where its songs go, and the library named after the folder it was
 /// in, if any.
 enum PackJob {
     Wrote {
@@ -630,13 +630,62 @@ pub struct PlaylistSpot {
     pub after: Option<usize>,
 }
 
-/// A song read for an import, from `path`: the library named after its folder (or songbook),
-/// and for a bundle, what it brought (its pictures and videos are brought in with the song).
-struct SongRead {
-    song: Result<sp_model::Presentation, String>,
-    path: PathBuf,
-    library: Option<String>,
-    bundle: Option<bundle::Opened>,
+/// What was read for an import from `path`, with the library named after its folder (or
+/// songbook): a song, or a song bundle's songs (whose pictures and videos are brought in with
+/// them).
+enum SongRead {
+    Song { song: Result<sp_model::Presentation, String>, path: PathBuf, library: Option<String> },
+    Bundle { opened: bundle::Opened, path: PathBuf, library: Option<String> },
+}
+
+/// A song bundle being taken in, song by song: what became of its pictures and videos brought
+/// so far (each is brought once, by the first song taken in that shows it), and those that
+/// couldn't be read.
+struct Bringing<'a> {
+    opened: &'a bundle::Opened,
+    placed: bundle::Placed,
+    failed: Vec<String>,
+}
+
+/// How an import knows a song the library has: its title, in any case, and its words.
+fn import_key(song: &sp_model::Presentation) -> (String, String) {
+    (song.title.trim().to_lowercase(), sp_model::to_song_text(song))
+}
+
+/// Where the library (`songs`) has a song being imported already: the song with its title and
+/// words (`have`, by [`import_key`]), else the one with its id (`ids`).
+fn already_here(
+    song: &sp_model::Presentation,
+    have: &HashMap<(String, String), usize>,
+    ids: &std::collections::HashSet<Uuid>,
+    songs: &[Arc<sp_model::Presentation>],
+) -> Option<usize> {
+    have.get(&import_key(song))
+        .copied()
+        .or_else(|| ids.contains(&song.id).then(|| songs.iter().position(|s| s.id == song.id)).flatten())
+}
+
+/// Puts items into playlist `at`, one after another in their order: after the item `after`
+/// names when it is the playlist in front, else at its end. A song already in it isn't added
+/// again.
+fn put_in_playlist(services: &mut service::Services, at: usize, after: Option<usize>, items: Vec<service::Item>) {
+    match after {
+        Some(after) if at == services.current => {
+            let mut slot = after + 1;
+            for item in items {
+                let before = services.front().items.len();
+                services.insert(slot, item);
+                if services.front().items.len() > before {
+                    slot += 1;
+                }
+            }
+        }
+        _ => {
+            for item in items {
+                services.add_to(at, item);
+            }
+        }
+    }
 }
 
 /// What an import did.
@@ -668,6 +717,9 @@ struct Imported {
     pictures: usize,
     videos: usize,
 }
+
+/// How the sentence saying a song imported is in the library already ends.
+const ALREADY: &str = " is already in the library.";
 
 /// Where the pointer is in the window, in its points, while files are dragged over it: asked of
 /// the system, as the window library doesn't say (see `file_drop.rs`). `None` where the system
@@ -4580,8 +4632,7 @@ impl App {
                 PackJob::Bundle { job, result, path, to, library } => match *result {
                     Ok(opened) => {
                         let mut done = Imported::default();
-                        let song = Ok(opened.song.clone());
-                        self.take_songs(vec![SongRead { song, path, library, bundle: Some(opened) }], &to, &mut done);
+                        self.take_songs(vec![SongRead::Bundle { opened, path, library }], &to, &mut done);
                         let said = self.say_imported(&done);
                         (job, if done.landed.is_empty() { Err(said) } else { Ok(said) })
                     }
@@ -5087,11 +5138,12 @@ impl App {
     /// `sp song import` do. Each song goes into the Songs folder; a folder's songs go into a
     /// library named after it (made if there isn't one), and other songs into the library
     /// shown, if any, unless `to` names the library; `to` may also name a playlist they are
-    /// added to. A song bundle's pictures and videos come into the library's Media folder and
-    /// the media bin; a large bundle is read on a thread of its own, and its song comes in when
-    /// it has been. The first song's slides are shown. A song the library already has, word
-    /// for word under the same title, isn't added again (it still goes into the library or
-    /// playlist named). The window's notice says what happened.
+    /// added to. Each song in a song bundle comes in, in the bundle's order, and the pictures
+    /// and videos they show into the library's Media folder and the media bin; a large bundle is
+    /// read on a thread of its own, and its songs come in when it has been. The first song's
+    /// slides are shown. A song the library already has, word for word under the same title,
+    /// isn't added again (it still goes into the library or playlist named). The window's
+    /// notice says what happened.
     fn import_songs_to(&mut self, paths: &[PathBuf], to: &SongsTo) -> Imported {
         let started = Instant::now();
         let mut done = Imported::default();
@@ -5129,14 +5181,13 @@ impl App {
             let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
             if load::is_songbook(path) {
                 match load::import_songbook(path) {
-                    Ok(book) => read.extend(book.into_iter().map(|(song, book)| SongRead {
+                    Ok(book) => read.extend(book.into_iter().map(|(song, book)| SongRead::Song {
                         song: Ok(song),
                         path: path.clone(),
                         library: book.or_else(|| library.clone()),
-                        bundle: None,
                     })),
                     Err(problem) => {
-                        read.push(SongRead { song: Err(problem), path: path.clone(), library: None, bundle: None });
+                        read.push(SongRead::Song { song: Err(problem), path: path.clone(), library: None });
                     }
                 }
                 continue;
@@ -5152,7 +5203,7 @@ impl App {
             } else {
                 load::import_file(path)
             };
-            read.push(SongRead { song, path: path.clone(), library: library.clone(), bundle: None });
+            read.push(SongRead::Song { song, path: path.clone(), library: library.clone() });
         }
         self.take_songs(read, to, &mut done);
         applog::event(
@@ -5179,7 +5230,7 @@ impl App {
     }
 
     /// Opens a song bundle to import: at once when it is small (and returns it, to be taken in
-    /// with the other songs), else on a thread of its own, whose song comes in when it has been
+    /// with the other songs), else on a thread of its own, whose songs come in when it has been
     /// read (see [`App::finish_packs`]).
     fn open_bundle(
         &mut self,
@@ -5197,12 +5248,7 @@ impl App {
         let small = std::fs::metadata(path).is_ok_and(|meta| meta.len() <= PACK_READ_AT_ONCE);
         if small || self.running.is_none() {
             return match bundle::open(path, &staging) {
-                Ok(opened) => Some(SongRead {
-                    song: Ok(opened.song.clone()),
-                    path: path.to_owned(),
-                    library,
-                    bundle: Some(opened),
-                }),
+                Ok(opened) => Some(SongRead::Bundle { opened, path: path.to_owned(), library }),
                 Err(problem) => {
                     let _ = std::fs::remove_dir_all(&staging);
                     done.problems.push(problem);
@@ -5235,13 +5281,13 @@ impl App {
         // A song deleted in the app (or a Bible page) isn't "already here": its file can be
         // imported again. Its id stays taken, so the one imported gets an id of its own.
         let removed = self.running.as_ref().map(|r| r.home_state.removed_songs.clone()).unwrap_or_default();
-        let mut have: std::collections::HashMap<(String, String), usize> = self
+        let mut have: HashMap<(String, String), usize> = self
             .show
             .presentations()
             .iter()
             .enumerate()
             .filter(|(at, _)| !removed.contains(at) && !self.app_made(*at))
-            .map(|(at, s)| ((s.title.trim().to_lowercase(), sp_model::to_song_text(s)), at))
+            .map(|(at, s)| (import_key(s), at))
             .collect();
         let chosen_library = to.library.or(self.import_library_override);
         if let Some(Some(id)) = to.library {
@@ -5249,22 +5295,47 @@ impl App {
                 r.home_state.libraries.iter().find(|library| library.id == id).map(|library| library.name.clone())
             });
         }
-        for SongRead { song, path, library, bundle } in read {
-            let (path, library) = (&path, &library);
-            // A bundle's own folder goes once its song is in (or isn't coming).
-            let staging = bundle.as_ref().map(|opened| opened.staging.clone());
-            let song = match song {
-                Ok(song) => Some(song),
-                Err(problem) => {
-                    done.problems.push(problem);
-                    None
+        for read in read {
+            match read {
+                SongRead::Song { song: Ok(song), path, library } => {
+                    self.take_song(song, &path, &library, None, chosen_library, &mut have, &mut ids, done);
                 }
-            };
-            if let Some(song) = song {
-                self.take_song(song, path, library, bundle.as_ref(), chosen_library, &mut have, &mut ids, done);
-            }
-            if let Some(staging) = staging {
-                let _ = std::fs::remove_dir_all(staging);
+                SongRead::Song { song: Err(problem), .. } => done.problems.push(problem),
+                SongRead::Bundle { opened, path, library } => {
+                    // Its songs one after another, in its order, sharing its pictures and videos.
+                    let mut bringing = Bringing { opened: &opened, placed: bundle::Placed::new(), failed: Vec::new() };
+                    for read in &opened.songs {
+                        let from = Some((&mut bringing, read));
+                        self.take_song(
+                            read.song.clone(),
+                            &path,
+                            &library,
+                            from,
+                            chosen_library,
+                            &mut have,
+                            &mut ids,
+                            done,
+                        );
+                    }
+                    // What the bundle left out, said once for it.
+                    let mut lost = opened.left_out.clone();
+                    lost.extend(bringing.failed);
+                    if !lost.is_empty() {
+                        for each in &lost {
+                            applog::event("songs", &format!("left out of {}: {each}", file_name(&path)));
+                        }
+                        const NAMED: usize = 10;
+                        let more = lost.len().saturating_sub(NAMED);
+                        lost.truncate(NAMED);
+                        let more = if more > 0 { format!(" and {more} more (see the log)") } else { String::new() };
+                        done.notes.push(match opened.songs.as_slice() {
+                            [one] => format!("{}: left out of the bundle: {}{more}.", one.song.title, lost.join(", ")),
+                            _ => format!("Left out of {}: {}{more}.", file_name(&path), lost.join(", ")),
+                        });
+                    }
+                    // Its own folder goes once its songs are in (or aren't coming).
+                    let _ = std::fs::remove_dir_all(&opened.staging);
+                }
             }
         }
         if let Some(at) = done.first {
@@ -5280,7 +5351,8 @@ impl App {
     }
 
     /// Takes in one song read for an import: skipped when the library has it already (but put
-    /// into the library named), else stored, with a bundle's pictures and videos brought in,
+    /// into the library named), else stored, with the pictures and videos it shows from its
+    /// bundle (`bundle`: the bundle being taken in, and the song as read from it) brought in,
     /// and put into its library.
     #[allow(clippy::too_many_arguments)]
     fn take_song(
@@ -5288,18 +5360,15 @@ impl App {
         mut song: sp_model::Presentation,
         path: &std::path::Path,
         library: &Option<String>,
-        bundle: Option<&bundle::Opened>,
+        bundle: Option<(&mut Bringing, &bundle::Song)>,
         chosen_library: Option<Option<Uuid>>,
-        have: &mut std::collections::HashMap<(String, String), usize>,
+        have: &mut HashMap<(String, String), usize>,
         ids: &mut std::collections::HashSet<Uuid>,
         done: &mut Imported,
     ) {
-        let look = (song.title.trim().to_lowercase(), sp_model::to_song_text(&song));
-        let already = have.get(&look).copied().or_else(|| {
-            ids.contains(&song.id).then(|| self.show.presentations().iter().position(|s| s.id == song.id)).flatten()
-        });
-        if let Some(at) = already {
-            done.problems.push(format!("{} is already in the library.", song.title));
+        let look = import_key(&song);
+        if let Some(at) = already_here(&song, have, ids, self.show.presentations()) {
+            done.problems.push(format!("{}{ALREADY}", song.title));
             done.first.get_or_insert(at);
             done.landed.push(at);
             // A song in two of the folders imported goes into both their libraries; one dropped
@@ -5325,9 +5394,10 @@ impl App {
         if !load::is_song_file(path) {
             song.id = Uuid::new_v4();
         }
-        // A bundle's pictures and videos come into the library, and its slides show them.
-        if let Some(opened) = bundle {
-            self.bring_bundle_media(&mut song, opened, done);
+        // The pictures and videos it shows from its bundle come into the library, and its
+        // slides show them.
+        if let Some((bringing, read)) = bundle {
+            self.bring_bundle_media(&mut song, bringing, read, done);
         }
         done.titles.push(song.title.clone());
         ids.insert(song.id);
@@ -5363,18 +5433,26 @@ impl App {
         }
     }
 
-    /// Brings an imported bundle's pictures and videos into the library's Media folder and the
-    /// media bin (the bin's own item when it has the same file already), and has the song's
-    /// slides show them. What didn't come is noted in `done`, by file name.
-    fn bring_bundle_media(&mut self, song: &mut sp_model::Presentation, opened: &bundle::Opened, done: &mut Imported) {
+    /// Brings the pictures and videos a song imported from a bundle shows (`read`, as read from
+    /// the bundle being taken in) into the library's Media folder and the media bin (the bin's
+    /// own item when it has the same file already), each once for the whole bundle, and has the
+    /// song's slides show them. The pictures the bundle doesn't hold are noted in `done`, by file
+    /// name; those that couldn't be read, in `bringing`.
+    fn bring_bundle_media(
+        &mut self,
+        song: &mut sp_model::Presentation,
+        bringing: &mut Bringing,
+        read: &bundle::Song,
+        done: &mut Imported,
+    ) {
         let title = song.title.clone();
-        let mut lost = opened.left_out.clone();
         if let Some(dir) = bible_store::data_dir() {
             let mut brought = pack::Brought::default();
             // Items added to the bin, pictures and videos.
             let mut added = (0, 0);
             let (show, pictures) = (&mut self.show, &mut self.bin_pictures);
-            let failed = bundle::bring(song, opened, &dir, &mut brought, |path, staged| {
+            let (opened, placed) = (bringing.opened, &mut bringing.placed);
+            let failed = bundle::bring(song, &read.slides, opened, placed, &dir, &mut brought, |path, staged| {
                 if let Some(have) = show.media().iter().find(|item| item.path == path) {
                     return Some(have.id);
                 }
@@ -5394,15 +5472,12 @@ impl App {
             if added != (0, 0) {
                 self.save_media_list();
             }
-            lost.extend(failed.into_iter().map(|name| format!("{name} (couldn't be read)")));
+            bringing.failed.extend(failed.into_iter().map(|name| format!("{name} (couldn't be read)")));
             done.pictures += added.0;
             done.videos += added.1;
         }
-        if !opened.missing.is_empty() {
-            done.notes.push(format!("{title}: not in the bundle: {}.", opened.missing.join(", ")));
-        }
-        if !lost.is_empty() {
-            done.notes.push(format!("{title}: left out of the bundle: {}.", lost.join(", ")));
+        if !read.missing.is_empty() {
+            done.notes.push(format!("{title}: not in the bundle: {}.", read.missing.join(", ")));
         }
     }
 
@@ -5428,23 +5503,7 @@ impl App {
             services.list.iter().position(|playlist| playlist.name == spot.name)
         };
         let Some(at) = found.filter(|_| !items.is_empty()) else { return };
-        match spot.after {
-            Some(after) if at == services.current => {
-                let mut slot = after + 1;
-                for item in items {
-                    let before = services.front().items.len();
-                    services.insert(slot, item);
-                    if services.front().items.len() > before {
-                        slot += 1;
-                    }
-                }
-            }
-            _ => {
-                for item in items {
-                    services.add_to(at, item);
-                }
-            }
-        }
+        put_in_playlist(services, at, spot.after, items);
         done.playlist = Some(services.list[at].name.clone());
     }
 
@@ -5459,13 +5518,26 @@ impl App {
             many => format!(" into {} libraries", many.len()),
         };
         let busy = !done.decks.is_empty() || !done.opening.is_empty() || !done.packs.is_empty();
+        // Several songs here already (a bundle's, say) are said together.
+        let all_here = done.problems.len() > 1 && done.problems.iter().all(|problem| problem.ends_with(ALREADY));
         let said = match (done.titles.as_slice(), done.problems.as_slice()) {
             ([], []) if busy => None,
             ([], []) => Some("There were no songs to import there.".to_owned()),
             ([one], []) => Some(format!("Imported {one}{into}.")),
             (many, []) => Some(format!("Imported {} songs{into}.", many.len())),
             ([], [problem]) => Some(problem.clone()),
-            ([], rest) => Some(format!("No songs imported. {}", rest[0])),
+            ([], rest) if all_here => Some(format!("All {} songs are already in the library.", rest.len())),
+            ([], rest) => Some(format!(
+                "No songs imported. {}{}",
+                rest[0],
+                if rest.len() > 1 { format!(" (and {} more; see the log)", rest.len() - 1) } else { String::new() }
+            )),
+            (imported, rest) if all_here => Some(format!(
+                "Imported {} of {} songs{into}; the other {} are already in the library.",
+                imported.len(),
+                imported.len() + rest.len(),
+                rest.len()
+            )),
             (imported, rest) => Some(format!(
                 "Imported {} of {} songs{into}. {}{}",
                 imported.len(),
@@ -5497,9 +5569,9 @@ impl App {
         }
         if !done.opening.is_empty() {
             words.push(format!(
-                "Opening {}; the window says when {} in.",
+                "Opening {}; the window says when {} songs are in.",
                 done.opening.join(", "),
-                if done.opening.len() == 1 { "its song is" } else { "their songs are" }
+                if done.opening.len() == 1 { "its" } else { "their" }
             ));
         }
         let text = words.join(" ");
@@ -9084,5 +9156,65 @@ mod tests {
         let key = |key: Key| show_key_command(&key, &show);
         assert_eq!(key(Key::Character("a".into())), jump(2));
         assert_eq!(key(Key::Character("7".into())), None);
+    }
+
+    /// A bundle's songs, taken in as an import takes them: one the library has already (or
+    /// that came earlier in the bundle) is found, not added again, and all of them, in the
+    /// bundle's order, go into a playlist where it was dropped on it.
+    #[test]
+    fn a_bundles_songs_go_into_a_playlist_in_order_and_one_here_already_isnt_added_twice() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("softpresenter-main-bundle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let song = |title: &str| sp_model::pro_example::titled_song_showing(title, &[]);
+        let bundle = dir.join("Service.proBundle");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&bundle).unwrap());
+        for (name, title) in [
+            ("Anchor Song.pro", "Anchor Song"),
+            ("Evening Lantern.docx.pro", "Evening Lantern"),
+            ("Anchor Song (copy).pro", "anchor song"),
+            ("Dawn Road.pro", "Dawn Road"),
+        ] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            zip.write_all(&song(title)).unwrap();
+        }
+        zip.finish().unwrap();
+        let opened = bundle::open(&bundle, &dir.join("staging")).unwrap();
+        // The library has Evening Lantern already, from another import (so another id).
+        let earlier = bundle::open(&bundle, &dir.join("staging-2")).unwrap();
+        let mut songs = vec![Arc::new(earlier.songs[1].song.clone())];
+        let mut have: HashMap<(String, String), usize> = HashMap::from([(import_key(&songs[0]), 0)]);
+        let mut ids = std::collections::HashSet::from([songs[0].id]);
+        let mut landed = Vec::new();
+        for read in &opened.songs {
+            let at = already_here(&read.song, &have, &ids, &songs).unwrap_or_else(|| {
+                songs.push(Arc::new(read.song.clone()));
+                have.insert(import_key(&read.song), songs.len() - 1);
+                ids.insert(read.song.id);
+                songs.len() - 1
+            });
+            landed.push(at);
+        }
+        let titles: Vec<&str> = songs.iter().map(|song| song.title.as_str()).collect();
+        assert_eq!(titles, ["Evening Lantern", "Anchor Song", "Dawn Road"], "each song once");
+        assert_eq!(landed, [1, 0, 1, 2]);
+        // Dropped on the playlist in front after its first item: in, in order, there; on
+        // another playlist's row: at its end, in order.
+        let item = |at: usize| service::Item::Song { key: format!("song-{at}"), title: songs[at].title.clone() };
+        let mut services = service::Services::default();
+        services.list[0].items = vec![
+            service::Item::Header { name: "Welcome".to_owned() },
+            service::Item::Header { name: "Sermon".to_owned() },
+        ];
+        services.list.push(service::Service { name: "Evening".to_owned(), items: Vec::new() });
+        put_in_playlist(&mut services, 0, Some(0), landed.iter().map(|&at| item(at)).collect());
+        put_in_playlist(&mut services, 1, Some(0), landed.iter().map(|&at| item(at)).collect());
+        let names = |playlist: usize| -> Vec<String> {
+            services.list[playlist].items.iter().map(|item| item.title().to_owned()).collect()
+        };
+        assert_eq!(names(0), ["Welcome", "Anchor Song", "Evening Lantern", "Dawn Road", "Sermon"]);
+        assert_eq!(names(1), ["Anchor Song", "Evening Lantern", "Dawn Road"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

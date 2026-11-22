@@ -705,9 +705,14 @@ pub mod example {
     /// pictures or videos given (an address, a path from a known folder, and `None` for a
     /// picture or whether a video loops), then a slide showing nothing.
     pub fn song_showing(media: &[(&str, &str, Option<bool>)]) -> Vec<u8> {
+        titled_song_showing("Harbour Lights", media)
+    }
+
+    /// The same, under another title.
+    pub fn titled_song_showing(title: &str, media: &[(&str, &str, Option<bool>)]) -> Vec<u8> {
         let ids: Vec<String> = (0..=media.len()).map(|n| format!("s{n}")).collect();
         let names: Vec<&str> = ids.iter().map(String::as_str).collect();
-        let mut out = [field(3, b"Harbour Lights"), field(12, &group("g", "Verse 1", &names))].concat();
+        let mut out = [field(3, title.as_bytes()), field(12, &group("g", "Verse 1", &names))].concat();
         for (at, (address, local, video)) in media.iter().enumerate() {
             let words = format!(r"{{\rtf1 Lamp number {at}}}");
             out.extend(field(13, &cue_showing(&ids[at], &words, &[media_action(address, local, *video)])));

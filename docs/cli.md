@@ -486,9 +486,11 @@ Windows encodings for Russian, Ukrainian and Western languages), with section na
 "Verse 1" or "Chorus" on their own lines; song text; lyric files from song services (the
 footer's song number, writers and copyright become the song's details); ChordPro (chords taken
 out); rich text; Word and OpenDocument files; SoftPresenter song files; ProPresenter 7 `.pro`
-documents and `.proBundle` bundles (the song, and the pictures and videos its slides show,
-which go into the media bin; the reply names any the bundle doesn't hold, and a bundle over
-64 MB is read in the background, with a job number); SoftProjector databases and songbooks. A PowerPoint, Keynote or OpenDocument
+documents and `.proBundle` bundles (every song in the bundle, in its order, and the pictures
+and videos their slides show, which go into the media bin, each once; the reply says how many
+pictures and videos came, names any a song shows that the bundle doesn't hold and everything
+in the bundle left out, with why, and a bundle over 64 MB is read in the background, with a
+job number); SoftProjector databases and songbooks. A PowerPoint, Keynote or OpenDocument
 presentation, a PDF, or a folder of pictures becomes a presentation of picture slides, made in
 the background. Anything else is refused, with the list of what is read.
 
@@ -1120,7 +1122,7 @@ the command's facts where it has any:
 | `song info SONG` | `id`, `title`, `artist`, `author`, `publisher`, `year`, `ccli`, `slides`, `theme`, `transition`, `loops` |
 | `search WORDS` | `[{"song": "Blessed Assurance", "number": 1, "title": false, "slides": [1]}]` |
 | `bible search WORDS` | `[{"verse": "John 3:16", "chapter": …, "words": "…", "bible": "KJV"}]` |
-| `song import` | `imported`, `making` (presentations still being turned into slides), `opening` (song bundles still being read), `notes` (pictures or videos a bundle's song came without), `problems` |
+| `song import` | `imported`, `making` (presentations still being turned into slides), `opening` (song bundles still being read), `notes` (pictures or videos a bundle's song came without, and what a bundle left out), `pictures` and `videos` (how many a bundle brought into the media bin), `problems` (songs not imported, those already in the library among them) |
 | `settings` | Every setting, as the app keeps it |
 | A command that starts a job | `job`: its number |
 

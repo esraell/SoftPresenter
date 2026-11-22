@@ -118,20 +118,28 @@ feature changes, this page changes in the same commit.
   "Psalm 133:3" the reference. `.pro` files can also be dropped on the window or given to
   `sp song import`. Documents with pictures or videos but no words are listed as not imported
   for now. A library of 4,372 songs comes across in about a third of a second.
-- **Song bundles from ProPresenter 7** (`.proBundle`, a song exported with its pictures and
-  videos) come in wherever a `.pro` document does: File › Import Songs…, Import from
-  ProPresenter…, a folder of them, dropping them on the window, or `sp song import`. The song
-  comes across as a `.pro` document does; each picture or video a slide shows is copied into the
-  library's Media folder (or found there already, by its contents), added to the media bin, and
-  shown behind that slide's words, and a video set to loop keeps looping. Bundles exported by
-  the program (pictures kept under the paths they had on the computer they came from) and ones
-  written by other tools (bare file names) are both read. A picture or video the bundle doesn't
-  hold is named in the window's notice and the song's words come in all the same. The bundle is
-  read as untrusted: nothing is ever written where an entry's name says, only the song and the
-  pictures and videos it shows are taken out, each within a size limit, and nothing in it is
-  run. A bundle larger than 64 MB is read in the background; the notice says when its song is
-  in. Its pictures keep their own file names in the Media folder (numbered when the name is
-  taken), so the media bin shows those names.
+- **Song bundles from ProPresenter 7** (`.proBundle`, one song or several, with their pictures
+  and videos) come in wherever a `.pro` document does: File › Import Songs…, Import from
+  ProPresenter…, a folder of them, dropping them on the window, or `sp song import`. Every
+  song in a bundle comes across as a `.pro` document does, in the
+  order of the bundle's entries (a bundle records no order of its own; the ones seen list their
+  songs by name); each picture or video a slide shows is copied into the library's Media folder
+  (or found there already, by its contents), added to the media bin once however many of the
+  songs show it, and shown behind that slide's words, and a video set to loop keeps looping.
+  Dropped on a playlist, all of a bundle's songs go in, in that order, where the line shows (on
+  a playlist's row in the chooser, at its end). A song the library has already, word for word
+  under the same title, isn't added again; the notice says how many were there. Bundles
+  exported by the program (pictures kept under the paths they had on the computer they came
+  from) and ones written by other tools (bare file names) are both read. A picture or video the
+  bundle doesn't hold is named in the window's notice and the song's words come in all the same;
+  so is everything else in the bundle that doesn't come in, and why: a song that can't be read,
+  a PDF (a bundle's PDFs don't come in yet), a picture no song shows, a file of another kind.
+  The bundle is read as untrusted: nothing is ever written where an entry's name says, only the
+  songs (at most 500, and 256 MB of them together) and the pictures and videos they show are
+  taken out, each within a size limit, and nothing in it is run. A bundle larger than 64 MB is
+  read in the background; the notice says when its songs are in. Its pictures keep their own
+  file names in the Media folder (numbered when the name is taken), so the media bin shows those
+  names.
 - **Dropping files from the Finder lands them where the pointer is.** Song files of every
   kind (song documents and bundles, text, lyric and ChordPro files, songbooks, song packs,
   folders of songs) always go to the songs, never into the media bin: dropped on a playlist (a

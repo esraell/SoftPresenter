@@ -116,9 +116,10 @@ message.
   from decompiling another product or from file formats extracted from one. One exception,
   agreed by the owner: the song importer reads ProPresenter 7 `.pro` documents using
   greyshirtguy's MIT-licensed definitions, and (asked for by the owner on 2026-11-21)
-  `.proBundle` files, a ZIP of one `.pro` and the pictures and videos it shows, whose layout was
-  learnt from the MIT-licensed propresenter7-php-lib's notes; it may name ProPresenter as a
-  plain fact where it says what it reads, and never writes those formats
+  `.proBundle` files, a ZIP of one or more `.pro` and the pictures and videos they show, whose
+  layout was learnt from the MIT-licensed propresenter7-php-lib's notes and from the owner's
+  own bundles; it may name ProPresenter as a plain fact where it says what it reads, and
+  never writes those formats
   ([docs/licences/song-documents.md](docs/licences/song-documents.md)). A second, the same way:
   the song importer reads SoftProjector's song databases and songbooks, whose layout was
   learnt from SoftProjector's GPL-3.0 source (table and column names, how a song's text is

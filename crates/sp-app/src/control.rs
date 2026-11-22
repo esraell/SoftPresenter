@@ -2695,7 +2695,7 @@ impl crate::App {
                 // A large song bundle is read in the background; `sp job` says when it is in.
                 if !done.opening.is_empty() {
                     busy.push(format!(
-                        "Opening {}; its song comes in when it has been read.",
+                        "Opening {}; its songs come in when it has been read.",
                         done.opening.join(", ")
                     ));
                 }
@@ -2705,6 +2705,8 @@ impl crate::App {
                     "making": decks,
                     "opening": done.opening,
                     "notes": done.notes,
+                    "pictures": done.pictures,
+                    "videos": done.videos,
                 });
                 if imported.is_empty() {
                     if !busy.is_empty() {
@@ -2717,7 +2719,8 @@ impl crate::App {
                     return Err(if problems.is_empty() {
                         "Nothing was imported.".to_owned()
                     } else {
-                        problems.join("\n")
+                        // Songs here already, and what a bundle left out.
+                        problems.iter().chain(&done.notes).cloned().collect::<Vec<_>>().join("\n")
                     });
                 }
                 // The text names the first few; the data lists them all.
@@ -2734,7 +2737,15 @@ impl crate::App {
                         many.len() - NAMED
                     ),
                 };
-                // What a bundle's song came without: pictures or videos missing or left out.
+                // A bundle's pictures and videos, and what its songs came without.
+                let things: Vec<String> = [(done.pictures, "picture"), (done.videos, "video")]
+                    .into_iter()
+                    .filter(|(n, _)| *n > 0)
+                    .map(|(n, what)| format!("{n} {what}{}", if n == 1 { "" } else { "s" }))
+                    .collect();
+                if !things.is_empty() {
+                    text.push_str(&format!("\nBrought {} into the media bin.", things.join(" and ")));
+                }
                 for note in &done.notes {
                     text.push_str(&format!("\n{note}"));
                 }

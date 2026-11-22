@@ -1,7 +1,11 @@
-//! Song bundles saved by ProPresenter 7 (`.proBundle`): one song document and the pictures and
-//! videos its slides show, in one zip file. The song is read as a `.pro` document is
-//! (`sp_model::read_pro_document`); its pictures and videos come into the library's Media
-//! folder and the media bin, and its slides show them.
+//! Song bundles saved by ProPresenter 7 (`.proBundle`): song documents and the pictures and
+//! videos their slides show, in one zip file. Most hold one song; some hold several side by
+//! side, with `Media/` and `PDF/` folders beside them (seen in one written with bare file names,
+//! as other tools write bundles, not as the program's own exports are). Each song is read
+//! as a `.pro` document is (`sp_model::read_pro_document`), in the order of the bundle's
+//! entries, which is the only order a bundle gives; their pictures and videos come into the
+//! library's Media folder and the media bin, each once however many songs show it, and their
+//! slides show them.
 //!
 //! Two layouts are known. A bundle the program exports keeps each picture and video under the
 //! whole path it had on the computer it came from, with its leading slash, and the song names
@@ -10,11 +14,13 @@
 //! its whole path, by its path from a known folder, or by a file name only one entry has.
 //!
 //! A bundle is untrusted input, read the way a song pack is (`pack.rs`): no entry's name is ever
-//! used as a path, only as a label to look things up by. Only the one song document and the
-//! pictures and videos the song shows are taken out, each within a size cap whatever the entry
-//! says, checked against the free disk space, into a folder of the app's own under a name the
-//! app makes. An entry whose name climbs out of its folder (`..`), a link, or an encrypted
-//! entry is left out and named. Nothing in a bundle is run.
+//! used as a path, only as a label to look things up by. Only the song documents (at most
+//! [`Limits::songs`] of them) and the pictures and videos the songs show are taken out, each
+//! within a size cap whatever the entry says, the songs within a cap together, the pictures
+//! checked against the free disk space, into a folder of the app's own under a name the app
+//! makes. An entry whose name climbs out of its folder (`..`), a link, or an encrypted entry is
+//! left out and named, and so is everything else not taken (a PDF, a picture no song shows, a
+//! song that can't be read). Nothing in a bundle is run.
 //!
 //! Archives exported by that program are reported to give the place of their ZIP64 end record
 //! wrongly in the record that points to it; a strict zip reader refuses them. That one number
@@ -38,7 +44,11 @@ pub fn is_bundle(path: &Path) -> bool {
 /// How much a bundle may hold.
 pub struct Limits {
     pub entries: usize,
+    /// Songs taken from one bundle; any more are left out, and said.
+    pub songs: usize,
     pub song: u64,
+    /// All its songs' documents together; songs past this are left out, and said.
+    pub all_songs: u64,
     pub picture: u64,
     pub video: u64,
     /// Room left free on the disk after the pictures and videos are taken out.
@@ -48,7 +58,9 @@ pub struct Limits {
 impl Limits {
     pub const NORMAL: Limits = Limits {
         entries: 20_000,
+        songs: 500,
         song: sp_model::LARGEST_PRO_FILE as u64,
+        all_songs: 256 * 1024 * 1024,
         picture: pack::LARGEST_PICTURE,
         video: 20 * 1024 * 1024 * 1024,
         keep_free: pack::KEEP_FREE,
@@ -66,18 +78,27 @@ pub struct Staged {
     pub looping: bool,
 }
 
+/// One of a bundle's songs, read, with the pictures and videos its slides show.
+#[derive(Debug)]
+pub struct Song {
+    pub song: Presentation,
+    /// Each slide that shows a picture or video: the slide's id and its place in the bundle's
+    /// `files`.
+    pub slides: Vec<(Uuid, usize)>,
+    /// The pictures and videos it shows that the bundle doesn't hold, by file name.
+    pub missing: Vec<String>,
+}
+
 /// A bundle read and checked, its pictures and videos put in a folder of the app's own.
 #[derive(Debug)]
 pub struct Opened {
-    pub song: Presentation,
+    /// Its songs, in the order of the bundle's entries.
+    pub songs: Vec<Song>,
+    /// The pictures and videos its songs show, each once.
     pub files: Vec<Staged>,
-    /// Each slide that shows a picture or video: the slide's id and its place in `files`.
-    pub slides: Vec<(Uuid, usize)>,
-    /// The pictures and videos the song shows that the bundle doesn't hold, by file name.
-    pub missing: Vec<String>,
     /// What was left out of the bundle, by file name, and why.
     pub left_out: Vec<String>,
-    /// The folder the pictures and videos were put in, removed once the song is in.
+    /// The folder the pictures and videos were put in, removed once the songs are in.
     pub staging: PathBuf,
 }
 
@@ -87,58 +108,113 @@ pub fn open(path: &Path, staging: &Path) -> Result<Opened, String> {
     open_with(path, staging, &Limits::NORMAL)
 }
 
-/// The song in a bundle, words only, without taking anything else out.
+/// The first song in a bundle, words only, without taking anything else out.
 pub fn read_words(path: &Path) -> Result<Presentation, String> {
     let name = file_name(path);
     let mut zip = archive(path).map_err(|_| not_a_bundle(&name))?;
-    let (song_at, _, _) = entries(&mut zip, &name, &Limits::NORMAL)?;
-    let (bytes, title) = read_song(&mut zip, song_at, &name, &Limits::NORMAL)?;
-    sp_model::read_pro_file(&bytes, &title).map_err(|why| format!("{name} could not be read ({why})."))
+    let found = entries(&mut zip, &name, &Limits::NORMAL)?;
+    let (at, entry) = &found.songs[0];
+    let bytes = read_song(&mut zip, *at, Limits::NORMAL.song).map_err(|why| song_problem(&name, &why))?;
+    sp_model::read_pro_file(&bytes, &title_of(entry)).map_err(|why| format!("{name} could not be read ({why})."))
 }
 
 pub fn open_with(path: &Path, staging: &Path, limits: &Limits) -> Result<Opened, String> {
     let name = file_name(path);
     let mut zip = archive(path).map_err(|_| not_a_bundle(&name))?;
-    let (song_at, labels, left_out) = entries(&mut zip, &name, limits)?;
-    let (bytes, title) = read_song(&mut zip, song_at, &name, limits)?;
-    let document =
-        sp_model::read_pro_document(&bytes, &title).map_err(|why| format!("{name} could not be read ({why})."))?;
-    std::fs::create_dir_all(staging).map_err(|e| format!("Could not make room for the bundle: {e}"))?;
-    let room = pack::free_space(staging).map_or(u64::MAX, |free| free.saturating_sub(limits.keep_free));
-    let mut opened = Opened {
-        song: document.song,
-        files: Vec::new(),
-        slides: Vec::new(),
-        missing: Vec::new(),
-        left_out,
-        staging: staging.to_path_buf(),
-    };
-    // Each entry taken out once, however many slides show it; and an entry that couldn't be,
-    // named once.
-    let mut taken: HashMap<usize, Option<usize>> = HashMap::new();
-    let mut written: u64 = 0;
-    for (slide, media) in &document.media {
-        let Some(found) = find(&labels, media) else {
-            let missing = shown(&shown_name(media));
-            if !opened.missing.contains(&missing) {
-                opened.missing.push(missing);
+    let Entries { songs, labels, mut left_out } = entries(&mut zip, &name, limits)?;
+    // Each song read and its bytes let go before the next, within its cap and the cap on all of
+    // them. One that can't be read is left out and named, unless it is the bundle's only song.
+    let only = songs.len() == 1;
+    let (mut documents, mut unread, mut read) = (Vec::new(), Vec::new(), 0u64);
+    for (at, entry) in &songs {
+        let cap = limits.song.min(limits.all_songs.saturating_sub(read));
+        let document = read_song(&mut zip, *at, cap)
+            .map_err(|why| if cap < limits.song && why == TOO_LARGE { TOO_MANY_WORDS.to_owned() } else { why })
+            .and_then(|bytes| {
+                read += bytes.len() as u64;
+                sp_model::read_pro_document(&bytes, &title_of(entry))
+            });
+        match document {
+            Ok(document) => documents.push(document),
+            Err(why) if only => return Err(song_problem(&name, &why)),
+            Err(why) if why == TOO_LARGE || why == TOO_MANY_WORDS => {
+                unread.push(format!("{} ({why})", shown(file_part(entry))));
             }
-            continue;
-        };
-        let label = &labels[found];
-        let place = match taken.get(&label.at) {
-            Some(place) => *place,
-            None => {
-                let place = take_out(&mut zip, label, media, staging, limits, room, &mut written, &mut opened);
-                taken.insert(label.at, place);
-                place
-            }
-        };
-        if let Some(place) = place {
-            opened.slides.push((*slide, place));
+            Err(why) => unread.push(format!("{} (could not be read: {why})", shown(file_part(entry)))),
         }
     }
+    if documents.is_empty() {
+        let more = unread.len().saturating_sub(10);
+        let named = unread[..unread.len() - more].join(", ");
+        let more = if more > 0 { format!(" and {more} more") } else { String::new() };
+        return Err(format!("None of the songs in {name} could be read: {named}{more}."));
+    }
+    left_out.extend(unread);
+    std::fs::create_dir_all(staging).map_err(|e| format!("Could not make room for the bundle: {e}"))?;
+    let room = pack::free_space(staging).map_or(u64::MAX, |free| free.saturating_sub(limits.keep_free));
+    let mut opened = Opened { songs: Vec::new(), files: Vec::new(), left_out, staging: staging.to_path_buf() };
+    // Each entry taken out once, however many slides (and songs) show it; and an entry that
+    // couldn't be, named once.
+    let mut taken: HashMap<usize, Option<usize>> = HashMap::new();
+    let mut written: u64 = 0;
+    for document in documents {
+        let mut song = Song { song: document.song, slides: Vec::new(), missing: Vec::new() };
+        for (slide, media) in &document.media {
+            let Some(found) = find(&labels, media) else {
+                let missing = shown(&shown_name(media));
+                if !song.missing.contains(&missing) {
+                    song.missing.push(missing);
+                }
+                continue;
+            };
+            let label = &labels[found];
+            let place = match taken.get(&label.at) {
+                Some(place) => *place,
+                None => {
+                    let place = take_out(&mut zip, label, media, staging, limits, room, &mut written, &mut opened);
+                    taken.insert(label.at, place);
+                    place
+                }
+            };
+            if let Some(place) = place {
+                song.slides.push((*slide, place));
+            }
+        }
+        opened.songs.push(song);
+    }
+    // What no song shows is named too, so nothing in a bundle goes unsaid.
+    for label in labels.iter().filter(|label| !taken.contains_key(&label.at)) {
+        let file = file_part(&label.name);
+        let why = if Path::new(file).extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) {
+            "a PDF, which doesn't come in with a bundle's songs"
+        } else if crate::media::is_media(Path::new(file)) {
+            "no song in the bundle shows it"
+        } else {
+            "not a song, picture or video"
+        };
+        opened.left_out.push(format!("{} ({why})", shown(file)));
+    }
     Ok(opened)
+}
+
+/// Why a song in a bundle wasn't read: larger than a song is, or (`TOO_MANY_WORDS`) past the
+/// cap on all the bundle's songs together.
+const TOO_LARGE: &str = "too large to be a song";
+const TOO_MANY_WORDS: &str = "the bundle's songs are too large together";
+
+/// What is said when a bundle's only song can't be read.
+fn song_problem(name: &str, why: &str) -> String {
+    if why == TOO_LARGE {
+        format!("{name}: its song is too large to be a song.")
+    } else {
+        format!("{name} could not be read ({why}).")
+    }
+}
+
+/// A song's title from its entry's name, for a document that names none.
+fn title_of(entry: &str) -> String {
+    let file = file_part(entry);
+    shown(file.rsplit_once('.').map_or(file, |(stem, _)| stem))
 }
 
 /// Takes one picture or video out into the staging folder: at most its cap (and the room left
@@ -192,41 +268,52 @@ fn take_out(
     }
 }
 
-/// Brings a bundle's pictures and videos into the library's Media folder, each under its own
-/// file name (made safe, and numbered when the name is taken; the media bin names an item by its
-/// file), or finds the file with the same contents there already; and has each slide of `song` (the bundle's song, or
-/// a copy of it) show its one. `item_for` gives the media bin item for a file in the library
-/// (adding one if the bin hasn't got it); a file just copied in that it gives none for (one
-/// that can't be read as a picture or video) is taken out again. Says the files that couldn't
-/// be brought.
+/// What became of a bundle's pictures and videos brought into a library so far, by their place
+/// in its `files`: the media bin item each became, or `None` for one that couldn't be brought.
+pub type Placed = HashMap<usize, Option<Uuid>>;
+
+/// Brings the pictures and videos one of a bundle's songs shows into the library's Media folder,
+/// each under its own file name (made safe, and numbered when the name is taken; the media bin
+/// names an item by its file), or finds the file with the same contents there already; and has
+/// each of `slides` (the song's, see [`Song`]) in `song` (the bundle's song, or a copy of it)
+/// show its one. Each file is brought once for the whole bundle, the first time a song shows
+/// it: `placed` keeps what each became. `item_for` gives the media bin item for a file in the
+/// library (adding one if the bin hasn't got it); a file just copied in that it gives none for
+/// (one that can't be read as a picture or video) is taken out again. Says the files that
+/// couldn't be brought, each once.
 pub fn bring(
     song: &mut Presentation,
+    slides: &[(Uuid, usize)],
     opened: &Opened,
+    placed: &mut Placed,
     library: &Path,
     brought: &mut pack::Brought,
     mut item_for: impl FnMut(&Path, &Staged) -> Option<Uuid>,
 ) -> Vec<String> {
     let dir = library.join("Media");
     let mut failed = Vec::new();
-    let items: Vec<Option<Uuid>> = opened
-        .files
-        .iter()
-        .map(|staged| {
-            let before = (brought.pictures, brought.videos);
-            let placed = place(staged, &dir, brought);
-            let item = placed.as_deref().and_then(|path| item_for(path, staged));
-            if item.is_none() {
-                if let Some(path) = placed.filter(|_| (brought.pictures, brought.videos) != before) {
-                    let _ = std::fs::remove_file(path);
-                    (brought.pictures, brought.videos) = before;
-                }
-                failed.push(staged.name.clone());
+    for (id, at) in slides {
+        let item = match placed.get(at) {
+            Some(item) => *item,
+            None => {
+                let item = opened.files.get(*at).and_then(|staged| {
+                    let before = (brought.pictures, brought.videos);
+                    let path = place(staged, &dir, brought);
+                    let item = path.as_deref().and_then(|path| item_for(path, staged));
+                    if item.is_none() {
+                        if let Some(path) = path.filter(|_| (brought.pictures, brought.videos) != before) {
+                            let _ = std::fs::remove_file(path);
+                            (brought.pictures, brought.videos) = before;
+                        }
+                        failed.push(staged.name.clone());
+                    }
+                    item
+                });
+                placed.insert(*at, item);
+                item
             }
-            item
-        })
-        .collect();
-    for (id, place) in &opened.slides {
-        let Some(item) = items.get(*place).copied().flatten() else { continue };
+        };
+        let Some(item) = item else { continue };
         if let Some(slide) = song.groups.iter_mut().flat_map(|g| &mut g.slides).find(|s| s.id == *id) {
             slide.actions.retain(|action| !matches!(action, ShowAction::Media { .. }));
             slide.actions.push(ShowAction::Media { id: item });
@@ -292,13 +379,22 @@ struct Label {
 
 type Zip = zip::ZipArchive<Mended<std::io::BufReader<std::fs::File>>>;
 
-/// Looks through a bundle's entries: the song's place, the entries that may be pictures or
-/// videos, and what was left out (and why).
-fn entries(zip: &mut Zip, name: &str, limits: &Limits) -> Result<(usize, Vec<Label>, Vec<String>), String> {
+/// What a look through a bundle's entries found: its song documents (their places and names,
+/// in order, at most [`Limits::songs`]), the entries that may be pictures or videos, and what
+/// was left out (and why).
+struct Entries {
+    songs: Vec<(usize, String)>,
+    labels: Vec<Label>,
+    left_out: Vec<String>,
+}
+
+/// Looks through a bundle's entries (see [`Entries`]).
+fn entries(zip: &mut Zip, name: &str, limits: &Limits) -> Result<Entries, String> {
     if zip.len() > limits.entries {
         return Err(format!("{name} has too many files in it to be a song bundle."));
     }
-    let (mut song, mut labels, mut left_out) = (None, Vec::new(), Vec::new());
+    let mut found = Entries { songs: Vec::new(), labels: Vec::new(), left_out: Vec::new() };
+    let mut more_songs = 0;
     for at in 0..zip.len() {
         let entry = zip.by_index_raw(at).map_err(|_| not_a_bundle(name))?;
         let raw = String::from_utf8_lossy(entry.name_raw()).into_owned();
@@ -306,39 +402,42 @@ fn entries(zip: &mut Zip, name: &str, limits: &Limits) -> Result<(usize, Vec<Lab
             continue;
         }
         if entry.is_symlink() || entry.encrypted() || climbs(&raw) {
-            left_out.push(format!("{} (not a plain file in the bundle)", shown(file_part(&raw))));
+            found.left_out.push(format!("{} (not a plain file in the bundle)", shown(file_part(&raw))));
             continue;
         }
         if is_song(&raw) {
-            match song {
-                None => song = Some(at),
-                Some(_) => left_out.push(format!("{} (a second song)", shown(file_part(&raw)))),
+            if found.songs.len() < limits.songs {
+                found.songs.push((at, raw));
+            } else {
+                more_songs += 1;
             }
             continue;
         }
-        labels.push(Label { at, name: raw, size: entry.size() });
+        found.labels.push(Label { at, name: raw, size: entry.size() });
     }
-    let song = song.ok_or_else(|| format!("{name} has no song in it."))?;
-    Ok((song, labels, left_out))
+    if found.songs.is_empty() {
+        return Err(format!("{name} has no song in it."));
+    }
+    if more_songs > 0 {
+        found.left_out.push(format!(
+            "{more_songs} more song{} (a bundle brings in at most {} songs)",
+            if more_songs == 1 { "" } else { "s" },
+            limits.songs
+        ));
+    }
+    Ok(found)
 }
 
-/// The song document's bytes (at most its cap, whatever the entry says) and the title from
-/// its file name.
-fn read_song(zip: &mut Zip, at: usize, name: &str, limits: &Limits) -> Result<(Vec<u8>, String), String> {
-    let mut entry = zip.by_index(at).map_err(|_| not_a_bundle(name))?;
-    let raw = String::from_utf8_lossy(entry.name_raw()).into_owned();
+/// A song document's bytes: at most `cap`, whatever the entry says. The error says why not
+/// (`TOO_LARGE` when it is larger).
+fn read_song(zip: &mut Zip, at: usize, cap: u64) -> Result<Vec<u8>, String> {
+    let mut entry = zip.by_index(at).map_err(|e| e.to_string())?;
     let mut bytes = Vec::new();
-    entry
-        .by_ref()
-        .take(limits.song.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("{name} could not be read ({e})."))?;
-    if bytes.len() as u64 > limits.song {
-        return Err(format!("{name}: its song is too large to be a song."));
+    entry.by_ref().take(cap.saturating_add(1)).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > cap {
+        return Err(TOO_LARGE.to_owned());
     }
-    let file = file_part(&raw);
-    let title = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
-    Ok((bytes, shown(title)))
+    Ok(bytes)
 }
 
 /// The last part of an entry's name, with either kind of slash.
@@ -594,6 +693,164 @@ mod tests {
         files
     }
 
+    /// Brings a bundle's first (or only) song's pictures and videos, as for a bundle of one.
+    fn bring_first(
+        song: &mut Presentation,
+        opened: &Opened,
+        library: &Path,
+        brought: &mut pack::Brought,
+        item_for: impl FnMut(&Path, &Staged) -> Option<Uuid>,
+    ) -> Vec<String> {
+        bring(song, &opened.songs[0].slides, opened, &mut Placed::new(), library, brought, item_for)
+    }
+
+    /// The media bin item each slide of a song shows.
+    fn shows(song: &Presentation) -> Vec<Option<Uuid>> {
+        let slides = song.groups.iter().flat_map(|g| &g.slides);
+        slides
+            .map(|slide| {
+                slide.actions.iter().find_map(|a| match a {
+                    ShowAction::Media { id } => Some(*id),
+                    _ => None,
+                })
+            })
+            .collect()
+    }
+
+    /// Writes a bundle of several songs, laid out as one seen was: the songs side by side,
+    /// folders for pictures and PDFs, the pictures named by where they were on the computer
+    /// they came from; with a picture two songs show, and entries that don't come in. Titles
+    /// and words made up for the test.
+    fn several_songs(bundle: &Path) {
+        use sp_model::pro_example::titled_song_showing;
+        let picture = picture();
+        let anchor = titled_song_showing("Anchor Song", &[("file:///Users/Ann/Pictures/Sky.png", "", None)]);
+        let lantern = titled_song_showing(
+            "Evening Lantern",
+            &[("file:///Users/Ann/Pictures/Sky.png", "", None), ("file:///Users/Ann/Movies/Waves.mov", "", Some(true))],
+        );
+        let dawn = titled_song_showing("Песня рассвета", &[]);
+        let file = std::fs::File::create(bundle).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        let entries: [(&str, &[u8]); 10] = [
+            ("Evening Lantern (modified).docx.pro", &lantern),
+            ("Anchor Song.pro", &anchor),
+            ("Media/Sky.png", &picture),
+            ("Media/Waves.mov", b"not really a film, but its bytes come across"),
+            ("Media/Unused.jpg", &picture),
+            ("PDF/Chords.pdf", b"%PDF-1.4 made up"),
+            ("Broken.pro", b"not a song document"),
+            ("../../Escape.pro", &anchor),
+            ("Notes.txt", b"words for the band"),
+            ("Песня рассвета Modified.docx.pro", &dawn),
+        ];
+        for (at, (name, bytes)) in entries.iter().enumerate() {
+            if at == 2 {
+                zip.add_directory("Media/", options).unwrap();
+                zip.add_directory("PDF/", options).unwrap();
+            }
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn a_bundle_of_several_songs_brings_each_in_its_order_and_a_shared_picture_once() {
+        let dir = TempDir::new("several");
+        let bundle = dir.0.join("Service.proBundle");
+        several_songs(&bundle);
+        let opened = open(&bundle, &dir.0.join("staging")).unwrap();
+        let titles: Vec<&str> = opened.songs.iter().map(|song| song.song.title.as_str()).collect();
+        assert_eq!(titles, ["Evening Lantern", "Anchor Song", "Песня рассвета"], "in the bundle's order");
+        // The picture both songs show is taken out once.
+        let names: Vec<&str> = opened.files.iter().map(|staged| staged.name.as_str()).collect();
+        assert_eq!(names, ["Sky.png", "Waves.mov"]);
+        let places = |at: usize| opened.songs[at].slides.iter().map(|(_, place)| *place).collect::<Vec<_>>();
+        assert_eq!((places(0), places(1), places(2)), (vec![0, 1], vec![0], vec![]));
+        assert!(opened.songs.iter().all(|song| song.missing.is_empty()));
+        // Nothing left out goes unsaid.
+        assert_eq!(opened.left_out.len(), 5, "{:?}", opened.left_out);
+        assert_eq!(opened.left_out[0], "Escape.pro (not a plain file in the bundle)");
+        assert!(opened.left_out[1].starts_with("Broken.pro (could not be read: "), "{:?}", opened.left_out);
+        assert_eq!(
+            opened.left_out[2..],
+            [
+                "Unused.jpg (no song in the bundle shows it)",
+                "Chords.pdf (a PDF, which doesn't come in with a bundle's songs)",
+                "Notes.txt (not a song, picture or video)"
+            ]
+        );
+        // Brought into the library song by song: each file once, and both songs' slides show
+        // the one item made for the picture they share.
+        let library = dir.0.join("library");
+        let (mut placed, mut brought, mut asked) = (Placed::new(), pack::Brought::default(), Vec::new());
+        let mut songs: Vec<Presentation> = opened.songs.iter().map(|song| song.song.clone()).collect();
+        for (song, read) in songs.iter_mut().zip(&opened.songs) {
+            let failed = bring(song, &read.slides, &opened, &mut placed, &library, &mut brought, |path, staged| {
+                asked.push(staged.name.clone());
+                let item = Uuid::new_v4();
+                assert!(path.starts_with(library.join("Media")));
+                Some(item)
+            });
+            assert!(failed.is_empty());
+        }
+        assert_eq!(asked, ["Sky.png", "Waves.mov"]);
+        assert_eq!((brought.pictures, brought.videos), (1, 1));
+        assert_eq!(files_in(&library.join("Media")).len(), 2);
+        let (lantern, anchor) = (shows(&songs[0]), shows(&songs[1]));
+        assert_eq!(lantern[0], anchor[0], "the shared picture is one media bin item");
+        assert!(lantern[1].is_some() && lantern[1] != lantern[0]);
+        assert_eq!(shows(&songs[2]), vec![None]);
+    }
+
+    #[test]
+    fn a_bundles_songs_are_capped_in_number_and_size_and_said_when_left_out() {
+        use sp_model::pro_example::titled_song_showing;
+        let dir = TempDir::new("caps");
+        let songs: Vec<Vec<u8>> =
+            ["One", "Two", "Three", "Four"].iter().map(|title| titled_song_showing(title, &[])).collect();
+        let bundle = dir.0.join("Many.proBundle");
+        let names = ["One.pro", "Two.pro", "Three.pro", "Four.pro"];
+        let entries: Vec<(&str, &[u8])> =
+            names.iter().zip(&songs).map(|(name, song)| (*name, song.as_slice())).collect();
+        zip_of(&bundle, &entries);
+        // More songs than a bundle brings: the first ones, and how many more were left out.
+        let two = Limits { songs: 2, ..Limits::NORMAL };
+        let opened = open_with(&bundle, &dir.0.join("s1"), &two).unwrap();
+        assert_eq!(opened.songs.len(), 2);
+        assert_eq!(opened.left_out, ["2 more songs (a bundle brings in at most 2 songs)"]);
+        // Past the cap on all the songs together, the rest are left out and named.
+        let room = (songs[0].len() + songs[1].len()) as u64;
+        let together = Limits { all_songs: room, ..Limits::NORMAL };
+        let opened = open_with(&bundle, &dir.0.join("s2"), &together).unwrap();
+        let titles: Vec<&str> = opened.songs.iter().map(|song| song.song.title.as_str()).collect();
+        assert_eq!(titles, ["One", "Two"]);
+        assert_eq!(
+            opened.left_out,
+            [
+                "Three.pro (the bundle's songs are too large together)",
+                "Four.pro (the bundle's songs are too large together)"
+            ]
+        );
+        // None that can be read: the bundle is refused, saying why for each.
+        let broken = dir.0.join("Broken.proBundle");
+        zip_of(&broken, &[("A.pro", b"not a song"), ("B.pro", b"nor this")]);
+        let problem = open(&broken, &dir.0.join("s3")).unwrap_err();
+        assert!(problem.starts_with("None of the songs in Broken.proBundle could be read: A.pro (could not be read: "));
+        // A bundle of one keeps saying what it said.
+        let one = dir.0.join("One.proBundle");
+        zip_of(&one, &[("A.pro", b"not a song")]);
+        assert!(open(&one, &dir.0.join("s4")).unwrap_err().starts_with("One.proBundle could not be read ("));
+        let small = Limits { song: 10, ..Limits::NORMAL };
+        zip_of(&one, &[("One.pro", &songs[0])]);
+        assert_eq!(
+            open_with(&one, &dir.0.join("s5"), &small).unwrap_err(),
+            "One.proBundle: its song is too large to be a song."
+        );
+    }
+
     #[test]
     fn an_exported_bundle_with_whole_paths_brings_its_song_and_pictures() {
         let dir = TempDir::new("exported");
@@ -616,11 +873,11 @@ mod tests {
         assert!(names_in(&bundle)[0].starts_with('/'), "the entry keeps its leading slash");
         let staging = dir.0.join(".opening-pack-1");
         let opened = open(&bundle, &staging).unwrap();
-        assert_eq!(opened.song.title, "Harbour Lights");
-        assert_eq!(opened.song.slide_count(), 4);
+        assert_eq!(opened.songs[0].song.title, "Harbour Lights");
+        assert_eq!(opened.songs[0].song.slide_count(), 4);
         assert_eq!(opened.files.len(), 2, "{:?}", opened.files);
-        assert_eq!(opened.slides.len(), 3);
-        assert!(opened.missing.is_empty() && opened.left_out.is_empty(), "{opened:?}");
+        assert_eq!(opened.songs[0].slides.len(), 3);
+        assert!(opened.songs[0].missing.is_empty() && opened.left_out.is_empty(), "{opened:?}");
         let (sky, waves) = (&opened.files[0], &opened.files[1]);
         assert_eq!((sky.name.as_str(), sky.video), ("Sky Blue.png", false));
         assert_eq!((waves.name.as_str(), waves.video, waves.looping), ("Waves.mov", true, true));
@@ -640,15 +897,15 @@ mod tests {
         let bundle = dir.0.join("Harbour Lights.probundle");
         zip_of(&bundle, &[("Sky.png", &picture), ("Harbour Lights.pro", &song)]);
         let opened = open(&bundle, &dir.0.join("staging")).unwrap();
-        assert_eq!((opened.files.len(), opened.slides.len()), (1, 2));
-        let mut song = opened.song.clone();
+        assert_eq!((opened.files.len(), opened.songs[0].slides.len()), (1, 2));
+        let mut song = opened.songs[0].song.clone();
         // Brought into the library: the picture is moved into its Media folder under a new
         // name, and both slides show the one bin item made for it.
         let library = dir.0.join("library");
         let item = Uuid::new_v4();
         let mut asked = Vec::new();
         let mut brought = pack::Brought::default();
-        let failed = bring(&mut song, &opened, &library, &mut brought, |path, staged| {
+        let failed = bring_first(&mut song, &opened, &library, &mut brought, |path, staged| {
             asked.push((path.to_path_buf(), staged.name.clone()));
             Some(item)
         });
@@ -677,7 +934,7 @@ mod tests {
         // The same bundle again finds the picture in the library already: nothing is added.
         let again = open(&bundle, &dir.0.join("staging-2")).unwrap();
         let mut brought = pack::Brought::default();
-        bring(&mut again.song.clone(), &again, &library, &mut brought, |path, _| {
+        bring_first(&mut again.songs[0].song.clone(), &again, &library, &mut brought, |path, _| {
             assert_eq!(path, placed);
             Some(item)
         });
@@ -691,7 +948,7 @@ mod tests {
         );
         let other = open(&other_sky, &dir.0.join("staging-4")).unwrap();
         let mut named = Vec::new();
-        bring(&mut other.song.clone(), &other, &library, &mut pack::Brought::default(), |path, _| {
+        bring_first(&mut other.songs[0].song.clone(), &other, &library, &mut pack::Brought::default(), |path, _| {
             named.push(path.to_path_buf());
             Some(item)
         });
@@ -702,8 +959,8 @@ mod tests {
         let other = open(&bundle, &dir.0.join("staging-3")).unwrap();
         let fresh = dir.0.join("fresh library");
         let mut brought = pack::Brought::default();
-        let mut song = other.song.clone();
-        let failed = bring(&mut song, &other, &fresh, &mut brought, |_, _| None);
+        let mut song = other.songs[0].song.clone();
+        let failed = bring_first(&mut song, &other, &fresh, &mut brought, |_, _| None);
         assert_eq!(failed, vec!["Sky.png"]);
         assert_eq!((brought.pictures, files_in(&fresh.join("Media")).len()), (0, 0));
         assert!(song.groups[0].slides.iter().all(|slide| slide.actions.is_empty()));
@@ -719,9 +976,9 @@ mod tests {
         let bundle = dir.0.join("Harbour Lights.proBundle");
         zip_of(&bundle, &[("Harbour Lights.pro", &song)]);
         let opened = open(&bundle, &dir.0.join("staging")).unwrap();
-        assert_eq!(opened.song.slide_count(), 3);
-        assert!(opened.files.is_empty() && opened.slides.is_empty());
-        assert_eq!(opened.missing, vec!["Sky Blue.png", "Clip.mp4"]);
+        assert_eq!(opened.songs[0].song.slide_count(), 3);
+        assert!(opened.files.is_empty() && opened.songs[0].slides.is_empty());
+        assert_eq!(opened.songs[0].missing, vec!["Sky Blue.png", "Clip.mp4"]);
         // Read for its words alone, it is the same song.
         assert_eq!(read_words(&bundle).unwrap().slide_count(), 3);
         // No song in it at all, or not a zip file: said plainly.
@@ -772,7 +1029,7 @@ mod tests {
                 "Big.png (too large)"
             ]
         );
-        assert_eq!(opened.missing, vec!["escaped.png", "escaped2.png"]);
+        assert_eq!(opened.songs[0].missing, vec!["escaped.png", "escaped2.png"]);
         // On the disk: only the staging folder, holding only the fine picture.
         assert_eq!(files_in(&inside), vec![staging.clone()]);
         assert_eq!(files_in(&staging).len(), 1);
@@ -898,7 +1155,7 @@ mod tests {
             let bundle = dir.0.join(format!("Shifted {shift}.proBundle"));
             std::fs::write(&bundle, &wrong).unwrap();
             let opened = open(&bundle, &dir.0.join(format!("staging {shift}"))).unwrap();
-            assert_eq!(opened.song.title, "Harbour Lights");
+            assert_eq!(opened.songs[0].song.title, "Harbour Lights");
             assert_eq!(std::fs::read(&opened.files[0].file).unwrap(), picture);
         }
     }
