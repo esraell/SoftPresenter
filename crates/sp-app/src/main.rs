@@ -8416,6 +8416,26 @@ impl ApplicationHandler<AppEvent> for App {
                         self.user_event(el, AppEvent::Menu(id.to_owned()));
                     }
                 }
+                // Testing aid: SOFTPRESENTER_EDIT=props or =stage opens the Edit view on the
+                // props (with one made when there is none) or on the stage layouts, in any run,
+                // so a test copy can be watched while it sits there.
+                if frame == 8
+                    && let Ok(kind) = std::env::var("SOFTPRESENTER_EDIT")
+                    && let Some(running) = self.running.as_mut()
+                {
+                    let state = &mut running.home_state;
+                    match kind.as_str() {
+                        "props" => {
+                            if state.props.is_empty() {
+                                state.props.push(props::Prop::new("Logo".to_owned()));
+                            }
+                            state.edit_kind_request = Some(home::EditKind::Props);
+                        }
+                        "stage" => state.edit_kind_request = Some(home::EditKind::Stage),
+                        _ => eprintln!("SOFTPRESENTER_EDIT is props or stage"),
+                    }
+                    running.home_window.request_redraw();
+                }
                 if let Some((at, slide)) = self.running.as_mut().and_then(|r| r.home_state.pending_edit.take()) {
                     self.apply_edit(at, slide);
                 }

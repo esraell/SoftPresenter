@@ -346,7 +346,9 @@ how long drawing took.
   `header`, `theme`, `template`, `stage-layout`, `group`, `object`, `message`, `prop` or
   `macro`, for a picture beside one taken without it), `_MACRO_STEPS=open` (the first macro's
   steps open; `menu=N` with its step N's menu open, `drag=N>M` with its step N carried over the
-  lower half of step M and held there, for a capture run; steps count from 1).
+  lower half of step M and held there, for a capture run; steps count from 1), `_EDIT=props|stage` (opens the Edit view
+  on the props, making one when there is none, or on the stage layouts, in any run, so a quiet
+  copy can be watched idling there).
 - A quiet copy never tidies the library (moves unused pictures to the Trash) unless
   `SOFTPRESENTER_SWEEP=DAYS` is set with a data folder of its own; it then tidies as if every file
   were that many days older. `touch -t` can't make a file look old to it: it goes by the newest of
