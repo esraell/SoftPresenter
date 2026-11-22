@@ -21,6 +21,9 @@ const MAX_CACHED: usize = 160;
 
 struct Thumb {
     id: egui::TextureId,
+    /// The slide it was drawn from: its own key, or the slide a picture of it in a theme
+    /// version was drawn from, so forgetting the slide forgets both.
+    of: Uuid,
     overflow: bool,
     /// The frame this thumbnail was last shown in.
     last_used: u64,
@@ -150,7 +153,7 @@ impl Thumbs {
         self.get_layers(
             gpu,
             egui_renderer,
-            slide.id,
+            (slide.id, slide.id),
             &Layers {
                 media_fit: media.map_or(sp_model::ImageFit::Fill, |(_, fit)| fit),
                 media: media.map(|(picture, _)| picture),
@@ -163,6 +166,46 @@ impl Thumbs {
             },
             theme,
         )
+    }
+
+    /// The thumbnail of a slide as a theme version draws it (`shown`, kept under its own id), made
+    /// from the slide whose id is `of`: forgetting that slide forgets this too. `None` means it
+    /// will be ready on a later frame.
+    pub fn get_in_version(
+        &mut self,
+        gpu: &Gpu,
+        egui_renderer: &mut egui_wgpu::Renderer,
+        shown: &Slide,
+        of: Uuid,
+        media: Option<(&Picture, sp_model::ImageFit)>,
+        theme: &Theme,
+    ) -> Option<(egui::TextureId, bool)> {
+        self.get_layers(
+            gpu,
+            egui_renderer,
+            (shown.id, of),
+            &Layers {
+                media_fit: media.map_or(sp_model::ImageFit::Fill, |(_, fit)| fit),
+                media: media.map(|(picture, _)| picture),
+                slide: Some(shown),
+                overlay: None,
+                time: 0.0,
+                backdrop: None,
+                mask: [0.0; 4],
+                announcement: None,
+            },
+            theme,
+        )
+    }
+
+    /// The thumbnail kept under `key`, when there is one to show, without drawing anything.
+    pub fn kept(&mut self, key: Uuid) -> Option<(egui::TextureId, bool)> {
+        let thumb = self.cache.get_mut(&key)?;
+        if thumb.failed.is_some_and(|at| at.elapsed() >= RETRY_AFTER) {
+            return None;
+        }
+        thumb.last_used = self.frame;
+        Some((thumb.id, thumb.overflow))
     }
 
     /// The thumbnail for a picture in the media bin. `None` means it will be ready on a later
@@ -178,7 +221,7 @@ impl Thumbs {
         self.get_layers(
             gpu,
             egui_renderer,
-            id,
+            (id, id),
             &Layers {
                 media_fit: sp_model::ImageFit::Fill,
                 media: Some(picture),
@@ -213,10 +256,15 @@ impl Thumbs {
         Some(id)
     }
 
-    /// Drops one thumbnail so it is drawn again, for when a slide's words change.
+    /// Drops one thumbnail so it is drawn again, for when a slide's words change, with the
+    /// pictures of it in theme versions.
     pub fn forget(&mut self, key: Uuid, egui_renderer: &mut egui_wgpu::Renderer) {
-        if let Some(thumb) = self.cache.remove(&key) {
-            egui_renderer.free_texture(&thumb.id);
+        let gone: Vec<Uuid> =
+            self.cache.iter().filter(|(have, thumb)| **have == key || thumb.of == key).map(|(have, _)| *have).collect();
+        for have in gone {
+            if let Some(thumb) = self.cache.remove(&have) {
+                egui_renderer.free_texture(&thumb.id);
+            }
         }
     }
 
@@ -224,7 +272,7 @@ impl Thumbs {
         &mut self,
         gpu: &Gpu,
         egui_renderer: &mut egui_wgpu::Renderer,
-        key: Uuid,
+        (key, of): (Uuid, Uuid),
         layers: &Layers,
         theme: &Theme,
     ) -> Option<(egui::TextureId, bool)> {
@@ -234,7 +282,9 @@ impl Thumbs {
                 thumb.last_used = self.frame;
                 return Some((thumb.id, thumb.overflow));
             }
-            self.forget(key, egui_renderer);
+            if let Some(thumb) = self.cache.remove(&key) {
+                egui_renderer.free_texture(&thumb.id);
+            }
         }
         if self.drawn_this_frame >= PER_FRAME {
             return None;
@@ -262,7 +312,7 @@ impl Thumbs {
         let overflow = built.overflow && failed.is_none();
         let id = egui_renderer.register_native_texture(&gpu.device, &view, wgpu::FilterMode::Linear);
         let pages = web_pages(layers.slide, theme);
-        self.cache.insert(key, Thumb { id, overflow, last_used: self.frame, pages, failed, _texture: texture });
+        self.cache.insert(key, Thumb { id, of, overflow, last_used: self.frame, pages, failed, _texture: texture });
         let ages: Vec<(Uuid, u64)> = self.cache.iter().map(|(id, thumb)| (*id, thumb.last_used)).collect();
         for old in to_evict(&ages, MAX_CACHED, self.frame) {
             if let Some(thumb) = self.cache.remove(&old) {

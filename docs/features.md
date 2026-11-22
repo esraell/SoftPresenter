@@ -203,7 +203,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   item after the open item, and opens the Bible page for a passage; under it is the filter.
 - **The dock** under the slides stays put while they scroll: a bar with the transition for all
   slides (Cut, Dissolve, or another from Advanced, in a switch of a fixed width), Continuous,
-  Undo and Redo, the three views and the slide size, and under it the media strip ("Media",
+  the theme version button once a theme has a version (see Theme versions), Undo and Redo,
+  the three views and the slide size, and under it the media strip ("Media",
   the menu of media playlists, how one picture or video gives way to the next, a chevron that
   folds the strip away, + to add some, then the pictures and videos with their names, each
   with ⋯ for its menu; the one showing is ringed in orange). The slides fade into the panel
@@ -213,8 +214,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - While the left column lists a playlist, the middle shows **the whole playlist as one scroll**,
   item after item, each under a bar with its name that stays at the top while its slides
   scroll under it. The open item's bar has a dot; a song's bar carries its tools (details,
-  words as text, arrangement, notes, and ⋯ for the song's menu, Add Slide and its place in the
-  playlist), and a song played in an arrangement has a row of pills under its bar and its
+  words as text, arrangement, the theme version button once a theme has a version, notes, and
+  ⋯ for the song's menu, Add Slide and its place in the playlist), and a song played in an arrangement has a row of pills under its bar and its
   slides in the order sung (see Arrangements above). Other items say what they are in a small label. A **Bible passage** kept
   in the playlist is shown as its slides, drawn by the Bible theme as the Bible page draws
   them; a click on one looks the passage up as the Bible page would and puts that verse on
@@ -835,8 +836,28 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Bible), keeps the usual look. While it is on, a version's template wins over one a slide
   names, and words it has no box for are left off. Only the slide changes: props, messages and
   the copyright line keep their look.
-  - A song or a passage in a playlist can be set to show in a version: when it goes on screen it
-    brings the version. This is the playlist's; the song itself doesn't change.
+  - **Making one**, in Edit › Themes, whose left column has the slides view's look: THEME with
+    + and the themes as rows (MAIN on the main one; a right-click has Make It the Main Theme,
+    Use On, Rename…, Duplicate and Delete…), then TEMPLATES with a switch, Usual | each version
+    the theme has, and + Version. That opens "Add a version to …": a name, offered from the
+    versions other themes have ("use the same name so the screens switch together"), and
+    copies of which templates it starts from (the song templates, the Bible template); the
+    first copy opens on the canvas. With a version picked, a line says it is used while that
+    version is on, with ⋯ for Rename… (in every theme), Add a Copy Of ▸ and Remove It From the
+    theme (which asks). Add, Copy, Delete, ↑ and ↓ act on the templates shown; each is a picture
+    with a strip (its number, name and what it is for: Songs, Bible, Songs and Bible, or By
+    hand), and a right-click has Used For, Rename…, Duplicate and Delete…. The canvas is titled
+    with the theme, the version and the template.
+  - A song or a passage in a playlist can be set to show in a version, from the **version
+    button** among its title-bar tools (the theme icon, in the lighter grey while one is set,
+    orange while the item is on screen in it) or Show With ▸ in its ⋯ and right-click menus:
+    the usual look or a version, and Keep It After This Item. When it goes on screen it brings
+    the version, and its tiles are drawn in it. Its row in the playlist has the version's name
+    in a small pill under its title, lit orange while it is on screen in it. This is the
+    playlist's; the song itself doesn't change.
+  - **By hand**, the button beside Continuous (the theme icon and ▾, lit while a version is on,
+    its tooltip naming it) switches the screens to the usual look or a version, keeps it until
+    switched back, and has Make or Change Versions… (Edit › Themes).
   - A version can also be switched on by a macro step ("Use the Offering version", "… until
     switched back", "Back to the usual look") or from the command line (`sp version use`).
   - When the next item goes on screen it is back to the usual look, unless the version was kept;

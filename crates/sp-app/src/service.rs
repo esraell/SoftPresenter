@@ -103,6 +103,11 @@ impl Item {
         Item::Song { key: key.into(), title: title.into(), show_with: None }
     }
 
+    /// Whether the item can be shown in a theme version: a song or a passage.
+    pub fn can_show_with(&self) -> bool {
+        matches!(self, Item::Song { .. } | Item::Passage(_))
+    }
+
     /// The theme version the item is shown in, if it is set to one.
     pub fn show_with(&self) -> Option<ShowWith> {
         match self {
@@ -357,6 +362,18 @@ impl Services {
         }
         self.chosen = self.chosen.and_then(|at| now.get(at).copied());
         Some(now)
+    }
+
+    /// Sets the theme version an item of the playlist in front shows in (none for the usual
+    /// look). Returns false, changing nothing, for an item that can't have one.
+    pub fn set_show_with(&mut self, index: usize, show_with: Option<ShowWith>) -> bool {
+        let at = self.current.min(self.list.len() - 1);
+        let Some(set) = self.list[at].items.get_mut(index).and_then(Item::show_with_mut) else { return false };
+        if *set != show_with {
+            *set = show_with;
+            self.changed = true;
+        }
+        true
     }
 
     /// Renames a header or a placeholder in the service shown.

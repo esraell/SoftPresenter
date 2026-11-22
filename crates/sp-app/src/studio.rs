@@ -1314,6 +1314,62 @@ pub fn list_heading(ui: &mut egui::Ui, text: &str) {
     cap(ui, pos2(place.min.x + 8.0, place.min.y + ABOVE + TALL / 2.0), Align2::LEFT_CENTER, text, TEXT_DIM);
 }
 
+/// A list's heading with a + at its right, as THEME has: `hint` says what the + makes.
+/// Returns the +.
+pub fn list_heading_with_add(ui: &mut egui::Ui, text: &str, hint: &str) -> egui::Response {
+    let top = ui.cursor().min.y;
+    list_heading(ui, text);
+    let middle = top + 14.0 + 15.5 / 2.0;
+    let right = ui.max_rect().max.x - 8.0;
+    let plus = Rect::from_center_size(pos2(right - ICON_BUTTON / 2.0, middle), egui::Vec2::splat(ICON_BUTTON));
+    icon_button(ui, plus, ui.scope_id().with(("list heading add", text)), Icon::Plus, 0.6, false).on_hover_text(hint)
+}
+
+/// What a plain row of the Edit view's left column shows: an icon, a name (none while a field
+/// retypes it in its place), and a small word in faint capitals at the right (MAIN).
+pub struct PlainRow<'a> {
+    pub icon: Icon,
+    pub name: Option<&'a str>,
+    pub tag: Option<&'a str>,
+    /// The one open: the chosen grey, and its name heavier and brighter.
+    pub on: bool,
+}
+
+/// Draws a plain row, 34 high, as songs and themes are listed above their pictures. Returns its
+/// response, where its name starts (at the middle of its line) and how far right the name may
+/// reach, for a field that retypes it.
+pub fn plain_row(ui: &mut egui::Ui, look: &PlainRow) -> (egui::Response, egui::Pos2, f32) {
+    let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
+    if look.on {
+        ui.painter().rect_filled(row, RADIUS, CARD);
+    } else if response.hovered() {
+        ui.painter().rect_filled(row, RADIUS, ROW_HOVER);
+    }
+    let middle = row.center().y;
+    let icon = Rect::from_min_size(pos2(row.min.x + 10.0, middle - 6.5), egui::Vec2::splat(13.0));
+    icons::paint(ui.painter(), look.icon, icon, if look.on { TEXT_DIM } else { TEXT_FAINT });
+    let mut right = row.max.x - 10.0;
+    if let Some(tag) = look.tag {
+        let drawn = paint_spaced(
+            ui,
+            pos2(right, middle),
+            Align2::RIGHT_CENTER,
+            &tag.to_uppercase(),
+            fixed_semibold(10.5),
+            TEXT_FAINT,
+            0.5,
+        );
+        right = drawn.min.x - 8.0;
+    }
+    let start = pos2(row.min.x + 35.0, middle);
+    if let Some(name) = look.name {
+        let (font, ink) = if look.on { (semibold(13.5), TEXT) } else { (FontId::proportional(13.5), TEXT_DIM) };
+        let clip = Rect::from_min_max(pos2(start.x, row.min.y), pos2(right.max(start.x), row.max.y));
+        ui.painter().with_clip_rect(clip).text(start, Align2::LEFT_CENTER, name, font, ink);
+    }
+    (response, start, right)
+}
+
 /// One of the keys over a list of pictures in the Edit view's left column.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ListKey {
@@ -1698,12 +1754,20 @@ struct ListRow<'a> {
     icon: Option<Icon>,
     /// A small number at the right (how many slides a song has).
     count: Option<usize>,
+    /// The theme version a playlist item shows in, as a small pill on a second line under its
+    /// title, and whether it is lit: the item on screen in that version.
+    version: Option<(&'a str, bool)>,
 }
 
-/// Draws one row of the left column's list, 42 high. Returns its response and where its
-/// "more" button goes (the caller makes the button after, so that it takes its own clicks).
+/// How tall a row with a version's pill under its title is: the title's line, 3, and the pill.
+const ROW_WITH_PILL: f32 = 5.0 + 18.2 + 3.0 + 15.0 + 5.0;
+
+/// Draws one row of the left column's list, 42 high, taller with a version's pill. Returns its
+/// response and where its "more" button goes (the caller makes the button after, so that it
+/// takes its own clicks).
 fn list_row(ui: &mut egui::Ui, look: &ListRow) -> (egui::Response, Rect) {
-    let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), LIST_ROW), Sense::click_and_drag());
+    let tall = if look.version.is_some() { ROW_WITH_PILL.max(LIST_ROW) } else { LIST_ROW };
+    let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), tall), Sense::click_and_drag());
     let more = Rect::from_center_size(
         pos2(row.max.x - 10.0 - MORE_BUTTON / 2.0, row.center().y),
         egui::Vec2::splat(MORE_BUTTON),
@@ -1761,10 +1825,27 @@ fn list_row(ui: &mut egui::Ui, look: &ListRow) -> (egui::Response, Rect) {
     };
     let clip = Rect::from_min_max(pos2(left, row.min.y), pos2(right.max(left), row.max.y));
     let painter = ui.painter().with_clip_rect(clip);
-    let title = painter.text(pos2(left, row.center().y), Align2::LEFT_CENTER, look.title, font, ink);
+    // With a version's pill, the title and the pill are one block in the middle of the row.
+    let title_middle = if look.version.is_some() { row.center().y - (3.0 + 15.0) / 2.0 } else { row.center().y };
+    let title = painter.text(pos2(left, title_middle), Align2::LEFT_CENTER, look.title, font, ink);
+    if let Some((name, lit)) = look.version {
+        let (ink, fill, edge) = if lit {
+            (TALLY, TALLY.gamma_multiply(0.16), TALLY.gamma_multiply(0.45))
+        } else {
+            (TEXT_DIM, Color32::TRANSPARENT, LINE)
+        };
+        let galley = spaced(ui, &name.to_uppercase(), fixed_semibold(10.0), ink, 0.5);
+        let pill = Rect::from_min_size(
+            pos2(left, title_middle + 18.2 / 2.0 + 3.0),
+            vec2((galley.size().x + 10.0).min(right - left), 15.0),
+        );
+        painter.rect_filled(pill, 4.0, fill);
+        painter.rect_stroke(pill, 4.0, Stroke::new(1.0, edge), StrokeKind::Inside);
+        painter.galley(pos2(pill.min.x + 5.0, pill.center().y - galley.size().y / 2.0), galley, ink);
+    }
     if let Some(tag) = look.tag {
         let galley = spaced(ui, &tag.to_uppercase(), fixed_semibold(11.0), TEXT_FAINT, 0.6);
-        painter.galley(pos2(title.max.x + 8.0, row.center().y - galley.size().y / 2.0), galley, TEXT_FAINT);
+        painter.galley(pos2(title.max.x + 8.0, title_middle - galley.size().y / 2.0), galley, TEXT_FAINT);
     }
     (response, more)
 }
@@ -3344,7 +3425,53 @@ pub fn item_menu(
         announce_button(ui, state, what, "It goes round by itself over the slides until it is cleared");
         ui.separator();
     }
+    if can_show_with(state, index) {
+        ui.menu_button("Show With", |ui| show_with_menu(ui, state, index, false));
+        ui.separator();
+    }
     item_moves(ui, show, state, index, ask);
+}
+
+/// Whether a playlist item (by its place in the playlist in front) can be shown in a theme
+/// version: a song or a passage, once some theme has a version.
+pub fn can_show_with(state: &HomeState, index: usize) -> bool {
+    !state.versions.is_empty()
+        && state.services.front().items.get(index).is_some_and(crate::service::Item::can_show_with)
+}
+
+/// What a playlist item shows in when it goes on screen: the usual look or one of the themes'
+/// versions, and whether that version stays on after it. It is the playlist's own; the song
+/// itself doesn't change. The menu of the item's version button (`heading`), and its Show With.
+pub fn show_with_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, heading: bool) {
+    use crate::service::ShowWith;
+    let Some(item) = state.services.front().items.get(index) else { return };
+    let now = item.show_with().filter(|wanted| state.versions.iter().any(|version| version.id == wanted.version));
+    if heading {
+        crate::live_tabs::menu_heading(ui, "When this item goes on screen, show it in");
+    }
+    let mut chosen = None;
+    if ui.add(egui::Button::selectable(now.is_none(), "The usual look")).clicked() {
+        chosen = Some(None);
+    }
+    for version in &state.versions {
+        let on = now.is_some_and(|wanted| wanted.version == version.id);
+        if ui.add(egui::Button::selectable(on, format!("The {} version", version.name))).clicked() {
+            chosen = Some(Some(ShowWith { version: version.id, keep: now.is_some_and(|wanted| wanted.keep) }));
+        }
+    }
+    ui.separator();
+    let keep = now.is_some_and(|wanted| wanted.keep);
+    let kept = ui
+        .add_enabled(now.is_some(), egui::Button::selectable(keep, "Keep It After This Item"))
+        .on_hover_text("The version stays on when the next item goes on screen, until it is switched back");
+    if kept.clicked() {
+        chosen = Some(now.map(|wanted| ShowWith { keep: !keep, ..wanted }));
+    }
+    ui.add_enabled(false, egui::Button::new("It applies in this playlist only; the song itself doesn\u{2019}t change"));
+    if let Some(chosen) = chosen {
+        state.services.set_show_with(index, chosen);
+        ui.close();
+    }
 }
 
 /// Play on Announcements Layer, for a song, a picture, a video or a media playlist; Stop
@@ -3736,6 +3863,11 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 .renaming_header
                 .as_ref()
                 .is_some_and(|(at, _)| *at == index && matches!(item, Item::Placeholder { .. }));
+            // The version it shows in, lit while it is on screen in it.
+            let version = item.show_with().and_then(|wanted| {
+                let found = state.versions.iter().find(|version| version.id == wanted.version)?;
+                Some((found.name.as_str(), live && state.version_switch.lights(index, found.id)))
+            });
             let look = ListRow {
                 number: Some(number),
                 title: if renaming { "" } else { item.title() },
@@ -3744,6 +3876,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 live,
                 faint: missing,
                 icon,
+                version,
                 ..ListRow::default()
             };
             let (mut response, more) = list_row(ui, &look);
@@ -4423,8 +4556,9 @@ fn dock_divider(ui: &egui::Ui, x: f32, middle: f32) {
 }
 
 /// The bar under the slides, the top of the dock: the transition for all slides (Cut,
-/// Dissolve, or another from Advanced), Continuous, Undo and Redo, the three ways to lay the
-/// slides out and their size. It is a shelf, a step darker than the panel, with a line along
+/// Dissolve, or another from Advanced), Continuous and, once a theme has a version, the button
+/// that switches the screens to one, Undo and Redo, the three ways to lay the slides out and
+/// their size. It is a shelf, a step darker than the panel, with a line along
 /// its top, and stays put while the slides scroll. In a narrow window Undo and Redo, then
 /// Continuous, then the size, are left out rather than squeezed (each is in the menu bar too).
 pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
@@ -4442,19 +4576,21 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
         // What there is room for, the least needed first to go.
         const SWITCH: f32 = 210.7;
         const VIEWS: f32 = 3.0 * 30.0 + 2.0 * 2.0 + 6.0;
-        const CONTINUOUS: f32 = 94.0;
         const UNDO: f32 = 58.0;
-        const SLIDER: f32 = 110.0;
+        const SLIDER: f32 = 86.0;
+        // Continuous, with the version button beside it once a theme has a version.
+        let versions = !state.versions.is_empty();
+        let continuous_wide: f32 = 94.0 + if versions { 8.0 + VERSION_BUTTON.x } else { 0.0 };
         let room = right - left;
-        let with_continuous = room >= SWITCH + 13.0 + CONTINUOUS + 12.0 + VIEWS;
-        let with_undo = room >= SWITCH + 13.0 + CONTINUOUS + 13.0 + 2.0 * UNDO + 8.0 + 12.0 + VIEWS;
+        let with_continuous = room >= SWITCH + 13.0 + continuous_wide + 12.0 + VIEWS;
+        let with_undo = room >= SWITCH + 13.0 + continuous_wide + 13.0 + 2.0 * UNDO + 8.0 + 12.0 + VIEWS;
         let with_slider = room
             >= SWITCH
                 + 12.0
                 + VIEWS
                 + 12.0
                 + 60.0
-                + if with_continuous { 13.0 + CONTINUOUS } else { 0.0 }
+                + if with_continuous { 13.0 + continuous_wide } else { 0.0 }
                 + if with_undo { 13.0 + 2.0 * UNDO + 8.0 } else { 0.0 };
         // The transition: one switch of a fixed width, so nothing beside it moves when the
         // name in its third part changes.
@@ -4523,13 +4659,17 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
         if with_continuous {
             dock_divider(ui, x + 6.5, middle);
             x += 13.0;
-            let place = Rect::from_min_size(pos2(x, middle - 15.0), vec2(CONTINUOUS, 30.0));
+            let place = Rect::from_min_size(pos2(x, middle - 15.0), vec2(94.0, 30.0));
             let button =
                 labelled_button(ui, place, ui.scope_id().with("continuous"), "Continuous", None, state.continuous);
             if button.on_hover_text("Next at the end of a song goes on to the next song").clicked() {
                 state.continuous = !state.continuous;
             }
-            x += CONTINUOUS;
+            x += 94.0;
+            if versions {
+                version_switch_button(ui, state, Rect::from_min_size(pos2(x + 8.0, middle - 15.0), VERSION_BUTTON));
+                x += 8.0 + VERSION_BUTTON.x;
+            }
         }
         if with_undo {
             use crate::menubar::Action;
@@ -4589,6 +4729,69 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
             if response.on_hover_text(hint).clicked() {
                 state.slide_view = view;
             }
+        }
+    });
+}
+
+/// The size of the button beside Continuous that switches the screens to a theme version.
+const VERSION_BUTTON: egui::Vec2 = vec2(40.0, 30.0);
+
+/// The button beside Continuous that switches every screen whose theme has a version to it, by
+/// hand: the theme icon and an arrow, lit while a version is on (its tooltip names it). Its
+/// menu: the usual look or each version, Keep It Until Switched Back, and Make or Change
+/// Versions… (Edit › Themes).
+fn version_switch_button(ui: &mut egui::Ui, state: &mut HomeState, place: Rect) {
+    use crate::versions::Ask;
+    let on = state.version_switch.on;
+    let name = on.and_then(|on| state.versions.iter().find(|version| version.id == on.version)).map(|v| v.name.clone());
+    let response = ui.interact(place, ui.scope_id().with("theme version"), Sense::click());
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&response));
+    let fill = match (name.is_some(), response.hovered() || open) {
+        (true, _) => KEY_LIT,
+        (false, true) => BUTTON_HOVER,
+        (false, false) => BUTTON,
+    };
+    ui.painter().rect_filled(place, 9.0, fill);
+    let start = place.center().x - (13.0 + 4.0 + 7.0) / 2.0;
+    let icon = Rect::from_min_size(pos2(start, place.center().y - 6.5), egui::Vec2::splat(13.0));
+    icons::paint(ui.painter(), Icon::Theme, icon, if name.is_some() { TALLY } else { TEXT });
+    let arrow = pos2(icon.max.x + 4.0 + 3.5, place.center().y);
+    ui.painter().text(arrow, Align2::CENTER_CENTER, "\u{25be}", FontId::proportional(12.5), TEXT_FAINT);
+    let example = state.versions.first().map(|version| version.name.clone()).unwrap_or_default();
+    let now = match &name {
+        Some(name) => format!("the {name} version is on"),
+        None => "the usual look".to_owned(),
+    };
+    let hint =
+        format!("Theme version: {now}. Choose a version, such as {example}, for every screen whose theme has it");
+    let response = response.on_hover_text(hint);
+    egui::Popup::menu(&response).show(|ui| {
+        crate::live_tabs::menu_heading(ui, "Show the screens in");
+        let keep = on.is_some_and(|on| on.keep);
+        let mut asked = None;
+        if ui.add(egui::Button::selectable(on.is_none(), "The usual look")).clicked() {
+            asked = Some(Ask::Use { version: None, keep: false });
+        }
+        for version in &state.versions {
+            let chosen = on.is_some_and(|on| on.version == version.id);
+            if ui.add(egui::Button::selectable(chosen, format!("The {} version", version.name))).clicked() {
+                asked = Some(Ask::Use { version: Some(version.id), keep });
+            }
+        }
+        ui.separator();
+        let kept = ui
+            .add_enabled(on.is_some(), egui::Button::selectable(keep, "Keep It Until Switched Back"))
+            .on_hover_text("The version stays on when the next item goes on screen");
+        if kept.clicked() {
+            asked = Some(Ask::Keep(!keep));
+        }
+        if ui.button("Make or Change Versions\u{2026}").on_hover_text("Edit \u{203a} Themes").clicked() {
+            state.menu_asked = Some(crate::menubar::Action::ThemesView);
+            ui.close();
+        }
+        if let Some(asked) = asked {
+            state.version_asks.push(asked);
+            ui.close();
         }
     });
 }

@@ -1153,7 +1153,7 @@ fn submenu<R>(ui: &mut egui::Ui, marked: bool, title: &str, contents: impl FnOnc
 }
 
 /// A small heading at the top of a menu, in faint capitals.
-fn menu_heading(ui: &mut egui::Ui, words: &str) {
+pub(crate) fn menu_heading(ui: &mut egui::Ui, words: &str) {
     let indent = ui.spacing().button_padding.x;
     ui.horizontal(|ui| {
         ui.add_space(indent);

@@ -6701,11 +6701,35 @@ impl App {
                     thumbs.get(gpu, egui_renderer, slide, media_for(slide), theme)
                 }
                 ThumbOf::BibleSlide(slide) => thumbs.get(gpu, egui_renderer, slide, None, bible_theme),
+                // In a theme version: kept under an id made from the slide's and the version's,
+                // and made only when it isn't kept; as usual when the theme hasn't the version.
+                ThumbOf::InVersion(at, slide, version) => {
+                    let theme = match at {
+                        Some(at) => {
+                            let own = show.presentations().get(at).and_then(|song| song.theme);
+                            own.and_then(|id| theme_arcs.iter().find(|theme| theme.id == id)).unwrap_or(main_theme)
+                        }
+                        None => bible_theme,
+                    };
+                    let key = Uuid::from_u128(slide.id.as_u128() ^ version.as_u128());
+                    match thumbs.kept(key) {
+                        Some(kept) => Some(kept),
+                        None => match theme.slide_in_version(slide, version) {
+                            Some(mut shown) => {
+                                shown.id = key;
+                                thumbs.get_in_version(gpu, egui_renderer, &shown, slide.id, media_for(slide), theme)
+                            }
+                            None => thumbs.get(gpu, egui_renderer, slide, media_for(slide), theme),
+                        },
+                    }
+                }
                 ThumbOf::Layout(index, slide) => {
-                    // A layout is made anew each frame; a fixed id lets its thumbnail be kept
-                    // until the theme changes, when every thumbnail is dropped.
+                    // A layout is made anew each frame; an id from its template's (a version's
+                    // templates are at the same places as the usual ones) lets its thumbnail be
+                    // kept until the theme changes, when every thumbnail is dropped.
                     let mut kept = slide.clone();
-                    kept.id = Uuid::from_u128(0x7068_656d_655f_6c61_796f_7574_0000_0000 + index as u128);
+                    let template = slide.template.map_or(index as u128, |id| id.as_u128());
+                    kept.id = Uuid::from_u128(0x7068_656d_655f_6c61_796f_7574_0000_0000 ^ template);
                     thumbs.get(gpu, egui_renderer, &kept, None, theme)
                 }
                 ThumbOf::Own(slide, own, again) => {
@@ -7039,6 +7063,20 @@ impl App {
                 && let Some(draft) = running.home_state.editing.as_mut()
             {
                 draft.selected = draft.slide.objects.first().map(|object| object.id);
+            }
+            // Testing aid: SOFTPRESENTER_CAPTURE_THEMES=version shows the theme's first version's
+            // templates; =add-version opens the sheet that adds a version to it.
+            if running.frames == GO_LIVE_AT + 4 {
+                let what = std::env::var("SOFTPRESENTER_CAPTURE_THEMES").unwrap_or_default();
+                let state = &mut running.home_state;
+                if what == "version"
+                    && let Some(edit) = state.theme_edit.as_mut()
+                {
+                    let first = edit.theme.versions.first().map(|version| version.id);
+                    state.editing = edit.show(first, 0);
+                } else if what == "add-version" && state.theme_edit.is_some() {
+                    state.version_sheet = Some(home::VersionSheet::adding(state));
+                }
             }
             // Testing aid: as if the theme's name and its first template's name had been
             // clicked to rename them.

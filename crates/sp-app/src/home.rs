@@ -211,6 +211,10 @@ pub struct HomeState {
     pub pending_group_name: Option<(usize, usize, String)>,
     /// The theme the operator has asked to delete, while they are being asked to confirm.
     pub confirm_delete_theme: Option<usize>,
+    /// The sheet that adds a version to the theme being edited, or renames one, while it is open.
+    pub version_sheet: Option<VersionSheet>,
+    /// A version of the theme being edited about to be taken out of it, once confirmed.
+    pub confirm_remove_version: Option<sp_model::Uuid>,
     /// The open theme's name while it is being retyped in the list of themes.
     pub renaming_theme: Option<String>,
 
@@ -1664,6 +1668,9 @@ pub enum ThumbOf<'a> {
     /// A slide of a song, by the song's place in the show: drawn with that song's own theme,
     /// whichever song is chosen.
     SongSlide(usize, &'a Slide),
+    /// A slide of a playlist item set to show in a theme version, drawn in it: a song's (by its
+    /// place, with its own theme) or, with none, a Bible passage's (with the Bible theme).
+    InVersion(Option<usize>, &'a Slide, sp_model::Uuid),
     /// A media item, by its index in the show.
     Media(usize),
     /// A slide drawn with a theme of its own (a prop's, a stage layout's), kept under the
@@ -1688,6 +1695,8 @@ impl Default for HomeState {
             renaming_group: None,
             pending_group_name: None,
             confirm_delete_theme: None,
+            version_sheet: None,
+            confirm_remove_version: None,
             renaming_theme: None,
 
             add_slide: None,
@@ -2213,6 +2222,8 @@ pub fn home_ui(
     confirm_delete_theme(ui, state);
     confirm_delete_prop(ui, state);
     crate::stage_editor::confirm_delete(state, |question, note| confirm_delete(ui, question, note));
+    version_sheet(ui, state);
+    confirm_remove_version(ui, state);
     confirm_delete_song(ui, show, state);
     confirm_delete_media(ui, show, state);
     confirm_delete_slides(ui, show, state);
@@ -2692,8 +2703,7 @@ fn edit_view(
         // Props and stage layouts: a heading and the keys that act on the one open here; their
         // pictures fill the room between these and the Objects shelf, further down.
         if theme_mode {
-            ui.add_space(10.0);
-            theme_list(ui, state);
+            theme_column(ui, state);
         } else if prop_mode {
             prop_ask = prop_list_head(ui, state);
         } else if stage_mode {
@@ -2962,202 +2972,8 @@ fn edit_view(
             },
         );
 
-        if let Some(edit) = state.theme_edit.as_ref() {
-            // The theme's templates, each drawn as it will look. Tags say what each is for:
-            // a song's slide uses, of the ones for songs, the one that suits what is on it;
-            // Bible slides use the one for Bible slides.
-            let marks: Vec<(bool, bool)> = edit.theme.templates.iter().map(|t| (t.songs, t.bible)).collect();
-            let mut link_bible = None;
-            let mut toggle_songs = None;
-            let layouts: Vec<(usize, String)> =
-                edit.theme.templates.iter().map(|template| template.name.clone()).enumerate().collect();
-            let only_one = layouts.len() <= 1;
-            let mut renamed_template: Option<Option<(usize, String)>> = None;
-            // Asked for from a template's menu, or the tile after the last: a copy of
-            // a template, or a template to delete.
-            let mut add_after = None;
-            let mut ask_delete = None;
-            let mut rename_started = std::mem::take(&mut state.rename_started);
-            let mut start_rename = None;
-            let slides: Vec<Slide> = edit.theme.templates.iter().map(sp_model::ThemeTemplate::as_slide).collect();
-            let current = edit.template;
-            egui::ScrollArea::vertical().id_salt("theme layout list").auto_shrink([false, false]).show(ui, |ui| {
-                let width = ui.available_width();
-                let image_size = vec2(width - 16.0, (width - 16.0) * 9.0 / 16.0);
-                for (index, ((template, name), slide)) in layouts.into_iter().zip(&slides).enumerate() {
-                    let (cell, response) = ui.allocate_exact_size(vec2(width, image_size.y + 30.0), Sense::click());
-                    let selected = template == current;
-                    ui.painter().rect_filled(cell, 0.0, if selected { EDIT_SELECTED } else { Color32::from_gray(52) });
-                    let image = Rect::from_min_size(cell.min + vec2(8.0, 8.0), image_size);
-                    ui.painter().rect_filled(image, 0.0, Color32::BLACK);
-                    if let Some(texture) = canvas.filter(|_| selected) {
-                        // The layout on the canvas is shown as it is this instant.
-                        egui::Image::from_texture((texture, image_size)).paint_at(ui, image);
-                    } else {
-                        match thumb(ThumbOf::Layout(index, slide)) {
-                            Some((texture, _)) => egui::Image::from_texture((texture, image_size)).paint_at(ui, image),
-                            None => ui.ctx().request_repaint(),
-                        }
-                    }
-                    if selected {
-                        ui.painter().rect_stroke(image, 0.0, Stroke::new(2.0, EDIT_OUTLINE), StrokeKind::Outside);
-                    }
-                    // The template's number and name. A click on the name of the template
-                    // on the canvas, or a double click, turns the name into a field.
-                    let ink = Color32::from_gray(230);
-                    let number = ui.painter().text(
-                        pos2(cell.min.x + 9.0, image.max.y + 10.0),
-                        Align2::LEFT_CENTER,
-                        format!("{}.", index + 1),
-                        FontId::proportional(11.5),
-                        ink,
-                    );
-                    let name_area = Rect::from_min_max(
-                        pos2(number.max.x + 2.0, image.max.y + 1.0),
-                        pos2(cell.max.x - 96.0, cell.max.y - 1.0),
-                    );
-                    let being_renamed = state.renaming_template.as_ref().is_some_and(|(which, _)| *which == template);
-                    if being_renamed && let Some((_, typed)) = state.renaming_template.as_mut() {
-                        let look = crate::studio::Lettering::plain(FontId::proportional(11.5), ink);
-                        let field = crate::studio::rename_field_at(
-                            ui,
-                            typed,
-                            &look,
-                            pos2(number.max.x + 6.0, image.max.y + 10.0),
-                            name_area.max.x,
-                        );
-                        if std::mem::take(&mut rename_started) {
-                            field.request_focus();
-                        }
-                        let (enter, escape) = ui
-                            .input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
-                        if escape {
-                            renamed_template = Some(None);
-                        } else if enter || field.lost_focus() {
-                            renamed_template = Some(Some((template, typed.clone())));
-                        }
-                    } else {
-                        ui.painter().with_clip_rect(name_area).text(
-                            pos2(number.max.x + 6.0, image.max.y + 10.0),
-                            Align2::LEFT_CENTER,
-                            name.as_str(),
-                            FontId::proportional(11.5),
-                            ink,
-                        );
-                        let on_name = response.interact_pointer_pos().is_some_and(|at| name_area.contains(at));
-                        if response.double_clicked() || (response.clicked() && selected && on_name) {
-                            start_rename = Some((template, name.clone()));
-                        }
-                    }
-                    // What is linked to this template, at the right of its name.
-                    let mut right = cell.max.x - 8.0;
-                    let (for_songs, for_bible) = marks.get(template).copied().unwrap_or_default();
-                    for (linked, tag) in [(for_bible, "Bible"), (for_songs, "Songs")] {
-                        if !linked {
-                            continue;
-                        }
-                        let ink = Color32::from_gray(225);
-                        let text = ui.painter().layout_no_wrap(tag.to_owned(), FontId::proportional(10.0), ink);
-                        let pill = Rect::from_min_size(
-                            pos2(right - text.size().x - 10.0, image.max.y + 2.0),
-                            vec2(text.size().x + 10.0, 16.0),
-                        );
-                        ui.painter().rect_filled(pill, 8.0, Color32::from_white_alpha(32));
-                        ui.painter().galley(pos2(pill.min.x + 5.0, pill.center().y - text.size().y / 2.0), text, ink);
-                        right = pill.min.x - 4.0;
-                    }
-                    if response.clicked() && !selected {
-                        chosen_template = Some(template);
-                    }
-                    response.context_menu(|ui| {
-                        // What the template is for: songs pick among the templates for songs;
-                        // Bible slides use one template.
-                        let mut songs = for_songs;
-                        if ui
-                            .checkbox(&mut songs, "Use for Songs")
-                            .on_hover_text("Songs pick, among these, the one that suits each slide")
-                            .clicked()
-                        {
-                            toggle_songs = Some(template);
-                            ui.close();
-                        }
-                        if ui
-                            .add_enabled(!for_bible, egui::Button::new("Use for Bible Slides"))
-                            .on_hover_text("Bible slides are drawn with this template, in this theme")
-                            .clicked()
-                        {
-                            link_bible = Some(template);
-                            ui.close();
-                        }
-                        ui.separator();
-                        if ui.button("Rename").clicked() {
-                            start_rename = Some((template, name.clone()));
-                            ui.close();
-                        }
-                        if ui.button("Duplicate").clicked() {
-                            add_after = Some(template);
-                            ui.close();
-                        }
-                        if ui.add_enabled(!only_one, egui::Button::new("Delete…")).clicked() {
-                            ask_delete = Some(template);
-                            ui.close();
-                        }
-                    });
-                }
-                // After the last template: a blank tile with a plus. It adds a template
-                // that starts as a copy of the one being edited.
-                let (cell, response) = ui.allocate_exact_size(vec2(width, image_size.y + 16.0), Sense::click());
-                let tile = Rect::from_min_size(cell.min + vec2(8.0, 8.0), image_size);
-                let line = if response.hovered() { crate::studio::ACCENT } else { Color32::from_gray(90) };
-                ui.painter().rect_filled(tile, 4.0, Color32::from_gray(if response.hovered() { 34 } else { 24 }));
-                ui.painter().rect_stroke(tile, 4.0, Stroke::new(1.0, line), StrokeKind::Inside);
-                icons::paint(ui.painter(), Icon::Plus, Rect::from_center_size(tile.center(), vec2(18.0, 18.0)), line);
-                if response.on_hover_text("Add a template. It starts as a copy of the one being edited.").clicked() {
-                    add_after = Some(current);
-                }
-            });
-            // Delete, with no box selected, deletes the template being edited (once confirmed).
-            if delete_template_key && !only_one {
-                ask_delete = Some(current);
-            }
-            if let Some(template) = ask_delete {
-                state.confirm_delete_template = Some(template);
-            }
-            if let (Some(after), Some(edit)) = (add_after, state.theme_edit.as_mut()) {
-                let at = edit.theme.add_template(after);
-                edit.changed = true;
-                chosen_template = Some(at);
-                // Its name is ready to be typed over.
-                start_rename = Some((at, edit.theme.templates[at].name.clone()));
-            }
-            if let Some(edit) = state.theme_edit.as_mut() {
-                if let Some(template) = link_bible {
-                    edit.theme.set_bible_template(template);
-                    edit.changed = true;
-                }
-                if let Some(toggled) = toggle_songs.and_then(|at| edit.theme.templates.get_mut(at)) {
-                    toggled.songs = !toggled.songs;
-                    edit.changed = true;
-                }
-            }
-            if let Some(start) = start_rename {
-                state.renaming_template = Some(start);
-                rename_started = true;
-            }
-            state.rename_started = rename_started;
-            if let Some(outcome) = renamed_template {
-                state.renaming_template = None;
-                if let (Some((template, name)), Some(edit)) = (outcome, state.theme_edit.as_mut()) {
-                    let name = name.trim();
-                    if let Some(renamed) = edit.theme.templates.get_mut(template)
-                        && !name.is_empty()
-                        && renamed.name != name
-                    {
-                        renamed.name = name.to_owned();
-                        edit.changed = true;
-                    }
-                }
-            }
+        if state.theme_edit.is_some() {
+            chosen_template = template_pictures(ui, state, thumb, canvas, delete_template_key);
         } else if prop_mode {
             prop_ask = prop_ask.or(prop_list(ui, state, thumb));
         } else if stage_mode {
@@ -3754,9 +3570,14 @@ fn edit_view(
         // The object tools, the same for a song's slide and a theme's layout: a text box, the
         // shapes, and pictures and videos.
         let offset = -104.0;
+        // In the Theme Editor they stand at the right, leaving the left for what is on the canvas.
+        let anchor = if theme_mode { inner.max.x - 256.0 } else { inner.center().x };
+        if theme_mode {
+            theme_canvas_title(ui, state, inner, anchor + offset - 48.0 - 14.0);
+        }
         // A picture from a file.
         let picture_bar =
-            Rect::from_center_size(pos2(inner.center().x + 104.0, inner.min.y + 22.0), vec2(96.0, 28.0));
+            Rect::from_center_size(pos2(anchor + 104.0, inner.min.y + 22.0), vec2(96.0, 28.0));
         let picture = ui.interact(picture_bar, ui.scope_id().with("add picture"), Sense::click());
         crate::studio::paint_button(ui.painter(), picture_bar, picture.hovered());
         ui.painter().text(
@@ -3773,7 +3594,7 @@ fn edit_view(
             state.picture_request = true;
         }
         // A live web page, in a box.
-        let web_bar = Rect::from_center_size(pos2(inner.center().x + 208.0, inner.min.y + 22.0), vec2(96.0, 28.0));
+        let web_bar = Rect::from_center_size(pos2(anchor + 208.0, inner.min.y + 22.0), vec2(96.0, 28.0));
         let web = ui.interact(web_bar, ui.scope_id().with("add web page"), Sense::click());
         crate::studio::paint_button(ui.painter(), web_bar, web.hovered());
         ui.painter().text(web_bar.center(), Align2::CENTER_CENTER, "Web Page", crate::studio::semibold(12.5), crate::studio::TEXT);
@@ -3786,7 +3607,7 @@ fn edit_view(
             // The inspector's address field takes the keyboard, ready for the address.
             ui.data_mut(|data| data.insert_temp(egui::Id::unique("web address focus"), true));
         }
-        let shapes_bar = Rect::from_center_size(pos2(inner.center().x, inner.min.y + 22.0), vec2(96.0, 28.0));
+        let shapes_bar = Rect::from_center_size(pos2(anchor, inner.min.y + 22.0), vec2(96.0, 28.0));
         let shapes = ui.interact(shapes_bar, ui.scope_id().with("add shape"), Sense::click());
         crate::studio::paint_button(ui.painter(), shapes_bar, shapes.hovered());
         ui.painter().text(
@@ -3806,7 +3627,7 @@ fn edit_view(
                 }
             }
         });
-        let bar = Rect::from_center_size(pos2(inner.center().x + offset, inner.min.y + 22.0), vec2(96.0, 28.0));
+        let bar = Rect::from_center_size(pos2(anchor + offset, inner.min.y + 22.0), vec2(96.0, 28.0));
         let add = ui.interact(bar, ui.scope_id().with("add text"), Sense::click());
         crate::studio::paint_button(ui.painter(), bar, add.hovered());
         ui.painter().text(
@@ -3902,6 +3723,48 @@ fn edit_view(
         apply_prop_ask(state, ask);
     } else if let Some(request) = stage_request {
         crate::stage_editor::apply(state, request);
+    }
+}
+
+/// The name of what is on the theme canvas, at its top left: the theme, the version when the
+/// template is a version's, and the template ("Built-in · Offering · Two languages"); then,
+/// where there is room before `right`, what it is in small capitals ("Template · Offering
+/// version").
+fn theme_canvas_title(ui: &egui::Ui, state: &HomeState, inner: Rect, right: f32) {
+    let Some(edit) = state.theme_edit.as_ref() else { return };
+    let Some(template) = edit.open_template() else { return };
+    let version = edit.version.and_then(|id| edit.theme.versions.iter().find(|v| v.id == id));
+    let (name, what) = match version {
+        Some(version) => (
+            format!("{} \u{b7} {} \u{b7} {}", edit.theme.name, version.name, template.name),
+            format!("Template \u{b7} {} version", version.name),
+        ),
+        None => (format!("{} \u{b7} {}", edit.theme.name, template.name), "Template".to_owned()),
+    };
+    let y = inner.min.y + 22.0;
+    let room = Rect::from_min_max(inner.min, pos2(right, inner.min.y + 44.0));
+    let font = crate::studio::semibold(16.0);
+    let title = ui.painter().with_clip_rect(room).text(
+        pos2(inner.min.x, y),
+        Align2::LEFT_CENTER,
+        name,
+        font,
+        crate::studio::TEXT,
+    );
+    let look = crate::studio::Lettering::cap(crate::studio::TEXT_FAINT);
+    let wide =
+        crate::studio::spaced(ui, &what.to_uppercase(), crate::studio::fixed(11.5), look.ink, look.spacing).size().x;
+    if title.max.x + 8.0 + wide < right {
+        let at = pos2(title.max.x + 8.0, y + 1.0);
+        crate::studio::paint_spaced(
+            ui,
+            at,
+            Align2::LEFT_CENTER,
+            &what.to_uppercase(),
+            crate::studio::fixed(11.5),
+            look.ink,
+            look.spacing,
+        );
     }
 }
 
@@ -5743,36 +5606,45 @@ fn confirm_delete_theme(ui: &mut egui::Ui, state: &mut HomeState) {
     }
 }
 
-/// Asks before deleting one of the templates of the theme being edited, and deletes it.
+/// Asks before deleting one of the templates shown in the Theme Editor (the usual ones or a
+/// version's), and deletes it. A version's last template takes the version out of the theme.
 fn confirm_delete_template(ui: &mut egui::Ui, state: &mut HomeState) {
     let Some(template) = state.confirm_delete_template else { return };
-    let bible_uses_it =
-        state.theme_edit.as_ref().and_then(|edit| edit.theme.templates.get(template)).is_some_and(|t| t.bible);
-    let name = state.theme_edit.as_ref().and_then(|edit| edit.theme.templates.get(template)).map(|t| t.name.clone());
-    let Some(name) = name else {
+    let Some(edit) = state.theme_edit.as_ref() else {
         state.confirm_delete_template = None;
         return;
     };
-    let note = if bible_uses_it {
-        "Bible slides use it; they will use the template that suits them best instead."
-    } else {
-        ""
+    let Some(doomed) = edit.templates().get(template) else {
+        state.confirm_delete_template = None;
+        return;
     };
-    let Some(delete) = confirm_delete(ui, &format!("Delete the template \"{name}\"?"), note) else { return };
+    let version = edit.version.and_then(|id| edit.theme.versions.iter().find(|v| v.id == id));
+    let note = match version {
+        Some(version) if version.templates.len() == 1 => {
+            format!("It is the last template of the {} version here, so the version leaves this theme.", version.name)
+        }
+        _ if doomed.bible => "Bible slides use it; they will use the template that suits them best instead.".to_owned(),
+        _ => String::new(),
+    };
+    let question = format!("Delete the template \"{}\"?", doomed.name);
+    let Some(delete) = confirm_delete(ui, &question, &note) else { return };
     state.confirm_delete_template = None;
     if delete
         && let Some(edit) = state.theme_edit.as_mut()
-        && edit.theme.remove_template(template)
+        && edit.theme.remove_template_in(edit.version, template)
     {
         edit.changed = true;
-        // The template being edited stays open. If it was the one deleted, the one before
-        // it (or the new first one) is opened in its place.
+        // The template being edited stays open. If it was the one deleted, the one before it
+        // (or the new first one) is opened in its place; with a version gone, the usual ones.
         let was = edit.template;
-        edit.template = if was >= template { was.saturating_sub(1) } else { was };
-        if was == template {
-            state.editing = Some(EditDraft::of_slide(edit.theme.templates[edit.template].as_slide(), edit.template));
-        } else if let Some(draft) = state.editing.as_mut() {
-            draft.at.slide = edit.template;
+        let open = if was >= template { was.saturating_sub(1) } else { was };
+        if was == template || !edit.theme.has_version(edit.version.unwrap_or_default()) {
+            state.editing = edit.show(edit.version, open);
+        } else {
+            edit.template = open;
+            if let Some(draft) = state.editing.as_mut() {
+                draft.at.slide = open;
+            }
         }
     }
 }
@@ -5784,186 +5656,719 @@ fn confirm_delete(ui: &mut egui::Ui, question: &str, note: &str) -> Option<bool>
     crate::studio::alert(ui.ctx(), question, crate::icons::Icon::Trash, question, &message, "Delete")
 }
 
-/// The top of the Theme Editor's left column: every theme in a plain list. A click opens a
-/// theme; a click on the open theme's name renames it; a tag shows which kinds of slide use
-/// each one, and a right-click changes that. The plus makes a new theme.
-fn theme_list(ui: &mut egui::Ui, state: &mut HomeState) {
-    use crate::studio::{ACCENT, CARD, TEXT, TEXT_DIM, TEXT_FAINT};
+/// What a template is for, in a word or two, as its strip says it: Songs, Bible, Songs and
+/// Bible, or By hand (only slides that name it use it).
+fn used_for(songs: bool, bible: bool) -> &'static str {
+    match (songs, bible) {
+        (true, true) => "Songs and Bible",
+        (true, false) => "Songs",
+        (false, true) => "Bible",
+        (false, false) => "By hand",
+    }
+}
+
+/// The first of `base`, "`base` 2", "`base` 3"… that none of `names` is.
+fn unused_name(base: &str, names: &[String]) -> String {
+    (1..)
+        .map(|n| if n == 1 { base.to_owned() } else { format!("{base} {n}") })
+        .find(|name| !names.contains(name))
+        .unwrap_or_else(|| base.to_owned())
+}
+
+/// The top of Edit › Themes' left column, in the slides view's look: THEME with a +, the themes
+/// as plain rows (MAIN on the main one: a click opens one, a click on the open one's name or a
+/// double click renames it, and a right-click has its other choices); then TEMPLATES: a switch
+/// between the usual templates and each version the theme has, + Version, a line about the
+/// version shown with its ⋯, and the row of actions on the templates shown.
+fn theme_column(ui: &mut egui::Ui, state: &mut HomeState) {
+    Frame::new().inner_margin(egui::Margin::symmetric(10, 0)).show(ui, |ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        if crate::studio::list_heading_with_add(ui, "Theme", "New theme: a copy of the main theme").clicked() {
+            state.theme_request = Some(ThemeRequest::New);
+        }
+        theme_rows(ui, state);
+        crate::studio::list_heading(ui, "Templates");
+        version_switch(ui, state);
+        version_line(ui, state);
+        template_actions(ui, state);
+    });
+}
+
+/// The themes, each a plain row: the theme icon, its name, MAIN on the main one.
+fn theme_rows(ui: &mut egui::Ui, state: &mut HomeState) {
     let editing = state.theme_edit.as_ref().map_or(0, |edit| edit.index);
-    Frame::new().inner_margin(egui::Margin { left: 10, right: 10, top: 10, bottom: 6 }).show(ui, |ui| {
-        ui.spacing_mut().item_spacing = vec2(6.0, 2.0);
-        ui.horizontal(|ui| {
-            crate::studio::caption(ui, "THEMES");
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let (plus, response) = ui.allocate_exact_size(vec2(20.0, 18.0), Sense::click());
-                let ink = if response.hovered() { TEXT } else { TEXT_FAINT };
-                icons::paint(ui.painter(), Icon::Plus, Rect::from_center_size(plus.center(), vec2(10.0, 10.0)), ink);
-                if response.on_hover_text("New theme: a copy of the one songs use").clicked() {
-                    state.theme_request = Some(ThemeRequest::New);
+    let names = state.theme_names.clone();
+    let mut start_rename = None;
+    let mut renamed: Option<Option<String>> = None;
+    egui::ScrollArea::vertical().id_salt("theme list").max_height(150.0).auto_shrink([false, true]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+        for (index, name) in names.iter().enumerate() {
+            let open = index == editing;
+            let renaming = open && state.renaming_theme.is_some();
+            let main = state.theme_for_songs == index;
+            let look = crate::studio::PlainRow {
+                icon: Icon::Theme,
+                name: (!renaming).then_some(name.as_str()),
+                tag: main.then_some("Main"),
+                on: open,
+            };
+            let (response, start, right) = crate::studio::plain_row(ui, &look);
+            if renaming && let Some(typed) = state.renaming_theme.as_mut() {
+                let look = crate::studio::Lettering::plain(crate::studio::semibold(13.5), crate::studio::TEXT);
+                let field = crate::studio::rename_field_at(ui, typed, &look, start, right);
+                if std::mem::take(&mut state.rename_started) {
+                    field.request_focus();
                 }
-            });
+                let (enter, escape) =
+                    ui.input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
+                if escape {
+                    renamed = Some(None);
+                } else if enter || field.lost_focus() {
+                    renamed = Some(Some(typed.clone()));
+                }
+            } else {
+                // A click opens the theme; a click on the open theme's name, or a double click,
+                // renames it, as in a file list.
+                let on_name = response.interact_pointer_pos().is_some_and(|at| at.x >= start.x && at.x <= right);
+                if response.clicked() || response.double_clicked() {
+                    state.picking = Picking::Themes;
+                }
+                if !open && (response.clicked() || response.double_clicked()) {
+                    state.theme_request = Some(ThemeRequest::Edit(index));
+                }
+                if response.double_clicked() || (response.clicked() && open && on_name) {
+                    start_rename = Some(index);
+                }
+            }
+            response.context_menu(|ui| theme_row_menu(ui, state, index, &mut start_rename));
+        }
+    });
+    if let Some(index) = start_rename {
+        // Renaming another theme opens it first; its name is retyped once it is open.
+        if index != editing {
+            state.theme_request = Some(ThemeRequest::Edit(index));
+        }
+        state.renaming_theme = names.get(index).cloned();
+        state.rename_started = true;
+    }
+    if let Some(outcome) = renamed {
+        state.renaming_theme = None;
+        if let (Some(name), Some(edit)) = (outcome, state.theme_edit.as_mut())
+            && !name.trim().is_empty()
+            && name.trim() != edit.theme.name
+        {
+            edit.theme.name = name.trim().to_owned();
+            edit.changed = true;
+        }
+    }
+}
+
+/// A theme row's right-click menu: Make It the Main Theme, Use On (the audience screens that
+/// draw with it), Rename…, Duplicate and Delete… (the built-in theme is always kept).
+fn theme_row_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, start_rename: &mut Option<usize>) {
+    let main = state.theme_for_songs == index;
+    let make_main = ui
+        .add_enabled(!main, egui::Button::new("Make It the Main Theme"))
+        .on_hover_text("Songs and Bible slides are drawn with the main theme");
+    if make_main.clicked() {
+        state.theme_request = Some(ThemeRequest::UseForSongs(index));
+        ui.close();
+    }
+    // Which audience screens draw with it: those set to it, and, for the main theme, those left
+    // on the main theme.
+    let id = state.theme_ids.get(index).copied();
+    let audience: Vec<usize> =
+        (0..state.screens.len()).filter(|at| state.screens[*at].kind == crate::screens::Kind::Audience).collect();
+    if !audience.is_empty() {
+        ui.menu_button("Use On", |ui| {
+            for at in audience {
+                let screen = &mut state.screens[at];
+                let mut on = screen.theme == id || (main && screen.theme.is_none());
+                if ui.checkbox(&mut on, screen.name.as_str()).clicked() {
+                    // On: this theme (the main one needs nothing of its own). Off: back to
+                    // the main theme.
+                    screen.theme = if on && !main { id } else { None };
+                    state.screens_changed = true;
+                }
+            }
         });
-        ui.add_space(4.0);
-        let names = state.theme_names.clone();
-        let mut start_rename = false;
-        let mut renamed: Option<Option<String>> = None;
-        egui::ScrollArea::vertical().id_salt("theme list").max_height(150.0).auto_shrink([false, true]).show(
-            ui,
-            |ui| {
-                for (index, name) in names.iter().enumerate() {
-                    let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
-                    let open = index == editing;
-                    if open {
-                        ui.painter().rect_filled(row, 7.0, ACCENT.gamma_multiply(0.22));
-                    } else if response.hovered() {
-                        ui.painter().rect_filled(row, 7.0, CARD);
+    }
+    ui.separator();
+    if ui.button("Rename\u{2026}").clicked() {
+        *start_rename = Some(index);
+        ui.close();
+    }
+    if ui.button("Duplicate").clicked() {
+        state.theme_request = Some(ThemeRequest::Duplicate(index));
+        ui.close();
+    }
+    let delete = ui
+        .add_enabled(!state.themes_kept.contains(&index), egui::Button::new("Delete\u{2026}"))
+        .on_disabled_hover_text("The built-in themes are always kept");
+    if delete.clicked() {
+        state.confirm_delete_theme = Some(index);
+        ui.close();
+    }
+}
+
+/// The switch between the theme's usual templates and each of its versions, and + Version,
+/// which wraps under it when they don't fit on one line. With no version: "Usual templates".
+fn version_switch(ui: &mut egui::Ui, state: &mut HomeState) {
+    use crate::studio::{SwitchLook, TEXT, TEXT_FAINT};
+    let Some(edit) = state.theme_edit.as_ref() else { return };
+    let versions: Vec<(sp_model::Uuid, String)> = edit.theme.versions.iter().map(|v| (v.id, v.name.clone())).collect();
+    let chosen = edit.version.and_then(|id| versions.iter().position(|(have, _)| *have == id)).map_or(0, |at| at + 1);
+    let look = SwitchLook {
+        font: FontId::proportional(11.5),
+        spacing: 0.0,
+        pad: 10.0,
+        height: 23.5,
+        inset: 3.0,
+        track: crate::studio::CARD,
+        idle: crate::studio::TEXT_DIM,
+    };
+    let labels: Vec<&str> = std::iter::once("Usual").chain(versions.iter().map(|(_, name)| name.as_str())).collect();
+    const BUTTON: egui::Vec2 = vec2(79.7, 24.0);
+    let room = ui.available_width() - 16.0;
+    let left = ui.cursor().min.x + 8.0;
+    let top = ui.cursor().min.y + 2.0;
+    let switch_wide = crate::studio::pill_cells(ui, pos2(left, top), &labels, &look)
+        .last()
+        .map_or(0.0, |cell| cell.max.x + look.inset - left);
+    let line = look.height + 2.0 * look.inset;
+    let words_wide = 100.0;
+    let first_wide = if versions.is_empty() { words_wide } else { switch_wide };
+    let one_line = first_wide + 8.0 + BUTTON.x <= room;
+    let tall = if one_line { line } else { line + 8.0 + BUTTON.y };
+    let (block, _) = ui.allocate_exact_size(vec2(ui.available_width(), 2.0 + tall + 8.0), Sense::hover());
+    if versions.is_empty() {
+        let at = pos2(left, block.min.y + 2.0 + line / 2.0);
+        ui.painter().text(at, Align2::LEFT_CENTER, "Usual templates", FontId::proportional(12.0), TEXT_FAINT);
+    } else {
+        let hints: Vec<String> = std::iter::once("The templates used in the usual look".to_owned())
+            .chain(versions.iter().map(|(_, name)| format!("The templates used while the {name} version is on")))
+            .collect();
+        let hints: Vec<&str> = hints.iter().map(String::as_str).collect();
+        let (_, clicked) =
+            crate::studio::pill_switch(ui, "theme versions", pos2(left, top), &labels, &hints, Some(chosen), &look);
+        if let Some(clicked) = clicked.filter(|clicked| *clicked != chosen)
+            && let Some(edit) = state.theme_edit.as_mut()
+        {
+            let version = clicked.checked_sub(1).and_then(|at| versions.get(at)).map(|(id, _)| *id);
+            state.editing = edit.show(version, 0);
+            state.renaming_template = None;
+        }
+    }
+    // + Version: at the right of the line, or of a line of its own under the switch.
+    let y = if one_line { block.min.y + 2.0 + line / 2.0 } else { block.min.y + 2.0 + line + 8.0 + BUTTON.y / 2.0 };
+    let place = Rect::from_center_size(pos2(left + room - BUTTON.x / 2.0, y), BUTTON);
+    let response = ui.interact(place, ui.scope_id().with("add version"), Sense::click());
+    crate::studio::paint_flat(
+        ui.painter(),
+        place,
+        crate::studio::RADIUS,
+        crate::studio::Flat::Plain,
+        response.hovered(),
+    );
+    let words = ui.painter().layout_no_wrap("Version".to_owned(), FontId::proportional(11.5), TEXT);
+    let start = place.center().x - (words.size().x + 10.0 + 7.0) / 2.0;
+    let mark = Rect::from_center_size(pos2(start + 5.0, place.center().y), vec2(10.0, 10.0));
+    icons::paint(ui.painter(), Icon::Plus, mark, TEXT);
+    ui.painter().galley(pos2(start + 17.0, place.center().y - words.size().y / 2.0), words, TEXT);
+    let hint = "Add a version to this theme: other templates for a moment in the service, such as the offering";
+    if response.on_hover_text(hint).clicked() {
+        state.version_sheet = Some(VersionSheet::adding(state));
+    }
+}
+
+/// Under the switch, while a version is shown: what it is for, and its ⋯ (Rename…, Add a Copy
+/// Of, Remove It From the theme).
+fn version_line(ui: &mut egui::Ui, state: &mut HomeState) {
+    use crate::studio::{MORE_BUTTON, TEXT_FAINT};
+    let Some(edit) = state.theme_edit.as_ref() else { return };
+    let Some(version) = edit.version.and_then(|id| edit.theme.versions.iter().find(|v| v.id == id)) else { return };
+    let (id, name, theme_name, theme) = (version.id, version.name.clone(), edit.theme.name.clone(), edit.index);
+    // The usual templates the version has no copy of yet, by name and what they are for.
+    let copyable: Vec<(usize, String)> = edit
+        .theme
+        .templates
+        .iter()
+        .enumerate()
+        .filter(|(_, usual)| {
+            !version
+                .templates
+                .iter()
+                .any(|have| have.name == usual.name && (have.songs, have.bible) == (usual.songs, usual.bible))
+        })
+        .map(|(at, usual)| (at, format!("{} ({})", usual.name, used_for(usual.songs, usual.bible).to_lowercase())))
+        .collect();
+    let words = format!("Used while the {name} version is on, on every screen with this theme.");
+    let wide = ui.available_width() - 16.0 - MORE_BUTTON - 6.0;
+    let galley = ui.painter().layout(words, FontId::proportional(11.5), TEXT_FAINT, wide);
+    let (block, _) = ui.allocate_exact_size(vec2(ui.available_width(), galley.size().y + 8.0), Sense::hover());
+    let text_top = block.min.y;
+    ui.painter().galley(pos2(block.min.x + 8.0, text_top), galley.clone(), TEXT_FAINT);
+    let more = Rect::from_center_size(
+        pos2(block.max.x - 8.0 - MORE_BUTTON / 2.0, text_top + galley.size().y / 2.0),
+        egui::Vec2::splat(MORE_BUTTON),
+    );
+    let more = crate::studio::more_button(ui, more, ui.scope_id().with(("version more", id)), true);
+    egui::Popup::menu(&more).show(|ui| {
+        if ui.button("Rename\u{2026}").on_hover_text("Renames it in every theme that has it").clicked() {
+            state.version_sheet =
+                Some(VersionSheet { renaming: Some(id), name, songs: false, bible: false, focus: true });
+            ui.close();
+        }
+        ui.menu_button("Add a Copy Of", |ui| {
+            if copyable.is_empty() {
+                ui.add_enabled(false, egui::Button::new("Every usual template is in it already"));
+            }
+            for (from, label) in &copyable {
+                if ui.button(label.as_str()).clicked() {
+                    state.version_asks.push(crate::versions::Ask::AddCopy { theme, version: id, from: *from });
+                    ui.close();
+                }
+            }
+        });
+        ui.separator();
+        if ui.button(format!("Remove It From \u{201c}{theme_name}\u{201d}\u{2026}")).clicked() {
+            state.confirm_remove_version = Some(id);
+            ui.close();
+        }
+    });
+}
+
+/// The row of actions on the templates shown: Add (a new one with the open one's main box),
+/// Copy, Delete (asks first), and ↑ and ↓ to move the open one among them.
+fn template_actions(ui: &mut egui::Ui, state: &mut HomeState) {
+    let Some(edit) = state.theme_edit.as_ref() else { return };
+    let (count, at, version) = (edit.templates().len(), edit.template, edit.version);
+    let can_delete = count > 1 || version.is_some();
+    let enabled = [true, count > 0, can_delete, at > 0, at + 1 < count];
+    let hints = [
+        "Add a template with the open one's main box",
+        "Add a copy of the open template",
+        "Delete the open template",
+        "Move the open template up",
+        "Move the open template down",
+    ];
+    match crate::studio::list_keys(ui, "template keys", enabled, hints) {
+        Some(crate::studio::ListKey::Add) => add_template_shown(state, false),
+        Some(crate::studio::ListKey::Copy) => add_template_shown(state, true),
+        Some(crate::studio::ListKey::Delete) => state.confirm_delete_template = Some(at),
+        Some(crate::studio::ListKey::Up) => move_template_shown(state, true),
+        Some(crate::studio::ListKey::Down) => move_template_shown(state, false),
+        None => {}
+    }
+}
+
+/// Adds a template to the set shown in the Theme Editor, after the one open, and opens it with
+/// its name ready to retype: with `copy` a copy of the open one; otherwise a new one with the
+/// open one's main box only, for songs in a version and by hand among the usual templates (so
+/// it takes no song's slides until it is told to).
+fn add_template_shown(state: &mut HomeState, copy: bool) {
+    let Some(edit) = state.theme_edit.as_mut() else { return };
+    let (set, after) = (edit.version, edit.template);
+    let original = edit.templates().get(after).map(|t| t.name.clone()).unwrap_or_default();
+    let names: Vec<String> = edit.templates().iter().map(|t| t.name.clone()).collect();
+    let Some(at) = edit.theme.add_template_in(set, after) else { return };
+    let Some(added) = edit.theme.set_mut(set).and_then(|templates| templates.get_mut(at)) else { return };
+    if copy {
+        added.name = unused_name(&format!("{original} copy"), &names);
+    } else {
+        added.boxes = added.box_for(Some(&sp_model::Role::primary())).cloned().into_iter().collect();
+        added.objects.clear();
+        added.songs = set.is_some();
+    }
+    let name = added.name.clone();
+    edit.changed = true;
+    state.editing = edit.show(set, at);
+    state.renaming_template = Some((at, name));
+    state.rename_started = true;
+}
+
+/// Moves the open template one place up or down among those shown.
+fn move_template_shown(state: &mut HomeState, up: bool) {
+    let Some(edit) = state.theme_edit.as_mut() else { return };
+    if let Some(to) = edit.theme.move_template_in(edit.version, edit.template, up) {
+        edit.template = to;
+        edit.changed = true;
+        if let Some(draft) = state.editing.as_mut() {
+            draft.at.slide = to;
+        }
+    }
+}
+
+/// The templates shown in Edit › Themes, each a picture with a strip (its number, its name and
+/// what it is for), the open one in the chosen grey. A click opens one; a click on the open
+/// one's name, or a double click, renames it; a right-click has Used For, Rename…, Duplicate
+/// and Delete…. Returns the template clicked, to open.
+fn template_pictures(
+    ui: &mut egui::Ui,
+    state: &mut HomeState,
+    thumb: &mut dyn FnMut(ThumbOf) -> Option<(TextureId, bool)>,
+    canvas: Option<TextureId>,
+    delete_key: bool,
+) -> Option<usize> {
+    let edit = state.theme_edit.as_ref()?;
+    let shown: Vec<(String, bool, bool, Slide)> =
+        edit.templates().iter().map(|t| (t.name.clone(), t.songs, t.bible, t.as_slide())).collect();
+    let (current, version) = (edit.template, edit.version);
+    let can_delete = shown.len() > 1 || version.is_some();
+    let mut chosen = None;
+    let mut ask_delete = None;
+    let mut used: Option<(usize, bool, bool)> = None;
+    let mut duplicate = None;
+    let mut start_rename = None;
+    let mut renamed: Option<Option<(usize, String)>> = None;
+    let mut rename_started = std::mem::take(&mut state.rename_started);
+    let list = egui::Id::unique(("theme template pictures", version));
+    egui::ScrollArea::vertical().id_salt("theme layout list").auto_shrink([false, false]).show(ui, |ui| {
+        let side = egui::Margin { left: 20, right: 20, top: crate::studio::LIST_TOP as i8, bottom: 12 };
+        Frame::new().inner_margin(side).show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(0.0, crate::studio::LIST_BETWEEN);
+            for (index, (name, songs, bible, slide)) in shown.iter().enumerate() {
+                let open = index == current;
+                let renaming = state.renaming_template.as_ref().is_some_and(|(which, _)| *which == index);
+                let label = format!("{name} \u{b7} {}", used_for(*songs, *bible));
+                let look = crate::studio::ListPicture {
+                    number: index + 1,
+                    name: &label,
+                    dot: None,
+                    open,
+                    live: false,
+                    renaming,
+                };
+                let (response, places) = crate::studio::list_picture(ui, list, index, &look);
+                let image = places.picture;
+                // Only the pictures in sight are drawn, or asked for; the open template is shown
+                // as it is on the canvas this instant.
+                if ui.is_rect_visible(image) {
+                    let corner = crate::studio::LIST_PICTURE_CORNER;
+                    ui.painter().rect_filled(image, corner, Color32::BLACK);
+                    let picture = match canvas.filter(|_| open) {
+                        Some(texture) => Some(texture),
+                        None => thumb(ThumbOf::Layout(index, slide)).map(|(texture, _)| texture),
+                    };
+                    match picture {
+                        Some(texture) => {
+                            egui::Image::from_texture((texture, image.size()))
+                                .corner_radius(corner)
+                                .paint_at(ui, image);
+                        }
+                        None => ui.ctx().request_repaint(),
                     }
-                    // Tags at the right say what uses this theme.
-                    let mut right = row.max.x - 6.0;
-                    // Main for the main theme; the names of the screens set to any other.
-                    let id = state.theme_ids.get(index).copied();
-                    let mut tags: Vec<(bool, &str)> = vec![(state.theme_for_songs == index, "Main")];
-                    tags.extend(
-                        state
-                            .screens
-                            .iter()
-                            .filter(|screen| screen.theme.is_some() && screen.theme == id)
-                            .map(|screen| (true, screen.name.as_str())),
-                    );
-                    for (used, tag) in tags {
-                        if !used {
-                            continue;
-                        }
-                        let text = ui.painter().layout_no_wrap(tag.to_owned(), FontId::proportional(10.0), TEXT_DIM);
-                        let pill = Rect::from_min_size(
-                            pos2(right - text.size().x - 10.0, row.center().y - 8.0),
-                            vec2(text.size().x + 10.0, 16.0),
-                        );
-                        ui.painter().rect_filled(pill, 8.0, Color32::from_white_alpha(18));
-                        ui.painter().galley(
-                            pos2(pill.min.x + 5.0, pill.center().y - text.size().y / 2.0),
-                            text,
-                            TEXT_DIM,
-                        );
-                        right = pill.min.x - 4.0;
+                }
+                if renaming && let Some((_, typed)) = state.renaming_template.as_mut() {
+                    let look = crate::studio::list_name_look(crate::studio::TEXT);
+                    let field = crate::studio::rename_field_at(ui, typed, &look, places.name, places.name_right);
+                    if std::mem::take(&mut rename_started) {
+                        field.request_focus();
                     }
-                    let name_area =
-                        Rect::from_min_max(pos2(row.min.x + 6.0, row.min.y + 3.0), pos2(right - 2.0, row.max.y - 3.0));
-                    if open && let Some(typed) = state.renaming_theme.as_mut() {
-                        // The open theme's name is white.
-                        let look = crate::studio::Lettering::plain(FontId::proportional(13.5), Color32::WHITE);
-                        let field = crate::studio::rename_field_at(
-                            ui,
-                            typed,
-                            &look,
-                            pos2(row.min.x + 10.0, row.center().y),
-                            name_area.max.x,
-                        );
-                        if std::mem::take(&mut state.rename_started) {
-                            field.request_focus();
-                        }
-                        let (enter, escape) = ui
-                            .input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
-                        if escape {
-                            renamed = Some(None);
-                        } else if enter || field.lost_focus() {
-                            renamed = Some(Some(typed.clone()));
-                        }
-                    } else {
-                        ui.painter().with_clip_rect(name_area).text(
-                            pos2(row.min.x + 10.0, row.center().y),
-                            Align2::LEFT_CENTER,
-                            name.as_str(),
-                            FontId::proportional(13.5),
-                            if open { Color32::WHITE } else { TEXT },
-                        );
-                        // A click opens the theme; a click on the open theme's name, or a double
-                        // click, renames it, as in a file list.
-                        if response.clicked() || response.double_clicked() {
-                            state.picking = Picking::Themes;
-                        }
-                        if response.double_clicked() || (response.clicked() && open) {
-                            if !open {
-                                state.theme_request = Some(ThemeRequest::Edit(index));
-                            } else {
-                                start_rename = true;
-                            }
-                        } else if response.clicked() {
-                            state.theme_request = Some(ThemeRequest::Edit(index));
-                        }
+                    let (enter, escape) =
+                        ui.input(|input| (input.key_pressed(egui::Key::Enter), input.key_pressed(egui::Key::Escape)));
+                    if escape {
+                        renamed = Some(None);
+                    } else if enter || field.lost_focus() {
+                        renamed = Some(Some((index, typed.clone())));
                     }
-                    response.context_menu(|ui| {
-                        // The main theme draws songs and Bible slides on every screen.
-                        if ui
-                            .add_enabled(state.theme_for_songs != index, egui::Button::new("Use as Main Theme"))
-                            .on_hover_text("Songs and Bible slides are drawn with the main theme")
-                            .clicked()
-                        {
-                            state.theme_request = Some(ThemeRequest::UseForSongs(index));
-                            ui.close();
-                        }
-                        // Which audience screens draw with it: those set to it, and, for the main
-                        // theme, those left on the main theme.
-                        let id = state.theme_ids.get(index).copied();
-                        let main = state.theme_for_songs == index;
-                        let audience: Vec<usize> = (0..state.screens.len())
-                            .filter(|at| state.screens[*at].kind == crate::screens::Kind::Audience)
-                            .collect();
-                        if !audience.is_empty() {
-                            ui.menu_button("Use on", |ui| {
-                                for at in audience {
-                                    let screen = &mut state.screens[at];
-                                    let mut on = screen.theme == id || (main && screen.theme.is_none());
-                                    if ui.checkbox(&mut on, screen.name.as_str()).clicked() {
-                                        // On: this theme (the main one needs nothing of its own).
-                                        // Off: back to the main theme.
-                                        screen.theme = if on && !main { id } else { None };
-                                        state.screens_changed = true;
-                                    }
-                                }
-                            });
-                        }
-                        if ui.button("Duplicate").clicked() {
-                            state.theme_request = Some(ThemeRequest::Duplicate(index));
-                            ui.close();
-                        }
-                        if open {
-                            ui.separator();
-                            if ui.button("Rename").clicked() {
-                                start_rename = true;
+                } else {
+                    let on_name = response.interact_pointer_pos().is_some_and(|at| at.y > image.max.y);
+                    if response.double_clicked() || (response.clicked() && open && on_name) {
+                        start_rename = Some((index, name.clone()));
+                    } else if response.clicked() && !open {
+                        chosen = Some(index);
+                    }
+                }
+                response.context_menu(|ui| {
+                    ui.menu_button("Used For", |ui| {
+                        for (words, wanted, hint) in [
+                            ("Songs", (true, false), "A song's slide uses, of these, the one that suits it"),
+                            ("Bible", (false, true), "Bible slides are drawn with it, in this set"),
+                            ("Both", (true, true), "Songs pick among it, and Bible slides use it"),
+                            ("Nothing by Itself", (false, false), "Only slides that name it use it"),
+                        ] {
+                            let on = (*songs, *bible) == wanted;
+                            if ui.add(egui::Button::selectable(on, words)).on_hover_text(hint).clicked() {
+                                used = Some((index, wanted.0, wanted.1));
                                 ui.close();
                             }
                         }
-                        // Deleting asks first. The built-in theme is always kept.
-                        ui.separator();
-                        let delete = ui
-                            .add_enabled(!state.themes_kept.contains(&index), egui::Button::new("Delete Theme…"))
-                            .on_disabled_hover_text("The built-in themes are always kept");
-                        if delete.clicked() {
-                            state.confirm_delete_theme = Some(index);
-                            ui.close();
-                        }
                     });
-                }
-            },
-        );
-        if start_rename {
-            state.renaming_theme = names.get(editing).cloned();
-            state.rename_started = true;
+                    ui.separator();
+                    if ui.button("Rename\u{2026}").clicked() {
+                        start_rename = Some((index, name.clone()));
+                        ui.close();
+                    }
+                    if ui.button("Duplicate").clicked() {
+                        duplicate = Some(index);
+                        ui.close();
+                    }
+                    if ui.add_enabled(can_delete, egui::Button::new("Delete\u{2026}")).clicked() {
+                        ask_delete = Some(index);
+                        ui.close();
+                    }
+                });
+            }
+        });
+    });
+    // Delete, with no box selected, deletes the template open (once confirmed).
+    if delete_key && can_delete {
+        ask_delete = Some(current);
+    }
+    if let Some(template) = ask_delete {
+        state.confirm_delete_template = Some(template);
+    }
+    if let Some((index, songs, bible)) = used
+        && let Some(edit) = state.theme_edit.as_mut()
+    {
+        if bible {
+            edit.theme.set_bible_template_in(version, index);
         }
-        if let Some(outcome) = renamed {
-            state.renaming_theme = None;
-            if let (Some(name), Some(edit)) = (outcome, state.theme_edit.as_mut())
-                && !name.trim().is_empty()
-                && name.trim() != edit.theme.name
+        if let Some(template) = edit.theme.set_mut(version).and_then(|templates| templates.get_mut(index)) {
+            template.songs = songs;
+            template.bible = bible;
+        }
+        edit.changed = true;
+    }
+    if let Some(index) = duplicate
+        && let Some(draft) = state.theme_edit.as_mut().and_then(|edit| edit.show(version, index))
+    {
+        state.editing = Some(draft);
+        add_template_shown(state, true);
+        rename_started = state.rename_started;
+    }
+    if let Some(start) = start_rename {
+        state.renaming_template = Some(start);
+        rename_started = true;
+    }
+    state.rename_started = rename_started;
+    if let Some(outcome) = renamed {
+        state.renaming_template = None;
+        if let (Some((template, name)), Some(edit)) = (outcome, state.theme_edit.as_mut()) {
+            let name = name.trim();
+            if let Some(changed) = edit.theme.set_mut(version).and_then(|templates| templates.get_mut(template))
+                && !name.is_empty()
+                && changed.name != name
             {
-                edit.theme.name = name.trim().to_owned();
+                changed.name = name.to_owned();
                 edit.changed = true;
             }
         }
-        ui.add_space(8.0);
-        crate::studio::caption(ui, "TEMPLATES");
+    }
+    chosen
+}
+
+/// The sheet that adds a version to the theme being edited, or renames one in every theme.
+pub struct VersionSheet {
+    /// The version renamed; none when one is being added.
+    pub renaming: Option<sp_model::Uuid>,
+    pub name: String,
+    /// Adding: start from copies of the theme's song templates, and of its Bible template.
+    pub songs: bool,
+    pub bible: bool,
+    /// The name takes the keyboard once, when the sheet opens.
+    pub focus: bool,
+}
+
+impl VersionSheet {
+    /// Adding a version to the theme being edited: the name another theme's version has (so the
+    /// screens switch together), starting from copies of its song templates.
+    pub fn adding(state: &HomeState) -> VersionSheet {
+        let theme = state.theme_edit.as_ref().map(|edit| &edit.theme);
+        let other = state.versions.iter().find(|version| theme.is_none_or(|theme| !theme.has_version(version.id)));
+        let songs = theme.is_some_and(|theme| theme.templates.iter().any(|t| t.songs));
+        VersionSheet {
+            renaming: None,
+            name: other.map(|v| v.name.clone()).unwrap_or_default(),
+            songs,
+            bible: false,
+            focus: true,
+        }
+    }
+}
+
+/// The sheet over the Theme Editor that adds a version to the theme ("Add a version to …": its
+/// name, offered from the versions other themes have, and which templates it starts as copies
+/// of), or renames one. Return does it; Escape or Cancel closes it.
+fn version_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
+    use crate::studio::{Flat, TEXT, TEXT_DIM, TEXT_FAINT};
+    let Some(edit) = state.theme_edit.as_ref() else {
+        state.version_sheet = None;
+        return;
+    };
+    let Some(sheet) = state.version_sheet.as_mut() else { return };
+    let theme = &edit.theme;
+    let others: Vec<String> =
+        state.versions.iter().filter(|version| !theme.has_version(version.id)).map(|v| v.name.clone()).collect();
+    let song_names: Vec<String> = theme.templates.iter().filter(|t| t.songs).map(|t| t.name.clone()).collect();
+    let bible_name = theme.templates.iter().find(|t| t.bible && !t.songs).map(|t| t.name.clone());
+    let title = match sheet.renaming {
+        Some(_) => "Rename version".to_owned(),
+        None => format!("Add a version to \u{201c}{}\u{201d}", theme.name),
+    };
+    let frame = Frame::new()
+        .fill(crate::studio::PANEL)
+        .stroke(Stroke::new(1.0, crate::studio::LINE))
+        .corner_radius(14.0)
+        .inner_margin(egui::Margin { left: 18, right: 18, top: 16, bottom: 16 });
+    let mut decided = None;
+    let id = egui::Id::unique("version sheet");
+    let area = egui::Modal::default_area(id).anchor(Align2::CENTER_CENTER, vec2(0.0, -30.0)).fade_in(false);
+    egui::Modal::new(id).area(area).backdrop_color(Color32::from_black_alpha(110)).frame(frame).show(ui.ctx(), |ui| {
+        ui.set_width(424.0);
+        ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+        let note = |ui: &mut egui::Ui, words: &str| {
+            ui.add(egui::Label::new(
+                egui::RichText::new(words.to_uppercase())
+                    .font(crate::studio::fixed(11.0))
+                    .extra_letter_spacing(0.6)
+                    .color(TEXT_FAINT),
+            ));
+        };
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(&title).font(crate::studio::semibold(15.0)).color(TEXT));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let (close, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
+                if crate::studio::quiet_icon(ui, close, ui.scope_id().with("close"), Icon::Close, 11.0, 0.7, None)
+                    .on_hover_text("Close")
+                    .clicked()
+                {
+                    decided = Some(false);
+                }
+            });
+        });
+        let about = match sheet.renaming {
+            Some(_) => "The name is shared: every theme\u{2019}s version of this name is renamed with it.",
+            None => {
+                "A version is another set of templates for a moment in the service, such as the offering, communion \
+                 or a kids\u{2019} segment. Switching to it by name changes every screen whose theme has a version of \
+                 that name, each in its own way; the others stay as they are."
+            }
+        };
+        ui.label(egui::RichText::new(about).size(12.5).color(TEXT_DIM));
+        ui.label(egui::RichText::new("Name").size(12.5).color(TEXT));
+        ui.horizontal(|ui| {
+            let wide = if sheet.renaming.is_none() && !others.is_empty() { 424.0 - 38.0 } else { 424.0 };
+            let field = ui.add(egui::TextEdit::singleline(&mut sheet.name).hint_text("Offering").desired_width(wide));
+            if std::mem::take(&mut sheet.focus) {
+                field.request_focus();
+            }
+            if field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                decided = Some(true);
+            }
+            // The names other themes' versions have, to take one.
+            if sheet.renaming.is_none() && !others.is_empty() {
+                let pick = ui.add(egui::Button::new("\u{25be}").min_size(vec2(30.0, 24.0)));
+                egui::Popup::menu(&pick.on_hover_text("The versions other themes have")).show(|ui| {
+                    for other in &others {
+                        if ui.button(other.as_str()).clicked() {
+                            sheet.name = other.clone();
+                            ui.close();
+                        }
+                    }
+                });
+            }
+        });
+        if sheet.renaming.is_none() {
+            if !others.is_empty() {
+                let quoted: Vec<String> = others.iter().map(|name| format!("\u{201c}{name}\u{201d}")).collect();
+                let verb = if others.len() == 1 { "is" } else { "are" };
+                note(
+                    ui,
+                    &format!(
+                        "{} {verb} in another theme: use the same name so the screens switch together.",
+                        quoted.join(", ")
+                    ),
+                );
+            }
+            ui.label(egui::RichText::new("Start from copies of").size(12.5).color(TEXT));
+            let songs_words = match song_names.is_empty() {
+                true => "The song templates".to_owned(),
+                false => format!("The song templates ({})", song_names.join(", ")),
+            };
+            ui.add_enabled(!song_names.is_empty(), egui::Checkbox::new(&mut sheet.songs, songs_words));
+            let bible_words = match &bible_name {
+                Some(name) => format!("The Bible template ({name})"),
+                None => "The Bible template".to_owned(),
+            };
+            ui.add_enabled(bible_name.is_some(), egui::Checkbox::new(&mut sheet.bible, bible_words));
+            note(ui, "A kind it has no template for (songs or Bible) keeps the usual look while the version is on.");
+        }
+        ui.add_space(4.0);
+        let ready = !sheet.name.trim().is_empty() && (sheet.renaming.is_some() || sheet.songs || sheet.bible);
+        let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
+        let font = FontId::proportional(12.5);
+        let yes_words = if sheet.renaming.is_some() { "Rename" } else { "Add version" };
+        let yes_wide = crate::studio::flat_button_width(ui, &[yes_words], &font, 13.0);
+        let yes = Rect::from_min_size(pos2(row.max.x - yes_wide, row.min.y), vec2(yes_wide, 30.0));
+        let no_wide = crate::studio::flat_button_width(ui, &["Cancel"], &font, 13.0);
+        let no = Rect::from_min_size(pos2(yes.min.x - 8.0 - no_wide, row.min.y), vec2(no_wide, 30.0));
+        if crate::studio::flat_button(ui, no, ui.scope_id().with("cancel"), "Cancel", font.clone(), Flat::Plain, true)
+            .clicked()
+        {
+            decided = Some(false);
+        }
+        if crate::studio::flat_button(ui, yes, ui.scope_id().with("yes"), yes_words, font, Flat::Main, ready).clicked()
+        {
+            decided = Some(true);
+        }
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            decided = Some(false);
+        }
+        if decided == Some(true) && !ready {
+            decided = None;
+        }
     });
+    match decided {
+        Some(true) => {
+            let Some(sheet) = state.version_sheet.take() else { return };
+            let name = sheet.name.trim().to_owned();
+            let ask = match sheet.renaming {
+                Some(version) => crate::versions::Ask::Rename { version, name },
+                None => {
+                    let from = (0..theme.templates.len())
+                        .filter(|at| {
+                            let template = &theme.templates[*at];
+                            (sheet.songs && template.songs) || (sheet.bible && template.bible && !template.songs)
+                        })
+                        .collect();
+                    crate::versions::Ask::Add { theme: edit.index, name, from }
+                }
+            };
+            state.version_asks.push(ask);
+        }
+        Some(false) => state.version_sheet = None,
+        None => {}
+    }
+}
+
+/// Asks before taking a version out of the theme being edited, with its templates, and asks the
+/// app to.
+fn confirm_remove_version(ui: &mut egui::Ui, state: &mut HomeState) {
+    let Some(version) = state.confirm_remove_version else { return };
+    let Some(edit) = state.theme_edit.as_ref() else {
+        state.confirm_remove_version = None;
+        return;
+    };
+    let Some(found) = edit.theme.versions.iter().find(|have| have.id == version) else {
+        state.confirm_remove_version = None;
+        return;
+    };
+    let count = found.templates.len();
+    let question = format!("Remove the {} version from \u{201c}{}\u{201d}?", found.name, edit.theme.name);
+    let note = format!(
+        "Its {count} template{} go. Screens using this theme keep the usual look while {} is on.",
+        if count == 1 { "" } else { "s" },
+        found.name
+    );
+    let theme = edit.index;
+    if let Some(remove) = crate::studio::alert(ui.ctx(), "remove version", Icon::Theme, &question, &note, "Remove") {
+        state.confirm_remove_version = None;
+        if remove {
+            state.version_asks.push(crate::versions::Ask::Remove { theme, version });
+        }
+    }
 }
 
 /// A menu that points a translation's words, or its reference, at one of the theme's boxes.
@@ -8263,6 +8668,7 @@ mod tests {
                         match which {
                             ThumbOf::Slide(_)
                             | ThumbOf::SongSlide(..)
+                            | ThumbOf::InVersion(..)
                             | ThumbOf::BibleSlide(_)
                             | ThumbOf::Layout(..) => slides += 1,
                             ThumbOf::Media(_) => media += 1,
@@ -8341,6 +8747,114 @@ mod tests {
         // With nothing selected, Delete is for the template.
         frame_with(&ctx, &show, &mut state, Some(Key::Delete));
         assert_eq!(state.confirm_delete_template, Some(0));
+    }
+
+    /// Runs one frame of the home view with these events, and returns each piece of text it drew,
+    /// with where, in the order drawn.
+    fn frame_texts(
+        ctx: &egui::Context,
+        show: &Show,
+        state: &mut HomeState,
+        events: Vec<Event>,
+        time: f64,
+    ) -> Vec<(String, Rect)> {
+        fn walk(shape: &egui::Shape, into: &mut Vec<(String, Rect)>) {
+            match shape {
+                egui::Shape::Text(text) => into.push((text.galley.text().to_owned(), text.visual_bounding_rect())),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1440.0, 900.0))),
+            time: Some(time),
+            events,
+            ..RawInput::default()
+        };
+        let output = ctx.run_ui(raw, |ui| {
+            home_ui(ui, show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+        });
+        let mut texts = Vec::new();
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut texts));
+        output.drop_without_applying_deltas();
+        texts
+    }
+
+    /// The middle of where `words` were drawn, or none.
+    fn drawn_at(texts: &[(String, Rect)], words: &str) -> Option<egui::Pos2> {
+        texts.iter().rfind(|(text, _)| text == words).map(|(_, rect)| rect.center())
+    }
+
+    /// The built-in theme with an Offering version made of copies of its two song templates.
+    fn offering_theme() -> (Theme, sp_model::Version) {
+        let mut theme = Theme::builtin();
+        let offering = sp_model::Version { id: sp_model::Uuid::from_u128(77), name: "Offering".to_owned() };
+        assert!(theme.add_version(&offering, &[0, 1]));
+        (theme, offering)
+    }
+
+    #[test]
+    fn the_themes_column_shows_a_versions_templates_and_the_canvas_names_the_version() {
+        let (ctx, show) = (egui::Context::default(), three_songs());
+        let (theme, offering) = offering_theme();
+        let first = EditDraft::of_slide(theme.templates[0].as_slide(), 0);
+        let mut state = HomeState {
+            theme_names: vec![theme.name.clone()],
+            versions: vec![offering.clone()],
+            theme_edit: Some(ThemeEdit::of(0, theme)),
+            editing: Some(first),
+            ..HomeState::default()
+        };
+        let mut time = 0.0;
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), time);
+        for words in ["THEME", "Built-in", "MAIN", "TEMPLATES", "Usual", "Offering", "Built-in \u{b7} Two languages"] {
+            assert!(drawn_at(&texts, words).is_some(), "{words} is drawn");
+        }
+        assert!(drawn_at(&texts, "TWO LANGUAGES \u{b7} SONGS").is_some(), "each template's strip says what it is for");
+        // A click on Offering shows the version's templates, its first on the canvas.
+        let at = drawn_at(&texts, "Offering").unwrap();
+        let press = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        for events in [vec![Event::PointerMoved(at)], vec![press(true)], vec![press(false)]] {
+            time += 0.1;
+            frame_texts(&ctx, &show, &mut state, events, time);
+        }
+        let edit = state.theme_edit.as_ref().unwrap();
+        assert_eq!(edit.version, Some(offering.id));
+        let opened = state.editing.as_ref().and_then(|draft| draft.slide.template);
+        assert_eq!(opened, Some(edit.theme.versions[0].templates[0].id));
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), time + 0.1);
+        assert!(drawn_at(&texts, "Built-in \u{b7} Offering \u{b7} Two languages").is_some(), "the canvas names it");
+        assert!(drawn_at(&texts, "Used while the Offering version is on, on every screen with this theme.").is_some());
+        // Its templates can all be deleted (the last takes the version out); the usual can't.
+        state.confirm_delete_template = None;
+        frame_with(&ctx, &show, &mut state, Some(Key::Delete));
+        assert_eq!(state.confirm_delete_template, Some(0));
+    }
+
+    #[test]
+    fn a_playlist_item_shown_in_a_version_has_its_name_under_its_title() {
+        let ctx = egui::Context::default();
+        let show = Show::new(vec![Arc::new(parse_song_text("Harbour", "Words\n"))]);
+        let (_, offering) = offering_theme();
+        let mut state = HomeState { playlist_open: true, versions: vec![offering.clone()], ..HomeState::default() };
+        state.services.add(crate::service::Item::song("title:Harbour", "Harbour"));
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), 0.0);
+        assert!(drawn_at(&texts, "OFFERING").is_none());
+        let set = crate::service::ShowWith { version: offering.id, keep: false };
+        assert!(state.services.set_show_with(0, Some(set)));
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), 0.1);
+        let title = drawn_at(&texts, "Harbour").expect("the title");
+        let pill = drawn_at(&texts, "OFFERING").expect("the version's name");
+        assert!(pill.y > title.y, "on a line of its own under the title");
+        // A version no theme has any more shows no pill.
+        state.versions.clear();
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), 0.2);
+        assert!(drawn_at(&texts, "OFFERING").is_none());
     }
 
     #[test]

@@ -19,6 +19,8 @@ pub enum Ask {
     /// Give a theme (by its place in the list) a version by name: the one another theme has by
     /// that name, or a new one. Its templates are copies of the theme's usual ones at `from`.
     Add { theme: usize, name: String, from: Vec<usize> },
+    /// Add a copy of one of a theme's usual templates to its version.
+    AddCopy { theme: usize, version: Uuid, from: usize },
     /// Rename a version in every theme that has it.
     Rename { version: Uuid, name: String },
     /// Take a version out of a theme, with its templates.
@@ -108,6 +110,12 @@ impl Switch {
             self.on = Some(On { version: asked.version, from: Some(here), keep: asked.keep });
         }
         self.on != before
+    }
+
+    /// True while a playlist item (by its place) is the one the version on is on for, in this
+    /// version: its pill and its button light while it is on screen.
+    pub fn lights(&self, item: usize, version: Uuid) -> bool {
+        self.on.is_some_and(|on| on.version == version && on.from.is_some_and(|from| from.item == Some(item)))
     }
 
     /// A version no theme has any more is switched off. Returns true if it was on.
@@ -234,6 +242,13 @@ impl crate::App {
                     format!("{} has the {} version: copies of {}.", target.name, version.name, copied.join(", "));
                 self.versions_saved(&[theme], Some((Some(version.id), 0)));
                 Ok(said)
+            }
+            Ask::AddCopy { theme, version, from } => {
+                let target = self.themes.get_mut(theme).ok_or("That theme is gone.")?;
+                let copied = target.templates.get(from).map(|t| t.name.clone()).unwrap_or_default();
+                let at = target.add_copy_to_version(version, from).ok_or("That template is not in the theme.")?;
+                self.versions_saved(&[theme], Some((Some(version), at)));
+                Ok(format!("Added a copy of {copied} to the version."))
             }
             Ask::Rename { version, name } => {
                 let name = name.trim().to_owned();
@@ -467,6 +482,7 @@ mod tests {
         assert!(!switch.slide_on(item(0, 0), None));
         assert!(switch.slide_on(item(1, 1), offering));
         assert_eq!(switch.version(), Some(OFFERING));
+        assert!(switch.lights(1, OFFERING) && !switch.lights(0, OFFERING) && !switch.lights(1, COMMUNION));
         // Its next slide keeps it; so does the same item put on screen again.
         assert!(!switch.slide_on(item(1, 1), offering));
         assert_eq!(switch.version(), Some(OFFERING));

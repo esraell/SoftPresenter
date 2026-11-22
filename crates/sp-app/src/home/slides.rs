@@ -1130,6 +1130,13 @@ fn draw_slides(
 ) {
     let song = &deck.deck;
     let view = sheet.grid.view;
+    // An item set to show in a theme version has its tiles drawn in it.
+    let version = deck
+        .item
+        .and_then(|at| state.services.front().items.get(at))
+        .and_then(crate::service::Item::show_with)
+        .map(|wanted| wanted.version)
+        .filter(|id| state.versions.iter().any(|version| version.id == *id));
     if matches!(body, Body::Line) {
         let at = pos2(sheet.left + INSET, sheet.y(place.body_top()) + INSET + LIST_ROW / 2.0);
         ui.painter().text(at, Align2::LEFT_CENTER, "No slides yet.", FontId::proportional(12.5), TEXT_FAINT);
@@ -1347,10 +1354,12 @@ fn draw_slides(
             SlideView::Grid => {
                 let picture = Rect::from_min_size(rect.min, sheet.grid.picture);
                 ui.painter().rect_filled(picture, ROUND, Color32::BLACK);
-                let of = match (deck.bible, deck.at) {
-                    (true, _) => ThumbOf::BibleSlide(slide),
-                    (false, Some(at)) => ThumbOf::SongSlide(at, slide),
-                    (false, None) => ThumbOf::Slide(slide),
+                let of = match (deck.bible, deck.at, version) {
+                    (true, _, Some(version)) => ThumbOf::InVersion(None, slide, version),
+                    (true, _, None) => ThumbOf::BibleSlide(slide),
+                    (false, Some(at), Some(version)) => ThumbOf::InVersion(Some(at), slide, version),
+                    (false, Some(at), None) => ThumbOf::SongSlide(at, slide),
+                    (false, None, _) => ThumbOf::Slide(slide),
                 };
                 match thumb(of) {
                     Some((texture, overflow)) => {
@@ -1868,6 +1877,15 @@ fn item_bar(
     if let Some(kind) = kind {
         x = pill(ui, &painter, pos2(x + 10.0, middle), kind).max.x;
     }
+    // A passage's version button, after its kind.
+    if let (Deck::Slides(slides), Some(item)) = (deck, item)
+        && slides.bible
+        && crate::studio::can_show_with(state, item)
+    {
+        let rect = Rect::from_center_size(pos2(x + 10.0 + ICON_BUTTON / 2.0, middle), egui::Vec2::splat(ICON_BUTTON));
+        x = rect.max.x;
+        version_button(ui, show, state, rect.intersect(bar), id.with("version"), item, if near { 1.0 } else { 0.6 });
+    }
     // What the "more" button and a right-click on the bar open.
     let mut menu = |ui: &mut egui::Ui, state: &mut HomeState| {
         if let Some((at, _)) = song {
@@ -1938,6 +1956,9 @@ fn item_bar(
         let arrangement = icon_button(ui, place(), id.with("arrangement"), Icon::Arrangement, strength, arranged)
             .on_hover_text("Arrangement: play the song's groups in another order");
         arrangement_menu(at, song, state, &arrangement);
+        if let Some(item) = item.filter(|item| crate::studio::can_show_with(state, *item)) {
+            version_button(ui, show, state, place(), id.with("version"), item, strength);
+        }
         let notes = icon_button(ui, place(), id.with("notes"), Icon::Notes, strength, state.show_notes)
             .on_hover_text("Notes: show the notes of the slide on screen");
         if notes.clicked() {
@@ -1980,6 +2001,57 @@ fn item_bar(
         state.services.chosen = item;
     }
     response.context_menu(|ui| menu(ui, state));
+}
+
+/// The version button among a playlist item's title-bar tools, once a theme has a version: the
+/// theme icon, in the "on" grey while the item is set to show in a version, and orange while it
+/// is on screen in it. A click opens what the item shows in when it goes on screen.
+#[allow(clippy::too_many_arguments)]
+fn version_button(
+    ui: &mut egui::Ui,
+    show: &Show,
+    state: &mut HomeState,
+    rect: Rect,
+    id: egui::Id,
+    item: usize,
+    strength: f32,
+) {
+    use crate::studio::{BUTTON, Flat, RADIUS, TALLY, TEXT, TEXT_DIM, paint_flat};
+    let wanted = state.services.front().items.get(item).and_then(crate::service::Item::show_with);
+    let set = wanted.and_then(|wanted| {
+        let version = state.versions.iter().find(|version| version.id == wanted.version)?;
+        Some((version.id, version.name.clone(), wanted.keep))
+    });
+    let response = ui.interact(rect, id, Sense::click());
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&response));
+    let hot = response.hovered() || open;
+    if set.is_some() {
+        paint_flat(ui.painter(), rect, RADIUS, Flat::On, false);
+    } else if hot {
+        ui.painter().rect_filled(rect, RADIUS, BUTTON);
+    }
+    let lit = show.live().is_some() && set.as_ref().is_some_and(|(id, ..)| state.version_switch.lights(item, *id));
+    let ink = if lit {
+        TALLY
+    } else if hot || set.is_some() {
+        TEXT
+    } else {
+        TEXT_DIM.gamma_multiply(strength)
+    };
+    icons::paint(ui.painter(), Icon::Theme, Rect::from_center_size(rect.center(), egui::Vec2::splat(14.0)), ink);
+    let hint = match &set {
+        Some((_, name, keep)) => {
+            let kept = if *keep { ", kept after it" } else { "" };
+            format!("Shows with the {name} version{kept}. Click to change")
+        }
+        None => {
+            let example =
+                state.versions.first().map_or_else(String::new, |version| format!(", such as {}", version.name));
+            format!("Show this with a theme version{example}")
+        }
+    };
+    let response = response.on_hover_text(hint);
+    egui::Popup::menu(&response).show(|ui| crate::studio::show_with_menu(ui, state, item, true));
 }
 
 /// The arrangement menu, from the Arrangement button beside a song's title or the arrangement's

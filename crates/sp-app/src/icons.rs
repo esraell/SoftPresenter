@@ -207,12 +207,14 @@ pub fn paint(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             p.circle(0.43, 0.43, 0.27);
             p.line(&[(0.63, 0.63), (0.88, 0.88)]);
         }
+        // A circle split down the middle, with lines across its right half: one look, several
+        // ways.
         Icon::Theme => {
-            p.rect(0.12, 0.16, 0.88, 0.84, 0.1);
-            p.fill_rect(0.22, 0.26, 0.48, 0.5, 0.04);
-            p.line(&[(0.58, 0.3), (0.78, 0.3)]);
-            p.line(&[(0.58, 0.45), (0.78, 0.45)]);
-            p.line(&[(0.22, 0.66), (0.78, 0.66)]);
+            p.circle(0.5, 0.5, 0.346);
+            p.line(&[(0.5, 0.154), (0.5, 0.846)]);
+            p.line(&[(0.5, 0.346), (0.792, 0.346)]);
+            p.line(&[(0.5, 0.5), (0.846, 0.5)]);
+            p.line(&[(0.5, 0.654), (0.792, 0.654)]);
         }
         Icon::Play => p.filled(&[(0.28, 0.16), (0.84, 0.5), (0.28, 0.84)]),
         Icon::Pause => {
