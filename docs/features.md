@@ -475,7 +475,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the cursor in the reference) and Edit, and Command-B to Bible as well (it stays Bold while
   editing a slide); Command-P
   opens the chooser of playlists and libraries; Command-F (or `/`) finds; Command-comma opens
-  Settings; Command-O opens the menu of the slide on screen. **Option-1 to 7** (Alt on other
+  Settings; Command-O opens the menu of the slide on screen (a Bible verse or VoxLive caption
+  has no menu, and says so). **Option-1 to 7** (Alt on other
   computers) open a tool tab
   (Timers, Messages, Props, Macros, Stage, Audio, VoxLive) and number what is in it, and then
   **1 to 9** start that timer, show that message or prop, run that macro, switch the stage to

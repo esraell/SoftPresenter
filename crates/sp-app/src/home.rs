@@ -2179,6 +2179,10 @@ pub fn home_ui(
         state.voxlive_slot.and_then(|slot| show.presentations().get(slot)).is_some_and(|v| v.slide_count() > 0);
     match crate::keys::frame(ui.ctx(), state, voxlive) {
         Some(crate::keys::Ask::Audience) => commands.push(Command::SetOutputEnabled(!show.output_enabled())),
+        // A Bible verse or VoxLive's captions, which the app makes, have no menu: it says so.
+        Some(crate::keys::Ask::LiveMenu) if show.live().is_some_and(|at| state.app_made(at.presentation)) => {
+            state.say("The verse or caption on screen has no menu.");
+        }
         // The menu of the slide on screen: its slide is brought into view, and its menu opened.
         Some(crate::keys::Ask::LiveMenu) if show.live().is_some() && !state.bible_open => {
             state.live_menu = Some(ui.ctx().cumulative_frame_nr());
@@ -12728,6 +12732,52 @@ mod tests {
         assert_eq!(state.notice.as_deref(), Some("Added John 3:16 to Playlist 1."));
         assert_eq!(state.renaming_service, Some((1, "Playlist 1".to_owned())));
         assert!(state.chooser_open && state.playlist_open && state.view_request == Some(0));
+    }
+
+    #[test]
+    fn a_slide_the_app_makes_has_no_menu_and_modifier_o_says_so() {
+        let ctx = egui::Context::default();
+        let mut show = Show::new(vec![Arc::new(parse_song_text("Captions", "[Verse 1]\nOne\n\nTwo\n"))]);
+        let click = |at: egui::Pos2, pressed: bool| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        for (round, made) in [false, true].into_iter().enumerate() {
+            // The song by itself, as VoxLive's captions are shown, or as a song of the library.
+            let time = round as f64;
+            let mut state = HomeState { voxlive_slot: made.then_some(0), ..HomeState::default() };
+            frame_texts(&ctx, &show, &mut state, vec![], time);
+            let texts = frame_texts(&ctx, &show, &mut state, vec![], time + 0.1);
+            let at = drawn_at(&texts, "VERSE 1").expect("the second slide's strip");
+            frame_texts(&ctx, &show, &mut state, vec![Event::PointerMoved(at), click(at, true)], time + 0.2);
+            frame_texts(&ctx, &show, &mut state, vec![click(at, false)], time + 0.3);
+            frame_texts(&ctx, &show, &mut state, vec![], time + 0.4);
+            assert_eq!(egui::Popup::is_any_open(&ctx), !made, "made {made}: a right-click opens a menu");
+            let escape = Event::Key {
+                key: Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            };
+            frame_texts(&ctx, &show, &mut state, vec![escape], time + 0.5);
+        }
+        // On screen, modifier-O says the made slide has no menu.
+        let mut state = HomeState { voxlive_slot: Some(0), ..HomeState::default() };
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        frame_texts(&ctx, &show, &mut state, vec![], 3.0);
+        let command_o = vec![
+            Event::ModifiersChanged(Modifiers::COMMAND),
+            Event::Key { key: Key::O, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND },
+        ];
+        frame_texts(&ctx, &show, &mut state, command_o, 3.1);
+        assert!(state.live_menu.is_none());
+        assert_eq!(
+            state.toast.as_ref().map(|(words, _)| words.as_str()),
+            Some("The verse or caption on screen has no menu.")
+        );
     }
 
     #[test]

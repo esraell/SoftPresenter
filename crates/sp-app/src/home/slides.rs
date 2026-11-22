@@ -1345,7 +1345,9 @@ fn draw_slides(
             let pencil = (!deck.made && here.is_some()).then(|| more.translate(vec2(-MORE_BUTTON, 0.0)));
             (more, pencil)
         };
-        let has_menu = here.is_some();
+        // Slides the app makes (a Bible passage, VoxLive's captions) have no menu: nothing in
+        // it applies to them, and they are never edited.
+        let has_menu = here.is_some() && !deck.made;
         match view {
             SlideView::Grid => {
                 let picture = Rect::from_min_size(rect.min, sheet.grid.picture);
@@ -1545,14 +1547,14 @@ fn draw_slides(
                 state.editing = EditDraft::of(show, here);
             }
         }
-        if let Some(here) = here {
+        if let Some(here) = here.filter(|_| has_menu) {
             let button = more_button(ui, more, id.with("more"), near);
             // Modifier-O: the menu of the slide on screen opens as if its button were clicked.
             if is_live && state.live_menu.take().is_some() {
                 egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&button));
             }
-            egui::Popup::menu(&button).show(|ui| slide_menu(ui, show, state, song, here, slide, deck.made));
-            response.context_menu(|ui| slide_menu(ui, show, state, song, here, slide, deck.made));
+            egui::Popup::menu(&button).show(|ui| slide_menu(ui, show, state, song, here, slide));
+            response.context_menu(|ui| slide_menu(ui, show, state, song, here, slide));
         }
     }
     // The slides being moved are dimmed where they are, and one of them follows the pointer,
@@ -2530,8 +2532,9 @@ fn nothing_open(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     });
 }
 
-/// A slide's menu, from its "more" button or a right-click. Editing is here, and on the
-/// pencil, so that reaching for it never puts a slide on screen by accident.
+/// A song slide's menu, from its "more" button or a right-click. Editing is here, and on the
+/// pencil, so that reaching for it never puts a slide on screen by accident. Slides the app
+/// makes have none.
 fn slide_menu(
     ui: &mut egui::Ui,
     show: &Show,
@@ -2539,15 +2542,11 @@ fn slide_menu(
     presentation: &Presentation,
     here: SlideRef,
     slide: &Slide,
-    made: bool,
 ) {
     let (which, index) = (here.presentation, here.slide);
     if ui.button("Edit").clicked() {
         state.editing = EditDraft::of(show, here);
         ui.close();
-    }
-    if made {
-        return;
     }
     ui.separator();
     // Cut and Copy take the slides picked out with this one, or this one.
