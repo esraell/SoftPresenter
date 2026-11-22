@@ -11,6 +11,13 @@
 //! - [`Discovery`] lists the devices (each output a card's driver offers, such as each of a
 //!   DeckLink Duo 2's four), the ways each can play out, and whether it can key, on its own
 //!   thread, and lists them again when a device is plugged in or taken away.
+//! - [`DeckLinkOutput`] plays a screen out of one device, on its own thread: the screens'
+//!   thread hands it each finished picture (as it does to NDI) and never waits; the output
+//!   turns the picture into the card's format (8-bit BGRA where the mode takes it, else 8-bit
+//!   YUV 4:2:2) and size (720p is scaled down from the 1920 x 1080 picture), and plays it on the
+//!   card's own clock a few frames ahead, the last picture again whenever no new one has come,
+//!   so a slow moment never leaves the card without a frame. A device that stops, goes away or
+//!   changes profile is opened again, every couple of seconds, until it is back.
 //!
 //! On Windows the crate is built without its bridge to the driver (Windows' DeckLink
 //! interface needs Microsoft's MIDL compiler), and behaves as on a computer without the
@@ -21,12 +28,18 @@
 mod ffi;
 
 pub mod check;
+mod convert;
 mod discover;
+mod play;
+mod player;
 mod pretend;
 
 use std::path::PathBuf;
 
+pub use convert::PixelFormat;
 pub use discover::Discovery;
+pub use play::{DeckLinkOutput, Log, State, Wanted, Watch};
+pub use player::Counts;
 
 /// What the operator is told when the driver can't be found.
 pub const NOT_INSTALLED: &str = "Desktop Video (Blackmagic's DeckLink driver) isn't installed on this computer.";

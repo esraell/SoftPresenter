@@ -3,6 +3,12 @@
 //! tried on a computer without a card. Their names start "Pretend", so they are never taken
 //! for a real card, and nothing they are sent leaves the computer.
 
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use crate::convert::Layout;
+use crate::play::{Opened, Wanted, choose};
+use crate::player::{Card, Finished, Halt};
 use crate::{Device, Mode};
 
 /// True when the testing switch asks for pretend devices.
@@ -92,6 +98,187 @@ pub fn devices() -> Vec<Device> {
         modes: modes(true),
     });
     devices
+}
+
+/// Opens pretend devices, for an output started while the testing switch is on.
+pub struct PretendOpener;
+
+impl crate::play::Opener for PretendOpener {
+    type Card = SimCard;
+
+    fn open(&mut self, wanted: &Wanted) -> Result<Opened<SimCard>, String> {
+        let devices = devices();
+        let device = devices
+            .iter()
+            .find(|device| device.is(wanted.id, &wanted.device))
+            .ok_or_else(|| format!("{} isn't connected.", wanted.device))?;
+        let (mode, format) = choose(device, wanted)?;
+        let layout = Layout { width: mode.width, height: mode.height, format, row_bytes: format.row_bytes(mode.width) };
+        Ok(Opened { card: SimCard::new(), device: device.name.clone(), mode, layout, keyed: wanted.keying })
+    }
+}
+
+/// A card that only keeps time: it gives each frame back once the time it was to be shown for
+/// is over, on the computer's clock, as a real card does on its own. What it is sent goes
+/// nowhere. Tests can make it stall or change profile.
+pub struct SimCard {
+    sim: Arc<Mutex<Sim>>,
+}
+
+/// A way to look at and steer a [`SimCard`] from elsewhere, in the tests.
+#[cfg(test)]
+#[derive(Clone)]
+pub struct SimControl(Arc<Mutex<Sim>>);
+
+#[derive(Default)]
+struct Sim {
+    /// When the clock started, and the time it started from.
+    started: Option<(Instant, i64)>,
+    scale: i64,
+    /// Frames held: key, when to show, for how long, and whether it was late when scheduled.
+    held: Vec<(usize, i64, i64, bool)>,
+    next_key: usize,
+    /// The last frame written: its length and first bytes.
+    written: Option<(usize, Vec<u8>)>,
+    stalled: bool,
+    profile: bool,
+    closed: bool,
+}
+
+impl Sim {
+    fn clock(&self) -> Option<i64> {
+        let (since, at) = self.started?;
+        Some(at + (since.elapsed().as_secs_f64() * self.scale as f64) as i64)
+    }
+}
+
+impl SimCard {
+    pub fn new() -> SimCard {
+        SimCard { sim: Arc::new(Mutex::new(Sim::default())) }
+    }
+
+    #[cfg(test)]
+    pub fn control(&self) -> SimControl {
+        SimControl(self.sim.clone())
+    }
+
+    fn sim(&self) -> std::sync::MutexGuard<'_, Sim> {
+        self.sim.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+impl Default for SimCard {
+    fn default() -> SimCard {
+        SimCard::new()
+    }
+}
+
+impl Drop for SimCard {
+    fn drop(&mut self) {
+        self.sim().closed = true;
+    }
+}
+
+#[cfg(test)]
+impl SimControl {
+    fn sim(&self) -> std::sync::MutexGuard<'_, Sim> {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The length and first sixteen bytes of the last frame written.
+    pub fn last_written(&self) -> Option<(usize, Vec<u8>)> {
+        self.sim().written.clone()
+    }
+
+    /// From now on the card gives no frame back, as a card that has stopped.
+    pub fn stall(&self) {
+        self.sim().stalled = true;
+    }
+
+    /// The card says its profile is changing.
+    pub fn change_profile(&self) {
+        self.sim().profile = true;
+    }
+
+    /// The card has been let go.
+    pub fn closed(&self) -> bool {
+        self.sim().closed
+    }
+}
+
+impl Card for SimCard {
+    type Frame = usize;
+
+    fn new_frame(&mut self) -> Result<usize, String> {
+        let mut sim = self.sim();
+        sim.next_key += 1;
+        Ok(sim.next_key)
+    }
+
+    fn write(&mut self, _frame: &mut usize, bytes: &[u8]) -> Result<(), String> {
+        self.sim().written = Some((bytes.len(), bytes[..bytes.len().min(16)].to_vec()));
+        Ok(())
+    }
+
+    fn key(frame: &usize) -> usize {
+        *frame
+    }
+
+    fn schedule(&mut self, frame: &usize, at: i64, duration: i64, _scale: i64) -> Result<(), String> {
+        let mut sim = self.sim();
+        let late = sim.clock().is_some_and(|now| at < now);
+        sim.held.push((*frame, at, duration, late));
+        Ok(())
+    }
+
+    fn start(&mut self, at: i64, scale: i64) -> Result<(), String> {
+        let mut sim = self.sim();
+        sim.started = Some((Instant::now(), at));
+        sim.scale = scale.max(1);
+        Ok(())
+    }
+
+    fn stream_time(&mut self, _scale: i64) -> Option<i64> {
+        self.sim().clock()
+    }
+
+    fn wait(&mut self, timeout: Duration) -> (Vec<(usize, Finished)>, Halt) {
+        let until = Instant::now() + timeout;
+        loop {
+            let pause = {
+                let mut sim = self.sim();
+                if std::mem::take(&mut sim.profile) {
+                    return (Vec::new(), Halt { stopped: false, profile: true });
+                }
+                if let (Some(now), false) = (sim.clock(), sim.stalled) {
+                    let done: Vec<(usize, Finished)> = sim
+                        .held
+                        .iter()
+                        .filter(|(_, at, duration, _)| at + duration <= now)
+                        .map(|(key, _, _, late)| (*key, if *late { Finished::Late } else { Finished::Shown }))
+                        .collect();
+                    if !done.is_empty() {
+                        sim.held.retain(|(key, ..)| !done.iter().any(|(gone, _)| gone == key));
+                        return (done, Halt::default());
+                    }
+                    let scale = sim.scale as f64;
+                    sim.held
+                        .iter()
+                        .map(|(_, at, duration, _)| {
+                            Duration::from_secs_f64(((at + duration - now).max(0) as f64 / scale).max(0.0))
+                        })
+                        .min()
+                } else {
+                    None
+                }
+            };
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return (Vec::new(), Halt::default());
+            }
+            std::thread::sleep(pause.map_or(left, |pause| pause.min(left)).max(Duration::from_micros(200)));
+        }
+    }
 }
 
 #[cfg(test)]
