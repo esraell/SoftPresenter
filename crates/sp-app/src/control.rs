@@ -1747,9 +1747,8 @@ impl crate::App {
     fn audio_state(&self) -> serde_json::Value {
         let Some(state) = self.running.as_ref().map(|r| &r.home_state) else { return serde_json::json!({}) };
         let playing = state.audio_playing;
-        let track = playing.track.and_then(|id| {
-            state.audio.playlists.iter().flat_map(|p| p.tracks.iter()).find(|t| t.id == id).map(|t| t.name.clone())
-        });
+        // The one playing even when it has been taken out of its playlist.
+        let track = playing.track.and_then(|id| state.audio.track(id)).map(|t| t.name.clone());
         serde_json::json!({
             "track": track,
             "paused": playing.paused,

@@ -70,9 +70,12 @@ pub struct Library {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Leaving {
     pub track: Track,
-    /// The playlist it was in, and its place there: the track now at that place comes next.
+    /// The playlist it was in, and its place there, kept up as tracks above it are taken out.
     pub playlist: Uuid,
     pub at: usize,
+    /// The track that came after it (the first, after the last), which comes next wherever it
+    /// has moved to; while it is in the playlist, its place stands for the leaving track's.
+    pub next: Option<Uuid>,
 }
 
 impl Default for Library {
@@ -133,7 +136,9 @@ impl Library {
             .find_map(|playlist| playlist.tracks.iter().position(|track| track.id == id).map(|at| (playlist, at)));
         listed.or_else(|| {
             let leaving = self.leaving.as_ref().filter(|leaving| leaving.track.id == id)?;
-            Some((self.playlists.iter().find(|playlist| playlist.id == leaving.playlist)?, leaving.at))
+            let playlist = self.playlists.iter().find(|playlist| playlist.id == leaving.playlist)?;
+            let next = leaving.next.and_then(|next| playlist.tracks.iter().position(|track| track.id == next));
+            Some((playlist, next.unwrap_or(leaving.at)))
         })
     }
 
@@ -164,8 +169,14 @@ impl Library {
         let Some(at) = shown.tracks.iter().position(|track| track.id == id) else { return };
         let track = shown.tracks.remove(at);
         let playlist = shown.id;
+        let next = shown.tracks.get(at).or(shown.tracks.first()).map(|track| track.id);
         if playing == Some(id) {
-            self.leaving = Some(Leaving { track, playlist, at });
+            self.leaving = Some(Leaving { track, playlist, at, next });
+        } else if let Some(leaving) = self.leaving.as_mut().filter(|leaving| leaving.playlist == playlist) {
+            // A track above the place of the one leaving: that place moves up with the rest.
+            if at < leaving.at {
+                leaving.at -= 1;
+            }
         }
     }
 
@@ -177,7 +188,8 @@ impl Library {
         }
         let gone = self.playlists.remove(at);
         if let Some(place) = gone.tracks.iter().position(|track| Some(track.id) == playing) {
-            self.leaving = Some(Leaving { track: gone.tracks[place].clone(), playlist: gone.id, at: place });
+            self.leaving =
+                Some(Leaving { track: gone.tracks[place].clone(), playlist: gone.id, at: place, next: None });
         }
         true
     }
@@ -455,6 +467,18 @@ mod tests {
         assert!(library.leaving.is_some());
         library.forget_leaving(Some(id(0)));
         assert!(library.leaving.is_none() && library.track(id(1)).is_none());
+        // Tracks above it taken out, or the one after it moved, while it plays: the track that
+        // came after it still comes next.
+        let mut library = fresh();
+        library.remove_track(id(2), Some(id(2)));
+        library.remove_track(id(0), Some(id(2)));
+        assert_eq!(library.after(id(2), |_| 0).map(|t| t.id), Some(id(3)));
+        library.shown_mut().tracks.swap(0, 1);
+        assert_eq!(library.after(id(2), |_| 0).map(|t| t.id), Some(id(3)));
+        assert_eq!(library.place_of(id(2)).map(|(_, at)| at), Some(0), "Four stands where it was");
+        // And that one taken out too: the track now at its place.
+        library.remove_track(id(3), Some(id(2)));
+        assert_eq!(library.after(id(2), |_| 0).map(|t| t.id), Some(id(1)));
         // The last one taken out while it plays: the first follows.
         let mut library = fresh();
         library.remove_track(id(3), Some(id(3)));

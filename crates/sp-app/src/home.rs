@@ -12846,6 +12846,8 @@ mod tests {
         assert!(drawn_at(&texts, "Identifying the screens:").is_some());
         assert!(drawn_at(&texts, "the room sees it").is_some());
         assert!(drawn_at(&texts, "Test pattern:").is_none(), "one thing at a time in the row");
+        let rect_of = |words: &str| texts.iter().rfind(|(text, _)| text == words).map(|(_, rect)| *rect).unwrap();
+        assert!(rect_of("the room sees it").max.x < rect_of("Stop").min.x - 8.0, "its words fit before Stop");
         let stop = drawn_at(&texts, "Stop").expect("its Stop key");
         let press = |pressed| Event::PointerButton {
             pos: stop,
