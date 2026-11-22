@@ -6346,6 +6346,9 @@ impl App {
             ..
         } = running;
         let mut raw_input = egui_state.take_egui_input(home_window);
+        // Testing aid: SOFTPRESENTER_FIND_DRAG drags a result of the find box (see
+        // `home::find_drag_events`).
+        raw_input.events.extend(home::find_drag_events(egui_ctx, &mut running.home_state));
         // Where the pointer is while files are dragged over the window: asked of the system, as
         // the window library doesn't say (see file_drop.rs).
         if running.home_state.drop_hover {

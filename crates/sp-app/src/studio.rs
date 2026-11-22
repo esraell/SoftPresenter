@@ -1380,6 +1380,194 @@ fn list_row(ui: &mut egui::Ui, look: &ListRow) -> (egui::Response, Rect) {
 #[derive(Clone)]
 struct SongDrag(Vec<usize>);
 
+/// Something carried in the window that the left column can take: songs from the song list, a
+/// picture or video from the media strip, or a result of the find box. Each lands where files
+/// of its kind dropped from the Finder would (`file_drop::DropTarget::takes`), shown the same
+/// way: an ink line where it goes in a playlist, an ink outline round a row it goes onto.
+#[derive(Clone)]
+enum Carried {
+    Songs(Vec<usize>),
+    Media(usize),
+    Found(crate::home::FoundDrag),
+}
+
+impl Carried {
+    /// What is being carried now, if anything the left column could take.
+    fn now(ctx: &egui::Context) -> Option<Carried> {
+        use egui::DragAndDrop;
+        if let Some(songs) = DragAndDrop::payload::<SongDrag>(ctx) {
+            return Some(Carried::Songs(songs.0.clone()));
+        }
+        if let Some(media) = DragAndDrop::payload::<crate::home::MediaDrag>(ctx) {
+            return Some(Carried::Media(media.0));
+        }
+        DragAndDrop::payload::<crate::home::FoundDrag>(ctx).map(|found| Carried::Found((*found).clone()))
+    }
+
+    /// What it is, for the places it could land.
+    fn kind(&self) -> crate::file_drop::Kind {
+        use crate::file_drop::Kind;
+        match self {
+            Carried::Songs(_) => Kind::Song,
+            Carried::Media(_) => Kind::Media,
+            Carried::Found(found) if found.song.is_some() => Kind::Song,
+            Carried::Found(_) => Kind::Passage,
+        }
+    }
+
+    /// Whether it can land on `target`: as a file of its kind can, but not in All Songs, which
+    /// has every song already.
+    fn lands_on(&self, target: &crate::file_drop::DropTarget) -> bool {
+        !matches!(target, crate::file_drop::DropTarget::Library(None)) && target.takes(self.kind())
+    }
+
+    /// What a playlist keeps for it, in order.
+    fn items(&self, show: &Show, state: &HomeState) -> Vec<crate::service::Item> {
+        use crate::service::Item;
+        match self {
+            Carried::Songs(songs) => songs
+                .iter()
+                .filter_map(|at| {
+                    let (key, song) = (state.song_keys.get(*at)?, show.presentations().get(*at)?);
+                    Some(Item::Song { key: key.clone(), title: song.title.clone() })
+                })
+                .collect(),
+            Carried::Media(at) => show
+                .media()
+                .get(*at)
+                .map(|media| Item::Media { id: media.id, name: media.name.clone() })
+                .into_iter()
+                .collect(),
+            Carried::Found(found) => vec![found.item.clone()],
+        }
+    }
+
+    /// The songs a library takes from it, by the names they are kept by.
+    fn song_keys(&self, state: &HomeState) -> Vec<String> {
+        let places = match self {
+            Carried::Songs(songs) => songs.clone(),
+            Carried::Found(found) => found.song.into_iter().collect(),
+            Carried::Media(_) => Vec::new(),
+        };
+        places.iter().filter_map(|at| state.song_keys.get(*at).cloned()).collect()
+    }
+
+    /// A result of the find box: dropped where it lands, it ends the search.
+    fn found(&self) -> Option<&crate::home::FoundDrag> {
+        match self {
+            Carried::Found(found) => Some(found),
+            _ => None,
+        }
+    }
+}
+
+/// Whether what is carried is let go over `area` this frame.
+fn let_go_over(ctx: &egui::Context, area: Rect) -> bool {
+    ctx.input(|input| input.pointer.any_released() && input.pointer.interact_pos().is_some_and(|at| area.contains(at)))
+}
+
+/// What is carried over `response` (a row it could be dropped on): `Some(true)` when it lands
+/// there, which an ink outline shows, `Some(false)` when it doesn't, which the pointer shows;
+/// `None` with nothing carried, or the pointer elsewhere.
+fn carried_over(response: &egui::Response, target: &crate::file_drop::DropTarget) -> Option<bool> {
+    let carried = Carried::now(&response.ctx).filter(|_| response.contains_pointer())?;
+    let lands = carried.lands_on(target);
+    if !lands {
+        response.ctx.set_cursor_icon(egui::CursorIcon::NoDrop);
+    }
+    Some(lands)
+}
+
+/// What is let go over `response` (a row) this frame, when it lands there. It is taken: nothing
+/// else can take it after.
+fn dropped_on(response: &egui::Response, target: &crate::file_drop::DropTarget) -> Option<Carried> {
+    let carried = Carried::now(&response.ctx).filter(|carried| carried.lands_on(target))?;
+    let released = response.contains_pointer() && response.ctx.input(|input| input.pointer.any_released());
+    released.then(|| {
+        egui::DragAndDrop::clear_payload(&response.ctx);
+        carried
+    })
+}
+
+/// Adds songs (by the names they are kept by) to a library, each once. Returns how many were
+/// not in it already.
+fn add_to_library(state: &mut HomeState, id: sp_model::Uuid, keys: &[String]) -> usize {
+    let Some(library) = state.libraries.iter_mut().find(|library| library.id == id) else { return 0 };
+    let mut added = 0;
+    for key in keys {
+        if !library.has(key) {
+            library.toggle(key);
+            added += 1;
+        }
+    }
+    if added > 0 {
+        state.libraries_changed = true;
+    }
+    added
+}
+
+/// A result of the find box has been dropped on a playlist (`index` among the playlists) and
+/// `item` added at its end (`added`), or found there already. The search ends. In the playlist
+/// listed in the left column the item is opened, as a click on its row opens it (nothing goes
+/// on the screens); in another playlist, a notice says where it went.
+#[allow(clippy::too_many_arguments)]
+fn found_added_to_playlist(
+    ctx: &egui::Context,
+    show: &Show,
+    state: &mut HomeState,
+    commands: &mut Vec<Command>,
+    index: usize,
+    item: &crate::service::Item,
+    added: bool,
+    name: &str,
+) {
+    use crate::service::Item;
+    crate::home::end_search(ctx, state);
+    let Some(playlist) = state.services.list.get(index) else { return };
+    let playlist_name = playlist.name.clone();
+    let place = if added {
+        playlist.items.len().checked_sub(1)
+    } else {
+        // Only a song is ever refused, being there already: it is opened where it is.
+        playlist.items.iter().position(|have| match (have, item) {
+            (Item::Song { key: have, .. }, Item::Song { key, .. }) => have == key,
+            _ => have == item,
+        })
+    };
+    if index == state.services.current && state.playlist_open {
+        if let Some(place) = place {
+            carry_out_item_ask(show, state, commands, ItemAsk::Open(place));
+        }
+        if !added {
+            state.say(format!("{name} is already in {playlist_name}."));
+        }
+    } else if added {
+        state.say(format!("Added {name} to {playlist_name}."));
+    } else {
+        state.say(format!("{name} is already in {playlist_name}."));
+    }
+}
+
+/// A song found with the find box has been dropped on a library (`added` to it, or there
+/// already): the search ends, and a notice says so.
+fn found_added_to_library(ctx: &egui::Context, state: &mut HomeState, id: sp_model::Uuid, added: bool, name: &str) {
+    crate::home::end_search(ctx, state);
+    let library = state.libraries.iter().find(|library| library.id == id).map_or_else(String::new, |l| l.name.clone());
+    state.say(if added { format!("Added {name} to {library}.") } else { format!("{name} is already in {library}.") });
+}
+
+/// What is carried beside the pointer while it is dragged: its name (or how many), on a small
+/// grey chip, until it is dropped.
+pub fn paint_carried(ctx: &egui::Context, words: &str) {
+    let Some(at) = ctx.pointer_latest_pos() else { return };
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("carried")));
+    let text = painter.layout_no_wrap(words.to_owned(), semibold(12.5), Color32::WHITE);
+    let chip = Rect::from_min_size(at + vec2(14.0, 10.0), text.size() + vec2(18.0, 10.0));
+    painter.rect_filled(chip, 8.0, SELECTED);
+    painter.rect_stroke(chip, 8.0, Stroke::new(1.0, Color32::from_white_alpha(30)), StrokeKind::Inside);
+    painter.galley(chip.min + vec2(9.0, 5.0), text, Color32::WHITE);
+}
+
 /// The left column: a small label saying whether a playlist or a library is listed, the name
 /// of the one that is (which opens the chooser of playlists and libraries), its items or
 /// songs, and at the foot what adds to it and a filter.
@@ -1456,17 +1644,20 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         if state.chooser_open {
             // Only things to open: the list and the foot are put away.
             egui::ScrollArea::vertical().id_salt("chooser").auto_shrink([false, false]).show(ui, |ui| {
-                chooser(ui, show, state);
+                chooser(ui, show, state, commands);
             });
             return;
         }
         left_foot(ui, show, state, commands);
-        // While songs are carried (or song files dragged in from the Finder) the chooser shows
-        // above the list, so they can be dropped on a playlist or a library.
-        if egui::DragAndDrop::has_payload_of_type::<SongDrag>(ui.ctx()) || crate::file_drop::wants_chooser(state) {
+        // While songs are carried (or song files dragged in from the Finder, or a result of
+        // the find box) the chooser shows above the list, so they can be dropped on a playlist
+        // or a library.
+        let carrying = egui::DragAndDrop::has_payload_of_type::<SongDrag>(ui.ctx())
+            || egui::DragAndDrop::has_payload_of_type::<crate::home::FoundDrag>(ui.ctx());
+        if carrying || crate::file_drop::wants_chooser(state) {
             let most = ui.available_height() * 0.6;
             egui::ScrollArea::vertical().id_salt("chooser").max_height(most).show(ui, |ui| {
-                chooser(ui, show, state);
+                chooser(ui, show, state, commands);
             });
             let (line, _) = ui.allocate_exact_size(vec2(width, 9.0), Sense::hover());
             ui.painter().hline(line.x_range(), line.center().y, Stroke::new(1.0, LINE));
@@ -1655,8 +1846,10 @@ fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, c
     let _ = commands;
 }
 
-/// One row of the chooser. Returns the row's response, its "more" button's place when it has
-/// one, and where its name starts and ends (for a field to retype it).
+/// One row of the chooser, for a playlist or a library (`target`, where what is carried in the
+/// window can land: an ink outline shows it will). Returns the row's response, its "more"
+/// button's place when it has one, and where its name starts and ends (for a field to retype
+/// it).
 #[allow(clippy::too_many_arguments)]
 fn chooser_row(
     ui: &mut egui::Ui,
@@ -1667,12 +1860,12 @@ fn chooser_row(
     counted: &str,
     on: bool,
     menu: bool,
+    target: &crate::file_drop::DropTarget,
 ) -> (egui::Response, Option<Rect>, egui::Pos2, f32) {
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), CHOOSER_ROW), Sense::hover());
     let button = if menu { Rect::from_min_max(row.min, pos2(row.max.x - ICON_BUTTON, row.max.y)) } else { row };
     let response = ui.interact(button, ui.scope_id().with("chooser row"), Sense::click());
-    let carried = response.dnd_hover_payload::<SongDrag>().is_some()
-        || response.dnd_hover_payload::<crate::home::MediaDrag>().is_some();
+    let carried = carried_over(&response, target) == Some(true);
     let painter = ui.painter();
     if on {
         painter.rect_filled(button, RADIUS, CARD);
@@ -1723,16 +1916,11 @@ fn chooser_head(ui: &mut egui::Ui, text: &str, add_hint: &str, second: bool) -> 
 
 /// The chooser: only things to open. The playlists first, then the song libraries under a
 /// line (All Songs, then each library); the one that is open has the lighter row, a heavier
-/// name and a tick. Songs carried from the list, and a picture or video from the media bin,
-/// can be dropped on a row.
-fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
+/// name and a tick. Songs carried from the list, a picture or video from the media bin, and a
+/// result of the find box can be dropped on a row that takes them (see `Carried`).
+fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
     use crate::service::Item;
     ui.spacing_mut().item_spacing = vec2(0.0, 1.0);
-    let song_item = |state: &HomeState, index: usize| {
-        let key = state.song_keys.get(index)?;
-        let song = show.presentations().get(index)?;
-        Some(Item::Song { key: key.clone(), title: song.title.clone() })
-    };
     if chooser_head(ui, "Playlists", "New playlist", false) {
         state.services.add_service();
         state.playlist_open = true;
@@ -1753,13 +1941,13 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
         let renaming = front && state.renaming_service.is_some();
         let on = state.playlist_open && front;
         let shown = if renaming { "" } else { name.as_str() };
+        let target = crate::file_drop::DropTarget::Playlist { index, after: None };
         let (response, more, start, right) = ui
             .push_id(("playlist", index), |ui| {
-                chooser_row(ui, Icon::Playlist, PLAYLIST_TINT, shown, *count, "item", on, true)
+                chooser_row(ui, Icon::Playlist, PLAYLIST_TINT, shown, *count, "item", on, true, &target)
             })
             .inner;
-        let target = crate::file_drop::DropTarget::Playlist { index, after: None };
-        crate::file_drop::offer(ui, state, crate::file_drop::Place::onto(response.rect, target));
+        crate::file_drop::offer(ui, state, crate::file_drop::Place::onto(response.rect, target.clone()));
         if renaming && let Some(typed) = state.renaming_service.as_mut() {
             let field = rename_field_at(ui, typed, FontId::proportional(14.0), TEXT, ACCENT, start, right);
             if std::mem::take(&mut state.rename_started) {
@@ -1788,17 +1976,13 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
             state.renaming_service = Some(name.clone());
             state.rename_started = true;
         }
-        if let Some(dropped) = response.dnd_release_payload::<SongDrag>() {
-            for at in dropped.0.iter() {
-                if let Some(item) = song_item(state, *at) {
-                    state.services.add_to(index, item);
-                }
+        // Songs, a picture or video, or a result of the find box go at the playlist's end.
+        if let Some(carried) = dropped_on(&response, &target) {
+            let items = carried.items(show, state);
+            let added: Vec<bool> = items.iter().map(|item| state.services.add_to(index, item.clone())).collect();
+            if let (Some(found), Some(item)) = (carried.found(), items.first()) {
+                found_added_to_playlist(ui.ctx(), show, state, commands, index, item, added == [true], &found.name);
             }
-        }
-        if let Some(dropped) = response.dnd_release_payload::<crate::home::MediaDrag>()
-            && let Some(media) = show.media().get(dropped.0)
-        {
-            state.services.add_to(index, Item::Media { id: media.id, name: media.name.clone() });
         }
         let several = playlists.len() > 1;
         let mut menu = |ui: &mut egui::Ui| {
@@ -1841,8 +2025,11 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     let songs =
         (0..show.presentations().len()).filter(|at| !hidden.contains(at) && !state.removed_songs.contains(at)).count();
     let on = !state.playlist_open && state.library_shown.is_none();
+    let everything = crate::file_drop::DropTarget::Library(None);
     let (all, ..) = ui
-        .push_id("all songs", |ui| chooser_row(ui, Icon::Library, LIBRARY_TINT, "All Songs", songs, "song", on, false))
+        .push_id("all songs", |ui| {
+            chooser_row(ui, Icon::Library, LIBRARY_TINT, "All Songs", songs, "song", on, false, &everything)
+        })
         .inner;
     crate::file_drop::offer_library_row(ui, state, all.rect, None);
     if all.clicked() {
@@ -1864,8 +2051,11 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
         } else {
             name.as_str()
         };
+        let target = crate::file_drop::DropTarget::Library(Some(id));
         let (response, more, start, right) = ui
-            .push_id(("library", id), |ui| chooser_row(ui, Icon::Library, LIBRARY_TINT, shown, count, "song", on, true))
+            .push_id(("library", id), |ui| {
+                chooser_row(ui, Icon::Library, LIBRARY_TINT, shown, count, "song", on, true, &target)
+            })
             .inner;
         crate::file_drop::offer_library_row(ui, state, response.rect, Some(id));
         if renaming && let Some((_, typed)) = state.renaming_library.as_mut() {
@@ -1900,15 +2090,11 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
             state.renaming_library = Some((id, name.clone()));
             state.rename_started = true;
         }
-        if let Some(dropped) = response.dnd_release_payload::<SongDrag>() {
-            let keys: Vec<String> = dropped.0.iter().filter_map(|at| state.song_keys.get(*at).cloned()).collect();
-            if let Some(library) = state.libraries.iter_mut().find(|library| library.id == id) {
-                for key in keys {
-                    if !library.has(&key) {
-                        library.toggle(&key);
-                        state.libraries_changed = true;
-                    }
-                }
+        // Songs carried from the list, or a song found with the find box (never a passage).
+        if let Some(carried) = dropped_on(&response, &target) {
+            let added = add_to_library(state, id, &carried.song_keys(state));
+            if let Some(found) = carried.found() {
+                found_added_to_library(ui.ctx(), state, id, added > 0, &found.name);
             }
         }
         let mut menu = |ui: &mut egui::Ui| {
@@ -2044,7 +2230,7 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
     let mut asks = SongAsks::default();
     let list = ui.available_rect_before_wrap();
     let target = crate::file_drop::DropTarget::Library(state.library_shown);
-    crate::file_drop::offer(ui, state, crate::file_drop::Place::onto(list, target).where_songs_land());
+    crate::file_drop::offer(ui, state, crate::file_drop::Place::onto(list, target.clone()).where_songs_land());
     let (pointer, mods, down) =
         ui.input(|input| (input.pointer.interact_pos(), input.modifiers, input.pointer.primary_down()));
     // Songs picked out lose the ones no longer listed.
@@ -2184,21 +2370,40 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
         }
     });
     asks.carry_out(show, state);
-    // Songs being carried say how many beside the pointer, until they are dropped.
-    if let Some(carried) = egui::DragAndDrop::payload::<SongDrag>(ui.ctx())
-        && let Some(at) = ui.ctx().pointer_latest_pos()
+    // A song found with the find box goes into the library listed (not All Songs, which has
+    // it already, and never a passage or verse): the list is outlined in ink while it would.
+    if let Some(carried) = Carried::now(ui.ctx()).filter(|carried| carried.found().is_some())
+        && pointer.is_some_and(|at| list.contains(at))
     {
+        if carried.lands_on(&target) {
+            ui.painter().rect_stroke(list, RADIUS, Stroke::new(2.0, TEXT), StrokeKind::Inside);
+        } else {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::NoDrop);
+        }
+        if let (true, Some(id), Some(found)) = (let_go_over(ui.ctx(), list), state.library_shown, carried.found())
+            && carried.lands_on(&target)
+        {
+            egui::DragAndDrop::clear_payload(ui.ctx());
+            let added = add_to_library(state, id, &carried.song_keys(state));
+            // Picked out and opened in the list, as a click on its row does; nothing goes on screen.
+            if let Some(song) = found.song {
+                state.picking = crate::home::Picking::Songs;
+                state.picked_songs = vec![song];
+                state.song_anchor = Some(song);
+                commands.push(Command::Select(song));
+                state.bible_open = false;
+                state.services.chosen = None;
+            }
+            found_added_to_library(ui.ctx(), state, id, added > 0, &found.name);
+        }
+    }
+    // Songs being carried say how many beside the pointer, until they are dropped.
+    if let Some(carried) = egui::DragAndDrop::payload::<SongDrag>(ui.ctx()) {
         let words = match carried.0.as_slice() {
             [one] => show.presentations().get(*one).map_or_else(String::new, |song| song.title.clone()),
             many => format!("{} songs", many.len()),
         };
-        let painter =
-            ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("carried songs")));
-        let text = painter.layout_no_wrap(words, semibold(12.5), Color32::WHITE);
-        let chip = Rect::from_min_size(at + vec2(14.0, 10.0), text.size() + vec2(18.0, 10.0));
-        painter.rect_filled(chip, 8.0, SELECTED);
-        painter.rect_stroke(chip, 8.0, Stroke::new(1.0, Color32::from_white_alpha(30)), StrokeKind::Inside);
-        painter.galley(chip.min + vec2(9.0, 5.0), text, Color32::WHITE);
+        paint_carried(ui.ctx(), &words);
     }
 }
 /// The song a playlist names, among the open songs: found by the name its file gave it, or by
@@ -3035,11 +3240,13 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     let pointer = ui.input(|input| input.pointer.interact_pos());
     let pointer_y = pointer.map(|at| at.y);
     let slot = pointer_y.map(|y| rows.iter().filter(|row| row.center().y < y).count());
-    // A picture or video carried from the media bin: dropped on a placeholder it takes its
-    // place; dropped between rows it goes there.
-    if let Some(carried) = egui::DragAndDrop::payload::<crate::home::MediaDrag>(ui.ctx())
+    // A picture or video carried from the media bin, or a result of the find box (a song, or a
+    // Bible passage or verse): dropped on a placeholder it takes its place; dropped between
+    // rows it goes there, above or below the row by which half of it the pointer is over.
+    if let Some(carried) = Carried::now(ui.ctx()).filter(|carried| carried.lands_on(&target(None)))
         && let Some(at) = pointer.filter(|at| list.inner_rect.contains(*at) && !filtering)
-        && let Some(media) = show.media().get(carried.0)
+        && let made = carried.items(show, state)
+        && let [item] = made.as_slice()
     {
         let onto = rows
             .iter()
@@ -3062,16 +3269,27 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         }
         if ui.input(|input| input.pointer.any_released()) {
             egui::DragAndDrop::clear_payload(ui.ctx());
-            let item = Item::Media { id: media.id, name: media.name.clone() };
+            let count = state.services.front().items.len();
             match onto {
                 Some((_, place)) => {
-                    state.services.fill(*place, item);
+                    state.services.fill(*place, item.clone());
                 }
                 None => {
                     // `slot` counts rows shown, which are every item while nothing filters.
                     let place = row_items.get(slot).copied().unwrap_or(items.len());
-                    state.services.insert(place, item);
+                    state.services.insert(place, item.clone());
                 }
+            }
+            // A result of the find box ends the search, and what it put in the playlist (or
+            // the song already there, which isn't added twice) is opened, as a click on its
+            // row opens it: nothing goes on the screens.
+            if let Some(found) = carried.found() {
+                crate::home::end_search(ui.ctx(), state);
+                let refused = onto.is_none() && state.services.front().items.len() == count;
+                if refused {
+                    state.say(format!("{} is already in {}.", found.name, state.services.front().name));
+                }
+                ask = state.services.chosen.map(ItemAsk::Open);
             }
         }
     }

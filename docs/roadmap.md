@@ -192,7 +192,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Printing.** Lyrics, slides and playlists, with notes (lyric sheets for the band). · M · Low
 - **Song menu extras.** Hiding an item, moving a song, copying and pasting songs between libraries, and showing a song in its library. (started: dragging to a library, and Duplicate) · S · Low
 - **Playlist menu extras and folders.** Duplicating, exporting and printing a playlist; folders for playlists and libraries in the sidebar; coloured headers. · S–M · Low
-- **Search extras.** A result previewed as text or slides, and a result dragged to a place in the playlist. (started: ⌘F searches titles and words; Return opens a result and ⌘Return adds it to the playlist) · S–M · Low
+- **Search extras.** A result previewed as text or slides. (started: ⌘F searches titles and words; Return opens a result and ⌘Return adds it to the playlist; a result is dragged to a place in the playlist, a playlist or a library) · S–M · Low
 - **File menu items.** New Playlist, New Library, Import, Export and Print. (started: New Song and New Slide; the + buttons make playlists and libraries) · S · Low
 - **MultiTracks, and Amazing's APlay.** APlay brings children's-ministry curriculum playlists in, ready to run. · L · Low
 - **Keynote import.** · L · Low

@@ -43,6 +43,10 @@ pub enum Kind {
     Slides,
     /// A Bible, or anything else.
     Other,
+    /// Never a file: a Bible passage or verse carried from the find box in the window, which a
+    /// playlist takes and a library doesn't. (Songs carried in the window are `Song`, pictures
+    /// and videos `Media`: they land where those files would.)
+    Passage,
 }
 
 /// What a dropped file is, as the drop decides it (song packs and Bibles first, then slides,
@@ -88,7 +92,7 @@ impl DropTarget {
     /// Whether files of this kind can land here.
     pub fn takes(&self, kind: Kind) -> bool {
         match self {
-            DropTarget::Playlist { .. } => matches!(kind, Kind::Song | Kind::Media),
+            DropTarget::Playlist { .. } => matches!(kind, Kind::Song | Kind::Media | Kind::Passage),
             DropTarget::Library(_) => matches!(kind, Kind::Song | Kind::Pack),
             DropTarget::MediaStrip => kind == Kind::Media,
         }
@@ -304,7 +308,7 @@ pub fn route(files: &[(PathBuf, Kind)], target: Option<&DropTarget>) -> Route {
             Kind::Song | Kind::Pack => route.songs.push(path.clone()),
             Kind::Media => route.media.push(path.clone()),
             Kind::Slides => route.slides.push(path.clone()),
-            Kind::Other => route.other.push(path.clone()),
+            Kind::Other | Kind::Passage => route.other.push(path.clone()),
         }
     }
     let songs: Vec<Kind> =

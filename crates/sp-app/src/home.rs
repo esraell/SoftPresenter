@@ -318,6 +318,9 @@ pub struct HomeState {
     /// Where the find box is in the bar along the top, when the window is wide enough for it:
     /// what a search finds is listed under it.
     pub find_rect: Option<Rect>,
+    /// Where each result the find box lists was drawn last, in the list's order (for a testing
+    /// aid to drag one, and for tests).
+    pub find_rows: Vec<Rect>,
     /// The find box's Bible results, and the Bible view's Search's verses as they are typed,
     /// each found on a thread of its own.
     pub finder: crate::find::Finder,
@@ -1317,6 +1320,7 @@ impl Default for HomeState {
             media_request: None,
             library_search: None,
             find_rect: None,
+            find_rows: Vec::new(),
             finder: crate::find::Finder::default(),
             page_finder: crate::find::Finder::new(crate::find::search_page),
             clock: crate::clock::SystemClock::default(),
@@ -3683,6 +3687,28 @@ pub enum MediaRequest {
 #[derive(Clone, Copy)]
 pub struct MediaDrag(pub usize);
 
+/// A result of the find box being carried to the left column (see `library_search`): what a
+/// playlist keeps for it (a song, or a Bible passage or verse with the Bible view's
+/// translations and choices as they were when the drag began), the song by its place among
+/// the songs (none for a passage or verse, which no library takes), its name, which follows the
+/// pointer, and which result it is, so that its row goes faint while it is carried.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FoundDrag {
+    pub item: crate::service::Item,
+    pub song: Option<usize>,
+    pub name: String,
+    pub from: Found,
+}
+
+/// One result of the find box, by what it is rather than its place in the list (a passage can
+/// arrive above the songs while one of them is carried): a song and the slide found in it, or
+/// a Bible passage or verse by what it looks up.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Found {
+    Song(usize, usize),
+    Bible(String),
+}
+
 /// Slides being dragged to another place in their song: the song, and the slides' places.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SlideDrag {
@@ -3869,6 +3895,85 @@ fn find_return_words() -> Option<&'static str> {
     WORDS.get_or_init(|| std::env::var("SOFTPRESENTER_FIND_RETURN").ok().filter(|words| !words.is_empty())).as_deref()
 }
 
+/// Testing aid: SOFTPRESENTER_FIND_DRAG=WORDS@X,Y types the words in the find box and, once
+/// what they find has been listed for a moment, presses on the first result and drags it to
+/// X,Y (the window's points) over a few frames, then holds it there, for a picture of a drag in
+/// progress; `WORDS@X,Y,drop` lets go there too. The window's own pointer is moved, not the
+/// mouse. It goes a step a frame, so it is for a capture run (`--capture-home`), whose window is
+/// drawn wherever it is: macOS doesn't draw a quiet copy's window kept behind the others.
+/// Returns the pointer's events for this frame, to go in with the window's own.
+pub fn find_drag_events(ctx: &egui::Context, state: &mut HomeState) -> Vec<egui::Event> {
+    /// What the switch asks: the words, where to, and whether to let go there.
+    fn asked() -> Option<&'static (String, egui::Pos2, bool)> {
+        static ASKED: std::sync::OnceLock<Option<(String, egui::Pos2, bool)>> = std::sync::OnceLock::new();
+        ASKED
+            .get_or_init(|| {
+                let asked = std::env::var("SOFTPRESENTER_FIND_DRAG").ok()?;
+                let (words, place) = asked.rsplit_once('@')?;
+                let mut numbers = place.split(',');
+                let x = numbers.next()?.trim().parse().ok()?;
+                let y = numbers.next()?.trim().parse().ok()?;
+                let drop = numbers.next().is_some_and(|word| word.trim() == "drop");
+                Some((words.to_owned(), pos2(x, y), drop))
+            })
+            .as_ref()
+    }
+    /// How far it has got: frames since the words were typed.
+    static STEP: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let Some((words, to, drop)) = asked() else { return Vec::new() };
+    let step = STEP.load(std::sync::atomic::Ordering::Relaxed);
+    let (events, next) = find_drag_step(ctx, state, step, words, *to, *drop);
+    STEP.store(next, std::sync::atomic::Ordering::Relaxed);
+    events
+}
+
+/// One frame of `find_drag_events`, at `step`: the pointer's events for it, and the next step.
+fn find_drag_step(
+    ctx: &egui::Context,
+    state: &mut HomeState,
+    step: u32,
+    words: &str,
+    to: egui::Pos2,
+    drop: bool,
+) -> (Vec<egui::Event>, u32) {
+    /// Frames the list is left to settle (the Bibles answer on a thread of their own), and the
+    /// frames the pointer takes to get there.
+    const SETTLE: u32 = 40;
+    const MOVES: u32 = 10;
+    let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    // The first result, and a little way below it: far enough for the press to be a drag.
+    let from = state.find_rows.first().map(|row| row.center());
+    let start = from.map(|from| from + vec2(0.0, 12.0));
+    let (moved, held) = (SETTLE + 1 + MOVES, SETTLE + 1 + MOVES + 20);
+    let events = match step {
+        0 => {
+            state.library_search = Some((words.to_owned(), 0));
+            Vec::new()
+        }
+        // Until something is listed, the count waits.
+        _ if step < SETTLE && from.is_none() => {
+            ctx.request_repaint();
+            return (Vec::new(), step);
+        }
+        _ if step == SETTLE => from.map(egui::Event::PointerMoved).into_iter().collect(),
+        _ if step == SETTLE + 1 => from.map(|from| press(from, true)).into_iter().collect(),
+        _ if step > SETTLE + 1 && step <= moved => {
+            let along = (step - SETTLE - 1) as f32 / MOVES as f32;
+            start.map(|start| egui::Event::PointerMoved(start + (to - start) * along)).into_iter().collect()
+        }
+        _ if step == held && drop => vec![press(to, false)],
+        _ if step > held => return (Vec::new(), step),
+        _ => Vec::new(),
+    };
+    ctx.request_repaint();
+    (events, step + 1)
+}
+
 /// What the find box in the top bar finds for the words typed in it, listed under it: a Bible
 /// passage first, when the words are a reference; then songs (titles first, then lines of their
 /// words); then Bible verses that hold the words. Return, or a click, opens the one picked: a
@@ -3956,6 +4061,11 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         verses.get(place - songs.len()).map(Pick::Bible)
     };
     let mut clicked = None;
+    // A result can be dragged onto the left column (a playlist, or a library for a song): the
+    // one being carried goes faint in the list, which stays open until it is dropped.
+    let mut dragged = None;
+    let carried = egui::DragAndDrop::payload::<FoundDrag>(ui.ctx()).map(|drag| drag.from.clone());
+    let mut rects = Vec::new();
     // What is found is listed under the find box, where the words are typed (in the middle of
     // a window too narrow to have the box).
     let screen = ui.ctx().content_rect();
@@ -3980,42 +4090,57 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 ui.set_width(wide - 12.0);
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
                 // One result: its name, what it is at the right, and a line of its words under.
-                let mut row = |ui: &mut egui::Ui, place: usize, title: &str, tag: &str, line: Option<&str>| {
-                    let height = if line.is_some() { 48.0 } else { 34.0 };
-                    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
-                    if place == picked || response.hovered() {
-                        ui.painter().rect_filled(rect, 9.0, CARD);
-                    }
-                    let first = if line.is_some() { rect.min.y + 16.0 } else { rect.center().y };
-                    let tag_at = pos2(rect.max.x - 10.0, first);
-                    let font = crate::studio::fixed(11.0);
-                    let tagged =
-                        crate::studio::paint_spaced(ui, tag_at, Align2::RIGHT_CENTER, tag, font, TEXT_DIM, 0.6);
-                    let words =
-                        Rect::from_min_max(pos2(rect.min.x + 10.0, rect.min.y), pos2(tagged.min.x - 10.0, rect.max.y));
-                    ui.painter().with_clip_rect(words).text(
-                        pos2(words.min.x, first),
-                        Align2::LEFT_CENTER,
-                        title,
-                        crate::studio::semibold(13.0),
-                        TEXT,
-                    );
-                    if let Some(line) = line {
-                        let under = Rect::from_min_max(pos2(rect.min.x + 10.0, rect.min.y), rect.max - vec2(10.0, 0.0));
-                        ui.painter().with_clip_rect(under).text(
-                            pos2(under.min.x, rect.min.y + 34.0),
-                            Align2::LEFT_CENTER,
-                            line,
-                            FontId::proportional(12.0),
-                            TEXT_FAINT,
+                let mut row =
+                    |ui: &mut egui::Ui, place: usize, title: &str, tag: &str, line: Option<&str>, faint: bool| {
+                        let height = if line.is_some() { 48.0 } else { 34.0 };
+                        let size = vec2(ui.available_width(), height);
+                        // A press that barely moves is a click, as everywhere else.
+                        let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
+                        rects.push(rect);
+                        if place == picked || response.hovered() {
+                            ui.painter().rect_filled(rect, 9.0, CARD);
+                        }
+                        let first = if line.is_some() { rect.min.y + 16.0 } else { rect.center().y };
+                        let tag_at = pos2(rect.max.x - 10.0, first);
+                        let font = crate::studio::fixed(11.0);
+                        let tagged =
+                            crate::studio::paint_spaced(ui, tag_at, Align2::RIGHT_CENTER, tag, font, TEXT_DIM, 0.6);
+                        let words = Rect::from_min_max(
+                            pos2(rect.min.x + 10.0, rect.min.y),
+                            pos2(tagged.min.x - 10.0, rect.max.y),
                         );
-                    }
-                    if response.clicked() {
-                        clicked = Some(place);
-                    }
-                };
+                        ui.painter().with_clip_rect(words).text(
+                            pos2(words.min.x, first),
+                            Align2::LEFT_CENTER,
+                            title,
+                            crate::studio::semibold(13.0),
+                            TEXT,
+                        );
+                        if let Some(line) = line {
+                            let under =
+                                Rect::from_min_max(pos2(rect.min.x + 10.0, rect.min.y), rect.max - vec2(10.0, 0.0));
+                            ui.painter().with_clip_rect(under).text(
+                                pos2(under.min.x, rect.min.y + 34.0),
+                                Align2::LEFT_CENTER,
+                                line,
+                                FontId::proportional(12.0),
+                                TEXT_FAINT,
+                            );
+                        }
+                        if faint {
+                            ui.painter().rect_filled(rect, 9.0, PANEL.gamma_multiply(0.6));
+                        }
+                        if response.clicked() {
+                            clicked = Some(place);
+                        }
+                        if response.drag_started() {
+                            dragged = Some(place);
+                        }
+                    };
+                let faint = |found: Found| carried.as_ref() == Some(&found);
                 for (place, found) in passage.iter().enumerate() {
-                    row(ui, place, &found.title, &found.tag, Some(&found.line));
+                    let faint = faint(Found::Bible(found.lookup.clone()));
+                    row(ui, place, &found.title, &found.tag, Some(&found.line), faint);
                 }
                 // A song found by its title, or each slide found by its words: its number and
                 // group at the right, the line found under.
@@ -4025,10 +4150,13 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                         (Some(_), Some((group, _))) => format!("{:02} {}", slide + 1, group.name.to_uppercase()),
                         _ => "SONG".to_owned(),
                     };
-                    row(ui, passage.len() + place, &song.title, &tag, line.as_deref());
+                    let faint = faint(Found::Song(*index, *slide));
+                    row(ui, passage.len() + place, &song.title, &tag, line.as_deref(), faint);
                 }
                 for (place, found) in verses.iter().enumerate() {
-                    row(ui, passage.len() + songs.len() + place, &found.title, &found.tag, Some(&found.line));
+                    let (place, faint) =
+                        (passage.len() + songs.len() + place, faint(Found::Bible(found.lookup.clone())));
+                    row(ui, place, &found.title, &found.tag, Some(&found.line), faint);
                 }
                 if total == 0 {
                     let words = if answered { "Nothing found" } else { "Looking in the Bibles…" };
@@ -4057,6 +4185,38 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             });
         });
         list = Some(shown.response.rect);
+    }
+    // A result dragged away is carried as what a playlist would keep for it: a song (a slide
+    // found by its words carries its song, as playlists hold songs), or a passage or verse with
+    // the Bible view's translations and choices, as Command-Return adds it.
+    if let Some(place) = dragged {
+        let carry = match at(place) {
+            Some(Pick::Song(index, slide, _)) => {
+                state.song_keys.get(index).zip(show.presentations().get(index)).map(|(key, song)| FoundDrag {
+                    item: crate::service::Item::Song { key: key.clone(), title: song.title.clone() },
+                    song: Some(index),
+                    name: song.title.clone(),
+                    from: Found::Song(index, slide),
+                })
+            }
+            Some(Pick::Bible(row)) => Some(FoundDrag {
+                item: crate::service::Item::Passage(crate::service::SavedPassage {
+                    lookup: row.lookup.clone(),
+                    ..state.bible.settings()
+                }),
+                song: None,
+                name: row.title.clone(),
+                from: Found::Bible(row.lookup.clone()),
+            }),
+            None => None,
+        };
+        if let Some(carry) = carry {
+            egui::DragAndDrop::set_payload(ui.ctx(), carry);
+        }
+    }
+    // What is carried says its name beside the pointer until it is dropped.
+    if let Some(carried) = egui::DragAndDrop::payload::<FoundDrag>(ui.ctx()) {
+        crate::studio::paint_carried(ui.ctx(), &carried.name);
     }
     // What to do, worked out while the lists are still at hand: a song by its place, a passage
     // by what to look up; and whether to add it to the playlist in front instead of opening it.
@@ -4142,11 +4302,18 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         }
         None => {}
     }
+    state.find_rows = rects;
     if ended {
-        // The find box gives the keyboard back, so the keys run the show again.
-        state.library_search = None;
-        ui.memory_mut(|memory| memory.surrender_focus(crate::studio::find_box_id()));
+        end_search(ui.ctx(), state);
     }
+}
+
+/// Ends the find box's search: the list under it goes, and the box gives the keyboard back, so
+/// the keys run the show again. A result dropped on the left column ends it too.
+pub fn end_search(ctx: &egui::Context, state: &mut HomeState) {
+    state.library_search = None;
+    state.find_rows.clear();
+    ctx.memory_mut(|memory| memory.surrender_focus(crate::studio::find_box_id()));
 }
 
 /// The key that adds each shape in the editor, in the order of `Shape::ALL`.
@@ -8492,6 +8659,271 @@ mod tests {
         assert!(filled.is_some(), "a drop on the placeholder's row puts the picture in its place");
         let (_, at) = between.expect("a drop elsewhere on the list puts it between two items");
         assert!((1..=3).contains(&at));
+    }
+
+    /// For dragging what the find box finds: the songs Alpha and Beta in the playlist in front,
+    /// which is listed, Gamma only in the library, another playlist (Evening) and a library
+    /// (Hymns); the Bible view's two places after the songs; Alpha's first slide on screen, as
+    /// during a service.
+    fn find_drag_setting() -> (Show, HomeState) {
+        use crate::service::{Item, Service};
+        let words = |first: &str| format!("[Verse 1]\n{first}\n\n[Chorus]\nThird lines\n");
+        let mut all: Vec<Arc<sp_model::Presentation>> =
+            [("Alpha", "Morning lines"), ("Beta", "Evening lines"), ("Gamma", "Harbour lantern")]
+                .iter()
+                .map(|(title, first)| Arc::new(parse_song_text(title, &words(first))))
+                .collect();
+        for _ in 0..2 {
+            all.push(Arc::new(sp_model::Presentation {
+                id: sp_model::Uuid::new_v4(),
+                title: "Bible".to_owned(),
+                groups: Vec::new(),
+                ..(*all[0]).clone()
+            }));
+        }
+        let mut show = Show::new(all);
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        let mut state = HomeState { playlist_open: true, ..HomeState::default() };
+        state.bible.slots = Some([3, 4]);
+        state.song_keys = ["alpha", "beta", "gamma", "bible-a", "bible-b"].map(str::to_owned).to_vec();
+        state.services.add(Item::Song { key: "alpha".to_owned(), title: "Alpha".to_owned() });
+        state.services.add(Item::Song { key: "beta".to_owned(), title: "Beta".to_owned() });
+        state.services.chosen = None;
+        state.services.list.push(Service { name: "Evening".to_owned(), items: Vec::new() });
+        state.libraries.push(crate::libraries::Library::new("Hymns".to_owned()));
+        (show, state)
+    }
+
+    /// What one frame of a drag drew: each piece of text and where, and the pointer's shape.
+    struct Drawn {
+        texts: Vec<(String, Rect)>,
+        cursor: egui::CursorIcon,
+    }
+
+    impl Drawn {
+        /// Where these words were drawn in the left column, last (a playlist's row in the
+        /// chooser, not its name over the column).
+        fn left(&self, words: &str) -> Rect {
+            self.texts
+                .iter()
+                .rfind(|(text, rect)| text == words && rect.max.x < crate::studio::LEFT_WIDTH + 20.0)
+                .map(|(_, rect)| *rect)
+                .unwrap_or_else(|| panic!("{words} is drawn in the left column"))
+        }
+    }
+
+    /// One frame of the window with these events, then what the app does after it; every
+    /// command given is kept in `commands`.
+    fn found_step(
+        ctx: &egui::Context,
+        show: &mut Show,
+        state: &mut HomeState,
+        events: Vec<Event>,
+        time: f64,
+        commands: &mut Vec<Command>,
+    ) -> Drawn {
+        fn walk(shape: &egui::Shape, into: &mut Vec<(String, Rect)>) {
+            match shape {
+                egui::Shape::Text(text) => into.push((text.galley.text().to_owned(), text.visual_bounding_rect())),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let raw = RawInput { time: Some(time), events, ..input(None) };
+        let mut asked = Vec::new();
+        let output = ctx.run_ui(raw, |ui| {
+            asked.extend(home_ui(ui, show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None));
+        });
+        let mut texts = Vec::new();
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut texts));
+        let cursor = output.platform_output.cursor_icon;
+        output.drop_without_applying_deltas();
+        as_the_app_does(show, state, asked.clone());
+        commands.extend(asked);
+        Drawn { texts, cursor }
+    }
+
+    /// Types `words` in the find box, presses on the result at `place` in its list and drags it
+    /// (a little way first, as a hand does), then to the place `to` picks from what is drawn
+    /// while it is carried, and lets go there. Returns every command given on the way, and what
+    /// was drawn with the pointer over that place.
+    fn drag_found(
+        show: &mut Show,
+        state: &mut HomeState,
+        words: &str,
+        place: usize,
+        to: impl Fn(&Drawn) -> egui::Pos2,
+    ) -> (Vec<Command>, Drawn, egui::Context) {
+        let ctx = egui::Context::default();
+        let press = |at: egui::Pos2, pressed: bool| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut commands = Vec::new();
+        state.library_search = Some((words.to_owned(), 0));
+        found_step(&ctx, show, state, vec![], 0.0, &mut commands);
+        found_step(&ctx, show, state, vec![], 0.1, &mut commands);
+        let from = state.find_rows.get(place).expect("the result is listed").center();
+        found_step(&ctx, show, state, vec![Event::PointerMoved(from)], 0.2, &mut commands);
+        found_step(&ctx, show, state, vec![press(from, true)], 0.3, &mut commands);
+        found_step(&ctx, show, state, vec![Event::PointerMoved(from + vec2(-4.0, 12.0))], 0.4, &mut commands);
+        let carrying =
+            found_step(&ctx, show, state, vec![Event::PointerMoved(from + vec2(-60.0, 40.0))], 0.5, &mut commands);
+        assert!(egui::DragAndDrop::has_payload_of_type::<FoundDrag>(&ctx), "the result is carried");
+        assert!(state.library_search.is_some(), "the list stays open while it is carried");
+        let at = to(&carrying);
+        let over = found_step(&ctx, show, state, vec![Event::PointerMoved(at)], 0.6, &mut commands);
+        found_step(&ctx, show, state, vec![press(at, false)], 0.7, &mut commands);
+        found_step(&ctx, show, state, vec![], 0.8, &mut commands);
+        assert!(!egui::DragAndDrop::has_any_payload(&ctx), "the drag has ended");
+        (commands, over, ctx)
+    }
+
+    /// Nothing went on the screens: the commands put nothing on, and Alpha's first slide is
+    /// still what the screens show.
+    fn nothing_went_live(show: &Show, commands: &[Command]) {
+        assert!(!goes_on_screen(commands), "nothing is put on the screens: {commands:?}");
+        assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }));
+    }
+
+    #[test]
+    fn a_song_found_dragged_between_two_playlist_items_goes_in_there_and_opens() {
+        use crate::service::Item;
+        let (mut show, mut state) = find_drag_setting();
+        // Over the upper half of Beta's row: the ink line is between Alpha and Beta.
+        let (commands, over, ctx) = drag_found(&mut show, &mut state, "gamma", 0, |drawn| {
+            let beta = drawn.left("Beta");
+            pos2(beta.center().x, beta.center().y - 8.0)
+        });
+        assert_eq!(over.cursor, egui::CursorIcon::Grabbing, "a place it can go");
+        let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
+        assert_eq!(titles, ["Alpha", "Gamma", "Beta"]);
+        // Opened, as a click on its row opens it; the search is over and the keys are free.
+        assert_eq!((state.services.chosen, show.selected()), (Some(1), 2));
+        assert!(state.library_search.is_none() && !ctx.text_edit_focused());
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn a_song_found_dropped_on_a_playlist_in_the_chooser_goes_at_its_end() {
+        use crate::service::Item;
+        let (mut show, mut state) = find_drag_setting();
+        let (commands, ..) = drag_found(&mut show, &mut state, "gamma", 0, |drawn| drawn.left("Evening").center());
+        assert_eq!(state.services.list[1].items, [Item::Song { key: "gamma".to_owned(), title: "Gamma".to_owned() }]);
+        assert_eq!(state.services.front().items.len(), 2, "the playlist in front is as it was");
+        assert!(state.library_search.is_none());
+        assert!(state.toast.as_ref().is_some_and(|(words, _)| words == "Added Gamma to Evening."), "{:?}", state.toast);
+        nothing_went_live(&show, &commands);
+        // On the playlist in front's own row: at its end, and opened.
+        let (mut show, mut state) = find_drag_setting();
+        let (commands, ..) = drag_found(&mut show, &mut state, "gamma", 0, |drawn| drawn.left("Service").center());
+        let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
+        assert_eq!(titles, ["Alpha", "Beta", "Gamma"]);
+        assert_eq!((state.services.chosen, show.selected()), (Some(2), 2));
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn a_passage_found_dragged_onto_the_playlist_becomes_a_passage_item() {
+        use crate::service::Item;
+        let (mut show, mut state) = find_drag_setting();
+        // Over the lower half of Beta's row: after it, at the end.
+        let (commands, ..) = drag_found(&mut show, &mut state, "jn 3:16", 0, |drawn| {
+            let beta = drawn.left("Beta");
+            pos2(beta.center().x, beta.center().y + 8.0)
+        });
+        let items = &state.services.front().items;
+        assert_eq!(items.len(), 3);
+        let Some(Item::Passage(saved)) = items.last() else { panic!("a passage: {items:?}") };
+        // Named as the first Bible (the Synodal, here) names it, with the Bible view's
+        // translations and choices, as Command-Return adds it.
+        let lookup = "От Иоанна 3:16".to_owned();
+        assert_eq!(saved, &crate::service::SavedPassage { lookup, ..state.bible.settings() });
+        assert_eq!(state.services.chosen, Some(2));
+        assert!(!state.bible_open && state.library_search.is_none());
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn a_passage_is_refused_by_a_library_and_a_song_found_goes_into_one() {
+        let (mut show, mut state) = find_drag_setting();
+        let before = state.services.clone();
+        let (commands, over, _) = drag_found(&mut show, &mut state, "jn 3:16", 0, |drawn| drawn.left("Hymns").center());
+        assert_eq!(over.cursor, egui::CursorIcon::NoDrop, "the pointer says it can't go there");
+        assert!(state.libraries[0].songs.is_empty(), "no library takes a passage");
+        assert_eq!(state.services.list, before.list);
+        assert!(state.library_search.is_some(), "dropped where it can't go, the search goes on");
+        nothing_went_live(&show, &commands);
+        // A song goes into the library, on its row in the chooser...
+        let (mut show, mut state) = find_drag_setting();
+        let (commands, ..) = drag_found(&mut show, &mut state, "gamma", 0, |drawn| drawn.left("Hymns").center());
+        assert_eq!(state.libraries[0].songs, ["gamma"]);
+        assert!(state.libraries_changed && state.library_search.is_none());
+        nothing_went_live(&show, &commands);
+        // ...or on its list, with the library listed; a passage there is refused.
+        let (mut show, mut state) = find_drag_setting();
+        state.playlist_open = false;
+        state.library_shown = Some(state.libraries[0].id);
+        let (_, over, _) = drag_found(&mut show, &mut state, "jn 3:16", 0, |_| pos2(120.0, 600.0));
+        assert_eq!(over.cursor, egui::CursorIcon::NoDrop);
+        assert!(state.libraries[0].songs.is_empty());
+        let (commands, ..) = drag_found(&mut show, &mut state, "gamma", 0, |_| pos2(120.0, 600.0));
+        assert_eq!(state.libraries[0].songs, ["gamma"]);
+        assert_eq!(show.selected(), 2, "picked out in the list, as a click on it does");
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn the_testing_aid_drags_the_first_result_where_it_is_told_and_lets_go() {
+        use crate::service::Item;
+        let (mut show, mut state) = find_drag_setting();
+        let ctx = egui::Context::default();
+        let mut commands = Vec::new();
+        // Where to: the upper half of Beta's row as it is drawn while a result is carried.
+        let (mut probe_show, mut probe) = find_drag_setting();
+        let (_, over, _) = drag_found(&mut probe_show, &mut probe, "gamma", 0, |drawn| drawn.left("Beta").center());
+        let to = over.left("Beta").center() - vec2(0.0, 8.0);
+        let mut step = 0;
+        for frame in 0..120 {
+            let (events, next) = find_drag_step(&ctx, &mut state, step, "gamma", to, true);
+            step = next;
+            found_step(&ctx, &mut show, &mut state, events, frame as f64 * 0.016, &mut commands);
+        }
+        let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
+        assert_eq!(titles, ["Alpha", "Gamma", "Beta"]);
+        assert!(state.library_search.is_none());
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn a_press_on_a_result_that_barely_moves_still_opens_it() {
+        let (mut show, mut state) = find_drag_setting();
+        let ctx = egui::Context::default();
+        let press = |at: egui::Pos2, pressed: bool| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut commands = Vec::new();
+        state.library_search = Some(("gamma".to_owned(), 0));
+        found_step(&ctx, &mut show, &mut state, vec![], 0.0, &mut commands);
+        found_step(&ctx, &mut show, &mut state, vec![], 0.1, &mut commands);
+        let at = state.find_rows[0].center();
+        found_step(&ctx, &mut show, &mut state, vec![Event::PointerMoved(at)], 0.2, &mut commands);
+        found_step(&ctx, &mut show, &mut state, vec![press(at, true)], 0.3, &mut commands);
+        let moved = at + vec2(2.0, 1.0);
+        found_step(&ctx, &mut show, &mut state, vec![Event::PointerMoved(moved)], 0.35, &mut commands);
+        found_step(&ctx, &mut show, &mut state, vec![press(moved, false)], 0.4, &mut commands);
+        found_step(&ctx, &mut show, &mut state, vec![], 0.5, &mut commands);
+        assert!(!egui::DragAndDrop::has_any_payload(&ctx), "nothing was carried");
+        // Opened as a click opens it: the song in the Show view, the playlist as it was.
+        assert_eq!(show.selected(), 2);
+        assert!(state.library_search.is_none());
+        assert_eq!(state.services.front().items.len(), 2);
+        nothing_went_live(&show, &commands);
     }
 
     #[test]

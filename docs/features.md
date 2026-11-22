@@ -363,7 +363,18 @@ feature changes, this page changes in the same commit.
   typed in), and verses that hold the words, from the Bibles in use written in the words'
   alphabet, each saying which Bible it is from; Return opens what is picked without putting anything on the screens,
   with its first slide or verse picked for Enter (see "A slide picked waits for Enter"), and
-  Command-Return adds it to the playlist in front; it does not search playlists or media), a
+  Command-Return adds it to the playlist in front. Any result can also be **dragged** (a press
+  that barely moves is still a click): its name follows the pointer, its row goes faint and
+  the list stays open, and the chooser shows above the left column's list. Dropped on the open
+  playlist's items it goes in where the ink line shows (above or below a row by which half of
+  it the pointer is over), or takes a placeholder's place; on a playlist in the chooser, at its
+  end; a song on a library (its row in the chooser, or its song list, outlined in ink) goes
+  into it. A song found by a line of its words brings the whole song, as playlists hold songs;
+  a passage or verse goes in with the Bible view's translations and choices, as
+  Command-Return adds it, and no library takes one (the pointer says so). After a drop the
+  search ends, the keyboard is the show's again, and what went into the playlist listed is
+  opened as a click on its row opens it; nothing goes on the screens. Dropped anywhere else,
+  nothing happens and the search stays open. The find box does not search playlists or media), a
   running timer's name and time just before the clock (in room nothing else uses, so nothing
   moves when it starts or stops), the clock (on a 12-hour or a
   24-hour clock as the computer is set, with the computer's own words for morning and
