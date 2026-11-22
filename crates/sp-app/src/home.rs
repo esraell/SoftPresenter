@@ -3664,8 +3664,12 @@ fn stage_tools(ui: &mut egui::Ui, state: &mut HomeState, inner: Rect, layout: us
     if wants_picture {
         state.picture_request = true;
     }
-    let (can_undo, can_redo) =
-        state.editing.as_ref().map_or((false, false), |draft| (draft.can_undo(), draft.can_redo()));
+    // They take the Edit view's steps in turn, as Command-Z does: the layout's own changes, and
+    // a layout deleted from the list.
+    let deleted = |step: Option<&EditStep>| step == Some(&EditStep::Deleted);
+    let (can_undo, can_redo) = state.editing.as_ref().map_or((false, false), |draft| {
+        (draft.can_undo() || deleted(state.edit_steps.last()), draft.can_redo() || deleted(state.edit_redo.last()))
+    });
     let (undo_hint, redo_hint) =
         (crate::keys::hint("Undo the last change", "Z", false), crate::keys::hint("Redo it", "Z", true));
     for (bar, words, enabled, hint, back) in [
@@ -3675,14 +3679,9 @@ fn stage_tools(ui: &mut egui::Ui, state: &mut HomeState, inner: Rect, layout: us
         let id = ui.scope_id().with(("stage history", words));
         let look = crate::studio::Flat::Plain;
         let pressed = crate::studio::flat_button(ui, bar, id, words, font.clone(), look, enabled);
-        if pressed.on_hover_text(hint).clicked()
-            && let Some(draft) = state.editing.as_mut()
-        {
-            if back {
-                draft.undo();
-            } else {
-                draft.redo();
-            }
+        if pressed.on_hover_text(hint).clicked() {
+            use crate::menubar::Action;
+            state.menu_asked = Some(if back { Action::Undo } else { Action::Redo });
         }
     }
 }

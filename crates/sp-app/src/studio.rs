@@ -3007,8 +3007,8 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
             // The "more" button opens what a right-click on the row does.
             let near = response.hovered() || ui.rect_contains_pointer(more);
             let button = more_button(ui, more, ui.scope_id().with(("song more", index)), near);
-            egui::Popup::menu(&button).show(|ui| song_menu(ui, show, state, commands, index, &mut asks, false));
-            response.context_menu(|ui| song_menu(ui, show, state, commands, index, &mut asks, false));
+            egui::Popup::menu(&button).show(|ui| song_menu(ui, show, state, commands, index, &mut asks, None));
+            response.context_menu(|ui| song_menu(ui, show, state, commands, index, &mut asks, None));
         }
         let ctx = ui.ctx().clone();
         sweep_rows(ui, state, crate::home::Picking::Songs, &rows, shown, list, pointer, down, |picked| {
@@ -3313,17 +3313,14 @@ fn songs_menu_acts_on(state: &HomeState, index: usize, in_playlist: bool) -> Vec
 /// The songs a song's menu adds to a playlist (Add to the playlist in front, Add to Playlist ▸),
 /// as dragging them does: in a library, the songs picked out with it when it is one of them;
 /// from a playlist, the songs of the items picked out with its item when that is one of several
-/// picked, in the playlist's order; else this song alone.
-fn songs_menu_adds(show: &Show, state: &HomeState, index: usize, in_playlist: bool) -> Vec<usize> {
+/// picked, in the playlist's order; else this song alone. `item` is the item's place, from a
+/// playlist.
+fn songs_menu_adds(show: &Show, state: &HomeState, index: usize, item: Option<usize>) -> Vec<usize> {
     use crate::service::Item;
-    if !in_playlist {
-        return songs_menu_acts_on(state, index, false);
-    }
+    let Some(place) = item else { return songs_menu_acts_on(state, index, false) };
     let items = &state.services.front().items;
-    let key = state.song_keys.get(index);
-    let place = items.iter().position(|item| matches!(item, Item::Song { key: have, .. } if Some(have) == key));
     let picks = &state.item_picks;
-    if !place.is_some_and(|place| picks.several() && picks.places.contains(&place)) {
+    if !(picks.several() && picks.places.contains(&place)) {
         return vec![index];
     }
     let mut places = picks.places.clone();
@@ -3337,10 +3334,11 @@ fn songs_menu_adds(show: &Show, state: &HomeState, index: usize, in_playlist: bo
         .collect()
 }
 
-/// A song's right-click menu, in the library or (`in_playlist`) for an item of the playlist in
-/// front, which then isn't offered as a playlist to add it to, and acts on this song alone. From
-/// a playlist its Delete is "Delete Song from Library…", at the foot of the item's menu (see
-/// [`delete_song_from_library`]), so it is never taken for Remove from Playlist.
+/// A song's right-click menu, in the library or for an item of the playlist in front (`item`,
+/// its place there), which then isn't offered as a playlist to add it to, and acts on this song
+/// alone but for Add to Playlist. From a playlist its Delete is "Delete Song from Library…", at
+/// the foot of the item's menu (see [`delete_song_from_library`]), so it is never taken for
+/// Remove from Playlist.
 pub fn song_menu(
     ui: &mut egui::Ui,
     show: &Show,
@@ -3348,11 +3346,12 @@ pub fn song_menu(
     commands: &mut Vec<Command>,
     index: usize,
     asks: &mut SongAsks,
-    in_playlist: bool,
+    item: Option<usize>,
 ) {
+    let in_playlist = item.is_some();
     let front = state.services.front().name.clone();
     // The songs an add takes: this one, or those picked with it, as a drag would carry them.
-    let adds = songs_menu_adds(show, state, index, in_playlist);
+    let adds = songs_menu_adds(show, state, index, item);
     if !in_playlist && ui.button(format!("Add to {front}")).clicked() {
         asks.add = adds.clone();
         ui.close();
@@ -3412,10 +3411,6 @@ pub fn song_menu(
     }
     // A copy beside it: from a playlist's item, a new item just after it too.
     if ui.button("Duplicate").clicked() {
-        let item = in_playlist
-            .then(|| state.song_keys.get(index).cloned())
-            .flatten()
-            .and_then(|key| state.services.place_of(state.services.front_at(), &crate::service::Item::song(key, "")));
         state.song_request = Some((index, crate::home::SongRequest::Duplicate { item }));
         ui.close();
     }
@@ -3618,7 +3613,7 @@ pub fn item_menu(
             state.add_slide = Some(song);
             ui.close();
         }
-        ui.menu_button("Song", |ui| song_menu(ui, show, state, commands, song, asks, true));
+        ui.menu_button("Song", |ui| song_menu(ui, show, state, commands, song, asks, Some(index)));
         ui.separator();
     }
     let announced = match state.services.front().items.get(index) {
@@ -6114,7 +6109,7 @@ pub mod tests {
         // The song's own part, from a playlist, has no Delete of its own.
         let mut drawn_words = Vec::new();
         let output = drawn(&ctx, vec![], |ui| {
-            song_menu(ui, &show, &mut state, &mut Vec::new(), 0, &mut SongAsks::default(), true);
+            song_menu(ui, &show, &mut state, &mut Vec::new(), 0, &mut SongAsks::default(), Some(0));
         });
         output.shapes.iter().for_each(|clipped| words(&clipped.shape, &mut drawn_words));
         output.drop_without_applying_deltas();
@@ -6127,7 +6122,7 @@ pub mod tests {
         state.services.show(0);
         let mut drawn_words = Vec::new();
         let output = drawn(&ctx, vec![], |ui| {
-            song_menu(ui, &show, &mut state, &mut Vec::new(), 0, &mut SongAsks::default(), true);
+            song_menu(ui, &show, &mut state, &mut Vec::new(), 0, &mut SongAsks::default(), Some(0));
         });
         output.shapes.iter().for_each(|clipped| words(&clipped.shape, &mut drawn_words));
         output.drop_without_applying_deltas();
@@ -6276,8 +6271,8 @@ pub mod tests {
         assert_eq!(state.item_picks.places, [0, 2]);
         // Song ▸ Add to Playlist from one of them adds every picked song, in order.
         state.services.list.push(crate::service::Service { name: "Evening".to_owned(), items: Vec::new() });
-        assert_eq!(songs_menu_adds(&show, &state, 3, true), [1, 3], "Two and Four");
-        assert_eq!(songs_menu_adds(&show, &state, 0, true), [0], "One isn't picked: just it");
+        assert_eq!(songs_menu_adds(&show, &state, 3, Some(2)), [1, 3], "Two and Four");
+        assert_eq!(songs_menu_adds(&show, &state, 0, Some(1)), [0], "One isn't picked: just it");
         SongAsks { add_to: Some((vec![1, 3], Some(1))), ..SongAsks::default() }.carry_out(&show, &mut state);
         assert_eq!(names(&state, 1), ["Two", "Four"]);
         let said = state.toast.take().map(|(words, _)| words);
@@ -6285,7 +6280,7 @@ pub mod tests {
         // In a library: the songs picked with the one clicked; Add to the playlist in front puts
         // them after the open item, the last of them opened, and says nothing while it is listed.
         state.picked_songs = vec![2, 0];
-        assert_eq!(songs_menu_adds(&show, &state, 2, false), [2, 0]);
+        assert_eq!(songs_menu_adds(&show, &state, 2, None), [2, 0]);
         state.services.list[1].items.clear();
         state.services.show(1);
         state.services.list[1].items = vec![Item::song("four", "Four"), Item::song("two", "Two")];

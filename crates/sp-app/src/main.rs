@@ -3825,10 +3825,32 @@ impl App {
             self.edit_song = editing;
         }
         let Some(redo) = state.song_undo.take() else { return };
-        let followed = state.editing.as_ref().map(|draft| (draft.at, draft.slide.id));
+        // The slide being edited, when it is a song's (a template, a prop or a stage layout is
+        // never followed as one).
+        let followed =
+            (editing.is_some()).then(|| state.editing.as_ref().map(|draft| (draft.at, draft.slide.id))).flatten();
+        // The step the editor took: it is the newest of the other list now.
+        let taken = if redo { state.edit_steps.last() } else { state.edit_redo.last() }.copied();
         // Something deleted from one of the Edit view's lists: put back (or deleted again),
-        // opened where its list opens it, not a slide to follow.
-        if self.history.removed_next(redo) {
+        // opened where its list opens it, not a slide to follow. When the history's next step
+        // isn't a delete, it was already taken from outside the editor (the Show view, `sp
+        // undo`): the step is let go, and nothing else is taken back in its place.
+        if taken == Some(home::EditStep::Deleted) {
+            if self.history.removed_next(redo) {
+                self.undo_show(redo);
+            } else if let Some(running) = self.running.as_mut() {
+                let state = &mut running.home_state;
+                if redo {
+                    state.edit_steps.pop()
+                } else {
+                    state.edit_redo.pop()
+                };
+            }
+            return;
+        }
+        // A change to a song's slides; only a song's slide being edited is followed (a template,
+        // a prop or a stage layout never is).
+        if followed.is_none() {
             self.undo_show(redo);
             return;
         }

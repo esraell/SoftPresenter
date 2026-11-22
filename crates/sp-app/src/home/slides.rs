@@ -1888,7 +1888,7 @@ fn item_bar(
                 ui.close();
             }
             ui.separator();
-            crate::studio::song_menu(ui, show, state, commands, at, asks, false);
+            crate::studio::song_menu(ui, show, state, commands, at, asks, None);
         }
         (None, None) => {}
     };
