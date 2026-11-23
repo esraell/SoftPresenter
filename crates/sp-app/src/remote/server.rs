@@ -122,19 +122,45 @@ const NEXT_STYLE_CSS: &str = include_str!("page/next/style.css");
 /// The files under `/next/`: content type (from the extension) and body, the design work's
 /// files unchanged. Its page names its script and style by relative address, so they load from
 /// beside it.
-fn next_file(path: &str) -> Option<(&'static str, &'static str)> {
+fn next_file(path: &str) -> Option<(&'static str, &'static [u8])> {
     let kind = |name: &str| match name.rsplit_once('.').map(|(_, extension)| extension) {
         Some("html") => "text/html; charset=utf-8",
         Some("js") => "text/javascript; charset=utf-8",
         Some("css") => "text/css; charset=utf-8",
+        Some("woff2") => "font/woff2",
+        Some("txt") => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     };
     match path {
-        "/next/" => Some((kind("index.html"), NEXT_INDEX_HTML)),
-        "/next/app.js" => Some((kind("app.js"), NEXT_APP_JS)),
-        "/next/style.css" => Some((kind("style.css"), NEXT_STYLE_CSS)),
+        "/next/" => Some((kind("index.html"), NEXT_INDEX_HTML.as_bytes())),
+        "/next/app.js" => Some((kind("app.js"), NEXT_APP_JS.as_bytes())),
+        "/next/style.css" => Some((kind("style.css"), NEXT_STYLE_CSS.as_bytes())),
+        // The slide face, SoftPresenter Sans, and its licence (SIL OFL 1.1), which goes with it.
+        "/next/fonts/SoftPresenterSans-Regular.woff2" => {
+            Some((kind("x.woff2"), include_bytes!("page/next/fonts/SoftPresenterSans-Regular.woff2")))
+        }
+        "/next/fonts/SoftPresenterSans-Bold.woff2" => {
+            Some((kind("x.woff2"), include_bytes!("page/next/fonts/SoftPresenterSans-Bold.woff2")))
+        }
+        "/next/fonts/SoftPresenterSans-Italic.woff2" => {
+            Some((kind("x.woff2"), include_bytes!("page/next/fonts/SoftPresenterSans-Italic.woff2")))
+        }
+        "/next/fonts/SoftPresenterSans-BoldItalic.woff2" => {
+            Some((kind("x.woff2"), include_bytes!("page/next/fonts/SoftPresenterSans-BoldItalic.woff2")))
+        }
+        "/next/fonts/OFL.txt" => Some((kind("OFL.txt"), include_bytes!("page/next/fonts/OFL.txt"))),
         _ => None,
     }
+}
+
+/// A tag for a file built into the app: the same bytes give the same tag, so a browser that has
+/// the file asks once whether it changed and is told it didn't (a font is fetched once, not on
+/// every load), and a new build with new bytes is fetched afresh.
+fn file_tag(body: &[u8]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    body.hash(&mut hasher);
+    format!("\"{:016x}\"", hasher.finish())
 }
 
 /// A picture read back from the GPU: tightly packed RGBA rows.
@@ -607,6 +633,7 @@ fn router(shared: Arc<Shared>) -> Router {
         .route("/favicon.ico", any(favicon))
         .route("/next/", any(next_page))
         .route("/next/{file}", any(next_page))
+        .route("/next/fonts/{file}", any(next_page))
         .route("/api/login", any(login))
         .route("/api/logout", any(logout))
         .route("/api/ws", any(socket))
@@ -736,7 +763,7 @@ fn cookie(parts: &Parts) -> Option<String> {
 fn finish(mut response: Response<Body>, host: &str) -> Response<Body> {
     let headers = response.headers_mut();
     let policy = format!(
-        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self' wss://{host}; \
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self' wss://{host}; \
          base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types 'none'"
     );
     if let Ok(policy) = HeaderValue::from_str(&policy) {
@@ -862,7 +889,21 @@ async fn next_page(State(shared): State<Arc<Shared>>, request: Request) -> Respo
         return answer;
     }
     match next_file(path) {
-        Some((kind, body)) => asset(&gate.host, kind, body),
+        Some((kind, body)) => {
+            let tag = file_tag(body);
+            let fresh =
+                parts.headers.get(header::IF_NONE_MATCH).and_then(|value| value.to_str().ok()) == Some(tag.as_str());
+            let builder = Response::builder()
+                .header(header::CONTENT_TYPE, kind)
+                .header(header::ETAG, tag)
+                .header(header::CACHE_CONTROL, "no-cache");
+            let response = if fresh {
+                builder.status(StatusCode::NOT_MODIFIED).body(Body::empty())
+            } else {
+                builder.body(Body::from(body))
+            };
+            finish(response.unwrap_or_default(), &gate.host)
+        }
         None => plain(StatusCode::NOT_FOUND, &gate.host, "Not here."),
     }
 }

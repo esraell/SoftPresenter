@@ -321,6 +321,25 @@ fn the_design_page_is_served_under_next_to_signed_in_devices_only_by_exact_names
     assert_eq!(script.text(), NEXT_APP_JS);
     let style = test.get("/next/style.css", Some(&token));
     assert_eq!((style.status, style.header("content-type")), (200, Some("text/css; charset=utf-8")));
+    // The slide face and its licence: fonts the policy lets the page use, signed-in only, and
+    // fetched once (asked again with its tag, a file is not sent again).
+    assert!(policy.contains("font-src 'self'"), "{policy}");
+    let cookie = format!("{COOKIE}={token}");
+    for name in ["Regular", "Bold", "Italic", "BoldItalic"] {
+        let path = format!("/next/fonts/SoftPresenterSans-{name}.woff2");
+        assert_eq!(test.get(&path, None).status, 401, "{path} signed out");
+        let font = test.get(&path, Some(&token));
+        assert_eq!((font.status, font.header("content-type")), (200, Some("font/woff2")), "{path}");
+        assert!(font.body.starts_with(b"wOF2"), "{path} is a woff2 file");
+        let tag = font.header("etag").expect("a tag").to_owned();
+        let again =
+            test.runtime.block_on(test.http("GET", &path, &[("Cookie", &cookie), ("If-None-Match", &tag)], b""));
+        assert_eq!((again.status, again.body.len()), (304, 0), "{path} asked again");
+    }
+    let licence = test.get("/next/fonts/OFL.txt", Some(&token));
+    assert_eq!((licence.status, licence.header("content-type")), (200, Some("text/plain; charset=utf-8")));
+    assert!(licence.text().to_lowercase().contains("open font license"));
+    assert_eq!(test.get("/next/fonts/other.woff2", Some(&token)).status, 404);
     // Only these names; nothing is found by a path.
     for path in
         ["/next/login.html", "/next/index.html", "/next/..%2fapp.js", "/next/%2e%2e/app.js", "/next/a/b", "/next"]

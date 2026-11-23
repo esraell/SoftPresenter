@@ -1,6 +1,12 @@
 /* Web control prototype, second look: an instrument. Modules on a chassis, keys you press,
    small mono labels, one hot colour. Every colour and size is a variable; a look is one block. */
 
+/* The slide face built into the app: SoftPresenter Sans (SIL Open Font License 1.1, fonts/OFL.txt). A face is fetched only when a slide uses it. */
+@font-face { font-family: 'SoftPresenter Sans'; src: url('fonts/SoftPresenterSans-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'SoftPresenter Sans'; src: url('fonts/SoftPresenterSans-Bold.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'SoftPresenter Sans'; src: url('fonts/SoftPresenterSans-Italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: 'SoftPresenter Sans'; src: url('fonts/SoftPresenterSans-BoldItalic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
+
 /* One look: dark. (The design began light; the light colours and the switch between them are gone.) */
 :root, [data-look="dark"] {
   --chassis: #0c0c0c;      /* behind the panels */
@@ -1618,3 +1624,71 @@ body.login { display: grid; grid-template: 1fr / 1fr; place-items: center; heigh
 /* The words picked, kept highlighted while a number is typed or a font chosen in the inspector. While typing, the browser's own. */
 .tx-in .tsel { background: rgba(140, 170, 255, .38); border-radius: .08em; }
 .tx-in[contenteditable] .tsel { background: none; }
+
+/* ───────── the first-run setup (designed 23 November; awaiting the owner) ─────────
+   One calm card over the window: the steps along the top, a big plain question, a few large choices, the way on at the foot.
+   Chosen things have the 2 px ink ring the import sheet uses; nothing moves. */
+.ui-sheet.su { width: min(780px, 100%); height: min(660px, calc(100vh - 32px)); }      /* every step the same size: the way on stays put */
+.ui-sheet.su .ui-sh b { font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--faint); }
+.ui-sheet.su .ui-sb { padding: 2px 28px 8px; gap: 14px; }
+.ui-sheet.su .ui-sf { padding: 14px 28px 20px; }
+.su-bar { display: flex; gap: 6px; margin-bottom: 4px; }
+.su-dot { display: flex; align-items: center; gap: 7px; padding: 5px 10px 5px 5px; border-radius: 99px; color: var(--faint); font-size: 12px; }
+.su-dot i { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font: 600 10px var(--mono); font-style: normal; box-shadow: inset 0 0 0 1px var(--line); }
+.su-dot i svg { width: 11px; height: 11px; }
+.su-dot.on { color: var(--ink); background: var(--well); } .su-dot.on i { background: var(--ink); color: var(--panel); box-shadow: none; }
+.su-dot.done { color: var(--dim); } .su-dot.done i { background: var(--sel); color: var(--ink); box-shadow: none; }
+.su-dot.skip i::after { content: '–'; } .su-dot.skip i { font-size: 0; } .su-dot.skip i::after { font-size: 12px; }
+.su-t { font-size: 26px; font-weight: 650; letter-spacing: -.01em; margin: 10px 0 0; }
+.su-line { color: var(--dim); font-size: 14px; margin: -6px 0 4px; }
+.su-q { font-size: 14px; font-weight: 600; margin: 8px 0 -2px; } .su-q .sub { margin-left: 6px; font-weight: 400; }
+.su-small { color: var(--faint); font-size: 12px; line-height: 1.45; margin: 0; }
+.su-langs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.su-lang { position: relative; text-align: left; display: grid; align-content: end; gap: 4px; min-height: 112px; padding: 16px; border-radius: var(--r-key); background: var(--well); }
+.su-lang b { font-size: 21px; font-weight: 600; } .su-lang span { color: var(--dim); font-size: 12px; }
+.su-lang.on { box-shadow: inset 0 0 0 2px var(--ink); }
+.su-tick { position: absolute; top: 12px; right: 12px; width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--faint); display: grid; place-items: center; }
+.su-lang.on .su-tick { background: var(--ink); color: var(--panel); box-shadow: none; } .su-tick svg { width: 11px; height: 11px; }
+.su-order { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .su-order .sel { width: auto; min-width: 130px; } .su-order .cap { margin-right: 4px; } .su-w { color: var(--dim); font-size: 13px; }
+.su-card { background: var(--well); border-radius: var(--r-key); padding: 14px 16px; display: grid; gap: 10px; }
+.su-src { display: flex; align-items: center; gap: 9px; font-size: 15px; } .su-src svg { width: 18px; height: 18px; color: var(--c-song); } .su-site { margin-left: auto; }
+.su-rows { display: grid; gap: 2px; }
+.su-row { display: grid; grid-template-columns: 22px 104px 110px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-height: 36px; padding: 0 8px; border-radius: var(--r-sm); background: var(--panel); }
+.su-row b { font-weight: 600; } .su-row .sub { text-transform: none; letter-spacing: 0; font: 12px var(--font); color: var(--faint); }
+.su-row.off { opacity: .55; } .su-row .sp { display: none; }
+.su-n { font-size: 12px; color: var(--dim); }
+.su-have { width: 16px; height: 16px; color: var(--ink); } .su-have svg { width: 14px; height: 14px; }
+.su-opt { grid-template-columns: 22px minmax(0, 1fr); background: none; padding: 0; color: var(--dim); font-size: 12.5px; }
+.su-more { justify-self: start; color: var(--dim); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+.su-warn { display: flex; align-items: center; gap: 10px; color: var(--ink); font-size: 12.5px; } .su-warn .nk { margin: 0; background: var(--next); flex: none; } .su-warn span { flex: 1; }
+.su-own { grid-template-columns: minmax(0, 1fr) auto; align-items: center; } .su-own-b { display: flex; gap: 6px; } .su-os { margin-top: 4px; }
+.su-bib { display: grid; grid-template-columns: 70px minmax(0, 1fr) 160px; align-items: center; gap: 10px; } .su-bib .sub { text-transform: none; letter-spacing: 0; font: 12px var(--font); color: var(--faint); }
+.su-scrs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.su-scr { text-align: left; display: grid; gap: 3px; padding: 12px; border-radius: var(--r-key); background: var(--well); }
+.su-scr b { font-size: 13.5px; font-weight: 600; } .su-scr span { color: var(--faint); font-size: 11.5px; min-height: 14px; }
+.su-scr-pic { aspect-ratio: 16 / 9; border-radius: 4px; background: #000; box-shadow: inset 0 0 0 1px var(--line); margin-bottom: 6px; display: grid; place-items: center; color: var(--faint); font-style: normal; font-size: 18px; }
+.su-scr.on { box-shadow: inset 0 0 0 2px var(--ink); }
+.su-id { display: flex; align-items: center; gap: 12px; }
+.su-ready { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 18px; align-items: start; }
+.su-list { display: grid; gap: 6px; }
+.su-done { display: grid; grid-template-columns: 20px 84px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 44px; padding: 6px 10px; border-radius: var(--r-sm); background: var(--well); font-size: 13px; }
+.su-di { display: grid; place-items: center; color: var(--ink); font-style: normal; } .su-di svg { width: 13px; height: 13px; } .su-di .nk { margin: 0; background: var(--next); }
+.su-dt { line-height: 1.35; } .su-done.warn .su-dt { color: var(--ink); }
+.su-prev { margin: 0; display: grid; gap: 8px; } .su-bprev { width: 340px; } .su-prev-pic .thumb { border-radius: 6px; box-shadow: 0 0 0 1px var(--line); }
+.su-tips { color: var(--dim); font-size: 12.5px; margin: 4px 0 0; } .su-tips b { color: var(--ink); font-weight: 600; }
+.su-prog { color: var(--dim); font: 12px var(--font); text-transform: none; letter-spacing: 0; } .su-dl { font-style: normal; margin-right: 6px; color: var(--ink); }
+
+/* ───────── the song catalog: kept apart, said where it is from ───────── */
+.sh-src.cat .sh-mark, .sh-kind.cat { color: var(--dim); }
+.cat-note { color: var(--faint); font-size: 12px; line-height: 1.4; margin: 2px 4px 8px; }
+.cat-bar, .cat-line { display: flex; align-items: center; gap: 10px; margin: -4px 0 10px; font-size: 12px; color: var(--dim); }
+.cat-bar .sub, .cat-line span { text-transform: none; letter-spacing: 0; font: 12px var(--font); color: var(--faint); }
+.cat-src { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); font-weight: 600; } .cat-src svg, .cat-line > svg { width: 14px; height: 14px; color: var(--c-song); flex: none; }
+.cat-info { display: grid; gap: 6px; padding: 12px 14px; border-radius: var(--r-key); background: var(--well); justify-items: start; }
+.cat-info .ui-p { margin: 0; }
+.cat-newer { display: flex; align-items: center; gap: 10px; font-size: 12.5px; } .cat-newer span { flex: 1; }
+.fd-sect { display: flex; align-items: center; gap: 6px; padding: 8px 12px 4px; color: var(--faint); border-top: 1px solid var(--line); margin-top: 4px; } .fd-sect svg { width: 12px; height: 12px; }
+.fd-row.cat .fd-ico, .fd-row.cat span { color: var(--c-song); }
+.cat-p { margin: 0; color: var(--dim); font-size: 12.5px; line-height: 1.4; }
+.cat-info .btn, .cat-line .btn, .cat-bar .btn, .su-site, .st-card .btn.sm { white-space: nowrap; flex: none; }
+.su-row.off > .sub:last-child { grid-column: 3 / -1; }

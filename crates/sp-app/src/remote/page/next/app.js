@@ -193,7 +193,10 @@ let uid = 0;
 const newId = p => (p || 'x') + (++uid);
 const clone = x => JSON.parse(JSON.stringify(x));
 
-const FONTS = { 'Linux Biolinum': "'Linux Biolinum', 'Linux Libertine', Georgia, serif", Helvetica: "'Helvetica Neue', Helvetica, Arial, sans-serif", Arial: 'Arial, sans-serif', 'Avenir Next': "'Avenir Next', Avenir, 'Segoe UI', sans-serif", Futura: "Futura, 'Century Gothic', sans-serif", 'Gill Sans': "'Gill Sans', 'Gill Sans MT', sans-serif", Optima: 'Optima, Candara, sans-serif', Verdana: 'Verdana, sans-serif', 'Trebuchet MS': "'Trebuchet MS', sans-serif", Impact: 'Impact, sans-serif',
+// The slide face built into the app (SoftPresenter Sans, OFL: fonts/OFL.txt) comes first, as in the app's font list; then the computer's own fonts.
+const DEF_FONT = 'SoftPresenter Sans';
+const FONTS = { 'SoftPresenter Sans': "'SoftPresenter Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif",
+  'Linux Biolinum': "'Linux Biolinum', 'Linux Libertine', Georgia, serif", Helvetica: "'Helvetica Neue', Helvetica, Arial, sans-serif", Arial: 'Arial, sans-serif', 'Avenir Next': "'Avenir Next', Avenir, 'Segoe UI', sans-serif", Futura: "Futura, 'Century Gothic', sans-serif", 'Gill Sans': "'Gill Sans', 'Gill Sans MT', sans-serif", Optima: 'Optima, Candara, sans-serif', Verdana: 'Verdana, sans-serif', 'Trebuchet MS': "'Trebuchet MS', sans-serif", Impact: 'Impact, sans-serif',
   Georgia: "Georgia, 'Times New Roman', serif", 'Times New Roman': "'Times New Roman', Times, serif", Palatino: "Palatino, 'Palatino Linotype', serif", Baskerville: 'Baskerville, Georgia, serif', Didot: 'Didot, Georgia, serif', 'Marker Felt': "'Marker Felt', 'Comic Sans MS', cursive", 'Courier New': "'Courier New', monospace", Menlo: 'Menlo, Consolas, monospace' };
 // On a Mac the F keys belong to the system (brightness, volume, Mission Control): SoftPresenter uses none there
 const MAC = /Mac|iPhone|iPad/.test((typeof navigator !== 'undefined' && (navigator.platform || navigator.userAgent)) || '');
@@ -202,7 +205,7 @@ const SHAPES = { rect: 'Rectangle', rounded: 'Rounded rectangle', ellipse: 'Elli
 const TRANSITIONS = ['Cut', 'Dissolve', 'Fade', 'Fade Black', 'Fade White', 'Push', 'Move In', 'Reveal', 'Fly In', 'Zoom In', 'Door', 'Flip', 'Swap', 'Wipe', 'Split', 'Blinds', 'Iris', 'Clock', 'Checkerboard'];
 const LABELS = ['Blank Slide', 'Instrumental', 'Repeat', 'Spoken Word'];
 const LINKS = { clock: 'The clock', date: 'The date', timer: 'A timer', title: "The song's title", group: "The slide's group", label: "The slide's label", notes: "The slide's notes", next: "The next slide's words", current: 'The words on screen', stagemsg: 'The stage message', copyright: 'The copyright line' };
-const DEF_STYLE = { font: 'Helvetica', size: 88, bold: true, italic: false, underline: false, strike: false, color: '#ffffff', align: 'center', valign: 'middle', stroke: false, strokeWidth: 6, shadow: true, spacing: 0, lineHeight: 1.25, caps: 'none', scaling: 'Text down', bullets: 'none', bg: null, scroll: 'none', shadowAngle: 315, shadowOffset: 10, shadowBlur: 15, shadowOpacity: .5, margin: 0 };
+const DEF_STYLE = { font: DEF_FONT, size: 88, bold: true, italic: false, underline: false, strike: false, color: '#ffffff', align: 'center', valign: 'middle', stroke: false, strokeWidth: 6, shadow: true, spacing: 0, lineHeight: 1.25, caps: 'none', scaling: 'Text down', bullets: 'none', bg: null, scroll: 'none', shadowAngle: 315, shadowOffset: 10, shadowBlur: 15, shadowOpacity: .5, margin: 0 };
 
 /* ───────── objects, slides, songs ───────── */
 const obj = (kind, name, more) => ({ id: newId('o'), kind, name, opacity: 1, hidden: false, locked: false, ...more });
@@ -405,6 +408,9 @@ const BIBLES_TO_DOWNLOAD = [['English', ['American Standard Version', "Young's L
 /* ═════════ the Bible, until step 2 ═════════ */
 const BIBLE_DATA = { bibles: { kjv: { name: 'King James Version', short: 'KJV', lang: 'en' }, syn: { name: 'Russian Synodal', short: 'RST', lang: 'ru' } }, text: { kjv: {}, syn: {} } };      // the Bible page waits for step 2 of the API
 
+/* ═════════ the song catalog, until the app serves it ═════════ */
+const CATALOG = { name: 'Worship Leader App', site: 'worshipleaderapp.com', langs: {}, songs: [] };      // the catalog comes with a later step of the API
+
 /* ═════════ core.js ═════════ */
 // Core: state, helpers, actions, menus and sheets, undo, drawing slides from objects and themes, and the show itself.
 'use strict';
@@ -556,7 +562,7 @@ function renderSheet() {
   if (!s) { el.hidden = true; el.replaceChildren(); return; }
   el.hidden = false;
   setTimeout(() => fitAll(el), 0);
-  put(el, html`<div class="ui-sheet ${s.wide ? 'wide' : ''}"><div class="ui-sh"><b>${s.title}</b><button class="iconbtn" data-a="sheetClose" aria-label="Close">${I.x}</button></div>
+  put(el, html`<div class="ui-sheet ${s.wide ? 'wide' : ''} ${s.cls || ''}"><div class="ui-sh"><b>${s.title}</b><button class="iconbtn" data-a="sheetClose" aria-label="Close">${I.x}</button></div>
     <div class="ui-sb">${s.body}</div><div class="ui-sf">${s.note ? html`<span class="sub">${s.note}</span>` : html`<span></span>`}
       ${(s.buttons || [{ t: 'Done' }]).map((b, n) => html`<button class="btn ${b.primary ? 'primary' : ''}" data-a="sheetBtn:${n}">${b.t}</button>`)}</div></div>`);
 }
@@ -584,7 +590,9 @@ function restore(json) {      // timers and props that are counting keep countin
 }
 function mutate(fn) {
   undoStack.push(JSON.stringify(DOC)); if (undoStack.length > 80) undoStack.shift(); redoStack = [];
-  fn(); afterChange();
+  fn();
+  if (state.mode === 'edit' && state.edit.target && state.edit.target.type === 'slide' && typeof catTouched === 'function') catTouched(songById(state.edit.target.songId));      // a song from the catalog, changed here, is never updated from it
+  afterChange();
 }
 // After a change or an undo, anything this page was pointing at may be gone: point it somewhere that exists.
 function fixState() {
@@ -595,6 +603,7 @@ function fixState() {
   if (!DOC.settings.sound) DOC.settings.sound = { main: 'default', music: { to: 'main', pair: 0 }, video: { to: 'main', pair: 0, level: 100 }, stream: { music: false, video: true } };
   if (state.src.type === 'pl' && !byId(DOC.playlists, state.src.id)) state.src = { type: 'pl', id: DOC.playlists[0].id };
   if (state.src.type === 'lib' && state.src.id !== 'all' && !byId(DOC.libraries, state.src.id)) state.src = { type: 'lib', id: 'all' };
+  if (state.src.type === 'cat' && !catOn()) state.src = { type: 'lib', id: 'all' };
   if (state.src.type === 'vox') state.src = { type: 'pl', id: DOC.playlists[0].id };
   if (!songById(state.openSong)) state.openSong = (DOC.songs[0] || {}).id;
   if (state.mediaView && !byId(DOC.mediaPlaylists, state.mediaView)) state.mediaView = null;
@@ -670,6 +679,7 @@ function copyrightLine(song) {
   const i = song.info || {}, parts = [];
   if (i.author) parts.push(i.author); if (i.year || i.publisher) parts.push(`© ${[i.year, i.publisher].filter(Boolean).join(' ')}`);
   if (i.ccli) parts.push(`CCLI Song # ${i.ccli}`); if (DOC.settings.ccliLicence) parts.push(`CCLI Licence # ${DOC.settings.ccliLicence}`);
+  if (song.from && DOC.settings.catCredit && typeof CATALOG !== 'undefined') parts.push(`Songs: ${CATALOG.name}`);      // only if the church chooses it (Settings › Integrations)
   return parts.join(' · ');
 }
 
@@ -737,7 +747,7 @@ function setWords(o, text) { const sp = remapSpans(o.text || '', text, o.spans);
 const decoCSS = l => [l.underline && 'underline', l.strike && 'line-through'].filter(Boolean).join(' ') || 'none';
 // One piece's look, against its box: the size as a share of the box's, so fitting the box to its words shrinks every piece alike.
 const runCSS = (look, s) => { const l = { ...s, ...look };
-  return `font-family:${FONTS[l.font] || FONTS.Helvetica};font-size:${+(l.size / s.size).toFixed(4)}em;font-weight:${l.bold ? 700 : 400};font-style:${l.italic ? 'italic' : 'normal'};text-decoration:${decoCSS(l)};color:${l.color};`; };
+  return `font-family:${FONTS[l.font] || FONTS[DEF_FONT]};font-size:${+(l.size / s.size).toFixed(4)}em;font-weight:${l.bold ? 700 : 400};font-style:${l.italic ? 'italic' : 'normal'};text-decoration:${decoCSS(l)};color:${l.color};`; };
 // The words of a box drawn piece by piece. Each piece carries its look (data-look) so that what is typed can be read back with
 // its styling; a bullet or number is drawn but not typed (data-pre). hl: the words picked while the inspector is being used.
 function styledWords(text, o, s, paras, hl) {
@@ -779,7 +789,7 @@ function objHTML(o, ctx, ed) {
       if (paras) text = text.split('\n').slice(0, paras).join('\n');
       if (s.bullets !== 'none' && text) text = text.split('\n').map((l, n) => (s.bullets === 'numbers' ? `${n + 1}. ` : '• ') + l).join('\n');
     }
-    const look = `font-family:${FONTS[s.font] || FONTS.Helvetica};font-size:${s.size / 19.2}cqw;font-weight:${s.bold ? 700 : 400};font-style:${s.italic ? 'italic' : 'normal'};text-decoration:${pieces ? 'none' : decoCSS(s)};`
+    const look = `font-family:${FONTS[s.font] || FONTS[DEF_FONT]};font-size:${s.size / 19.2}cqw;font-weight:${s.bold ? 700 : 400};font-style:${s.italic ? 'italic' : 'normal'};text-decoration:${pieces ? 'none' : decoCSS(s)};`
       + `color:${s.color};text-align:${s.align};justify-content:${{ top: 'flex-start', middle: 'center', bottom: 'flex-end' }[s.valign]};letter-spacing:${s.spacing / 19.2}cqw;line-height:${s.lineHeight};`
       + `text-transform:${{ none: 'none', upper: 'uppercase', lower: 'lowercase', title: 'capitalize' }[s.caps]};`
       + (s.shadow ? `text-shadow:${(Math.cos(s.shadowAngle * Math.PI / 180) * s.shadowOffset / 19.2).toFixed(3)}cqw ${(-Math.sin(s.shadowAngle * Math.PI / 180) * s.shadowOffset / 19.2).toFixed(3)}cqw ${s.shadowBlur / 19.2}cqw rgba(0,0,0,${s.shadowOpacity});` : '') + (s.margin ? `padding:${s.margin / 19.2}cqw;` : '') + (s.stroke ? `-webkit-text-stroke:${s.strokeWidth / 19.2}cqw #000;paint-order:stroke fill;` : '')
@@ -865,6 +875,7 @@ function decks() {
   if (deckCache) return deckCache;
   if (state.src.type === 'lib') { const s = songById(state.openSong); return deckCache = s ? [songDeck(s, 'lib-' + s.id)] : []; }
   if (state.src.type === 'vox') return deckCache = [voxDeck()];
+  if (state.src.type === 'cat') { const s = catSongs().find(x => x.id === state.openCat) || catSongs()[0]; if (s) state.openCat = s.id; return deckCache = s ? [songDeck(s, 'cat-' + s.id)] : []; }      // a catalog song, to look at
   return deckCache = playlist().items.map(itemDeck);
 }
 const deckByKey = key => key === 'bible' ? bibleDeck() : key === 'bible-held' ? state.heldBible : key === 'vox' ? voxDeck() : decks().find(d => d.key === key) || (state.heldDeck && state.heldDeck.key === key ? state.heldDeck : undefined);      // heldDeck: the song on screen after its item left the playlist
@@ -1132,7 +1143,7 @@ M.itemVersion = ([id]) => { const it = itemById(id); return [{ head: 'When this 
 VIEWS.show = { left: renderShowLeft, centre: renderShowCentre };
 
 /* ───────── left: where the songs come from, then what is in it ───────── */
-const srcName = () => state.src.type === 'pl' ? playlist().name : state.src.type === 'vox' ? 'VoxLive' : state.src.id === 'all' ? 'All Songs' : byId(DOC.libraries, state.src.id).name;
+const srcName = () => state.src.type === 'pl' ? playlist().name : state.src.type === 'vox' ? 'VoxLive' : state.src.type === 'cat' ? CATALOG.name : state.src.id === 'all' ? 'All Songs' : byId(DOC.libraries, state.src.id).name;
 const librarySongs = () => state.src.id === 'all' ? DOC.songs.filter(s => !s.notInLibrary) : byId(DOC.libraries, state.src.id).songs.map(songById).filter(Boolean);
 const voxReady = () => DOC.voxlive.connected && DOC.voxlive.screens.length > 0;
 
@@ -1142,13 +1153,14 @@ function renderShowLeft() {
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
   // One row of the chooser: a mark for what kind of thing it is, its name, what is in it, and a tick on the one that is open
   const src = (type, id, name, sub, menu = '') => { const on = state.src.type === type && state.src.id === id;
-    return html`<div class="sh-src ${type} ${on ? 'on' : ''}"><button class="rowbtn" data-a="src:${type},${id}"><span class="sh-mark">${type === 'pl' ? I.playlist : I.library}</span><span class="t">${name}</span><span class="meta mono" title="${sub}">${parseInt(sub)}</span>${on ? html`<span class="sh-open">${I.check}</span>` : ''}</button>${menu}</div>`; };
+    return html`<div class="sh-src ${type} ${on ? 'on' : ''}"><button class="rowbtn" data-a="src:${type},${id}"><span class="sh-mark">${type === 'pl' ? I.playlist : type === 'cat' ? I.catalog : I.library}</span><span class="t">${name}</span><span class="meta mono" title="${sub}">${sub.split(' ')[0]}</span>${on ? html`<span class="sh-open">${I.check}</span>` : ''}</button>${menu}</div>`; };
   const panel = html`<div class="sh-panel ${state.srcMenu ? '' : 'closed'}">
     <div class="sect-h"><span class="cap">Playlists</span><span class="sh-what">a service, in order</span><button class="iconbtn" data-a="newPlaylist" title="New playlist">${I.plus}</button></div>
     ${DOC.playlists.map(p => src('pl', p.id, p.name, plural(p.items.filter(i => i.kind !== 'header').length, 'item'), dots('pl', p.id)))}
     <div class="sect-h sh-second"><span class="cap">Song libraries</span><span class="sh-what">every song you keep</span><button class="iconbtn" data-a="newLibrary" title="New library">${I.plus}</button></div>
     ${src('lib', 'all', 'All Songs', plural(DOC.songs.length, 'song'))}
-    ${DOC.libraries.map(l => src('lib', l.id, l.name, plural(l.songs.length, 'song'), dots('lib', l.id)))}</div>`;
+    ${DOC.libraries.map(l => src('lib', l.id, l.name, plural(l.songs.length, 'song'), dots('lib', l.id)))}
+    ${catOn() ? html`<div class="sect-h sh-second"><span class="cap">Song catalog</span><span class="sh-what">free songs to find</span></div>${src('cat', 'wla', CATALOG.name, `${fmtN(catCount())} songs`)}` : ''}</div>`;
   let rows = '', add = '';
   if (state.src.type === 'pl') {
     let n = 0; const ic = { passage: I.book, media: I.film, mediaPlaylist: I.loop, placeholder: I.slot };
@@ -1170,9 +1182,10 @@ function renderShowLeft() {
       html`<div class="item ${state.live && state.live.deck === 'lib-' + s.id && state.on ? 'live' : ''}"><button class="rowbtn ${state.openSong === s.id ? 'on' : ''} ${state.songPick.includes(s.id) ? 'pickd' : ''}" data-a="openSong:${s.id}" data-m="song:${s.id}" draggable="true" data-drag="song:${s.id}"><span class="ico">${I.song}</span><span class="t">${s.title}${state.changedOutside === s.id ? html`<i class="sh-slot sh-chg">changed</i>` : ''}${state.src.id === 'all' && inLib(s.id) ? html`<i class="sh-slot">${inLib(s.id)}</i>` : ''}</span><span class="meta mono">${s.slides.length || ''}</span><span class="sh-rowmore" data-a="menu:song,${s.id}" title="More">${I.more}</span></button></div>`)
       : html`<div class="sh-none">${f ? 'No songs match' : 'No songs here yet. Make one, import some, or drag songs onto this library’s name.'}</div>`;
     add = html`<div class="sh-order"><span class="cap">Order</span>${seg([['listed', 'As listed'], ['az', 'A–Z'], ['slides', 'Longest']], order, 'songOrder')}</div><button class="btn sh-add" data-a="newSong">${I.plus} New song</button>`;
-  } else rows = html`<div class="sh-none">The church’s VoxLive screens, one slide each. Click one to put its live captions on the screens.</div>`;
-  put('left', html`<div class="sect items"><div class="sect-h"><span class="cap">${state.src.type === 'pl' ? 'Playlist' : state.src.type === 'vox' ? 'Integration' : 'Library'}</span><button class="iconbtn" data-a="menu:importMenu" title="Import songs or slides">${svg('M6.500 2v6.500M4 6l2.500 2.500L9 6M2.500 10.500h8')}</button></div>
-    <button class="plbtn ${state.srcMenu ? 'open' : ''}" data-a="srcMenu" title="Choose a library or playlist (Option-P)"><i class="sh-kind ${state.src.type === 'pl' ? 'pl' : 'lib'}">${state.src.type === 'pl' ? I.playlist : I.library}</i><span>${srcName()}</span><span class="chev">${I.chev}</span></button>${panel}${rows}</div>
+  } else if (state.src.type === 'cat') ({ rows, add } = catLeft(hit));
+  else rows = html`<div class="sh-none">The church’s VoxLive screens, one slide each. Click one to put its live captions on the screens.</div>`;
+  put('left', html`<div class="sect items"><div class="sect-h"><span class="cap">${state.src.type === 'pl' ? 'Playlist' : state.src.type === 'vox' ? 'Integration' : state.src.type === 'cat' ? 'Song catalog' : 'Library'}</span><button class="iconbtn" data-a="menu:importMenu" title="Import songs or slides">${svg('M6.500 2v6.500M4 6l2.500 2.500L9 6M2.500 10.500h8')}</button></div>
+    <button class="plbtn ${state.srcMenu ? 'open' : ''}" data-a="srcMenu" title="Choose a library or playlist (Option-P)"><i class="sh-kind ${state.src.type === 'pl' ? 'pl' : state.src.type === 'cat' ? 'cat' : 'lib'}">${state.src.type === 'pl' ? I.playlist : state.src.type === 'cat' ? I.catalog : I.library}</i><span>${srcName()}</span><span class="chev">${I.chev}</span></button>${panel}${rows}</div>
     <div class="sh-foot">${add}<input class="search" placeholder="Filter" data-i="filter" value="${state.filter}"></div>`);
 }
 A.srcMenu = () => { state.srcMenu = !state.srcMenu; renderShowLeft(); };
@@ -1183,6 +1196,7 @@ A.src = ([type, id]) => {
   deckCache = null;
   if (type === 'pl') state.openItem = (decks().find(d => d.slides && d.slides.length) || {}).key || null;
   if (type === 'lib' && !librarySongs().some(s => s.id === state.openSong)) state.openSong = (librarySongs()[0] || {}).id || null;
+  if (type === 'cat') { deckCache = null; state.openCat = (catSongs().find(s => s.id === state.openCat) || catSongs()[0] || {}).id || null; }
   render(); 
 };
 // Picking items the Finder way (as the app has it, 21 November): a click picks one and is the anchor; Shift-click takes the
@@ -1303,7 +1317,7 @@ A.newSong = () => openSheet({ title: 'New song', wide: true,
     
   } }] });
 A.songInfo = ([id]) => { const s = songById(id), i = s.info; openSheet({ title: `${s.title} · details`,
-  body: html`${[['artist', 'Artist'], ['author', 'Author'], ['publisher', 'Publisher'], ['year', 'Year'], ['ccli', 'CCLI Song #']].map(([k, l]) => field(l, html`<input class="field" id="si-${k}" value="${i[k] == null ? '' : i[k]}">`))}<p class="ui-p sub" style="margin-top:10px">${copyrightLine(s) || 'The copyright line is built from these'}</p>`,
+  body: html`${catInfo(s)}${[['artist', 'Artist'], ['author', 'Author'], ['publisher', 'Publisher'], ['year', 'Year'], ['ccli', 'CCLI Song #']].map(([k, l]) => field(l, html`<input class="field" id="si-${k}" value="${i[k] == null ? '' : i[k]}">`))}<p class="ui-p sub" style="margin-top:10px">${copyrightLine(s) || 'The copyright line is built from these'}</p>`,
   buttons: [{ t: 'Cancel' }, { t: 'Save', primary: true, f: () => mutate(() => { for (const k of Object.keys(i)) i[k] = $('si-' + k).value.trim(); }) }] }); };
 A.songNotes = ([id]) => { const s = songById(id); openSheet({ title: `${s.title} · operator notes`, body: html`<textarea class="ui-ta" id="snText" placeholder="Notes for whoever runs the slides">${s.notes || ''}</textarea>`,
   buttons: [{ t: 'Cancel' }, { t: 'Save', primary: true, f: () => mutate(() => { s.notes = $('snText').value; }) }] }); };
@@ -1365,7 +1379,8 @@ function pickSlide(key, s, run) {
 const targets = (key, s) => state.picked.deck === key && state.picked.set.includes(s) ? [...state.picked.set].sort((a, b) => a - b) : [s];
 A.goAt = ([key, q]) => { state.picked = { deck: null, set: [] }; state.cue = null; go(key, +q); };
 A.go = ([key, s], el, ev) => { if (ev && (ev.metaKey || ev.ctrlKey || ev.shiftKey)) return pickSlide(key, +s, ev.shiftKey); state.picked = { deck: null, set: [] }; state.cue = null; go(key, null, +s); };      // a click puts that slide on and drops the cue
-A.editSlide = ([key, s]) => enterEdit(key, +s);
+A.editSlide = ([key, s]) => { if (!key.startsWith('cat-')) return enterEdit(key, +s);      // a catalog song edited joins the library first
+  let j; mutate(() => { j = catJoin(key.slice(8)); }); toast(`“${j.title}” is in your library now, to change as you like`); enterEdit(null, +s, j.id); };
 function slideOp(key, s, what) {
   const d = deckByKey(key), song = d.song, idx = targets(key, s), sl = song.slides;
   if (what === 'copy' || what === 'cut') { state.clip = { type: 'slides', slides: idx.map(i => clone(sl[i])) }; if (what === 'copy') return toast(`${idx.length} slide${idx.length > 1 ? 's' : ''} copied`); }
@@ -1417,7 +1432,7 @@ function slideTile(d, sl, s, at) {      // `at`, when the song has an arrangemen
   const picked = state.picked.deck === d.key && state.picked.set.includes(s);
   const badges = [sl.check ? html`<i class="sh-b chk" title="${sl.check}. Its menu has Mark as Checked">Check</i>` : '', sl.hotkey ? html`<i class="sh-b key">${sl.hotkey}</i>` : '', sl.advance ? html`<i class="sh-b">${sl.advance}s</i>` : '', sl.actions && sl.actions.length ? html`<i class="sh-b">${sl.actions.length} act</i>` : '', sl.transition ? html`<i class="sh-b">${sl.transition.kind}</i>` : ''];
   const colour = sl.bible || sl.vox ? 'var(--c-bible)' : groupColour(sl.group), cued = isCued(d.key, q, s), cls = `${(q >= 0 ? !!state.live && !!state.on && state.live.deck === d.key && state.live.q === q : isLive(d.key, s)) ? 'live' : ''} ${cued ? 'cued' : ''} ${again ? 'again' : ''} ${at && at.out ? 'out' : ''} ${picked ? 'pickd' : ''} ${sl.enabled === false ? 'off' : ''} ${first || !d.song ? '' : 'cont'}`;
-  const drag = d.song && !again, a = { 'data-a': again ? `goAt:${d.key},${q}` : `go:${d.key},${s}`, 'data-m': `slide:${d.key},${s}`, draggable: drag ? 'true' : null, 'data-drag': drag ? `slide:${d.key},${s}` : null }, v = DOC.settings.view;
+  const drag = d.song && !again && !d.key.startsWith('cat-'), a = { 'data-a': again ? `goAt:${d.key},${q}` : `go:${d.key},${s}`, 'data-m': `slide:${d.key},${s}`, draggable: drag ? 'true' : null, 'data-drag': drag ? `slide:${d.key},${s}` : null }, v = DOC.settings.view;
   if (v === 'easy') return html`<button class="sh-easy ${cls}" style="--g:${colour}" ${a}><span class="n mono">${num}</span><i class="dot"></i><span class="w">${slideWords(sl).replace(/\n/g, ' / ')}</span><span class="g">${name}</span><span class="edit" data-a="menu:slide,${d.key},${s}" title="More">${I.more}</span></button>`;
   if (v === 'table') return html`<button class="sh-trow ${cls}" style="--g:${colour}" ${a}><span class="n mono">${num}</span><span class="g"><i class="dot"></i>${name}</span><span class="w">${slideWords(sl).replace(/\n/g, ' / ')}</span><span class="nt">${sl.notes || ''}</span></button>`;
   return html`<button class="slide ${cls}" style="--g:${colour}" ${a}>${thumb(sl, d.ctx)}
@@ -1441,7 +1456,8 @@ function deckHTML(d) {
       const len = s.slides.filter(sl => sl.enabled && sl.group === g).length, on = liveQ >= q && liveQ < q + len * count, pass = on && len ? Math.floor((liveQ - q) / len) + 1 : 0; q += len * count;
       return html`<button class="sh-chip ${on ? 'on' : ''}" style="--g:${groupColour(g)}" data-a="arrGo:${d.key},${n}" data-m="arrChip:${s.id},${n}" draggable="true" data-drag="arr:${s.id},${n}" title="Click to go there · drag to move · the arrow sets how many times"><i class="dot"></i>${g}${count > 1 ? html`<b class="sh-x mono">${on ? `${pass}/${count}` : '×' + count}</b>` : ''}<span class="sh-chipmore" data-a="menu:arrChip,${s.id},${n}" title="Times, move or remove">${I.chev}</span></button>`; }), html`<button class="iconbtn" data-a="menu:arrAdd,${s.id}" title="Add a group">${I.plus}</button>`]}</div>`;
   }
-  const tools = (!s ? (d.app ? html`<span class="pill">Opens in the app</span>` : d.kind === 'passage' ? html`<span class="pill">Bible</span>${verTool(d)}` : d.kind === 'vox' ? html`<span class="pill">Live captions</span>` : '')
+  const catHere = d.key.startsWith('cat-');      // a catalog song: to look at and add, not to change
+  const tools = catHere ? '' : (!s ? (d.app ? html`<span class="pill">Opens in the app</span>` : d.kind === 'passage' ? html`<span class="pill">Bible</span>${verTool(d)}` : d.kind === 'vox' ? html`<span class="pill">Live captions</span>` : '')
     : html`${d.slot ? html`<span class="pill">${d.slot}</span>` : ''}${s.loop ? html`<span class="pill">Loops</span>` : ''}<span class="sh-tools"><button class="iconbtn" data-a="songInfo:${s.id}" title="Details">${I.info}</button><button class="iconbtn" data-a="songWords:${s.id}" title="Edit Words">${I.words}</button><button class="iconbtn ${showArr ? 'lit' : ''}" data-a="songArr:${s.id}" title="Arrangement">${I.arr}</button>${verTool(d)}<button class="iconbtn ${s.notes ? 'lit' : ''}" data-a="songNotes:${s.id}" title="Notes">${I.notes}</button><button class="iconbtn" data-a="${d.item ? `menu:item,${d.key}` : `menu:song,${s.id}`}" title="More">${I.more}</button></span>`);
   const v = DOC.settings.view, wrap = body => html`<div class="${v === 'grid' ? 'grid' : v === 'easy' ? 'sh-list' : 'sh-tbl'}">${v === 'table' ? html`<div class="sh-thead"><span></span><span>Group</span><span>Words</span><span>Notes</span></div>` : ''}${body}</div>`;
   let body;
@@ -1451,7 +1467,7 @@ function deckHTML(d) {
       out.length ? [html`<div class="sh-outh cap">Not in this arrangement · still there to click</div>`, wrap(out.map((i, n) => slideTile(d, d.slides[i], i, { q: -1, out: true, prev: n ? d.slides[out[n - 1]].group : null })))] : ''];
   } else body = wrap(d.slides.map((sl, i) => slideTile(d, sl, i)));
   const askHere = s && state.changedOutside === s.id ? html`<div class="sh-ask"><i class="nk ask">?</i><span>This song was changed outside SoftPresenter. Read it again from its file, or keep SoftPresenter’s version?</span><button class="btn sm primary" data-a="outside:reload">Reload</button><button class="btn sm" data-a="outside:keep">Keep mine</button></div>` : '';
-  return html`${at}<div class="grp-h" ${open} ${m}><b>${d.title}</b>${tools}<span class="sp"></span></div>${askHere}${chips}${body}`;
+  return html`${at}<div class="grp-h" ${open} ${m}><b>${d.title}</b>${tools}<span class="sp"></span></div>${catHere ? catBar(d) : catLine(s)}${askHere}${chips}${body}`;
 }
 function renderShowCentre() {
   const st = DOC.settings, tr = st.transition, mv = state.mediaView && byId(DOC.mediaPlaylists, state.mediaView);
@@ -2456,7 +2472,8 @@ function renderInspector() {
 }
 A.itab = ([x]) => { state.itab = x; renderRight(); };
 // One html piece, not a bare list: main.js's font search still draws #fontList from it as a string, through the bridge.
-const fontRows = f => { const names = Object.keys(FONTS).filter(n => n.toLowerCase().includes(f.toLowerCase()));
+const fontNames = () => [DEF_FONT, ...Object.keys(FONTS).filter(n => n !== DEF_FONT).sort((a, b) => a.localeCompare(b))];      // the app's order: its own face first, then the computer's A–Z
+const fontRows = f => { const names = fontNames().filter(n => n.toLowerCase().includes(f.toLowerCase()));
   return names.length ? html`${names.map(n => html`<button class="rowbtn" data-a="fontPick:${n}"><span class="t" style="font-family:${FONTS[n]};font-size:17px">${n}</span></button>`)}` : html`<p class="ui-p sub">No font by that name</p>`; };
 A.fontSheet = () => openSheet({ title: 'Font', body: html`<input class="field" id="fontFind" data-i="fontFind" placeholder="Search fonts"><div class="ui-list" id="fontList">${fontRows('')}</div>`, buttons: [{ t: 'Cancel' }] });
 A.fontPick = ([n]) => { closeSheet(); edApply('style.font', () => n); };
@@ -2658,7 +2675,7 @@ function renderSettings() {
       html`<button class="btn" data-a="keysSheet">Every key</button>`),
     card('Groups', 'A group’s key jumps to it; change them in Groups', html`<div class="st-keygrid">${DOC.groups.filter(g => g.key).map(g => html`<span><span class="st-key mono">${g.key}</span>${g.name}</span>`)}</div>`)];
   if (sec === 'Integrations') { const v = DOC.voxlive;
-    body = [card('VoxLive', 'Live translation captions on a screen', v.connected
+    body = [catCard(card), card('VoxLive', 'Live translation captions on a screen', v.connected
         ? stLine('API key', html`<span class="st-key mono" style="text-transform:none">${v.key}…</span><button class="btn" data-a="voxDisconnect">Disconnect</button>`, 'Kept in the computer’s keychain; only its first characters are shown')
         : stLine('API key', html`<input class="field" id="voxKey" type="password" placeholder="Paste the key made in VoxLive"><button class="btn primary" data-a="voxConnect">Connect</button>`, 'Made in VoxLive › Settings › API keys, with the screens permissions'),
         html`<span class="pill" style="color:${v.connected ? 'var(--ok)' : 'var(--faint)'}">${v.connected ? 'Connected' : 'Not connected'}</span>`),
@@ -2864,16 +2881,7 @@ A.voxLook = ([id]) => { const sc = byId(DOC.voxlive.screens, id), l = state.shee
 C.voxSet = (v, [k], el) => { state.sheet.look[k] = el.type === 'checkbox' ? el.checked : +v; A.voxLook([state.sheet.vox]); };
 A.voxSetA = ([k, v]) => { state.sheet.look[k] = v; A.voxLook([state.sheet.vox]); };
 
-/* the first-start setup */
-A.setup = ([step]) => { const n = +(step || 0), steps = ['Screens', 'Songs', 'Bibles', 'Permissions'];
-  const body = [
-    html`${field('The congregation sees', html`<select class="sel">${options(['HP 27f', '3DTV', 'A window on this display', 'NDI'], 'HP 27f')}</select>`)}${field('The stage sees (optional)', html`<select class="sel">${options(['Nothing', 'Stage TV', '3DTV'], 'Stage TV')}</select>`)}<p class="ui-p sub">The main display, with the menu bar, is never offered: it is where SoftPresenter’s own window is. The screen goes there at once.</p><button class="btn" data-a="identify">Identify screens</button>`,
-    html`<p class="ui-p">Bring your songs in now, or later from the Import button above the song list.</p><div class="ui-cards"><button class="ui-card" data-a="say:A library found on this computer would come in with one click"><b>A library found on this Mac</b><span>4,372 songs · one click</span></button><button class="ui-card" data-a="say:Song files would be chosen here"><b>Song files</b><span>Text, lyric files, ChordPro, Word…</span></button></div>`,
-    html`${field('The Bible on top', html`<select class="sel" data-c="bibleRow:0,bible">${options(Object.entries(BIBLE_DATA.bibles).map(([id, b]) => [id, b.name]), B().rows[0].bible)}</select>`)}${field('The Bible below', html`<select class="sel" data-c="setupBelow">${options([...Object.entries(BIBLE_DATA.bibles).map(([id, b]) => [id, b.name]), ['none', 'None']], (B().rows[1] || { bible: 'none' }).bible)}</select>`)}`,
-    html`<p class="ui-p">macOS will ask for these, once each:</p><div class="ui-list"><div class="ui-row"><span class="t">Controlling the app that opens a presentation</span><span class="sub">to draw a presentation as pictures</span></div><div class="ui-row"><span class="t">The local network</span><span class="sub">to send screens over NDI and serve this page</span></div><div class="ui-row"><span class="t">Files in Documents</span><span class="sub">where the library is kept</span></div></div>`][n];
-  openSheet({ title: `Set up SoftPresenter · ${n + 1} of ${steps.length} · ${steps[n]}`, wide: true, body,
-    buttons: [n > 0 ? { t: 'Back', keep: true, f: () => A.setup([n - 1]) } : { t: 'Later' }, n < steps.length - 1 ? { t: 'Next', primary: true, keep: true, f: () => A.setup([n + 1]) } : { t: 'Finish', primary: true }] }); };
-C.setupBelow = v => { const r = B().rows; if (v === 'none') r.splice(1); else if (r[1]) r[1].bible = v; else r.push({ bible: v, verse: 'verse2', ref: 'ref2' }); };
+/* the first-start setup: setup.js */
 A.outsideDemo = () => { state.changedOutside = DOC.songs[1].id; state.mode = 'show'; render(); };
 
 /* keys that can be changed */
@@ -2971,6 +2979,294 @@ function scrCardsHTML(top) {
 A.scrFine = (_, el, ev) => { if (ev) ev.preventDefault(); state.scrFine = !state.scrFine; render(); };
 A.scrAddAsk = () => A.scrAdd(['Audience']);      // what it is for (stage included) is the setup's first question
 
+/* ═════════ setup.js ═════════ */
+// The first-run setup and the song catalog it brings (the owner, 23 November: "i want it to look nice and very simple";
+// "make sure all the importatn things are in the onbaording so when theyre done its ready for them to use").
+// Five steps: Languages (with the welcome), Songs, Bibles, Screens, Ready. Each can be skipped; every answer is the same one
+// Settings makes, and the setup can be opened again from the SoftPresenter menu. AWAITING THE OWNER: a design to approve.
+'use strict';
+
+/* ───────── the song catalog (Worship Leader App) ─────────
+   Songs downloaded from it are kept apart from the church's own: found in the find box and the chooser, marked with where they
+   came from, and joining the library when one goes into a playlist or is edited. Untouched songs update quietly; anything the
+   church changed stays changed. */
+const CAT_LANGS = Object.keys(CATALOG.langs);
+I.catalog = svg('M3.500 2h7v8.500h-7zM1.800 3.800v8h6.500M5.500 4.500h3M5.500 6.500h3', 1.2);      // a stack of pages: a collection to look in (the name says whose)
+const catState = () => state.cat || (state.cat = { have: {}, dl: {}, fail: {}, offline: false });      // nothing downloaded in the sample until the owner approves the design; ?demo=cat… turns it on
+const catSample = () => { catState().have = { ru: { at: Date.now() - 3 * 864e5 }, en: { at: Date.now() - 3 * 864e5 } }; };      // the sample church keeps Russian and English
+const catHave = () => catState().have;
+const catOn = () => CATALOG.songs.length > 0 && CAT_LANGS.some(l => catHave()[l]);
+const catCount = () => CAT_LANGS.filter(l => catHave()[l]).reduce((n, l) => n + CATALOG.langs[l].songs, 0);
+const fmtN = n => n.toLocaleString('en-GB');
+const langName = l => CATALOG.langs[l] ? CATALOG.langs[l].name : l;
+const CAT_CACHE = {};
+// A catalog song as a song to look at (not in the library): its own words only.
+function catSong(key) {
+  if (CAT_CACHE[key]) return CAT_CACHE[key];
+  const c = CATALOG.songs.find(x => x.key === key); if (!c) return null;
+  const s = song(c.title, c.groups.map(([, g, w]) => [g, [w, '']]));
+  s.id = 'wla-' + key; s.cat = { key, no: c.no || null, lang: c.lang };
+  return (CAT_CACHE[key] = s);
+}
+const catSongs = () => CATALOG.songs.filter(c => catHave()[c.lang]).map(c => catSong(c.key));
+const catOf = s => s && (s.cat || s.from) ? CATALOG.songs.find(c => c.key === (s.cat || s.from).key) : null;
+// The other language comes along group by group, where both versions have the group (Verse 1 with Verse 1); a group with no
+// partner shows one language. Returns the slides' second lines, and the groups left with one language.
+function catLineUp(c, lang) {
+  const other = c.links && CATALOG.songs.find(x => x.key === c.links[lang]); if (!other) return null;
+  const theirs = Object.fromEntries(other.groups.map(([code, , w]) => [code, w]));
+  return { lines: c.groups.map(([code]) => theirs[code] || ''), alone: c.groups.filter(([code]) => !theirs[code]).map(([, g]) => g), other };
+}
+// Into the library: a copy of its own, in a library named after the catalog, with the second language if the church shows one.
+function catJoin(key) {
+  const had = DOC.songs.find(s => s.from && s.from.key === key); if (had) return had;
+  const c = CATALOG.songs.find(x => x.key === key), langs = DOC.settings.langs || [], below = langs.find(l => l !== c.lang);
+  const up = below && DOC.settings.catLinked !== false ? catLineUp(c, below) : null;
+  const s = song(c.title, c.groups.map(([, g, w], n) => [g, [w, up ? up.lines[n] : '']]));
+  s.from = { key, no: c.no || null, lang: c.lang, added: Date.now(), changed: false, newer: false, alone: up && up.alone.length ? { lang: below, groups: up.alone } : null, with: up ? below : null };
+  DOC.songs.push(s);
+  let lib = DOC.libraries.find(l => l.catalog); if (!lib) { lib = { id: newId('lib'), name: CATALOG.name, songs: [], catalog: true }; DOC.libraries.push(lib); }
+  lib.songs.push(s.id);
+  return s;
+}
+// A song the church edits stops updating from the catalog (it is never overwritten); the Edit page calls this through mutate.
+const catTouched = s => { if (s && s.from && !s.from.changed) s.from.changed = true; };
+
+// The catalog in the chooser and the left column: songs to find, never mixed into the church's own.
+function catLeft(hit) {
+  const list = catSongs().filter(s => hit(s.title) || s.slides.some(sl => hit(allWords(sl))) || (s.cat.no && hit(String(s.cat.no))));
+  const rows = list.length ? list.map(s => html`<div class="item"><button class="rowbtn ${state.openCat === s.id ? 'on' : ''}" data-a="openCat:${s.id}" data-m="catSong:${s.cat.key}" draggable="true" data-drag="song:${s.id}" title="Drag it onto a playlist or library in the chooser"><span class="ico">${I.catalog}</span><span class="t">${s.title}</span><span class="meta mono">${s.cat.lang.toUpperCase()}</span></button></div>`)
+    : html`<div class="sh-none">No songs match</div>`;
+  return { rows: [html`<p class="cat-note">Free songs to find. One joins your library when you add it, put it in a playlist or edit it.</p>`, rows],
+    add: html`<button class="btn sh-add" data-a="catSettings">Languages and updates…</button>` };
+}
+M.catSong = ([key]) => [{ t: 'Add to Library', f: () => A.catAdd([key]) }, { head: 'Add to Playlist' }, ...DOC.playlists.map(p => ({ t: p.name, f: () => catToPlaylist(key, p.id) }))];
+function catToPlaylist(key, pid) { let s; const p = byId(DOC.playlists, pid); mutate(() => { s = catJoin(key); p.items.push({ id: newId('it'), kind: 'song', song: s.id }); }); toast(`Added ${s.title} to ${p.name}${s.from.with ? `, with its ${CATALOG.langs[s.from.with].en} version below` : ''}.`); }
+// A catalog song's slides: to look at, put on screen, or take into the library; changing one starts with the library.
+const slideMenu0 = M.slide;
+M.slide = ([key, s]) => !String(key).startsWith('cat-') ? slideMenu0([key, s]) : [{ t: 'Add Song to Library', f: () => A.catAdd([key.slice(8)]) }, { t: 'Edit (it joins your library)', f: () => A.editSlide([key, s]) }];
+A.openCat = ([id]) => { state.openCat = id; deckCache = null; render(); };
+A.catSettings = () => { state.mode = 'settings'; state.setTab = 'integrations'; render(); };
+// The title bar of a catalog song: where it is from, in words, and the way into the library.
+function catBar(d) {
+  const s = d.song, c = catOf(s); if (!c) return '';
+  const others = Object.keys(c.links || {}).filter(l => catHave()[l]);
+  return html`<div class="cat-bar"><span class="cat-src">${I.catalog} From ${CATALOG.name}</span>${others.length ? html`<span class="sub">Also in ${others.map(langName).join(', ')}</span>` : ''}${c.chords ? html`<span class="sub" title="Chords are kept with the song; slides never show them">Has chords</span>` : ''}<span class="sp"></span><button class="btn sm" data-a="menu:catSong,${c.key}">${I.plus} Add to… ▾</button></div>`;
+}
+A.catAdd = ([key]) => { let s; mutate(() => { s = catJoin(key); }); toast(`“${s.title}” is in your library now${s.from.with ? `, with its ${CATALOG.langs[s.from.with].en} version below` : ''}`); };
+// A library song that came from the catalog: a quiet line under its title bar, only when there is something to say.
+function catLine(s) {
+  if (!s || !s.from) return '';
+  const bits = [];
+  if (s.from.alone) bits.push(`${s.from.alone.groups.join(', ')} ${s.from.alone.groups.length === 1 ? 'shows' : 'show'} ${CATALOG.langs[s.from.lang].en} only: the ${CATALOG.langs[s.from.alone.lang].en} version has no ${s.from.alone.groups.length === 1 ? 'such group' : 'such groups'}`);
+  if (s.from.changed && s.from.newer) bits.push(`A newer version is in ${CATALOG.name}; yours is kept`);
+  return bits.length ? html`<div class="cat-line">${I.catalog}<span>${bits.join(' · ')}</span>${s.from.changed && s.from.newer ? html`<button class="btn sm" data-a="songInfo:${s.id}">Look at it</button>` : ''}</div>` : '';
+}
+// In a song's details: where it came from, with the site, and what updating does to it.
+function catInfo(s) {
+  if (!s || !s.from) return '';
+  const when = new Date(s.from.added).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  return html`<div class="cat-info"><div class="cat-src">${I.catalog} From ${CATALOG.name}</div>
+    <p class="cat-p">Added ${when}${s.from.no ? html` · <span title="The catalog’s own number for it">№ ${s.from.no}</span>` : ''}${s.from.with ? ` · with its ${CATALOG.langs[s.from.with].en} version` : ''}</p>
+    <p class="cat-p">${s.from.changed ? `Changed here, so it is never updated from ${CATALOG.name}.` : `Kept up to date from ${CATALOG.name} until it is changed here.`}</p>
+    ${s.from.changed && s.from.newer ? html`<div class="cat-newer"><span>A newer version is in ${CATALOG.name}. Yours stays as it is unless you choose it.</span><button class="btn sm" data-a="catNewer:${s.id}">Use the Newer Version</button></div>` : ''}
+    <button class="btn sm" data-a="catSite" title="Opens ${CATALOG.site} in your browser">${CATALOG.site} ↗</button></div>`;
+}
+A.catSite = () => toast(`${CATALOG.site} opens in your browser`);      // the app opens it; this page stays on its own address
+A.catNewer = ([id]) => { closeSheet(); mutate(() => { const s = songById(id); s.from.newer = false; s.from.changed = false; }); toast('The newer version is in; Undo brings yours back'); };
+
+// Find: the church's own songs first, then the catalog's, under its name. A bare number finds the catalog's number for a song.
+function catFind(want) {
+  if (!catOn() || want.length < 2) return [];
+  const num = /^\d+$/.test(want) ? +want : null, out = [];
+  for (const c of CATALOG.songs) {
+    if (!catHave()[c.lang] || DOC.songs.some(s => s.from && s.from.key === c.key)) continue;      // one in the library already shows as the library's
+    const s = catSong(c.key), hitNo = num != null && c.no === num, k = num != null ? -1 : s.slides.findIndex(sl => [s.title, sl.group, allWords(sl)].join('\n').toLowerCase().includes(want));
+    if (!hitNo && k < 0) continue;
+    out.push(html`<button class="fd-row cat" data-a="findCat:${s.id},${Math.max(0, k)}" draggable="true" data-drag="find:cat,${c.key}" title="From ${CATALOG.name}. Drag it into the playlist, or open it"><i class="fd-ico">${I.catalog}</i><b>${s.title}</b><span class="mono">${hitNo ? `№ ${c.no} · ` : ''}${c.lang.toUpperCase()}</span><em>${slideWords(s.slides[Math.max(0, k)]).split('\n')[0]}</em></button>`);
+    if (out.length >= 4) break;
+  }
+  return out.length ? [html`<div class="fd-sect cap">${I.catalog}${CATALOG.name}</div>`, ...out] : [];
+}
+A.findCat = ([id]) => { $('find').value = ''; $('found').hidden = true; $('find').blur(); state.mode = 'show'; state.src = { type: 'cat', id: 'wla' }; state.openCat = id; state.srcMenu = false; deckCache = null; render(); };
+
+/* ───────── the setup ───────── */
+const SU_STEPS = ['Languages', 'Songs', 'Bibles', 'Screens', 'Ready'];
+// The Bibles the app has, by language (the app's list, 23 November): built in, or downloaded with Continue.
+const SU_BIBLES = {
+  ru: [['syn', 'Синодальный перевод', true]],
+  en: [['kjv', 'King James Version', true], ['web', 'World English Bible', true], ['bsb', 'Berean Standard Bible', true], ['asv', 'American Standard Version', false], ['ylt', 'Young’s Literal Translation', false], ['dby', 'Darby Translation', false], ['gnv', 'Geneva Bible 1599', false]],
+  uk: [['ukr1905', 'Переклад Куліша та Пулюя', false], ['npu', 'Новий переклад українською (Новий Завіт і Псалми)', false]],
+};
+const suBible = id => { for (const l of CAT_LANGS) { const b = SU_BIBLES[l].find(x => x[0] === id); if (b) return { id, name: b[1], built: b[2], lang: l }; } return null; };
+const SU_DISPLAYS = [['HP 27f', '1920 × 1080'], ['3DTV', '3840 × 2160'], ['Stage TV', '1920 × 1080']];      // the sample's displays; the main one (with the menu bar) is never offered
+
+function suNew(at = 0) {
+  const sys = (navigator.languages || ['en']).map(l => l.slice(0, 2)), had = DOC.settings.langs && DOC.settings.langs.length ? [...DOC.settings.langs] : null;
+  const langs = had || (CAT_LANGS.filter(l => sys.includes(l)).length ? CAT_LANGS.filter(l => sys.includes(l)) : ['en']);
+  const pick = l => (SU_BIBLES[l] || [])[0] ? SU_BIBLES[l][0][0] : null;
+  state.su = { step: at, again: !!DOC.settings.setupDone, langs, songs: Object.fromEntries(langs.map(l => [l, !catHave()[l]])), others: false, looked: false, skipped: {},
+    top: pick(langs[0]), below: langs[1] ? pick(langs[1]) : null, aud: 'HP 27f', stage: 'Stage TV' };
+}
+A.setup = ([step]) => { suNew(+(step || 0)); suOpen(); };
+function suOpen() {
+  const u = state.su, n = u.step, last = n === SU_STEPS.length - 1;
+  const ticked = n === 1 ? u.langs.concat(u.others ? CAT_LANGS.filter(l => !u.langs.includes(l)) : []).filter(l => u.songs[l] && !catHave()[l] && !catState().offline && CATALOG.langs[l].songs) : [];
+  const dlBible = n === 2 ? [u.top, u.below].map(suBible).filter(b => b && !b.built) : [];
+  u.seen = Math.max(u.seen || 0, n);
+  const go = n === 0 && !u.again ? 'Get Started' : last ? 'Start Using SoftPresenter' : ticked.length || dlBible.length ? 'Download and Continue' : 'Continue';
+  openSheet({ title: 'Setup', wide: true, cls: 'su', body: html`${suBar(n)}${suBody(n)}`,
+    note: html`<span id="suProgress" class="su-prog">${suProgress()}</span>`,
+    buttons: [n === 0 ? { t: u.again ? 'Close' : 'Skip Setup', f: () => { if (!u.again) toast('The setup is in the SoftPresenter menu whenever you want it'); } } : { t: 'Back', keep: true, f: () => suGo(n - 1) },
+      ...(n > 0 && !last ? [{ t: 'Skip', keep: true, f: () => { u.skipped[n] = true; suGo(n + 1); } }] : last ? [{ t: 'Show a Test Slide', keep: true, f: suTest }] : []),
+      { t: go, primary: true, keep: !last, f: () => { if (last) return suFinish(); if (n === 0 && !u.langs.length) { refuse('Choose at least one language'); return false; } delete u.skipped[n]; if (n === 1) ticked.forEach(catDownload); if (n === 0) suLangsDone(); suGo(n + 1); } }] });
+  if (document.activeElement && $('sheet').contains(document.activeElement)) document.activeElement.blur();      // a question to read first, not a field to type in
+}
+const suGo = n => { state.su.step = Math.max(0, Math.min(SU_STEPS.length - 1, n)); suOpen(); const b = $('sheet').querySelector('.ui-sb'); if (b) b.scrollTop = 0; };
+// The steps along the top: the one now in ink, those done with a tick, those skipped with a dash.
+const suBar = n => html`<div class="su-bar">${SU_STEPS.map((t, i) => html`<button class="su-dot ${i === n ? 'on' : i < n ? (state.su.skipped[i] ? 'skip' : 'done') : ''}" data-a="suStep:${i}" ${{ disabled: i > (state.su.seen || 0) || (!state.su.langs.length && i > 0) }}><i>${i < n && !state.su.skipped[i] ? I.check : i + 1}</i>${t}</button>`)}</div>`;
+A.suStep = ([i]) => { if (state.su.step === 0 && +i > 0) { if (!state.su.langs.length) return refuse('Choose at least one language'); suLangsDone(); } suGo(+i); };      // only to steps already reached
+const suHead = (t, line) => html`<h2 class="su-t">${t}</h2>${line ? html`<p class="su-line">${line}</p>` : ''}`;
+
+function suBody(n) {
+  const u = state.su;
+  if (n === 0) {
+    const card = l => { const on = u.langs.includes(l), L = CATALOG.langs[l];
+      return html`<button class="su-lang ${on ? 'on' : ''}" data-a="suLang:${l}" aria-pressed="${on ? 'true' : 'false'}"><i class="su-tick">${on ? I.check : ''}</i><b>${L.name}</b><span>${L.en !== L.name ? L.en + ' · ' : ''}${L.songs ? `${fmtN(L.songs)} songs` : 'No songs yet'} · ${SU_BIBLES[l].length === 1 ? 'a Bible' : `${SU_BIBLES[l].length} Bibles`}</span></button>`; };
+    const sel = (which, now) => html`<select class="sel" data-c="suOrder:${which}">${options(u.langs.map(l => [l, langName(l)]), now)}</select>`;
+    return html`${suHead(u.again ? 'Set up SoftPresenter' : 'Welcome to SoftPresenter', u.again ? 'Your answers are filled in. Change what you like; nothing else changes.' : 'A few questions and it’s ready for Sunday. Every answer can be changed later.')}
+      <h3 class="su-q">Which languages does your church show?</h3>
+      <div class="su-langs">${CAT_LANGS.map(card)}</div>
+      ${u.langs.length > 1 ? html`<div class="su-order"><span class="cap">On screen</span>${sel(0, u.langs[0])}<span class="su-w">on top,</span>${sel(1, u.langs[1])}<span class="su-w">below</span></div>
+        <p class="su-small">Songs and Bible passages show two languages, one above the other.${u.langs.length > 2 ? ` ${langName(u.langs[2])} songs and Bibles are there too, for when you want them.` : ''}</p>`
+        : html`<p class="su-small">${u.langs.length ? 'One language on screen. Choose a second for songs and passages in two.' : 'Choose at least one.'} More languages are coming.</p>`}`;
+  }
+  if (n === 1) {
+    const st = catState(), shown = u.langs.concat(u.others ? CAT_LANGS.filter(l => !u.langs.includes(l)) : []);
+    const row = l => { const L = CATALOG.langs[l], have = catHave()[l], dl = st.dl[l], none = !L.songs;
+      if (none) return html`<div class="su-row off"><span class="su-chk"></span><b>${L.name}</b><span class="sub">No songs in this language yet</span></div>`;
+      if (have) return html`<div class="su-row"><i class="su-have">${I.check}</i><b>${L.name}</b><span class="su-n mono">${fmtN(L.songs)} songs</span><span class="sub">On this computer · checked ${suAgo(have.at)}</span><span class="sp"></span><button class="btn sm" data-a="say:Checking ${L.en} for new songs (the app’s monthly check, done now)">Update Now</button><button class="btn sm" data-a="suRemove:${l}">Remove</button></div>`;
+      return html`<label class="su-row ${st.offline ? 'off' : ''}"><input type="checkbox" data-c="suSongs:${l}" ${{ checked: !!u.songs[l] && !st.offline, disabled: st.offline }}><b>${L.name}</b><span class="su-n mono">${fmtN(L.songs)} songs</span><span class="sub">${dl ? `Downloading · ${dl.pct}%` : `${L.mb} to download · ${L.disk} on this computer`}</span></label>`; };
+    const below = u.langs[1];
+    return html`${suHead('Songs', 'Free songs to search, and the songs you already have.')}
+      <div class="su-card"><div class="su-src">${I.catalog}<b>Songs from ${CATALOG.name}</b><button class="btn sm su-site" data-a="catSite">${CATALOG.site} ↗</button></div>
+        <p class="su-small">A free songbook. The songs are kept on this computer, so finding one needs no internet, and they stay apart from your own songs until you use one.</p>
+        ${st.offline ? html`<div class="su-warn"><i class="nk warn"></i><span>Not connected to the internet. The songs can be downloaded later, here or in Settings › Integrations.</span><button class="btn sm" data-a="suRetry">Try Again</button></div>` : ''}
+        <div class="su-rows">${shown.map(row)}</div>
+        ${!u.others && CAT_LANGS.some(l => !u.langs.includes(l)) ? html`<button class="su-more" data-a="suOthers">Other languages…</button>` : ''}
+        ${below ? html`<label class="su-row su-opt"><input type="checkbox" data-c="suLinked" ${{ checked: DOC.settings.catLinked !== false }}><span>A song’s ${CATALOG.langs[below].en} version comes along as the second line, group by group, when it has one</span></label>` : ''}</div>
+      <div class="su-card su-own"><div><b>Songs you already have</b><p class="su-small">${u.looked ? 'Found on this computer: 4,372 songs in 6 libraries. Each comes in as a library of the same name.' : 'A library on this computer, or song files: text, ChordPro, Word and others.'}</p>${u.looked || !isMac() ? '' : html`<p class="su-small su-os">macOS asks whether SoftPresenter may use your Documents folder: choose OK.</p>`}</div>
+        <div class="su-own-b">${u.looked ? html`<button class="btn" data-a="say:4,372 songs would come in, in 6 libraries">Bring Them In</button>` : html`<button class="btn" data-a="suLook">Look on This Computer</button>`}<button class="btn" data-a="say:Song files would be chosen here">Choose Files…</button></div></div>`;
+  }
+  if (n === 2) {
+    const opts = now => html`${u.langs.map(l => html`<optgroup label="${langName(l)}">${options(SU_BIBLES[l].map(([id, name]) => [id, name]), now)}</optgroup>`)}`;
+    const row = (label, which, now) => { const b = suBible(now);
+      return html`<div class="su-bib"><span class="cap">${label}</span><select class="sel" data-c="suBible:${which}">${which === 'below' ? html`<option value="" ${{ selected: !now }}>None (one translation)</option>` : ''}${opts(now)}</select><span class="sub">${!b ? '' : b.built ? 'On this computer' : 'Downloads with Continue'}</span></div>`; };
+    return html`${suHead('Bibles', u.langs.length > 1 ? 'Passages show two translations, one above the other, in the languages you chose.' : 'The translation passages show in. A second can go below it.')}
+      <div class="su-card">${row('On top', 'top', u.top)}${row('Below', 'below', u.below)}
+        ${[u.top, u.below].includes('npu') ? html`<p class="su-small">The New Ukrainian Translation has the New Testament and the Psalms only.</p>` : ''}</div>
+      ${suBiblePreview()}
+      <p class="su-small">More translations, and a Bible file you have, are added in the Bible page’s Options.</p>`;
+  }
+  if (n === 3) {
+    const card = (which, name, size, now) => html`<button class="su-scr ${now === name ? 'on' : ''}" data-a="suScreen:${which},${name}"><i class="su-scr-pic">${name === 'In a window' ? '▭' : name.startsWith('No') || name === 'Not now' ? '—' : ''}</i><b>${name}</b><span>${size}</span></button>`;
+    return html`${suHead('Screens', 'Where the slides go. A screen goes there at once, so you can check.')}
+      <h3 class="su-q">The congregation sees</h3>
+      <div class="su-scrs">${SU_DISPLAYS.filter(([d]) => d !== u.stage || d === u.aud).map(([d, sz]) => card('aud', d, sz, u.aud))}${card('aud', 'In a window', 'Move it to a screen later', u.aud)}${card('aud', 'Not now', 'Choose in Settings later', u.aud)}</div>
+      <h3 class="su-q">The band sees <span class="su-w">a stage screen, if you have one</span></h3>
+      <div class="su-scrs">${SU_DISPLAYS.filter(([d]) => d !== u.aud).map(([d, sz]) => card('stage', d, sz, u.stage))}${card('stage', 'No stage screen', '', u.stage)}</div>
+      <div class="su-id"><button class="btn" data-a="identify">Identify Screens</button><span class="su-small">Shows each screen’s name on it. Your main display, with the menu bar, keeps SoftPresenter’s own window.</span></div>`;
+  }
+  // Ready: what is set, with a way back to each; what was skipped or still needs doing says so.
+  const st = catState(), dl = Object.keys(st.dl), fail = Object.keys(st.fail), kept = CAT_LANGS.filter(l => catHave()[l]);
+  const item = (i, label, text, warn = false, act = null, none = false) => html`<div class="su-done ${warn ? 'warn' : ''}"><i class="su-di">${warn ? html`<i class="nk warn"></i>` : none ? '–' : I.check}</i><span class="cap">${label}</span><span class="su-dt">${text}</span>${act || html`<button class="btn sm" data-a="suStep:${i}">Change</button>`}</div>`;
+  const songsText = fail.length ? html`<span>${fail.map(l => `${CATALOG.langs[l].en} songs didn’t download: ${st.fail[l]}`).join('; ')}.</span>`
+    : kept.length || dl.length ? html`<span>${fmtN(kept.concat(dl).reduce((n, l) => n + CATALOG.langs[l].songs, 0))} songs from ${CATALOG.name}${dl.length ? html` · <b class="su-pct">${Math.round(dl.reduce((n, l) => n + st.dl[l].pct, 0) / dl.length)}%</b>` : ''}</span>` : 'None yet. Your own songs, or the catalog’s, can come in at any time.';
+  const prev = suPreview();
+  return html`${suHead('Ready for Sunday', 'Here is what is set. Everything can be changed in Settings at any time.')}
+    <div class="su-ready"><div class="su-list">
+      ${item(0, 'Languages', u.langs.length > 1 ? `${langName(u.langs[0])} on top, ${langName(u.langs[1])} below` : langName(u.langs[0] || 'en'))}
+      ${item(1, 'Songs', songsText, fail.length > 0, fail.length ? html`<button class="btn sm" data-a="suRetry">Try Again</button>` : null, !fail.length && !kept.length && !dl.length)}
+      ${item(2, 'Bibles', u.skipped[2] ? 'The usual one: King James Version' : [u.top, u.below].map(suBible).filter(Boolean).map(b => b.name).join(', '))}
+      ${u.skipped[3] || u.aud === 'Not now' ? item(3, 'Screens', 'No screen chosen yet: slides won’t show anywhere until one is.', true, html`<button class="btn sm" data-a="suStep:3">Choose</button>`)
+        : item(3, 'Screens', `The congregation: ${u.aud}${u.stage && !u.stage.startsWith('No') ? ` · the band: ${u.stage}` : ''}`)}
+    </div><figure class="su-prev"><div class="su-prev-pic">${prev}</div><figcaption class="su-small">How songs will look. Change the look in Edit › Themes.</figcaption></figure></div>
+    <p class="su-tips"><b>Click a slide</b> to put it on screen, <b>Space</b> for the next, <b>Esc</b> to clear. Later, in Settings: <b>Remote Control</b>, to run the slides from a phone.</p>`;
+}
+// John 3:16 in the translations chosen, as passages will show (one still to download shows once it is in).
+function suBiblePreview() {
+  const u = state.su, chosen = [u.top, u.below].filter(Boolean), ids = chosen.filter(id => BIBLE_DATA.bibles[id] && bibleText(id, 'John', 3, 16)), one = ids.length === 1;
+  if (!ids.length) return '';
+  const objs = ids.flatMap((id, n) => [{ id: 'suv' + n, kind: 'text', name: 'Verse', role: n ? 'verse2' : 'verse1', text: bibleText(id, 'John', 3, 16), opacity: 1, ...(one ? { frame: { x: 130, y: 130, w: 1660, h: 660 }, style: { size: 60 } } : {}) },
+    { id: 'sur' + n, kind: 'text', name: 'Reference', role: n ? 'ref2' : 'ref1', text: refTitle({ book: 'John', chapter: 3, from: 16, to: 16 }, id), opacity: 1, ...(one ? { frame: { x: 130, y: 820, w: 1660, h: 100 }, style: { size: 46 } } : {}) }]);
+  const later = chosen.filter(id => !ids.includes(id)).map(id => (suBible(id) || {}).name).filter(Boolean);
+  return html`<figure class="su-prev su-bprev"><div class="su-prev-pic">${thumb({ id: 'su-bible', group: '', label: '', objects: objs, bible: true }, { kind: 'bible' })}</div><figcaption class="su-small">John 3:16, as passages will show${later.length ? ` (${later.join(', ')} once downloaded)` : ''}.</figcaption></figure>`;
+}
+const isMac = () => /Mac/.test(navigator.platform || navigator.userAgent);
+const suAgo = t => { const d = Math.round((Date.now() - t) / 864e5); return d <= 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`; };
+// A slide in the chosen languages, from the sample catalog song.
+function suPreview() {
+  const u = state.su, c = CATALOG.songs.find(x => x.key === ({ ru: 'ru1', en: 'en1', uk: 'uk1' }[u.langs[0] || 'en'])), up = u.langs[1] ? catLineUp(c, u.langs[1]) : null;
+  return thumb(slide(c.groups[1][1], c.groups[1][2], up ? up.lines[1] : ''), { kind: 'songs' });
+}
+const suProgress = () => { const st = catState(), dl = Object.keys(st.dl); if (!dl.length) return '';
+  return html`<i class="su-dl">↓</i>${dl.map(l => `${CATALOG.langs[l].en} songs ${st.dl[l].pct}%`).join(' · ')}`; };
+
+A.suLang = ([l]) => { const u = state.su; u.langs = u.langs.includes(l) ? u.langs.filter(x => x !== l) : [...u.langs, l]; if (!(l in u.songs)) u.songs[l] = !catHave()[l]; suOpen(); };
+C.suOrder = (v, [which]) => { const u = state.su, i = +which, j = u.langs.indexOf(v); if (j < 0 || j === i) return; [u.langs[i], u.langs[j]] = [u.langs[j], u.langs[i]]; suOpen(); };
+function suLangsDone() {      // the languages choose the Bibles offered: the first in each language, top and below
+  const u = state.su, pick = l => SU_BIBLES[l] ? SU_BIBLES[l][0][0] : null;
+  if (!u.top || (suBible(u.top) || {}).lang !== u.langs[0]) u.top = pick(u.langs[0]);
+  if (u.langs[1] && (!u.below || (suBible(u.below) || {}).lang !== u.langs[1])) u.below = pick(u.langs[1]);
+  if (!u.langs[1]) u.below = null;
+}
+C.suSongs = (v, [l]) => { state.su.songs[l] = v; suOpen(); };
+C.suLinked = v => { DOC.settings.catLinked = v; };
+A.suOthers = () => { state.su.others = true; suOpen(); };
+A.suLook = () => { state.su.looked = true; suOpen(); };
+A.suRemove = ([l]) => catRemove(l, suOpen);
+// Taking a language's songs off asks first: Undo can't download them again.
+function catRemove(l, then) { const L = CATALOG.langs[l];
+  openSheet({ title: `Remove the ${L.en} songs?`, body: html`<p class="ui-p">${fmtN(L.songs)} songs from ${CATALOG.name} come off this computer and out of find. They can be downloaded again. Songs already in your library stay.</p>`,
+    buttons: [{ t: 'Cancel', f: () => { then(); return false; } }, { t: 'Remove', primary: true, f: () => { delete catHave()[l]; toast(`${L.en} songs from ${CATALOG.name} are off this computer`); then(); return false; } }] }); }
+A.suRetry = () => { const st = catState(); st.offline = false; const again = Object.keys(st.fail); st.fail = {}; again.forEach(catDownload); suOpen(); };
+C.suBible = (v, [which]) => { state.su[which] = v || null; suOpen(); };
+A.suScreen = ([which, name]) => { state.su[which] = name; suOpen(); };
+function suTest() { const d = decks().find(x => x.song && x.seq && x.seq.length); if (d) go(d.key, 0); toast(state.su.aud === 'Not now' ? 'A test slide is up, but no screen is chosen to show it' : `A test slide is on ${state.su.aud}. Esc clears it`); }
+function suFinish() {
+  const u = state.su;
+  mutate(() => { DOC.settings.langs = [...u.langs]; DOC.settings.setupDone = true;
+    const rows = B().rows; if (!u.skipped[2]) { if (u.top && BIBLE_DATA.bibles[u.top]) rows[0].bible = u.top; if (u.below && BIBLE_DATA.bibles[u.below]) { if (rows[1]) rows[1].bible = u.below; else rows.push({ bible: u.below, verse: 'verse2', ref: 'ref2' }); } else if (!u.below) rows.splice(1); } });      // the Bible page's translations line: skipped, it stays as it was
+  if (Object.keys(catState().dl).length) toast(`Downloading songs from ${CATALOG.name}. You can start; they become findable as they arrive.`);
+}
+// A download: carries on behind the setup, and after it, with its progress; a notice says when the songs can be found.
+function catDownload(l) {
+  const st = catState(); if (st.dl[l] || catHave()[l]) return;
+  st.dl[l] = { pct: 0 }; const step = Math.max(4, Math.round(40 / Math.max(1, CATALOG.langs[l].songs / 3000)));
+  const tick = () => { const d = st.dl[l]; if (!d) return; d.pct = Math.min(100, d.pct + step);
+    if (d.pct >= 100) { delete st.dl[l]; st.have[l] = { at: Date.now() }; toast(`${fmtN(CATALOG.langs[l].songs)} ${CATALOG.langs[l].en} songs from ${CATALOG.name} can be found now`); if (state.mode === 'show' && !state.sheet) renderShowLeft(); }
+    const p = $('suProgress'); if (p) put(p, suProgress()); const pct = document.querySelector('.su-pct'); if (pct && state.su) { const dl = Object.keys(st.dl); pct.textContent = dl.length ? Math.round(dl.reduce((n, x) => n + st.dl[x].pct, 0) / dl.length) + '%' : 'done'; }
+    if (st.dl[l]) setTimeout(tick, 350); };
+  setTimeout(tick, 350);
+}
+
+// Settings › Integrations: the catalog's languages, updates and credit. Nothing names it on the audience's screens unless chosen.
+function catCard(card) {
+  const st = catState(), langs = CAT_LANGS.filter(l => CATALOG.langs[l].songs);
+  return card(CATALOG.name, 'Free songs to find, kept on this computer', [
+    langs.map(l => { const L = CATALOG.langs[l], have = catHave()[l], dl = st.dl[l];
+      return stLine(L.name, have ? html`<button class="btn" data-a="say:Checking ${L.en} songs for changes">Update Now</button><button class="btn" data-a="catDrop:${l}">Remove</button>` : dl ? html`<span class="sub">Downloading · ${dl.pct}%</span>` : html`<button class="btn" data-a="catGet:${l}">Download</button>`,
+        have ? `${fmtN(L.songs)} songs · checked ${suAgo(have.at)}` : `${fmtN(L.songs)} songs · ${L.mb} to download · ${L.disk} on this computer`); }),
+    stLine('Second language', onoff(DOC.settings.catLinked !== false, 'catLinkedSet'), 'A song’s version in your second language comes along below it, group by group, when it has one'),
+    stLine('Name it in the copyright line', onoff(!!DOC.settings.catCredit, 'catCreditSet'), `Adds “Songs: ${CATALOG.name}” where the copyright line shows, on the audience’s screens. Off unless you choose it`),
+    html`<p class="lede" style="margin:10px 0 12px">Songs you haven’t changed are brought up to date about once a month, never while something is on screen. A song you changed is never overwritten: its details say when a newer version is there.</p>`],
+    html`<button class="btn sm" data-a="catSite">${CATALOG.site} ↗</button>`);
+}
+A.catGet = ([l]) => { catDownload(l); render(); };
+A.catDrop = ([l]) => catRemove(l, () => { closeSheet(); render(); });
+A.catLinkedSet = () => mutate(() => { DOC.settings.catLinked = DOC.settings.catLinked === false; });
+A.catCreditSet = () => mutate(() => { DOC.settings.catCredit = !DOC.settings.catCredit; });
+
 /* ═════════ drag.js ═════════ */
 // Dragging: slides and playlist items into a new order, songs onto a playlist or library, pictures and videos onto slides, items and placeholders.
 'use strict';
@@ -2988,7 +3284,7 @@ function dropFor(el, e = {}) {      // what dropping here would do, or null
   if (k === 'item' && over && over.kind === 'item' && over.el !== dragging.el) return { el: over.el, what: 'moveItem', to: over.args[0], after: farHalf(over.el, e) };
   if (k === 'find') {      // from the find list: only into the list shown (the owner, 23 November: to put it elsewhere, open that first). Into the open
     // playlist at the line or onto a placeholder; into the library listed, songs only. The chooser doesn't come up.
-    const song = dragging.args[0] === 'song', slotRow = over && over.kind === 'item' && (byId(playlist().items, over.args[0]) || {}).kind === 'placeholder';
+    const song = dragging.args[0] !== 'passage', slotRow = over && over.kind === 'item' && (byId(playlist().items, over.args[0]) || {}).kind === 'placeholder';
     if (over && over.kind === 'item' && state.src.type === 'pl') return slotRow && song ? { el: over.el, what: 'findInSlot', to: over.args[0], into: true } : { el: over.el, what: 'findToItem', to: over.args[0], after: farHalf(over.el, e) };
     if (song && state.src.type === 'lib' && state.src.id !== 'all' && el.closest('#left .items')) return { el: el.closest('#left .items'), what: 'findTo', type: 'lib', id: state.src.id, into: true };
     return null;
@@ -3042,7 +3338,8 @@ document.addEventListener('drop', e => {
       const items = playlist().items, ids = itemSel().includes(d.args[0]) ? itemSel() : [d.args[0]], moving = items.filter(i => ids.includes(i.id)), before = byId(items, t.to);
       if (moving.includes(before)) return; moving.forEach(it => items.splice(items.indexOf(it), 1)); items.splice(items.indexOf(before) + (t.after ? 1 : 0), 0, ...moving); }
     if (t.what.startsWith('find')) {      // a slide found by its words brings its whole song; then the search ends and the item is opened, nothing live
-      const [kind, ...a] = d.args, item = () => kind === 'song' ? { id: newId('it'), kind: 'song', song: a[0] } : { id: newId('it'), kind: 'passage', passage: { book: a[0], chapter: +a[1], from: +a[2], to: +a[3] } };
+      let [kind, ...a] = d.args; if (kind === 'cat') { const j = catJoin(a[0]); kind = 'song'; a = [j.id]; if (j.from.with) toast(`“${j.title}” is in your library now, with its ${CATALOG.langs[j.from.with].en} version below`); }      // from the catalog: it joins the library as it goes in
+      const item = () => kind === 'song' ? { id: newId('it'), kind: 'song', song: a[0] } : { id: newId('it'), kind: 'passage', passage: { book: a[0], chapter: +a[1], from: +a[2], to: +a[3] } };
       const name = kind === 'song' ? songById(a[0]).title : `${a[0]} ${a[1]}:${a[2]}${a[3] !== a[2] ? '-' + a[3] : ''}`;
       if (t.what === 'findToItem') { const items = playlist().items, it = item(); items.splice(items.indexOf(byId(items, t.to)) + (t.after ? 1 : 0), 0, it); state.openItem = it.id; state.itemPick = [it.id]; }
       if (t.what === 'findInSlot') { const it = byId(playlist().items, t.to); it.song = a[0]; state.openItem = it.id; }
@@ -3057,7 +3354,7 @@ document.addEventListener('drop', e => {
     if (t.what === 'moveArr') arrMove(arrOf(songById(d.args[0])).groups, +d.args[1], t.to, t.after);
     if (t.what === 'moveStep') { const st = byId(DOC.macros, d.args[0]).steps, from = +d.args[1]; let to = t.to + (t.after ? 1 : 0); if (from < to) to--; st.splice(to, 0, st.splice(from, 1)[0]); }
     if (t.what === 'moveTrack') { const pl = byId(DOC.audio, d.args[0]), from = +d.args[1]; let to = t.to + (t.after ? 1 : 0); if (from < to) to--; trackMove(pl, from, to); }
-    if (t.what === 'songTo') { const ids = state.songPick.includes(d.args[0]) ? state.songPick : [d.args[0]];
+    if (t.what === 'songTo') { const ids = (state.songPick.includes(d.args[0]) ? state.songPick : [d.args[0]]).map(id => id.startsWith('wla-') ? catJoin(id.slice(4)).id : id);      // a catalog song joins the library as it goes
       if (t.type === 'pl') { const p = byId(DOC.playlists, t.id); ids.forEach(id => p.items.push({ id: newId('it'), kind: 'song', song: id })); toast(ids.length > 1 ? `Added ${ids.length} songs to ${p.name}.` : `Added ${songById(ids[0]).title} to ${p.name}.`); }
       else { const l = byId(DOC.libraries, t.id); ids.forEach(id => { if (!l.songs.includes(id)) l.songs.push(id); }); toast(ids.length > 1 ? `Added ${ids.length} songs to ${l.name}.` : `Added ${songById(ids[0]).title} to ${l.name}.`); }
       state.songPick = []; }
@@ -3779,6 +4076,8 @@ function renderFind() {
   let n = 0;
   for (const s of DOC.songs) for (let k = 0; k < s.slides.length && n < 6; k++) if ([s.title, s.slides[k].group, allWords(s.slides[k])].join('\n').toLowerCase().includes(want)) { rows.push(row(`findSong:${s.id},${k}`, s.title, `Song · ${s.slides[k].group}`, slideWords(s.slides[k]).split('\n')[0])); n++; }
   if (!ref && want.length >= 3) { let b = 0; const src = BIBLE_DATA.text[bib]; for (const book in src) for (const ch in src[book]) for (const v in src[book][ch]) if (b < 3 && src[book][ch][v].toLowerCase().includes(want)) { rows.push(row(`bibleOpen:${book},${ch},${v},${v}`, refTitle({ book, chapter: +ch, from: +v, to: +v }, bib), `Bible · ${short}`, src[book][ch][v])); b++; } }
+  if (/^\d+$/.test(want)) for (const s of DOC.songs) if (s.from && s.from.no === +want) rows.push(row(`findSong:${s.id},0`, s.title, `Song · № ${s.from.no}`, slideWords(s.slides[0]).split('\n')[0]));      // a song from the catalog, by the catalog's number for it
+  rows.push(...catFind(want));      // then the catalog's songs, under its name
   put(box, rows.length ? rows : html`<div class="none">Nothing found</div>`);
 }
 // ⌘Return in find: the first result goes into the playlist in front (a passage as one item), and nothing goes on screen
@@ -3787,9 +4086,10 @@ function findAdd() {
   let item = null, name = '';
   if (r && !r.missing) { item = { kind: 'passage', passage: { book: r.book, chapter: r.chapter, from: r.from, to: r.to } }; name = refTitle(r); }
   else if (first && first.dataset.a.startsWith('findSong:')) { const id = first.dataset.a.slice(9).split(',')[0]; item = { kind: 'song', song: id }; name = songById(id).title; }
+  else if (first && first.dataset.a.startsWith('findCat:')) { const key = first.dataset.a.slice(12).split(',')[0]; item = { kind: 'song', catKey: key }; name = catSong(key).title; }      // from the catalog: it joins the library as it goes in
   else if (first && first.dataset.a.startsWith('bibleOpen:')) { const [book, ch, v] = first.dataset.a.slice(10).split(','); item = { kind: 'passage', passage: { book, chapter: +ch, from: +v, to: +v } }; name = refTitle(item.passage); }
   if (!item) return refuse('Nothing to add');
-  mutate(() => { p.items.push({ id: newId('it'), ...item }); }); f.value = ''; renderFind(); f.blur(); if (!(state.mode === 'show' && state.src.type === 'pl' && p === playlist())) toast(`${name} added to ${p.name}`);      // only when it went out of sight
+  mutate(() => { if (item.catKey) { item.song = catJoin(item.catKey).id; delete item.catKey; } p.items.push({ id: newId('it'), ...item }); }); f.value = ''; renderFind(); f.blur(); if (!(state.mode === 'show' && state.src.type === 'pl' && p === playlist())) toast(`${name} added to ${p.name}`);      // only when it went out of sight
 }
 A.findSong = ([id, k]) => {       // jump to it and cue that slide; nothing goes on screen until Enter
   $('find').value = ''; $('found').hidden = true; $('find').blur(); state.mode = 'show'; deckCache = null;
@@ -3922,3 +4222,23 @@ Object.assign(DEMOS, {      // Testing aid: words styled inside a box, some of t
   words: () => { enterEdit(null, 0, DOC.songs[1].id); const m = DOC.songs[1].slides[0].objects.find(o => o.role === 'main'), t = m.text, a = t.indexOf('the light'), b = t.indexOf('You are');
     m.spans = [{ from: a, to: a + 9, italic: true, size: 104, color: '#8fc8ff' }]; state.sels = [m.id]; state.itab = 'Text'; state.tsel = { id: m.id, from: b, to: a + 9 }; render(); } });
 if (q.get('demo') === 'words') DEMOS.words();
+// Testing aids: the first-run setup and the song catalog (designed 23 November; awaiting the owner)
+const suDemo = (step, langs, more) => { catState().have = {}; A.setup([0]); const u = state.su; u.langs = langs; u.songs = Object.fromEntries(CAT_LANGS.map(l => [l, langs.includes(l)])); suLangsDone(); u.step = step; if (more) more(u); suOpen(); };
+const catDemoSong = () => { let s; mutate(() => { s = catJoin('ru1'); s.from.changed = true; s.from.newer = true; }); return s; };
+Object.assign(DEMOS, {
+  su0: () => suDemo(0, ['ru', 'en']), su1: () => suDemo(1, ['ru', 'en']), su1off: () => suDemo(1, ['ru', 'en'], () => { catState().offline = true; }),
+  su1none: () => { CATALOG.langs.uk.songs = 0; suDemo(1, ['uk', 'en']); },      // a language with no songs yet, Ukrainian standing in
+  su2: () => suDemo(2, ['ru', 'en'], () => { catState().dl = { ru: { pct: 38 }, en: { pct: 71 } }; }), su2uk: () => suDemo(2, ['uk', 'en']),
+  su3: () => suDemo(3, ['ru', 'en'], () => { catState().dl = { ru: { pct: 54 } }; catState().have.en = { at: Date.now() }; }),
+  su4: () => suDemo(4, ['ru', 'en'], () => { catState().dl = { ru: { pct: 62 } }; catState().have.en = { at: Date.now() }; }),
+  su4skip: () => suDemo(4, ['en'], u => { u.skipped = { 1: true, 2: true, 3: true }; }),
+  su4fail: () => suDemo(4, ['ru', 'en'], () => { catState().fail = { ru: 'the connection dropped part way' }; catState().have.en = { at: Date.now() }; }),
+  suagain: () => { catSample(); DOC.settings.setupDone = true; DOC.settings.langs = ['ru', 'en']; A.setup([1]); },
+  catfind: () => { catSample(); $('find').value = '245'; renderFind(); }, catfind2: () => { catSample(); $('find').value = 'harbour'; renderFind(); },
+  catlist: () => { catSample(); A.src(['cat', 'wla']); A.openCat(['wla-ru1']); },
+  catlib: () => { catSample(); DOC.settings.langs = ['ru', 'en']; const s = catDemoSong(); A.src(['lib', DOC.libraries.find(l => l.catalog).id]); A.openSong([s.id]); },
+  catinfo: () => { catSample(); DOC.settings.langs = ['ru', 'en']; const s = catDemoSong(); A.src(['lib', DOC.libraries.find(l => l.catalog).id]); A.openSong([s.id]); A.songInfo([s.id]); },
+  catchooser: () => { catSample(); state.srcMenu = true; render(); },
+  catset: () => { catSample(); state.mode = 'settings'; state.section = 'Integrations'; render(); },
+});
+if (/^(su|cat)/.test(q.get('demo') || '') && DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();

@@ -129,7 +129,7 @@ are remembered at once.
 4. **No file paths.** Nothing is served from a path in a request: the pages are compiled into
    the app, and pictures are found by a slide's id. Unknown paths are `404`.
 5. **Headers on every answer:**
-   `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self' wss://HOST; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types 'none'`
+   `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self' wss://HOST; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types 'none'`
    (so a page can't make a string into script or markup, even by a slip),
    `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
    `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy: same-origin`, and
@@ -147,7 +147,7 @@ put it in with `textContent`, never `innerHTML`.
 | `GET /` | yes (else 303 to /login) | The page |
 | `GET /login`, `/login.js`, `/style.css` | no | The sign-in page, its script, the style sheet |
 | `GET /app.js` | yes | The page's script |
-| `GET /next/`, `/next/app.js`, `/next/style.css` | yes (`/next/` else 303 to /login, the files 401) | The design work's page, beside the built-in one: the same checks and headers; these three names only |
+| `GET /next/`, `/next/app.js`, `/next/style.css`, `/next/fonts/SoftPresenterSans-{Regular,Bold,Italic,BoldItalic}.woff2`, `/next/fonts/OFL.txt` | yes (`/next/` else 303 to /login, the files 401) | The design work's page, beside the built-in one: the same checks and headers; these names only. Each carries an `ETag` from its bytes, so a browser asks once whether it changed (304) and fetches the fonts once |
 | `GET /favicon.ico` | no | 204 |
 | `POST /api/login` | no | Sign in (above) |
 | `POST /api/logout` | yes | Forget this device |
