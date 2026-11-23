@@ -1170,7 +1170,7 @@ fn text_look(
     words_picked: bool,
 ) {
     let full = ui.available_width();
-    egui::ComboBox::from_id_salt("font family")
+    let font_menu = egui::ComboBox::from_id_salt("font family")
         .selected_text(if mix.font_family {
             egui::RichText::new("Mixed").italics().color(DIM)
         } else {
@@ -1215,6 +1215,13 @@ fn text_look(
                 }
             }
         });
+    // Testing aid: SOFTPRESENTER_CAPTURE_FONT_MENU=1 opens the font list once, for a capture.
+    static MENU_OPENED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if std::env::var_os("SOFTPRESENTER_CAPTURE_FONT_MENU").is_some()
+        && !MENU_OPENED.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        egui::Popup::open_id(ui.ctx(), font_menu.response.id.with("popup"));
+    }
     egui::ComboBox::from_id_salt("font weight").selected_text(weight_name(wanted.weight)).width(full).show_ui(
         ui,
         |ui| {
