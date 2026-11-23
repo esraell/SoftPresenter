@@ -2232,11 +2232,11 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             return;
         }
         left_foot(ui, show, state, commands);
-        // While songs are carried (or song files dragged in from the Finder, or a result of
-        // the find box) the chooser shows above the list, so they can be dropped on a playlist
-        // or a library.
-        let carrying = egui::DragAndDrop::has_payload_of_type::<SongDrag>(ui.ctx())
-            || egui::DragAndDrop::has_payload_of_type::<crate::home::FoundDrag>(ui.ctx());
+        // While songs from the song list are carried (or song files dragged in from the Finder)
+        // the chooser shows above the list, so they can be dropped on a playlist or a library.
+        // A result of the find box goes only into the list shown: someone wanting it elsewhere
+        // opens that list first (the owner, 2026-11-23).
+        let carrying = egui::DragAndDrop::has_payload_of_type::<SongDrag>(ui.ctx());
         if carrying || crate::file_drop::wants_chooser(state) {
             let most = ui.available_height() * 0.6;
             egui::ScrollArea::vertical().id_salt("chooser").max_height(most).show(ui, |ui| {

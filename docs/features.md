@@ -260,8 +260,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   does Escape, which then clears nothing on the screens. A library lists its songs, each with
   how many slides it has (and, in All Songs, the library it is in); at the foot are the order they
   are listed in (**As listed, A–Z, Longest**, kept between runs), **New song** and a filter. A
-  song's ⋯, or a right-click, opens its menu. While songs are dragged the chooser shows above
-  the list, so they can be dropped on a playlist or a library; a new song made while a library
+  song's ⋯, or a right-click, opens its menu. While songs from the list are dragged the chooser
+  shows above it, so they can be dropped on a playlist or a library (a result dragged from the
+  find box goes only into the list shown, with no chooser); a new song made while a library
   is shown goes into it. Which of the two the column was left listing is kept between runs.
 - A playlist lists its items in running order: each with its number, its title, a small mark
   for a Bible passage, a picture or video, a media playlist or a placeholder, an orange number on

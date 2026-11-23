@@ -12706,20 +12706,22 @@ mod tests {
     }
 
     #[test]
-    fn a_song_found_dropped_on_a_playlist_in_the_chooser_goes_at_its_end() {
+    fn a_song_found_carried_goes_only_into_the_list_shown_with_no_chooser() {
         use crate::service::Item;
         let (mut show, mut state) = find_drag_setting();
-        let (commands, ..) = drag_found(&mut show, &mut state, "gamma", 0, |drawn| drawn.left("Evening").center());
-        assert_eq!(state.services.list[1].items, [Item::song("gamma".to_owned(), "Gamma".to_owned())]);
-        assert_eq!(state.services.front().items.len(), 2, "the playlist in front is as it was");
-        assert!(state.library_search.is_none());
-        assert_eq!(state.notices.newest(), Some("Added Gamma to Evening."), "out of sight: an entry says where");
-        nothing_went_live(&show, &commands);
-        // On the playlist in front's own row: at its end, and opened.
-        let (mut show, mut state) = find_drag_setting();
-        let (commands, ..) = drag_found(&mut show, &mut state, "gamma", 0, |drawn| drawn.left("Service").center());
+        let (commands, ..) = drag_found(&mut show, &mut state, "gamma", 0, |drawn| {
+            // The other playlists and the libraries don't show while it is carried.
+            let in_left = |words: &str| {
+                drawn.texts.iter().any(|(text, rect)| text == words && rect.max.x < crate::studio::LEFT_WIDTH + 20.0)
+            };
+            assert!(!in_left("Evening"), "no chooser while a find result is carried");
+            // Over the lower half of Beta's row: after it, at the end.
+            let beta = drawn.left("Beta");
+            pos2(beta.center().x, beta.center().y + 8.0)
+        });
         let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
         assert_eq!(titles, ["Alpha", "Beta", "Gamma"]);
+        assert!(state.services.list[1].items.is_empty(), "the other playlist is as it was");
         assert_eq!((state.services.chosen, show.selected()), (Some(2), 2));
         nothing_went_live(&show, &commands);
     }
@@ -12746,30 +12748,23 @@ mod tests {
     }
 
     #[test]
-    fn a_passage_is_refused_by_a_library_and_a_song_found_goes_into_one() {
+    fn a_passage_is_refused_by_the_library_listed_and_a_song_found_goes_into_it() {
+        // With the library listed (a find result goes only into the list shown): a passage is
+        // refused there, and the pointer says so...
         let (mut show, mut state) = find_drag_setting();
         let before = state.services.clone();
-        let (commands, over, _) = drag_found(&mut show, &mut state, "jn 3:16", 0, |drawn| drawn.left("Hymns").center());
+        state.playlist_open = false;
+        state.library_shown = Some(state.libraries[0].id);
+        let (commands, over, _) = drag_found(&mut show, &mut state, "jn 3:16", 0, |_| pos2(120.0, 600.0));
         assert_eq!(over.cursor, egui::CursorIcon::NoDrop, "the pointer says it can't go there");
         assert!(state.libraries[0].songs.is_empty(), "no library takes a passage");
         assert_eq!(state.services.list, before.list);
         assert!(state.library_search.is_some(), "dropped where it can't go, the search goes on");
         nothing_went_live(&show, &commands);
-        // A song goes into the library, on its row in the chooser...
-        let (mut show, mut state) = find_drag_setting();
-        let (commands, ..) = drag_found(&mut show, &mut state, "gamma", 0, |drawn| drawn.left("Hymns").center());
-        assert_eq!(state.libraries[0].songs, ["gamma"]);
-        assert!(state.libraries_changed && state.library_search.is_none());
-        nothing_went_live(&show, &commands);
-        // ...or on its list, with the library listed; a passage there is refused.
-        let (mut show, mut state) = find_drag_setting();
-        state.playlist_open = false;
-        state.library_shown = Some(state.libraries[0].id);
-        let (_, over, _) = drag_found(&mut show, &mut state, "jn 3:16", 0, |_| pos2(120.0, 600.0));
-        assert_eq!(over.cursor, egui::CursorIcon::NoDrop);
-        assert!(state.libraries[0].songs.is_empty());
+        // ...and a song goes in, picked out in the list.
         let (commands, ..) = drag_found(&mut show, &mut state, "gamma", 0, |_| pos2(120.0, 600.0));
         assert_eq!(state.libraries[0].songs, ["gamma"]);
+        assert!(state.libraries_changed && state.library_search.is_none());
         assert_eq!(show.selected(), 2, "picked out in the list, as a click on it does");
         nothing_went_live(&show, &commands);
     }
