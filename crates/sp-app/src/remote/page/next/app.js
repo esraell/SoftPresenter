@@ -2944,7 +2944,7 @@ function addAudioFiles(files) {
 // doesn't cover changes from a page yet (step 2 of the API), and this page never changes the app's data behind its back.
 
 const REMOTE_MODE = window.SP_REMOTE === true ? 'app' : window.SP_REMOTE === 'fixture' || new URLSearchParams(location.search).get('remote') === 'fixture' ? 'fixture' : null;
-const REMOTE = { queue: [], lastStep: 0, on: false, mode: null, socket: null, epoch: null, version: 0, parts: {}, you: null, offset: 0, nextId: 1, waiting: new Map(), retry: 500,
+const REMOTE = { queue: [], lastStep: 0, libs: {}, on: false, mode: null, socket: null, epoch: null, version: 0, parts: {}, you: null, offset: 0, nextId: 1, waiting: new Map(), retry: 500,
   preview: null, lastBeat: 0, watch: 0, status: 'off', sent: [], slides: new Map(), loading: new Set(), lists: {}, library: null, refusedEdit: false };
 const AT_THE_COMPUTER = 'Changing songs, playlists and settings is done at the computer for now. Running the show works from here.';
 const serverNow = () => Date.now() + REMOTE.offset;
@@ -3051,7 +3051,9 @@ function remoteApply(all, changed = []) {
   if (has('versions')) DOC.versions = ((P.versions || {}).versions || []).filter(v => okId(v.id)).map(v => ({ id: v.id, name: v.name }));
   if (has('screens')) DOC.screens = ((P.screens || {}).screens || []).map((x, n) => ({ ...clone(SCREEN_LIKE), id: 'rs' + n, name: x.name, kind: x.kind === 'stage' ? 'Stage' : 'Audience', on: x.shown !== false, doing: x.doing || '', tone: x.tone }));
   if (all) remoteSend(['groups'], true).then(r => { if (r.ok && Array.isArray(r.data)) { DOC.groups = r.data.map(g => ({ name: g.group, color: okColour(g.color), key: g.key || '', names: g.names || [] })); render(); } });      // the groups' colours, for the dots under the slides
-  if (has('library') && REMOTE.library && REMOTE.library.rev !== (P.library || {}).rev) remoteFetchSongs();      // the library changed: its list is read again
+  if (has('library')) { const rev = (P.library || {}).rev;      // the library changed: the lists open here are read again
+    if (REMOTE.library && REMOTE.library.rev !== rev) remoteFetchSongs();
+    for (const name of Object.keys(REMOTE.libs)) if (REMOTE.libs[name].rev !== rev) remoteFetchLibrary(name); }
   if (has('playlist') || has('playlists') || has('bin') || has('library')) remotePlaylists();
   if (has('notices')) remoteNotices();
   remoteLive();
@@ -3078,14 +3080,16 @@ function remotePlaylists() {
   const frontItems = (front.items || []).map(item);
   DOC.playlists = (P.playlists || []).map(p => ({ id: nameId('rpl', p.name), name: p.name, num: p.number, rev: p.rev, front: !!p.front, items: p.front ? frontItems : [] }));
   if (!DOC.playlists.length) DOC.playlists = [{ id: nameId('rpl', front.name || ''), name: front.name || 'Playlist', front: true, items: frontItems }];
-  DOC.songs = [...songs.values(), ...remoteLibrarySongs()];
+  const libSongs = remoteLibrarySongs();
+  DOC.songs = [...songs.values(), ...libSongs];
+  DOC.libraries = ((P.library || {}).libraries || []).map(l => ({ id: nameId('rl', l.name), name: l.name, songs: REMOTE.libs[l.name] ? REMOTE.libs[l.name].songs.map(x => libKey(x.id)) : [] }));
   const f = DOC.playlists.find(p => p.front) || DOC.playlists[0];
   if (was && was.rev !== front.rev) {      // reordered, added to or taken from elsewhere: the open item is found again by what it is
     const same = it => { const so = it.song && songs.get(it.song); return it.kind === was.kind && (so ? (was.appId ? so.appId === was.appId : so.title === was.title) : (it.name || '') === was.title); };
     const now = frontItems.find(i => i.id === state.openItem); if (!now || !same(now)) { const found = frontItems.find(same); state.openItem = found ? found.id : null; }
     state.itemPick = []; state.cue = null;
   }
-  const onAll = state.src.type === 'lib' && state.src.id === 'all';      // All Songs stays open; anything else goes back to the playlist in front
+  const onAll = state.src.type === 'lib' && (state.src.id === 'all' || DOC.libraries.some(l => l.id === state.src.id));      // All Songs or a library stays open; anything else goes back to the playlist in front
   if (!onAll && (state.src.type !== 'pl' || !byId(DOC.playlists, state.src.id) || !byId(DOC.playlists, state.src.id).front)) state.src = { type: 'pl', id: f.id };
   if (!f.items.some(i => i.id === state.openItem)) state.openItem = (f.items.find(i => i.kind === 'song') || f.items[0] || {}).id || null;
 }
@@ -3149,10 +3153,20 @@ function remoteFetchSongs() {
     remotePlaylists(); fixState(); render();
   });
 }
-function remoteLibrarySongs() {
-  if (!REMOTE.library) return [];
-  const lib = REMOTE.library.rev || 'x';
-  return REMOTE.library.songs.map(x => songObject(`sg${x.id}r${okId(lib) ? lib : 'x'}`, x.title, { appId: x.id, num: x.num }));
+const libKey = id => { const rev = (REMOTE.parts.library || {}).rev; return `sg${id}r${okId(rev) ? rev : 'x'}`; };
+function remoteLibrarySongs() {      // every song in a list open here, once each
+  const seen = new Map();
+  for (const list of [REMOTE.library, ...Object.values(REMOTE.libs)]) for (const x of (list && list.songs) || []) if (!seen.has(x.id)) seen.set(x.id, songObject(libKey(x.id), x.title, { appId: x.id, num: x.num }));
+  return [...seen.values()];
+}
+// A library of its own: its songs, each with its id (a song that can't be found has none, and isn't listed)
+function remoteFetchLibrary(name) {
+  const rev = (REMOTE.parts.library || {}).rev;
+  remoteSend(['library', name], true).then(r => {
+    if (!r.ok || !Array.isArray(r.data)) return;
+    REMOTE.libs[name] = { rev, songs: r.data.filter(x => x && !x.missing && okId(x.id)).map(x => ({ id: x.id, num: x.number, title: x.title })) };
+    remotePlaylists(); fixState(); render();
+  });
 }
 
 // Slides are read when they come into view, so a long playlist opens at once: two at a time (the server lets four
@@ -3228,7 +3242,7 @@ remoteWrapA('undo', () => refuse('Undo for changes made from here comes with the
 remoteWrapA('redo', () => refuse('Undo for changes made from here comes with the next step. Use Undo at the computer.'));
 // another playlist: the app runs from the one in front, so choosing one here puts it in front there too
 remoteWrapA('src', (orig, [type, id]) => { if (type === 'lib' && id === 'all') { orig([type, id]); if (!REMOTE.library) remoteFetchSongs(); return; }
-  if (type !== 'pl') return refuse('Libraries of their own come to the remote page with the next step. All Songs works from here.'); const p = byId(DOC.playlists, id); if (p && !p.front) remoteSend(['playlist', 'open', p.name]); else orig([type, id]); });
+  if (type === 'lib') { const l = byId(DOC.libraries, id); if (!l) return; orig([type, id]); if (!REMOTE.libs[l.name]) remoteFetchLibrary(l.name); return; } const p = byId(DOC.playlists, id); if (p && !p.front) remoteSend(['playlist', 'open', p.name]); else orig([type, id]); });
 remoteWrap('render', orig => {
   if (state.mode !== 'show') { const why = REASON[state.mode] || REASON[state.mode === 'themes' ? 'edit' : 'settings']; state.mode = 'show'; state.sels = []; setTimeout(() => refuse(why), 0); }
   orig(); remoteLoadVisible();
@@ -3284,6 +3298,7 @@ class FixtureSocket extends EventTarget {
     if (a[0] === 'slides' && a[1] === '4a80878c-8c17-4a93-98ee-f9d5570bc111') return reply(F.replies.slidesItem2);      // Harbour Lights, by its id
     if (a[0] === 'playlist' && a.length === 1) return reply(F.replies.playlist);
     if (a[0] === 'songs') return reply(F.replies.songs);
+    if (a[0] === 'library') return reply({ ok: true, text: '', data: [...F.replies.songs.data.slice(1).map(x => ({ number: x.number, title: x.title, id: x.id, missing: false })), { number: 9, title: 'A song that has gone', id: null, missing: true }] });      // the shape since 787c892
     if (a[0] === 'groups') return reply({ ok: true, text: '', data: [{ key: 'C', group: 'Chorus', names: ['chorus', 'chorus 1'], color: '#cc4eb4' }, { key: 'V', group: 'Verse', names: ['verse'], color: '#4285f4' }] });      // docs/cli.md's own example
     if (a[0] === 'next') { reply({ ok: true, text: 'On screen: Harbour Lights, slide 2 of 2 (Chorus).' }); this.emit(JSON.stringify(F.change)); return; }
     reply({ ok: true, text: 'Done.' });
