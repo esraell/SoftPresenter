@@ -22,6 +22,9 @@ const INK: Color32 = Color32::from_gray(235);
 const DIM: Color32 = Color32::from_gray(150);
 /// Space between the panel's edge and its controls.
 const SIDE: f32 = 12.0;
+/// Space above and below the controls in the scrolling body.
+const TOP: f32 = 8.0;
+const BOTTOM: f32 = 10.0;
 const ROW: f32 = 24.0;
 /// The width of the panel and of the controls inside it. Rows are sized from this, not from
 /// the space they find, so a row can never push the panel wider.
@@ -261,7 +264,8 @@ fn labelled(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui, f32)
         ui.allocate_ui_with_layout(vec2(104.0, ROW), Layout::right_to_left(Align::Center), |ui| {
             ui.label(egui::RichText::new(label).size(12.5).color(DIM));
         });
-        let width = ui.available_width();
+        // The gap after the label is taken from what is left, so the control ends on the edge.
+        let width = (ui.available_width() - ui.spacing().item_spacing.x).max(40.0);
         add(ui, width);
     });
 }
@@ -269,11 +273,15 @@ fn labelled(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui, f32)
 /// A pop-up list showing its current choice.
 fn choice<T: PartialEq + Copy>(ui: &mut egui::Ui, salt: &str, width: f32, value: &mut T, options: &[(T, &str)]) {
     let shown = options.iter().find(|(v, _)| v == value).map_or("", |(_, name)| name);
-    egui::ComboBox::from_id_salt(salt).selected_text(shown).width(width).show_ui(ui, |ui| {
-        for (option, name) in options {
-            ui.selectable_value(value, *option, *name);
-        }
-    });
+    egui::ComboBox::from_id_salt(salt)
+        .selected_text(shown)
+        .width(width)
+        .wrap_mode(egui::TextWrapMode::Truncate)
+        .show_ui(ui, |ui| {
+            for (option, name) in options {
+                ui.selectable_value(value, *option, *name);
+            }
+        });
 }
 
 /// The colours in the grid at the top of every colour pop-up: greys,
@@ -493,9 +501,18 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
             body = body.vertical_scroll_offset(down);
         }
         body.show(ui, |ui| {
-            Frame::new().inner_margin(egui::Margin { left: SIDE as i8, right: SIDE as i8, top: 8, bottom: 10 }).show(
-                ui,
-                |ui| {
+            // The controls get a fixed width, SIDE in from each edge, and the column is given
+            // that and the height they used, never what they measured: a control wider than
+            // its room cannot widen the column and take the right margin with it.
+            let room = ui.available_rect_before_wrap();
+            let inside = Rect::from_min_max(
+                pos2(room.min.x + SIDE, room.min.y + TOP),
+                pos2(room.max.x - SIDE, room.min.y + TOP + 100_000.0),
+            );
+            let mut content = ui.new_child(egui::UiBuilder::new().max_rect(inside));
+            {
+                let ui = &mut content;
+                {
                     ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
                     let visuals = ui.visuals_mut();
                     visuals.extreme_bg_color = FIELD;
@@ -518,8 +535,10 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
                             draft.share_change(theme, &before);
                         }
                     }
-                },
-            );
+                }
+            }
+            let used = content.min_rect().height();
+            ui.allocate_rect(Rect::from_min_size(room.min, vec2(room.width(), TOP + used + BOTTOM)), Sense::hover());
         });
     });
     leave
@@ -1208,6 +1227,9 @@ fn text_look(
     ui.horizontal(|ui| {
         let gap = ui.spacing().item_spacing.x;
         let button = 28.0;
+        // A button grows to its words and padding, so the padding is small enough that the
+        // button's own size is the 28 it is given.
+        ui.spacing_mut().button_padding.x = 2.0;
         let field = (full - 2.0 * (button + gap)).max(40.0);
         ui.add_sized(
             [field, ROW - 2.0],
@@ -1578,5 +1600,103 @@ fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
     }
     for (index, step) in order.iter().enumerate() {
         ui.label(egui::RichText::new(format!("{}.  {step}", index + 1)).size(12.0).color(INK));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use egui::RawInput;
+    use sp_engine::Show;
+    use sp_engine::SlideRef;
+    use sp_model::parse_song_text;
+
+    use super::*;
+    use crate::editor::EditDraft;
+
+    /// Lays the inspector out in a column as wide as the window's and gives the right edge of
+    /// the widest control the frame holds.
+    fn widest(state: &mut HomeState, theme: &Theme) -> f32 {
+        let ctx = crate::studio::tests::styled();
+        let mut widest: f32 = 0.0;
+        let mut worst = String::new();
+        for _ in 0..3 {
+            let raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(PANEL_WIDTH, 900.0))),
+                ..RawInput::default()
+            };
+            ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().frame(Frame::NONE).show(ui, |ui| {
+                    inspector(ui, state, theme);
+                    widest = 0.0;
+                    ui.ctx().viewport(|viewport| {
+                        for (_, rects) in viewport.this_pass.widgets.layers() {
+                            for widget in rects {
+                                // Below the tab bar and above the footer, and not the scroll area.
+                                if widget.rect.min.y > 45.0
+                                    && widget.rect.max.y < 850.0
+                                    && widget.rect.height() < 100.0
+                                    && widget.rect.max.x > widest
+                                {
+                                    widest = widget.rect.max.x;
+                                    worst = format!("{:?} {:?}", widget.rect, widget.sense);
+                                }
+                            }
+                        }
+                    });
+                });
+            })
+            .drop_without_applying_deltas();
+        }
+        eprintln!("widest control ends at {widest}: {worst}");
+        widest
+    }
+
+    fn editing_text(tab: InspectorTab, with_spans: bool, select: bool) -> HomeState {
+        let show = Show::new(vec![Arc::new(parse_song_text("S", "We lift our voices\nWe sing together\n"))]);
+        let mut state = HomeState::default();
+        let mut draft = EditDraft::of(&show, SlideRef { presentation: 0, slide: 0 }).unwrap();
+        draft.selected = draft.slide.objects.first().map(|object| object.id);
+        if with_spans
+            && let Some(sp_model::ObjectKind::Text { spans, .. }) = draft.selected_object_mut().map(|o| &mut o.kind)
+        {
+            spans.push(sp_model::TextSpan::new(
+                3,
+                7,
+                sp_model::SpanStyle {
+                    italic: Some(true),
+                    fill: Some(Rgba { r: 255, g: 200, b: 0, a: 255 }),
+                    ..Default::default()
+                },
+            ));
+        }
+        if select {
+            draft.typing = draft.selected;
+            draft.typing_range = Some((0, 9));
+        }
+        state.editing = Some(draft);
+        state.inspector.tab = tab;
+        state
+    }
+
+    #[test]
+    fn no_control_reaches_past_the_inspectors_right_edge() {
+        let theme = Theme::builtin();
+        for (tab, spans, select) in [
+            (InspectorTab::Text, false, false),
+            (InspectorTab::Text, true, false),
+            (InspectorTab::Text, true, true),
+            (InspectorTab::Shape, false, false),
+            (InspectorTab::Build, false, false),
+        ] {
+            let mut state = editing_text(tab, spans, select);
+            let edge = PANEL_WIDTH - SIDE;
+            let widest = widest(&mut state, &theme);
+            assert!(
+                widest <= edge + 0.1,
+                "{tab:?} spans {spans} selected {select}: ends at {widest}, the edge is {edge}"
+            );
+        }
     }
 }
