@@ -264,8 +264,9 @@ fn labelled(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui, f32)
         ui.allocate_ui_with_layout(vec2(104.0, ROW), Layout::right_to_left(Align::Center), |ui| {
             ui.label(egui::RichText::new(label).size(12.5).color(DIM));
         });
-        // The gap after the label is taken from what is left, so the control ends on the edge.
-        let width = (ui.available_width() - ui.spacing().item_spacing.x).max(40.0);
+        // What is left after the label (egui has already stepped past the gap after it), so the
+        // control ends on the edge.
+        let width = ui.available_width().max(40.0);
         add(ui, width);
     });
 }
