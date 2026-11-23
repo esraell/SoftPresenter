@@ -115,7 +115,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | File › Import Songs › Song Files…, Words from Text… (or drop song files on the window) | Import songs from song files (SoftPresenter's own, `.pro` documents, ChordPro and lyric files, songbooks) or words in text, rich-text or Word files (`load.rs` lists each kind's endings) |
 | File › Import Songs › A Song Bundle… | `.proBundle` bundles (every song in one, in its order; their pictures and videos go into the media bin, `bundle.rs`) and song packs |
 | File › Import Songs › A Library Folder… (or drop a folder) | Bring a library folder across; each folder becomes a library; on a Mac song documents and bundles can be chosen too |
-| File › Import Slides (presentations, PDF or Pictures)… (or drop one, or a folder of pictures) | A presentation of slides: a `.pptx` asks first, As Slides (editable, read from the file: `pptx.rs`) or As Pictures (picture slides from the program that opens it: `convert.rs`); a PDF or pictures are one picture slide each, made on threads, their slides there at once and pictures filling in (`deck.rs`) |
+| File › Import Slides… and Import › Slides… beside the songs (`HomeState::slides_sheet`; or drop one, or a folder of pictures) | The sheet **Import Slides**: two cards, Pictures as slides (a picture dialog) and A presentation (a file dialog for `.pptx`, `.ppsx`, `.key`, `.odp`, `.ppt`, `.pps` and PDF). A presentation file then opens the sheet **Import “Sermon.pptx”** (`home/import_sheet.rs`, `HomeState::ask_import`; one file at a time, the rest in `AskImport::later`): As Slides (editable, read from the file: `pptx.rs`) or As Pictures (picture slides from an app on this computer that opens it: `convert.rs`); the ringed card is what that kind of file came in as last time (`HomeState::import_as`, kept with the settings), else As Slides; greyed cards give their reason; Enter, a click, Escape and Cancel as the sheet says; the sheets count in `alert_open`, so no key reaches the show. A PDF or pictures are one picture slide each, made on threads, their slides there at once and pictures filling in (`deck.rs`). After As Slides the notice names the slides to check, each wearing an amber Check tag in its strip (`Slide::check`, kept in the saved slide), whose menu has Mark as Checked |
 | Command-L | Back to the song on screen |
 
 Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can be chosen with
@@ -416,7 +416,8 @@ picture came:
   window, separated as in PATH), `_HOVER=FILES` (files kept over the window, for a picture of
   where they would land), `_DROP_AT=X,Y` (where the pointer is for those, in the window's
   points), `_PICK=songs:0,2` (or `media:…`, `items:…` for the playlist in front),
-  `_WINDOW_SIZE=WxH`, `_NDI=NAME`, `_HIDE_NDI=1`, `_HIDE_DECKLINK=1`, `_PRETEND_DECKLINK=1` (made-up
+  `_WINDOW_SIZE=WxH`, `_NDI=NAME`, `_HIDE_NDI=1`, `_HIDE_PICTURE_APPS=1` (as on a Mac where no app can
+  open a presentation to draw it: the greyed As Pictures card, and the sheet with neither), `_HIDE_DECKLINK=1`, `_PRETEND_DECKLINK=1` (made-up
   DeckLink devices that play into nothing), `_TRACE_PREVIEW=1`, `_LIVE_TAB=NAME` (open a
   tool tab), `_TAB_SCROLL=POINTS` (scroll the open tab down, for a picture of its foot),
   `_LANGUAGE=ru|uk|en` (as if the computer were set to that language, for the Bible view's start),

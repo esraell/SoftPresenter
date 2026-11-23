@@ -11,10 +11,10 @@
 //! left out.
 //!
 //! A slide holds one look per text box: a box that mixes sizes, colours or fonts is given the
-//! look most of its letters have, and its slide is named to check. What can't be mapped (charts,
+//! look most of its letters have, and its slide is marked to check. What can't be mapped (charts,
 //! SmartArt, tables, 3D, embedded video and OLE objects) is drawn from the picture the file
 //! carries for it, when it carries one (as a fallback beside the object, or a video's poster),
-//! and otherwise left out; either way the slide is named to check.
+//! and otherwise left out; either way the slide is marked to check.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -53,7 +53,7 @@ pub struct Read {
     /// The slides, in order.
     pub slides: Vec<Slide>,
     /// The slides to check, by number (from 1), and why.
-    pub check: Vec<(usize, String)>,
+    pub check: Vec<(usize, Vec<String>)>,
 }
 
 /// The parts of a package that are read.
@@ -724,6 +724,20 @@ struct Look {
     stroke: Option<StrokeLook>,
 }
 
+/// What a frame or the newer form of an object holds, in a few words: a table, a chart, a
+/// diagram or an embedded object.
+fn frame_kind(frame: Node) -> &'static str {
+    if frame.descendants().any(|n| is(n, "tbl")) {
+        "a table"
+    } else if frame.descendants().any(|n| is(n, "chart")) {
+        "a chart"
+    } else if frame.descendants().any(|n| is(n, "relIds")) {
+        "a diagram"
+    } else {
+        "an embedded object"
+    }
+}
+
 impl<'a, 'p> SlideCx<'a, 'p> {
     fn colours(&self) -> Colours<'_> {
         Colours { theme: self.theme, map: &self.map, placeholder: None }
@@ -779,7 +793,7 @@ impl<'a, 'p> SlideCx<'a, 'p> {
                 let path = rels.get(&id).map(|(_, p)| p.clone());
                 match path.and_then(|p| self.picture_object("Background", whole, &p, None)) {
                     Some(object) => self.objects.push(object),
-                    None => self.flag("a background picture that couldn't be read"),
+                    None => self.flag("a background picture couldn't be read"),
                 }
             }
         }
@@ -847,7 +861,7 @@ impl<'a, 'p> SlideCx<'a, 'p> {
     /// coordinates).
     fn shapes(&mut self, tree: Node, parts: &Parts, place: Place, is_slide: bool, depth: usize) {
         if depth > MOST_GROUP_DEPTH {
-            self.flag("shapes inside too many groups");
+            self.flag("shapes inside too many groups were left out");
             return;
         }
         for shape in tree.children().filter(Node::is_element) {
@@ -892,26 +906,21 @@ impl<'a, 'p> SlideCx<'a, 'p> {
         match (use_choice, child(content, "Fallback")) {
             (Some(c), _) => self.shapes(c, parts, place, is_slide, depth + 1),
             (None, Some(f)) => {
-                self.flag("something drawn from the picture the file keeps for it");
+                // What the object was, from what the newer form of it held.
+                let what = child(content, "Choice").map_or("something", frame_kind);
+                self.flag(&format!("{what} came in as its picture"));
                 self.shapes(f, parts, place, is_slide, depth + 1);
             }
-            (None, None) => self.flag("something SoftPresenter can't show"),
+            (None, None) => self.flag("something couldn't come in"),
         }
     }
 
     /// A chart, table, diagram or embedded object: its picture if the file keeps one.
     fn frame(&mut self, frame: Node, parts: &Parts, place: Place) {
-        let what = if frame.descendants().any(|n| is(n, "tbl")) {
-            "a table"
-        } else if frame.descendants().any(|n| is(n, "chart")) {
-            "a chart"
-        } else if frame.descendants().any(|n| is(n, "relIds")) {
-            "a diagram"
-        } else {
-            "an embedded object"
-        };
+        let what = frame_kind(frame);
+
         let Some(boxed) = child(frame, "xfrm").and_then(box_of) else {
-            self.flag(what);
+            self.flag(&format!("{what} couldn't come in"));
             return;
         };
         let embed = frame
@@ -922,9 +931,9 @@ impl<'a, 'p> SlideCx<'a, 'p> {
         match embed.and_then(|path| self.picture_object(what, rect, &path, None)) {
             Some(object) => {
                 self.objects.push(object);
-                self.flag(&format!("{what}, drawn from the picture the file keeps for it"));
+                self.flag(&format!("{what} came in as its picture"));
             }
-            None => self.flag(what),
+            None => self.flag(&format!("{what} couldn't come in")),
         }
     }
 
@@ -948,11 +957,11 @@ impl<'a, 'p> SlideCx<'a, 'p> {
             (c.iter().any(|v| *v > 0.0) && c[0] + c[2] < 1.0 && c[1] + c[3] < 1.0).then_some(c)
         });
         if shape.descendants().any(|n| matches!(n.tag_name().name(), "videoFile" | "audioFile" | "wavAudioFile")) {
-            self.flag("embedded sound or video, which isn't brought in");
+            self.flag("embedded sound or video didn't come in");
         }
         let name = name_of(shape);
         let Some(mut object) = path.and_then(|p| self.picture_object(&name, rect, &p, crop)) else {
-            self.flag("a picture that couldn't be read");
+            self.flag("a picture couldn't be read");
             return;
         };
         if let Some(own) = xfrm_of(shape) {
@@ -1055,7 +1064,7 @@ impl<'a, 'p> SlideCx<'a, 'p> {
                     object.kind = ObjectKind::Shape { shape: kind };
                     self.objects.push(object);
                 }
-                None => self.flag("a shape SoftPresenter can't draw"),
+                None => self.flag("a shape couldn't be drawn"),
             }
         }
         if let Some(mut text) = self.text(&chain, key.as_ref(), parts, frame) {
@@ -1183,7 +1192,7 @@ impl<'a, 'p> SlideCx<'a, 'p> {
             .iter()
             .any(|(k, _)| (tenths(k), k.colour, &k.font) != (tenths(&dominant), dominant.colour, &dominant.font))
         {
-            self.flag("text that mixes sizes, colours or fonts in one box");
+            self.flag("a text box had mixed sizes; it took its main look");
         }
 
         // The box: insets, anchor and fitting, from the shape or what it inherits.
@@ -1343,7 +1352,7 @@ pub fn read(bytes: &[u8], name: &str, most: usize, save: &mut Save<'_>) -> Resul
 
         let Some(slide_doc) = reader.doc(path) else {
             result.slides.push(Slide::new(Vec::new()));
-            result.check.push((number, "it couldn't be read".to_owned()));
+            result.check.push((number, vec!["the slide couldn't be read".to_owned()]));
             continue;
         };
         let mut map = colour_map(master_doc.as_deref(), false).unwrap_or_default();
@@ -1398,7 +1407,7 @@ pub fn read(bytes: &[u8], name: &str, most: usize, save: &mut Save<'_>) -> Resul
         slide.notes = notes_of(&reader, &slide_rels);
         result.slides.push(slide);
         if !flags.is_empty() {
-            result.check.push((number, flags.join("; ")));
+            result.check.push((number, flags));
         }
     }
     Ok(result)
@@ -1713,8 +1722,8 @@ mod tests {
         assert_eq!(shape.fill, Some(Rgba::rgb(255, 0, 0)));
         assert_eq!(shape.stroke.map(|s| s.color), Some(Rgba::rgb(0, 255, 0)));
         assert!(matches!(shape.kind, ObjectKind::Shape { shape: Shape::Rectangle }));
-        let why = &read.check.iter().find(|(n, _)| *n == 2).unwrap().1;
-        assert!(why.contains("mixes sizes"), "{why}");
+        let why = &read.check.iter().find(|(n, _)| *n == 2).unwrap().1.join("; ");
+        assert!(why.contains("mixed sizes"), "{why}");
     }
 
     #[test]
@@ -1725,12 +1734,40 @@ mod tests {
         assert!(matches!(third.objects[1].kind, ObjectKind::Image { .. }));
         let fourth = &read.slides[3];
         assert_eq!(fourth.objects.len(), 1, "only the background: the chart keeps no picture");
-        let why: HashMap<usize, &str> = read.check.iter().map(|(n, w)| (*n, w.as_str())).collect();
-        assert!(why[&3].contains("picture the file keeps"), "{why:?}");
-        assert!(why[&4].contains("a chart") && !why[&4].contains("keeps"), "{why:?}");
-        let note = crate::deck::check_note(&read.check).unwrap();
-        assert!(note.starts_with("Check slides 2 (") && note.contains("3 (") && note.contains("4 ("), "{note}");
-        assert!(!note.contains("1 ("), "{note}");
+        let why: HashMap<usize, String> = read.check.iter().map(|(n, w)| (*n, w.join("; "))).collect();
+        assert!(why[&3].contains("a chart came in as its picture"), "{why:?}");
+        assert!(why[&4].contains("a chart couldn't come in"), "{why:?}");
+        let note = crate::deck::came_in_note("Sample", read.slides.len(), &read.check);
+        assert!(note.starts_with("\u{201c}Sample\u{201d} came in as 5 slides. Check slides 2, 3 and 4: "), "{note}");
+        assert!(note.contains("a chart came in as its picture; a chart couldn't come in"), "{note}");
+    }
+
+    #[test]
+    fn a_slide_to_check_keeps_its_reason_in_its_saved_data_until_it_is_marked() {
+        let mut read = read(&sample(), "Sample.pptx", 300, &mut numbered_saver()).unwrap();
+        crate::deck::mark_to_check(&mut read.slides, &read.check);
+        let checked: Vec<usize> =
+            read.slides.iter().enumerate().filter(|(_, s)| s.check.is_some()).map(|(at, _)| at + 1).collect();
+        assert_eq!(checked, [2, 3, 4], "the slides the notice names, and no others");
+        assert!(read.slides[2].check.as_deref().unwrap().contains("a chart came in as its picture"));
+        // Saved and read back, as a restart does: the reason is still there.
+        let saved = serde_json::to_string(&read.slides).unwrap();
+        let back: Vec<Slide> = serde_json::from_str(&saved).unwrap();
+        assert_eq!(back[2].check, read.slides[2].check);
+        assert!(!saved.contains("\"check\":null"), "a slide with nothing to check saves no field");
+        // A slide saved before there was a check reads back with none.
+        let older = serde_json::to_string(&Slide::new(Vec::new())).unwrap();
+        assert!(!older.contains("check"));
+        assert_eq!(serde_json::from_str::<Slide>(&older).unwrap().check, None);
+    }
+
+    /// Testing aid: `SP_WRITE_SAMPLE_PPTX=<file>` writes the five-slide deck these tests read, to
+    /// try the app with (slides 2 to 4 are the ones to check).
+    #[test]
+    #[ignore = "writes a sample deck to try the app with; needs SP_WRITE_SAMPLE_PPTX"]
+    fn write_the_sample_deck() {
+        let Some(path) = std::env::var_os("SP_WRITE_SAMPLE_PPTX") else { return };
+        std::fs::write(path, sample()).unwrap();
     }
 
     #[test]
@@ -1785,7 +1822,7 @@ mod tests {
         bytes = zipped(&parts);
         let read = read(&bytes, "Hostile.pptx", 300, &mut numbered_saver()).unwrap();
         assert!(read.slides[0].objects.is_empty());
-        assert!(read.check.iter().any(|(n, why)| *n == 1 && why.contains("couldn't be read")));
+        assert!(read.check.iter().any(|(n, why)| *n == 1 && why.join("; ").contains("couldn't be read")));
     }
 
     fn unzip_all(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
@@ -1850,7 +1887,7 @@ mod tests {
         parts.push(("ppt/media/image1.png".to_owned(), vec![0; LARGEST_PICTURE + 1]));
         let read = read(&zipped(&parts), "Huge.pptx", 300, &mut numbered_saver()).unwrap();
         assert!(read.slides[1].objects.iter().all(|o| !matches!(o.kind, ObjectKind::Image { .. })));
-        let why = &read.check.iter().find(|(n, _)| *n == 2).unwrap().1;
+        let why = &read.check.iter().find(|(n, _)| *n == 2).unwrap().1.join("; ");
         assert!(why.contains("background picture"), "{why}");
     }
 
@@ -1917,7 +1954,8 @@ mod tests {
                     _ => "other".to_owned(),
                 })
                 .collect();
-            let check = read.check.iter().find(|(n, _)| *n == at + 1).map(|(_, why)| why.as_str()).unwrap_or("");
+            let check =
+                read.check.iter().find(|(n, _)| *n == at + 1).map(|(_, why)| why.join("; ")).unwrap_or_default();
             eprintln!(
                 "{:>2} {}{} | {} || {check}",
                 at + 1,

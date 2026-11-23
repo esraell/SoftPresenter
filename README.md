@@ -56,7 +56,8 @@ SoftPresenter is built to be:
   jumps, nineteen transitions, libraries of your own, and playlists with headers, shown as one
   scroll from song to song. Songs import from text, ChordPro, rich-text, Word and lyric-service
   files, in any common encoding, and whole song libraries come across from other presentation
-  software. PowerPoint, Keynote and PDF files, and folders of pictures, come in as slides. Undo
+  software. Presentation files (`.pptx`, `.key`, `.odp` and more), PDFs and folders of pictures
+  come in as slides. Undo
   and redo.
 - **Bible.** Type `John 3:16-18`, `Пс 22:1-3` or `Ів 3:16` and the chapter fills as you type,
   with no need to press Return, as a page to read or as slides; or click a book on a keypad of
@@ -127,7 +128,7 @@ The full list, area by area, is in [docs/features.md](docs/features.md).
    first-run setup, keeping each song's groups and arrangements.
 3. **Build the running order.** Make a playlist with the + beside PLAYLISTS (say "Sunday
    Morning"), drag songs into it in order, and add headers to group them. Sermon and notice
-   slides that arrive as PowerPoint, Keynote or PDF files come in with File › Import Slides…,
+   slides that arrive as presentation or PDF files come in with File › Import Slides…,
    or by dropping them on the window: each page becomes a slide, ready to drag into the
    playlist.
 4. **Add the readings.** Control-B goes to the Bible page from anywhere. Type a reference such
@@ -189,9 +190,9 @@ Two things are optional:
   it, NDI screens say NDI isn't installed and everything else works.
 - **Desktop Video** 16.0 or later (free, from Blackmagic Design) to play a screen out of a
   DeckLink card. Without it there are no DeckLink outputs to choose.
-- **Keynote** (free from Apple), PowerPoint or LibreOffice, only to bring presentation files in
-  as pictures of their slides (a Keynote file needs Keynote). A `.pptx` can come in as editable
-  slides with none of them, and PDFs and pictures need none either.
+- **An app that opens presentation files**, only to bring a presentation in as pictures of its
+  slides (a `.key` file needs the app that made it). A `.pptx` can come in as editable slides
+  with none installed, and PDFs and pictures need none either.
 
 Song text files can be opened from the command line, such as the sample:
 `cargo run --release -- samples/sample-song.txt`. Other options: `--list-displays`,

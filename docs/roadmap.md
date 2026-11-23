@@ -145,7 +145,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Windowed output of a chosen screen.** (started: New Windowed Output makes a new audience screen) · S · Low
 - **Richer Identify.** Each layer named on the screens, and each output's device, resolution and frame rate shown. (started: Identify Screens shows the name, a border and a colour) · S · Low
 - **Test pattern window.** About ten patterns with options, a logo, and a choice of screen. (started: colour bars, a grid and white in the Screens menu) · S–M · Low
-- **Screens settings.** A performance overlay, the timing source, 10-bit colour and HDR, and Keynote screens. · S–L · Low
+- **Screens settings.** A performance overlay, the timing source, 10-bit colour and HDR. · S–L · Low
 - **Recording or streaming a screen.** Capture to disk, or stream over RTMP or to Resi, with a Live menu in the toolbar and capture actions. · L · Low
 - **Blackmagic SDI and HDMI outputs.** Dissolves on a DeckLink output, a video's sound over SDI, and DeckLink on Windows. (started: any screen played out of a DeckLink output on the card's own clock, in the format chosen, with the card's keyer sending fill and key or keying over its input; checked here with pretend devices, a real card to be checked) · M · Low
 
@@ -176,7 +176,7 @@ rather than a feature, but no church on Windows can use the app without them.
 ## Library, playlists and import/export
 
 - **Choices when importing songs.** How slides are split (paragraph, line or marker, and how many lines), and the theme, library and playlist imported songs go to. (started: File › Import Songs, drops and `sp song import` read text, lyric, ChordPro, rich-text and Word files, find sections, and share long stretches into slides of up to four lines) · S · Medium
-- **PowerPoint import, the rest.** `.pptx` files come in as editable slides or as pictures. Still to come: `.odp` and `.key` as editable slides, tables, text that mixes looks inside one box (a text box has one look), and arrow heads and other line ends. · M · Medium
+- **Presentation import, the rest.** `.pptx` files come in as editable slides or as pictures. Still to come: `.odp` and `.key` as editable slides, tables, text that mixes looks inside one box (a text box has one look), and arrow heads and other line ends. · M · Medium
 - **Lighter screens for picture-heavy decks.** The drawing library keeps up to about thirty full-size pictures per screen (roughly half a gigabyte each) until its texture fills; let them go sooner. · S–M · Medium
 - **Importing from a church's existing presentation software**, so a library can move over in one go: songs, playlists and their media. (started: ProPresenter 7 songs, library folders and song bundles, with groups, arrangements, labels, notes and copyright details, and a bundle's pictures and videos; not yet playlists, or the pictures and videos a plain song document names) · M · High
 - **SongSelect inside the app.** Search, preview and import from the search panel (⌘F). May need CCLI's agreement. · L · Medium
@@ -194,7 +194,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Search extras.** A result previewed as text or slides. (started: ⌘F searches titles and words; Return opens a result and ⌘Return adds it to the playlist; a result is dragged to a place in the playlist, a playlist or a library) · S–M · Low
 - **File menu items.** New Playlist, New Library, Import, Export and Print. (started: New Song and Add Slide; the + buttons make playlists and libraries) · S · Low
 - **MultiTracks, and Amazing's APlay.** APlay brings children's-ministry curriculum playlists in, ready to run. · L · Low
-- **Keynote import.** · L · Low
+- **`.key` import as editable slides.** · L · Low
 - **Moving to another computer, workspaces and cloud sync.** (started: one data folder, which `SOFTPRESENTER_DATA` can point elsewhere) · M–L · Low
 - **Sending presentations to digital signage screens.** · L · Low
 

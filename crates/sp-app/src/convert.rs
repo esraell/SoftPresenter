@@ -1,46 +1,42 @@
-//! Presentation files from other programs (PowerPoint, Keynote, OpenDocument) turned into a PDF
-//! by a program on this Mac that can open them, so their slides come in as pictures that look
-//! exactly as that program draws them (the "As Pictures" way of bringing a presentation in; the
-//! other way reads a `.pptx` directly, see [`crate::pptx`]). Which programs are tried, in order:
+//! Presentation files from other programs turned into a PDF by an app on this Mac that can
+//! open them, so their slides come in as pictures that look exactly as that app draws them (the
+//! "As Pictures" way of bringing a presentation in; the other way reads a `.pptx` directly, see
+//! [`crate::pptx`]). Which apps are tried, in order, depends on the kind of file: a `.pptx`
+//! (or `.ppt`, `.pps`, `.ppsx`) goes to the apps that open those, a `.key` to the one that does,
+//! an `.odp` to the ones that open OpenDocument.
 //!
-//! - PowerPoint files: Keynote (which opens them), then PowerPoint, then LibreOffice.
-//! - Keynote files: Keynote.
-//! - OpenDocument presentations: LibreOffice, then PowerPoint.
+//! Two of the three are asked through AppleScript, which macOS lets SoftPresenter do once the
+//! person allows it (it asks the first time). They are started with `launch` (hidden, with no
+//! window and not brought to the front) and never `activate`d; the file is opened and exported
+//! without a window being shown where the app allows it. The third is run headless. An app
+//! SoftPresenter started is quit again afterwards; one that was already open is left alone. Each
+//! attempt gets two minutes.
 //!
-//! PowerPoint and Keynote are asked through AppleScript, which macOS lets SoftPresenter do once
-//! the person allows it (it asks the first time). They are started with `launch` (hidden, with
-//! no window and not brought to the front) and never `activate`d; the file is opened and
-//! exported without a window being shown where the program allows it. LibreOffice is run
-//! headless. A program SoftPresenter started is quit again afterwards; one that was already
-//! open is left alone. Each attempt gets two minutes.
+//! What the person is told never names an app: the apps are named here, in code, only because
+//! they have to be started by the names they are installed under.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// A program that can turn presentations into PDFs.
+/// An app that can turn presentations into PDFs, by how it is asked to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Program {
-    PowerPoint,
-    Keynote,
-    LibreOffice,
+    /// Asked by script to open the file and save a PDF in its own folder.
+    ScriptSaves,
+    /// Asked by script to open the file and export a PDF where it is told.
+    ScriptExports,
+    /// Run without a window, to convert the file.
+    Headless,
 }
 
 impl Program {
-    pub fn name(self) -> &'static str {
-        match self {
-            Program::PowerPoint => "PowerPoint",
-            Program::Keynote => "Keynote",
-            Program::LibreOffice => "LibreOffice",
-        }
-    }
-
-    /// Where the program is when it is installed.
+    /// Where the app is when it is installed.
     fn app(self) -> PathBuf {
         let name = match self {
-            Program::PowerPoint => "Microsoft PowerPoint.app",
-            Program::Keynote => "Keynote.app",
-            Program::LibreOffice => "LibreOffice.app",
+            Program::ScriptSaves => "Microsoft PowerPoint.app",
+            Program::ScriptExports => "Keynote.app",
+            Program::Headless => "LibreOffice.app",
         };
         let system = Path::new("/Applications").join(name);
         if system.exists() {
@@ -49,12 +45,12 @@ impl Program {
         std::env::var_os("HOME").map_or(system.clone(), |home| PathBuf::from(home).join("Applications").join(name))
     }
 
-    /// The name the program runs under, for asking whether it is running.
+    /// The name the app runs under, for asking whether it is running.
     fn process(self) -> &'static str {
         match self {
-            Program::PowerPoint => "Microsoft PowerPoint",
-            Program::Keynote => "Keynote",
-            Program::LibreOffice => "soffice",
+            Program::ScriptSaves => "Microsoft PowerPoint",
+            Program::ScriptExports => "Keynote",
+            Program::Headless => "soffice",
         }
     }
 
@@ -71,7 +67,7 @@ impl Program {
     /// Asks a program SoftPresenter started to quit, when its script didn't get to (it was
     /// stopped for taking too long, or failed part way).
     fn quit(self) {
-        if self != Program::LibreOffice {
+        if self != Program::Headless {
             let script = format!("tell application \"{}\" to quit", self.process());
             let _ = run_for(osascript(&script, &[]), Duration::from_secs(15));
         }
@@ -89,36 +85,36 @@ const TIME_ALLOWED: Duration = Duration::from_secs(120);
 pub fn programs_for(path: &Path) -> &'static [Program] {
     let ending = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     match ending.as_str() {
-        // Keynote first: it has been tried and works; PowerPoint is asked when Keynote isn't
-        // there, until it has been tried.
-        "pptx" | "ppt" | "pps" | "ppsx" => &[Program::Keynote, Program::PowerPoint, Program::LibreOffice],
-        "key" => &[Program::Keynote],
-        "odp" => &[Program::LibreOffice, Program::PowerPoint],
+        // The exporting one first: it has been tried and works; the one that saves is asked when
+        // it isn't there, until it has been tried.
+        "pptx" | "ppt" | "pps" | "ppsx" => &[Program::ScriptExports, Program::ScriptSaves, Program::Headless],
+        "key" => &[Program::ScriptExports],
+        "odp" => &[Program::Headless, Program::ScriptSaves],
         _ => &[],
     }
 }
 
 /// The installed program that will turn this file into slides, if there is one.
 pub fn program_for(path: &Path) -> Option<Program> {
+    // Testing aid: SOFTPRESENTER_HIDE_PICTURE_APPS=1 behaves as on a computer where no app can
+    // open a presentation to draw it (the greyed As Pictures card, and the sheet with neither).
+    if std::env::var_os("SOFTPRESENTER_HIDE_PICTURE_APPS").is_some() {
+        return None;
+    }
     programs_for(path).iter().copied().find(|program| program.installed())
 }
 
-/// What to do when no program on this Mac can open the file, in plain words.
+/// What to say when no app on this Mac can open the file to draw it, in plain words.
 pub fn none_installed(path: &Path) -> String {
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    let names: Vec<&str> = programs_for(path).iter().map(|p| p.name()).collect();
-    let needs = match names.as_slice() {
-        [one] => one.to_string(),
-        [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
-        [] => "a presentation program".to_owned(),
-    };
-    let slides = if matches!(crate::deck::kind_of(path), "pptx") {
-        " Bring it in as slides instead (it needs no program), or export it as a PDF and drop that here."
+    let ending = path.extension().map_or_else(String::new, |e| format!(".{}", e.to_string_lossy().to_lowercase()));
+    let instead = if matches!(crate::deck::kind_of(path), "pptx") {
+        " Bring it in as slides instead (it needs no app), or export it as a PDF and drop that here."
     } else {
-        " Or export it as a PDF and drop that here."
+        " Saved as .pptx it could come in as slides, or export it as a PDF and drop that here."
     };
     format!(
-        "To bring in {name} as pictures, SoftPresenter uses {needs}, and none is on this Mac (Keynote is free from the App Store).{slides}"
+        "No app on this computer can open {ending} files to draw them, so \u{201c}{name}\u{201d} can\u{2019}t come in as pictures.{instead}"
     )
 }
 
@@ -132,14 +128,14 @@ pub fn to_pdf(path: &Path, folder: &Path) -> Result<(PathBuf, Program), String> 
     for program in programs_for(path).iter().copied().filter(|p| p.installed()) {
         let was_running = program.running();
         let made = match program {
-            Program::Keynote => by_keynote(&full, folder),
-            Program::PowerPoint => by_powerpoint(&full),
-            Program::LibreOffice => by_libreoffice(&full, folder),
+            Program::ScriptExports => by_exporting(&full, folder),
+            Program::ScriptSaves => by_saving(&full),
+            Program::Headless => by_headless(&full, folder),
         };
         match made {
             Ok(pdf) if pdf.is_file() => return Ok((pdf, program)),
-            Ok(_) => problems.push(format!("{} made no PDF", program.name())),
-            Err(problem) => problems.push(format!("{}: {problem}", program.name())),
+            Ok(_) => problems.push("it made no PDF".to_owned()),
+            Err(problem) => problems.push(problem),
         }
         // A program this started stays out of the way: closed again if it didn't close itself.
         if !was_running && program.running() {
@@ -150,14 +146,14 @@ pub fn to_pdf(path: &Path, folder: &Path) -> Result<(PathBuf, Program), String> 
         return Err(none_installed(path));
     }
     Err(format!(
-        "{name} could not be turned into slides ({}). Export it as a PDF and drop that here.",
+        "{name} could not be drawn as pictures (the app that opened it said: {}). Export it as a PDF and drop that here.",
         problems.join("; ")
     ))
 }
 
-/// Keynote: open, export as a PDF (skipped slides left out, as in the show), close. The file
+/// The exporting app: open, export as a PDF (skipped slides left out, as in the show), close. The file
 /// names go to the script as arguments, never into its text.
-fn by_keynote(path: &Path, folder: &Path) -> Result<PathBuf, String> {
+fn by_exporting(path: &Path, folder: &Path) -> Result<PathBuf, String> {
     let pdf = folder.join("slides.pdf");
     let script = r#"on run argv
     set inFile to POSIX file (item 1 of argv)
@@ -175,9 +171,9 @@ end run"#;
     Ok(pdf)
 }
 
-/// PowerPoint: open, save as a PDF, close. PowerPoint may only write inside its own folder
+/// The saving app: open, save as a PDF, close. It may only write inside its own folder
 /// without asking the person, so the PDF is made there and read from there.
-fn by_powerpoint(path: &Path) -> Result<PathBuf, String> {
+fn by_saving(path: &Path) -> Result<PathBuf, String> {
     let home = std::env::var_os("HOME").ok_or("no home folder")?;
     let folder =
         PathBuf::from(home).join("Library/Containers/com.microsoft.Powerpoint/Data/Library/Caches/SoftPresenter");
@@ -200,9 +196,9 @@ end run"#;
     Ok(pdf)
 }
 
-/// LibreOffice, without a window.
-fn by_libreoffice(path: &Path, folder: &Path) -> Result<PathBuf, String> {
-    let soffice = Program::LibreOffice.app().join("Contents/MacOS/soffice");
+/// The headless app, without a window.
+fn by_headless(path: &Path, folder: &Path) -> Result<PathBuf, String> {
+    let soffice = Program::Headless.app().join("Contents/MacOS/soffice");
     let mut command = Command::new(soffice);
     command.args(["--headless", "--norestore", "--convert-to", "pdf", "--outdir"]).arg(folder).arg(path);
     run(command)?;
@@ -278,19 +274,24 @@ mod tests {
 
     #[test]
     fn each_kind_of_file_has_its_programs_best_first() {
-        assert_eq!(programs_for(Path::new("a.PPTX")), &[Program::Keynote, Program::PowerPoint, Program::LibreOffice]);
-        assert_eq!(programs_for(Path::new("a.key")), &[Program::Keynote]);
-        assert_eq!(programs_for(Path::new("a.odp")), &[Program::LibreOffice, Program::PowerPoint]);
+        let all = &[Program::ScriptExports, Program::ScriptSaves, Program::Headless];
+        assert_eq!(programs_for(Path::new("a.PPTX")), all);
+        assert_eq!(programs_for(Path::new("a.key")), &[Program::ScriptExports]);
+        assert_eq!(programs_for(Path::new("a.odp")), &[Program::Headless, Program::ScriptSaves]);
         assert!(programs_for(Path::new("a.pdf")).is_empty());
     }
 
     #[test]
-    fn with_no_program_the_message_says_what_would_do() {
+    fn with_no_app_the_message_says_what_would_do_and_names_no_product() {
         let said = none_installed(Path::new("/x/Sermon.pptx"));
-        assert!(
-            said.contains("Sermon.pptx") && said.contains("Keynote, PowerPoint or LibreOffice") && said.contains("PDF")
-        );
-        assert!(said.contains("as slides instead") && !none_installed(Path::new("Talk.key")).contains("as slides"));
-        assert!(none_installed(Path::new("Talk.key")).contains("uses Keynote,"));
+        assert!(said.contains("\u{201c}Sermon.pptx\u{201d}") && said.contains(".pptx files") && said.contains("PDF"));
+        assert!(said.contains("as slides instead"));
+        let key = none_installed(Path::new("Talk.key"));
+        assert!(key.contains("open .key files to draw them") && key.contains("as .pptx") && key.contains("PDF"));
+        for words in [said, key] {
+            for product in ["Keynote", "PowerPoint", "LibreOffice", "Microsoft", "Office"] {
+                assert!(!words.contains(product), "{words}");
+            }
+        }
     }
 }

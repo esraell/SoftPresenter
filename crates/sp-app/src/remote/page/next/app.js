@@ -1447,7 +1447,7 @@ M.importMenu = () => [{ head: 'Import Songs' }, { t: 'A Library Folder…', f: (
 A.importSheet = () => openSheet({ title: 'Import Slides', wide: true,
   body: html`<div class="ui-cards">
     <button class="ui-card" data-a="importDo:pictures"><b>Pictures as slides</b><span>Choose pictures; each becomes a slide, in the order people number them</span></button>
-    <button class="ui-card" data-a="importDo:slides"><b>A presentation</b><span>PowerPoint, Keynote or a PDF. The app turns each page into a picture slide; here a sample comes in</span></button></div>`,
+    <button class="ui-card" data-a="importDo:slides"><b>A presentation</b><span>A .pptx, .ppsx, .key, .odp, .ppt or .pps file, or a PDF. You choose how it comes in; here a sample comes in</span></button></div>`,
   note: 'In the app you can also drop files on the window', buttons: [{ t: 'Close' }] });
 A.importDo = ([what]) => {
   closeSheet();
@@ -2628,7 +2628,7 @@ A.setup = ([step]) => { const n = +(step || 0), steps = ['Screens', 'Songs', 'Bi
     html`${field('The congregation sees', html`<select class="sel">${options(['HP 27f', '3DTV', 'A window on this display', 'NDI'], 'HP 27f')}</select>`)}${field('The stage sees (optional)', html`<select class="sel">${options(['Nothing', 'Stage TV', '3DTV'], 'Stage TV')}</select>`)}<p class="ui-p sub">The main display, with the menu bar, is never offered: it is where SoftPresenter’s own window is. The screen goes there at once.</p><button class="btn" data-a="identify">Identify screens</button>`,
     html`<p class="ui-p">Bring your songs in now, or later from the Import button above the song list.</p><div class="ui-cards"><button class="ui-card" data-a="say:A library found on this computer would come in with one click"><b>A library found on this Mac</b><span>4,372 songs · one click</span></button><button class="ui-card" data-a="say:Song files would be chosen here"><b>Song files</b><span>Text, lyric files, ChordPro, Word…</span></button></div>`,
     html`${field('The Bible on top', html`<select class="sel" data-c="bibleRow:0,bible">${options(Object.entries(BIBLE_DATA.bibles).map(([id, b]) => [id, b.name]), B().rows[0].bible)}</select>`)}${field('The Bible below', html`<select class="sel" data-c="setupBelow">${options([...Object.entries(BIBLE_DATA.bibles).map(([id, b]) => [id, b.name]), ['none', 'None']], (B().rows[1] || { bible: 'none' }).bible)}</select>`)}`,
-    html`<p class="ui-p">macOS will ask for these, once each:</p><div class="ui-list"><div class="ui-row"><span class="t">Controlling Keynote or PowerPoint</span><span class="sub">to turn a presentation into slides</span></div><div class="ui-row"><span class="t">The local network</span><span class="sub">to send screens over NDI and serve this page</span></div><div class="ui-row"><span class="t">Files in Documents</span><span class="sub">where the library is kept</span></div></div>`][n];
+    html`<p class="ui-p">macOS will ask for these, once each:</p><div class="ui-list"><div class="ui-row"><span class="t">Controlling the app that opens a presentation</span><span class="sub">to draw a presentation as pictures</span></div><div class="ui-row"><span class="t">The local network</span><span class="sub">to send screens over NDI and serve this page</span></div><div class="ui-row"><span class="t">Files in Documents</span><span class="sub">where the library is kept</span></div></div>`][n];
   openSheet({ title: `Set up SoftPresenter · ${n + 1} of ${steps.length} · ${steps[n]}`, wide: true, body,
     buttons: [n > 0 ? { t: 'Back', keep: true, f: () => A.setup([n - 1]) } : { t: 'Later' }, n < steps.length - 1 ? { t: 'Next', primary: true, keep: true, f: () => A.setup([n + 1]) } : { t: 'Finish', primary: true }] }); };
 C.setupBelow = v => { const r = B().rows; if (v === 'none') r.splice(1); else if (r[1]) r[1].bible = v; else r.push({ bible: v, verse: 'verse2', ref: 'ref2' }); };
@@ -2909,7 +2909,7 @@ function mediaFromFile(f) {
 }
 function addMediaFiles(files) { const made = files.filter(f => /^(image|video)\//.test(f.type)).map(mediaFromFile); if (!made.length) return refuse('Choose pictures or videos'); mutate(() => { DOC.media.push(...made); if (state.mediaView) byId(DOC.mediaPlaylists, state.mediaView).items.push(...made.map(m => m.id)); });  }
 function addPictureSlides(files) {
-  const pics = files.filter(f => f.type.startsWith('image/')).sort(natural); if (!pics.length) return refuse('Choose pictures. A PowerPoint, Keynote or PDF is turned into pictures by the app.');
+  const pics = files.filter(f => f.type.startsWith('image/')).sort(natural); if (!pics.length) return refuse('Choose pictures. A presentation or a PDF is turned into pictures by the app.');
   mutate(() => { const s = song(pics.length === 1 ? pics[0].name.replace(/\.[^.]+$/, '') : 'Imported slides', []);
     s.slides = pics.map((f, n) => { const m = { ...mediaFromFile(f), deck: true }; m.bg = `url("${m.url}") center / contain no-repeat #fff`; DOC.media.push(m); return slide('', '', '', { label: `Page ${n + 1}`, objects: [obj('image', f.name, { media: m.id, frame: { x: 0, y: 0, w: 1920, h: 1080 } })] }); });
     DOC.songs.push(s); state.src = { type: 'lib', id: 'all' }; state.openSong = s.id; state.mode = 'show'; });

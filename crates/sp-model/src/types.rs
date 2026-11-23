@@ -520,6 +520,10 @@ pub struct Slide {
     /// Goes on to the next slide by itself this many seconds after it is put on screen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub advance: Option<f32>,
+    /// Why this slide, brought in from a presentation file, needs a look before it is used.
+    /// Kept with the slide, so it survives a restart, until the person marks it as checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<String>,
 }
 
 impl Slide {
@@ -535,6 +539,7 @@ impl Slide {
             actions: Vec::new(),
             hot_key: None,
             advance: None,
+            check: None,
         }
     }
 

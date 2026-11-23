@@ -628,6 +628,7 @@ const SLIDE_CHANGES: &[&str] = &[
     "notes",
     "enable",
     "disable",
+    "checked",
     "hotkey",
     "transition",
     "template",
@@ -1074,8 +1075,8 @@ Themes
                                wait for it, or ask with job N)
   song import FILE.pptx [--as slides|pictures]
                                a presentation as editable slides (read from the file, the usual
-                               way for .pptx), or as pictures of its slides (exact look; needs a
-                               program that opens it)
+                               way for .pptx), or as pictures of its slides (exact look; needs an
+                               app on this computer that opens it)
 
 Changing a slide (each change is saved, can be undone, and shows on screen at once)
   slide SONG N [--json]        the slide's objects: words, place and look (* = the slide's own)
@@ -1094,6 +1095,7 @@ Changing a slide (each change is saved, can be undone, and shows on screen at on
   slide group SONG N NAME      slide N starts a group of that name (or renames its group)
   slide label SONG N LABEL|none | slide notes SONG N TEXT|none
   slide enable SONG N | slide disable SONG N     (a disabled slide is passed over)
+  slide checked SONG N         take the tag off a slide that came in from a presentation needing a look
   slide hotkey SONG N KEY|none | slide transition SONG N KIND [SECONDS] | none
   slide template SONG N TEMPLATE|auto | slide media SONG N MEDIA-ITEM|none
   slide web SONG N URL|off     a live web page on the slide (a box filling it, behind the

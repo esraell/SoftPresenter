@@ -750,6 +750,15 @@ impl crate::App {
                     })
                 })
             }
+            "checked" => self.slide_edit(words, |song, index, _| {
+                let (_, slide) = song.slide(index)?;
+                let said = match slide.check {
+                    Some(_) => format!("slide {} marked as checked", index + 1),
+                    None => format!("slide {} had nothing to check", index + 1),
+                };
+                let changed = sp_model::Slide { check: None, ..slide.clone() };
+                song.with_slide(index, changed).map(|song| (song, said))
+            }),
             "hotkey" => self.slide_change_one(words, "slide hotkey SONG N KEY|none", |slide, value| {
                 slide.hot_key = match value {
                     none if none.eq_ignore_ascii_case("none") => None,

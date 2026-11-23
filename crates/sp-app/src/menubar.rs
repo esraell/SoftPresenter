@@ -205,7 +205,7 @@ pub const MENUS: &[(&str, &[Entry])] = &[
             Do(Action::NewSong, "New Song", cmd('N')),
             Do(Action::NewSlide, "Add Slide", shift_cmd('N')),
             Entry::Sub("Import Songs", IMPORT_SONGS),
-            Do(Action::ImportSlides, "Import Slides (PowerPoint, Keynote, PDF or Pictures)…", None),
+            Do(Action::ImportSlides, "Import Slides…", None),
             Line,
             Do(Action::ExportSongs, "Export Songs…", None),
             Do(Action::ReloadSongs, "Reload Songs from Their Files", None),

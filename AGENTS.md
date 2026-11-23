@@ -75,6 +75,7 @@ person:
 | `SOFTPRESENTER_HOLD_WINDOW_PICTURE=<ms>@<seconds>` | The first picture a screen's window asks for that many seconds after the start comes that many milliseconds late, once, as when the window system is slow to give a window its next picture (works in a quiet run) |
 | `SOFTPRESENTER_OUTPUT_ROOM=<lines>` | The screens' painter has room for that many lines whatever is drawn, so a fuller slide is too heavy for them |
 | `SOFTPRESENTER_HIDE_NDI=1` | Behave as on a computer without NDI installed |
+| `SOFTPRESENTER_HIDE_PICTURE_APPS=1` | Behave as on a Mac where no app can open a presentation to draw it (the import sheet greys As Pictures) |
 | `SOFTPRESENTER_NDI_LOSE=<n>` or `<n>@<place>` | The next n NDI pictures somebody is watching for count as lost on their way back from the GPU (with a place, only that picture of each drawing: 1 is the first) |
 | `SOFTPRESENTER_NDI=<name>` | Also send over NDI under this name, this run only |
 | `SOFTPRESENTER_HIDE_DECKLINK=1` | Behave as on a computer without Desktop Video (the DeckLink driver) |

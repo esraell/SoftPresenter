@@ -1422,21 +1422,30 @@ fn draw_slides(
                     pencil.map_or(if has_menu { more.min.x } else { rect.max.x - 3.0 }, |pencil| pencil.min.x) - 4.0;
                 let mut tags = slide_tags(slide);
                 if entry.again {
-                    tags.insert(0, ("AGAIN".to_owned(), false));
+                    tags.insert(0, Tag::new("AGAIN", TagLook::Plain));
                 }
-                for (words, key) in tags.into_iter().rev() {
-                    let galley = crate::studio::spaced(ui, &words, fixed_semibold(11.0), TEXT_DIM, 0.3);
-                    let tag = Rect::from_min_max(
+                for tag in tags.into_iter().rev() {
+                    let (fill, ink) = match tag.look {
+                        TagLook::Check => (crate::studio::CARE, Color32::from_gray(0x11)),
+                        TagLook::Key => (crate::studio::BUTTON, TEXT),
+                        TagLook::Plain => (CARD, TEXT_DIM),
+                    };
+                    let galley = crate::studio::spaced(ui, &tag.words, fixed_semibold(11.0), ink, 0.3);
+                    let place = Rect::from_min_max(
                         pos2(right - galley.size().x - 8.0, middle - 8.5),
                         pos2(right, middle + 8.5),
                     );
-                    if tag.min.x < drawn.max.x + 40.0 {
+                    if place.min.x < drawn.max.x + 40.0 {
                         break;
                     }
-                    ui.painter().rect_filled(tag, 4.0, if key { crate::studio::BUTTON } else { CARD });
-                    let ink = if key { TEXT } else { TEXT_DIM };
-                    ui.painter().galley(pos2(tag.min.x + 4.0, middle - galley.size().y / 2.0), galley, ink);
-                    right = tag.min.x - 4.0;
+                    ui.painter().rect_filled(place, 4.0, fill);
+                    ui.painter().galley(pos2(place.min.x + 4.0, middle - galley.size().y / 2.0), galley, ink);
+                    if let Some(hover) = tag.hover {
+                        // Only hovering: a click on the tag is still a click on the slide.
+                        let id = ui.scope_id().with(("tag", slide.id, tag.words.clone()));
+                        ui.interact(place, id, Sense::hover()).on_hover_text(hover);
+                    }
+                    right = place.min.x - 4.0;
                 }
                 let (font, ink) = if is_live {
                     (if first { fixed_semibold(12.0) } else { fixed(12.0) }, TALLY)
@@ -1605,25 +1614,56 @@ pub(super) fn dot_colour(colour: Rgba) -> Color32 {
     if light < 60.0 { Color32::from_rgb(0x6b, 0x7f, 0x99) } else { color32(colour) }
 }
 
-/// The small tags in a slide's strip for what the slide does: its hot key (true: drawn as a
-/// key), the time after which it goes on by itself, how many actions it has, its own
-/// transition, and that it is switched off.
-fn slide_tags(slide: &Slide) -> Vec<(String, bool)> {
+/// How a small tag in a slide's strip is drawn.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum TagLook {
+    /// Grey on a card.
+    Plain,
+    /// A key, on a button's grey.
+    Key,
+    /// Amber, black words: the slide came in from a presentation and needs a look.
+    Check,
+}
+
+/// One small tag in a slide's strip.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(super) struct Tag {
+    pub(super) words: String,
+    pub(super) look: TagLook,
+    /// What the tag says when the pointer rests on it.
+    pub(super) hover: Option<String>,
+}
+
+impl Tag {
+    fn new(words: impl Into<String>, look: TagLook) -> Tag {
+        Tag { words: words.into(), look, hover: None }
+    }
+}
+
+/// The small tags in a slide's strip for what the slide does: its hot key, the time after which
+/// it goes on by itself, how many actions it has, its own transition, that it is switched off,
+/// and last (so it is the one nearest the pencil, and the last to go when there is no room) that
+/// it came in from a presentation and is to be checked, with why.
+pub(super) fn slide_tags(slide: &Slide) -> Vec<Tag> {
     let mut tags = Vec::new();
     if let Some(key) = slide.hot_key {
-        tags.push((key.to_string(), true));
+        tags.push(Tag::new(key.to_string(), TagLook::Key));
     }
     if let Some(seconds) = slide.advance {
-        tags.push((format!("{seconds:.0}S"), false));
+        tags.push(Tag::new(format!("{seconds:.0}S"), TagLook::Plain));
     }
     if !slide.actions.is_empty() {
-        tags.push((format!("{} ACT", slide.actions.len()), false));
+        tags.push(Tag::new(format!("{} ACT", slide.actions.len()), TagLook::Plain));
     }
     if let Some(own) = slide.transition {
-        tags.push((own.kind.name().to_uppercase(), false));
+        tags.push(Tag::new(own.kind.name().to_uppercase(), TagLook::Plain));
     }
     if !slide.enabled {
-        tags.push(("OFF".to_owned(), false));
+        tags.push(Tag::new("OFF", TagLook::Plain));
+    }
+    if let Some(why) = slide.check.as_deref() {
+        let hover = format!("Check this slide: {why}. Mark as Checked, in its menu, takes this tag off.");
+        tags.push(Tag { hover: Some(hover), ..Tag::new("CHECK", TagLook::Check) });
     }
     tags
 }
@@ -2739,6 +2779,13 @@ fn slide_menu(
             }
         });
     });
+    // A slide that came in from a presentation with a reason to look at it: marked as looked at,
+    // which takes its tag off (Undo puts it back).
+    let to_check = these.iter().any(|at| presentation.slide(*at).is_some_and(|(_, one)| one.check.is_some()));
+    if to_check && ui.button("Mark as Checked").clicked() {
+        state.slide_request = edited(&|one| Slide { check: None, ..one.clone() });
+        ui.close();
+    }
     // The look of the slide's text, to give another slide.
     if ui.button("Copy Style").clicked() {
         state.inspector.copied_style = slide.objects.iter().find_map(|object| object.text_style().cloned());

@@ -492,8 +492,8 @@ fn permissions(ui: &mut egui::Ui) {
             "When SoftPresenter looks for a library of song documents or opens songs, pictures and videos kept there.",
         ),
         (
-            "Control Keynote or PowerPoint",
-            "The first time you import a PowerPoint or Keynote file, SoftPresenter asks that program to turn its slides into pictures.",
+            "Controlling the app that opens a presentation",
+            "The first time you bring a presentation in as pictures, SoftPresenter asks an app on this Mac that can open it to draw its slides. macOS asks once, to allow that.",
         ),
     ] {
         ui.label(RichText::new(what).font(semibold(13.0)).color(TEXT));

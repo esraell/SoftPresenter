@@ -124,6 +124,9 @@ impl crate::App {
             if let Some(key) = slide.hot_key {
                 marks.push(format!("key {key}"));
             }
+            if slide.check.is_some() {
+                marks.push("to check".to_owned());
+            }
             let marked = if marks.is_empty() { String::new() } else { format!("   ({})", marks.join(", ")) };
             lines.push(format!(
                 "{:>3}. {}{}{}{}",
@@ -137,7 +140,7 @@ impl crate::App {
             let mut entry = serde_json::json!({
                 "slide": index + 1, "group": group.name, "words": words, "on_screen": live,
                 "enabled": slide.enabled, "label": slide.label, "hot_key": slide.hot_key,
-                "id": slide.id, "thumb": thumb,
+                "check": slide.check, "id": slide.id, "thumb": thumb,
             });
             if full {
                 let (block, facts) = self.slide_facts(&read, index)?;
@@ -269,6 +272,9 @@ impl crate::App {
         if let Some(key) = slide.hot_key {
             settings.push(format!("hot key {key}"));
         }
+        if let Some(why) = &slide.check {
+            settings.push(format!("to check: {why}"));
+        }
         if let Some(transition) = &slide.transition {
             settings.push(format!("transition {} {:.1}s", transition.kind.name(), transition.seconds));
         }
@@ -290,7 +296,7 @@ impl crate::App {
         let data = serde_json::json!({
             "song": read.title, "slide": index + 1, "group": group.name, "objects": objects,
             "enabled": slide.enabled, "label": slide.label, "notes": slide.notes, "hot_key": slide.hot_key,
-            "transition": slide.transition, "template": template, "actions": actions, "advance": slide.advance,
+            "check": slide.check, "transition": slide.transition, "template": template, "actions": actions, "advance": slide.advance,
         });
         Ok((lines.join("\n"), data))
     }

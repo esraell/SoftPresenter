@@ -541,13 +541,15 @@ and videos their slides show, which go into the media bin, each once; the reply 
 pictures and videos came, names any a song shows that the bundle doesn't hold and everything
 in the bundle left out, with why, and a bundle over 64 MB is read in the background, with a
 job number); SoftProjector databases and songbooks. A `.pptx` becomes a presentation of
-editable slides (read from the file, no program started; add `--as pictures` for pictures of
-the slides instead, drawn by a program on the Mac that opens it, exactly as it draws them); a
+editable slides (read from the file, no app started; add `--as pictures` for pictures of
+the slides instead, drawn by an app on the Mac that opens it, exactly as that app draws them); a
 `.ppt`, `.key` or `.odp` presentation, a PDF, or a folder of pictures becomes a presentation of
 picture slides, made in the background (its slides are there at once and their pictures fill
 in). Without `--as`, a `.pptx` comes in as it was last brought in from the app (slides at
 first). `--as slides` on a file that can only come in as pictures says so. The reply names the
-slides to check (a chart, a table, text with mixed looks) once the import is done. Anything
+slides to check (a chart, a table, text with mixed looks) once the import is done; each of
+them is marked "to check" in `slide list` and `slide show` (and has `check` in their JSON) until
+`slide checked SONG N` takes the mark off. Anything
 else is refused, with the list of what is read.
 
     $ sp song new "River Song" river.txt
@@ -584,6 +586,7 @@ else is refused, with the list of what is read.
 | `slide delete SONG N`, `slide duplicate SONG N`, `slide move SONG N to M` | Deletes (at once; `sp undo` puts it back), copies or moves a slide (a moved slide joins the group where it lands) |
 | `slide group SONG N NAME` | Slide N starts a group of that name (or renames the group it starts) |
 | `slide label SONG N LABEL\|none`, `slide notes SONG N TEXT\|none`, `slide hotkey SONG N KEY\|none` | A slide's label, operator notes and hot key (one letter or digit) |
+| `slide checked SONG N` | Takes the "to check" mark off a slide that came in from a presentation (the menu's Mark as Checked) |
 | `slide enable\|disable SONG N` | A switched-off slide is passed over by Next |
 | `slide transition SONG N KIND [SECONDS]\|none`, `slide template SONG N TEMPLATE\|auto`, `slide media SONG N ITEM\|none` | A slide's own transition, template, and the media it puts behind the words |
 | `slide web SONG N URL\|off` | A live web page on the slide: the address of its web page box, or a new box filling the slide, behind the words, if it has none (`off` takes it away). Only `https://` addresses (a bare name gets `https://` in front); `sp slide SONG N` lists the box as `Web page: URL`, and its JSON has `"kind": "web"` and `"url"` |

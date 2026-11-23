@@ -2180,7 +2180,7 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             ui.separator();
             if ui
                 .button("Slides\u{2026}")
-                .on_hover_text("A presentation, a PDF or a folder of pictures, as picture slides")
+                .on_hover_text("Pictures as slides, or a presentation (.pptx, .ppsx, .key, .odp, .ppt, .pps or a PDF)")
                 .clicked()
             {
                 state.menu_asked = Some(Action::ImportSlides);
@@ -3148,18 +3148,6 @@ pub fn alert(ctx: &egui::Context, id: &str, icon: Icon, title: &str, message: &s
 /// An alert with any number of buttons side by side, the first of which is Cancel (Escape
 /// answers with it): the place of the button picked, or `None` until one is. `default` is the
 /// one Return gives, with a faint ring.
-pub fn choose(
-    ctx: &egui::Context,
-    id: &str,
-    icon: Icon,
-    title: &str,
-    message: &str,
-    labels: &[&str],
-    default: usize,
-) -> Option<usize> {
-    choose_with(ctx, id, icon, title, message, labels, default, false, 340.0)
-}
-
 #[allow(clippy::too_many_arguments)]
 fn choose_with(
     ctx: &egui::Context,

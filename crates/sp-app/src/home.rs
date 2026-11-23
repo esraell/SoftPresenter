@@ -16,7 +16,9 @@ use crate::screens::{Kind, Output, Screen};
 
 use crate::icons::{self, Icon};
 
+mod import_sheet;
 mod slides;
+pub use import_sheet::{AskImport, ImportAnswer, SlidesChoice};
 use slides::{slide_area, slide_grid};
 
 /// The pills that hold toolbar items, and text fields.
@@ -333,10 +335,14 @@ pub struct HomeState {
     /// Keys on Buttons, or the switch in the list of keys; kept with the preferences), and
     /// whether a testing aid shows them for a picture without changing the setting.
     pub keys_on_buttons: bool,
-    /// Presentation files waiting to be told how to come in: as slides or as pictures.
+    /// The presentation file the sheet asks about: as slides or as pictures.
     pub ask_import: Option<AskImport>,
-    /// The answer: the files, and how they are to come in. Taken by the app.
-    pub import_answer: Option<(Vec<std::path::PathBuf>, crate::deck::ImportAs)>,
+    /// The answer: the file, and how it is to come in. Taken by the app.
+    pub import_answer: Option<ImportAnswer>,
+    /// The sheet Import › Slides… opens is showing.
+    pub slides_sheet: bool,
+    /// What it was answered with. Taken by the app.
+    pub slides_choice: Option<SlidesChoice>,
     /// How each kind of presentation file was last brought in, by kind (`pptx`) and then
     /// `slides` or `pictures`; kept in the settings.
     pub import_as: std::collections::BTreeMap<String, String>,
@@ -1792,6 +1798,8 @@ impl Default for HomeState {
             keys_on_buttons: false,
             ask_import: None,
             import_answer: None,
+            slides_sheet: false,
+            slides_choice: None,
             import_as: std::collections::BTreeMap::new(),
             key_tags_for_capture: false,
             key_sheet: false,
@@ -2060,6 +2068,8 @@ impl HomeState {
         !self.confirm_delete_songs.is_empty()
             || !self.confirm_delete_media.is_empty()
             || self.confirm_delete_theme.is_some()
+            || self.ask_import.is_some()
+            || self.slides_sheet
     }
 
     /// Whether an Escape pressed now belongs to something over the window (a menu, a question,
@@ -2301,7 +2311,8 @@ fn home_view(
     version_sheet(ui, state);
     confirm_delete_song(ui, show, state);
     confirm_delete_media(ui, show, state);
-    ask_import_as(ui, state);
+    import_sheet::ask_import_sheet(ui, state);
+    import_sheet::slides_sheet(ui, state);
     // Delete (or Backspace) deletes what is picked out in the list last clicked: what Undo
     // brings back at once (slides, playlist items), the rest after asking; with neither list
     // last clicked, the slide picked out by a right-click.
@@ -5817,63 +5828,22 @@ fn new_song_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
     }
 }
 
-/// Presentation files waiting to be told how to come in.
-#[derive(Clone, Debug, PartialEq)]
-pub struct AskImport {
-    pub paths: Vec<std::path::PathBuf>,
-}
-
 impl HomeState {
+    /// How a kind of presentation file (`pptx`) came in last time; `None` if it never has.
+    pub fn kept_import(&self, kind: &str) -> Option<crate::deck::ImportAs> {
+        self.import_as.get(kind).and_then(|name| crate::deck::ImportAs::from_name(name))
+    }
+
     /// How a kind of presentation file (`pptx`) was last brought in; slides until it has been
     /// brought in as pictures.
     pub fn import_choice(&self, kind: &str) -> crate::deck::ImportAs {
-        self.import_as
-            .get(kind)
-            .and_then(|name| crate::deck::ImportAs::from_name(name))
-            .unwrap_or(crate::deck::ImportAs::Slides)
+        self.kept_import(kind).unwrap_or(crate::deck::ImportAs::Slides)
     }
 
     /// Remembers how a kind of presentation file was brought in.
     pub fn remember_import(&mut self, kind: &str, how: crate::deck::ImportAs) {
         self.import_as.insert(kind.to_owned(), how.name().to_owned());
     }
-}
-
-/// Asks how presentation files are to come in: as slides (to edit; read straight from the file),
-/// or as pictures of them (the exact look). What was chosen last for the kind is the answer
-/// Return gives, and is remembered anew with each answer.
-fn ask_import_as(ui: &mut egui::Ui, state: &mut HomeState) {
-    use crate::deck::{ImportAs, kind_of, reads_as_slides};
-    let Some(ask) = state.ask_import.clone() else { return };
-    let direct: Vec<&std::path::PathBuf> = ask.paths.iter().filter(|p| reads_as_slides(p)).collect();
-    let title = match direct.as_slice() {
-        [one] => {
-            format!(
-                "Bring in {} as\u{2026}",
-                one.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned())
-            )
-        }
-        many => format!("Bring in these {} presentations as\u{2026}", many.len()),
-    };
-    let last = direct.first().map_or(ImportAs::Slides, |path| state.import_choice(kind_of(path)));
-    let message = "Slides can be edited, and are read straight from the file. Pictures look exactly as they                    did in the program that made them, which has to be on this Mac.";
-    let labels = ["Cancel", "As Pictures", "As Slides"];
-    let default = if last == ImportAs::Pictures { 1 } else { 2 };
-    let Some(answer) =
-        crate::studio::choose(ui.ctx(), "import as", crate::icons::Icon::Import, &title, message, &labels, default)
-    else {
-        return;
-    };
-    state.ask_import = None;
-    let how = match answer {
-        1 => ImportAs::Pictures,
-        2 => ImportAs::Slides,
-        _ => return,
-    };
-    for path in &direct {
-        state.remember_import(kind_of(path), how);
-    }
-    state.import_answer = Some((ask.paths, how));
 }
 
 fn confirm_delete_song(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
@@ -13996,6 +13966,247 @@ mod tests {
         assert!(commands.is_empty(), "and clears nothing: {commands:?}");
         assert!(state.chooser_open, "nor closes what is under it");
         assert_eq!(state.notices.look(), crate::notices::Look::Quiet, "closed: seen");
+    }
+
+    fn presentation_ask(
+        path: &str,
+        slides_ok: bool,
+        pictures_ok: bool,
+        kept: Option<crate::deck::ImportAs>,
+    ) -> AskImport {
+        AskImport { path: path.into(), later: Vec::new(), slides_ok, pictures_ok, kept }
+    }
+
+    fn click_events(at: egui::Pos2) -> (Vec<Event>, Vec<Event>) {
+        let button = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        (vec![Event::PointerMoved(at), button(true)], vec![button(false)])
+    }
+
+    #[test]
+    fn the_import_sheets_cards_are_ringed_greyed_and_marked_by_what_can_be_done() {
+        use crate::deck::ImportAs::{Pictures, Slides};
+        // The first time, a .pptx is ringed As Slides; nothing is marked.
+        let first = presentation_ask("/x/Sermon.pptx", true, true, None);
+        assert_eq!(first.ringed(), Some(Slides));
+        assert_eq!(first.reason(Slides), None);
+        assert_eq!(first.foot(), "Enter takes the one ringed. The choice is kept for .pptx files");
+        // What came in last time is ringed instead, whatever it was.
+        assert_eq!(presentation_ask("/x/Sermon.pptx", true, true, Some(Pictures)).ringed(), Some(Pictures));
+        assert_eq!(presentation_ask("/x/Sermon.pptx", true, true, Some(Slides)).ringed(), Some(Slides));
+        // A kept choice that can't be done now is not ringed: the one that can is.
+        assert_eq!(presentation_ask("/x/Sermon.pptx", true, false, Some(Pictures)).ringed(), Some(Slides));
+        // A .key can only be pictures: As Slides is greyed, with its reason.
+        let key = presentation_ask("/x/Easter.key", false, true, None);
+        assert_eq!(key.ringed(), Some(Pictures));
+        assert_eq!(key.reason(Slides).as_deref(), Some("Only .pptx and .ppsx files can come in as slides"));
+        assert_eq!(key.reason(Pictures), None);
+        assert_eq!(key.foot(), "Enter takes the one ringed. The choice is kept for .key files");
+        // And with no app to draw it, As Pictures is greyed, with its reason.
+        let none = presentation_ask("/x/Sermon.pptx", true, false, None);
+        assert_eq!(none.reason(Pictures).as_deref(), Some("No app on this computer can open .pptx files to draw them"));
+        // Neither: one paragraph.
+        let neither = presentation_ask("/x/Easter.key", false, false, None);
+        assert_eq!(neither.ringed(), None);
+        assert_eq!(
+            neither.nothing_words(),
+            "No app on this computer can open .key files to draw them, so \u{201c}Easter.key\u{201d} can\u{2019}t come in. \
+             Saved as .pptx, it could come in as slides."
+        );
+    }
+
+    #[test]
+    fn the_import_sheet_shows_its_words_and_takes_enter_a_click_or_escape() {
+        use crate::deck::ImportAs::{Pictures, Slides};
+        let (ctx, show) = (egui::Context::default(), three_songs());
+        let all_words = |texts: &[(String, Rect)]| texts.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>().join("|");
+        let mut state = HomeState {
+            ask_import: Some(presentation_ask("/x/Sermon.pptx", true, true, Some(Pictures))),
+            ..HomeState::default()
+        };
+        let mut time = 0.0;
+        let mut frame = |state: &mut HomeState, events: Vec<Event>| {
+            time += 0.1;
+            frame_texts(&ctx, &show, state, events, time)
+        };
+        frame(&mut state, vec![]);
+        let texts = frame(&mut state, vec![]);
+        let words = all_words(&texts);
+        assert!(words.contains("Import \u{201c}Sermon.pptx\u{201d}"), "{words}");
+        assert!(words.contains("As Slides") && words.contains("As Pictures"));
+        assert!(words.contains("ENTER TAKES THE ONE RINGED. THE CHOICE IS KEPT FOR .PPTX FILES"), "{words}");
+        assert!(words.contains("LAST TIME"), "kept: marked");
+        assert!(words.contains("Words stay words, ready to edit. Read straight from the file in a moment."));
+        assert!(state.alert_open(), "the show's keys wait while it asks");
+        // Enter takes the ringed card, which is what came in last time.
+        frame(&mut state, pressed(Key::Enter, Modifiers::NONE));
+        let answer = state.import_answer.take().expect("Enter answers");
+        assert_eq!((answer.how, state.ask_import.is_none()), (Some(Pictures), true));
+        assert_eq!(state.kept_import("pptx"), Some(Pictures));
+        // A click takes either: here the one that isn't ringed.
+        state.ask_import = Some(presentation_ask("/x/Sermon.pptx", true, true, Some(Pictures)));
+        frame(&mut state, vec![]);
+        let texts = frame(&mut state, vec![]);
+        let at = drawn_at(&texts, "As Slides").expect("the card's title");
+        let (down, up) = click_events(at + vec2(20.0, 30.0));
+        frame(&mut state, down);
+        frame(&mut state, up);
+        assert_eq!(state.import_answer.take().expect("a click answers").how, Some(Slides));
+        // The first time nothing is marked.
+        state.ask_import = Some(presentation_ask("/x/Sermon.pptx", true, true, None));
+        frame(&mut state, vec![]);
+        let texts = frame(&mut state, vec![]);
+        assert!(!all_words(&texts).contains("LAST TIME"));
+        // Escape closes it and answers nothing.
+        frame(&mut state, pressed(Key::Escape, Modifiers::NONE));
+        assert!(state.ask_import.is_none() && state.import_answer.is_none());
+        // Cancel does the same.
+        state.ask_import = Some(presentation_ask("/x/Sermon.pptx", true, true, None));
+        frame(&mut state, vec![]);
+        let texts = frame(&mut state, vec![]);
+        let cancel = drawn_at(&texts, "Cancel").expect("Cancel");
+        let (down, up) = click_events(cancel);
+        frame(&mut state, down);
+        frame(&mut state, up);
+        assert!(state.ask_import.is_none() && state.import_answer.is_none());
+    }
+
+    #[test]
+    fn a_greyed_card_gives_its_reason_in_place_of_its_line_and_cant_be_clicked() {
+        let (ctx, show) = (egui::Context::default(), three_songs());
+        let mut state = HomeState {
+            ask_import: Some(presentation_ask("/x/Easter.key", false, true, None)),
+            ..HomeState::default()
+        };
+        let mut time = 0.0;
+        let mut frame = |state: &mut HomeState, events: Vec<Event>| {
+            time += 0.1;
+            frame_texts(&ctx, &show, state, events, time)
+        };
+        frame(&mut state, vec![]);
+        let texts = frame(&mut state, vec![]);
+        let words: Vec<&str> = texts.iter().map(|(t, _)| t.as_str()).collect();
+        assert!(words.contains(&"Only .pptx and .ppsx files can come in as slides"), "{words:?}");
+        assert!(!words.iter().any(|w| w.contains("Read straight from the file")), "its line is gone");
+        let at = drawn_at(&texts, "As Slides").expect("title");
+        let (down, up) = click_events(at + vec2(20.0, 30.0));
+        frame(&mut state, down);
+        frame(&mut state, up);
+        assert!(state.import_answer.is_none() && state.ask_import.is_some(), "a greyed card takes no click");
+        // Enter takes the ringed one: pictures.
+        frame(&mut state, pressed(Key::Enter, Modifiers::NONE));
+        assert_eq!(state.import_answer.take().and_then(|a| a.how), Some(crate::deck::ImportAs::Pictures));
+    }
+
+    #[test]
+    fn with_neither_way_possible_the_sheet_is_a_paragraph_and_ok() {
+        let (ctx, show) = (egui::Context::default(), three_songs());
+        let ask =
+            AskImport { later: vec!["/x/Next.key".into()], ..presentation_ask("/x/Easter.key", false, false, None) };
+        let mut state = HomeState { ask_import: Some(ask), ..HomeState::default() };
+        let mut time = 0.0;
+        let mut frame = |state: &mut HomeState, events: Vec<Event>| {
+            time += 0.1;
+            frame_texts(&ctx, &show, state, events, time)
+        };
+        frame(&mut state, vec![]);
+        let texts = frame(&mut state, vec![]);
+        let words: Vec<&str> = texts.iter().map(|(t, _)| t.as_str()).collect();
+        assert!(words.iter().any(|w| w.starts_with("No app on this computer can open .key files to draw them, so")));
+        assert!(words.contains(&"OK") && !words.contains(&"As Slides"), "{words:?}");
+        frame(&mut state, pressed(Key::Enter, Modifiers::NONE));
+        let answer = state.import_answer.take().expect("OK answers");
+        assert_eq!(answer.how, None);
+        assert_eq!(answer.later, vec![std::path::PathBuf::from("/x/Next.key")], "the others still get asked");
+    }
+
+    #[test]
+    fn escape_over_the_import_sheet_closes_it_and_leaves_what_is_on_screen() {
+        let (ctx, mut show) = (egui::Context::default(), three_songs());
+        show.apply(Command::GoTo(SlideRef { presentation: 1, slide: 0 }));
+        let mut state = HomeState {
+            ask_import: Some(presentation_ask("/x/Sermon.pptx", true, true, None)),
+            ..HomeState::default()
+        };
+        frame_commands(&ctx, &show, &mut state, vec![], 0.0);
+        assert!(state.escape_taken_above(&ctx), "Escape is the sheet's");
+        let commands = frame_commands(&ctx, &show, &mut state, pressed(Key::Escape, Modifiers::NONE), 0.1);
+        assert!(state.ask_import.is_none(), "it closes");
+        assert!(commands.is_empty(), "and puts nothing on screen or off it: {commands:?}");
+        assert!(show.live().is_some());
+    }
+
+    #[test]
+    fn the_slides_sheet_offers_pictures_or_a_presentation() {
+        let (ctx, show) = (egui::Context::default(), three_songs());
+        let mut state = HomeState { slides_sheet: true, ..HomeState::default() };
+        let mut time = 0.0;
+        let mut frame = |state: &mut HomeState, events: Vec<Event>| {
+            time += 0.1;
+            frame_texts(&ctx, &show, state, events, time)
+        };
+        frame(&mut state, vec![]);
+        let texts = frame(&mut state, vec![]);
+        let words: Vec<&str> = texts.iter().map(|(t, _)| t.as_str()).collect();
+        assert!(words.contains(&"Import Slides") && words.contains(&"Pictures as slides"));
+        assert!(words.contains(&"A .pptx, .ppsx, .key, .odp, .ppt or .pps file, or a PDF. You choose how it comes in"));
+        let at = drawn_at(&texts, "A presentation").expect("card");
+        let (down, up) = click_events(at + vec2(10.0, 30.0));
+        frame(&mut state, down);
+        frame(&mut state, up);
+        assert_eq!(state.slides_choice.take(), Some(SlidesChoice::Presentation));
+        assert!(!state.slides_sheet);
+        // Escape closes it with no answer.
+        state.slides_sheet = true;
+        frame(&mut state, vec![]);
+        frame(&mut state, pressed(Key::Escape, Modifiers::NONE));
+        assert!(!state.slides_sheet && state.slides_choice.is_none());
+    }
+
+    #[test]
+    fn a_slide_to_check_has_an_amber_tag_with_its_reason_and_mark_as_checked_takes_it_off() {
+        let ctx = egui::Context::default();
+        let mut song = parse_song_text("Sermon", "[Verse 1]\nOne\n\nTwo\n");
+        song.groups[0].slides[1].check = Some("a chart came in as its picture".to_owned());
+        let show = Show::new(vec![Arc::new(song)]);
+        let mut state = HomeState::default();
+        frame_texts(&ctx, &show, &mut state, vec![], 0.0);
+        let texts = frame_texts(&ctx, &show, &mut state, vec![], 0.1);
+        let tags: Vec<_> = texts.iter().filter(|(t, _)| t == "CHECK").collect();
+        assert_eq!(tags.len(), 1, "only the slide with a reason has the tag");
+        // Its hover is the reason.
+        let tag = tags[0].1.center();
+        frame_texts(&ctx, &show, &mut state, vec![Event::PointerMoved(tag)], 0.2);
+        frame_texts(&ctx, &show, &mut state, vec![], 1.5);
+        let texts = frame_texts(&ctx, &show, &mut state, vec![], 1.6);
+        assert!(
+            texts.iter().any(|(t, _)| t.contains("a chart came in as its picture")),
+            "{:?}",
+            texts.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>()
+        );
+        // Right-click the slide: its menu has Mark as Checked, which asks for the slide without it.
+        let right = |at, pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let place = pos2(tag.x - 80.0, tag.y);
+        frame_texts(&ctx, &show, &mut state, vec![Event::PointerMoved(place), right(place, true)], 2.0);
+        frame_texts(&ctx, &show, &mut state, vec![right(place, false)], 2.1);
+        let texts = frame_texts(&ctx, &show, &mut state, vec![], 2.2);
+        let item = drawn_at(&texts, "Mark as Checked").expect("the menu offers it");
+        let (down, up) = click_events(item);
+        frame_texts(&ctx, &show, &mut state, down, 2.3);
+        frame_texts(&ctx, &show, &mut state, up, 2.4);
+        let (_, request) = state.slide_request.take().expect("it asks for the change");
+        let SlideRequest::Edit(edits) = request else { panic!("an edit, so that Undo puts it back") };
+        assert_eq!(edits.len(), 1);
+        assert_eq!((edits[0].0, edits[0].1.check.clone()), (1, None));
     }
 
     #[test]

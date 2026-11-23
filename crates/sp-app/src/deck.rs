@@ -31,7 +31,7 @@ pub fn is_pdf(path: &Path) -> bool {
     has_ending(path, &[PDF_ENDING])
 }
 
-/// True for a file a presentation program saved (PowerPoint, Keynote, OpenDocument).
+/// True for a file a presentation program saved (a `.pptx`, `.ppsx`, `.ppt`, `.pps`, `.key` or `.odp`).
 pub fn is_presentation_file(path: &Path) -> bool {
     has_ending(path, &DECK_ENDINGS)
 }
@@ -205,15 +205,16 @@ pub fn chosen_pictures(mut files: Vec<PathBuf>) -> Source {
 /// A deck laid out: its presentation, what to say about it, and the work still to do.
 pub struct Laid {
     pub presentation: Presentation,
-    /// What to tell the person beyond "made N slides" (the slides to check).
-    pub note: Option<String>,
+    /// What to tell the person when it is not the usual "Made N slides from X" (a presentation
+    /// read as slides names the ones to check).
+    pub said: Option<String>,
     pending: Pending,
 }
 
 /// A deck made.
 pub struct Finished {
     pub presentation: Presentation,
-    pub note: Option<String>,
+    pub said: Option<String>,
 }
 
 /// The pictures of a laid out deck that are yet to be made, each for a slide.
@@ -262,7 +263,7 @@ pub fn lay_out(source: &Source) -> Result<Laid, String> {
         files.push((picture.clone(), slide.id, file));
         slides.push(slide);
     }
-    Ok(Laid { presentation: presentation(title, slides), note: None, pending: Pending::Copies { files } })
+    Ok(Laid { presentation: presentation(title, slides), said: None, pending: Pending::Copies { files } })
 }
 
 /// Makes the pictures a laid out deck waits for, as many at once as the computer has cores,
@@ -289,7 +290,7 @@ pub struct LaidPending(Pending);
 impl Laid {
     /// Splits the work still to do from the presentation and its note.
     pub fn split(self) -> (Finished, LaidPending) {
-        (Finished { presentation: self.presentation, note: self.note }, LaidPending(self.pending))
+        (Finished { presentation: self.presentation, said: self.said }, LaidPending(self.pending))
     }
 }
 
@@ -357,20 +358,48 @@ fn lay_out_pptx(path: &Path) -> Result<Laid, String> {
     std::fs::create_dir_all(&folder).map_err(|e| format!("Could not make the Images folder: {e}"))?;
     let mut save = |bytes: &[u8], ending: &str, crop: Option<[f32; 4]>| keep_picture(&folder, bytes, ending, crop);
     let read = crate::pptx::read(&bytes, &name, MOST_SLIDES, &mut save)?;
-    let note = check_note(&read.check);
-    Ok(Laid { presentation: presentation(title, read.slides), note, pending: Pending::Nothing })
+    let mut slides = read.slides;
+    mark_to_check(&mut slides, &read.check);
+    let said = Some(came_in_note(&title, slides.len(), &read.check));
+    Ok(Laid { presentation: presentation(title, slides), said, pending: Pending::Nothing })
 }
 
-/// The sentence naming the slides to check, if there are any.
-pub fn check_note(check: &[(usize, String)]) -> Option<String> {
+/// Gives each slide named its reasons to be looked at, kept with it until it is marked as checked.
+pub fn mark_to_check(slides: &mut [sp_model::Slide], check: &[(usize, Vec<String>)]) {
+    for (number, reasons) in check {
+        if let Some(slide) = number.checked_sub(1).and_then(|at| slides.get_mut(at)) {
+            slide.check = Some(reasons.join("; "));
+        }
+    }
+}
+
+/// What the notice says when a presentation came in as slides: how many, and which of them to
+/// check, with why: "“Sermon” came in as 24 slides. Check slides 3 and 7: a chart came in as
+/// its picture; a text box had mixed sizes; it took its main look." Reasons are named once
+/// however many slides have them; the slide's own tag says which it has.
+pub fn came_in_note(title: &str, count: usize, check: &[(usize, Vec<String>)]) -> String {
+    let plural = if count == 1 { "" } else { "s" };
+    let mut said = format!("\u{201c}{title}\u{201d} came in as {count} slide{plural}.");
     if check.is_empty() {
-        return None;
+        return said;
     }
     const NAMED: usize = 8;
-    let named: Vec<String> = check.iter().take(NAMED).map(|(number, why)| format!("{number} ({why})")).collect();
+    let numbers: Vec<String> = check.iter().take(NAMED).map(|(number, _)| number.to_string()).collect();
     let more = check.len().saturating_sub(NAMED);
-    let more = if more > 0 { format!(", and {more} more") } else { String::new() };
-    Some(format!("Check slide{} {}{more}.", if check.len() == 1 { "" } else { "s" }, named.join(", ")))
+    let which = match (numbers.as_slice(), more) {
+        ([one], 0) => one.clone(),
+        (numbers, 0) => format!("{} and {}", numbers[..numbers.len() - 1].join(", "), numbers[numbers.len() - 1]),
+        (numbers, more) => format!("{} and {more} more", numbers.join(", ")),
+    };
+    let mut reasons: Vec<&str> = Vec::new();
+    for reason in check.iter().flat_map(|(_, why)| why.iter()) {
+        if !reasons.contains(&reason.as_str()) {
+            reasons.push(reason);
+        }
+    }
+    let plural = if check.len() == 1 { "" } else { "s" };
+    said.push_str(&format!(" Check slide{plural} {which}: {}.", reasons.join("; ")));
+    said
 }
 
 /// The most pixels a picture taken from a presentation may have.
@@ -452,7 +481,7 @@ fn lay_out_pdf(path: &Path, title: String, then_delete: Option<PathBuf>) -> Resu
     }
     Ok(Laid {
         presentation: presentation(title, slides),
-        note: None,
+        said: None,
         pending: Pending::Pdf { path: path.to_owned(), files, then_delete },
     })
 }
@@ -765,12 +794,24 @@ mod tests {
 
     #[test]
     fn the_slides_to_check_are_named_in_a_sentence() {
-        assert_eq!(check_note(&[]), None);
-        let one = check_note(&[(3, "a chart".to_owned())]).unwrap();
-        assert_eq!(one, "Check slide 3 (a chart).");
-        let many: Vec<(usize, String)> = (1..=10).map(|n| (n, "a table".to_owned())).collect();
-        let said = check_note(&many).unwrap();
-        assert!(said.starts_with("Check slides 1 (a table), 2 (a table)") && said.ends_with(", and 2 more."), "{said}");
+        let none = came_in_note("Sermon", 24, &[]);
+        assert_eq!(none, "\u{201c}Sermon\u{201d} came in as 24 slides.");
+        let one = came_in_note("Talk", 1, &[(1, vec!["a chart came in as its picture".to_owned()])]);
+        assert_eq!(one, "\u{201c}Talk\u{201d} came in as 1 slide. Check slide 1: a chart came in as its picture.");
+        let chart = "a chart came in as its picture".to_owned();
+        let mixed = vec!["a text box had mixed sizes; it took its main look".to_owned()];
+        let said = came_in_note("Sermon", 24, &[(3, vec![chart.clone()]), (7, mixed.clone())]);
+        assert_eq!(
+            said,
+            "\u{201c}Sermon\u{201d} came in as 24 slides. Check slides 3 and 7: a chart came in as its picture; \
+             a text box had mixed sizes; it took its main look."
+        );
+        let many: Vec<(usize, Vec<String>)> = (1..=10).map(|n| (n, vec![chart.clone()])).collect();
+        let said = came_in_note("Deck", 12, &many);
+        assert!(
+            said.contains("Check slides 1, 2, 3, 4, 5, 6, 7, 8 and 2 more: a chart came in as its picture."),
+            "{said}"
+        );
     }
 
     /// Testing aid: `SP_TEST_PDF=<file>` and `SOFTPRESENTER_DATA=<empty folder>`.

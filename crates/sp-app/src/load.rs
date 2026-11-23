@@ -205,7 +205,7 @@ pub fn import_file(path: &Path) -> Result<Presentation, String> {
         return Err(format!(
             "{name} isn't a kind of file songs come in. Songs come from text, lyric and ChordPro files, rich text, \
              Word and OpenDocument files, .pro and .proBundle files, .sps and .sqlite songbooks and SoftPresenter songs; PDFs, \
-             PowerPoint and Keynote files and folders of pictures come in as slides."
+             presentation files (.pptx, .ppsx, .key, .odp, .ppt, .pps) and folders of pictures come in as slides."
         ));
     }
     if crate::bundle::is_bundle(path) {

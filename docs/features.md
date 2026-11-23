@@ -132,12 +132,21 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   number, writers and copyright go into the song's details; a church's own licence number is
   never kept), ChordPro (sections from its directives, chords taken out), SoftPresenter's own
   song text and song files, rich text, and on macOS Word and OpenDocument files.
-- **Slides from a presentation file, a PDF or pictures.** File › Import Slides…, dropping the
-  file or a folder of pictures on the window, or `sp song import`. A `.pptx` (or `.ppsx`) is
-  read directly, with no program started, into slides you can edit (**As Slides**), or turned
-  into pictures of its slides (**As Pictures**); a dialog asks which, with what that kind of file
-  was last brought in as ready to confirm (`sp song import FILE --as slides|pictures` says it
-  without the dialog). A `.ppt`, `.pps`, `.key` or `.odp` comes in as pictures only.
+- **Slides from a presentation file, a PDF or pictures.** File › Import Slides… (or Import ›
+  Slides… beside the songs) opens a sheet with two cards: **Pictures as slides** and **A
+  presentation** (a `.pptx`, `.ppsx`, `.key`, `.odp`, `.ppt` or `.pps` file, or a PDF). Dropping
+  the file or a folder of pictures on the window, or `sp song import`, comes in the same way. A
+  PDF asks nothing. Any other presentation opens the sheet **Import “Sermon.pptx”**, two cards
+  side by side: **As Slides** (words stay words, ready to edit; read straight from the file, with
+  no app started) and **As Pictures** (the exact look, each slide a picture, drawn unseen by an
+  app on this computer that can open the file, and closed again). The way that kind of file came
+  in last time is ringed and marked "Last time"; the first time a `.pptx` or `.ppsx` is ringed
+  As Slides. Enter takes the ringed card, a click takes either, Escape or Cancel closes it (the
+  show's keys wait meanwhile, so Escape clears nothing). A card that can't be used is greyed and
+  gives its reason in place of its line ("Only .pptx and .ppsx files can come in as slides", "No
+  app on this computer can open .key files to draw them"); with neither possible the sheet is
+  that one paragraph and OK. Several files are asked about one at a time. `sp song import FILE
+  --as slides|pictures` says it without the sheet.
   - **As Slides** maps each slide's text boxes (the font, size, bold, italic, underline, colour,
     alignment, line spacing and bullets most of a box's letters have), pictures (cropped as the
     slide crops them), solid, gradient and picture backgrounds, rectangles, rounded rectangles,
@@ -151,17 +160,21 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     and video aren't brought in (a video's poster picture is). A box that mixes sizes, colours or
     fonts takes the look most of its letters have, since a text box here has one look. Every
     slide that has any of these, or a shape that can't be drawn, is named when the import is
-    done ("Check slides 3 (a chart, drawn from the picture the file keeps for it), …"). The
+    done: "“Sermon” came in as 24 slides. Check slides 3 and 7: a chart came in as its picture; a
+    text box had mixed sizes; it took its main look." Each slide named wears an amber **Check**
+    tag in its strip, with its reason as the hover; its menu has **Mark as Checked**, which takes
+    the tag off (Undo puts it back; `sp slide checked SONG N` does the same). The reason is kept
+    in the slide's saved data, so the tag survives a restart until the slide is marked. The
     file is read with limits: bounded sizes and numbers of parts, overlapping parts refused, no
     document types or entities, bounded nesting, and a picture over 32 MB or 64 million pixels
     left out. It takes a few milliseconds for a text deck, a fraction of a second with pictures.
-  - **As Pictures** turns the file into a PDF with a program on the Mac that opens it (Keynote,
-    then PowerPoint, then LibreOffice for `.pptx`; Keynote for `.key`; LibreOffice then PowerPoint
-    for `.odp`), so its slides look exactly as that program draws them. The program is started
-    without a window and without coming to the front where it allows that (LibreOffice runs
-    headless); macOS asks once to allow it, a program SoftPresenter started is closed again, and
-    one that was already open is left alone. With none of them installed it says so, and for a
-    `.pptx` offers As Slides.
+  - **As Pictures** turns the file into a PDF with an app on the Mac that opens it (up to three
+    are tried, best first, by the kind of file), so its slides look exactly as that app draws
+    them. The app is started without a window and without coming to the front where it allows
+    that; macOS asks once to allow it, an app SoftPresenter started is closed again, and one
+    that was already open is left alone. With none installed the card is greyed and says so (no
+    app is named: the words are "No app on this computer can open .key files to draw them"), and
+    for a `.pptx` As Slides is offered.
   - **A PDF or pictures** become one picture slide each, in a new presentation named after the
     file or folder, saved in the Images folder so the deck keeps working when the file moves.
     The presentation appears at once with all its slides; the pages (drawn at up to 1920 × 1080

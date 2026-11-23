@@ -433,7 +433,7 @@ enum ShowStep {
     /// A song's place, and the song as it was (or, to redo, as it was before the undo).
     Song(usize, Arc<sp_model::Presentation>),
     /// Something deleted.
-    Removed(removed::Removed),
+    Removed(Box<removed::Removed>),
 }
 
 impl ShowHistory {
@@ -444,7 +444,7 @@ impl ShowHistory {
 
     /// Keeps something just deleted, to put back, and drops what could be redone.
     fn remember_removed(&mut self, removed: removed::Removed) {
-        self.keep(ShowStep::Removed(removed));
+        self.keep(ShowStep::Removed(Box::new(removed)));
     }
 
     fn keep(&mut self, step: ShowStep) {
@@ -519,7 +519,7 @@ impl ShowHistory {
         match from.pop()? {
             (ShowStep::Removed(removed), when) => {
                 to.push((ShowStep::Removed(removed.clone()), when));
-                Some(removed)
+                Some(*removed)
             }
             other => {
                 from.push(other);
@@ -5646,10 +5646,10 @@ impl App {
                         self.start_deck(source);
                     }
                     deck::ImportAs::Pictures => match convert::program_for(path) {
-                        Some(program) => {
+                        Some(_) => {
                             let source =
                                 deck::Source::Presentation { path: path.clone(), mode: deck::ImportAs::Pictures };
-                            done.decks.push(format!("{} (as pictures, with {})", source.name(), program.name()));
+                            done.decks.push(format!("{} (as pictures)", source.name()));
                             self.start_deck(source);
                         }
                         None => done.problems.push(convert::none_installed(path)),
@@ -6130,11 +6130,9 @@ impl App {
                     let count = made.presentation.slide_count();
                     applog::event("slides", &format!("made {count} slides from {name}"));
                     self.add_song(made.presentation, false);
-                    let mut said = format!("Made {count} slide{} from {name}.", if count == 1 { "" } else { "s" });
-                    if let Some(note) = made.note {
-                        said = format!("{said} {note}");
-                    }
-                    Ok(said)
+                    Ok(made.said.unwrap_or_else(|| {
+                        format!("Made {count} slide{} from {name}.", if count == 1 { "" } else { "s" })
+                    }))
                 }
                 Err(problem) => {
                     applog::event("slides", &format!("could not make slides: {problem}"));
@@ -6186,50 +6184,94 @@ impl App {
         })
     }
 
-    /// Imports files that make slides (from the menu or a drop), first asking how a presentation
-    /// file that can be read directly is to come in: as slides, or as pictures of them.
+    /// Imports files that make slides (from the menu or a drop). PDFs and folders of pictures
+    /// come in at once; each presentation file is asked about in turn, by the sheet that says
+    /// how it can come in: as slides, or as pictures.
     fn import_slides_asking(&mut self, files: &[PathBuf]) {
-        let askable = files.iter().any(|path| deck::is_presentation_file(path) && deck::reads_as_slides(path));
-        match self.running.as_mut() {
-            Some(running) if askable => {
-                running.home_state.ask_import = Some(home::AskImport { paths: files.to_vec() });
-                running.home_window.request_redraw();
-            }
-            _ => {
-                self.import_songs(files);
-            }
+        let (presentations, others): (Vec<PathBuf>, Vec<PathBuf>) =
+            files.iter().cloned().partition(|path| deck::is_presentation_file(path));
+        if !others.is_empty() {
+            self.import_songs(&others);
+        }
+        self.ask_next_import(presentations);
+    }
+
+    /// Opens the sheet for the first of these presentation files, the rest waiting behind it
+    /// (behind the one the sheet is already asking about, if there is one).
+    fn ask_next_import(&mut self, mut waiting: Vec<PathBuf>) {
+        if waiting.is_empty() {
+            return;
+        }
+        let Some(running) = self.running.as_mut() else {
+            // No window to ask in: each comes in the way it was last, or as slides.
+            self.import_songs(&waiting);
+            return;
+        };
+        if let Some(open) = running.home_state.ask_import.as_mut() {
+            open.later.append(&mut waiting);
+            return;
+        }
+        let path = waiting.remove(0);
+        running.home_state.ask_import = Some(home::AskImport {
+            slides_ok: deck::reads_as_slides(&path),
+            pictures_ok: convert::program_for(&path).is_some(),
+            kept: running.home_state.kept_import(deck::kind_of(&path)),
+            path,
+            later: waiting,
+        });
+        running.home_window.request_redraw();
+    }
+
+    /// Carries out the answer to the question of how a presentation is to come in, then asks
+    /// about the next file chosen with it.
+    fn handle_import_answer(&mut self) {
+        let Some(answer) = self.running.as_mut().and_then(|r| r.home_state.import_answer.take()) else {
+            return;
+        };
+        if let Some(how) = answer.how {
+            self.import_songs_to(&[answer.path], &SongsTo { deck_as: Some(how), ..SongsTo::default() });
+        }
+        self.ask_next_import(answer.later);
+    }
+
+    /// Carries out what Import › Slides… was answered with.
+    fn handle_slides_choice(&mut self) {
+        match self.running.as_mut().and_then(|r| r.home_state.slides_choice.take()) {
+            Some(home::SlidesChoice::Pictures) => self.choose_pictures_to_import(),
+            Some(home::SlidesChoice::Presentation) => self.choose_presentations_to_import(),
+            None => {}
         }
     }
 
-    /// Carries out the answer to the question of how a presentation is to come in.
-    fn handle_import_answer(&mut self) {
-        let Some((paths, choice)) = self.running.as_mut().and_then(|r| r.home_state.import_answer.take()) else {
-            return;
-        };
-        self.import_songs_to(&paths, &SongsTo { deck_as: Some(choice), ..SongsTo::default() });
-    }
-
-    /// Asks for presentations, PDFs or pictures to make slides of: each presentation file or
-    /// PDF becomes a presentation, and the pictures chosen together become one.
-    fn choose_slides_to_import(&mut self) {
-        let mut endings = deck::DECK_ENDINGS.to_vec();
-        endings.push(deck::PDF_ENDING);
-        endings.extend(media::PICTURES);
+    /// Asks for pictures to make slides of: the pictures chosen together become one presentation.
+    fn choose_pictures_to_import(&mut self) {
         let Some(chosen) = rfd::FileDialog::new()
-            .set_title("Import Slides")
-            .add_filter("Presentations, PDFs and pictures", &endings)
+            .set_title("Import Pictures as Slides")
+            .add_filter("Pictures", &media::PICTURES)
             .pick_files()
         else {
             return;
         };
-        let (pictures, files): (Vec<PathBuf>, Vec<PathBuf>) =
-            chosen.into_iter().partition(|path| media::is_media(path) && !media::is_video(path));
-        if !files.is_empty() {
-            self.import_slides_asking(&files);
-        }
+        let pictures: Vec<PathBuf> =
+            chosen.into_iter().filter(|path| media::is_media(path) && !media::is_video(path)).collect();
         if !pictures.is_empty() {
             self.start_deck(deck::chosen_pictures(pictures));
         }
+    }
+
+    /// Asks for presentation files and PDFs: a PDF becomes a presentation at once, and each
+    /// presentation file is asked about.
+    fn choose_presentations_to_import(&mut self) {
+        let mut endings = deck::DECK_ENDINGS.to_vec();
+        endings.push(deck::PDF_ENDING);
+        let Some(files) = rfd::FileDialog::new()
+            .set_title("Import a Presentation")
+            .add_filter("Presentations and PDFs", &endings)
+            .pick_files()
+        else {
+            return;
+        };
+        self.import_slides_asking(&files);
     }
 
     /// Import Songs › Song Files…: asks which song files to import (songs saved by SoftPresenter,
@@ -8251,7 +8293,11 @@ impl App {
             return self.choose_words_to_import();
         }
         if action == A::ImportSlides {
-            return self.choose_slides_to_import();
+            if let Some(running) = self.running.as_mut() {
+                running.home_state.slides_sheet = true;
+                running.home_window.request_redraw();
+            }
+            return;
         }
         if action == A::ExportSongs {
             let picked = self.running.as_ref().map(|r| r.home_state.picked_songs.clone()).unwrap_or_default();
@@ -9180,6 +9226,7 @@ impl ApplicationHandler<AppEvent> for App {
                 self.handle_songs();
                 self.handle_decks();
                 self.handle_import_answer();
+                self.handle_slides_choice();
                 self.handle_setup();
                 // The Bible page's set-up (translations, boxes, options) is remembered the
                 // moment it changes, so it is as it was left at the next start.
