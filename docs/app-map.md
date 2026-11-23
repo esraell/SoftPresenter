@@ -167,7 +167,11 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   Shape tab); pictures and videos can be dropped on it from the Finder. Double-click a
   text box to type in it. The letter keys add objects (T for a text box, one key per shape).
 - **Inspector** (in the right column, under Clear All): Shape (place, fill, outline, shadow, flip), Text (words, font, size, colour,
-  alignment, spacing, outline, shadow, gradient, linked text such as a clock or a timer), Build
+  alignment, spacing, outline, shadow, gradient, linked text such as a clock or a timer; its head says
+  THE WHOLE BOX, or SELECTED WORDS and the words quoted while words are selected in a box being typed
+  in, and font, size, B I U S and colour then change only those words, a half-lit key or "Mixed"
+  showing where they differ; Clear word styles, beside Copy and Paste Style, takes every word's own
+  look off), Build
   (how an object comes on and goes off).
 - **Footer** (at the foot of the inspector): Slide Notes, Live Edit (changes reach the screens
   as they are made), Done.
@@ -397,7 +401,7 @@ picture came:
 | `sp-ndi` | Sending screens over NDI (the runtime is opened when an NDI screen starts) |
 | `sp-decklink` | Playing screens out of Blackmagic Design DeckLink cards: finding the devices, their modes and each one's own default format on a thread of its own, choosing the format a new output starts in (`Device::start`), and SoftPresenter's C++ bridge to the driver (`bridge/bridge.cpp`, the only place it is called, through `src/ffi.rs`); the SDK's headers are in `third_party/decklink-sdk` |
 | `sp-bible` | Bibles: references, verse numbering (and judging it from a Bible's chapters), search, and reading Bibles in other programs' formats (`import`: Zefania, OSIS, Beblia, `<b>`/`<c>`/`<v>` XML, USFM, USX, zipped or not, with limits for untrusted files) |
-| `sp-app` | The app: the window (egui), the screens' thread (`output.rs`), the views (`home.rs`, `studio.rs`, `editor.rs`, `inspector.rs`), the stage layouts (`stage.rs` for what they hold and show, `stage_editor.rs` for their parts of the Edit view), the command line (`control.rs`, and `slide_cli.rs` for changing slides), the menu bar (`menubar.rs`), theme versions while the show runs and their commands (`versions.rs`), what was deleted that Undo puts back (`removed.rs`), the notices and their status button (`notices.rs`), Remote Control (`remote.rs` and `remote/`: the HTTPS and WebSocket server on its own thread (`server.rs`), sign-in and devices (`auth.rs`), the certificate (`cert.rs`), which commands a page may send (`policy.rs`), the versioned state (`hub.rs`, published by `state.rs`), its Settings pane (`pane.rs`) and the small page built in (`page/`); the API is in `docs/remote-api.md`) |
+| `sp-app` | The app: the window (egui), the screens' thread (`output.rs`), the views (`home.rs`, `studio.rs`, `editor.rs`, `inspector.rs`), the stage layouts (`stage.rs` for what they hold and show, `stage_editor.rs` for their parts of the Edit view), the command line (`control.rs`, and `slide_cli.rs` for changing slides), styled words in a box (`sp-model`'s `spans.rs`, and `text_map.rs` for following them through caps, lists and line changes; drawn in `sp-render`'s `scene.rs`), the menu bar (`menubar.rs`), theme versions while the show runs and their commands (`versions.rs`), what was deleted that Undo puts back (`removed.rs`), the notices and their status button (`notices.rs`), Remote Control (`remote.rs` and `remote/`: the HTTPS and WebSocket server on its own thread (`server.rs`), sign-in and devices (`auth.rs`), the certificate (`cert.rs`), which commands a page may send (`policy.rs`), the versioned state (`hub.rs`, published by `state.rs`), its Settings pane (`pane.rs`) and the small page built in (`page/`); the API is in `docs/remote-api.md`) |
 
 ## Trying the app safely (for agents and tests)
 

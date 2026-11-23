@@ -427,6 +427,24 @@ the wrong item shown. Items are named by their number in the playlist in front; 
 another playlist, put it in front first (`["playlist", "open", "NAME"]`, which the window shows
 too).
 
+## Words styled inside a box
+
+The snapshot carries each slide's words, not its objects; a page that wants a text object's
+looks asks with `["slide", SONG, N, "--json"]`, and the reply's objects carry the box's own look
+and, for a text object with styled words, `spans`:
+
+    {"kind": "text", "text": "Eph 5:25 Husbands, love your wives", "spans":
+      [{"start": 0, "end": 8, "weight": 700, "italic": false}, {"start": 9, "end": 17, "fill": {"r": 192, "g": 0, "b": 0, "a": 255}}]}
+
+**Offsets count characters** (Unicode scalar values, from 0, `end` not included), not UTF-8
+bytes and not UTF-16 units: in JavaScript, `Array.from(text)` makes the matching index, and a
+letter with a separate combining mark is two steps. A span sets only what differs from the
+box (`font_family`, `size` in slide units, `weight`, `italic`, `underline`, `strike`, `fill`);
+a word's look is the theme's, then the box's own, then the span's. Spans are sorted, apart,
+inside the text and at most 512; `slides` marks a slide that has some with `styled_words`
+(each text object's number and spans). `["slide", "style", SONG, N, OBJECT, "weight=bold",
+"--chars", "0-8"]` styles words (see [cli.md](cli.md)).
+
 ## Slide pictures
 
     GET /thumb/{slide id}/{version id | usual}/{look}.jpg

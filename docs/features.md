@@ -969,6 +969,16 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   file is read (sorted, apart, inside the words, at most 512; anything wrong is dropped), follow
   the characters through caps, bullets and line changes, and shrink and grow with the box. Every
   change to a box's words goes through one function that moves, cuts and joins them.
+  In the Edit view, select words while typing in a box and the Text tab's Font, Size, B I U S and
+  Colour (and Command-B, I, U, or Control where there is no menu bar) change only those words;
+  with only a caret they change the whole box and every word takes the new value. The tab's head
+  says "The whole box" or "Selected words" and quotes them; where the words differ a key is
+  half lit and Size and Font say "Mixed". The words stay selected, with a soft blue behind them,
+  while the inspector is used. Typed words take the look of the words before them, Escape
+  puts the words and their looks back, Paste Style and Back to theme leave the words' looks
+  alone, and **Clear word styles** takes them all off. A .pptx's bold, italic, sizes and
+  colours come in as styled words. `sp slide style SONG N [OBJECT] key=value --chars FROM-TO`
+  styles words from a script, and `sp slide SONG N --json` lists a box's spans.
 - Text and shape fills can be a colour or a linear (at any angle) or radial gradient to a second
   colour. Every colour well opens a grid of swatches with the full colour picker under it.
 - Shapes (rectangle, rounded rectangle, ellipse, triangles, rhombus, polygon, star, arrows) from

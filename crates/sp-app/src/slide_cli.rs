@@ -142,6 +142,17 @@ impl crate::App {
                 "enabled": slide.enabled, "label": slide.label, "hot_key": slide.hot_key,
                 "check": slide.check, "id": slide.id, "thumb": thumb,
             });
+            // Words styled one by one: for each text object that has any, its number and spans.
+            let styled: Vec<serde_json::Value> = slide
+                .objects
+                .iter()
+                .enumerate()
+                .filter(|(_, object)| !object.spans().is_empty())
+                .map(|(at, object)| serde_json::json!({"object": at + 1, "spans": object.spans()}))
+                .collect();
+            if !styled.is_empty() {
+                entry["styled_words"] = serde_json::json!(styled);
+            }
             if full {
                 let (block, facts) = self.slide_facts(&read, index)?;
                 blocks.push(block);
@@ -333,11 +344,14 @@ impl crate::App {
 
     /// `slide style SONG N|all [OBJECT] key=value … | reset`.
     fn ctl_slide_style(&mut self, args: &[String]) -> Result<Reply, String> {
-        let usage = "slide style SONG N|all [OBJECT] key=value …   (or reset; settings: slide style keys)";
+        let usage =
+            "slide style SONG N|all [OBJECT] key=value … [--chars FROM-TO]   (or reset; settings: slide style keys)";
         if args.first().is_some_and(|w| w.eq_ignore_ascii_case("keys")) {
             return Ok(Reply::done(STYLE_KEYS.trim_end()));
         }
         let [song, which, rest @ ..] = args else { return Err(usage.to_owned()) };
+        let (rest, chars) = take_chars(rest)?;
+        let rest = &rest[..];
         if rest.is_empty() {
             return Err(usage.to_owned());
         }
@@ -369,10 +383,13 @@ impl crate::App {
                 Err(_) if slides.len() > 1 => continue,
                 Err(problem) => return Err(problem),
             };
-            let ObjectKind::Text { style, .. } = &mut changed.objects[which].kind else {
+            let ObjectKind::Text { text, style, spans } = &mut changed.objects[which].kind else {
                 return Err(format!("Object {} has no words to style.", which + 1));
             };
-            said = apply_settings(style, settings)?;
+            said = match chars {
+                Some((from, to)) => style_words(text.chars().count(), spans, from, to, settings)?,
+                None => apply_settings(style, settings)?,
+            };
             song = song.with_slide(*index, changed).ok_or("No such slide.")?;
         }
         if said.is_empty() {
@@ -587,6 +604,113 @@ pub fn parse_color(typed: &str) -> Option<Rgba> {
     }
 }
 
+/// Takes `--chars FROM-TO` (or `--chars=FROM-TO`) out of a command's words: the characters of
+/// the words to style, counted from 0 with TO not included, as the saved file counts them.
+type Chars = Option<(usize, usize)>;
+
+fn take_chars(words: &[String]) -> Result<(Vec<String>, Chars), String> {
+    let mut kept = Vec::new();
+    let mut range = None;
+    let mut words = words.iter();
+    while let Some(word) = words.next() {
+        let value = if word == "--chars" {
+            Some(words.next().ok_or("--chars needs a range, such as 4-9.")?.as_str())
+        } else {
+            word.strip_prefix("--chars=")
+        };
+        let Some(value) = value else {
+            kept.push(word.clone());
+            continue;
+        };
+        let bad = || format!("--chars is FROM-TO, two numbers counted from 0 (TO not included), not {value}.");
+        let (from, to) = value.split_once('-').ok_or_else(bad)?;
+        let (from, to) =
+            (from.trim().parse::<usize>().map_err(|_| bad())?, to.trim().parse::<usize>().map_err(|_| bad())?);
+        if from >= to {
+            return Err(bad());
+        }
+        range = Some((from, to));
+    }
+    Ok((kept, range))
+}
+
+/// Styles the characters from `from` to `to` of words `length` characters long: the settings
+/// a word can have (font, size, weight, italic, underline, strike, colour) go to a span there,
+/// `key=reset` clears one, and `reset` alone clears them all. Anything else is the box's.
+fn style_words(
+    length: usize,
+    spans: &mut Vec<sp_model::TextSpan>,
+    from: usize,
+    to: usize,
+    settings: &[String],
+) -> Result<Vec<String>, String> {
+    let to = to.min(length);
+    if from >= to {
+        return Err(format!("The words have {length} characters; --chars {from}-{to} is past them."));
+    }
+    let field = |key: &str| match key.trim().to_lowercase().as_str() {
+        "font" | "font_family" => Some("font_family"),
+        "color" | "colour" | "fill" => Some("fill"),
+        "size" => Some("size"),
+        "weight" => Some("weight"),
+        "italic" => Some("italic"),
+        "underline" => Some("underline"),
+        "strike" => Some("strike"),
+        _ => None,
+    };
+    let mut clear: Vec<&'static str> = Vec::new();
+    let mut set: Vec<String> = Vec::new();
+    let mut everything = false;
+    for setting in settings {
+        if setting.eq_ignore_ascii_case("reset") {
+            everything = true;
+            continue;
+        }
+        let (key, value) = setting.split_once('=').ok_or_else(|| format!("{setting}: write settings as key=value."))?;
+        let name = field(key).ok_or_else(|| {
+            format!("{key} is a setting of the whole box; with --chars only font, size, weight, italic, underline, strike and colour apply to words.")
+        })?;
+        if value.trim().eq_ignore_ascii_case("reset") {
+            clear.push(name);
+        } else {
+            set.push(setting.clone());
+        }
+    }
+    let mut scratch = TextStyle::default();
+    let mut said = apply_settings(&mut scratch, &set)?;
+    if everything {
+        said.push("back to the box's look".to_owned());
+    }
+    said.extend(clear.iter().map(|name| format!("{name} as the box has it")));
+    said.push(format!("characters {from}-{to}"));
+    sp_model::restyle(spans, from, to, length, |own| {
+        if everything {
+            *own = sp_model::SpanStyle::default();
+        }
+        for name in &clear {
+            match *name {
+                "font_family" => own.font_family = None,
+                "fill" => own.fill = None,
+                "size" => own.size = None,
+                "weight" => own.weight = None,
+                "italic" => own.italic = None,
+                "underline" => own.underline = None,
+                _ => own.strike = None,
+            }
+        }
+        *own = own.over(&sp_model::SpanStyle {
+            font_family: scratch.font_family.clone(),
+            size: scratch.size,
+            weight: scratch.weight,
+            italic: scratch.italic,
+            underline: scratch.underline,
+            strike: scratch.strike,
+            fill: scratch.fill,
+        });
+    });
+    Ok(said)
+}
+
 /// Changes a text object's own look by settings written key=value (see [`STYLE_KEYS`]), or
 /// `reset` for the theme's look. Returns each change in words, or what is wrong.
 pub fn apply_settings(style: &mut TextStyle, settings: &[String]) -> Result<Vec<String>, String> {
@@ -738,7 +862,7 @@ fn describe(slide: &Slide, number: usize, object: &Object, theme: &Theme) -> (St
         "frame": {"x": place.x, "y": place.y, "w": place.w, "h": place.h, "own": object.frame.is_some()},
     });
     match &object.kind {
-        ObjectKind::Text { text: words, style, .. } => {
+        ObjectKind::Text { text: words, style, spans } => {
             text.push_str(&format!(": \"{}\"", words.replace('\n', " / ")));
             text.push_str(&format!(
                 "\n    at x={:.0} y={:.0} w={:.0} h={:.0} ({whose_place})",
@@ -746,6 +870,9 @@ fn describe(slide: &Slide, number: usize, object: &Object, theme: &Theme) -> (St
             ));
             data["kind"] = serde_json::json!("text");
             data["text"] = serde_json::json!(words);
+            if !spans.is_empty() {
+                data["spans"] = serde_json::to_value(spans).unwrap_or_default();
+            }
             if let Some(look) = theme.text_style_on(slide, object.role.as_ref(), style) {
                 let own = serde_json::to_value(style).unwrap_or_default();
                 let mark = |field: &str| if own.get(field).is_some_and(|v| !v.is_null()) { "*" } else { "" };
@@ -800,6 +927,31 @@ mod tests {
         let mut named = Object::text(Role::translation(), "Перевод");
         named.name = "Russian".to_owned();
         Slide::new(vec![Object::text(Role::primary(), "Main words"), named])
+    }
+
+    #[test]
+    fn chars_style_words_and_reset_takes_it_off_again() {
+        let words = |list: &[&str]| list.iter().map(|w| (*w).to_owned()).collect::<Vec<String>>();
+        let (rest, range) = take_chars(&words(&["size=30", "--chars", "4-9", "weight=bold"])).unwrap();
+        assert_eq!((rest, range), (words(&["size=30", "weight=bold"]), Some((4, 9))));
+        assert_eq!(take_chars(&words(&["--chars=0-1"])).unwrap().1, Some((0, 1)));
+        for bad in ["9-4", "x", "3-", "--chars"] {
+            let given = if bad == "--chars" { words(&[bad]) } else { words(&["--chars", bad]) };
+            assert!(take_chars(&given).is_err(), "{bad}");
+        }
+        let mut spans = Vec::new();
+        let said = style_words(10, &mut spans, 4, 9, &words(&["weight=bold", "colour=#ff0000"])).unwrap();
+        assert!(said.contains(&"characters 4-9".to_owned()), "{said:?}");
+        assert_eq!(spans.len(), 1);
+        assert_eq!((spans[0].start, spans[0].end, spans[0].style.weight), (4, 9, Some(700)));
+        assert_eq!(spans[0].style.fill, Some(Rgba { r: 255, g: 0, b: 0, a: 255 }));
+        // A setting of the whole box is not for words.
+        assert!(style_words(10, &mut spans, 4, 9, &words(&["align=left"])).is_err());
+        // One setting taken off, then the rest.
+        style_words(10, &mut spans, 4, 9, &words(&["colour=reset"])).unwrap();
+        assert_eq!(spans[0].style.fill, None);
+        style_words(10, &mut spans, 0, 10, &words(&["reset"])).unwrap();
+        assert!(spans.is_empty());
     }
 
     #[test]

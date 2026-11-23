@@ -580,7 +580,7 @@ else is refused, with the list of what is read.
 | `slide SONG N` | A slide's settings (off, label, hot key, transition, template, actions, notes) and objects: number, name, role, words, place and look, with `*` beside settings that are the slide's own rather than the theme's |
 | `slide item N SLIDE [in PLAYLIST]` | The same for a slide of a playlist's item N, a saved Bible passage included (read only: a passage's slides are made from the Bible, so `slide text` and the rest don't change them) |
 | `slide text SONG N [OBJECT] WORDS` | Sets an object's words (`\n` starts a new line). OBJECT is its number, name or role (`main`, `translation`…), the main text if left out |
-| `slide style SONG N\|all [OBJECT] key=value…` | An object's look on one slide or every slide; `key=reset`, or `reset` alone, goes back to the theme's. `slide style keys` lists the settings |
+| `slide style SONG N\|all [OBJECT] key=value… [--chars FROM-TO]` | An object's look on one slide or every slide; `key=reset`, or `reset` alone, goes back to the theme's. `slide style keys` lists the settings. With `--chars FROM-TO` only those words are styled (characters counted from 0, TO not included, as in the saved file): `font`, `size`, `weight`, `italic`, `underline`, `strike` and `colour` make a styled word, `key=reset` takes one off, `reset` takes them all off; settings of the whole box are refused. `slide SONG N --json` lists a text object's `spans` (`start`, `end`, and the settings that differ there), and `slides` marks slides that have them (`styled_words`) |
 | `slide frame SONG N\|all OBJECT x= y= w= h=` | Where an object sits, in the slide's pixels (1920 × 1080); `reset` puts it back. A box partly or wholly off the slide is warned about |
 | `slide add SONG [after N] [group NAME] WORDS` | A new slide, at the end unless after N; with a group, only the new slide is in it |
 | `slide delete SONG N`, `slide duplicate SONG N`, `slide move SONG N to M` | Deletes (at once; `sp undo` puts it back), copies or moves a slide (a moved slide joins the group where it lands) |
@@ -611,6 +611,8 @@ it in an editor that has it open, and shows at once on a slide that is on screen
     Blessed Assurance, every slide: size 90.
     $ sp slide style "River Song" 1 size=0
     size goes from 1 to 1000, not 0.
+    $ sp slide style "River Song" 1 weight=bold colour=#c00000 --chars 0-4
+    River Song, slide 1: weight bold, colour #c00000, characters 0-4.
     $ sp slide frame "River Song" 1 main x=-5000
     River Song, slide 1: Main at x=-5000 y=170 w=1680 h=400. It is off the slide (1920 x 1080), so it won't show.
     $ sp slide add "Blessed Assurance" after 1 group Pre-Chorus "A new slide"
