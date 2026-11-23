@@ -202,7 +202,7 @@ const SHAPES = { rect: 'Rectangle', rounded: 'Rounded rectangle', ellipse: 'Elli
 const TRANSITIONS = ['Cut', 'Dissolve', 'Fade', 'Fade Black', 'Fade White', 'Push', 'Move In', 'Reveal', 'Fly In', 'Zoom In', 'Door', 'Flip', 'Swap', 'Wipe', 'Split', 'Blinds', 'Iris', 'Clock', 'Checkerboard'];
 const LABELS = ['Blank Slide', 'Instrumental', 'Repeat', 'Spoken Word'];
 const LINKS = { clock: 'The clock', date: 'The date', timer: 'A timer', title: "The song's title", group: "The slide's group", label: "The slide's label", notes: "The slide's notes", next: "The next slide's words", current: 'The words on screen', stagemsg: 'The stage message', copyright: 'The copyright line' };
-const DEF_STYLE = { font: 'Helvetica', size: 88, bold: true, italic: false, underline: false, color: '#ffffff', align: 'center', valign: 'middle', stroke: false, strokeWidth: 6, shadow: true, spacing: 0, lineHeight: 1.25, caps: 'none', scaling: 'Text down', bullets: 'none', bg: null, scroll: 'none', shadowAngle: 315, shadowOffset: 10, shadowBlur: 15, shadowOpacity: .5, margin: 0 };
+const DEF_STYLE = { font: 'Helvetica', size: 88, bold: true, italic: false, underline: false, strike: false, color: '#ffffff', align: 'center', valign: 'middle', stroke: false, strokeWidth: 6, shadow: true, spacing: 0, lineHeight: 1.25, caps: 'none', scaling: 'Text down', bullets: 'none', bg: null, scroll: 'none', shadowAngle: 315, shadowOffset: 10, shadowBlur: 15, shadowOpacity: .5, margin: 0 };
 
 /* ───────── objects, slides, songs ───────── */
 const obj = (kind, name, more) => ({ id: newId('o'), kind, name, opacity: 1, hidden: false, locked: false, ...more });
@@ -692,6 +692,66 @@ function buildSteps(slide) {
   for (const o of slide.objects) if (o.build && o.build.out && o.build.out !== 'None') out.push({ id: o.id, phase: 'out' });
   return out;
 }
+/* ───────── words styled inside a box (the owner, 23 November) ───────── */
+// A box's words are plain text (o.text); o.spans says where some of them differ from the box: { from, to, ...look }, offsets
+// being this page's own string positions (the app's unit is turned into these where its data comes in). A span's look overrides
+// the box's style, which overrides the theme. Alignment, spacing, bullets and the rest stay the box's.
+const WORD_LOOK = ['font', 'size', 'bold', 'italic', 'underline', 'strike', 'color'];
+// The words cut where any span starts or ends (and at extra cuts), each piece with the look its spans give it.
+function runsOf(text, spans, cuts = []) {
+  const at = new Set([0, text.length]), len = text.length;
+  for (const n of [...cuts, ...(spans || []).flatMap(sp => [sp.from, sp.to])]) if (n > 0 && n < len) at.add(n);
+  const edges = [...at].sort((a, b) => a - b), out = [];
+  for (let k = 0; k + 1 < edges.length; k++) {
+    const from = edges[k], to = edges[k + 1], look = {};
+    for (const sp of spans || []) if (sp.from <= from && sp.to >= to) for (const p of WORD_LOOK) if (sp[p] !== undefined) look[p] = sp[p];
+    out.push({ from, to, look: Object.fromEntries(WORD_LOOK.filter(p => p in look).map(p => [p, look[p]])) });
+  }
+  return out;
+}
+const sameLook = (a, b) => WORD_LOOK.every(p => a[p] === b[p]);
+// Spans kept tidy: no overlaps, neighbours with the same look joined, and nothing that only repeats the box (a word set back to
+// the box's look follows the box again).
+function tidySpans(text, spans, box) {
+  const out = [];
+  for (const r of runsOf(text, spans)) {
+    const look = {}; for (const p of WORD_LOOK) if (r.look[p] !== undefined && !(box && box[p] === r.look[p])) look[p] = r.look[p];
+    if (!Object.keys(look).length) continue;
+    const last = out[out.length - 1];
+    if (last && last.to === r.from && sameLook(last, look)) last.to = r.to; else out.push({ from: r.from, to: r.to, ...look });
+  }
+  return out;
+}
+// Words retyped elsewhere (the words editor): spans over the unchanged start and end keep their words; the changed middle takes a
+// span's look only from one that covered all of it.
+function remapSpans(was, now, spans) {
+  if (!spans || !spans.length || was === now) return spans;
+  let pre = 0; while (pre < was.length && pre < now.length && was[pre] === now[pre]) pre++;
+  let suf = 0; while (suf < was.length - pre && suf < now.length - pre && was[was.length - 1 - suf] === now[now.length - 1 - suf]) suf++;
+  const d = now.length - was.length, oldEnd = was.length - suf;
+  const start = x => x >= oldEnd ? x + d : x <= pre ? x : now.length - suf, end = x => x <= pre ? x : x >= oldEnd ? x + d : pre;      // words put in where a span starts or ends stay outside it
+  return tidySpans(now, spans.map(sp => ({ ...sp, from: start(sp.from), to: end(sp.to) })).filter(sp => sp.to > sp.from));
+}
+// New words for a box (the words editor): its spans follow the words that stayed.
+function setWords(o, text) { const sp = remapSpans(o.text || '', text, o.spans); o.text = text; if (sp && sp.length) o.spans = sp; else delete o.spans; }
+const decoCSS = l => [l.underline && 'underline', l.strike && 'line-through'].filter(Boolean).join(' ') || 'none';
+// One piece's look, against its box: the size as a share of the box's, so fitting the box to its words shrinks every piece alike.
+const runCSS = (look, s) => { const l = { ...s, ...look };
+  return `font-family:${FONTS[l.font] || FONTS.Helvetica};font-size:${+(l.size / s.size).toFixed(4)}em;font-weight:${l.bold ? 700 : 400};font-style:${l.italic ? 'italic' : 'normal'};text-decoration:${decoCSS(l)};color:${l.color};`; };
+// The words of a box drawn piece by piece. Each piece carries its look (data-look) so that what is typed can be read back with
+// its styling; a bullet or number is drawn but not typed (data-pre). hl: the words picked while the inspector is being used.
+function styledWords(text, o, s, paras, hl) {
+  const out = [], pre = n => s.bullets === 'none' || !text ? '' : html`<span data-pre="" contenteditable="false">${s.bullets === 'numbers' ? `${n + 1}. ` : '• '}</span>`;
+  let line = 0; out.push(pre(0));
+  for (const r of runsOf(text, o.spans, hl ? [hl.from, hl.to] : [])) {
+    const parts = text.slice(r.from, r.to).split('\n'), on = hl && r.from >= hl.from && r.to <= hl.to;
+    for (let i = 0; i < parts.length; i++) {
+      if (i) { line++; if (paras && line >= paras) return out; out.push(BR, pre(line)); }
+      if (parts[i]) out.push(html`<span class="${on ? 'tsel' : ''}" data-look="${JSON.stringify(r.look)}" style="${runCSS(r.look, s)}">${parts[i]}</span>`);
+    }
+  }
+  return out;
+}
 function objHTML(o, ctx, ed) {
   if (o.hidden && !ed) return '';
   const f = o.frame, picked = ed && state.sels.includes(o.id), solo = picked && state.sels.length === 1;
@@ -712,16 +772,20 @@ function objHTML(o, ctx, ed) {
     else if (b.in && b.in !== 'None') bd = { 'data-bd': `${kind},${from},${b.delay || 0}` };
   }
   if (o.kind === 'text') {
-    const s = o.style;
+    const s = o.style, hl = ed && state.tsel && state.tsel.id === o.id && typeof wordsPicked === 'function' ? wordsPicked() : null;
     let text = o.linked ? linkedValue(o, ctx) : o.text || '';
-    if (paras) text = text.split('\n').slice(0, paras).join('\n');
-    if (s.bullets !== 'none' && text) text = text.split('\n').map((l, n) => (s.bullets === 'numbers' ? `${n + 1}. ` : '• ') + l).join('\n');
-    const look = `font-family:${FONTS[s.font] || FONTS.Helvetica};font-size:${s.size / 19.2}cqw;font-weight:${s.bold ? 700 : 400};font-style:${s.italic ? 'italic' : 'normal'};text-decoration:${s.underline ? 'underline' : 'none'};`
+    const pieces = !o.linked && ((o.spans && o.spans.length) || hl || (ed && s.bullets !== 'none'));      // words styled in the box, or being styled
+    if (!pieces) {
+      if (paras) text = text.split('\n').slice(0, paras).join('\n');
+      if (s.bullets !== 'none' && text) text = text.split('\n').map((l, n) => (s.bullets === 'numbers' ? `${n + 1}. ` : '• ') + l).join('\n');
+    }
+    const look = `font-family:${FONTS[s.font] || FONTS.Helvetica};font-size:${s.size / 19.2}cqw;font-weight:${s.bold ? 700 : 400};font-style:${s.italic ? 'italic' : 'normal'};text-decoration:${pieces ? 'none' : decoCSS(s)};`
       + `color:${s.color};text-align:${s.align};justify-content:${{ top: 'flex-start', middle: 'center', bottom: 'flex-end' }[s.valign]};letter-spacing:${s.spacing / 19.2}cqw;line-height:${s.lineHeight};`
       + `text-transform:${{ none: 'none', upper: 'uppercase', lower: 'lowercase', title: 'capitalize' }[s.caps]};`
       + (s.shadow ? `text-shadow:${(Math.cos(s.shadowAngle * Math.PI / 180) * s.shadowOffset / 19.2).toFixed(3)}cqw ${(-Math.sin(s.shadowAngle * Math.PI / 180) * s.shadowOffset / 19.2).toFixed(3)}cqw ${s.shadowBlur / 19.2}cqw rgba(0,0,0,${s.shadowOpacity});` : '') + (s.margin ? `padding:${s.margin / 19.2}cqw;` : '') + (s.stroke ? `-webkit-text-stroke:${s.strokeWidth / 19.2}cqw #000;paint-order:stroke fill;` : '')
       + ((o.fill || o.gradient) ? `background:${fillCSS(o)};` : '') + border;
-    const inner = s.bg ? html`<span class="tx-bg" style="background:${s.bg}">${lines(text)}</span>` : lines(text);
+    const words = pieces ? styledWords(text, o, s, paras, hl) : lines(text);
+    const inner = s.bg ? html`<span class="tx-bg" style="background:${s.bg}">${words}</span>` : words;
     const fit = { 'data-fit': s.scroll === 'none' && /up|down/i.test(s.scaling) ? `${s.size / 19.2},${s.scaling.toLowerCase()}` : null };
     return html`<div class="${cls}${o.linked ? ' linked' : ''}${s.scroll !== 'none' ? ' ticker sc-' + s.scroll : ''}" ${at} ${bd} ${fit} style="${place}${look}"><div class="tx-in" ${{ 'data-tx': ed && !o.linked ? o.id : null }}>${inner}</div>${badge}${handles}</div>`;
   }
@@ -991,15 +1055,17 @@ function scrollToDeck(id, smooth) {
 
 /* ───────── render: each mode fills the left and the middle; the right column is always the same ───────── */
 const VIEWS = {};
-let lastMode = null, pointerHeld = false, pointerEl = null, fromField = false, renderWaiting = false, renderTimer = 0;
+let drawing = false, lastMode = null, pointerHeld = false, pointerEl = null, fromField = false, renderWaiting = false, renderTimer = 0;
 function flushRender() { if (renderWaiting) { renderWaiting = false; render(); } }
 function render() {
   deckCache = null;
   if (typeof dragging !== 'undefined' && dragging) { renderWaiting = true; return; }      // a redraw would throw away the thing being dragged and end the drag; it waits for the drop
   if (fromField && pointerHeld) { renderWaiting = true; clearTimeout(renderTimer); renderTimer = setTimeout(flushRender, 250); return; }      // the button under the pointer must survive until its click
-  renderTop(); (VIEWS[state.mode] || VIEWS.show).left(); (VIEWS[state.mode] || VIEWS.show).centre(); renderRight();
+  drawing = true;      // a box being typed in, taken away by the redraw, loses its focus: that is not someone leaving it
+  try { renderTop(); (VIEWS[state.mode] || VIEWS.show).left(); (VIEWS[state.mode] || VIEWS.show).centre(); renderRight(); } finally { drawing = false; }
   if (lastMode !== state.mode) { $('slides').scrollTop = 0; $('left').scrollTop = 0; lastMode = state.mode; }
   fitAll(document.body);
+  if (state.retype) { const r = state.retype; state.retype = null; startTyping(r.id, r.from, r.to); }      // typing goes on where it was, after a style was set from the keyboard or a button
 }
 function renderTop() {
   $('brand').textContent = BRAND; put('navToggle', I.list);
@@ -1214,9 +1280,9 @@ function slidesFromDrafts(drafts, old) {   // rebuilt slides keep their looks, l
     const s = old && old[n] ? clone(old[n]) : old && old.length ? { ...clone(old[old.length - 1]), label: '', notes: '', hotkey: '', actions: [] } : slide(d.group, '', '');
     s.id = newId('s'); s.objects.forEach(o => { o.id = newId('o'); }); s.group = d.group;
     let main = s.objects.find(o => o.role === 'main'); if (!main) { main = words('main', ''); s.objects.unshift(main); }
-    main.text = d.pri.join('\n');
+    setWords(main, d.pri.join('\n'));
     const tr = s.objects.find(o => o.role === 'translation');
-    if (d.tr.length) { if (tr) tr.text = d.tr.join('\n'); else s.objects.push(words('translation', d.tr.join('\n'))); } else if (tr) s.objects.splice(s.objects.indexOf(tr), 1);
+    if (d.tr.length) { if (tr) setWords(tr, d.tr.join('\n')); else s.objects.push(words('translation', d.tr.join('\n'))); } else if (tr) s.objects.splice(s.objects.indexOf(tr), 1);
     return s;
   });
 }
@@ -1467,15 +1533,21 @@ function presChoice(name) {
     note: `Enter takes the one ringed. The choice is kept for .${ext} files`, buttons: [{ t: 'Cancel' }] });
 }
 A.presAs = ([how]) => { const f = state.presFile; if (!f) return; DOC.settings.importAs = { ...(DOC.settings.importAs || {}), [f.ext]: how }; closeSheet(); presImport(f.name, how); };
-// The sample: five slides. As Slides, two are named to check (a chart that came in as its picture; a box of mixed sizes that took
-// its main look), one keeps its notes and one hidden in the file comes in switched off. A PDF's deck shows at once and its pages fill in.
+// The sample: five slides. As Slides, two are named to check (a chart and a table that came in as pictures), one keeps its notes, one
+// keeps its words' own sizes and colours (a .pptx's runs become styled words), and one hidden in the file comes in switched off.
+// A PDF's deck shows at once and its pages fill in.
+function presSlide(p, n) {
+  const sl = slide('', `${p}\n${n === 1 ? '• Youth evening, Friday\n• Lunch after the service' : ''}`.trim(), '', { label: '', notes: n === 0 ? 'Welcome everyone; mention the visitors’ card' : '', enabled: n !== 3, check: n === 2 ? 'A chart came in as its picture' : n === 4 ? 'A table came in as its picture' : '' });
+  if (n === 1) { const m = sl.objects.find(o => o.role === 'main'); m.spans = [{ from: 0, to: p.length, size: 120, color: '#8fc8ff' }, { from: m.text.indexOf('Friday'), to: m.text.indexOf('Friday') + 6, italic: true, bold: false }]; }      // a heading bigger and coloured, a day in italics
+  return sl;
+}
 function presImport(name, how) {
   const title = name.replace(/\.[^.]+$/, ''), pages = ['Welcome', 'This week', 'Giving', 'Small groups', 'Thank you'];
   let s;
   mutate(() => {
     s = song(title, []);
     s.slides = pages.map((p, n) => how === 'slides'
-      ? slide('', `${p}\n${n === 1 ? '• Youth evening, Friday\n• Lunch after the service' : ''}`.trim(), '', { label: '', notes: n === 0 ? 'Welcome everyone; mention the visitors’ card' : '', enabled: n !== 3, check: n === 2 ? 'A chart came in as its picture' : n === 1 ? 'A text box had mixed sizes; it took its main look' : '' })
+      ? presSlide(p, n)
       : slide('', '', '', { label: `Page ${n + 1}`, pending: name.toLowerCase().endsWith('.pdf'), objects: [obj('image', `Page ${n + 1}`, { media: DOC.media[n % 3].id, frame: { x: 0, y: 0, w: 1920, h: 1080 } })] }));
     DOC.songs.push(s); state.src = { type: 'lib', id: 'all' }; state.openSong = s.id;
   });
@@ -2001,14 +2073,125 @@ function setProp(o, eff, path, v) {
   else o[a] = v;
 }
 const getProp = (e, path) => path.split('.').reduce((t, k) => t == null ? undefined : t[k], e);
-function edApply(path, fn) {
-  const t = edTarget(), eff = edEff(t), list = edPicked(t); if (!list.length) return;
-  mutate(() => { const tt = edTarget(); edPicked(tt).forEach(o => { const e = eff.find(x => x.id === o.id); setProp(o, e, path, fn(getProp(e, path), e)); }); });
+// A word's look (font, size, bold, italic, underlined, struck, colour) is set on the words picked in a box when there are some, else on
+// the whole box: then every word takes it (the spans give that look up). One change, one Undo step, typing not yet kept included.
+// perRun: each piece from its own value (A− and A+ keep the differences between sizes).
+function edApply(path, fn, perRun = false) {
+  const t = edTarget(), list = edPicked(t); if (!list.length) return;
+  const key = path.startsWith('style.') && WORD_LOOK.includes(path.slice(6)) ? path.slice(6) : null;
+  const el = typingEl(), typed = el && list.some(o => o.id === el.dataset.tx) ? el : null, sel = typed ? typedSelection(typed) : null;
+  const w = !key ? null : typed ? (sel && sel.to > sel.from ? { id: typed.dataset.tx, from: sel.from, to: sel.to } : null) : wordsPicked();
+  if (typed) state.retype = { id: typed.dataset.tx, from: sel ? sel.from : null, to: sel ? sel.to : null };
+  if (w) state.tsel = { id: w.id, from: w.from, to: w.to };
+  mutate(() => {
+    const tt = edTarget(), eff = edEff(tt);
+    if (typed) foldTyped(typed, tt, eff);
+    if (w) return styleWords(tt, eff, w, key, fn, perRun);
+    edPicked(tt).forEach(o => { const e = eff.find(x => x.id === o.id);
+      if (!key || o.kind !== 'text') return setProp(o, e, path, fn(getProp(e, path), e));
+      if (perRun) { setProp(o, e, path, fn(e.style[key])); if (o.spans) o.spans = o.spans.map(sp => sp[key] !== undefined ? { ...sp, [key]: fn(sp[key]) } : sp); }
+      else { setProp(o, e, path, fn(wordsSum(o.text || '', o.spans, e.style, 0, (o.text || '').length)[key], e)); if (o.spans) o.spans = o.spans.map(sp => { const c = { ...sp }; delete c[key]; return c; }); }
+      if (o.spans) { o.spans = tidySpans(o.text || '', o.spans, { ...e.style, ...o.style }); if (!o.spans.length) delete o.spans; }
+    });
+  });
 }
 A.edSet = ([path, v]) => edApply(path, () => v === '' ? null : v);
-A.edToggle = ([path]) => edApply(path, now => !now);
-A.edBump = ([path, by]) => edApply(path, now => Math.max(8, (now || 0) + +by));
+A.edToggle = ([path]) => edApply(path, now => now !== true);      // some on and some off: all on
+A.edBump = ([path, by]) => edApply(path, now => Math.max(8, (now || 0) + +by), true);
 C.edIn = (v, [path], el) => edApply(path, () => el.type === 'number' || el.type === 'range' ? +v : v === '' ? null : v);
+
+/* ───────── words picked inside a box ───────── */
+const MIXED = Symbol('mixed');
+// The look of some of a box's words, prop by prop: one value, or MIXED (and, under prop + 's', every value there).
+function wordsSum(text, spans, box, from, to) {
+  const runs = runsOf(text, spans, [from, to]).filter(r => r.from >= from && r.to <= to && r.to > r.from), sum = {};
+  for (const p of WORD_LOOK) { const vals = new Set((runs.length ? runs : [{ look: {} }]).map(r => r.look[p] !== undefined ? r.look[p] : box[p])); sum[p] = vals.size > 1 ? MIXED : [...vals][0]; sum[p + 's'] = [...vals]; }
+  return sum;
+}
+function styleWords(tt, eff, w, key, fn, perRun) {
+  const o = byId(tt.holder.objects, w.id), e = eff.find(x => x.id === w.id); if (!o || !e) return;
+  const text = o.text || '', from = Math.min(w.from, text.length), to = Math.min(w.to, text.length); if (to <= from) return;
+  const runs = runsOf(text, o.spans, [from, to]), inside = r => r.from >= from && r.to <= to, now = wordsSum(text, o.spans, e.style, from, to)[key];
+  o.spans = tidySpans(text, runs.map(r => { const look = { ...r.look };
+    if (inside(r)) { const v = perRun ? fn(look[key] !== undefined ? look[key] : e.style[key]) : fn(now); if (v == null || (key === 'size' && !(v >= 1))) delete look[key]; else look[key] = v; }
+    return { from: r.from, to: r.to, ...look }; }), e.style);
+  if (!o.spans.length) delete o.spans;
+}
+// The words picked in the box being styled, kept while the inspector is used (a number typed, a font chosen), checked against now.
+function wordsPicked() {
+  const w = state.tsel; if (!w || (state.mode !== 'edit' && state.mode !== 'themes') || state.sels.length !== 1 || state.sels[0] !== w.id) return null;
+  const o = byId(edTarget().holder.objects, w.id); if (!o || o.kind !== 'text' || o.linked) return null;
+  const to = Math.min(w.to, (o.text || '').length); return to > w.from ? { id: w.id, from: w.from, to } : null;
+}
+// What the inspector shows for a text box: the picked words' look, or the whole box's; mixed where they differ.
+function wordsNow(e) {
+  const el = typingEl(), mine = el && el.dataset.tx === e.id, now = mine ? readTyped(el, e.style) : { text: e.text || '', spans: e.linked ? [] : e.spans || [] };
+  let w = null;
+  if (mine) { const r = typedSelection(el); if (r && r.to > r.from) w = r; } else { const p = wordsPicked(); if (p && p.id === e.id) w = p; }
+  if (w && w.to > now.text.length) w = null;
+  return { w, text: now.text, sum: wordsSum(now.text, now.spans, e.style, w ? w.from : 0, w ? w.to : now.text.length) };
+}
+
+/* ───────── typing: the box's words read back with their looks ───────── */
+const typingEl = () => { const a = document.activeElement; return a && a.isContentEditable && a.dataset && a.dataset.tx ? a : null; };
+// Each piece of what is in a typed box, in order: its words (a line break as \n) and the look of the piece it is in. A bullet or
+// number the box draws is passed over.
+function walkTyped(root, visit) {
+  let text = '';
+  const go = (n, look) => { for (const c of n.childNodes) {
+    if (c.nodeType === 3) { const t = c.data.replace(/\u00a0/g, ' '); visit(t, c, look); text += t; continue; }
+    if (c.nodeType !== 1 || c.hasAttribute('data-pre')) continue;
+    if (c.tagName === 'BR') { visit('\n', c, look); text += '\n'; continue; }
+    if (/^(DIV|P)$/.test(c.tagName) && text && !text.endsWith('\n')) { visit('\n', c, look); text += '\n'; }      // a line some browsers make a block of its own
+    let mine = look; if (c.hasAttribute('data-look')) { try { mine = JSON.parse(c.getAttribute('data-look')); } catch (_) { /* drawn here, so it always reads */ } }
+    go(c, mine);
+  } };
+  go(root, null);
+  return text;
+}
+// The words and their spans as typed. What is typed takes the look of the words before it (at the very start, after it).
+function readTyped(el, box) {
+  let text = ''; const looks = [];
+  walkTyped(el, (t, n, look) => { text += t; for (let i = 0; i < t.length; i++) looks.push(look); });
+  while (text.endsWith('\n')) { text = text.slice(0, -1); looks.pop(); }
+  for (let i = 1; i < looks.length; i++) if (!looks[i]) looks[i] = looks[i - 1];
+  const first = looks.find(Boolean) || {}; for (let i = 0; i < looks.length && !looks[i]; i++) looks[i] = first;
+  const spans = []; looks.forEach((l, i) => { const last = spans[spans.length - 1]; if (last && last.to === i && sameLook(last, l)) last.to = i + 1; else spans.push({ from: i, to: i + 1, ...l }); });
+  return { text, spans: tidySpans(text, spans, box) };
+}
+function typedIndex(el, node, off) {
+  let pos = 0, at = null; const pt = document.createRange(); pt.setStart(node, off);
+  walkTyped(el, (t, n) => { if (at != null) return; if (n === node && n.nodeType === 3) { at = pos + Math.min(off, t.length); return; } if (pt.comparePoint(n, 0) >= 0) { at = pos; return; } pos += t.length; });
+  return at == null ? pos : at;
+}
+function typedSelection(el) {
+  const s = getSelection(); if (!s.rangeCount) return null; const r = s.getRangeAt(0);
+  if (!el.contains(r.startContainer) || !el.contains(r.endContainer)) return null;
+  const a = typedIndex(el, r.startContainer, r.startOffset), b = typedIndex(el, r.endContainer, r.endOffset);
+  return { from: Math.min(a, b), to: Math.max(a, b) };
+}
+function typedPoint(el, index) {
+  let pos = 0, at = null;
+  walkTyped(el, (t, n) => { if (at) return; if (n.nodeType === 3 && index <= pos + t.length) at = [n, index - pos]; else if (n.nodeType !== 3 && index === pos) at = [n.parentNode, [...n.parentNode.childNodes].indexOf(n)]; pos += t.length; });
+  return at || [el, el.childNodes.length];
+}
+// Typing not yet kept, kept: true if anything changed.
+function foldTyped(el, tt, eff) {
+  const id = el.dataset.tx, o = byId(tt.holder.objects, id), e = eff.find(x => x.id === id); if (!o || !e) return false;
+  const r = readTyped(el, e.style);
+  if (r.text === (o.text || '') && JSON.stringify(r.spans) === JSON.stringify(tidySpans(o.text || '', o.spans, e.style))) return false;
+  o.text = r.text; if (r.spans.length) o.spans = r.spans; else delete o.spans;
+  return true;
+}
+document.addEventListener('selectionchange', () => {      // words picked or let go while typing: the inspector says what it now changes
+  const el = typingEl(); if (!el) return;
+  const r = typedSelection(el), next = r && r.to > r.from ? { id: el.dataset.tx, from: r.from, to: r.to } : null, was = state.tsel;
+  if (next === was || (next && was && next.id === was.id && next.from === was.from && next.to === was.to)) return;
+  state.tsel = next;
+  if ((state.mode === 'edit' || state.mode === 'themes') && state.itab === 'Text') renderInspector();
+});
+// A style key pressed while typing keeps the words picked and the typing going.
+document.addEventListener('mousedown', e => { if (typingEl() && e.target.closest && e.target.closest('#tabbody button')) e.preventDefault(); }, true);
 
 /* ───────── one editor, four kinds of thing ───────── */
 const edKindNow = () => state.mode === 'themes' ? 'themes' : ({ prop: 'props', layout: 'stage' }[(state.edit.target || {}).type] || 'slides');
@@ -2055,7 +2238,7 @@ A.edSlideOp = ([what]) => {
   if (what === 'del' && sl.length === 1) return refuse('A song keeps at least one slide.');
   mutate(() => {
     const tt = edTarget(), list = tt.song.slides; state.sels = [];
-    if (what === 'add' || what === 'dup') { const c = clone(list[k]); c.id = newId('s'); c.objects.forEach(o => { o.id = newId('o'); if (what === 'add' && o.kind === 'text' && !o.linked) o.text = o.role === 'main' ? 'New slide' : ''; });
+    if (what === 'add' || what === 'dup') { const c = clone(list[k]); c.id = newId('s'); c.objects.forEach(o => { o.id = newId('o'); if (what === 'add' && o.kind === 'text' && !o.linked) { o.text = o.role === 'main' ? 'New slide' : ''; delete o.spans; } });
       if (what === 'add') { c.objects = c.objects.filter(o => o.role !== 'translation'); c.label = ''; c.notes = ''; c.hotkey = ''; c.actions = []; }
       list.splice(k + 1, 0, c); state.edit.target.k = k + 1; }
     if (what === 'del') { list.splice(k, 1); state.edit.target.k = Math.min(k, list.length - 1); }
@@ -2167,7 +2350,7 @@ function edInsert(kind, arg) {
     state.sels = [o.id]; state.itab = o.kind === 'text' ? 'Text' : 'Shape';
   });
 }
-A.edPick = ([id], el, ev) => { if (ev && ev.shiftKey) state.sels.includes(id) ? state.sels.splice(state.sels.indexOf(id), 1) : state.sels.push(id); else state.sels = [id]; const o = edPicked(edTarget())[0]; if (o) state.itab = o.kind === 'text' ? state.itab === 'Slide' ? 'Text' : state.itab : state.itab === 'Text' || state.itab === 'Slide' ? 'Shape' : state.itab; render(); };
+A.edPick = ([id], el, ev) => { state.tsel = null; if (ev && ev.shiftKey) state.sels.includes(id) ? state.sels.splice(state.sels.indexOf(id), 1) : state.sels.push(id); else state.sels = [id]; const o = edPicked(edTarget())[0]; if (o) state.itab = o.kind === 'text' ? state.itab === 'Slide' ? 'Text' : state.itab : state.itab === 'Text' || state.itab === 'Slide' ? 'Shape' : state.itab; render(); };
 A.edObjToggle = ([prop, id]) => mutate(() => { const o = byId(edTarget().holder.objects, id); o[prop] = !o[prop]; });
 A.edObj = ([what]) => {
   const t = edTarget(), picked = edPicked(t); if (!picked.length) return;
@@ -2206,8 +2389,9 @@ function renderInspector() {
   $('tabs').className = 'tabs' + (tabs.length === 1 ? ' one' : '');
   put('tabs', tabs.map(x => html`<button class="${x === state.itab ? 'on' : ''}" data-a="itab:${x}">${x}</button>`));
   const row = (label, ctl) => html`<div class="irow"><span class="cap">${label}</span><div class="ctl">${ctl}</div></div>`;
-  const key = (face, on, a, title = '') => html`<button class="btn sq ${on ? 'onkey' : ''}" data-a="${a}" title="${title}">${face}</button>`;
-  const sw = (path, now, noneToo) => html`${noneToo ? html`<button class="swt none ${!now ? 'on' : ''}" data-a="edSet:${path}," title="None"></button>` : ''}${SWATCHES.map(c => html`<button class="swt ${now === c ? 'on' : ''}" style="background:${c}" data-a="edSet:${path},${c}" title="${c}"></button>`)}<label class="swt any ${now && !SWATCHES.includes(now) ? 'on' : ''}" title="Any colour" style="${now && !SWATCHES.includes(now) ? 'background:' + now : ''}"><input type="color" data-c="edIn:${path}" value="${/^#[0-9a-f]{6}$/i.test(now || '') ? now : '#808080'}" aria-label="Any colour"></label>`;
+  const key = (face, on, a, title = '', mixed = false) => html`<button class="btn sq ${on ? 'onkey' : mixed ? 'mixed' : ''}" data-a="${a}" title="${mixed ? title + ': some are, some aren’t' : title}">${face}</button>`;
+  // mixed: the words picked have several colours; none is ringed and the last well shows two of them
+  const sw = (path, now, noneToo, mixed = null) => html`${noneToo ? html`<button class="swt none ${!now ? 'on' : ''}" data-a="edSet:${path}," title="None"></button>` : ''}${SWATCHES.map(c => html`<button class="swt ${now === c ? 'on' : ''}" style="background:${c}" data-a="edSet:${path},${c}" title="${c}"></button>`)}<label class="swt any ${now && !SWATCHES.includes(now) ? 'on' : ''}${mixed ? ' mixed' : ''}" title="${mixed ? 'Mixed colours: choose one for all' : 'Any colour'}" style="${mixed ? `background:linear-gradient(135deg, ${mixed[0]} 50%, ${mixed[1]} 50%)` : now && !SWATCHES.includes(now) ? 'background:' + now : ''}"><input type="color" data-c="edIn:${path}" value="${/^#[0-9a-f]{6}$/i.test(now || '') ? now : '#808080'}" aria-label="Any colour"></label>`;
   const sel = (path, list, now) => html`<select class="sel" data-c="edIn:${path}">${options(list, now == null ? '' : now)}</select>`;
   const num = (path, v, more = null) => html`<input class="num" type="number" data-c="edIn:${path}" value="${v}" ${more}>`;
   let body = '';
@@ -2228,11 +2412,16 @@ function renderInspector() {
     if (t.type === 'prop' && !t.prop) body = '';
     else if (t.type === 'prop') body = [row('Clears', html`<select class="sel" data-c="propClears:${t.prop.id}">${options([0, 10, 30, 60].map(n => [n, n ? `After ${n} seconds` : 'Never']), t.prop.clears || 0)}</select>`), html`<div class="hint">A prop stays over the slides until it is taken off. Make it here like a slide.</div>`];
     if (t.type === 'layout') body = html`<div class="hint">Each box shows something live: the words on screen, the next slide, the clock, a timer, the notes. Add more from Add › Linked Text. Screens using this layout: ${DOC.screens.filter(s => s.layout === t.layout.id).map(s => s.name).join(', ') || 'none'}.</div>`;
-  } else if (state.itab === 'Text') { const s = o.style;
-    body = [row('Font', html`<button class="btn ed-font" data-a="fontSheet" style="font-family:${FONTS[s.font]}">${s.font}</button>`),
-      row('Size', [num('style.size', s.size, { min: '8', max: '400' }), key('A−', false, 'edBump:style.size,-4', 'Smaller'), key('A+', false, 'edBump:style.size,4', 'Bigger')]),
-      row('Style', [key('B', s.bold, 'edToggle:style.bold', 'Bold'), key(html`<i>I</i>`, s.italic, 'edToggle:style.italic', 'Italic'), key(html`<u>U</u>`, s.underline, 'edToggle:style.underline', 'Underline')]),
-      row('Colour', sw('style.color', s.color)),
+  } else if (state.itab === 'Text') { const s = o.style, wn = wordsNow(o), w = wn.w, v = wn.sum, mx = p => v[p] === MIXED;
+    const said = w ? wn.text.slice(w.from, w.to).replace(/\s+/g, ' ').trim() : '', quote = said.length > 26 ? said.slice(0, 25).trimEnd() + '…' : said;
+    // The line that says what the four rows under it change: the words picked, or the whole box (and then every word in it).
+    const scope = (label, note) => html`<div class="iscope"><span class="cap">${label}</span>${note ? html`<span class="sub">${note}</span>` : ''}</div>`;
+    body = [scope(w ? 'Selected words' : eff.length > 1 ? `${eff.length} boxes` : 'The whole box', w ? `“${quote}”` : eff.length > 1 || o.linked ? '' : 'Select words in it to change only them'),
+      row('Font', html`<button class="btn ed-font ${mx('font') ? 'mixed' : ''}" data-a="fontSheet" style="${mx('font') ? '' : 'font-family:' + FONTS[v.font]}">${mx('font') ? 'Mixed' : v.font}</button>`),
+      row('Size', [num('style.size', mx('size') ? '' : v.size, { min: '8', max: '400', placeholder: mx('size') ? 'Mixed' : null, class: mx('size') ? 'num mixed' : null, 'aria-label': 'Size' }), key('A−', false, 'edBump:style.size,-4', 'Smaller'), key('A+', false, 'edBump:style.size,4', 'Bigger')]),
+      row('Style', [key('B', v.bold === true, 'edToggle:style.bold', 'Bold (⌘B)', mx('bold')), key(html`<i>I</i>`, v.italic === true, 'edToggle:style.italic', 'Italic (⌘I)', mx('italic')), key(html`<u>U</u>`, v.underline === true, 'edToggle:style.underline', 'Underlined (⌘U)', mx('underline')), key(html`<s>S</s>`, v.strike === true, 'edToggle:style.strike', 'Struck through', mx('strike'))]),
+      row('Colour', sw('style.color', mx('color') ? null : v.color, false, mx('color') ? v.colors.slice(0, 2) : null)),
+      w ? scope('The whole box', '') : '',
       row('Align', [['left', 'center', 'right'].map(a => key(I[a], s.align === a, `edSet:style.align,${a}`, a)), html`<i class="rule"></i>`, ['top', 'middle', 'bottom'].map(a => key(I[a], s.valign === a, `edSet:style.valign,${a}`, a))]),
       row('Effects', html`<button class="btn ${s.stroke ? 'onkey' : ''}" data-a="edToggle:style.stroke">Outline</button><button class="btn ${s.shadow ? 'onkey' : ''}" data-a="edToggle:style.shadow">Shadow</button>`),
       s.shadow ? row('Shadow', html`<label class="ed-mini">Angle${num('style.shadowAngle', s.shadowAngle, { step: '15' })}</label><label class="ed-mini">Offset${num('style.shadowOffset', s.shadowOffset, { min: '0' })}</label><label class="ed-mini">Blur${num('style.shadowBlur', s.shadowBlur, { min: '0' })}</label>`) : '',
@@ -2244,7 +2433,7 @@ function renderInspector() {
       row('Behind', sw('style.bg', s.bg, true)),
       row('Shows', html`<select class="sel" data-c="edIn:linked">${options([['', 'Its own words'], ...Object.entries(LINKS)], o.linked || '')}</select>${o.linked === 'timer' ? html`<select class="sel" data-c="edIn:timer">${options(DOC.timers.map(x => x.name), o.timer)}</select>` : ''}`),
       t.type === 'template' ? row('Holds', html`<select class="sel" data-c="edIn:role">${options([['', 'Nothing (just text)'], 'main', 'translation', 'verse1', 'ref1', 'verse2', 'ref2'], o.role || '')}</select>`) : '',
-      html`<div class="ctl"><button class="btn" data-a="edStyle:copy">Copy style</button><button class="btn" data-a="edStyle:paste">Paste style</button>${t.type === 'slide' && o.role ? html`<button class="btn" data-a="edStyle:theme" title="Let the theme decide again">Back to theme</button>` : ''}</div>`];
+      html`<div class="ctl"><button class="btn" data-a="edStyle:copy">Copy style</button><button class="btn" data-a="edStyle:paste">Paste style</button>${t.type === 'slide' && o.role ? html`<button class="btn" data-a="edStyle:theme" title="Let the theme decide the box’s look and place again; words styled in it keep their own">Back to theme</button>` : ''}${o.spans && o.spans.length && !o.linked ? html`<button class="btn" data-a="edStyle:plain" title="Every word takes the box’s look again">Clear word styles</button>` : ''}</div>`];
   } else if (state.itab === 'Shape') { const f = o.frame, g = o.gradient, st = o.stroke || { w: 0, color: '#ffffff' };
     body = [row('Place', html`<div class="num4">${['x', 'y', 'w', 'h'].map(p => html`<label>${p.toUpperCase()}${num('frame.' + p, Math.round(f[p]))}</label>`)}</div>`),
       row('Arrange', [['left', 'center', 'right', 'top', 'middle', 'bottom'].map(a => key(I[a], false, `edAlign:${a}`, `Align ${a}${eff.length > 1 ? '' : ' on the slide'}`)), eff.length > 2 ? html`<button class="btn" data-a="edAlign:spreadh">Spread ↔</button><button class="btn" data-a="edAlign:spreadv">Spread ↕</button>` : '']),
@@ -2280,22 +2469,38 @@ A.edStyle = ([what]) => {
   const t = edTarget(), e = edEff(t).find(x => state.sels.includes(x.id)); if (!e || e.kind !== 'text') return;
   if (what === 'copy') { state.clip = { type: 'style', style: clone(e.style) }; return toast('Text style copied'); }
   if (what === 'paste' && (!state.clip || state.clip.type !== 'style')) return refuse('Copy a style first');
+  if (what === 'plain') { state.tsel = null; return mutate(() => edPicked(edTarget()).forEach(o => { delete o.spans; })); }
   mutate(() => edPicked(edTarget()).forEach(o => { if (what === 'theme') { delete o.style; delete o.frame; } else if (o.kind === 'text') o.style = { ...(o.style || {}), ...clone(state.clip.style) }; }));
 };
 
 /* ───────── typing in a text box: kept when the box loses focus ───────── */
-function startTyping(id) {
-  const el = document.querySelector(`#canvas [data-tx="${id}"]`); if (!el) return;
+// from, to: the words to pick again (after a style was set while typing); none: the caret at the end.
+function startTyping(id, from, to) {
+  const el = document.querySelector(`#canvas [data-tx="${CSS.escape(id)}"]`); if (!el) return;
   el.setAttribute('contenteditable', 'plaintext-only'); el.focus();
-  const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+  const r = document.createRange();
+  if (from == null) { r.selectNodeContents(el); r.collapse(false); }
+  else { const x = typedPoint(el, from), y = typedPoint(el, to == null ? from : to); r.setStart(x[0], x[1]); r.setEnd(y[0], y[1]); }
+  const s = getSelection(); s.removeAllRanges(); s.addRange(r);
 }
 document.addEventListener('focusout', e => {
-  const id = e.target.dataset && e.target.dataset.tx; if (!id || !e.target.hasAttribute('contenteditable')) return;
-  e.target.removeAttribute('contenteditable');
-  const o = byId(edTarget().holder.objects, id), text = e.target.innerText.replace(/ /g, ' ').replace(/\n+$/, '');
-  if (!o || text === (o.text || '')) return;
-  fromField = pointerHeld && !!pointerEl && !e.target.contains(pointerEl);
-  try { mutate(() => { byId(edTarget().holder.objects, id).text = text; }); } finally { fromField = false; }
+  const el = e.target, id = el.dataset && el.dataset.tx; if (!id || !el.hasAttribute('contenteditable')) return;
+  el.removeAttribute('contenteditable');
+  if (drawing) return;      // taken away by a redraw: what was typed was kept just before it
+  const keep = [e.relatedTarget, pointerEl].some(n => n && n.closest && n.closest('aside.right, #sheet, #menu'));      // to the inspector or its font list: the words stay picked
+  if (!keep) state.tsel = null;
+  if (!el.isConnected) return;
+  if (el.dataset.cancel) { delete el.dataset.cancel; state.tsel = null; return render(); }      // Escape: back as it was
+  const t = edTarget(), o = byId(t.holder.objects, id), ef = edEff(t).find(x => x.id === id); if (!o || !ef) return;
+  const r = readTyped(el, ef.style), same = r.text === (o.text || '') && JSON.stringify(r.spans) === JSON.stringify(tidySpans(o.text || '', o.spans, ef.style));
+  if (keep && state.tsel) {      // to the inspector with words selected: what was typed is kept (one Undo step) and only the slide is redrawn, with the
+    // words highlighted, so the field or key being pressed stays where it is
+    if (!same) { undoStack.push(JSON.stringify(DOC)); redoStack = []; foldTyped(el, t, edEff(t)); fixState(); if (state.liveEdit && edIsLive(t)) putUp(); }
+    VIEWS[state.mode].centre(); fitAll($('canvas')); return;
+  }
+  if (same) { if (el.querySelector('.tsel')) render(); return; }
+  fromField = pointerHeld && !!pointerEl && !el.contains(pointerEl);
+  try { mutate(() => foldTyped(el, edTarget(), edEff(edTarget()))); } finally { fromField = false; }
 });
 
 /* ───────── picking, moving and resizing on the slide ───────── */
@@ -2303,6 +2508,7 @@ let drag = null;
 document.addEventListener('pointerdown', e => {
   if ((state.mode !== 'edit' && state.mode !== 'themes') || state.reflow) return;
   const cv = e.target.closest && e.target.closest('#canvas'); if (!cv || e.target.isContentEditable) return;
+  if (state.tsel && !typingEl()) { state.tsel = null; render(); }      // the words picked for the inspector are let go
   const hd = e.target.closest('[data-hd]'), ob = e.target.closest('[data-ob]');
   if (!ob) { if (state.sels.length) { state.sels = []; render(); } return; }
   const id = ob.dataset.ob, was = state.sels.length === 1 && state.sels[0] === id;
@@ -2780,10 +2986,10 @@ function dropFor(el, e = {}) {      // what dropping here would do, or null
     if (sg && arrOf(sg) && sg.slides[+over.args[1]].group !== sg.slides[+dragging.args[1]].group) return null; }      // under an arrangement the groups stand where the arrangement puts them: a slide moves only among its own group
   if (k === 'slide' && over && over.kind === 'slide' && over.args[0] === dragging.args[0] && over.el !== dragging.el) return { el: over.el, what: 'moveSlide', to: +over.args[1], after: farHalf(over.el, e, true), across: true };
   if (k === 'item' && over && over.kind === 'item' && over.el !== dragging.el) return { el: over.el, what: 'moveItem', to: over.args[0], after: farHalf(over.el, e) };
-  if (k === 'find') {      // from the find list: into the open playlist at the line, onto a placeholder, a playlist or a library; passages never to a library
+  if (k === 'find') {      // from the find list: only into the list shown (the owner, 23 November: to put it elsewhere, open that first). Into the open
+    // playlist at the line or onto a placeholder; into the library listed, songs only. The chooser doesn't come up.
     const song = dragging.args[0] === 'song', slotRow = over && over.kind === 'item' && (byId(playlist().items, over.args[0]) || {}).kind === 'placeholder';
     if (over && over.kind === 'item' && state.src.type === 'pl') return slotRow && song ? { el: over.el, what: 'findInSlot', to: over.args[0], into: true } : { el: over.el, what: 'findToItem', to: over.args[0], after: farHalf(over.el, e) };
-    if (src) { const [type, id] = src.dataset.a.slice(4).split(','); if (type === 'pl' || (song && type === 'lib' && id !== 'all')) return { el: src, what: 'findTo', type, id }; }
     if (song && state.src.type === 'lib' && state.src.id !== 'all' && el.closest('#left .items')) return { el: el.closest('#left .items'), what: 'findTo', type: 'lib', id: state.src.id, into: true };
     return null;
   }
@@ -2814,7 +3020,7 @@ const clearDropMarks = () => document.querySelectorAll('.dropping').forEach(x =>
 document.addEventListener('dragstart', e => {
   const d = dragOf(e.target); if (!d) return;
   d.x = e.clientX; d.y = e.clientY;
-  dragging = d; d.el.classList.add('drag-src'); document.body.classList.add('is-dragging'); if (d.kind === 'song') document.body.classList.add('is-dragging-song'); if (d.kind === 'find') document.body.classList.add('is-dragging-find');      // the chooser shows above the list, and the find list stays open
+  dragging = d; d.el.classList.add('drag-src'); document.body.classList.add('is-dragging'); if (d.kind === 'song') document.body.classList.add('is-dragging-song'); if (d.kind === 'find') document.body.classList.add('is-dragging-find');      // the find list stays open; the chooser shows for songs from the song list only
   try { e.dataTransfer.setData('text/plain', d.el.dataset.drag); e.dataTransfer.effectAllowed = 'copyMove'; } catch (_) { /* a scripted drag has no data transfer */ }
 });
 document.addEventListener('dragover', e => { if (dragging) { const o = dragOf(e.target); dragging.home = !!o && o.el === dragging.el; } const t = dropFor(e.target, e); clearDropMarks(); if (!t) return; e.preventDefault(); if (t.what === 'stay') return; t.el.classList.add('dropping'); if ('after' in t) { t.el.classList.toggle('drop-after', t.after); t.el.classList.toggle('drop-across', !!t.across); } else t.el.classList.add('drop-into'); });
@@ -3424,8 +3630,9 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (el.isContentEditable) {
-    if (k === 'Escape') { const o = byId(edTarget().holder.objects, el.dataset.tx); el.innerText = o ? o.text || '' : ''; el.blur(); }
+    if (k === 'Escape') { el.dataset.cancel = '1'; el.blur(); }      // back as it was, styled words and all
     if (k === 'Enter' && cmd) el.blur();
+    if (cmd && !e.altKey && !e.shiftKey && /^[biu]$/i.test(k)) { e.preventDefault(); return A.edToggle([`style.${{ b: 'bold', i: 'italic', u: 'underline' }[k.toLowerCase()]}`]); }      // the words picked, or with none the whole box
     return;
   }
   if (k === 'Escape' && el.matches && el.matches('.sc-name input, .st-in')) { el.value = el.defaultValue; el.blur(); return; }      // a name retyped in place: Escape puts it back
@@ -3554,7 +3761,7 @@ A.keysSheet = () => {
     ['Going places', [['⌥S  ⌥B  ⌥E', 'Show, Bible (ready for a reference), Edit'], ['⌥,', 'Settings'], ['⌥P', 'Playlists and libraries'], [keyList('find') + '  ⌥F', 'Find a song, a line or a verse'], ['?', 'This list']]],
     ['The live tools', [['⌥1 … ⌥7', 'Open Timers, Messages, Props, Macros, Stage, Audio, VoxLive'], ['then 1 … 9', 'Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track'], ['⌥M  then 1 … 9', 'Show that picture or video'], ['⌥A  ⌥T', 'Audience screens, stage screens, on or off'], ['⌥O', 'The menu for the slide on screen']]],
     ['Menus and windows', [['↑  ↓', 'Move'], ['→  ←', 'Open a group of choices; go back'], ['Enter', 'Choose'], ['Esc', 'Close']]],
-    ['Changing things', [['⌘Z  ⇧⌘Z', 'Undo, redo'], ['⌘C  ⌘X  ⌘V', 'Copy, cut, paste the picked slides (objects in Edit)'], ['Delete', 'Delete what is picked: what Undo brings back goes at once (playlist items, slides, a media playlist’s items); songs in a library, pictures in the bin and screens ask first'], ['⇧↑  ⇧↓  ⌘A', 'Pick several in the left column: grow the pick, or pick them all'], ['T  ⌘D  ⌘A', 'In Edit: a new text box, duplicate, pick everything'], ['Arrows', 'In Edit: nudge the picked object (Shift for one pixel)']]],
+    ['Changing things', [['⌘Z  ⇧⌘Z', 'Undo, redo'], ['⌘C  ⌘X  ⌘V', 'Copy, cut, paste the picked slides (objects in Edit)'], ['Delete', 'Delete what is picked: what Undo brings back goes at once (playlist items, slides, a media playlist’s items); songs in a library, pictures in the bin and screens ask first'], ['⇧↑  ⇧↓  ⌘A', 'Pick several in the left column: grow the pick, or pick them all'], ['T  ⌘D  ⌘A', 'In Edit: a new text box, duplicate, pick everything'], ['Arrows', 'In Edit: nudge the picked object (Shift for one pixel)'], ['⌘B  ⌘I  ⌘U', 'Typing in a box: bold, italic, underlined, for the words selected (or the whole box)']]],
   ];
   openSheet({ title: 'Keys', wide: true, body: html`<div class="ui-keyson"><b>Show keys on buttons</b><span>A small tag beside each button with its key. In the app this is also in the Help menu.</span>${onoffKeys()}</div><div class="ui-keys">${groups.map(([name, rows]) => html`<section><span class="cap">${name}</span>${rows.map(([k, what]) => html`<div class="ui-key"><span class="ks">${k.split(/\s{2,}/).map(x => html`<kbd class="st-key mono">${x}</kbd>`)}</span><span>${what}</span></div>`)}</section>`)}</div>`,
     note: 'The first nine can be changed in Settings › Keys.', buttons: [{ t: 'Done', primary: true }] });
@@ -3711,3 +3918,7 @@ Object.assign(DEMOS, {      // Testing aids: notices, the status button and its 
   noteask: () => { state.changedOutside = DOC.songs[1].id; render(); },
   noterefuse: () => { render(); setTimeout(() => { go(playlist().items[7].id, 2); refuse('That playlist is empty'); }, 80); } });
 if (['notes', 'notesnew', 'noteask', 'noterefuse'].includes(q.get('demo'))) DEMOS[q.get('demo')]();
+Object.assign(DEMOS, {      // Testing aid: words styled inside a box, some of them selected (mixed looks) for the inspector
+  words: () => { enterEdit(null, 0, DOC.songs[1].id); const m = DOC.songs[1].slides[0].objects.find(o => o.role === 'main'), t = m.text, a = t.indexOf('the light'), b = t.indexOf('You are');
+    m.spans = [{ from: a, to: a + 9, italic: true, size: 104, color: '#8fc8ff' }]; state.sels = [m.id]; state.itab = 'Text'; state.tsel = { id: m.id, from: b, to: a + 9 }; render(); } });
+if (q.get('demo') === 'words') DEMOS.words();
