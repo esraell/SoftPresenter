@@ -7709,6 +7709,15 @@ impl App {
                     if std::env::var("SOFTPRESENTER_CAPTURE_EDITOR").as_deref() == Ok("typing") {
                         draft.typing = draft.selected;
                         draft.typing_started = true;
+                        // Testing aid: SOFTPRESENTER_CAPTURE_SELECT=FROM-TO also selects those
+                        // characters of the words, for a picture of the inspector's head then.
+                        draft.typing_range = std::env::var("SOFTPRESENTER_CAPTURE_SELECT").ok().and_then(|r| {
+                            let (a, b) = r.split_once('-')?;
+                            Some((a.parse().ok()?, b.parse().ok()?))
+                        });
+                        if draft.typing_range.is_some() {
+                            draft.typing_started = false;
+                        }
                     }
                 }
                 // Testing aid: put a picture from a file on the slide, as Picture… does.

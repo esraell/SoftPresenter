@@ -1195,28 +1195,22 @@ fn text_look(
                 }
             }
         });
-    ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt("font weight")
-            .selected_text(weight_name(wanted.weight))
-            .width(full - 86.0 - 62.0)
-            .show_ui(ui, |ui| {
-                for (weight, name) in WEIGHTS {
-                    ui.selectable_value(&mut wanted.weight, weight, name);
-                }
-            });
-        for (label, by, hint) in
-            [("A\u{2212}", -SIZE_STEP, "Every size one step smaller"), ("A+", SIZE_STEP, "Every size one step bigger")]
-        {
-            if ui
-                .add_sized([20.0, ROW - 2.0], egui::Button::new(egui::RichText::new(label).size(11.0)))
-                .on_hover_text(hint)
-                .clicked()
-            {
-                inspector.size_step = by;
+    egui::ComboBox::from_id_salt("font weight").selected_text(weight_name(wanted.weight)).width(full).show_ui(
+        ui,
+        |ui| {
+            for (weight, name) in WEIGHTS {
+                ui.selectable_value(&mut wanted.weight, weight, name);
             }
-        }
+        },
+    );
+    // Size on a row of its own, with the two steps beside it: every width is worked out from
+    // the room there is, so the row is never wider than the column.
+    ui.horizontal(|ui| {
+        let gap = ui.spacing().item_spacing.x;
+        let button = 28.0;
+        let field = (full - 2.0 * (button + gap)).max(40.0);
         ui.add_sized(
-            [80.0, ROW - 2.0],
+            [field, ROW - 2.0],
             egui::DragValue::new(&mut wanted.size)
                 .speed(1.0)
                 .range(8.0..=600.0)
@@ -1224,6 +1218,17 @@ fn text_look(
                 .custom_formatter(move |value, _| if mix.size { "Mixed".to_owned() } else { format!("{value:.0}") }),
         )
         .on_hover_text("Size, in slide units");
+        for (label, by, hint) in
+            [("A\u{2212}", -SIZE_STEP, "Every size one step smaller"), ("A+", SIZE_STEP, "Every size one step bigger")]
+        {
+            if ui
+                .add_sized([button, ROW - 2.0], egui::Button::new(egui::RichText::new(label).size(11.0)))
+                .on_hover_text(hint)
+                .clicked()
+            {
+                inspector.size_step = by;
+            }
+        }
     });
     ui.horizontal(|ui| {
         let on = [
