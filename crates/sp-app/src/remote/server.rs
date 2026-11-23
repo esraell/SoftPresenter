@@ -119,12 +119,10 @@ const NEXT_INDEX_HTML: &str = include_str!("page/next/index.html");
 const NEXT_APP_JS: &str = include_str!("page/next/app.js");
 const NEXT_STYLE_CSS: &str = include_str!("page/next/style.css");
 
-/// The files under `/next/`: content type (from the extension) and body. The page's own HTML
-/// names its script and style as `/app.js` and `/style.css`, which are the built-in page's;
-/// here those two names are read as the files beside it. The files themselves are the design
-/// work's, unchanged.
+/// The files under `/next/`: content type (from the extension) and body, the design work's
+/// files unchanged. Its page names its script and style by relative address, so they load from
+/// beside it.
 fn next_file(path: &str) -> Option<(&'static str, &'static str)> {
-    static INDEX: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let kind = |name: &str| match name.rsplit_once('.').map(|(_, extension)| extension) {
         Some("html") => "text/html; charset=utf-8",
         Some("js") => "text/javascript; charset=utf-8",
@@ -132,14 +130,7 @@ fn next_file(path: &str) -> Option<(&'static str, &'static str)> {
         _ => "application/octet-stream",
     };
     match path {
-        "/next/" => Some((
-            kind("index.html"),
-            INDEX.get_or_init(|| {
-                NEXT_INDEX_HTML
-                    .replace("href=\"/style.css\"", "href=\"/next/style.css\"")
-                    .replace("src=\"/app.js\"", "src=\"/next/app.js\"")
-            }),
-        )),
+        "/next/" => Some((kind("index.html"), NEXT_INDEX_HTML)),
         "/next/app.js" => Some((kind("app.js"), NEXT_APP_JS)),
         "/next/style.css" => Some((kind("style.css"), NEXT_STYLE_CSS)),
         _ => None,

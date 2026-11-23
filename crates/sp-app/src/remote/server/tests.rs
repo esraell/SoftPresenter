@@ -309,7 +309,8 @@ fn the_design_page_is_served_under_next_to_signed_in_devices_only_by_exact_names
     assert_eq!(page.status, 200);
     assert_eq!(page.header("content-type"), Some("text/html; charset=utf-8"));
     let text = page.text();
-    assert!(text.contains("href=\"/next/style.css\"") && text.contains("src=\"/next/app.js\""), "{text}");
+    // Its files by relative address, so they load from beside it, never the built-in page's.
+    assert!(text.contains("href=\"style.css\"") && text.contains("src=\"app.js\""), "{text}");
     assert!(!text.contains("\"/app.js\"") && !text.contains("\"/style.css\""));
     // The same policy and headers as the built-in page.
     let policy = page.header("content-security-policy").expect("a policy");

@@ -141,7 +141,7 @@ mistake impossible:
 | `slides item N [in PLAYLIST]` | The slides of a playlist's item N (of the playlist in front if none is named): a song's, or a saved Bible passage's, made as opening it would make them but without opening it, so the Bible page stays as it is |
 | `slides SONG --full`, `slides item N [in PLAYLIST] --full` | Every slide as `slide SONG N` gives it (its own settings, its objects, their words, places and looks), in one reply |
 | `search WORDS` | Songs with those words in their title or slides, and on which slides |
-| `libraries`, `library NAME` | The libraries with how many songs each has (and how many are missing); one library's songs |
+| `libraries`, `library NAME` | The libraries with how many songs each has (and how many are missing); one library's songs (with `--json`, each song's number, title, `id` and whether it is `missing`) |
 | `playlists`, `playlist [NAME]` | The playlists; one playlist's items (the one in front if none is named) |
 | `media` | The media bin's pictures and videos |
 | `themes`, `timers`, `messages`, `props`, `macros`, `audio` | Each list, with its state: a timer's kind, time and whether it runs; a message's words and whether it shows; a prop on screen; a macro's steps |

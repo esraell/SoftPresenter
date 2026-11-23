@@ -1069,7 +1069,7 @@ VIEWS.show = { left: renderShowLeft, centre: renderShowCentre };
 
 /* ───────── left: where the songs come from, then what is in it ───────── */
 const srcName = () => state.src.type === 'pl' ? playlist().name : state.src.type === 'vox' ? 'VoxLive' : state.src.id === 'all' ? 'All Songs' : byId(DOC.libraries, state.src.id).name;
-const librarySongs = () => state.src.id === 'all' ? DOC.songs : byId(DOC.libraries, state.src.id).songs.map(songById).filter(Boolean);
+const librarySongs = () => state.src.id === 'all' ? DOC.songs.filter(s => !s.notInLibrary) : byId(DOC.libraries, state.src.id).songs.map(songById).filter(Boolean);
 const voxReady = () => DOC.voxlive.connected && DOC.voxlive.screens.length > 0;
 
 function renderShowLeft() {
@@ -3049,9 +3049,10 @@ function remoteApply(all, changed = []) {
   if (has('props')) DOC.props = (P.props || []).map(p => ({ id: nameId('rp', p.name), name: p.name, clears: p.clears_after || 0, objects: [], showing: !!p.showing }));
   if (has('macros')) DOC.macros = (P.macros || []).map((m, n) => ({ id: nameId('rc', m.name), name: m.name, color: SWATCHES[2 + n % 6], atStart: !!m.startup, steps: [], appSteps: m.steps || [] }));
   if (has('versions')) DOC.versions = ((P.versions || {}).versions || []).filter(v => okId(v.id)).map(v => ({ id: v.id, name: v.name }));
-  if (has('screens')) DOC.screens = ((P.screens || {}).screens || []).map((x, n) => ({ ...clone(SCREEN_LIKE), id: 'rs' + n, name: x.name, kind: 'Audience', on: x.shown !== false, doing: x.doing || '', tone: x.tone }));
+  if (has('screens')) DOC.screens = ((P.screens || {}).screens || []).map((x, n) => ({ ...clone(SCREEN_LIKE), id: 'rs' + n, name: x.name, kind: x.kind === 'stage' ? 'Stage' : 'Audience', on: x.shown !== false, doing: x.doing || '', tone: x.tone }));
   if (all) remoteSend(['groups'], true).then(r => { if (r.ok && Array.isArray(r.data)) { DOC.groups = r.data.map(g => ({ name: g.group, color: okColour(g.color), key: g.key || '', names: g.names || [] })); render(); } });      // the groups' colours, for the dots under the slides
-  if (has('playlist') || has('playlists') || has('bin')) remotePlaylists();
+  if (has('library') && REMOTE.library && REMOTE.library.rev !== (P.library || {}).rev) remoteFetchSongs();      // the library changed: its list is read again
+  if (has('playlist') || has('playlists') || has('bin') || has('library')) remotePlaylists();
   if (has('notices')) remoteNotices();
   remoteLive();
   remoteTimes();
@@ -3063,28 +3064,29 @@ function remotePlaylists() {
   const was = (() => { const pl = DOC.playlists.find(p => p.front), it = pl && pl.items.find(i => i.id === state.openItem); if (!it) return null;
     const so = it.song && byId(DOC.songs, it.song); return { kind: it.kind, appId: so && so.appId, title: so ? so.title : it.name || '', rev: pl.rev }; })();
   const item = i => {
-    const id = 'ri' + (Number(i.item) | 0), base = { id, num: Number(i.item) | 0 };
+    const uid = okId(i.uid) ? i.uid : null, id = uid ? 'ru' + uid : 'ri' + (Number(i.item) | 0), base = { id, num: Number(i.item) | 0, uid };      // an item's own id, kept across moves
     if (i.kind === 'header') return { ...base, kind: 'header', name: i.title };
     if (i.kind === 'placeholder') return { ...base, kind: 'placeholder', name: i.title, song: null };
     if (i.kind === 'media') { const m = DOC.media.find(x => x.num === i.number); return { ...base, kind: 'media', media: m ? m.id : 'gone' }; }
     if (i.kind === 'media_playlist') { const mp = DOC.mediaPlaylists.find(x => x.name === i.title); return { ...base, kind: 'mediaPlaylist', mp: mp ? mp.id : 'gone' }; }
     if (i.missing) return { ...base, kind: 'song', song: 'gone', title: i.title };
     // a song or a passage: its slides come with `slides item N`, kept under the item's number and the playlist's rev
-    const key = `is${okId(front.rev) ? front.rev : 'x'}n${Number(i.item) | 0}`;
-    songs.set(key, songObject(key, i.title, { appId: i.id || null, num: i.number || null, item: i.item, passage: i.kind === 'passage' }));
+    const lib = (P.library || {}).rev, key = uid ? `is${uid}r${okId(lib) ? lib : 'x'}` : `is${okId(front.rev) ? front.rev : 'x'}n${Number(i.item) | 0}`;      // read again when the library changes
+    songs.set(key, songObject(key, i.title, { appId: okId(i.id) ? i.id : null, num: i.number || null, item: i.item, uid, passage: i.kind === 'passage', notInLibrary: true }));
     return { ...base, kind: 'song', song: key };
   };
   const frontItems = (front.items || []).map(item);
   DOC.playlists = (P.playlists || []).map(p => ({ id: nameId('rpl', p.name), name: p.name, num: p.number, rev: p.rev, front: !!p.front, items: p.front ? frontItems : [] }));
   if (!DOC.playlists.length) DOC.playlists = [{ id: nameId('rpl', front.name || ''), name: front.name || 'Playlist', front: true, items: frontItems }];
-  DOC.songs = [...songs.values()];
+  DOC.songs = [...songs.values(), ...remoteLibrarySongs()];
   const f = DOC.playlists.find(p => p.front) || DOC.playlists[0];
   if (was && was.rev !== front.rev) {      // reordered, added to or taken from elsewhere: the open item is found again by what it is
     const same = it => { const so = it.song && songs.get(it.song); return it.kind === was.kind && (so ? (was.appId ? so.appId === was.appId : so.title === was.title) : (it.name || '') === was.title); };
     const now = frontItems.find(i => i.id === state.openItem); if (!now || !same(now)) { const found = frontItems.find(same); state.openItem = found ? found.id : null; }
     state.itemPick = []; state.cue = null;
   }
-  if (state.src.type !== 'pl' || !byId(DOC.playlists, state.src.id) || !byId(DOC.playlists, state.src.id).front) state.src = { type: 'pl', id: f.id };
+  const onAll = state.src.type === 'lib' && state.src.id === 'all';      // All Songs stays open; anything else goes back to the playlist in front
+  if (!onAll && (state.src.type !== 'pl' || !byId(DOC.playlists, state.src.id) || !byId(DOC.playlists, state.src.id).front)) state.src = { type: 'pl', id: f.id };
   if (!f.items.some(i => i.id === state.openItem)) state.openItem = (f.items.find(i => i.kind === 'song') || f.items[0] || {}).id || null;
 }
 function remoteNotices() {
@@ -3138,6 +3140,21 @@ function remoteTimes() {
 }
 function remoteTick() { remoteTimes(); paintClock(); }      // in place, as the sample's clock does: a press is never lost to a redraw
 
+// All Songs: the app's list, each song with its own id (asked for when All Songs is opened, and again when the library changes)
+function remoteFetchSongs() {
+  const rev = (REMOTE.parts.library || {}).rev;
+  remoteSend(['songs'], true).then(r => {
+    if (!r.ok || !Array.isArray(r.data)) return;
+    REMOTE.library = { rev, songs: r.data.filter(x => x && okId(x.id)).map(x => ({ id: x.id, num: x.number, title: x.title })) };
+    remotePlaylists(); fixState(); render();
+  });
+}
+function remoteLibrarySongs() {
+  if (!REMOTE.library) return [];
+  const lib = REMOTE.library.rev || 'x';
+  return REMOTE.library.songs.map(x => songObject(`sg${x.id}r${okId(lib) ? lib : 'x'}`, x.title, { appId: x.id, num: x.num }));
+}
+
 // Slides are read when they come into view, so a long playlist opens at once: two at a time (the server lets four
 // commands wait, and Next must never queue behind reads), each tried again a little later if the app was busy.
 function remoteLoadVisible() {
@@ -3166,13 +3183,14 @@ function remotePump() {
 function remoteWrap(name, fn) { const orig = window[name]; window[name] = function (...a) { return REMOTE.on ? fn(orig, ...a) : orig(...a); }; }
 function remoteWrapA(name, fn) { const orig = A[name]; if (!orig) return; A[name] = function (...a) { return REMOTE.on ? fn(orig, ...a) : orig(...a); }; }
 const frontPl = () => DOC.playlists.find(p => p.front) || DOC.playlists[0];
-const aimOf = key => { const d = deckByKey(key), p = frontPl(); return d && d.item && d.item.num && state.src.type === 'pl' && playlist() === p ? ['--aim', d.item.num, '--rev', REMOTE.parts.playlist ? REMOTE.parts.playlist.rev : ''] : null; };
+const aimOf = key => { const d = deckByKey(key), p = frontPl(); if (!(d && d.item && state.src.type === 'pl' && playlist() === p)) return null;
+  return d.item.uid ? ['--aim', d.item.uid] : d.item.num ? ['--aim', d.item.num, '--rev', REMOTE.parts.playlist ? REMOTE.parts.playlist.rev : ''] : null; };
 remoteWrap('go', (orig, key, q, s) => {
   const d = deckByKey(key); if (!d || !d.slides) return;
   if (q == null) q = d.seq.indexOf(s);
   const n = (q >= 0 ? d.seq[q] : s) + 1, aim = aimOf(key);
   state.cue = null;
-  if (aim) return remoteSend(['go', aim[0], aim[1], n, aim[2], aim[3]]);
+  if (aim) return remoteSend(['go', aim[0], aim[1], n, ...aim.slice(2)]);
   if (d.song && (d.song.appId || d.song.num)) return remoteSend(['go', d.song.appId || d.song.num, n]);
   refuse('That can’t be put on screen from here yet.');
 });
@@ -3209,7 +3227,8 @@ remoteWrapA('notesClear', () => remoteSend(['notices', 'clear']));
 remoteWrapA('undo', () => refuse('Undo for changes made from here comes with the next step. Use Undo at the computer.'));
 remoteWrapA('redo', () => refuse('Undo for changes made from here comes with the next step. Use Undo at the computer.'));
 // another playlist: the app runs from the one in front, so choosing one here puts it in front there too
-remoteWrapA('src', (orig, [type, id]) => { if (type !== 'pl') return refuse('Libraries come to the remote page with the next step.'); const p = byId(DOC.playlists, id); if (p && !p.front) remoteSend(['playlist', 'open', p.name]); else orig([type, id]); });
+remoteWrapA('src', (orig, [type, id]) => { if (type === 'lib' && id === 'all') { orig([type, id]); if (!REMOTE.library) remoteFetchSongs(); return; }
+  if (type !== 'pl') return refuse('Libraries of their own come to the remote page with the next step. All Songs works from here.'); const p = byId(DOC.playlists, id); if (p && !p.front) remoteSend(['playlist', 'open', p.name]); else orig([type, id]); });
 remoteWrap('render', orig => {
   if (state.mode !== 'show') { const why = REASON[state.mode] || REASON[state.mode === 'themes' ? 'edit' : 'settings']; state.mode = 'show'; state.sels = []; setTimeout(() => refuse(why), 0); }
   orig(); remoteLoadVisible();
@@ -3262,6 +3281,7 @@ class FixtureSocket extends EventTarget {
     const a = m.args, reply = r => this.emit(JSON.stringify({ type: 'reply', id: m.id, reply: r }));
     if (a[0] === 'menu') return reply(F.replies.refused);
     if (a[0] === 'slides' && a[1] === 'item') return reply(a[2] === '2' ? F.replies.slidesItem2 : { ok: true, text: '', data: [] });
+    if (a[0] === 'slides' && a[1] === '4a80878c-8c17-4a93-98ee-f9d5570bc111') return reply(F.replies.slidesItem2);      // Harbour Lights, by its id
     if (a[0] === 'playlist' && a.length === 1) return reply(F.replies.playlist);
     if (a[0] === 'songs') return reply(F.replies.songs);
     if (a[0] === 'groups') return reply({ ok: true, text: '', data: [{ key: 'C', group: 'Chorus', names: ['chorus', 'chorus 1'], color: '#cc4eb4' }, { key: 'V', group: 'Verse', names: ['verse'], color: '#4285f4' }] });      // docs/cli.md's own example

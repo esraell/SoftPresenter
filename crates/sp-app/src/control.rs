@@ -2310,15 +2310,28 @@ impl crate::App {
                 let at = find("library", &names, &rest(args, 1))?;
                 let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
                 let library = state.libraries.get(at).ok_or("No such library.")?;
-                let songs: Vec<String> = library
+                // As data, each song has its place in the library, its title and its stable id
+                // (what `go`, `slides` and `slide` take), or none when it can't be found.
+                let found: Vec<(String, Option<sp_model::Uuid>)> = library
                     .songs
                     .iter()
                     .map(|key| match crate::studio::playlist_song(&self.show, state, key) {
-                        Some(index) => self.show.presentations()[index].title.clone(),
-                        None => format!("{} (missing)", key.strip_prefix("title:").unwrap_or("a song")),
+                        Some(index) => {
+                            let song = &self.show.presentations()[index];
+                            (song.title.clone(), Some(song.id))
+                        }
+                        None => (format!("{} (missing)", key.strip_prefix("title:").unwrap_or("a song")), None),
                     })
                     .collect();
-                Ok(Reply::with(format!("{}\n{}", library.name, numbered(&songs)), serde_json::json!(songs)))
+                let songs: Vec<String> = found.iter().map(|(title, _)| title.clone()).collect();
+                let data: Vec<serde_json::Value> = found
+                    .iter()
+                    .enumerate()
+                    .map(|(place, (title, id))| {
+                        serde_json::json!({"number": place + 1, "title": title, "id": id, "missing": id.is_none()})
+                    })
+                    .collect();
+                Ok(Reply::with(format!("{}\n{}", library.name, numbered(&songs)), serde_json::json!(data)))
             }
             None => Err("library NAME, library open NAME, or library open all".to_owned()),
         }

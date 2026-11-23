@@ -156,8 +156,8 @@ put it in with `textContent`, never `innerHTML`.
 
 The built-in page's files are in `crates/sp-app/src/remote/page/`. The design work's page is
 compiled in beside them (`page/next/`, byte for byte the design work's files) and served under
-`/next/` from a fixed table of names; its HTML names its script and style as `/app.js` and
-`/style.css`, which the server reads as `/next/app.js` and `/next/style.css` there. The sign-in
+`/next/` from a fixed table of names; its HTML names its script and style by relative address,
+so they load from beside it. The sign-in
 page is shared: its script is the design work's (the Sign In button stays disabled until the
 script runs), and its form is `method="post"`, so a Return pressed early can't send the password
 in the address.
