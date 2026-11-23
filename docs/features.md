@@ -1283,7 +1283,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **The page** built in for now is small: whether it is connected, what is on screen with a
   live picture of what the audience sees, the playlist in front, and Previous, Next and Clear
   All. The full page comes from the design work and talks to the same API
-  ([remote-api.md](remote-api.md)).
+  ([remote-api.md](remote-api.md)). The design work's page is served beside it at `/next/`
+  (behind the same sign-in and checks) while the owner decides how it should work on narrow
+  screens.
 - **The same commands as `sp`**: the page sends `sp`'s commands, carried out on the app's main
   thread by the same handler, and gets the same replies. Not those that reach the computer's
   own files and folders (importing, exporting, adding media or audio, a picture or song text

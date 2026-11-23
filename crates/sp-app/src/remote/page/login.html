@@ -11,10 +11,10 @@
 <main class="card">
   <h1>SoftPresenter</h1>
   <p class="dim">Remote Control</p>
-  <form id="signin">
+  <form id="signin" method="post" action="/login">
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
-    <button type="submit">Sign In</button>
+    <button type="submit" id="signinGo" disabled>Sign In</button>
     <p id="said" class="said" role="status"></p>
   </form>
   <p class="dim small">This device is remembered after it signs in, until it is forgotten in

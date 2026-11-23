@@ -146,14 +146,20 @@ put it in with `textContent`, never `innerHTML`.
 | `GET /` | yes (else 303 to /login) | The page |
 | `GET /login`, `/login.js`, `/style.css` | no | The sign-in page, its script, the style sheet |
 | `GET /app.js` | yes | The page's script |
+| `GET /next/`, `/next/app.js`, `/next/style.css` | yes (`/next/` else 303 to /login, the files 401) | The design work's page, beside the built-in one: the same checks and headers; these three names only |
 | `GET /favicon.ico` | no | 204 |
 | `POST /api/login` | no | Sign in (above) |
 | `POST /api/logout` | yes | Forget this device |
 | `GET /api/ws` | yes | The WebSocket (Origin checked) |
 | `GET /thumb/{slide}/{version}/{look}.jpg` | yes | A slide's picture ([below](#slide-pictures)) |
 
-The built-in page's files are in `crates/sp-app/src/remote/page/`; the design work's page will
-take their place there (same names, or more files added to the server's routes).
+The built-in page's files are in `crates/sp-app/src/remote/page/`. The design work's page is
+compiled in beside them (`page/next/`, byte for byte the design work's files) and served under
+`/next/` from a fixed table of names; its HTML names its script and style as `/app.js` and
+`/style.css`, which the server reads as `/next/app.js` and `/next/style.css` there. The sign-in
+page is shared: its script is the design work's (the Sign In button stays disabled until the
+script runs), and its form is `method="post"`, so a Return pressed early can't send the password
+in the address.
 
 ## The WebSocket
 

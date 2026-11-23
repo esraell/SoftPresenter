@@ -279,13 +279,13 @@ fn the_sign_in_page_is_public_and_everything_else_needs_a_device() {
     assert_eq!(page.header("x-content-type-options"), Some("nosniff"));
     assert_eq!(page.header("x-frame-options"), Some("DENY"));
     // The pages themselves never put words in as HTML.
-    for script in [LOGIN_JS, APP_JS] {
+    for script in [LOGIN_JS, APP_JS, NEXT_APP_JS] {
         assert!(
             !script.contains("innerHTML") && !script.contains("outerHTML") && !script.contains("insertAdjacentHTML")
         );
         assert!(!script.contains("eval("));
     }
-    for page in [LOGIN_HTML, INDEX_HTML] {
+    for page in [LOGIN_HTML, INDEX_HTML, NEXT_INDEX_HTML] {
         assert!(!page.contains("<script>"), "no inline script");
         let handler = page.match_indices(" on").any(|(at, _)| {
             let rest = &page[at + 3..];
@@ -294,6 +294,49 @@ fn the_sign_in_page_is_public_and_everything_else_needs_a_device() {
         });
         assert!(!handler, "no inline event handlers");
     }
+}
+
+#[test]
+fn the_design_page_is_served_under_next_to_signed_in_devices_only_by_exact_names() {
+    let test = start_test("next");
+    // Signed out: the page goes to sign-in, its files are refused.
+    let page = test.get("/next/", None);
+    assert_eq!((page.status, page.header("location")), (303, Some("/login")));
+    assert_eq!(test.get("/next/app.js", None).status, 401);
+    assert_eq!(test.get("/next/style.css", None).status, 401);
+    let token = test.token();
+    let page = test.get("/next/", Some(&token));
+    assert_eq!(page.status, 200);
+    assert_eq!(page.header("content-type"), Some("text/html; charset=utf-8"));
+    let text = page.text();
+    assert!(text.contains("href=\"/next/style.css\"") && text.contains("src=\"/next/app.js\""), "{text}");
+    assert!(!text.contains("\"/app.js\"") && !text.contains("\"/style.css\""));
+    // The same policy and headers as the built-in page.
+    let policy = page.header("content-security-policy").expect("a policy");
+    assert!(policy.contains("script-src 'self'") && policy.contains("trusted-types 'none'"), "{policy}");
+    assert_eq!(page.header("x-frame-options"), Some("DENY"));
+    let script = test.get("/next/app.js", Some(&token));
+    assert_eq!((script.status, script.header("content-type")), (200, Some("text/javascript; charset=utf-8")));
+    assert_eq!(script.text(), NEXT_APP_JS);
+    let style = test.get("/next/style.css", Some(&token));
+    assert_eq!((style.status, style.header("content-type")), (200, Some("text/css; charset=utf-8")));
+    // Only these names; nothing is found by a path.
+    for path in
+        ["/next/login.html", "/next/index.html", "/next/..%2fapp.js", "/next/%2e%2e/app.js", "/next/a/b", "/next"]
+    {
+        let answer = test.get(path, Some(&token));
+        assert!(matches!(answer.status, 400 | 404), "{path}: {}", answer.status);
+    }
+    // The built-in page is untouched.
+    assert_eq!(test.get("/app.js", Some(&token)).text(), APP_JS);
+    // Host is checked here as everywhere.
+    let wrong = test.runtime.block_on(test.http(
+        "GET",
+        "/next/",
+        &[("Host", "evil.example"), ("Cookie", &format!("{COOKIE}={token}"))],
+        b"",
+    ));
+    assert_eq!(wrong.status, 421);
 }
 
 #[test]

@@ -5,6 +5,8 @@
   const form = document.getElementById("signin");
   const field = document.getElementById("password");
   const said = document.getElementById("said");
+  // The button waits for this script, so pressing Enter early can never send the password some other way.
+  document.getElementById("signinGo").disabled = false;
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     said.textContent = "Signing in…";

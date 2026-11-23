@@ -112,6 +112,40 @@ const INDEX_HTML: &str = include_str!("page/index.html");
 const APP_JS: &str = include_str!("page/app.js");
 const STYLE_CSS: &str = include_str!("page/style.css");
 
+/// The design work's page, served beside the built-in one under `/next/` (the owner has not
+/// decided how it should look on narrow screens). A fixed table of exact names: nothing is
+/// ever looked up by a path from a request.
+const NEXT_INDEX_HTML: &str = include_str!("page/next/index.html");
+const NEXT_APP_JS: &str = include_str!("page/next/app.js");
+const NEXT_STYLE_CSS: &str = include_str!("page/next/style.css");
+
+/// The files under `/next/`: content type (from the extension) and body. The page's own HTML
+/// names its script and style as `/app.js` and `/style.css`, which are the built-in page's;
+/// here those two names are read as the files beside it. The files themselves are the design
+/// work's, unchanged.
+fn next_file(path: &str) -> Option<(&'static str, &'static str)> {
+    static INDEX: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let kind = |name: &str| match name.rsplit_once('.').map(|(_, extension)| extension) {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "text/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        _ => "application/octet-stream",
+    };
+    match path {
+        "/next/" => Some((
+            kind("index.html"),
+            INDEX.get_or_init(|| {
+                NEXT_INDEX_HTML
+                    .replace("href=\"/style.css\"", "href=\"/next/style.css\"")
+                    .replace("src=\"/app.js\"", "src=\"/next/app.js\"")
+            }),
+        )),
+        "/next/app.js" => Some((kind("app.js"), NEXT_APP_JS)),
+        "/next/style.css" => Some((kind("style.css"), NEXT_STYLE_CSS)),
+        _ => None,
+    }
+}
+
 /// A picture read back from the GPU: tightly packed RGBA rows.
 pub struct Rgba {
     pub width: u32,
@@ -580,6 +614,8 @@ fn router(shared: Arc<Shared>) -> Router {
         .route("/style.css", any(style_css))
         .route("/app.js", any(app_js))
         .route("/favicon.ico", any(favicon))
+        .route("/next/", any(next_page))
+        .route("/next/{file}", any(next_page))
         .route("/api/login", any(login))
         .route("/api/logout", any(logout))
         .route("/api/ws", any(socket))
@@ -813,6 +849,31 @@ async fn app_js(State(shared): State<Arc<Shared>>, request: Request) -> Response
         return plain(StatusCode::UNAUTHORIZED, &gate.host, "Sign in first.");
     }
     only_get(&parts, &gate.host).unwrap_or_else(|| asset(&gate.host, "text/javascript; charset=utf-8", APP_JS))
+}
+
+/// The design work's page and its two files, for a signed-in device only; any other name
+/// under `/next/` is not here.
+async fn next_page(State(shared): State<Arc<Shared>>, request: Request) -> Response<Body> {
+    let (parts, _) = request.into_parts();
+    let gate = match gate(&shared, &parts) {
+        Ok(gate) => gate,
+        Err(answer) => return *answer,
+    };
+    let path = parts.uri.path();
+    if gate.device.is_none() {
+        return if path == "/next/" {
+            see_other(&gate.host, "/login")
+        } else {
+            plain(StatusCode::UNAUTHORIZED, &gate.host, "Sign in first.")
+        };
+    }
+    if let Some(answer) = only_get(&parts, &gate.host) {
+        return answer;
+    }
+    match next_file(path) {
+        Some((kind, body)) => asset(&gate.host, kind, body),
+        None => plain(StatusCode::NOT_FOUND, &gate.host, "Not here."),
+    }
 }
 
 async fn favicon(State(shared): State<Arc<Shared>>, request: Request) -> Response<Body> {
