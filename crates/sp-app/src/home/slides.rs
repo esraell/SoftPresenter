@@ -1376,17 +1376,30 @@ fn draw_slides(
                     (false, Some(at), None) => ThumbOf::SongSlide(at, slide),
                     (false, None, _) => ThumbOf::Slide(slide),
                 };
-                match thumb(of) {
-                    Some((texture, overflow)) => {
-                        egui::Image::from_texture((texture, picture.size())).corner_radius(ROUND).paint_at(ui, picture);
-                        if overflow {
-                            // Its words don't fit their box: take care.
-                            let mark = picture.right_top() + vec2(-14.0, 14.0);
-                            ui.painter().circle_filled(mark, 9.0, crate::studio::CARE);
-                            ui.painter().text(mark, Align2::CENTER_CENTER, "!", semibold(13.0), Color32::BLACK);
+                if let Some(page) = state.pages_waiting.get(&slide.id) {
+                    // Its picture isn't drawn yet: the page it will be, faint on the dark.
+                    ui.painter().text(
+                        picture.center(),
+                        Align2::CENTER_CENTER,
+                        format!("Page {page}\u{2026}"),
+                        FontId::proportional(14.0),
+                        TEXT_FAINT,
+                    );
+                } else {
+                    match thumb(of) {
+                        Some((texture, overflow)) => {
+                            egui::Image::from_texture((texture, picture.size()))
+                                .corner_radius(ROUND)
+                                .paint_at(ui, picture);
+                            if overflow {
+                                // Its words don't fit their box: take care.
+                                let mark = picture.right_top() + vec2(-14.0, 14.0);
+                                ui.painter().circle_filled(mark, 9.0, crate::studio::CARE);
+                                ui.painter().text(mark, Align2::CENTER_CENTER, "!", semibold(13.0), Color32::BLACK);
+                            }
                         }
+                        None => ui.ctx().request_repaint(),
                     }
-                    None => ui.ctx().request_repaint(),
                 }
                 // A slide switched off stays in the song but is stepped over: it is dimmed.
                 if !slide.enabled {

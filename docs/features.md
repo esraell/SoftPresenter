@@ -179,7 +179,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     file or folder, saved in the Images folder so the deck keeps working when the file moves.
     The presentation appears at once with all its slides; the pages (drawn at up to 1920 × 1080
     on white, turned and cropped as the PDF says, several at a time on background threads) and
-    the copied pictures fill in as they are ready, and the window and keys go on working.
+    the copied pictures fill in as they are ready, and the window and keys go on working. A
+    slide whose page isn't drawn yet reads "Page 3…" in faint on dark in its strip. The pictures
+    still to make are written down (in the data folder's "Pictures to draw") before the
+    presentation is handed over, so quitting within the first second leaves no blank slides: the
+    next start draws the pictures that aren't there (from the same PDF, so it must still be where
+    it was), and each picture is written under another name and renamed when whole, so one cut
+    short by a quit is never mistaken for a picture.
     Pictures in a folder go in the order people number them (Slide2 before Slide10). A 40-page
     PDF takes about 0.07 seconds where it took 0.4 seconds one page at a time.
 - **Bringing songs across from SoftProjector.** Its database (`spData.sqlite`) or an exported

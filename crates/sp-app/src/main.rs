@@ -1337,6 +1337,8 @@ struct App {
     version_seen: Option<(sp_engine::SlideRef, Option<usize>, Option<usize>)>,
     /// PDFs and folders of pictures being made into slides, each on a thread of its own.
     decks: deck::Decks,
+    /// Whether the decks an earlier run left unfinished have been taken up (once, at the start).
+    decks_resumed: bool,
     /// The media items' pictures, by item: a small copy of each for the window, and the
     /// full-size pictures of the item on screen and a few others for the screens.
     bin_pictures: bin_pictures::BinPictures,
@@ -6123,11 +6125,30 @@ impl App {
     /// slides the pictures drawn since (a slide's thumbnail is drawn again once its picture is
     /// there).
     fn handle_decks(&mut self) {
+        // Decks an earlier run was quit in the middle of finish now, once the window is there.
+        if !self.decks_resumed && self.running.is_some() {
+            self.decks_resumed = true;
+            let waker = self.waker.clone();
+            let ctx = self.running.as_ref().map(|running| running.egui_ctx.clone());
+            let waiting = self.decks.resume(move || match (&waker, &ctx) {
+                (Some(waker), _) => {
+                    let _ = waker.send_event(AppEvent::DeckDone);
+                }
+                (None, Some(ctx)) => ctx.request_repaint(),
+                (None, None) => {}
+            });
+            if let Some(running) = self.running.as_mut() {
+                running.home_state.pages_waiting.extend(waiting);
+            }
+        }
         for (path, made) in self.decks.finished() {
             let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
             let said = match made {
                 Ok(made) => {
                     let count = made.presentation.slide_count();
+                    if let Some(running) = self.running.as_mut() {
+                        running.home_state.pages_waiting.extend(made.waiting.iter().copied());
+                    }
                     applog::event("slides", &format!("made {count} slides from {name}"));
                     self.add_song(made.presentation, false);
                     Ok(made.said.unwrap_or_else(|| {
@@ -6149,20 +6170,26 @@ impl App {
                 deck::Fill::Page { slide, file } => {
                     sp_render::forget_picture(&file);
                     if let Some(running) = self.running.as_mut() {
+                        running.home_state.pages_waiting.remove(&slide);
                         running.thumbs.forget(slide, &mut running.egui_renderer);
                         running.home_window.request_redraw();
                     }
                 }
-                deck::Fill::Done { name, failed, .. } => {
+                deck::Fill::Done { name, unfilled, .. } => {
+                    let failed = unfilled.len();
                     applog::event("slides", &format!("drew the pictures of {name} ({failed} could not be drawn)"));
-                    if failed > 0
-                        && let Some(running) = self.running.as_mut()
-                    {
-                        let plural = if failed == 1 { "" } else { "s" };
-                        running
-                            .home_state
-                            .notices
-                            .trouble(format!("{failed} picture{plural} of {name} could not be drawn."));
+                    if let Some(running) = self.running.as_mut() {
+                        for slide in &unfilled {
+                            // Not coming: the strip stops saying so.
+                            running.home_state.pages_waiting.remove(slide);
+                        }
+                        if failed > 0 {
+                            let plural = if failed == 1 { "" } else { "s" };
+                            running
+                                .home_state
+                                .notices
+                                .trouble(format!("{failed} picture{plural} of {name} could not be drawn."));
+                        }
                         running.home_window.request_redraw();
                     }
                 }
@@ -9675,6 +9702,7 @@ fn main() -> ExitCode {
         voxlive_item_from: None,
         version_seen: None,
         decks: deck::Decks::default(),
+        decks_resumed: false,
         // A picture read on a reader's thread wakes the window's thread to take it in.
         bin_pictures: {
             let proxy = std::sync::Mutex::new(event_loop.create_proxy());

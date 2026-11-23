@@ -77,7 +77,12 @@ pub fn measure(path: &Path) -> Result<(u32, u32), String> {
 /// Copies a picture into a folder under a name.
 pub fn copy_into(path: &Path, folder: &Path, file: &str) -> Result<(), String> {
     let shown = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
-    std::fs::copy(path, folder.join(file)).map(drop).map_err(|e| format!("Could not copy {shown}: {e}"))
+    // Copied under another name and then renamed, so a quit part way never leaves a picture that
+    // is there but cut short.
+    let writing = folder.join(format!("{file}.tmp"));
+    std::fs::copy(path, &writing)
+        .and_then(|_| std::fs::rename(&writing, folder.join(file)))
+        .map_err(|e| format!("Could not copy {shown}: {e}"))
 }
 
 #[cfg(test)]

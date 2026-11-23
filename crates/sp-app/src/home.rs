@@ -339,6 +339,9 @@ pub struct HomeState {
     pub ask_import: Option<AskImport>,
     /// The answer: the file, and how it is to come in. Taken by the app.
     pub import_answer: Option<ImportAnswer>,
+    /// Slides of a deck whose pictures are still being drawn, with the number of the page each
+    /// shows: their strips say "Page 3…" until it is.
+    pub pages_waiting: std::collections::HashMap<sp_model::Uuid, usize>,
     /// The sheet Import › Slides… opens is showing.
     pub slides_sheet: bool,
     /// What it was answered with. Taken by the app.
@@ -1798,6 +1801,7 @@ impl Default for HomeState {
             keys_on_buttons: false,
             ask_import: None,
             import_answer: None,
+            pages_waiting: std::collections::HashMap::new(),
             slides_sheet: false,
             slides_choice: None,
             import_as: std::collections::BTreeMap::new(),
@@ -14207,6 +14211,21 @@ mod tests {
         let SlideRequest::Edit(edits) = request else { panic!("an edit, so that Undo puts it back") };
         assert_eq!(edits.len(), 1);
         assert_eq!((edits[0].0, edits[0].1.check.clone()), (1, None));
+    }
+
+    #[test]
+    fn slides_waiting_for_their_picture_say_which_page_they_will_be_until_it_is_drawn() {
+        let ctx = egui::Context::default();
+        let show = Show::new(vec![Arc::new(parse_song_text("Pages", "[Verse 1]\nOne\n\nTwo\n\nThree\n"))]);
+        let third = show.presentations()[0].slide(2).map(|(_, slide)| slide.id).expect("three slides");
+        let mut state = HomeState { pages_waiting: [(third, 3)].into(), ..HomeState::default() };
+        frame_texts(&ctx, &show, &mut state, vec![], 0.0);
+        let texts = frame_texts(&ctx, &show, &mut state, vec![], 0.1);
+        assert_eq!(texts.iter().filter(|(text, _)| text == "Page 3\u{2026}").count(), 1);
+        state.pages_waiting.remove(&third);
+        frame_texts(&ctx, &show, &mut state, vec![], 0.2);
+        let texts = frame_texts(&ctx, &show, &mut state, vec![], 0.3);
+        assert!(texts.iter().all(|(text, _)| !text.starts_with("Page ")), "drawn: it says nothing");
     }
 
     #[test]

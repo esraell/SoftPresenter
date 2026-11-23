@@ -6,9 +6,10 @@
 //! own: the operator's window and keys go on working meanwhile, even mid-service.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex};
 
+use serde::{Deserialize, Serialize};
 use sp_model::{Group, Object, Presentation, SlideRect, Uuid};
 
 /// A PDF, whose pages become slides.
@@ -215,9 +216,13 @@ pub struct Laid {
 pub struct Finished {
     pub presentation: Presentation,
     pub said: Option<String>,
+    /// The slides whose pictures are yet to be drawn, with the number of the page each is (what
+    /// their strips say until it is: "Page 3…").
+    pub waiting: Vec<(Uuid, usize)>,
 }
 
 /// The pictures of a laid out deck that are yet to be made, each for a slide.
+#[derive(Serialize, Deserialize)]
 enum Pending {
     Nothing,
     Pdf { path: PathBuf, files: Vec<(Uuid, String)>, then_delete: Option<PathBuf> },
@@ -229,8 +234,8 @@ enum Pending {
 pub enum Fill {
     /// This slide's picture is in its file now.
     Page { slide: Uuid, file: String },
-    /// Every picture has been tried; this many could not be made.
-    Done { key: PathBuf, name: String, failed: usize },
+    /// Every picture has been tried; these slides' pictures could not be made.
+    Done { key: PathBuf, name: String, unfilled: Vec<Uuid> },
 }
 
 /// Lays out the presentation for a deck, on the calling thread, quickly: its slides are there
@@ -267,21 +272,27 @@ pub fn lay_out(source: &Source) -> Result<Laid, String> {
 }
 
 /// Makes the pictures a laid out deck waits for, as many at once as the computer has cores,
-/// and says as each is done. Returns how many could not be made.
+/// and says as each is done, and at the end which could not be made.
 pub fn fill(laid_pending: LaidPending, key: PathBuf, name: &str, each: &(dyn Fn(Fill) + Sync)) {
     let folder = crate::images::folder().filter(|folder| std::fs::create_dir_all(folder).is_ok());
-    let failed = match (laid_pending.0, folder) {
-        (Pending::Nothing, _) => 0,
+    let unfilled = match (laid_pending.0, folder) {
+        (Pending::Nothing, _) => Vec::new(),
         (Pending::Pdf { path, files, then_delete }, folder) => {
-            let failed = folder.map_or(files.len(), |folder| fill_pdf(&path, &files, &folder, each));
+            let unfilled = match folder {
+                Some(folder) => fill_pdf(&path, &files, &folder, each),
+                None => files.iter().map(|(slide, _)| *slide).collect(),
+            };
             if let Some(work) = then_delete {
                 let _ = std::fs::remove_dir_all(work);
             }
-            failed
+            unfilled
         }
-        (Pending::Copies { files }, folder) => folder.map_or(files.len(), |folder| fill_copies(&files, &folder, each)),
+        (Pending::Copies { files }, folder) => match folder {
+            Some(folder) => fill_copies(&files, &folder, each),
+            None => files.iter().map(|(_, slide, _)| *slide).collect(),
+        },
     };
-    each(Fill::Done { key, name: name.to_owned(), failed });
+    each(Fill::Done { key, name: name.to_owned(), unfilled });
 }
 
 /// What [`lay_out`] leaves for [`fill`].
@@ -290,8 +301,108 @@ pub struct LaidPending(Pending);
 impl Laid {
     /// Splits the work still to do from the presentation and its note.
     pub fn split(self) -> (Finished, LaidPending) {
-        (Finished { presentation: self.presentation, said: self.said }, LaidPending(self.pending))
+        let waiting = match &self.pending {
+            Pending::Pdf { files, .. } => files.iter().enumerate().map(|(at, (slide, _))| (*slide, at + 1)).collect(),
+            _ => Vec::new(),
+        };
+        (Finished { presentation: self.presentation, said: self.said, waiting }, LaidPending(self.pending))
     }
+}
+
+/// A deck's pictures still to be made, written down before the deck is handed to the app, so
+/// before it can be saved: if a quit comes before they are drawn (the slides then saved with
+/// pictures that aren't there yet), the next start finishes them.
+#[derive(Serialize, Deserialize)]
+struct Job {
+    key: PathBuf,
+    name: String,
+    pending: Pending,
+}
+
+/// Where the jobs are kept.
+fn jobs_folder() -> Option<PathBuf> {
+    crate::bible_store::data_dir().map(|dir| dir.join("Pictures to draw"))
+}
+
+/// Writes a job down in `folder` (all at once, so a half-written one is never read), and says
+/// where. Nothing is written for a deck with no pictures to make.
+fn write_job(folder: &Path, key: &Path, name: &str, pending: &Pending) -> Option<PathBuf> {
+    if matches!(pending, Pending::Nothing) {
+        return None;
+    }
+    std::fs::create_dir_all(folder).ok()?;
+    let job = serde_json::json!({ "key": key, "name": name, "pending": pending });
+    let (path, writing) =
+        (folder.join(format!("{}.json", Uuid::new_v4())), folder.join(format!("{}.tmp", Uuid::new_v4())));
+    std::fs::write(&writing, serde_json::to_vec(&job).ok()?).ok()?;
+    std::fs::rename(&writing, &path).ok().map(|()| path)
+}
+
+/// Takes a job off the list once its pictures have been tried.
+fn forget_job(path: Option<PathBuf>) {
+    if let Some(path) = path {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+impl Job {
+    /// The slides whose picture isn't in `images` yet, with the number of each (from 1).
+    fn missing(&self, images: &Path) -> Vec<(Uuid, usize)> {
+        let gone = |file: &str| !images.join(file).is_file();
+        match &self.pending {
+            Pending::Nothing => Vec::new(),
+            Pending::Pdf { files, .. } => {
+                files.iter().enumerate().filter(|(_, (_, file))| gone(file)).map(|(at, (s, _))| (*s, at + 1)).collect()
+            }
+            Pending::Copies { files } => files
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, _, file))| gone(file))
+                .map(|(at, (_, s, _))| (*s, at + 1))
+                .collect(),
+        }
+    }
+
+    /// Whether what the pictures are made from is still there.
+    fn source_is_there(&self) -> bool {
+        match &self.pending {
+            Pending::Nothing => false,
+            Pending::Pdf { path, .. } => path.is_file(),
+            Pending::Copies { files } => files.iter().any(|(from, _, _)| from.is_file()),
+        }
+    }
+
+    /// Gives up on a job that can't be finished: the work folder it made goes.
+    fn give_up(self) {
+        if let Pending::Pdf { then_delete: Some(work), .. } = self.pending {
+            let _ = std::fs::remove_dir_all(work);
+        }
+    }
+}
+
+/// The jobs an earlier run left in `folder`, each with its file, oldest first by name.
+fn left_jobs(folder: &Path) -> Vec<(PathBuf, Job)> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(folder)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ending| ending == "json"))
+        .collect();
+    files.sort();
+    files
+        .into_iter()
+        .filter_map(|file| {
+            let job = serde_json::from_slice::<Job>(&std::fs::read(&file).ok()?).ok();
+            match job {
+                Some(job) => Some((file, job)),
+                None => {
+                    let _ = std::fs::remove_file(&file);
+                    None
+                }
+            }
+        })
+        .collect()
 }
 
 /// How many threads draw at once.
@@ -299,23 +410,41 @@ fn threads() -> usize {
     std::thread::available_parallelism().map_or(2, |n| n.get()).clamp(2, 8)
 }
 
-fn fill_pdf(path: &Path, files: &[(Uuid, String)], folder: &Path, each: &(dyn Fn(Fill) + Sync)) -> usize {
-    let made = std::sync::atomic::AtomicUsize::new(0);
+/// Draws a PDF's pages into `folder`, one file each (a page whose file is there already, from an
+/// earlier run, is left as it is), and returns the slides whose page could not be.
+fn fill_pdf(path: &Path, files: &[(Uuid, String)], folder: &Path, each: &(dyn Fn(Fill) + Sync)) -> Vec<Uuid> {
+    let made = Mutex::new(vec![false; files.len()]);
     let drawn = sp_video::pdf_draw(path, PAGE_SIZE.0, PAGE_SIZE.1, MOST_SLIDES, threads(), |number, frame| {
         let Some((slide, file)) = files.get(number - 1) else { return true };
-        if save_png(&folder.join(file), &frame).is_ok() {
-            made.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let there = folder.join(file).is_file();
+        if there || save_png(&folder.join(file), &frame).is_ok() {
+            if let Ok(mut made) = made.lock() {
+                made[number - 1] = true;
+            }
             each(Fill::Page { slide: *slide, file: file.clone() });
         }
+        slow_down();
         true
     });
     let _ = drawn;
-    files.len().saturating_sub(made.load(std::sync::atomic::Ordering::Relaxed))
+    let made = made.into_inner().unwrap_or_default();
+    files.iter().zip(made).filter(|(_, made)| !made).map(|((slide, _), _)| *slide).collect()
 }
 
-fn fill_copies(files: &[(PathBuf, Uuid, String)], folder: &Path, each: &(dyn Fn(Fill) + Sync)) -> usize {
+/// Testing aid: SOFTPRESENTER_SLOW_PAGES=<milliseconds> makes each page take that long longer to
+/// draw, so a quit part way through a deck can be tried by hand with a short PDF.
+fn slow_down() {
+    static SLOW: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    let wait =
+        SLOW.get_or_init(|| std::env::var("SOFTPRESENTER_SLOW_PAGES").ok().and_then(|ms| ms.parse().ok()).unwrap_or(0));
+    if *wait > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(*wait));
+    }
+}
+
+fn fill_copies(files: &[(PathBuf, Uuid, String)], folder: &Path, each: &(dyn Fn(Fill) + Sync)) -> Vec<Uuid> {
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let failed = std::sync::atomic::AtomicUsize::new(0);
+    let failed = Mutex::new(Vec::new());
     std::thread::scope(|scope| {
         for _ in 0..threads().min(files.len().max(1)) {
             scope.spawn(|| {
@@ -323,17 +452,21 @@ fn fill_copies(files: &[(PathBuf, Uuid, String)], folder: &Path, each: &(dyn Fn(
                 loop {
                     let at = next.fetch_add(1, Relaxed);
                     let Some((from, slide, file)) = files.get(at) else { return };
-                    match crate::images::copy_into(from, folder, file) {
+                    let there = folder.join(file).is_file();
+                    match if there { Ok(()) } else { crate::images::copy_into(from, folder, file) } {
                         Ok(()) => each(Fill::Page { slide: *slide, file: file.clone() }),
                         Err(_) => {
-                            failed.fetch_add(1, Relaxed);
+                            if let Ok(mut failed) = failed.lock() {
+                                failed.push(*slide);
+                            }
                         }
                     }
+                    slow_down();
                 }
             });
         }
     });
-    failed.load(std::sync::atomic::Ordering::Relaxed)
+    failed.into_inner().unwrap_or_default()
 }
 
 /// Makes the presentation for a deck whole, on the calling thread (every picture is made before
@@ -490,13 +623,19 @@ fn lay_out_pdf(path: &Path, title: String, then_delete: Option<PathBuf>) -> Resu
 fn save_png(path: &Path, frame: &sp_video::Frame) -> Result<(), String> {
     use image::ImageEncoder;
     let rgb: Vec<u8> = frame.rgba.as_chunks::<4>().0.iter().flat_map(|&[r, g, b, _]| [r, g, b]).collect();
-    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+    // Written under another name and then renamed, so a quit part way never leaves a picture
+    // that is there but cut short.
+    let writing = path.with_extension("tmp");
+    let file = std::fs::File::create(&writing).map_err(|e| e.to_string())?;
     let encoder = image::codecs::png::PngEncoder::new_with_quality(
         std::io::BufWriter::new(file),
         image::codecs::png::CompressionType::Fast,
         image::codecs::png::FilterType::Adaptive,
     );
-    encoder.write_image(&rgb, frame.width, frame.height, image::ExtendedColorType::Rgb8).map_err(|e| e.to_string())
+    encoder
+        .write_image(&rgb, frame.width, frame.height, image::ExtendedColorType::Rgb8)
+        .and_then(|()| std::fs::rename(&writing, path).map_err(image::ImageError::IoError))
+        .map_err(|e| e.to_string())
 }
 
 /// What one deck being made came to.
@@ -535,6 +674,8 @@ impl Decks {
             move || match lay_out(&source) {
                 Ok(laid) => {
                     let (finished, pending) = laid.split();
+                    // Written down before the deck is handed over, so before it can be saved.
+                    let job = jobs_folder().and_then(|folder| write_job(&folder, &path, &source.name(), &pending.0));
                     let _ = tx.send((path.clone(), Ok(finished)));
                     wake();
                     fill(pending, path.clone(), &source.name(), &|made| {
@@ -543,6 +684,7 @@ impl Decks {
                         }
                         wake();
                     });
+                    forget_job(job);
                 }
                 Err(problem) => {
                     let _ = tx.send((path, Err(problem)));
@@ -553,6 +695,41 @@ impl Decks {
         if std::thread::Builder::new().name("making slides".to_owned()).spawn(work).is_err() {
             self.busy.retain(|busy| *busy != path);
         }
+    }
+
+    /// Takes up the decks an earlier run left with pictures still to be drawn (it was quit before
+    /// they were): each is finished on a thread of its own, drawing only the pictures that
+    /// aren't there. Returns the slides now waiting for a page, with its number.
+    pub fn resume(&mut self, wake: impl Fn() + Send + Sync + 'static) -> Vec<(Uuid, usize)> {
+        let (Some(jobs), Some(images)) = (jobs_folder(), crate::images::folder()) else { return Vec::new() };
+        let wake = Arc::new(wake);
+        let mut waiting = Vec::new();
+        for (file, job) in left_jobs(&jobs) {
+            let missing = job.missing(&images);
+            if missing.is_empty() || !job.source_is_there() || self.busy.contains(&job.key) {
+                // Nothing left to draw, or nothing to draw it from.
+                forget_job(Some(file));
+                job.give_up();
+                continue;
+            }
+            if matches!(job.pending, Pending::Pdf { .. }) {
+                waiting.extend(missing);
+            }
+            self.busy.push(job.key.clone());
+            let (fills, wake) = (Mutex::new(self.fills_tx.clone()), wake.clone());
+            let work = move || {
+                let Job { key, name, pending } = job;
+                fill(LaidPending(pending), key, &name, &|made| {
+                    if let Ok(fills) = fills.lock() {
+                        let _ = fills.send(made);
+                    }
+                    wake();
+                });
+                forget_job(Some(file));
+            };
+            let _ = std::thread::Builder::new().name("making slides".to_owned()).spawn(work);
+        }
+        waiting
     }
 
     /// The decks laid out since the last look.
@@ -691,8 +868,8 @@ mod tests {
         let images = folder.join("Images");
         std::fs::create_dir_all(&images).unwrap();
         let told = Mutex::new(Vec::new());
-        let failed = fill_pdf(path, files, &images, &|fill| told.lock().unwrap().push(fill));
-        assert_eq!(failed, 0);
+        let unfilled = fill_pdf(path, files, &images, &|fill| told.lock().unwrap().push(fill));
+        assert!(unfilled.is_empty());
         let told = told.into_inner().unwrap();
         assert_eq!(told.len(), 12);
         for (at, slide) in slides.iter().enumerate() {
@@ -723,6 +900,94 @@ mod tests {
         })
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn pictures_still_to_be_drawn_when_the_app_is_quit_are_drawn_at_the_next_start() {
+        let folder = temp("quit");
+        let (jobs, images) = (folder.join("Pictures to draw"), folder.join("Images"));
+        std::fs::create_dir_all(&images).unwrap();
+        let sizes: Vec<(u32, u32)> = vec![(960, 540); 6];
+        let pdf = folder.join("Six.pdf");
+        std::fs::write(&pdf, pdf_of(&sizes)).unwrap();
+        let (finished, pending) = lay_out_pdf(&pdf, "Six".to_owned(), None).unwrap().split();
+        let numbers: Vec<usize> = finished.waiting.iter().map(|(_, n)| *n).collect();
+        assert_eq!(numbers, [1, 2, 3, 4, 5, 6], "every slide waits for its page");
+        // Written down before the deck is handed to the app, which may save it a second later.
+        assert!(write_job(&jobs, &pdf, "Six", &Pending::Nothing).is_none(), "nothing to draw, nothing kept");
+        let job = write_job(&jobs, &pdf, "Six", &pending.0).expect("the job is kept");
+        // The app is quit with three pages drawn.
+        let Pending::Pdf { files, .. } = &pending.0 else { panic!("a PDF") };
+        assert!(fill_pdf(&pdf, &files[..3], &images, &|_| {}).is_empty());
+        let drawn_first: Vec<Vec<u8>> =
+            files[..3].iter().map(|(_, file)| std::fs::read(images.join(file)).unwrap()).collect();
+        let slides: Vec<_> = finished.presentation.slides().map(|(_, slide)| slide.clone()).collect();
+        // The next start finds the job, sees which pictures are missing, and draws those.
+        let mut found = left_jobs(&jobs);
+        assert_eq!(found.len(), 1);
+        let (file, left) = found.remove(0);
+        assert_eq!(file, job);
+        let missing: Vec<usize> = left.missing(&images).iter().map(|(_, n)| *n).collect();
+        assert_eq!(missing, [4, 5, 6]);
+        assert!(left.source_is_there());
+        let Pending::Pdf { path, files, .. } = &left.pending else { panic!("a PDF") };
+        assert!(fill_pdf(path, files, &images, &|_| {}).is_empty());
+        for (at, slide) in slides.iter().enumerate() {
+            let ObjectKind::Image { file, .. } = &slide.objects[0].kind else { panic!("a picture slide") };
+            image::image_dimensions(images.join(file)).expect("a whole picture is there");
+            if at < 3 {
+                assert_eq!(std::fs::read(images.join(file)).unwrap(), drawn_first[at], "drawn pictures are kept");
+            }
+        }
+        assert!(left.missing(&images).is_empty());
+        let leftovers: Vec<_> = std::fs::read_dir(&images)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "a picture is renamed into place only when whole");
+        forget_job(Some(job));
+        assert!(left_jobs(&jobs).is_empty());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_job_that_cant_be_finished_or_read_is_dropped() {
+        let folder = temp("jobs");
+        let jobs = folder.join("jobs");
+        std::fs::create_dir_all(&jobs).unwrap();
+        // One cut short in writing, and one whose PDF has been taken away.
+        std::fs::write(jobs.join("0.json"), b"{\"key\":").unwrap();
+        let slide = Uuid::new_v4();
+        let pending = Pending::Pdf {
+            path: folder.join("Gone.pdf"),
+            files: vec![(slide, "a.png".to_owned())],
+            then_delete: Some(folder.join("work")),
+        };
+        std::fs::create_dir_all(folder.join("work")).unwrap();
+        let kept = write_job(&jobs, Path::new("Gone.pdf"), "Gone", &pending).unwrap();
+        let found = left_jobs(&jobs);
+        assert_eq!(found.len(), 1, "the torn one is dropped");
+        assert!(!jobs.join("0.json").exists());
+        let (file, job) = found.into_iter().next().unwrap();
+        assert_eq!(file, kept);
+        assert_eq!(job.missing(&folder), [(slide, 1)]);
+        assert!(!job.source_is_there(), "nothing to draw it from");
+        job.give_up();
+        assert!(!folder.join("work").exists(), "the work folder goes with it");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_copied_picture_is_whole_when_it_is_there() {
+        let folder = temp("copy");
+        let from = folder.join("one.png");
+        std::fs::write(&from, rgb_png(12, 8)).unwrap();
+        crate::images::copy_into(&from, &folder, "two.png").unwrap();
+        assert_eq!(std::fs::read(&from).unwrap(), std::fs::read(folder.join("two.png")).unwrap());
+        assert!(!folder.join("two.png.tmp").exists());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
     #[test]
     fn a_folder_of_pictures_is_laid_out_at_once_and_copied_in_parallel_in_order() {
         let folder = temp("pictures");
@@ -737,7 +1002,7 @@ mod tests {
         let Pending::Copies { files } = &laid.pending else { panic!("pictures wait to be copied") };
         let to = folder.join("Images");
         std::fs::create_dir_all(&to).unwrap();
-        assert_eq!(fill_copies(files, &to, &|_| {}), 0);
+        assert!(fill_copies(files, &to, &|_| {}).is_empty());
         for (at, slide) in slides.iter().enumerate() {
             let ObjectKind::Image { file, .. } = &slide.objects[0].kind else { panic!("a picture slide") };
             let (w, _) = image::image_dimensions(to.join(file)).unwrap();
