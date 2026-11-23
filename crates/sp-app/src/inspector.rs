@@ -1524,6 +1524,7 @@ fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             ui.label(egui::RichText::new(text).size(12.5).strong().color(INK));
         });
     };
+    // Each menu fills what is left of its row after its label, as every inspector menu does.
     for coming_in in [true, false] {
         let build = if coming_in { &mut object.build_in } else { &mut object.build_out };
         ui.horizontal(|ui| {
@@ -1531,7 +1532,8 @@ fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             let mut effect = build.map(|build| build.effect);
             let mut options: Vec<(Option<BuildEffect>, &str)> = vec![(None, "None")];
             options.extend(BuildEffect::ALL.iter().map(|effect| (Some(*effect), effect.name(coming_in))));
-            choice(ui, if coming_in { "build in" } else { "build out" }, 150.0, &mut effect, &options);
+            let room = ui.available_width();
+            choice(ui, if coming_in { "build in" } else { "build out" }, room, &mut effect, &options);
             if effect != build.map(|build| build.effect) {
                 *build =
                     effect.map(|effect| Build { effect, on_click: !coming_in, ..build.unwrap_or(Build::of(effect)) });
@@ -1547,10 +1549,11 @@ fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                         (Direction::FromTop, "Top"),
                         (Direction::FromBottom, "Bottom"),
                     ];
+                    let room = ui.available_width();
                     choice(
                         ui,
                         if coming_in { "build in side" } else { "build out side" },
-                        150.0,
+                        room,
                         &mut build.direction,
                         &sides,
                     );
@@ -1566,13 +1569,15 @@ fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 ui.horizontal(|ui| {
                     label(ui, "Starts");
                     let starts = [(false, "With the Slide"), (true, "On a Click")];
-                    choice(ui, "build in start", 150.0, &mut build.on_click, &starts);
+                    let room = ui.available_width();
+                    choice(ui, "build in start", room, &mut build.on_click, &starts);
                 });
                 if is_text {
                     ui.horizontal(|ui| {
                         label(ui, "Delivery");
                         let ways = [(false, "All at Once"), (true, "By Paragraph")];
-                        choice(ui, "build in delivery", 150.0, &mut build.by_paragraph, &ways);
+                        let room = ui.available_width();
+                        choice(ui, "build in delivery", room, &mut build.by_paragraph, &ways);
                     });
                     if build.by_paragraph {
                         let hint = if build.on_click {
