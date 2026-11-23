@@ -1542,3 +1542,58 @@ body.login { display: grid; grid-template: 1fr / 1fr; place-items: center; heigh
 .clip .pic .sl-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
 .clip .pic .vid, .clip .pic .sh-clipmore { z-index: 1; }
 .thumb .sl-words { position: absolute; inset: 8%; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--dim); font-size: 6cqw; line-height: 1.25; white-space: pre-line; overflow: hidden; }
+
+/* ═════════ Narrow screens (the owner, 23 November: tablet and phone designed before the remote page replaces the app's own) ═════════
+   Tablet (≤ 1180): two columns, the slides and the right column; the playlist is a drawer (☰); the top bar keeps what an
+   operator needs (the light, the clock, Audience and Stage) and gives up words for icons.
+   Phone (≤ 720): a remote. What is on screen, the open item's slides, and Prev, Clear All and Next under the thumb. */
+.top, .main { min-width: 0; }
+@media (max-width: 1180px) {
+  .top { gap: 10px; padding: 0 10px; overflow: hidden; }
+  .navtoggle { display: grid; }
+  .brandname, .runtimer, .keysbtn { display: none !important; }
+  .findwrap { width: auto; flex: 1 1 200px; min-width: 120px; max-width: 360px; }
+  .top-mid { gap: 8px; }
+  button.conn, .conn { width: auto; min-width: 0; flex: none; padding: 5px 7px; }
+  button.conn span { display: none; }
+  .top-right { gap: 6px; flex: none; }
+  .out { padding: 0 9px; gap: 6px; } .out b { display: none; }
+  .main { grid-template-columns: minmax(0, 1fr) 320px; }
+  .left { position: fixed; top: 52px; bottom: 10px; left: 10px; width: 264px; z-index: 30; transform: translateX(-110%); transition: transform .18s; box-shadow: 0 20px 60px rgba(0,0,0,.45); }
+  .nav-open .left { transform: none; }
+  .nav-open .scrim { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 20; }
+}
+@media (max-width: 900px) {
+  .modes button { padding: 5px 10px; }
+  .clock { display: none; }
+  .main { grid-template-columns: minmax(0, 1fr) 300px; }
+}
+@media (max-width: 720px) {
+  .top { gap: 8px; }
+  .modes, .top-mid .findwrap, #gear, .note { display: none !important; }
+  .top-mid { flex: 1; justify-content: flex-end; }
+  .main { grid-template-columns: minmax(0, 1fr); }
+  .right { min-width: 0; }
+  .program { max-width: none; }
+  .slides .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .sh-head, .grp-h { min-width: 0; }
+  .grp-h .sh-tools, .grp-h .sh-dots { display: none; }
+}
+@media (max-width: 1180px) {
+  .top button.conn { display: flex !important; }      /* the connection's light stays: on a remote it is the first thing to look at */
+  .foot input[data-i="size"] { display: none; }          /* tiles fit the column by themselves; the bar stays one row */
+  .card .t { min-width: 0; } .card .t b, .card .t span:not(.time) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+@media (max-width: 900px) {
+  .slides .grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)) !important; }
+  .layer { padding-left: 8px; padding-right: 6px; letter-spacing: .02em; }
+}
+@media (max-width: 720px) {
+  .tabs, .tabbody, .layers { display: none !important; }      /* the phone is a remote: what is on screen, the slides, Prev, Clear All and Next */
+  .strip .edit[data-a^="editSlide"] { display: none !important; }
+}
+@media (max-width: 720px) {
+  .top .top-mid { display: flex !important; flex: 1; justify-content: flex-end; }
+  .slides .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+@media (max-width: 1180px) { .card .t b { display: block; } }
