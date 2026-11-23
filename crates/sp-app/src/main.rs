@@ -9168,8 +9168,12 @@ impl ApplicationHandler<AppEvent> for App {
                 if let Some(action) = self.running.as_mut().and_then(|r| r.home_state.menu_asked.take()) {
                     self.menu_action(el, action);
                 }
+                let thumbnails = self.running.as_ref().map(|running| running.thumbs.spare_bytes() >> 20);
                 self.home_timing.report_each_minute("window", || {
-                    applog::memory_mb().map_or_else(String::new, |mb| format!("{mb} MB resident"))
+                    let resident = applog::memory_mb().map_or_else(String::new, |mb| format!("{mb} MB resident"));
+                    // What the painter of the thumbnails keeps ready between pictures.
+                    thumbnails
+                        .map_or(resident.clone(), |held| format!("{resident}, thumbnails painter holds {held} MB"))
                 });
                 self.apply(commands);
                 // Testing aid: drag files over the window (SOFTPRESENTER_HOVER, kept there, for a

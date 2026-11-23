@@ -591,6 +591,12 @@ fn ndi_count_needs_drawing(sources: &[NdiSeen], drawn_for: &[(Uuid, u32)], owed:
     owed || sources.iter().any(|source| source.wanted && !drawn_for.contains(&(source.id, source.arrivals)))
 }
 
+/// True when every NDI source has the last picture drawn for it and nothing is owed (`well`),
+/// so that a drawing may leave out the sources a video's new picture does not change.
+fn ndi_settled(sources: &[NdiSeen], drawn_for: &[(Uuid, u32)], well: bool) -> bool {
+    well && !ndi_count_needs_drawing(sources, drawn_for, false)
+}
+
 /// Whether a picture is to be drawn for an NDI source. Not for one that could not start (NDI
 /// not installed, say), and not for one nobody is watching: it would be drawn, read back from
 /// the GPU and thrown away. A count that isn't known (the source is still starting, or its
@@ -837,6 +843,14 @@ struct Target {
     passed_over: Option<Instant>,
 }
 
+impl Target {
+    /// True when the window shows the picture it was last given: painted, and its window set up
+    /// and not passed over. A drawing that leaves it out then leaves it right.
+    fn up_to_date(&self) -> bool {
+        self.configured && self.passed_over.is_none() && self.state == Shown::default() && self.shown.is_some()
+    }
+}
+
 /// A copy of the picture a video lends, to draw: its pixels as they are, in whichever order
 /// their bytes come (the GPU reads either), so copying is all the work there is.
 fn copied(lent: &sp_video::Lent<'_>) -> Option<Picture> {
@@ -1044,6 +1058,9 @@ struct Output {
     /// How often and how long the screens are drawn, and how many video pictures came, for the log.
     timing: crate::applog::Timing,
     video_pictures: u64,
+    /// The second (since 1970) in which the screens were last drawn whole for the time on them
+    /// (see `draw_video`).
+    ticked_second: u64,
     /// Where the pass under way spends its time, written to the log when it is held up (see
     /// `output/held.rs`).
     held: Held,
@@ -1141,6 +1158,7 @@ fn run(
         started: Instant::now(),
         timing: crate::applog::Timing::new("screen drawings"),
         video_pictures: 0,
+        ticked_second: 0,
         held: Held::new(Instant::now()),
         live_preview,
         waker,
@@ -1204,7 +1222,7 @@ fn run(
                     output.finish_ndi();
                     output.end_round();
                     if output.plays_video() && output.take_video_picture() {
-                        output.draw(false);
+                        output.draw_video();
                     }
                     continue;
                 }
@@ -1244,9 +1262,10 @@ fn run(
                     if output.draw_again_if_due() {
                         continue;
                     }
-                    // A new picture of the video redraws everything, the time included.
+                    // A new picture of the video redraws what shows it, and the time on the
+                    // screens that keep it, once in each second.
                     if output.take_video_picture() {
-                        output.draw(false);
+                        output.draw_video();
                         continue;
                     }
                     // Otherwise the time changes only as a second begins (a video, or a web page
@@ -1273,7 +1292,7 @@ fn run(
                 Ok(msg) => Some(msg),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     if output.take_video_picture() {
-                        output.draw(false);
+                        output.draw_video();
                     }
                     continue;
                 }
@@ -1489,6 +1508,23 @@ fn run(
             output.draw(new_picture);
         }
     }
+}
+
+/// Which videos are playing, for [`changes_with_video`].
+#[derive(Clone, Copy)]
+struct Playing {
+    /// One plays behind the words.
+    behind: bool,
+    /// One plays in a box on the slide, its layout or a stage layout.
+    in_boxes: bool,
+    /// One plays on the Announcements layer, which this screen shows.
+    announced: bool,
+}
+
+/// Whether an audience screen with this look (see-through or not) shows a playing video.
+fn changes_with_video(look: &crate::screens::Look, see_through: bool, playing: Playing) -> bool {
+    // A see-through screen leaves out the media behind the words.
+    (look.media && !see_through && playing.behind) || playing.in_boxes || (look.announcements && playing.announced)
 }
 
 /// How far in a fade is, from 0 to 1, eased so it starts and ends gently.
@@ -1748,6 +1784,40 @@ impl Output {
         (media.filter(|_| look.media), slide, over, theme, announcement)
     }
 
+    /// Whether a screen's picture changes when a playing video gives a new picture: the video
+    /// is behind its words or in a box on its slide, in its announcements, or (for a stage
+    /// screen) in a screen's picture it shows. When unsure, true: a picture drawn that did not
+    /// change costs time, one not drawn that did is wrong on the screen.
+    fn shows_video(&self, id: Uuid) -> bool {
+        if let Some((_, layout)) = self.stage.iter().find(|(have, _)| *have == id) {
+            // A stage layout's own videos are among the slide's (see `sync_slide_video`).
+            return self.stage_on
+                && (!self.frame.slide_video.is_empty()
+                    || layout
+                        .templates
+                        .first()
+                        .is_some_and(|t| crate::stage::sources(t).iter().any(|screen| self.shows_video(*screen))));
+        }
+        // Black, a test pattern, or a key made from the picture of its fill (drawn with it).
+        if self.key_of(id).is_some() || self.overlay.test_pattern.is_some() || !self.frame.enabled {
+            return false;
+        }
+        // A screen being identified is drawn whole.
+        if self.identify.iter().any(|(have, ..)| *have == id) {
+            return true;
+        }
+        let look = self.look_of(id);
+        let playing = Playing {
+            behind: self.frame.video.is_some() || self.video_picture.is_some(),
+            in_boxes: !self.frame.slide_video.is_empty(),
+            announced: self
+                .announcement
+                .as_ref()
+                .is_some_and(|shown| shown.video.is_some() && (shown.on_slide_screens || !look.slides)),
+        };
+        changes_with_video(&look, self.see_through(id).is_some(), playing)
+    }
+
     /// How an audience screen shows the show: its own look, or every layer.
     fn look_of(&self, id: Uuid) -> crate::screens::Look {
         self.looks.iter().find(|(have, _)| *have == id).map_or_else(crate::screens::Look::default, |(_, look)| *look)
@@ -1897,17 +1967,37 @@ impl Output {
     /// changed since the last receiver left, the picture sent then, which is still the one on
     /// the screens.
     fn send_ndi(&mut self, frame: &Frame, changed: NdiChange) {
+        self.send_ndi_of(frame, changed, false);
+    }
+
+    /// [`Output::send_ndi`], with `moving_only` for the drawing of a playing video's new
+    /// picture: only the pictures that show the video are drawn, and only the sources that show
+    /// it have the one they sent put out of date.
+    fn send_ndi_of(&mut self, frame: &Frame, changed: NdiChange, moving_only: bool) {
         self.finish_ndi();
         if self.ndi.is_empty() && self.decklink.is_empty() {
             return;
         }
         let seen = self.ndi_seen();
+        // Only the pictures that show a video are drawn for its new picture when all is as it
+        // should be: every source has the last picture drawn for it, none is owed or put off.
+        // Anything else is drawn whole, so what is owed to a source is never counted done by a
+        // drawing that left it out.
+        let moving_only = moving_only
+            && ndi_settled(
+                &seen,
+                &self.ndi_drawn_for,
+                self.ndi_state == Shown::default() && !self.ndi_lost.owed() && self.ndi_dirty.is_none(),
+            );
         // A drawing put off while a picture was on its way back is drawn now, or not drawn
         // because nobody is watching any more: what it changed counts as changed now.
         let changed = changed.with(self.ndi_dirty);
         // Another picture is asked for, which a source nobody is watching will not get: the
         // one it had is out of date. (Said for every such picture; the source acts on it once.)
         let mut forget = ndi_out_of_date(&seen, changed);
+        if moving_only {
+            forget.retain(|id| self.shows_video(*id));
+        }
         // A picture still on its way back from the GPU does not go to a source nobody is
         // watching any more, which would throw it away. It was newer than the one the source
         // has, so that one is out of date.
@@ -1947,6 +2037,10 @@ impl Output {
                 self.ndi_state.skipped();
                 all_painted = false;
                 break;
+            }
+            // Its picture is the one its sources are sending.
+            if moving_only && !self.shows_video(group.of) {
+                continue;
             }
             // A see-through screen's picture is painted on clear, and goes with its alpha; its
             // keys are made from these same pixels, on their sources' own threads.
@@ -2204,13 +2298,43 @@ impl Output {
     /// the frame asks for a dissolve; anything else (a resize, an uncovered window) is drawn
     /// at once.
     fn draw(&mut self, new_picture: bool) {
+        self.draw_with(new_picture, false);
+    }
+
+    /// Draws what a new picture of a playing video changes, and nothing else: a screen that
+    /// does not show the video (one without the media layer, a see-through one, a stage screen
+    /// that follows no screen showing it) is not painted, shown, read back from the GPU or sent
+    /// again, for its picture is the one it has. The screens are all drawn once in each second
+    /// when something on them shows the time, and whole while anything else moves or fades.
+    fn draw_video(&mut self) {
+        let second =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_secs());
+        let time_moves = self.ticks() && second != self.ticked_second;
+        if time_moves {
+            self.ticked_second = second;
+        }
+        let steady = self.fading.is_none()
+            && self.targets.iter().all(|target| target.fade.is_none())
+            && !self.building()
+            && !self.scrolling()
+            && !self.identify_breathing();
+        self.draw_with(false, steady && !time_moves);
+    }
+
+    /// Draws the screens: all of them, or with `moving_only` just those a playing video's new
+    /// picture changes.
+    fn draw_with(&mut self, new_picture: bool, moving_only: bool) {
         let started = Instant::now();
-        self.draw_now(new_picture);
+        self.draw_now(new_picture, moving_only);
         self.timing.add(started.elapsed());
         let (videos, screens, ndi) = (self.video_pictures, self.targets.len(), self.ndi.len());
+        let spare = self.painter.spare_bytes() >> 20;
         let (held, sources) = (&mut self.held, &self.ndi);
         let extra = || {
-            let mut words = format!("{videos} video pictures, {screens} windows, {ndi} NDI; {}", held.minute_words());
+            let mut words = format!(
+                "{videos} video pictures, {screens} windows, {ndi} NDI, painter holds {spare} MB; {}",
+                held.minute_words()
+            );
             // A picture NDI took long to send held up nothing here (sending is on the source's
             // own thread), but is worth knowing of.
             for (_, source) in sources {
@@ -2312,12 +2436,17 @@ impl Output {
         true
     }
 
-    fn draw_now(&mut self, new_picture: bool) {
-        self.round.begin();
+    fn draw_now(&mut self, new_picture: bool, moving_only: bool) {
+        // A drawing of the screens a video changes says nothing of the others.
+        if moving_only {
+            self.round.begin_part();
+        } else {
+            self.round.begin();
+        }
         // Cheap copies: the picture and the slide are shared, not duplicated.
         let frame = self.frame.clone();
         self.windows_behind = true;
-        self.send_ndi(&frame, NdiChange::Any);
+        self.send_ndi_of(&frame, NdiChange::Any, moving_only);
         self.capture(&frame);
         // How far a fade already under way has got, before the clock is started again.
         let amount = self.fading.map(|(started, look)| fade_amount(started, look.duration()));
@@ -2342,6 +2471,9 @@ impl Output {
             if self.window_fill(id).is_some() {
                 let target = &mut self.targets[index];
                 (target.shown, target.fade) = (None, None);
+                continue;
+            }
+            if moving_only && !self.shows_video(id) && self.targets[index].up_to_date() {
                 continue;
             }
             let scene = self.scene_for(id, &frame, w, h);
@@ -2373,7 +2505,9 @@ impl Output {
         }
         self.windows_behind = false;
         // The preview follows, fading if the screens do.
-        self.draw_live_preview(&frame, new_picture);
+        if !moving_only || self.shows_video(self.preview_screen.unwrap_or(Uuid::nil())) {
+            self.draw_live_preview(&frame, new_picture);
+        }
         if fading {
             self.fade_step();
         }
@@ -3746,5 +3880,41 @@ mod tests {
         // The same picture drawn again part-way keeps the nearer of the two.
         assert_eq!(fade_start(1, 2, 0.2, false), 1);
         assert_eq!(fade_start(1, 2, 0.8, false), 2);
+    }
+
+    #[test]
+    fn a_new_video_picture_changes_only_the_screens_that_show_the_video() {
+        use crate::screens::Look;
+        let behind = Playing { behind: true, in_boxes: false, announced: false };
+        let nothing = Playing { behind: false, in_boxes: false, announced: false };
+        let usual = Look::default();
+        assert!(changes_with_video(&usual, false, behind), "a screen with every layer shows the video behind");
+        let words_only = Look { media: false, ..Look::default() };
+        assert!(!changes_with_video(&words_only, false, behind), "one without the media layer does not");
+        assert!(!changes_with_video(&usual, true, behind), "a see-through one leaves the media out");
+        assert!(!changes_with_video(&usual, false, nothing), "no video, no change");
+        // A video in a box on the slide is shown with the slide, whatever the media layer.
+        let boxed = Playing { in_boxes: true, ..nothing };
+        assert!(changes_with_video(&words_only, false, boxed) && changes_with_video(&usual, true, boxed));
+        // The Announcements layer's video, for a screen that shows it.
+        let announced = Playing { announced: true, ..nothing };
+        assert!(changes_with_video(&words_only, false, announced));
+        assert!(!changes_with_video(&Look { announcements: false, ..words_only }, false, announced));
+    }
+
+    #[test]
+    fn a_drawing_leaves_out_ndi_sources_only_when_all_have_their_pictures_and_none_is_owed() {
+        let one = seen(true, false);
+        let drawn = [(one.id, one.arrivals)];
+        assert!(ndi_settled(&[one], &drawn, true));
+        // Something owed, put off or undrawn: drawn whole.
+        assert!(!ndi_settled(&[one], &drawn, false));
+        // A receiver that came since the last drawing has not been drawn for.
+        let back = NdiSeen { arrivals: one.arrivals + 1, ..one };
+        assert!(!ndi_settled(&[back], &drawn, true));
+        // A source never drawn for (one just started) is drawn for first.
+        assert!(!ndi_settled(&[one], &[], true));
+        // One nobody is watching has nothing drawn for it, so it holds nothing back.
+        assert!(ndi_settled(&[seen(false, false)], &[], true));
     }
 }

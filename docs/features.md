@@ -1181,6 +1181,18 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   say how many receivers each NDI screen has, or that nobody is watching. The number is NDI's
   own (NDI's monitor app, for one, counts as two receivers); with an NDI too old to count
   them, the screen is drawn and sent all the time.
+- While a video plays, only the screens that show it are drawn again for each of its pictures:
+  an audience screen with the media layer on (or with a video in a box on its slide or in its
+  announcements), a stage screen that shows a picture of such a screen, and the same screens'
+  NDI and DeckLink pictures, which are read back from the GPU and sent only for them. A screen
+  without the media layer, or a see-through one, keeps the picture it has, so it costs no
+  drawing, no showing in its window and no readback while the video plays. The time on stage
+  screens and in messages still moves once a second, and everything is drawn as before while a
+  dissolve, a build, scrolling words or the identify wash is under way. The screens' log line
+  says how much memory the painter holds (the operator window's, how much the thumbnails'
+  painter does). On the DeckLink side, a solid picture is turned into the card's BGRA or YUV
+  frame in a fifth to a quarter of the time it took, and one scaled to a card's other size
+  (720p, a 4K mode) in about a third.
 - Screens fill displays by the names System Settings shows ("3DTV", "HP 27f"). The main
   display, with the menu bar, is never offered and never filled: it is where SoftPresenter's
   own window is. A fresh start puts the first screen on the first other display, or in a

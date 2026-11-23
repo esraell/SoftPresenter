@@ -95,6 +95,11 @@ impl Thumbs {
         })
     }
 
+    /// The bytes of GPU memory the painter keeps ready between pictures.
+    pub fn spare_bytes(&self) -> u64 {
+        self.painter.spare_bytes()
+    }
+
     /// Call once at the start of each frame.
     pub fn begin_frame(&mut self) {
         self.drawn_this_frame = 0;
