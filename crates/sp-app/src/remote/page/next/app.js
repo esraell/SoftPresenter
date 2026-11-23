@@ -875,7 +875,7 @@ const cueHere = () => !!state.cue && !cueIsLive() && (state.mode === 'bible' ? s
 const isCued = (key, q, s) => !!state.cue && !cueIsLive() && state.cue.deck === key && (q >= 0 ? state.cue.q === q : state.cue.s === s);
 function moveCue(dir) {
   const c = state.cue, d = c && deckByKey(c.deck); if (!d) return;
-  const q = c.q + dir; if (q < 0 || q >= d.seq.length) return refuse(d.key === 'bible' ? `That is the ${dir > 0 ? 'last' : 'first'} verse of the chapter` : `That is the ${dir > 0 ? 'last' : 'first'} slide`);
+  const q = c.q + dir; if (q < 0 || q >= d.seq.length) return;      // at either end nothing moves and nothing is said (the owner: those notices are not needed)
   state.cue = { deck: c.deck, q, s: d.seq[q] }; render(); followLive('.cued');
 }
 function goCue() { const c = state.cue; state.cue = null; go(c.deck, c.q, c.s); }
@@ -901,14 +901,11 @@ function step(dir) {
   const q = (state.live.q >= 0 ? state.live.q : d.seq.findIndex(i => i > state.live.s) - (dir > 0 ? 1 : 0)) + dir;
   if (q >= 0 && q < d.seq.length) return go(d.key, q);
   if (d.song && d.song.loop && dir > 0) return go(d.key, 0);
-  const end = dir > 0 ? 'the last slide' : 'the first slide';
-  if (d.key.startsWith('bible')) return refuse(`That is ${dir > 0 ? 'the last' : 'the first'} verse of the chapter`);
-  if (d === state.heldDeck && !decks().some(x => x.key === d.key)) return refuse(`That is ${end}`);      // a song from elsewhere goes on to nothing
-  if (d.key === 'vox' || state.src.type !== 'pl') return refuse(`That is ${end}`);
-  if (!DOC.settings.continuous) return refuse(`That is ${end} of ${d.title}. Continuous is off, so Next stays in the song`);
+  // At an end, Next and Previous stay put and say nothing (the owner: those notices are not needed): the last verse of a passage,
+  // a song from elsewhere, a library's song, Continuous off, or either end of the playlist.
+  if (d.key.startsWith('bible') || (d === state.heldDeck && !decks().some(x => x.key === d.key)) || d.key === 'vox' || state.src.type !== 'pl' || !DOC.settings.continuous) return;
   const all = decks(), at = all.findIndex(x => x.key === d.key);
   for (let n = at + dir; n >= 0 && n < all.length; n += dir) if (all[n].slides && all[n].seq.length && (all[n].kind === 'song' || all[n].kind === 'passage')) return go(all[n].key, dir > 0 ? 0 : all[n].seq.length - 1);   // on through songs and passages; over media, placeholders and headers
-  refuse(`That is ${end} of the playlist`);
 }
 function clear(layer) {
   for (const k of layer === 'all' ? ['slide', 'media', 'props', 'messages', 'audio', 'announcements'] : [layer]) {
@@ -3049,6 +3046,7 @@ function remotePicture(blob) {
   });
 }
 // A command, as `sp` would type it. A refusal comes back in the app's own words, shown as the cue under what was clicked.
+// An ok reply shows nothing, an end reached (`"at_end": true`) among them: the owner wants nothing said there.
 function remoteSend(args, quiet) {
   REMOTE.sent.push(args);
   return new Promise(resolve => {
@@ -3340,6 +3338,7 @@ class FixtureSocket extends EventTarget {
     if (a[0] === 'library') return reply({ ok: true, text: '', data: [...F.replies.songs.data.slice(1).map(x => ({ number: x.number, title: x.title, id: x.id, missing: false })), { number: 9, title: 'A song that has gone', id: null, missing: true }] });      // the shape since 787c892
     if (a[0] === 'groups') return reply({ ok: true, text: '', data: [{ key: 'C', group: 'Chorus', names: ['chorus', 'chorus 1'], color: '#cc4eb4' }, { key: 'V', group: 'Verse', names: ['verse'], color: '#4285f4' }] });      // docs/cli.md's own example
     if (a[0] === 'next') { reply({ ok: true, text: 'On screen: Harbour Lights, slide 2 of 2 (Chorus).' }); this.emit(JSON.stringify(F.change)); return; }
+    if (a[0] === 'previous') return reply({ ok: true, text: 'That is the first slide of Harbour Lights, and Continuous is off.', data: { at_end: true } });      // an end reached: ok, the why in text (docs/remote-api.md)
     reply({ ok: true, text: 'Done.' });
   }
   picture() { const c = document.createElement('canvas'); c.width = 64; c.height = 36; const g = c.getContext('2d'); g.fillStyle = '#1d2a3a'; g.fillRect(0, 0, 64, 36);
@@ -3492,9 +3491,9 @@ document.addEventListener('keydown', e => {
   if (state.mode !== 'show') return;
   if (k === 'ArrowUp' || k === 'ArrowDown') {       // the item above or below, passing over headers
     e.preventDefault(); const dir = k === 'ArrowUp' ? -1 : 1;
-    if (state.src.type === 'lib') { const list = librarySongs(), n = list.findIndex(s => s.id === state.openSong) + dir; if (list[n]) A.openSong([list[n].id], 'key'); else refuse(dir > 0 ? 'That is the last song in the list' : 'That is the first song in the list'); return; }
+    if (state.src.type === 'lib') { const list = librarySongs(), n = list.findIndex(s => s.id === state.openSong) + dir; if (list[n]) A.openSong([list[n].id], 'key'); return; }      // at either end: nothing, silently
     const all = decks(); for (let n = all.findIndex(x => x.key === state.openItem) + dir; n >= 0 && n < all.length; n += dir) if (all[n].kind !== 'header') return A.openItem([all[n].key, 'key']);
-    return refuse(dir > 0 ? 'That is the last item in the playlist' : 'That is the first item in the playlist');
+    return;      // at either end of the playlist: nothing, silently
   }
   if (k === 'Enter' && !(el.closest && el.closest('button, a, summary'))) {      // the open item goes on screen from its first slide
     const d = decks().find(x => x.key === (state.src.type === 'lib' ? 'lib-' + state.openSong : state.openItem)); e.preventDefault();
@@ -3710,5 +3709,5 @@ Object.assign(DEMOS, {      // Testing aids: notices, the status button and its 
   notes: () => { toast('“Harbour Lights” added to Wednesday Evening'); toast('Reading Ukrainian_Ogienko.xml…'); toast('Installed Ukrainian Ogienko'); trouble('SoftPresenter didn’t answer. Open it, then connect again, and it will carry on from where it stopped.'); NOTES.forEach((n, k) => { n.time = new Date(Date.now() - (k + 1) * 4 * 60000); }); NOTES[3].seen = true; render(); setTimeout(() => { state.notesOpen = true; renderNote(); }, 60); },
   notesnew: () => { toast('“Harbour Lights” added to Wednesday Evening'); trouble('SoftPresenter didn’t answer. Open it, then connect again.'); render(); },
   noteask: () => { state.changedOutside = DOC.songs[1].id; render(); },
-  noterefuse: () => { render(); setTimeout(() => { go(playlist().items[7].id, 2); refuse('That is the last slide of the playlist'); }, 80); } });
+  noterefuse: () => { render(); setTimeout(() => { go(playlist().items[7].id, 2); refuse('That playlist is empty'); }, 80); } });
 if (['notes', 'notesnew', 'noteask', 'noterefuse'].includes(q.get('demo'))) DEMOS[q.get('demo')]();
