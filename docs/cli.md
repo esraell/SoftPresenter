@@ -547,7 +547,7 @@ the slides instead, drawn by an app on the Mac that opens it, exactly as that ap
 picture slides, made in the background (its slides are there at once and their pictures fill
 in). Without `--as`, a `.pptx` comes in as it was last brought in from the app (slides at
 first). `--as slides` on a file that can only come in as pictures says so. The reply names the
-slides to check (a chart, a table, text with mixed looks) once the import is done; each of
+slides to check (a chart, a table or an embedded object that came in as its picture, or didn't come in) once the import is done; each of
 them is marked "to check" in `slide list` and `slide show` (and has `check` in their JSON) until
 `slide checked SONG N` takes the mark off. Anything
 else is refused, with the list of what is read.

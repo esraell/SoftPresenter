@@ -508,7 +508,7 @@ pub fn mark_to_check(slides: &mut [sp_model::Slide], check: &[(usize, Vec<String
 
 /// What the notice says when a presentation came in as slides: how many, and which of them to
 /// check, with why: "“Sermon” came in as 24 slides. Check slides 3 and 7: a chart came in as
-/// its picture; a text box had mixed sizes; it took its main look." Reasons are named once
+/// its picture; a table came in as its picture." Reasons are named once
 /// however many slides have them; the slide's own tag says which it has.
 pub fn came_in_note(title: &str, count: usize, check: &[(usize, Vec<String>)]) -> String {
     let plural = if count == 1 { "" } else { "s" };
@@ -1064,12 +1064,12 @@ mod tests {
         let one = came_in_note("Talk", 1, &[(1, vec!["a chart came in as its picture".to_owned()])]);
         assert_eq!(one, "\u{201c}Talk\u{201d} came in as 1 slide. Check slide 1: a chart came in as its picture.");
         let chart = "a chart came in as its picture".to_owned();
-        let mixed = vec!["a text box had mixed sizes; it took its main look".to_owned()];
+        let mixed = vec!["a table came in as its picture".to_owned()];
         let said = came_in_note("Sermon", 24, &[(3, vec![chart.clone()]), (7, mixed.clone())]);
         assert_eq!(
             said,
             "\u{201c}Sermon\u{201d} came in as 24 slides. Check slides 3 and 7: a chart came in as its picture; \
-             a text box had mixed sizes; it took its main look."
+             a table came in as its picture."
         );
         let many: Vec<(usize, Vec<String>)> = (1..=10).map(|n| (n, vec![chart.clone()])).collect();
         let said = came_in_note("Deck", 12, &many);

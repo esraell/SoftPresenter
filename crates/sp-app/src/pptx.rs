@@ -10,8 +10,9 @@
 //! nest too deeply or carry too many attributes, and a picture over [`LARGEST_PICTURE`] is
 //! left out.
 //!
-//! A slide holds one look per text box: a box that mixes sizes, colours or fonts is given the
-//! look most of its letters have, and its slide is marked to check. What can't be mapped (charts,
+//! A text box takes the look most of its letters have, and words whose run differs (bold,
+//! italic, underline, strike, size, colour or Latin typeface) keep their own look as spans.
+//! What can't be mapped (charts,
 //! SmartArt, tables, 3D, embedded video and OLE objects) is drawn from the picture the file
 //! carries for it, when it carries one (as a fallback beside the object, or a video's poster),
 //! and otherwise left out; either way the slide is marked to check.
@@ -1116,6 +1117,10 @@ impl<'a, 'p> SlideCx<'a, 'p> {
         let mut lines: Vec<String> = Vec::new();
         let mut kinds: Vec<(Level, usize)> = Vec::new();
         let mut first: Option<Level> = None;
+        // Each run with letters in it: where it starts in the words (counting characters, line
+        // breaks included), how long it is, and its look.
+        let mut runs: Vec<(usize, usize, Level)> = Vec::new();
+        let mut pos = 0usize;
         let (mut dots, mut numbers, mut counted) = (0, 0, 0);
         let (mut spaced, mut spaced_n) = (0.0_f64, 0);
         for paragraph in children(body, "p") {
@@ -1147,19 +1152,26 @@ impl<'a, 'p> SlideCx<'a, 'p> {
                             run.overlay_run(rpr, &colours, theme);
                         }
                         let letters = text.chars().filter(|c| !c.is_whitespace()).count();
+                        let long = text.chars().count();
                         if letters > 0 {
+                            runs.push((pos, long, run.clone()));
                             match kinds.iter_mut().find(|(k, _)| k.same_look(&run)) {
                                 Some((_, n)) => *n += letters,
                                 None => kinds.push((run, letters)),
                             }
                         }
                         line.push_str(&text);
+                        pos += long;
                     }
-                    "br" => lined.push(std::mem::take(&mut line)),
+                    "br" => {
+                        lined.push(std::mem::take(&mut line));
+                        pos += 1;
+                    }
                     _ => {}
                 }
             }
             lined.push(line);
+            pos += 1;
             if lined.iter().any(|l| !l.trim().is_empty()) {
                 let size = level.size.unwrap_or(18.0);
                 first.get_or_insert_with(|| level.clone());
@@ -1185,15 +1197,9 @@ impl<'a, 'p> SlideCx<'a, 'p> {
             lines.pop();
         }
         let start = lines.iter().position(|l| !l.trim().is_empty()).unwrap_or(0);
+        let skipped: usize = lines[..start].iter().map(|l| l.chars().count() + 1).sum();
         let words = lines[start..].join("\n");
         let dominant = kinds.iter().max_by_key(|(_, n)| *n).map(|(k, _)| k.clone()).unwrap_or_else(|| first.clone());
-        let tenths = |k: &Level| k.size.map(|s| (s * 10.0) as i64);
-        if kinds
-            .iter()
-            .any(|(k, _)| (tenths(k), k.colour, &k.font) != (tenths(&dominant), dominant.colour, &dominant.font))
-        {
-            self.flag("a text box had mixed sizes; it took its main look");
-        }
 
         // The box: insets, anchor and fitting, from the shape or what it inherits.
         let mut inset = [91_440.0, 45_720.0, 91_440.0, 45_720.0];
@@ -1260,8 +1266,36 @@ impl<'a, 'p> SlideCx<'a, 'p> {
             baseline: Some(0.0),
             ..TextStyle::default()
         };
+        // Words whose run looks different from the box's keep their own look.
+        let box_size = g.points(size).max(1.0);
+        let face = |k: &Level| {
+            k.font.clone().filter(|f| !f.is_empty()).or_else(|| Some(theme.minor.clone()).filter(|f| !f.is_empty()))
+        };
+        let spans: Vec<sp_model::TextSpan> = runs
+            .iter()
+            .filter_map(|(from, long, run)| {
+                let from = from.checked_sub(skipped)?;
+                let run_size = g.points(run.size.unwrap_or(18.0) * scale).max(1.0);
+                let own = sp_model::SpanStyle {
+                    font_family: Some(face(run)).filter(|f| *f != face(&dominant)).flatten(),
+                    size: ((run_size - box_size).abs() > 0.5).then_some(run_size),
+                    weight: ((run.bold == Some(true)) != (dominant.bold == Some(true)))
+                        .then_some(if run.bold == Some(true) { 700 } else { 400 }),
+                    italic: ((run.italic == Some(true)) != (dominant.italic == Some(true)))
+                        .then_some(run.italic == Some(true)),
+                    underline: ((run.underline == Some(true)) != (dominant.underline == Some(true)))
+                        .then_some(run.underline == Some(true)),
+                    strike: ((run.strike == Some(true)) != (dominant.strike == Some(true)))
+                        .then_some(run.strike == Some(true)),
+                    fill: (run.colour.unwrap_or(Rgba::BLACK) != dominant.colour.unwrap_or(Rgba::BLACK))
+                        .then(|| run.colour.unwrap_or(Rgba::BLACK)),
+                };
+                Some(sp_model::TextSpan::new(from, from + long, own))
+            })
+            .collect();
+        let spans = sp_model::TextSpan::normalize(spans, words.chars().count());
         let mut object = base_object("Text", frame);
-        object.kind = ObjectKind::Text { text: words, style, spans: Vec::new() };
+        object.kind = ObjectKind::Text { text: words, style, spans };
         Some(object)
     }
 }
@@ -1722,8 +1756,12 @@ mod tests {
         assert_eq!(shape.fill, Some(Rgba::rgb(255, 0, 0)));
         assert_eq!(shape.stroke.map(|s| s.color), Some(Rgba::rgb(0, 255, 0)));
         assert!(matches!(shape.kind, ObjectKind::Shape { shape: Shape::Rectangle }));
-        let why = &read.check.iter().find(|(n, _)| *n == 2).unwrap().1.join("; ");
-        assert!(why.contains("mixed sizes"), "{why}");
+        // The two sizes in the box are no longer a reason to check: the 36 point word is a span.
+        assert!(read.check.iter().all(|(n, _)| *n != 2), "{:?}", read.check);
+        let ObjectKind::Text { spans, .. } = &second.objects[1].kind else { unreachable!() };
+        let bigger = f64::from(spans[0].style.size.unwrap());
+        assert!((bigger - 36.0 * 12700.0 * 1920.0 / 9144000.0).abs() < 0.01, "{spans:?}");
+        assert_eq!(spans[0].start..spans[0].end, 5..8, "the run \" yo\" in \"Hello yo\"");
     }
 
     #[test]
@@ -1738,7 +1776,7 @@ mod tests {
         assert!(why[&3].contains("a chart came in as its picture"), "{why:?}");
         assert!(why[&4].contains("a chart couldn't come in"), "{why:?}");
         let note = crate::deck::came_in_note("Sample", read.slides.len(), &read.check);
-        assert!(note.starts_with("\u{201c}Sample\u{201d} came in as 5 slides. Check slides 2, 3 and 4: "), "{note}");
+        assert!(note.starts_with("\u{201c}Sample\u{201d} came in as 5 slides. Check slides 3 and 4: "), "{note}");
         assert!(note.contains("a chart came in as its picture; a chart couldn't come in"), "{note}");
     }
 
@@ -1748,7 +1786,7 @@ mod tests {
         crate::deck::mark_to_check(&mut read.slides, &read.check);
         let checked: Vec<usize> =
             read.slides.iter().enumerate().filter(|(_, s)| s.check.is_some()).map(|(at, _)| at + 1).collect();
-        assert_eq!(checked, [2, 3, 4], "the slides the notice names, and no others");
+        assert_eq!(checked, [3, 4], "the slides the notice names, and no others");
         assert!(read.slides[2].check.as_deref().unwrap().contains("a chart came in as its picture"));
         // Saved and read back, as a restart does: the reason is still there.
         let saved = serde_json::to_string(&read.slides).unwrap();

@@ -157,11 +157,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     behind the slide. Speaker notes come into the slide's notes, and hidden slides come in
     disabled. A chart, table, diagram or embedded object is drawn from the picture the file
     keeps for it if it keeps one (often beside the object), otherwise left out; embedded sound
-    and video aren't brought in (a video's poster picture is). A box that mixes sizes, colours or
-    fonts takes the look most of its letters have, since a text box here has one look. Every
-    slide that has any of these, or a shape that can't be drawn, is named when the import is
-    done: "“Sermon” came in as 24 slides. Check slides 3 and 7: a chart came in as its picture; a
-    text box had mixed sizes; it took its main look." Each slide named wears an amber **Check**
+    and video aren't brought in (a video's poster picture is). A box that mixes looks takes
+    the look most of its letters have, and the words whose run differs (bold, italic,
+    underline, strike-through, size, colour or typeface) keep their own as styled words. Every
+    slide that has a chart, table or other thing that can't be drawn is named when the import is
+    done: "“Sermon” came in as 24 slides. Check slides 3 and 7: a chart came in as its picture;
+    an embedded object came in as its picture." Each slide named wears an amber **Check**
     tag in its strip, with its reason as the hover; its menu has **Mark as Checked**, which takes
     the tag off (Undo puts it back; `sp slide checked SONG N` does the same). The reason is kept
     in the slide's saved data, so the tag survives a restart until the slide is marked. The
