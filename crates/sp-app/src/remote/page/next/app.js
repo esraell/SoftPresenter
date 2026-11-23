@@ -736,6 +736,7 @@ function objHTML(o, ctx, ed) {
 }
 // One slide as HTML: the theme's colour, the slide's own media, then its objects.
 function slideHTML(slide, ctx = {}, ed = false) {
+  if (slide.pending && !ed) return html`<div class="bg" style="background:#111"></div><div class="sl-words">${slide.label || 'A page'}…</div>`;      // a PDF's page still being drawn
   if (slide.img && !ed) return html`<div class="bg" style="background:#000"></div><div class="sl-words">${slideWords(slide)}</div><img class="sl-img" src="${slide.img}" alt="" draggable="false">`;      // the words show if the picture can't be had      // the app's own picture of it (Remote Control)
   const r = resolved(slide, ctx), m = slide.media && !ctx.noMedia ? mediaById(slide.media) : null;
   return html`${ctx.noBg ? '' : html`<div class="bg" style="background:${r.picture ? (mediaById(r.picture) || {}).bg || r.bg : r.bg}"></div>`}${m ? html`<div class="bg" style="background:${m.bg}"></div>` : ''}${r.objects.map(o => objHTML(o, { ...ctx, slide }, ed))}`;
@@ -1342,7 +1343,7 @@ M.slide = ([key, s]) => {
     { t: 'Media', sub: [{ t: 'None', on: !sl.media, f: () => setSlides(key, s, x => { x.media = null; }) }, ...DOC.media.map(m => ({ t: m.name, on: sl.media === m.id, f: () => setSlides(key, s, x => { x.media = m.id; }) }))] },
     { t: `Actions${sl.actions.length ? ` (${sl.actions.length})` : ''}`, sub: [...sl.actions.map((a, i) => ({ t: `Remove: ${stepText(a)}`, f: () => mutate(() => { sl.actions.splice(i, 1); }) })), sl.actions.length && { sep: true },
       { t: 'Add an Action', sub: stepChoices.map(c => ({ t: stepText(c), f: () => mutate(() => { sl.actions.push(c); }) })) }] },
-    { t: sl.enabled ? 'Disable' : 'Enable', f: () => setSlides(key, s, x => { x.enabled = !sl.enabled; }) }, { sep: true },
+    { t: sl.enabled ? 'Disable' : 'Enable', f: () => setSlides(key, s, x => { x.enabled = !sl.enabled; }) }, sl.check && { t: 'Mark as Checked', f: () => setSlides(key, s, x => { delete x.check; }) }, { sep: true },
     { t: 'Copy Style', f: () => slideOp(key, s, 'style') }, { t: 'Paste Style', dim: !state.clip || state.clip.type !== 'style', f: () => state.clip && state.clip.type === 'style' && slideOp(key, s, 'pastestyle') }];
 };
 
@@ -1351,7 +1352,7 @@ function slideTile(d, sl, s, at) {      // `at`, when the song has an arrangemen
   const q = at ? at.q : -1, again = !!(at && at.again), num = two((q >= 0 ? q : s) + 1);
   const first = at ? at.prev !== sl.group : s === 0 || d.slides[s - 1].group !== sl.group, name = [sl.group, sl.label].filter(Boolean).join(' · ');
   const picked = state.picked.deck === d.key && state.picked.set.includes(s);
-  const badges = [sl.hotkey ? html`<i class="sh-b key">${sl.hotkey}</i>` : '', sl.advance ? html`<i class="sh-b">${sl.advance}s</i>` : '', sl.actions && sl.actions.length ? html`<i class="sh-b">${sl.actions.length} act</i>` : '', sl.transition ? html`<i class="sh-b">${sl.transition.kind}</i>` : ''];
+  const badges = [sl.check ? html`<i class="sh-b chk" title="${sl.check}. Its menu has Mark as Checked">Check</i>` : '', sl.hotkey ? html`<i class="sh-b key">${sl.hotkey}</i>` : '', sl.advance ? html`<i class="sh-b">${sl.advance}s</i>` : '', sl.actions && sl.actions.length ? html`<i class="sh-b">${sl.actions.length} act</i>` : '', sl.transition ? html`<i class="sh-b">${sl.transition.kind}</i>` : ''];
   const colour = sl.bible || sl.vox ? 'var(--c-bible)' : groupColour(sl.group), cued = isCued(d.key, q, s), cls = `${(q >= 0 ? !!state.live && !!state.on && state.live.deck === d.key && state.live.q === q : isLive(d.key, s)) ? 'live' : ''} ${cued ? 'cued' : ''} ${again ? 'again' : ''} ${at && at.out ? 'out' : ''} ${picked ? 'pickd' : ''} ${sl.enabled === false ? 'off' : ''} ${first || !d.song ? '' : 'cont'}`;
   const drag = d.song && !again, a = { 'data-a': again ? `goAt:${d.key},${q}` : `go:${d.key},${s}`, 'data-m': `slide:${d.key},${s}`, draggable: drag ? 'true' : null, 'data-drag': drag ? `slide:${d.key},${s}` : null }, v = DOC.settings.view;
   if (v === 'easy') return html`<button class="sh-easy ${cls}" style="--g:${colour}" ${a}><span class="n mono">${num}</span><i class="dot"></i><span class="w">${slideWords(sl).replace(/\n/g, ' / ')}</span><span class="g">${name}</span><span class="edit" data-a="menu:slide,${d.key},${s}" title="More">${I.more}</span></button>`;
@@ -1447,15 +1448,51 @@ M.importMenu = () => [{ head: 'Import Songs' }, { t: 'A Library Folder…', f: (
 A.importSheet = () => openSheet({ title: 'Import Slides', wide: true,
   body: html`<div class="ui-cards">
     <button class="ui-card" data-a="importDo:pictures"><b>Pictures as slides</b><span>Choose pictures; each becomes a slide, in the order people number them</span></button>
-    <button class="ui-card" data-a="importDo:slides"><b>A presentation</b><span>A .pptx, .ppsx, .key, .odp, .ppt or .pps file, or a PDF. You choose how it comes in; here a sample comes in</span></button></div>`,
+    <button class="ui-card" data-a="importPres"><b>A presentation</b><span>A .pptx, .ppsx, .key, .odp, .ppt or .pps file, or a PDF. You choose how it comes in</span></button></div>`,
   note: 'In the app you can also drop files on the window', buttons: [{ t: 'Close' }] });
+// A presentation (as the app has it, c46ddff): As Slides (editable, read straight from a .pptx or .ppsx) or As Pictures (the exact
+// look, drawn unseen by an app on this computer that can open the file). The last choice for each kind of file is ready on Enter.
+const PRES_FILES = '.pptx,.ppsx,.key,.odp,.ppt,.pps,.pdf';
+A.importPres = () => pickFiles(PRES_FILES, files => files[0] && presChoice(files[0].name));
+function presChoice(name) {
+  closeSheet();
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  if (ext === 'pdf') return presImport(name, 'pictures');      // a PDF is pictures already: no question
+  const slides = ext === 'pptx' || ext === 'ppsx', pictures = !state.noDrawApp, kept = (DOC.settings.importAs || {})[ext], last = kept || (slides ? 'slides' : 'pictures');
+  if (!slides && !pictures) return openSheet({ title: `Import “${name}”`, body: html`<p class="ui-p">No app on this computer can open .${ext} files to draw them, so “${name}” can’t come in. Saved as .pptx, it could come in as slides.</p>`, buttons: [{ t: 'OK', primary: true }] });
+  const pick = slides && pictures ? last : slides ? 'slides' : 'pictures';
+  const card = (how, title, line, can, why) => html`<button class="ui-card ui-choice ${pick === how ? 'on' : ''}" data-a="presAs:${how}" ${can ? null : { disabled: true, title: why }}>
+    <b>${title}${pick === how && kept === how && slides && pictures ? html`<i class="ui-last cap">Last time</i>` : ''}</b><span>${can ? line : why}</span></button>`;
+  state.presFile = { name, ext, pick };
+  openSheet({ title: `Import “${name}”`, wide: true, body: html`<div class="ui-cards">
+    ${card('slides', 'As Slides', 'Words stay words, ready to edit. Read straight from the file in a moment. Charts and tables come in as pictures', slides, `Only .pptx and .ppsx files can come in as slides`)}
+    ${card('pictures', 'As Pictures', 'The exact look, each slide a picture. An app on this computer that can open the file draws it unseen, and is closed again', pictures, `No app on this computer can open .${ext} files to draw them`)}</div>`,
+    note: `Enter takes the one ringed. The choice is kept for .${ext} files`, buttons: [{ t: 'Cancel' }] });
+}
+A.presAs = ([how]) => { const f = state.presFile; if (!f) return; DOC.settings.importAs = { ...(DOC.settings.importAs || {}), [f.ext]: how }; closeSheet(); presImport(f.name, how); };
+// The sample: five slides. As Slides, two are named to check (a chart that came in as its picture; a box of mixed sizes that took
+// its main look), one keeps its notes and one hidden in the file comes in switched off. A PDF's deck shows at once and its pages fill in.
+function presImport(name, how) {
+  const title = name.replace(/\.[^.]+$/, ''), pages = ['Welcome', 'This week', 'Giving', 'Small groups', 'Thank you'];
+  let s;
+  mutate(() => {
+    s = song(title, []);
+    s.slides = pages.map((p, n) => how === 'slides'
+      ? slide('', `${p}\n${n === 1 ? '• Youth evening, Friday\n• Lunch after the service' : ''}`.trim(), '', { label: '', notes: n === 0 ? 'Welcome everyone; mention the visitors’ card' : '', enabled: n !== 3, check: n === 2 ? 'A chart came in as its picture' : n === 1 ? 'A text box had mixed sizes; it took its main look' : '' })
+      : slide('', '', '', { label: `Page ${n + 1}`, pending: name.toLowerCase().endsWith('.pdf'), objects: [obj('image', `Page ${n + 1}`, { media: DOC.media[n % 3].id, frame: { x: 0, y: 0, w: 1920, h: 1080 } })] }));
+    DOC.songs.push(s); state.src = { type: 'lib', id: 'all' }; state.openSong = s.id;
+  });
+  const checks = s.slides.map((x, n) => x.check ? n + 1 : 0).filter(Boolean);
+  toast(how === 'slides' ? `“${title}” came in as ${s.slides.length} slides.${checks.length ? ` Check slide${checks.length > 1 ? 's' : ''} ${checks.join(' and ')}: ${s.slides.filter(x => x.check).map(x => x.check.toLowerCase()).join('; ')}.` : ''}` : `“${title}” came in as ${s.slides.length} picture slides.`);
+  if (s.slides.some(x => x.pending)) { let n = 0; const fill = () => { const sl = s.slides[n++]; if (!sl) return; delete sl.pending; render(); setTimeout(fill, 150); }; setTimeout(fill, 150); }
+}
 A.importDo = ([what]) => {
   closeSheet();
   if (what === 'songs') return pickFiles('.txt,.text,.cho,.chopro,.crd,.pro,text/plain', files => Promise.all(files.map(f => f.text().then(t => importSongText(f.name, t)))).then(addImportedSongs));
   if (what === 'pictures') return pickFiles('image/*', addPictureSlides);
   if (what.startsWith('sample-')) what = what.slice(7);
   mutate(() => {
-    if (what === 'slides') {
+    if (what === 'slides') {      // the old sample, kept for the checks: a PDF's three pages
       const s = song('Sermon slides.pdf', []); s.slides = [1, 2, 3].map(n => slide('', '', '', { label: `Page ${n}`, objects: [obj('image', `Page ${n}`, { media: DOC.media[(n - 1) % 3].id, frame: { x: 0, y: 0, w: 1920, h: 1080 } })] }));
       DOC.songs.push(s); state.src = { type: 'lib', id: 'all' }; state.openSong = s.id; return toast('3 pages came in as picture slides');
     }
@@ -3392,7 +3429,7 @@ document.addEventListener('keydown', e => {
   }
   if (k === 'Escape' && el.matches && el.matches('.sc-name input, .st-in')) { el.value = el.defaultValue; el.blur(); return; }      // a name retyped in place: Escape puts it back
   if (el.matches && el.matches('input:not([type=range]), textarea, select')) { if (k === 'Enter' && state.sheet && el.tagName === 'INPUT') { const b = $('sheet').querySelector('.btn.primary'); if (b) b.click(); } return; }
-  if (state.sheet) { if (k === 'Escape') closeSheet(); return; }
+  if (state.sheet) { if (k === 'Escape') closeSheet(); else if (k === 'Enter' && $('sheet').querySelector('.ui-choice.on:not([disabled])')) { e.preventDefault(); $('sheet').querySelector('.ui-choice.on').click(); } return; }      // Enter takes the choice ringed
   if (k === 'Escape' && state.notesOpen) { e.preventDefault(); return A.notesOpen(); }      // Escape closes the list of notices, and clears nothing
   if (k === 'Escape' && state.mode === 'show' && state.srcMenu) { e.preventDefault(); state.srcMenu = false; return renderShowLeft(); }      // Escape closes the chooser; it never clears the screens then
   if (k === 'Escape' && state.mode === 'edit' && state.reflow) { e.preventDefault(); state.reflow = false; return render(); }      // and the words editor
@@ -3593,7 +3630,8 @@ if (REMOTE_MODE) remoteStart();      // served by SoftPresenter: its own state; 
 else { go(DOC.playlists[0].items[3].id, null, 2); showMedia('m1'); }          // start as the app's sample does
 tick(); setInterval(tick, 1000);
 requestAnimationFrame(() => scrollToDeck(state.openItem, false));
-const DEMOS = {      // Testing aid: ?demo=name opens a state to look at
+const DEMOS = {
+  pres: () => presChoice('Sermon.pptx'), preskey: () => presChoice('Easter.key'), presnone: () => { state.noDrawApp = true; presChoice('Easter.key'); }, presin: () => { presImport('Sermon.pptx', 'slides'); },      // Testing aid: ?demo=name opens a state to look at
   bible: () => { lookUp(parseRef('ps 23 1-4')); go('bible', null, 1); }, bibleRows: () => { state.mode = 'bible'; B().fold = false; B().view = 'slides'; render(); }, bibleOptions: () => { state.mode = 'bible'; render(); A.bibleOptions(); },
   bibles: () => { state.mode = 'bible'; render(); A.biblesSheet(); },
   edit: () => { enterEdit(DOC.playlists[0].items[3].id, 2); state.sels = [edTarget().holder.objects[0].id]; state.itab = 'Text'; render(); }, editShape: () => { enterEdit(DOC.playlists[0].items[3].id, 0); edInsert('shape', 'star'); },
