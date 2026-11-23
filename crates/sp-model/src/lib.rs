@@ -11,6 +11,8 @@ mod pro_file;
 mod rtf;
 mod softprojector;
 mod song_text;
+mod spans;
+mod text_map;
 mod theme;
 mod transition;
 mod types;
@@ -29,6 +31,7 @@ pub use softprojector::from_softprojector;
 pub use song_text::{
     GROUP_KEYS, clean_box_text, group_color, groups_for_key, key_for_group, parse_song_text, to_song_text,
 };
+pub use spans::{Drawn, MOST_SPANS, SpanStyle, TextSpan, byte_ranges, edit_text, restyle, smallest_edit, style_at};
 pub use theme::{
     Align, BIBLE_TEMPLATE, BIBLE_THEME_ID, BoxStyle, Caps, Gradient, GradientKind, LINE_HEIGHT, LineFill,
     LineTransform, ListStyle, Scaling, Scroll, Shadow, SlideRect, TextStyle, Theme, ThemeTemplate, ThemeVersion,

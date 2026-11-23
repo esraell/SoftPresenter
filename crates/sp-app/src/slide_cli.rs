@@ -316,10 +316,10 @@ impl crate::App {
         let which = find_object(slide, object)?;
         let words = words.replace("\\n", "\n");
         let mut changed = slide.clone();
-        match &mut changed.objects[which].kind {
-            ObjectKind::Text { text, .. } => *text = words.clone(),
-            _ => return Err(format!("Object {} has no words.", which + 1)),
+        if !matches!(changed.objects[which].kind, ObjectKind::Text { .. }) {
+            return Err(format!("Object {} has no words.", which + 1));
         }
+        changed.objects[which].set_text(&words);
         let name = object_name(&changed.objects[which]);
         let song = presentation.with_slide(index, changed).ok_or("No such slide.")?;
         self.change_song(at, song);
@@ -738,7 +738,7 @@ fn describe(slide: &Slide, number: usize, object: &Object, theme: &Theme) -> (St
         "frame": {"x": place.x, "y": place.y, "w": place.w, "h": place.h, "own": object.frame.is_some()},
     });
     match &object.kind {
-        ObjectKind::Text { text: words, style } => {
+        ObjectKind::Text { text: words, style, .. } => {
             text.push_str(&format!(": \"{}\"", words.replace('\n', " / ")));
             text.push_str(&format!(
                 "\n    at x={:.0} y={:.0} w={:.0} h={:.0} ({whose_place})",

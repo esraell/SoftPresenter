@@ -1,13 +1,18 @@
 use parley::{Alignment, AlignmentOptions, FontWeight, Layout, LineHeight, PositionedLayoutItem, StyleProperty};
 use sp_model::{
     Align, BoxStyle, ImageFit, Object, ObjectKind, Rgba, SLIDE_HEIGHT, SLIDE_WIDTH, Scaling, Shape, Slide, SlideRect,
-    Theme, VAlign,
+    TextSpan, Theme, VAlign,
 };
 use vello::kurbo::{Affine, BezPath, CircleSegment, Ellipse, Join, Rect, RoundedRect, Shape as _, Stroke};
 use vello::peniko::{Color, Fill, Mix};
 use vello::{Glyph, Scene};
 
 use crate::{Fonts, Picture};
+
+/// The colour a span gives its words, carried through the text layout as its brush; none where
+/// the words are the box's own colour (or gradient).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Ink(Option<Rgba>);
 
 /// A scene ready to paint, and whether any text did not fit its box.
 pub struct Built {
@@ -200,8 +205,10 @@ fn draw_objects(
         let rect = object.frame.unwrap_or_else(|| template.place_for(object.role.as_ref()));
         // A text box set to fit its text grows or shrinks about its middle to the text's height.
         let rect = match &object.kind {
-            ObjectKind::Text { text, style } => match template.text_style(object.role.as_ref(), style) {
-                Some(look) if look.scaling == Scaling::ContainerUpOrDown => fitted_container(fonts, text, &look, rect),
+            ObjectKind::Text { text, style, spans } => match template.text_style(object.role.as_ref(), style) {
+                Some(look) if look.scaling == Scaling::ContainerUpOrDown => {
+                    fitted_container(fonts, text, spans, &look, rect)
+                }
                 _ => rect,
             },
             ObjectKind::Shape { .. }
@@ -275,10 +282,10 @@ fn draw_objects(
                 draw_screen_label(scene, fonts, placed, label, template, rect, &outline);
             }
         }
-        if let ObjectKind::Text { text, style } = &object.kind {
+        if let ObjectKind::Text { text, style, spans } = &object.kind {
             // The theme's style for the object's role, with the object's own settings over it.
             let Some(style) = template.text_style(object.role.as_ref(), style) else { continue };
-            overflow |= draw_text_box(scene, fonts, placed, text, &style, rect, time, object.shown_paragraphs);
+            overflow |= draw_text_box(scene, fonts, placed, (text, spans), &style, rect, time, object.shown_paragraphs);
         }
         if faded {
             scene.pop_layer();
@@ -403,7 +410,7 @@ fn draw_screen_label(
     let strip = Rect::new(x, y, x + f64::from(band.w), y + f64::from(band.h));
     scene.fill(Fill::NonZero, placed, Color::from_rgba8(0, 0, 0, 170), None, &strip);
     let words = label.lines().next().unwrap_or_default();
-    draw_text_box(scene, fonts, placed, words, &look, band, 0.0, None);
+    draw_text_box(scene, fonts, placed, (words, &[]), &look, band, 0.0, None);
     scene.pop_layer();
 }
 
@@ -516,14 +523,15 @@ fn paint_picture(
 }
 
 /// A box made as tall as its text at the text's own size (inside its margins), about its middle.
-fn fitted_container(fonts: &mut Fonts, text: &str, style: &BoxStyle, rect: SlideRect) -> SlideRect {
-    let text = &*style.line_transform.apply(text);
-    let text = &*style.list.apply(text);
-    let text = &*style.caps.apply(text);
+fn fitted_container(fonts: &mut Fonts, text: &str, spans: &[TextSpan], style: &BoxStyle, rect: SlideRect) -> SlideRect {
+    let drawn = style.drawn(text, spans, false);
+    let (text, spans) = (&*drawn.text, &*drawn.spans);
     let [left, top, right, bottom] = style.margins.map(|margin| margin.max(0.0));
     let width = (rect.w - left - right).max(1.0);
-    let height =
-        lay_out(fonts, text, style, style.size, width).height() + gaps_total(text, style, style.size) + top + bottom;
+    let height = lay_out(fonts, text, spans, style, style.size, width).height()
+        + gaps_total(text, style, style.size)
+        + top
+        + bottom;
     SlideRect { y: rect.y + (rect.h - height) / 2.0, h: height.max(1.0), ..rect }
 }
 
@@ -789,12 +797,28 @@ pub fn object_frame(slide: &Slide, object: &Object, theme: &Theme) -> SlideRect 
     object.frame.unwrap_or_else(|| theme.place_on(slide, object.role.as_ref()))
 }
 
-pub(crate) fn lay_out(fonts: &mut Fonts, text: &str, style: &BoxStyle, size: f32, width: f32) -> Layout<()> {
-    lay_out_within(fonts, text, style, size, Some(width))
+pub(crate) fn lay_out(
+    fonts: &mut Fonts,
+    text: &str,
+    spans: &[TextSpan],
+    style: &BoxStyle,
+    size: f32,
+    width: f32,
+) -> Layout<Ink> {
+    lay_out_within(fonts, text, spans, style, size, Some(width))
 }
 
 /// Lays text out at a size, wrapping it at `width`, or on lines as long as they are with `None`.
-fn lay_out_within(fonts: &mut Fonts, text: &str, style: &BoxStyle, size: f32, width: Option<f32>) -> Layout<()> {
+/// `spans` (counted in the characters of `text`) set their own look over the box's; their sizes
+/// and the spacing between letters grow and shrink with `size` as the box's own do.
+fn lay_out_within(
+    fonts: &mut Fonts,
+    text: &str,
+    spans: &[TextSpan],
+    style: &BoxStyle,
+    size: f32,
+    width: Option<f32>,
+) -> Layout<Ink> {
     fonts.starting_layout();
     let mut builder = fonts.layout_cx.ranged_builder(&mut fonts.font_cx, text, 1.0, true);
     builder.push_default(StyleProperty::FontSize(size));
@@ -810,7 +834,32 @@ fn lay_out_within(fonts: &mut Fonts, text: &str, style: &BoxStyle, size: f32, wi
         builder.push_default(StyleProperty::LetterSpacing(style.letter_spacing * size / style.size.max(1.0)));
     }
     builder.push_default(StyleProperty::FontFamily(style.font_family.as_str().into()));
-    let mut layout: Layout<()> = builder.build(text);
+    let scale = size / style.size.max(1.0);
+    for (range, own) in sp_model::byte_ranges(text, spans) {
+        if let Some(family) = &own.font_family {
+            builder.push(StyleProperty::FontFamily(family.as_str().into()), range.clone());
+        }
+        if let Some(own_size) = own.size {
+            builder.push(StyleProperty::FontSize(own_size * scale), range.clone());
+        }
+        if let Some(weight) = own.weight {
+            builder.push(StyleProperty::FontWeight(FontWeight::new(f32::from(weight))), range.clone());
+        }
+        if let Some(italic) = own.italic {
+            let slant = if italic { parley::FontStyle::Italic } else { parley::FontStyle::Normal };
+            builder.push(StyleProperty::FontStyle(slant), range.clone());
+        }
+        if let Some(underline) = own.underline {
+            builder.push(StyleProperty::Underline(underline), range.clone());
+        }
+        if let Some(strike) = own.strike {
+            builder.push(StyleProperty::Strikethrough(strike), range.clone());
+        }
+        if own.fill.is_some() {
+            builder.push(StyleProperty::Brush(Ink(own.fill)), range);
+        }
+    }
+    let mut layout: Layout<Ink> = builder.build(text);
     let alignment = match style.align {
         Align::Left => Alignment::Left,
         Align::Center => Alignment::Center,
@@ -866,8 +915,14 @@ pub fn scrolls(slide: &Slide, theme: &Theme) -> bool {
 /// Lays the text out at the style's size, shrinking in small steps until it fits the box's
 /// height or reaches the smallest allowed size. Returns the layout and whether it still
 /// overflows.
-fn fit(fonts: &mut Fonts, text: &str, style: &BoxStyle, rect: SlideRect) -> (Layout<()>, bool, f32) {
-    let too_big = |layout: &Layout<()>, size: f32| {
+fn fit(
+    fonts: &mut Fonts,
+    text: &str,
+    spans: &[TextSpan],
+    style: &BoxStyle,
+    rect: SlideRect,
+) -> (Layout<Ink>, bool, f32) {
+    let too_big = |layout: &Layout<Ink>, size: f32| {
         layout.height() + gaps_total(text, style, size) > rect.h || layout.width() > rect.w + 0.5
     };
     let (shrinks, grows) = match style.scaling {
@@ -880,14 +935,14 @@ fn fit(fonts: &mut Fonts, text: &str, style: &BoxStyle, rect: SlideRect) -> (Lay
     };
     // Fitted before (the same slide drawn again): laid out once, at the size it came to.
     let box_size = (rect.w, rect.h);
-    if let Some(size) = fonts.fitted_size(text, style, box_size) {
-        let layout = lay_out(fonts, text, style, size, rect.w);
+    if let Some(size) = fonts.fitted_size(text, spans, style, box_size) {
+        let layout = lay_out(fonts, text, spans, style, size, rect.w);
         let overflow = too_big(&layout, size);
         return (layout, overflow, size);
     }
     let floor = style.min_size.min(style.size).max(1.0);
     let mut size = style.size.max(floor);
-    let mut layout = lay_out(fonts, text, style, size, rect.w);
+    let mut layout = lay_out(fonts, text, spans, style, size, rect.w);
     // A written line a little too long for the box is made a little smaller, so it stays on one
     // row, as lyrics are written; one much too long (a paragraph, a Bible verse) wraps instead.
     if shrinks && wraps(&layout, text) {
@@ -895,7 +950,7 @@ fn fit(fonts: &mut Fonts, text: &str, style: &BoxStyle, rect: SlideRect) -> (Lay
         let mut trial = size;
         while trial > lowest {
             trial = (trial * 0.96).max(lowest);
-            let smaller = lay_out(fonts, text, style, trial, rect.w);
+            let smaller = lay_out(fonts, text, spans, style, trial, rect.w);
             if !wraps(&smaller, text) {
                 (size, layout) = (trial, smaller);
                 break;
@@ -905,12 +960,12 @@ fn fit(fonts: &mut Fonts, text: &str, style: &BoxStyle, rect: SlideRect) -> (Lay
     if too_big(&layout, size) {
         while shrinks && too_big(&layout, size) && size > floor {
             size = (size * 0.96).max(floor);
-            layout = lay_out(fonts, text, style, size, rect.w);
+            layout = lay_out(fonts, text, spans, style, size, rect.w);
         }
     } else if grows && !text.trim().is_empty() {
         // Grow in small steps and keep the last size that still fitted.
         while size < LARGEST_GROWN {
-            let bigger = lay_out(fonts, text, style, size * 1.04, rect.w);
+            let bigger = lay_out(fonts, text, spans, style, size * 1.04, rect.w);
             if too_big(&bigger, size * 1.04) {
                 break;
             }
@@ -919,7 +974,7 @@ fn fit(fonts: &mut Fonts, text: &str, style: &BoxStyle, rect: SlideRect) -> (Lay
         }
     }
     let overflow = too_big(&layout, size);
-    fonts.remember_fit(text, style, box_size, size);
+    fonts.remember_fit(text, spans, style, box_size, size);
     (layout, overflow, size)
 }
 
@@ -928,7 +983,7 @@ fn fit(fonts: &mut Fonts, text: &str, style: &BoxStyle, rect: SlideRect) -> (Lay
 const KEEP_LINES_DOWN_TO: f32 = 0.7;
 
 /// Whether a written line of the text runs onto more than one row.
-fn wraps(layout: &Layout<()>, text: &str) -> bool {
+fn wraps(layout: &Layout<Ink>, text: &str) -> bool {
     layout.len() > text.trim_end().split('\n').count()
 }
 
@@ -984,23 +1039,15 @@ fn draw_text_box(
     scene: &mut Scene,
     fonts: &mut Fonts,
     to_target: Affine,
-    text: &str,
+    words: (&str, &[TextSpan]),
     style: &BoxStyle,
     rect: SlideRect,
     time: f32,
     paragraphs: Option<usize>,
 ) -> bool {
-    let text = &*style.line_transform.apply(text);
-    let text = &*style.list.apply(text);
-    let text = &*style.caps.apply(text);
     // Text moving sideways runs on one long line.
-    let joined;
-    let text = if style.scroll.sideways() {
-        joined = text.lines().map(str::trim).filter(|line| !line.is_empty()).collect::<Vec<_>>().join("     ");
-        joined.as_str()
-    } else {
-        text
-    };
+    let drawn = style.drawn(words.0, words.1, style.scroll.sideways());
+    let (text, spans) = (&*drawn.text, &*drawn.spans);
     // The text is laid out inside the box's margins.
     let [left, top, right, bottom] = style.margins.map(|margin| margin.max(0.0));
     let rect = SlideRect {
@@ -1012,9 +1059,9 @@ fn draw_text_box(
     // Scrolling text keeps its size: it moves instead of being made to fit.
     let scroll = style.scroll;
     let (layout, overflow, size) = match scroll {
-        sp_model::Scroll::None => fit(fonts, text, style, rect),
-        way if way.sideways() => (lay_out_within(fonts, text, style, style.size, None), false, style.size),
-        _ => (lay_out(fonts, text, style, style.size, rect.w), false, style.size),
+        sp_model::Scroll::None => fit(fonts, text, spans, style, rect),
+        way if way.sideways() => (lay_out_within(fonts, text, spans, style, style.size, None), false, style.size),
+        _ => (lay_out(fonts, text, spans, style, style.size, rect.w), false, style.size),
     };
     // Paragraph spacing moves each line down by a gap for each line break above it.
     let spacing = f64::from(spacing_at(style, size));
@@ -1106,6 +1153,9 @@ fn draw_text_box(
                 };
                 let font = run.run().font();
                 let size = run.run().font_size();
+                // A span's own colour is a flat one, over any gradient the box has.
+                let own_ink: Option<vello::peniko::Brush> = run.style().brush.0.map(|ink| color(ink).into());
+                let run_fill = own_ink.as_ref().unwrap_or(&fill);
                 let coords: Vec<i16> = run.run().normalized_coords().iter().map(|c| c.to_bits()).collect();
                 let glyphs: Vec<Glyph> = run.positioned_glyphs().map(|g| Glyph { id: g.id, x: g.x, y: g.y }).collect();
                 match pass {
@@ -1139,7 +1189,7 @@ fn draw_text_box(
                         .transform(origin)
                         .brush_transform(brush_place)
                         .normalized_coords(&coords)
-                        .brush(&fill)
+                        .brush(run_fill)
                         .draw(Fill::NonZero, glyphs.iter().copied()),
                 }
                 // Underline and strike-through are bars across the run, in the text's colour.
@@ -1148,14 +1198,14 @@ fn draw_text_box(
                     let (left, baseline) = (f64::from(run.offset()), f64::from(run.baseline()));
                     let right = left + f64::from(run.advance());
                     let bars = [
-                        (style.underline, metrics.underline_offset, metrics.underline_size),
-                        (style.strike, metrics.strikethrough_offset, metrics.strikethrough_size),
+                        (run.style().underline.is_some(), metrics.underline_offset, metrics.underline_size),
+                        (run.style().strikethrough.is_some(), metrics.strikethrough_offset, metrics.strikethrough_size),
                     ];
                     for (wanted, offset, thickness) in bars {
                         if wanted {
                             let y = baseline - f64::from(offset);
                             let bar = Rect::new(left, y, right, y + f64::from(thickness.max(1.0)));
-                            scene.fill(Fill::NonZero, origin, &fill, brush_place, &bar);
+                            scene.fill(Fill::NonZero, origin, run_fill, brush_place, &bar);
                         }
                     }
                 }
@@ -1275,14 +1325,15 @@ mod tests {
         let rect = SlideRect { x: 0.0, y: 0.0, w: 1728.0, h: 700.0 };
         // At the box's size this line takes two rows; made a little smaller it fits on one.
         let line = "Filled with His goodness, lost in His love";
-        let full = lay_out(&mut fonts, line, &style, style.size, rect.w);
+        let full = lay_out(&mut fonts, line, &[], &style, style.size, rect.w);
         assert!(full.len() > 1, "the test needs a line that wraps at full size");
-        let (layout, _, size) = fit(&mut fonts, &format!("{line}\nThis is my story, this is my song"), &style, rect);
+        let (layout, _, size) =
+            fit(&mut fonts, &format!("{line}\nThis is my story, this is my song"), &[], &style, rect);
         assert_eq!(layout.len(), 2, "each written line on one row");
         assert!(size < style.size && size >= style.size * KEEP_LINES_DOWN_TO);
         // A paragraph far too long for one row wraps at its size, as before.
         let paragraph = "For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish";
-        let (layout, _, size) = fit(&mut fonts, paragraph, &style, rect);
+        let (layout, _, size) = fit(&mut fonts, paragraph, &[], &style, rect);
         assert!(layout.len() > 1);
         assert_eq!(size, style.size);
     }
@@ -1293,14 +1344,14 @@ mod tests {
         let style = Theme::builtin().templates[0].boxes[0].clone();
         let rect = SlideRect { x: 0.0, y: 0.0, w: 900.0, h: 300.0 };
         let text = "A long line of words that has to be made smaller to fit inside a small box on the slide";
-        let (first, first_over, first_size) = fit(&mut fonts, text, &style, rect);
+        let (first, first_over, first_size) = fit(&mut fonts, text, &[], &style, rect);
         assert!(first_size < style.size, "the test needs text that is shrunk");
-        assert_eq!(fonts.fitted_size(text, &style, (rect.w, rect.h)), Some(first_size));
-        let (again, again_over, again_size) = fit(&mut fonts, text, &style, rect);
+        assert_eq!(fonts.fitted_size(text, &[], &style, (rect.w, rect.h)), Some(first_size));
+        let (again, again_over, again_size) = fit(&mut fonts, text, &[], &style, rect);
         assert_eq!((again_size, again_over, again.len()), (first_size, first_over, first.len()));
         // Another box size, or other words, is fitted afresh.
-        assert_eq!(fonts.fitted_size(text, &style, (rect.w, rect.h + 1.0)), None);
-        assert_eq!(fonts.fitted_size("Other words", &style, (rect.w, rect.h)), None);
+        assert_eq!(fonts.fitted_size(text, &[], &style, (rect.w, rect.h + 1.0)), None);
+        assert_eq!(fonts.fitted_size("Other words", &[], &style, (rect.w, rect.h)), None);
     }
 
     #[test]
@@ -1334,7 +1385,7 @@ mod tests {
         let text =
             "ABCXYZ abcxyz 0123456789 АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ абвгдеёжзийклмнопрстуфхцчшщъыьэюя ҐґЄєІіЇї";
         let theme = Theme::builtin();
-        let layout = lay_out(&mut Fonts::new(), text, &theme.templates[0].boxes[0], 40.0, 100_000.0);
+        let layout = lay_out(&mut Fonts::new(), text, &[], &theme.templates[0].boxes[0], 40.0, 100_000.0);
         let mut glyphs = 0;
         for line in layout.lines() {
             for item in line.items() {
@@ -1369,11 +1420,11 @@ mod tests {
         let theme = Theme::builtin();
         let base = theme.templates[0].boxes[0].clone();
         let text = "Light rises\nover the hills";
-        let plain = lay_out(&mut fonts, text, &base, 60.0, 10_000.0);
+        let plain = lay_out(&mut fonts, text, &[], &base, 60.0, 10_000.0);
         let spaced = BoxStyle { letter_spacing: 10.0, ..base.clone() };
-        assert!(lay_out(&mut fonts, text, &spaced, 60.0, 10_000.0).width() > plain.width() + 50.0);
+        assert!(lay_out(&mut fonts, text, &[], &spaced, 60.0, 10_000.0).width() > plain.width() + 50.0);
         let tall = BoxStyle { line_height: 2.0, ..base.clone() };
-        assert!(lay_out(&mut fonts, text, &tall, 60.0, 10_000.0).height() > plain.height() * 1.4);
+        assert!(lay_out(&mut fonts, text, &[], &tall, 60.0, 10_000.0).height() > plain.height() * 1.4);
         // Text that fits its box no longer fits once wide margins are kept clear inside it.
         let fixed = |margins| {
             let look = BoxStyle { margins, scaling: Scaling::None, ..base.clone() };
@@ -1387,12 +1438,152 @@ mod tests {
         assert!(fixed([600.0, 120.0, 600.0, 120.0]));
     }
 
+    /// What each run of a layout is drawn with: size, font, how the font is set, slant, and
+    /// whether it is underlined or has its own colour.
+    type Drawn = (f32, u64, Vec<i16>, bool, bool, bool, Option<Rgba>);
+
+    fn runs_of(layout: &Layout<Ink>) -> Vec<Drawn> {
+        let mut runs = Vec::new();
+        for line in layout.lines() {
+            for item in line.items() {
+                if let PositionedLayoutItem::GlyphRun(run) = item {
+                    let synthesis = run.run().synthesis();
+                    runs.push((
+                        run.run().font_size(),
+                        run.run().font().data.id() * 1000 + u64::from(run.run().font().index),
+                        run.run().normalized_coords().iter().map(|c| c.to_bits()).collect(),
+                        synthesis.embolden(),
+                        synthesis.skew().is_some(),
+                        run.style().underline.is_some(),
+                        run.style().brush.0,
+                    ));
+                }
+            }
+        }
+        runs
+    }
+
+    #[test]
+    fn a_styled_word_is_drawn_differently_from_the_words_beside_it() {
+        let mut fonts = Fonts::new();
+        let base = BoxStyle { weight: 400, ..Theme::builtin().templates[0].boxes[0].clone() };
+        let text = "plain word plain";
+        let look = |own: sp_model::SpanStyle| vec![sp_model::TextSpan::new(6, 10, own)];
+        let plain = lay_out(&mut fonts, text, &[], &base, base.size, 10_000.0);
+        let red = Rgba::rgb(255, 0, 0);
+        // Weight and slant need a face for them on this computer; a computer with one face of
+        // the theme's font cannot show the difference, so those are tried only where it can.
+        let faces = |own: sp_model::SpanStyle| {
+            let layout = lay_out(&mut Fonts::new(), text, &look(own), &base, base.size, 10_000.0);
+            let runs = runs_of(&layout);
+            runs.len() == 3 && runs[1] != runs[0]
+        };
+        let bold = sp_model::SpanStyle { weight: Some(700), ..Default::default() };
+        let slanted = sp_model::SpanStyle { italic: Some(true), ..Default::default() };
+        let mut tries = vec![
+            ("size", sp_model::SpanStyle { size: Some(base.size * 2.0), ..Default::default() }),
+            ("underline", sp_model::SpanStyle { underline: Some(true), ..Default::default() }),
+            ("colour", sp_model::SpanStyle { fill: Some(red), ..Default::default() }),
+        ];
+        for (name, own) in [("bold", bold), ("italic", slanted)] {
+            if faces(own.clone()) {
+                tries.push((name, own));
+            } else {
+                // A Mac has them for the theme's font; elsewhere the font may have one face.
+                #[cfg(target_os = "macos")]
+                panic!("{name} draws like the words beside it");
+            }
+        }
+        for (name, own) in tries {
+            let layout = lay_out(&mut fonts, text, &look(own), &base, base.size, 10_000.0);
+            let runs = runs_of(&layout);
+            assert_eq!(runs.len(), 3, "{name}: before, the word, after: {runs:?}");
+            assert_ne!(runs[1], runs[0], "{name}: the word looks like what is before it");
+            assert_ne!(runs[1], runs[2], "{name}: the word looks like what is after it");
+            assert_eq!(runs[0], runs[2], "{name}: the neighbours differ");
+            // The words beside it are drawn as they are with no spans at all.
+            assert_eq!(runs[0], runs_of(&plain)[0], "{name}");
+        }
+        // Bigger letters make the line wider.
+        let big = sp_model::SpanStyle { size: Some(base.size * 2.0), ..Default::default() };
+        assert!(lay_out(&mut fonts, text, &look(big), &base, base.size, 10_000.0).width() > plain.width() * 1.2);
+    }
+
+    #[test]
+    fn a_spans_size_shrinks_with_the_box_and_the_rest_follows_the_theme() {
+        let mut fonts = Fonts::new();
+        let base = Theme::builtin().templates[0].boxes[0].clone();
+        let text = "plain word plain";
+        let own = sp_model::SpanStyle { size: Some(base.size * 1.5), ..Default::default() };
+        let spans = vec![sp_model::TextSpan::new(6, 10, own)];
+        // Drawn at half size (as when the text is shrunk to fit), both halve.
+        let layout = lay_out(&mut fonts, text, &spans, &base, base.size / 2.0, 10_000.0);
+        let sizes: Vec<f32> = runs_of(&layout).iter().map(|run| run.0).collect();
+        assert_eq!(sizes, vec![base.size / 2.0, base.size * 0.75, base.size / 2.0]);
+        // The theme makes its text bigger: the plain words follow; the word that was given a
+        // size by hand keeps it.
+        let bigger = BoxStyle { size: base.size * 2.0, ..base.clone() };
+        let layout = lay_out(&mut fonts, text, &spans, &bigger, bigger.size, 10_000.0);
+        let sizes: Vec<f32> = runs_of(&layout).iter().map(|run| run.0).collect();
+        assert_eq!(sizes, vec![base.size * 2.0, base.size * 1.5, base.size * 2.0]);
+    }
+
+    #[test]
+    fn a_slide_with_styled_words_builds_fits_and_fits_again_the_same() {
+        let theme = Theme::builtin();
+        let mut object = Object::text(Role::primary(), ["A line of words in a verse"; 9].join("\n"));
+        if let ObjectKind::Text { spans, .. } = &mut object.kind {
+            let red =
+                sp_model::SpanStyle { fill: Some(Rgba::rgb(255, 0, 0)), underline: Some(true), ..Default::default() };
+            *spans = vec![
+                sp_model::TextSpan::new(0, 6, sp_model::SpanStyle { weight: Some(800), ..Default::default() }),
+                sp_model::TextSpan::new(10, 20, red),
+            ];
+        }
+        let slide = Slide::new(vec![object]);
+        let mut fonts = Fonts::new();
+        let first = build_scene(&mut fonts, Some(&slide), &theme, 1920, 1080);
+        let again = build_scene(&mut fonts, Some(&slide), &theme, 1920, 1080);
+        assert_eq!(first.overflow, again.overflow);
+        assert!(!first.overflow, "nine lines shrink to fit");
+        // Different spans are not served the size another set was fitted to.
+        let mut other = slide.clone();
+        if let ObjectKind::Text { spans, .. } = &mut other.objects[0].kind {
+            spans[0].style.size = Some(400.0);
+        }
+        assert!(build_scene(&mut fonts, Some(&other), &theme, 1920, 1080).overflow, "huge words do not fit nine lines");
+    }
+
+    #[test]
+    fn spans_that_cut_through_clusters_or_run_past_the_words_do_not_panic() {
+        // A letter with a combining mark, a family emoji joined by zero-width joiners, and a
+        // Cyrillic word; spans start and stop inside them, and past the end.
+        let text = "e\u{301}x \u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} слово";
+        let length = text.chars().count();
+        let base = Theme::builtin().templates[0].boxes[0].clone();
+        let style = sp_model::SpanStyle { size: Some(40.0), weight: Some(700), ..Default::default() };
+        let mut fonts = Fonts::new();
+        for start in 0..=length + 2 {
+            for end in start..=length + 4 {
+                let spans = vec![sp_model::TextSpan::new(start, end, style.clone())];
+                lay_out(&mut fonts, text, &spans, &base, base.size, 800.0);
+            }
+        }
+        // Spans that were never normalized (out of order, overlapping) still lay out.
+        let loose = vec![
+            sp_model::TextSpan::new(5, 9, style.clone()),
+            sp_model::TextSpan::new(1, 7, style.clone()),
+            sp_model::TextSpan::new(3, 3, style),
+        ];
+        lay_out(&mut fonts, text, &loose, &base, base.size, 800.0);
+    }
+
     #[test]
     fn a_box_set_to_fit_its_text_grows_about_its_middle() {
         let mut fonts = Fonts::new();
         let look = BoxStyle { scaling: Scaling::ContainerUpOrDown, ..Theme::builtin().templates[0].boxes[0].clone() };
         let place = SlideRect { x: 100.0, y: 400.0, w: 1600.0, h: 100.0 };
-        let grown = fitted_container(&mut fonts, "One\nTwo\nThree", &look, place);
+        let grown = fitted_container(&mut fonts, "One\nTwo\nThree", &[], &look, place);
         assert!(grown.h > 300.0, "{grown:?}");
         assert!((grown.y + grown.h / 2.0 - 450.0).abs() < 0.5, "about its middle");
         assert_eq!((grown.x, grown.w), (place.x, place.w));

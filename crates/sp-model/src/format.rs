@@ -99,6 +99,41 @@ mod tests {
     }
 
     #[test]
+    fn a_song_without_styled_words_is_saved_byte_for_byte_as_before() {
+        let text = to_json(&song());
+        assert!(!text.contains("spans"), "no spans, no key");
+        // Read and written again, the file is the same bytes.
+        assert_eq!(to_json(&from_json(&text).unwrap()), text);
+    }
+
+    #[test]
+    fn styled_words_are_saved_in_the_song_file_and_come_back() {
+        let mut p = song();
+        let crate::ObjectKind::Text { spans, .. } = &mut p.groups[0].slides[0].objects[0].kind else {
+            panic!("a text object")
+        };
+        *spans = vec![crate::TextSpan::new(
+            0,
+            5,
+            crate::SpanStyle { weight: Some(700), italic: Some(true), ..crate::SpanStyle::default() },
+        )];
+        let text = to_json(&p);
+        assert!(text.contains("\"spans\""));
+        assert_eq!(from_json(&text).unwrap(), p);
+        // A hostile file: a span past the words is cut to them, and one that is nonsense goes.
+        let spans_of = |text: &str| {
+            let read = from_json(text).unwrap();
+            let crate::ObjectKind::Text { spans, .. } = &read.groups[0].slides[0].objects[0].kind else {
+                panic!("a text object")
+            };
+            spans.clone()
+        };
+        let long = spans_of(&text.replace("\"end\": 5", "\"end\": 99999"));
+        assert_eq!((long[0].start, long[0].end), (0, "Light rises".chars().count()));
+        assert!(spans_of(&text.replace("\"weight\": 700", "\"weight\": 0")).is_empty());
+    }
+
+    #[test]
     fn a_song_reads_back_exactly_as_it_was_written() {
         let p = song();
         assert_eq!(from_json(&to_json(&p)).unwrap(), p);

@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 use std::time::Instant;
 
-use sp_model::{ObjectKind, Slide, TextLink};
+use sp_model::{Slide, TextLink};
 
 use crate::timers::Timer;
 
@@ -55,8 +55,8 @@ pub fn fill<'s>(slide: &'s Slide, values: &Values) -> Cow<'s, Slide> {
     }
     let mut filled = slide.clone();
     for object in &mut filled.objects {
-        if let (Some(link), ObjectKind::Text { text, .. }) = (object.link, &mut object.kind) {
-            *text = value(link, slide, values);
+        if let Some(link) = object.link {
+            object.set_text(&value(link, slide, values));
         }
     }
     Cow::Owned(filled)

@@ -488,7 +488,7 @@ impl EditDraft {
             shows: sp_model::StageShows::default(),
             gradient: None,
             shown_paragraphs: None,
-            kind: ObjectKind::Text { text: "Text".to_owned(), style: TextStyle::default() },
+            kind: ObjectKind::Text { text: "Text".to_owned(), style: TextStyle::default(), spans: Vec::new() },
         };
         self.selected = Some(object.id);
         self.slide.objects.push(object);
@@ -746,10 +746,11 @@ impl EditDraft {
         let ids = self.selection();
         let mut changed = false;
         for object in self.slide.objects.iter_mut().filter(|object| ids.contains(&object.id)) {
-            let ObjectKind::Text { text, .. } = &mut object.kind else { continue };
+            let ObjectKind::Text { text, .. } = &object.kind else { continue };
             let new = change(text);
             if new != *text {
-                *text = new;
+                // Words that stay, stay styled: only the part that changed is replaced.
+                object.set_text(&new);
                 changed = true;
             }
         }
@@ -1473,12 +1474,14 @@ mod tests {
         let first = d.slide.clone();
         for (i, now) in [10.0, 10.3, 10.6, 10.9].into_iter().enumerate() {
             let before = d.slide.clone();
-            d.slide.objects[0].kind = ObjectKind::Text { text: "a".repeat(i + 1), style: TextStyle::default() };
+            d.slide.objects[0].kind =
+                ObjectKind::Text { text: "a".repeat(i + 1), style: TextStyle::default(), spans: Vec::new() };
             d.record_run(before, now);
         }
         // A pause, then more typing: a second step.
         let before = d.slide.clone();
-        d.slide.objects[0].kind = ObjectKind::Text { text: "later".to_owned(), style: TextStyle::default() };
+        d.slide.objects[0].kind =
+            ObjectKind::Text { text: "later".to_owned(), style: TextStyle::default(), spans: Vec::new() };
         d.record_run(before, 13.0);
         assert!(d.undo());
         assert_eq!(d.slide.objects[0].as_text(), Some("aaaa"));

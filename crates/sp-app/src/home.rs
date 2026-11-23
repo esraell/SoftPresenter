@@ -3469,13 +3469,14 @@ fn edit_view(
             });
             let object = draft.slide.objects.iter_mut().find(|o| o.id == id);
             match (placed, object) {
-                (Some((rect, look)), Some(sp_model::Object { kind: sp_model::ObjectKind::Text { text, .. }, .. })) => {
+                (Some((rect, look)), Some(object)) if object.as_text().is_some() => {
+                    let mut typed = object.as_text().unwrap_or_default().to_owned();
                     // The box is covered while it is typed in, so only the words being typed
                     // are read; the slide shows them in its own look as soon as typing ends.
                     ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(8, 9, 11));
                     ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.5, crate::studio::ACCENT), StrokeKind::Outside);
                     let size = look.map_or(20.0, |look| (look.size * scale).clamp(13.0, 34.0));
-                    let field = egui::TextEdit::multiline(text)
+                    let field = egui::TextEdit::multiline(&mut typed)
                         .frame(Frame::NONE)
                         .font(FontId::proportional(size))
                         .align(Align2::CENTER_TOP)
@@ -3484,6 +3485,9 @@ fn edit_view(
                     if started {
                         field.request_focus();
                     }
+                    // What was typed goes in as an edit, so words styled one by one keep their
+                    // looks.
+                    object.set_text(&typed);
                     if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
                         draft.typing = None;
                     }

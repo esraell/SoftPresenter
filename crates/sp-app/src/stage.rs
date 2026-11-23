@@ -240,8 +240,8 @@ pub fn as_slide(layout: &ThemeTemplate) -> Slide {
         .map(|object| {
             let mut object = object.clone();
             let (item, shows) = (item_of(&object), object.shows);
-            if let (Some(item), ObjectKind::Text { text, .. }) = (item, &mut object.kind) {
-                *text = sample_for(item, &shows);
+            if let Some(item) = item {
+                object.set_text(&sample_for(item, &shows));
             }
             object
         })
@@ -259,14 +259,14 @@ pub fn with_slide(layout: &ThemeTemplate, slide: &Slide) -> ThemeTemplate {
         let mut kept = object.clone();
         kept.shown_paragraphs = None;
         let item = item_of(object);
-        if let ObjectKind::Text { text, style } = &mut kept.kind {
+        if let ObjectKind::Text { text, style, spans } = &mut kept.kind {
             let role = object.role.clone().unwrap_or_else(Role::primary);
             let rect = object.frame.unwrap_or(SlideRect { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 });
             let min_size = layout.style_for(&role).map_or(30.0, |style| style.min_size);
             let look = style.over(&editor_box(role.clone(), rect, min_size));
             *style = TextStyle::all(&look);
             if let Some(item) = item {
-                text.clear();
+                sp_model::edit_text(text, spans, 0, usize::MAX, "");
                 if !boxes.iter().any(|have| have.role.0 == item) {
                     let mut mirror = layout
                         .style_for(&role)
@@ -606,17 +606,15 @@ pub fn slide(
             Some(item) => {
                 let value = item_value(item, &object.shows, now, next, overlay, about);
                 object.hidden = value.is_none();
-                if let ObjectKind::Text { text, .. } = &mut object.kind {
-                    *text = value.unwrap_or_default();
-                }
+                object.set_text(&value.unwrap_or_default());
                 // The stage message stands out in red, unless its box has a fill of its own.
                 if item == MESSAGE && object.fill.is_none() {
                     object.fill = Some(Rgba::rgb(190, 30, 30));
                 }
             }
             None => {
-                if let (Some(link), ObjectKind::Text { text, .. }) = (object.link, &mut object.kind) {
-                    *text = crate::links::value(link, now.unwrap_or(&empty), &values);
+                if let Some(link) = object.link {
+                    object.set_text(&crate::links::value(link, now.unwrap_or(&empty), &values));
                 }
             }
         }

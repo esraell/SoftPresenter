@@ -64,14 +64,19 @@ impl Role {
 
 /// What an object on a slide is. More kinds (pictures, video) are added here.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", from = "ObjectKindIn")]
 pub enum ObjectKind {
     /// A block of text. Line breaks in `text` are kept. `style` holds what this object sets
-    /// for itself; the rest of its look comes from the theme.
+    /// for itself; the rest of its look comes from the theme. `spans` holds the words that
+    /// look different from the rest, by character (see [`crate::TextSpan`]); they are kept
+    /// sound, and change with the words only through [`crate::edit_text`] (or
+    /// [`Object::replace_text`] and [`Object::set_text`], which call it).
     Text {
         text: String,
         #[serde(default, skip_serializing_if = "TextStyle::is_default")]
         style: TextStyle,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        spans: Vec<crate::TextSpan>,
     },
     /// A drawn shape filling the object's place, in the object's fill colour.
     Shape { shape: Shape },
@@ -101,6 +106,56 @@ pub enum ObjectKind {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         label: String,
     },
+}
+
+/// What a file holds for [`ObjectKind`]: the same shapes, read, then made sound (a file is not
+/// to be trusted). A text object's spans are checked against its words here, so every way of
+/// loading an object gets the same care.
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum ObjectKindIn {
+    Text {
+        text: String,
+        #[serde(default)]
+        style: TextStyle,
+        #[serde(default, deserialize_with = "crate::TextSpan::lenient")]
+        spans: Vec<crate::TextSpan>,
+    },
+    Shape {
+        shape: Shape,
+    },
+    Image {
+        file: String,
+        #[serde(default)]
+        fit: ImageFit,
+    },
+    Web {
+        url: String,
+    },
+    Screen {
+        #[serde(default)]
+        screen: Option<Uuid>,
+        #[serde(default)]
+        corner: f32,
+        #[serde(default)]
+        label: String,
+    },
+}
+
+impl From<ObjectKindIn> for ObjectKind {
+    fn from(read: ObjectKindIn) -> ObjectKind {
+        match read {
+            ObjectKindIn::Text { text, style, spans } => {
+                let spans =
+                    if spans.is_empty() { spans } else { crate::TextSpan::normalize(spans, text.chars().count()) };
+                ObjectKind::Text { text, style, spans }
+            }
+            ObjectKindIn::Shape { shape } => ObjectKind::Shape { shape },
+            ObjectKindIn::Image { file, fit } => ObjectKind::Image { file, fit },
+            ObjectKindIn::Web { url } => ObjectKind::Web { url },
+            ObjectKindIn::Screen { screen, corner, label } => ObjectKind::Screen { screen, corner, label },
+        }
+    }
 }
 
 /// How an item on a stage layout shows what it shows: which timer, the clock's form, how many
@@ -358,7 +413,7 @@ impl Object {
             shows: StageShows::default(),
             gradient: None,
             shown_paragraphs: None,
-            kind: ObjectKind::Text { text: text.into(), style: TextStyle::default() },
+            kind: ObjectKind::Text { text: text.into(), style: TextStyle::default(), spans: Vec::new() },
         }
     }
 
@@ -449,6 +504,41 @@ impl Object {
         }
     }
 
+    /// The words of a text object that look different from the rest; none for other objects.
+    pub fn spans(&self) -> &[crate::TextSpan] {
+        match &self.kind {
+            ObjectKind::Text { spans, .. } => spans,
+            _ => &[],
+        }
+    }
+
+    /// Replaces the characters from `start` to `end` of a text object's words with `with`,
+    /// moving its spans to follow ([`crate::edit_text`]). Does nothing to other objects.
+    pub fn replace_text(&mut self, start: usize, end: usize, with: &str) {
+        if let ObjectKind::Text { text, spans, .. } = &mut self.kind {
+            crate::edit_text(text, spans, start, end, with);
+        }
+    }
+
+    /// Makes a text object's words `new`, by the smallest change that gets there (or, if it
+    /// has as many characters as before, letter for letter), so the spans on the words that
+    /// stay stay with them. Every writer of a text object's words that has
+    /// the whole new text, not an edit, comes here. Does nothing to other objects.
+    pub fn set_text(&mut self, new: &str) {
+        let ObjectKind::Text { text, spans, .. } = &mut self.kind else { return };
+        if spans.is_empty() {
+            if text != new {
+                new.clone_into(text);
+            }
+        } else if text.chars().count() == new.chars().count() {
+            // Letters swapped for letters (capitals, a corrected word): each stays as styled as
+            // it was.
+            new.clone_into(text);
+        } else if let Some((start, end, with)) = crate::smallest_edit(text, new) {
+            crate::edit_text(text, spans, start, end, with);
+        }
+    }
+
     pub fn as_text(&self) -> Option<&str> {
         match &self.kind {
             ObjectKind::Text { text, .. } => Some(text),
@@ -474,9 +564,7 @@ impl Slide {
                 }
                 (Some(at), false) => {
                     // Only the words change; the object keeps the look it was given.
-                    if let ObjectKind::Text { text: words, .. } = &mut self.objects[at].kind {
-                        *words = text;
-                    }
+                    self.objects[at].set_text(&text);
                 }
                 (None, false) => {
                     let at = position.min(self.objects.len());
@@ -552,7 +640,9 @@ impl Slide {
             .iter()
             .map(|object| {
                 let kind = match &object.kind {
-                    ObjectKind::Text { style, .. } => ObjectKind::Text { text: String::new(), style: style.clone() },
+                    ObjectKind::Text { style, .. } => {
+                        ObjectKind::Text { text: String::new(), style: style.clone(), spans: Vec::new() }
+                    }
                     other @ (ObjectKind::Shape { .. }
                     | ObjectKind::Image { .. }
                     | ObjectKind::Web { .. }

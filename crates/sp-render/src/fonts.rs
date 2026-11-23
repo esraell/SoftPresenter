@@ -53,7 +53,7 @@ use parley::{FontContext, LayoutContext};
 /// Font lookup and text-layout scratch space. Make one per thread that draws and keep it.
 pub struct Fonts {
     pub(crate) font_cx: FontContext,
-    pub(crate) layout_cx: LayoutContext<()>,
+    pub(crate) layout_cx: LayoutContext<crate::scene::Ink>,
     /// The sizes text was last fitted to its boxes at, newest last: fitting tries size after
     /// size, laying the text out each time, and a slide behind a playing video is drawn again
     /// for every picture of it.
@@ -70,6 +70,7 @@ pub struct Fonts {
 /// A size text was fitted to a box at: the same text, style and box always fit the same way.
 struct Fitted {
     text: String,
+    spans: Vec<sp_model::TextSpan>,
     style: sp_model::BoxStyle,
     box_size: (f32, f32),
     size: f32,
@@ -397,9 +398,18 @@ impl Fonts {
     }
 
     /// The size this text was fitted to a box of this size at before, in this style.
-    pub(crate) fn fitted_size(&mut self, text: &str, style: &sp_model::BoxStyle, box_size: (f32, f32)) -> Option<f32> {
+    pub(crate) fn fitted_size(
+        &mut self,
+        text: &str,
+        spans: &[sp_model::TextSpan],
+        style: &sp_model::BoxStyle,
+        box_size: (f32, f32),
+    ) -> Option<f32> {
         self.catch_up();
-        let at = self.fitted.iter().rposition(|f| f.box_size == box_size && f.text == text && f.style == *style)?;
+        let at = self
+            .fitted
+            .iter()
+            .rposition(|f| f.box_size == box_size && f.text == text && f.spans == spans && f.style == *style)?;
         // Used again: moved to the end, so the ones not used for longest are let go first.
         let found = self.fitted.remove(at);
         let size = found.size;
@@ -408,11 +418,18 @@ impl Fonts {
     }
 
     /// Remembers the size text was fitted to a box at.
-    pub(crate) fn remember_fit(&mut self, text: &str, style: &sp_model::BoxStyle, box_size: (f32, f32), size: f32) {
+    pub(crate) fn remember_fit(
+        &mut self,
+        text: &str,
+        spans: &[sp_model::TextSpan],
+        style: &sp_model::BoxStyle,
+        box_size: (f32, f32),
+        size: f32,
+    ) {
         if self.fitted.len() >= MOST_FITTED {
             self.fitted.remove(0);
         }
-        self.fitted.push(Fitted { text: text.to_owned(), style: style.clone(), box_size, size });
+        self.fitted.push(Fitted { text: text.to_owned(), spans: spans.to_vec(), style: style.clone(), box_size, size });
     }
 }
 
@@ -523,7 +540,7 @@ mod tests {
     fn glyphs(fonts: &mut Fonts, family: &str, text: &str) -> Vec<(u32, f32, f32)> {
         let mut style = Theme::builtin().templates[0].boxes[0].clone();
         style.font_family = family.to_owned();
-        let layout = lay_out(fonts, text, &style, 60.0, 10_000.0);
+        let layout = lay_out(fonts, text, &[], &style, 60.0, 10_000.0);
         let mut found = Vec::new();
         for line in layout.lines() {
             for item in line.items() {

@@ -883,7 +883,7 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         rule(ui);
     }
     let role = object.role.clone();
-    let ObjectKind::Text { text, style } = &mut object.kind else {
+    let ObjectKind::Text { text, style, spans } = &mut object.kind else {
         ui.label(
             egui::RichText::new("A shape has no text. Its colour and outline are on the Shape tab.")
                 .size(12.0)
@@ -975,11 +975,11 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
                     sp_model::TextLink::Timer { id } => timer_name(id),
                     _ => None,
                 };
-                *text = crate::links::placeholder(chosen, name);
+                sp_model::edit_text(text, spans, 0, usize::MAX, &crate::links::placeholder(chosen, name));
             }
             // Unlinked: the words the link put there go too, and the box says "Text" again, as a
             // new one does. Words of its own were never replaced, so they stay.
-            None if placeholder => *text = "Text".to_owned(),
+            None if placeholder => sp_model::edit_text(text, spans, 0, usize::MAX, "Text"),
             _ => {}
         }
         object.link = link;
@@ -989,16 +989,18 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     }
     rule(ui);
     ui.horizontal(|ui| {
-        let note = if style.is_default() { "Looks as the theme has it" } else { "Styled by hand on this slide" };
+        let plain = style.is_default() && spans.is_empty();
+        let note = if plain { "Looks as the theme has it" } else { "Styled by hand on this slide" };
         ui.label(egui::RichText::new(note).size(11.5).color(DIM));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let reset = egui::Button::new(egui::RichText::new("Reset style").size(12.0));
             if ui
-                .add_enabled(!style.is_default(), reset)
-                .on_hover_text("Give this text the theme's look again")
+                .add_enabled(!plain, reset)
+                .on_hover_text("Give this text the theme's look again, words you styled one by one too")
                 .clicked()
             {
                 *style = TextStyle::default();
+                spans.clear();
             }
         });
     });

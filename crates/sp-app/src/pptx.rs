@@ -1261,7 +1261,7 @@ impl<'a, 'p> SlideCx<'a, 'p> {
             ..TextStyle::default()
         };
         let mut object = base_object("Text", frame);
-        object.kind = ObjectKind::Text { text: words, style };
+        object.kind = ObjectKind::Text { text: words, style, spans: Vec::new() };
         Some(object)
     }
 }
@@ -1648,7 +1648,7 @@ mod tests {
 
     fn text_of(object: &Object) -> (&str, &TextStyle) {
         match &object.kind {
-            ObjectKind::Text { text, style } => (text, style),
+            ObjectKind::Text { text, style, .. } => (text, style),
             other => panic!("not text: {other:?}"),
         }
     }
@@ -1940,7 +1940,7 @@ mod tests {
                 .objects
                 .iter()
                 .map(|o| match &o.kind {
-                    ObjectKind::Text { text, style } => format!(
+                    ObjectKind::Text { text, style, .. } => format!(
                         "text {:?} {}pt {} {:?}",
                         text.chars().take(24).collect::<String>(),
                         style.size.unwrap_or(0.0) / 2.667,

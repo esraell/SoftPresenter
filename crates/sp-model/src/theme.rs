@@ -48,7 +48,7 @@ pub enum Caps {
 }
 
 /// Words left in lower case inside a line in title case.
-const SMALL_WORDS: [&str; 16] =
+pub(crate) const SMALL_WORDS: [&str; 16] =
     ["a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of", "on", "or", "the", "to", "with"];
 
 impl Caps {
@@ -1274,6 +1274,12 @@ pub fn fonts_used(presentation: &crate::Presentation, theme: &Theme) -> Vec<Stri
                 {
                     families.push(drawn.font_family);
                 }
+                // Words given a font of their own.
+                for family in object.spans().iter().filter_map(|span| span.style.font_family.as_ref()) {
+                    if !families.contains(family) {
+                        families.push(family.clone());
+                    }
+                }
             }
         }
     }
@@ -1717,6 +1723,16 @@ mod tests {
             vec!["Georgia".to_owned(), theme.templates[0].boxes[0].font_family.clone()]
         );
         assert!(fonts_used(&crate::parse_song_text("S", ""), &theme).is_empty());
+        // A font given to a few words counts too.
+        let crate::ObjectKind::Text { spans, .. } = &mut song.groups[0].slides[0].objects[0].kind else {
+            panic!("a text object")
+        };
+        *spans = vec![crate::TextSpan::new(
+            0,
+            1,
+            crate::SpanStyle { font_family: Some("Palatino".to_owned()), ..crate::SpanStyle::default() },
+        )];
+        assert!(fonts_used(&song, &theme).contains(&"Palatino".to_owned()));
     }
 
     #[test]

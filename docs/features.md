@@ -959,6 +959,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   paste, undo, renaming by clicking a name, font search, and typing straight on the slide.
 - Character spacing, line height, paragraph spacing, baseline and margins for a text box, under
   the gear beside B I U S.
+- **Styled words inside a text box.** A text box keeps a list of spans beside its words: a range
+  of characters and the look that differs there (font, size, weight, italic, underline, strike,
+  colour). Offsets count characters (Unicode scalar values), not bytes or UTF-16 units. A span
+  overrides the box's own look, which overrides the theme's, so a theme change still reaches
+  every setting not made by hand; alignment, line spacing, margins and bullets stay per box.
+  Spans are saved only when there are some (an older file is saved unchanged), checked when a
+  file is read (sorted, apart, inside the words, at most 512; anything wrong is dropped), follow
+  the characters through caps, bullets and line changes, and shrink and grow with the box. Every
+  change to a box's words goes through one function that moves, cuts and joins them.
 - Text and shape fills can be a colour or a linear (at any angle) or radial gradient to a second
   colour. Every colour well opens a grid of swatches with the full colour picker under it.
 - Shapes (rectangle, rounded rectangle, ellipse, triangles, rhombus, polygon, star, arrows) from
