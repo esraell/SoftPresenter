@@ -371,6 +371,8 @@ pub struct SpanMix {
     pub underline: bool,
     pub strike: bool,
     pub fill: bool,
+    /// When the colour differs, one of the colours that is not the first's.
+    pub other_fill: Option<Rgba>,
 }
 
 /// The look of the characters from `start` to `end` over the box's look `base`: that of the
@@ -398,6 +400,9 @@ pub fn look_of_range(spans: &[TextSpan], start: usize, end: usize, base: &BoxSty
         mix.underline |= p.underline != first.underline;
         mix.strike |= p.strike != first.strike;
         mix.fill |= p.fill != first.fill;
+        if p.fill != first.fill && mix.other_fill.is_none() {
+            mix.other_fill = Some(p.fill);
+        }
     }
     (first, mix)
 }
@@ -603,6 +608,22 @@ mod tests {
         ];
         let kept = TextSpan::normalize(spans, 8);
         assert_eq!(kept, vec![span(2, 6, ok), span(6, 8, italic())]);
+    }
+
+    #[test]
+    fn a_range_with_two_colours_names_the_other_and_a_step_keeps_the_differences() {
+        let base = crate::Theme::builtin().text_style(None, &crate::TextStyle::default()).unwrap();
+        let red = Rgba::rgb(200, 0, 0);
+        let mut spans =
+            vec![span(2, 4, SpanStyle { fill: Some(red), size: Some(base.size + 10.0), ..SpanStyle::default() })];
+        let (first, mix) = look_of_range(&spans, 0, 6, &base);
+        assert!(mix.fill && mix.size);
+        assert_eq!((first.fill, mix.other_fill), (base.fill, Some(red)));
+        assert_eq!(look_of_range(&spans, 2, 4, &base).1, SpanMix::default());
+        // Everything in the range one step bigger: the red word is still 10 above the others.
+        restyle_range(&mut spans, 0, 6, 6, &base, |look| look.size += 4.0);
+        let sizes: Vec<Option<f32>> = spans.iter().map(|s| s.style.size).collect();
+        assert_eq!(sizes, vec![Some(base.size + 4.0), Some(base.size + 14.0), Some(base.size + 4.0)]);
     }
 
     #[test]

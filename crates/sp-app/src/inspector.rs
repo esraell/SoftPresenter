@@ -55,7 +55,12 @@ pub struct InspectorState {
     pub refocus_typing: bool,
     /// Set when the change just made is a step of its own for Undo.
     pub new_step: bool,
+    /// A− or A+ was pressed beside Size: how much to step every size by (slide units).
+    pub size_step: f32,
 }
+
+/// How far A− and A+ move a size, in slide units.
+const SIZE_STEP: f32 = 4.0;
 
 const WEIGHTS: [(u16, &str); 9] = [
     (100, "Thin"),
@@ -319,9 +324,20 @@ const SWATCHES: [[u8; 3]; 40] = [
 /// A colour well that opens a pop-up: a grid of swatches to pick from, and the full colour
 /// picker under it for any other colour.
 fn colour(ui: &mut egui::Ui, value: &mut Rgba, hint: &str) {
+    colour_split(ui, value, hint, None);
+}
+
+/// A colour well; with `split` (the words picked have two colours) it shows the two, cut
+/// corner to corner, and no swatch is marked as the one in use.
+fn colour_split(ui: &mut egui::Ui, value: &mut Rgba, hint: &str, split: Option<Rgba>) {
     let (well, response) = ui.allocate_exact_size(vec2(54.0, ROW - 2.0), Sense::click());
     let painter = ui.painter();
     painter.rect_filled(well, 4.0, to_color32(*value));
+    if let Some(other) = split {
+        // The lower right half, from the top right corner to the bottom left.
+        let lower = vec![well.right_top(), well.right_bottom(), well.left_bottom()];
+        painter.add(egui::Shape::convex_polygon(lower, to_color32(other), egui::Stroke::NONE));
+    }
     painter.rect_stroke(well, 4.0, egui::Stroke::new(1.0, Color32::from_gray(90)), egui::StrokeKind::Inside);
     let response = response.on_hover_text(hint);
     egui::Popup::from_toggle_button_response(&response)
@@ -470,7 +486,13 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
             );
         }
 
-        egui::ScrollArea::vertical().id_salt("inspector body").auto_shrink([false, false]).show(ui, |ui| {
+        // Testing aid: SOFTPRESENTER_INSPECTOR_SCROLL=<points> opens the inspector scrolled down
+        // that far, to take a picture of rows below the fold.
+        let mut body = egui::ScrollArea::vertical().id_salt("inspector body").auto_shrink([false, false]);
+        if let Some(down) = std::env::var("SOFTPRESENTER_INSPECTOR_SCROLL").ok().and_then(|v| v.parse::<f32>().ok()) {
+            body = body.vertical_scroll_offset(down);
+        }
+        body.show(ui, |ui| {
             Frame::new().inner_margin(egui::Margin { left: SIDE as i8, right: SIDE as i8, top: 8, bottom: 10 }).show(
                 ui,
                 |ui| {
@@ -996,6 +1018,32 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
             || wanted.font_family != shown.font_family;
     }
 
+    // A− and A+: every size moves by the same step, so the differences stay. With words
+    // picked only those words move; with none the box's size and every word's together.
+    let step = std::mem::take(&mut inspector.size_step);
+    if step != 0.0 {
+        let length = text.chars().count();
+        let box_look = style.over(&base);
+        let stepped = |size: f32| (size + step).clamp(8.0, 600.0);
+        match picked {
+            Some((_, from, to)) => {
+                sp_model::restyle_range(spans, from, to, length, &box_look, |look| look.size = stepped(look.size));
+                inspector.refocus_typing = true;
+            }
+            None => {
+                let mut whole = box_look.clone();
+                whole.size = stepped(box_look.size);
+                *style = TextStyle::between(&base, &whole);
+                for span in spans.iter_mut() {
+                    if let Some(size) = span.style.size {
+                        span.style.size = Some(stepped(size));
+                    }
+                }
+            }
+        }
+        inspector.new_step = true;
+    }
+
     if for_theme || stage_item {
         return;
     }
@@ -1150,12 +1198,23 @@ fn text_look(
     ui.horizontal(|ui| {
         egui::ComboBox::from_id_salt("font weight")
             .selected_text(weight_name(wanted.weight))
-            .width(full - 86.0)
+            .width(full - 86.0 - 62.0)
             .show_ui(ui, |ui| {
                 for (weight, name) in WEIGHTS {
                     ui.selectable_value(&mut wanted.weight, weight, name);
                 }
             });
+        for (label, by, hint) in
+            [("A\u{2212}", -SIZE_STEP, "Every size one step smaller"), ("A+", SIZE_STEP, "Every size one step bigger")]
+        {
+            if ui
+                .add_sized([20.0, ROW - 2.0], egui::Button::new(egui::RichText::new(label).size(11.0)))
+                .on_hover_text(hint)
+                .clicked()
+            {
+                inspector.size_step = by;
+            }
+        }
         ui.add_sized(
             [80.0, ROW - 2.0],
             egui::DragValue::new(&mut wanted.size)
@@ -1235,10 +1294,9 @@ fn text_look(
 
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Text Colour").size(13.0).color(INK));
-        if mix.fill {
-            ui.label(egui::RichText::new("Mixed").size(11.5).italics().color(DIM));
-        }
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| colour(ui, &mut wanted.fill, "Text colour"));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            colour_split(ui, &mut wanted.fill, "Text colour", mix.fill.then_some(mix.other_fill).flatten())
+        });
     });
     ui.add_space(4.0);
     ui.horizontal(|ui| fill_kind(ui, "text fill kind", &mut wanted.gradient));
