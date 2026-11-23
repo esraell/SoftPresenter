@@ -406,17 +406,11 @@ pub fn picture(path: &Path, max_side: u32) -> Result<Frame, String> {
     draw(&image).ok_or_else(|| format!("{}: the picture is empty.", shown_name(path)))
 }
 
-/// Draws each page of a PDF in turn, as large as fits in `max_width` × `max_height`, on white,
-/// turned as the page says and cut to its crop box, and hands it to `each` with its number
-/// (from 1) and the number of pages drawn in all; `each` returns `false` to stop. At most
-/// `most_pages` pages are drawn. Only one page is held at a time. Returns how many were drawn.
-pub fn pdf_pages(
+/// Opens a PDF and says how many pages (at most `most_pages`) it has, or why it can't be read.
+fn open_pdf(
     path: &Path,
-    max_width: u32,
-    max_height: u32,
     most_pages: usize,
-    mut each: impl FnMut(usize, usize, Frame) -> bool,
-) -> Result<usize, String> {
+) -> Result<(objc2_core_foundation::CFRetained<CGPDFDocument>, usize), String> {
     let name = shown_name(path);
     let url = file_url(path)?;
     // SAFETY: NSURL and CFURL are toll-free bridged: the same object, usable as either.
@@ -430,21 +424,70 @@ pub fn pdf_pages(
     if pages == 0 {
         return Err(format!("{name} has no pages."));
     }
-    // SAFETY: the name is a static string the framework defines.
-    let space = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB }))
-        .ok_or_else(|| "The colour space for drawing pages is missing.".to_owned())?;
-    for number in 1..=pages {
-        let Some(page) = CGPDFDocument::page(Some(&document), number) else { continue };
-        let Some(frame) = draw_page(&page, max_width, max_height, &space) else { continue };
-        if !each(number, pages, frame) {
-            return Ok(number);
-        }
-    }
-    Ok(pages)
+    Ok((document, pages))
 }
 
-/// One PDF page drawn as large as fits in the size given.
-fn draw_page(page: &CGPDFPage, max_width: u32, max_height: u32, space: &CGColorSpace) -> Option<Frame> {
+/// The size each page of a PDF is drawn at by [`pdf_draw`] (as large as fits in `max_width` x
+/// `max_height`, turned as the page says and cut to its crop box), without drawing any: one for
+/// each of the first `most_pages` pages, so a deck can be laid out at once.
+pub fn pdf_sizes(path: &Path, max_width: u32, max_height: u32, most_pages: usize) -> Result<Vec<(u32, u32)>, String> {
+    let (document, pages) = open_pdf(path, most_pages)?;
+    Ok((1..=pages)
+        .map(|number| {
+            CGPDFDocument::page(Some(&document), number)
+                .and_then(|page| fitted(&page, max_width, max_height))
+                .map_or((max_width, max_height), |(_, _, width, height, _)| (width as u32, height as u32))
+        })
+        .collect())
+}
+
+/// Draws the pages of a PDF on `threads` threads at once, each page as [`pdf_sizes`] says, on
+/// white, and hands each to `each` with its number (from 1), from the thread that drew it, in
+/// whatever order they finish; `each` returns `false` to stop everything. Every thread opens
+/// the document for itself. Returns how many pages were drawn.
+pub fn pdf_draw(
+    path: &Path,
+    max_width: u32,
+    max_height: u32,
+    most_pages: usize,
+    threads: usize,
+    each: impl Fn(usize, Frame) -> bool + Sync,
+) -> Result<usize, String> {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
+    let (_, pages) = open_pdf(path, most_pages)?;
+    let next = AtomicUsize::new(1);
+    let stopped = AtomicBool::new(false);
+    let drawn = AtomicUsize::new(0);
+    let work = || {
+        let Ok((document, _)) = open_pdf(path, most_pages) else { return };
+        // SAFETY: the name is a static string the framework defines.
+        let Some(space) = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB })) else { return };
+        loop {
+            let number = next.fetch_add(1, Relaxed);
+            if number > pages || stopped.load(Relaxed) {
+                return;
+            }
+            let Some(page) = CGPDFDocument::page(Some(&document), number) else { continue };
+            let Some(frame) = draw_page(&page, max_width, max_height, &space) else { continue };
+            drawn.fetch_add(1, Relaxed);
+            if !each(number, frame) {
+                stopped.store(true, Relaxed);
+                return;
+            }
+        }
+    };
+    std::thread::scope(|scope| {
+        for _ in 1..threads.clamp(1, pages) {
+            scope.spawn(work);
+        }
+        work();
+    });
+    Ok(drawn.load(Relaxed))
+}
+
+/// What fits a page in the size given: its crop box's width and height, then the size drawn
+/// and the scale.
+fn fitted(page: &CGPDFPage, max_width: u32, max_height: u32) -> Option<(f64, f64, usize, usize, f64)> {
     let crop = CGPDFPage::box_rect(Some(page), CGPDFBox::CropBox);
     let (w, h) = (crop.size.width, crop.size.height);
     if !(w > 0.0 && h > 0.0) {
@@ -455,6 +498,14 @@ fn draw_page(page: &CGPDFPage, max_width: u32, max_height: u32, space: &CGColorS
     let scale = (f64::from(max_width) / shown_w).min(f64::from(max_height) / shown_h);
     let width = ((shown_w * scale).round() as usize).max(1);
     let height = ((shown_h * scale).round() as usize).max(1);
+    Some((w, h, width, height, scale))
+}
+
+/// One PDF page drawn as large as fits in the size given.
+fn draw_page(page: &CGPDFPage, max_width: u32, max_height: u32, space: &CGColorSpace) -> Option<Frame> {
+    let (w, h, width, height, scale) = fitted(page, max_width, max_height)?;
+    let crop = CGPDFPage::box_rect(Some(page), CGPDFBox::CropBox);
+    let turn = CGPDFPage::rotation_angle(Some(page)).rem_euclid(360);
     let mut rgba = vec![0u8; width.checked_mul(height)?.checked_mul(4)?];
     let info = CGImageAlphaInfo::PremultipliedLast.0 | CGImageByteOrderInfo::Order32Big.0;
     // SAFETY: the buffer holds `height` rows of `width * 4` bytes and outlives the context,

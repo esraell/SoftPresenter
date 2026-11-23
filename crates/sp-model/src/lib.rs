@@ -2,6 +2,7 @@
 //! parser. No drawing, no windows.
 
 mod action;
+pub mod bounded_zip;
 mod build;
 mod format;
 mod import;

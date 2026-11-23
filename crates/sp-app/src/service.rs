@@ -811,6 +811,9 @@ pub struct Prefs {
     /// True when each button's key is written beside it (Help › Show Keys on Buttons).
     #[serde(default)]
     pub keys_on_buttons: bool,
+    /// How each kind of presentation file was last brought in (`pptx`: `slides` or `pictures`).
+    #[serde(default)]
+    pub import_as: std::collections::BTreeMap<String, String>,
 }
 
 /// When a song's copyright line is shown.
@@ -875,6 +878,7 @@ impl Default for Prefs {
             playlist_in_front: false,
             song_order: "listed".to_owned(),
             keys_on_buttons: false,
+            import_as: std::collections::BTreeMap::new(),
         }
     }
 }

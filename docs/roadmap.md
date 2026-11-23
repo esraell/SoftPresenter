@@ -176,7 +176,7 @@ rather than a feature, but no church on Windows can use the app without them.
 ## Library, playlists and import/export
 
 - **Choices when importing songs.** How slides are split (paragraph, line or marker, and how many lines), and the theme, library and playlist imported songs go to. (started: File › Import Songs, drops and `sp song import` read text, lyric, ChordPro, rich-text and Word files, find sections, and share long stretches into slides of up to four lines) · S · Medium
-- **PowerPoint import.** As editable slides, as pictures, or as objects and text (weekly sermon slides). (started: PowerPoint, Keynote and OpenDocument files, PDFs and folders of pictures become picture slides; editable slides to come) · L · High
+- **PowerPoint import, the rest.** `.pptx` files come in as editable slides or as pictures. Still to come: `.odp` and `.key` as editable slides, tables, text that mixes looks inside one box (a text box has one look), and arrow heads and other line ends. · M · Medium
 - **Lighter screens for picture-heavy decks.** The drawing library keeps up to about thirty full-size pictures per screen (roughly half a gigabyte each) until its texture fills; let them go sooner. · S–M · Medium
 - **Importing from a church's existing presentation software**, so a library can move over in one go: songs, playlists and their media. (started: ProPresenter 7 songs, library folders and song bundles, with groups, arrangements, labels, notes and copyright details, and a bundle's pictures and videos; not yet playlists, or the pictures and videos a plain song document names) · M · High
 - **SongSelect inside the app.** Search, preview and import from the search panel (⌘F). May need CCLI's agreement. · L · Medium

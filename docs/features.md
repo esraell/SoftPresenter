@@ -132,18 +132,43 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   number, writers and copyright go into the song's details; a church's own licence number is
   never kept), ChordPro (sections from its directives, chords taken out), SoftPresenter's own
   song text and song files, rich text, and on macOS Word and OpenDocument files.
-- **Slides from PowerPoint, Keynote, a PDF or pictures.** File › Import Slides…, dropping the
-  file or a folder of pictures on the window, or `sp song import`. A PowerPoint, Keynote or
-  OpenDocument presentation is turned into a PDF by a program on the Mac that opens it
-  (Keynote, then PowerPoint, then LibreOffice for PowerPoint files; Keynote for Keynote files),
-  so its slides look exactly as that program draws them; macOS asks once to allow it, and a
-  program SoftPresenter opened is closed again. Each page or picture becomes
-  a slide showing it across the whole slide, in a new presentation named after the file or
-  folder. Pages are drawn at up to 1920 × 1080 on white, turned and cropped as the PDF says, and
-  saved in the Images folder, so the deck keeps working when the file moves. Pictures in a
-  folder go in the order people number them (Slide2 before Slide10). It happens in the
-  background, so the window and keys go on working; a 60-page deck takes about ten seconds.
-  With no program that opens the file, it says what to install, or to export a PDF.
+- **Slides from a presentation file, a PDF or pictures.** File › Import Slides…, dropping the
+  file or a folder of pictures on the window, or `sp song import`. A `.pptx` (or `.ppsx`) is
+  read directly, with no program started, into slides you can edit (**As Slides**), or turned
+  into pictures of its slides (**As Pictures**); a dialog asks which, with what that kind of file
+  was last brought in as ready to confirm (`sp song import FILE --as slides|pictures` says it
+  without the dialog). A `.ppt`, `.pps`, `.key` or `.odp` comes in as pictures only.
+  - **As Slides** maps each slide's text boxes (the font, size, bold, italic, underline, colour,
+    alignment, line spacing and bullets most of a box's letters have), pictures (cropped as the
+    slide crops them), solid, gradient and picture backgrounds, rectangles, rounded rectangles,
+    ellipses and a few other simple shapes with their fill and outline, and lines, in their
+    places, scaled from the deck's slide to SoftPresenter's (a 4:3 deck is centred, not
+    stretched). What a placeholder leaves unsaid comes from its slide layout and master, and
+    colours and fonts from the theme; the master's and layout's own pictures and shapes sit
+    behind the slide. Speaker notes come into the slide's notes, and hidden slides come in
+    disabled. A chart, table, diagram or embedded object is drawn from the picture the file
+    keeps for it if it keeps one (often beside the object), otherwise left out; embedded sound
+    and video aren't brought in (a video's poster picture is). A box that mixes sizes, colours or
+    fonts takes the look most of its letters have, since a text box here has one look. Every
+    slide that has any of these, or a shape that can't be drawn, is named when the import is
+    done ("Check slides 3 (a chart, drawn from the picture the file keeps for it), …"). The
+    file is read with limits: bounded sizes and numbers of parts, overlapping parts refused, no
+    document types or entities, bounded nesting, and a picture over 32 MB or 64 million pixels
+    left out. It takes a few milliseconds for a text deck, a fraction of a second with pictures.
+  - **As Pictures** turns the file into a PDF with a program on the Mac that opens it (Keynote,
+    then PowerPoint, then LibreOffice for `.pptx`; Keynote for `.key`; LibreOffice then PowerPoint
+    for `.odp`), so its slides look exactly as that program draws them. The program is started
+    without a window and without coming to the front where it allows that (LibreOffice runs
+    headless); macOS asks once to allow it, a program SoftPresenter started is closed again, and
+    one that was already open is left alone. With none of them installed it says so, and for a
+    `.pptx` offers As Slides.
+  - **A PDF or pictures** become one picture slide each, in a new presentation named after the
+    file or folder, saved in the Images folder so the deck keeps working when the file moves.
+    The presentation appears at once with all its slides; the pages (drawn at up to 1920 × 1080
+    on white, turned and cropped as the PDF says, several at a time on background threads) and
+    the copied pictures fill in as they are ready, and the window and keys go on working.
+    Pictures in a folder go in the order people number them (Slide2 before Slide10). A 40-page
+    PDF takes about 0.07 seconds where it took 0.4 seconds one page at a time.
 - **Bringing songs across from SoftProjector.** Its database (`spData.sqlite`) or an exported
   songbook (`.sps`), dropped on the window or chosen in File › Import Songs › Song Files…: each songbook
   becomes a library of its name, each song keeps its number before its title (so "123" still

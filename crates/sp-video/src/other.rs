@@ -8,14 +8,27 @@ pub fn picture(_path: &Path, _max_side: u32) -> Result<Frame, String> {
     Err("This picture format can be opened on macOS only, for now.".to_owned())
 }
 
-pub fn pdf_pages(
+const NO_PDF: &str =
+    "PDF files can be turned into slides on macOS only, for now. Export the slides as pictures instead.";
+
+pub fn pdf_sizes(
     _path: &Path,
     _max_width: u32,
     _max_height: u32,
     _most_pages: usize,
-    _each: impl FnMut(usize, usize, Frame) -> bool,
+) -> Result<Vec<(u32, u32)>, String> {
+    Err(NO_PDF.to_owned())
+}
+
+pub fn pdf_draw(
+    _path: &Path,
+    _max_width: u32,
+    _max_height: u32,
+    _most_pages: usize,
+    _threads: usize,
+    _each: impl Fn(usize, Frame) -> bool + Sync,
 ) -> Result<usize, String> {
-    Err("PDF files can be turned into slides on macOS only, for now. Export the slides as pictures instead.".to_owned())
+    Err(NO_PDF.to_owned())
 }
 
 /// The account's home folder from the system's own records: on macOS only, for now.

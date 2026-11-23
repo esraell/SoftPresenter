@@ -45,7 +45,6 @@ pub struct Imported {
 /// Copies a picture into the Images folder under a name of its own. The error is a sentence for
 /// the operator.
 pub fn import(path: &Path) -> Result<Imported, String> {
-    let shown = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
     // A video stays where it is (they can be large) and is named by its whole path; its still
     // gives its shape.
     if crate::media::is_video(path) {
@@ -54,19 +53,31 @@ pub fn import(path: &Path) -> Result<Imported, String> {
         let file = path.to_string_lossy().into_owned();
         return Ok(Imported { file, name, width: still.width(), height: still.height() });
     }
-    // A picture in a format the system reads (HEIC, TIFF...) is measured by decoding it.
-    let (width, height) = image::image_dimensions(path).or_else(|e| {
-        crate::media::load_picture(path)
-            .map(|picture| (picture.width(), picture.height()))
-            .map_err(|_| format!("{shown}: not a picture SoftPresenter can open ({e})."))
-    })?;
+    let (width, height) = measure(path)?;
     let dir = folder().ok_or_else(|| "Could not find where to keep pictures on this computer.".to_owned())?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Could not make the Images folder: {e}"))?;
     let ending = path.extension().map_or_else(String::new, |e| format!(".{}", e.to_string_lossy().to_lowercase()));
     let file = format!("{}{ending}", sp_model::Uuid::new_v4());
-    std::fs::copy(path, dir.join(&file)).map_err(|e| format!("Could not copy {shown}: {e}"))?;
+    copy_into(path, &dir, &file)?;
     let name = path.file_stem().map_or_else(|| "Picture".to_owned(), |stem| stem.to_string_lossy().into_owned());
     Ok(Imported { file, name, width, height })
+}
+
+/// How big a picture is, in pixels. A picture in a format the system reads (HEIC, TIFF...) is
+/// measured by decoding it.
+pub fn measure(path: &Path) -> Result<(u32, u32), String> {
+    let shown = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+    image::image_dimensions(path).or_else(|e| {
+        crate::media::load_picture(path)
+            .map(|picture| (picture.width(), picture.height()))
+            .map_err(|_| format!("{shown}: not a picture SoftPresenter can open ({e})."))
+    })
+}
+
+/// Copies a picture into a folder under a name.
+pub fn copy_into(path: &Path, folder: &Path, file: &str) -> Result<(), String> {
+    let shown = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+    std::fs::copy(path, folder.join(file)).map(drop).map_err(|e| format!("Could not copy {shown}: {e}"))
 }
 
 #[cfg(test)]

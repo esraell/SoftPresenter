@@ -9,6 +9,8 @@ license.workspace = true
 uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# Zips read with limits (bounded_zip): Bibles and presentation files.
+zip.workspace = true
 
 [lints]
 workspace = true

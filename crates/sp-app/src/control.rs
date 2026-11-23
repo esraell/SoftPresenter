@@ -716,9 +716,12 @@ fn with_full_paths(args: Vec<String>) -> Vec<String> {
     if !names_files {
         return args;
     }
+    let args_were = args.clone();
     args.into_iter()
         .enumerate()
         .map(|(at, word)| match Path::new(&word) {
+            // The word after `--as` says how, and is never a file.
+            _ if at > 2 && args_were.get(at - 1).is_some_and(|w| w == "--as") => word,
             path if at >= 2 && path.exists() => {
                 path.canonicalize().map_or(word.clone(), |full| full.to_string_lossy().into_owned())
             }
@@ -1069,6 +1072,10 @@ Themes
                                a song pack's songs; ones already here are skipped unless told
                                (a pack with videos goes on in the background: add --wait to
                                wait for it, or ask with job N)
+  song import FILE.pptx [--as slides|pictures]
+                               a presentation as editable slides (read from the file, the usual
+                               way for .pptx), or as pictures of its slides (exact look; needs a
+                               program that opens it)
 
 Changing a slide (each change is saved, can be undone, and shows on screen at once)
   slide SONG N [--json]        the slide's objects: words, place and look (* = the slide's own)
@@ -3237,7 +3244,16 @@ impl crate::App {
                 } else {
                     crate::pack::Same::Skip
                 };
-                let mut paths: Vec<std::path::PathBuf> = args[2..]
+                // `--as slides` or `--as pictures`: how presentation files come in (otherwise as
+                // each kind was last brought in).
+                let mut words: Vec<String> = args[2..].to_vec();
+                let mut deck_as = None;
+                if let Some(at) = words.iter().position(|w| w == "--as") {
+                    let how = words.get(at + 1).and_then(|w| crate::deck::ImportAs::from_name(w));
+                    deck_as = Some(how.ok_or("--as slides, or --as pictures")?);
+                    words.drain(at..=at + 1);
+                }
+                let mut paths: Vec<std::path::PathBuf> = words
                     .iter()
                     .filter(|w| !matches!(w.as_str(), "--skip" | "--replace" | "--keep-both"))
                     .map(std::path::PathBuf::from)
@@ -3267,7 +3283,7 @@ impl crate::App {
                     let text = said_packs.join("\n");
                     return if any_in { Ok(Reply::done(text)) } else { Err(text) };
                 }
-                let done = self.import_songs_to(&paths, &crate::SongsTo::default());
+                let done = self.import_songs_to(&paths, &crate::SongsTo { deck_as, ..crate::SongsTo::default() });
                 let (imported, problems, decks) = (&done.titles, &done.problems, &done.decks);
                 let mut busy: Vec<String> = Vec::new();
                 if !decks.is_empty() {

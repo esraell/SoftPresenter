@@ -115,7 +115,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | File › Import Songs › Song Files…, Words from Text… (or drop song files on the window) | Import songs from song files (SoftPresenter's own, `.pro` documents, ChordPro and lyric files, songbooks) or words in text, rich-text or Word files (`load.rs` lists each kind's endings) |
 | File › Import Songs › A Song Bundle… | `.proBundle` bundles (every song in one, in its order; their pictures and videos go into the media bin, `bundle.rs`) and song packs |
 | File › Import Songs › A Library Folder… (or drop a folder) | Bring a library folder across; each folder becomes a library; on a Mac song documents and bundles can be chosen too |
-| File › Import Slides (PowerPoint, Keynote, PDF or Pictures)… (or drop one, or a folder of pictures) | A presentation of picture slides, one per slide, page or picture |
+| File › Import Slides (presentations, PDF or Pictures)… (or drop one, or a folder of pictures) | A presentation of slides: a `.pptx` asks first, As Slides (editable, read from the file: `pptx.rs`) or As Pictures (picture slides from the program that opens it: `convert.rs`); a PDF or pictures are one picture slide each, made on threads, their slides there at once and pictures filling in (`deck.rs`) |
 | Command-L | Back to the song on screen |
 
 Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can be chosen with

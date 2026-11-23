@@ -189,8 +189,9 @@ Two things are optional:
   it, NDI screens say NDI isn't installed and everything else works.
 - **Desktop Video** 16.0 or later (free, from Blackmagic Design) to play a screen out of a
   DeckLink card. Without it there are no DeckLink outputs to choose.
-- **Keynote** (free from Apple), PowerPoint or LibreOffice, to bring presentation files in as
-  slides; a Keynote file needs Keynote. PDFs and pictures need none of them.
+- **Keynote** (free from Apple), PowerPoint or LibreOffice, only to bring presentation files in
+  as pictures of their slides (a Keynote file needs Keynote). A `.pptx` can come in as editable
+  slides with none of them, and PDFs and pictures need none either.
 
 Song text files can be opened from the command line, such as the sample:
 `cargo run --release -- samples/sample-song.txt`. Other options: `--list-displays`,

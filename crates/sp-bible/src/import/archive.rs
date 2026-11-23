@@ -6,6 +6,8 @@
 use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 
+use sp_model::bounded_zip::{ZipRefusal, is_zip};
+
 use super::{Document, kind_of_text};
 
 /// How much may be read for one Bible.
@@ -120,10 +122,6 @@ pub(super) fn documents_at(path: &Path, name: &str, limits: &Limits) -> Result<V
     documents_in(&bytes, name, limits)
 }
 
-fn is_zip(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"PK\x03\x04") || bytes.starts_with(b"PK\x05\x06")
-}
-
 /// Text decoded from what was read, counted against what may be unpacked in all: decoding can
 /// make text longer than its bytes (one byte of an old encoding can be three of UTF-8).
 fn decoded(bytes: &[u8], unpacked: &mut u64, limits: &Limits, name: &str) -> Result<String, String> {
@@ -145,49 +143,30 @@ pub(super) fn documents_in(bytes: &[u8], name: &str, limits: &Limits) -> Result<
         let text = decoded(bytes, &mut unpacked, limits, name)?;
         return Ok(vec![Document { name: name.to_owned(), text }]);
     }
-    let not_zip = || format!("{name} is a damaged zip file.");
-    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|_| not_zip())?;
-    if zip.len() > limits.entries {
-        return Err(too_many(name));
-    }
-    // Entries that share their packed bytes would make the same unpacking be done over and over:
-    // such a zip is refused (none is ever made that way honestly).
-    if zip.has_overlapping_files().unwrap_or(true) {
-        return Err(format!("{name} is a damaged zip file: its files overlap."));
-    }
+    let zip_limits = sp_model::bounded_zip::ZipLimits {
+        file: limits.file,
+        entry: limits.entry,
+        unpacked: limits.unpacked,
+        entries: limits.entries,
+    };
     let mut documents = Vec::new();
-    let mut packed = 0_u64;
-    for at in 0..zip.len() {
-        let (entry_name, wanted, size) = {
-            let entry = zip.by_index_raw(at).map_err(|_| not_zip())?;
-            let entry_name = String::from_utf8_lossy(entry.name_raw()).into_owned();
-            let plain = !entry.is_dir() && !entry.is_symlink() && !entry.encrypted();
-            (entry_name.clone(), plain && worth_reading(&entry_name), entry.compressed_size())
-        };
-        if !wanted {
-            continue;
-        }
-        // The entries read can't be packed into more bytes than the zip has.
-        packed = packed.saturating_add(size);
-        if packed > bytes.len() as u64 {
-            return Err(not_zip());
-        }
-        let mut entry = zip.by_index(at).map_err(|_| not_zip())?;
-        // What the entry says about its size is not trusted: only what is read counts.
-        let room = limits.entry.min(limits.unpacked.saturating_sub(unpacked));
-        let mut read = Vec::new();
-        entry.by_ref().take(room + 1).read_to_end(&mut read).map_err(|_| not_zip())?;
-        if read.len() as u64 > room {
-            return Err(unpacks_too_much(name));
-        }
-        // A zip in a zip is never opened.
-        if is_zip(&read) {
-            unpacked += read.len() as u64;
-            continue;
-        }
-        let text = decoded(&read, &mut unpacked, limits, name)?;
-        documents.push(Document { name: entry_name, text });
-    }
+    let read =
+        sp_model::bounded_zip::for_each_entry(bytes, &zip_limits, worth_reading, |entry_name, read, unpacked| {
+            // Decoding can make text longer than its bytes, and that counts too.
+            let text = sp_model::decode_text(&read);
+            *unpacked += (text.len() as u64).max(read.len() as u64);
+            if *unpacked > limits.unpacked {
+                return Err(ZipRefusal::UnpacksTooMuch);
+            }
+            documents.push(Document { name: entry_name, text });
+            Ok(())
+        });
+    read.map_err(|refusal| match refusal {
+        ZipRefusal::Damaged => format!("{name} is a damaged zip file."),
+        ZipRefusal::Overlap => format!("{name} is a damaged zip file: its files overlap."),
+        ZipRefusal::TooMany => too_many(name),
+        ZipRefusal::UnpacksTooMuch => unpacks_too_much(name),
+    })?;
     Ok(documents)
 }
 

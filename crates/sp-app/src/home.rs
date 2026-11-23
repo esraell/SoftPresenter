@@ -333,6 +333,13 @@ pub struct HomeState {
     /// Keys on Buttons, or the switch in the list of keys; kept with the preferences), and
     /// whether a testing aid shows them for a picture without changing the setting.
     pub keys_on_buttons: bool,
+    /// Presentation files waiting to be told how to come in: as slides or as pictures.
+    pub ask_import: Option<AskImport>,
+    /// The answer: the files, and how they are to come in. Taken by the app.
+    pub import_answer: Option<(Vec<std::path::PathBuf>, crate::deck::ImportAs)>,
+    /// How each kind of presentation file was last brought in, by kind (`pptx`) and then
+    /// `slides` or `pictures`; kept in the settings.
+    pub import_as: std::collections::BTreeMap<String, String>,
     pub key_tags_for_capture: bool,
     /// The list of every key is open.
     pub key_sheet: bool,
@@ -1783,6 +1790,9 @@ impl Default for HomeState {
             pick_scroll: 0,
             numbers: None,
             keys_on_buttons: false,
+            ask_import: None,
+            import_answer: None,
+            import_as: std::collections::BTreeMap::new(),
             key_tags_for_capture: false,
             key_sheet: false,
             live_menu: None,
@@ -2109,6 +2119,7 @@ impl HomeState {
             playlist_in_front: self.playlist_open,
             song_order: self.song_order.name().to_owned(),
             keys_on_buttons: self.keys_on_buttons,
+            import_as: self.import_as.clone(),
             ..crate::service::Prefs::default()
         }
     }
@@ -2146,6 +2157,7 @@ impl HomeState {
         self.playlist_open = prefs.playlist_in_front;
         self.song_order = crate::kept::SongOrder::named(&prefs.song_order);
         self.keys_on_buttons = prefs.keys_on_buttons;
+        self.import_as = prefs.import_as.clone();
     }
 
     /// How long a new picture takes to fade in on the output; zero when slides cut.
@@ -2289,6 +2301,7 @@ fn home_view(
     version_sheet(ui, state);
     confirm_delete_song(ui, show, state);
     confirm_delete_media(ui, show, state);
+    ask_import_as(ui, state);
     // Delete (or Backspace) deletes what is picked out in the list last clicked: what Undo
     // brings back at once (slides, playlist items), the rest after asking; with neither list
     // last clicked, the slide picked out by a right-click.
@@ -5802,6 +5815,65 @@ fn new_song_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
         Some(false) => state.new_song_sheet = None,
         _ => {}
     }
+}
+
+/// Presentation files waiting to be told how to come in.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AskImport {
+    pub paths: Vec<std::path::PathBuf>,
+}
+
+impl HomeState {
+    /// How a kind of presentation file (`pptx`) was last brought in; slides until it has been
+    /// brought in as pictures.
+    pub fn import_choice(&self, kind: &str) -> crate::deck::ImportAs {
+        self.import_as
+            .get(kind)
+            .and_then(|name| crate::deck::ImportAs::from_name(name))
+            .unwrap_or(crate::deck::ImportAs::Slides)
+    }
+
+    /// Remembers how a kind of presentation file was brought in.
+    pub fn remember_import(&mut self, kind: &str, how: crate::deck::ImportAs) {
+        self.import_as.insert(kind.to_owned(), how.name().to_owned());
+    }
+}
+
+/// Asks how presentation files are to come in: as slides (to edit; read straight from the file),
+/// or as pictures of them (the exact look). What was chosen last for the kind is the answer
+/// Return gives, and is remembered anew with each answer.
+fn ask_import_as(ui: &mut egui::Ui, state: &mut HomeState) {
+    use crate::deck::{ImportAs, kind_of, reads_as_slides};
+    let Some(ask) = state.ask_import.clone() else { return };
+    let direct: Vec<&std::path::PathBuf> = ask.paths.iter().filter(|p| reads_as_slides(p)).collect();
+    let title = match direct.as_slice() {
+        [one] => {
+            format!(
+                "Bring in {} as\u{2026}",
+                one.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+            )
+        }
+        many => format!("Bring in these {} presentations as\u{2026}", many.len()),
+    };
+    let last = direct.first().map_or(ImportAs::Slides, |path| state.import_choice(kind_of(path)));
+    let message = "Slides can be edited, and are read straight from the file. Pictures look exactly as they                    did in the program that made them, which has to be on this Mac.";
+    let labels = ["Cancel", "As Pictures", "As Slides"];
+    let default = if last == ImportAs::Pictures { 1 } else { 2 };
+    let Some(answer) =
+        crate::studio::choose(ui.ctx(), "import as", crate::icons::Icon::Import, &title, message, &labels, default)
+    else {
+        return;
+    };
+    state.ask_import = None;
+    let how = match answer {
+        1 => ImportAs::Pictures,
+        2 => ImportAs::Slides,
+        _ => return,
+    };
+    for path in &direct {
+        state.remember_import(kind_of(path), how);
+    }
+    state.import_answer = Some((ask.paths, how));
 }
 
 fn confirm_delete_song(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {

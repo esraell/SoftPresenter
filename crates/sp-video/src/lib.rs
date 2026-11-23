@@ -28,13 +28,13 @@ pub use web::WebPage;
 mod ffmpeg;
 
 #[cfg(target_os = "macos")]
-pub use mac::{display_names, home_folder, pdf_pages, picture};
+pub use mac::{display_names, home_folder, pdf_draw, pdf_sizes, picture};
 
 #[cfg(not(target_os = "macos"))]
 mod other;
 
 #[cfg(not(target_os = "macos"))]
-pub use other::{display_names, home_folder, pdf_pages, picture};
+pub use other::{display_names, home_folder, pdf_draw, pdf_sizes, picture};
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

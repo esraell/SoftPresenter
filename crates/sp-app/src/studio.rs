@@ -3142,7 +3142,37 @@ pub fn song_to_edit(show: &Show, state: &HomeState) -> Option<SlideRef> {
 /// `confirm` (drawn in red, as macOS draws a destructive button); Escape cancels. `None` until
 /// it is answered.
 pub fn alert(ctx: &egui::Context, id: &str, icon: Icon, title: &str, message: &str, confirm: &str) -> Option<bool> {
-    const WIDTH: f32 = 268.0;
+    choose_with(ctx, id, icon, title, message, &["Cancel", confirm], 1, true, 268.0).map(|answer| answer == 1)
+}
+
+/// An alert with any number of buttons side by side, the first of which is Cancel (Escape
+/// answers with it): the place of the button picked, or `None` until one is. `default` is the
+/// one Return gives, with a faint ring.
+pub fn choose(
+    ctx: &egui::Context,
+    id: &str,
+    icon: Icon,
+    title: &str,
+    message: &str,
+    labels: &[&str],
+    default: usize,
+) -> Option<usize> {
+    choose_with(ctx, id, icon, title, message, labels, default, false, 340.0)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn choose_with(
+    ctx: &egui::Context,
+    id: &str,
+    icon: Icon,
+    title: &str,
+    message: &str,
+    labels: &[&str],
+    default: usize,
+    destructive: bool,
+    width: f32,
+) -> Option<usize> {
+    let width_of_alert = width;
     let red = Color32::from_rgb(255, 99, 88);
     // It fades and settles in quickly, as a macOS alert does.
     let shown = ctx.animate_bool_with_time(egui::Id::unique(("alert shown", id)), true, 0.14);
@@ -3160,8 +3190,8 @@ pub fn alert(ctx: &egui::Context, id: &str, icon: Icon, title: &str, message: &s
         .frame(frame)
         .show(ctx, |ui| {
             ui.multiply_opacity(shown);
-            ui.set_width(WIDTH - 36.0);
-            let mut answer = None;
+            ui.set_width(width_of_alert - 36.0);
+            let mut answer: Option<usize> = None;
             ui.vertical_centered(|ui| {
                 // The icon, in a rounded tile as an app's icon is.
                 let (tile, _) = ui.allocate_exact_size(vec2(56.0, 56.0), Sense::hover());
@@ -3189,12 +3219,13 @@ pub fn alert(ctx: &egui::Context, id: &str, icon: Icon, title: &str, message: &s
                 }
                 ui.add_space(16.0);
             });
-            // Two buttons side by side, each half the width: Cancel, then the answer.
+            // The buttons side by side, each the same width: Cancel first, then the answers.
             let gap = 8.0;
-            let size = vec2((ui.available_width() - gap) / 2.0, 28.0);
+            let size = vec2((ui.available_width() - gap * (labels.len() as f32 - 1.0)) / labels.len() as f32, 28.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
-                for (label, yes) in [("Cancel", false), (confirm, true)] {
+                for (at, label) in labels.iter().enumerate() {
+                    let yes = at == default;
                     let (place, button) = ui.allocate_exact_size(size, Sense::click());
                     let fill = match (yes, button.is_pointer_button_down_on(), button.hovered()) {
                         (_, true, _) => Color32::from_white_alpha(52),
@@ -3211,11 +3242,11 @@ pub fn alert(ctx: &egui::Context, id: &str, icon: Icon, title: &str, message: &s
                             StrokeKind::Inside,
                         );
                     }
-                    let ink = if yes { red } else { Color32::WHITE };
+                    let ink = if yes && destructive { red } else { Color32::WHITE };
                     let font = if yes { semibold(13.0) } else { FontId::proportional(13.0) };
                     ui.painter().text(place.center(), Align2::CENTER_CENTER, label, font, ink);
                     if button.clicked() {
-                        answer = Some(yes);
+                        answer = Some(at);
                     }
                 }
             });
@@ -3227,9 +3258,9 @@ pub fn alert(ctx: &egui::Context, id: &str, icon: Icon, title: &str, message: &s
         ctx.request_repaint();
     }
     let answer = response.inner.or(if escape {
-        Some(false)
+        Some(0)
     } else if enter {
-        Some(true)
+        Some(default)
     } else {
         None
     });

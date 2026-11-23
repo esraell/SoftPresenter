@@ -1,15 +1,18 @@
 //! Presentation files from other programs (PowerPoint, Keynote, OpenDocument) turned into a PDF
 //! by a program on this Mac that can open them, so their slides come in as pictures that look
-//! exactly as that program draws them. Which programs are tried, in order:
+//! exactly as that program draws them (the "As Pictures" way of bringing a presentation in; the
+//! other way reads a `.pptx` directly, see [`crate::pptx`]). Which programs are tried, in order:
 //!
 //! - PowerPoint files: Keynote (which opens them), then PowerPoint, then LibreOffice.
 //! - Keynote files: Keynote.
 //! - OpenDocument presentations: LibreOffice, then PowerPoint.
 //!
 //! PowerPoint and Keynote are asked through AppleScript, which macOS lets SoftPresenter do once
-//! the person allows it (it asks the first time). LibreOffice is run without a window. A
-//! program SoftPresenter opened is quit again afterwards; one that was already open is left
-//! open. Each attempt gets two minutes.
+//! the person allows it (it asks the first time). They are started with `launch` (hidden, with
+//! no window and not brought to the front) and never `activate`d; the file is opened and
+//! exported without a window being shown where the program allows it. LibreOffice is run
+//! headless. A program SoftPresenter started is quit again afterwards; one that was already
+//! open is left alone. Each attempt gets two minutes.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -44,6 +47,34 @@ impl Program {
             return system;
         }
         std::env::var_os("HOME").map_or(system.clone(), |home| PathBuf::from(home).join("Applications").join(name))
+    }
+
+    /// The name the program runs under, for asking whether it is running.
+    fn process(self) -> &'static str {
+        match self {
+            Program::PowerPoint => "Microsoft PowerPoint",
+            Program::Keynote => "Keynote",
+            Program::LibreOffice => "soffice",
+        }
+    }
+
+    /// Whether the program is running now.
+    fn running(self) -> bool {
+        Command::new("/usr/bin/pgrep")
+            .args(["-x", self.process()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    /// Asks a program SoftPresenter started to quit, when its script didn't get to (it was
+    /// stopped for taking too long, or failed part way).
+    fn quit(self) {
+        if self != Program::LibreOffice {
+            let script = format!("tell application \"{}\" to quit", self.process());
+            let _ = run_for(osascript(&script, &[]), Duration::from_secs(15));
+        }
     }
 
     fn installed(self) -> bool {
@@ -81,9 +112,13 @@ pub fn none_installed(path: &Path) -> String {
         [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
         [] => "a presentation program".to_owned(),
     };
+    let slides = if matches!(crate::deck::kind_of(path), "pptx") {
+        " Bring it in as slides instead (it needs no program), or export it as a PDF and drop that here."
+    } else {
+        " Or export it as a PDF and drop that here."
+    };
     format!(
-        "To bring in {name}, SoftPresenter uses {needs}, and none is on this Mac (Keynote is free from the App Store). \
-         Or export it as a PDF and drop that here."
+        "To bring in {name} as pictures, SoftPresenter uses {needs}, and none is on this Mac (Keynote is free from the App Store).{slides}"
     )
 }
 
@@ -95,6 +130,7 @@ pub fn to_pdf(path: &Path, folder: &Path) -> Result<(PathBuf, Program), String> 
     std::fs::create_dir_all(folder).map_err(|e| format!("Could not make a folder to work in: {e}"))?;
     let mut problems = Vec::new();
     for program in programs_for(path).iter().copied().filter(|p| p.installed()) {
+        let was_running = program.running();
         let made = match program {
             Program::Keynote => by_keynote(&full, folder),
             Program::PowerPoint => by_powerpoint(&full),
@@ -104,6 +140,10 @@ pub fn to_pdf(path: &Path, folder: &Path) -> Result<(PathBuf, Program), String> 
             Ok(pdf) if pdf.is_file() => return Ok((pdf, program)),
             Ok(_) => problems.push(format!("{} made no PDF", program.name())),
             Err(problem) => problems.push(format!("{}: {problem}", program.name())),
+        }
+        // A program this started stays out of the way: closed again if it didn't close itself.
+        if !was_running && program.running() {
+            program.quit();
         }
     }
     if problems.is_empty() {
@@ -123,6 +163,7 @@ fn by_keynote(path: &Path, folder: &Path) -> Result<PathBuf, String> {
     set inFile to POSIX file (item 1 of argv)
     set outFile to POSIX file (item 2 of argv)
     set wasOpen to application "Keynote" is running
+    if not wasOpen then launch application "Keynote"
     tell application "Keynote"
         set theDocument to open inFile
         export theDocument to outFile as PDF
@@ -146,6 +187,7 @@ fn by_powerpoint(path: &Path) -> Result<PathBuf, String> {
     set inFile to POSIX file (item 1 of argv)
     set outFile to (item 2 of argv)
     set wasOpen to application "Microsoft PowerPoint" is running
+    if not wasOpen then launch application "Microsoft PowerPoint"
     tell application "Microsoft PowerPoint"
         open inFile
         set thePresentation to active presentation
@@ -169,16 +211,25 @@ fn by_libreoffice(path: &Path, folder: &Path) -> Result<PathBuf, String> {
 }
 
 fn run_script(script: &str, paths: &[&Path]) -> Result<(), String> {
+    run(osascript(script, paths))
+}
+
+fn osascript(script: &str, paths: &[&Path]) -> Command {
     let mut command = Command::new("/usr/bin/osascript");
     command.arg("-e").arg(script);
     for path in paths {
         command.arg(path);
     }
-    run(command)
+    command
 }
 
 /// Runs a program for at most [`TIME_ALLOWED`], and says in plain words why it failed.
-fn run(mut command: Command) -> Result<(), String> {
+fn run(command: Command) -> Result<(), String> {
+    run_for(command, TIME_ALLOWED)
+}
+
+/// Runs a program for at most `allowed`, and says in plain words why it failed.
+fn run_for(mut command: Command, allowed: Duration) -> Result<(), String> {
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -198,7 +249,7 @@ fn run(mut command: Command) -> Result<(), String> {
     let status = loop {
         match child.try_wait().map_err(|e| e.to_string())? {
             Some(status) => break status,
-            None if started.elapsed() > TIME_ALLOWED => {
+            None if started.elapsed() > allowed => {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err("it took too long".to_owned());
@@ -239,6 +290,7 @@ mod tests {
         assert!(
             said.contains("Sermon.pptx") && said.contains("Keynote, PowerPoint or LibreOffice") && said.contains("PDF")
         );
+        assert!(said.contains("as slides instead") && !none_installed(Path::new("Talk.key")).contains("as slides"));
         assert!(none_installed(Path::new("Talk.key")).contains("uses Keynote,"));
     }
 }

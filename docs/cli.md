@@ -540,9 +540,15 @@ documents and `.proBundle` bundles (every song in the bundle, in its order, and 
 and videos their slides show, which go into the media bin, each once; the reply says how many
 pictures and videos came, names any a song shows that the bundle doesn't hold and everything
 in the bundle left out, with why, and a bundle over 64 MB is read in the background, with a
-job number); SoftProjector databases and songbooks. A PowerPoint, Keynote or OpenDocument
-presentation, a PDF, or a folder of pictures becomes a presentation of picture slides, made in
-the background. Anything else is refused, with the list of what is read.
+job number); SoftProjector databases and songbooks. A `.pptx` becomes a presentation of
+editable slides (read from the file, no program started; add `--as pictures` for pictures of
+the slides instead, drawn by a program on the Mac that opens it, exactly as it draws them); a
+`.ppt`, `.key` or `.odp` presentation, a PDF, or a folder of pictures becomes a presentation of
+picture slides, made in the background (its slides are there at once and their pictures fill
+in). Without `--as`, a `.pptx` comes in as it was last brought in from the app (slides at
+first). `--as slides` on a file that can only come in as pictures says so. The reply names the
+slides to check (a chart, a table, text with mixed looks) once the import is done. Anything
+else is refused, with the list of what is read.
 
     $ sp song new "River Song" river.txt
     Made the song River Song.
@@ -649,7 +655,7 @@ The settings `slide style keys` lists (`theme box` takes the same):
     line_transform=none|remove_line_returns|line_returns_as_slashes
     line_height=0.1-10   letter_spacing=-50-200  paragraph_spacing=0-500   baseline=-500-500
 
-A picture slide (from a PDF or a presentation) has a picture object and no words: `slide` lists
+A picture slide (from a PDF or a presentation brought in as pictures) has a picture object and no words: `slide` lists
 it and `slide frame` moves it, while `slide text` and `slide style` say "The slide has no words."
 
 ## Playlists and libraries

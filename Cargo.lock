@@ -3788,6 +3788,7 @@ dependencies = [
  "rfd",
  "ring",
  "rodio",
+ "roxmltree",
  "security-framework",
  "serde",
  "serde_json",
@@ -3841,6 +3842,7 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+ "zip",
 ]
 
 [[package]]

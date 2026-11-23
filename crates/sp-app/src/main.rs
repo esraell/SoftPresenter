@@ -40,6 +40,7 @@ mod notices;
 mod output;
 mod outside;
 mod pack;
+mod pptx;
 mod private_folder;
 mod props;
 mod remote;
@@ -690,6 +691,9 @@ pub struct SongsTo {
     pub library: Option<Option<Uuid>>,
     /// A playlist they are added to as well.
     pub playlist: Option<PlaylistSpot>,
+    /// How presentation files come in (as slides, or as pictures), when it was said; otherwise
+    /// as each kind was last brought in.
+    pub deck_as: Option<deck::ImportAs>,
 }
 
 /// A place in a playlist: the playlist, by its place in the list and its name (to find it again
@@ -3488,7 +3492,7 @@ impl App {
             self.add_dropped_file(path);
         }
         if !route.slides.is_empty() {
-            self.import_songs(&route.slides);
+            self.import_slides_asking(&route.slides);
         }
         if !route.songs.is_empty() {
             let to = self.songs_to(route.songs_to.as_ref());
@@ -3499,7 +3503,9 @@ impl App {
     /// Where songs dropped on a playlist or library go.
     fn songs_to(&self, target: Option<&file_drop::DropTarget>) -> SongsTo {
         match target {
-            Some(file_drop::DropTarget::Library(library)) => SongsTo { library: Some(*library), playlist: None },
+            Some(file_drop::DropTarget::Library(library)) => {
+                SongsTo { library: Some(*library), playlist: None, deck_as: None }
+            }
             Some(file_drop::DropTarget::Playlist { index, after }) => {
                 let name = self
                     .running
@@ -3507,7 +3513,7 @@ impl App {
                     .and_then(|r| r.home_state.services.list.get(*index))
                     .map(|playlist| playlist.name.clone());
                 let playlist = name.map(|name| PlaylistSpot { index: *index, name, after: *after });
-                SongsTo { library: None, playlist }
+                SongsTo { library: None, playlist, deck_as: None }
             }
             _ => SongsTo::default(),
         }
@@ -5628,13 +5634,26 @@ impl App {
                     Err(problem) => done.problems.push(problem),
                 }
             } else if deck::is_presentation_file(path) {
-                match convert::program_for(path) {
-                    Some(program) => {
-                        let source = deck::Source::File(path.clone());
-                        done.decks.push(format!("{} (with {})", source.name(), program.name()));
+                let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                if to.deck_as == Some(deck::ImportAs::Slides) && !deck::reads_as_slides(path) {
+                    done.problems.push(format!("{name} can only come in as pictures: it isn't a .pptx file."));
+                    continue;
+                }
+                match self.deck_mode(path, to.deck_as) {
+                    deck::ImportAs::Slides => {
+                        let source = deck::Source::Presentation { path: path.clone(), mode: deck::ImportAs::Slides };
+                        done.decks.push(source.name());
                         self.start_deck(source);
                     }
-                    None => done.problems.push(convert::none_installed(path)),
+                    deck::ImportAs::Pictures => match convert::program_for(path) {
+                        Some(program) => {
+                            let source =
+                                deck::Source::Presentation { path: path.clone(), mode: deck::ImportAs::Pictures };
+                            done.decks.push(format!("{} (as pictures, with {})", source.name(), program.name()));
+                            self.start_deck(source);
+                        }
+                        None => done.problems.push(convert::none_installed(path)),
+                    },
                 }
             } else if deck::is_pdf(path) || (path.is_dir() && deck::pictures_in(path).is_some()) {
                 let source = deck::Source::File(path.clone());
@@ -6063,7 +6082,7 @@ impl App {
         let Some(running) = self.running.as_ref() else {
             // No window to wake: make it now.
             match deck::make(&source) {
-                Ok(made) => self.add_song(made, false),
+                Ok(made) => self.add_song(made.presentation, false),
                 Err(problem) => applog::event("slides", &problem),
             }
             return;
@@ -6072,7 +6091,7 @@ impl App {
         // hidden or behind others, and the deck would wait for the next time it is drawn.
         let ctx = running.egui_ctx.clone();
         let waker = self.waker.clone();
-        self.decks.start(source, move || match waker {
+        self.decks.start(source, move || match &waker {
             Some(waker) => {
                 let _ = waker.send_event(AppEvent::DeckDone);
             }
@@ -6100,16 +6119,22 @@ impl App {
         }
     }
 
-    /// Adds the decks made since the last look, and says how each went.
+    /// Adds the decks laid out since the last look, says how each went, and puts into their
+    /// slides the pictures drawn since (a slide's thumbnail is drawn again once its picture is
+    /// there).
     fn handle_decks(&mut self) {
         for (path, made) in self.decks.finished() {
             let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
             let said = match made {
                 Ok(made) => {
-                    let count = made.slide_count();
+                    let count = made.presentation.slide_count();
                     applog::event("slides", &format!("made {count} slides from {name}"));
-                    self.add_song(made, false);
-                    Ok(format!("Made {count} slide{} from {name}.", if count == 1 { "" } else { "s" }))
+                    self.add_song(made.presentation, false);
+                    let mut said = format!("Made {count} slide{} from {name}.", if count == 1 { "" } else { "s" });
+                    if let Some(note) = made.note {
+                        said = format!("{said} {note}");
+                    }
+                    Ok(said)
                 }
                 Err(problem) => {
                     applog::event("slides", &format!("could not make slides: {problem}"));
@@ -6121,6 +6146,67 @@ impl App {
                 running.home_window.request_redraw();
             }
         }
+        for filled in self.decks.filled() {
+            match filled {
+                deck::Fill::Page { slide, file } => {
+                    sp_render::forget_picture(&file);
+                    if let Some(running) = self.running.as_mut() {
+                        running.thumbs.forget(slide, &mut running.egui_renderer);
+                        running.home_window.request_redraw();
+                    }
+                }
+                deck::Fill::Done { name, failed, .. } => {
+                    applog::event("slides", &format!("drew the pictures of {name} ({failed} could not be drawn)"));
+                    if failed > 0
+                        && let Some(running) = self.running.as_mut()
+                    {
+                        let plural = if failed == 1 { "" } else { "s" };
+                        running
+                            .home_state
+                            .notices
+                            .trouble(format!("{failed} picture{plural} of {name} could not be drawn."));
+                        running.home_window.request_redraw();
+                    }
+                }
+            }
+        }
+    }
+
+    /// How a presentation file comes in: as the person said, else as its kind was last brought
+    /// in, else as slides where the file can be read directly. A file that can't be read
+    /// directly only comes in as pictures.
+    fn deck_mode(&self, path: &std::path::Path, asked: Option<deck::ImportAs>) -> deck::ImportAs {
+        if !deck::reads_as_slides(path) {
+            return deck::ImportAs::Pictures;
+        }
+        asked.unwrap_or_else(|| {
+            self.running
+                .as_ref()
+                .map_or(deck::ImportAs::Slides, |running| running.home_state.import_choice(deck::kind_of(path)))
+        })
+    }
+
+    /// Imports files that make slides (from the menu or a drop), first asking how a presentation
+    /// file that can be read directly is to come in: as slides, or as pictures of them.
+    fn import_slides_asking(&mut self, files: &[PathBuf]) {
+        let askable = files.iter().any(|path| deck::is_presentation_file(path) && deck::reads_as_slides(path));
+        match self.running.as_mut() {
+            Some(running) if askable => {
+                running.home_state.ask_import = Some(home::AskImport { paths: files.to_vec() });
+                running.home_window.request_redraw();
+            }
+            _ => {
+                self.import_songs(files);
+            }
+        }
+    }
+
+    /// Carries out the answer to the question of how a presentation is to come in.
+    fn handle_import_answer(&mut self) {
+        let Some((paths, choice)) = self.running.as_mut().and_then(|r| r.home_state.import_answer.take()) else {
+            return;
+        };
+        self.import_songs_to(&paths, &SongsTo { deck_as: Some(choice), ..SongsTo::default() });
     }
 
     /// Asks for presentations, PDFs or pictures to make slides of: each presentation file or
@@ -6139,7 +6225,7 @@ impl App {
         let (pictures, files): (Vec<PathBuf>, Vec<PathBuf>) =
             chosen.into_iter().partition(|path| media::is_media(path) && !media::is_video(path));
         if !files.is_empty() {
-            self.import_songs(&files);
+            self.import_slides_asking(&files);
         }
         if !pictures.is_empty() {
             self.start_deck(deck::chosen_pictures(pictures));
@@ -9093,6 +9179,7 @@ impl ApplicationHandler<AppEvent> for App {
                 self.handle_versions();
                 self.handle_songs();
                 self.handle_decks();
+                self.handle_import_answer();
                 self.handle_setup();
                 // The Bible page's set-up (translations, boxes, options) is remembered the
                 // moment it changes, so it is as it was left at the next start.

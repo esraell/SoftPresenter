@@ -34,6 +34,7 @@ trash.workspace = true
 rfd.workspace = true
 rodio.workspace = true
 zip.workspace = true
+roxmltree.workspace = true
 flate2.workspace = true
 fs4.workspace = true
 # Remote Control (src/remote): a small HTTPS and WebSocket server on its own thread, running
