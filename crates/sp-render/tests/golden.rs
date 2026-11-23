@@ -35,7 +35,11 @@ fn slide(primary: &str, translation: Option<&str>) -> Slide {
 }
 
 fn golden_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(format!("{name}.png"))
+    // Testing aid: SOFTPRESENTER_TEST_ROOT=<a copy of the repository> finds the pictures there,
+    // for test programs built on one computer and run on another (Windows from the Mac).
+    let crate_dir = std::env::var_os("SOFTPRESENTER_TEST_ROOT")
+        .map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")), |root| PathBuf::from(root).join("crates/sp-render"));
+    crate_dir.join("tests/golden").join(format!("{name}.png"))
 }
 
 fn write_png(path: &PathBuf, pixels: &[u8], w: u32, h: u32) {

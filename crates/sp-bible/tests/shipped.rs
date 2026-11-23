@@ -3,7 +3,12 @@
 use sp_bible::{BOOKS, Bible, Numbering, VerseRef, convert, parse_reference};
 
 fn load(name: &str) -> Bible {
-    let path = format!("{}/../../assets/bibles/{name}.spbible", env!("CARGO_MANIFEST_DIR"));
+    // Testing aid: SOFTPRESENTER_TEST_ROOT=<a copy of the repository> reads the Bibles there, for
+    // test programs built on one computer and run on another.
+    let path = match std::env::var("SOFTPRESENTER_TEST_ROOT") {
+        Ok(root) => format!("{root}/assets/bibles/{name}.spbible"),
+        Err(_) => format!("{}/../../assets/bibles/{name}.spbible", env!("CARGO_MANIFEST_DIR")),
+    };
     Bible::from_bytes(&std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))).unwrap()
 }
 
