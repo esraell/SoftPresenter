@@ -171,8 +171,9 @@ fn by_exporting(path: &Path, folder: &Path) -> Result<PathBuf, String> {
         open inFile
         set newId to missing value
         repeat 500 times
-            repeat with oneId in (id of every document)
-                set docId to contents of oneId
+            set openNow to id of every document
+            repeat with place from 1 to count of openNow
+                set docId to item place of openNow
                 if openBefore does not contain {docId} then
                     if newId is missing value or (name of document id docId) starts with baseName then set newId to docId
                 end if
