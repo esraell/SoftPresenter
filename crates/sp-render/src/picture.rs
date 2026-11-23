@@ -119,6 +119,11 @@ impl Picture {
         Picture::from_pixels(nw, nh, out, self.image.format).unwrap_or_else(|| self.clone())
     }
 
+    /// The pixels, four bytes each, row after row, in the picture's own order of bytes.
+    pub fn pixels(&self) -> &[u8] {
+        self.image.data.data()
+    }
+
     pub fn width(&self) -> u32 {
         self.image.width
     }

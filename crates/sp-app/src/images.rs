@@ -28,9 +28,15 @@ pub fn resolve(file: &str) -> Option<PathBuf> {
     }
 }
 
-/// Reads the picture a picture object names, for the renderer.
+/// Reads the picture a picture object names, for the renderer, as large as the screens need.
 pub fn load(file: &str) -> Option<sp_render::Picture> {
     resolve(file).and_then(|path| crate::media::load_picture(&path).ok())
+}
+
+/// Reads the picture a picture object names no larger than `max_side` on its longer side, for
+/// the renderer's small copies (thumbnails): decoded at that size, never whole.
+pub fn load_at(file: &str, max_side: u32) -> Option<sp_render::Picture> {
+    resolve(file).and_then(|path| crate::media::load_picture_at(&path, max_side).ok())
 }
 
 /// A picture copied into the Images folder: its name there, a name for the object, and its size.
@@ -63,15 +69,11 @@ pub fn import(path: &Path) -> Result<Imported, String> {
     Ok(Imported { file, name, width, height })
 }
 
-/// How big a picture is, in pixels. A picture in a format the system reads (HEIC, TIFF...) is
-/// measured by decoding it.
+/// How big a picture is, in pixels, the way up the camera held it. A picture in a format only
+/// the system reads (HEIC, TIFF...) is measured by decoding a copy of it.
 pub fn measure(path: &Path) -> Result<(u32, u32), String> {
     let shown = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
-    image::image_dimensions(path).or_else(|e| {
-        crate::media::load_picture(path)
-            .map(|picture| (picture.width(), picture.height()))
-            .map_err(|_| format!("{shown}: not a picture SoftPresenter can open ({e})."))
-    })
+    crate::media::picture_size(path).map_err(|e| format!("{shown}: not a picture SoftPresenter can open ({e})."))
 }
 
 /// Copies a picture into a folder under a name.

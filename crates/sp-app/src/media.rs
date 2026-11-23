@@ -2,14 +2,38 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::SystemTime;
 
 use sp_model::Uuid;
 use sp_render::Picture;
 
-/// Pictures larger than this on their longer side are scaled down when loaded. A screen is at
-/// most a few thousand pixels wide, and a phone photo kept at full size costs tens of megabytes.
+/// Pictures larger than this on their longer side are scaled down when loaded, however large
+/// the screens are. A phone photo kept at full size costs tens of megabytes.
 pub const MAX_SIDE: u32 = 2560;
+
+/// The largest a full picture is loaded, for a screen of 4K: a picture across a 3840 pixel wide
+/// output needs that many. Larger screens are shown a picture scaled up from this.
+const MOST_SIDE: u32 = 3840;
+
+/// The longer side of the largest output opened so far, at most [`MOST_SIDE`]; never below
+/// [`MAX_SIDE`], so a picture is never softer than before there was a 4K output to think of.
+static SCREEN_SIDE: AtomicU32 = AtomicU32::new(MAX_SIDE);
+
+/// Says how many pixels an output is, so pictures loaded from now on are sharp on it (up to
+/// 4K). Pictures already kept stay as they are until they are read again.
+pub fn note_screen(width: u32, height: u32) {
+    raise(&SCREEN_SIDE, width, height);
+}
+
+fn raise(side: &AtomicU32, width: u32, height: u32) {
+    side.fetch_max(width.max(height).min(MOST_SIDE), Ordering::Relaxed);
+}
+
+/// How large a picture for a screen is loaded: the longer side of the largest output so far.
+pub fn screen_side() -> u32 {
+    SCREEN_SIDE.load(Ordering::Relaxed)
+}
 
 /// A video's still is shown only until its first picture comes (and in thumbnails), so it is
 /// kept smaller.
@@ -344,10 +368,17 @@ pub fn is_video(path: &Path) -> bool {
     VIDEOS.contains(&extension(path).as_str())
 }
 
-/// Reads and decodes a picture file; for a video, a still from it. The error is a plain
-/// sentence for the operator.
+/// Reads and decodes a picture file for the screens (no larger than [`screen_side`]); for a
+/// video, a still from it. The error is a plain sentence for the operator.
 pub fn load_picture(path: &Path) -> Result<Picture, String> {
-    let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+    load_picture_at(path, screen_side())
+}
+
+/// Reads a picture file no larger than `max_side` on its longer side, turned the way the camera
+/// held it; for a video, a still from it. On a Mac the picture is decoded straight to that size
+/// (a 6000 pixel photo is never held whole), and a smaller one is never enlarged.
+pub fn load_picture_at(path: &Path, max_side: u32) -> Result<Picture, String> {
+    let name = shown_name(path);
     let ext = extension(path);
     let from_system = |frame: Result<sp_video::Frame, String>| {
         let frame = frame?;
@@ -355,50 +386,86 @@ pub fn load_picture(path: &Path) -> Result<Picture, String> {
             .ok_or_else(|| format!("{name}: the picture is empty."))
     };
     if VIDEOS.contains(&ext.as_str()) {
-        return from_system(sp_video::still(path, VIDEO_STILL_SIDE));
+        return from_system(sp_video::still(path, max_side.min(VIDEO_STILL_SIDE)));
     }
     if SYSTEM_PICTURES.contains(&ext.as_str()) {
-        return from_system(sp_video::picture(path, MAX_SIDE));
+        return from_system(sp_video::picture(path, max_side));
     }
     if !OWN_PICTURES.contains(&ext.as_str()) {
         return Err(format!(
             "{name}: not a picture or video SoftPresenter can open (such as PNG, JPEG, HEIC, TIFF, MP4 or MOV)."
         ));
     }
-    let decoded = image::open(path).map_err(|e| format!("{name}: could not be opened ({e})."))?;
-    let decoded = if decoded.width().max(decoded.height()) > MAX_SIDE {
-        decoded.resize(MAX_SIDE, MAX_SIDE, image::imageops::FilterType::Triangle)
-    } else {
-        decoded
-    };
-    let rgba = decoded.to_rgba8();
+    // The Mac's system first; the decoders here are the way on other systems, and the way left
+    // when the system can't read a file.
+    #[cfg(target_os = "macos")]
+    if let Ok(picture) = from_system(sp_video::picture(path, max_side)) {
+        return Ok(picture);
+    }
+    decode_here(path, max_side).map_err(|e| format!("{name}: could not be opened ({e})."))
+}
+
+fn shown_name(path: &Path) -> String {
+    path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned())
+}
+
+/// Decodes a picture with the `image` crate, scaled to no more than `max_side` the moment it is
+/// whole (so the full-size pixels are let go before anything else is made from them), and turned
+/// as its metadata says.
+fn decode_here(path: &Path, max_side: u32) -> Result<Picture, String> {
+    use image::ImageDecoder as _;
+    let mut decoder = image::ImageReader::open(path)
+        .and_then(image::ImageReader::with_guessed_format)
+        .map_err(|e| e.to_string())?
+        .into_decoder()
+        .map_err(|e| e.to_string())?;
+    let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
+    let decoded = image::DynamicImage::from_decoder(decoder).map_err(|e| e.to_string())?;
+    let mut small = shrink(decoded, max_side);
+    small.apply_orientation(orientation);
+    let rgba = small.into_rgba8();
     let (width, height) = rgba.dimensions();
-    Picture::from_rgba(width, height, rgba.into_raw()).ok_or_else(|| format!("{name}: the picture is empty."))
+    Picture::from_rgba(width, height, rgba.into_raw()).ok_or_else(|| "the picture is empty".to_owned())
+}
+
+/// A picture scaled to no more than `max_side` on its longer side; one that is not larger is
+/// handed back as it is. Takes the picture, so the original is dropped as soon as the copy is
+/// made.
+fn shrink(picture: image::DynamicImage, max_side: u32) -> image::DynamicImage {
+    if max_side > 0 && picture.width().max(picture.height()) > max_side {
+        picture.resize(max_side, max_side, image::imageops::FilterType::Triangle)
+    } else {
+        picture
+    }
+}
+
+/// How big a picture is on screen, in pixels, the way up the camera held it. Reads only the
+/// file's start when the `image` crate knows the format; otherwise the system decodes a copy.
+pub fn picture_size(path: &Path) -> Result<(u32, u32), String> {
+    use image::ImageDecoder as _;
+    use image::metadata::Orientation::{Rotate90, Rotate90FlipH, Rotate270, Rotate270FlipH};
+    let known =
+        image::ImageReader::open(path).and_then(image::ImageReader::with_guessed_format).ok().and_then(|reader| {
+            let mut decoder = reader.into_decoder().ok()?;
+            let (width, height) = decoder.dimensions();
+            let turned = matches!(decoder.orientation(), Ok(Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH));
+            Some(if turned { (height, width) } else { (width, height) })
+        });
+    match known {
+        Some(size) => Ok(size),
+        None => load_picture(path).map(|picture| (picture.width(), picture.height())),
+    }
 }
 
 /// Reads a picture file, or a video's still, as the small copy the media bin keeps. True with
 /// it when the copy is the whole picture (it was no larger), or a video's still (shown on the
 /// screens only until the video's first picture comes), so the screens can show it as it is.
 pub fn load_small(path: &Path) -> Result<(Picture, bool), String> {
-    let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
-    let from_system = |frame: Result<sp_video::Frame, String>| {
-        let frame = frame?;
-        Picture::from_rgba(frame.width, frame.height, frame.rgba)
-            .ok_or_else(|| format!("{name}: the picture is empty."))
-    };
-    let ext = extension(path);
-    if VIDEOS.contains(&ext.as_str()) {
-        return Ok((from_system(sp_video::still(path, SMALL_SIDE))?, true));
-    }
-    if SYSTEM_PICTURES.contains(&ext.as_str()) {
-        // The system makes a copy no larger than asked; one smaller is the whole picture.
-        let picture = from_system(sp_video::picture(path, SMALL_SIDE))?;
-        let whole = picture.width().max(picture.height()) < SMALL_SIDE;
-        return Ok((picture, whole));
-    }
-    let full = load_picture(path)?;
-    let whole = full.width().max(full.height()) <= SMALL_SIDE;
-    Ok((full.shrunk(SMALL_SIDE), whole))
+    let picture = load_picture_at(path, SMALL_SIDE)?;
+    // A video's still is shown on the screens only until its first picture comes, so it counts
+    // as whole; a picture smaller than the copy asked for is whole too.
+    let whole = is_video(path) || picture.width().max(picture.height()) < SMALL_SIDE;
+    Ok((picture, whole))
 }
 
 #[cfg(test)]
@@ -617,6 +684,96 @@ mod tests {
         write_png(&path, 5120, 1280);
         let picture = load_picture(&path).unwrap();
         assert_eq!((picture.width(), picture.height()), (MAX_SIDE, 640));
+    }
+
+    /// A JPEG of left half red, right half blue, with the camera's turn written in.
+    fn write_jpeg(path: &Path, width: u32, height: u32, orientation: u8) {
+        let mut rgb = Vec::new();
+        for _ in 0..height {
+            for x in 0..width {
+                rgb.extend(if x < width / 2 { [230, 20, 20] } else { [20, 20, 230] });
+            }
+        }
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 95)
+            .encode(&rgb, width, height, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        // An EXIF segment right after the start of the picture: one tag, the orientation.
+        let mut exif = b"Exif\0\0MM\0*\0\0\0\x08\0\x01\x01\x12\0\x03\0\0\0\x01".to_vec();
+        exif.extend([0, orientation, 0, 0, 0, 0, 0, 0]);
+        let mut with = vec![0xFF, 0xD8, 0xFF, 0xE1];
+        with.extend(((exif.len() + 2) as u16).to_be_bytes());
+        with.extend(exif);
+        with.extend(&jpeg[2..]);
+        std::fs::write(path, with).unwrap();
+    }
+
+    #[test]
+    fn a_picture_is_loaded_at_the_size_asked_for_and_never_enlarged() {
+        for ending in ["png", "jpg"] {
+            let (big, small) = (temp(&format!("ask.{ending}")), temp(&format!("ask-small.{ending}")));
+            image::RgbImage::from_pixel(3000, 1000, image::Rgb([10, 200, 30])).save(&big).unwrap();
+            image::RgbImage::from_pixel(64, 36, image::Rgb([10, 200, 30])).save(&small).unwrap();
+            for load in [load_picture_at, decode_here_as_load] {
+                let picture = load(&big, 800).unwrap();
+                assert_eq!((picture.width(), picture.height()), (800, 267), "{ending}: scaled to the side asked for");
+                let picture = load(&small, 2560).unwrap();
+                assert_eq!((picture.width(), picture.height()), (64, 36), "{ending}: a small picture stays as it is");
+            }
+        }
+    }
+
+    fn decode_here_as_load(path: &Path, side: u32) -> Result<Picture, String> {
+        decode_here(path, side)
+    }
+
+    #[test]
+    fn a_picture_is_turned_the_way_the_camera_held_it() {
+        let path = temp("turned.jpg");
+        for (orientation, size) in [(1, (40, 20)), (3, (40, 20)), (6, (20, 40)), (8, (20, 40))] {
+            write_jpeg(&path, 40, 20, orientation);
+            for picture in [load_picture_at(&path, 2560).unwrap(), decode_here(&path, 2560).unwrap()] {
+                assert_eq!((picture.width(), picture.height()), size, "orientation {orientation}");
+            }
+            assert_eq!(picture_size(&path).unwrap(), size, "measured as it is shown");
+        }
+        // Turned a quarter clockwise, the left (red) half is on top.
+        write_jpeg(&path, 40, 20, 6);
+        for picture in [load_picture_at(&path, 2560).unwrap(), decode_here(&path, 2560).unwrap()] {
+            let pixels = picture.pixels();
+            let at = |y: usize| &pixels[(y * 20 + 10) * 4..(y * 20 + 10) * 4 + 4];
+            assert!(at(5)[0] > 150 && at(5)[2] < 100, "top is red: {:?}", at(5));
+            assert!(at(35)[2] > 150 && at(35)[0] < 100, "bottom is blue: {:?}", at(35));
+        }
+    }
+
+    #[test]
+    fn a_pictures_see_through_pixels_stay_see_through() {
+        let path = temp("alpha.png");
+        let mut pixels = image::RgbaImage::from_pixel(8, 8, image::Rgba([200, 100, 50, 255]));
+        pixels.put_pixel(1, 1, image::Rgba([200, 100, 50, 128]));
+        pixels.put_pixel(2, 2, image::Rgba([0, 0, 0, 0]));
+        pixels.save(&path).unwrap();
+        for picture in [load_picture_at(&path, 2560).unwrap(), decode_here(&path, 2560).unwrap()] {
+            let data = picture.pixels();
+            let at = |x: usize, y: usize| &data[(y * 8 + x) * 4..(y * 8 + x) * 4 + 4];
+            assert_eq!(at(0, 0), [200, 100, 50, 255]);
+            assert!(at(1, 1)[3].abs_diff(128) <= 1 && at(1, 1)[0].abs_diff(200) <= 3, "{:?}", at(1, 1));
+            assert_eq!(at(2, 2)[3], 0);
+        }
+    }
+
+    #[test]
+    fn the_screens_ask_for_a_size_that_is_never_below_before_and_never_above_4k() {
+        let side = AtomicU32::new(MAX_SIDE);
+        raise(&side, 1920, 1080);
+        assert_eq!(side.load(Ordering::Relaxed), MAX_SIDE, "a 1080p screen doesn't make pictures smaller");
+        raise(&side, 3840, 2160);
+        assert_eq!(side.load(Ordering::Relaxed), 3840);
+        raise(&side, 1920, 1080);
+        assert_eq!(side.load(Ordering::Relaxed), 3840, "nor does one opened after a 4K screen");
+        raise(&side, 7680, 4320);
+        assert_eq!(side.load(Ordering::Relaxed), 3840, "8K is shown from the 4K picture");
     }
 
     #[test]

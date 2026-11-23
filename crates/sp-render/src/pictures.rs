@@ -24,6 +24,11 @@ use crate::Picture;
 /// Reads the picture a file names, or `None` if it can't.
 pub type Loader = fn(&str) -> Option<Picture>;
 
+/// Reads the picture a file names no larger than the given number of pixels on its longer side
+/// (decoded at that size, so a big photo is never held whole for a thumbnail), or `None` if it
+/// can't.
+pub type SmallLoader = fn(&str, u32) -> Option<Picture>;
+
 /// How many bytes of pixels are kept at most: room for about sixty full-screen 1080p pictures.
 const KEEP_BYTES: usize = 512 * 1024 * 1024;
 
@@ -37,6 +42,7 @@ fn small_name(file: &str) -> String {
 }
 
 static LOADER: OnceLock<Loader> = OnceLock::new();
+static SMALL_LOADER: OnceLock<SmallLoader> = OnceLock::new();
 static KEPT: OnceLock<Mutex<Kept>> = OnceLock::new();
 /// Files for the loader thread to read, and what to do once one is read.
 static QUEUE: OnceLock<Mutex<Sender<String>>> = OnceLock::new();
@@ -70,6 +76,21 @@ pub fn lock_waits() -> Duration {
 /// Says how a picture object's file is read. Set once, when the app starts.
 pub fn set_picture_loader(loader: Loader) {
     let _ = LOADER.set(loader);
+}
+
+/// Says how a picture object's file is read for a small copy. Set once, when the app starts;
+/// without it a file is read whole and shrunk.
+pub fn set_small_picture_loader(loader: SmallLoader) {
+    let _ = SMALL_LOADER.set(loader);
+}
+
+/// Reads a file's picture for a small copy: at that size if the app says how, else whole and
+/// shrunk, the whole one let go at once.
+fn read_small(file: &str) -> Option<Picture> {
+    match SMALL_LOADER.get() {
+        Some(load) => load(file, SMALL_SIDE).map(|small| small.shrunk(SMALL_SIDE)),
+        None => LOADER.get().and_then(|load| load(file)).map(|full| full.shrunk(SMALL_SIDE)),
+    }
 }
 
 /// Says this thread draws only pictures and fonts already read, never reading a file itself: a
@@ -207,7 +228,7 @@ pub(crate) fn picture_at(file: &str, drawn_side: f64) -> Option<Picture> {
             return None;
         }
     }
-    let read = LOADER.get().and_then(|load| load(file)).map(|full| full.shrunk(SMALL_SIDE));
+    let read = read_small(file);
     if let Ok(mut kept) = timed_lock(kept) {
         kept.insert(&small, read.clone());
     }
@@ -330,6 +351,24 @@ mod tests {
         assert_eq!(picture_at("wide-live", 300.0).unwrap().width(), 1280, "a video's frame is never a stale copy");
         forget_picture("wide-live");
         assert!(picture_at("missing", 300.0).is_none());
+    }
+
+    static ASKED: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
+
+    fn small_of_wide(file: &str, side: u32) -> Option<Picture> {
+        ASKED.lock().unwrap().push((file.to_owned(), side));
+        file.starts_with("wide")
+            .then(|| Picture::from_rgba(side, side * 9 / 16, vec![255; (side * (side * 9 / 16) * 4) as usize]))
+            .flatten()
+    }
+
+    #[test]
+    fn a_small_copy_is_read_at_the_size_it_needs_not_whole() {
+        set_small_picture_loader(small_of_wide);
+        let small = picture_at("wide-asks", 300.0).unwrap();
+        assert_eq!((small.width(), small.height()), (SMALL_SIDE, 360));
+        let asked = ASKED.lock().unwrap().iter().filter(|(file, _)| file == "wide-asks").cloned().collect::<Vec<_>>();
+        assert_eq!(asked, [("wide-asks".to_owned(), SMALL_SIDE)], "asked once, for the small side only");
     }
 
     #[test]

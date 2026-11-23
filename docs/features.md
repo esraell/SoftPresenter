@@ -407,7 +407,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   costs little memory. At the start the window opens at once and the bin fills in as its
   pictures are read; a file that is gone or can't be read leaves the bin.
   Pictures can be PNG, JPEG, WebP, GIF, BMP, and on the Mac also HEIC (iPhone photos), TIFF,
-  Photoshop, AVIF and JPEG 2000. Videos play with their sound and loop: MP4, MOV and M4V
+  Photoshop, AVIF and JPEG 2000. A picture is never held at its full size: the bin's small copy
+  is 960 pixels on its longer side, and a picture for the screens is 2560, or 3840 once a 4K
+  screen has been opened (a smaller picture is never enlarged). On the Mac the system decodes
+  straight to that size, so a 6000 x 4000 photo never takes a gigabyte while it loads; on other
+  systems the full-size pixels are let go the moment the smaller copy is made. Photos are turned
+  the way the camera held them. Videos play with their sound and loop: MP4, MOV and M4V
   (including HEVC and ProRes) through macOS's own player, and everything else (MKV, WebM, AVI,
   WMV, FLV, MPEG, TS and others, or an MP4 the Mac's player can't decode) through FFmpeg,
   played as it is, never converted first. FFmpeg comes inside the app (an LGPL build of FFmpeg
