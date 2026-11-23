@@ -196,12 +196,12 @@ mistake impossible:
     Harbour Lights, slide 1 of 2 (Verse 1)
      1. Main: "Lanterns are lit along the shore"
         at x=120 y=240 w=1680 h=600 (the theme's)
-        font Helvetica Neue, size 96, weight 700, italic off, colour #ffffff, align Center, scaling TextDown
+        font SoftPresenter Sans, size 96, weight 700, italic off, colour #ffffff, align Center, scaling TextDown
 
     Harbour Lights, slide 2 of 2 (Verse 2)
      1. Main: "Harbour lights for evermore"
         at x=120 y=240 w=1680 h=600 (the theme's)
-        font Helvetica Neue, size 96, weight 700, italic off, colour #ffffff, align Center, scaling TextDown
+        font SoftPresenter Sans, size 96, weight 700, italic off, colour #ffffff, align Center, scaling TextDown
 
 `item` followed by a number names a playlist item; a song whose title starts with "Item" and a
 number is named by its number, its id, or its title in quotes (`sp slides "Item 3"`).
@@ -598,10 +598,10 @@ it in an editor that has it open, and shows at once on a slide that is on screen
     River Song, slide 1 of 3 (Verse 1)
      1. Main: "Down by the river the morning is new / Light on the water and grass in the dew"
         at x=120 y=170 w=1680 h=400 (the theme's)
-        font Helvetica Neue, size 96, weight 700, italic off, colour #ffffff, align Center, scaling TextDown
+        font SoftPresenter Sans, size 96, weight 700, italic off, colour #ffffff, align Center, scaling TextDown
      2. Translation: "У реки утро снова встаёт / Свет на воде и роса на траве"
         at x=120 y=610 w=1680 h=320 (the theme's)
-        font Helvetica Neue, size 64, weight 700, italic off, colour #ff9628, align Center, scaling TextDown
+        font SoftPresenter Sans, size 64, weight 700, italic off, colour #ff9628, align Center, scaling TextDown
 
     $ sp slide text "River Song" 1 "Down by the river the morning is new\nLight on the water, dew on the grass"
     River Song, slide 1: Main now says "Down by the river the morning is new / Light on the water, dew on the grass".
@@ -631,7 +631,7 @@ it in an editor that has it open, and shows at once on a slide that is on screen
         at x=0 y=0 w=1920 h=1080 (its own)
      2. Main: "Blessed assurance, Jesus is mine / Oh, what a foretaste of glory divine"
         at x=120 y=240 w=1680 h=600 (the theme's)
-        font Helvetica Neue, size 96, weight 700, italic off, colour #ffffff, align Center, scaling TextDown
+        font SoftPresenter Sans, size 96, weight 700, italic off, colour #ffffff, align Center, scaling TextDown
     $ sp slide web "Blessed Assurance" 1 off
     Blessed Assurance: slide 1 has no web page.
     $ sp slide item 4 2 in friday
@@ -764,12 +764,12 @@ kept with:
     $ sp theme templates Built-in
     Built-in
       1. Two languages (for songs)
-           box 1: Main — Helvetica Neue 96pt, at x=120 y=170 w=1680 h=400
-           box 2: Translation — Helvetica Neue 64pt, at x=120 y=610 w=1680 h=320
-           box 3: Reference — Helvetica Neue 44pt, at x=120 y=950 w=1680 h=80
+           box 1: Main — SoftPresenter Sans 96pt, at x=120 y=170 w=1680 h=400
+           box 2: Translation — SoftPresenter Sans 64pt, at x=120 y=610 w=1680 h=320
+           box 3: Reference — SoftPresenter Sans 44pt, at x=120 y=950 w=1680 h=80
       2. One language (for songs)
-           box 1: Main — Helvetica Neue 96pt, at x=120 y=240 w=1680 h=600
-           box 2: Reference — Helvetica Neue 44pt, at x=120 y=950 w=1680 h=80
+           box 1: Main — SoftPresenter Sans 96pt, at x=120 y=240 w=1680 h=600
+           box 2: Reference — SoftPresenter Sans 44pt, at x=120 y=950 w=1680 h=80
       3. Bible (for Bible)
            box 1: Main — Linux Biolinum 96pt, at x=65 y=18 w=1790 h=378
            …

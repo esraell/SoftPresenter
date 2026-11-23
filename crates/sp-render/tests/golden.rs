@@ -1,7 +1,8 @@
 //! Image tests: draw through the real GPU path, read the pixels back and compare with stored
 //! pictures in `tests/golden/`. Run with `PC_UPDATE_GOLDEN=1` to write the pictures; without
 //! it a missing picture is a failure, so a deleted file cannot pass quietly.
-//! They use the system font and need a GPU.
+//! They use the bundled font alone (SoftPresenter Sans), never the computer's own, so the
+//! pictures are the same on every computer. They need a GPU.
 
 use std::path::PathBuf;
 
@@ -19,7 +20,7 @@ fn render_with(slide: Option<&Slide>, theme: &Theme, w: u32, h: u32) -> Vec<u8> 
     let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
     let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
     let mut painter = Painter::new(device).expect("painter");
-    let built = build_scene(&mut Fonts::new(), slide, theme, w, h);
+    let built = build_scene(&mut Fonts::bundled_only(), slide, theme, w, h);
     let texture = target_texture(device, w, h);
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     painter.paint(device, queue, &built.scene, &view, w, h).expect("paint");
@@ -124,6 +125,34 @@ fn bilingual_1920x1080() {
     let orange = px.chunks(4).filter(|p| p[0] > 230 && (120..180).contains(&p[1]) && p[2] < 80).count();
     assert!(orange > 10_000, "expected orange text, found {orange} pixels");
     assert_matches_golden("bilingual_1920x1080", &px, 1920, 1080);
+}
+
+/// Russian and Ukrainian (with і, ї, є and ґ) in every style of the bundled typeface, one style
+/// to a line: regular, bold, italic, bold italic.
+#[test]
+fn cyrillic_in_every_style() {
+    use sp_model::{SpanStyle, TextSpan};
+    let lines = [
+        "Свет встаёт над холмами. Ґанок, їжак, є і",
+        "Свет встаёт над холмами. Ґанок, їжак, є і",
+        "Свет встаёт над холмами. Ґанок, їжак, є і",
+        "Свет встаёт над холмами. Ґанок, їжак, є і",
+    ];
+    let styles = [(400, false), (700, false), (400, true), (700, true)];
+    let mut s = slide(&lines.join("\n"), None);
+    let mut start = 0;
+    let mut spans = Vec::new();
+    for (line, (weight, italic)) in lines.iter().zip(styles) {
+        let end = start + line.chars().count();
+        let style = SpanStyle { weight: Some(weight), italic: Some(italic), ..SpanStyle::default() };
+        spans.push(TextSpan::new(start, end, style));
+        start = end + 1;
+    }
+    let ObjectKind::Text { spans: own, .. } = &mut s.objects[0].kind else { panic!("a text object") };
+    *own = spans;
+    let px = render(Some(&s), 1920, 1080);
+    assert!(count_lit(&px) > 20_000, "expected white text");
+    assert_matches_golden("cyrillic_in_every_style", &px, 1920, 1080);
 }
 
 #[test]
@@ -244,7 +273,7 @@ fn render_layers(media: Option<&sp_render::Picture>, slide: Option<&Slide>, w: u
         mask: [0.0; 4],
         announcement: None,
     };
-    let built = sp_render::build_layers(&mut Fonts::new(), &layers, &Theme::builtin(), w, h);
+    let built = sp_render::build_layers(&mut Fonts::bundled_only(), &layers, &Theme::builtin(), w, h);
     let texture = target_texture(device, w, h);
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     painter.paint(device, queue, &built.scene, &view, w, h).expect("paint");
@@ -377,10 +406,10 @@ fn a_cross_fade_blends_two_pictures() {
     let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
     let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
     let mut painter = Painter::new(device).expect("painter");
-    let black = build_scene(&mut Fonts::new(), None, &Theme::builtin(), w, h).scene;
+    let black = build_scene(&mut Fonts::bundled_only(), None, &Theme::builtin(), w, h).scene;
     let mut white_theme = Theme::builtin();
     white_theme.background = Some(Rgba::WHITE);
-    let white = build_scene(&mut Fonts::new(), Some(&Slide::new(Vec::new())), &white_theme, w, h).scene;
+    let white = build_scene(&mut Fonts::bundled_only(), Some(&Slide::new(Vec::new())), &white_theme, w, h).scene;
     let mut middle_of = |amount: f32| {
         let texture = target_texture(device, w, h);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -405,10 +434,10 @@ fn transitions_put_each_picture_where_it_belongs() {
     let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
     let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
     let mut painter = Painter::new(device).expect("painter");
-    let black = build_scene(&mut Fonts::new(), Some(&Slide::new(Vec::new())), &Theme::builtin(), w, h).scene;
+    let black = build_scene(&mut Fonts::bundled_only(), Some(&Slide::new(Vec::new())), &Theme::builtin(), w, h).scene;
     let mut white_theme = Theme::builtin();
     white_theme.background = Some(Rgba::WHITE);
-    let white = build_scene(&mut Fonts::new(), Some(&Slide::new(Vec::new())), &white_theme, w, h).scene;
+    let white = build_scene(&mut Fonts::bundled_only(), Some(&Slide::new(Vec::new())), &white_theme, w, h).scene;
     let mut shade_at = |kind: TransitionKind, amount: f32, x: u32| {
         let texture = target_texture(device, w, h);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -435,10 +464,10 @@ fn every_transition_starts_on_the_old_picture_and_ends_on_the_new() {
     let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
     let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
     let mut painter = Painter::new(device).expect("painter");
-    let black = build_scene(&mut Fonts::new(), Some(&Slide::new(Vec::new())), &Theme::builtin(), w, h).scene;
+    let black = build_scene(&mut Fonts::bundled_only(), Some(&Slide::new(Vec::new())), &Theme::builtin(), w, h).scene;
     let mut white_theme = Theme::builtin();
     white_theme.background = Some(Rgba::WHITE);
-    let white = build_scene(&mut Fonts::new(), Some(&Slide::new(Vec::new())), &white_theme, w, h).scene;
+    let white = build_scene(&mut Fonts::bundled_only(), Some(&Slide::new(Vec::new())), &white_theme, w, h).scene;
     // Points in from the edges: the middle and near each corner.
     let points = [(w / 2, h / 2), (w / 8, h / 8), (w * 7 / 8, h / 8), (w / 8, h * 7 / 8), (w * 7 / 8, h * 7 / 8)];
     for direction in [Direction::FromLeft, Direction::FromTop] {
@@ -537,7 +566,7 @@ fn scrolling_text_starts_in_its_box_and_moves_with_time() {
             mask: [0.0; 4],
             announcement: None,
         };
-        let built = sp_render::build_layers(&mut Fonts::new(), &layers, &Theme::builtin(), 640, 360);
+        let built = sp_render::build_layers(&mut Fonts::bundled_only(), &layers, &Theme::builtin(), 640, 360);
         let texture = target_texture(device, 640, 360);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         painter.paint(device, queue, &built.scene, &view, 640, 360).expect("paint");
@@ -575,7 +604,7 @@ fn a_themes_picture_is_behind_its_slides_until_media_shows() {
             mask: [0.0; 4],
             announcement: None,
         };
-        let built = sp_render::build_layers(&mut Fonts::new(), &layers, &theme, 160, 90);
+        let built = sp_render::build_layers(&mut Fonts::bundled_only(), &layers, &theme, 160, 90);
         let texture = target_texture(device, 160, 90);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         painter.paint(device, queue, &built.scene, &view, 160, 90).expect("paint");
@@ -606,7 +635,7 @@ fn a_screens_colour_fills_the_empty_room_and_its_covered_edges() {
         mask: [480.0, 0.0, 0.0, 0.0],
         announcement: None,
     };
-    let built = sp_render::build_layers(&mut Fonts::new(), &layers, &Theme::builtin(), 160, 120);
+    let built = sp_render::build_layers(&mut Fonts::bundled_only(), &layers, &Theme::builtin(), 160, 120);
     let texture = target_texture(device, 160, 120);
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     painter.paint(device, queue, &built.scene, &view, 160, 120).expect("paint");
@@ -632,7 +661,7 @@ fn transition_sheet() {
     let coloured = |rgba: Rgba, words: &str| {
         let mut theme = Theme::builtin();
         theme.background = Some(rgba);
-        build_scene(&mut Fonts::new(), Some(&slide(words, None)), &theme, w, h).scene
+        build_scene(&mut Fonts::bundled_only(), Some(&slide(words, None)), &theme, w, h).scene
     };
     let from = coloured(Rgba { r: 200, g: 40, b: 40, a: 255 }, "Old");
     let to = coloured(Rgba { r: 40, g: 80, b: 220, a: 255 }, "New");
@@ -708,7 +737,7 @@ fn a_picture_still_shows_after_a_blank_drawing() {
     let photo = flat(1600, 1200, [230, 30, 30]);
     let mut draw = |media: Option<&sp_render::Picture>| {
         let layers = sp_render::Layers { media_fit: sp_model::ImageFit::Fill, media, ..Default::default() };
-        let built = sp_render::build_layers(&mut Fonts::new(), &layers, &Theme::builtin(), 160, 90);
+        let built = sp_render::build_layers(&mut Fonts::bundled_only(), &layers, &Theme::builtin(), 160, 90);
         let texture = target_texture(device, 160, 90);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         painter.paint(device, queue, &built.scene, &view, 160, 90).expect("paint");
@@ -765,7 +794,7 @@ fn media_scene(media: &sp_render::Picture, w: u32, h: u32) -> sp_render::vello::
         mask: [0.0; 4],
         announcement: None,
     };
-    sp_render::build_layers(&mut Fonts::new(), &layers, &Theme::builtin(), w, h).scene
+    sp_render::build_layers(&mut Fonts::bundled_only(), &layers, &Theme::builtin(), w, h).scene
 }
 
 /// Rows of a picture eight pixels by four, its left half one colour and its right half another,
@@ -814,7 +843,7 @@ fn a_moving_picture_shows_the_pixels_sent_last_in_their_true_colours() {
 
     // A scene of plain colour in between (the renderer's own picture texture is thrown away
     // by such a scene) doesn't leave the video black.
-    let plain = build_scene(&mut Fonts::new(), None, &Theme::builtin(), w, h).scene;
+    let plain = build_scene(&mut Fonts::bundled_only(), None, &Theme::builtin(), w, h).scene;
     let (left, _) = paint(&mut painter, &plain);
     assert_eq!(left, [0, 0, 0, 255]);
     let (left, right) = paint(&mut painter, &scene);
@@ -850,7 +879,7 @@ fn a_moving_picture_let_go_leaves_no_texture_behind() {
     let mut painter = Painter::new(device).expect("painter");
     let texture = target_texture(device, w, h);
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let plain = build_scene(&mut Fonts::new(), None, &Theme::builtin(), w, h).scene;
+    let plain = build_scene(&mut Fonts::bundled_only(), None, &Theme::builtin(), w, h).scene;
 
     let never_painted = painter.moving_picture(device, 8, 4, PixelOrder::Bgra).expect("moving picture");
     assert_eq!(painter.moving_pictures(), 1);
@@ -1013,12 +1042,14 @@ fn patterned(width: u32, height: u32) -> sp_render::Picture {
     sp_render::Picture::from_rgba(width, height, rgba).expect("picture")
 }
 
-/// The heaviest pictures a service draws, by name: a full reading, two of them half-way through
+/// The heaviest pictures a service draws, by name (`sentences` is how many sentences of the
+/// reading; the amounts the tests ask for are what SoftPresenter Sans, with its many curves,
+/// needs to be as heavy as these tests mean, and no more): a full reading, two of them half-way through
 /// a dissolve and a wipe, a slide of many shapes, and words over a picture.
 fn heavy_scenes(w: u32, h: u32, sentences: usize) -> Vec<(&'static str, sp_render::vello::Scene)> {
     use sp_model::{Direction, TransitionKind};
     let theme = Theme::builtin();
-    let mut fonts = Fonts::new();
+    let mut fonts = Fonts::bundled_only();
     let first = build_scene(&mut fonts, Some(&dense_passage(0, sentences)), &theme, w, h).scene;
     let second = build_scene(&mut fonts, Some(&dense_passage(3, sentences)), &theme, w, h).scene;
     let dissolve = sp_render::cross_fade(&first, &second, 0.5, w, h);
@@ -1129,10 +1160,10 @@ fn pictures_are_the_same_with_working_memory_sized_from_them() {
     let mut sized = Easel::new();
     let mut fixed = Easel::kept_at(ScratchSizes::UPSTREAM);
     for (w, h) in [(3840, 2160), (480, 270)] {
-        for (name, scene) in heavy_scenes(w, h, 3) {
+        for (name, scene) in heavy_scenes(w, h, 1) {
             let ours = sized.paint(&scene, w, h).expect("paint");
             let theirs = fixed.paint(&scene, w, h).expect("paint with fixed sizes");
-            assert!(count_lit(&ours) > 300, "{name} at {w}: something bright is drawn");
+            assert!(count_lit(&ours) > if w > 1_000 { 300 } else { 10 }, "{name} at {w}: something bright is drawn");
             assert_same_picture(&format!("{name} at {w}"), &ours, &theirs);
         }
     }
@@ -1147,10 +1178,11 @@ fn a_slide_too_heavy_for_the_old_fixed_sizes_is_drawn_in_full() {
     let mut sized = Easel::new();
     let mut roomy = Easel::kept_at(ROOMY);
     for (w, h) in [(3840, 2160), (480, 270)] {
-        for (name, scene) in heavy_scenes(w, h, 14) {
+        for (name, scene) in heavy_scenes(w, h, 9) {
             let name = format!("{name} at {w}");
             let first = sized.paint(&scene, w, h).expect("paint");
-            assert!(count_lit(&first) > 1_000, "{name}: the letters are drawn");
+            // (Small letters at thumbnail size, half faded in a dissolve, light up few pixels.)
+            assert!(count_lit(&first) > if w > 1_000 { 1_000 } else { 50 }, "{name}: the letters are drawn");
             let reruns = sized.painter.reruns();
             let again = sized.paint(&scene, w, h).expect("paint again");
             assert_eq!(sized.painter.reruns(), reruns, "{name}: the second drawing knows the room it needs");
@@ -1163,7 +1195,7 @@ fn a_slide_too_heavy_for_the_old_fixed_sizes_is_drawn_in_full() {
 
     // The old sizes cannot hold the 4K reading: that is now an error, not an empty picture.
     let mut fixed = Easel::kept_at(ScratchSizes::UPSTREAM);
-    let (name, reading) = heavy_scenes(3840, 2160, 14).swap_remove(0);
+    let (name, reading) = heavy_scenes(3840, 2160, 9).swap_remove(0);
     assert_eq!(name, "reading");
     assert!(fixed.paint(&reading, 3840, 2160).is_err(), "the fixed sizes are too small, and say so");
 }
@@ -1174,8 +1206,8 @@ fn a_slide_too_heavy_for_the_old_fixed_sizes_is_drawn_in_full() {
 #[test]
 fn a_painter_goes_from_heavy_to_light_and_back_and_gives_memory_back() {
     let mut easel = Easel::new();
-    let heavy = heavy_scenes(3840, 2160, 14).swap_remove(0).1;
-    let light = heavy_scenes(480, 270, 3).swap_remove(4).1;
+    let heavy = heavy_scenes(3840, 2160, 9).swap_remove(0).1;
+    let light = heavy_scenes(480, 270, 1).swap_remove(4).1;
     let light_alone = Easel::new().paint(&light, 480, 270).expect("paint");
 
     let heavy_first = easel.paint(&heavy, 3840, 2160).expect("paint");
@@ -1263,7 +1295,7 @@ fn a_picture_that_outgrows_its_room_many_times_over_is_still_drawn() {
 #[test]
 fn a_picture_too_heavy_to_draw_is_refused_and_the_next_one_is_drawn() {
     let (w, h) = (3840, 2160);
-    let (name, over_photo) = heavy_scenes(w, h, 3).swap_remove(4);
+    let (name, over_photo) = heavy_scenes(w, h, 1).swap_remove(4);
     assert_eq!(name, "photo");
     let mut too_heavy = over_photo.clone();
     cover_many_times(&mut too_heavy, 12_000, w, h);
@@ -1305,7 +1337,7 @@ fn a_picture_too_heavy_to_draw_is_refused_and_the_next_one_is_drawn() {
 fn more_slides_than_a_painter_keeps_in_mind_are_each_drawn_right() {
     let (w, h) = (480, 270);
     let theme = Theme::builtin();
-    let mut fonts = Fonts::new();
+    let mut fonts = Fonts::bundled_only();
     let scenes: Vec<_> =
         (0..12).map(|seed| build_scene(&mut fonts, Some(&dense_passage(seed, 3)), &theme, w, h).scene).collect();
     let mut reference = Easel::kept_at(ROOMY);
@@ -1333,13 +1365,13 @@ type Sized = (u32, u32, sp_render::vello::Scene);
 fn threads_draw_with_one_device(for_how_long: std::time::Duration) {
     use std::time::{Duration, Instant};
     let theme = Theme::builtin();
-    let mut fonts = Fonts::new();
+    let mut fonts = Fonts::bundled_only();
     let light: Vec<Sized> = (0..10)
         .map(|seed| (480, 270, build_scene(&mut fonts, Some(&dense_passage(seed, 3)), &theme, 480, 270).scene))
         .collect();
     let heavy: Vec<Sized> = [(3840, 2160), (2560, 1440)]
         .into_iter()
-        .flat_map(|(w, h)| heavy_scenes(w, h, 14).into_iter().map(move |(_, scene)| (w, h, scene)))
+        .flat_map(|(w, h)| heavy_scenes(w, h, 9).into_iter().map(move |(_, scene)| (w, h, scene)))
         .collect();
     // What each should look like, from a painter with plenty of room on a device of its own.
     let mut reference = Easel::kept_at(ROOMY);
@@ -1441,7 +1473,7 @@ fn a_painter_waits_while_the_device_is_pestered(for_how_long: std::time::Duratio
     use std::time::Instant;
     let (w, h) = (64, 36);
     let theme = Theme::builtin();
-    let mut fonts = Fonts::new();
+    let mut fonts = Fonts::bundled_only();
     let scenes: Vec<_> =
         (0..10).map(|seed| build_scene(&mut fonts, Some(&dense_passage(seed, 1)), &theme, w, h).scene).collect();
     let mut reference = Easel::kept_at(ROOMY);
@@ -1502,7 +1534,7 @@ fn a_painter_waiting_for_the_gpu_is_not_tripped_by_another_thread_asking_it_for_
 fn a_picture_the_gpu_is_too_slow_with_is_given_up_and_drawn_when_asked_again() {
     use std::time::Duration;
     let (w, h) = (3840, 2160);
-    let (name, reading) = heavy_scenes(w, h, 14).swap_remove(0);
+    let (name, reading) = heavy_scenes(w, h, 9).swap_remove(0);
     assert_eq!(name, "reading");
     let expected = Easel::kept_at(ROOMY).paint(&reading, w, h).expect("paint with plenty of room");
 
@@ -1551,7 +1583,7 @@ fn a_picture_the_gpu_is_too_slow_with_is_given_up_and_drawn_when_asked_again() {
 #[test]
 fn a_photograph_in_a_picture_the_gpu_dropped_is_sent_again() {
     let (w, h) = (1920, 1080);
-    let (name, over_photo) = heavy_scenes(w, h, 3).swap_remove(4);
+    let (name, over_photo) = heavy_scenes(w, h, 1).swap_remove(4);
     assert_eq!(name, "photo");
     let expected = Easel::new().paint(&over_photo, w, h).expect("paint");
     // Dropped as the first picture a painter draws, and as a later one.
@@ -1716,7 +1748,7 @@ fn a_see_through_screen_and_its_key_come_from_one_picture() {
         backdrop: Some(Rgba { r: 0, g: 0, b: 0, a: 0 }),
         ..Default::default()
     };
-    let scene = sp_render::build_layers(&mut Fonts::new(), &layers, &Theme::builtin(), w, h).scene;
+    let scene = sp_render::build_layers(&mut Fonts::bundled_only(), &layers, &Theme::builtin(), w, h).scene;
     let mut easel = Easel::new();
     let (picture, fill) = easel.paint_see_through(&scene, w, h);
     let alphas: Vec<u8> = fill.chunks(4).map(|p| p[3]).collect();

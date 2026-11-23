@@ -89,7 +89,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   computer's own paths. Opening a pack again adds nothing twice: a theme the computer has (the
   same id) is used as it is, and a picture or video already in the library (the same contents)
   is reused. Fonts don't travel (their licences rarely allow it): a theme's font missing on the
-  other computer falls back to one it has. A pack with videos is written or opened in the
+  other computer falls back to one it has (SoftPresenter Sans, the default, is in every copy of the app). A pack with videos is written or opened in the
   background; `--wait` waits for it, and `sp job N` says how it went.
 - Playlists, libraries, macros, the song that starts with the app and slides' "go to song"
   actions find a library song by the id in its file, so they keep working when the library
@@ -1050,6 +1050,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   main theme (or a song's own). Under the main theme, the screens that draw with it are ticked
   and greyed, "Follows the main theme", since unticking one would leave it on the main theme;
   one on another theme can be ticked, which puts it back on the main theme.
+- **SoftPresenter Sans** is the default typeface for slides: Regular, Bold, Italic and Bold Italic
+  are built into the program (an open licence, [docs/licences/softpresenter-sans.md](licences/softpresenter-sans.md)),
+  with Latin, Cyrillic (Russian, Ukrainian) and Greek, so slides wrap the same on a Mac, Windows
+  and Linux. New themes, the built-in theme and new stage layouts use it; a saved theme, slide or layout
+  that names another font keeps it. It comes first in the Text tab's font list.
 - The built-in theme has a template for each: two languages and one for songs, and one for
   Bible slides (the Russian Synodal verse and its reference on top, the King James Version and
   its reference below, in Linux Biolinum on black; its settings live in

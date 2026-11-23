@@ -29,6 +29,9 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp target/release/softpresenter "$app/Contents/MacOS/softpresenter"
 # The app's icon, for the Dock, the Finder and the app switcher.
 cp assets/icons/SoftPresenter.icns "$app/Contents/Resources/SoftPresenter.icns"
+# SoftPresenter Sans, the slides' typeface, is built into the program; its licence goes with it.
+mkdir -p "$app/Contents/Resources/SoftPresenterSans"
+cp crates/sp-render/fonts/OFL.txt crates/sp-render/fonts/AUTHORS.txt "$app/Contents/Resources/SoftPresenterSans/"
 # FFmpeg, which plays the videos macOS's own player can't (MKV, WebM, AVI and others): an LGPL
 # build, made once by scripts/build-ffmpeg.sh, beside the app's program with its licence and a
 # note of its source. Without it (a computer that can't download it, say) the app still builds,

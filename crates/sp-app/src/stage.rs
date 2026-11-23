@@ -466,7 +466,7 @@ fn base_box() -> BoxStyle {
         role: Role::primary(),
         name: None,
         rect: SlideRect { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 },
-        font_family: "Helvetica Neue".to_owned(),
+        font_family: sp_model::DEFAULT_FONT_FAMILY.to_owned(),
         weight: 700,
         italic: false,
         size: 96.0,
@@ -934,10 +934,13 @@ Band: clock=TIME/None | timer=Some("Sermon  TIMER")/None | stage-message=Some("W
         // Read again, they are the same: the ids made for the items stay put.
         assert_eq!(read_layouts(SAVED_BEFORE).unwrap(), loaded);
         assert_eq!(lines.join("\n"), SHOWN_BEFORE);
-        // The built-in layouts are those, with their items as objects.
+        // The built-in layouts are those, with their items as objects, and since then set in the
+        // default typeface (the file names the one they were set in, and keeps it above).
         for (made, was) in builtin_layouts().iter().zip(&saved) {
+            let mut was = was.clone();
+            was.boxes.iter_mut().for_each(|style| style.font_family = sp_model::DEFAULT_FONT_FAMILY.to_owned());
             assert_eq!(made.boxes, was.boxes);
-            assert_eq!(normalized(was), *made);
+            assert_eq!(normalized(&was), *made);
         }
     }
 

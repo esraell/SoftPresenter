@@ -202,6 +202,14 @@ from the copy in `third_party/fontique`, which SoftPresenter has changed: the co
 Fontique's licence files, marks each change, and says what was changed and why in its
 `PROVENANCE.md`. [`docs/licences/fontique.md`](docs/licences/fontique.md) explains.
 
+### SoftPresenter Sans
+
+SoftPresenter sets slides in SoftPresenter Sans, a typeface built into the program: Libertinus
+Sans 7.051 under another name, copyright 2012-2024 the Libertinus Project Authors, with SoftPresenter's
+Bold Italic added, licensed under the SIL Open Font License 1.1. The licence and the authors
+are kept beside the font files in `crates/sp-render/fonts` and in the Mac app's Resources.
+[`docs/licences/softpresenter-sans.md`](docs/licences/softpresenter-sans.md) explains.
+
 ### Other libraries
 
 SoftPresenter is built from many open-source Rust libraries, each under its own licence (MIT,

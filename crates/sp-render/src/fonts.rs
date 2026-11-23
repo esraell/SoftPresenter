@@ -49,6 +49,25 @@ use parley::fontique::{
     SourceLoader, map_unchanging,
 };
 use parley::{FontContext, LayoutContext};
+use sp_model::DEFAULT_FONT_FAMILY;
+
+/// SoftPresenter Sans, the default typeface for slides, built into the program so that every
+/// computer has it: Regular, Bold, Italic and Bold Italic. It is Libertinus Sans under another
+/// name, licensed under the SIL Open Font License 1.1 (`fonts/OFL.txt`).
+const BUNDLED: [&[u8]; 4] = [
+    include_bytes!("../fonts/SoftPresenterSans-Regular.ttf"),
+    include_bytes!("../fonts/SoftPresenterSans-Bold.ttf"),
+    include_bytes!("../fonts/SoftPresenterSans-Italic.ttf"),
+    include_bytes!("../fonts/SoftPresenterSans-BoldItalic.ttf"),
+];
+
+/// Adds the bundled fonts to a collection. Their data is the program's own, so nothing is read
+/// from a file and nothing can change under it.
+fn add_bundled(collection: &mut Collection) {
+    for data in BUNDLED {
+        collection.register_fonts(Blob::new(Arc::new(data)), None);
+    }
+}
 
 /// Font lookup and text-layout scratch space. Make one per thread that draws and keep it.
 pub struct Fonts {
@@ -137,7 +156,8 @@ fn elsewhere() -> Option<Loaded> {
 /// The computer's fonts, looked for now if no thread has yet. Not on the screens' thread.
 fn found() -> &'static Collection {
     FOUND.get_or_init(|| {
-        let collection = Collection::new(CollectionOptions { shared: false, system_fonts: true });
+        let mut collection = Collection::new(CollectionOptions { shared: false, system_fonts: true });
+        add_bundled(&mut collection);
         READ_SO_FAR.fetch_add(1, Ordering::AcqRel);
         collection
     })
@@ -337,15 +357,27 @@ fn send(job: Job) -> bool {
     jobs.lock().is_ok_and(|tx| tx.send(job).is_ok())
 }
 
+/// A collection of the bundled fonts alone.
+fn bundled_only() -> Collection {
+    let mut collection = Collection::new(CollectionOptions { shared: false, system_fonts: false });
+    add_bundled(&mut collection);
+    collection
+}
+
 impl Fonts {
     /// Uses the fonts installed on this computer. The first one made looks for them, which
     /// takes a moment; on the screens' thread the loader thread does that instead.
     pub fn new() -> Fonts {
         let collection = if elsewhere().is_some() { FOUND.get().cloned() } else { Some(found().clone()) };
         let found = collection.is_some();
-        let collection =
-            collection.unwrap_or_else(|| Collection::new(CollectionOptions { shared: false, system_fonts: false }));
+        let collection = collection.unwrap_or_else(bundled_only);
         Fonts::with(collection, found)
+    }
+
+    /// Only the bundled fonts, none of the computer's: text in SoftPresenter Sans is laid out
+    /// and drawn the same on every computer. For pictures that are compared with stored ones.
+    pub fn bundled_only() -> Fonts {
+        Fonts::with(bundled_only(), true)
     }
 
     fn with(collection: Collection, found: bool) -> Fonts {
@@ -434,11 +466,16 @@ impl Fonts {
 }
 
 impl Fonts {
-    /// The names of the font families installed on this computer, sorted.
+    /// The names of the font families installed on this computer, sorted, with the default
+    /// typeface first.
     pub fn family_names(&mut self) -> Vec<String> {
         let mut names: Vec<String> = self.font_cx.collection.family_names().map(str::to_owned).collect();
         names.sort_by_key(|name| name.to_lowercase());
         names.dedup();
+        if let Some(at) = names.iter().position(|name| name == DEFAULT_FONT_FAMILY) {
+            let default = names.remove(at);
+            names.insert(0, default);
+        }
         names
     }
 }
@@ -487,6 +524,22 @@ mod tests {
     /// How a font file was had: `None` if it never was, `Some(None)` if it was read whole.
     fn how(path: &Path) -> Option<Option<MappedFrom>> {
         HOW.lock().ok()?.as_ref()?.get(path).copied()
+    }
+
+    /// SoftPresenter Sans is in every collection, with all four of its faces, and comes first in
+    /// the list of families, whatever fonts the computer has.
+    #[test]
+    fn the_bundled_typeface_is_always_there() {
+        let mut only = Fonts::bundled_only();
+        assert_eq!(only.family_names(), [DEFAULT_FONT_FAMILY]);
+        let family = only.font_cx.collection.family_by_name(DEFAULT_FONT_FAMILY).expect("the family");
+        assert_eq!(family.fonts().len(), 4);
+        // Before the computer's fonts are found, as on the screens' thread at the start.
+        let mut first = Fonts::with(bundled_only(), false);
+        assert_eq!(first.family_names()[0], DEFAULT_FONT_FAMILY);
+        // Letters are laid out in it, not drawn as missing ones.
+        let letters = glyphs(&mut only, DEFAULT_FONT_FAMILY, "Свет ґ ї Light");
+        assert!(letters.iter().all(|glyph| glyph.0 != 0));
     }
 
     /// Fonts this computer has, with pair kerning, to copy and spoil. Empty on a computer with
@@ -887,7 +940,8 @@ mod tests {
                     let _ = tx.lock().map(|tx| tx.send(()));
                 }));
                 let mut fonts = Fonts::new();
-                let there_at_first = FOUND.get().is_some() || fonts.found || !fonts.family_names().is_empty();
+                let there_at_first =
+                    FOUND.get().is_some() || fonts.found || fonts.family_names() != [DEFAULT_FONT_FAMILY];
                 let empty_at_first = glyphs(&mut fonts, &family, text).is_empty() && !fonts.found;
                 // Each time the loader says something is there, again: first the fonts are
                 // found, then the family's file is read.

@@ -352,6 +352,11 @@ impl Default for Shadow {
     }
 }
 
+/// The typeface slides are set in unless a theme or a slide names another: SoftPresenter Sans,
+/// which the program carries inside it, so every computer has it. A saved theme always names
+/// its font, so changing this changes only themes made from now on.
+pub const DEFAULT_FONT_FAMILY: &str = "SoftPresenter Sans";
+
 /// How the text box with one role is placed and drawn.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BoxStyle {
@@ -744,7 +749,7 @@ impl Theme {
             role,
             name: None,
             rect,
-            font_family: "Helvetica Neue".to_owned(),
+            font_family: DEFAULT_FONT_FAMILY.to_owned(),
             weight: 700,
             italic: false,
             size,
@@ -1306,6 +1311,18 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn new_looks_use_the_default_typeface_and_a_saved_look_keeps_its_own() {
+        assert_eq!(Theme::builtin().templates[0].boxes[0].font_family, DEFAULT_FONT_FAMILY);
+        let mut theme = Theme::builtin();
+        theme.templates[0].boxes[0].font_family = "Helvetica Neue".to_owned();
+        let back = Theme::from_json(&theme.to_json()).unwrap();
+        assert_eq!(back.templates[0].boxes[0].font_family, "Helvetica Neue");
+        // A file must name its font: one that doesn't is not read as having the default.
+        let unnamed = theme.to_json().replace("\"font_family\": \"Helvetica Neue\",", "");
+        assert!(Theme::from_json(&unnamed).is_err());
+    }
 
     #[test]
     fn a_theme_saved_before_the_project_was_renamed_still_opens() {
