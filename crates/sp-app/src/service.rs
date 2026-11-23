@@ -168,9 +168,131 @@ impl Item {
 pub struct Service {
     pub name: String,
     pub items: Vec<Item>,
+    /// The stable ids of the items ([`Service::uids`]).
+    #[serde(default)]
+    pub uids: UidBook,
+}
+
+/// Remembers a stable id (`uid`) for each item of a playlist, so a page that names an item by it
+/// still finds it after the items are moved about, saved, or the app is opened again. Items
+/// are changed in many places, so the book doesn't watch them: whoever asks for the ids
+/// ([`Service::uids`]) first has it compare the items with what it last saw. An item that is the
+/// same as one it knew keeps that one's id, wherever it has gone; an item changed in place (a
+/// rename, a theme version) keeps the id of the one of its kind that went; anything else is
+/// new. Two identical items (two headers of one name) are told apart by their order only.
+#[derive(Default)]
+pub struct UidBook(std::sync::Mutex<Book>);
+
+#[derive(Default, Clone)]
+struct Book {
+    /// The items as they were when the ids were last settled; `None` for a book just read.
+    seen: Option<Vec<Item>>,
+    uids: Vec<Uuid>,
+}
+
+impl Clone for UidBook {
+    fn clone(&self) -> UidBook {
+        UidBook(std::sync::Mutex::new(self.book().clone()))
+    }
+}
+
+impl std::fmt::Debug for UidBook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("UidBook")
+    }
+}
+
+/// Ids are bookkeeping: two playlists with the same items are the same playlist.
+impl PartialEq for UidBook {
+    fn eq(&self, _: &UidBook) -> bool {
+        true
+    }
+}
+
+impl Eq for UidBook {}
+
+impl Serialize for UidBook {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.book().uids.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for UidBook {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<UidBook, D::Error> {
+        let uids = Vec::<Uuid>::deserialize(deserializer)?;
+        Ok(UidBook(std::sync::Mutex::new(Book { seen: None, uids })))
+    }
+}
+
+impl UidBook {
+    fn book(&self) -> std::sync::MutexGuard<'_, Book> {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The id of each of `items`, in order.
+    fn settle(&self, items: &[Item]) -> Vec<Uuid> {
+        let mut book = self.book();
+        let Book { seen, uids } = &mut *book;
+        match seen.as_deref() {
+            Some(old) if old == items && uids.len() == items.len() => return uids.clone(),
+            // A file just read: its ids stand if there is one for each item and none repeats.
+            None => {
+                let mut once = std::collections::HashSet::new();
+                if !(uids.len() == items.len() && uids.iter().all(|uid| once.insert(*uid))) {
+                    *uids = items.iter().map(|_| Uuid::new_v4()).collect();
+                }
+                *seen = Some(items.to_vec());
+                return uids.clone();
+            }
+            Some(_) => {}
+        }
+        let old = seen.take().unwrap_or_default();
+        let mut taken = vec![false; old.len()];
+        let mut now: Vec<Option<Uuid>> = vec![None; items.len()];
+        // The same item, where it was if it still is there, else the first of its kind not yet used.
+        for (at, item) in items.iter().enumerate() {
+            let spot = if old.get(at) == Some(item) && !taken[at] {
+                Some(at)
+            } else {
+                (0..old.len()).find(|&place| !taken[place] && old[place] == *item)
+            };
+            if let Some(place) = spot.filter(|place| *place < uids.len()) {
+                taken[place] = true;
+                now[at] = Some(uids[place]);
+            }
+        }
+        // What is left, changed in place: the same kind of item takes the id of the one that went.
+        for (at, item) in items.iter().enumerate() {
+            if now[at].is_some() {
+                continue;
+            }
+            let kind = std::mem::discriminant(item);
+            let spot = (0..old.len())
+                .find(|&place| !taken[place] && place < uids.len() && std::mem::discriminant(&old[place]) == kind);
+            if let Some(place) = spot {
+                taken[place] = true;
+                now[at] = Some(uids[place]);
+            }
+        }
+        let settled: Vec<Uuid> = now.into_iter().map(|uid| uid.unwrap_or_else(Uuid::new_v4)).collect();
+        *uids = settled.clone();
+        *seen = Some(items.to_vec());
+        settled
+    }
 }
 
 impl Service {
+    /// The stable id of each item, in order: kept when items are moved, when the playlist is
+    /// saved and read again, and after a restart. Written to the services file.
+    pub fn uids(&self) -> Vec<Uuid> {
+        self.uids.settle(&self.items)
+    }
+
+    /// The place of the item with this id.
+    pub fn place_of_uid(&self, uid: Uuid) -> Option<usize> {
+        self.uids().iter().position(|have| *have == uid)
+    }
+
     /// A short word that changes whenever the playlist's items do (added, removed, moved,
     /// renamed, set to a theme version): a remote page names an item by its place, with this,
     /// so a playlist changed meanwhile is noticed rather than the wrong item shown.
@@ -198,7 +320,7 @@ pub struct Services {
 impl Default for Services {
     fn default() -> Services {
         Services {
-            list: vec![Service { name: "Service".to_owned(), items: Vec::new() }],
+            list: vec![Service { name: "Service".to_owned(), items: Vec::new(), uids: Default::default() }],
             current: 0,
             chosen: None,
             changed: false,
@@ -526,7 +648,7 @@ impl Services {
     /// Makes a new, empty service and brings it to the front.
     pub fn add_service(&mut self) {
         let name = (1..).map(|n| format!("Playlist {n}")).find(|name| self.list.iter().all(|s| &s.name != name));
-        self.list.push(Service { name: name.unwrap_or_default(), items: Vec::new() });
+        self.list.push(Service { name: name.unwrap_or_default(), items: Vec::new(), uids: Default::default() });
         self.current = self.list.len() - 1;
         self.chosen = None;
         self.changed = true;
@@ -565,6 +687,9 @@ impl Services {
     }
 
     pub fn to_json(&self) -> String {
+        for service in &self.list {
+            service.uids();
+        }
         let newest = self.list.iter().flat_map(|service| &service.items).any(Item::needs_version_3);
         let file =
             File { format: FORMAT.to_owned(), version: if newest { VERSION } else { 2 }, services: self.clone() };
@@ -588,6 +713,14 @@ impl Services {
             services.list = Services::default().list;
         }
         services.current = services.current.min(services.list.len() - 1);
+        // A file from before items had ids (or with ids that don't fit) is saved again at once, so
+        // the ids made now are the ones the next opening reads.
+        for service in &services.list {
+            let before = service.uids.book().uids.clone();
+            if service.uids() != before {
+                services.changed = true;
+            }
+        }
         Ok(services)
     }
 }
@@ -1187,7 +1320,7 @@ mod tests {
         assert_eq!(titles(&services, 0), ["A", "X", "Y", "B", "C"]);
         assert_eq!(services.chosen, Some(2), "the last put in is the open one");
         // Another playlist: at its end, the open item of the one in front left alone.
-        services.list.push(Service { name: "Evening".to_owned(), items: vec![song("a")] });
+        services.list.push(Service { name: "Evening".to_owned(), items: vec![song("a")], uids: Default::default() });
         assert_eq!(services.put_in(1, Some(0), vec![song("b")]), [true]);
         assert_eq!((titles(&services, 1), services.chosen), (vec!["A".to_owned(), "B".to_owned()], Some(2)));
     }
@@ -1214,7 +1347,11 @@ mod tests {
         let named = |names: &[&str]| Services {
             list: names
                 .iter()
-                .map(|name| Service { name: (*name).to_owned(), items: vec![song("a"), song("b")] })
+                .map(|name| Service {
+                    name: (*name).to_owned(),
+                    items: vec![song("a"), song("b")],
+                    uids: Default::default(),
+                })
                 .collect(),
             current: 2,
             chosen: Some(1),
@@ -1263,6 +1400,7 @@ mod tests {
         services.list.push(Service {
             name: "Evening".to_owned(),
             items: vec![song("x"), Item::Placeholder { name: "Sermon".to_owned() }],
+            uids: Default::default(),
         });
         services.chosen = Some(2);
         assert_eq!(services.fill_in(1, 1, song("y")), Some(1));
@@ -1301,5 +1439,82 @@ mod tests {
         assert!(
             Services::from_json("{\"format\":\"something else\",\"version\":1,\"list\":[],\"current\":0}").is_err()
         );
+    }
+
+    #[test]
+    fn an_item_keeps_its_uid_when_the_items_are_moved_renamed_or_saved() {
+        let mut services = Services::default();
+        services.list[0].items = vec![song("a"), Item::Header { name: "Worship".to_owned() }, song("b"), song("c")];
+        let first = services.list[0].uids();
+        assert_eq!(first.len(), 4);
+        assert_eq!(first.iter().collect::<std::collections::HashSet<_>>().len(), 4, "all different");
+        assert_eq!(services.list[0].uids(), first, "asking again changes nothing");
+        // Moved: each keeps its own.
+        services.list[0].items.swap(0, 3);
+        assert_eq!(services.list[0].uids(), vec![first[3], first[1], first[2], first[0]]);
+        // One taken out, one put in: the new one has a new uid, the others their own.
+        services.list[0].items.remove(1);
+        services.list[0].items.insert(0, song("d"));
+        let now = services.list[0].uids();
+        assert_eq!(&now[1..], &[first[3], first[2], first[0]]);
+        assert!(!first.contains(&now[0]));
+        // Renamed in place: the same item.
+        services.list[0].items[0] = song("d2");
+        assert_eq!(services.list[0].uids(), now);
+        // Several changes at once before anyone asks: still told apart by what they are.
+        let before = services.list[0].uids();
+        services.list[0].items.reverse();
+        services.list[0].items.push(song("e"));
+        let after = services.list[0].uids();
+        assert_eq!(after[..4], [before[3], before[2], before[1], before[0]]);
+        assert!(!before.contains(&after[4]));
+        // Saved and read again, and a clone: the same uids.
+        let again = Services::from_json(&services.to_json()).unwrap();
+        assert_eq!(again.list[0].uids(), after);
+        assert_eq!(services.list[0].clone().uids(), after);
+        // Read again and moved: still each its own.
+        let mut again = again;
+        again.list[0].items.rotate_left(1);
+        assert_eq!(again.list[0].uids(), [&after[1..], &after[..1]].concat());
+    }
+
+    #[test]
+    fn a_file_from_before_uids_gets_them_without_losing_anything() {
+        let text = r#"{"format": "softpresenter-services", "version": 2, "list": [{"name": "Sunday",
+            "items": [{"kind": "song", "key": "abc", "title": "Abc"}, {"kind": "header", "name": "Word"}]}],
+            "current": 0}"#;
+        let services = Services::from_json(text).unwrap();
+        assert!(services.changed, "saved again at once, so the ids made now are the ones read next time");
+        let uids = services.front().uids();
+        assert_eq!(uids.len(), 2);
+        assert_eq!(services.front().items, vec![song_titled("abc", "Abc"), Item::Header { name: "Word".to_owned() }]);
+        // Saving writes them, and the next reading keeps them.
+        let saved = services.to_json();
+        assert!(saved.contains(&uids[0].to_string()) && saved.contains(&uids[1].to_string()));
+        let read = Services::from_json(&saved).unwrap();
+        assert!(!read.changed, "nothing to save again");
+        assert_eq!(read.front().uids(), uids);
+    }
+
+    #[test]
+    fn uids_that_do_not_fit_the_items_are_made_again() {
+        let text = |uids: &str| {
+            format!(
+                r#"{{"format": "softpresenter-services", "version": 2, "list": [{{"name": "Sunday",
+                "items": [{{"kind": "header", "name": "A"}}, {{"kind": "header", "name": "B"}}], "uids": {uids}}}],
+                "current": 0}}"#
+            )
+        };
+        let one = "00000000-0000-4000-8000-000000000001";
+        let two = "00000000-0000-4000-8000-000000000002";
+        // Right: kept.
+        let kept = Services::from_json(&text(&format!("[\"{one}\", \"{two}\"]"))).unwrap().front().uids();
+        assert_eq!((kept[0].to_string(), kept[1].to_string()), (one.to_owned(), two.to_owned()));
+        // The same one twice, or too few: new ones, one each, all different.
+        for bad in [format!("[\"{one}\", \"{one}\"]"), format!("[\"{one}\"]"), "[]".to_owned()] {
+            let made = Services::from_json(&text(&bad)).unwrap().front().uids();
+            assert_eq!(made.len(), 2);
+            assert_ne!(made[0], made[1]);
+        }
     }
 }

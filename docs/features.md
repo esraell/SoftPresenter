@@ -288,7 +288,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   that goes on by itself goes on into the next song or passage only with Continuous on. A
   page or script that keeps its own open item names it each time (`sp next --aim 3`,
   `sp go --aim 3 2`): the step is worked out from that item, with nothing picked, and the
-  window's open item, picks and chosen song stay as they are.
+  window's open item, picks and chosen song stay as they are. Each playlist item has an id of
+  its own (`uid`, in `sp playlist --json` and in what a page is sent) that stays with it when
+  the items are moved, when the playlist is saved and when the app opens again, and `--aim`
+  takes it in place of the item's number, so a page's open item follows a reorder exactly.
+  `sp songs --json` gives each song's stable id (which `go`, `slides` and `slide` take in
+  place of its title), and each screen says whether it is an audience or a stage screen.
 - **A slide picked waits for Enter.** What the find box opens with Return has a slide picked
   (a song's first slide as sung, or the slide whose words were found; a Bible passage's first
   verse: a single verse, typed as a reference or found by its words, is the passage, and with a

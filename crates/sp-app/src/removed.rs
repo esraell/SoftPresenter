@@ -520,8 +520,10 @@ mod tests {
     fn three_of_each() -> HomeState {
         let names = ["One", "Two", "Three"];
         let mut state = HomeState::default();
-        state.services.list =
-            names.iter().map(|name| Service { name: (*name).to_owned(), items: Vec::new() }).collect();
+        state.services.list = names
+            .iter()
+            .map(|name| Service { name: (*name).to_owned(), items: Vec::new(), uids: Default::default() })
+            .collect();
         state.libraries = names.iter().map(|name| crate::libraries::Library::new((*name).to_owned())).collect();
         state.audio.playlists = names.iter().map(|name| crate::audio::Playlist::new((*name).to_owned())).collect();
         state.timers = names.iter().map(|name| crate::timers::Timer::new((*name).to_owned())).collect();

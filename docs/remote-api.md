@@ -129,7 +129,8 @@ are remembered at once.
 4. **No file paths.** Nothing is served from a path in a request: the pages are compiled into
    the app, and pictures are found by a slide's id. Unknown paths are `404`.
 5. **Headers on every answer:**
-   `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self' wss://HOST; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+   `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self' wss://HOST; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types 'none'`
+   (so a page can't make a string into script or markup, even by a slip),
    `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
    `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy: same-origin`, and
    `Cache-Control: no-store` unless a picture says otherwise.
@@ -316,14 +317,21 @@ version the screens draw in. A Bible passage on screen is `kind: "passage"`, its
 
 **`playlist`** — the playlist in front: `{"name", "number", "rev", "live_item", "items": […]}`,
 the items as `sp playlist --json` lists them. Each has `item` (its place in the playlist: the
-number `--aim` takes), `title`, `text` (as `sp` shows it), `kind`
+number `--aim` takes), `uid` (the item's own id, [below](#the-pages-own-state-open-item-picks-cue)), `title`, `text` (as `sp` shows it), `kind`
 (`song|passage|header|media|media_playlist|placeholder`) and `missing`; a song adds its `id` and
 `number` (its place in the library, not the playlist), a picture or video its `media_type` and
 `number` (in the media bin). For example:
 
-    {"item": 1, "kind": "header", "title": "Worship", "text": "— Worship —", "missing": false}
-    {"item": 2, "kind": "song", "id": "58a9…", "number": 2, "title": "Test One", "text": "Test One", "missing": false}
-    {"item": 4, "kind": "media", "media_type": "picture", "number": 2, "title": "pic001.png", "text": "pic001.png (picture)", "missing": false}
+    {"item": 1, "uid": "6148368d-7262-44cb-9cbf-389667f98e5b", "kind": "header", "title": "Worship", "text": "— Worship —", "missing": false}
+    {"item": 2, "uid": "032fb9a3-4bc7-4f35-9cc6-23ca08c68153", "kind": "song", "id": "58a9…", "number": 2, "title": "Test One", "text": "Test One", "missing": false}
+    {"item": 4, "uid": "9f75b90a-22d8-4c2a-907d-cab4589f9399", "kind": "media", "media_type": "picture", "number": 2, "title": "pic001.png", "text": "pic001.png (picture)", "missing": false}
+
+`uid` belongs to the item in the playlist, not to the song or picture it shows (the same song in
+two playlists is two items, and a song's `id` is its own). It stays with the item when the items
+are moved about, when the playlist is saved and read again and when the app is opened again; an
+item put in, or one that is taken out and put back, has a new one. An item changed in place (a
+header renamed, a theme version set) keeps its uid. Two identical items (two headers of one
+name) are told apart by their order only.
 
 `rev` changes whenever the items do; send it with `--aim` ([below](#the-pages-own-state-open-item-picks-cue)).
 
@@ -331,8 +339,8 @@ number `--aim` takes), `title`, `text` (as `sp` shows it), `kind`
 demand: `["playlist", "NAME"]`.
 
 **`library`** — `{"songs": 214, "rev": "…", "libraries": […]}`. The songs come on demand:
-`["songs"]` (all, with ids; fetch again when `rev` changes), `["library", "NAME"]`,
-`["search", "WORDS"]`. A song's slides: `["slides", "<song id>"]`; a playlist item's:
+`["songs"]` (all; fetch again when `rev` changes; each `{"number": 2, "title": "Harbour Lights", "id": "829a…", "changed_outside": false}`, where `id` is the song's stable id), `["library", "NAME"]`,
+`["search", "WORDS"]`. A song's slides: `["slides", "<song id>"]` (`go` and `slide` take the id too); a playlist item's:
 `["slides", "item", "3"]` (each slide with `id` and `thumb`).
 
 **`bin`** — the media bin: `{"items": [{"number", "id", "name", "kind": "picture|video", "fit",
@@ -356,7 +364,7 @@ demand: `["playlist", "NAME"]`.
 **`messages`**, **`props`**, **`macros`** — as `sp messages|props|macros --json` give them
 (which is on screen included).
 
-**`screens`** — `{"screens": [ … as sp screens --json, each with "tone": "good|trouble" ],
+**`screens`** — `{"screens": [ … as sp screens --json (each with `"kind": "audience|stage"`), each with "tone": "good|trouble" ],
 "audience_on", "stage_on", "identify"}`. `doing` is the screen's status in words.
 
 **`notices`** — the list under the app's status button, as the app keeps it (`notices.rs`):
@@ -402,13 +410,17 @@ act "on the open item" are told which item:
 - `["go", "--aim", "3", "2", "--rev", REV]`: slide 2 of item 3 on screen (its first slide
   without the number; a picture, video or media playlist with `1` or nothing). **Enter** is a
   `go` to the page's cue.
+- `["next", "--aim", "<uid>"]`, `["go", "--aim", "<uid>", "2"]`: the item named by its `uid` (the
+  `uid` of the `playlist` part's item) in place of its number. It is found wherever it has been
+  moved to, so `--rev` isn't needed (and is ignored); if the item is no longer in the playlist in
+  front the command is refused: "That item is no longer in Sunday; look again and try once more."
 - `["go", "<song id>", "2"]`: a song's slide from the library.
 
 `first`, `last`, `group NAME` and `hotkey KEY` still act on the song the window shows; from a
 page use `go --aim ITEM SLIDE` (or `go SONG SLIDE`), and `group NAME in SONG`.
 
 The window's open item, picks and chosen song stay as they are. `--rev` is the playlist's `rev`
-from the `playlist` part: if the playlist changed since the page saw it, the command is refused
+from the `playlist` part (a page that names its open item by `uid` can leave it out): if the playlist changed since the page saw it, the command is refused
 ("Sunday has changed since it was last looked at; look again and try once more.") rather than
 the wrong item shown. Items are named by their number in the playlist in front; to run from
 another playlist, put it in front first (`["playlist", "open", "NAME"]`, which the window shows

@@ -151,7 +151,17 @@ impl crate::App {
         let Some(playlist) = self.running.as_ref().and_then(|r| r.home_state.services.list.get(list)) else {
             return (Vec::new(), Vec::new());
         };
-        playlist.items.iter().enumerate().map(|(at, item)| item_entry(at + 1, item, &self.found(item))).unzip()
+        let uids = playlist.uids();
+        playlist
+            .items
+            .iter()
+            .enumerate()
+            .map(|(at, item)| {
+                let (line, mut data) = item_entry(at + 1, item, &self.found(item));
+                data["uid"] = serde_json::json!(uids[at]);
+                (line, data)
+            })
+            .unzip()
     }
 
     /// The playlist a name stands for, or the one in front (for other command modules).
@@ -246,7 +256,11 @@ impl crate::App {
         if state.services.list.iter().any(|p| p.name.eq_ignore_ascii_case(name)) {
             return Err(format!("There is a playlist called {name} already."));
         }
-        state.services.list.push(crate::service::Service { name: name.to_owned(), items: Vec::new() });
+        state.services.list.push(crate::service::Service {
+            name: name.to_owned(),
+            items: Vec::new(),
+            uids: Default::default(),
+        });
         state.services.changed = true;
         Ok(Reply::done(format!("Made the playlist {name}.")))
     }

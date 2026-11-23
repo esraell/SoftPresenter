@@ -5424,7 +5424,11 @@ impl App {
                     name = format!("{} ({n})", playlist.name);
                     n += 1;
                 }
-                services.list.push(service::Service { name: name.clone(), items: playlist.items });
+                services.list.push(service::Service {
+                    name: name.clone(),
+                    items: playlist.items,
+                    uids: Default::default(),
+                });
                 services.changed = true;
                 playlist_name = Some(name);
             }
@@ -10119,7 +10123,11 @@ mod tests {
             service::Item::Header { name: "Welcome".to_owned() },
             service::Item::Header { name: "Sermon".to_owned() },
         ];
-        services.list.push(service::Service { name: "Evening".to_owned(), items: Vec::new() });
+        services.list.push(service::Service {
+            name: "Evening".to_owned(),
+            items: Vec::new(),
+            uids: Default::default(),
+        });
         services.put_in(0, Some(0), landed.iter().map(|&at| item(at)).collect());
         services.put_in(1, Some(0), landed.iter().map(|&at| item(at)).collect());
         let names = |playlist: usize| -> Vec<String> {

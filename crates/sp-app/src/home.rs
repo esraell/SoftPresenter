@@ -12489,7 +12489,7 @@ mod tests {
         state.services.add(Item::song("alpha".to_owned(), "Alpha".to_owned()));
         state.services.add(Item::song("beta".to_owned(), "Beta".to_owned()));
         state.services.chosen = None;
-        state.services.list.push(Service { name: "Evening".to_owned(), items: Vec::new() });
+        state.services.list.push(Service { name: "Evening".to_owned(), items: Vec::new(), uids: Default::default() });
         state.libraries.push(crate::libraries::Library::new("Hymns".to_owned()));
         (show, state)
     }

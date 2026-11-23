@@ -1959,12 +1959,30 @@ impl crate::App {
                     .as_ref()
                     .is_some_and(|r| r.home_state.notices.asks_about(crate::outside::Waiting::Song(at)))
         };
-        let names: Vec<String> = self
-            .listed_songs()
-            .into_iter()
-            .map(|(at, title)| if waiting(at) { format!("{title} (changed outside SoftPresenter)") } else { title })
+        let listed = self.listed_songs();
+        let names: Vec<String> = listed
+            .iter()
+            .map(
+                |(at, title)| {
+                    if waiting(*at) { format!("{title} (changed outside SoftPresenter)") } else { title.clone() }
+                },
+            )
             .collect();
-        Reply::with(numbered(&names), serde_json::json!(names))
+        // As data, each song has its place in this list and its stable id: what `go`, `slides` and
+        // `slide` take in place of the title, and what a playlist item's `id` is.
+        let data: Vec<serde_json::Value> = listed
+            .iter()
+            .enumerate()
+            .map(|(place, (at, title))| {
+                serde_json::json!({
+                    "number": place + 1,
+                    "title": title,
+                    "id": self.show.presentations().get(*at).map(|song| song.id),
+                    "changed_outside": waiting(*at),
+                })
+            })
+            .collect();
+        Reply::with(numbered(&names), serde_json::json!(data))
     }
 
     fn ctl_named_list(&self, _kind: &str, names: impl Fn(&crate::home::HomeState) -> Vec<String>) -> Reply {
@@ -1999,6 +2017,12 @@ impl crate::App {
     fn aimed_item(&self, aim: &Aim) -> Result<usize, String> {
         let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
         let list = state.services.front();
+        // An item's `uid` names it exactly, wherever it has been moved to since: no `--rev` needed.
+        if let Ok(uid) = sp_model::Uuid::parse_str(aim.item.trim()) {
+            return list
+                .place_of_uid(uid)
+                .ok_or_else(|| format!("That item is no longer in {}; look again and try once more.", list.name));
+        }
         if aim.rev.as_ref().is_some_and(|rev| *rev != list.rev()) {
             return Err(format!(
                 "{} has changed since it was last looked at; look again and try once more.",
@@ -2204,6 +2228,7 @@ impl crate::App {
                 let format = crate::screens::decklink_format(screen, &state.decklink);
                 serde_json::json!({
                     "name": screen.name,
+                    "kind": if audience { "audience" } else { "stage" },
                     "doing": doing,
                     "shown": shown_now,
                     "format": match &screen.output {
@@ -3493,7 +3518,8 @@ mod tests {
         assert!(aim_words(&names(&["--aim"])).is_err());
         assert!(aim_words(&names(&["--rev", "00ff"])).is_err());
         // A playlist's rev changes when its items do, and only then.
-        let mut list = crate::service::Service { name: "Sunday".to_owned(), items: Vec::new() };
+        let mut list =
+            crate::service::Service { name: "Sunday".to_owned(), items: Vec::new(), uids: Default::default() };
         let empty = list.rev();
         list.items.push(crate::service::Item::Header { name: "Worship".to_owned() });
         assert_ne!(list.rev(), empty);

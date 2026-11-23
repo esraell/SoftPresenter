@@ -6309,7 +6309,11 @@ pub mod tests {
         assert_eq!(names(&state, 0), ["Two", "One", "Four", "Three"]);
         assert_eq!(state.item_picks.places, [0, 2]);
         // Song ▸ Add to Playlist from one of them adds every picked song, in order.
-        state.services.list.push(crate::service::Service { name: "Evening".to_owned(), items: Vec::new() });
+        state.services.list.push(crate::service::Service {
+            name: "Evening".to_owned(),
+            items: Vec::new(),
+            uids: Default::default(),
+        });
         assert_eq!(songs_menu_adds(&show, &state, 3, Some(2)), [1, 3], "Two and Four");
         assert_eq!(songs_menu_adds(&show, &state, 0, Some(1)), [0], "One isn't picked: just it");
         SongAsks { add_to: Some((vec![1, 3], Some(1))), ..SongAsks::default() }.carry_out(&show, &mut state);
@@ -6739,7 +6743,11 @@ pub mod tests {
         let show = Show::new(Vec::new());
         let mut state = HomeState { playlist_open: true, chooser_open: true, ..HomeState::default() };
         state.services.list[0].name = "Morning".to_owned();
-        state.services.list.push(Service { name: "Evening".to_owned(), items: vec![Item::song("a", "A")] });
+        state.services.list.push(Service {
+            name: "Evening".to_owned(),
+            items: vec![Item::song("a", "A")],
+            uids: Default::default(),
+        });
         state.services.current = 1;
         state.services.chosen = Some(0);
         let frame = |state: &mut HomeState, events: Vec<Event>| {
