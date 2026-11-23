@@ -153,21 +153,43 @@ pub fn to_pdf(path: &Path, folder: &Path) -> Result<(PathBuf, Program), String> 
 
 /// The exporting app: open, export as a PDF (skipped slides left out, as in the show), close. The file
 /// names go to the script as arguments, never into its text.
+///
+/// What `open` gives back is never used: for a file it converts (a `.pptx`), that is not the
+/// document it made, and exporting it made the app quit with an error. Instead the documents open
+/// before are noted, and the one that appears after (the one named after the file, if several
+/// do) is exported and closed. A document the person had open is never exported or closed.
 fn by_exporting(path: &Path, folder: &Path) -> Result<PathBuf, String> {
     let pdf = folder.join("slides.pdf");
     let script = r#"on run argv
     set inFile to POSIX file (item 1 of argv)
     set outFile to POSIX file (item 2 of argv)
+    set baseName to item 3 of argv
     set wasOpen to application "Keynote" is running
     if not wasOpen then launch application "Keynote"
     tell application "Keynote"
-        set theDocument to open inFile
+        set openBefore to id of every document
+        open inFile
+        set newId to missing value
+        repeat 500 times
+            repeat with oneId in (id of every document)
+                set docId to contents of oneId
+                if openBefore does not contain {docId} then
+                    if newId is missing value or (name of document id docId) starts with baseName then set newId to docId
+                end if
+            end repeat
+            if newId is not missing value then exit repeat
+            delay 0.2
+        end repeat
+        if newId is missing value then error "The file didn't open (if it is open there already, close it and try again)."
+        set theDocument to document id newId
         export theDocument to outFile as PDF
         close theDocument saving no
     end tell
     if not wasOpen then tell application "Keynote" to quit
 end run"#;
-    run_script(script, &[path, &pdf])?;
+    // The file's name without its ending, to tell its document from others that open at once.
+    let stem = Path::new(path.file_stem().unwrap_or_default());
+    run_script(script, &[path, &pdf, stem])?;
     Ok(pdf)
 }
 
