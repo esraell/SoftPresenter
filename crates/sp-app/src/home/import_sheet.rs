@@ -282,7 +282,7 @@ pub fn slides_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
                     0.0,
                     SlidesChoice::Pictures,
                     "Pictures as slides",
-                    "Pictures chosen together, one slide each, in a presentation named after their folder",
+                    "Pictures chosen together become one presentation, a slide each, in the order their names number them",
                 ),
                 (
                     232.0,

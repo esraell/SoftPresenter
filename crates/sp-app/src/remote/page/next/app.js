@@ -1447,7 +1447,7 @@ M.importMenu = () => [{ head: 'Import Songs' }, { t: 'A Library Folder…', f: (
   { sep: true }, { t: 'Slides…', f: () => A.importSheet() }];
 A.importSheet = () => openSheet({ title: 'Import Slides', wide: true,
   body: html`<div class="ui-cards">
-    <button class="ui-card" data-a="importDo:pictures"><b>Pictures as slides</b><span>Choose pictures; each becomes a slide, in the order people number them</span></button>
+    <button class="ui-card" data-a="importDo:pictures"><b>Pictures as slides</b><span>Pictures chosen together become one presentation, a slide each, in the order their names number them</span></button>
     <button class="ui-card" data-a="importPres"><b>A presentation</b><span>A .pptx, .ppsx, .key, .odp, .ppt or .pps file, or a PDF. You choose how it comes in</span></button></div>`,
   note: 'In the app you can also drop files on the window', buttons: [{ t: 'Close' }] });
 // A presentation (as the app has it, c46ddff): As Slides (editable, read straight from a .pptx or .ppsx) or As Pictures (the exact
@@ -1483,7 +1483,9 @@ function presImport(name, how) {
     DOC.songs.push(s); state.src = { type: 'lib', id: 'all' }; state.openSong = s.id;
   });
   const checks = s.slides.map((x, n) => x.check ? n + 1 : 0).filter(Boolean);
-  toast(how === 'slides' ? `“${title}” came in as ${s.slides.length} slides.${checks.length ? ` Check slide${checks.length > 1 ? 's' : ''} ${checks.join(' and ')}: ${s.slides.filter(x => x.check).map(x => x.check.toLowerCase()).join('; ')}.` : ''}` : `“${title}” came in as ${s.slides.length} picture slides.`);
+  const named = checks.length > 8 ? `${checks.slice(0, 8).join(', ')} and ${checks.length - 8} more` : checks.length > 1 ? `${checks.slice(0, -1).join(', ')} and ${checks[checks.length - 1]}` : String(checks[0]);
+  const reasons = [...new Set(s.slides.filter(x => x.check).map(x => x.check.toLowerCase()))].join('; ');      // each reason once
+  toast(how === 'slides' ? `“${title}” came in as ${s.slides.length} slides.${checks.length ? ` Check slide${checks.length > 1 ? 's' : ''} ${named}: ${reasons}.` : ''}` : `“${title}” came in as ${s.slides.length} picture slides.`);
   if (s.slides.some(x => x.pending)) { let n = 0; const fill = () => { const sl = s.slides[n++]; if (!sl) return; delete sl.pending; render(); setTimeout(fill, 150); }; setTimeout(fill, 150); }
 }
 A.importDo = ([what]) => {
