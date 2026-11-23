@@ -887,6 +887,26 @@ fn into_texture(
         .or_else(|| copied(lent))
 }
 
+/// The picture a playing video's decoder made, as a GPU texture over the decoder's own memory,
+/// drawn as the media: the GPU turns it into the moving picture's texture (made, or made again
+/// for another size) without the CPU touching a pixel. `None` when the texture could not be
+/// shown.
+#[cfg(target_os = "macos")]
+fn decoded_into_texture(
+    texture: wgpu::Texture,
+    painter: &mut Painter,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    video_texture: &mut Option<MovingPicture>,
+) -> Option<Picture> {
+    let (width, height) = (texture.width(), texture.height());
+    let order = sp_render::PixelOrder::Bgra;
+    if !video_texture.as_ref().is_some_and(|kept| kept.fits(width, height, order)) {
+        *video_texture = painter.moving_picture(device, width, height, order);
+    }
+    video_texture.as_ref().filter(|kept| painter.show_texture(device, queue, kept, texture)).map(MovingPicture::picture)
+}
+
 /// A copy of a playing video's newest picture, if a new one has come, with the time taken to
 /// fetch it and to copy it noted apart.
 fn copied_from(frames: &sp_video::Frames, held: &mut Held) -> Option<Picture> {
@@ -1038,6 +1058,10 @@ struct Output {
     /// into: one for each video, so the picture a fade starts from keeps the old video's.
     video_picture: Option<Picture>,
     video_texture: Option<MovingPicture>,
+    /// Makes GPU textures of the memory the system's player decodes into, so those pictures
+    /// aren't copied: made when the first video plays; `Some(None)` where that can't be done.
+    #[cfg(target_os = "macos")]
+    video_import: Option<Option<sp_video::GpuImport>>,
     /// The Announcements layer's slide, if one is on.
     announcement: Option<Announcement>,
     /// How the next new picture fades in: the slides' transition, or the media's when only the
@@ -1098,6 +1122,10 @@ fn run(
         Ok(painter) => painter,
         Err(e) => return eprintln!("The output cannot draw on this computer: {e}"),
     };
+    // Videos the system plays reach the GPU through a small compute pass: compiled now, not when
+    // the first video's first picture comes.
+    #[cfg(target_os = "macos")]
+    painter.prepare_texture_copy(&device);
     // Testing aid: SOFTPRESENTER_OUTPUT_ROOM (see `output_room`).
     if let Some(room) = std::env::var("SOFTPRESENTER_OUTPUT_ROOM").ok().as_deref().and_then(output_room) {
         painter.keep_scratch_at(Some(room));
@@ -1149,6 +1177,8 @@ fn run(
         overlay: Overlay::default(),
         video_picture: None,
         video_texture: None,
+        #[cfg(target_os = "macos")]
+        video_import: None,
         announcement: None,
         look: sp_model::Transition::of(sp_model::TransitionKind::Cut),
         ndi_trouble: crate::applog::Lasting::default(),
@@ -2651,15 +2681,38 @@ impl Output {
         // The video behind the slide: its pixels go straight from the player into a texture on
         // the GPU, the same one for every picture, with nothing copied or put in another order
         // on the way. Only this thread's painter draws it (the screens, the live preview, NDI).
+        #[cfg(target_os = "macos")]
+        let Output { frame, painter, device, queue, video_texture, video_import, held, .. } = self;
+        #[cfg(not(target_os = "macos"))]
         let Output { frame, painter, device, queue, video_texture, held, .. } = self;
         if let Some(frames) = frame.video.as_ref() {
             let fetching = Instant::now();
             let mut copying = Duration::ZERO;
-            let shown = frames.next_with(|lent| {
-                let began = Instant::now();
-                let shown = into_texture(lent, painter, device, queue, video_texture);
-                copying = began.elapsed();
-                shown
+            // A video the system plays goes to the GPU as the decoder's own memory; one whose
+            // pictures can't (clear parts, FFmpeg's, another system) is copied.
+            #[cfg(target_os = "macos")]
+            let by_texture =
+                video_import.get_or_insert_with(|| sp_video::GpuImport::new(device)).as_ref().and_then(|import| {
+                    match frames.next_texture(import, device) {
+                        sp_video::GpuNext::Picture(texture) => {
+                            let began = Instant::now();
+                            let shown = decoded_into_texture(texture, painter, device, queue, video_texture);
+                            copying = began.elapsed();
+                            Some(Some(shown))
+                        }
+                        sp_video::GpuNext::Nothing => Some(None),
+                        sp_video::GpuNext::Unavailable => None,
+                    }
+                });
+            #[cfg(not(target_os = "macos"))]
+            let by_texture: Option<Option<Option<Picture>>> = None;
+            let shown = by_texture.unwrap_or_else(|| {
+                frames.next_with(|lent| {
+                    let began = Instant::now();
+                    let shown = into_texture(lent, painter, device, queue, video_texture);
+                    copying = began.elapsed();
+                    shown
+                })
             });
             held.add(Part::VideoFetch, For::Nothing, fetching.elapsed().saturating_sub(copying));
             if let Some(shown) = shown {

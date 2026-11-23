@@ -25,11 +25,19 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 # Web pages in boxes on slides, drawn off-screen by the system's web view.
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "objc2-core-foundation", "WKWebView", "WKWebViewConfiguration", "WKSnapshotConfiguration", "WKNavigationDelegate", "WKUIDelegate", "WKNavigationAction", "WKNavigationResponse", "WKNavigation", "WKWebsiteDataStore", "WKPreferences", "WKFrameInfo", "WKSecurityOrigin", "WKWindowFeatures", "WKDownload", "WKUserContentController", "WKContentWorld"] }
 block2 = "0.6"
+# Videos the system plays go to the GPU without a copy: each decoded picture's memory is
+# handed to wgpu as a texture (mac/gpu.rs). The versions are the ones wgpu itself and Vello
+# already use, so nothing new is built.
+wgpu = { version = "30", default-features = false, features = ["metal", "wgpu-core", "std", "parking_lot"] }
+objc2-metal = { version = "0.3", default-features = false, features = ["std", "MTLDevice", "MTLTexture", "MTLPixelFormat", "MTLResource", "MTLAllocation"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 # The web engine's check (examples/web_check.rs) runs outside the app, so it starts AppKit itself.
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSRunningApplication"] }
+# The zero-copy check (examples/zero_copy.rs) reads textures back from the GPU.
+sp-render.workspace = true
+pollster.workspace = true
 
 # Calls into the system's media frameworks need `unsafe`; this crate alone allows it, and only
 # in its macOS module. Every unsafe block says why it is sound.

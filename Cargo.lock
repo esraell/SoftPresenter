@@ -3878,9 +3878,13 @@ dependencies = [
  "objc2-core-video",
  "objc2-foundation 0.3.2",
  "objc2-image-io",
+ "objc2-metal 0.3.2",
  "objc2-web-kit",
+ "pollster 1.0.3",
  "rodio",
  "serde_json",
+ "sp-render",
+ "wgpu",
 ]
 
 [[package]]

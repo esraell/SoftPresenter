@@ -28,7 +28,7 @@ pub use web::WebPage;
 mod ffmpeg;
 
 #[cfg(target_os = "macos")]
-pub use mac::{display_names, home_folder, pdf_draw, pdf_sizes, picture};
+pub use mac::{GpuImport, GpuNext, display_names, home_folder, pdf_draw, pdf_sizes, picture};
 
 #[cfg(not(target_os = "macos"))]
 mod other;
@@ -133,6 +133,21 @@ impl Frames {
                 Source::Ffmpeg(frames) => frames.next(),
             },
             Frames::Web(frames) => frames.next(),
+        }
+    }
+
+    /// The picture to show now as a GPU texture made of the decoder's own memory, with nothing
+    /// copied, for a video the system plays whose pictures can go that way (see
+    /// [`GpuNext`]). The thread drawing the screens asks this first, and copies with
+    /// [`Frames::next_with`] when it is answered [`GpuNext::Unavailable`].
+    #[cfg(target_os = "macos")]
+    pub fn next_texture(&self, import: &GpuImport, device: &wgpu::Device) -> GpuNext {
+        match self {
+            Frames::Video(video) => match video.now() {
+                Source::System(frames) => frames.next_texture(import, device),
+                Source::Ffmpeg(_) => GpuNext::Unavailable,
+            },
+            Frames::Web(_) => GpuNext::Unavailable,
         }
     }
 

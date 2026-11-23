@@ -947,6 +947,111 @@ fn two_moving_pictures_keep_their_own_pixels() {
     assert!(is_about(left, blue) && is_about(right, red), "half-way: {left:?} {right:?}");
 }
 
+/// A BGRA texture that is already on the GPU (a decoded video picture's own memory) and the
+/// same pixels sent as rows from the CPU give pictures that are the same to the last byte: the
+/// GPU's copy only turns the order of the bytes.
+#[test]
+fn a_texture_sent_on_the_gpu_draws_the_same_pixels_as_rows_sent_from_the_cpu() {
+    use sp_render::PixelOrder;
+    let (w, h) = (64, 36);
+    let (sw, sh) = (13u32, 7u32);
+    let mut cx = RenderContext::new();
+    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
+    let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+    let mut painter = Painter::new(device).expect("painter");
+    // Every pixel different, in every byte, with the fourth byte full as a video's are.
+    let bgra: Vec<u8> =
+        (0..sw * sh).flat_map(|n| [(n * 7 + 3) as u8, (n * 19 + 101) as u8, (n * 37 + 200) as u8, 255]).collect();
+    let bgra_texture = |width: u32, usage: wgpu::TextureUsages| {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width, height: sh, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8Unorm,
+            usage,
+            view_formats: &[],
+        })
+    };
+    let source = bgra_texture(sw, wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST);
+    queue.write_texture(
+        source.as_image_copy(),
+        &bgra,
+        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(sw * 4), rows_per_image: None },
+        wgpu::Extent3d { width: sw, height: sh, depth_or_array_layers: 1 },
+    );
+    // Each way has a painter of its own, so that both pictures sit in the same place in the
+    // renderer's picture atlas (where a picture sits changes the last digit of how it is scaled).
+    let mut cpu_painter = Painter::new(device).expect("painter");
+    let from_cpu = cpu_painter.moving_picture(device, sw, sh, PixelOrder::Bgra).expect("moving picture");
+    assert!(cpu_painter.show_rows(queue, &from_cpu, &bgra, sw as usize * 4));
+    let from_gpu = painter.moving_picture(device, sw, sh, PixelOrder::Bgra).expect("moving picture");
+    assert!(painter.show_texture(device, queue, &from_gpu, source.clone()));
+    let texture = target_texture(device, w, h);
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let drawn = |painter: &mut Painter, moving: &sp_render::MovingPicture| {
+        painter.paint(device, queue, &media_scene(&moving.picture(), w, h), &view, w, h).expect("paint");
+        read_pixels(device, queue, &texture).expect("read back")
+    };
+    let (cpu, gpu) = (drawn(&mut cpu_painter, &from_cpu), drawn(&mut painter, &from_gpu));
+    let first = cpu.iter().zip(&gpu).position(|(a, b)| a != b);
+    assert!(
+        first.is_none(),
+        "the two ways draw the same picture: first difference at {first:?}: {:?} vs {:?}",
+        first.map(|i| &cpu[i / 4 * 4..i / 4 * 4 + 4]),
+        first.map(|i| &gpu[i / 4 * 4..i / 4 * 4 + 4])
+    );
+    assert!(cpu.chunks(4).any(|pixel| pixel[0] != pixel[2]), "and it is not one flat colour");
+    // A texture of another size or kind is refused, and nothing changes.
+    let wrong = bgra_texture(sw + 1, wgpu::TextureUsages::TEXTURE_BINDING);
+    assert!(!painter.show_texture(device, queue, &from_gpu, wrong));
+    let rgba = painter.moving_picture(device, sw, sh, PixelOrder::Rgba).expect("moving picture");
+    assert!(!painter.show_texture(device, queue, &rgba, source), "a picture made for RGBA bytes isn't sent BGRA");
+    assert!(drawn(&mut painter, &from_gpu) == cpu);
+}
+
+/// A texture sent with `show_texture` is held by the painter until the GPU says it has finished
+/// with it, and no more than a few at a time are held however far behind the GPU is.
+#[test]
+fn textures_sent_to_the_gpu_are_held_until_it_is_done_with_them() {
+    use sp_render::PixelOrder;
+    let mut cx = RenderContext::new();
+    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
+    let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+    let mut painter = Painter::new(device).expect("painter");
+    let moving = painter.moving_picture(device, 8, 4, PixelOrder::Bgra).expect("moving picture");
+    let make = || {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: 8, height: 4, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })
+    };
+    assert_eq!(painter.textures_in_flight(), 0);
+    assert!(painter.show_texture(device, queue, &moving, make()));
+    assert_eq!(painter.textures_in_flight(), 1, "held at once, the GPU not yet known to be done");
+    device.poll(wgpu::PollType::wait_indefinitely()).expect("the GPU finishes");
+    // The next one's arrival lets the finished one go.
+    assert!(painter.show_texture(device, queue, &moving, make()));
+    assert_eq!(painter.textures_in_flight(), 1, "the first was let go once the GPU was done with it");
+    // Far behind: never more than a few.
+    for _ in 0..40 {
+        assert!(painter.show_texture(device, queue, &moving, make()));
+    }
+    assert!(painter.textures_in_flight() <= 8, "{} held", painter.textures_in_flight());
+    device.poll(wgpu::PollType::wait_indefinitely()).expect("the GPU finishes");
+    let texture = target_texture(device, 8, 4);
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    painter.paint(device, queue, &media_scene(&moving.picture(), 8, 4), &view, 8, 4).expect("paint");
+    assert_eq!(painter.textures_in_flight(), 0, "all let go once the GPU said so");
+}
+
 /// A moving picture's fourth bytes are its alpha (a web page, a video with clear parts played
 /// by FFmpeg): where they are 0, what is behind it shows.
 #[test]

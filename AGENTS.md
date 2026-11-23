@@ -78,6 +78,7 @@ person:
 | `SOFTPRESENTER_HIDE_NDI=1` | Behave as on a computer without NDI installed |
 | `SOFTPRESENTER_SLOW_PAGES=<ms>` | Each page of a PDF being made into slides takes that many milliseconds longer, to try a quit part way through (the pictures are drawn at the next start) or to see "Page N…" |
 | `SOFTPRESENTER_HIDE_PICTURE_APPS=1` | Behave as on a Mac where no app can open a presentation to draw it (the import sheet greys As Pictures) |
+| `SOFTPRESENTER_VIDEO_COPY=1` | Videos the system plays reach the GPU as copies of their pixels, as on a computer where they can't go as the decoder's own memory (to compare the two ways) |
 | `SOFTPRESENTER_NDI_LOSE=<n>` or `<n>@<place>` | The next n NDI pictures somebody is watching for count as lost on their way back from the GPU (with a place, only that picture of each drawing: 1 is the first) |
 | `SOFTPRESENTER_NDI=<name>` | Also send over NDI under this name, this run only |
 | `SOFTPRESENTER_HIDE_DECKLINK=1` | Behave as on a computer without Desktop Video (the DeckLink driver) |
@@ -95,7 +96,8 @@ message.
 ## Rules
 
 - **`unsafe` code** is allowed only in `sp-video`'s two macOS modules (`mac` for videos and
-  pictures, `web_mac` for web pages), `sp-ndi`'s `runtime` module and `sp-decklink`'s `ffi`
+  pictures, with its `gpu` part that hands a decoded picture's memory to wgpu through wgpu's
+  Metal interface, `web_mac` for web pages), `sp-ndi`'s `runtime` module and `sp-decklink`'s `ffi`
   module, and every block says why it is sound. `web_mac` also calls two web view settings outside Apple's published interface
   (window occlusion detection and the page background), only when the web view answers to them;
   the owner agreed to that on 2026-11-20. Anywhere else, find a safe way or ask the owner.

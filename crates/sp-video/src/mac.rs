@@ -1,6 +1,10 @@
 //! AVFoundation and ImageIO.
 
+mod gpu;
+pub use gpu::{GpuImport, GpuNext};
+
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -8,19 +12,20 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{AllocAnyThread, MainThreadMarker};
 use objc2_av_foundation::{
-    AVAssetImageGenerator, AVMediaTypeVideo, AVPlayer, AVPlayerActionAtItemEnd, AVPlayerItem, AVPlayerItemStatus,
-    AVPlayerItemVideoOutput, AVURLAsset,
+    AVAssetImageGenerator, AVMediaCharacteristicContainsAlphaChannel, AVMediaTypeVideo, AVPlayer,
+    AVPlayerActionAtItemEnd, AVPlayerItem, AVPlayerItemStatus, AVPlayerItemVideoOutput, AVURLAsset,
 };
-use objc2_core_foundation::{CFDictionary, CFString, CFURL, CGPoint, CGRect, CGSize};
+use objc2_core_foundation::{CFBoolean, CFDictionary, CFString, CFURL, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{
     CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo, CGImageByteOrderInfo, CGPDFBox,
     CGPDFDocument, CGPDFPage, kCGColorSpaceSRGB,
 };
-use objc2_core_media::{CMTime, kCMTimeZero};
+use objc2_core_media::{CMFormatDescription, CMTime, kCMFormatDescriptionExtension_ContainsAlphaChannel, kCMTimeZero};
 use objc2_core_video::{
     CVGetCurrentHostTime, CVPixelBuffer, CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow,
     CVPixelBufferGetHeight, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth, CVPixelBufferLockBaseAddress,
-    CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress, kCVPixelBufferHeightKey, kCVPixelBufferPixelFormatTypeKey,
+    CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress, kCVPixelBufferHeightKey,
+    kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey, kCVPixelBufferPixelFormatTypeKey,
     kCVPixelBufferWidthKey, kCVPixelFormatType_32BGRA,
 };
 use objc2_foundation::{NSDictionary, NSNumber, NSString, NSURL};
@@ -77,12 +82,70 @@ fn smaller_size(item: &AVPlayerItem) -> Option<(u32, u32)> {
     crate::smaller_than_wide(size.width, size.height, MAX_VIDEO_WIDTH as f64)
 }
 
+/// The four-character codes of the video formats that carry a picture's clear parts: ProRes
+/// 4444 (with and without extra quality), Animation and PNG in a movie.
+const ALPHA_CODECS: [u32; 4] = [
+    u32::from_be_bytes(*b"ap4h"),
+    u32::from_be_bytes(*b"ap4x"),
+    u32::from_be_bytes(*b"rle "),
+    u32::from_be_bytes(*b"png "),
+];
+
+/// Whether a video's pictures may have clear parts, from what its format says and not from its
+/// pixels: the format says so itself (HEVC with alpha, ProRes 4444 and others set a flag), or is
+/// one of the few that always can ([`ALPHA_CODECS`]). A video whose format can't be read is
+/// taken to, so that it keeps the way such videos are drawn.
+fn may_carry_alpha(formats: &[(u32, bool)]) -> bool {
+    formats.is_empty() || formats.iter().any(|(codec, flagged)| *flagged || ALPHA_CODECS.contains(codec))
+}
+
+/// Whether the first video track's format says its pictures may have clear parts (see
+/// [`may_carry_alpha`]).
+fn track_may_carry_alpha(item: &AVPlayerItem) -> bool {
+    // SAFETY: reads a static the framework defines.
+    let Some(video) = (unsafe { AVMediaTypeVideo }) else { return true };
+    // The same synchronous reading of the header as `smaller_size`.
+    #[allow(deprecated)]
+    // SAFETY: plain getters on live objects.
+    let Some(track) = (unsafe { item.asset().tracksWithMediaType(video).firstObject() }) else { return true };
+    // SAFETY: a plain getter on a live object, and a static the framework defines.
+    if unsafe { AVMediaCharacteristicContainsAlphaChannel.is_some_and(|alpha| track.hasMediaCharacteristic(alpha)) } {
+        return true;
+    }
+    // SAFETY: a plain getter on a live object.
+    let descriptions = unsafe { track.formatDescriptions() };
+    let formats: Vec<(u32, bool)> = descriptions
+        .iter()
+        .map(|description| {
+            // SAFETY: every element of a track's format descriptions is a CMFormatDescription, a
+            // Core Foundation object that is also an Objective-C one, so the pointer is to one;
+            // it is only read, and `descriptions` keeps it alive.
+            let description = unsafe { &*Retained::as_ptr(&description).cast::<CMFormatDescription>() };
+            // SAFETY: plain getters on a live description; the flag's key is a static the
+            // framework defines.
+            let (codec, flag) = unsafe {
+                (
+                    description.media_sub_type(),
+                    description
+                        .extension(kCMFormatDescriptionExtension_ContainsAlphaChannel)
+                        .is_some_and(|flag| flag.downcast_ref::<CFBoolean>().is_none_or(CFBoolean::as_bool)),
+                )
+            };
+            (codec, flag)
+        })
+        .collect();
+    may_carry_alpha(&formats)
+}
+
 /// A video playing, with its sound. It lives on the main thread.
 pub struct Player {
     player: Retained<AVPlayer>,
     item: Retained<AVPlayerItem>,
     output: Retained<AVPlayerItemVideoOutput>,
     halved: Arc<Mutex<Vec<u8>>>,
+    /// Whether pictures may go to the GPU as they are (see [`Frames::next_texture`]): not for a
+    /// video whose format may carry clear parts.
+    zero_copy: Arc<AtomicBool>,
     looping: bool,
     ended: bool,
 }
@@ -104,6 +167,16 @@ impl Player {
         // picture afterwards, and a smoother picture.
         let smaller = smaller_size(&item).map(|(w, h)| (NSNumber::new_u32(w), NSNumber::new_u32(h)));
         let (mut keys, mut values) = (vec![key], vec![format.as_ref() as &AnyObject]);
+        // Pictures in memory the GPU can read where it is (an IOSurface, which Metal can
+        // use as a texture), so the screens needn't copy them; they can still be read by
+        // the CPU, as before.
+        let (metal, no_properties): (_, Retained<NSDictionary<NSString, AnyObject>>) =
+            (NSNumber::new_bool(true), NSDictionary::new());
+        // SAFETY: the keys are static strings the framework defines.
+        keys.extend(unsafe {
+            [ns_key(kCVPixelBufferMetalCompatibilityKey), ns_key(kCVPixelBufferIOSurfacePropertiesKey)]
+        });
+        values.extend([metal.as_ref() as &AnyObject, no_properties.as_ref()]);
         if let Some((width, height)) = &smaller {
             // SAFETY: the keys are static strings the framework defines.
             keys.extend(unsafe { [ns_key(kCVPixelBufferWidthKey), ns_key(kCVPixelBufferHeightKey)] });
@@ -121,12 +194,13 @@ impl Player {
         // At the end the player stays where it is, so it can be looped or left on its last picture.
         // SAFETY: a plain setter on a live object.
         unsafe { player.setActionAtItemEnd(AVPlayerActionAtItemEnd::None) };
-        Ok(Player { player, item, output, halved: Arc::default(), looping: false, ended: false })
+        let zero_copy = Arc::new(AtomicBool::new(!track_may_carry_alpha(&item)));
+        Ok(Player { player, item, output, halved: Arc::default(), zero_copy, looping: false, ended: false })
     }
 
     /// Where its pictures are taken from, on any thread.
     pub fn frames(&self) -> Frames {
-        Frames { output: self.output.clone(), halved: self.halved.clone() }
+        Frames { output: self.output.clone(), halved: self.halved.clone(), zero_copy: self.zero_copy.clone() }
     }
 
     pub fn play(&mut self) {
@@ -239,9 +313,34 @@ pub struct Frames {
     output: Retained<AVPlayerItemVideoOutput>,
     /// Room for the half-size copy of a picture too wide, used again for each.
     halved: Arc<Mutex<Vec<u8>>>,
+    /// True while pictures may go to the GPU without a copy: from the video's format (see
+    /// [`track_may_carry_alpha`]), and until one fails to.
+    zero_copy: Arc<AtomicBool>,
 }
 
 impl Frames {
+    /// The newest picture as a GPU texture made of the decoder's own memory, with nothing copied
+    /// ([`GpuNext::Picture`]); [`GpuNext::Nothing`] when there is no new picture since the last
+    /// was taken; and [`GpuNext::Unavailable`], with no picture taken, when this video's
+    /// pictures must be copied as [`Frames::next_with`] does (its format may have clear parts,
+    /// or a picture could not be made a texture earlier). The texture holds the picture's pixels
+    /// in BGRA order, and keeps the decoder's memory from being used again until the GPU is
+    /// done with it.
+    pub fn next_texture(&self, import: &GpuImport, device: &wgpu::Device) -> GpuNext {
+        if !self.zero_copy.load(Ordering::Relaxed) {
+            return GpuNext::Unavailable;
+        }
+        let Some(buffer) = self.newest() else { return GpuNext::Nothing };
+        match import.texture(device, buffer) {
+            Some(texture) => GpuNext::Picture(texture),
+            None => {
+                // This picture is lost; from the next on they are copied.
+                self.zero_copy.store(false, Ordering::Relaxed);
+                GpuNext::Nothing
+            }
+        }
+    }
+
     /// The picture to show now, if there is a new one since the last was taken.
     pub fn next(&self) -> Option<Frame> {
         let buffer = self.newest()?;
@@ -562,4 +661,33 @@ pub fn display_names() -> Vec<(u32, String)> {
             Some((number.unsignedIntValue(), screen.localizedName().to_string()))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn code(four: &[u8; 4]) -> u32 {
+        u32::from_be_bytes(*four)
+    }
+
+    /// Whether pictures go to the GPU as they are is decided from the video's format, never from
+    /// its pixels: the ordinary codecs do, whatever the extra formats say; the ones that carry
+    /// clear parts, or say they do, don't; and a video whose format can't be read doesn't.
+    #[test]
+    fn a_videos_format_says_whether_its_pictures_may_have_clear_parts() {
+        // H.264, HEVC, ProRes 422, JPEG and MPEG-4: none.
+        for plain in [b"avc1", b"hvc1", b"hev1", b"apcn", b"mp4v", b"jpeg"] {
+            assert!(!may_carry_alpha(&[(code(plain), false)]), "{}", String::from_utf8_lossy(plain));
+        }
+        // ProRes 4444 (both), Animation and PNG always can.
+        for alpha in [b"ap4h", b"ap4x", b"rle ", b"png "] {
+            assert!(may_carry_alpha(&[(code(alpha), false)]), "{}", String::from_utf8_lossy(alpha));
+        }
+        // HEVC with alpha says so itself.
+        assert!(may_carry_alpha(&[(code(b"hvc1"), true)]));
+        // One format of several that can is enough; a video with no format to read is taken to.
+        assert!(may_carry_alpha(&[(code(b"avc1"), false), (code(b"ap4h"), false)]));
+        assert!(may_carry_alpha(&[]));
+    }
 }

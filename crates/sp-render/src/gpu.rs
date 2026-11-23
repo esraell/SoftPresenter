@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use vello::low_level::vello_encoding::Patch;
@@ -14,6 +16,57 @@ pub struct Painter {
     moving: Vec<KeptMoving>,
     /// How many pictures have been painted (see [`Painter::paints`]).
     paints: u64,
+    /// Copies a BGRA texture that is already on the GPU into a moving picture's: made the first
+    /// time one is shown, or by [`Painter::prepare_texture_copy`].
+    swizzle: Option<Swizzle>,
+    /// Textures [`Painter::show_texture`] sent to the GPU that it may not have finished with,
+    /// each with what says it has.
+    in_flight: VecDeque<(wgpu::Texture, Arc<AtomicBool>)>,
+}
+
+/// The most textures [`Painter::show_texture`] holds on to at once. More than this many
+/// unfinished means the GPU is far behind; wgpu itself keeps each texture until its commands
+/// are done, so letting go of the oldest early costs nothing but this extra hold.
+const MOST_IN_FLIGHT: usize = 8;
+
+/// A compute pass that copies a BGRA texture's pixels into a moving picture's texture byte for
+/// byte: the texture is read as the colours it holds (red, green, blue, alpha) and written back
+/// in the order of the bytes it had (blue first), so the picture is the very bytes
+/// [`Painter::show_rows`] sends, and is drawn the same.
+struct Swizzle {
+    pipeline: wgpu::ComputePipeline,
+}
+
+const SWIZZLE_SHADER: &str = "
+@group(0) @binding(0) var source: texture_2d<f32>;
+@group(0) @binding(1) var dest: texture_storage_2d<rgba8unorm, write>;
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    let size = textureDimensions(source);
+    if (id.x >= size.x || id.y >= size.y) {
+        return;
+    }
+    textureStore(dest, id.xy, textureLoad(source, id.xy, 0).bgra);
+}
+";
+
+impl Swizzle {
+    fn new(device: &wgpu::Device) -> Swizzle {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("sp-render texture copy"),
+            source: wgpu::ShaderSource::Wgsl(SWIZZLE_SHADER.into()),
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("sp-render texture copy"),
+            layout: None,
+            module: &module,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+        Swizzle { pipeline }
+    }
 }
 
 /// Why a picture was not painted. The texture it was to go into is left as it was.
@@ -111,7 +164,13 @@ impl Painter {
             pipeline_cache: None,
         };
         Renderer::new(device, options)
-            .map(|renderer| Painter { renderer, moving: Vec::new(), paints: 0 })
+            .map(|renderer| Painter {
+                renderer,
+                moving: Vec::new(),
+                paints: 0,
+                swizzle: None,
+                in_flight: VecDeque::new(),
+            })
             .map_err(|e| e.to_string())
     }
 
@@ -139,7 +198,8 @@ impl Painter {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+            // Pixels are written by the queue (`show_rows`) or by a compute pass (`show_texture`).
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::STORAGE_BINDING,
             view_formats: &[],
         });
         // The renderer takes the pixels from the texture, by the picture's name. The picture's
@@ -190,6 +250,83 @@ impl Painter {
         );
         self.renderer.mark_override_image_dirty(&moving.picture.image);
         true
+    }
+
+    /// Sends a moving picture its new pixels from a texture already on the GPU (a decoded video
+    /// picture's own memory), with no copy through the CPU: the texture is 32-bit BGRA with
+    /// the picture's size, and the moving picture must have been made for [`PixelOrder::Rgba`]
+    /// (the GPU turns the order of the bytes as it copies). Everything drawn with its picture
+    /// from now on shows them. False, with nothing changed, when the texture isn't of that
+    /// kind.
+    ///
+    /// The painter keeps `source` until the GPU says it has finished with it, however soon the
+    /// caller would have let it go, so whatever memory the texture stands for isn't used
+    /// again early.
+    pub fn show_texture(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        moving: &MovingPicture,
+        source: wgpu::Texture,
+    ) -> bool {
+        let (width, height) = (moving.picture.width(), moving.picture.height());
+        if source.format() != wgpu::TextureFormat::Bgra8Unorm
+            || (source.width(), source.height()) != (width, height)
+            || !source.usage().contains(wgpu::TextureUsages::TEXTURE_BINDING)
+            || moving.picture.image.format != PixelOrder::Bgra.format()
+        {
+            return false;
+        }
+        self.retire_finished();
+        let swizzle = self.swizzle.get_or_insert_with(|| Swizzle::new(device));
+        let from = source.create_view(&wgpu::TextureViewDescriptor::default());
+        let to = moving.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bindings = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("sp-render texture copy"),
+            layout: &swizzle.pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&from) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&to) },
+            ],
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            pass.set_pipeline(&swizzle.pipeline);
+            pass.set_bind_group(0, &bindings, &[]);
+            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        }
+        queue.submit([encoder.finish()]);
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        queue.on_submitted_work_done(move || flag.store(true, Ordering::Release));
+        self.in_flight.push_back((source, done));
+        if self.in_flight.len() > MOST_IN_FLIGHT {
+            self.in_flight.pop_front();
+        }
+        self.renderer.mark_override_image_dirty(&moving.picture.image);
+        true
+    }
+
+    /// Gets the compute pass [`Painter::show_texture`] uses ready, which takes a moment (the
+    /// GPU's compiler works on it), so that the first picture of a video doesn't. Does nothing
+    /// the second time.
+    pub fn prepare_texture_copy(&mut self, device: &wgpu::Device) {
+        self.swizzle.get_or_insert_with(|| Swizzle::new(device));
+    }
+
+    /// Lets go of the textures [`Painter::show_texture`] held that the GPU has finished with.
+    fn retire_finished(&mut self) {
+        while self.in_flight.front().is_some_and(|(_, done)| done.load(Ordering::Acquire)) {
+            self.in_flight.pop_front();
+        }
+    }
+
+    /// How many textures sent with [`Painter::show_texture`] are still held, the GPU not
+    /// having said it has finished with them as of the last [`Painter::show_texture`] or
+    /// [`Painter::paint`].
+    pub fn textures_in_flight(&self) -> usize {
+        self.in_flight.len()
     }
 
     /// How many moving pictures' textures are kept: those something may still show, as of the
@@ -287,6 +424,7 @@ impl Painter {
         base_color: Color,
     ) -> Result<(), PaintError> {
         self.paints += 1;
+        self.retire_finished();
         let params = RenderParams { base_color, width: w, height: h, antialiasing_method: AaConfig::Area };
         // A scene of plain colour fills only (no text, gradient or picture) makes vello 0.12 take
         // a shortcut that throws its picture atlas away while still counting the pictures in it
