@@ -239,7 +239,8 @@ pub fn edit_text(text: &mut String, spans: &mut Vec<TextSpan>, start: usize, end
     } else if start > 0 {
         style_at(spans, start - 1).cloned()
     } else {
-        None
+        // At the very start, the look of the words after.
+        style_at(spans, 0).cloned()
     };
     let mut moved = Vec::with_capacity(spans.len() + 1);
     for span in spans.drain(..) {
@@ -343,6 +344,85 @@ impl BoxStyle {
         let (text, spans) = crate::text_map::finish(chars, spans);
         Drawn { text: Cow::Owned(text), spans: Cow::Owned(spans) }
     }
+}
+
+impl SpanStyle {
+    /// What a span must set to make `look` out of `base`: only the settings that differ.
+    pub fn between(base: &BoxStyle, look: &BoxStyle) -> SpanStyle {
+        SpanStyle {
+            font_family: (look.font_family != base.font_family).then(|| look.font_family.clone()),
+            size: (look.size != base.size).then_some(look.size),
+            weight: (look.weight != base.weight).then_some(look.weight),
+            italic: (look.italic != base.italic).then_some(look.italic),
+            underline: (look.underline != base.underline).then_some(look.underline),
+            strike: (look.strike != base.strike).then_some(look.strike),
+            fill: (look.fill != base.fill).then_some(look.fill),
+        }
+    }
+}
+
+/// Which settings differ between the characters of a range.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SpanMix {
+    pub font_family: bool,
+    pub size: bool,
+    pub weight: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strike: bool,
+    pub fill: bool,
+}
+
+/// The look of the characters from `start` to `end` over the box's look `base`: that of the
+/// first character, and which settings are not the same all through the range.
+pub fn look_of_range(spans: &[TextSpan], start: usize, end: usize, base: &BoxStyle) -> (BoxStyle, SpanMix) {
+    let mut pieces: Vec<BoxStyle> = Vec::new();
+    let mut at = start;
+    for span in spans.iter().filter(|s| s.end > start && s.start < end) {
+        if span.start > at {
+            pieces.push(base.clone());
+        }
+        pieces.push(span.style.over_box(base));
+        at = span.end;
+    }
+    if at < end {
+        pieces.push(base.clone());
+    }
+    let first = pieces.first().cloned().unwrap_or_else(|| base.clone());
+    let mut mix = SpanMix::default();
+    for p in &pieces {
+        mix.font_family |= p.font_family != first.font_family;
+        mix.size |= p.size != first.size;
+        mix.weight |= p.weight != first.weight;
+        mix.italic |= p.italic != first.italic;
+        mix.underline |= p.underline != first.underline;
+        mix.strike |= p.strike != first.strike;
+        mix.fill |= p.fill != first.fill;
+    }
+    (first, mix)
+}
+
+/// Makes `change` to the look of the characters from `start` to `end` of words `length`
+/// characters long, over the box's look `base`: a setting that comes out as the box's own is
+/// not kept as a span's.
+pub fn restyle_range(
+    spans: &mut Vec<TextSpan>,
+    start: usize,
+    end: usize,
+    length: usize,
+    base: &BoxStyle,
+    change: impl Fn(&mut BoxStyle),
+) {
+    restyle(spans, start, end, length, |own| {
+        let mut look = own.over_box(base);
+        change(&mut look);
+        *own = SpanStyle::between(base, &look);
+    });
+}
+
+/// Clears one setting from every span (as a change to the whole box does), by `clear`.
+pub fn clear_in_spans(spans: &mut Vec<TextSpan>, length: usize, clear: impl Fn(&mut SpanStyle)) {
+    restyle(spans, 0, length, length, |own| clear(own));
 }
 
 #[cfg(test)]

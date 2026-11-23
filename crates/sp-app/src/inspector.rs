@@ -50,6 +50,11 @@ pub struct InspectorState {
     pub notes_open: bool,
     /// What has been typed to narrow the list of fonts.
     pub font_search: String,
+    /// Set when a control styled the words selected on the slide, so the field being typed in
+    /// takes the keyboard back with the same words selected.
+    pub refocus_typing: bool,
+    /// Set when the change just made is a step of its own for Undo.
+    pub new_step: bool,
 }
 
 const WEIGHTS: [(u16, &str); 9] = [
@@ -873,6 +878,7 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         state.timers.iter().map(|timer| (timer.id, timer.name.clone())).collect();
     let inspector = &mut state.inspector;
     let Some(draft) = state.editing.as_mut() else { return };
+    let words_selected = draft.selected_words();
     let Some(object) = draft.selected_object_mut() else {
         return nothing_selected(ui);
     };
@@ -883,6 +889,7 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         rule(ui);
     }
     let role = object.role.clone();
+    let object_id = object.id;
     let ObjectKind::Text { text, style, spans } = &mut object.kind else {
         ui.label(
             egui::RichText::new("A shape has no text. Its colour and outline are on the Shape tab.")
@@ -892,6 +899,28 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         return;
     };
     let Some(base) = theme.text_style(role.as_ref(), &TextStyle::default()) else { return };
+    let picked = words_selected.filter(|(id, ..)| *id == object_id);
+    // What the rows below change: the words picked, or the whole box.
+    let heading = |ui: &mut egui::Ui, title: &str, note: &str| {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(title).size(10.5).color(INK).strong());
+            if !note.is_empty() {
+                ui.label(egui::RichText::new(note).size(11.0).color(DIM));
+            }
+        });
+    };
+    match picked {
+        Some((_, from, to)) => {
+            let words: String = text.chars().skip(from).take(to - from).collect::<String>().replace('\n', " ");
+            let words = if words.chars().count() > 26 {
+                format!("\u{201c}{}\u{2026}\u{201d}", words.chars().take(25).collect::<String>().trim_end())
+            } else {
+                format!("\u{201c}{words}\u{201d}")
+            };
+            heading(ui, "SELECTED WORDS", &words);
+        }
+        None => heading(ui, "THE WHOLE BOX", "Select words in it to change only them"),
+    }
 
     ui.horizontal(|ui| {
         let half = (ui.available_width() - 6.0) / 2.0;
@@ -915,14 +944,56 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
             *style = copied.clone();
         }
     });
+    if !spans.is_empty()
+        && ui
+            .add_sized([ui.available_width(), ROW], egui::Button::new("Clear word styles"))
+            .on_hover_text("Every word takes the box's look again")
+            .clicked()
+    {
+        spans.clear();
+        inspector.new_step = true;
+    }
     ui.add_space(2.0);
     // The words are typed on the slide itself (double-click the box), not here.
 
-    let shown = style.over(&base);
+    // With words selected on the slide the controls show, and change, those words; with none,
+    // the whole box.
+    let box_look = style.over(&base);
+    let (shown, mix) = match words_selected.filter(|(id, ..)| *id == object_id) {
+        Some((_, from, to)) => sp_model::look_of_range(spans, from, to, &box_look),
+        None => sp_model::look_of_range(spans, 0, text.chars().count(), &box_look),
+    };
     let mut wanted = shown.clone();
-    text_look(ui, &mut wanted, &base, &fonts, inspector);
+    text_look(ui, &mut wanted, &base, &fonts, inspector, mix, picked.is_some());
     if wanted != shown {
-        *style = TextStyle::between(&base, &wanted);
+        let length = text.chars().count();
+        match words_selected.filter(|(id, ..)| *id == object_id) {
+            Some((_, from, to)) => {
+                sp_model::restyle_range(spans, from, to, length, &box_look, |look| look.follow_change(&shown, &wanted));
+                // What a word cannot have (alignment, shadow) goes to the box.
+                let mut whole = wanted.clone();
+                whole.font_family.clone_from(&box_look.font_family);
+                (whole.size, whole.weight, whole.italic) = (box_look.size, box_look.weight, box_look.italic);
+                (whole.underline, whole.strike, whole.fill) = (box_look.underline, box_look.strike, box_look.fill);
+                *style = TextStyle::between(&base, &whole);
+                // The words stay selected: the field takes the keyboard back.
+                inspector.refocus_typing = true;
+            }
+            None => {
+                // Every word takes what was set for the box; what the controls did not change
+                // stays as it was.
+                let mut whole = wanted.clone();
+                for_each_span_setting(&mut whole, &box_look);
+                crate::editor::apply_to_whole_box(spans, length, &shown, &wanted, &mut whole);
+                *style = TextStyle::between(&base, &whole);
+            }
+        }
+        // A switch or a choice is a step of its own; dragging a size or a colour is one run.
+        inspector.new_step = wanted.weight != shown.weight
+            || wanted.italic != shown.italic
+            || wanted.underline != shown.underline
+            || wanted.strike != shown.strike
+            || wanted.font_family != shown.font_family;
     }
 
     if for_theme || stage_item {
@@ -982,6 +1053,9 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
             None if placeholder => sp_model::edit_text(text, spans, 0, usize::MAX, "Text"),
             _ => {}
         }
+        if link.is_some() {
+            spans.clear();
+        }
         object.link = link;
     }
     if stage {
@@ -989,21 +1063,32 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     }
     rule(ui);
     ui.horizontal(|ui| {
-        let plain = style.is_default() && spans.is_empty();
+        let plain = style.is_default();
         let note = if plain { "Looks as the theme has it" } else { "Styled by hand on this slide" };
         ui.label(egui::RichText::new(note).size(11.5).color(DIM));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let reset = egui::Button::new(egui::RichText::new("Reset style").size(12.0));
             if ui
                 .add_enabled(!plain, reset)
-                .on_hover_text("Give this text the theme's look again, words you styled one by one too")
+                .on_hover_text("Give this text the theme's look again; words you styled one by one keep theirs")
                 .clicked()
             {
                 *style = TextStyle::default();
-                spans.clear();
             }
         });
     });
+}
+
+/// Puts the box's own value back in each setting a word can have.
+fn for_each_span_setting(look: &mut BoxStyle, box_look: &BoxStyle) {
+    look.font_family.clone_from(&box_look.font_family);
+    (look.size, look.weight, look.italic) = (box_look.size, box_look.weight, box_look.italic);
+    (look.underline, look.strike, look.fill) = (box_look.underline, box_look.strike, box_look.fill);
+}
+
+/// The small heading over rows that act on the whole box.
+fn heading_line(ui: &mut egui::Ui, title: &str) {
+    ui.label(egui::RichText::new(title).size(10.5).color(INK).strong());
 }
 
 /// The Text tab's controls for one look. `wanted` starts as the look the text has now.
@@ -1013,10 +1098,16 @@ fn text_look(
     base: &BoxStyle,
     fonts: &[String],
     inspector: &mut InspectorState,
+    mix: sp_model::SpanMix,
+    words_picked: bool,
 ) {
     let full = ui.available_width();
     egui::ComboBox::from_id_salt("font family")
-        .selected_text(wanted.font_family.as_str())
+        .selected_text(if mix.font_family {
+            egui::RichText::new("Mixed").italics().color(DIM)
+        } else {
+            egui::RichText::new(wanted.font_family.as_str())
+        })
         .width(full)
         .height(360.0)
         .show_ui(ui, |ui| {
@@ -1067,12 +1158,23 @@ fn text_look(
             });
         ui.add_sized(
             [80.0, ROW - 2.0],
-            egui::DragValue::new(&mut wanted.size).speed(1.0).range(8.0..=600.0).max_decimals(0),
+            egui::DragValue::new(&mut wanted.size)
+                .speed(1.0)
+                .range(8.0..=600.0)
+                .max_decimals(0)
+                .custom_formatter(move |value, _| if mix.size { "Mixed".to_owned() } else { format!("{value:.0}") }),
         )
         .on_hover_text("Size, in slide units");
     });
     ui.horizontal(|ui| {
-        let on = [wanted.weight >= 600, wanted.italic, wanted.underline, wanted.strike];
+        let on = [
+            wanted.weight >= 600 && !mix.weight,
+            wanted.italic && !mix.italic,
+            wanted.underline && !mix.underline,
+            wanted.strike && !mix.strike,
+        ];
+        let halves = [mix.weight, mix.italic, mix.underline, mix.strike];
+        let bar_start = ui.cursor().min;
         let pressed = segments(
             ui,
             "bius",
@@ -1092,6 +1194,16 @@ fn text_look(
                 };
             },
         );
+        // A style that some of the words have and some do not is half lit, its lower half in grey.
+        for (index, half) in halves.into_iter().enumerate() {
+            if half {
+                let cell = Rect::from_min_size(
+                    pos2(bar_start.x + 28.0 * index as f32, bar_start.y + ROW / 2.0),
+                    vec2(28.0, ROW / 2.0),
+                );
+                ui.painter().rect_filled(cell, 4.0, Color32::from_rgba_unmultiplied(150, 150, 150, 120));
+            }
+        }
         match pressed {
             Some(0) => wanted.weight = if on[0] { 400 } else { 700 },
             Some(1) => wanted.italic = !wanted.italic,
@@ -1123,12 +1235,18 @@ fn text_look(
 
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Text Colour").size(13.0).color(INK));
+        if mix.fill {
+            ui.label(egui::RichText::new("Mixed").size(11.5).italics().color(DIM));
+        }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| colour(ui, &mut wanted.fill, "Text colour"));
     });
     ui.add_space(4.0);
     ui.horizontal(|ui| fill_kind(ui, "text fill kind", &mut wanted.gradient));
     rule(ui);
 
+    if words_picked {
+        heading_line(ui, "THE WHOLE BOX");
+    }
     labelled(ui, "Scaling", |ui, width| {
         let options = [
             (Scaling::None, "None"),

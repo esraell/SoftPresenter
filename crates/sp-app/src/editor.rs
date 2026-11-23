@@ -320,6 +320,15 @@ pub struct EditDraft {
     /// only just begun (so its field can take the keyboard once).
     pub typing: Option<Uuid>,
     pub typing_started: bool,
+    /// The characters selected in the field being typed in (start, end; start is before end),
+    /// kept while the field has the keyboard, so a control in the inspector can style them
+    /// after it has taken the keyboard away. Empty or none: no words are selected.
+    pub typing_range: Option<(usize, usize)>,
+    /// Set when the field being typed in should take the keyboard back, and the selection with
+    /// it, as after a control in the inspector was used.
+    pub typing_refocus: bool,
+    /// The words and spans of the box when typing in it began, for Escape.
+    pub typing_backup: Option<(String, Vec<sp_model::TextSpan>)>,
     pub drag: Option<Drag>,
     undo: Vec<Slide>,
     redo: Vec<Slide>,
@@ -331,6 +340,81 @@ pub struct EditDraft {
     /// True where several objects may share a role, as on a stage layout (two clocks): a copy
     /// keeps its original's. Elsewhere a copy belongs to no theme box.
     pub keeps_roles: bool,
+}
+
+/// What a look set for the whole box means for the words: a setting the controls changed from
+/// what they showed is the box's now, and every word takes it.
+pub fn apply_to_whole_box(
+    spans: &mut Vec<sp_model::TextSpan>,
+    length: usize,
+    shown: &sp_model::BoxStyle,
+    target: &sp_model::BoxStyle,
+    look: &mut sp_model::BoxStyle,
+) {
+    use sp_model::clear_in_spans as clear;
+    if target.font_family != shown.font_family {
+        look.font_family.clone_from(&target.font_family);
+        clear(spans, length, |s| s.font_family = None);
+    }
+    if target.size != shown.size {
+        look.size = target.size;
+        clear(spans, length, |s| s.size = None);
+    }
+    if target.weight != shown.weight {
+        look.weight = target.weight;
+        clear(spans, length, |s| s.weight = None);
+    }
+    if target.italic != shown.italic {
+        look.italic = target.italic;
+        clear(spans, length, |s| s.italic = None);
+    }
+    if target.underline != shown.underline {
+        look.underline = target.underline;
+        clear(spans, length, |s| s.underline = None);
+    }
+    if target.strike != shown.strike {
+        look.strike = target.strike;
+        clear(spans, length, |s| s.strike = None);
+    }
+    if target.fill != shown.fill {
+        look.fill = target.fill;
+        clear(spans, length, |s| s.fill = None);
+    }
+}
+
+/// A change made to the whole box: the settings it changed are no longer set word by word, so
+/// they are taken out of every span.
+pub fn clear_spans_for_changes(
+    spans: &mut Vec<sp_model::TextSpan>,
+    length: usize,
+    before: &sp_model::BoxStyle,
+    after: &sp_model::BoxStyle,
+) {
+    use sp_model::clear_in_spans as clear;
+    if spans.is_empty() {
+        return;
+    }
+    if after.font_family != before.font_family {
+        clear(spans, length, |s| s.font_family = None);
+    }
+    if after.size != before.size {
+        clear(spans, length, |s| s.size = None);
+    }
+    if after.weight != before.weight {
+        clear(spans, length, |s| s.weight = None);
+    }
+    if after.italic != before.italic {
+        clear(spans, length, |s| s.italic = None);
+    }
+    if after.underline != before.underline {
+        clear(spans, length, |s| s.underline = None);
+    }
+    if after.strike != before.strike {
+        clear(spans, length, |s| s.strike = None);
+    }
+    if after.fill != before.fill {
+        clear(spans, length, |s| s.fill = None);
+    }
 }
 
 impl EditDraft {
@@ -351,6 +435,9 @@ impl EditDraft {
             renaming: None,
             typing: None,
             typing_started: false,
+            typing_range: None,
+            typing_refocus: false,
+            typing_backup: None,
             drag: None,
             undo: Vec::new(),
             serial: next_draft_serial(),
@@ -378,6 +465,9 @@ impl EditDraft {
             renaming: None,
             typing: None,
             typing_started: false,
+            typing_range: None,
+            typing_refocus: false,
+            typing_backup: None,
             drag: None,
             undo: Vec::new(),
             serial: next_draft_serial(),
@@ -726,19 +816,74 @@ impl EditDraft {
     pub fn restyle(&mut self, theme: &Theme, change: impl Fn(&mut sp_model::BoxStyle)) -> bool {
         let ids = self.selection();
         let Some(template) = theme.template_for(&self.slide).cloned() else { return false };
+        let selected_words = self.selected_words();
         let mut changed = false;
         for object in self.slide.objects.iter_mut().filter(|object| ids.contains(&object.id)) {
             let Some(base) = template.box_for(object.role.as_ref()).cloned() else { continue };
-            let ObjectKind::Text { style, .. } = &mut object.kind else { continue };
-            let mut look = style.over(&base);
+            let ObjectKind::Text { text, style, spans } = &mut object.kind else { continue };
+            let before_spans = spans.clone();
+            let box_look = style.over(&base);
+            let mut look = box_look.clone();
             change(&mut look);
+            let length = text.chars().count();
+            match selected_words.filter(|(id, ..)| *id == object.id) {
+                // Words are selected: the settings a word can have go to those words, the rest
+                // (alignment, shadow) to the box.
+                Some((_, from, to)) => {
+                    sp_model::restyle_range(spans, from, to, length, &box_look, &change);
+                    let keep = |look: &mut sp_model::BoxStyle| {
+                        look.font_family.clone_from(&box_look.font_family);
+                        (look.size, look.weight, look.italic) = (box_look.size, box_look.weight, box_look.italic);
+                        (look.underline, look.strike, look.fill) = (box_look.underline, box_look.strike, box_look.fill);
+                    };
+                    keep(&mut look);
+                }
+                // A whole box: what it changes in the box's look is no longer set word by word.
+                None => {
+                    clear_spans_for_changes(spans, length, &box_look, &look);
+                    let (shown, _) = sp_model::look_of_range(spans, 0, length, &box_look);
+                    let mut target = shown.clone();
+                    change(&mut target);
+                    apply_to_whole_box(spans, length, &shown, &target, &mut look);
+                }
+            }
             let own = TextStyle::between(&base, &look);
-            if own != *style {
+            if own != *style || *spans != before_spans {
                 *style = own;
                 changed = true;
             }
         }
+        if changed {
+            // One step of its own: not folded into the typing just before it.
+            self.last_recorded = f64::NEG_INFINITY;
+        }
         changed
+    }
+
+    /// The text object being typed in, and the first and last character of the words selected
+    /// in it, if any are.
+    pub fn selected_words(&self) -> Option<(Uuid, usize, usize)> {
+        let (from, to) = self.typing_range.filter(|(from, to)| from < to)?;
+        let id = self.typing?;
+        self.slide.objects.iter().any(|o| o.id == id && o.as_text().is_some()).then_some((id, from, to))
+    }
+
+    /// The look the controls show for the selected text object: the look of the selected words
+    /// if any are selected (and which settings differ among them), else the box's.
+    pub fn look_shown(&self, theme: &Theme) -> Option<(sp_model::BoxStyle, sp_model::SpanMix)> {
+        let object = self.selected_object()?;
+        let box_look = theme.text_style_on(&self.slide, object.role.as_ref(), object.text_style()?)?;
+        Some(match self.selected_words().filter(|(id, ..)| *id == object.id) {
+            Some((_, from, to)) => sp_model::look_of_range(object.spans(), from, to, &box_look),
+            None => {
+                sp_model::look_of_range(object.spans(), 0, object.as_text().map_or(0, |t| t.chars().count()), &box_look)
+            }
+        })
+    }
+
+    /// Starts a new undo step with the next change, whatever came just before it.
+    pub fn break_run(&mut self) {
+        self.last_recorded = f64::NEG_INFINITY;
     }
 
     /// Changes the words of every selected text object. Returns true if any changed.
@@ -1290,6 +1435,41 @@ mod tests {
         assert!(d.slide.objects.iter().any(|o| o.id == front && !o.locked));
         assert!(d.lock(false));
         assert!(d.slide.objects.iter().all(|o| !o.locked));
+    }
+
+    #[test]
+    fn controls_style_the_selected_words_or_the_whole_box_and_each_is_one_undo_step() {
+        let theme = Theme::builtin();
+        let mut d = draft();
+        let id = d.slide.objects[0].id;
+        d.select_only(Some(id));
+        // "Main words": words 5..10 selected while typing in the box.
+        d.typing = Some(id);
+        d.typing_range = Some((5, 10));
+        let before = d.slide.clone();
+        d.record();
+        assert!(d.restyle(&theme, |look| look.italic = true));
+        let ObjectKind::Text { style, spans, .. } = &d.slide.objects[0].kind else { panic!("a text object") };
+        assert!(style.is_default(), "the box is not touched");
+        assert_eq!(spans.len(), 1);
+        assert_eq!((spans[0].start, spans[0].end, spans[0].style.italic), (5, 10, Some(true)));
+        // What the controls show for those words, and for a range that is only partly italic.
+        let (look, mixed) = d.look_shown(&theme).unwrap();
+        assert!(look.italic && !mixed.italic);
+        d.typing_range = Some((0, 10));
+        let (_, mixed) = d.look_shown(&theme).unwrap();
+        assert!(mixed.italic, "some of the words are italic and some are not");
+        // One Undo takes the styling back.
+        assert!(d.undo());
+        assert_eq!(d.slide, before);
+        // Only a caret: the whole box, and every word takes it.
+        d.redo();
+        d.typing_range = Some((3, 3));
+        d.record();
+        assert!(d.restyle(&theme, |look| look.italic = true));
+        let ObjectKind::Text { style, spans, .. } = &d.slide.objects[0].kind else { panic!("a text object") };
+        assert!(spans.is_empty(), "the words gave the look up");
+        assert_eq!(style.italic, Some(true));
     }
 
     #[test]

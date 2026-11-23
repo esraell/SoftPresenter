@@ -2679,24 +2679,18 @@ fn edit_view(
             EditRequest::AddText => draft.add_text(),
             EditRequest::AddShape(shape) => draft.add_shape(shape),
             EditRequest::Bold => {
-                let bold = draft
-                    .selected_object()
-                    .and_then(|object| theme.text_style_on(&draft.slide, object.role.as_ref(), object.text_style()?))
-                    .is_some_and(|look| look.weight >= 600);
+                // Of the selected words, if any are selected: all in it, or it is not in all.
+                let bold = draft.look_shown(theme).is_some_and(|(look, mixed)| look.weight >= 600 && !mixed.weight);
                 draft.restyle(theme, |look| look.weight = if bold { 400 } else { 700 });
             }
             EditRequest::Italic => {
-                let italic = draft
-                    .selected_object()
-                    .and_then(|object| theme.text_style_on(&draft.slide, object.role.as_ref(), object.text_style()?))
-                    .is_some_and(|look| look.italic);
+                // Of the selected words, if any are selected: all in it, or it is not in all.
+                let italic = draft.look_shown(theme).is_some_and(|(look, mixed)| look.italic && !mixed.italic);
                 draft.restyle(theme, |look| look.italic = !italic);
             }
             EditRequest::Underline => {
-                let underline = draft
-                    .selected_object()
-                    .and_then(|object| theme.text_style_on(&draft.slide, object.role.as_ref(), object.text_style()?))
-                    .is_some_and(|look| look.underline);
+                // Of the selected words, if any are selected: all in it, or it is not in all.
+                let underline = draft.look_shown(theme).is_some_and(|(look, mixed)| look.underline && !mixed.underline);
                 draft.restyle(theme, |look| look.underline = !underline);
             }
             EditRequest::Bigger => {
@@ -3458,6 +3452,7 @@ fn edit_view(
         }
 
         // Typing on the slide: a field over the box being edited, in the box's own place.
+        let mut shortcut: Option<EditRequest> = None;
         if let Some(draft) = state.editing.as_mut()
             && let Some(id) = draft.typing
         {
@@ -3475,26 +3470,83 @@ fn edit_view(
                     // are read; the slide shows them in its own look as soon as typing ends.
                     ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(8, 9, 11));
                     ui.painter().rect_stroke(rect, 4.0, Stroke::new(1.5, crate::studio::ACCENT), StrokeKind::Outside);
-                    let size = look.map_or(20.0, |look| (look.size * scale).clamp(13.0, 34.0));
+                    let size = look.as_ref().map_or(20.0, |look| (look.size * scale).clamp(13.0, 34.0));
+                    let field_id = ui.scope_id().with(("typing on the slide", id));
+                    if started {
+                        draft.typing_range = None;
+                        draft.typing_backup = Some((object.as_text().unwrap_or_default().to_owned(), object.spans().to_vec()));
+                    }
+                    // After a control in the inspector took the keyboard to style words, the
+                    // field takes it back with the same words selected.
+                    let refocus = std::mem::take(&mut draft.typing_refocus)
+                        | std::mem::take(&mut state.inspector.refocus_typing);
+                    if refocus && let Some((from, to)) = draft.typing_range {
+                        let mut edit = egui::text_edit::TextEditState::load(ui.ctx(), field_id).unwrap_or_default();
+                        edit.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(from),
+                            egui::text::CCursor::new(to),
+                        )));
+                        edit.store(ui.ctx(), field_id);
+                    }
+                    // The words show their styles as they are typed: the look a box has by
+                    // itself is not shown (the field is dark), the words styled one by one are.
+                    let styled = look.clone().map(|look| (look, object.spans().to_vec()));
+                    let picked = draft.typing_range.filter(|_| !ui.memory(|m| m.has_focus(field_id)));
+                    let mut layouter = |ui: &egui::Ui, words: &dyn egui::TextBuffer, wrap: f32| {
+                        let job = typing_job(words.as_str(), styled.as_ref(), size, wrap, picked);
+                        ui.fonts_mut(|fonts| fonts.layout_job(job))
+                    };
                     let field = egui::TextEdit::multiline(&mut typed)
+                        .id(field_id)
+                        .layouter(&mut layouter)
                         .frame(Frame::NONE)
                         .font(FontId::proportional(size))
                         .align(Align2::CENTER_TOP)
                         .desired_width(rect.width() - 16.0);
                     let field = ui.put(rect.shrink(8.0), field);
-                    if started {
+                    if started || refocus {
                         field.request_focus();
+                    }
+                    if field.has_focus()
+                        && let Some(range) = egui::text_edit::TextEditState::load(ui.ctx(), field_id)
+                            .and_then(|edit| edit.cursor.char_range())
+                    {
+                        let (a, b) = (usize::from(range.primary.index), usize::from(range.secondary.index));
+                        draft.typing_range = Some((a.min(b), a.max(b)));
                     }
                     // What was typed goes in as an edit, so words styled one by one keep their
                     // looks.
                     object.set_text(&typed);
+                    // Command-B, I and U where there is no menu bar to take them.
+                    if !cfg!(target_os = "macos") && field.has_focus() {
+                        let key = ui.input(|input| {
+                            [(egui::Key::B, EditRequest::Bold), (egui::Key::I, EditRequest::Italic), (egui::Key::U, EditRequest::Underline)]
+                                .into_iter()
+                                .find(|(key, _)| input.modifiers.command && input.key_pressed(*key))
+                        });
+                        if let Some((_, request)) = key {
+                            shortcut = Some(request);
+                        }
+                    }
                     if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                        // The words and their looks go back as they were when typing began, as
+                        // Undo would put them (the one place the words are set whole).
+                        if let (Some((words, saved)), sp_model::ObjectKind::Text { text, spans, .. }) =
+                            (draft.typing_backup.take(), &mut object.kind)
+                        {
+                            *text = words;
+                            *spans = saved;
+                        }
                         draft.typing = None;
                     }
                 }
                 // The object went away while it was being typed in.
                 _ => draft.typing = None,
             }
+        }
+
+        if shortcut.is_some() && state.edit_request.is_none() {
+            state.edit_request = shortcut;
         }
 
         // On a stage layout: its name, and one Add menu (with the items it can show live and
@@ -3586,6 +3638,9 @@ fn edit_view(
     if let (Some(draft), Some(before)) = (state.editing.as_mut(), before)
         && draft.slide != before
     {
+        if std::mem::take(&mut state.inspector.new_step) {
+            draft.break_run();
+        }
         if draft.drag.is_none() && !draft.stepped {
             draft.record_run(before, now);
         }
@@ -4351,6 +4406,81 @@ fn output_choices(
     choices.extend(crate::screens::decklink_choices(current, decklink));
     choices.push(Output::Off);
     choices
+}
+
+/// The words of a box as the field typed in shows them: each span's look over the box's (bold,
+/// slanted, underlined, struck through, bigger or smaller in proportion, its own colour).
+/// A font of a span's own is not shown here, only on the slide. `picked` (characters) are
+/// drawn with a soft blue behind them, for when the field has lost the keyboard to a control
+/// in the inspector and the words are still the ones being styled.
+fn typing_job(
+    words: &str,
+    styled: Option<&(sp_model::BoxStyle, Vec<sp_model::TextSpan>)>,
+    size: f32,
+    wrap: f32,
+    picked: Option<(usize, usize)>,
+) -> egui::text::LayoutJob {
+    let ink = Color32::from_gray(230);
+    let plain = egui::TextFormat { font_id: FontId::proportional(size), color: ink, ..Default::default() };
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = wrap;
+    job.keep_trailing_whitespace = true;
+    let mut pieces: Vec<(std::ops::Range<usize>, egui::TextFormat)> = Vec::new();
+    match styled {
+        Some((look, spans)) if !spans.is_empty() => {
+            let format_of = |own: &sp_model::SpanStyle| {
+                let on = own.over_box(look);
+                let this = (on.size / look.size.max(1.0) * size).clamp(8.0, 80.0);
+                let font_id = if on.weight >= 600 { crate::studio::semibold(this) } else { FontId::proportional(this) };
+                let stroke = |wanted: bool| if wanted { Stroke::new(1.0, ink) } else { Stroke::NONE };
+                egui::TextFormat {
+                    font_id,
+                    color: own.fill.map_or(ink, |c| Color32::from_rgba_unmultiplied(c.r, c.g, c.b, c.a)),
+                    italics: on.italic,
+                    underline: stroke(on.underline),
+                    strikethrough: stroke(on.strike),
+                    ..Default::default()
+                }
+            };
+            let base = format_of(&sp_model::SpanStyle::default());
+            let mut at = 0;
+            for (range, own) in sp_model::byte_ranges(words, spans) {
+                if range.start < at || range.start >= range.end {
+                    continue;
+                }
+                if range.start > at {
+                    pieces.push((at..range.start, base.clone()));
+                }
+                at = range.end;
+                pieces.push((range, format_of(own)));
+            }
+            if at < words.len() {
+                pieces.push((at..words.len(), base));
+            }
+        }
+        _ => pieces.push((0..words.len(), plain)),
+    }
+    let marked = picked.filter(|(a, b)| a < b).map(|(a, b)| {
+        let byte = |c: usize| words.char_indices().nth(c).map_or(words.len(), |(i, _)| i);
+        (byte(a), byte(b))
+    });
+    let blue = Color32::from_rgba_unmultiplied(80, 140, 255, 90);
+    for (range, format) in pieces {
+        let Some((from, to)) = marked else {
+            job.append(&words[range], 0.0, format);
+            continue;
+        };
+        let cuts = [range.start, from.clamp(range.start, range.end), to.clamp(range.start, range.end), range.end];
+        for pair in cuts.windows(2) {
+            if pair[0] < pair[1] {
+                let inside = pair[0] >= from && pair[1] <= to;
+                let format =
+                    egui::TextFormat { background: if inside { blue } else { format.background }, ..format.clone() };
+                job.append(&words[pair[0]..pair[1]], 0.0, format);
+            }
+        }
+    }
+    job
 }
 
 /// A change the menu bar asks the editor to make to the selected objects. The editor makes it
