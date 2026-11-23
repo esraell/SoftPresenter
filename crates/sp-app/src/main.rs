@@ -2976,7 +2976,7 @@ impl App {
     /// Next (`forward`) or Previous, from a key, the menu or the command line: the keys act on
     /// the open item, and leave a slide picked for Enter (see `running`). Returns what was said
     /// instead, if anything was.
-    fn step_keys(&mut self, forward: bool) -> Option<String> {
+    fn step_keys(&mut self, forward: bool) -> Option<running::Said> {
         self.step_aimed(forward, None)
     }
 
@@ -2984,7 +2984,7 @@ impl App {
     /// playlist in front were the open one and nothing were picked: for a remote page, which
     /// keeps its own open item and picks and must not move the window's. An item it starts goes
     /// on screen without becoming the window's open item.
-    pub(crate) fn step_aimed(&mut self, forward: bool, aim: Option<usize>) -> Option<String> {
+    pub(crate) fn step_aimed(&mut self, forward: bool, aim: Option<usize>) -> Option<running::Said> {
         let command = if forward { Command::Next } else { Command::Previous };
         let running = self.running.as_ref()?;
         let state = &running.home_state;
@@ -3023,8 +3023,10 @@ impl App {
                     running.home_state.notices.refuse(words.clone());
                     running.home_window.request_redraw();
                 }
-                return Some(words);
+                return Some(running::Said { words, at_end: false });
             }
+            // At an end: nothing in the window, only words for a command's reply.
+            running::Do::Stay(words) => return Some(running::Said { words, at_end: true }),
         }
         None
     }
@@ -3053,21 +3055,17 @@ impl App {
             }
             return false;
         };
-        let word = state.picked_word(&self.show).unwrap_or("slide");
         let bible = state.picked.as_ref().is_some_and(|picked| picked.passage.is_some());
         let order = self.show.presentations().get(at.presentation).map(|song| song.order()).unwrap_or_default();
         let next = running::pick_beside(&order, at.slide, forward);
         let Some(running) = self.running.as_mut() else { return true };
-        match next {
-            Some(slide) => running.home_state.set_pick(
+        // At either end the pick stays, with no notice.
+        if let Some(slide) = next {
+            running.home_state.set_pick(
                 &self.show,
                 sp_engine::SlideRef { presentation: at.presentation, slide },
                 bible,
-            ),
-            None => running
-                .home_state
-                .notices
-                .refuse(format!("That is the {} {word}.", if forward { "last" } else { "first" })),
+            );
         }
         running.home_window.request_redraw();
         true
@@ -3093,7 +3091,7 @@ impl App {
         match running::enter(&stops, listed, picked) {
             Some(running::Do::Show(command)) => self.apply(vec![command]),
             Some(running::Do::Start { item, last }) => self.start_item(item, last),
-            Some(running::Do::Say(_)) | None => {}
+            Some(running::Do::Say(_) | running::Do::Stay(_)) | None => {}
         }
     }
 
@@ -4515,7 +4513,7 @@ impl App {
             let due = frames >= 5 && last.is_none_or(|at| at.elapsed() >= Duration::from_secs(2));
             if due && let Some(running) = self.running.as_mut() {
                 *last = Some(Instant::now());
-                running.home_state.notices.refuse("That is the last slide of the playlist.");
+                running.home_state.notices.refuse("Press Enter to put the picked verse on screen.");
                 running.home_window.request_redraw();
             }
             return;

@@ -2909,13 +2909,6 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
             None if down => Some(0),
             _ => None,
         };
-        if next.is_none() && (up || down) {
-            state.notices.refuse(if down {
-                "That is the last song in the list."
-            } else {
-                "That is the first song in the list."
-            });
-        }
         if let Some(next) = next {
             let song = shown[next];
             if shift {
@@ -4357,25 +4350,23 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 None if down => Some(0),
                 _ => None,
             };
-            match next {
-                Some(next) => {
-                    ask = Some(ItemAsk::Open(openable[next]));
-                    state.playlist_scroll_to = Some(openable[next]);
-                    // With Shift, the items on the way are picked out too, as in the Finder.
-                    let picks = &mut state.item_picks;
-                    if shift {
-                        if picks.anchor.is_none() {
-                            picks.anchor = state.services.chosen;
-                        }
-                        let mods = egui::Modifiers::SHIFT;
-                        crate::home::pick(&mut picks.places, &mut picks.anchor, &row_items, openable[next], mods);
-                    } else {
-                        picks.places = vec![openable[next]];
-                        picks.anchor = Some(openable[next]);
+            // At either end of the playlist nothing opens, with no notice.
+            if let Some(next) = next {
+                ask = Some(ItemAsk::Open(openable[next]));
+                state.playlist_scroll_to = Some(openable[next]);
+                // With Shift, the items on the way are picked out too, as in the Finder.
+                let picks = &mut state.item_picks;
+                if shift {
+                    if picks.anchor.is_none() {
+                        picks.anchor = state.services.chosen;
                     }
-                    picks.made_in(&state.services);
+                    let mods = egui::Modifiers::SHIFT;
+                    crate::home::pick(&mut picks.places, &mut picks.anchor, &row_items, openable[next], mods);
+                } else {
+                    picks.places = vec![openable[next]];
+                    picks.anchor = Some(openable[next]);
                 }
-                None => state.notices.refuse(crate::running::no_item_beyond(down)),
+                picks.made_in(&state.services);
             }
         }
     }

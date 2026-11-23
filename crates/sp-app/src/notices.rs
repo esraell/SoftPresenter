@@ -10,7 +10,7 @@
 //! - **information** about what happened out of sight (added to another playlist, a file read
 //!   or written, a Bible installed), with a quiet dot.
 //!
-//! A **refusal** (why nothing happened: "That is the last slide") is not an entry. It is a cue
+//! A **refusal** (why nothing happened: "Press Enter to put the picked verse on screen") is not an entry. It is a cue
 //! under the place of action for a moment, and never kept. A confirmation of what the
 //! operator just did and can see is never said at all.
 //!
@@ -207,7 +207,7 @@ impl Notices {
         notice.actions.iter().any(|offered| offered.id == action).then_some((about, action == RELOAD))
     }
 
-    /// Why nothing happened ("That is the last slide."), said at the place of action for a
+    /// Why nothing happened ("Look a passage up first."), said at the place of action for a
     /// moment and never kept: under what was clicked, or under the preview's readout when it was
     /// a key. Better still is a control greyed so nothing is refused.
     pub fn refuse(&mut self, text: impl Into<String>) {
@@ -834,11 +834,11 @@ mod tests {
     fn a_refusal_makes_no_entry_but_the_command_line_can_say_it() {
         let mut notices = Notices::default();
         let mark = notices.mark();
-        notices.refuse("That is the last slide.");
+        notices.refuse("Look a passage up first.");
         assert_eq!(notices.entries().count(), 0, "a refusal is a cue, never an entry");
         assert_eq!(notices.look(), Look::Quiet);
-        assert_eq!(notices.refused(), Some("That is the last slide."));
-        assert_eq!(notices.said_since(mark), Some("That is the last slide."));
+        assert_eq!(notices.refused(), Some("Look a passage up first."));
+        assert_eq!(notices.said_since(mark), Some("Look a passage up first."));
         let mark = notices.mark();
         assert_eq!(notices.said_since(mark), None, "nothing since");
         notices.trouble("That media playlist has nothing in it.");

@@ -327,7 +327,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   under the slides), Next at the end of a song goes on into the next song or **Bible
   passage**, passing over headers, placeholders, pictures and videos, and Previous at a song's
   first slide goes back into the last slide of the one before; at either end of the playlist,
-  or with Continuous off, nothing changes and a brief cue under the preview's readout says why. The menu
+  or with Continuous off, nothing changes and nothing is said: reaching an end needs no notice (the
+  same for ↑ and ↓ at the ends of the playlist, the song list and a passage's verses, and a verse
+  longer at either end of a book). The menu
   bar's Next Slide and Previous Slide, and `sp next` and `sp previous`, do the same; a slide
   that goes on by itself goes on into the next song or passage only with Continuous on. A
   page or script that keeps its own open item names it each time (`sp next --aim 3`,
@@ -500,7 +502,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   stage layout, a theme's last usual template and a song's last slide, Move Up and Move Down at the ends of a list
   ("Already at the top", "Already at the bottom"), and the Key choice of a screen with no other audience screen to
   show are greyed the same way. The Delete key, which has no greyed look, still says why with a brief cue, as do
-  the keyboard's refusals (such as the last slide).
+  the keyboard's other refusals (such as Enter with nothing to put on).
 - **Deleting, one rule:** what Undo can bring back goes at once, with no question and no
   notice: slides, items taken out of a playlist (or out of a media playlist), playlists,
   libraries, audio playlists, timer,

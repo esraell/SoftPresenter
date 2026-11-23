@@ -1504,22 +1504,16 @@ impl BiblePage {
         let Some(lead) = self.lead() else { return };
         let Ok(bible) = self.shelf.get(lead) else { return };
         let Ok(range) = sp_bible::parse_reference_in(&self.shown, &bible.info.language) else { return };
-        match bible.extend(range, forward) {
-            Some(longer) => {
-                // Still kept in the language it was typed in.
-                let keep = match &self.keep {
-                    Keep::In(language) => Keep::In(language.clone()),
-                    _ => Keep::Lead,
-                };
-                self.typed_at = None;
-                self.lookup = bible.label(longer.start, longer.end);
-                self.make(live, false, false, true, keep);
-            }
-            None => {
-                let end = if forward { "end" } else { "start" };
-                let book = sp_bible::book_name(range.start.book, &self.names_language());
-                self.message = Some(format!("That is the {end} of {book}."));
-            }
+        // At either end of the book the passage stays as it is, with no notice.
+        if let Some(longer) = bible.extend(range, forward) {
+            // Still kept in the language it was typed in.
+            let keep = match &self.keep {
+                Keep::In(language) => Keep::In(language.clone()),
+                _ => Keep::Lead,
+            };
+            self.typed_at = None;
+            self.lookup = bible.label(longer.start, longer.end);
+            self.make(live, false, false, true, keep);
         }
     }
 
@@ -6935,11 +6929,13 @@ fn bible_pick_keys(ui: &egui::Ui, show: &Show, state: &mut HomeState, commands: 
     // With neither, the passage's first verse, among its chapter's slides when they were made.
     let first = state.bible.passage_slides().start;
     let moved = match (picked, live) {
-        (None, None) if first < count => Ok(first),
+        (None, None) if first < count => Ok(Some(first)),
         _ => crate::running::move_pick(count, picked, live, down),
     };
     match moved {
-        Ok(slide) => state.set_pick(show, SlideRef { presentation: slot, slide }, true),
+        Ok(Some(slide)) => state.set_pick(show, SlideRef { presentation: slot, slide }, true),
+        // At either end the pick stays, with no notice.
+        Ok(None) => {}
         Err(words) => state.notices.refuse(words),
     }
 }
@@ -10799,7 +10795,7 @@ mod tests {
                 show.apply(command);
                 None
             }
-            crate::running::Do::Say(words) => Some(words),
+            crate::running::Do::Say(words) | crate::running::Do::Stay(words) => Some(words),
             crate::running::Do::Start { .. } => panic!("nothing in a playlist is started here"),
         }
     }
@@ -11391,13 +11387,13 @@ mod tests {
         assert_eq!(commands, vec![Command::Next]);
         assert_eq!(show.live(), verse(18), "the next verse on screen");
         // With the screen cleared, ↓ picks again from the passage's first verse, and the pick
-        // stays at the chapter's last verse, and says so.
+        // stays at the chapter's last verse, saying nothing.
         show.apply(Command::ClearAll);
         for at in 0..25 {
             frame_then_app(&ctx, &mut show, &mut state, vec![key(Key::ArrowDown)], 0.9 + f64::from(at) * 0.01);
         }
         assert_eq!(state.pick(&show), verse(35), "the last verse stays picked");
-        assert_eq!(state.notices.refused(), Some("That is the last verse."));
+        assert_eq!(state.notices.refused(), None, "reaching the end needs no notice");
     }
 
     #[test]
@@ -13872,9 +13868,10 @@ mod tests {
         let (ctx, mut state) = (egui::Context::default(), HomeState::default());
         frame_events(&ctx, &show, &mut state, Vec::new(), 1.0);
         // A key refused: under the preview's readout, in the right column.
-        state.notices.refuse("That is the last slide of the playlist.");
+        state.notices.refuse("Press Enter to put the picked verse on screen.");
         let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), 1.1);
-        let (_, chip) = texts.iter().find(|(words, _)| words == "That is the last slide of the playlist.").unwrap();
+        let (_, chip) =
+            texts.iter().find(|(words, _)| words == "Press Enter to put the picked verse on screen.").unwrap();
         let under = state.notices.cue.as_ref().and_then(|cue| cue.under).expect("placed when first drawn");
         assert!(under.min.x > 1280.0 - crate::studio::RIGHT_WIDTH, "the readout is in the right column: {under:?}");
         assert!(chip.min.y > under.max.y, "the cue is under it: {chip:?}");
@@ -13882,9 +13879,9 @@ mod tests {
         assert_eq!(state.notices.look(), crate::notices::Look::Quiet, "nor lights the button");
         // Still there a moment later, gone after its 2.4 seconds.
         let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), 3.0);
-        assert!(texts.iter().any(|(words, _)| words.starts_with("That is the last slide")));
+        assert!(texts.iter().any(|(words, _)| words.starts_with("Press Enter to put")));
         let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), 3.6);
-        assert!(!texts.iter().any(|(words, _)| words.starts_with("That is the last slide")));
+        assert!(!texts.iter().any(|(words, _)| words.starts_with("Press Enter to put")));
         assert!(state.notices.cue.is_none());
         // Refused just after a click: under what was clicked.
         let mut time = 4.0;

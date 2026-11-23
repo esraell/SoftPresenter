@@ -224,8 +224,9 @@ reply:
 (a picture's file, a folder) is cut to its file name, so the computer's folders and the user's
 name in them stay on the computer (the state is sent the same way). It is carried out on the
 app's main thread by the same handler as `sp` and the window's own buttons. `ok: false` is a **refusal**; `text` is the
-app's own words for why (show it as the cue chip), such as "That is the last slide." or "River
-Song has 6 slides; there is no slide 9.". Every command gets exactly one reply, within 15
+app's own words for why (show it as the cue chip), such as "River Song has 6 slides; there is no
+slide 9.". Next or Previous at an end is not a refusal: `ok: true`, with `data` `{"at_end": true}`,
+and the window shows nothing for it, so a page shouldn't either. Every command gets exactly one reply, within 15
 seconds ("SoftPresenter did not answer in time." otherwise).
 
 Refused before they reach the app, with words saying so (read as the app would read them:

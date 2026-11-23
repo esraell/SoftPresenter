@@ -88,6 +88,17 @@ pub enum Do {
     Start { item: usize, last: bool },
     /// Change nothing, and say this.
     Say(String),
+    /// Change nothing: the show is at an end of what it steps through. Said only in a command's
+    /// reply (to `sp` or a remote page), never in the window: reaching an end needs no notice
+    /// (the owner, 2026-11-23).
+    Stay(String),
+}
+
+/// What Next or Previous said instead of moving, for a command's reply: `at_end` when it stayed
+/// at an end of what it steps through (said in the reply only).
+pub struct Said {
+    pub words: String,
+    pub at_end: bool,
 }
 
 /// What Next or Previous does while a slide picked waits for Enter (`picked` says what it is):
@@ -118,7 +129,7 @@ pub fn step(situation: &Situation, forward: bool) -> Do {
     let Here::Item(here) = situation.here else {
         // Not in the playlist: the show steps, or stays at the end of what it shows.
         return if edge && situation.here == Here::Elsewhere {
-            Do::Say(if forward { "That is the last slide." } else { "That is the first slide." }.to_owned())
+            Do::Stay(if forward { "That is the last slide." } else { "That is the first slide." }.to_owned())
         } else {
             Do::Show(command)
         };
@@ -127,15 +138,13 @@ pub fn step(situation: &Situation, forward: bool) -> Do {
         return Do::Show(command);
     }
     let title = situation.titles.get(here).map_or("", String::as_str);
-    let (end, key) = if forward { ("last", "Next") } else { ("first", "Previous") };
+    let end = if forward { "last" } else { "first" };
     if !situation.continuous {
-        return Do::Say(format!(
-            "That is the {end} slide of {title}. Continuous is off, so {key} stays in it (Continuous is in the bar under the slides)."
-        ));
+        return Do::Stay(format!("That is the {end} slide of {title}, and Continuous is off."));
     }
     match next_stop(stops, here, forward) {
         Some(item) => Do::Start { item, last: !forward },
-        None => Do::Say(format!("That is the {end} slide of the playlist.")),
+        None => Do::Stay(format!("That is the {end} slide of the playlist.")),
     }
 }
 
@@ -187,17 +196,22 @@ pub fn enter(stops: &[Stop], listed: Listed, picked: Option<SlideRef>) -> Option
 /// Where ↑ (`down` false) or ↓ moves the pick in the Bible view's passage of `count` slides: to
 /// the verse before or after the one picked, or with none picked the one on screen (`live`, by
 /// its place in the passage), or with neither to the first (↓) or the last (↑). At either end
-/// it stays, and says so.
-pub fn move_pick(count: usize, picked: Option<usize>, live: Option<usize>, down: bool) -> Result<usize, &'static str> {
+/// it stays (`None`), saying nothing.
+pub fn move_pick(
+    count: usize,
+    picked: Option<usize>,
+    live: Option<usize>,
+    down: bool,
+) -> Result<Option<usize>, &'static str> {
     if count == 0 {
         return Err("Look a passage up first.");
     }
-    match picked.or(live).filter(|at| *at < count) {
-        Some(at) if down => (at + 1 < count).then_some(at + 1).ok_or("That is the last verse."),
-        Some(at) => at.checked_sub(1).ok_or("That is the first verse."),
-        None if down => Ok(0),
-        None => Ok(count - 1),
-    }
+    Ok(match picked.or(live).filter(|at| *at < count) {
+        Some(at) if down => (at + 1 < count).then_some(at + 1),
+        Some(at) => at.checked_sub(1),
+        None if down => Some(0),
+        None => Some(count - 1),
+    })
 }
 
 /// What Space or an arrow does while a slide is picked (the owner's rule, 2026-11-21).
@@ -235,11 +249,6 @@ pub fn pick_beside(order: &[usize], at: usize, forward: bool) -> Option<usize> {
         Some(place) => place.checked_sub(1).and_then(|place| order.get(place).copied()),
         None => order.first().copied(),
     }
-}
-
-/// What ↑ or ↓ says when there is no item above or below to open.
-pub fn no_item_beyond(down: bool) -> &'static str {
-    if down { "That is the last item in the playlist." } else { "That is the first item in the playlist." }
 }
 
 #[cfg(test)]
@@ -356,10 +365,10 @@ mod tests {
     fn at_either_end_of_the_playlist_it_stays_and_says_so() {
         let playlist = service();
         let s = situation(&playlist, Here::Item(7), Some(7), true, false);
-        assert_eq!(step(&s, true), Do::Say("That is the last slide of the playlist.".to_owned()));
+        assert_eq!(step(&s, true), Do::Stay("That is the last slide of the playlist.".to_owned()));
         let playlist = service();
         let s = situation(&playlist, Here::Item(2), Some(2), false, true);
-        assert_eq!(step(&s, false), Do::Say("That is the first slide of the playlist.".to_owned()));
+        assert_eq!(step(&s, false), Do::Stay("That is the first slide of the playlist.".to_owned()));
     }
 
     #[test]
@@ -367,15 +376,15 @@ mod tests {
         let playlist = service();
         let mut s = situation(&playlist, Here::Item(2), Some(2), true, false);
         s.continuous = false;
-        let Do::Say(said) = step(&s, true) else { panic!("it stays") };
-        assert!(said.starts_with("That is the last slide of Alpha. Continuous is off"), "{said}");
+        let Do::Stay(said) = step(&s, true) else { panic!("it stays") };
+        assert_eq!(said, "That is the last slide of Alpha, and Continuous is off.");
     }
 
     #[test]
     fn a_song_from_a_library_stays_at_its_end_and_says_so() {
         let playlist = service();
         let s = situation(&playlist, Here::Elsewhere, Some(3), true, false);
-        assert_eq!(step(&s, true), Do::Say("That is the last slide.".to_owned()));
+        assert_eq!(step(&s, true), Do::Stay("That is the last slide.".to_owned()));
         let playlist = service();
         let s = situation(&playlist, Here::Elsewhere, Some(3), false, false);
         assert_eq!(step(&s, true), Do::Show(Command::Next), "the open item isn't started over a song from elsewhere");
@@ -446,16 +455,16 @@ mod tests {
     #[test]
     fn up_and_down_move_the_pick_through_the_passage_and_stay_at_its_ends() {
         // Five verses. From the one picked.
-        assert_eq!(move_pick(5, Some(1), None, true), Ok(2));
-        assert_eq!(move_pick(5, Some(1), None, false), Ok(0));
-        assert_eq!(move_pick(5, Some(4), Some(0), true), Err("That is the last verse."));
-        assert_eq!(move_pick(5, Some(0), None, false), Err("That is the first verse."));
+        assert_eq!(move_pick(5, Some(1), None, true), Ok(Some(2)));
+        assert_eq!(move_pick(5, Some(1), None, false), Ok(Some(0)));
+        assert_eq!(move_pick(5, Some(4), Some(0), true), Ok(None), "it stays at the last verse");
+        assert_eq!(move_pick(5, Some(0), None, false), Ok(None), "and at the first");
         // None picked: from the verse on screen.
-        assert_eq!(move_pick(5, None, Some(2), true), Ok(3));
-        assert_eq!(move_pick(5, None, Some(2), false), Ok(1));
+        assert_eq!(move_pick(5, None, Some(2), true), Ok(Some(3)));
+        assert_eq!(move_pick(5, None, Some(2), false), Ok(Some(1)));
         // Neither: the first, or the last.
-        assert_eq!(move_pick(5, None, None, true), Ok(0));
-        assert_eq!(move_pick(5, None, None, false), Ok(4));
+        assert_eq!(move_pick(5, None, None, true), Ok(Some(0)));
+        assert_eq!(move_pick(5, None, None, false), Ok(Some(4)));
         assert!(move_pick(0, None, None, true).is_err(), "no passage");
     }
 

@@ -1315,10 +1315,16 @@ impl crate::App {
                     }
                     _ => self.step_aimed(false, aim),
                 };
-                Ok(Reply::done(match said {
-                    Some(said) => format!("{said} {}", self.live_words()),
-                    None => self.live_words(),
-                }))
+                // Staying at an end is marked in the data, so a page can leave it unsaid as the
+                // window does.
+                Ok(match said {
+                    Some(said) if said.at_end => Reply::with(
+                        format!("{} {}", said.words, self.live_words()),
+                        serde_json::json!({ "at_end": true }),
+                    ),
+                    Some(said) => Reply::done(format!("{} {}", said.words, self.live_words())),
+                    None => Reply::done(self.live_words()),
+                })
             })(),
             "go" => match aim_words(&args[1..]) {
                 Ok((words, Some(aim))) => self.aimed_item(&aim).and_then(|item| self.go_aimed(item, &words)),
