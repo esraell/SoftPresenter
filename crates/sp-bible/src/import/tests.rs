@@ -466,23 +466,60 @@ fn a_huge_book_name_is_looked_up_in_a_moment() {
     assert_eq!(crate::book_by_written_name(&format!("Revelation {}", "of John ".repeat(10_000))), book_by_code("REV"));
 }
 
+/// Reads what `make` builds for a small count and for a count ten times larger, and fails if
+/// the larger takes much more than ten times as long: the cost of each repeat must not grow
+/// with the number of repeats (a quadratic reader would take a hundred times as long). Each
+/// size is timed three times and the quickest taken, so a busy computer, which only ever adds
+/// time, upsets neither; and a little time is allowed on top for what is left of its noise.
+fn costs_no_more_each_time(what: &str, small: usize, make: impl Fn(usize) -> String, read: impl Fn(&str)) {
+    let quickest = |count: usize| {
+        let input = make(count);
+        (0..3)
+            .map(|_| {
+                let started = std::time::Instant::now();
+                read(&input);
+                started.elapsed()
+            })
+            .min()
+            .unwrap()
+    };
+    let (few, many) = (quickest(small), quickest(small * 10));
+    assert!(
+        many < few * 10 * 4 + std::time::Duration::from_millis(100),
+        "{what}: {small} repeats took {few:?}, {} took {many:?}",
+        small * 10
+    );
+}
+
 #[test]
 fn the_same_verse_begun_over_and_over_costs_no_more_each_time() {
-    let usfm = format!("\\id PSA\n{}", "\\c 1\n\\d A title.\n\\v 1 Words.\n".repeat(100_000));
-    let imported = quickly(std::time::Duration::from_millis(100), "100,000 repeats in USFM", || read(&usfm, "x.usfm"));
+    let usfm = |count: usize| format!("\\id PSA\n{}", "\\c 1\n\\d A title.\n\\v 1 Words.\n".repeat(count));
+    costs_no_more_each_time("repeats in USFM", 10_000, usfm, |text| {
+        read(text, "x.usfm");
+    });
+    let imported = read(&usfm(100_000), "x.usfm");
     let verse = imported.verse(at("PSA", 1, 1)).unwrap();
     assert!(verse.starts_with("A title.") && verse.chars().count() <= LONGEST_VERSE, "{}", verse.len());
-    let usx = format!(
-        "<usx version=\"3.0\"><book code=\"PSA\" style=\"id\"/>{}</usx>",
-        "<chapter number=\"1\" style=\"c\"/><para style=\"d\">A title.</para><para style=\"q1\"><verse number=\"1\" style=\"v\"/>Words.</para>"
-            .repeat(100_000)
-    );
-    // Thirteen megabytes of XML: the time is reading them, once.
-    let imported = quickly(std::time::Duration::from_millis(1000), "100,000 repeats in USX", || read(&usx, "x.usx"));
+    let usx = |count: usize| {
+        format!(
+            "<usx version=\"3.0\"><book code=\"PSA\" style=\"id\"/>{}</usx>",
+            "<chapter number=\"1\" style=\"c\"/><para style=\"d\">A title.</para><para style=\"q1\"><verse number=\"1\" style=\"v\"/>Words.</para>"
+                .repeat(count)
+        )
+    };
+    costs_no_more_each_time("repeats in USX", 10_000, usx, |text| {
+        read(text, "x.usx");
+    });
+    let imported = read(&usx(100_000), "x.usx");
     assert!(imported.verse(at("PSA", 1, 1)).unwrap().chars().count() <= LONGEST_VERSE);
-    // A title that never ends, and one verse's words in one enormous piece, stay within bounds.
-    let long = format!("\\id PSA\n\\c 2\n\\d {}\n\\v 1 {}\n", "title ".repeat(200_000), "word ".repeat(200_000));
-    let imported = quickly(std::time::Duration::from_millis(1500), "a 2 MB title and verse", || read(&long, "x.usfm"));
+    // A title that never ends, and one verse's words in one enormous piece, stay within bounds
+    // and cost in proportion to their size.
+    let long =
+        |count: usize| format!("\\id PSA\n\\c 2\n\\d {}\n\\v 1 {}\n", "title ".repeat(count), "word ".repeat(count));
+    costs_no_more_each_time("a long title and verse", 20_000, long, |text| {
+        read(text, "x.usfm");
+    });
+    let imported = read(&long(200_000), "x.usfm");
     assert!(imported.verse(at("PSA", 2, 1)).unwrap().chars().count() <= LONGEST_VERSE);
 }
 
