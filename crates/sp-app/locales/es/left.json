@@ -60,5 +60,7 @@
   "left.some_already_in": ["{n} de ellos ya está en {list}.", "{n} de ellos ya están en {list}."],
   "left.added": "Se añadió {item} a {list}.",
   "left.added_songs": ["Se añadió {n} canción a {list}.", "Se añadieron {n} canciones a {list}."],
-  "left.added_items": ["Se añadió {n} elemento a {list}.", "Se añadieron {n} elementos a {list}."]
+  "left.added_items": ["Se añadió {n} elemento a {list}.", "Se añadieron {n} elementos a {list}."],
+  "left.order.listed.short": "Tal cual",
+  "left.order.longest.short": "Largas"
 }

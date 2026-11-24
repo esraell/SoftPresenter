@@ -1879,12 +1879,16 @@ pub fn even_switch(
     const BETWEEN: f32 = 2.0;
     const INSET: f32 = 3.0;
     ui.painter().rect_filled(track, track.height() / 2.0, CARD);
-    let each = (track.width() - 2.0 * INSET - BETWEEN * labels.len().saturating_sub(1) as f32) / labels.len() as f32;
+    // Evenly shared, unless a choice's words need more than their share (as with tab_switch).
+    let room = track.width() - 2.0 * INSET - BETWEEN * labels.len().saturating_sub(1) as f32;
+    let widths = shared_widths(room, &even_switch_needs(ui, labels, &font));
     let reach = ((LEAST_CLICK - (track.height() - 2.0 * INSET)) / 2.0).max(0.0);
     let mut clicked = None;
+    let mut across = track.min.x + INSET;
     for (index, label) in labels.iter().enumerate() {
-        let corner = pos2(track.min.x + INSET + (each + BETWEEN) * index as f32, track.min.y + INSET);
-        let cell = Rect::from_min_size(corner, vec2(each, track.height() - 2.0 * INSET));
+        let corner = pos2(across, track.min.y + INSET);
+        across += widths[index] + BETWEEN;
+        let cell = Rect::from_min_size(corner, vec2(widths[index], track.height() - 2.0 * INSET));
         let mut response =
             ui.interact(cell.expand2(vec2(0.0, reach)), ui.scope_id().with((salt, index)), Sense::click());
         let on = chosen == Some(index);
@@ -1899,6 +1903,18 @@ pub fn even_switch(
         }
     }
     clicked
+}
+
+/// What each choice of an [`even_switch`] needs: its words and the room either side of them.
+fn even_switch_needs(ui: &egui::Ui, labels: &[&str], font: &FontId) -> Vec<f32> {
+    labels.iter().map(|label| widest(ui, &[*label], font) + 2.0 * TAB_PAD).collect()
+}
+
+/// Whether `labels` fit an [`even_switch`] in `track` with the room either side of each, so a
+/// place can use its short forms when they don't.
+pub fn even_switch_fits(ui: &egui::Ui, track: Rect, labels: &[&str], font: &FontId) -> bool {
+    let room = track.width() - 2.0 * 3.0 - 2.0 * labels.len().saturating_sub(1) as f32;
+    even_switch_needs(ui, labels, font).iter().sum::<f32>() <= room
 }
 
 /// What one row of the left column's list shows.
@@ -2716,13 +2732,23 @@ fn left_foot(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &m
                 t("left.order.az.hint", "By title"),
                 t("left.order.longest.hint", "The songs with the most slides first"),
             ];
-            let labels = [
+            let font = FontId::proportional(11.0);
+            let usual = [
                 t("left.order.listed", "As listed"),
                 t("left.order.az", "A\u{2013}Z"),
                 t("left.order.longest", "Longest"),
             ];
-            if let Some(at) = even_switch(ui, "song order", track, &labels, &hints, chosen, FontId::proportional(11.0))
-            {
+            // Too long for the row with room round each: the short forms.
+            let labels = if even_switch_fits(ui, track, &usual, &font) {
+                usual
+            } else {
+                [
+                    ts("left.order.listed", "As listed"),
+                    ts("left.order.az", "A\u{2013}Z"),
+                    ts("left.order.longest", "Longest"),
+                ]
+            };
+            if let Some(at) = even_switch(ui, "song order", track, &labels, &hints, chosen, font) {
                 state.song_order = orders[at];
             }
             top += 26.8 + 8.0;
