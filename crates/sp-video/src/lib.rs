@@ -893,7 +893,9 @@ mod tests {
     /// The video behind the slide comes from FFmpeg as planes, and the colours the GPU makes of
     /// them are the ones FFmpeg itself made of the same video as RGBA, as it was asked before
     /// (so nothing shifts colour): for video named BT.709 or BT.601, video naming nothing (taken
-    /// as BT.601 and limited range, at HD size too), and full range. Two videos FFmpeg must
+    /// as BT.601 and limited range, at HD size too), and full range; and for an H.264 video
+    /// (where FFmpeg has an H.264 encoder to make one), which the graphics chip decodes, so
+    /// that FFmpeg's RGBA is made from the chip's planes rather than its own decoder's. Two videos FFmpeg must
     /// scale for RGBA (an odd size, which planes keep, and one larger than the screens, which
     /// both ways scale) are one flat colour, which the planes keep: FFmpeg's RGBA of a scaled
     /// picture comes out a step or three darker than its own unscaled conversion.
@@ -906,7 +908,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("softpresenter-planes-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let limited = |matrix| Colours { matrix, full_range: false };
-        let clips: [(&str, &str, &[&str], Colours); 6] = [
+        let lossless: &[&str] = &["-c:v", "ffv1"];
+        let h264: &[&str] = &["-c:v", "libx264", "-preset", "ultrafast", "-crf", "12"];
+        let clips: [(&str, &str, &[&str], Colours); 7] = [
             ("bt709", "testsrc2=s=1280x720", &["-colorspace", "bt709", "-color_range", "tv"], limited(Matrix::Bt709)),
             (
                 "bt601",
@@ -923,6 +927,7 @@ mod tests {
             ),
             ("odd", "color=c=0x3080C0:s=321x181", &["-colorspace", "bt709"], limited(Matrix::Bt709)),
             ("larger", "color=c=0x3080C0:s=2560x1440", &["-colorspace", "bt709"], limited(Matrix::Bt709)),
+            ("h264", "testsrc2=s=1280x720", &["-colorspace", "bt709", "-color_range", "tv"], limited(Matrix::Bt709)),
         ];
         for (name, source, tags, colours) in clips {
             let path = dir.join(format!("{name}.mkv"));
@@ -931,10 +936,14 @@ mod tests {
                 .arg(format!("{source}:r=30:d=1"))
                 .args(["-pix_fmt", "yuv420p"])
                 .args(tags)
-                .args(["-c:v", "ffv1"])
+                .args(if name == "h264" { h264 } else { lossless })
                 .arg(&path)
                 .status()
                 .expect("FFmpeg runs");
+            if name == "h264" && !made.success() {
+                eprintln!("this FFmpeg has no H.264 encoder: the H.264 video wasn't checked");
+                continue;
+            }
             assert!(made.success(), "the {name} video is made");
             let (pw, ph, from_planes, came) = first_picture(&path, Lend::Planes);
             assert_eq!(came, Some(colours), "{name}: planes, in the colours the video names");
