@@ -1033,20 +1033,38 @@ fn held_picture(asked: &str) -> Option<(Duration, Duration)> {
 
 /// Sets a window's surface up, saying whether that worked. A failure is caught here, not left to
 /// stop the thread: a screen that can't be drawn this moment is tried again next frame.
+///
+/// The operator's window and the screens share one device, and setting a surface up waits for
+/// the GPU to come idle: work the other thread hands in at that moment makes it fail ("Failed to
+/// wait for GPU to come idle"), mostly as the app starts. That is only a race, so it is tried
+/// again a few times, a moment apart, and if it still loses, the next frame tries again; it is
+/// written as an event, not a problem.
 pub(crate) fn configure(
     device: &wgpu::Device,
     surface: &wgpu::Surface<'static>,
     config: &wgpu::SurfaceConfiguration,
 ) -> bool {
-    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-    surface.configure(device, config);
-    match pollster::block_on(scope.pop()) {
-        None => true,
-        Some(error) => {
-            crate::applog::problem("output", &format!("A screen's window could not be set up yet: {error}"));
-            false
+    const TRIES: u32 = 4;
+    for attempt in 1..=TRIES {
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        surface.configure(device, config);
+        let Some(error) = pollster::block_on(scope.pop()) else { return true };
+        let raced = error.to_string().contains("come idle");
+        if raced && attempt < TRIES {
+            std::thread::sleep(Duration::from_millis(2));
+            continue;
         }
+        if raced {
+            crate::applog::event(
+                "output",
+                "A window's surface met other work on the GPU as it was set up; trying again",
+            );
+        } else {
+            crate::applog::problem("output", &format!("A screen's window could not be set up yet: {error}"));
+        }
+        return false;
     }
+    false
 }
 
 struct Output {
