@@ -1253,10 +1253,18 @@ fn run(
     };
     // Videos the system plays reach the GPU through a small compute pass, and the planes FFmpeg
     // gives are turned into colours by another: compiled now, not when the first video's first
-    // picture comes.
+    // picture comes. So is all else a video's first picture would be the first to need, up to
+    // the size FFmpeg gives the screens' videos (1080p).
     #[cfg(target_os = "macos")]
     painter.prepare_texture_copy(&device);
-    painter.prepare_planes(&device);
+    let preparing = Instant::now();
+    match painter.prepare_video(&device, &queue, 1920, 1080) {
+        Ok(()) => crate::applog::event(
+            "output",
+            &format!("The screens' painter was readied for a 1920 x 1080 video in {:?}", preparing.elapsed()),
+        ),
+        Err(e) => crate::applog::event("output", &format!("The screens' painter couldn't be readied for video: {e}")),
+    }
     // Testing aid: SOFTPRESENTER_OUTPUT_ROOM (see `output_room`).
     if let Some(room) = std::env::var("SOFTPRESENTER_OUTPUT_ROOM").ok().as_deref().and_then(output_room) {
         painter.keep_scratch_at(Some(room));

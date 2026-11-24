@@ -1031,7 +1031,7 @@ fn a_videos_planes_are_drawn_in_the_colours_the_processor_makes_of_them() {
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     let mut cpu_painter = Painter::new(device).expect("painter");
     let mut painter = Painter::new(device).expect("painter");
-    painter.prepare_planes(device);
+    painter.prepare_video(device, queue, 1920, 1080).expect("readied for a 1080p video");
     let from_cpu = cpu_painter.moving_picture(device, w, h, PixelOrder::Rgba).expect("moving picture");
     let from_gpu = painter.moving_picture(device, w, h, PixelOrder::Rgba).expect("moving picture");
     let drawn = |painter: &mut Painter, moving: &sp_render::MovingPicture| {
@@ -1084,6 +1084,23 @@ fn a_videos_planes_are_drawn_in_the_colours_the_processor_makes_of_them() {
     let bgra = painter.moving_picture(device, w, h, PixelOrder::Bgra).expect("moving picture");
     assert!(!painter.show_planes(device, queue, &bgra, &planes), "a picture made for BGRA bytes isn't sent planes");
     assert!(drawn(&mut painter, &from_gpu) == before);
+}
+
+/// Readying the painter for a video leaves nothing of its own behind: the clear picture it
+/// paints is let go at the next painting, and pictures drawn after look as they always did.
+#[test]
+fn readying_for_a_video_leaves_no_picture_behind() {
+    let (w, h) = (64, 36);
+    let (device, queue) = gpu();
+    let mut painter = Painter::new(device).expect("painter");
+    painter.prepare_video(device, queue, 1920, 1080).expect("readied for a 1080p video");
+    let texture = target_texture(device, w, h);
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let plain = build_scene(&mut Fonts::bundled_only(), None, &Theme::builtin(), w, h).scene;
+    painter.paint(device, queue, &plain, &view, w, h).expect("paint");
+    assert_eq!(painter.moving_pictures(), 0, "the picture it painted is let go");
+    let pixels = read_pixels(device, queue, &texture).expect("read back");
+    assert_eq!(pixel(&pixels, w, 8, 18), [0, 0, 0, 255]);
 }
 
 /// A texture sent with `show_texture` is held by the painter until the GPU says it has finished

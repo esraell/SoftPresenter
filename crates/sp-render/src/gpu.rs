@@ -8,7 +8,7 @@ use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene,
 
 use crate::picture::rows_hold;
 use crate::yuv::ToColours;
-use crate::{Picture, PixelOrder, YuvPlanes};
+use crate::{Picture, PixelOrder, YuvColours, YuvMatrix, YuvPlanes};
 
 /// Paints scenes into GPU textures. One per thread that draws.
 pub struct Painter {
@@ -21,7 +21,7 @@ pub struct Painter {
     /// time one is shown, or by [`Painter::prepare_texture_copy`].
     swizzle: Option<Swizzle>,
     /// Turns a video's two planes into a moving picture's pixels: made the first time a video
-    /// is shown that way, or by [`Painter::prepare_planes`].
+    /// is shown that way, or by [`Painter::prepare_video`].
     to_colours: Option<ToColours>,
     /// Textures [`Painter::show_texture`] sent to the GPU that it may not have finished with,
     /// each with what says it has.
@@ -341,11 +341,44 @@ impl Painter {
         true
     }
 
-    /// Gets the compute pass [`Painter::show_planes`] uses ready, which takes a moment (the GPU's
-    /// compiler works on it), so that the first picture of a video doesn't. Does nothing the
-    /// second time.
-    pub fn prepare_planes(&mut self, device: &wgpu::Device) {
+    /// Gets the painter ready for the first video of this size, on a screen of this size, so
+    /// that its first picture, in the middle of the fade into it, costs no more than the next.
+    /// On a PC's integrated graphics the first 1080p video's first pictures held the screens
+    /// for four tenths of a second, in the painter but not waiting for the GPU, and the same
+    /// video shown again didn't: something the painter makes once. Everything that picture is
+    /// the first to need is made here: the compute pass [`Painter::show_planes`] uses (the
+    /// GPU's compiler takes a moment over it: a tenth of a second on a Mac), the textures a
+    /// video's planes of this size go into, room for a picture this size in the renderer's own
+    /// texture of pictures, and what the renderer needs for a fade over the whole screen with
+    /// a picture in it. One clear picture of this size is turned from planes and faded into,
+    /// in a texture of that size, and let go.
+    pub fn prepare_video(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+    ) -> Result<(), PaintError> {
         self.to_colours.get_or_insert_with(|| ToColours::new(device));
+        let Some(moving) = self.moving_picture(device, width, height, PixelOrder::Rgba) else { return Ok(()) };
+        let (cw, ch) = YuvPlanes::chroma_size(width, height);
+        let (luma, chroma) = (vec![16u8; width as usize * height as usize], vec![128u8; cw as usize * ch as usize * 2]);
+        let planes = YuvPlanes {
+            width,
+            height,
+            luma: &luma,
+            luma_row: width as usize,
+            chroma: &chroma,
+            chroma_row: cw as usize * 2,
+            colours: YuvColours { matrix: YuvMatrix::Bt709, full_range: false },
+        };
+        self.show_planes(device, queue, &moving, &planes);
+        let mut video = Scene::new();
+        video.draw_image(&moving.picture.image, vello::kurbo::Affine::IDENTITY);
+        let fade = crate::cross_fade(&Scene::new(), &video, 0.5, width, height);
+        let target = target_texture(device, width, height);
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        self.paint(device, queue, &fade, &view, width, height)
     }
 
     /// Gets the compute pass [`Painter::show_texture`] uses ready, which takes a moment (the
