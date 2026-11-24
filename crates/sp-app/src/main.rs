@@ -2343,7 +2343,10 @@ impl App {
         let Some(running) = self.running.as_mut() else { return };
         match sp_video::Player::open(&item.path) {
             Ok(mut player) => {
-                let engine = if player.uses_ffmpeg() { "FFmpeg" } else { "the system's player" };
+                let engine = match player.ffmpeg_asked() {
+                    Some(asked) => format!("FFmpeg ({asked})"),
+                    None => "the system's player".to_owned(),
+                };
                 applog::event(
                     "video",
                     &format!("opened {} with {engine} in {:?}", item.path.display(), started.elapsed()),
@@ -2958,6 +2961,9 @@ impl App {
         let mut switched = false;
         for (file, player) in &mut self.slide_videos {
             wait = wait.min(player.tick());
+            if let Some(note) = player.take_note() {
+                applog::event("video", &note);
+            }
             // A video FFmpeg couldn't take over either isn't tried again on every tick (each try
             // starts FFmpeg's prober on this thread).
             if player.problem().is_none() || player.uses_ffmpeg() || self.slide_video_refused.contains(file) {
@@ -2990,6 +2996,9 @@ impl App {
     fn tick_video(&mut self) -> Option<Instant> {
         let (id, player) = self.video.as_mut()?;
         let wait = player.tick();
+        if let Some(note) = player.take_note() {
+            applog::event("video", &note);
+        }
         let handed = player.take_handed_over();
         let id = *id;
         match handed {
@@ -3028,7 +3037,11 @@ impl App {
                 let running = self.running.as_mut()?;
                 match sp_video::Player::open_with_ffmpeg(&item.path) {
                     Ok(mut fallback) => {
-                        applog::event("video", &format!("playing {} with FFmpeg instead", item.path.display()));
+                        let asked = fallback.ffmpeg_asked().unwrap_or_default();
+                        applog::event(
+                            "video",
+                            &format!("playing {} with FFmpeg instead ({asked})", item.path.display()),
+                        );
                         fallback.set_looping(loops);
                         if quiet {
                             fallback.set_volume(0.0);

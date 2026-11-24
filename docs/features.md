@@ -455,7 +455,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   9.0.2, with its licence and source in the app's Resources), so nothing needs installing; AV1
   plays on Macs whose video hardware decodes it (M3 and later). On Windows every video plays
   through FFmpeg, whose LGPL build (`ffmpeg.exe`, `ffprobe.exe`) sits beside the program in the
-  zip `scripts/windows-package.sh` makes. A video the Mac's player plays
+  zip `scripts/windows-package.sh` makes. FFmpeg decodes on the graphics chip where the codec
+  allows: the Mac's video hardware, or Direct3D 11's video decoder on Windows; a video it can't
+  decode that way (no graphics driver, say) plays with FFmpeg's own decoder on the processor,
+  and the log says so. A video the Mac's player plays
   behind the words goes to the screens as the decoder's own picture memory, with no copy through
   the processor (a video whose format can carry clear parts, everything FFmpeg plays, and a video
   in a box on a slide or on the Announcements layer are still copied).

@@ -3,7 +3,8 @@
 //! the sound. Nothing is converted first, so a video brought in at the last minute plays at
 //! once. The pictures are paced here, by a clock that the sound starts, so they keep in step;
 //! pausing simply stops reading, and FFmpeg waits on its full pipe. Only a seek starts FFmpeg
-//! again. Where the codec allows, FFmpeg decodes on the Mac's video hardware.
+//! again. Where the codec allows, FFmpeg decodes on the graphics chip: the Mac's video hardware,
+//! or Direct3D 11's video decoder on Windows (see [`HARDWARE`]).
 
 use std::collections::VecDeque;
 use std::io::Read;
@@ -24,6 +25,20 @@ const RATE: u32 = 48_000;
 const CHANNELS: u16 = 2;
 /// At most half a second of sound waits to be played; FFmpeg is held back beyond that.
 const SOUND_AHEAD: usize = RATE as usize * CHANNELS as usize / 2;
+
+/// The graphics chip's video decoder FFmpeg is asked to use (`-hwaccel`): the Mac's video
+/// hardware, or Direct3D 11's decoder on Windows (DXVA2, the older one, can't make its device
+/// outside the desktop session, as for a program started by a service). FFmpeg decodes with
+/// its own decoder where the chip has none for the codec, but stops if the decoder can't be set
+/// up at all (no graphics driver, say): a still that gets nothing that way, or a run that stops
+/// with an error before its first picture, is asked for again without it.
+const HARDWARE: Option<&str> = if cfg!(target_os = "macos") {
+    Some("videotoolbox")
+} else if cfg!(windows) {
+    Some("d3d11va")
+} else {
+    None
+};
 
 /// Where an FFmpeg program is: in the app, then where Homebrew and others put it. An app opened
 /// from the Finder isn't given the shell's search path, so the places are named in full.
@@ -131,23 +146,31 @@ pub fn still(path: &Path, max_side: u32, at: f64) -> Result<Frame, String> {
     let ffmpeg = tool("ffmpeg").ok_or_else(|| missing(path))?;
     let (w, h) = fitted(&info, max_side, max_side);
     let at = info.duration.map_or(0.0, |length| at.min(length * 0.5));
-    let mut command = quiet(ffmpeg);
-    command.args(["-nostdin", "-hide_banner", "-loglevel", "error"]);
-    // As for playing: the Mac's video hardware where the codec allows (and FFmpeg's own decoder
-    // where it doesn't). AV1, which FFmpeg alone decodes only through the hardware, needs it.
-    if cfg!(target_os = "macos") {
-        command.args(["-hwaccel", "videotoolbox"]);
-    }
-    let out = command
-        .args(["-ss", &format!("{at:.3}"), "-i"])
-        .arg(path)
-        .args(["-frames:v", "1", "-an", "-sn", "-vf", &format!("scale={w}:{h},setsar=1")])
-        .args(["-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .map_err(|e| format!("{}: FFmpeg could not be started ({e}).", shown_name(path)))?;
+    // As for playing: the graphics chip's decoder where the codec allows (and FFmpeg's own
+    // decoder where it doesn't). AV1, which FFmpeg alone decodes only through the hardware,
+    // needs it. One that can't be set up gets nothing, and the picture is asked for again
+    // without it.
+    let read = |hardware: Option<&str>| {
+        let mut command = quiet(&ffmpeg);
+        command.args(["-nostdin", "-hide_banner", "-loglevel", "error"]);
+        if let Some(decoder) = hardware {
+            command.args(["-hwaccel", decoder]);
+        }
+        command
+            .args(["-ss", &format!("{at:.3}"), "-i"])
+            .arg(path)
+            .args(["-frames:v", "1", "-an", "-sn", "-vf", &format!("scale={w}:{h},setsar=1")])
+            .args(["-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1"])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|e| format!("{}: FFmpeg could not be started ({e}).", shown_name(path)))
+    };
     let wanted = (w as usize) * (h as usize) * 4;
+    let mut out = read(HARDWARE)?;
+    if out.stdout.len() != wanted && HARDWARE.is_some() {
+        out = read(None)?;
+    }
     if out.stdout.len() != wanted {
         return Err(format!("{}: FFmpeg could not read a picture from this video.", shown_name(path)));
     }
@@ -338,6 +361,9 @@ struct Run {
     /// A looping video's pictures ran out: FFmpeg could not start the file again by itself
     /// (it can't for one it can't seek in, such as many FLV files), so the player does.
     ran_out: Arc<AtomicBool>,
+    /// FFmpeg stopped before its first picture, asked to decode on the graphics chip: most
+    /// likely the chip's decoder couldn't be set up, so the player asks again without it.
+    hardware_failed: Arc<AtomicBool>,
     problem: Arc<Mutex<Option<String>>>,
     children: Vec<Child>,
     threads: Vec<JoinHandle<()>>,
@@ -369,6 +395,11 @@ pub struct Player {
     looping: bool,
     paused: bool,
     volume: f32,
+    /// The graphics chip's decoder FFmpeg is asked to use: [`HARDWARE`], until it has failed
+    /// for this video.
+    hardware: Option<&'static str>,
+    /// Something to say in the log once, such as that the graphics chip couldn't decode it.
+    note: Option<String>,
     slot: Arc<Mutex<Slot>>,
     stream: Option<rodio::OutputStream>,
     run: Option<Run>,
@@ -396,6 +427,8 @@ impl Player {
             looping: false,
             paused: true,
             volume: 1.0,
+            hardware: HARDWARE,
+            note: None,
             slot: Arc::default(),
             stream,
             run: None,
@@ -414,6 +447,7 @@ impl Player {
         let stop = Arc::new(AtomicBool::new(false));
         let ended = Arc::new(AtomicBool::new(false));
         let ran_out = Arc::new(AtomicBool::new(false));
+        let hardware_failed = Arc::new(AtomicBool::new(false));
         let problem = Arc::new(Mutex::new(None));
         let mut run = Run {
             from,
@@ -421,6 +455,7 @@ impl Player {
             stop: stop.clone(),
             ended: ended.clone(),
             ran_out: ran_out.clone(),
+            hardware_failed: hardware_failed.clone(),
             problem: problem.clone(),
             children: Vec::new(),
             threads: Vec::new(),
@@ -439,8 +474,8 @@ impl Player {
         let (w, h) = self.size;
         let fps = self.info.fps;
         let mut pictures = quiet(&ffmpeg);
-        if cfg!(target_os = "macos") {
-            pictures.args(["-hwaccel", "videotoolbox"]);
+        if let Some(decoder) = self.hardware {
+            pictures.args(["-hwaccel", decoder]);
         }
         // Up to 1080p, two decoding threads keep up and hold far less memory than FFmpeg's own
         // choice (a 1080p VP9 video: about 190 MB, against about 270 MB). Larger videos need
@@ -481,6 +516,7 @@ impl Player {
         let slot = self.slot.clone();
         let (looping, frame_len) = (self.looping, (w as usize) * (h as usize) * 4);
         let (clock_v, stop_v, ended_v) = (clock.clone(), stop.clone(), ended.clone());
+        let on_hardware = self.hardware.is_some();
         run.threads.push(std::thread::spawn(move || {
             let mut shown: u64 = 0;
             loop {
@@ -490,6 +526,12 @@ impl Player {
                         // FFmpeg has stopped, so what it said is all read in a moment.
                         let _ = drained.join();
                         let said = first_error.lock().map(|first| first.clone()).unwrap_or_default();
+                        if on_hardware && !said.is_empty() {
+                            // Most likely the graphics chip's decoder couldn't be set up: neither
+                            // ended nor a problem yet, as the player asks again without it.
+                            hardware_failed.store(true, Ordering::Relaxed);
+                            return;
+                        }
                         let first = if said.is_empty() { "it could not decode the video".to_owned() } else { said };
                         if let Ok(mut problem) = problem.lock() {
                             *problem = Some(format!("FFmpeg could not play the video: {first}"));
@@ -674,8 +716,34 @@ impl Player {
         self.run.as_ref().and_then(|run| run.problem.lock().ok().and_then(|problem| problem.clone()))
     }
 
+    /// How FFmpeg is asked to decode, for the log: on the graphics chip (where the codec
+    /// allows), or with its own decoder on the processor.
+    pub fn decoding(&self) -> String {
+        match self.hardware {
+            Some(decoder) => format!("decoding asked of the graphics chip ({decoder}) where the codec allows"),
+            None => "decoding on the processor".to_owned(),
+        }
+    }
+
+    /// Something to say in the log once, if there is something new.
+    pub fn take_note(&mut self) -> Option<String> {
+        self.note.take()
+    }
+
     /// FFmpeg loops by itself; nothing to do but say when to look again.
     pub fn tick(&mut self) -> Duration {
+        // FFmpeg stopped before its first picture, asked to decode on the graphics chip: asked
+        // again, from the same place, with its own decoder.
+        if let Some(run) = self.run.as_ref().filter(|run| run.hardware_failed.load(Ordering::Relaxed)) {
+            let from = run.from;
+            let decoder = self.hardware.take().unwrap_or_default();
+            self.note = Some(format!(
+                "FFmpeg couldn't decode {} on the graphics chip ({decoder}); it decodes on the processor instead",
+                shown_name(&self.path)
+            ));
+            let _ = self.start_at(from);
+            return Duration::from_millis(50);
+        }
         // A looping video FFmpeg couldn't start again by itself is started again from its
         // beginning here (one that gave no pictures at all is left with its problem said).
         if self.looping && self.run.as_ref().is_some_and(|run| run.ran_out.load(Ordering::Relaxed)) {
@@ -710,6 +778,40 @@ mod tests {
         // A cover picture is not the video.
         let cover = serde_json::json!({"streams": [{"codec_type": "video", "width": 600, "height": 600, "disposition": {"attached_pic": 1}}]});
         assert!(info_from(&cover).is_none());
+    }
+
+    /// A video FFmpeg can't decode with the graphics chip asked for (here a decoder that doesn't
+    /// exist, as when the chip's can't be set up) is played all the same, with FFmpeg's own
+    /// decoder, and the log is told once.
+    #[test]
+    fn a_run_whose_hardware_decoder_fails_is_asked_for_again_without_it() {
+        let Some(ffmpeg) = tool("ffmpeg") else {
+            eprintln!("FFmpeg isn't on this computer: the fallback wasn't checked");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("softpresenter-hwfallback-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("grey.mkv");
+        let made = Command::new(ffmpeg)
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=gray:s=64x36:r=30:d=1", "-c:v", "ffv1"])
+            .arg(&path)
+            .status()
+            .expect("FFmpeg runs");
+        assert!(made.success(), "the video is made");
+        let mut player = Player::open(&path).expect("FFmpeg opens the video");
+        player.hardware = Some("no-such-decoder");
+        player.start_at(0.0).unwrap();
+        let (started, mut note, mut picture) = (Instant::now(), None, None);
+        while started.elapsed() < Duration::from_secs(5) && picture.is_none() {
+            std::thread::sleep(player.tick().min(Duration::from_millis(20)));
+            note = note.or_else(|| player.take_note());
+            picture = player.frames().next();
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(picture.is_some(), "a picture came with FFmpeg's own decoder");
+        assert_eq!(player.problem(), None);
+        assert!(note.is_some_and(|note| note.contains("no-such-decoder")), "the log was told");
+        assert_eq!(player.decoding(), "decoding on the processor");
     }
 
     #[test]

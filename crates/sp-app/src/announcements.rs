@@ -437,6 +437,9 @@ impl crate::App {
         let what = on.what;
         let player = on.video.as_mut()?;
         let wait = player.tick();
+        if let Some(note) = player.take_note() {
+            crate::applog::event("announcements", &note);
+        }
         let handed = player.take_handed_over();
         let problem = player.problem();
         match handed {

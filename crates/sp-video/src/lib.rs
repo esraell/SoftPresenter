@@ -399,6 +399,26 @@ impl Player {
         matches!(self.engine, Engine::Ffmpeg(_))
     }
 
+    /// What FFmpeg was asked for, for the log: how to decode (and so what it was asked, not
+    /// what it used: it says nothing more). `None` for the system's player.
+    pub fn ffmpeg_asked(&self) -> Option<String> {
+        match &self.engine {
+            #[cfg(target_os = "macos")]
+            Engine::System(_) => None,
+            Engine::Ffmpeg(player) => Some(player.decoding()),
+        }
+    }
+
+    /// Something to say in the log once, if there is something new: that FFmpeg couldn't decode
+    /// on the graphics chip, say.
+    pub fn take_note(&mut self) -> Option<String> {
+        match &mut self.engine {
+            #[cfg(target_os = "macos")]
+            Engine::System(_) => None,
+            Engine::Ffmpeg(player) => player.take_note(),
+        }
+    }
+
     /// The file playing now.
     pub fn path(&self) -> &Path {
         &self.path
