@@ -120,7 +120,7 @@ are remembered at once.
    warns about the figures once more each time the address changes.)
    Anything else is `421`. So a web page elsewhere that gets its own name pointed at the
    computer (DNS rebinding) is refused.
-2. **A signed-in device**, for everything except `/login`, `/login.js`, `/style.css` and
+2. **A signed-in device**, for everything except `/login`, `/login.js`, `/style.css`, the `/next/` redirects and
    `/favicon.ico`: otherwise `401` (or `303` to `/login` for `/`).
 3. **Origin** must be `https://` + that Host on `POST /api/login`, `POST /api/logout` and the
    WebSocket upgrade; otherwise `403`. Sign-in also needs `Content-Type: application/json`
@@ -147,20 +147,24 @@ put it in with `textContent`, never `innerHTML`.
 | `GET /` | yes (else 303 to /login) | The page |
 | `GET /login`, `/login.js`, `/style.css` | no | The sign-in page, its script, the style sheet |
 | `GET /app.js` | yes | The page's script |
-| `GET /next/`, `/next/app.js`, `/next/style.css`, `/next/fonts/SoftPresenterSans-{Regular,Bold,Italic,BoldItalic}.woff2`, `/next/fonts/OFL.txt` | yes (`/next/` else 303 to /login, the files 401) | The design work's page, beside the built-in one: the same checks and headers; these names only. Each carries an `ETag` from its bytes, so a browser asks once whether it changed (304) and fetches the fonts once |
+| `GET /fonts/SoftPresenterSans-{Regular,Bold,Italic,BoldItalic}.woff2`, `/fonts/OFL.txt` | yes (else 401) | The slide face, SoftPresenter Sans, and its licence; these names only |
+| `GET /next/`, `/next/app.js`, `/next/style.css`, `/next/fonts/…` (the same names as above) | no | `307` to the same file at `/` (the page used to be tried out under `/next/`; bookmarks still work). Any other name under `/next/` is `404`; the new address is never made from the request's text |
 | `GET /favicon.ico` | no | 204 |
 | `POST /api/login` | no | Sign in (above) |
 | `POST /api/logout` | yes | Forget this device |
 | `GET /api/ws` | yes | The WebSocket (Origin checked) |
 | `GET /thumb/{slide}/{version}/{look}.jpg` | yes | A slide's picture ([below](#slide-pictures)) |
 
-The built-in page's files are in `crates/sp-app/src/remote/page/`. The design work's page is
-compiled in beside them (`page/next/`, byte for byte the design work's files) and served under
-`/next/` from a fixed table of names; its HTML names its script and style by relative address,
-so they load from beside it. The sign-in
-page is shared: its script is the design work's (the Sign In button stays disabled until the
-script runs), and its form is `method="post"`, so a Return pressed early can't send the password
-in the address.
+The page's files are in `crates/sp-app/src/remote/page/` (`index.html`, `app.js`, `style.css`,
+`fonts/`, and the sign-in page `login.html` with `login.js`), compiled in and served from a fixed
+table of exact names (`page_file` in `server.rs`); nothing is looked up by a path from a
+request. Every file carries an `ETag` from its bytes and `Cache-Control: no-cache`, so a browser
+asks once whether it changed (304), and fetches the fonts once. The page names its script and
+style by relative address, and its fonts from the style sheet by `fonts/…`. The sign-in
+page's script posts to `/api/login` as above (the Sign In button stays disabled until the script
+runs), and its form is `method="post"`, so a Return pressed early can't send the password in the
+address. The sign-in page and the style sheet are open to anyone; the page, its script and the
+fonts are for a signed-in device only.
 
 ## The WebSocket
 
@@ -593,7 +597,7 @@ NDI receivers, DeckLink devices with the formats each can key).
 
 ## Wiring the prototype: a checklist
 
-1. Serve its files from `crates/sp-app/src/remote/page/` (scripts and styles as files).
+1. Its files are served from `crates/sp-app/src/remote/page/` (scripts and styles as files).
 2. On load: open the socket; send `hello` with `preview` and the `resume` from the last
    snapshot or change (keep epoch and version in memory, or in `sessionStorage`).
 3. Replace parts whole on `snapshot` and `change`; draw from them.

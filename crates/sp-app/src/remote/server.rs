@@ -112,17 +112,18 @@ const INDEX_HTML: &str = include_str!("page/index.html");
 const APP_JS: &str = include_str!("page/app.js");
 const STYLE_CSS: &str = include_str!("page/style.css");
 
-/// The design work's page, served beside the built-in one under `/next/` (the owner has not
-/// decided how it should look on narrow screens). A fixed table of exact names: nothing is
-/// ever looked up by a path from a request.
-const NEXT_INDEX_HTML: &str = include_str!("page/next/index.html");
-const NEXT_APP_JS: &str = include_str!("page/next/app.js");
-const NEXT_STYLE_CSS: &str = include_str!("page/next/style.css");
+/// How a built-in file is served.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Who {
+    /// Anyone who can reach the server (the sign-in page, its script, the style sheet).
+    Anyone,
+    /// A signed-in device; a signed-out one is sent to the sign-in (the page itself) or refused.
+    SignedIn,
+}
 
-/// The files under `/next/`: content type (from the extension) and body, the design work's
-/// files unchanged. Its page names its script and style by relative address, so they load from
-/// beside it.
-fn next_file(path: &str) -> Option<(&'static str, &'static [u8])> {
+/// The files the page is made of: content type (from the extension), body and who may have
+/// it. A fixed table of exact names: nothing is ever looked up by a path from a request.
+fn page_file(path: &str) -> Option<(&'static str, &'static [u8], Who)> {
     let kind = |name: &str| match name.rsplit_once('.').map(|(_, extension)| extension) {
         Some("html") => "text/html; charset=utf-8",
         Some("js") => "text/javascript; charset=utf-8",
@@ -131,24 +132,28 @@ fn next_file(path: &str) -> Option<(&'static str, &'static [u8])> {
         Some("txt") => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     };
+    let signed_in = |name: &str, body: &'static [u8]| Some((kind(name), body, Who::SignedIn));
+    let anyone = |name: &str, body: &'static [u8]| Some((kind(name), body, Who::Anyone));
     match path {
-        "/next/" => Some((kind("index.html"), NEXT_INDEX_HTML.as_bytes())),
-        "/next/app.js" => Some((kind("app.js"), NEXT_APP_JS.as_bytes())),
-        "/next/style.css" => Some((kind("style.css"), NEXT_STYLE_CSS.as_bytes())),
+        "/" => signed_in("index.html", INDEX_HTML.as_bytes()),
+        "/app.js" => signed_in("app.js", APP_JS.as_bytes()),
+        "/login" => anyone("login.html", LOGIN_HTML.as_bytes()),
+        "/login.js" => anyone("login.js", LOGIN_JS.as_bytes()),
+        "/style.css" => anyone("style.css", STYLE_CSS.as_bytes()),
         // The slide face, SoftPresenter Sans, and its licence (SIL OFL 1.1), which goes with it.
-        "/next/fonts/SoftPresenterSans-Regular.woff2" => {
-            Some((kind("x.woff2"), include_bytes!("page/next/fonts/SoftPresenterSans-Regular.woff2")))
+        "/fonts/SoftPresenterSans-Regular.woff2" => {
+            signed_in("x.woff2", include_bytes!("page/fonts/SoftPresenterSans-Regular.woff2"))
         }
-        "/next/fonts/SoftPresenterSans-Bold.woff2" => {
-            Some((kind("x.woff2"), include_bytes!("page/next/fonts/SoftPresenterSans-Bold.woff2")))
+        "/fonts/SoftPresenterSans-Bold.woff2" => {
+            signed_in("x.woff2", include_bytes!("page/fonts/SoftPresenterSans-Bold.woff2"))
         }
-        "/next/fonts/SoftPresenterSans-Italic.woff2" => {
-            Some((kind("x.woff2"), include_bytes!("page/next/fonts/SoftPresenterSans-Italic.woff2")))
+        "/fonts/SoftPresenterSans-Italic.woff2" => {
+            signed_in("x.woff2", include_bytes!("page/fonts/SoftPresenterSans-Italic.woff2"))
         }
-        "/next/fonts/SoftPresenterSans-BoldItalic.woff2" => {
-            Some((kind("x.woff2"), include_bytes!("page/next/fonts/SoftPresenterSans-BoldItalic.woff2")))
+        "/fonts/SoftPresenterSans-BoldItalic.woff2" => {
+            signed_in("x.woff2", include_bytes!("page/fonts/SoftPresenterSans-BoldItalic.woff2"))
         }
-        "/next/fonts/OFL.txt" => Some((kind("OFL.txt"), include_bytes!("page/next/fonts/OFL.txt"))),
+        "/fonts/OFL.txt" => signed_in("OFL.txt", include_bytes!("page/fonts/OFL.txt")),
         _ => None,
     }
 }
@@ -625,15 +630,16 @@ async fn serve(
 
 fn router(shared: Arc<Shared>) -> Router {
     Router::new()
-        .route("/", any(root))
-        .route("/login", any(login_page))
-        .route("/login.js", any(login_js))
-        .route("/style.css", any(style_css))
-        .route("/app.js", any(app_js))
+        .route("/", any(page_at))
+        .route("/login", any(page_at))
+        .route("/login.js", any(page_at))
+        .route("/style.css", any(page_at))
+        .route("/app.js", any(page_at))
+        .route("/fonts/{file}", any(page_at))
         .route("/favicon.ico", any(favicon))
-        .route("/next/", any(next_page))
-        .route("/next/{file}", any(next_page))
-        .route("/next/fonts/{file}", any(next_page))
+        .route("/next/", any(moved))
+        .route("/next/{file}", any(moved))
+        .route("/next/fonts/{file}", any(moved))
         .route("/api/login", any(login))
         .route("/api/logout", any(logout))
         .route("/api/ws", any(socket))
@@ -796,15 +802,6 @@ fn json(status: StatusCode, host: &str, value: serde_json::Value) -> Response<Bo
     finish(response, host)
 }
 
-fn asset(host: &str, kind: &'static str, text: &'static str) -> Response<Body> {
-    let response = Response::builder()
-        .header(header::CONTENT_TYPE, kind)
-        .header(header::CACHE_CONTROL, "no-cache")
-        .body(Body::from(text))
-        .unwrap_or_default();
-    finish(response, host)
-}
-
 fn see_other(host: &str, to: &'static str) -> Response<Body> {
     let response = Response::builder()
         .status(StatusCode::SEE_OTHER)
@@ -820,66 +817,22 @@ fn only_get(parts: &Parts, host: &str) -> Option<Response<Body>> {
         .then(|| plain(StatusCode::METHOD_NOT_ALLOWED, host, "Not here."))
 }
 
-async fn root(State(shared): State<Arc<Shared>>, request: Request) -> Response<Body> {
-    let (parts, _) = request.into_parts();
-    let gate = match gate(&shared, &parts) {
-        Ok(gate) => gate,
-        Err(answer) => return *answer,
-    };
-    if let Some(answer) = only_get(&parts, &gate.host) {
-        return answer;
-    }
-    match gate.device {
-        Some(_) => asset(&gate.host, "text/html; charset=utf-8", INDEX_HTML),
-        None => see_other(&gate.host, "/login"),
-    }
-}
-
-/// The public pages: the sign-in page, its script and the style sheet.
-async fn public(shared: Arc<Shared>, request: Request, kind: &'static str, text: &'static str) -> Response<Body> {
-    let (parts, _) = request.into_parts();
-    let gate = match gate(&shared, &parts) {
-        Ok(gate) => gate,
-        Err(answer) => return *answer,
-    };
-    only_get(&parts, &gate.host).unwrap_or_else(|| asset(&gate.host, kind, text))
-}
-
-async fn login_page(State(shared): State<Arc<Shared>>, request: Request) -> Response<Body> {
-    public(shared, request, "text/html; charset=utf-8", LOGIN_HTML).await
-}
-
-async fn login_js(State(shared): State<Arc<Shared>>, request: Request) -> Response<Body> {
-    public(shared, request, "text/javascript; charset=utf-8", LOGIN_JS).await
-}
-
-async fn style_css(State(shared): State<Arc<Shared>>, request: Request) -> Response<Body> {
-    public(shared, request, "text/css; charset=utf-8", STYLE_CSS).await
-}
-
-async fn app_js(State(shared): State<Arc<Shared>>, request: Request) -> Response<Body> {
-    let (parts, _) = request.into_parts();
-    let gate = match gate(&shared, &parts) {
-        Ok(gate) => gate,
-        Err(answer) => return *answer,
-    };
-    if gate.device.is_none() {
-        return plain(StatusCode::UNAUTHORIZED, &gate.host, "Sign in first.");
-    }
-    only_get(&parts, &gate.host).unwrap_or_else(|| asset(&gate.host, "text/javascript; charset=utf-8", APP_JS))
-}
-
-/// The design work's page and its two files, for a signed-in device only; any other name
-/// under `/next/` is not here.
-async fn next_page(State(shared): State<Arc<Shared>>, request: Request) -> Response<Body> {
+/// A built-in file: the page and its script and fonts for a signed-in device only (a signed-out
+/// browser asking for the page goes to the sign-in, for a file it is refused), the sign-in page
+/// and the style sheet for anyone. A file is sent with a tag, so a browser asks again and is
+/// told it has the latest, and with `no-cache`, so a new build is fetched afresh.
+async fn page_at(State(shared): State<Arc<Shared>>, request: Request) -> Response<Body> {
     let (parts, _) = request.into_parts();
     let gate = match gate(&shared, &parts) {
         Ok(gate) => gate,
         Err(answer) => return *answer,
     };
     let path = parts.uri.path();
-    if gate.device.is_none() {
-        return if path == "/next/" {
+    let Some((kind, body, who)) = page_file(path) else {
+        return plain(StatusCode::NOT_FOUND, &gate.host, "Not here.");
+    };
+    if who == Who::SignedIn && gate.device.is_none() {
+        return if path == "/" {
             see_other(&gate.host, "/login")
         } else {
             plain(StatusCode::UNAUTHORIZED, &gate.host, "Sign in first.")
@@ -888,24 +841,48 @@ async fn next_page(State(shared): State<Arc<Shared>>, request: Request) -> Respo
     if let Some(answer) = only_get(&parts, &gate.host) {
         return answer;
     }
-    match next_file(path) {
-        Some((kind, body)) => {
-            let tag = file_tag(body);
-            let fresh =
-                parts.headers.get(header::IF_NONE_MATCH).and_then(|value| value.to_str().ok()) == Some(tag.as_str());
-            let builder = Response::builder()
-                .header(header::CONTENT_TYPE, kind)
-                .header(header::ETAG, tag)
-                .header(header::CACHE_CONTROL, "no-cache");
-            let response = if fresh {
-                builder.status(StatusCode::NOT_MODIFIED).body(Body::empty())
-            } else {
-                builder.body(Body::from(body))
-            };
-            finish(response.unwrap_or_default(), &gate.host)
-        }
-        None => plain(StatusCode::NOT_FOUND, &gate.host, "Not here."),
-    }
+    let tag = file_tag(body);
+    let fresh = parts.headers.get(header::IF_NONE_MATCH).and_then(|value| value.to_str().ok()) == Some(tag.as_str());
+    let builder = Response::builder()
+        .header(header::CONTENT_TYPE, kind)
+        .header(header::ETAG, tag)
+        .header(header::CACHE_CONTROL, "no-cache");
+    let response = if fresh {
+        builder.status(StatusCode::NOT_MODIFIED).body(Body::empty())
+    } else {
+        builder.body(Body::from(body))
+    };
+    finish(response.unwrap_or_default(), &gate.host)
+}
+
+/// The page used to be tried out under `/next/`; bookmarks to it go to the same file at `/`.
+/// Only the page's own names are sent on (the new address is never made from the request's
+/// text), anything else under `/next/` is not here.
+async fn moved(State(shared): State<Arc<Shared>>, request: Request) -> Response<Body> {
+    let (parts, _) = request.into_parts();
+    let gate = match gate(&shared, &parts) {
+        Ok(gate) => gate,
+        Err(answer) => return *answer,
+    };
+    let to = match parts.uri.path() {
+        "/next/" => "/",
+        "/next/app.js" => "/app.js",
+        "/next/style.css" => "/style.css",
+        "/next/fonts/SoftPresenterSans-Regular.woff2" => "/fonts/SoftPresenterSans-Regular.woff2",
+        "/next/fonts/SoftPresenterSans-Bold.woff2" => "/fonts/SoftPresenterSans-Bold.woff2",
+        "/next/fonts/SoftPresenterSans-Italic.woff2" => "/fonts/SoftPresenterSans-Italic.woff2",
+        "/next/fonts/SoftPresenterSans-BoldItalic.woff2" => "/fonts/SoftPresenterSans-BoldItalic.woff2",
+        "/next/fonts/OFL.txt" => "/fonts/OFL.txt",
+        _ => return plain(StatusCode::NOT_FOUND, &gate.host, "Not here."),
+    };
+    only_get(&parts, &gate.host).unwrap_or_else(|| {
+        let response = Response::builder()
+            .status(StatusCode::TEMPORARY_REDIRECT)
+            .header(header::LOCATION, to)
+            .body(Body::empty())
+            .unwrap_or_default();
+        finish(response, &gate.host)
+    })
 }
 
 async fn favicon(State(shared): State<Arc<Shared>>, request: Request) -> Response<Body> {

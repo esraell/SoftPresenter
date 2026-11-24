@@ -1471,12 +1471,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   on, it stays on the next time the app opens. Off, nothing listens; switching it off closes
   every page's connection at once. While on, the top bar's status line (when no timer runs and
   Canva Sync has nothing to say) reads REMOTE ON · N CONNECTED, and a click opens its pane.
-- **The page** built in for now is small: whether it is connected, what is on screen with a
-  live picture of what the audience sees, the playlist in front, and Previous, Next and Clear
-  All. The full page comes from the design work and talks to the same API
-  ([remote-api.md](remote-api.md)). The design work's page is served beside it at `/next/`
-  (behind the same sign-in and checks) while the owner decides how it should work on narrow
-  screens.
+- **The page** is the design work's: one page for a computer, a tablet and a phone (the left
+  playlist and the right column fold away on narrow screens, with Audience and Stage staying
+  in the top bar). It shows whether it is connected, what is on screen with a live picture of
+  what the audience sees, the playlist in front, the slides, the transport, and the tabs, and it
+  talks to the API ([remote-api.md](remote-api.md)). The sign-in page is in the same look. The
+  address the page was first tried out at, `/next/`, still sends a bookmark to the same file at
+  `/`.
 - **The same commands as `sp`**: the page sends `sp`'s commands, carried out on the app's main
   thread by the same handler, and gets the same replies. Not those that reach the computer's
   own files and folders (importing, exporting, adding media or audio, a picture or song text

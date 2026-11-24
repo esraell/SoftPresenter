@@ -279,13 +279,13 @@ fn the_sign_in_page_is_public_and_everything_else_needs_a_device() {
     assert_eq!(page.header("x-content-type-options"), Some("nosniff"));
     assert_eq!(page.header("x-frame-options"), Some("DENY"));
     // The pages themselves never put words in as HTML.
-    for script in [LOGIN_JS, APP_JS, NEXT_APP_JS] {
+    for script in [LOGIN_JS, APP_JS] {
         assert!(
             !script.contains("innerHTML") && !script.contains("outerHTML") && !script.contains("insertAdjacentHTML")
         );
         assert!(!script.contains("eval("));
     }
-    for page in [LOGIN_HTML, INDEX_HTML, NEXT_INDEX_HTML] {
+    for page in [LOGIN_HTML, INDEX_HTML] {
         assert!(!page.contains("<script>"), "no inline script");
         let handler = page.match_indices(" on").any(|(at, _)| {
             let rest = &page[at + 3..];
@@ -297,65 +297,100 @@ fn the_sign_in_page_is_public_and_everything_else_needs_a_device() {
 }
 
 #[test]
-fn the_design_page_is_served_under_next_to_signed_in_devices_only_by_exact_names() {
-    let test = start_test("next");
-    // Signed out: the page goes to sign-in, its files are refused.
-    let page = test.get("/next/", None);
+fn the_page_and_its_files_are_served_with_their_types_to_the_right_people() {
+    let test = start_test("files");
+    // Signed out: the page goes to sign-in, its script and fonts are refused, the sign-in
+    // page, its script and the style sheet are open.
+    let page = test.get("/", None);
     assert_eq!((page.status, page.header("location")), (303, Some("/login")));
-    assert_eq!(test.get("/next/app.js", None).status, 401);
-    assert_eq!(test.get("/next/style.css", None).status, 401);
+    for path in ["/app.js", "/fonts/SoftPresenterSans-Regular.woff2", "/fonts/OFL.txt"] {
+        assert_eq!(test.get(path, None).status, 401, "{path} signed out");
+    }
+    for (path, kind, body) in [
+        ("/login", "text/html; charset=utf-8", LOGIN_HTML),
+        ("/login.js", "text/javascript; charset=utf-8", LOGIN_JS),
+        ("/style.css", "text/css; charset=utf-8", STYLE_CSS),
+    ] {
+        let open = test.get(path, None);
+        assert_eq!((open.status, open.header("content-type")), (200, Some(kind)), "{path}");
+        assert_eq!(open.text(), body, "{path}");
+        assert!(open.header("etag").is_some() && open.header("cache-control") == Some("no-cache"), "{path}");
+    }
     let token = test.token();
-    let page = test.get("/next/", Some(&token));
-    assert_eq!(page.status, 200);
-    assert_eq!(page.header("content-type"), Some("text/html; charset=utf-8"));
-    let text = page.text();
-    // Its files by relative address, so they load from beside it, never the built-in page's.
-    assert!(text.contains("href=\"style.css\"") && text.contains("src=\"app.js\""), "{text}");
-    assert!(!text.contains("\"/app.js\"") && !text.contains("\"/style.css\""));
-    // The same policy and headers as the built-in page.
+    let cookie = format!("{COOKIE}={token}");
+    let page = test.get("/", Some(&token));
+    assert_eq!((page.status, page.header("content-type")), (200, Some("text/html; charset=utf-8")));
+    assert_eq!(page.text(), INDEX_HTML);
+    // Nothing points at the old trial address.
+    for (name, text) in [("index", INDEX_HTML), ("app", APP_JS), ("style", STYLE_CSS), ("login", LOGIN_HTML)] {
+        assert!(!text.contains("/next/") && !text.contains("\"next/"), "{name} still names /next/");
+    }
+    // The same policy and headers on every answer, fonts allowed from here only.
     let policy = page.header("content-security-policy").expect("a policy");
     assert!(policy.contains("script-src 'self'") && policy.contains("trusted-types 'none'"), "{policy}");
+    assert!(policy.contains("font-src 'self'") && policy.contains("frame-ancestors 'none'"), "{policy}");
     assert_eq!(page.header("x-frame-options"), Some("DENY"));
-    let script = test.get("/next/app.js", Some(&token));
+    let script = test.get("/app.js", Some(&token));
     assert_eq!((script.status, script.header("content-type")), (200, Some("text/javascript; charset=utf-8")));
-    assert_eq!(script.text(), NEXT_APP_JS);
-    let style = test.get("/next/style.css", Some(&token));
-    assert_eq!((style.status, style.header("content-type")), (200, Some("text/css; charset=utf-8")));
-    // The slide face and its licence: fonts the policy lets the page use, signed-in only, and
-    // fetched once (asked again with its tag, a file is not sent again).
-    assert!(policy.contains("font-src 'self'"), "{policy}");
-    let cookie = format!("{COOKIE}={token}");
+    assert_eq!(script.text(), APP_JS);
+    // The slide face and its licence: signed-in only, and fetched once (asked again with its
+    // tag, a file is not sent again).
     for name in ["Regular", "Bold", "Italic", "BoldItalic"] {
-        let path = format!("/next/fonts/SoftPresenterSans-{name}.woff2");
-        assert_eq!(test.get(&path, None).status, 401, "{path} signed out");
+        let path = format!("/fonts/SoftPresenterSans-{name}.woff2");
         let font = test.get(&path, Some(&token));
         assert_eq!((font.status, font.header("content-type")), (200, Some("font/woff2")), "{path}");
         assert!(font.body.starts_with(b"wOF2"), "{path} is a woff2 file");
+        assert!(font.header("cache-control") == Some("no-cache"), "{path}");
         let tag = font.header("etag").expect("a tag").to_owned();
         let again =
             test.runtime.block_on(test.http("GET", &path, &[("Cookie", &cookie), ("If-None-Match", &tag)], b""));
         assert_eq!((again.status, again.body.len()), (304, 0), "{path} asked again");
     }
-    let licence = test.get("/next/fonts/OFL.txt", Some(&token));
+    let licence = test.get("/fonts/OFL.txt", Some(&token));
     assert_eq!((licence.status, licence.header("content-type")), (200, Some("text/plain; charset=utf-8")));
     assert!(licence.text().to_lowercase().contains("open font license"));
-    assert_eq!(test.get("/next/fonts/other.woff2", Some(&token)).status, 404);
     // Only these names; nothing is found by a path.
     for path in
-        ["/next/login.html", "/next/index.html", "/next/..%2fapp.js", "/next/%2e%2e/app.js", "/next/a/b", "/next"]
+        ["/fonts/other.woff2", "/fonts/..%2fapp.js", "/fonts/%2e%2e/app.js", "/fonts/a/b", "/fonts", "/index.html"]
     {
         let answer = test.get(path, Some(&token));
         assert!(matches!(answer.status, 400 | 404), "{path}: {}", answer.status);
     }
-    // The built-in page is untouched.
-    assert_eq!(test.get("/app.js", Some(&token)).text(), APP_JS);
+    // Only a read: a page is not posted to.
+    let posted = test.runtime.block_on(test.http("POST", "/app.js", &[("Cookie", &cookie)], b"{}"));
+    assert_eq!(posted.status, 405);
     // Host is checked here as everywhere.
-    let wrong = test.runtime.block_on(test.http(
-        "GET",
-        "/next/",
-        &[("Host", "evil.example"), ("Cookie", &format!("{COOKIE}={token}"))],
-        b"",
-    ));
+    let wrong = test.runtime.block_on(test.http("GET", "/", &[("Host", "evil.example"), ("Cookie", &cookie)], b""));
+    assert_eq!(wrong.status, 421);
+}
+
+#[test]
+fn the_old_trial_address_sends_a_bookmark_to_the_same_file_at_the_root() {
+    let test = start_test("moved");
+    let token = test.token();
+    let cookie = format!("{COOKIE}={token}");
+    for (from, to) in [
+        ("/next/", "/"),
+        ("/next/app.js", "/app.js"),
+        ("/next/style.css", "/style.css"),
+        ("/next/fonts/SoftPresenterSans-Bold.woff2", "/fonts/SoftPresenterSans-Bold.woff2"),
+        ("/next/fonts/OFL.txt", "/fonts/OFL.txt"),
+    ] {
+        // Signed in or not, the same answer; the new address does the signing-in check.
+        for cookies in [None, Some(cookie.as_str())] {
+            let headers: Vec<(&str, &str)> = cookies.map(|c| ("Cookie", c)).into_iter().collect();
+            let answer = test.runtime.block_on(test.http("GET", from, &headers, b""));
+            assert_eq!((answer.status, answer.header("location")), (307, Some(to)), "{from}");
+            assert!(answer.header("content-security-policy").is_some());
+        }
+    }
+    // A redirect is never made from the request's own text.
+    for path in ["/next/other.js", "/next//evil.example", "/next/%2f%2fevil.example", "/next/fonts/%2e%2e", "/next"] {
+        let answer = test.get(path, Some(&token));
+        assert!(matches!(answer.status, 400 | 404) && answer.header("location").is_none(), "{path}: {}", answer.status);
+    }
+    // Host is checked here too.
+    let wrong = test.runtime.block_on(test.http("GET", "/next/", &[("Host", "evil.example")], b""));
     assert_eq!(wrong.status, 421);
 }
 
