@@ -17,6 +17,7 @@ sp-ndi = { path = "crates/sp-ndi" }
 sp-decklink = { path = "crates/sp-decklink" }
 sp-bible = { path = "crates/sp-bible" }
 sp-video = { path = "crates/sp-video" }
+sp-winapi = { path = "crates/sp-winapi" }
 # Fetching Bibles: a small blocking HTTPS client, and the checksum each download is checked against.
 ureq = "3"
 sha2 = "0.10"

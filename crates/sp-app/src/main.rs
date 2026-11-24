@@ -1,5 +1,9 @@
 //! SoftPresenter: a home window with a slide grid, and a separate output for the audience.
 
+// On Windows the app is a window program, so no console opens beside it. Typed commands still
+// print: `main` joins the console they were typed in (see `sp_winapi::attach_parent_console`).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod announcements;
 mod applog;
 mod audio;
@@ -984,6 +988,20 @@ fn operator_displays(
     operator
 }
 
+/// The part of a display a window may use: on Windows what the taskbar leaves, asked of the
+/// system; elsewhere the display less room for a menu bar at the top and a dock at the bottom
+/// (the window library doesn't say how much they take).
+fn work_area(monitor: &winit::monitor::MonitorHandle, scale: f64) -> displays::Rect {
+    let (pos, size) = (monitor.position(), monitor.size());
+    if let Some((x, y, w, h)) =
+        sp_winapi::work_area_at(pos.x + (size.width / 2) as i32, pos.y + (size.height / 2) as i32)
+    {
+        return displays::Rect { x, y, w, h };
+    }
+    let (top, bottom) = ((48.0 * scale) as u32, (96.0 * scale) as u32);
+    displays::Rect { x: pos.x, y: pos.y + top as i32, w: size.width, h: size.height.saturating_sub(top + bottom) }
+}
+
 /// The connected displays, named as macOS names them in System Settings, and which is the main
 /// display (`primary`, with the menu bar).
 pub(crate) fn display_list(
@@ -1499,10 +1517,41 @@ impl App {
                 Some((w.parse::<f64>().ok()?, h.parse::<f64>().ok()?))
             })
             .unwrap_or((1440.0, 900.0));
-        let home_attrs = Window::default_attributes()
-            .with_title("SoftPresenter")
-            .with_inner_size(winit::dpi::LogicalSize::new(width, height))
-            .with_min_inner_size(winit::dpi::LogicalSize::new(1100.0, 700.0));
+        // The window opens inside the work area of the display it opens on (the part the
+        // taskbar or the menu bar leaves), no larger than it, and centred: the operating
+        // system's own place for a new window cascades down and off a small screen.
+        let first_monitor = el.primary_monitor().or_else(|| monitors.first().cloned());
+        let scale = first_monitor.as_ref().map_or(1.0, |m| m.scale_factor());
+        let work = first_monitor.as_ref().map(|m| work_area(m, scale));
+        let (frame_w, frame_h) = ((16.0 * scale) as u32, (40.0 * scale) as u32);
+        let wanted_inner = ((width * scale) as u32, (height * scale) as u32);
+        let mut home_attrs = Window::default_attributes().with_title("SoftPresenter");
+        let min_inner = (1100.0 * scale, 700.0 * scale);
+        match work {
+            Some(work) => {
+                let put = displays::place_home_window(
+                    (wanted_inner.0 + frame_w, wanted_inner.1 + frame_h),
+                    None,
+                    work,
+                    &[work],
+                );
+                home_attrs = home_attrs
+                    .with_inner_size(winit::dpi::PhysicalSize::new(
+                        put.w.saturating_sub(frame_w).max(1),
+                        put.h.saturating_sub(frame_h).max(1),
+                    ))
+                    .with_min_inner_size(winit::dpi::PhysicalSize::new(
+                        (min_inner.0 as u32).min(put.w.saturating_sub(frame_w).max(1)),
+                        (min_inner.1 as u32).min(put.h.saturating_sub(frame_h).max(1)),
+                    ))
+                    .with_position(winit::dpi::PhysicalPosition::new(put.x, put.y));
+            }
+            None => {
+                home_attrs = home_attrs
+                    .with_inner_size(winit::dpi::LogicalSize::new(width, height))
+                    .with_min_inner_size(winit::dpi::LogicalSize::new(1100.0, 700.0));
+            }
+        }
         // A run that only saves a picture of the window stays out of the way: its windows open
         // behind everything else and do not take the keyboard, so whoever is using the
         // computer is not interrupted.
@@ -1517,6 +1566,14 @@ impl App {
         let home_attrs = behind(home_attrs);
         let home_window =
             Arc::new(el.create_window(home_attrs).map_err(|e| format!("Could not open the home window: {e}"))?);
+        // The frame is known now: if the guess at it left the window off the work area, move it.
+        if let (Some(work), Ok(at)) = (work, home_window.outer_position()) {
+            let size = home_window.outer_size();
+            let put = displays::place_home_window((size.width, size.height), Some((at.x, at.y)), work, &[work]);
+            if (put.x, put.y) != (at.x, at.y) {
+                home_window.set_outer_position(winit::dpi::PhysicalPosition::new(put.x, put.y));
+            }
+        }
         let operator = operator_displays(&monitors, home_window.current_monitor(), el.primary_monitor());
 
         // A display asked for on the command line must exist. The screens' windows are opened
@@ -3819,8 +3876,20 @@ impl App {
         }
         let already = already.is_some();
         let started = Instant::now();
+        // A video that can't play here says so at once, in words for this system. The reply
+        // carries no file name (the caller has it); the notice below names it.
+        let no_ffmpeg = !already && media::needs_missing_ffmpeg(path);
         // Only the small copy is kept; the full-size picture is read when it goes on screen.
-        let result = if already { Ok(None) } else { media::load_small(path).map(Some) };
+        let result = if already {
+            Ok(None)
+        } else if no_ffmpeg {
+            Err(format!(
+                "This video needs FFmpeg to play, and FFmpeg isn't on this computer. {}",
+                media::ffmpeg_advice()
+            ))
+        } else {
+            media::load_small(path).map(Some)
+        };
         let Some(running) = self.running.as_mut() else {
             return Err("The window isn't open.".to_owned());
         };
@@ -3853,7 +3922,12 @@ impl App {
             }
             Err(message) => {
                 applog::event("media", &format!("could not add {}: {message}", path.display()));
-                running.home_state.notices.trouble(message);
+                if no_ffmpeg {
+                    let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                    running.home_state.notices.trouble(format!("{name}: {message}"));
+                } else {
+                    running.home_state.notices.trouble(message);
+                }
             }
         }
         if let Some(running) = self.running.as_mut() {
@@ -9689,6 +9763,11 @@ fn main() -> ExitCode {
     // `softpresenter ctl …` (or just `softpresenter next`, `softpresenter status`…) controls
     // the running app, and nothing else: no window, no log.
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Anything typed after the program's name may print an answer (or a mistake): on Windows
+    // that needs the console it was typed in, unless the output already goes to a file or pipe.
+    if !args.is_empty() {
+        sp_winapi::attach_parent_console();
+    }
     match args.first().map(String::as_str) {
         Some("ctl") => return control::run_client(args[1..].to_vec()),
         // `softpresenter decklink-check …`: lists the DeckLink devices, and with `play` sends a

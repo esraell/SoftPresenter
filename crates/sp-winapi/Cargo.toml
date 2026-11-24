@@ -1,0 +1,26 @@
+[package]
+name = "sp-winapi"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+# The two Windows calls the app can't make safely: finding a parent console to print to, and
+# asking a monitor for the part of it the taskbar leaves free. windows-sys is already in the
+# build (winit and others use it); this adds no crate.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+] }
+
+# Calling Windows needs `unsafe`; this crate allows it only in its `windows` module. Every
+# unsafe block says why it is sound.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

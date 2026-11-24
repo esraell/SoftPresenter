@@ -3800,6 +3800,7 @@ dependencies = [
  "sp-ndi",
  "sp-render",
  "sp-video",
+ "sp-winapi",
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
@@ -3885,6 +3886,13 @@ dependencies = [
  "serde_json",
  "sp-render",
  "wgpu",
+]
+
+[[package]]
+name = "sp-winapi"
+version = "0.1.0"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

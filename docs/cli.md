@@ -44,6 +44,16 @@ On Windows (which has no tested build yet) there is no installer for `sp`: the c
 typed after the program itself, `softpresenter.exe COMMAND`, and `sp` alone does not start the
 app.
 
+On Windows the program is a window program, so no console opens beside the app. A command typed
+in a console still prints its answer there: with a command, the program joins the console it
+was typed in, unless its output already goes to a file or a pipe (`> out.txt`, `| more`, an ssh
+session), when it uses that and attaches to nothing. Windows consoles don't wait for a window
+program, so the prompt comes back at once and the answer may appear after it, and `%ERRORLEVEL%`
+or `$LASTEXITCODE` isn't set. To wait for the answer and get the exit code, run it through
+`start /wait softpresenter.exe COMMAND` (cmd) or
+`Start-Process -Wait -PassThru softpresenter.exe -ArgumentList 'COMMAND'` (PowerShell, with
+output sent to a file), or pipe it: `softpresenter.exe COMMAND | more`.
+
 ## The basics
 
 - **Names** can be typed in full or in part, in any case and any script: `sp go bless` finds
@@ -697,16 +707,16 @@ it in an editor that has it open, and shows at once on a slide that is on screen
     Psalms 117:1-2, slide 2 of 2 (Psalms 117:2)
      1. Main: "For his merciful kindness is great toward us: and the truth of the LORD endureth for ever. Praise ye the LORD."
         at x=65 y=18 w=1790 h=378 (the theme's)
-        font Linux Biolinum, size 96, weight 400, italic off, colour #ffffff, align Left, scaling TextUpOrDown
+        font SoftPresenter Sans, size 96, weight 400, italic off, colour #ffffff, align Left, scaling TextUpOrDown
      2. Translation: "For his loving kindness is great toward us. The LORD’s faithfulness endures forever. Praise the LORD!"
         at x=65 y=540 w=1790 h=378 (the theme's)
-        font Linux Biolinum, size 96, weight 400, italic off, colour #ffffff, align Left, scaling TextUpOrDown
+        font SoftPresenter Sans, size 96, weight 400, italic off, colour #ffffff, align Left, scaling TextUpOrDown
      3. Reference: "Psalm 117:2"
         at x=65 y=429 w=1790 h=110 (the theme's)
-        font Linux Biolinum, size 44, weight 700, italic off, colour #ffffff, align Right, scaling TextUpOrDown
+        font SoftPresenter Sans, size 44, weight 700, italic off, colour #ffffff, align Right, scaling TextUpOrDown
      4. Translation reference: "Psalm 117:2"
         at x=65 y=951 w=1790 h=110 (the theme's)
-        font Linux Biolinum, size 44, weight 700, italic off, colour #ffffff, align Right, scaling TextUpOrDown
+        font SoftPresenter Sans, size 44, weight 700, italic off, colour #ffffff, align Right, scaling TextUpOrDown
 
 The settings `slide style keys` lists (`theme box` takes the same):
 
@@ -830,7 +840,7 @@ kept with:
            box 1: Main — SoftPresenter Sans 96pt, at x=120 y=240 w=1680 h=600
            box 2: Reference — SoftPresenter Sans 44pt, at x=120 y=950 w=1680 h=80
       3. Bible (for Bible)
-           box 1: Main — Linux Biolinum 96pt, at x=65 y=18 w=1790 h=378
+           box 1: Main — SoftPresenter Sans 96pt, at x=65 y=18 w=1790 h=378
            …
     $ sp theme duplicate Built-in as Evening
     Copied Built-in as Evening.
