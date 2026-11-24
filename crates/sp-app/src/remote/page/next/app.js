@@ -197,8 +197,8 @@ const clone = x => JSON.parse(JSON.stringify(x));
 // The slide face built into the app (SoftPresenter Sans, OFL: fonts/OFL.txt) comes first, as in the app's font list; then the computer's own fonts.
 const DEF_FONT = 'SoftPresenter Sans';
 const FONTS = { 'SoftPresenter Sans': "'SoftPresenter Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif",
-  'Linux Biolinum': "'Linux Biolinum', 'Linux Libertine', Georgia, serif", Helvetica: "'Helvetica Neue', Helvetica, Arial, sans-serif", Arial: 'Arial, sans-serif', 'Avenir Next': "'Avenir Next', Avenir, 'Segoe UI', sans-serif", Futura: "Futura, 'Century Gothic', sans-serif", 'Gill Sans': "'Gill Sans', 'Gill Sans MT', sans-serif", Optima: 'Optima, Candara, sans-serif', Verdana: 'Verdana, sans-serif', 'Trebuchet MS': "'Trebuchet MS', sans-serif", Impact: 'Impact, sans-serif',
-  Georgia: "Georgia, 'Times New Roman', serif", 'Times New Roman': "'Times New Roman', Times, serif", Palatino: "Palatino, 'Palatino Linotype', serif", Baskerville: 'Baskerville, Georgia, serif', Didot: 'Didot, Georgia, serif', 'Marker Felt': "'Marker Felt', 'Comic Sans MS', cursive", 'Courier New': "'Courier New', monospace", Menlo: 'Menlo, Consolas, monospace' };
+  Helvetica: "'Helvetica Neue', Helvetica, Arial, sans-serif", Arial: 'Arial, sans-serif', 'Avenir Next': "'Avenir Next', Avenir, 'Segoe UI', sans-serif", Futura: "Futura, 'Century Gothic', sans-serif", 'Gill Sans': "'Gill Sans', 'Gill Sans MT', sans-serif", Optima: 'Optima, Candara, sans-serif', Verdana: 'Verdana, sans-serif', 'Trebuchet MS': "'Trebuchet MS', sans-serif", Impact: 'Impact, sans-serif',
+  Georgia: "Georgia, 'Times New Roman', serif", 'Linux Biolinum': "'Linux Biolinum', 'Linux Libertine', Georgia, serif", 'Times New Roman': "'Times New Roman', Times, serif", Palatino: "Palatino, 'Palatino Linotype', serif", Baskerville: 'Baskerville, Georgia, serif', Didot: 'Didot, Georgia, serif', 'Marker Felt': "'Marker Felt', 'Comic Sans MS', cursive", 'Courier New': "'Courier New', monospace", Menlo: 'Menlo, Consolas, monospace' };
 // On a Mac the F keys belong to the system (brightness, volume, Mission Control): SoftPresenter uses none there
 const MAC = /Mac|iPhone|iPad/.test((typeof navigator !== 'undefined' && (navigator.platform || navigator.userAgent)) || '');
 const SWATCHES = ['#ffffff', '#000000', '#d2cec6', '#ff4a1a', '#ffc400', '#34c56b', '#4285f4', '#cc4eb4'];
@@ -271,12 +271,13 @@ const twoLang = () => ({ id: newId('tpl'), name: 'Two languages', for: 'songs', 
 const oneLang = () => ({ id: newId('tpl'), name: 'One language', for: 'songs', objects: [
   box('Main', 'main', { x: 120, y: 240, w: 1680, h: 600 }, { size: 96, ...WORDS_LOOK }, 'The words of the song')] });
 // The Bible template, as the owner's own app has it: the first translation's verse and reference on the top half, the second's below;
-// Linux Biolinum, white on black, verses to the left and middled, references bold to the right; verse type starts at 96 and comes down to fit.
+// Set in the app's slide face (as the app has it, 05b5ebe: every computer has it), white on black, verses to the left and middled,
+// references bold to the right; verse type starts at 96 and comes down to fit.
 const bibleTpl = () => ({ id: newId('tpl'), name: 'Bible', for: 'bible', objects: [
-  box('Verse 1', 'verse1', { x: 65, y: 18, w: 1790, h: 378 }, { font: 'Linux Biolinum', size: 96, bold: false, align: 'left', valign: 'middle', shadow: false, color: '#ffffff', lineHeight: 1.25 }, 'The first Bible’s verse'),
-  box('Reference 1', 'ref1', { x: 65, y: 429, w: 1790, h: 110 }, { font: 'Linux Biolinum', size: 44, bold: true, align: 'right', valign: 'middle', shadow: false, color: '#ffffff' }, 'От Иоанна 3:16'),
-  box('Verse 2', 'verse2', { x: 65, y: 540, w: 1790, h: 378 }, { font: 'Linux Biolinum', size: 96, bold: false, align: 'left', valign: 'middle', shadow: false, color: '#ffffff', lineHeight: 1.25 }, 'The second Bible’s verse'),
-  box('Reference 2', 'ref2', { x: 65, y: 951, w: 1790, h: 110 }, { font: 'Linux Biolinum', size: 44, bold: true, align: 'right', valign: 'middle', shadow: false, color: '#ffffff' }, 'John 3:16')] });
+  box('Verse 1', 'verse1', { x: 65, y: 18, w: 1790, h: 378 }, { font: DEF_FONT, size: 96, bold: false, align: 'left', valign: 'middle', shadow: false, color: '#ffffff', lineHeight: 1.25 }, 'The first Bible’s verse'),
+  box('Reference 1', 'ref1', { x: 65, y: 429, w: 1790, h: 110 }, { font: DEF_FONT, size: 44, bold: true, align: 'right', valign: 'middle', shadow: false, color: '#ffffff' }, 'От Иоанна 3:16'),
+  box('Verse 2', 'verse2', { x: 65, y: 540, w: 1790, h: 378 }, { font: DEF_FONT, size: 96, bold: false, align: 'left', valign: 'middle', shadow: false, color: '#ffffff', lineHeight: 1.25 }, 'The second Bible’s verse'),
+  box('Reference 2', 'ref2', { x: 65, y: 951, w: 1790, h: 110 }, { font: DEF_FONT, size: 44, bold: true, align: 'right', valign: 'middle', shadow: false, color: '#ffffff' }, 'John 3:16')] });
 const lowerThird = { id: newId('theme'), name: 'Lower third', bg: '#000000', picture: null, templates: [
   { id: newId('tpl'), name: 'Words in a band', for: 'songs', objects: [
     obj('shape', 'Band', { shape: 'rect', fill: '#000000', opacity: .7, frame: { x: 0, y: 760, w: 1920, h: 320 } }),
