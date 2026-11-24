@@ -5950,7 +5950,16 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
         });
         ui.add_space(10.0);
         let about = match &screen.output {
-            Output::Automatic => "Choose the display this screen fills. The main display, with the menu bar, is kept for SoftPresenter's own window.",
+            // The main display is the one with the menu bar on a Mac, the taskbar on Windows.
+            Output::Automatic if cfg!(target_os = "macos") => {
+                "Choose the display this screen fills. The main display, with the menu bar, is kept for SoftPresenter's own window."
+            }
+            Output::Automatic if cfg!(windows) => {
+                "Choose the display this screen fills. The main display, with the taskbar, is kept for SoftPresenter's own window."
+            }
+            Output::Automatic => {
+                "Choose the display this screen fills. The main display is kept for SoftPresenter's own window."
+            }
             Output::Display(_) => {
                 "If this display is unplugged the screen shows nowhere until it is back; it never moves to another display."
             }

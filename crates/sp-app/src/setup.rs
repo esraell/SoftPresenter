@@ -377,7 +377,7 @@ fn songs(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState) {
         ui.add_space(8.0);
         say(
             ui,
-            "Or skip this and start with the sample song. Songs can be imported at any time from the File menu, or dropped on the window.",
+            "Or skip this and start with the sample song. Songs can be imported at any time with the \u{2193} button in the left column, or dropped on the window.",
         );
         if let Some(said) = &setup.songs_said {
             ui.add_space(10.0);
@@ -413,7 +413,7 @@ fn songs(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState) {
     ui.add_space(8.0);
     say(
         ui,
-        "Or skip this and start with the sample song. Songs can be imported at any time from the File menu, or dropped on the window.",
+        "Or skip this and start with the sample song. Songs can be imported at any time with the \u{2193} button in the left column, or dropped on the window.",
     );
     if let Some(said) = &setup.songs_said {
         ui.add_space(10.0);
