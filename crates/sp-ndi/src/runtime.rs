@@ -21,13 +21,38 @@
 //! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use std::ffi::{CString, c_char, c_int, c_void};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use libloading::Library;
 
-/// What the operator is told when the runtime can't be found.
-pub const NOT_INSTALLED: &str = "NDI isn't installed on this computer. Install NDI Tools (free, from https://ndi.video/), then turn this screen on again.";
+/// What the operator is told when the runtime can't be found. NDI Tools, which installs the
+/// runtime on a Mac or on Windows, doesn't exist for Linux: there the app downloads NDI itself.
+pub const NOT_INSTALLED: &str = not_installed(cfg!(target_os = "linux"));
+
+/// The words of [`NOT_INSTALLED`], on Linux or elsewhere.
+const fn not_installed(linux: bool) -> &'static str {
+    if linux {
+        "NDI isn't installed on this computer. Download NDI\u{2026} in the Screens window gets it (free, from NDI)."
+    } else {
+        "NDI isn't installed on this computer. Install NDI Tools (free, from https://ndi.video/), then turn this screen on again."
+    }
+}
+
+/// The folder of the app's own where it keeps the runtime it downloaded (Linux only).
+static OWN_FOLDER: OnceLock<PathBuf> = OnceLock::new();
+
+/// Says where the app keeps the runtime it downloads itself on Linux, where NDI Tools doesn't
+/// exist. It is looked in right after the folder `NDI_RUNTIME_DIR_V6` names. Only the first
+/// call counts.
+pub fn set_own_folder(folder: PathBuf) {
+    let _ = OWN_FOLDER.set(folder);
+}
+
+/// The file the runtime was opened from, once it has been. It stays open until the app quits.
+pub fn opened_from() -> Option<&'static Path> {
+    RUNTIME.get().map(|runtime| runtime.path.as_path())
+}
 
 /// `NDIlib_send_create_t`.
 #[repr(C)]
@@ -134,6 +159,8 @@ type SendConnections = unsafe extern "C" fn(*mut c_void, u32) -> c_int;
 /// as the app runs.
 pub struct Runtime {
     _library: Library,
+    /// Where the library was opened from.
+    path: PathBuf,
     send_create: SendCreateFn,
     send_destroy: SendDestroy,
     send_video: SendVideo,
@@ -188,9 +215,10 @@ pub fn locate() -> Option<PathBuf> {
     places().into_iter().find(|path| path.is_file())
 }
 
-/// Where the runtime may be, in the order to try: the folder NDI's own variable names, a copy
-/// inside the app, where NDI's runtime installer puts it, the SDK's copy, and on a Mac with NDI
-/// Tools but not the runtime installer, the copy inside one of NDI's own apps.
+/// Where the runtime may be, in the order to try: the folder NDI's own variable names, on Linux
+/// the copy the app downloaded, a copy inside the app, where NDI's runtime installer puts it,
+/// the SDK's copy, and on a Mac with NDI Tools but not the runtime installer, the copy inside
+/// one of NDI's own apps.
 fn places() -> Vec<PathBuf> {
     let name = if cfg!(target_os = "macos") {
         "libndi.dylib"
@@ -209,6 +237,11 @@ fn places() -> Vec<PathBuf> {
     }
     if let Some(folder) = std::env::var_os("NDI_RUNTIME_DIR_V6") {
         places.push(PathBuf::from(folder).join(name));
+    }
+    if cfg!(target_os = "linux")
+        && let Some(folder) = OWN_FOLDER.get()
+    {
+        places.push(folder.join(name));
     }
     if let Some(folder) = std::env::var_os("NDI_RUNTIME_DIR_V5") {
         places.push(PathBuf::from(folder).join(name_v5));
@@ -306,9 +339,10 @@ fn open(places: &[PathBuf]) -> Result<Runtime, String> {
     let Some(path) = places.iter().find(|path| path.is_file()) else {
         return Err(NOT_INSTALLED.to_owned());
     };
-    // SAFETY: the file is NDI's runtime, found where NDI installs it (or where the operator's
-    // NDI_RUNTIME_DIR_V6 points); opening it runs only its own set-up, which NDI documents as
-    // safe to do on any thread.
+    // SAFETY: the file is NDI's runtime, found where NDI installs it, where the operator's
+    // NDI_RUNTIME_DIR_V6 points, or on Linux where the app put it, taken unchanged from NDI's
+    // own SDK download once the operator accepted NDI's licence; opening it runs only its own
+    // set-up, which NDI documents as safe to do on any thread.
     let library = unsafe { Library::new(path) }
         .map_err(|e| format!("The NDI runtime at {} could not be opened: {e}", path.display()))?;
     let missing = |name: &str, e: libloading::Error| format!("The NDI runtime is too old or damaged (no {name}): {e}");
@@ -352,7 +386,15 @@ fn open(places: &[PathBuf]) -> Result<Runtime, String> {
     if !unsafe { initialize() } {
         return Err("NDI can't run on this computer's processor.".to_owned());
     }
-    Ok(Runtime { _library: library, send_create, send_destroy, send_video, send_connections, receiving })
+    Ok(Runtime {
+        _library: library,
+        path: path.clone(),
+        send_create,
+        send_destroy,
+        send_video,
+        send_connections,
+        receiving,
+    })
 }
 
 /// An NDI source on the network. Dropping it takes the source away.
@@ -639,7 +681,14 @@ mod tests {
     fn with_no_runtime_anywhere_it_says_ndi_isnt_installed_and_where_to_get_it() {
         let nowhere = vec![PathBuf::from("/nonexistent/libndi.dylib")];
         let problem = open(&nowhere).err().unwrap();
-        assert!(problem.contains("isn't installed") && problem.contains("https://ndi.video/"));
+        assert_eq!(problem, NOT_INSTALLED);
+        // NDI Tools on a Mac and on Windows; on Linux, where NDI Tools doesn't exist, the app's
+        // own download.
+        let elsewhere = not_installed(false);
+        assert!(elsewhere.contains("isn't installed") && elsewhere.contains("https://ndi.video/"));
+        let linux = not_installed(true);
+        assert!(linux.contains("isn't installed") && linux.contains("Download NDI\u{2026}"));
+        assert!(!linux.contains("NDI Tools"));
     }
 
     #[test]

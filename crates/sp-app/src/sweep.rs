@@ -40,8 +40,9 @@ pub const LAST_RUN_FILE: &str = ".last-tidy";
 /// The folder a song pack is unpacked into while it is opened (see `open_pack` in main.rs).
 const OPENING_PACK: &str = ".opening-pack-";
 /// Folders at the top of the library that hold no names of pictures: the two tidied, the
-/// Bibles, the command line's socket, and presentations being turned into slides.
-const NOT_READ: [&str; 5] = ["Images", "Media", "Bibles", "control", "Converting"];
+/// Bibles, the command line's socket, presentations being turned into slides, and the NDI
+/// downloaded on Linux.
+const NOT_READ: [&str; 6] = ["Images", "Media", "Bibles", "control", "Converting", "NDI"];
 /// The two folders tidied.
 const TIDIED: [&str; 2] = ["Images", "Media"];
 /// Endings of the app's own files, which must read whole or the tidy stops.

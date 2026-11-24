@@ -1078,7 +1078,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Look again beside it; SoftPresenter's own NDI outputs are never offered (a source shown in
   a slide would show itself). One line under it says what is so: how many are found, that it is
   still looking, that NDI isn't installed (SoftPresenter uses the NDI Tools you install
-  yourself, as for sending), or, in amber, that the chosen source isn't sending. Then Fits
+  yourself, as for sending; on Linux, Download NDI… under the line installs NDI, as in the
+  Screens window), or, in amber, that the chosen source isn't sending. Then Fits
   (Fit, Fill or Stretch), Quality (Full, or Light: the sender's smaller picture, less network
   and less of the computer) and Sound (Off or On; the setting is kept, and the box says
   "Sound comes later": the app has no way yet to play a source's sound, so none is faked).
@@ -1096,7 +1097,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   a second and show the slide without it, never a frozen picture; it fades back in when the
   source returns. The operator gets an amber notice ("NDI "Camera 1" stopped sending. Its
   slides show without it until it is back."), and the editor shows an amber dashed box tagged
-  "· not sending". The runtime is the one NDI Tools installs, opened as for sending. The
+  "· not sending". The runtime is the one NDI Tools installs (on Linux, the one Download NDI…
+  installs), opened as for sending. The
   remote page shows the box as drawn and can't add one (there is no remote command for it).
   Songs with an NDI box are saved as version 4 of the song file; older SoftPresenters say to
   update. Not yet: sound, and `sp` has no command to add one (`sp slide SONG N` lists it).
@@ -1245,6 +1247,21 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Screens window (**Option-Command-1**). Its − asks before a screen goes ("Remove the screen
   “Lobby”? Nothing more is sent to it, and its settings go. This can't be undone."), as Undo
   can't bring a screen back.
+- **NDI on Linux.** NDI Tools, which installs NDI's runtime on a Mac and on Windows, doesn't
+  exist for Linux, so there, while NDI isn't installed, an NDI screen in the Screens window (and
+  an NDI Source box in the inspector) has **Download NDI…** beside the ndi.video link. It
+  downloads NDI's SDK for Linux over HTTPS from NDI's own server (68 MB in November 2026), on a thread of
+  its own, saying how far it has got ("Downloading NDI… 12 of 68 MB", with a bar and Cancel),
+  then "Checking the download…", and shows NDI's licence from inside it, in a box to scroll,
+  with Accept and Cancel. Only Accept installs anything: NDI's runtime for the computer's
+  processor (64-bit Intel or AMD; 64-bit ARM where the SDK has it), with NDI's licence and the
+  licences the runtime is built with, goes into `NDI/` in the data folder, never a system
+  folder, and no administrator password is asked for. Cancel, a failure, and a finished
+  install all delete the download. NDI screens that found no NDI start at once, without a
+  restart, and it then says "NDI 6.3.2 installed (downloaded 24 Nov 2026)", with Remove (NDI
+  stays in use until SoftPresenter restarts, and it says so). A download that isn't laid out as
+  NDI's SDK is (NDI may have changed it), is damaged or cut short, or has no runtime for the
+  processor installs nothing, and says which. A Mac and Windows still point to NDI Tools.
 - **DeckLink outputs** (SoftPresenter for Blackmagic Design DeckLink). With Blackmagic's driver,
   Desktop Video 16.0 or later, installed, each output the card offers is a choice for any
   audience or stage screen, named as the driver names it ("DeckLink Duo (1)": a DeckLink Duo 2

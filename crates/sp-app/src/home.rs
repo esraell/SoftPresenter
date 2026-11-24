@@ -558,6 +558,8 @@ pub struct HomeState {
     pub ndi_available: bool,
     /// The NDI sources found, and which are wanted and not sending (for the inspector).
     pub ndi: crate::ndi_in::NdiView,
+    /// Download NDI… on Linux, as far as it has got, and the NDI the app installed.
+    pub ndi_download: crate::ndi_download::NdiDownload,
     /// The DeckLink devices found, and how the driver stands (no devices without it).
     pub decklink: sp_decklink::Found,
     /// The Edit view's right-hand panel.
@@ -1870,6 +1872,7 @@ impl Default for HomeState {
             // Assumed until it has been looked for.
             ndi_available: true,
             ndi: crate::ndi_in::NdiView::default(),
+            ndi_download: crate::ndi_download::NdiDownload::default(),
             decklink: sp_decklink::Found { driver: sp_decklink::Driver::Looking, devices: Vec::new() },
             inspector: crate::inspector::InspectorState::default(),
             theme_edit: None,
@@ -6056,17 +6059,21 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
         }
         ui.label(egui::RichText::new(about).size(11.5).color(TEXT_DIM));
         // Where NDI comes from, wherever it is chosen; and, without it, that it isn't installed.
+        // On Linux, where NDI Tools doesn't exist, the app downloads NDI itself.
         if matches!(screen.output, Output::Ndi(_)) {
+            let download = crate::ndi_download::offered();
             ui.horizontal_wrapped(|ui| {
                 if !state.ndi_available {
-                    ui.label(
-                        egui::RichText::new("NDI isn't installed on this computer. Install NDI Tools (free), then turn this screen on again:")
-                            .size(11.5)
-                            .color(Color32::from_rgb(255, 170, 120)),
-                    );
+                    let words = if download {
+                        t("screens.ndi.not_installed", "NDI isn't installed on this computer.")
+                    } else {
+                        "NDI isn't installed on this computer. Install NDI Tools (free), then turn this screen on again:"
+                    };
+                    ui.label(egui::RichText::new(words).size(11.5).color(Color32::from_rgb(255, 170, 120)));
                 }
                 ui.hyperlink_to(egui::RichText::new("ndi.video").size(11.5), sp_ndi::DOWNLOAD_URL);
             });
+            crate::ndi_download::ui(ui, &mut state.ndi_download, state.ndi_available);
         }
         // An audience screen's look: which layers it shows, its colour, its covered edges.
         if screen.kind == Kind::Audience {

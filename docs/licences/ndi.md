@@ -17,7 +17,8 @@ publishing or selling anything that includes NDI.
 ## Receiving
 
 NDI sources in slides are received with the same runtime, opened the same way as for sending
-(the user's own NDI Tools install; nothing from the SDK is in this repository). The few
+(the user's own NDI Tools install, or on Linux the runtime they had the app download from NDI;
+nothing from the SDK is in this repository). The few
 receiving and finding functions are declared in `sp-ndi`'s `runtime` module following
 `Processing.NDI.Find.h` and `Processing.NDI.Recv.h`, under the same MIT notice as the sending
 ones. The app asks for the picture only, never audio, and shows it as it arrives.
@@ -83,7 +84,24 @@ ones. The app asks for the picture only, never audio, and shows it as it arrives
   inside its own apps (NDI Virtual Input, NDI Scan Converter; never another company's app),
   and opens it on that screen's own thread. Without it, the screen says NDI
   isn't installed and links to https://ndi.video/, and the rest of the app is unaffected.
-  Nothing from NDI is copied into the app.
+  Nothing from NDI is copied into the app or its download.
+- On Linux, where NDI Tools doesn't exist and the runtime comes only inside the NDI SDK for
+  Linux, the person using the app can have it fetch that SDK themselves (Download NDI…, in
+  `crates/sp-app/src/ndi_download.rs`): from NDI's own server
+  (`https://downloads.ndi.tv/SDK/NDI_SDK_Linux/Install_NDI_SDK_v6_Linux.tar.gz`), never from
+  us, so SoftPresenter distributes nothing of NDI's. The app shows them NDI's licence
+  (`NDI SDK License Agreement.txt`, from inside the download) and installs only if they press
+  Accept: it never accepts for them, and never runs NDI's script. It then takes, unchanged,
+  only what using NDI needs: the runtime for their processor (`libndi.so.6`), the licence they
+  accepted, and the runtime's own licence list (`libndi_licenses.txt`, which goes beside the
+  runtime), into `NDI/` in the app's data folder, for SoftPresenter alone; the rest of the SDK
+  (headers, examples, tools, documentation) is never unpacked, and the download is deleted.
+  `NDI/` sits in the library folder, so anything that copies or shares the whole library
+  (a backup, a sync) must leave it out: nothing of NDI's goes anywhere from SoftPresenter.
+  The runtime is then opened as any other, right after the folder
+  `NDI_RUNTIME_DIR_V6` names. The download is read as untrusted (`ndi_download/sdk.rs`): its
+  layout was learnt from how packagers and community tools unpack it, not from NDI's script
+  running, and anything unexpected installs nothing.
 - The two examples in `crates/sp-ndi/examples` (which look for and receive NDI sources, to
   check SoftPresenter's own) use a third-party NDI library that needs the SDK; they build
   only with `--features sdk-examples`, never as part of the app or its tests.

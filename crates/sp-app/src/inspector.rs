@@ -667,6 +667,7 @@ fn ndi_source(
     (source, scaling, quality, sound): (&mut String, &mut sp_model::ImageFit, &mut sp_model::NdiQuality, &mut bool),
     view: &mut crate::ndi_in::NdiView,
     installed: bool,
+    download: &mut crate::ndi_download::NdiDownload,
 ) {
     ui.label(egui::RichText::new("NDI Source").size(12.5).strong().color(INK));
     ui.add_space(2.0);
@@ -712,6 +713,10 @@ fn ndi_source(
     let (words, amber) = crate::ndi_in::line(runtime, view.sources.len(), source, stopped);
     let ink = if amber { crate::studio::CARE } else { crate::studio::TEXT_DIM };
     ui.label(egui::RichText::new(words).size(11.5).color(ink));
+    // On Linux, where NDI Tools doesn't exist, the app downloads NDI itself.
+    if !installed || download.under_way() {
+        crate::ndi_download::ui(ui, download, installed);
+    }
     ui.add_space(4.0);
     let row = |ui: &mut egui::Ui, label: &str, add: &mut dyn FnMut(&mut egui::Ui)| {
         ui.horizontal(|ui| {
@@ -746,7 +751,7 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let history = (state.can_undo(false), state.can_undo(true));
     let menu_asked = &mut state.menu_asked;
     let lock_shape = &mut state.inspector.lock_shape;
-    let (ndi_view, ndi_installed) = (&mut state.ndi, state.ndi_available);
+    let (ndi_view, ndi_installed, ndi_download) = (&mut state.ndi, state.ndi_available, &mut state.ndi_download);
     let Some(draft) = state.editing.as_mut() else { return };
     let themed = draft.selected_object().map(|object| object_frame(&draft.slide, object, theme));
     let (Some(frame), Some(object)) = (themed, draft.selected_object_mut()) else {
@@ -874,7 +879,7 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
 
     // An NDI source: which one, and how its picture is received and shown.
     if let sp_model::ObjectKind::Ndi { source, scaling, quality, sound } = &mut object.kind {
-        ndi_source(ui, object_id, (source, scaling, quality, sound), ndi_view, ndi_installed);
+        ndi_source(ui, object_id, (source, scaling, quality, sound), ndi_view, ndi_installed, ndi_download);
         rule(ui);
     }
 

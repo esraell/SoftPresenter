@@ -44,6 +44,7 @@ mod make_cli;
 mod media;
 mod menubar;
 mod messages;
+mod ndi_download;
 mod ndi_in;
 mod notices;
 mod output;
@@ -7083,6 +7084,12 @@ impl App {
         let Some(running) = self.running.as_mut() else {
             return;
         };
+        // NDI downloaded or removed in the app (Linux): looked for again at once, and the
+        // screens that found no NDI are started again (below).
+        running.home_state.ndi_download.poll();
+        if running.home_state.ndi_download.take_changed() {
+            running.ndi_checked = None;
+        }
         // Whether NDI is installed, looked at again every few seconds (a few file checks), so
         // installing it while the app runs is noticed.
         if running.ndi_checked.is_none_or(|at| at.elapsed() >= Duration::from_secs(3)) {
@@ -7491,7 +7498,13 @@ impl App {
             *looks_sent = looks;
         }
 
-        // NDI: start, rename and stop sources.
+        // NDI: start, rename and stop sources. A source that found no NDI starts again once
+        // NDI has been downloaded in the app.
+        if home_state.ndi_download.take_restart() {
+            ndi_sent.retain(|(id, _)| {
+                !matches!(output.ndi_status(*id), output::NdiStatus::Failed(reason) if reason == sp_ndi::NOT_INSTALLED)
+            });
+        }
         let wanted: Vec<(Uuid, String)> = list
             .iter()
             .zip(&placed)
@@ -10327,6 +10340,14 @@ fn main() -> ExitCode {
     }
     for done in &settled {
         applog::event("song ids", done);
+    }
+    // On Linux, NDI downloaded in the app is kept in its own folder, looked in for NDI's
+    // runtime; a download a quit left part of the way through is deleted.
+    if ndi_download::offered()
+        && let Some(folder) = ndi_download::folder()
+    {
+        ndi_download::tidy(&folder);
+        sp_ndi::set_own_folder(folder);
     }
     // Picture objects on slides are read from the app's Images folder.
     sp_render::set_picture_loader(images::load);
