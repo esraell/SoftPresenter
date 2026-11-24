@@ -1,4 +1,5 @@
 {
   "_note": "Español de España; see topbar.json. Words that several areas use.",
-  "common.seconds_unit": "s"
+  "common.seconds_unit": "s",
+  "common.newer_installed": "Se ha instalado una versión más nueva de SoftPresenter. Cierra SoftPresenter y vuelve a abrirlo para usarla."
 }

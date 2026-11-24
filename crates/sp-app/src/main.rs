@@ -950,7 +950,7 @@ fn screen_name(state: &HomeState, id: Uuid) -> &str {
 /// The connected displays as the window system lists them.
 /// Notes in the log where a screen's window was asked to go and which display it is on, so a
 /// screen on the wrong display can be seen from the log.
-fn log_placement(screen: &str, place: &Placed, window: &Window, displays: &[DisplayInfo]) {
+fn log_placement(screen: &str, place: &Placed, window: &Arc<Window>, displays: &[DisplayInfo]) {
     let asked = match place {
         Placed::Fullscreen(index) => {
             displays.iter().find(|d| d.index == *index).map_or("a display", |d| d.name.as_str())
@@ -965,9 +965,89 @@ fn log_placement(screen: &str, place: &Placed, window: &Window, displays: &[Disp
     // Wayland gives no window a position: the line then says so instead of ending in "at ".
     let place = match window.outer_position() {
         Ok(p) => format!("{screen}: asked for {asked}; the window is on {on} at {},{}", p.x, p.y),
-        Err(_) => format!("{screen}: asked for {asked}; the window is on {on} (the window system doesn't say where)"),
+        Err(_) => {
+            look_again_later(screen, asked, window);
+            format!("{screen}: asked for {asked}; the window is on {on} (the window system doesn't say where)")
+        }
     };
     applog::event("screens", &place);
+}
+
+/// Screens' windows whose place the window system didn't say when they were made (Wayland gives
+/// a window no position, and says which display it is on only once it is up), with when.
+type LateLook = (std::sync::Weak<Window>, String, String, Instant);
+static LOOK_AGAIN: std::sync::Mutex<Vec<LateLook>> = std::sync::Mutex::new(Vec::new());
+
+/// How long after a window is made its display is looked at again.
+const LOOK_AGAIN_AFTER: Duration = Duration::from_millis(1500);
+
+/// Notes a screen's window to be looked at again a moment from now, and wakes the event loop
+/// then (a thread of its own asks the window to draw), so the log says where it really went.
+fn look_again_later(screen: &str, asked: &str, window: &Arc<Window>) {
+    let weak = Arc::downgrade(window);
+    if let Ok(mut pending) = LOOK_AGAIN.lock() {
+        pending.push((weak.clone(), screen.to_owned(), asked.to_owned(), Instant::now()));
+    }
+    std::thread::spawn(move || {
+        std::thread::sleep(LOOK_AGAIN_AFTER);
+        if let Some(window) = weak.upgrade() {
+            window.request_redraw();
+        }
+    });
+}
+
+/// Logs where the windows noted by `look_again_later` are now that they are up.
+fn log_late_placements(displays: &[DisplayInfo]) {
+    let Ok(mut pending) = LOOK_AGAIN.try_lock() else { return };
+    if pending.is_empty() {
+        return;
+    }
+    pending.retain(|(window, screen, asked, made)| {
+        if made.elapsed() < LOOK_AGAIN_AFTER {
+            return true;
+        }
+        if let Some(window) = window.upgrade() {
+            let on = window
+                .current_monitor()
+                .and_then(|m| {
+                    let name = m.name();
+                    displays
+                        .iter()
+                        .find(|d| d.x == m.position().x && d.y == m.position().y)
+                        .or_else(|| displays.iter().find(|d| name.as_deref().is_some_and(|n| d.is_named(n))))
+                        .map(|d| d.name.clone())
+                })
+                .unwrap_or_else(|| "a display the window system doesn't name".to_owned());
+            applog::event("screens", &format!("{screen}: asked for {asked}; once up, the window is on {on}"));
+        }
+        false
+    });
+}
+
+/// The program file this copy started from, as it was then (its size and time written).
+static STARTED_FROM: std::sync::OnceLock<Option<(PathBuf, u64, std::time::SystemTime)>> = std::sync::OnceLock::new();
+
+/// The program file's size and time now, for comparing with how it was at the start.
+fn program_file_now(path: &std::path::Path) -> Option<(u64, std::time::SystemTime)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
+}
+
+/// Notes the program file as it is at the start (called early, once).
+fn note_program_file() {
+    STARTED_FROM.get_or_init(|| {
+        let path = std::env::current_exe().ok()?;
+        let (len, at) = program_file_now(&path)?;
+        Some((path, len, at))
+    });
+}
+
+/// Whether a different program file now stands where this copy started from: a newer build was
+/// installed while this one runs (copied over it, or its app swapped for a new one). A file
+/// gone and not replaced isn't counted.
+fn newer_program_installed() -> bool {
+    let Some(Some((path, len, at))) = STARTED_FROM.get() else { return false };
+    program_file_now(path).is_some_and(|(now_len, now_at)| now_len != *len || now_at != *at)
 }
 
 /// Whether a screen's window that has to leave its display (it was switched off, or the display
@@ -1987,6 +2067,33 @@ impl App {
             running.home_state.actions_depth = depth;
         }
         if any && let Some(running) = self.running.as_ref() {
+            running.home_window.request_redraw();
+        }
+    }
+
+    /// Says once, in the notices, when a newer build has been installed over this copy while it
+    /// runs, so whoever runs it knows to quit and reopen it. Looked at about once a minute.
+    fn say_if_newer_installed(&mut self) {
+        static LAST: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+        static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if SAID.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        let Ok(mut last) = LAST.lock() else { return };
+        if last.is_some_and(|at| at.elapsed() < Duration::from_secs(60)) {
+            return;
+        }
+        *last = Some(Instant::now());
+        if !newer_program_installed() {
+            return;
+        }
+        SAID.store(true, std::sync::atomic::Ordering::Relaxed);
+        applog::event("update", "a newer program file was installed while this copy runs");
+        if let Some(running) = self.running.as_mut() {
+            running.home_state.notices.info(i18n::t(
+                "common.newer_installed",
+                "A newer SoftPresenter has been installed. Quit and reopen SoftPresenter to use it.",
+            ));
             running.home_window.request_redraw();
         }
     }
@@ -10036,6 +10143,10 @@ impl ApplicationHandler<AppEvent> for App {
         // slide's actions, or a message that leaves by itself must not wait for it.
         self.run_actions();
         self.tick_advance();
+        self.say_if_newer_installed();
+        if let Some(running) = self.running.as_ref() {
+            log_late_placements(&running.home_state.displays);
+        }
         self.sync_overlay();
         // What plays from a followed folder is kept going as its files come and go, before the
         // layers' own clocks move them on.
@@ -10433,6 +10544,7 @@ fn main() -> ExitCode {
     sources.push(None);
 
     start_steps::mark("songs read");
+    note_program_file();
     // Menu bar choices arrive as user events carrying the item's id.
     let mut builder = EventLoop::<AppEvent>::with_user_event();
     // A run that only saves a picture must not come to the front of whatever is in use.
