@@ -1692,3 +1692,21 @@ body.login { display: grid; grid-template: 1fr / 1fr; place-items: center; heigh
 .cat-p { margin: 0; color: var(--dim); font-size: 12.5px; line-height: 1.4; }
 .cat-info .btn, .cat-line .btn, .cat-bar .btn, .su-site, .st-card .btn.sm { white-space: nowrap; flex: none; }
 .su-row.off > .sub:last-child { grid-column: 3 / -1; }
+
+/* Long titles (23 November). A list row's title takes up to two lines, broken where the chosen row's 600 weight breaks them
+   (fitTitles in show.js), so choosing a row never changes its height; one still too long ends in … and shows whole in its
+   tooltip. One line: 42 high; two: 7 + 17 + 17 + 7 = 48. The ⋯ stays (always visible) at 26 but stands 4 from the row's end
+   and 4 from what is before it, so its dots sit 10 in, as the number does on the left: the title gains 12 (142 in all). */
+.sect.items .rowbtn { padding-right: 4px; }
+.sect.items .rowbtn .sh-rowmore { margin-left: -6px; }
+.rowbtn .tt { display: block; min-width: 0; }
+.rowbtn .tt .ln { display: block; white-space: nowrap; overflow: hidden; }
+.rowbtn .t.two { line-height: 17px; }
+.rowbtn .tt .ln.tags .sh-slot:first-child { margin-left: 0; }
+.sect.items .rowbtn:has(.t.two) { padding-top: 7px; padding-bottom: 7px; }
+/* The kind's mark (passage, video, media playlist, placeholder) shows at the right, 8 from the title, as the guide and the app
+   have it; a header's ⋯ sits at the right level with its name, as every other row's does, without making the header taller. */
+.item .rowbtn .ico { display: grid; margin-left: -2px; }
+.sh-hrow { display: flex; align-items: center; gap: 10px; padding-right: 4px; }
+.sh-hrow .hn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-hrow .sh-rowmore { margin: -6px 0 -6px -6px; }

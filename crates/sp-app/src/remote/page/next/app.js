@@ -229,12 +229,13 @@ const harbour = song('Harbour Lights', [
   ['Chorus', ['Bring us home, bring us home\nOver every wave we have known', 'Приведи нас домой, домой\nЧерез волны, что были с тобой']],
   ['Verse 2', ['Every storm we passed you were standing near\nEvery word of yours has kept us here', 'В каждой буре ты был рядом с нами\nТвоё слово держит нас годами']],
 ]);
-const steady = song('Steady Ground', [
+// Two titles named by their first line, as many churches name hymns: long enough to take a second line in the list (the words are written for this sample).
+const steady = song('Я построю дом на твёрдой земле', [
   ['Verse 1', ['I will build my house on steady ground\nWhere the rain may fall and the wind may sound', 'Я построю дом на твёрдой земле\nПусть идёт дождь, пусть ветер во мгле']],
   ['Chorus', ['You are my rock, you are my song\nYou are the place where I belong', 'Ты моя скала, ты песнь моя\nТы то место, где буду я']],
   ['Bridge', ['Steady, steady, steady ground', 'Твёрдая, твёрдая земля']],
 ]);
-const evening = song('Evening Song', [
+const evening = song('The Day Is Folding into Night', [
   ['Verse 1', ['The day is folding into night\nAnd every window holds a light', '']],
   ['Chorus', ['Keep us, keep us through the dark\nUntil the morning finds us', '']],
 ]);
@@ -1166,11 +1167,11 @@ function renderShowLeft() {
     let n = 0; const ic = { passage: I.book, media: I.film, mediaPlaylist: I.loop, placeholder: I.slot };
     rows = decks().map(d => {
       const pk = itemSel(), multi = pk.length > 1, rowCls = multi ? (pk.includes(d.key) ? (state.openItem === d.key ? 'on' : 'pickd') : state.openItem === d.key ? 'opn' : '') : state.openItem === d.key ? 'on' : '';
-      if (d.kind === 'header') return hit(d.title) ? html`<button class="sh-hrow cap ${multi && pk.includes(d.key) ? 'pickd' : ''}" data-a="openItem:${d.key}" data-m="item:${d.key}" draggable="true" data-drag="item:${d.key}">${d.title}<span class="sh-rowmore" data-a="menu:item,${d.key}" title="More">${I.more}</span></button>` : '';
+      if (d.kind === 'header') return hit(d.title) ? html`<button class="sh-hrow cap ${multi && pk.includes(d.key) ? 'pickd' : ''}" data-a="openItem:${d.key}" data-m="item:${d.key}" draggable="true" data-drag="item:${d.key}"><span class="hn">${d.title}</span><span class="sh-rowmore" data-a="menu:item,${d.key}" title="More">${I.more}</span></button>` : '';
       n++; if (!hit(d.title)) return '';
       const live = state.live && state.live.deck === d.key && !!state.on, pill = verPill(d);
       return html`<div class="item ${live ? 'live' : ''} ${d.kind === 'missing' || (d.kind === 'media' && !d.media) ? 'gone' : ''}"><button class="rowbtn ${rowCls}" data-a="openItem:${d.key}" data-m="item:${d.key}" draggable="true" data-drag="item:${d.key}">
-        <span class="num mono">${two(n)}</span><span class="t ${pill ? 'has-ver' : ''}">${pill ? html`<span class="tt">${d.title}</span>${pill}` : d.title}${d.slot ? html`<i class="sh-slot">${d.slot}</i>` : ''}${d.kind === 'missing' ? html` <i class="sh-slot">missing</i>` : ''}</span>
+        <span class="num mono">${two(n)}</span><span class="t ${pill ? 'has-ver' : ''}"><span class="tt">${d.title}</span>${pill}${d.slot ? html`<i class="sh-slot">${d.slot}</i>` : ''}${d.kind === 'missing' ? html` <i class="sh-slot">missing</i>` : ''}</span>
         ${ic[d.kind] ? html`<span class="ico">${ic[d.kind]}</span>` : ''}<span class="sh-rowmore" data-a="menu:item,${d.key}" title="More">${I.more}</span></button></div>`;
     });
     add = html`<button class="btn sh-add" data-a="menu:addItem">${I.plus} Add to playlist</button>`;
@@ -1179,7 +1180,7 @@ function renderShowLeft() {
     if (order === 'az') listed.sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })); if (order === 'slides') listed.sort((a, b) => b.slides.length - a.slides.length);
     const inLib = id => (DOC.libraries.find(l => l.songs.includes(id)) || {}).name;
     rows = listed.length ? listed.map(s =>
-      html`<div class="item ${state.live && state.live.deck === 'lib-' + s.id && state.on ? 'live' : ''}"><button class="rowbtn ${state.openSong === s.id ? 'on' : ''} ${state.songPick.includes(s.id) ? 'pickd' : ''}" data-a="openSong:${s.id}" data-m="song:${s.id}" draggable="true" data-drag="song:${s.id}"><span class="ico">${I.song}</span><span class="t">${s.title}${state.changedOutside === s.id ? html`<i class="sh-slot sh-chg">changed</i>` : ''}${state.src.id === 'all' && inLib(s.id) ? html`<i class="sh-slot">${inLib(s.id)}</i>` : ''}</span><span class="meta mono">${s.slides.length || ''}</span><span class="sh-rowmore" data-a="menu:song,${s.id}" title="More">${I.more}</span></button></div>`)
+      html`<div class="item ${state.live && state.live.deck === 'lib-' + s.id && state.on ? 'live' : ''}"><button class="rowbtn ${state.openSong === s.id ? 'on' : ''} ${state.songPick.includes(s.id) ? 'pickd' : ''}" data-a="openSong:${s.id}" data-m="song:${s.id}" draggable="true" data-drag="song:${s.id}"><span class="ico">${I.song}</span><span class="t"><span class="tt">${s.title}</span>${state.changedOutside === s.id ? html`<i class="sh-slot sh-chg">changed</i>` : ''}${state.src.id === 'all' && inLib(s.id) ? html`<i class="sh-slot">${inLib(s.id)}</i>` : ''}</span><span class="meta mono">${s.slides.length || ''}</span><span class="sh-rowmore" data-a="menu:song,${s.id}" title="More">${I.more}</span></button></div>`)
       : html`<div class="sh-none">${f ? 'No songs match' : 'No songs here yet. Make one, import some, or drag songs onto this library’s name.'}</div>`;
     add = html`<div class="sh-order"><span class="cap">Order</span>${seg([['listed', 'As listed'], ['az', 'A–Z'], ['slides', 'Longest']], order, 'songOrder')}</div><button class="btn sh-add" data-a="newSong">${I.plus} New song</button>`;
   } else if (state.src.type === 'cat') ({ rows, add } = catLeft(hit));
@@ -1187,7 +1188,51 @@ function renderShowLeft() {
   put('left', html`<div class="sect items"><div class="sect-h"><span class="cap">${state.src.type === 'pl' ? 'Playlist' : state.src.type === 'vox' ? 'Integration' : state.src.type === 'cat' ? 'Song catalog' : 'Library'}</span><button class="iconbtn" data-a="menu:importMenu" title="Import songs or slides">${svg('M6.500 2v6.500M4 6l2.500 2.500L9 6M2.500 10.500h8')}</button></div>
     <button class="plbtn ${state.srcMenu ? 'open' : ''}" data-a="srcMenu" title="Choose a library or playlist (Option-P)"><i class="sh-kind ${state.src.type === 'pl' ? 'pl' : state.src.type === 'cat' ? 'cat' : 'lib'}">${state.src.type === 'pl' ? I.playlist : state.src.type === 'cat' ? I.catalog : I.library}</i><span>${srcName()}</span><span class="chev">${I.chev}</span></button>${panel}${rows}</div>
     <div class="sh-foot">${add}<input class="search" placeholder="Filter" data-i="filter" value="${state.filter}"></div>`);
+  fitTitles(document.getElementById('left'));
 }
+// A list row's title takes up to two lines, broken where the chosen row's heavier weight (600) breaks them, so a row keeps its
+// height whether it is chosen or not. A title still too long ends in … on its second line and shows whole in the row's tooltip.
+// A tag after the title (missing, changed, a library's name) never shortens it: it follows the last line where there is room,
+// takes a line of its own under a one-line title, and otherwise is left to the tooltip. The app lays its rows out the same way.
+const titleRuler = document.createElement('canvas').getContext('2d');
+function twoLines(text, room) {
+  const fits = s => titleRuler.measureText(s).width <= room;
+  if (fits(text)) return { lines: [text], cut: false };
+  let first = '';
+  for (const w of text.split(' ')) { const more = first ? `${first} ${w}` : w; if (fits(more)) first = more; else break; }
+  if (!first) { let n = 1; while (n < text.length && fits(text.slice(0, n + 1))) n++; first = text.slice(0, n); }      // one word longer than the line: cut by letters
+  const rest = text.slice(first.length).trimStart();
+  if (fits(rest)) return { lines: [first, rest], cut: false };
+  let n = rest.length; while (n > 0 && !fits(`${rest.slice(0, n).trimEnd()}…`)) n--;
+  return { lines: [first, `${rest.slice(0, n).trimEnd()}…`], cut: true };
+}
+const titleTags = new WeakMap();      // a title's tags, kept so that it can be laid out again when its room changes
+function fitTitles(root) {
+  for (const tt of root.querySelectorAll('.rowbtn .tt')) {
+    const t = tt.parentElement, row = t.closest('.rowbtn');
+    if (!tt.dataset.full) { tt.dataset.full = tt.textContent.replace(/\s+/g, ' ').trim(); titleTags.set(tt, [...t.querySelectorAll(':scope > .sh-slot')]); }
+    const full = tt.dataset.full, tags = titleTags.get(tt);
+    tt.textContent = full; t.append(...tags); t.classList.remove('two'); row.removeAttribute('title');      // as drawn, before it is fitted
+    const room = t.clientWidth;
+    if (room <= 0 || !full) continue;
+    const cs = getComputedStyle(tt);
+    titleRuler.font = `600 ${cs.fontSize} ${cs.fontFamily}`;
+    const tail = tags.reduce((w, g) => w + g.getBoundingClientRect().width + parseFloat(getComputedStyle(g).marginLeft || 0), 0);
+    const { lines, cut } = twoLines(full, room), lastFits = titleRuler.measureText(lines[lines.length - 1]).width + tail <= room;
+    const line = text => { const ln = document.createElement('span'); ln.className = 'ln'; ln.textContent = text; return ln; };
+    tt.replaceChildren(...lines.map(line));
+    let left = [];
+    if (tags.length && lastFits) tt.lastChild.append(...tags);
+    else if (tags.length && lines.length === 1) { const own = line(''); own.classList.add('tags'); own.append(...tags); tt.append(own); }
+    else if (tags.length) { left = tags.map(g => g.textContent); tags.forEach(g => g.remove()); }
+    t.classList.toggle('two', tt.children.length > 1);
+    if (cut || left.length) row.title = [full, ...left].join(' · ');
+  }
+}
+// The room changes with the window (a tablet turned round, a window made narrower): the titles are fitted again, at most once a
+// frame. Only their lines are redrawn, so a field being typed in keeps its place.
+let refitting = 0;
+addEventListener('resize', () => { if (!refitting) refitting = requestAnimationFrame(() => { refitting = 0; if (state.mode === 'show') fitTitles(document.getElementById('left')); }); });
 A.srcMenu = () => { state.srcMenu = !state.srcMenu; renderShowLeft(); };
 A.songOrder = ([o]) => { state.songOrder = o; renderShowLeft(); };
 A.emptyAdd = ([what]) => { const it = M.addItem().find(x => x.t.startsWith({ song: 'A song', passage: 'A Bible', header: 'A header' }[what])); if (it) it.f(); };
@@ -1257,7 +1302,7 @@ M.item = ([id]) => {
   return [
     s && { t: 'Add Slide', f: () => mutate(() => { const last = s.slides[s.slides.length - 1]; s.slides.push(slide(last ? last.group : 'Verse 1', 'New slide', '')); }) },
     s && { t: 'Song', sub: M.song([s.id, playlist().id, id]) },
-    (it.kind === 'header' || it.kind === 'placeholder') && { t: 'Rename', f: () => renameAt(it.kind === 'header' ? `#left .sh-hrow[data-drag="item:${id}"]` : `#left [data-drag="item:${id}"] .t`, it.name, v => mutate(() => { it.name = v; }), 'Rename') },
+    (it.kind === 'header' || it.kind === 'placeholder') && { t: 'Rename', f: () => renameAt(it.kind === 'header' ? `#left .sh-hrow[data-drag="item:${id}"] .hn` : `#left [data-drag="item:${id}"] .t`, it.name, v => mutate(() => { it.name = v; }), 'Rename') },
     it.kind === 'placeholder' && { t: 'Fill with Song…', f: () => A.fillSlot([id]) },
     it.kind === 'passage' && { t: 'Open on the Bible Page', f: () => { lookUp({ ...it.passage }); state.mode = 'bible'; render(); } },
     it.kind === 'placeholder' && it.song && { t: 'Empty It', f: () => mutate(() => { it.song = null; }) },
