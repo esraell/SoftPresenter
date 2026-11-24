@@ -43,7 +43,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   after which it goes on, actions, a transition of its own or being switched off, then a pencil
   (the editor) and ⋯ (its menu, as a right-click). The slide on screen has an orange ring and
   orange words; slides picked out have a blue ring.
-- In the Show view, ↑ and ↓ open the song above or below in the song list (with Shift, picking
+- In the Service view, ↑ and ↓ open the song above or below in the song list (with Shift, picking
   out the songs on the way), or the item above or below in a playlist (passing over headers);
   ← → and Space go on moving the slides.
 - Groups (Verse 1, Chorus, Bridge…) with a dot in the group's colour and one-key jumps.
@@ -60,7 +60,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   `sp` command. The app never saves over a song or theme file changed since it read it: it asks,
   with **Reload** (the file's version) or **Keep mine** (SoftPresenter's written over it), as a
   question in the notices (the status button turns amber with "?"; the list never opens by
-  itself), and for a song also in an amber-tinted strip under its title bar in the Show view:
+  itself), and for a song also in an amber-tinted strip under its title bar in the Service view:
   "This song was changed outside SoftPresenter. Read it again from its file, or keep
   SoftPresenter's version?". A song on screen, being edited, or holding changes not saved is
   never swapped unasked; the question offers it instead. Answered in either place, it goes,
@@ -421,7 +421,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   stay picked. Delete (or Backspace) acts on the list last clicked: in a playlist it takes the
   items picked (or the one open) out of it at once, asking nothing, as no song is deleted; any
   kind of item, the one on screen too, which stays on screen; only while the keyboard is the left
-  column's (in the Show view, not on the Bible page, with the chooser put away). Nothing is said,
+  column's (in the Service view, not on the Bible page, with the chooser put away). Nothing is said,
   as what went is there to see; Undo (Command-Z) puts them back where they were, picked out
   again; Remove from Playlist in an item's menu does the same, for all the items picked when it
   is one of them ("Remove 2 Items from Playlist"), and Move Up and Move Down move them all one
@@ -544,12 +544,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   group; Disable gives them all what it offers for the clicked one); never on slides picked in
   another song.
   A song's menu has Loop to First Slide, for a loop of announcements. Undo and Redo (Command-Z, Shift-Command-Z) step back through
-  these changes in the Show view and on the Bible page, and the audience stays on the same slide;
+  these changes in the Service view and on the Bible page, and the audience stays on the same slide;
   what was deleted takes its turn in the same order.
 - **Greyed, not refused:** a control that can't do anything now is greyed, and its hover says why, so
   there is nothing to refuse. Undo and Redo (the buttons under the slides, in the stage layout editor and the
   inspector, and the Edit menu) are greyed with "Nothing to undo" or "Nothing to redo", following the history in
-  force (the Show view's, or the Edit view's own order). Paste Style is greyed until a style is copied ("Copy a
+  force (the Service view's, or the Edit view's own order). Paste Style is greyed until a style is copied ("Copy a
   style first"). Remove on the last audience screen ("There is always one audience screen"), Delete on the last
   stage layout, a theme's last usual template and a song's last slide, Move Up and Move Down at the ends of a list
   ("Already at the top", "Already at the bottom"), and the Key choice of a screen with no other audience screen to
@@ -663,7 +663,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - A slide can carry the same actions as a macro, done when it goes on screen (its menu's
   Actions › Add Action offers them in the same groups as a macro's + Add a step).
 - **The window** is three round panels on a dark window: the left column, the middle, and a
-  right column that is the same in every view. Along the top: the views (Show, Bible, Edit), a
+  right column that is the same in every view. Along the top: the views (Service, Bible, Edit), a
   find box (press `/`, or Command-F: it finds songs by title and then each slide whose words
   have what is typed, tagged with its group ("Song · Chorus"), a slide picked being brought into view and
   ringed in ink for a moment, a Bible passage when a reference is typed (named and quoted in the language it was
@@ -687,7 +687,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   24-hour clock as the computer is set, the figures alone, with no AM or PM), the Audience and Stage
   keys, a `?` (the list of every key, as the `?` key opens it) and Settings.
 - **Keys for getting around**, the same on every computer (Command on a Mac, Ctrl elsewhere;
-  they don't depend on the Mac's menu bar): **Command-1, -2 and -3** go to Show, Bible (with
+  they don't depend on the Mac's menu bar): **Command-1, -2 and -3** go to Service, Bible (with
   the cursor in the reference) and Edit, and Command-B to Bible as well (it stays Bold while
   editing a slide); Command-P
   opens the chooser of playlists and libraries; Command-F (or `/`) finds; Command-comma opens
@@ -726,7 +726,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   acts on the slides picked out (or the one open), the prop, the stage layout or the template
   open. Templates and themes are dragged to another place the same way (the built-in theme
   stays first, and the themes' order is kept for the next start). Under Slides, a SONG heading comes first, over the songs to
-  choose from as plain rows with a song's mark (those of the playlist the Show view lists, or
+  choose from as plain rows with a song's mark (those of the playlist the Service view lists, or
   of the library it lists, and the song open), the open one lighter; a long list scrolls in
   its own room.
 - **Looking at one screen**: with more than two screens, a small arrow in the preview block's
@@ -820,7 +820,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   with none looks that verse up (Shift: the passage from the verse clicked before) and picks it,
   without putting anything on screen. Only the verses in view are drawn, so the longest psalm
   costs no more than a short chapter. **Slides** shows the slides as the Bible theme draws them,
-  at the Show view's size: with a slide a verse, the same chapter as the page, the passage's
+  at the Service view's size: with a slide a verse, the same chapter as the page, the passage's
   slides in a fine faint ring (the verse picked in its ink ring, the verse
   on screen in orange), so any verse can be clicked there too; made into one slide, that slide.
   Which of the two is kept between starts.
@@ -889,7 +889,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   understood keeps the keyboard in the field instead). In the Bible view a letter or number
   typed with no field taking the keyboard starts the next reference in the field (so "ps 23"
   typed after Return goes there); it never jumps the song on screen to a group, as letters do in
-  the Show view. Command-2 or Command-B (Ctrl elsewhere), from anywhere, goes back to the field
+  the Service view. Command-2 or Command-B (Ctrl elsewhere), from anywhere, goes back to the field
   with its words selected, ready for the next reference.
 - History, the other side of the left column, lists the passages that were on screen, newest
   first, named in the operator's language, with the time (or the day, for earlier ones): the
@@ -961,7 +961,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   opened, and nothing a file declares or names is expanded or fetched.
 - One click keeps a passage: + Add puts it in the playlist in front (its tooltip names the
   playlist; the ▾ beside it lists the other playlists, then **New Playlist…**, which makes one
-  with the passage in it, brings it to the front and opens the Show view with its name ready to
+  with the passage in it, brings it to the front and opens the Service view with its name ready to
   type), to be brought back with the same settings. A playlist takes the same passage in the
   same translations once: adding it again says "John 3:16 is already in Sunday", as `sp bible
   REFERENCE --add` does; the same verses in other translations go in as another item. It keeps the
@@ -974,12 +974,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 
 ## Editing
 - **Edit always opens something.** Command-3, the Edit key in the top bar and View › Edit open
-  the song chosen in the Show view (at the slide picked out, or the slide on screen when it is in
+  the song chosen in the Service view (at the slide picked out, or the slide on screen when it is in
   that song). When that song can't be edited (it has no slides, or it is a Bible passage or the
   VoxLive item, which the app makes), Edit opens the song on screen, then the first song of the
   playlist in front, then the first song there is; with no song at all a brief cue says how to make
   one. On a Mac, Command-3 had stopped reaching the menu bar's Edit; it does again.
-- **Moving slides.** Drag a slide to another place in its song, in the Show view's grid or the
+- **Moving slides.** Drag a slide to another place in its song, in the Service view's grid or the
   Edit view's list; an ink line shows where it will go (before or after the slide it is dropped
   on, by which half of it the pointer is over, in that slide's group), the slides being moved go
   faint, and the list scrolls when the drag nears its top or bottom. A press that barely moves
@@ -1001,7 +1001,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   in its strip (a group's colour follows its name); the menu also has Duplicate, Delete,
   Move Up and Move Down. ↑ and ↓ open the slide before or after (with no object selected).
   Shift-click picks out the slides from the one open to the one clicked, Command-click picks
-  one out or puts it back, as in the Show view and the lists of songs and media; the slides
+  one out or puts it back, as in the Service view and the lists of songs and media; the slides
   picked out move together when one is dragged, and Cmd-C copies them. While a question is
   open in the Edit view (whether to delete slides, a prop, a stage layout or a template),
   Delete, the arrows and the other keys wait for it and change nothing behind it.

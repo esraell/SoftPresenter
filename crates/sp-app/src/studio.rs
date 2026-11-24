@@ -978,7 +978,7 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             0
         };
         let hints = [
-            crate::keys::hint("Show", "1", false),
+            crate::keys::hint("Service", "1", false),
             format!(
                 "{}; {} too",
                 crate::keys::hint("Bible, ready for a reference", "2", false),
@@ -992,7 +992,7 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             ui,
             "views",
             at,
-            &["Show", "Bible", "Edit"],
+            &["Service", "Bible", "Edit"],
             &hints,
             ORDER.iter().position(|shown| *shown == view),
             &SwitchLook::views(),
@@ -1000,7 +1000,7 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         // With Show Keys on Buttons: each view's key beside it (Command-1, 2 and 3; Ctrl
         // elsewhere).
         if crate::keys::tags_shown(state) {
-            let cells = pill_cells(ui, at, &["Show", "Bible", "Edit"], &SwitchLook::views());
+            let cells = pill_cells(ui, at, &["Service", "Bible", "Edit"], &SwitchLook::views());
             for (cell, key) in cells.iter().zip(["1", "2", "3"]) {
                 crate::keys::corner_tag(ui.painter(), *cell, &crate::keys::with_modifier(key));
             }
@@ -3379,7 +3379,7 @@ pub fn playlist_song(show: &Show, state: &HomeState, key: &str) -> Option<usize>
         .filter(|index| listed(*index))
 }
 
-/// The slide Edit opens: in the song chosen in the Show view (never another song that happens
+/// The slide Edit opens: in the song chosen in the Service view (never another song that happens
 /// to be on screen, or on the Announcements layer), the slide picked out with a right-click,
 /// or else the slide on screen if it is in that song, or else the song's first slide.
 pub fn slide_to_edit(show: &Show, state: &HomeState) -> SlideRef {
@@ -4211,7 +4211,7 @@ fn picked_to_move(state: &mut HomeState, index: usize) {
     }
 }
 
-/// Whether ↑ and ↓ go through the song list or the playlist: in the Show view, with nothing
+/// Whether ↑ and ↓ go through the song list or the playlist: in the Service view, with nothing
 /// being typed and the song search closed.
 pub fn list_keys_work(ui: &egui::Ui, state: &HomeState) -> bool {
     // Not under an open menu, where the arrows move between its choices, nor under the list of

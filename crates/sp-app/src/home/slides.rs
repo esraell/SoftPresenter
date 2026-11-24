@@ -1,4 +1,4 @@
-//! The middle of the Show view: the open playlist as one scroll, item after item, each under a
+//! The middle of the Service view: the open playlist as one scroll, item after item, each under a
 //! bar with its name that stays at the top while its slides scroll under it; or the one song
 //! chosen in a library, shown the same way. The Bible page shows its passage with the same
 //! tiles.
@@ -505,7 +505,7 @@ impl SlideDeck {
     }
 }
 
-/// What the middle of the Show view shows: the playlist in front, every item of it, when the
+/// What the middle of the Service view shows: the playlist in front, every item of it, when the
 /// left column lists a playlist; otherwise the song chosen, by itself. Also keeps the open
 /// item and the song chosen in step (see [`keep_in_step`]).
 pub fn decks(show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) -> Vec<Deck> {
@@ -2472,7 +2472,7 @@ fn arrangement_strip(
     }
 }
 
-/// The middle of the Show view: the playlist in front as one scroll, or the song chosen in a
+/// The middle of the Service view: the playlist in front as one scroll, or the song chosen in a
 /// library, with the bar under the slides at its foot.
 pub fn slide_area(
     ui: &mut egui::Ui,
@@ -2772,7 +2772,7 @@ fn slide_menu(
             }
         }
     });
-    // A key that puts this slide on screen in the Show view.
+    // A key that puts this slide on screen in the Service view.
     ui.menu_button("Hot Key", |ui| {
         if ui.add(egui::Button::selectable(slide.hot_key.is_none(), "None")).clicked() {
             state.slide_request = edited(&|one| Slide { hot_key: None, ..one.clone() });
@@ -3185,7 +3185,7 @@ mod tests {
         let (slot, looked_up) = state.bible.pending.take().expect("the passage was looked up");
         assert_eq!(looked_up.title, title);
         assert_eq!(state.services.chosen, Some(1), "and the passage is the open item");
-        assert!(!state.bible_open, "the Show view stays");
+        assert!(!state.bible_open, "the Service view stays");
         // As the app does next: the passage goes into its place and its slide on screen.
         show.replace_presentation(slot, Arc::new(looked_up));
         show.apply(Command::GoTo(SlideRef { presentation: slot, slide: 1 }));
@@ -3277,11 +3277,11 @@ mod tests {
         let asked = click(&ctx, &show, &mut state, row(84.0), &mut time);
         assert!(asked.is_empty(), "{asked:?}");
         assert_eq!(state.services.chosen, before);
-        // The passage: opened in the Show view; the Bible page is left as it was.
+        // The passage: opened in the Service view; the Bible page is left as it was.
         let asked = click(&ctx, &show, &mut state, row(84.0 + 34.5), &mut time);
         assert!(asked.is_empty(), "{asked:?}");
         assert_eq!(state.services.chosen, Some(3));
-        assert!(!state.bible_open, "the Show view stays");
+        assert!(!state.bible_open, "the Service view stays");
         assert!(state.bible.pending.is_none() && state.bible.go_live.is_none(), "nothing was looked up");
         // Open on the Bible Page, in its menu, is how it gets there.
         crate::studio::carry_out_item_ask(&show, &mut state, &mut Vec::new(), ItemAsk::Bible(3));

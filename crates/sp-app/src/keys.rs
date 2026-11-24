@@ -354,7 +354,7 @@ pub fn frame(ctx: &egui::Context, state: &mut HomeState, voxlive: bool) -> Optio
         if editing {
             return;
         }
-        // The playlists and libraries to choose from, in the Show view.
+        // The playlists and libraries to choose from, in the Service view.
         if pressed(input, Key::P, false) {
             state.view_request = Some(0);
             state.chooser_open = true;
@@ -652,11 +652,11 @@ mod tests {
         assert_eq!(chord_on(false, false, false, false, true, "1"), "Ctrl+1");
         assert_eq!(chord_on(false, true, true, true, true, "K"), "Ctrl+Alt+Shift+K");
         // What the window says in a hover hint or a notice goes through it.
-        let (show, shifted, tab) = (hint("Show", "1", false), hint("Screens", "1", true), tab_hint("Timers", 0));
+        let (show, shifted, tab) = (hint("Service", "1", false), hint("Screens", "1", true), tab_hint("Timers", 0));
         if cfg!(target_os = "macos") {
             assert_eq!(
                 (show.as_str(), shifted.as_str(), tab.as_str()),
-                ("Show (\u{2318}1)", "Screens (\u{21e7}\u{2318}1)", "Timers (\u{2325}1)")
+                ("Service (\u{2318}1)", "Screens (\u{21e7}\u{2318}1)", "Timers (\u{2325}1)")
             );
             assert_eq!(hint_key("N"), "\u{2318}N");
         } else {

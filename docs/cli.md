@@ -282,7 +282,7 @@ each time with the token the last reply gave.
 | `stage picture LAYOUT main\|SCREEN\|off` | A picture of what an audience screen shows, live, on a stage layout: the layout's screen picture shows `main` (the first audience screen, whichever that is) or the audience screen named, kept by its id so renaming it changes nothing; a layout with none gets one at the top right. `off` takes the layout's screen pictures away. A stage screen is never shown |
 | `stage frame LAYOUT OBJECT x= y= w= h=` | Where one of a stage layout's objects sits, in the stage's pixels (1920 × 1080). OBJECT is its number in `stage objects` or its name |
 | `test bars\|grid\|white\|off` | A test pattern on the audience screens |
-| `view show\|edit\|bible\|themes`, `view words [SONG]` | Switches the window's view (`themes` is the Edit view on the themes; `edit` is the Edit view on a song's slides); `view words` opens Edit Words, the song's words as text (`view reflow`, its old word, still works) |
+| `view service\|bible\|edit\|themes`, `view words [SONG]` | Switches the window's view (`show`, the Service view's old name, still works; `themes` is the Edit view on the themes; `edit` is the Edit view on a song's slides); `view words` opens Edit Words, the song's words as text (`view reflow`, its old word, still works) |
 
     $ sp go "River Song"
     On screen: River Song, slide 1 of 3 (Verse 1).

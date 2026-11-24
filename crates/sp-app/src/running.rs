@@ -168,15 +168,15 @@ fn next_stop(stops: &[Stop], here: usize, forward: bool) -> Option<usize> {
 /// Where Enter is pressed, as it matters to what it does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Listed {
-    /// The Show view, with the playlist in front listed, and its open item.
+    /// The Service view, with the playlist in front listed, and its open item.
     Playlist(Option<usize>),
-    /// The Show view, with a library listed.
+    /// The Service view, with a library listed.
     Library,
     /// The Bible view.
     Bible,
 }
 
-/// What Enter does: a slide picked goes on screen. Otherwise, in the Show view, the open item
+/// What Enter does: a slide picked goes on screen. Otherwise, in the Service view, the open item
 /// goes on screen from its first slide (with a library listed, the song chosen); in the Bible
 /// view nothing does until a verse is picked.
 pub fn enter(stops: &[Stop], listed: Listed, picked: Option<SlideRef>) -> Option<Do> {

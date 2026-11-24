@@ -8,7 +8,7 @@ Website: [softpresenter.com](https://softpresenter.com)
 [![Checks](https://github.com/esraell/SoftPresenter/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/esraell/SoftPresenter/actions/workflows/ci.yml)
 ![macOS; Windows and Linux in testing](https://img.shields.io/badge/platform-macOS%3B%20Windows%20and%20Linux%20in%20testing-lightgrey)
 
-![The Show view: the Sunday Morning playlist open on Showers of Blessing, its slides in English with the Russian under each, the verse on screen over a background picture, two timers and the media bin](docs/images/home.png)
+![The Service view: the Sunday Morning playlist open on Showers of Blessing, its slides in English with the Russian under each, the verse on screen over a background picture, two timers and the media bin](docs/images/home.png)
 
 > **Early version.** Things change until 1.0, and it isn't ready to be a church's only presentation app yet. Bug reports and ideas are welcome in [Issues](https://github.com/esraell/SoftPresenter/issues).
 
@@ -112,7 +112,7 @@ The full list, area by area, is in [docs/features.md](docs/features.md). In shor
    right-click a song, picture or video and choose Play on Announcements Layer.
 6. **Choose what the stage sees.** In the Stage tab, give each stage screen a layout: Words and
    Next, Words Only, Words and Notes, Clock and Timer, or one you design.
-7. **Run it.** In the Show view (Command-1), open the playlist and click the first slide, or press
+7. **Run it.** In the Service view (Command-1), open the playlist and click the first slide, or press
    Space. The right arrow and Space go forward, the left arrow goes back, and letters jump to a
    group (A for Verse 1, C for the chorus). Escape clears everything; the layer keys under the
    preview clear one layer at a time (on Windows and Linux, F2 to F6 do too). Timers, messages
@@ -196,7 +196,7 @@ status` instead of `sp status`.
 | Cmd+, | Settings |
 | Option+Cmd+1 | Screens |
 | Shift+Cmd+1 / Shift+Cmd+2 | audience / stage screens on or off |
-| Cmd+1, Cmd+2 (or Cmd+B), Cmd+3 | Show, Bible (ready for a reference), Edit (Control+T opens the themes on a Mac) |
+| Cmd+1, Cmd+2 (or Cmd+B), Cmd+3 | Service, Bible (ready for a reference), Edit (Control+T opens the themes on a Mac) |
 | Cmd+P | the playlists and libraries to choose from |
 | Option+1 … Option+7, then 1 … 9 | open a tool tab and number what is in it, then start, show, run or play the one with that number |
 | Shift+Cmd+M, then 1 … 9 | show that picture or video |
@@ -241,7 +241,7 @@ kept beside it as "SoftPresenter (moved to Documents)".
 SoftPresenter aims to be the presentation app a church never has to pay for and never outgrows:
 complete enough for a large Sunday service, simple enough for a volunteer, light enough for an
 old laptop, and open to scripts and AI. First on the list: bringing playlists and media across
-from a church's existing software, and fixing a slide's words from the Show view. After that
+from a church's existing software, and fixing a slide's words from the Service view. After that
 come the whole app in a browser (Remote Control's API is in place; its fuller page is still
 being designed) with a phone remote, and an MCP server for AI assistants. Planned with
 [TimelyChurch](https://timelychurch.com): setlists planned there for a service arriving in

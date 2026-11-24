@@ -956,7 +956,7 @@ Running the show
   select SONG                  show a song's slides without putting anything on screen
   clear [all|slide|media|props|messages|audio|announcements]
   audience on|off              stage on|off           identify on|off
-  view show|edit|bible|themes
+  view service|bible|edit|themes
 
 Layers and controls
   media show ITEM | media add FILE… | media samples | media delete ITEM --yes
@@ -2210,14 +2210,16 @@ impl crate::App {
 
     fn ctl_view(&mut self, which: &str) -> Result<Reply, String> {
         let at = match which.to_lowercase().as_str() {
-            "show" => 0,
+            // "show" is the Service view's old name, kept for scripts written with it.
+            "service" | "show" => 0,
             "edit" => 1,
             "bible" => 2,
             "themes" => 3,
-            _ => return Err("Which view: show, edit, bible or themes?".to_owned()),
+            _ => return Err("Which view: service, bible, edit or themes?".to_owned()),
         };
         self.with_state(|state| state.view_request = Some(at));
-        Ok(Reply::done(format!("Switching to the {which} view.")))
+        let name = ["Service", "Edit", "Bible", "Themes"][at];
+        Ok(Reply::done(format!("Switching to the {name} view.")))
     }
 
     /// Each screen, and what it is doing: filling a display, in a window, sending over NDI, or

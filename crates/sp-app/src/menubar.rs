@@ -297,7 +297,7 @@ pub const MENUS: &[(&str, &[Entry])] = &[
     (
         "View",
         &[
-            Check(Action::ShowView, "Show", cmd('1')),
+            Check(Action::ShowView, "Service", cmd('1')),
             Check(Action::BibleView, "Bible", cmd('2')),
             Check(Action::EditView, "Edit", cmd('3')),
             Check(Action::ThemesView, "Themes", ctrl('T')),

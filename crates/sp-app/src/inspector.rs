@@ -461,7 +461,7 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
                         }
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("Done").on_hover_text("Go back to the Show view").clicked() {
+                        if ui.button("Done").on_hover_text("Go back to the Service view").clicked() {
                             leave = true;
                         }
                         if !for_theme {

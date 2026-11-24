@@ -486,7 +486,7 @@ impl crate::App {
     }
 
     /// Puts a song changed from the command line in its place, as a change in the window is
-    /// put: it can be undone (from the Show view, or the Edit view's undo), it is saved, its
+    /// put: it can be undone (from the Service view, or the Edit view's undo), it is saved, its
     /// pictures are drawn again, an editor open on it shows it, and the screens show it at once.
     pub(crate) fn change_song(&mut self, at: usize, song: Presentation) {
         let ids: Vec<sp_model::Uuid> = song.slides().map(|(_, slide)| slide.id).collect();

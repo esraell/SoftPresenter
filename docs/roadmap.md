@@ -12,8 +12,8 @@ Size: S = under a day, M = days, L = a week or more. Sunday: how much it matters
 1. **Playlists and media from a church's existing presentation software.** Songs, libraries
    and song bundles (with their pictures and videos) come across already; playlists, and the
    pictures and videos a plain song document names on the computer it is on, are next. · M
-2. **Fixing a slide's words from the Show view.** Mend a typo on the live slide without leaving
-   the Show view. · S–M
+2. **Fixing a slide's words from the Service view.** Mend a typo on the live slide without leaving
+   the Service view. · S–M
 3. **Corner pin (keystone).** Square up a projector that is off-axis. · M
 4. **More slide and macro actions.** Audio tracks and playlists, clearing audio and
    announcements, changing a stage layout or a saved screen setup, running another macro,
@@ -37,7 +37,7 @@ rather than a feature, but no church on Windows can use the app without them.
 
 - **Clear buttons of your own.** Each clears a chosen set of layers (for example words and props, keeping the background), and can be used from keys, macros and remotes. (started: a clear button for each layer, Clear All, a macro's Clear steps for every layer, and F1–F6 off a Mac) · M · Medium
 - **Slides shown on the stage screens only.** A key or a slide action sends the slides that follow to the stage screens only, while the audience keeps its picture (band notes, sermon notes). · M · Medium
-- **Fixing a slide's words from the Show view.** A small pop-up for a typo spotted mid-service, without opening the editor. (started: the editor, Edit Words and Live Edit) · S–M · Medium
+- **Fixing a slide's words from the Service view.** A small pop-up for a typo spotted mid-service, without opening the editor. (started: the editor, Edit Words and Live Edit) · S–M · Medium
 - **A whole song that moves on by itself.** One setting in the song's header moves every slide on after 5, 10, 15 or 20 seconds or a time of your own, for announcement loops. (started: Go to Next on each slide, set one by one from fixed times of 3 to 60 seconds, and Loop to First Slide) · S · Medium
 - **Text format pop-over.** Change the font, size, colour, capitals, alignment, outline and shadow of the selected slides or songs at once. (started: styling per box in the editor, and Copy Style and Paste Style) · M · Medium
 - **Notes for a whole song.** One line of operator notes kept with the song and shown in its header. (started: the notes strip shows the notes of the slide on screen) · S · Low
@@ -62,7 +62,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **A text style applied to all slides at once.** (started: Copy Style and Paste Style) · S · Low
 - **More fills.** Text as a cut-out, a media fill, background invert or blur; shapes filled with a picture, a video, a web page, a live camera, a background effect or another object on the slide. (started: colour, and linear and radial gradients) · M–L · Low
 - **Custom shapes and shape settings.** Draw shapes of your own with a pen; set a star's points and a polygon's sides; Option-drag to duplicate; Shift keeps proportions. (started: ten fixed shapes, and ⌘D duplicates) · M · Low
-- **Showing a slide from the editor.** Send the slide being edited to the screens. (started: Live Edit sends edits to the screens; Show in the editor goes back to the Show view) · S · Low
+- **Showing a slide from the editor.** Send the slide being edited to the screens. (started: Live Edit sends edits to the screens; Show in the editor goes back to the Service view) · S · Low
 - **Outline and text details.** Dashed outlines, an underline colour, and for scrolling text its speed, start point, edge fade and gap. (started: outline width and colour, and scroll direction) · S · Low
 - **Number fields that take sums and can be dragged to change the value.** · S · Low
 - **Animated graphics.** A searchable library of animated graphics to drop on slides; the graphics have to be made first. · M · Low
@@ -201,7 +201,7 @@ rather than a feature, but no church on Windows can use the app without them.
 
 - **Network API.** HTTP and WebSocket (and one JSON message per line over TCP) control of slides, playlists, clears, timers, messages, props, macros, screen setups and screens, with live status updates and slide thumbnails. It runs the same commands as `sp`, so the command line, the browser, remotes and AI agents always do the same thing. Off until it is switched on in Settings, on the local network only, with passwords for watching and for control. Most of this section needs it. (started: Remote Control serves HTTPS and a WebSocket from the app, switched on in Settings, behind a password with remembered devices, running `sp`'s commands with live state, slide pictures and the live preview (docs/remote-api.md); still to come: a watching-only password, one JSON message per line over TCP) · L · Medium
 - **Phone or tablet remote.** Browse playlists, put slides up, clear, run macros; passwords for watching only and for control. M as a web page the app serves, L as an app. (started: a small page built into Remote Control, with Next, Previous, Clear All and the live preview; the full page comes from the design work) · M–L · Medium
-- **The whole app in a browser.** A web page the app serves, laid out like the Show view: libraries and playlists, the slides, what is on screen, the media and the live tools (timers, messages, props, macros, clears), updating as the show changes. The show can then be run from any computer or tablet on the network, and a second operator can help from another room. Needs the network API. · L · Medium
+- **The whole app in a browser.** A web page the app serves, laid out like the Service view: libraries and playlists, the slides, what is on screen, the media and the live tools (timers, messages, props, macros, clears), updating as the show changes. The show can then be run from any computer or tablet on the network, and a second operator can help from another room. Needs the network API. · L · Medium
 - **Running without a window (headless).** SoftPresenter on a computer with nobody at it: it drives the screens or sends NDI, and is run from the browser page, a remote or `sp`. For a booth or rack computer that only feeds the projectors or a stream, a second computer that sends the stage screens, and scripts and agents that make slides, packs or pictures with no one watching. Comes after the network API and the whole app in a browser, which are how it is run. · M · Low
 - **Stream Deck and Bitfocus Companion.** Buttons that run the show, ideally through modules that already exist. Needs the network API. · M · Medium
 - **MIDI in and out.** A note map (next slide, clear, pick by number) and slide actions that send notes. · M · Low

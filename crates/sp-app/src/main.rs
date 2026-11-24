@@ -903,7 +903,7 @@ fn find_key_is_free(state: &home::HomeState, ctx: &egui::Context) -> bool {
         && !egui::Popup::is_any_open(ctx)
 }
 
-/// Whether Enter is free to run the show (in the Show view and the Bible view alike): no
+/// Whether Enter is free to run the show (in the Service view and the Bible view alike): no
 /// control has the keyboard, the Edit view is not open, and no sheet, question, menu or Options
 /// is open over the window.
 fn enter_key_is_free(state: &home::HomeState, ctx: &egui::Context) -> bool {
@@ -1365,7 +1365,7 @@ struct App {
     /// wait on Reload or Keep mine.
     held_songs: Vec<usize>,
     held_themes: Vec<usize>,
-    /// The changes made to songs in the Show view, to undo and redo.
+    /// The changes made to songs in the Service view, to undo and redo.
     history: ShowHistory,
     /// The song open in the Edit view, if any, and where the song history was when it opened:
     /// steps from before then are dropped once the editor changes the song.
@@ -4011,7 +4011,7 @@ impl App {
         }
     }
 
-    /// Undoes the last change made to a song in the Show view, or redoes the last one undone.
+    /// Undoes the last change made to a song in the Service view, or redoes the last one undone.
     /// Keeps the Edit view's undo order and the song history in step: drops what can no longer
     /// be undone safely, notes when the editor opens and closes, and undoes or redoes a change of
     /// the song's slides asked for from the editor, the slide being edited following it.
@@ -4066,7 +4066,7 @@ impl App {
         let taken = if redo { state.edit_steps.last() } else { state.edit_redo.last() }.copied();
         // Something deleted from one of the Edit view's lists: put back (or deleted again),
         // opened where its list opens it, not a slide to follow. When the history's next step
-        // isn't a delete, it was already taken from outside the editor (the Show view, `sp
+        // isn't a delete, it was already taken from outside the editor (the Service view, `sp
         // undo`): the step is let go, and nothing else is taken back in its place.
         if taken == Some(home::EditStep::Deleted) {
             if self.history.removed_next(redo) {
@@ -4101,7 +4101,7 @@ impl App {
         }
     }
 
-    /// Whether Undo (or Redo) in the Show view has a step to take, as [`App::undo_show`] takes
+    /// Whether Undo (or Redo) in the Service view has a step to take, as [`App::undo_show`] takes
     /// it: something deleted to put back (or delete again), or a change to a song that is still
     /// there. Something just deleted, not yet in the history, goes in first, which leaves nothing
     /// to redo.
@@ -4113,7 +4113,7 @@ impl App {
             || self.history.peek(redo).is_some_and(|index| index < self.show.presentations().len())
     }
 
-    /// Tells the window what the Show view's history can undo and redo now, so Undo and Redo are
+    /// Tells the window what the Service view's history can undo and redo now, so Undo and Redo are
     /// greyed when it has nothing. After the frame's work (`redraw`), a change asks for the window
     /// to be drawn again, so the buttons follow at once.
     fn note_show_history(&mut self, redraw: bool) {
@@ -4246,7 +4246,7 @@ impl App {
         }
     }
 
-    /// Keeps a song's arrangements as changed in the Show view, and the one it is played in.
+    /// Keeps a song's arrangements as changed in the Service view, and the one it is played in.
     fn handle_arrangement(&mut self) {
         let Some((index, arrangements, chosen)) =
             self.running.as_mut().and_then(|r| r.home_state.arrangement_request.take())
@@ -4505,8 +4505,8 @@ impl App {
         let Some(edited) = song.with_slide(at.slide, slide) else {
             return;
         };
-        // A change made in the Show view can be undone there. The Edit view keeps its own steps;
-        // the Show view's steps for the song from before it opened are dropped, so they can't
+        // A change made in the Service view can be undone there. The Edit view keeps its own steps;
+        // the Service view's steps for the song from before it opened are dropped, so they can't
         // undo its edits. Its own changes of the song's slides (moves, pastes) are kept.
         if self.running.as_ref().is_some_and(|r| r.home_state.editing.is_none()) {
             self.remember_for_undo(at.presentation);
@@ -8609,7 +8609,7 @@ impl App {
             panel.window.request_redraw();
             return;
         }
-        // In the Show view and on the Bible page (which has no undo of its own), with nothing
+        // In the Service view and on the Bible page (which has no undo of its own), with nothing
         // being typed, Undo and Redo step through the changes made to songs.
         let in_show = self.running.as_ref().is_some_and(|r| {
             let state = &r.home_state;
@@ -8793,7 +8793,7 @@ impl App {
             A::AudioTab => state.live_tab = 5,
             A::MediaBin => state.media_hidden = !state.media_hidden,
             A::ShowLiveSong => {
-                // The song on screen, chosen in the Show view.
+                // The song on screen, chosen in the Service view.
                 if let Some(live) = self.show.live() {
                     commands.push(Command::Select(live.presentation));
                     state.editing = None;
@@ -10119,7 +10119,7 @@ mod tests {
         frame(false);
         assert!(enter_key_is_free(&state, &ctx), "the Bible view, nothing with the keyboard");
         state.bible_open = false;
-        assert!(enter_key_is_free(&state, &ctx), "the Show view");
+        assert!(enter_key_is_free(&state, &ctx), "the Service view");
         frame(true);
         frame(true);
         assert!(!enter_key_is_free(&state, &ctx), "a field has the keyboard (the find box, Scripture Lookup)");
@@ -10149,7 +10149,7 @@ mod tests {
         assert!(!show_key_held_back(&state, &ctx, &Key::Named(NamedKey::Space)), "Space still runs the show");
         assert!(!show_key_held_back(&state, &ctx, &Key::Named(NamedKey::Escape)), "and Escape clears");
         state.bible_open = false;
-        assert!(!show_key_held_back(&state, &ctx, &s), "the Show view keeps its group letters");
+        assert!(!show_key_held_back(&state, &ctx, &s), "the Service view keeps its group letters");
     }
 
     #[test]
@@ -10398,7 +10398,7 @@ mod tests {
         let k = Key::Character("k".into());
         assert!(!opens_find(&k) && !opens_find(&Key::Named(NamedKey::Space)));
         assert_eq!(show_key_command(&k, &show), Some(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 1 })));
-        // It is free in the Show view, and not while the Edit view is open or a sheet is up.
+        // It is free in the Service view, and not while the Edit view is open or a sheet is up.
         let ctx = egui::Context::default();
         let mut state = home::HomeState::default();
         assert!(find_key_is_free(&state, &ctx));
@@ -10467,7 +10467,7 @@ mod tests {
         state.setup = Some(setup::Setup::new());
         assert!(escape_closes_something(&state, &ctx));
         state.setup = None;
-        // The playlist chooser and the Reflow editor too, in the Show view where they are; Enter
+        // The playlist chooser and the Reflow editor too, in the Service view where they are; Enter
         // still runs the show under them.
         let opens: [fn(&mut home::HomeState); 2] =
             [|state| state.chooser_open = true, |state| state.reflow = Some((0, "Words".to_owned()))];

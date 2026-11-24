@@ -124,7 +124,7 @@ pub fn pick(picked: &mut Vec<usize>, anchor: &mut Option<usize>, shown: &[usize]
     *anchor = Some(index);
 }
 
-/// How a presentation's slides are laid out in the Show view.
+/// How a presentation's slides are laid out in the Service view.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SlideView {
     /// Thumbnails in rows.
@@ -247,7 +247,7 @@ pub struct HomeState {
     pub edit_steps: Vec<EditStep>,
     pub edit_redo: Vec<EditStep>,
     pub edit_steps_draft: u64,
-    /// Whether the app's one history (the Show view's) has a step to undo, and one to redo: set
+    /// Whether the app's one history (the Service view's) has a step to undo, and one to redo: set
     /// by the app before each frame and after its work, so Undo and Redo are greyed when there is
     /// nothing to take back (see [`HomeState::can_undo`]).
     pub show_history: (bool, bool),
@@ -259,7 +259,7 @@ pub struct HomeState {
     pub clear_song_redo: bool,
     /// A change to a slide asked for from its menu.
     pub slide_request: Option<(SlideRef, SlideRequest)>,
-    /// A song's arrangements changed in the Show view: the song, its arrangements, and the one
+    /// A song's arrangements changed in the Service view: the song, its arrangements, and the one
     /// it is played in.
     pub arrangement_request: Option<(usize, Vec<sp_model::Arrangement>, Option<sp_model::Uuid>)>,
     /// The libraries, the one shown (`None` for All Songs), and true when they have changed and
@@ -1583,7 +1583,7 @@ pub struct ThemeEdit {
     pub template: usize,
     /// Set when the theme has changed this frame. The app takes the theme and clears this.
     pub changed: bool,
-    /// Set when the operator asks to go back to the Show view.
+    /// Set when the operator asks to go back to the Service view.
     pub leave: bool,
 }
 
@@ -1959,7 +1959,7 @@ impl HomeState {
     }
 
     /// The slide picked to go on screen next by Enter, while it still can be: in the view open
-    /// now (in the Bible view, in the passage shown; in the Show view, in the song chosen), there
+    /// now (in the Bible view, in the passage shown; in the Service view, in the song chosen), there
     /// and switched on, and not on screen. A slide of its passage or song gone on screen since
     /// it was picked (by Enter, a click or a key) has taken its place.
     pub fn pick(&self, show: &Show) -> Option<SlideRef> {
@@ -2086,7 +2086,7 @@ impl HomeState {
             || !self.bible.options.details.is_empty()
     }
 
-    /// Whether the playlist chooser or the Reflow editor is open in the Show view, where
+    /// Whether the playlist chooser or the Reflow editor is open in the Service view, where
     /// Escape closes it instead of clearing the screens.
     pub fn show_view_overlay_open(&self) -> bool {
         let show_view = !self.bible_open && self.editing.is_none();
@@ -2372,7 +2372,7 @@ fn home_view(
             }
             // The playlist's items picked (or the one open) are taken out of it at once: no
             // song is deleted, so nothing is asked, and Undo puts them back. Only while the
-            // keyboard is the left column's, as for ↑ and ↓ (the Show view, the search closed,
+            // keyboard is the left column's, as for ↑ and ↓ (the Service view, the search closed,
             // the list of keys away), with the playlist listed and the chooser put away.
             Picking::Items
                 if state.playlist_open && !state.chooser_open && crate::studio::list_keys_work(ui, state) =>
@@ -3836,7 +3836,7 @@ fn stage_tools(ui: &mut egui::Ui, state: &mut HomeState, inner: Rect, layout: us
 /// row shows there are more to scroll to, and the slides keep their room.
 const EDIT_SONGS_TALL: f32 = 4.5 * crate::studio::PLAIN_ROW;
 
-/// The songs the Edit view offers over the slides: those of the playlist the Show view's left
+/// The songs the Edit view offers over the slides: those of the playlist the Service view's left
 /// column lists, in its order and each once, or else the songs of the library it lists, as it
 /// lists them; and the song open, at the end, when they don't include it.
 fn songs_to_edit(show: &Show, state: &mut HomeState, open: usize) -> Vec<usize> {
@@ -5048,7 +5048,7 @@ pub fn pointer_drag(step: u32, from: egui::Pos2, to: egui::Pos2, drop: bool) -> 
 /// What the find box in the top bar finds for the words typed in it, listed under it: a Bible
 /// passage first, when the words are a reference; then songs (titles first, then lines of their
 /// words); then Bible verses that hold the words. Return, or a click, opens the one picked: a
-/// song in the Show view, a passage or verse in the Bible view. Nothing goes on the screens.
+/// song in the Service view, a passage or verse in the Bible view. Nothing goes on the screens.
 /// With Command (Ctrl elsewhere), Return adds it to the playlist in front instead.
 fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
     let hidden = state.hidden_slots();
@@ -6103,7 +6103,7 @@ pub fn picks_of_one_song(picked: &[SlideRef]) -> Option<(usize, Vec<usize>)> {
     Some((song, slides))
 }
 
-/// The Delete key on slides of the Show view: deletes them at once, as [`delete_slides`] does,
+/// The Delete key on slides of the Service view: deletes them at once, as [`delete_slides`] does,
 /// unless they are all the song's slides, which a song never loses (it always keeps one): then
 /// a refusal's cue says so, and nothing goes.
 fn delete_slides_or_say(show: &Show, state: &mut HomeState, song: usize, slides: &[usize]) {
@@ -7517,7 +7517,7 @@ fn bible_add(ui: &mut egui::Ui, state: &mut HomeState, add: Rect, arrow: Rect) {
 /// which it becomes; and as the Bible page shows no playlist, an entry in the notices says where it went.
 /// The same passage in the same translations goes in once: then a refusal's cue says it is there
 /// already. With no playlist given, a new one is made with the passage in it and comes to the
-/// front, its name ready to type in the chooser of the Show view, as a song's New Playlist…
+/// front, its name ready to type in the chooser of the Service view, as a song's New Playlist…
 /// does (there to see, so nothing is said).
 fn add_passage(state: &mut HomeState, playlist: Option<usize>, saved: crate::service::SavedPassage) {
     let item = crate::service::Item::Passage(saved);
@@ -8293,7 +8293,7 @@ fn copy_these_slides(ctx: &egui::Context, state: &mut HomeState, slides: Vec<Sli
     ctx.copy_text(text);
 }
 
-/// In the Show view, with nothing being typed: Copy (and Cut) take the slides picked out in the
+/// In the Service view, with nothing being typed: Copy (and Cut) take the slides picked out in the
 /// song shown, or the one selected; Paste puts slides copied last just after the last slide
 /// picked out (or the one selected, or the one on screen, or at the end).
 fn slide_clipboard_keys(ui: &egui::Ui, show: &Show, which: usize, state: &mut HomeState) {
@@ -9336,7 +9336,7 @@ mod tests {
         assert_eq!(picked, Some(4), "the fifth slide picked, one verse a slide");
     }
 
-    /// Drags in the Show view's grid from one point to another, over a few frames.
+    /// Drags in the Service view's grid from one point to another, over a few frames.
     fn drag_in_grid(state: &mut HomeState, show: &Show, from: egui::Pos2, to: egui::Pos2) {
         let ctx = egui::Context::default();
         let mut clock = 0.0;
@@ -11302,7 +11302,7 @@ mod tests {
                 .collect()
         };
 
-        // A slide a verse: the chapter's 36 slides, at the Show view's size; the passage's first
+        // A slide a verse: the chapter's 36 slides, at the Service view's size; the passage's first
         // picked (the ink ring), the rest of the passage in a faint ring, the others none.
         let ctx = egui::Context::default();
         let (mut show, mut state) = looked_up(&ctx, true);
@@ -13420,7 +13420,7 @@ mod tests {
             place(&mut state, false);
         }
         assert!(state.removed.is_empty());
-        // Back in the Show view with the playlist listed, Delete takes Beta out.
+        // Back in the Service view with the playlist listed, Delete takes Beta out.
         found_step(&ctx, &mut show, &mut state, pressed(Key::Delete, Modifiers::NONE), time + 0.1, &mut commands);
         assert_eq!(state.services.front().items.len(), 4);
     }
@@ -13554,7 +13554,7 @@ mod tests {
         found_step(&ctx, &mut show, &mut state, vec![press(moved, false)], 0.4, &mut commands);
         found_step(&ctx, &mut show, &mut state, vec![], 0.5, &mut commands);
         assert!(!egui::DragAndDrop::has_any_payload(&ctx), "nothing was carried");
-        // Opened as a click opens it: the song in the Show view, the playlist as it was.
+        // Opened as a click opens it: the song in the Service view, the playlist as it was.
         assert_eq!(show.selected(), 2);
         assert!(state.library_search.is_none());
         assert_eq!(state.services.front().items.len(), 2);
@@ -13870,7 +13870,7 @@ mod tests {
         assert_eq!(state.services.front().items.len(), 3);
         assert!(matches!(&state.services.front().items[1], crate::service::Item::Passage(_)), "after the open one");
         assert_eq!(state.services.chosen, Some(1), "and opened");
-        // New Playlist…: a playlist of its own, in front, its name ready to type in the Show view,
+        // New Playlist…: a playlist of its own, in front, its name ready to type in the Service view,
         // there to see, so nothing is said.
         add_passage(&mut state, None, saved(&["kjv"]));
         assert_eq!(state.services.list.len(), 2);
