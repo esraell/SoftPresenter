@@ -324,7 +324,7 @@ fn timers_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             };
             let time_right = key(2.0).min.x - CARD_GAP;
             paint_spaced(ui, pos2(time_right, y), Align2::RIGHT_CENTER, &time, time_font, ink, -0.5);
-            if icon_key(ui, key(2.0), egui::Id::unique(("timer reset", id)), Icon::Forward, 15.0, true)
+            if icon_key(ui, key(2.0), egui::Id::unique(("timer reset", id)), Icon::Back, 15.0, true)
                 .on_hover_text("Reset")
                 .clicked()
             {

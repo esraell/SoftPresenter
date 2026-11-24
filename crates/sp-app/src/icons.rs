@@ -323,13 +323,17 @@ pub fn paint(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             p.line(&[(0.24, 0.24), (0.76, 0.76)]);
             p.line(&[(0.76, 0.24), (0.24, 0.76)]);
         }
+        // A circle turning back (anticlockwise), open at the upper left: from the top round the
+        // right, the bottom and the left, with the head at the top pointing left.
         Icon::Back => {
-            p.arc(0.5, 0.54, 0.32, 0.8, 1.55);
-            p.line(&[(0.5, 0.06), (0.64, 0.22), (0.44, 0.34)]);
+            p.arc(0.5, 0.54, 0.32, -0.25, 0.56);
+            p.line(&[(0.58, 0.09), (0.44, 0.22), (0.58, 0.35)]);
         }
+        // A circle turning forward (clockwise), open at the upper right: from the right round the
+        // bottom and the left to the top, with the head at the top pointing right.
         Icon::Forward => {
-            p.arc(0.5, 0.54, 0.32, -0.05, 0.7);
-            p.line(&[(0.5, 0.06), (0.36, 0.22), (0.56, 0.34)]);
+            p.arc(0.5, 0.54, 0.32, -0.06, 0.75);
+            p.line(&[(0.42, 0.09), (0.56, 0.22), (0.42, 0.35)]);
         }
         Icon::ToEnd => {
             p.line(&[(0.12, 0.5), (0.7, 0.5)]);

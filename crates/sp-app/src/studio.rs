@@ -5417,8 +5417,7 @@ fn video_row(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
     }
     let forward_at = pos2(row.min.x + 75.0, y);
     let forward = round_key(ui, forward_at, 26.0, "video forward", dark, false);
-    // The arrow that turns clockwise (the icon named Back is drawn that way).
-    icons::paint(ui.painter(), Icon::Back, Rect::from_center_size(forward_at, egui::Vec2::splat(15.0)), TEXT);
+    icons::paint(ui.painter(), Icon::Forward, Rect::from_center_size(forward_at, egui::Vec2::splat(15.0)), TEXT);
     if forward.on_hover_text(t("right.video.forward", "Forward 10 seconds")).clicked()
         && let Some(length) = length
     {
