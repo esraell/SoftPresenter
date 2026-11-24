@@ -18,6 +18,11 @@
 //! - A program run by the same user with fewer rights than usual (low integrity) is not kept
 //!   out by anything set here. Windows keeps it out by itself, which a test in `control`
 //!   shows on Windows (with a socket marked for such programs, which lets it in, beside).
+//!   Windows reads the socket file's access list and label when a program connects, as when
+//!   one opens a file, and refuses a program they do not let in; the one exception found is
+//!   a full administrator's token (what an ssh login to an administrator's account has),
+//!   which is let in whatever they say, as it could read the file anyway. The tests in
+//!   `control` therefore ask through `runas` without those rights when they are run from one.
 //!
 //! Windows offers no way to do this without `unsafe` code except through its own tools, so the
 //! lists are set and read with `icacls.exe` and the user is found with `whoami.exe`, both taken

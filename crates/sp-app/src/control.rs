@@ -4024,6 +4024,79 @@ mod tests {
         let _ = std::fs::remove_dir_all(&folder);
     }
 
+    /// Whether this test program runs with an administrator's full token (high rights), as it
+    /// does over ssh to an administrator's account. Windows lets such a program connect to any
+    /// socket, whatever the socket file's access list or label say, so a test of what those keep
+    /// out must not be run from one: it runs its program through `runas` without those rights.
+    #[cfg(windows)]
+    fn runs_elevated() -> bool {
+        let groups =
+            private_folder::run(private_folder::tool("whoami.exe").expect("whoami").args(["/groups", "/fo", "csv"]));
+        groups.is_ok_and(|groups| groups.contains("S-1-16-12288"))
+    }
+
+    /// Runs a program of this user with the rights an ordinary program has and gives what it
+    /// printed, `set` being the environment variables it is given. From a program of an
+    /// ordinary user it is run as it is; from an administrator's full token, through `runas
+    /// /trustlevel:0x20000` (a basic user: the administrators' group and the privileges taken
+    /// away), which prints nothing itself, so the program writes to a file that is read once it
+    /// says it has finished. (`runas` opens a console window for the program, which is why this
+    /// is done only from a full administrator's token, over ssh, where there is no screen.)
+    #[cfg(windows)]
+    fn run_ordinary(program: &Path, args: &[&str], set: &[(&str, &Path)]) -> Result<String, String> {
+        if !runs_elevated() {
+            let mut run = std::process::Command::new(program);
+            run.args(args);
+            for (name, value) in set {
+                run.env(name, value);
+            }
+            let ran = run.output().map_err(|e| e.to_string())?;
+            return Ok(format!("{}\n{}", String::from_utf8_lossy(&ran.stdout), String::from_utf8_lossy(&ran.stderr)));
+        }
+        let scratch = socket_folder("ordinary");
+        std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
+        let (script, out) = (scratch.join("run.cmd"), scratch.join("out.txt"));
+        let mut text = String::from("@echo off\r\n");
+        for (name, value) in set {
+            text += &format!("set {name}={}\r\n", value.display());
+        }
+        text += &format!(
+            "\"{}\" {} > \"{}\" 2>&1\r\necho finished>> \"{}\"\r\n",
+            program.display(),
+            args.join(" "),
+            out.display(),
+            out.display()
+        );
+        let result = std::fs::write(&script, text).map_err(|e| e.to_string()).and_then(|()| {
+            private_folder::run(private_folder::tool("runas.exe")?.arg("/trustlevel:0x20000").arg(&script))?;
+            let waiting = std::time::Instant::now();
+            loop {
+                let said = std::fs::read_to_string(&out).unwrap_or_default();
+                if said.contains("finished") {
+                    return Ok(said);
+                }
+                if waiting.elapsed() > Duration::from_secs(60) {
+                    return Err(format!("the program run through runas did not finish: {said}"));
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        let _ = std::fs::remove_dir_all(&scratch);
+        result
+    }
+
+    /// Not a test of its own: what a test below runs a copy of this test program to do, to say
+    /// whether a program of ordinary rights can connect to the socket named.
+    #[cfg(windows)]
+    #[test]
+    fn windows_connect_helper() {
+        let Some(path) = std::env::var_os("SP_TEST_CONNECT") else { return };
+        match UnixStream::connect(Path::new(&path)) {
+            Ok(_) => println!("helper connect: connected"),
+            Err(problem) => println!("helper connect: refused ({problem})"),
+        }
+    }
+
     /// Not a test of its own: what the test below runs a copy of this test program to do, with
     /// low rights. It says how it was run and whether it could connect to each socket named.
     #[cfg(windows)]
@@ -4056,7 +4129,8 @@ mod tests {
     /// Windows by itself lets such a program read the user's files but not write to them, and
     /// connecting to a socket is taken here to need writing.
     ///
-    /// A copy of this test program, marked to run with low rights, tries two sockets: the
+    /// A copy of this test program, marked to run with low rights (and without an administrator's
+    /// rights, if this test program has them: see `run_ordinary`), tries two sockets: the
     /// control socket as the app makes it, and one marked as open to low-rights programs, to
     /// show that such a program can connect at all.
     #[cfg(windows)]
@@ -4076,14 +4150,11 @@ mod tests {
         let copy = programs.join("low.exe");
         std::fs::copy(std::env::current_exe().expect("this test program"), &copy).expect("a copy of this test program");
         icacls(&copy, &["/setintegritylevel", "Low"]);
-        let ran = std::process::Command::new(&copy)
-            .args(["control::tests::windows_low_rights_helper", "--exact", "--nocapture", "--test-threads=1"])
-            .env("SP_TEST_LOW_PRIVATE", &private)
-            .env("SP_TEST_LOW_OPEN", &open)
-            .output();
+        let helper = ["control::tests::windows_low_rights_helper", "--exact", "--nocapture", "--test-threads=1"];
+        let ran = run_ordinary(&copy, &helper, &[("SP_TEST_LOW_PRIVATE", &private), ("SP_TEST_LOW_OPEN", &open)]);
         let _ = std::fs::remove_dir_all(&programs);
-        let ran = ran.expect("the copy ran");
-        let said = format!("{}\n{}", String::from_utf8_lossy(&ran.stdout), String::from_utf8_lossy(&ran.stderr));
+        let said = ran.expect("the copy ran");
+        println!("{said}");
         assert!(
             said.contains("helper level: low"),
             "NOTHING LEARNT: the copy did not run with low rights, so this says nothing about such programs. It said:\n{said}"
@@ -4111,11 +4182,17 @@ mod tests {
         let folder = socket_folder("deny");
         let path = folder.join("c.sock");
         let _listening = echo_at(&path).expect("listening");
-        assert!(say_to(&path, &["status"]).expect("let in at first").ok);
+        // Asked by a program of ordinary rights, as `sp` is, and not by this test program, which
+        // an administrator's full token would let in whatever the list says.
+        let this = std::env::current_exe().expect("this test program");
+        let helper = ["control::tests::windows_connect_helper", "--exact", "--nocapture", "--test-threads=1"];
+        let asks = |path: &Path| run_ordinary(&this, &helper, &[("SP_TEST_CONNECT", path)]).expect("the helper ran");
+        let first = asks(&path);
+        assert!(first.contains("helper connect: connected"), "let in at first: {first}");
         let user = private_folder::user().expect("which user this is");
         icacls(&path, &["/deny", &format!("*{user}:F"), "/L"]);
-        let said = say_to(&path, &["status"]).expect_err("refused once the file's list refuses this user");
-        assert!(said.starts_with(NOT_RUNNING), "{said}");
+        let said = asks(&path);
+        assert!(said.contains("helper connect: refused"), "refused once the file's list refuses this user: {said}");
         icacls(&path, &["/remove:d", &format!("*{user}"), "/L"]);
         let _ = std::fs::remove_dir_all(&folder);
     }
