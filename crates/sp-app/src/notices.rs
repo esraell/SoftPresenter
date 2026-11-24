@@ -147,6 +147,12 @@ impl Notices {
         }
     }
 
+    /// A lasting trouble that is over: its entry (the one with these words) leaves the list.
+    pub fn withdraw(&mut self, text: &str) {
+        let text = crate::applog::plain_paths(text).into_owned();
+        self.list.retain(|notice| !(notice.kind == Kind::Trouble && notice.text == text.trim()));
+    }
+
     /// Something about security, in the list like any other, but kept from a remote page's
     /// `notices seen` and `notices clear` until the operator has seen it in the app.
     pub fn secure(&mut self, kind: Kind, text: impl Into<String>) {

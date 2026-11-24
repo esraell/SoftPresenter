@@ -69,6 +69,7 @@ person:
 | `SOFTPRESENTER_MENU=<ids>` | Choose menu bar items by id, one every few frames |
 | `SOFTPRESENTER_WINDOW_SIZE=1100x700` | Open the window at another size |
 | `SOFTPRESENTER_STRESS=1` | Redraw continuously, to check memory stays flat |
+| `SOFTPRESENTER_SCREENS_FILL=<display name>` | A quiet run's screens fill that one named display (never the main one), through the real window code, instead of opening in a window. For a virtual display made by `spikes/virtual-display` and nothing anyone looks at; with `SOFTPRESENTER_SCREENS_ON_TOP=1` the windows also take the real level above the menu bar |
 | `SOFTPRESENTER_SCREENS_ON_TOP=1` | Keep the screens' windows above all others, so a timing run on one display really draws them (in a quiet run too, where they still don't take the keyboard) |
 | `SOFTPRESENTER_RESIZE_AID=<from>x<to>` | Resize the operator's window in 40 steps, 50 ms apart, from that width (points) to the other and back, saying on stderr for each step the window's size, the size its surface was drawn at and how many frames were drawn at the new size, then quit |
 | `SOFTPRESENTER_STOP_DRAWING_AFTER=<s>` | Stop drawing the window after a while, as minimising does |
@@ -98,7 +99,8 @@ message.
 
 - **`unsafe` code** is allowed only in `sp-video`'s two macOS modules (`mac` for videos and
   pictures, with its `gpu` part that hands a decoded picture's memory to wgpu through wgpu's
-  Metal interface, `web_mac` for web pages), `sp-ndi`'s `runtime` module, `sp-winapi`'s `windows` module (two Windows calls: joining
+  Metal interface and its `cover` part that puts a screen's window on its display and listens for
+  the displays changing, `web_mac` for web pages), `sp-ndi`'s `runtime` module, `sp-winapi`'s `windows` module (two Windows calls: joining
   the console a command was typed in, and asking a monitor for its work area) and `sp-decklink`'s `ffi`
   module, and every block says why it is sound. `web_mac` also calls two web view settings outside Apple's published interface
   (window occlusion detection and the page background), only when the web view answers to them;

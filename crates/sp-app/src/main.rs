@@ -75,6 +75,7 @@ mod thumbs;
 mod timers;
 mod versions;
 mod voxlive;
+mod window_plan;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -91,7 +92,7 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, NamedKey};
-use winit::window::{Fullscreen, Window, WindowId};
+use winit::window::{Window, WindowId};
 
 use crate::displays::{DisplayInfo, choose_output};
 use crate::editor::EditDraft;
@@ -565,6 +566,10 @@ enum AppEvent {
     Canva,
     /// A song catalog download or check finished on its thread (see `catalog_cli`).
     CatalogDone,
+    /// The system says the displays changed (macOS: a display plugged in or out, the main one
+    /// changed, a size or the arrangement changed). Only macOS sends it.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    DisplaysChanged,
 }
 
 /// The most web pages kept running at once: those on screen, then those loaded ahead. Each is a
@@ -962,6 +967,97 @@ fn log_placement(screen: &str, place: &Placed, window: &Window, displays: &[Disp
     applog::event("screens", &place);
 }
 
+/// Whether a screen's window that has to leave its display (it was switched off, or the display
+/// went) is kept hidden to show again (macOS), or closed and made again when needed (the other
+/// systems, where a window can't be moved off a display that has gone without being shown).
+const KEEP_HIDDEN: bool = cfg!(target_os = "macos");
+
+/// How often the displays are looked at though nothing has said they changed. On macOS the
+/// system says so (`DisplayWatch`) and this is only a backstop; elsewhere it is how a display
+/// plugged out is found (the window library doesn't pass on the system's word), within a second.
+const DISPLAYS_LOOK_EVERY: Duration =
+    if cfg!(target_os = "macos") { Duration::from_secs(5) } else { Duration::from_secs(1) };
+
+/// A display's place and size as a rectangle.
+fn monitor_rect(monitor: &winit::monitor::MonitorHandle) -> displays::Rect {
+    displays::Rect {
+        x: monitor.position().x,
+        y: monitor.position().y,
+        w: monitor.size().width,
+        h: monitor.size().height,
+    }
+}
+
+/// Puts a screen's window on its display and shows it there, with no animation. On macOS it is
+/// a plain borderless window put on the display's frame above the menu bar and Dock (see
+/// `sp_video::cover_display`), never a full-screen Space, which slides in and out. Elsewhere it
+/// is the window library's borderless full screen on that display, which Windows does at once.
+/// `fresh` is a window just opened on the display.
+fn put_on_display(
+    window: &Window,
+    monitor: &winit::monitor::MonitorHandle,
+    above: bool,
+    take_key: bool,
+    fresh: bool,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use winit::platform::macos::MonitorHandleExtMacOS;
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let _ = fresh;
+        let handle = window.window_handle().map_err(|e| e.to_string())?;
+        let RawWindowHandle::AppKit(handle) = handle.as_raw() else { return Err("Not a macOS window.".to_owned()) };
+        sp_video::cover_display(handle.ns_view, monitor.native_id(), above, take_key)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (above, take_key);
+        if !fresh {
+            window.set_fullscreen(None);
+        }
+        window.set_outer_position(monitor.position());
+        window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(Some(monitor.clone()))));
+        window.set_visible(true);
+        Ok(())
+    }
+}
+
+/// Makes the surface a window is drawn on and gives it to the output thread. False (with the
+/// reason in the notices) when it can't be made.
+fn add_surface(
+    output: &OutputHandle,
+    context: &RenderContext,
+    device_id: usize,
+    screen: &screens::Screen,
+    window: &Arc<Window>,
+    notices: &mut notices::Notices,
+) -> bool {
+    let surface = match context.instance.create_surface(window.clone()) {
+        Ok(surface) => surface,
+        Err(e) => {
+            notices.lasting_trouble(format!("Could not draw to \"{}\": {e}", screen.name));
+            return false;
+        }
+    };
+    let format = match surface_format(&surface, context.devices[device_id].adapter()) {
+        Ok(format) => format,
+        Err(e) => {
+            notices.lasting_trouble(e);
+            return false;
+        }
+    };
+    let size = window.inner_size();
+    output.send(OutputMsg::AddSurface {
+        id: screen.id,
+        name: screen.name.clone(),
+        surface,
+        format,
+        w: size.width,
+        h: size.height,
+    });
+    true
+}
+
 /// The displays as last asked of the system: when, the displays connected then, and what
 /// `display_list` and `operator_displays` said of them.
 struct DisplaysSeen {
@@ -1293,6 +1389,14 @@ struct Running {
     ndi_checked: Option<Instant>,
     /// The displays as last asked of the system (see `sync_screens`).
     displays_seen: Option<DisplaysSeen>,
+    /// The screens whose display is away, with the notice said for each (see `window_plan`).
+    away: std::collections::BTreeMap<Uuid, String>,
+    /// When the displays are next looked at though nothing has said they changed (a backstop to
+    /// what the system tells us on macOS, the only way on the other systems), and the macOS
+    /// watch that wakes the loop when they change.
+    displays_look_at: Instant,
+    #[cfg(target_os = "macos")]
+    display_watch: Option<sp_video::DisplayWatch>,
     /// The live preview's two textures, as the window knows them.
     live_preview_ids: Vec<egui::TextureId>,
     /// The same two textures, for Remote Control to read the newest back from (never the
@@ -1326,10 +1430,16 @@ struct ScreenWindow {
     window: Arc<Window>,
     placed: Placed,
     name: String,
-    /// When the window was last put on its display, and how many times it has been put back
-    /// after being found on another (macOS can put a full-screen window on the main display).
+    /// When the window was last put on its display.
     placed_at: Instant,
-    put_back: u8,
+    /// Hidden (macOS keeps a hidden window to show again), with its picture let go.
+    hidden: bool,
+    /// The display's rectangle it was last put on, and how many times it has been put back since
+    /// being found elsewhere (see `window_plan`).
+    put_on: Option<displays::Rect>,
+    tries: u8,
+    /// Made as a macOS window that covers a display (see `put_on_display`).
+    cover: bool,
 }
 
 struct App {
@@ -1721,6 +1831,10 @@ impl App {
             live_textures,
             ndi_checked: None,
             displays_seen: None,
+            away: std::collections::BTreeMap::new(),
+            displays_look_at: Instant::now() + DISPLAYS_LOOK_EVERY,
+            #[cfg(target_os = "macos")]
+            display_watch: None,
 
             preview_before: None,
             preview_changed: Instant::now(),
@@ -6891,6 +7005,22 @@ impl App {
         running.home_window.request_redraw();
     }
 
+    /// Looks at the displays when it is time (see `DISPLAYS_LOOK_EVERY`), and says when it will
+    /// be time again.
+    fn look_at_displays(&mut self, el: &ActiveEventLoop) -> Option<Instant> {
+        let due = self.running.as_ref()?.displays_look_at;
+        if due > Instant::now() {
+            return Some(due);
+        }
+        if let Some(running) = self.running.as_mut() {
+            running.displays_look_at = Instant::now() + DISPLAYS_LOOK_EVERY;
+            // Asked afresh: a display's size or the main display can change with the same list.
+            running.displays_seen = None;
+        }
+        self.sync_screens(el);
+        self.running.as_ref().map(|running| running.displays_look_at)
+    }
+
     /// True for a run that only saves a picture, or is asked to stay out of the way.
     fn quiet(&self) -> bool {
         self.options.capture_home.is_some() || std::env::var_os("SOFTPRESENTER_QUIET").is_some()
@@ -7004,6 +7134,13 @@ impl App {
             let ndi_aid = std::env::var_os("SOFTPRESENTER_NDI").is_some();
             for place in &mut placed {
                 match place {
+                    // Testing aid: SOFTPRESENTER_SCREENS_FILL=<display name> lets a quiet run's
+                    // screens fill that one display (a virtual one made for the test, never a
+                    // display anyone looks at), through the same window code as a real run.
+                    Placed::Fullscreen(index)
+                        if std::env::var("SOFTPRESENTER_SCREENS_FILL").is_ok_and(|name| {
+                            displays.iter().any(|d| d.index == *index && d.name == name && !d.main)
+                        }) => {}
                     Placed::Fullscreen(_) => *place = Placed::Window,
                     Placed::Ndi(_) if !ndi_aid => {
                         *place = Placed::Nothing("Not sent in a quiet run (a test or a capture).".to_owned());
@@ -7019,12 +7156,15 @@ impl App {
         }
         // A kind of screen switched off closes its windows, so the display shows what is behind
         // them rather than black. NDI goes on sending (black), so a stream keeps its source.
-        for (screen, place) in list.iter().zip(placed.iter_mut()) {
-            let on = match screen.kind {
+        let on_flags: Vec<bool> = list
+            .iter()
+            .map(|screen| match screen.kind {
                 screens::Kind::Audience => audience_on,
                 screens::Kind::Stage => running.home_state.stage_on,
-            };
-            if !on && matches!(place, Placed::Fullscreen(_) | Placed::Window) {
+            })
+            .collect();
+        for ((_, place), on) in list.iter().zip(placed.iter_mut()).zip(&on_flags) {
+            if !*on && matches!(place, Placed::Fullscreen(_) | Placed::Window) {
                 *place = Placed::Nothing("Switched off".to_owned());
             }
         }
@@ -7038,62 +7178,148 @@ impl App {
             }
         }
         running.retired.retain(|(_, since)| since.elapsed() < Duration::from_secs(2));
+        // Which screens' displays are away (said once, and taken back when they return).
+        let now_away = window_plan::away(&list, &on_flags, &displays);
+        let (said, over) = window_plan::notice_changes(&running.away, &now_away);
+        for text in said {
+            applog::event("screens", &text);
+            running.home_state.notices.lasting_trouble(text);
+        }
+        for text in over {
+            running.home_state.notices.withdraw(&text);
+        }
+        running.away = now_away;
         let Running { output, screen_windows, retired, context, device_id, home_state, .. } = running;
         let Some(output) = output.as_ref() else { return };
 
-        // Windows: keep, move, open or close each one.
+        // Windows: what to do with each (see `window_plan`), then do it. A window that fills a
+        // display is hidden at once when its display goes, and put back when it returns.
         let mut old = std::mem::take(screen_windows);
+        let seen: Vec<window_plan::Seen> = old
+            .iter()
+            .map(|have| window_plan::Seen {
+                screen: have.screen,
+                shown: !have.hidden,
+                on: have.window.current_monitor().map(|monitor| monitor_rect(&monitor)),
+                put_on: have.put_on,
+                tries: have.tries,
+                settled: have.placed_at.elapsed() >= Duration::from_secs(2),
+            })
+            .collect();
+        let steps = window_plan::plan(&list, &placed, &on_flags, &displays, &seen);
+        let above = !quiet || std::env::var_os("SOFTPRESENTER_SCREENS_ON_TOP").is_some();
         let mut opened = false;
-        for (screen, place) in list.iter().zip(&placed) {
-            if !matches!(place, Placed::Fullscreen(_) | Placed::Window) {
-                continue;
-            }
-            if let Some(at) = old.iter().position(|have| have.screen == screen.id) {
-                let mut kept = old.remove(at);
-                if kept.placed != *place {
-                    match place {
-                        Placed::Fullscreen(index) => {
-                            // Out of full screen, onto the display, then full screen there: macOS
-                            // fills the display the window is on, whatever display is asked for.
-                            if let Some(monitor) = monitors.get(*index) {
-                                kept.window.set_fullscreen(None);
-                                kept.window.set_outer_position(monitor.position());
-                            }
-                            kept.window.set_fullscreen(Some(Fullscreen::Borderless(monitors.get(*index).cloned())));
+        for ((screen, place), step) in list.iter().zip(&placed).zip(&steps) {
+            let existing = old.iter().position(|have| have.screen == screen.id);
+            match step {
+                window_plan::Step::Idle | window_plan::Step::Close => continue,
+                window_plan::Step::Hide(why) => {
+                    let Some(at) = existing else { continue };
+                    let mut kept = old.remove(at);
+                    // At once: the picture is let go, and the window is out of the way.
+                    output.send(OutputMsg::RemoveSurface(screen.id));
+                    kept.window.set_visible(false);
+                    applog::event("screens", &format!("{}: hidden, because {}", screen.name, why.in_words()));
+                    if KEEP_HIDDEN {
+                        kept.hidden = true;
+                        if *why != window_plan::Why::Stray {
+                            kept.put_on = None;
+                            kept.tries = 0;
                         }
-                        _ => kept.window.set_fullscreen(None),
+                        screen_windows.push(kept);
+                    } else {
+                        retired.push((kept.window, Instant::now()));
                     }
-                    log_placement(&screen.name, place, &kept.window, &displays);
-                    kept.placed_at = Instant::now();
-                    kept.put_back = 0;
-                } else if let Placed::Fullscreen(index) = place
-                    && !fresh
-                    && let Some(monitor) = monitors.get(*index)
-                    && kept.put_back < 3
-                    && kept.placed_at.elapsed() >= Duration::from_secs(2)
-                    && kept.window.current_monitor().is_some_and(|on| on != *monitor)
-                {
-                    // Found on another display than the one it fills: put it back.
-                    kept.window.set_fullscreen(None);
-                    kept.window.set_outer_position(monitor.position());
-                    kept.window.set_fullscreen(Some(Fullscreen::Borderless(Some(monitor.clone()))));
-                    kept.placed_at = Instant::now();
-                    kept.put_back += 1;
-                    applog::event("screens", &format!("{}: was on another display; put back", screen.name));
-                    log_placement(&screen.name, place, &kept.window, &displays);
-                    kept.window.set_cursor_visible(!matches!(place, Placed::Fullscreen(_)));
-                    kept.placed = place.clone();
+                    continue;
                 }
-                if kept.name != screen.name {
-                    kept.window.set_title(&format!("{} — SoftPresenter", screen.name));
-                    kept.name = screen.name.clone();
+                window_plan::Step::Keep => {
+                    let Some(at) = existing else { continue };
+                    let mut kept = old.remove(at);
+                    let on = kept.window.current_monitor().map(|monitor| monitor_rect(&monitor));
+                    if kept.put_on.is_some() && on == kept.put_on && kept.placed_at.elapsed() >= Duration::from_secs(2)
+                    {
+                        kept.tries = 0;
+                    }
+                    if kept.name != screen.name {
+                        kept.window.set_title(&format!("{} — SoftPresenter", screen.name));
+                        kept.name = screen.name.clone();
+                    }
+                    screen_windows.push(kept);
+                    continue;
                 }
-                screen_windows.push(kept);
-                continue;
+                window_plan::Step::Other => {
+                    if !matches!(place, Placed::Window) {
+                        continue;
+                    }
+                    if let Some(at) = existing {
+                        let mut kept = old.remove(at);
+                        if !kept.cover {
+                            if kept.placed != *place {
+                                kept.window.set_fullscreen(None);
+                                log_placement(&screen.name, place, &kept.window, &displays);
+                                kept.placed_at = Instant::now();
+                            }
+                            kept.placed = place.clone();
+                            if kept.name != screen.name {
+                                kept.window.set_title(&format!("{} — SoftPresenter", screen.name));
+                                kept.name = screen.name.clone();
+                            }
+                            screen_windows.push(kept);
+                            continue;
+                        }
+                        // A window that covered a display is not made an ordinary window again.
+                        output.send(OutputMsg::RemoveSurface(screen.id));
+                        kept.window.set_visible(false);
+                        retired.push((kept.window, Instant::now()));
+                    }
+                }
+                window_plan::Step::Place(rect) | window_plan::Step::Open(rect) => {
+                    let Placed::Fullscreen(index) = place else { continue };
+                    let Some(monitor) = monitors.get(*index) else { continue };
+                    if let Some(at) = existing {
+                        let mut kept = old.remove(at);
+                        if !cfg!(target_os = "macos") || kept.cover {
+                            let was_hidden = kept.hidden;
+                            let again = kept.put_on == Some(*rect);
+                            if let Err(problem) = put_on_display(&kept.window, monitor, above, !quiet, false) {
+                                applog::event("screens", &format!("{}: {problem}", screen.name));
+                                output.send(OutputMsg::RemoveSurface(screen.id));
+                                kept.window.set_visible(false);
+                                retired.push((kept.window, Instant::now()));
+                                continue;
+                            }
+                            kept.hidden = false;
+                            kept.put_on = Some(*rect);
+                            kept.tries = if again { kept.tries.saturating_add(1) } else { 0 };
+                            kept.placed = place.clone();
+                            kept.placed_at = Instant::now();
+                            kept.window.set_cursor_visible(false);
+                            log_placement(&screen.name, place, &kept.window, &displays);
+                            if was_hidden {
+                                opened |= add_surface(
+                                    output,
+                                    context,
+                                    *device_id,
+                                    screen,
+                                    &kept.window,
+                                    &mut home_state.notices,
+                                );
+                            }
+                            screen_windows.push(kept);
+                            continue;
+                        }
+                        // An ordinary window is made again as one that covers the display.
+                        output.send(OutputMsg::RemoveSurface(screen.id));
+                        kept.window.set_visible(false);
+                        retired.push((kept.window, Instant::now()));
+                    }
+                }
             }
+            // Open a window: for a screen with none, or one that couldn't be used again.
             let attrs = Window::default_attributes().with_title(format!("{} — SoftPresenter", screen.name));
+            let covering = matches!(place, Placed::Fullscreen(_));
             let attrs = match place {
-                // Opened on the display first, as large as it, and made full screen once it is
+                // Opened on the display first, as large as it, and put to fill it once it is
                 // there (below): a window made full screen as it opens fills the main display on
                 // macOS, whatever display is asked for, which put the audience on the operator's
                 // monitor.
@@ -7121,6 +7347,13 @@ impl App {
                     }
                 }
             };
+            // On macOS a window that covers a display is made without a frame and unseen, put on
+            // its display's frame, and only then shown: it is never seen anywhere else.
+            let attrs = if covering && cfg!(target_os = "macos") {
+                attrs.with_decorations(false).with_visible(false)
+            } else {
+                attrs
+            };
             let attrs = if std::env::var_os("SOFTPRESENTER_SCREENS_ON_TOP").is_some() {
                 // Testing aid: SOFTPRESENTER_SCREENS_ON_TOP keeps the screens' windows above
                 // every other window, so a timing run on one display draws them for real (a
@@ -7140,44 +7373,36 @@ impl App {
                     continue;
                 }
             };
-            if let Placed::Fullscreen(index) = place
+            let mut put_on = None;
+            if let (Placed::Fullscreen(index), window_plan::Step::Place(rect) | window_plan::Step::Open(rect)) =
+                (place, step)
                 && let Some(monitor) = monitors.get(*index)
             {
-                window.set_outer_position(monitor.position());
-                window.set_fullscreen(Some(Fullscreen::Borderless(Some(monitor.clone()))));
+                if let Err(problem) = put_on_display(&window, monitor, above, !quiet, true) {
+                    window.set_visible(false);
+                    home_state
+                        .notices
+                        .lasting_trouble(format!("Could not put \"{}\" on its display: {problem}", screen.name));
+                    continue;
+                }
+                put_on = Some(*rect);
             }
             log_placement(&screen.name, place, &window, &displays);
             window.set_cursor_visible(!matches!(place, Placed::Fullscreen(_)));
-            let surface = match context.instance.create_surface(window.clone()) {
-                Ok(surface) => surface,
-                Err(e) => {
-                    home_state.notices.lasting_trouble(format!("Could not draw to \"{}\": {e}", screen.name));
-                    continue;
-                }
-            };
-            let format = match surface_format(&surface, context.devices[*device_id].adapter()) {
-                Ok(format) => format,
-                Err(e) => {
-                    home_state.notices.lasting_trouble(e);
-                    continue;
-                }
-            };
-            let size = window.inner_size();
-            output.send(OutputMsg::AddSurface {
-                id: screen.id,
-                name: screen.name.clone(),
-                surface,
-                format,
-                w: size.width,
-                h: size.height,
-            });
+            if !add_surface(output, context, *device_id, screen, &window, &mut home_state.notices) {
+                window.set_visible(false);
+                continue;
+            }
             screen_windows.push(ScreenWindow {
                 screen: screen.id,
                 window,
                 placed: place.clone(),
                 name: screen.name.clone(),
                 placed_at: Instant::now(),
-                put_back: 0,
+                hidden: false,
+                put_on,
+                tries: 0,
+                cover: covering && cfg!(target_os = "macos"),
             });
             opened = true;
         }
@@ -9176,6 +9401,19 @@ impl ApplicationHandler<AppEvent> for App {
                     self.apply(vec![Command::SetOutputEnabled(false)]);
                 }
                 self.sync_screens(el);
+                // macOS says when the displays change (a display plugged out, say): the screens'
+                // windows are dealt with before anyone sees them out of place.
+                #[cfg(target_os = "macos")]
+                if let Some(waker) = self.waker.clone()
+                    && let Some(running) = self.running.as_mut()
+                {
+                    let waker = std::sync::Mutex::new(waker);
+                    running.display_watch = Some(sp_video::DisplayWatch::start(move || {
+                        if let Ok(waker) = waker.lock() {
+                            let _ = waker.send_event(AppEvent::DisplaysChanged);
+                        }
+                    }));
+                }
                 // The menu bar, for a run someone is using.
                 #[cfg(target_os = "macos")]
                 if !self.quiet() {
@@ -9254,6 +9492,17 @@ impl ApplicationHandler<AppEvent> for App {
                     running.home_state.notices.info(said);
                     running.home_window.request_redraw();
                 }
+                return;
+            }
+            // The system says the displays changed: looked at afresh at once (a main display or a
+            // size that changed doesn't change the list of displays), so a screen's window is
+            // hidden or put back before anyone sees it where it should not be.
+            AppEvent::DisplaysChanged => {
+                if let Some(running) = self.running.as_mut() {
+                    running.displays_seen = None;
+                    running.displays_look_at = Instant::now() + DISPLAYS_LOOK_EVERY;
+                }
+                self.sync_screens(el);
                 return;
             }
             AppEvent::DeckLink => {
@@ -9353,11 +9602,20 @@ impl ApplicationHandler<AppEvent> for App {
         }
         if let Some(screen) = running.screen_windows.iter().find(|have| have.window.id() == id).map(|have| have.screen)
         {
+            let mut check_displays = false;
             match event {
+                // Also how a display going is noticed at once on Windows: the system moves its
+                // windows to the main display, which moves or resizes them.
                 WindowEvent::Resized(size) => {
                     if let Some(output) = &running.output {
                         output.send(OutputMsg::Resized(screen, size.width, size.height));
                     }
+                    running.displays_seen = None;
+                    check_displays = true;
+                }
+                WindowEvent::Moved(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                    running.displays_seen = None;
+                    check_displays = true;
                 }
                 // Closing a screen's window switches that screen off; it stays in the list.
                 WindowEvent::CloseRequested => {
@@ -9400,6 +9658,9 @@ impl ApplicationHandler<AppEvent> for App {
                     }
                 }
                 _ => {}
+            }
+            if check_displays {
+                self.sync_screens(el);
             }
             return;
         }
@@ -9726,6 +9987,10 @@ impl ApplicationHandler<AppEvent> for App {
             .as_ref()
             .filter(|r| r.home_state.media_playlists.iter().any(|p| p.folder.is_some()))
             .map(|_| self.folders_checked + self.folder_look_every());
+        // The displays, looked at now and then: the screens' windows must never be left on the
+        // operator's display by a change nobody was told of (the loop sleeps while idle, and
+        // macOS doesn't draw a window that is covered, so nothing else would look).
+        let looked_at = self.look_at_displays(el);
         // Songs changed in the Edit view are written once typing has paused for a second.
         const SAVE_AFTER: Duration = Duration::from_secs(1);
         let save_at = self.unsaved_since.map(|since| since + SAVE_AFTER);
@@ -9776,6 +10041,7 @@ impl ApplicationHandler<AppEvent> for App {
             folders_at,
             waiting_at,
             remote_at,
+            looked_at,
         ];
         match wake.into_iter().flatten().min() {
             Some(at) => {

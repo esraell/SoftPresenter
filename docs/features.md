@@ -1304,13 +1304,29 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   display, with the menu bar, is never offered and never filled: it is where SoftPresenter's
   own window is. A fresh start puts the first screen on the first other display, or in a
   window on a Mac with one display.
-- Switching the audience (or stage) screens off closes their windows, so the display shows
-  what is behind them, not black; NDI goes on sending black (all clear, for a see-through
+- A screen takes over its display at once, and gives it back at once, with no animation. On a
+  Mac it is a plain borderless window put exactly on the display's frame, above the menu bar
+  and Dock on that display, on every Space and staying put when Spaces change, and out of
+  Cmd-` and Mission Control; it never makes a full-screen Space (which slides in and out), and
+  never changes the Mac's menu bar or Dock on the operator's display. On Windows it is a
+  borderless window on the monitor's rectangle, which Windows shows at once and which hides the
+  taskbar on that monitor.
+- Switching the audience (or stage) screens off hides their windows at once, so the display
+  shows what is behind them, not black; NDI goes on sending black (all clear, for a see-through
   screen), so a stream keeps its source. A
   screen in a window opens on a display the operator doesn't work on when there is one.
 - A screen keeps the display it was set to, by name. If that display isn't connected, the
   Screens window shows it as disconnected and the screen shows nothing anywhere (it never
   jumps to another display); it goes back to its display as soon as it is connected again.
+- A screen never strays onto the operator's display. When a projector is switched off or its
+  cable drops, the system moves that screen's window onto the main display; SoftPresenter
+  hides the window within a second (at once on a Mac, which says so, and on Windows when the
+  window is moved) and keeps a notice: "The audience display (NAME) was disconnected. The
+  audience screen will come back when it returns." When the display returns the window goes
+  back on it and the notice goes. A window found on the wrong display is put back a few times,
+  then hidden. The same holds at start-up, when the main display changes, and when displays
+  swap places in the list. (Macs: the system's own word that displays changed; elsewhere the
+  displays are looked at once a second.)
   Identify Screens marks each screen with its name, a border and a wash of its own colour that
   breathes a few times to catch the eye (the Screens window shows each screen's colour beside
   it). While it is on, however it was started (the menu bar or the Screens window), the row

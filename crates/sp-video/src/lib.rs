@@ -12,8 +12,8 @@
 //! from a [`Frames`] (see the `web` module).
 //!
 //! This is the one crate in SoftPresenter that may use `unsafe` code, for calls into the
-//! system's frameworks, and only in its two macOS modules (`mac` for videos and pictures,
-//! `web_mac` for web pages); each such call says why it is sound.
+//! system's frameworks, and only in its two macOS modules (`mac` for videos and pictures, with its
+//! `gpu` and `cover` parts, `web_mac` for web pages); each such call says why it is sound.
 
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
@@ -29,7 +29,9 @@ pub use web::WebPage;
 mod ffmpeg;
 
 #[cfg(target_os = "macos")]
-pub use mac::{GpuImport, GpuNext, display_names, home_folder, pdf_draw, pdf_sizes, picture};
+pub use mac::{
+    DisplayWatch, GpuImport, GpuNext, cover_display, display_names, home_folder, pdf_draw, pdf_sizes, picture,
+};
 
 #[cfg(not(target_os = "macos"))]
 mod other;

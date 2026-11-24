@@ -376,7 +376,7 @@ The per-minute `[output]` line adds the longest pass, how many passes were over 
 100 ms, how many pictures reached the windows and how many didn't (a covered window shows
 none), how late the thread woke when that was 50 ms or more, and an NDI send of 100 ms or more.
 A DeckLink output's thread says when opening its device took 100 ms or more, and the window
-says when a screen's window is covered or uncovered and when the displays change (`[screens]`).
+says when a screen's window is covered or uncovered and when the displays change (`[screens]`). Where a screen's window goes when displays change is decided by `window_plan.rs` (a pure function: displays, screens' targets and where each window is, in; open, keep, put back, hide out, with the notice for a display that went; tested with made-up displays) and carried out by `App::sync_screens` in `main.rs`. On a Mac the window is placed by `sp_video::cover_display` (`crates/sp-video/src/mac/cover.rs`: level, Spaces behaviour, exact frame), and `sp_video::DisplayWatch` wakes the loop when macOS says the displays changed; elsewhere `App::look_at_displays` looks once a second. Testing aids: `SOFTPRESENTER_SCREENS_FILL=<display name>` (a quiet run's screens fill that one display), with `SOFTPRESENTER_SCREENS_ON_TOP=1` for the real window level; `spikes/virtual-display` makes a virtual display to try it on.
 
 A screen window's next picture to draw into is asked for on a thread of the window's own
 (`output/next_picture.rs`). The window system lends a window a few pictures and takes each back

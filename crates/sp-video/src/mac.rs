@@ -1,6 +1,8 @@
 //! AVFoundation and ImageIO.
 
+mod cover;
 mod gpu;
+pub use cover::{DisplayWatch, cover_display};
 pub use gpu::{GpuImport, GpuNext};
 
 use std::path::Path;
