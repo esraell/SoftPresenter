@@ -605,7 +605,11 @@ pub fn apply_style(ctx: &egui::Context) {
     }
     visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, LINE);
     visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT_DIM);
-    ctx.set_visuals(visuals);
+    // The app is always dark, whatever the computer's light or dark setting: egui would otherwise
+    // follow the system and draw menus and dropdowns in its own light look when the Mac is light.
+    ctx.set_theme(egui::ThemePreference::Dark);
+    ctx.set_visuals_of(egui::Theme::Dark, visuals.clone());
+    ctx.set_visuals_of(egui::Theme::Light, visuals);
     ctx.all_styles_mut(|style| {
         use egui::TextStyle::{Body, Button, Heading, Monospace, Small};
         style.text_styles.insert(Body, FontId::new(13.0, FontFamily::Proportional));
@@ -6259,6 +6263,20 @@ pub mod tests {
 
     use super::*;
     use crate::home::{Picking, Sweep};
+
+    #[test]
+    fn menus_and_dropdowns_stay_dark_when_the_computer_is_light() {
+        let ctx = egui::Context::default();
+        apply_style(&ctx);
+        // Pinned to dark, so the computer's light or dark setting is never followed...
+        assert_eq!(ctx.options(|options| options.theme_preference), egui::ThemePreference::Dark);
+        // ...and both of egui's looks are the app's own, so a menu or dropdown is dark either way.
+        for theme in [egui::Theme::Light, egui::Theme::Dark] {
+            let visuals = ctx.style_of(theme).visuals.clone();
+            assert!(visuals.dark_mode, "{theme:?}");
+            assert_eq!(visuals.window_fill, PANEL, "{theme:?}");
+        }
+    }
 
     fn rows() -> Vec<(usize, Rect)> {
         (0..3).map(|n| (5 + n, Rect::from_min_size(pos2(0.0, n as f32 * 32.0), vec2(200.0, 30.0)))).collect()
