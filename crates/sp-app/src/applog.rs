@@ -85,10 +85,16 @@ pub fn time_writing() -> std::time::Duration {
 pub fn plain_paths(text: &str) -> std::borrow::Cow<'_, str> {
     const VERBATIM: &str = "\\\\?\\";
     const VERBATIM_UNC: &str = "\\\\?\\UNC\\";
+    // The same, as a quoted string writes it (each backslash doubled): a command's words are
+    // logged that way.
+    const QUOTED: &str = "\\\\\\\\?\\\\";
+    const QUOTED_UNC: &str = "\\\\\\\\?\\\\UNC\\\\";
     if !text.contains(VERBATIM) {
         return std::borrow::Cow::Borrowed(text);
     }
-    std::borrow::Cow::Owned(text.replace(VERBATIM_UNC, "\\\\").replace(VERBATIM, ""))
+    std::borrow::Cow::Owned(
+        text.replace(QUOTED_UNC, "\\\\\\\\").replace(QUOTED, "").replace(VERBATIM_UNC, "\\\\").replace(VERBATIM, ""),
+    )
 }
 
 /// Writes one line: the clock time, the seconds since the start, what part of the app it is
@@ -215,6 +221,15 @@ mod tests {
         assert_eq!(plain_paths("added \\\\?\\C:\\Music\\a.mp3 in 3ms"), "added C:\\Music\\a.mp3 in 3ms");
         assert_eq!(plain_paths("\\\\?\\UNC\\server\\share\\a.mp3"), "\\\\server\\share\\a.mp3");
         assert_eq!(plain_paths("/Users/a/b.mp3 and C:\\x"), "/Users/a/b.mp3 and C:\\x");
+        // A command's words, logged as quoted strings, each backslash doubled.
+        assert_eq!(
+            plain_paths(r#"["song", "import", "\\\\?\\C:\\Songs\\a.txt"] -> done"#),
+            r#"["song", "import", "C:\\Songs\\a.txt"] -> done"#
+        );
+        assert_eq!(
+            plain_paths(r#"["media", "add", "\\\\?\\UNC\\server\\a.mp4"]"#),
+            r#"["media", "add", "\\\\server\\a.mp4"]"#
+        );
     }
 
     #[test]
