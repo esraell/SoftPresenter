@@ -167,6 +167,7 @@ function nodes(x, ns = null, out = []) {
 function put(el, ...content) {
   if (typeof el === 'string') el = document.getElementById(el);
   el.replaceChildren(...nodes(content, el.namespaceURI === SVG_NS ? SVG_NS : null));
+  if (typeof LANG_PASS === 'function') LANG_PASS(el);      // design aid only (langtool.js, never shipped): the words in another language, or stretched
   return el;
 }
 
@@ -442,6 +443,7 @@ const svg = (d, w = 1.4, s = 13) => html`<svg width="${s}" height="${s}" viewBox
 // A label that swaps between two wordings keeps the width of the longer one, so nothing beside it moves when it changes.
 const sw = (on, a, b) => html`<span class="ui-sw" data-w="${on ? b : a}">${on ? a : b}</span>`;
 const I = {
+  undo: svg('M4.800 3L2.300 5.500 4.800 8M2.300 5.500h5.700a2.500 2.500 0 0 1 0 5H6.200', 1.4), redo: svg('M8.200 3l2.500 2.500L8.200 8M10.700 5.500H5a2.500 2.500 0 0 0 0 5h1.800', 1.4),
   note: svg('M5 10.300a1.700 1.700 0 1 1-1.700-1.700A1.700 1.700 0 0 1 5 10.300zM5 10.300V3.200l6-1.400v7.300M11 9a1.700 1.700 0 1 1-1.700-1.700A1.700 1.700 0 0 1 11 9z', 1.3),
   theme: svg('M6.500 2a4.500 4.500 0 1 0 0 9 4.500 4.500 0 0 0 0-9zM6.500 2v9M6.500 4.500h3.800M6.500 6.500h4.500M6.500 8.500h3.800', 1.2), template: svg('M2 3h9v7.500H2zM2 5.500h9M5.200 5.500v5', 1.2), layers: svg('M2 8.700l4.500 2 4.500-2M2 6l4.500 2 4.500-2-4.500-2z', 1.2), monitor: svg('M2 2.800h9v6H2zM4.800 11h3.400M6.500 8.800V11', 1.2),
   playlist: svg('M2 3.5h.01M2 6.5h.01M2 9.5h.01M4.800 3.500h6.200M4.800 6.500h6.200M4.800 9.500h6.200', 1.6), library: svg('M2.800 2.500v7.500M5.500 2.500v7.500M8 3.200l2.300 6.800M1.500 11h10', 1.5),
@@ -820,9 +822,10 @@ function objHTML(o, ctx, ed) {
   else if (o.kind === 'screen') { const scr = o.source === 'main' ? null : byId(DOC.screens, o.source);      // a live picture of an audience screen, on a stage layout
     return html`<div class="${cls} ob-screen" ${at} ${bd} style="${place}${shadow}"><div class="ob-scr">${screenHTML(scr)}</div><span class="ob-tag">⧉ ${scr ? scr.name : 'Audience screens'}</span>${badge}${handles}</div>`; }
   else if (o.kind === 'web') look = 'background:repeating-linear-gradient(45deg, rgba(255,255,255,.05) 0 6%, transparent 6% 12%);border:.15cqw dashed rgba(255,255,255,.4);';
-  else if (o.kind === 'ndi') { const src = ndiSource(o.source), here = ndiHere(o.source);      // a picture coming in over NDI, as a web page comes in
+  else if (o.kind === 'ndi') { const src = ndiSource(o.source), here = !!o.source && ndiHere(o.source);      // a picture coming in over NDI, as a web page comes in
     if (!here && !ed) return '';      // on the screens (after the app holds the last picture two seconds) and in the lists, a source that isn't sending isn't there
-    return html`<div class="${cls} ob-ndi ${here ? '' : 'gone'}" ${at} ${bd} style="${place}${shadow}"><span class="ob-tag">NDI · ${src ? src.name : o.source}${here ? '' : ndiState() === 'none' ? ' · NDI isn’t installed' : ' · not found'}</span>${badge}${handles}</div>`; }
+    const state_ = !o.source ? 'empty' : here ? '' : 'gone';      // no source chosen yet: a plain dashed box, as an empty web page's; one not sending: amber
+    return html`<div class="${cls} ob-ndi ${state_}" ${at} ${bd} style="${place}${shadow}"><span class="ob-tag">NDI · ${!o.source ? 'choose a source' : src ? src.name : o.source}${!o.source || here ? '' : ndiState() === 'none' ? ' · NDI isn’t installed' : ' · not sending'}</span>${badge}${handles}</div>`; }
   else look = `background:${fillCSS(o)};${CLIP[o.shape] ? `clip-path:${CLIP[o.shape]};` : `border-radius:${o.shape === 'ellipse' ? '50%' : o.shape === 'rounded' ? '3cqw' : '0'};${border}`}`;
   const mark = o.kind === 'web' ? html`<span class="ob-tag">🌐 ${o.url || ''}</span>` : o.kind === 'video' ? html`<span class="ob-tag">▶ VIDEO</span>` : '';
   return html`<div class="${cls}" ${at} ${bd} style="${place}${look}${shadow}">${mark}${badge}${handles}</div>`;
@@ -964,7 +967,7 @@ function setCue(key, q, s) {
   if (q == null || q < 0) q = d.seq.indexOf(s); if (q < 0) q = 0; state.cue = { deck: key, q, s: d.seq[q] };
 }
 const cueIsLive = () => !!state.cue && !!state.live && !!state.on && state.live.deck === state.cue.deck && state.live.q === state.cue.q;
-// a cue belongs to the view it was made in: a verse in Bible, a slide in Show
+// a cue belongs to the view it was made in: a verse in Bible, a slide in Service
 const cueHere = () => !!state.cue && !cueIsLive() && (state.mode === 'bible' ? state.cue.deck === 'bible' : state.mode === 'show' && state.cue.deck !== 'bible');
 const isCued = (key, q, s) => !!state.cue && !cueIsLive() && state.cue.deck === key && (q >= 0 ? state.cue.q === q : state.cue.s === s);
 function moveCue(dir) {
@@ -1099,7 +1102,8 @@ function render() {
 }
 function renderTop() {
   $('brand').textContent = BRAND; put('navToggle', I.list);
-  put('modes', [['show', 'Show', 'S'], ['bible', 'Bible', 'B'], ['edit', 'Edit', 'E']].map(([m, name, k]) => html`<button class="${state.mode === m || (m === 'edit' && state.mode === 'themes') ? 'on' : ''}" data-a="mode:${m}" title="${name} (${keyText('⌥' + k)})">${name}<kbd class="kh">${keyText('⌥' + k)}</kbd></button>`));
+  // the owner named the first view Service (23 November; the app e3d08de); inside it is still 'show'
+  put('modes', [['show', 'Service', 'S'], ['bible', 'Bible', 'B'], ['edit', 'Edit', 'E']].map(([m, name, k]) => html`<button class="${state.mode === m || (m === 'edit' && state.mode === 'themes') ? 'on' : ''}" data-a="mode:${m}" title="${name} (${keyText('⌥' + k)})">${name}<kbd class="kh">${keyText('⌥' + k)}</kbd></button>`));
   $('gear').classList.toggle('on', state.mode === 'settings');
   document.body.classList.toggle('show-keys', !!DOC.settings.showKeys);      // key tags: a setting, not a held key
   document.body.classList.toggle('no-left', state.mode === 'bible' && !state.bible.lists);
@@ -1224,7 +1228,7 @@ function renderShowLeft() {
   } else if (state.src.type === 'cat') ({ rows, add } = catLeft(hit));
   else rows = html`<div class="sh-none">The church’s VoxLive screens, one slide each. Click one to put its live captions on the screens.</div>`;
   put('left', html`<div class="sect items"><div class="sect-h"><span class="cap">${state.src.type === 'pl' ? 'Playlist' : state.src.type === 'vox' ? 'Integration' : state.src.type === 'cat' ? 'Song catalog' : 'Library'}</span><button class="iconbtn" data-a="menu:importMenu" title="Import songs or slides">${svg('M6.500 2v6.500M4 6l2.500 2.500L9 6M2.500 10.500h8')}</button></div>
-    <button class="plbtn ${state.srcMenu ? 'open' : ''}" data-a="srcMenu" title="Choose a library or playlist (${keyText('⌥P')})"><i class="sh-kind ${state.src.type === 'pl' ? 'pl' : state.src.type === 'cat' ? 'cat' : 'lib'}">${state.src.type === 'pl' ? I.playlist : state.src.type === 'cat' ? I.catalog : I.library}</i><span>${srcName()}</span><span class="chev">${I.chev}</span></button>${panel}${rows}</div>
+    <button class="plbtn ${state.srcMenu ? 'open' : ''}" data-a="srcMenu" title="Choose a library or playlist (${keyText('⌘P')})"><i class="sh-kind ${state.src.type === 'pl' ? 'pl' : state.src.type === 'cat' ? 'cat' : 'lib'}">${state.src.type === 'pl' ? I.playlist : state.src.type === 'cat' ? I.catalog : I.library}</i><span>${srcName()}</span><span class="chev">${I.chev}</span></button>${panel}${rows}</div>
     <div class="sh-foot">${add}<input class="search" placeholder="Filter" data-i="filter" value="${state.filter}"></div>`);
   fitTitles(document.getElementById('left'));
 }
@@ -1566,11 +1570,11 @@ function renderShowCentre() {
       <button class="${tr.kind !== 'Cut' && tr.kind !== 'Dissolve' ? 'on' : ''}" data-a="transSheet" title="Every other transition"><span class="sh-trk">${tr.kind !== 'Cut' && tr.kind !== 'Dissolve' ? tr.kind : 'Advanced'}</span> ▾</button></div>
     <i class="sh-div"></i><button class="btn ${st.continuous ? 'onkey' : ''}" data-a="continuous" title="Next at the end of a song goes on to the next song">Continuous</button>
     ${DOC.versions.length ? html`<button class="btn sh-vbtn ${state.version ? 'lit' : ''}" data-a="menu:version" title="Theme version: ${state.version ? `the ${versionName(state.version.id)} version is on` : 'the usual look'}. Choose a version, such as ${DOC.versions[0].name}, for every screen whose theme has it" aria-label="Theme version">${I.theme}<i class="chev">▾</i></button>` : ''}
-    <i class="sh-div"></i><button class="btn" data-a="undo" ${undoStack.length ? { title: `Undo (${keyText('⌘Z')})` } : { disabled: true, title: 'Nothing to undo' }}>Undo</button><button class="btn" data-a="redo" ${redoStack.length ? { title: `Redo (${keyText('⇧⌘Z')})` } : { disabled: true, title: 'Nothing to redo' }}>Redo</button><span class="sp"></span>
+    <i class="sh-div"></i><button class="iconbtn ui-ur" data-a="undo" aria-label="Undo" ${undoStack.length ? { title: `Undo (${keyText('⌘Z')})` } : { disabled: true, title: 'Nothing to undo' }}>${I.undo}</button><button class="iconbtn ui-ur" data-a="redo" aria-label="Redo" ${redoStack.length ? { title: `Redo (${keyText('⇧⌘Z')})` } : { disabled: true, title: 'Nothing to redo' }}>${I.redo}</button><span class="sp"></span>
     <div class="seg">${[['grid', I.grid, 'Grid'], ['easy', I.easy, 'Words only'], ['table', I.table, 'Table']].map(([k, ic, t]) => html`<button class="${st.view === k ? 'on' : ''}" data-a="view:${k}" title="${t}">${ic}</button>`)}</div>
     <input type="range" min="130" max="340" value="${st.size}" data-i="size" aria-label="Slide size">`);
   const list = (mv ? mv.items.map(mediaById).filter(Boolean) : DOC.media).filter(m => !m.deck), mt = DOC.mediaTransition;
-  put('media', html`<div class="media-h"><span class="cap">Media</span><kbd class="kh">${keyText('⌥M')} then 1–9</kbd><button class="pill" data-a="menu:mediaSrc">${mv ? mv.name : 'All Media'} ▾</button>
+  put('media', html`<div class="media-h"><span class="cap">Media</span><kbd class="kh">${keyText('⇧⌘M')} then 1–9</kbd><button class="pill" data-a="menu:mediaSrc">${mv ? mv.name : 'All Media'} ▾</button>
       ${mv ? html`<button class="btn sm" data-a="playMp:${mv.id}">${I.play} Play this playlist</button>${mv.follow ? html`<span class="pill">Follows ${mv.follow}</span>` : ''}` : ''}
       <span class="sp"></span><button class="pill" data-a="menu:mediaTr">${mt.kind}${mt.kind === 'Cut' ? '' : ' ' + mt.time + 's'} ▾</button><button class="iconbtn" data-a="addMedia" title="Add pictures or videos">${I.plus}</button></div>
     <div class="bin">${list.length ? list.map(m => html`<button class="clip ${state.mediaOn === m.id ? 'on' : ''} ${state.mediaPick.includes(m.id) ? 'pickd' : ''}" data-a="media:${m.id}" data-m="media:${m.id}" draggable="true" data-drag="media:${m.id}">
@@ -2078,7 +2082,7 @@ A.bibleAdd = ([plId]) => { const p = byId(DOC.playlists, plId), r = { ...B().ref
 M.bibleAdd = () => { const front = state.src.type === 'pl' ? playlist() : DOC.playlists[0];
   return [...DOC.playlists.filter(p => p !== front).map(p => ({ t: `Add to “${p.name}”`, f: () => A.bibleAdd([p.id]) })), { sep: true },
     { t: 'New Playlist…', f: () => { const p = { id: newId('pl'), name: 'New Playlist', items: [{ id: newId('it'), kind: 'passage', passage: { ...B().ref } }] }; mutate(() => { DOC.playlists.push(p); state.src = { type: 'pl', id: p.id }; state.mode = 'show'; });
-      renameAt('.plbtn > span', p.name, v => mutate(() => { p.name = v; }), 'Name the playlist'); } }]; };      // in front, in the Show view, its name ready to type
+      renameAt('.plbtn > span', p.name, v => mutate(() => { p.name = v; }), 'Name the playlist'); } }]; };      // in front, in the Service view, its name ready to type
 
 // The field follows what is typed a moment after typing stops; nothing goes on screen until a verse is clicked.
 let brefTimer;
@@ -2417,7 +2421,7 @@ function renderEditCentre() {
   }
   const z = state.zoom, width = z === 'Fit' ? 'min(100%, calc((100vh - 250px) * 16 / 9))' : (1920 * +z / 100) + 'px';
   put('slides', html`${bar(html`<button class="btn" data-a="menu:edAdd">${I.plus} Add ▾</button>
-      ${t.type === 'slide' ? html`<button class="btn" data-a="edWords" title="The song's words as text">Words</button>` : ''}<button class="btn" data-a="undo">Undo</button><button class="btn" data-a="redo">Redo</button><i class="rule"></i>
+      ${t.type === 'slide' ? html`<button class="btn" data-a="edWords" title="The song's words as text">Words</button>` : ''}<button class="iconbtn ui-ur" data-a="undo" aria-label="Undo" title="Undo (${keyText('⌘Z')})">${I.undo}</button><button class="iconbtn ui-ur" data-a="redo" aria-label="Redo" title="Redo (${keyText('⇧⌘Z')})">${I.redo}</button><i class="rule"></i>
       <select class="sel" data-c="edZoom" aria-label="Zoom">${options(['Fit', '25', '50', '75', '100', '150', '200'].map(x => [x, x === 'Fit' ? 'Fit' : x + '%']), z)}</select><button class="btn ${state.gridOn ? 'onkey' : ''}" data-a="edGrid" title="A grid that boxes snap to">Grid</button>
       ${t.type === 'slide' ? html`<i class="rule"></i><button class="btn ${state.liveEdit ? 'onkey' : ''}" data-a="edLive" title="Send changes to the screens as they are made">Live edit</button>` : ''}`)}
     <div class="ed-stage ${z === 'Fit' ? '' : 'zoomed'}"><div class="thumb canvas" id="canvas" style="width:${width}">${slideHTML(t.holder, t.ctx, true)}
@@ -2448,24 +2452,19 @@ M.edAdd = () => { const t = edTarget(); return [
   { t: 'Text', k: 'T', f: () => edInsert('text') },
   { t: 'Shape', sub: Object.entries(SHAPES).map(([k, n]) => ({ t: n, f: () => edInsert('shape', k) })) },
   { t: 'Picture or Video', sub: DOC.media.map(m => ({ t: m.name, f: () => edInsert('media', m.id) })) },
-  { t: 'Web Page…', f: () => ask('Web page', 'Address', 'https://', v => { if (!/^https:\/\//.test(v)) return refuse('Only addresses starting with https:// open'); edInsert('web', v); }) },
-  { t: 'NDI Source…', f: () => A.ndiSheet() },
+  { t: 'Web Page', f: () => edInsert('web', '') },
+  { t: 'NDI Source', f: () => edInsert('ndi', null) },
   { t: 'Linked Text', sub: Object.entries(LINKS).map(([k, n]) => ({ t: n, f: () => edInsert('link', k) })) },
   t.type === 'layout' && { t: 'Screen Picture', sub: [{ t: 'Audience screens (main)', f: () => edInsert('screen', 'main') }, ...DOC.screens.filter(x => x.kind === 'Audience').map(x => ({ t: x.name, f: () => edInsert('screen', x.id) }))] },
   t.type === 'template' && { t: 'A Box for Words', sub: ['main', 'translation', 'verse1', 'ref1', 'verse2', 'ref2'].map(r => ({ t: r, f: () => edInsert('role', r) })) }]; };
-// Picking an NDI source: the sources the finder sees on the network, the computer each is on, and Look again. While it finds
-// none it says so and keeps looking; without the NDI runtime it says what to install. The app's own outputs show greyed: one
-// shown in a slide would show itself. Choosing one adds the object (or, from the inspector, points the picked one at it).
-A.ndiSheet = ([forId] = []) => {
-  const st = ndiState(), found = st === 'found' ? NDI_SOURCES : [];
-  const pick = n => html`<button class="nd-row ${n.own ? 'own' : ''}" ${n.own ? { disabled: true, title: 'SoftPresenter’s own output: shown in a slide it would show itself' } : { 'data-a': `ndiPick:${n.id}${forId ? ',' + forId : ''}` }}><b>${n.name}</b><span>${n.own ? 'This computer · SoftPresenter’s own' : n.host}</span></button>`;
-  openSheet({ title: 'NDI source', body: html`<div class="nd-head"><span class="sub">${st === 'none' ? 'NDI isn’t installed' : found.length ? `${found.filter(n => !n.own).length} found on this network` : 'Looking on this network…'}</span><button class="btn sm" data-a="ndiLook">Look again</button></div>
-    ${st === 'none' ? html`<p class="nd-none">NDI isn’t installed on this computer. SoftPresenter uses the NDI Tools you install yourself, as it does for sending. Once they are in, sources show here.</p>`
-      : found.length ? html`<div class="nd-list">${found.map(pick)}</div>` : html`<p class="nd-none">None found yet. A camera, a computer or another app sending NDI on this network shows here as soon as it starts. This list keeps looking while it is open.</p>`}`,
-    note: 'The picture comes in as a web page does: put it anywhere on the slide, at any size.', buttons: [{ t: 'Cancel' }] });
-};
-A.ndiLook = () => A.ndiSheet();
-A.ndiPick = ([id, forId]) => { closeSheet(); if (forId) { mutate(() => { const o = byId(edTarget().holder.objects, forId); if (o) { o.source = id; o.name = `NDI · ${ndiSource(id).name}`; } }); } else edInsert('ndi', id); };
+// An NDI source is chosen as a web page's address is: in the inspector, from the sources the finder sees on the network (the
+// app's own outputs aren't offered: one shown in a slide would show itself). The line under it says what is happening.
+const ndiLine = o => { const st = ndiState(), found = NDI_SOURCES.filter(n => !n.own).length, src = ndiSource(o.source);
+  if (st === 'none') return 'NDI isn’t installed on this computer. SoftPresenter uses the NDI Tools you install yourself, as it does for sending.';
+  if (!o.source) return st === 'found' && found ? `${found} found on this network. The picture shows, live, while the slide is on screen.` : 'Looking for NDI on this network. A source shows here as soon as it starts sending.';
+  if (!ndiHere(o.source)) return `“${src ? src.name : o.source}” isn’t sending now. On screen the slide shows without it until it is back.`;
+  return 'The picture shows, live, while the slide is on screen.'; };
+A.ndiLook = () => render();
 function edInsert(kind, arg) {
   mutate(() => {
     const obs = edTarget().holder.objects; let o;
@@ -2475,13 +2474,16 @@ function edInsert(kind, arg) {
     if (kind === 'shape') o = obj('shape', SHAPES[arg], { shape: arg, fill: '#ff4a1a', frame: { x: 660, y: 390, w: 600, h: 300 } });
     if (kind === 'media') { const m = mediaById(arg); o = obj(m.video ? 'video' : 'image', m.name, { media: arg, scaling: 'Fill', frame: { x: 0, y: 0, w: 1920, h: 1080 } }); }
     if (kind === 'screen') o = obj('screen', 'Screen picture', { source: arg, frame: { x: 1160, y: 40, w: 720, h: 405 } });
-    if (kind === 'web') o = obj('web', 'Web page', { url: arg, frame: { x: 260, y: 200, w: 1400, h: 680 } });
-    if (kind === 'ndi') o = obj('ndi', `NDI · ${ndiSource(arg).name}`, { source: arg, scaling: 'Fit', quality: 'Full', sound: 'Off', frame: { x: 260, y: 146, w: 1400, h: 788 } });
+    const same = k => obs.filter(x => x.kind === k).length, nth = (name, k) => same(k) ? `${name} ${same(k) + 1}` : name;      // a second one is "Web page 2", as the app names them
+    if (kind === 'web') o = obj('web', nth('Web page', 'web'), { url: arg || '', frame: { x: 260, y: 200, w: 1400, h: 680 } });
+    if (kind === 'ndi') o = obj('ndi', nth('NDI source', 'ndi'), { source: arg || '', scaling: 'Fit', quality: 'Full', sound: 'Off', frame: { x: 260, y: 146, w: 1400, h: 788 } });
     if (kind === 'media') obs.unshift(o); else obs.push(o);        // a picture or video goes behind the words
-    state.sels = [o.id]; state.itab = o.kind === 'text' ? 'Text' : 'Shape';
+    state.sels = [o.id]; state.itab = OWN_TAB[o.kind] || 'Box';
   });
+  // A web page's address, or an NDI source, is chosen in the inspector, which takes the keyboard at once (as in the app)
+  if (kind === 'web' || kind === 'ndi') setTimeout(() => { const f = document.querySelector(`[data-c="edIn:${kind === 'web' ? 'url' : 'source'}"]`); if (f) f.focus(); });
 }
-A.edPick = ([id], el, ev) => { state.tsel = null; if (ev && ev.shiftKey) state.sels.includes(id) ? state.sels.splice(state.sels.indexOf(id), 1) : state.sels.push(id); else state.sels = [id]; const o = edPicked(edTarget())[0]; if (o) state.itab = o.kind === 'text' ? state.itab === 'Slide' ? 'Text' : state.itab : state.itab === 'Text' || state.itab === 'Slide' ? 'Shape' : state.itab; render(); };
+A.edPick = ([id], el, ev) => { state.tsel = null; if (ev && ev.shiftKey) state.sels.includes(id) ? state.sels.splice(state.sels.indexOf(id), 1) : state.sels.push(id); else state.sels = [id]; const o = edPicked(edTarget())[0]; if (o && !['Box', 'Animation'].includes(state.itab)) state.itab = OWN_TAB[o.kind] || 'Box'; render(); };      // Box and Animation stay open from one object to the next
 A.edObjToggle = ([prop, id]) => mutate(() => { const o = byId(edTarget().holder.objects, id); o[prop] = !o[prop]; });
 A.edObj = ([what]) => {
   const t = edTarget(), picked = edPicked(t); if (!picked.length) return;
@@ -2511,11 +2513,18 @@ A.edAlign = ([how]) => {
   });
 };
 
-/* ───────── inspector: where the timers sit in Show ───────── */
+/* ───────── inspector: where the timers sit in Service ───────── */
+// The inspector's tabs follow what is picked (the owner, 23 November: "instead of naming it shape … name it to something that
+// makes sense"): the object's own tab first, named for what it is; then Box (where it sits, its size, the box's look, its order,
+// rename, duplicate, delete); then Animation, on slides and props only. Several of one kind keep their kind's tab; several of
+// different kinds share Box (and Animation).
+const OWN_TAB = { text: 'Text', shape: 'Shape', image: 'Picture', video: 'Video', web: 'Web Page', ndi: 'NDI Source', screen: 'Screen' };
+const inspTabs = (t, eff) => { const kinds = [...new Set(eff.map(e => e.kind))], own = kinds.length === 1 ? OWN_TAB[kinds[0]] : null;
+  return [own, 'Box', t.type === 'slide' || t.type === 'prop' ? 'Animation' : null].filter(Boolean); };
 function renderInspector() {
   const t = edTarget(), eff = edEff(t).filter(e => state.sels.includes(e.id)), o = eff[0];
   const none = { slide: 'Slide', template: 'Theme', prop: 'Prop', layout: 'Layout' }[t.type];
-  const tabs = !o ? [none] : o.kind === 'text' ? ['Text', 'Shape', 'Build'] : ['Shape', 'Build'];
+  const tabs = !o ? [none] : inspTabs(t, eff);
   if (!tabs.includes(state.itab)) state.itab = tabs[0];
   $('tabs').className = 'tabs' + (tabs.length === 1 ? ' one' : '');
   put('tabs', tabs.map(x => html`<button class="${x === state.itab ? 'on' : ''}" data-a="itab:${x}">${x}</button>`));
@@ -2565,20 +2574,32 @@ function renderInspector() {
       row('Shows', html`<select class="sel" data-c="edIn:linked">${options([['', 'Its own words'], ...Object.entries(LINKS)], o.linked || '')}</select>${o.linked === 'timer' ? html`<select class="sel" data-c="edIn:timer">${options(DOC.timers.map(x => x.name), o.timer)}</select>` : ''}`),
       t.type === 'template' ? row('Holds', html`<select class="sel" data-c="edIn:role">${options([['', 'Nothing (just text)'], 'main', 'translation', 'verse1', 'ref1', 'verse2', 'ref2'], o.role || '')}</select>`) : '',
       html`<div class="ctl"><button class="btn" data-a="edStyle:copy">Copy style</button><button class="btn" data-a="edStyle:paste">Paste style</button>${t.type === 'slide' && o.role ? html`<button class="btn" data-a="edStyle:theme" title="Let the theme decide the box’s look and place again; words styled in it keep their own">Back to theme</button>` : ''}${o.spans && o.spans.length && !o.linked ? html`<button class="btn" data-a="edStyle:plain" title="Every word takes the box’s look again">Clear word styles</button>` : ''}</div>`];
-  } else if (state.itab === 'Shape') { const f = o.frame, g = o.gradient, st = o.stroke || { w: 0, color: '#ffffff' };
-    body = [row('Place', html`<div class="num4">${['x', 'y', 'w', 'h'].map(p => html`<label>${p.toUpperCase()}${num('frame.' + p, Math.round(f[p]))}</label>`)}</div>`),
+  } else if (state.itab === 'Box') { const f = o.frame, g = o.gradient, st = o.stroke || { w: 0, color: '#ffffff' }, kinds = [...new Set(eff.map(e => e.kind))], words = kinds.every(k => k === 'text');
+    const what = { text: 'text box', shape: 'shape', image: 'picture', video: 'video', web: 'web page', ndi: 'NDI source', screen: 'screen picture' };
+    body = [eff.length > 1 ? html`<div class="iscope"><span class="cap">${eff.length} objects</span><span class="sub">${kinds.map(k => what[k] || k).join(', ')}</span></div>` : '',
+      row('Place', html`<div class="num4">${['x', 'y', 'w', 'h'].map(p => html`<label>${p.toUpperCase()}${num('frame.' + p, Math.round(f[p]))}</label>`)}</div>`),
       row('Arrange', [['left', 'center', 'right', 'top', 'middle', 'bottom'].map(a => key(I[a], false, `edAlign:${a}`, `Align ${a}${eff.length > 1 ? '' : ' on the slide'}`)), eff.length > 2 ? html`<button class="btn" data-a="edAlign:spreadh">Spread ↔</button><button class="btn" data-a="edAlign:spreadv">Spread ↕</button>` : '']),
-      o.kind === 'image' || o.kind === 'video' ? row('Fits', sel('scaling', ['Fit', 'Fill', 'Stretch'], o.scaling || 'Fill')) : o.kind === 'ndi' ? [row('Source', html`<select class="sel" data-c="edIn:source">${options([...NDI_SOURCES.filter(n => !n.own && ndiState() === 'found').map(n => [n.id, `${n.name} · ${n.host}`]), ...(ndiHere(o.source) ? [] : [[o.source, `${ndiSource(o.source) ? ndiSource(o.source).name : o.source} · not found`]])], o.source)}</select><button class="btn" data-a="ndiSheet:${o.id}" title="Look for sources again">Look again</button>`),
-        row('Fits', sel('scaling', ['Fit', 'Fill', 'Stretch'], o.scaling || 'Fit')),
-        row('Quality', html`${sel('quality', ['Full', 'Light'], o.quality || 'Full')}<span class="sub">Light takes the sender’s smaller picture</span>`),
-        row('Sound', html`${sel('sound', ['Off', 'On'], o.sound || 'Off')}<span class="sub">with the video sound</span>`)] : o.kind === 'web' ? row('Address', html`<input class="field" data-c="edIn:url" value="${o.url == null ? '' : o.url}">`) : o.kind === 'screen' ? row('Shows', html`<select class="sel" data-c="edIn:source">${options([['main', 'Audience screens (main)'], ...DOC.screens.filter(x => x.kind === 'Audience').map(x => [x.id, x.name])], o.source)}</select>`)
-        : [row('Fill', sw('fill', o.fill, true)), row('Gradient', html`<select class="sel" data-c="edIn:gradient.kind">${options([['', 'None'], ['linear', 'Linear'], ['radial', 'Radial']], g ? g.kind : '')}</select>${g && g.kind === 'linear' ? num('gradient.angle', g.angle, { step: '15' }) : ''}`), g ? row('To', sw('gradient.to', g.to)) : ''],
-      row('Outline', [num('stroke.w', st.w, { min: '0', max: '60' }), SWATCHES.slice(0, 5).map(c => html`<button class="swt ${st.color === c ? 'on' : ''}" style="background:${c}" data-a="edSet:stroke.color,${c}"></button>`)]),
-      row('Effects', html`<button class="btn ${o.shadow ? 'onkey' : ''}" data-a="edToggle:shadow">Shadow</button><button class="btn ${o.flipH ? 'onkey' : ''}" data-a="edToggle:flipH">Flip ↔</button><button class="btn ${o.flipV ? 'onkey' : ''}" data-a="edToggle:flipV">Flip ↕</button>`),
       row('Rotate', [num('rotation', o.rotation || 0, { step: '5', min: '-180', max: '180' }), html`<span class="sub">degrees</span>`]),
       row('Opacity', html`<input type="range" min="0" max="1" step="0.05" value="${o.opacity == null ? 1 : o.opacity}" data-c="edIn:opacity" aria-label="Opacity" style="flex:1">`),
+      words ? [row('Fill', sw('fill', o.fill, true)), row('Gradient', html`<select class="sel" data-c="edIn:gradient.kind">${options([['', 'None'], ['linear', 'Linear'], ['radial', 'Radial']], g ? g.kind : '')}</select>${g && g.kind === 'linear' ? num('gradient.angle', g.angle, { step: '15' }) : ''}`), g ? row('To', sw('gradient.to', g.to)) : ''] : '',
+      kinds.includes('shape') ? '' : row('Outline', [num('stroke.w', st.w, { min: '0', max: '60' }), SWATCHES.slice(0, 5).map(c => html`<button class="swt ${st.color === c ? 'on' : ''}" style="background:${c}" data-a="edSet:stroke.color,${c}"></button>`)]),
+      row('Effects', html`<button class="btn ${o.shadow ? 'onkey' : ''}" data-a="edToggle:shadow">Shadow</button><button class="btn ${o.flipH ? 'onkey' : ''}" data-a="edToggle:flipH">Flip ↔</button><button class="btn ${o.flipV ? 'onkey' : ''}" data-a="edToggle:flipV">Flip ↕</button>`),
       row('Order', html`<button class="btn" data-a="edObj:front">Forward</button><button class="btn" data-a="edObj:back">Back</button>`),
       row('Object', html`<button class="btn" data-a="edObj:rename">Rename</button><button class="btn" data-a="edObj:dup">Duplicate</button><button class="btn" data-a="edObj:del">Delete</button>`)];
+  } else if (state.itab !== 'Animation') { const g = o.gradient, st = o.stroke || { w: 0, color: '#ffffff' }, m = (o.kind === 'image' || o.kind === 'video') && mediaById(o.media);      // the object's own tab
+    body = o.kind === 'shape' ? [row('Shape', sel('shape', Object.entries(SHAPES), o.shape)), row('Fill', sw('fill', o.fill, true)), row('Gradient', html`<select class="sel" data-c="edIn:gradient.kind">${options([['', 'None'], ['linear', 'Linear'], ['radial', 'Radial']], g ? g.kind : '')}</select>${g && g.kind === 'linear' ? num('gradient.angle', g.angle, { step: '15' }) : ''}`), g ? row('To', sw('gradient.to', g.to)) : '',
+        row('Outline', [num('stroke.w', st.w, { min: '0', max: '60' }), SWATCHES.slice(0, 5).map(c => html`<button class="swt ${st.color === c ? 'on' : ''}" style="background:${c}" data-a="edSet:stroke.color,${c}"></button>`)])]
+      : o.kind === 'image' || o.kind === 'video' ? [row('File', html`<span class="ed-file" title="${m ? m.name : ''}">${m ? m.name : 'Gone from the media bin'}</span>`), row('Fits', sel('scaling', ['Fit', 'Fill', 'Stretch'], o.scaling || 'Fill')),
+        o.kind === 'video' ? html`<p class="ed-line">It plays from the start while the slide is on screen.</p>` : '']
+      : o.kind === 'ndi' ? [row('Source', html`<select class="sel" data-c="edIn:source">${options([['', ndiState() === 'none' ? 'NDI isn’t installed' : ndiState() === 'found' && NDI_SOURCES.some(n => !n.own) ? 'Choose a source…' : 'Looking…'], ...(ndiState() === 'found' ? NDI_SOURCES.filter(n => !n.own).map(n => [n.id, `${n.name} · ${n.host}`]) : []), ...(o.source && !ndiHere(o.source) ? [[o.source, `${ndiSource(o.source) ? ndiSource(o.source).name : o.source} · not sending`]] : [])], o.source || '')}</select><button class="btn" data-a="ndiLook" title="Look for NDI sources again">Look again</button>`),
+        html`<p class="ed-line ${o.source && !ndiHere(o.source) && ndiState() !== 'none' ? 'care' : ''}">${ndiLine(o)}</p>`,
+        row('Fits', sel('scaling', ['Fit', 'Fill', 'Stretch'], o.scaling || 'Fit')),
+        row('Quality', html`${sel('quality', ['Full', 'Light'], o.quality || 'Full')}<span class="sub">Light takes the sender’s smaller picture</span>`),
+        row('Sound', html`<select class="sel" data-c="edIn:sound" disabled>${options(['Off'], 'Off')}</select><span class="sub">Sound comes later</span>`)]      // as the app has it (de5bc10): no way yet to take NDI's sound
+      : o.kind === 'web' ? [row('Address', html`<input class="field" data-c="edIn:url" placeholder="https://…" value="${o.url == null ? '' : o.url}">`),
+        html`<p class="ed-line ${o.url && !/^https:\/\//.test(o.url) ? 'care' : ''}">${o.url && !/^https:\/\//.test(o.url) ? 'Only web pages whose address starts with https:// can be shown.' : 'The page shows, live, while the slide is on screen.'}</p>`]
+      : o.kind === 'screen' ? [row('Shows', html`<select class="sel" data-c="edIn:source">${options([['main', 'Audience screens (main)'], ...DOC.screens.filter(x => x.kind === 'Audience').map(x => [x.id, x.name])], o.source)}</select>`), html`<p class="ed-line">A live picture of that screen, for the stage.</p>`]
+      : '';
   } else { const b = { in: 'None', from: 'Left', when: 'With the slide', delay: 0, out: 'None', byPara: false, ...(o.build || {}) };
     body = [row('Comes on', [sel('build.in', ['None', 'Dissolve', 'Fly In', 'Zoom'], b.in), b.in === 'Fly In' ? sel('build.from', ['Left', 'Right', 'Top', 'Bottom'], b.from) : '']),
       row('When', sel('build.when', ['With the slide', 'On a click of Next'], b.when)), row('Delay', [num('build.delay', b.delay, { min: '0', max: '10', step: '0.5' }), html`<span class="sub">seconds</span>`]),
@@ -2648,7 +2669,7 @@ document.addEventListener('pointerdown', e => {
   if (!ob) { if (state.sels.length) { state.sels = []; render(); } return; }
   const id = ob.dataset.ob, was = state.sels.length === 1 && state.sels[0] === id;
   if (e.shiftKey) { state.sels.includes(id) ? state.sels.splice(state.sels.indexOf(id), 1) : state.sels.push(id); render(); return; }
-  if (!state.sels.includes(id)) { state.sels = [id]; const o0 = byId(edTarget().holder.objects, id); state.itab = o0.kind === 'text' ? 'Text' : 'Shape'; render(); }
+  if (!state.sels.includes(id)) { state.sels = [id]; const o0 = byId(edTarget().holder.objects, id); if (!['Box', 'Animation'].includes(state.itab)) state.itab = OWN_TAB[o0.kind] || 'Box'; render(); }
   const t = edTarget(), eff = edEff(t), moving = edPicked(t).filter(o => !o.locked); if (!moving.length) return;
   e.preventDefault();
   drag = { ids: moving.map(o => o.id), start: Object.fromEntries(moving.map(o => [o.id, { ...eff.find(x => x.id === o.id).frame }])), hd: hd ? hd.dataset.hd : '', x: e.clientX, y: e.clientY, k: 1920 / $('canvas').getBoundingClientRect().width, moved: false, was, id, before: JSON.stringify(DOC), now: {},
@@ -2739,7 +2760,7 @@ VIEWS.settings = { left: renderSettingsLeft, centre: renderSettings };
 const SECTIONS = ['Screens', 'Sound', 'General', 'Groups', 'Keys', 'Integrations', 'Web control', 'Coverage'];
 const PEOPLE = [{ who: 'This browser', can: 'Control', me: true }, { who: 'iPad in the front row', can: 'Watch' }];
 const KEYS = [['Space  →', 'Next slide'], ['←', 'Previous slide'], ['↑  ↓', 'The item above or below in the playlist; in Bible, the verse before or after'], ['Home  End', 'First or last slide of the song'], ['Esc', 'Clear all'], ['F2 F3 F4 F5 F6', 'Clear the slide, media, props, audio, message'],
-  ['A letter', 'The slide with that hot key, or the group it stands for'], ['/', 'Find a song, a line or a verse'], ['Ctrl B', 'The Bible page, ready for a reference'], ['⌘Z  ⇧⌘Z', 'Undo and redo'], ['⌘C ⌘X ⌘V', 'Copy, cut and paste slides, or objects in Edit'],
+  ['A letter', 'The slide with that hot key, or the group it stands for'], ['/', 'Find a song, a line or a verse'], ['⌘B', 'The Bible page, ready for a reference'], ['⌘Z  ⇧⌘Z', 'Undo and redo'], ['⌘C ⌘X ⌘V', 'Copy, cut and paste slides, or objects in Edit'],
   ['Delete', 'Delete the picked slides, or the picked object in Edit'], ['Arrows', 'Nudge the picked object, in Edit (Shift for one pixel)'], ['T', 'A new text box, in Edit']];
 
 function renderSettingsLeft() {
@@ -2768,7 +2789,14 @@ function renderSettings() {
     body = scrCardsHTML(top);      // what plays at start is a macro now: Macros › “Run when SoftPresenter opens” (the owner, 22 November)
   }
   if (sec === 'General') { const eg = DOC.songs.find(s => copyrightLine(s) && s.info && (s.info.author || s.info.ccli)) || DOC.songs[0];
-    body = [card('Copyright', 'The line under a song’s words', html`
+    // The app's own words (designed 23 November): the computer's language when the app has it, else English; or one chosen here.
+    // Each language is named in itself. Songs and Bibles keep their own languages (setup, Languages); the Bible page has its own
+    // reading language. The remote page follows this choice, so a team uses the same words.
+    const uiLangs = [['auto', `The computer’s language (${{ ru: 'Русский', uk: 'Українська', es: 'Español' }[(navigator.language || 'en').slice(0, 2)] || 'English'})`], ['en', 'English'], ['ru', 'Русский'], ['uk', 'Українська'], ['es', 'Español']];
+    body = [card('Language', 'The words of SoftPresenter itself', html`
+      ${stLine('Language', html`<select class="sel" data-c="setVal:uiLang">${options(uiLangs, st.uiLang || 'auto')}</select>`, 'Buttons, menus and messages. Changes at once.')}
+      <div class="st-eg"><span class="cap">Not this</span><span>The languages your songs and Bibles show in are set in Setup › Languages; the Bible page has its own reading language (Аа).</span></div>`),
+      card('Copyright', 'The line under a song’s words', html`
       ${stLine('Where it shows', html`<select class="sel" data-c="setVal:copyrightAt">${options([['first', 'On a song’s first slide'], ['last', 'On its last slide'], ['every', 'On every slide'], ['none', 'Nowhere']], st.copyrightAt)}</select>`)}
       ${stLine('CCLI licence number', html`<input class="field" data-c="setVal:ccliLicence" value="${st.ccliLicence ?? ''}">`, 'The church’s own')}
       <div class="st-eg"><span class="cap">How it reads</span><span>${copyrightLine(eg) || 'Fill in a song’s details to see its line'}</span></div>`),
@@ -4023,6 +4051,9 @@ document.addEventListener('pointerup', e => { if (e.target.matches && e.target.m
 const keyAction = k => Object.keys(DOC.settings.keys).find(a => DOC.settings.keys[a].includes(k));
 document.addEventListener('keydown', e => {
   const el = e.target, k = e.key, cmd = e.metaKey || e.ctrlKey;
+  // The show's keys go by their place on the keyboard, not the letter it types, so they work with any layout (C is the chorus
+  // with a Russian layout too, where it types "с"); typing a reference in Bible still takes the letter typed.
+  const pk = /^Key[A-Z]$/.test(e.code || '') ? e.code.slice(3).toLowerCase() : e.code === 'Slash' ? '/' : /^Digit[0-9]$/.test(e.code || '') ? e.code.slice(5) : k;
   if (state.capture) { e.preventDefault(); if (k === 'Escape') { closeSheet(); return; } return keyCaptured(k); }
   if (state.menu) {       // a menu is open: the arrows move in it, Enter chooses, Esc closes
     const items = [...document.querySelectorAll('#menu .ui-mi:not(.dim)')], at = items.indexOf(document.activeElement);
@@ -4057,11 +4088,11 @@ document.addEventListener('keydown', e => {
   if (k === 'Escape' && state.notesOpen) { e.preventDefault(); return A.notesOpen(); }      // Escape closes the list of notices, and clears nothing
   if (k === 'Escape' && state.mode === 'show' && state.srcMenu) { e.preventDefault(); state.srcMenu = false; return renderShowLeft(); }      // Escape closes the chooser; it never clears the screens then
   if (k === 'Escape' && state.mode === 'edit' && state.reflow) { e.preventDefault(); state.reflow = false; return render(); }      // and the words editor
+  if (cmd && !e.altKey && cmdKey(e.code, e.shiftKey)) return e.preventDefault();
   if (e.altKey && !cmd && altKey(e.code)) return e.preventDefault();
   if (k === '?') { e.preventDefault(); return A.keysSheet(); }
   if (state.chord && k === 'Escape') { e.preventDefault(); return endChord(); }
   if (state.chord && /^[1-9]$/.test(k) && !cmd) { e.preventDefault(); return chordPick(+k); }
-  if (e.ctrlKey && k.toLowerCase() === 'b') { e.preventDefault(); state.mode = 'bible'; render(); const f = $('bRef'); if (!f) return true; f.focus(); f.select(); return; }
   if (cmd && k.toLowerCase() === 'z') { e.preventDefault(); return e.shiftKey ? A.redo() : A.undo(); }
 
   if (state.mode === 'edit' || state.mode === 'themes') {     // here the keyboard belongs to what is being edited, not the show
@@ -4099,7 +4130,7 @@ document.addEventListener('keydown', e => {
   }
   if ((k === 'Delete' || k === 'Backspace') && d && d.song && p.set.length) { e.preventDefault(); const key = p.deck, s = p.set[0], n = p.set.length; return undoable(n > 1 ? `Delete ${n} slides?` : 'Delete this slide?', 'Undo brings them back.', 'Delete', () => slideOp(key, s, 'delete')); }
   if (cueHere() && !state.on && (k === 'ArrowRight' || k === 'ArrowLeft')) { e.preventDefault(); return moveCue(k === 'ArrowRight' ? 1 : -1); }      // nothing on screen: the arrows choose, Space or Enter put it on
-  const does = keyAction(k), clears = { clearSlide: 'slide', clearMedia: 'media', clearProps: 'props', clearAudio: 'audio', clearMessages: 'messages' };
+  const does = keyAction(pk) || keyAction(k), clears = { clearSlide: 'slide', clearMedia: 'media', clearProps: 'props', clearAudio: 'audio', clearMessages: 'messages' };
   if (does === 'find') { e.preventDefault(); return $('find').focus(); }
   if (does === 'next') { e.preventDefault(); return step(1); }
   if (does === 'previous') { e.preventDefault(); return step(-1); }
@@ -4127,8 +4158,8 @@ document.addEventListener('keydown', e => {
   if (!cur || !cur.slides) return;
   if (k === 'Home') return go(cur.key, 0);
   if (k === 'End') return go(cur.key, cur.seq.length - 1);
-  if (/^[a-z0-9]$/i.test(k)) {         // a slide's own hot key first, then the group that letter stands for
-    const K = k.toUpperCase(); let s = cur.slides.findIndex(sl => sl.hotkey === K);
+  if (/^[a-z0-9]$/i.test(pk)) {         // a slide's own hot key first, then the group that letter stands for
+    const K = pk.toUpperCase(); let s = cur.slides.findIndex(sl => sl.hotkey === K);
     if (s < 0) { const g = DOC.groups.find(x => x.key === K); if (g) s = cur.slides.findIndex(sl => sl.group === g.name && sl.enabled !== false); }
     if (s >= 0) go(cur.key, null, s);
   }
@@ -4148,19 +4179,33 @@ function chordPick(n) {       // after Option-1…7 or Option-M, a number does t
   const el = sel && [...document.querySelectorAll(kind === 'media' ? sel : '#tabbody ' + sel)][n - 1];
   if (el) el.click(); startChord(kind);
 }
+// The keys, as the app has them (keys.rs, master ed55269 and 1949738): Command on a Mac, Ctrl elsewhere. A browser keeps
+// ⌘1–⌘3 for its own tabs, so here the views keep ⌥S, ⌥B and ⌥E (the app: ⌘1, ⌘2, ⌘3); everything else is the app's key.
+const toBible = () => { state.mode = 'bible'; render(); const f = $('bRef'); if (f) { f.focus(); f.select(); } return true; };
+function cmdKey(code, shift) {
+  if (shift) switch (code) {
+    case 'Digit1': A.out(['audience']); return true;
+    case 'Digit2': A.out(['stage']); return true;
+    case 'KeyM': if (state.mode === 'show' || state.mode === 'bible') startChord('media'); return true;
+    default: return false;
+  }
+  switch (code) {
+    case 'KeyB': return state.mode === 'edit' || state.mode === 'themes' ? false : toBible();      // in the editor it is Bold
+    case 'Comma': A.mode(['settings']); return true;
+    case 'KeyF': $('find').focus(); return true;
+    case 'KeyP': return altKey('KeyP');
+    case 'KeyO': return altKey('KeyO');
+    default: return false;
+  }
+}
 function altKey(code) {
   const digit = /^Digit([1-9])$/.exec(code), tabs = [...document.querySelectorAll('#tabs [data-a^="tab:"]')];
   if (digit) { const t = tabs[+digit[1] - 1]; if (!t) return false; t.click(); startChord('tab'); return true; }
   switch (code) {
     case 'KeyS': A.mode(['show']); return true;
-    case 'KeyB': { state.mode = 'bible'; render(); const f = $('bRef'); if (!f) return true; f.focus(); f.select(); return true; }
+    case 'KeyB': return toBible();
     case 'KeyE': A.mode(['edit']); return true;
-    case 'Comma': A.mode(['settings']); return true;
-    case 'KeyA': A.out(['audience']); return true;
-    case 'KeyT': A.out(['stage']); return true;
-    case 'KeyF': $('find').focus(); return true;
     case 'KeyP': { state.mode = 'show'; state.srcMenu = true; render(); const b = document.querySelector('.sh-panel .sh-src.on [data-a^="src:"]') || document.querySelector('.sh-panel [data-a^="src:"]'); if (b) b.focus(); return true; }
-    case 'KeyM': if (state.mode === 'show' || state.mode === 'bible') startChord('media'); return true;
     case 'KeyO': { if (state.live && state.on && /^(bible|vox)/.test(state.live.deck)) { refuse('The verse or caption on screen has no menu.'); return true; }
       const s = document.querySelector('#slides .live[data-m]') || document.querySelector('#slides .pickd[data-m]'); if (!s) { refuse('Put a slide on screen, or pick one, to open its menu'); return true; }
       const r = s.getBoundingClientRect(), [kind, ...rest] = s.dataset.m.split(':'); openMenu(M[kind](rest.join(':').split(',')), r.left + 24, r.top + 24); return true; }
@@ -4174,8 +4219,8 @@ A.keysSheet = () => {
   const groups = [
     ['Running the slides', [[keyList('next'), 'Next slide'], [keyList('previous'), 'Previous slide'], ['↑  ↓', 'The item above or below, cued at its first slide; in Bible, the verse before or after'], ['Enter', 'The cued slide or verse goes on screen (after a search, or ↑ ↓)'], ['← →', 'With nothing on screen, move the cue; Space or Enter puts it on'], ['Home  End', 'First or last slide of the song'], ['A letter', 'Jump to a group (C for the chorus), or a slide’s own hot key']]],
     ['Clearing', [[keyList('clearAll'), 'Clear everything'], [[keyList('clearSlide'), keyList('clearMedia'), keyList('clearProps'), keyList('clearAudio'), keyList('clearMessages')].filter(Boolean).join('  ') || 'The layer keys', 'Clear the slide, media, props, audio, message']]],
-    ['Going places', [['⌥S  ⌥B  ⌥E', 'Show, Bible (ready for a reference), Edit'], ['⌥,', 'Settings'], ['⌥P', 'Playlists and libraries'], [keyList('find') + '  ⌥F', 'Find a song, a line or a verse'], ['?', 'This list']]],
-    ['The live tools', [['⌥1 … ⌥7', 'Open Timers, Messages, Props, Macros, Stage, Audio, VoxLive'], ['then 1 … 9', 'Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track'], ['⌥M  then 1 … 9', 'Show that picture or video'], ['⌥A  ⌥T', 'Audience screens, stage screens, on or off'], ['⌥O', 'The menu for the slide on screen']]],
+    ['Going places', [['⌥S  ⌥B  ⌥E', 'Service, Bible (ready for a reference), Edit (in the app ⌘1 ⌘2 ⌘3; a browser keeps those)'], ['⌘B', 'Bible, too (Bold while editing a slide)'], ['⌘,', 'Settings'], ['⌘P', 'Playlists and libraries'], [keyList('find') + '  ⌘F', 'Find a song, a line or a verse'], ['?', 'This list']]],
+    ['The live tools', [['⌥1 … ⌥7', 'Open Timers, Messages, Props, Macros, Stage, Audio, VoxLive'], ['then 1 … 9', 'Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track'], ['⇧⌘M  then 1 … 9', 'Show that picture or video'], ['⇧⌘1  ⇧⌘2', 'Audience screens, stage screens, on or off'], ['⌘O', 'The menu for the slide on screen']]],
     ['Menus and windows', [['↑  ↓', 'Move'], ['→  ←', 'Open a group of choices; go back'], ['Enter', 'Choose'], ['Esc', 'Close']]],
     ['Changing things', [['⌘Z  ⇧⌘Z', 'Undo, redo'], ['⌘C  ⌘X  ⌘V', 'Copy, cut, paste the picked slides (objects in Edit)'], ['Delete', 'Delete what is picked: what Undo brings back goes at once (playlist items, slides, a media playlist’s items); songs in a library, pictures in the bin and screens ask first'], ['⇧↑  ⇧↓  ⌘A', 'Pick several in the left column: grow the pick, or pick them all'], ['T  ⌘D  ⌘A', 'In Edit: a new text box, duplicate, pick everything'], ['Arrows', 'In Edit: nudge the picked object (Shift for one pixel)'], ['⌘B  ⌘I  ⌘U', 'Typing in a box: bold, italic, underlined, for the words selected (or the whole box)']]],
   ];
@@ -4278,7 +4323,8 @@ const DEMOS = {
 };
 if (DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();
 // The two screen switches are written in the page itself: their keys, as the computer names them
-for (const [id, k] of [['outAudience', '⌥A'], ['outStage', '⌥T']]) { const b = $(id); if (b) { b.title = b.title.replace(k, keyText(k)); const t = b.querySelector('.kh'); if (t) t.textContent = keyText(k); } }
+for (const [id, k] of [['outAudience', '⇧⌘1'], ['outStage', '⇧⌘2']]) { const b = $(id); if (b) { b.title = b.title.replace(k, keyText(k)); const t = b.querySelector('.kh'); if (t) t.textContent = keyText(k); } }
+if (q.has('lang') || q.has('probe')) { const sc = document.createElement('script'); sc.src = 'langtool.js'; document.body.appendChild(sc); }      // Testing aid: the app's words in another language, or stretched, and where they don't fit
 if (q.has('linktest')) { const sc = document.createElement('script'); sc.src = 'linktest.js'; document.body.appendChild(sc); }      // Testing aid
 if (q.has('selftest')) { const sc = document.createElement('script'); sc.src = 'selftest.js'; document.body.appendChild(sc); }
 if (q.has('remotetest')) { const sc = document.createElement('script'); sc.src = 'remotetest.js'; document.body.appendChild(sc); }      // Testing aid: with ?remote=fixture
@@ -4370,12 +4416,20 @@ Object.assign(DEMOS, {
   samples: () => A.sampleBackgrounds(),
 });
 if (/^samples/.test(q.get('demo') || '') && DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();
-// Testing aid: an NDI source in a slide: the picker, the picker finding nothing or without NDI, the object, and its source lost
+// Testing aid: an NDI source in a slide: just added (its source to choose), finding none, without NDI, chosen, and stopped
 Object.assign(DEMOS, {
-  ndisheet: () => { DEMOS.edit(); setTimeout(() => A.ndiSheet(), 60); },
-  ndinone: () => { state.ndi = 'looking'; NDI_SOURCES.length = 0; DEMOS.edit(); setTimeout(() => A.ndiSheet(), 60); },
-  ndimissing: () => { state.ndi = 'none'; DEMOS.edit(); setTimeout(() => A.ndiSheet(), 60); },
+  ndiadd: () => { DEMOS.edit(); edInsert('ndi', null); render(); },
+  ndinone: () => { state.ndi = 'looking'; DEMOS.edit(); edInsert('ndi', null); render(); },
+  ndimissing: () => { state.ndi = 'none'; DEMOS.edit(); edInsert('ndi', null); render(); },
   ndiobj: () => { DEMOS.edit(); edInsert('ndi', 'STREAM-PC (Camera 1)'); render(); },
   ndilost: () => { DEMOS.edit(); edInsert('ndi', 'STREAM-PC (Camera 1)'); state.ndiLost = ['STREAM-PC (Camera 1)']; trouble('NDI “Camera 1” stopped sending. Its slides show without it until it is back.'); render(); },
+  webadd: () => { DEMOS.edit(); edInsert('web', ''); render(); },
 });
-if (/^ndi/.test(q.get('demo') || '') && DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();
+if (/^(ndi|webadd)/.test(q.get('demo') || '') && DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();
+// Testing aid: the inspector's tabs for each kind: a picture, a web page's Box, and two kinds picked together
+Object.assign(DEMOS, {
+  insppic: () => { DEMOS.edit(); edInsert('media', 'm1'); render(); },
+  inspbox: () => { DEMOS.edit(); edInsert('web', 'https://example.org/live'); state.itab = 'Box'; render(); },
+  inspmixed: () => { DEMOS.edit(); edInsert('web', 'https://example.org/live'); state.sels.push(edTarget().holder.objects[0].id); render(); },
+});
+if (/^insp/.test(q.get('demo') || '') && DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();
