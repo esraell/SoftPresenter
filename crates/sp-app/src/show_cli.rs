@@ -8,6 +8,12 @@ use sp_engine::{Command, SlideRef};
 use crate::control::{Reply, find};
 use crate::home::VideoRequest;
 
+/// Whether a name typed on the command line means this name: the same letters whatever their
+/// case, in every alphabet (`припев` is `Припев`), ignoring spaces round either.
+pub(crate) fn same_name(have: &str, typed: &str) -> bool {
+    have.trim().to_lowercase() == typed.trim().to_lowercase()
+}
+
 fn on_off(word: Option<&String>) -> Result<bool, String> {
     match word.map(|w| w.to_lowercase()).as_deref() {
         Some("on" | "yes") => Ok(true),
@@ -152,7 +158,7 @@ impl crate::App {
         let mut index = 0;
         let mut found = None;
         for group in &presentation.groups {
-            if group.name.trim().eq_ignore_ascii_case(name.trim())
+            if same_name(&group.name, &name)
                 && let Some(skip) = group.slides.iter().position(|slide| slide.enabled)
             {
                 found = Some(index + skip);
@@ -468,10 +474,8 @@ impl crate::App {
             None
         } else {
             let names: Vec<String> = audience.iter().map(|s| s.name.clone()).collect();
-            if let Some(stage) = state
-                .screens
-                .iter()
-                .find(|s| s.kind == crate::screens::Kind::Stage && s.name.eq_ignore_ascii_case(source.trim()))
+            if let Some(stage) =
+                state.screens.iter().find(|s| s.kind == crate::screens::Kind::Stage && same_name(&s.name, &source))
             {
                 return Err(format!(
                     "{} is a stage screen; a screen picture shows an audience screen: main, {}.",
@@ -598,5 +602,20 @@ impl crate::App {
             Some(crate::props::TestPattern::White) => "White on the audience screens.",
             None => "The test pattern is off.",
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::same_name;
+
+    #[test]
+    fn names_match_in_any_case_in_any_alphabet() {
+        assert!(same_name("Припев", "припев"));
+        assert!(same_name("припев", " ПРИПЕВ "));
+        assert!(same_name("Verse 1", "verse 1"));
+        assert!(same_name("Strophe Ä", "strophe ä"));
+        assert!(!same_name("Припев", "Куплет"));
+        assert!(!same_name("Припев 1", "Припев"));
     }
 }
