@@ -210,6 +210,14 @@ Bold Italic added, licensed under the SIL Open Font License 1.1. The licence and
 are kept beside the font files in `crates/sp-render/fonts` and in the Mac app's Resources.
 [`docs/licences/softpresenter-sans.md`](docs/licences/softpresenter-sans.md) explains.
 
+### Sample backgrounds
+
+SoftPresenter carries seven sample slide backgrounds, five pictures, a stand-in for a camera shot
+and a looping video, in `assets/backgrounds` and, in the Mac app, in `Contents/Resources/Backgrounds`.
+The project drew them with its own script, `assets/backgrounds/make_backgrounds.py`, and released
+them and the script under CC0 1.0 Universal (public domain).
+[`docs/licences/backgrounds.md`](docs/licences/backgrounds.md) explains.
+
 ### Other libraries
 
 SoftPresenter is built from many open-source Rust libraries, each under its own licence (MIT,

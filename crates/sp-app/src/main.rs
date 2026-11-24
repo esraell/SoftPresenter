@@ -3,6 +3,7 @@
 mod announcements;
 mod applog;
 mod audio;
+mod backgrounds;
 mod bible;
 mod bible_language;
 mod bible_page;

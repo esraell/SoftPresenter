@@ -32,6 +32,9 @@ cp assets/icons/SoftPresenter.icns "$app/Contents/Resources/SoftPresenter.icns"
 # SoftPresenter Sans, the slides' typeface, is built into the program; its licence goes with it.
 mkdir -p "$app/Contents/Resources/SoftPresenterSans"
 cp crates/sp-render/fonts/OFL.txt crates/sp-render/fonts/AUTHORS.txt "$app/Contents/Resources/SoftPresenterSans/"
+# The sample backgrounds (pictures and a looping video, CC0), for the screen that will offer them.
+mkdir -p "$app/Contents/Resources/Backgrounds"
+cp assets/backgrounds/*.jpg assets/backgrounds/*.mp4 assets/backgrounds/README.md "$app/Contents/Resources/Backgrounds/"
 # FFmpeg, which plays the videos macOS's own player can't (MKV, WebM, AVI and others): an LGPL
 # build, made once by scripts/build-ffmpeg.sh, beside the app's program with its licence and a
 # note of its source. Without it (a computer that can't download it, say) the app still builds,
