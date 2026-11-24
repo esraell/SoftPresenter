@@ -37,9 +37,14 @@ t0=$(now); sp audience on >/dev/null
 i=0; while [ "$(shown)" = 0 ] && [ $i -lt 100 ]; do sleep 0.02; i=$((i+1)); done
 t1=$(now); echo "window on the display after $(python3 -c "print(round(($t1-$t0)*1000))") ms"
 "$VD" windows softpresenter $APP_PID
+ids() { "$VD" windows softpresenter $APP_PID | grep "Screen 1" | awk '{print $2}' | tr '\n' ' '; }
+sp test grid >/dev/null
 echo "--- audience off (should hide at once)"
+before=$(ids)
 sp audience off >/dev/null; sleep 0.3; echo "shown on the display: $(shown)"
-sp audience on >/dev/null; sleep 0.5; echo "shown again: $(shown)"
+sp audience on >/dev/null; sleep 1; echo "shown again: $(shown)"
+echo "window numbers before and after: [$before] [$(ids)] (the same: the window was kept and shown again)"
+screencapture -x -R1512,0,640,360 "$WORK/after-off-on.png" && echo "picture saved: $WORK/after-off-on.png"
 echo "--- waiting for the display to go (about 12 s after it was made)"
 while [ "$(shown)" != 0 ]; do sleep 0.1; done
 t2=$(now)
@@ -55,6 +60,8 @@ t3=$(now)
 i=0; while [ "$(shown)" = 0 ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done
 t4=$(now); echo "window back after $(python3 -c "print(round(($t4-$t3)*1000))") ms"
 sleep 1; sp notices 2>&1 | head -5
+echo "window numbers: [$(ids)]"
+screencapture -x -R1512,0,640,360 "$WORK/after-return.png" && echo "picture saved: $WORK/after-return.png"
 echo "--- app log"
 grep -h "screens" "$SOFTPRESENTER_DATA"/*.log "$SOFTPRESENTER_DATA"/log/* 2>/dev/null | tail -20
 sp menu Quit >/dev/null 2>&1

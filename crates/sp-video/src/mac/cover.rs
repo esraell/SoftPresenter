@@ -42,17 +42,12 @@ fn behaviour() -> NSWindowCollectionBehavior {
 
 /// Puts the window whose view is `view` exactly on the display with this id (as the window
 /// library names it: `MonitorHandleExtMacOS::native_id`) and shows it there, with no animation.
-/// `above_menu_bar` is false only in a test that must stay behind other windows. `take_key`
-/// lets the window take the keyboard; otherwise it is shown without.
+/// `above_menu_bar` is false only in a test that must stay behind other windows. The window is
+/// shown without taking the keyboard from whoever has it.
 ///
 /// Must be called on the main thread, with the view of a window that is alive. Fails, changing
 /// nothing, when there is no such display now.
-pub fn cover_display(
-    view: NonNull<c_void>,
-    display_id: u32,
-    above_menu_bar: bool,
-    take_key: bool,
-) -> Result<(), String> {
+pub fn cover_display(view: NonNull<c_void>, display_id: u32, above_menu_bar: bool) -> Result<(), String> {
     let mtm = MainThreadMarker::new().ok_or("A window is placed on the main thread.")?;
     let key = NSString::from_str("NSScreenNumber");
     let frame = NSScreen::screens(mtm)
@@ -78,11 +73,7 @@ pub fn cover_display(
     // Appears and goes without the system's fade or zoom.
     window.setAnimationBehavior(NSWindowAnimationBehavior::None);
     window.setFrame_display_animate(frame, true, false);
-    if take_key {
-        window.makeKeyAndOrderFront(None);
-    } else {
-        window.orderFrontRegardless();
-    }
+    window.orderFrontRegardless();
     Ok(())
 }
 

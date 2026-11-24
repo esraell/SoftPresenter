@@ -284,7 +284,7 @@ each time with the token the last reply gave.
 | `select SONG` | Shows a song's slides in the window without putting anything on screen |
 | `continuous on\|off` | Continuous: after a song's last slide, Next goes on to the playlist's next item |
 | `clear [LAYER]` | Clears `slide`, `media`, `props`, `messages`, `audio`, `announcements`, or `all` (the default) |
-| `audience on\|off`, `stage on\|off` | The audience or stage screens (off closes their windows; NDI sends black, or all clear for a see-through screen) |
+| `audience on\|off`, `stage on\|off` | The audience or stage screens (off hides their windows at once; NDI sends black, or all clear for a see-through screen) |
 | `identify on\|off` | Identify Screens |
 | `stage message TEXT`, `stage message clear` | Words for the stage screens only (`\n` starts a new line) |
 | `stage layout SCREEN LAYOUT` | Which stage layout a stage screen shows |

@@ -997,7 +997,6 @@ fn put_on_display(
     window: &Window,
     monitor: &winit::monitor::MonitorHandle,
     above: bool,
-    take_key: bool,
     fresh: bool,
 ) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -1007,11 +1006,11 @@ fn put_on_display(
         let _ = fresh;
         let handle = window.window_handle().map_err(|e| e.to_string())?;
         let RawWindowHandle::AppKit(handle) = handle.as_raw() else { return Err("Not a macOS window.".to_owned()) };
-        sp_video::cover_display(handle.ns_view, monitor.native_id(), above, take_key)
+        sp_video::cover_display(handle.ns_view, monitor.native_id(), above)
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (above, take_key);
+        let _ = above;
         if !fresh {
             window.set_fullscreen(None);
         }
@@ -7212,15 +7211,29 @@ impl App {
         for ((screen, place), step) in list.iter().zip(&placed).zip(&steps) {
             let existing = old.iter().position(|have| have.screen == screen.id);
             match step {
-                window_plan::Step::Idle | window_plan::Step::Close => continue,
+                window_plan::Step::Idle => {
+                    // A window hidden for a while is kept (on a Mac) to show again; otherwise
+                    // it goes with the rest below.
+                    if KEEP_HIDDEN && let Some(at) = existing {
+                        screen_windows.push(old.remove(at));
+                    }
+                    continue;
+                }
+                window_plan::Step::Close => continue,
                 window_plan::Step::Hide(why) => {
                     let Some(at) = existing else { continue };
                     let mut kept = old.remove(at);
+                    if kept.hidden {
+                        // Already hidden (a stray that stays so): nothing more to do.
+                        screen_windows.push(kept);
+                        continue;
+                    }
                     // At once: the picture is let go, and the window is out of the way.
                     output.send(OutputMsg::RemoveSurface(screen.id));
                     kept.window.set_visible(false);
                     applog::event("screens", &format!("{}: hidden, because {}", screen.name, why.in_words()));
-                    if KEEP_HIDDEN {
+                    // A stray is kept hidden on every system, so it is not made again and again.
+                    if KEEP_HIDDEN || *why == window_plan::Why::Stray {
                         kept.hidden = true;
                         if *why != window_plan::Why::Stray {
                             kept.put_on = None;
@@ -7281,7 +7294,7 @@ impl App {
                         if !cfg!(target_os = "macos") || kept.cover {
                             let was_hidden = kept.hidden;
                             let again = kept.put_on == Some(*rect);
-                            if let Err(problem) = put_on_display(&kept.window, monitor, above, !quiet, false) {
+                            if let Err(problem) = put_on_display(&kept.window, monitor, above, false) {
                                 applog::event("screens", &format!("{}: {problem}", screen.name));
                                 output.send(OutputMsg::RemoveSurface(screen.id));
                                 kept.window.set_visible(false);
@@ -7296,6 +7309,7 @@ impl App {
                             kept.window.set_cursor_visible(false);
                             log_placement(&screen.name, place, &kept.window, &displays);
                             if was_hidden {
+                                applog::event("screens", &format!("{}: shown again on its display", screen.name));
                                 opened |= add_surface(
                                     output,
                                     context,
@@ -7378,7 +7392,7 @@ impl App {
                 (place, step)
                 && let Some(monitor) = monitors.get(*index)
             {
-                if let Err(problem) = put_on_display(&window, monitor, above, !quiet, true) {
+                if let Err(problem) = put_on_display(&window, monitor, above, true) {
                     window.set_visible(false);
                     home_state
                         .notices
