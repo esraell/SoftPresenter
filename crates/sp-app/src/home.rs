@@ -5511,7 +5511,10 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
             // list). It opens over the home window, so Settings steps aside.
             ui.add_space(14.0);
             if ui
-                .add(egui::Button::new("Set Up SoftPresenter\u{2026}"))
+                .add_sized(
+                    vec2(ui.available_width(), 28.0),
+                    egui::Button::new(egui::RichText::new("Set Up SoftPresenter\u{2026}").size(12.0)),
+                )
                 .on_hover_text("Run the first-start setup again: screens, songs, Bibles, permissions")
                 .clicked()
             {

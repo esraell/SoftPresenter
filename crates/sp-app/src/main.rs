@@ -7979,9 +7979,10 @@ impl App {
                         running.home_state.preferences_pane =
                             home::PANES.iter().position(|pane| *pane == "Remote Control").unwrap_or(0);
                     }
-                    // Any pane by its name ("Key Mappings", "groups").
+                    // Any pane by its name ("Key Mappings", "key-mappings", "groups").
                     other => {
-                        if let Some(at) = home::PANES.iter().position(|pane| pane.eq_ignore_ascii_case(other)) {
+                        let named = other.replace(['-', '_'], " ");
+                        if let Some(at) = home::PANES.iter().position(|pane| pane.eq_ignore_ascii_case(&named)) {
                             running.home_state.preferences_pane = at;
                         }
                     }
