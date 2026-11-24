@@ -28,7 +28,7 @@ Size: S = under a day, M = days, L = a week or more. Sunday: how much it matters
     music.** · M
 11. **More on stage.** A video countdown, and the current or next slide as a picture. · M
 
-Next in line: the network API, with the whole app in a browser and a phone remote, spell check, formatting one word, CCLI usage
+Next in line: the network API, with the whole app in a browser and a phone remote, spell check, CCLI usage
 reporting, editable key mappings, adding time to a running timer, and Russian and Ukrainian
 menus. Tested Windows and Linux builds are left out of the ranking because they are a port
 rather than a feature, but no church on Windows can use the app without them.
@@ -52,7 +52,6 @@ rather than a feature, but no church on Windows can use the app without them.
 
 ## Slides and editing
 
-- **Formatting one word differently from the rest of its box.** · M · Medium
 - **Spell check.** Misspelt words underlined in lyrics and slides (⌘; and ⌘:). · M · Medium
 - **More linked text.** Slide number and slides left, the next playlist item and header, time left before the slide moves on by itself, time left in the video, another box's text, a text file and an RSS feed. Slide count and the next item are the ones stage screens use. (started: ten sources: clock, date, timer, title, group, label, next slide, notes, stage message and copyright) · S–M · Medium
 - **Slide sizes other than 1920 × 1080.** A size for a song or a theme (1280 × 720, 4:3 or your own), for LED walls and 4:3 projectors. · L · Low

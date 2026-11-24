@@ -1,42 +1,56 @@
 # SoftPresenter
 
-**Fast, free, open-source software for putting songs, Bible verses and media on the screens in a
-church service. Everything you can click, a script or an AI agent can do.**
+**Free, open-source presentation software for churches: songs, the Bible and media on your screens, in two languages.**
 
 Website: [softpresenter.com](https://softpresenter.com)
 
 [![Licence: GPL-3.0-or-later](https://img.shields.io/badge/licence-GPL--3.0--or--later-blue)](LICENSE)
 [![Checks](https://github.com/esraell/SoftPresenter/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/esraell/SoftPresenter/actions/workflows/ci.yml)
-![macOS now; Windows and Linux planned](https://img.shields.io/badge/platform-macOS-lightgrey)
+![macOS; Windows and Linux in testing](https://img.shields.io/badge/platform-macOS%3B%20Windows%20and%20Linux%20in%20testing-lightgrey)
 
-![The Show view: the Sunday Morning playlist with its songs one after another in English and Russian, a slide on screen over a background picture, two timers and the media bin](docs/images/home.png)
+![The Show view: the Sunday Morning playlist open on Showers of Blessing, its slides in English with the Russian under each, the verse on screen over a background picture, two timers and the media bin](docs/images/home.png)
 
-> **Early days: everything may change until 1.0.** SoftPresenter is young. Until version 1.0,
-> anything may change without notice: how the window looks and is laid out (a redesign is
-> planned), how features work, the `sp` commands, the files it saves, and the code itself. Some
-> buttons still do less than they look like they should, so it isn't ready to run a Sunday
-> service on its own yet. It is built in the open; bug reports and ideas are welcome in
-> [Issues](https://github.com/esraell/SoftPresenter/issues).
+> **Early version.** Things change until 1.0, and it isn't ready to be a church's only presentation app yet. Bug reports and ideas are welcome in [Issues](https://github.com/esraell/SoftPresenter/issues).
 
-## Why SoftPresenter
+## Why churches use it
 
-Churches put words on screens every week: songs, readings, notices. The apps that do it well cost
-a lot, are heavy on older computers, and treat a service in two languages as an afterthought.
-SoftPresenter is built to be:
+- **Free.** No licence fee, no account, no subscription.
+- **Two languages on every slide.** The main language and its translation, for churches that sing in Russian or Ukrainian and English side by side.
+- **The Bible done right.** Type a reference in English, Russian or Ukrainian, and the translations line up verse by verse, even where they number verses differently.
+- **Light on the computer.** Built to run well on a modest laptop; the screens never wait for the operator's window.
+- **Works with your stream.** NDI, Blackmagic DeckLink, stage screens, and a screen laid out as a lower third.
+- **Brings your songs and slides with you.** SoftProjector, text, ChordPro, Word, and PowerPoint files as editable slides or as pictures.
 
-- **Free and open.** No licence fee, no account, no subscription. Everything it needs, the Bibles
-  it offers included, is hosted with this repository.
-- **Made for two languages.** Every slide can carry a main language and a translation, for
-  churches that sing in Russian or Ukrainian and English side by side.
-- **Right about the Bible.** Translations number some verses differently (the Russian Psalms are
-  the best-known case). SoftPresenter lines up the same verse across translations instead of
-  pairing chapter and verse numbers blindly.
-- **Fast and light.** Slides are drawn on the GPU, the audience screen never waits for the
-  operator's window, and it is built to run well on a modest laptop.
-- **Familiar.** Laid out the way people who run church screens expect: libraries and playlists
-  on the left, slides in the middle, what is on screen on the right, media along the bottom.
-- **Open to scripts and AI.** Most of what the operator does during a service, a script or an AI
-  agent can do from the command line.
+> **Coming from SoftProjector?** Its database (`spData.sqlite`) or an exported songbook (`.sps`) comes straight across: each songbook becomes a library, each song keeps its number, its verses and choruses, and an arrangement that repeats the chorus after every verse, as SoftProjector does. Drop the file on the window.
+
+## What it looks like
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/bible.png" alt="The Bible page: John 3 to read, verse 16 in the King James Version with the Russian Synodal under it, highlighted and on screen, beside the keypad of the books"></td>
+    <td width="50%"><img src="docs/images/stage.png" alt="A stage screen: the words on screen in English and Russian, the next slide below them in smaller type, a sermon timer at the top left and the clock at the top right"></td>
+  </tr>
+  <tr>
+    <td align="center">The Bible in two translations, lined up verse by verse</td>
+    <td align="center">A stage screen, as the band sees it</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/lower-third.png" alt="A stream screen laid out as a lower third: two lines of English in white with the Russian under them in gold, low on a soft background picture that stands in for the camera"></td>
+    <td width="50%"><img src="docs/images/import-sheet.png" alt="The sheet that opens when a presentation file is dropped on the window, Import Sunday Sermon.pptx, with two cards: As Slides, ringed, and As Pictures"></td>
+  </tr>
+  <tr>
+    <td align="center">A livestream lower third, from a screen of its own (shown over a stand-in picture)</td>
+    <td align="center">A presentation comes in as slides or as pictures</td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><img src="docs/images/styled-words.png" width="50%" alt="The slide editor with one box holding words styled differently: a bold reference, an italic line and one word in gold, with the Text tab of the inspector open"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">Words styled inside one box</td>
+  </tr>
+</table>
+
+**Works with:** NDI, Blackmagic DeckLink, Canva Sync and VoxLive captions, each optional.
 
 ## Who it's for
 
@@ -47,118 +61,69 @@ SoftPresenter is built to be:
 - **Worship teams and livestreams:** stage screens with the words now, the next slide, the clock
   and a timer; any screen sent over NDI to streaming software or a video switcher, laid out its
   own way if needed (a lower third for the stream).
-- **Lobbies and automation:** loops of pictures and videos before and after the service, and a
-  command line for scripts, button panels and AI agents.
+- **Lobbies:** loops of pictures and videos before and after the service.
 
 ## What it does
 
-- **Songs and slides.** Songs as slides in groups (Verse, Chorus, Bridge), arrangements, one-key
-  jumps, nineteen transitions, libraries of your own, and playlists with headers, shown as one
-  scroll from song to song. Songs import from text, ChordPro, rich-text, Word and lyric-service
-  files, in any common encoding, and whole song libraries come across from other presentation
-  software. Presentation files (`.pptx`, `.key`, `.odp` and more), PDFs and folders of pictures
-  come in as slides. Undo
-  and redo.
-- **Bible.** Type `John 3:16-18`, `Пс 22:1-3` or `Ів 3:16` and the chapter fills as you type,
-  with no need to press Return, as a page to read or as slides; or click a book on a keypad of
-  all 66 (or in lists), or search by word. Up to four translations on one slide, a history of
-  the passages shown, and book names in English, Russian and Ukrainian, read in the language
-  typed or one chosen. Four Bibles come with the app and sixteen more install from
-  its Bibles window; a Bible file the church already has (Zefania, OSIS, USFM and other common
-  formats) installs when dropped on the window.
-- **Media.** Pictures and videos behind the words or on their own, media playlists, folders the
-  app watches, and an announcements layer that loops a song, a picture, a video or a media
-  playlist by itself. Canva Sync fetches the announcements video fresh from a Canva
-  presentation. Videos play as they are, never converted.
-- **Screens.** Any number of audience screens on displays (never the one the operator works
-  on), in windows, over NDI or out of a Blackmagic Design DeckLink card (SDI or HDMI, with the
-  card's keyer), each with its own look and theme if you like (a lobby can show
-  only the media, a stream a lower third); stage screens with layouts you design; test patterns
-  and Identify Screens.
-- **Live tools.** Timers, messages over the slides, props such as a logo, macros that do several
-  things in one click, walk-in music with crossfades, and a message for the stage.
-- **Editing and themes.** A slide editor with text, shapes, pictures, videos, gradients and
-  builds; themes that decide where each kind of text goes, used across songs and Bible slides.
-- **Command line.** `sp` (full name `softpresenter`) controls the running app: `sp status`,
-  `sp next`, `sp clear all`, and slides, media, messages, timers, macros, the Bible and every
-  menu item. Install it from SoftPresenter › Install Command Line Tool…;
-  [docs/cli.md](docs/cli.md) has the commands.
-- **Remote Control.** Run the show from a tablet or another computer on the church's network:
-  switched on in Settings, the app serves a page over HTTPS behind a password, and the page
-  sends the same commands as `sp` ([docs/remote-api.md](docs/remote-api.md)).
+The full list, area by area, is in [docs/features.md](docs/features.md). In short:
 
-The full list, area by area, is in [docs/features.md](docs/features.md).
-
-<table>
-  <tr>
-    <td width="50%"><img src="docs/images/bible.png" alt="The Bible page: John 3 to read, verses 16 to 18 in the King James Version with the Russian Synodal under them, beside the keypad of the books"></td>
-    <td width="50%"><img src="docs/images/stage.png" alt="A stage screen: the slide on screen in English and Russian, the next slide below it, a sermon timer and the clock"></td>
-  </tr>
-  <tr>
-    <td align="center">The Bible in two translations, lined up verse by verse</td>
-    <td align="center">A stage screen as the band sees it</td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/images/editor.png" alt="The editor: a slide in two languages with its English box selected and the inspector's Text tab open"></td>
-    <td width="50%"><img src="docs/images/screens.png" alt="The Screens window: an audience screen, an NDI stream and a stage screen, with the selected screen's output and look"></td>
-  </tr>
-  <tr>
-    <td align="center">The slide editor</td>
-    <td align="center">Audience, NDI and stage screens</td>
-  </tr>
-</table>
-
-![The media bin: three pictures and a video, the picture on screen outlined in red](docs/images/media.png)
+- **Songs and slides.** Groups (Verse, Chorus, Bridge), arrangements, one-key jumps, playlists
+  with headers, and a slide editor with text, shapes, pictures and video. Words can be styled
+  inside one box (a bold reference, an italic line, one word in a colour). SoftPresenter Sans,
+  with Latin, Cyrillic and Greek, is built in, so slides look the same on every computer.
+- **Presentations.** A `.pptx` comes in as slides you can edit, read straight from the file, or
+  as pictures of its slides drawn by an app on the Mac that can open it; PDFs and folders of
+  pictures come in as slides.
+- **Bible.** Four Bibles come with the app and sixteen more install from its Bibles window;
+  up to four translations on one slide, and book names in English, Russian and Ukrainian.
+- **Media.** Pictures and videos behind the words or on their own, and an announcements layer
+  that loops by itself. Video the Mac plays goes to the screens without being copied.
+- **Screens.** Any number of audience screens on displays, in windows, over NDI or out of a
+  DeckLink card, each with its own look and theme; stage screens with layouts you design.
+- **Remote Control.** Run the show from a computer or tablet on the church's network: switched
+  on in Settings, the app serves a page over HTTPS behind a password
+  ([docs/remote-api.md](docs/remote-api.md)).
 
 ## A service from start to finish
 
 1. **Set up the screens.** The first start opens a short setup: choose the display the
-   congregation sees (the projector or TV, by the name macOS gives it) and a stage display if
-   there is one. The Mac's main display, where you work, is never filled; on a Mac with one
-   display, the screen opens in a window. Later, the Screens window (Option-Command-1) changes
-   them and adds more, including screens sent over NDI. Identify Screens shows each screen's
-   name on it, so you can check which is which.
-2. **Bring in the songs.** New Song (Command-N) asks for a title and a theme and takes the words
-   pasted in: a line in square brackets starts a group, a blank line starts a new slide, and a
-   line with only `--` separates the main language from the translation. Songs you already have
-   come in with File › Import Songs, which offers them by kind of file (A Library Folder…, A Song
-   Bundle…, Song Files…, Words from Text…), or by dropping their files on the window: text (see
-   [the format](#song-text-files)), ChordPro, rich text, Word and lyric-service files. A whole
-   library from other presentation software comes across too, with A Library Folder… or the
-   first-run setup, keeping each song's groups and arrangements.
+   congregation sees (the projector or TV) and a stage display if there is one. The Mac's main
+   display, where you work, is never filled; on a Mac with one display, the screen opens in a
+   window. Later, the Screens window (Option-Command-1) changes them and adds more, including
+   screens sent over NDI. Identify Screens shows each screen's name on it.
+2. **Bring in the songs.** New Song (Command-N) takes the words pasted in: a line in square
+   brackets starts a group, a blank line starts a new slide, and a line with only `--`
+   separates the main language from the translation. Songs you already have come in with
+   File › Import Songs, or by dropping their files on the window: text (see
+   [the format](#song-text-files)), ChordPro, rich text, Word, lyric-service files, and whole
+   libraries from SoftProjector and other presentation software, keeping each song's groups
+   and arrangements.
 3. **Build the running order.** Make a playlist with the + beside PLAYLISTS (say "Sunday
    Morning"), drag songs into it in order, and add headers to group them. Sermon and notice
-   slides that arrive as presentation or PDF files come in with File › Import Slides…,
-   or by dropping them on the window: each page becomes a slide, ready to drag into the
-   playlist.
+   slides that arrive as presentation or PDF files come in with File › Import Slides… or by
+   dropping them on the window. A `.pptx` asks whether to bring it in as slides you can edit
+   or as pictures; a PDF becomes a picture for each page.
 4. **Add the readings.** Control-B goes to the Bible page from anywhere. Type a reference such
-   as `John 3:16-18` and the chapter fills as you type (book names are offered as you go), or
-   click a book, a chapter and a verse; nothing goes on screen until you click a verse of the
-   passage, or press Enter on the one picked. Pick a second translation for the next row, set what each slide shows under Options
-   (with a live preview), and add the passage to the playlist with one click. History brings
-   back any passage that was on screen.
-5. **Add pictures and videos.** Drop them on the window to put them in the media bin, and group
-   them in a media playlist (the menu beside MEDIA). For a loop before the service, choose Play
-   This Playlist, or right-click a song, a picture, a video or a media playlist and choose Play
-   on Announcements Layer. To start it every
-   time the app opens, make a macro that plays it (+ Add a step, Announcements)
-   and tick Run When SoftPresenter Opens in the macro's menu.
+   as `John 3:16-18` and the chapter fills as you type, or click a book, a chapter and a
+   verse; nothing goes on screen until you click a verse or press Enter on the one picked. Pick
+   a second translation for the next row, and add the passage to the playlist with one click.
+5. **Add pictures and videos.** Drop them on the window to put them in the media bin. For a
+   loop before the service, group them in a media playlist and choose Play This Playlist, or
+   right-click a song, picture or video and choose Play on Announcements Layer.
 6. **Choose what the stage sees.** In the Stage tab, give each stage screen a layout: Words and
    Next, Words Only, Words and Notes, Clock and Timer, or one you design.
 7. **Run it.** In the Show view (Command-1), open the playlist and click the first slide, or press
    Space. The right arrow and Space go forward, the left arrow goes back, and letters jump to a
-   group (A for Verse 1, C for the chorus). With View › Continuous on, the last slide of
-   a song leads into the next song. Escape clears everything, walk-in music and announcements
-   included; the layer keys under the preview clear one layer at a time (on Windows and Linux,
-   F2 to F6 do too). Timers, messages and macros sit in the tabs
-   under Clear All.
+   group (A for Verse 1, C for the chorus). Escape clears everything; the layer keys under the
+   preview clear one layer at a time (on Windows and Linux, F2 to F6 do too). Timers, messages
+   and macros sit in the tabs under Clear All.
 8. **Afterwards.** There is nothing to save: every change is written as you make it, and the
    playlist is ready for next week.
 
 ## Get started
 
 There is no download yet: SoftPresenter is built from source, on a Mac with macOS 13 or later
-(Windows and Linux are planned). You need:
+Windows and Linux builds are in testing: they compile and pass their automated tests on real machines, but nothing is released for them yet. You need:
 
 - **The Xcode Command Line Tools:** `xcode-select --install`.
 - **Rust through [rustup](https://rustup.rs).** `rust-toolchain.toml` pins the version
@@ -267,13 +232,20 @@ SoftPresenter aims to be the presentation app a church never has to pay for and 
 complete enough for a large Sunday service, simple enough for a volunteer, light enough for an
 old laptop, and open to scripts and AI. First on the list: bringing playlists and media across
 from a church's existing software, and fixing a slide's words from the Show view. After that
-come the whole app in a browser (on Remote Control's API) with a phone remote, an MCP server
-for AI assistants, and tested Windows and Linux builds.
+come the whole app in a browser (Remote Control's API is in place; its fuller page is still
+being designed) with a phone remote, and an MCP server for AI assistants. Windows and Linux are
+in testing; releasing them is the other big step.
 
 The full plan, about 170 features with their size and how much each matters on a Sunday, is in
 [docs/roadmap.md](docs/roadmap.md). Nothing in it is promised by a date.
 
 ## For developers and AI agents
+
+SoftPresenter is open to scripts and AI: most of what the operator does during a service, a
+script or an AI agent can do too. `sp` (full name `softpresenter`) controls the running app from
+the command line (`sp status`, `sp next`, `sp clear all`, and slides, media, messages, timers,
+macros, the Bible and every menu item); install it from SoftPresenter › Install Command Line
+Tool…. Remote Control sends the same commands from a page.
 
 - [docs/app-map.md](docs/app-map.md) maps every view, panel and window, what each part does, the
   command-line command that does the same, where the files are, and how to try the app safely.

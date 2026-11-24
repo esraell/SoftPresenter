@@ -747,7 +747,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   moment, and fades as that screen fades. In the editor, the Stage tab's pictures and the
   preview, it stands in as a dark box with a screen in it.
 
-![A stage screen: the slide on screen in English and Russian, the next slide, a sermon timer and the clock](images/stage.png)
+![A stage screen: the words on screen in English and Russian, the next slide below them, a sermon timer and the clock](images/stage.png)
 
 ## Bible
 - The Bible page, in the design's look: on the left, in place of the playlist, **Books | History**
@@ -934,7 +934,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   whatever the Bibles' order or the language chosen (so does the find box's Command-Return, and
   History). A passage kept before this opens in the first translation's numbering, as it did.
 
-![The Bible page: John 3 to read, verses 16 to 18 in the King James Version with the Russian Synodal under them, verse 16 picked, beside the keypad of the books](images/bible.png)
+![The Bible page: John 3 to read, verse 16 in the King James Version with the Russian Synodal under it, highlighted and on screen, beside the keypad of the books](images/bible.png)
 
 ## Editing
 - **Edit always opens something.** Command-3, the Edit key in the top bar and View › Edit open
@@ -1042,7 +1042,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Escape, closes it without keeping what was typed, and clears nothing on the screens.
 - **Cmd+N** makes a new song.
 
-![The editor](images/editor.png)
+![The slide editor: a song's slide in English and Russian with the Russian box selected and the inspector's Text tab open](images/editor.png)
 
 ## Themes
 - A theme decides where each kind of text goes and how it looks. It has any number of
@@ -1129,7 +1129,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     gone, and items set to it go back to the usual look. An older SoftPresenter opening the file
     draws the usual look.
 
-![The theme editor](images/themes.png)
+![The theme editor: the Built-in theme's Two languages template with its main box selected, and a second theme, Lower Third, in the list](images/themes.png)
 
 ## Getting started
 - The first start on a Mac (and the first start after updating, on a Mac set up before there
