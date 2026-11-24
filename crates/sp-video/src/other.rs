@@ -8,9 +8,11 @@ pub fn picture(_path: &Path, _max_side: u32) -> Result<Frame, String> {
     Err("This picture format can be opened on macOS only, for now.".to_owned())
 }
 
+#[cfg(not(windows))]
 const NO_PDF: &str =
-    "PDF files can be turned into slides on macOS only, for now. Export the slides as pictures instead.";
+    "PDF files can be turned into slides on macOS and Windows only, for now. Export the slides as pictures instead.";
 
+#[cfg(not(windows))]
 pub fn pdf_sizes(
     _path: &Path,
     _max_width: u32,
@@ -20,6 +22,7 @@ pub fn pdf_sizes(
     Err(NO_PDF.to_owned())
 }
 
+#[cfg(not(windows))]
 pub fn pdf_draw(
     _path: &Path,
     _max_width: u32,

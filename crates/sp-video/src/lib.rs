@@ -2,7 +2,8 @@
 //! plays what it can, decoding in hardware: MP4, MOV, HEVC, ProRes and the like. Everything
 //! else (MKV, WebM, AVI, or a codec this Mac's player lacks) is played by FFmpeg, run as a
 //! separate program, without converting it first. Pictures are read with ImageIO, which reads
-//! what Preview reads (HEIC, TIFF, PSD and others).
+//! what Preview reads (HEIC, TIFF, PSD and others). On Windows, PDF pages are drawn by Windows'
+//! own PDF reader (`pdf_windows`).
 //!
 //! A [`Player`] is made and controlled on the main thread. The pictures it makes are taken from
 //! a [`Frames`], which can go to another thread: the one drawing the screens.
@@ -34,7 +35,17 @@ pub use mac::{GpuImport, GpuNext, display_names, home_folder, pdf_draw, pdf_size
 mod other;
 
 #[cfg(not(target_os = "macos"))]
-pub use other::{display_names, home_folder, pdf_draw, pdf_sizes, picture};
+pub use other::{display_names, home_folder, picture};
+
+#[cfg(all(not(target_os = "macos"), not(windows)))]
+pub use other::{pdf_draw, pdf_sizes};
+
+// PDF pages on Windows, by Windows' own PDF reader (asked through PowerShell; no unsafe code).
+#[cfg(any(windows, test))]
+mod pdf_windows;
+
+#[cfg(windows)]
+pub use pdf_windows::{pdf_draw, pdf_sizes, powershell};
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

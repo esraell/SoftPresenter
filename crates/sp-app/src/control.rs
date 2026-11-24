@@ -501,6 +501,8 @@ fn read_unshown(prompt: &str) -> Option<String> {
 }
 
 /// Whether the program was started through a link (`sp`), not by its own path or as an app.
+/// Only Unix systems have such links (Windows runs the program by its own name).
+#[cfg(unix)]
 pub fn started_through_link() -> bool {
     let Some(started_as) = std::env::args_os().next().map(PathBuf::from) else { return false };
     let is_link = |path: &Path| std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
@@ -834,7 +836,9 @@ pub fn is_command(word: &str) -> bool {
     COMMANDS.contains(&word.to_lowercase().as_str())
 }
 
-/// The names the command is installed as: the short one to type, and the full one.
+/// The names the command is installed as: the short one to type, and the full one (as links,
+/// on Unix systems).
+#[cfg(unix)]
 pub const COMMAND_NAMES: [&str; 2] = ["sp", "softpresenter"];
 
 /// Puts the `sp` (and `softpresenter`) command on the PATH: links to this program in the

@@ -10,7 +10,12 @@
 //! window and not brought to the front) and never `activate`d; the file is opened and exported
 //! without a window being shown where the app allows it. The third is run headless. An app
 //! SoftPresenter started is quit again afterwards; one that was already open is left alone. Each
-//! attempt gets two minutes.
+//! attempt gets two minutes (five on Windows, where saving a long deck takes longer).
+//!
+//! On Windows the saving app is asked through Windows PowerShell instead (its own automation,
+//! opened read-only and without a window, hidden slides left out, saved as a PDF and closed), and
+//! the headless app is run the same way as on a Mac; their PDFs are drawn by Windows' own PDF
+//! reader (`sp_video::pdf_draw`).
 //!
 //! What the person is told never names an app: the apps are named here, in code, only because
 //! they have to be started by the names they are installed under.
@@ -32,7 +37,8 @@ pub enum Program {
 
 impl Program {
     /// Where the app is when it is installed.
-    fn app(self) -> PathBuf {
+    #[cfg(target_os = "macos")]
+    fn app(self) -> Option<PathBuf> {
         let name = match self {
             Program::ScriptSaves => "Microsoft PowerPoint.app",
             Program::ScriptExports => "Keynote.app",
@@ -40,21 +46,57 @@ impl Program {
         };
         let system = Path::new("/Applications").join(name);
         if system.exists() {
-            return system;
+            return Some(system);
         }
-        std::env::var_os("HOME").map_or(system.clone(), |home| PathBuf::from(home).join("Applications").join(name))
+        let own = std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Applications").join(name))?;
+        own.exists().then_some(own)
+    }
+
+    /// Where the app's program is when it is installed: the saving one where Windows' own list
+    /// of programs says, or where it installs by default; the headless one in Program Files.
+    #[cfg(windows)]
+    fn app(self) -> Option<PathBuf> {
+        let program_files = |name: &str| {
+            ["ProgramFiles", "ProgramFiles(x86)"]
+                .iter()
+                .filter_map(std::env::var_os)
+                .map(|root| PathBuf::from(root).join(name))
+                .find(|place| place.is_file())
+        };
+        match self {
+            Program::ScriptSaves => registered("POWERPNT.EXE")
+                .or_else(|| program_files(r"Microsoft Office\root\Office16\POWERPNT.EXE"))
+                .or_else(|| program_files(r"Microsoft Office\Office16\POWERPNT.EXE")),
+            Program::Headless => program_files(r"LibreOffice\program\soffice.exe"),
+            Program::ScriptExports => None,
+        }
+    }
+
+    /// The headless app, where Linux packages put it; the others don't run there.
+    #[cfg(all(not(target_os = "macos"), not(windows)))]
+    fn app(self) -> Option<PathBuf> {
+        match self {
+            Program::Headless => ["/usr/bin/soffice", "/usr/bin/libreoffice", "/usr/local/bin/soffice"]
+                .iter()
+                .map(PathBuf::from)
+                .find(|place| place.is_file()),
+            Program::ScriptSaves | Program::ScriptExports => None,
+        }
     }
 
     /// The name the app runs under, for asking whether it is running.
     fn process(self) -> &'static str {
         match self {
+            Program::ScriptSaves if cfg!(windows) => "POWERPNT.EXE",
             Program::ScriptSaves => "Microsoft PowerPoint",
             Program::ScriptExports => "Keynote",
+            Program::Headless if cfg!(windows) => "soffice.bin",
             Program::Headless => "soffice",
         }
     }
 
     /// Whether the program is running now.
+    #[cfg(not(windows))]
     fn running(self) -> bool {
         Command::new("/usr/bin/pgrep")
             .args(["-x", self.process()])
@@ -64,22 +106,75 @@ impl Program {
             .is_ok_and(|status| status.success())
     }
 
+    #[cfg(windows)]
+    fn running(self) -> bool {
+        let mut command = windows_tool("tasklist.exe");
+        command.args(["/FI", &format!("IMAGENAME eq {}", self.process()), "/NH", "/FO", "CSV"]);
+        command.output().is_ok_and(|out| {
+            String::from_utf8_lossy(&out.stdout).to_lowercase().contains(&self.process().to_lowercase())
+        })
+    }
+
     /// Asks a program SoftPresenter started to quit, when its script didn't get to (it was
     /// stopped for taking too long, or failed part way).
     fn quit(self) {
-        if self != Program::Headless {
+        if self == Program::Headless {
+            return;
+        }
+        #[cfg(target_os = "macos")]
+        {
             let script = format!("tell application \"{}\" to quit", self.process());
             let _ = run_for(osascript(&script, &[]), Duration::from_secs(15));
         }
+        #[cfg(windows)]
+        {
+            let mut command = windows_tool("taskkill.exe");
+            command.args(["/IM", self.process()]);
+            let _ = run_for(command, Duration::from_secs(15));
+        }
     }
 
+    /// Installed, on a system whose PDFs SoftPresenter can draw (not Linux yet).
     fn installed(self) -> bool {
-        cfg!(target_os = "macos") && self.app().exists()
+        cfg!(any(target_os = "macos", windows)) && self.app().is_some()
     }
 }
 
-/// How long one program gets to make the PDF.
-const TIME_ALLOWED: Duration = Duration::from_secs(120);
+/// One of Windows' own programs, from its own folder, with no console window.
+#[cfg(windows)]
+fn windows_tool(name: &str) -> Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let root = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+    let mut command = Command::new(root.join("System32").join(name));
+    command.creation_flags(CREATE_NO_WINDOW).stdin(Stdio::null());
+    command
+}
+
+/// Where Windows' own list of installed programs ("App Paths") says a program is.
+#[cfg(windows)]
+fn registered(program: &str) -> Option<PathBuf> {
+    let key = format!(r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{program}");
+    let mut command = windows_tool("reg.exe");
+    command.args(["query", &key, "/ve"]);
+    let out = command.output().ok().filter(|out| out.status.success())?;
+    path_from_reg(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// The path in what `reg query … /ve` prints: "(Default)    REG_SZ    C:\…\POWERPNT.EXE".
+#[cfg(any(windows, test))]
+fn path_from_reg(printed: &str) -> Option<PathBuf> {
+    let line = printed.lines().find(|line| line.contains("REG_SZ") || line.contains("REG_EXPAND_SZ"))?;
+    let (_, value) = line.split_once("REG_SZ").or_else(|| line.split_once("REG_EXPAND_SZ"))?;
+    let value = value.trim().trim_matches('"');
+    let path = PathBuf::from(value);
+    (!value.is_empty() && (cfg!(test) || path.is_file())).then_some(path)
+}
+
+/// How long one program gets to make the PDF. Windows' saving app takes about a second and a
+/// half a slide on an ordinary office PC (20 slides: 45 seconds, starting it included), so a long
+/// deck gets longer there.
+const TIME_ALLOWED: Duration = Duration::from_secs(if cfg!(windows) { 300 } else { 120 });
 
 /// The programs that can open a presentation file, best first.
 pub fn programs_for(path: &Path) -> &'static [Program] {
@@ -122,13 +217,14 @@ pub fn none_installed(path: &Path) -> String {
 /// trying the next when one fails. Returns the PDF and the program that made it.
 pub fn to_pdf(path: &Path, folder: &Path) -> Result<(PathBuf, Program), String> {
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    let full = path.canonicalize().map_err(|e| format!("{name} could not be found ({e})."))?;
+    let full = plain(&path.canonicalize().map_err(|e| format!("{name} could not be found ({e})."))?);
     std::fs::create_dir_all(folder).map_err(|e| format!("Could not make a folder to work in: {e}"))?;
     let mut problems = Vec::new();
     for program in programs_for(path).iter().copied().filter(|p| p.installed()) {
         let was_running = program.running();
         let made = match program {
             Program::ScriptExports => by_exporting(&full, folder),
+            Program::ScriptSaves if cfg!(windows) => by_saving_on_windows(&full, folder),
             Program::ScriptSaves => by_saving(&full),
             Program::Headless => by_headless(&full, folder),
         };
@@ -219,10 +315,76 @@ end run"#;
     Ok(pdf)
 }
 
+/// The saving app on Windows, asked through its own automation from Windows PowerShell: the file
+/// opened read-only and without a window, its hidden slides left out (in that copy, never the
+/// file), saved as a PDF in `folder`, closed. The app is quit again only if it wasn't running and
+/// has nothing else open. The paths go to the script in environment variables, never its text.
+#[cfg(windows)]
+fn by_saving_on_windows(path: &Path, folder: &Path) -> Result<PathBuf, String> {
+    const SCRIPT: &str = r#"$ErrorActionPreference = 'Stop'
+try {
+  $wasRunning = [bool](Get-Process -Name POWERPNT -ErrorAction SilentlyContinue)
+  $app = New-Object -ComObject PowerPoint.Application
+  try {
+    # Open(FileName, ReadOnly, Untitled, WithWindow): read-only, keeping its name, no window.
+    $presentation = $app.Presentations.Open($env:SP_PPT_IN, -1, 0, 0)
+    try {
+      for ($at = $presentation.Slides.Count; $at -ge 1; $at--) {
+        $slide = $presentation.Slides.Item($at)
+        if ($slide.SlideShowTransition.Hidden -eq -1) { $slide.Delete() }
+      }
+      if ($presentation.Slides.Count -eq 0) { throw 'every slide in it is hidden' }
+      # 32: save as PDF.
+      $presentation.SaveAs($env:SP_PPT_OUT, 32)
+    } finally {
+      $presentation.Close()
+    }
+  } finally {
+    if (-not $wasRunning -and $app.Presentations.Count -eq 0) { $app.Quit() }
+    [void][Runtime.InteropServices.Marshal]::ReleaseComObject($app)
+  }
+} catch {
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
+}
+"#;
+    let pdf = folder.join("slides.pdf");
+    let mut command = sp_video::powershell(SCRIPT)?;
+    command.env("SP_PPT_IN", path).env("SP_PPT_OUT", &pdf);
+    run(command)?;
+    Ok(pdf)
+}
+
+#[cfg(not(windows))]
+fn by_saving_on_windows(_path: &Path, _folder: &Path) -> Result<PathBuf, String> {
+    Err("it runs on Windows only".to_owned())
+}
+
+/// A path as other programs take it: on Windows without the `\\?\` that `canonicalize` puts in
+/// front (a program asked by automation may not read that form).
+fn plain(path: &Path) -> PathBuf {
+    if cfg!(windows) {
+        let text = path.to_string_lossy();
+        if let Some(rest) = text.strip_prefix(r"\\?\")
+            && !rest.starts_with(r"UNC\")
+        {
+            return PathBuf::from(rest);
+        }
+    }
+    path.to_path_buf()
+}
+
 /// The headless app, without a window.
 fn by_headless(path: &Path, folder: &Path) -> Result<PathBuf, String> {
-    let soffice = Program::Headless.app().join("Contents/MacOS/soffice");
+    let app = Program::Headless.app().ok_or("it isn't installed")?;
+    let soffice = if cfg!(target_os = "macos") { app.join("Contents/MacOS/soffice") } else { app };
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut command = Command::new(soffice);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
     command.args(["--headless", "--norestore", "--convert-to", "pdf", "--outdir"]).arg(folder).arg(path);
     run(command)?;
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -302,6 +464,17 @@ mod tests {
         assert_eq!(programs_for(Path::new("a.key")), &[Program::ScriptExports]);
         assert_eq!(programs_for(Path::new("a.odp")), &[Program::Headless, Program::ScriptSaves]);
         assert!(programs_for(Path::new("a.pdf")).is_empty());
+    }
+
+    #[test]
+    fn windows_list_of_programs_gives_the_saving_apps_path() {
+        let printed = "\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\POWERPNT.EXE\r\n    (Default)    REG_SZ    C:\\Program Files\\Microsoft Office\\Root\\Office16\\POWERPNT.EXE\r\n";
+        assert_eq!(
+            path_from_reg(printed),
+            Some(PathBuf::from("C:\\Program Files\\Microsoft Office\\Root\\Office16\\POWERPNT.EXE"))
+        );
+        assert_eq!(path_from_reg("ERROR: The system was unable to find the specified registry key"), None);
+        assert_eq!(path_from_reg("    (Default)    REG_SZ    \r\n"), None, "an empty value is no program");
     }
 
     #[test]
