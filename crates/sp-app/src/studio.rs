@@ -3319,9 +3319,27 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
             found_added_to_library(ui.ctx(), state, id, added > 0, &found.name);
         }
     }
-    // Songs being carried say how many beside the pointer, until they are dropped.
-    if let Some(carried) = egui::DragAndDrop::payload::<SongDrag>(ui.ctx()) {
-        let words = match carried.0.as_slice() {
+    // Songs being dragged say what they are beside the pointer from the first move, and until
+    // they are dropped: while the drag is still in the list, the songs it has picked out; once
+    // it has left, the songs it carries (and the chooser is up to drop them on).
+    let dragging = if let Some(carried) = egui::DragAndDrop::payload::<SongDrag>(ui.ctx()) {
+        Some(carried.0.clone())
+    } else {
+        state
+            .sweep
+            .filter(|sweep| sweep.list == crate::home::Picking::Songs && !sweep.carried)
+            .filter(|sweep| down && pointer.is_some_and(|at| at.distance(sweep.start) >= 3.0))
+            .map(|sweep| {
+                if state.picked_songs.is_empty() {
+                    sweep.from.into_iter().collect()
+                } else {
+                    state.picked_songs.clone()
+                }
+            })
+    };
+    if let Some(songs) = dragging {
+        let words = match songs.as_slice() {
+            [] => String::new(),
             [one] => show.presentations().get(*one).map_or_else(String::new, |song| song.title.clone()),
             many => format!("{} songs", many.len()),
         };
@@ -6461,6 +6479,129 @@ pub mod tests {
             });
             output.drop_without_applying_deltas();
         }
+    }
+
+    /// Draws the left column in a 1280 x 800 window for each frame of pointer events, keeping
+    /// `state` and the context between them; gives what the last frame drew.
+    fn left_frames(show: &Show, state: &mut HomeState, frames: &[Vec<Event>]) -> (egui::Context, Vec<String>) {
+        let ctx = styled();
+        let mut last = None;
+        for (n, events) in frames.iter().enumerate() {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+                time: Some(n as f64 * 0.1),
+                events: events.clone(),
+                ..RawInput::default()
+            };
+            let output = ctx.run_ui(input, |ui| library(ui, show, state, &mut Vec::new()));
+            if let Some(before) = last.replace(output) {
+                before.drop_without_applying_deltas();
+            }
+        }
+        let last = last.expect("at least one frame");
+        let words = texts(&last);
+        last.drop_without_applying_deltas();
+        (ctx, words)
+    }
+
+    fn texts(output: &egui::FullOutput) -> Vec<String> {
+        fn walk(shape: &egui::Shape, into: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => into.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let mut into = Vec::new();
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut into));
+        into
+    }
+
+    /// The three songs the drag tests list.
+    fn three_songs() -> Show {
+        let song = |title: &str| Arc::new(sp_model::parse_song_text(title, "One\n\nTwo\n"));
+        Show::new(vec![song("Morning Song"), song("Evening Song"), song("Noon Song")])
+    }
+
+    /// A state with those songs kept under keys, and a library holding them all, shown or not.
+    fn state_with_a_library(shown: bool) -> HomeState {
+        let keys = ["a", "b", "c"].map(str::to_owned).to_vec();
+        let mut library = crate::libraries::Library::new("Hymns".to_owned());
+        library.songs = keys.clone();
+        HomeState {
+            song_keys: keys,
+            library_shown: shown.then_some(library.id),
+            libraries: vec![library],
+            ..HomeState::default()
+        }
+    }
+
+    /// Where the left column's first song row is: the first place a press starts a drag.
+    fn first_song_row(show: &Show, shown: bool) -> egui::Pos2 {
+        for y in (60..400).step_by(6) {
+            let mut probe = state_with_a_library(shown);
+            let at = pos2(120.0, y as f32);
+            let frames =
+                [vec![Event::PointerMoved(at)], vec![press(at, true)], vec![Event::PointerMoved(at + vec2(8.0, 0.0))]];
+            left_frames(show, &mut probe, &frames);
+            if probe.sweep.is_some() {
+                return at;
+            }
+        }
+        panic!("no song row to press on");
+    }
+
+    /// Drags the first song row to `to` and says whether the song is carried and what the last
+    /// frame drew.
+    fn drag_first_song(shown: bool, to: egui::Pos2) -> (bool, Vec<String>) {
+        let show = three_songs();
+        let mut state = state_with_a_library(shown);
+        let at = first_song_row(&show, shown);
+        let frames = [
+            vec![Event::PointerMoved(at)],
+            vec![press(at, true)],
+            vec![Event::PointerMoved(at + vec2(8.0, 0.0))],
+            vec![Event::PointerMoved((at + to.to_vec2()) / 2.0)],
+            vec![Event::PointerMoved(to)],
+            vec![Event::PointerMoved(to + vec2(1.0, 0.0))],
+        ];
+        let (ctx, words) = left_frames(&show, &mut state, &frames);
+        (egui::DragAndDrop::has_payload_of_type::<SongDrag>(&ctx), words)
+    }
+
+    #[test]
+    fn a_song_dragged_in_all_songs_is_carried_with_its_name_and_the_chooser_comes_up() {
+        let (carried, words) = drag_first_song(false, pos2(700.0, 200.0));
+        assert!(carried, "the song is carried once it leaves the list");
+        let chips = words.iter().filter(|text| text.as_str() == "Morning Song").count();
+        assert_eq!(chips, 2, "the row and the chip beside the pointer: {words:?}");
+        assert!(words.iter().any(|text| text == "SONG LIBRARIES"), "the chooser is up: {words:?}");
+    }
+
+    #[test]
+    fn a_song_dragged_in_a_library_is_carried_with_its_name_and_the_chooser_comes_up() {
+        let (carried, words) = drag_first_song(true, pos2(700.0, 200.0));
+        assert!(carried, "the song is carried once it leaves the list");
+        let chips = words.iter().filter(|text| text.as_str() == "Morning Song").count();
+        assert_eq!(chips, 2, "the row and the chip beside the pointer: {words:?}");
+        assert!(words.iter().any(|text| text == "SONG LIBRARIES"), "the chooser is up: {words:?}");
+    }
+
+    #[test]
+    fn a_song_dragged_inside_the_list_shows_its_name_beside_the_pointer_at_once() {
+        let show = three_songs();
+        let mut state = state_with_a_library(false);
+        let at = first_song_row(&show, false);
+        let frames = [
+            vec![Event::PointerMoved(at)],
+            vec![press(at, true)],
+            vec![Event::PointerMoved(at + vec2(8.0, 2.0))],
+            vec![Event::PointerMoved(at + vec2(12.0, 3.0))],
+        ];
+        let (ctx, words) = left_frames(&show, &mut state, &frames);
+        assert!(!egui::DragAndDrop::has_payload_of_type::<SongDrag>(&ctx), "still in the list");
+        let chips = words.iter().filter(|text| text.as_str() == "Morning Song").count();
+        assert_eq!(chips, 2, "the row and the chip");
     }
 
     #[test]

@@ -7225,6 +7225,9 @@ impl App {
         // Testing aid: SOFTPRESENTER_FIND_DRAG drags a result of the find box (see
         // `home::find_drag_events`).
         raw_input.events.extend(home::find_drag_events(egui_ctx, &mut running.home_state));
+        // Testing aid: SOFTPRESENTER_POINTER_DRAG drags from one point to another (see
+        // `home::pointer_drag_events`).
+        raw_input.events.extend(home::pointer_drag_events(egui_ctx));
         // Testing aid: SOFTPRESENTER_MACRO_STEPS=drag=N>M drags a macro's step (see
         // `live_tabs::steps_aid_events`).
         raw_input.events.extend(live_tabs::steps_aid_events(egui_ctx));

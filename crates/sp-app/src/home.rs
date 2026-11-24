@@ -4953,6 +4953,39 @@ fn find_drag_step(
     (events, step + 1)
 }
 
+/// Testing aid: SOFTPRESENTER_POINTER_DRAG=X,Y@X,Y presses at the first point and drags to the
+/// second over a few frames, then holds it there, for a picture of a drag in progress (a song
+/// pulled out of the list, say); `X,Y@X,Y,drop` lets go there too. The window's own pointer is
+/// moved, not the mouse. It starts some frames into the run, once the window has settled, and
+/// is for a capture run (`--capture-home`), whose window is drawn wherever it is.
+/// Returns the pointer's events for this frame, to go in with the window's own.
+pub fn pointer_drag_events(ctx: &egui::Context) -> Vec<egui::Event> {
+    type Asked = Option<(egui::Pos2, egui::Pos2, bool)>;
+    fn asked() -> &'static Asked {
+        static ASKED: std::sync::OnceLock<Asked> = std::sync::OnceLock::new();
+        ASKED.get_or_init(|| {
+            let asked = std::env::var("SOFTPRESENTER_POINTER_DRAG").ok()?;
+            let (from, rest) = asked.split_once('@')?;
+            let point = |text: &str| -> Option<egui::Pos2> {
+                let (x, y) = text.split_once(',')?;
+                Some(pos2(x.trim().parse().ok()?, y.trim().parse().ok()?))
+            };
+            let drop = rest.ends_with(",drop");
+            Some((point(from)?, point(rest.trim_end_matches(",drop"))?, drop))
+        })
+    }
+    /// Frames since the window first drew; the drag waits a while for the lists to settle.
+    static STEP: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    const SETTLE: u32 = 40;
+    let Some((from, to, drop)) = asked() else { return Vec::new() };
+    let step = STEP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    ctx.request_repaint();
+    if step < SETTLE {
+        return Vec::new();
+    }
+    pointer_drag(step - SETTLE, *from, *to, *drop).unwrap_or_default()
+}
+
 /// Testing aid: the pointer's events for one frame of a drag, `step` frames after it starts: it
 /// goes to `from` and presses there, goes a little way down (far enough for the press to be a
 /// drag) and on to `to` over a few frames, and holds there, letting go after a while when
