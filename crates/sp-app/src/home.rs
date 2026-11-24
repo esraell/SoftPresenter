@@ -14248,8 +14248,13 @@ mod tests {
         let show = three_songs();
         let (ctx, mut state, mut time) = (egui::Context::default(), HomeState::default(), 0.0);
         let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), time);
+        // The first slide's number, "01". (Not the top bar's clock, which reads 01:… just after one.)
         let first_line = |texts: &[(String, Rect)]| {
-            texts.iter().find(|(words, _)| words.starts_with("01")).map(|(_, at)| at.min.y).expect("a slide's strip")
+            texts
+                .iter()
+                .find(|(words, _)| words.starts_with("01") && !words.contains(':'))
+                .map(|(_, at)| at.min.y)
+                .expect("a slide's strip")
         };
         let before = first_line(&texts);
         state.notices.ask(Waiting::Song(show.selected()), "One was changed outside SoftPresenter.");
