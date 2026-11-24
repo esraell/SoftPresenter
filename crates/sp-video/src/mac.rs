@@ -146,9 +146,18 @@ pub struct Player {
     /// Whether pictures may go to the GPU as they are (see [`Frames::next_texture`]): not for a
     /// video whose format may carry clear parts.
     zero_copy: Arc<AtomicBool>,
+    /// A picture taken for the GPU that couldn't be made a texture, kept for the next copy.
+    parked: Arc<Mutex<Option<Parked>>>,
     looping: bool,
     ended: bool,
 }
+
+/// A picture's pixel buffer set aside to be taken next (see [`Frames::next_texture`]).
+struct Parked(Retained<CVPixelBuffer>);
+
+// SAFETY: a pixel buffer is a Core Foundation object, whose reference count may be changed from
+// any thread, and this one is only put in and taken out of its place, under a lock.
+unsafe impl Send for Parked {}
 
 impl Player {
     /// Opens a video, paused at its start. Must be called on the main thread. The error is a
@@ -195,12 +204,26 @@ impl Player {
         // SAFETY: a plain setter on a live object.
         unsafe { player.setActionAtItemEnd(AVPlayerActionAtItemEnd::None) };
         let zero_copy = Arc::new(AtomicBool::new(!track_may_carry_alpha(&item)));
-        Ok(Player { player, item, output, halved: Arc::default(), zero_copy, looping: false, ended: false })
+        Ok(Player {
+            player,
+            item,
+            output,
+            halved: Arc::default(),
+            zero_copy,
+            parked: Arc::default(),
+            looping: false,
+            ended: false,
+        })
     }
 
     /// Where its pictures are taken from, on any thread.
     pub fn frames(&self) -> Frames {
-        Frames { output: self.output.clone(), halved: self.halved.clone(), zero_copy: self.zero_copy.clone() }
+        Frames {
+            output: self.output.clone(),
+            halved: self.halved.clone(),
+            zero_copy: self.zero_copy.clone(),
+            parked: self.parked.clone(),
+        }
     }
 
     pub fn play(&mut self) {
@@ -316,6 +339,8 @@ pub struct Frames {
     /// True while pictures may go to the GPU without a copy: from the video's format (see
     /// [`track_may_carry_alpha`]), and until one fails to.
     zero_copy: Arc<AtomicBool>,
+    /// A picture taken for the GPU that couldn't be made a texture, kept for the next copy.
+    parked: Arc<Mutex<Option<Parked>>>,
 }
 
 impl Frames {
@@ -323,7 +348,8 @@ impl Frames {
     /// ([`GpuNext::Picture`]); [`GpuNext::Nothing`] when there is no new picture since the last
     /// was taken; and [`GpuNext::Unavailable`], with no picture taken, when this video's
     /// pictures must be copied as [`Frames::next_with`] does (its format may have clear parts,
-    /// or a picture could not be made a texture earlier). The texture holds the picture's pixels
+    /// or a picture could not be made a texture: that one is kept, and the copy that follows
+    /// takes it). The texture holds the picture's pixels
     /// in BGRA order, and keeps the decoder's memory from being used again until the GPU is
     /// done with it.
     pub fn next_texture(&self, import: &GpuImport, device: &wgpu::Device) -> GpuNext {
@@ -331,14 +357,14 @@ impl Frames {
             return GpuNext::Unavailable;
         }
         let Some(buffer) = self.newest() else { return GpuNext::Nothing };
-        match import.texture(device, buffer) {
-            Some(texture) => GpuNext::Picture(texture),
-            None => {
-                // This picture is lost; from the next on they are copied.
-                self.zero_copy.store(false, Ordering::Relaxed);
-                GpuNext::Nothing
-            }
+        if let Some(texture) = import.texture(device, &buffer) {
+            return GpuNext::Picture(texture);
         }
+        // From now on this video's pictures are copied, this one first: kept for the next
+        // `next_with`, so that a video that is paused shows its picture all the same.
+        self.zero_copy.store(false, Ordering::Relaxed);
+        *self.parked.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Parked(buffer));
+        GpuNext::Unavailable
     }
 
     /// The picture to show now, if there is a new one since the last was taken.
@@ -373,8 +399,12 @@ impl Frames {
         (width > 0 && height > 0).then(|| show(&lend(&halved, width, height, width * 4)))
     }
 
-    /// The newest picture's pixel buffer, if there is a new one since the last was taken.
+    /// The newest picture's pixel buffer, if there is a new one since the last was taken (or one
+    /// was kept because it couldn't go to the GPU).
     fn newest(&self) -> Option<Retained<CVPixelBuffer>> {
+        if let Some(Parked(buffer)) = self.parked.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
+            return Some(buffer);
+        }
         let host = i64::try_from(CVGetCurrentHostTime()).unwrap_or(i64::MAX);
         // SAFETY: a video output may be asked for pictures from any thread; these are plain values.
         let time = unsafe { self.output.itemTimeForMachAbsoluteTime(host) };

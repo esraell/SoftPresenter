@@ -30,8 +30,8 @@ pub enum GpuNext {
     Picture(wgpu::Texture),
     /// No new picture since the last was taken.
     Nothing,
-    /// This video's pictures can't go to the GPU as they are: nothing was taken, and they are
-    /// to be copied (see [`super::Frames::next_with`]).
+    /// This video's pictures can't go to the GPU as they are: they are to be copied (see
+    /// [`super::Frames::next_with`]), which gives the picture just taken, if one was.
     Unavailable,
 }
 
@@ -84,11 +84,11 @@ impl GpuImport {
     /// A texture over a decoded picture's memory. `None` for a picture that isn't one plane of
     /// 32-bit BGRA pixels, or isn't in an IOSurface (the texture cache refuses it), or is empty or wider than the screens need
     /// ([`MAX_VIDEO_WIDTH`]), or that Core Video or Metal won't make a texture of.
-    pub(super) fn texture(&self, device: &wgpu::Device, buffer: Retained<CVPixelBuffer>) -> Option<wgpu::Texture> {
-        if CVPixelBufferGetPixelFormatType(&buffer) != kCVPixelFormatType_32BGRA {
+    pub(super) fn texture(&self, device: &wgpu::Device, buffer: &Retained<CVPixelBuffer>) -> Option<wgpu::Texture> {
+        if CVPixelBufferGetPixelFormatType(buffer) != kCVPixelFormatType_32BGRA {
             return None;
         }
-        let (width, height) = (CVPixelBufferGetWidth(&buffer), CVPixelBufferGetHeight(&buffer));
+        let (width, height) = (CVPixelBufferGetWidth(buffer), CVPixelBufferGetHeight(buffer));
         if width == 0 || height == 0 || width > MAX_VIDEO_WIDTH {
             return None;
         }
@@ -102,7 +102,7 @@ impl GpuImport {
             CVMetalTextureCache::create_texture_from_image(
                 None,
                 &self.cache,
-                &buffer,
+                buffer,
                 None,
                 MTLPixelFormat::BGRA8Unorm,
                 width,
@@ -121,7 +121,7 @@ impl GpuImport {
         if raw.width() != width || raw.height() != height || raw.pixelFormat() != MTLPixelFormat::BGRA8Unorm {
             return None;
         }
-        let held = Held { _buffer: buffer, _texture: texture };
+        let held = Held { _buffer: buffer.clone(), _texture: texture };
         // SAFETY: `raw` is a 2D, one-level Metal texture of this size and format, made on the
         // Metal device of the wgpu device it is wrapped for (the cache was made from that
         // device's own), and its memory is not touched by anything else while it is held
