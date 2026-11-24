@@ -7,6 +7,10 @@
 #   open target/release/SoftPresenter.app
 set -eu
 cd "$(dirname "$0")/.."
+# The paths of the source and of the libraries are written into the program (for messages about
+# where it stopped); the builder's home folder is shortened to ~ in them, so a build that is shared
+# says nothing about whose computer made it.
+export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$HOME=~"
 cargo build --release -p sp-app "$@"
 
 # What the app is signed with. A local build is signed with a code-signing identity of its

@@ -25,7 +25,9 @@ pub fn folder() -> Option<PathBuf> {
         places.push(dir.join("../Resources/Backgrounds"));
         places.push(dir.join("Backgrounds"));
     }
-    if cfg!(debug_assertions) {
+    // Left out of a release build altogether, so the build's own folder never goes into it.
+    #[cfg(debug_assertions)]
+    {
         // Testing aid: SOFTPRESENTER_TEST_ROOT=<a copy of the repository> finds the files there,
         // for test programs built on one computer and run on another.
         let root = std::env::var_os("SOFTPRESENTER_TEST_ROOT")

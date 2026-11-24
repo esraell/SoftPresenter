@@ -165,3 +165,8 @@ matter most:
 - **Never force-push or rewrite `master`.** To undo a pushed commit, revert it.
 - **Several agents at once:** each works in its own git worktree. Don't write in another
   session's working tree; hand it your commits to cherry-pick instead.
+- **A build that leaves this computer** (sent to a tester, released, copied to another machine)
+  carries no one's home folder: `scripts/macos-app.sh` shortens it to `~` with
+  `--remap-path-prefix`; for any other build to share (Windows, Linux), set
+  `RUSTFLAGS="--remap-path-prefix=$HOME=~"` yourself. Check with
+  `strings <program> | grep -c "$HOME"`, which must be 0.
