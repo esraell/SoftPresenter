@@ -934,7 +934,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   whatever the Bibles' order or the language chosen (so does the find box's Command-Return, and
   History). A passage kept before this opens in the first translation's numbering, as it did.
 
-![The Bible page: John 3 to read, verse 16 in the King James Version with the Russian Synodal under it, highlighted and on screen, beside the keypad of the books](images/bible.png)
+![The Bible page: Psalm 23 in the King James Version with the Russian Synodal under each verse (Psalm 22 there), verse 1 highlighted and on screen, beside the list of books, chapters and verses](images/bible.png)
 
 ## Editing
 - **Edit always opens something.** Command-3, the Edit key in the top bar and View › Edit open

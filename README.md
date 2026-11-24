@@ -27,19 +27,19 @@ Website: [softpresenter.com](https://softpresenter.com)
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/bible.png" alt="The Bible page: John 3 to read, verse 16 in the King James Version with the Russian Synodal under it, highlighted and on screen, beside the keypad of the books"></td>
+    <td width="50%"><img src="docs/images/bible.png" alt="The Bible page: Psalm 23 in the King James Version with the Russian Synodal under each verse, numbered Psalm 22 there, verse 1 highlighted and on screen, beside the list of books, chapters and verses"></td>
     <td width="50%"><img src="docs/images/stage.png" alt="A stage screen: the words on screen in English and Russian, the next slide below them in smaller type, a sermon timer at the top left and the clock at the top right"></td>
   </tr>
   <tr>
-    <td align="center">The Bible in two translations, lined up verse by verse</td>
+    <td align="center">The Bible in two translations, lined up verse by verse even where the numbering differs</td>
     <td align="center">A stage screen, as the band sees it</td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/lower-third.png" alt="A stream screen laid out as a lower third: two lines of English in white with the Russian under them in gold, low on a soft background picture that stands in for the camera"></td>
+    <td width="50%"><img src="docs/images/lower-third.jpg" alt="A stream screen laid out as a lower third: two lines of English in white with the Russian under them in grey, low on a blurred picture of a room with soft lights that stands in for the camera"></td>
     <td width="50%"><img src="docs/images/import-sheet.png" alt="The sheet that opens when a presentation file is dropped on the window, Import Sunday Sermon.pptx, with two cards: As Slides, ringed, and As Pictures"></td>
   </tr>
   <tr>
-    <td align="center">A livestream lower third, from a screen of its own (shown over a stand-in picture)</td>
+    <td align="center">A livestream lower third, from a screen of its own (here over a stand-in for the camera picture)</td>
     <td align="center">A presentation comes in as slides or as pictures</td>
   </tr>
   <tr>
