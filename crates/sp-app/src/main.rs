@@ -1465,7 +1465,7 @@ struct App {
     /// Bible downloads started from the command line: each job's number, the Bible's id and name.
     bible_jobs: Vec<(u64, String, String)>,
     /// The socket `softpresenter ctl` reaches the app through, while it listens.
-    _control: Option<control::Listening>,
+    _control: std::sync::Arc<std::sync::Mutex<Option<control::Listening>>>,
     /// `status --wait`s held until something changes or their time is up.
     waiting: Vec<control::Waiter>,
     /// Remote Control: the web page other devices run the show from, while switched on.
@@ -1625,8 +1625,10 @@ impl App {
             use winit::platform::macos::ActiveEventLoopExtMacOS;
             el.set_allows_automatic_window_tabbing(false);
         }
+        start_steps::mark("event loop started");
         let monitors: Vec<_> = el.available_monitors().collect();
         let displays = display_list(monitors.iter().cloned(), el.primary_monitor());
+        start_steps::mark("displays listed");
         if self.options.list_displays {
             for d in &displays {
                 let main = if d.main { " (main display)" } else { "" };
@@ -1692,6 +1694,8 @@ impl App {
         let home_attrs = behind(home_attrs);
         let home_window =
             Arc::new(el.create_window(home_attrs).map_err(|e| format!("Could not open the home window: {e}"))?);
+        start_steps::mark("window made");
+        applog::event("start", &format!("steps: {}", start_steps::said()));
         // The frame is known now: if the guess at it left the window off the work area, move it.
         if let (Some(work), Ok(at)) = (work, home_window.outer_position()) {
             let size = home_window.outer_size();
@@ -1733,7 +1737,7 @@ impl App {
         );
         let gpu = Gpu { device: handle.device.clone(), queue: handle.queue.clone() };
         // By default a graphics error ends the program; in a service it is better to say so and carry on.
-        gpu.device.on_uncaptured_error(Arc::new(|error| eprintln!("Graphics error: {error}")));
+        gpu.device.on_uncaptured_error(Arc::new(|error| graphics_error(&error.to_string())));
         let home_format = surface_format(&home_surface, handle.adapter())?;
 
         let waker: Option<output::Waker> = self.waker.clone().map(|proxy| {
@@ -7786,6 +7790,18 @@ impl App {
         // not see the operator resizing a window.
         const SETTLE: Duration = Duration::from_millis(120);
         const LIVE_RESIZE_WAIT: Duration = Duration::from_millis(8);
+        // The surface always follows the window. A size the window took without a resize being
+        // handled (moved onto the work area as it opened, on a slow computer) left egui drawing
+        // for one size onto a surface of another, which the GPU refuses on every frame; the
+        // surface is set up again at once, as for a size that has settled.
+        let inner = home_window.inner_size();
+        if home_resize.is_none()
+            && inner.width > 0
+            && inner.height > 0
+            && (inner.width, inner.height) != (home_config.width, home_config.height)
+        {
+            *home_resize = Some((inner, Instant::now().checked_sub(SETTLE).unwrap_or_else(Instant::now)));
+        }
         if let Some((size, changed)) = *home_resize {
             let settled = changed.elapsed() >= SETTLE;
             if !*home_resize_held_back || settled {
@@ -10117,6 +10133,55 @@ impl ApplicationHandler<AppEvent> for App {
     }
 }
 
+/// A graphics error nobody asked to catch, written in the log (a window program on Windows has no
+/// console for it to go to). One that comes on every frame is written once, then once a minute
+/// with how many times it came since, so it can't fill the log.
+fn graphics_error(error: &str) {
+    use std::sync::Mutex;
+    static LAST: Mutex<Option<(String, u32, Instant)>> = Mutex::new(None);
+    eprintln!("Graphics error: {error}");
+    let Ok(mut last) = LAST.lock() else { return };
+    match last.as_mut() {
+        Some((said, again, at)) if said == error && at.elapsed() < Duration::from_secs(60) => *again += 1,
+        _ => {
+            let repeated = match last.as_ref() {
+                Some((said, again, _)) if said == error && *again > 0 => {
+                    format!(" ({again} more times in the last minute)")
+                }
+                _ => String::new(),
+            };
+            applog::problem("gpu", &format!("Graphics error{repeated}: {error}"));
+            *last = Some((error.to_owned(), 0, Instant::now()));
+        }
+    }
+}
+
+/// How long each step of starting took, said in one log line once the window is up, so a slow
+/// start on someone's computer shows where the time went.
+mod start_steps {
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    static STEPS: Mutex<Vec<(&'static str, Instant)>> = Mutex::new(Vec::new());
+
+    /// Notes that a step has just finished.
+    pub fn mark(step: &'static str) {
+        if let Ok(mut steps) = STEPS.lock() {
+            steps.push((step, Instant::now()));
+        }
+    }
+
+    /// Each step with how long it took after the one before, in milliseconds.
+    pub fn said() -> String {
+        let Ok(steps) = STEPS.lock() else { return String::new() };
+        steps
+            .windows(2)
+            .map(|pair| format!("{} {} ms", pair[1].0, pair[1].1.duration_since(pair[0].1).as_millis()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
 fn main() -> ExitCode {
     // `softpresenter ctl …` (or just `softpresenter next`, `softpresenter status`…) controls
     // the running app, and nothing else: no window, no log.
@@ -10209,6 +10274,7 @@ fn main() -> ExitCode {
     // id, once, in whichever library folder is in use.
     let settled = bible_store::data_dir().map(|dir| song_ids::settle(&dir, true)).unwrap_or_default();
     applog::start();
+    start_steps::mark("log opened");
     for done in &moved {
         applog::event("renamed", done);
     }
@@ -10300,6 +10366,7 @@ fn main() -> ExitCode {
     songs.push(voxlive::item(&[]));
     sources.push(None);
 
+    start_steps::mark("songs read");
     // Menu bar choices arrive as user events carrying the item's id.
     let mut builder = EventLoop::<AppEvent>::with_user_event();
     // A run that only saves a picture must not come to the front of whatever is in use.
@@ -10330,7 +10397,9 @@ fn main() -> ExitCode {
             }
         }));
     }
+    start_steps::mark("event loop made");
     let (themes, songs_theme, moved_in) = theme_store::load_all();
+    start_steps::mark("themes read");
     // Themes changed while loading (a Bible layout brought into the main theme) are written
     // at once, with the new note of what is in use, so it happens only once.
     if !moved_in.is_empty() {
@@ -10354,6 +10423,65 @@ fn main() -> ExitCode {
     }
     let (pack_tx, pack_rx) = std::sync::mpsc::channel();
     let (bible_tx, bible_rx) = std::sync::mpsc::channel();
+    start_steps::mark("files noted");
+    let remote = remote::Remote::open();
+    start_steps::mark("remote control read");
+    // Commands from `softpresenter ctl` come in on the control socket. Without it (another copy
+    // has it, say) the app runs as usual. It is set up on a thread of its own: keeping its folder
+    // private runs Windows' own tools several times, which took 25 seconds on a busy PC, and the
+    // window doesn't wait for that; commands are answered a moment after it opens.
+    let control: std::sync::Arc<std::sync::Mutex<Option<control::Listening>>> = std::sync::Arc::default();
+    {
+        let kept = control.clone();
+        let proxy = std::sync::Mutex::new(event_loop.create_proxy());
+        let set_up = std::thread::Builder::new().name("control setup".to_owned()).spawn(move || {
+            let started = Instant::now();
+            match control::listen(move |incoming| {
+                if let Ok(proxy) = proxy.lock() {
+                    let _ = proxy.send_event(AppEvent::Control(incoming));
+                }
+            }) {
+                Ok(listening) => {
+                    applog::event(
+                        "control",
+                        &format!("listening for commands after {} ms", started.elapsed().as_millis()),
+                    );
+                    if let Ok(mut kept) = kept.lock() {
+                        *kept = Some(listening);
+                    }
+                }
+                Err(problem) => applog::event("control", &problem),
+            }
+        });
+        if let Err(problem) = set_up {
+            applog::event("control", &format!("Could not start listening for commands: {problem}"));
+        }
+    }
+    start_steps::mark("command socket started");
+    let show = Show::new(songs.into_iter().map(Arc::new).collect());
+    start_steps::mark("show made");
+    // A picture read on a reader's thread wakes the window's thread to take it in.
+    let bin_pictures = {
+        let proxy = std::sync::Mutex::new(event_loop.create_proxy());
+        bin_pictures::BinPictures::new(move || {
+            if let Ok(proxy) = proxy.lock() {
+                let _ = proxy.send_event(AppEvent::MediaRead);
+            }
+        })
+    };
+    start_steps::mark("picture readers started");
+    let voxlive = voxlive::Client::new();
+    start_steps::mark("voxlive client made");
+    let canva = {
+        let proxy = std::sync::Mutex::new(event_loop.create_proxy());
+        let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            if let Ok(proxy) = proxy.lock() {
+                let _ = proxy.send_event(AppEvent::Canva);
+            }
+        });
+        canva::Client::new(canva::Places::for_app(), Some(wake))
+    };
+    start_steps::mark("canva client made");
     let mut app = App {
         options,
         waker: Some(event_loop.create_proxy()),
@@ -10368,27 +10496,12 @@ fn main() -> ExitCode {
         drop_pointer: None,
         bible_jobs: Vec::new(),
         waiting: Vec::new(),
-        remote: remote::Remote::open(),
+        remote,
         remote_started: false,
         remote_pages_seen: 0,
         remote_call: false,
-        // Commands from `softpresenter ctl` come in on the control socket. Without it (another
-        // copy has it, say) the app runs as usual.
-        _control: {
-            let proxy = std::sync::Mutex::new(event_loop.create_proxy());
-            match control::listen(move |incoming| {
-                if let Ok(proxy) = proxy.lock() {
-                    let _ = proxy.send_event(AppEvent::Control(incoming));
-                }
-            }) {
-                Ok(listening) => Some(listening),
-                Err(problem) => {
-                    applog::event("control", &problem);
-                    None
-                }
-            }
-        },
-        show: Show::new(songs.into_iter().map(Arc::new).collect()),
+        _control: control,
+        show,
         sources,
         bible_slots,
         voxlive_slot,
@@ -10396,15 +10509,7 @@ fn main() -> ExitCode {
         version_seen: None,
         decks: deck::Decks::default(),
         decks_resumed: false,
-        // A picture read on a reader's thread wakes the window's thread to take it in.
-        bin_pictures: {
-            let proxy = std::sync::Mutex::new(event_loop.create_proxy());
-            bin_pictures::BinPictures::new(move || {
-                if let Ok(proxy) = proxy.lock() {
-                    let _ = proxy.send_event(AppEvent::MediaRead);
-                }
-            })
-        },
+        bin_pictures,
         bin_started: None,
         unsaved: Vec::new(),
         history: ShowHistory::default(),
@@ -10423,16 +10528,8 @@ fn main() -> ExitCode {
         ndi: ndi_in::Inputs::default(),
         ndi_seen: 0,
         ndi_drawn: None,
-        voxlive: voxlive::Client::new(),
-        canva: {
-            let proxy = std::sync::Mutex::new(event_loop.create_proxy());
-            let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
-                if let Ok(proxy) = proxy.lock() {
-                    let _ = proxy.send_event(AppEvent::Canva);
-                }
-            });
-            canva::Client::new(canva::Places::for_app(), Some(wake))
-        },
+        voxlive,
+        canva,
         catalog: catalog_cli::CatalogState::default(),
         voxlive_preview: None,
         voxlive_said: None,
@@ -10474,6 +10571,7 @@ fn main() -> ExitCode {
         quitting: None,
     };
     // The pictures that were in the media bin last time, then any named on the command line.
+    start_steps::mark("app filled in");
     let saved = media::load_list();
     app.media_playlists = saved.playlists;
     let mut pictures_to_load = saved.entries;
@@ -10515,6 +10613,7 @@ fn main() -> ExitCode {
         }
     }
     app.bin_started = Some((Instant::now(), app.show.media().len()));
+    start_steps::mark("app made");
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("The window system stopped: {e}");
         return ExitCode::FAILURE;
