@@ -5497,36 +5497,61 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
         let names: Vec<&str> = std::iter::once(advanced_words)
             .chain(sp_model::TransitionKind::ALL.iter().map(|kind| transition_name(*kind)))
             .collect();
-        let cut_wide = widest(ui, &[cut_words], &font) + 22.0;
-        let dissolve_wide = widest(ui, &[dissolve_words], &font) + 22.0;
-        let third_wide = widest(ui, &names, &font) + 10.0 + 20.0;
-        let switch_wide = 3.0 + cut_wide + 2.0 + dissolve_wide + 2.0 + third_wide + 3.0;
         let continuous_font = FontId::proportional(12.5);
-        let continuous_button = widest(ui, &[t("dock.continuous", "Continuous")], &continuous_font) + 36.0;
-        let undo_words = [t("dock.undo", "Undo"), t("dock.redo", "Redo")];
-        let undo_wide = widest(ui, &undo_words, &continuous_font) + 24.0;
-        let switch = switch_wide;
-        let undo = undo_wide;
-        // Continuous, with the version button beside it once a theme has a version.
+        let continuous_words = widest(ui, &[t("dock.continuous", "Continuous")], &continuous_font);
+        // Undo and Redo are icons, their keys in the tooltip, so no language widens them.
+        let undo = 30.0;
         let versions = !state.versions.is_empty();
-        let continuous_wide: f32 = continuous_button + if versions { 8.0 + VERSION_BUTTON.x } else { 0.0 };
         let room = right - left;
-        let with_continuous = room >= switch + 13.0 + continuous_wide + 12.0 + VIEWS;
-        let with_undo = room >= switch + 13.0 + continuous_wide + 13.0 + 2.0 * undo + 8.0 + 12.0 + VIEWS;
-        let with_slider = room
-            >= switch
+        // Continuous is a switch an operator may need mid-service, so it is the last to go. The
+        // switch's third part is as wide as the longest transition name, so nothing beside it
+        // moves when another is chosen; in a narrow window it is as wide as the name it shows
+        // instead, and then, if Continuous still doesn't fit, everything takes slimmer padding.
+        let kind = state.transition.kind;
+        let other = !matches!(kind, K::Cut | K::Dissolve);
+        let shown = if other { transition_name(kind) } else { advanced_words };
+        let name_widths = (widest(ui, &names, &font), widest(ui, &[advanced_words, shown], &font));
+        let (cut_text, dissolve_text) = (widest(ui, &[cut_words], &font), widest(ui, &[dissolve_words], &font));
+        let fit = |tight: bool, full_third: bool| {
+            let (pad, third_pad, continuous_pad) = if tight { (14.0, 22.0, 26.0) } else { (22.0, 30.0, 36.0) };
+            let third = if full_third { name_widths.0 } else { name_widths.1 } + third_pad;
+            let continuous = continuous_words + continuous_pad;
+            let switch = 3.0 + cut_text + pad + 2.0 + dissolve_text + pad + 2.0 + third + 3.0;
+            (switch, cut_text + pad, dissolve_text + pad, third, continuous)
+        };
+        let needs = |(switch, _, _, _, continuous): (f32, f32, f32, f32, f32), undo_too: bool| {
+            switch
+                + 13.0
+                + continuous
+                + if versions { 8.0 + VERSION_BUTTON.x } else { 0.0 }
+                + if undo_too { 13.0 + 2.0 * undo + 8.0 } else { 0.0 }
                 + 12.0
                 + VIEWS
-                + 12.0
-                + 60.0
-                + if with_continuous { 13.0 + continuous_wide } else { 0.0 }
-                + if with_undo { 13.0 + 2.0 * undo + 8.0 } else { 0.0 };
-        // The transition: one switch of a fixed width, so nothing beside it moves when the
-        // name in its third part changes.
-        let kind = state.transition.kind;
+        };
+        let chosen = [fit(false, true), fit(false, false), fit(true, false)]
+            .into_iter()
+            .find(|sizes| room >= needs(*sizes, false))
+            .unwrap_or(fit(true, false));
+        let (switch, cut_wide, dissolve_wide, third_wide, continuous_button) = chosen;
+        let tight = continuous_button < continuous_words + 36.0;
+        // Continuous, with the version button beside it once a theme has a version.
+        let continuous_wide: f32 = continuous_button + if versions { 8.0 + VERSION_BUTTON.x } else { 0.0 };
+        let with_continuous = room >= switch + 13.0 + continuous_wide + 12.0 + VIEWS;
+        let with_undo = room >= switch + 13.0 + continuous_wide + 13.0 + 2.0 * undo + 8.0 + 12.0 + VIEWS;
+        // The slide size goes first: only when everything else is there.
+        let with_slider = with_continuous
+            && with_undo
+            && room
+                >= switch
+                    + 12.0
+                    + VIEWS
+                    + 12.0
+                    + 60.0
+                    + if with_continuous { 13.0 + continuous_wide } else { 0.0 }
+                    + if with_undo { 13.0 + 2.0 * undo + 8.0 } else { 0.0 };
+        // The transition: one switch, its third part sized above.
         let track = Rect::from_min_size(pos2(left, middle - 15.1), vec2(switch.min(room), 30.2));
         ui.painter().rect_filled(track, 15.1, CARD);
-        let other = !matches!(kind, K::Cut | K::Dissolve);
         let third = if other { transition_name(kind) } else { advanced_words };
         let mut x = track.min.x + 3.0;
         let mut more = None;
@@ -5550,8 +5575,9 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
             let ink = if on || response.hovered() { TEXT } else { TEXT_DIM };
             if index == 2 {
                 // The name, cut short if it is long, and the arrow that says it opens a list.
+                let (inset, arrow) = if tight { (8.0, 14.0) } else { (10.0, 20.0) };
                 let words =
-                    Rect::from_min_max(pos2(cell.min.x + 10.0, cell.min.y), pos2(cell.max.x - 20.0, cell.max.y));
+                    Rect::from_min_max(pos2(cell.min.x + inset, cell.min.y), pos2(cell.max.x - arrow, cell.max.y));
                 ui.painter().with_clip_rect(words).text(
                     words.left_center(),
                     Align2::LEFT_CENTER,
@@ -5560,7 +5586,7 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
                     ink,
                 );
                 ui.painter().text(
-                    pos2(cell.max.x - 12.0, cell.center().y),
+                    pos2(cell.max.x - arrow + 8.0, cell.center().y),
                     Align2::CENTER_CENTER,
                     "\u{25be}",
                     FontId::proportional(12.0),
@@ -5617,15 +5643,14 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
                 crate::keys::hint(t("dock.undo.hint", "Undo"), "Z", false),
                 crate::keys::hint(t("dock.redo.hint", "Redo"), "Z", true),
             ];
-            for ((label, action), hint) in
-                [(undo_words[0], Action::Undo), (undo_words[1], Action::Redo)].into_iter().zip(&hints)
+            for ((icon, action), hint) in
+                [(Icon::Undo, Action::Undo), (Icon::Redo, Action::Redo)].into_iter().zip(&hints)
             {
                 // Greyed when the history in force has nothing to take back, saying so.
                 let redo = action == Action::Redo;
                 let enabled = state.can_undo(redo);
                 let place = Rect::from_min_size(pos2(x, middle - 15.0), vec2(undo, 30.0));
-                let font = FontId::proportional(12.5);
-                let button = flat_button(ui, place, ui.scope_id().with(label), label, font, Flat::Plain, enabled);
+                let button = icon_key(ui, place, ui.scope_id().with(("undo", redo)), icon, 15.0, enabled);
                 let why = crate::home::nothing_to(redo);
                 if button.on_hover_text(if enabled { hint.as_str() } else { why }).clicked() {
                     state.menu_asked = Some(action);

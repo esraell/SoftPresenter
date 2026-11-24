@@ -36,6 +36,8 @@ pub enum Icon {
     Close,
     Back,
     Forward,
+    Undo,
+    Redo,
     ToEnd,
     Flag,
     Stage,
@@ -78,7 +80,7 @@ pub enum Icon {
 
 /// Every icon, so a test can draw them all.
 #[cfg(test)]
-pub const ALL: [Icon; 57] = [
+pub const ALL: [Icon; 59] = [
     Icon::Search,
     Icon::Theme,
     Icon::Play,
@@ -108,6 +110,8 @@ pub const ALL: [Icon; 57] = [
     Icon::Close,
     Icon::Back,
     Icon::Forward,
+    Icon::Undo,
+    Icon::Redo,
     Icon::ToEnd,
     Icon::Flag,
     Icon::Stage,
@@ -334,6 +338,20 @@ pub fn paint(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
         Icon::Forward => {
             p.arc(0.5, 0.54, 0.32, -0.06, 0.75);
             p.line(&[(0.42, 0.09), (0.56, 0.22), (0.42, 0.35)]);
+        }
+        // An arrow back to the left, its tail turning down and under, as a step taken back.
+        Icon::Undo => {
+            p.line(&[(0.34, 0.22), (0.18, 0.38), (0.34, 0.54)]);
+            p.line(&[(0.18, 0.38), (0.6, 0.38)]);
+            p.arc(0.6, 0.58, 0.2, -0.25, 0.25);
+            p.line(&[(0.6, 0.78), (0.36, 0.78)]);
+        }
+        // The same turned round: a step taken again.
+        Icon::Redo => {
+            p.line(&[(0.66, 0.22), (0.82, 0.38), (0.66, 0.54)]);
+            p.line(&[(0.82, 0.38), (0.4, 0.38)]);
+            p.arc(0.4, 0.58, 0.2, 0.75, 0.25);
+            p.line(&[(0.4, 0.78), (0.64, 0.78)]);
         }
         Icon::ToEnd => {
             p.line(&[(0.12, 0.5), (0.7, 0.5)]);
