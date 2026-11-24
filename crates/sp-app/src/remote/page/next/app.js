@@ -200,7 +200,7 @@ const FONTS = { 'SoftPresenter Sans': "'SoftPresenter Sans', 'Helvetica Neue', H
   Georgia: "Georgia, 'Times New Roman', serif", 'Times New Roman': "'Times New Roman', Times, serif", Palatino: "Palatino, 'Palatino Linotype', serif", Baskerville: 'Baskerville, Georgia, serif', Didot: 'Didot, Georgia, serif', 'Marker Felt': "'Marker Felt', 'Comic Sans MS', cursive", 'Courier New': "'Courier New', monospace", Menlo: 'Menlo, Consolas, monospace' };
 // On a Mac the F keys belong to the system (brightness, volume, Mission Control): SoftPresenter uses none there
 const MAC = /Mac|iPhone|iPad/.test((typeof navigator !== 'undefined' && (navigator.platform || navigator.userAgent)) || '');
-const SWATCHES = ['#ffffff', '#000000', '#f6a53a', '#ff4a1a', '#ffc400', '#34c56b', '#4285f4', '#cc4eb4'];
+const SWATCHES = ['#ffffff', '#000000', '#d2cec6', '#ff4a1a', '#ffc400', '#34c56b', '#4285f4', '#cc4eb4'];
 const SHAPES = { rect: 'Rectangle', rounded: 'Rounded rectangle', ellipse: 'Ellipse', triangle: 'Triangle', rhombus: 'Rhombus', hexagon: 'Polygon', star: 'Star', arrow: 'Arrow' };
 const TRANSITIONS = ['Cut', 'Dissolve', 'Fade', 'Fade Black', 'Fade White', 'Push', 'Move In', 'Reveal', 'Fly In', 'Zoom In', 'Door', 'Flip', 'Swap', 'Wipe', 'Split', 'Blinds', 'Iris', 'Clock', 'Checkerboard'];
 const LABELS = ['Blank Slide', 'Instrumental', 'Repeat', 'Spoken Word'];
@@ -258,11 +258,17 @@ const MEDIA_BG = {
 };
 
 /* ───────── themes: a template's boxes say where each kind of words goes and how it looks ───────── */
+// The built-in theme's words (the owner, 23 November): white over the second language in Stone (#d2cec6), both bold, a thin
+// black outline (2 out from the letters) and a soft shadow straight down. Saved themes keep their own look.
+const STONE = '#d2cec6';
+// The shadow's opacity is 0.3: the app draws a shadow as six strokes of even strength, so 0.3 there looks like 0.6 in a
+// browser's soft blur (the app's renders, master 0e002ec). The prototype keeps the app's number.
+const WORDS_LOOK = { bold: true, stroke: true, strokeWidth: 2, shadow: true, shadowAngle: 270, shadowOffset: 4, shadowBlur: 18, shadowOpacity: .3 };
 const twoLang = () => ({ id: newId('tpl'), name: 'Two languages', for: 'songs', objects: [
-  box('Main', 'main', { x: 120, y: 170, w: 1680, h: 400 }, { size: 88 }, 'The words of the song\nin the first language'),
-  box('Translation', 'translation', { x: 120, y: 610, w: 1680, h: 330 }, { size: 60, color: '#f6a53a' }, 'Слова песни\nна втором языке')] });
+  box('Main', 'main', { x: 120, y: 170, w: 1680, h: 400 }, { size: 96, ...WORDS_LOOK }, 'The words of the song\nin the first language'),
+  box('Translation', 'translation', { x: 120, y: 610, w: 1680, h: 330 }, { size: 64, color: STONE, ...WORDS_LOOK }, 'Слова песни\nна втором языке')] });
 const oneLang = () => ({ id: newId('tpl'), name: 'One language', for: 'songs', objects: [
-  box('Main', 'main', { x: 120, y: 240, w: 1680, h: 600 }, { size: 96 }, 'The words of the song')] });
+  box('Main', 'main', { x: 120, y: 240, w: 1680, h: 600 }, { size: 96, ...WORDS_LOOK }, 'The words of the song')] });
 // The Bible template, as the owner's own app has it: the first translation's verse and reference on the top half, the second's below;
 // Linux Biolinum, white on black, verses to the left and middled, references bold to the right; verse type starts at 96 and comes down to fit.
 const bibleTpl = () => ({ id: newId('tpl'), name: 'Bible', for: 'bible', objects: [
@@ -274,7 +280,7 @@ const lowerThird = { id: newId('theme'), name: 'Lower third', bg: '#000000', pic
   { id: newId('tpl'), name: 'Words in a band', for: 'songs', objects: [
     obj('shape', 'Band', { shape: 'rect', fill: '#000000', opacity: .7, frame: { x: 0, y: 760, w: 1920, h: 320 } }),
     box('Main', 'main', { x: 120, y: 780, w: 1680, h: 170 }, { size: 58 }, 'The words of the song'),
-    box('Translation', 'translation', { x: 120, y: 950, w: 1680, h: 110 }, { size: 40, color: '#f6a53a' }, 'Слова песни')] },
+    box('Translation', 'translation', { x: 120, y: 950, w: 1680, h: 110 }, { size: 40, color: STONE }, 'Слова песни')] },
   { id: newId('tpl'), name: 'Verse in a band', for: 'bible', objects: [
     obj('shape', 'Band', { shape: 'rect', fill: '#000000', opacity: .7, frame: { x: 0, y: 760, w: 1920, h: 320 } }),
     box('Verse 1', 'verse1', { x: 120, y: 780, w: 1680, h: 220 }, { font: 'Georgia', size: 40, bold: false, align: 'left', shadow: false }, 'The verse'),
@@ -287,8 +293,8 @@ const givingCode = frame => obj('shape', 'Giving code (picture)', { shape: 'rect
 const giveBand = () => [obj('shape', 'Band', { shape: 'rect', fill: '#000000', opacity: .78, frame: { x: 0, y: 770, w: 1920, h: 310 } }), givingCode({ x: 1560, y: 800, w: 240, h: 240 }),
   obj('text', 'Giving words', { frame: { x: 120, y: 820, w: 1380, h: 110 }, style: { size: 70, bold: true, align: 'left' }, text: 'Scan to give' }),
   obj('text', 'Giving words, second line', { frame: { x: 120, y: 930, w: 1380, h: 80 }, style: { size: 42, align: 'left', color: '#b9b9b2' }, text: 'or give at the welcome desk' })];
-const offerTwo = () => ({ id: newId('tpl'), name: 'Two languages', for: 'songs', version: 'ver-offering', objects: [box('Main', 'main', { x: 120, y: 110, w: 1680, h: 560 }, { size: 88 }, 'The words of the song'), ...giveBand()] });
-const offerOne = () => ({ id: newId('tpl'), name: 'One language', for: 'songs', version: 'ver-offering', objects: [box('Main', 'main', { x: 120, y: 110, w: 1680, h: 560 }, { size: 96 }, 'The words of the song'), ...giveBand()] });
+const offerTwo = () => ({ id: newId('tpl'), name: 'Two languages', for: 'songs', version: 'ver-offering', objects: [box('Main', 'main', { x: 120, y: 110, w: 1680, h: 560 }, { size: 96, ...WORDS_LOOK }, 'The words of the song'), ...giveBand()] });
+const offerOne = () => ({ id: newId('tpl'), name: 'One language', for: 'songs', version: 'ver-offering', objects: [box('Main', 'main', { x: 120, y: 110, w: 1680, h: 560 }, { size: 96, ...WORDS_LOOK }, 'The words of the song'), ...giveBand()] });
 lowerThird.templates.push({ id: newId('tpl'), name: 'Words in a band', for: 'songs', version: 'ver-offering', objects: [
   obj('shape', 'Band', { shape: 'rect', fill: '#000000', opacity: .7, frame: { x: 0, y: 760, w: 1920, h: 320 } }),
   box('Main', 'main', { x: 120, y: 790, w: 1360, h: 240 }, { size: 58 }, 'The words of the song'), givingCode({ x: 1590, y: 790, w: 200, h: 200 }),
@@ -793,7 +799,7 @@ function objHTML(o, ctx, ed) {
     const look = `font-family:${FONTS[s.font] || FONTS[DEF_FONT]};font-size:${s.size / 19.2}cqw;font-weight:${s.bold ? 700 : 400};font-style:${s.italic ? 'italic' : 'normal'};text-decoration:${pieces ? 'none' : decoCSS(s)};`
       + `color:${s.color};text-align:${s.align};justify-content:${{ top: 'flex-start', middle: 'center', bottom: 'flex-end' }[s.valign]};letter-spacing:${s.spacing / 19.2}cqw;line-height:${s.lineHeight};`
       + `text-transform:${{ none: 'none', upper: 'uppercase', lower: 'lowercase', title: 'capitalize' }[s.caps]};`
-      + (s.shadow ? `text-shadow:${(Math.cos(s.shadowAngle * Math.PI / 180) * s.shadowOffset / 19.2).toFixed(3)}cqw ${(-Math.sin(s.shadowAngle * Math.PI / 180) * s.shadowOffset / 19.2).toFixed(3)}cqw ${s.shadowBlur / 19.2}cqw rgba(0,0,0,${s.shadowOpacity});` : '') + (s.margin ? `padding:${s.margin / 19.2}cqw;` : '') + (s.stroke ? `-webkit-text-stroke:${s.strokeWidth / 19.2}cqw #000;paint-order:stroke fill;` : '')
+      + (s.shadow ? `text-shadow:${(Math.cos(s.shadowAngle * Math.PI / 180) * s.shadowOffset / 19.2).toFixed(3)}cqw ${(-Math.sin(s.shadowAngle * Math.PI / 180) * s.shadowOffset / 19.2).toFixed(3)}cqw ${s.shadowBlur / 19.2}cqw rgba(0,0,0,${s.shadowOpacity});` : '') + (s.margin ? `padding:${s.margin / 19.2}cqw;` : '') + (s.stroke ? `-webkit-text-stroke:${2 * s.strokeWidth / 19.2}cqw #000;paint-order:stroke fill;` : '')      // the app strokes twice the outline's width under the fill, so the outline shows its width outside the letters
       + ((o.fill || o.gradient) ? `background:${fillCSS(o)};` : '') + border;
     const words = pieces ? styledWords(text, o, s, paras, hl) : lines(text);
     const inner = s.bg ? html`<span class="tx-bg" style="background:${s.bg}">${words}</span>` : words;
@@ -857,7 +863,7 @@ function itemDeck(it) {
   if (it.kind === 'passage') { const sl = passageSlides(it.passage); return { key: it.id, kind: 'passage', title: refTitle(it.passage), slides: sl, seq: sl.map((_, i) => i), ctx: { kind: 'bible', theme: state.bible.opts.theme, version: it.version }, item: it }; }
   if (it.kind === 'header') return { key: it.id, kind: 'header', title: it.name, item: it };
   if (it.kind === 'app') { const sl = wordsSlide(it.name, it.name); sl.id = 'app-' + it.id; return { key: it.id, kind: 'passage', app: true, title: it.name, slides: [sl], seq: [0], ctx: { raw: true, bg: '#000000' }, item: it }; }      // something only the real app can open, such as a saved Bible passage
-  if (it.kind === 'media') { const m = mediaById(it.media); return { key: it.id, kind: 'media', title: m ? m.name : 'A picture or video that has gone', media: m, item: it }; }
+  if (it.kind === 'media') { const m = mediaById(it.media); return { key: it.id, kind: 'media', title: m ? mediaLabel(m) : 'A picture or video that has gone', media: m, item: it }; }
   if (it.kind === 'mediaPlaylist') { const mp = byId(DOC.mediaPlaylists, it.mp); return { key: it.id, kind: 'mediaPlaylist', title: mp ? mp.name : 'A media playlist that has gone', mp, item: it }; }
   return { key: it.id, kind: 'placeholder', title: it.name, item: it };
 }
@@ -1118,6 +1124,13 @@ function renameInPlace(el, now, done) {
 }
 // rename where the name is shown when it is on view; otherwise a small sheet
 const renameAt = (el, now, done, title, label = 'Name') => { if (!renameInPlace(typeof el === 'string' ? document.querySelector(el) : el, now, done)) ask(title, label, now, done); };
+
+// A media file's label in the media bin and in a playlist (the owner's README pictures, 23 November): its name without the
+// extension (the VIDEO badge and the kind's mark say what it is), unless another file in the bin has the same name in another
+// format, when both keep their extensions to be told apart. Menus, sheets and tooltips show the whole file name. A label still
+// too long for its place ends in … on one line.
+const bareName = n => n.replace(/\.[A-Za-z0-9]{1,5}$/, '');
+const mediaLabel = m => DOC.media.some(o => o !== m && !o.deck && bareName(o.name).toLowerCase() === bareName(m.name).toLowerCase()) ? m.name : bareName(m.name);
 
 /* ───────── theme versions: one name, every screen that has it ───────── */
 const versionName = id => (byId(DOC.versions || [], id) || { name: '' }).name;
@@ -1536,7 +1549,7 @@ function renderShowCentre() {
       ${mv ? html`<button class="btn sm" data-a="playMp:${mv.id}">${I.play} Play this playlist</button>${mv.follow ? html`<span class="pill">Follows ${mv.follow}</span>` : ''}` : ''}
       <span class="sp"></span><button class="pill" data-a="menu:mediaTr">${mt.kind}${mt.kind === 'Cut' ? '' : ' ' + mt.time + 's'} ▾</button><button class="iconbtn" data-a="addMedia" title="Add pictures or videos">${I.plus}</button></div>
     <div class="bin">${list.length ? list.map(m => html`<button class="clip ${state.mediaOn === m.id ? 'on' : ''} ${state.mediaPick.includes(m.id) ? 'pickd' : ''}" data-a="media:${m.id}" data-m="media:${m.id}" draggable="true" data-drag="media:${m.id}">
-      <div class="pic" style="background:${m.bg}">${m.poster ? html`<img class="sl-img" src="${m.poster}" alt="" draggable="false">` : ''}${m.video ? html`<span class="vid">▶ VIDEO</span>` : ''}<span class="sh-clipmore" data-a="menu:media,${m.id}" title="More">${I.more}</span></div><div class="nm">${m.name}</div></button>`) : html`<button class="sh-binempty" data-a="addMedia">${I.plus} ${mv ? 'This media playlist is empty. Add pictures or videos' : 'Add pictures or videos to show behind the words'}</button>`}</div>`);
+      <div class="pic" style="background:${m.bg}">${m.poster ? html`<img class="sl-img" src="${m.poster}" alt="" draggable="false">` : ''}${m.video ? html`<span class="vid">▶ VIDEO</span>` : ''}<span class="sh-clipmore" data-a="menu:media,${m.id}" title="More">${I.more}</span></div><div class="nm" title="${m.name}">${mediaLabel(m)}</div></button>`) : html`<button class="sh-binempty" data-a="addMedia">${I.plus} ${mv ? 'This media playlist is empty. Add pictures or videos' : 'Add pictures or videos to show behind the words'}</button>${!mv && samplesMissing().length ? html`<button class="sh-binempty sh-binsample" data-a="sampleBackgrounds">Or use the sample backgrounds</button>` : ''}`}</div>`);
 }
 A.trans = ([kind]) => mutate(() => { DOC.settings.transition = { kind, time: kind === 'Cut' ? 0 : .5, dir: 'Left' }; });
 A.transSheet = () => { const t = DOC.settings.transition; openSheet({ title: 'Transition for all slides',
@@ -1549,6 +1562,22 @@ A.view = ([v]) => { DOC.settings.view = v; render(); };
 A.media = ([id], el, ev) => { if (ev && (ev.metaKey || ev.ctrlKey || ev.shiftKey)) { state.mediaPick.includes(id) ? state.mediaPick.splice(state.mediaPick.indexOf(id), 1) : state.mediaPick.push(id); return render(); } state.mediaPick = []; showMedia(id); };
 A.playMp = ([id]) => playMediaPlaylist(id);
 A.addMedia = () => pickFiles('image/*,video/*', addMediaFiles);
+// The sample backgrounds that come with the app (CC0, drawn for it; design-requests/backgrounds): added to the media bin as any
+// picture is, and gathered in their own media playlist so they are easy to find and to remove together. One already in the
+// bin is not added twice; once all are in, the media playlist itself is how to reach them.
+const SAMPLE_BACKGROUNDS = [['Still.jpg', 'still'], ['First Light.jpg', 'first-light'], ['Night Blue.jpg', 'night-blue'], ['Evening Hills.jpg', 'evening-hills'],
+  ['Olive.jpg', 'olive'], ['Room Out of Focus.jpg', 'room-out-of-focus'], ['Drifting Light.mp4', 'drifting-light', 16]];
+const samplesMissing = () => SAMPLE_BACKGROUNDS.filter(([name]) => !DOC.media.some(m => m.sample === name));
+A.sampleBackgrounds = () => {
+  const add = samplesMissing(), mp = () => DOC.mediaPlaylists.find(p => p.sample);
+  if (!add.length) { if (mp()) { state.mediaView = mp().id; render(); } return; }
+  mutate(() => {
+    const made = add.map(([name, file, length]) => ({ id: newId('m'), name, sample: name, bg: `url("samples/${file}.jpg") center / cover`, scaling: 'Scale to Fill', ...(length ? { video: true, length, loop: true } : {}) }));
+    DOC.media.push(...made);
+    if (!mp()) DOC.mediaPlaylists.push({ id: newId('mp'), name: 'Sample Backgrounds', items: [], follow: null, sample: true });
+    const p = mp(); p.items.push(...made.map(m => m.id)); state.mediaView = p.id;
+  });
+};
 M.media = ([id]) => { const m = mediaById(id), d = decks().find(x => x.key === state.openItem && x.song) || decks().find(x => x.song); return [
   { t: 'Show', f: () => showMedia(id) },
   { t: 'Scaling', sub: ['Scale to Fill', 'Scale to Fit', 'Stretch to Fill'].map(s => ({ t: s, on: m.scaling === s, f: () => mutate(() => { m.scaling = s; }) })) },
@@ -1560,6 +1589,7 @@ M.media = ([id]) => { const m = mediaById(id), d = decks().find(x => x.key === s
 M.mediaSrc = () => { const mv = state.mediaView && byId(DOC.mediaPlaylists, state.mediaView); return [
   { t: 'All Media', on: !mv, f: () => { state.mediaView = null; render(); } }, ...DOC.mediaPlaylists.map(p => ({ t: p.name, on: mv === p, f: () => { state.mediaView = p.id; render(); } })), { sep: true },
   { t: 'New Media Playlist…', f: () => { const p = { id: newId('mp'), name: 'New Media Playlist', items: [], follow: null }; mutate(() => { DOC.mediaPlaylists.push(p); state.mediaView = p.id; }); renameAt('[data-a="menu:mediaSrc"] span', p.name, v => mutate(() => { p.name = v; }), 'Name the media playlist'); } },
+  samplesMissing().length && { t: 'Add the Sample Backgrounds', f: () => A.sampleBackgrounds() },
   mv && { t: 'Play This Playlist', f: () => playMediaPlaylist(mv.id) },
   mv && (mv.follow ? { t: 'Stop Following the Folder', f: () => mutate(() => { mv.follow = null; }) } : { t: 'Follow a Folder…', f: () => ask('Follow a folder', 'Folder', 'Announcements export', v => mutate(() => { mv.follow = v; }), { note: 'Pictures and videos put in it join the playlist as they appear' }) }),
   mv && { t: 'Rename…', f: () => ask('Rename', 'Name', mv.name, v => mutate(() => { mv.name = v; })) },
@@ -3818,6 +3848,7 @@ remoteWrapA('stageMsg', () => refuse('Stage messages come to the remote page wit
 // What makes or changes things opens nothing here: it says at once where it is done (a form filled in vain helps nobody).
 for (const name of ['transSheet', 'messageEdit', 'timerEdit', 'propNew', 'macroNew', 'newSong', 'importSheet', 'audioNew', 'macroStepDel', 'macroAtStart']) remoteWrapA(name, () => refuse(REASON.edit));
 remoteWrapA('addMedia', () => refuse('Adding pictures and videos from here comes with the next step. Add them at the computer for now.'));
+remoteWrapA('sampleBackgrounds', () => refuse('The sample backgrounds are added at the computer for now: the media bin’s list, Add the Sample Backgrounds.'));
 // A message shown once: the app keeps it as "Quick message"
 remoteWrapA('messageOnce', () => ask('Show a message', 'Words', '', v => remoteSend(['message', 'show', '--text', v]), { placeholder: 'The car with the lights on, please', ok: 'Show' }));
 remoteWrapA('continuous', () => remoteSend(['continuous', DOC.settings.continuous ? 'off' : 'on']));
@@ -4287,3 +4318,10 @@ Object.assign(DEMOS, {
   catset: () => { catSample(); state.mode = 'settings'; state.section = 'Integrations'; render(); },
 });
 if (/^(su|cat)/.test(q.get('demo') || '') && DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();
+// Testing aid: the sample backgrounds: offered in the media bin's list, offered by an empty bin, and once added
+Object.assign(DEMOS, {
+  samplesmenu: () => setTimeout(() => { const el = document.querySelector('[data-a="menu:mediaSrc"]'), r = el.getBoundingClientRect(); openMenu(M.mediaSrc(), r.left, r.bottom + 4); }, 50),
+  samplesempty: () => { DOC.media = []; DOC.mediaPlaylists.forEach(p => { p.items = []; }); state.mediaOn = null; render(); },
+  samples: () => A.sampleBackgrounds(),
+});
+if (/^samples/.test(q.get('demo') || '') && DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();
