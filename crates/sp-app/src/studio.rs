@@ -135,10 +135,15 @@ pub fn round_corners(ui: &egui::Ui, panel: Rect) {
 /// One line of words in a face with room added between its letters, as the small capital
 /// labels and the numbers in the fixed-width face are set.
 pub fn spaced(ui: &egui::Ui, text: &str, font: FontId, ink: Color32, spacing: f32) -> Arc<egui::Galley> {
+    spaced_in(ui.ctx(), text, font, ink, spacing)
+}
+
+/// [`spaced`] with only the context, to measure a line before there is a place to draw it.
+fn spaced_in(ctx: &egui::Context, text: &str, font: FontId, ink: Color32, spacing: f32) -> Arc<egui::Galley> {
     let mut job = egui::text::LayoutJob::default();
     let format = egui::TextFormat { font_id: font, color: ink, extra_letter_spacing: spacing, ..Default::default() };
     job.append(text, 0.0, format);
-    ui.fonts_mut(|fonts| fonts.layout_job(job))
+    ctx.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
 /// Paints one line set with [`spaced`], anchored at `at`. Returns where it was drawn.
@@ -1650,9 +1655,12 @@ pub const ROW_HOVER: Color32 = Color32::from_rgb(0x1f, 0x1f, 0x1f);
 /// The side of a button that is only its icon, and of the "more" button at the end of a row.
 pub const ICON_BUTTON: f32 = 28.0;
 pub const MORE_BUTTON: f32 = 26.0;
-/// How tall a row of the left column's list is, and a row of the chooser.
+/// How tall a row of the left column's list is at least (one line of title), and a row of the
+/// chooser.
 const LIST_ROW: f32 = 42.0;
 const CHOOSER_ROW: f32 = 36.0;
+/// How far a "more" button's edge stands from the end of its row, and from what is before it.
+pub const MORE_EDGE: f32 = 4.0;
 
 /// A small capital label in the fixed-width face, as sections and strips are headed.
 pub fn cap(ui: &egui::Ui, at: egui::Pos2, anchor: Align2, text: &str, ink: Color32) -> Rect {
@@ -1760,6 +1768,9 @@ struct ListRow<'a> {
     /// The item's number in the playlist, in the fixed-width face at the left.
     number: Option<usize>,
     title: &'a str,
+    /// The title is being retyped in place: the row keeps the height its title gives it, but
+    /// the title is not drawn (the field is).
+    renaming: bool,
     /// A small word after the title, in capitals (the library a song is in).
     tag: Option<&'a str>,
     /// The open item or song: the lighter row, its title heavier.
@@ -1780,21 +1791,152 @@ struct ListRow<'a> {
     version: Option<(&'a str, bool)>,
 }
 
-/// How tall a row with a version's pill under its title is: the title's line, 3, and the pill.
-const ROW_WITH_PILL: f32 = 5.0 + 18.2 + 3.0 + 15.0 + 5.0;
+/// How far apart a title's lines are, and the room above and below them in a row.
+const TITLE_LINE: f32 = 17.0;
+const ROW_PAD: f32 = 7.0;
+/// The most lines a title takes.
+const TITLE_LINES: usize = 2;
+/// The version's pill under the title block: the gap, then the pill.
+const PILL_GAP: f32 = 3.0;
+const PILL_HEIGHT: f32 = 15.0;
 
-/// Draws one row of the left column's list, 42 high, taller with a version's pill. Returns its
-/// response and where its "more" button goes (the caller makes the button after, so that it
-/// takes its own clicks).
+/// Where a row's small tag goes, after the title.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum TagPlace {
+    /// After the title's last line, this far from the title's left.
+    After(f32),
+    /// On a line of its own under a title of one line.
+    OwnLine,
+    /// Nowhere on the row: in its hover text, after the title.
+    Hover,
+}
+
+/// How a row's title and tag lie in the room it has, worked out once for both measuring the row
+/// and drawing it.
+struct RowShape {
+    /// The title as the row shows it: in the heavier face when it is the open one, otherwise in
+    /// the plain face broken at the places the heavier face breaks it, so choosing a row never
+    /// moves a word.
+    title: Arc<egui::Galley>,
+    /// The lines of the title as the heavy face breaks them.
+    lines: Vec<String>,
+    tag: Option<(Arc<egui::Galley>, TagPlace)>,
+    /// What the row says when the pointer rests on it, if its words don't all show.
+    hover: Option<String>,
+    /// Where the title starts, from the row's left, and how much room it has.
+    left: f32,
+    room: f32,
+    /// The row's height.
+    height: f32,
+}
+
+impl RowShape {
+    /// How many lines the title block has, a tag on its own line included.
+    fn block_lines(&self) -> usize {
+        self.lines.len() + usize::from(matches!(self.tag, Some((_, TagPlace::OwnLine))))
+    }
+
+    /// The title block's height, the version's pill under it included.
+    fn block_height(&self, pill: bool) -> f32 {
+        self.block_lines() as f32 * TITLE_LINE + if pill { PILL_GAP + PILL_HEIGHT } else { 0.0 }
+    }
+}
+
+/// Lays out a row's words for a row `width` wide: the room for the title is what is left between
+/// the number at the left, and the "more" button and the kind's mark, the dot or the count at
+/// the right.
+fn row_shape(ctx: &egui::Context, look: &ListRow, width: f32) -> RowShape {
+    let left = 10.0 + if look.number.is_some() { 28.0 + 10.0 } else { 0.0 };
+    let mut right = width - MORE_EDGE - MORE_BUTTON - MORE_EDGE;
+    // A row without a number has the dot where a count goes; its room is the same either way,
+    // so the title breaks where it did when the song goes on screen.
+    let reserve = if look.number.is_none() && look.count.is_some_and(|count| count > 0) {
+        let count = look.count.unwrap_or(0).to_string();
+        let words = ctx.fonts_mut(|fonts| fonts.layout_no_wrap(count, fixed(11.0), Color32::WHITE));
+        (words.size().x + 8.0).max(16.0)
+    } else if look.number.is_none() && look.live {
+        16.0
+    } else if look.icon.is_some() {
+        14.0 + 8.0
+    } else {
+        0.0
+    };
+    right -= reserve;
+    let room = (right - left).max(10.0);
+    let (heavy_face, ink) = if look.faint {
+        (false, TEXT_FAINT.gamma_multiply(0.7))
+    } else if look.chosen {
+        (true, TEXT)
+    } else {
+        (false, TEXT_DIM)
+    };
+    let mut job = egui::text::LayoutJob::single_section(
+        look.title.to_owned(),
+        egui::TextFormat { font_id: semibold(13.5), color: ink, line_height: Some(TITLE_LINE), ..Default::default() },
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: room,
+        max_rows: TITLE_LINES,
+        break_anywhere: false,
+        overflow_character: Some('\u{2026}'),
+    };
+    let heavy = ctx.fonts_mut(|fonts| fonts.layout_job(job));
+    let lines: Vec<String> = if heavy.rows.is_empty() {
+        vec![String::new()]
+    } else {
+        heavy.rows.iter().map(|row| row.text().trim_end().to_owned()).collect()
+    };
+    let cut = heavy.elided;
+    // The same lines in the plain face, each ending where the heavy face ends it.
+    let mut plain_job = egui::text::LayoutJob::single_section(
+        lines.join("\n"),
+        egui::TextFormat {
+            font_id: FontId::proportional(13.5),
+            color: ink,
+            line_height: Some(TITLE_LINE),
+            ..Default::default()
+        },
+    );
+    plain_job.wrap.max_width = f32::INFINITY;
+    let title_galley = if heavy_face { heavy.clone() } else { ctx.fonts_mut(|fonts| fonts.layout_job(plain_job)) };
+    let last_width = heavy.rows.last().map_or(0.0, |row| row.row.size.x);
+    let tag = look.tag.filter(|_| !look.renaming).map(|tag| {
+        let galley = spaced_in(ctx, &tag.to_uppercase(), fixed_semibold(11.0), TEXT_FAINT, 0.6);
+        let place = if last_width + 8.0 + galley.size().x <= room {
+            TagPlace::After(last_width + 8.0)
+        } else if lines.len() < TITLE_LINES {
+            TagPlace::OwnLine
+        } else {
+            TagPlace::Hover
+        };
+        (galley, place)
+    });
+    let hover = match (&tag, look.tag) {
+        (Some((_, TagPlace::Hover)), Some(tag)) => Some(format!("{} \u{b7} {tag}", look.title)),
+        _ if cut => Some(look.title.to_owned()),
+        _ => None,
+    };
+    let mut shape = RowShape { title: title_galley, lines, tag, hover, left, room, height: LIST_ROW };
+    let pill = look.version.is_some();
+    shape.height = LIST_ROW.max(2.0 * ROW_PAD + shape.block_height(pill));
+    shape
+}
+
+/// Draws one row of the left column's list: 42 high with a title of one line, 48 with two (or
+/// a tag on its own line), taller with a version's pill. Returns its response and where its
+/// "more" button goes (the caller makes the button after, so that it takes its own clicks).
 fn list_row(ui: &mut egui::Ui, look: &ListRow) -> (egui::Response, Rect) {
-    let tall = if look.version.is_some() { ROW_WITH_PILL.max(LIST_ROW) } else { LIST_ROW };
-    let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), tall), Sense::click_and_drag());
+    let shape = row_shape(ui.ctx(), look, ui.available_width());
+    let (row, mut response) = ui.allocate_exact_size(vec2(ui.available_width(), shape.height), Sense::click_and_drag());
     let more = Rect::from_center_size(
-        pos2(row.max.x - 10.0 - MORE_BUTTON / 2.0, row.center().y),
+        pos2(row.max.x - MORE_EDGE - MORE_BUTTON / 2.0, row.center().y),
         egui::Vec2::splat(MORE_BUTTON),
     );
     if !ui.is_rect_visible(row) {
         return (response, more);
+    }
+    if let Some(hover) = &shape.hover {
+        response = response.on_hover_text(hover);
     }
     let painter = ui.painter();
     if look.chosen || look.lit {
@@ -1802,9 +1944,8 @@ fn list_row(ui: &mut egui::Ui, look: &ListRow) -> (egui::Response, Rect) {
     } else if response.hovered() {
         painter.rect_filled(row, RADIUS, ROW_HOVER);
     }
-    let mut left = row.min.x + 10.0;
     if let Some(number) = look.number {
-        let cell = Rect::from_min_size(pos2(left, row.center().y - 12.8), vec2(28.0, 25.6));
+        let cell = Rect::from_min_size(pos2(row.min.x + 10.0, row.center().y - 12.8), vec2(28.0, 25.6));
         painter.rect_filled(cell, 4.0, CARD);
         let ink = if look.live {
             TALLY
@@ -1814,41 +1955,53 @@ fn list_row(ui: &mut egui::Ui, look: &ListRow) -> (egui::Response, Rect) {
             TEXT_FAINT
         };
         paint_spaced(ui, cell.center(), Align2::CENTER_CENTER, &format!("{number:02}"), fixed(19.0), ink, -0.8);
-        left += 28.0 + 10.0;
     }
+    let left = row.min.x + shape.left;
     // From the right: the "more" button, then the tally dot, the kind's mark or the count. A
     // numbered row (a playlist's item) says it is on screen by its orange number alone, so it
     // keeps its kind's mark; a row without a number has the dot.
-    let mut right = more.min.x - 10.0;
+    let right = more.min.x - MORE_EDGE;
     if look.live && look.number.is_none() {
         paint_tally(ui.painter(), pos2(right - 4.0, row.center().y));
-        right -= 8.0 + 8.0;
     } else if let Some(icon) = look.icon {
         let mark = Rect::from_center_size(pos2(right - 7.0, row.center().y), vec2(14.0, 14.0));
         icons::paint(ui.painter(), icon, mark, TEXT_FAINT);
-        right -= 14.0 + 8.0;
     } else if let Some(count) = look.count.filter(|count| *count > 0) {
-        let drawn = ui.painter().text(
+        ui.painter().text(
             pos2(right, row.center().y),
             Align2::RIGHT_CENTER,
             count.to_string(),
             fixed(11.0),
             TEXT_FAINT,
         );
-        right = drawn.min.x - 8.0;
     }
-    let (font, ink) = if look.faint {
-        (FontId::proportional(13.5), TEXT_FAINT.gamma_multiply(0.7))
+    let ink = if look.faint {
+        TEXT_FAINT.gamma_multiply(0.7)
     } else if look.chosen {
-        (semibold(13.5), TEXT)
+        TEXT
     } else {
-        (FontId::proportional(13.5), TEXT_DIM)
+        TEXT_DIM
     };
-    let clip = Rect::from_min_max(pos2(left, row.min.y), pos2(right.max(left), row.max.y));
-    let painter = ui.painter().with_clip_rect(clip);
-    // With a version's pill, the title and the pill are one block in the middle of the row.
-    let title_middle = if look.version.is_some() { row.center().y - (3.0 + 15.0) / 2.0 } else { row.center().y };
-    let title = painter.text(pos2(left, title_middle), Align2::LEFT_CENTER, look.title, font, ink);
+    let pill = look.version.is_some();
+    // The title block (its lines, a tag on a line of its own, the version's pill) is one block
+    // in the middle of the row, a half pixel high so that a title in a row alone sits on the
+    // pixels the field that renames it puts its words on.
+    let top = row.center().y - shape.block_height(pill) / 2.0 - 0.5;
+    let painter = ui.painter().with_clip_rect(row);
+    if !look.renaming {
+        painter.galley(pos2(left, top), shape.title.clone(), ink);
+    }
+    let lines = shape.lines.len() as f32;
+    if let Some((galley, place)) = &shape.tag {
+        let at = match place {
+            TagPlace::After(x) => Some(pos2(left + x, top + (lines - 0.5) * TITLE_LINE - galley.size().y / 2.0)),
+            TagPlace::OwnLine => Some(pos2(left, top + (lines + 0.5) * TITLE_LINE - galley.size().y / 2.0)),
+            TagPlace::Hover => None,
+        };
+        if let Some(at) = at {
+            painter.galley(at, galley.clone(), TEXT_FAINT);
+        }
+    }
     if let Some((name, lit)) = look.version {
         let (ink, fill, edge) = if lit {
             (TALLY, TALLY.gamma_multiply(0.16), TALLY.gamma_multiply(0.45))
@@ -1857,18 +2010,93 @@ fn list_row(ui: &mut egui::Ui, look: &ListRow) -> (egui::Response, Rect) {
         };
         let galley = spaced(ui, &name.to_uppercase(), fixed_semibold(10.0), ink, 0.5);
         let pill = Rect::from_min_size(
-            pos2(left, title_middle + 18.2 / 2.0 + 3.0),
-            vec2((galley.size().x + 10.0).min(right - left), 15.0),
+            pos2(left, top + shape.block_lines() as f32 * TITLE_LINE + PILL_GAP),
+            vec2((galley.size().x + 10.0).min(shape.room), PILL_HEIGHT),
         );
         painter.rect_filled(pill, 4.0, fill);
         painter.rect_stroke(pill, 4.0, Stroke::new(1.0, edge), StrokeKind::Inside);
         painter.galley(pos2(pill.min.x + 5.0, pill.center().y - galley.size().y / 2.0), galley, ink);
     }
-    if let Some(tag) = look.tag {
-        let galley = spaced(ui, &tag.to_uppercase(), fixed_semibold(11.0), TEXT_FAINT, 0.6);
-        painter.galley(pos2(title.max.x + 8.0, title_middle - galley.size().y / 2.0), galley, TEXT_FAINT);
-    }
     (response, more)
+}
+
+/// How tall each song's row is in the song list and where each starts, kept from frame to
+/// frame: a title is laid out again only when the songs, the libraries (which give the tag
+/// in All Songs) or the list's width change.
+#[derive(Default, Clone)]
+struct SongRowHeights {
+    key: Option<(usize, u32, bool, u64, u64)>,
+    /// Each listed song's row height.
+    heights: Vec<f32>,
+    /// Where each row starts, from the top of the list, and at the end where the list ends.
+    tops: Vec<f32>,
+}
+
+impl SongRowHeights {
+    fn update(
+        &mut self,
+        ctx: &egui::Context,
+        show: &Show,
+        state: &HomeState,
+        list: &Arc<crate::kept::SongList>,
+        width: f32,
+    ) {
+        use std::hash::{Hash, Hasher};
+        let in_library = state.library_shown.is_some();
+        // Which library names a song in All Songs: all the keys, hashed, so a song moved from
+        // one library to another is noticed.
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        if !in_library {
+            for library in &state.libraries {
+                library.name.hash(&mut hasher);
+                library.songs.hash(&mut hasher);
+            }
+        }
+        let key = (Arc::as_ptr(list) as usize, width.to_bits(), in_library, hasher.finish(), state.lists.songs.epoch());
+        if self.key != Some(key) {
+            let mut first_library: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+            if !in_library {
+                for library in state.libraries.iter().rev() {
+                    for song in &library.songs {
+                        first_library.insert(song.as_str(), library.name.as_str());
+                    }
+                }
+            }
+            self.heights = list
+                .shown
+                .iter()
+                .map(|index| {
+                    let Some(song) = show.presentations().get(*index) else { return 0.0 };
+                    let tag = state.song_keys.get(*index).and_then(|key| first_library.get(key.as_str()).copied());
+                    let look = ListRow {
+                        title: song.title.as_str(),
+                        tag,
+                        count: Some(song.slide_count()),
+                        ..ListRow::default()
+                    };
+                    row_shape(ctx, &look, width).height
+                })
+                .collect();
+            self.key = Some(key);
+        }
+        self.tops.clear();
+        self.tops.reserve(self.heights.len() + 1);
+        let mut at = 0.0;
+        for height in &self.heights {
+            self.tops.push(at);
+            at += height;
+        }
+        self.tops.push(at);
+    }
+}
+
+/// The rows of a list (starting at `tops`, with where the last ends after them) that a scroll
+/// area's `viewport` shows: from the first to the one before the end.
+fn rows_in_view(tops: &[f32], viewport: Rect) -> (usize, usize) {
+    let rows = tops.len().saturating_sub(1);
+    let first = tops.partition_point(|top| *top <= viewport.min.y).saturating_sub(1).min(rows);
+    let end = tops[..rows].partition_point(|top| *top < viewport.max.y).max(first);
+    (first, end)
 }
 
 /// Songs being dragged from the library, by their places among the songs.
@@ -2888,8 +3116,8 @@ pub fn listed_songs(show: &Show, state: &mut HomeState) -> std::sync::Arc<crate:
 /// (or a right-click) opens its menu, and it can be dragged onto a playlist or a library in
 /// the chooser, which shows while songs are carried.
 fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
-    let list = listed_songs(show, state);
-    let (total, shown) = (list.total, &list.shown);
+    let list_of_songs = listed_songs(show, state);
+    let (total, shown) = (list_of_songs.total, &list_of_songs.shown);
     let in_library = state.library_shown.is_some();
     let live_in = show.live().map(|at| at.presentation);
     let mut asks = SongAsks::default();
@@ -2943,19 +3171,29 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
         state.picking = crate::home::Picking::Songs;
     }
     // Only the rows in view are laid out, so thousands of songs cost no more to draw than a few.
+    // Rows are as tall as their titles make them, so where each starts is worked out first
+    // (each title laid out once, and again only when it, the width or the libraries change).
+    let heights_id = ui.make_persistent_id("song row heights");
+    let mut heights: SongRowHeights = ui.data_mut(|data| data.remove_temp(heights_id)).unwrap_or_default();
+    heights.update(ui.ctx(), show, state, &list_of_songs, list.width());
+    let tops = std::mem::take(&mut heights.tops);
     let mut scroll = egui::ScrollArea::vertical().id_salt("song list").auto_shrink([false, false]);
     // The song gone to by ↑ or ↓ is kept in sight.
-    if let Some(row) = scroll_to {
+    if let Some(row) = scroll_to.filter(|row| *row < shown.len()) {
         let id = ui.make_persistent_id("song list");
         let offset = egui::scroll_area::State::load(ui.ctx(), id).map_or(0.0, |state| state.clamped_offset().y);
-        let (top, height) = (row as f32 * LIST_ROW, list.height());
+        let (top, bottom, height) = (tops[row], tops[row + 1], list.height());
         if top < offset {
             scroll = scroll.vertical_scroll_offset(top);
-        } else if top + LIST_ROW > offset + height {
-            scroll = scroll.vertical_scroll_offset(top + LIST_ROW - height);
+        } else if bottom > offset + height {
+            scroll = scroll.vertical_scroll_offset(bottom - height);
         }
     }
-    scroll.show_rows(ui, LIST_ROW, shown.len(), |ui, in_view| {
+    scroll.show_viewport(ui, |ui, viewport| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let (first, end) = rows_in_view(&tops, viewport);
+        ui.add_space(tops[first]);
+        let in_view = first..end;
         let several = state.picked_songs.len() > 1;
         let mut rows: Vec<(usize, Rect)> = Vec::new();
         for index in shown[in_view].iter().copied() {
@@ -3019,6 +3257,7 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
             egui::Popup::menu(&button).show(|ui| song_menu(ui, show, state, commands, index, &mut asks, None));
             response.context_menu(|ui| song_menu(ui, show, state, commands, index, &mut asks, None));
         }
+        ui.add_space(tops[shown.len()] - tops[end]);
         let ctx = ui.ctx().clone();
         sweep_rows(ui, state, crate::home::Picking::Songs, &rows, shown, list, pointer, down, |picked| {
             egui::DragAndDrop::set_payload(&ctx, SongDrag(picked));
@@ -3036,6 +3275,8 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
             ui.label(egui::RichText::new("No songs match.").size(12.5).color(TEXT_FAINT));
         }
     });
+    heights.tops = tops;
+    ui.data_mut(|data| data.insert_temp(heights_id, heights));
     asks.carry_out(show, state);
     // A song found with the find box goes into the library listed (not All Songs, which has
     // it already, and never a passage or verse): the list is outlined in ink while it would.
@@ -4068,7 +4309,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 let at = pos2(row.min.x + 10.0, row.min.y + 21.75);
                 // Its ⋯ at the right, as every other row has, level with its name.
                 let more = Rect::from_center_size(
-                    pos2(row.max.x - 10.0 - MORE_BUTTON / 2.0, at.y),
+                    pos2(row.max.x - MORE_EDGE - MORE_BUTTON / 2.0, at.y),
                     egui::Vec2::splat(MORE_BUTTON),
                 );
                 match state.renaming_header.as_mut().filter(|(at, _)| *at == index) {
@@ -4141,7 +4382,8 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             });
             let look = ListRow {
                 number: Some(number),
-                title: if renaming { "" } else { item.title() },
+                title: item.title(),
+                renaming,
                 chosen,
                 lit: state.item_picks.several() && state.item_picks.places.contains(&index),
                 live,
@@ -4158,7 +4400,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 let at = pos2(row.min.x + 48.0, row.center().y);
                 // Faint, as a placeholder's name is, and short of its mark at the right.
                 let look = Lettering::plain(FontId::proportional(13.5), TEXT_FAINT.gamma_multiply(0.7));
-                let right = more.min.x - 10.0 - 14.0 - 8.0;
+                let right = more.min.x - MORE_EDGE - 14.0 - 8.0;
                 if let Some(done) = rename_in_row(ui, typed, &look, at, right, focus) {
                     renamed = Some(done.map(|name| (index, name)));
                 }
@@ -6858,5 +7100,138 @@ pub mod tests {
             assert!(state.renaming_header.is_none(), "{words}: Escape ends it");
         }
         assert_eq!(state.services.front().items[0].title(), "Worship", "Escape keeps the name it had");
+    }
+
+    const ROW_WIDTH: f32 = 224.0;
+
+    fn two_title() -> &'static str {
+        "Come, Thou Fount of Every Blessing"
+    }
+
+    /// A row of a playlist's items, numbered, with this title.
+    fn item_look(title: &str) -> ListRow<'_> {
+        ListRow { number: Some(1), title, ..ListRow::default() }
+    }
+
+    #[test]
+    fn a_row_is_42_high_for_one_line_of_title_and_48_for_two() {
+        let ctx = styled();
+        let one = row_shape(&ctx, &item_look("Blessed Assurance"), ROW_WIDTH);
+        let two = row_shape(&ctx, &item_look(two_title()), ROW_WIDTH);
+        assert_eq!((one.lines.len(), one.height), (1, 42.0));
+        assert_eq!((two.lines.len(), two.height), (2, 48.0), "{:?}", two.lines);
+        // A version's pill adds its gap and its height under the title block.
+        let pilled = |title| ListRow { version: Some(("Youth", false)), ..item_look(title) };
+        assert_eq!(row_shape(&ctx, &pilled(two_title()), ROW_WIDTH).height, 7.0 + 34.0 + 3.0 + 15.0 + 7.0);
+        assert_eq!(row_shape(&ctx, &pilled("Blessed Assurance"), ROW_WIDTH).height, 7.0 + 17.0 + 3.0 + 15.0 + 7.0);
+    }
+
+    #[test]
+    fn the_room_for_a_title_is_142_and_120_after_a_kinds_mark() {
+        let ctx = styled();
+        let passage = ListRow { icon: Some(Icon::Book), ..item_look("Psalm 23") };
+        assert_eq!(row_shape(&ctx, &item_look("Blessed Assurance"), ROW_WIDTH).room, 142.0);
+        assert_eq!(row_shape(&ctx, &passage, ROW_WIDTH).room, 120.0);
+    }
+
+    #[test]
+    fn choosing_a_row_keeps_its_height_and_the_plain_face_breaks_where_the_heavy_one_does() {
+        let ctx = styled();
+        for title in [
+            "Showers of Blessing",
+            "Tell Me the Story of Jesus",
+            two_title(),
+            "When I Survey the Wondrous Cross and Every Blessing Besides",
+            "Слушайте повесть любви в простоте,",
+            "Благословений потоки",
+        ] {
+            let chosen = row_shape(&ctx, &ListRow { chosen: true, ..item_look(title) }, ROW_WIDTH);
+            let unchosen = row_shape(&ctx, &item_look(title), ROW_WIDTH);
+            assert_eq!((chosen.height, &chosen.lines), (unchosen.height, &unchosen.lines), "{title}");
+            let plain: Vec<String> = unchosen.title.rows.iter().map(|row| row.text()).collect();
+            assert_eq!(plain, unchosen.lines, "the plain face breaks where the heavy one does: {title}");
+            assert!(unchosen.title.size().x <= unchosen.room + 1.0, "{title}: plain is no wider than the room");
+        }
+    }
+
+    #[test]
+    fn a_word_longer_than_a_line_is_cut_by_letters_and_a_title_cut_after_two_lines_says_it_whole_on_hover() {
+        let ctx = styled();
+        let word = "Supercalifragilisticexpialidocious";
+        let shape = row_shape(&ctx, &item_look(word), ROW_WIDTH);
+        assert_eq!(shape.lines.len(), 2, "{:?}", shape.lines);
+        assert!(shape.lines[0].len() > 5 && !shape.lines[0].ends_with('\u{2026}'));
+        assert!(shape.hover.is_none(), "{word} fits in two lines whole");
+        let title =
+            "When I Survey the Wondrous Cross on Which the Prince of Glory Died, My Richest Gain I Count But Loss";
+        let cut = row_shape(&ctx, &item_look(title), ROW_WIDTH);
+        assert_eq!(cut.lines.len(), 2);
+        assert!(cut.lines[1].ends_with('\u{2026}'), "{:?}", cut.lines);
+        assert_eq!(cut.hover.as_deref(), Some(title));
+        let whole = row_shape(&ctx, &item_look(two_title()), ROW_WIDTH);
+        assert!(whole.hover.is_none(), "a title that shows whole needs no hover text");
+    }
+
+    #[test]
+    fn a_tag_never_shortens_a_title_it_follows_it_or_takes_a_line_or_goes_to_the_hover_text() {
+        let ctx = styled();
+        let song = |title, tag| {
+            let look = ListRow { tag: Some(tag), count: Some(3), title, ..ListRow::default() };
+            row_shape(&ctx, &look, ROW_WIDTH)
+        };
+        let place = |shape: &RowShape| shape.tag.as_ref().map(|tag| tag.1);
+        // A short title: the tag follows it on its line.
+        let short = song("Grace", "Youth");
+        assert!(matches!(place(&short), Some(TagPlace::After(_))), "{:?}", place(&short));
+        assert_eq!(short.height, 42.0);
+        // A title of one line that fills it: the tag has a line of its own, and the row is 48.
+        let full = song("Showers of Blessing", "Youth");
+        assert_eq!(full.lines.len(), 1, "{:?}", full.lines);
+        assert_eq!(place(&full), Some(TagPlace::OwnLine));
+        assert_eq!(full.height, 48.0);
+        assert!(full.hover.is_none());
+        // Two lines, the second too full for the tag: it goes into the hover text.
+        let title = "Come, Thou Fount of Every Blessing, Teach Me Some";
+        let two = song(title, "Youth");
+        assert_eq!(two.lines.len(), 2, "{:?}", two.lines);
+        assert_eq!(place(&two), Some(TagPlace::Hover));
+        assert_eq!(two.hover, Some(format!("{title} \u{b7} Youth")));
+        assert_eq!(two.height, 48.0);
+        // The title breaks the same with or without the tag.
+        let bare = row_shape(&ctx, &ListRow { count: Some(3), title, ..ListRow::default() }, ROW_WIDTH);
+        assert_eq!(bare.lines, two.lines);
+    }
+
+    #[test]
+    fn the_more_button_stands_4_from_the_rows_end_and_the_row_is_as_tall_as_its_title() {
+        let ctx = styled();
+        for (title, height) in [("Blessed Assurance", 42.0), (two_title(), 48.0)] {
+            let mut found = None;
+            let output = drawn(&ctx, vec![], |ui| {
+                ui.set_max_width(ROW_WIDTH);
+                let (response, more) = list_row(ui, &item_look(title));
+                found = Some((response.rect, more));
+            });
+            output.drop_without_applying_deltas();
+            let (row, more) = found.expect("drawn");
+            assert_eq!(row.height(), height, "{title}");
+            assert_eq!(more.size(), vec2(26.0, 26.0));
+            assert_eq!(more.max.x, row.max.x - 4.0);
+            assert_eq!(more.center().y, row.center().y);
+            // Its dots sit 17 from the end less the button's half: 4 + 13.
+            assert_eq!(row.max.x - more.center().x, 4.0 + 13.0);
+        }
+    }
+
+    #[test]
+    fn the_visible_rows_of_a_list_of_different_heights_are_found_by_where_each_starts() {
+        // Rows 48, 42, 48, 42 high.
+        let tops = [0.0, 48.0, 90.0, 138.0, 180.0];
+        let view = |from: f32, to: f32| rows_in_view(&tops, Rect::from_min_max(pos2(0.0, from), pos2(10.0, to)));
+        assert_eq!(view(0.0, 40.0), (0, 1));
+        assert_eq!(view(47.0, 50.0), (0, 2), "a row is in view while any of it is");
+        assert_eq!(view(48.0, 90.0), (1, 2));
+        assert_eq!(view(100.0, 400.0), (2, 4));
+        assert_eq!(rows_in_view(&[0.0], Rect::from_min_max(pos2(0.0, 0.0), pos2(10.0, 50.0))), (0, 0));
     }
 }

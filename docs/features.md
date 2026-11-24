@@ -268,7 +268,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - A playlist lists its items in running order: each with its number, its title, a small mark
   for a Bible passage, a picture or video, a media playlist or a placeholder, an orange number on
   the one on screen (whose row is brought into view when it goes on screen), and ⋯ for its
-  menu. Headers are small capital lines, with a ⋯ too. An item has **one menu**, the same from
+  menu. A title in the left column's lists takes up to two lines (42 high for one, 48 for two), broken
+  where the heavier chosen face breaks it so choosing a row moves nothing, and ends in … if it is
+  still too long, when the row's hover text gives it whole; a tag after it (the library's name in
+  All Songs) never shortens it: it follows the last line, takes a line of its own, or goes into
+  the hover text. The ⋯ is always there, 4 from the row's end. Headers are small capital lines,
+  with a ⋯ too. An item has **one menu**, the same from
   its row's ⋯, a right-click on the row, and the ⋯ (or a right-click) on its title bar over the
   slides: Add Slide and Song ▸ (the song's own menu) for a song; Play on Announcements Layer
   for a picture, a video or a media playlist; Fill with Song for a placeholder, Open on the

@@ -12673,6 +12673,8 @@ mod tests {
     /// What one frame of a drag drew: each piece of text and where, and the pointer's shape.
     struct Drawn {
         texts: Vec<(String, Rect)>,
+        /// Where each piece of text starts (its top left), by the words it has.
+        starts: Vec<(String, egui::Pos2)>,
         cursor: egui::CursorIcon,
     }
 
@@ -12711,10 +12713,13 @@ mod tests {
         time: f64,
         commands: &mut Vec<Command>,
     ) -> Drawn {
-        fn walk(shape: &egui::Shape, into: &mut Vec<(String, Rect)>) {
+        fn walk(shape: &egui::Shape, into: &mut Vec<(String, Rect)>, starts: &mut Vec<(String, egui::Pos2)>) {
             match shape {
-                egui::Shape::Text(text) => into.push((text.galley.text().to_owned(), text.visual_bounding_rect())),
-                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                egui::Shape::Text(text) => {
+                    into.push((text.galley.text().to_owned(), text.visual_bounding_rect()));
+                    starts.push((text.galley.text().to_owned(), text.pos));
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into, starts)),
                 _ => {}
             }
         }
@@ -12724,13 +12729,13 @@ mod tests {
         let output = ctx.run_ui(raw, |ui| {
             asked.extend(home_ui(ui, show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None));
         });
-        let mut texts = Vec::new();
-        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut texts));
+        let (mut texts, mut starts) = (Vec::new(), Vec::new());
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut texts, &mut starts));
         let cursor = output.platform_output.cursor_icon;
         output.drop_without_applying_deltas();
         as_the_app_does(show, state, asked.clone());
         commands.extend(asked);
-        Drawn { texts, cursor }
+        Drawn { texts, starts, cursor }
     }
 
     /// Types `words` in the find box, presses on the result at `place` in its list and drags it
@@ -12819,6 +12824,113 @@ mod tests {
             let order = if escape { ["Alpha", "Beta"] } else { ["Beta", "Alpha"] };
             assert_eq!(titles, order, "with Escape: {escape}");
         }
+    }
+
+    /// Hymns whose titles take two lines in the left column, one line, then two again, in the
+    /// playlist in front.
+    fn long_titles_setting() -> (Show, HomeState) {
+        use crate::service::Item;
+        let titles = ["Come, Thou Fount of Every Blessing", "Grace", "Tell Me the Story of Jesus and His Love"];
+        let songs = titles.iter().map(|title| Arc::new(parse_song_text(title, "Words written for a test\n")));
+        let show = Show::new(songs.collect());
+        let mut state = HomeState { playlist_open: true, ..HomeState::default() };
+        state.song_keys = titles.iter().map(|title| title.to_lowercase()).collect();
+        for title in titles {
+            state.services.add(Item::song(title.to_lowercase(), title.to_owned()));
+        }
+        state.services.chosen = None;
+        (show, state)
+    }
+
+    /// Where the title `words` starts, whether it is drawn on one line or two.
+    fn title_start(drawn: &Drawn, words: &str) -> egui::Pos2 {
+        drawn
+            .starts
+            .iter()
+            .find(|(text, at)| text.replace('\n', " ") == words && at.x < crate::studio::LEFT_WIDTH)
+            .unwrap_or_else(|| panic!("{words} is drawn in the left column"))
+            .1
+    }
+
+    #[test]
+    fn rows_of_two_line_titles_are_48_high_and_a_one_line_title_between_them_42() {
+        let (mut show, mut state) = long_titles_setting();
+        let (ctx, mut commands) = (crate::studio::tests::styled(), Vec::new());
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], 0.0, &mut commands);
+        let first = title_start(&drawn, "Come, Thou Fount of Every Blessing");
+        let second = title_start(&drawn, "Grace");
+        let third = title_start(&drawn, "Tell Me the Story of Jesus and His Love");
+        // A title of two lines starts 6.5 into its row (7 less the half pixel the words are
+        // raised by), one of a line 12 in; the first row is 48 high, the second 42.
+        assert_eq!(second.y - first.y, 48.0 - 6.5 + 12.0);
+        assert_eq!(third.y - second.y, 42.0 - 12.0 + 6.5);
+        // They break the same when one is chosen.
+        state.services.chosen = Some(0);
+        let chosen = found_step(&ctx, &mut show, &mut state, vec![], 0.1, &mut commands);
+        assert_eq!(title_start(&chosen, "Come, Thou Fount of Every Blessing"), first);
+        assert_eq!(title_start(&chosen, "Tell Me the Story of Jesus and His Love"), third);
+    }
+
+    #[test]
+    fn a_row_dragged_between_two_line_rows_lands_where_the_ink_line_is_by_their_real_halves() {
+        use crate::service::Item;
+        let (mut show, mut state) = long_titles_setting();
+        let (ctx, mut commands) = (crate::studio::tests::styled(), Vec::new());
+        let press = |at: egui::Pos2, pressed: bool| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], 0.0, &mut commands);
+        let from = title_start(&drawn, "Tell Me the Story of Jesus and His Love") + vec2(5.0, 8.0);
+        // The first row starts 6.5 above its title: 48 high, so the second (42) starts 48 below
+        // and its middle is 48 + 21 below. 66 down is above that middle: the third goes after
+        // the first, which the same place in rows 42 high all through would not say.
+        let top = title_start(&drawn, "Come, Thou Fount of Every Blessing").y - 6.5;
+        let to = pos2(from.x, top + 66.0);
+        let frames = [
+            vec![Event::PointerMoved(from)],
+            vec![press(from, true)],
+            vec![Event::PointerMoved(from + vec2(0.0, -12.0))],
+            vec![Event::PointerMoved(to)],
+            vec![press(to, false)],
+            vec![],
+        ];
+        for (n, events) in frames.into_iter().enumerate() {
+            found_step(&ctx, &mut show, &mut state, events, 0.1 * (n + 1) as f64, &mut commands);
+        }
+        let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
+        assert_eq!(
+            titles[..],
+            ["Come, Thou Fount of Every Blessing", "Tell Me the Story of Jesus and His Love", "Grace"]
+        );
+    }
+
+    #[test]
+    fn going_down_a_library_of_two_line_titles_keeps_the_song_gone_to_in_view() {
+        let title = |n: usize| format!("Hymn {n} of every blessing counted");
+        let songs = (0..40).map(|n| Arc::new(parse_song_text(&title(n), "Words written for a test\n")));
+        let mut show = Show::new(songs.collect());
+        let mut state = HomeState { song_keys: (0..40).map(|n| format!("hymn {n}")).collect(), ..HomeState::default() };
+        let (ctx, mut commands) = (crate::studio::tests::styled(), Vec::new());
+        let mut time = 0.0;
+        let mut step = |events: Vec<Event>, show: &mut Show, state: &mut HomeState, commands: &mut Vec<Command>| {
+            time += 0.1;
+            found_step(&ctx, show, state, events, time, commands)
+        };
+        let drawn = step(vec![], &mut show, &mut state, &mut commands);
+        let (first, second) = (title_start(&drawn, &title(0)), title_start(&drawn, &title(1)));
+        assert_eq!(second.y - first.y, 48.0, "each title takes two lines");
+        let mut last = drawn;
+        for _ in 0..30 {
+            step(pressed(Key::ArrowDown, Modifiers::NONE), &mut show, &mut state, &mut commands);
+            last = step(vec![], &mut show, &mut state, &mut commands);
+        }
+        let gone_to = show.selected();
+        assert_eq!(gone_to, 30, "↓ went down one song at a time");
+        let at = title_start(&last, &title(gone_to));
+        assert!(at.y > 0.0 && at.y + 34.0 < 800.0, "the song gone to is in view, at {at:?}");
     }
 
     #[test]
@@ -13137,7 +13249,10 @@ mod tests {
         let words = |drawn: &Drawn| drawn.texts.iter().map(|(text, _)| text.clone()).collect::<Vec<_>>();
         // The header's ⋯, at the right of its row, as every row has one.
         let header = drawn.texts.iter().find(|(text, _)| text.eq_ignore_ascii_case("Worship")).expect("drawn").1;
-        let more = pos2(crate::studio::LEFT_WIDTH - 10.0 - crate::studio::MORE_BUTTON / 2.0, header.center().y);
+        let more = pos2(
+            crate::studio::LEFT_WIDTH - crate::studio::MORE_EDGE - crate::studio::MORE_BUTTON / 2.0,
+            header.center().y,
+        );
         let drawn = click_holding(&ctx, (&mut show, &mut state), more, Modifiers::NONE, &mut time, &mut commands);
         let menu = words(&drawn);
         for offered in ["Rename", "Move Up", "Move Down", "Remove from Playlist"] {
