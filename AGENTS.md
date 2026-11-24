@@ -70,6 +70,7 @@ person:
 | `SOFTPRESENTER_WINDOW_SIZE=1100x700` | Open the window at another size |
 | `SOFTPRESENTER_STRESS=1` | Redraw continuously, to check memory stays flat |
 | `SOFTPRESENTER_SCREENS_ON_TOP=1` | Keep the screens' windows above all others, so a timing run on one display really draws them (in a quiet run too, where they still don't take the keyboard) |
+| `SOFTPRESENTER_RESIZE_AID=<from>x<to>` | Resize the operator's window in 40 steps, 50 ms apart, from that width (points) to the other and back, saying on stderr for each step the window's size, the size its surface was drawn at and how many frames were drawn at the new size, then quit |
 | `SOFTPRESENTER_STOP_DRAWING_AFTER=<s>` | Stop drawing the window after a while, as minimising does |
 | `SOFTPRESENTER_TRACE_REPAINT=1` | Log what keeps asking for the window to be redrawn |
 | `SOFTPRESENTER_GPU_TOO_SLOW=<n>` or `<n>@<seconds>` | The screens give up the next n pictures they must wait for the GPU for, as when it is too slow (from that many seconds after the start) |

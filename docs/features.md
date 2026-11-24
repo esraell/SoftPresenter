@@ -27,6 +27,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   show while the list is open. `sp notices` lists it, `sp notices answer N ANSWER` answers a
   question as its button does, and `sp notices seen` and `sp notices clear` do what closing the
   list and Clear All do; a Remote Control page mirrors the button with the same commands.
+- **Resizing the window** redraws the operator's window at its new size as it is dragged, so the
+  layout reflows live and nothing is stretched. If setting the window up for a new size ever
+  holds the graphics card long enough to risk the audience screens' pictures, the rest of that
+  drag falls back to taking the size on once it has stopped changing for a moment.
 - **A refusal is a brief cue, not a notice.** When nothing happens and the operator should know
   why ("That is the last slide of the playlist.", "Two is already in Sunday.", "There is no
   song to edit yet…"), a small dark chip says so for about 2.4 seconds under the place of

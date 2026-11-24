@@ -1212,6 +1212,9 @@ struct Running {
     /// the screens' pictures included, so it is done once the size has settled, never on each
     /// step of a drag: the audience must not see the operator resizing a window.
     home_resize: Option<(winit::dpi::PhysicalSize<u32>, Instant)>,
+    /// Set when taking on a size live held the GPU for longer than `LIVE_RESIZE_WAIT`: the rest
+    /// of that drag waits for the size to settle again, as before, until it ends.
+    home_resize_held_back: bool,
     /// The windows audience screens are drawn in, one per screen that has one.
     screen_windows: Vec<ScreenWindow>,
     /// Windows of screens that were moved elsewhere or switched off, hidden, and dropped a
@@ -1588,6 +1591,7 @@ impl App {
             home_surface,
             home_config,
             home_resize: None,
+            home_resize_held_back: false,
             screen_windows: Vec::new(),
             retired: Vec::new(),
             ndi_sent: Vec::new(),
@@ -7195,6 +7199,67 @@ impl App {
         running.home_window.request_redraw();
     }
 
+    /// Testing aid: SOFTPRESENTER_RESIZE_AID=<from>x<to> (window widths in points) resizes the
+    /// operator's window in 20 steps, 50 ms apart, from that width to the other and back to the
+    /// first, as a drag does, and says on stderr for each step the size asked for, the size the
+    /// window has, the size its surface was drawn at in the last frame and how many frames were
+    /// drawn at the new size before the next step. A drag is only followed live if each frame is.
+    fn resize_testing_aid(&mut self) {
+        struct Aid {
+            step: u32,
+            at: Instant,
+            drawn: u32,
+            matching: u32,
+        }
+        static AID: std::sync::Mutex<Option<Aid>> = std::sync::Mutex::new(None);
+        let Ok(asked) = std::env::var("SOFTPRESENTER_RESIZE_AID") else { return };
+        let Some((from, to)) =
+            asked.split_once('x').and_then(|(a, b)| Some((a.parse::<f64>().ok()?, b.parse::<f64>().ok()?)))
+        else {
+            return;
+        };
+        let Some(running) = self.running.as_mut() else { return };
+        let frames = running.frames;
+        let inner = running.home_window.inner_size();
+        let config = (running.home_config.width, running.home_config.height);
+        let Ok(mut guard) = AID.lock() else { return };
+        // Starts after the first few frames, once the window has settled.
+        let aid = guard.get_or_insert(Aid { step: 0, at: Instant::now(), drawn: 0, matching: 0 });
+        if frames < 10 {
+            aid.at = Instant::now();
+            running.next_repaint = aid.at.checked_add(Duration::from_millis(50));
+            return;
+        }
+        if aid.step > 0 {
+            aid.drawn += 1;
+            aid.matching += u32::from(config == (inner.width, inner.height));
+        }
+        if aid.at.elapsed() < Duration::from_millis(50) {
+            // Nothing is asked to be drawn but the next step, so frames counted are only those
+            // the resizing itself brought.
+            running.next_repaint = aid.at.checked_add(Duration::from_millis(50));
+            return;
+        }
+        if aid.step > 0 {
+            eprintln!(
+                "resize step {}: window {}x{}, surface {}x{}, {} frames drawn, {} at the window's size",
+                aid.step, inner.width, inner.height, config.0, config.1, aid.drawn, aid.matching
+            );
+        }
+        if aid.step == 40 {
+            eprintln!("resize aid done");
+            std::process::exit(0);
+        }
+        aid.step += 1;
+        aid.at = Instant::now();
+        aid.drawn = 0;
+        aid.matching = 0;
+        let fraction = f64::from(if aid.step <= 20 { aid.step } else { 40 - aid.step }) / 20.0;
+        let width = from + (to - from) * fraction;
+        let size = winit::dpi::LogicalSize::new(width, 700.0);
+        let _ = running.home_window.request_inner_size(size);
+    }
+
     /// Draws one frame of the home window and returns what the operator asked for.
     fn draw_home(&mut self) -> Vec<Command> {
         // Undo and Redo are drawn greyed when the history has nothing to take back.
@@ -7214,6 +7279,7 @@ impl App {
             home_surface,
             home_config,
             home_resize,
+            home_resize_held_back,
             gpu,
             egui_ctx,
             egui_state,
@@ -7236,14 +7302,26 @@ impl App {
         if running.home_state.drop_hover {
             running.home_state.file_drag.pointer = file_drop_pointer(home_window, egui_ctx);
         }
-        // A new size is taken on once it has stopped changing for a moment. Until then the
-        // window is drawn at the size it had, which macOS stretches to fit.
+        // A new size is taken on as it comes, so the window is drawn at the size it has while it
+        // is dragged and macOS has nothing to stretch. Setting the surface up waits for what the
+        // GPU is doing, the screens' pictures included, so if that ever takes longer than
+        // `LIVE_RESIZE_WAIT` the rest of the drag falls back to taking the size on once it has
+        // stopped changing for `SETTLE` (the window is stretched until then): the audience must
+        // not see the operator resizing a window.
         const SETTLE: Duration = Duration::from_millis(120);
+        const LIVE_RESIZE_WAIT: Duration = Duration::from_millis(8);
         if let Some((size, changed)) = *home_resize {
-            if changed.elapsed() >= SETTLE {
+            let settled = changed.elapsed() >= SETTLE;
+            if !*home_resize_held_back || settled {
+                let configuring = Instant::now();
                 home_config.width = size.width;
                 home_config.height = size.height;
                 output::configure(&gpu.device, home_surface, home_config);
+                if settled {
+                    *home_resize_held_back = false;
+                } else if configuring.elapsed() > LIVE_RESIZE_WAIT {
+                    *home_resize_held_back = true;
+                }
                 *home_resize = None;
             } else {
                 let points = home_window.scale_factor() as f32;
@@ -9194,6 +9272,12 @@ impl ApplicationHandler<AppEvent> for App {
                     running.home_resize = Some((size, Instant::now()));
                 }
                 running.home_window.request_redraw();
+                // While macOS runs its resize loop it waits for the picture at the new size and
+                // stretches the old one until it has it, so the frame is drawn here, within the
+                // event, rather than at the next redraw. (Only when the drag is taken on live.)
+                if !running.home_resize_held_back && size.width > 0 && size.height > 0 {
+                    self.window_event(el, id, WindowEvent::RedrawRequested);
+                }
             }
             // Testing aid: stop drawing the operator window after a few seconds, as macOS does
             // when it is minimised, to check that what runs by the clock goes on without it.
@@ -9207,6 +9291,7 @@ impl ApplicationHandler<AppEvent> for App {
                 let drawing = Instant::now();
                 let commands = self.draw_home();
                 self.home_timing.add(drawing.elapsed());
+                self.resize_testing_aid();
                 // A command chosen from a right-click menu in the window, done as the menu bar's.
                 if let Some(action) = self.running.as_mut().and_then(|r| r.home_state.menu_asked.take()) {
                     self.menu_action(el, action);
