@@ -410,6 +410,39 @@ pub fn next_name(screens: &[Screen], kind: Kind) -> String {
         .unwrap_or_default()
 }
 
+/// Gives the screens the displays' names as the system shows them, and says whether any
+/// changed (to be saved). A screen set up as Automatic (no longer offered) is given the first
+/// display that isn't the main one and isn't taken; one saved under a display's old name
+/// ("Monitor #0", `\\.\DISPLAY2`) is given the name the system shows ("3DTV", "Mi TV").
+pub fn give_displays(screens: &mut [Screen], displays: &[DisplayInfo]) -> bool {
+    let mut given = false;
+    for at in 0..screens.len() {
+        let taken: Vec<&str> = screens
+            .iter()
+            .enumerate()
+            .filter(|(other, _)| *other != at)
+            .filter_map(|(_, screen)| match &screen.output {
+                Output::Display(name) => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        let now = match &screens[at].output {
+            Output::Automatic => {
+                displays.iter().find(|d| !d.main && !taken.iter().any(|name| d.is_named(name))).map(|d| d.name.clone())
+            }
+            Output::Display(name) => {
+                displays.iter().find(|d| d.old_name == *name && d.name != *name).map(|d| d.name.clone())
+            }
+            _ => None,
+        };
+        if let Some(name) = now {
+            screens[at].output = Output::Display(name);
+            given = true;
+        }
+    }
+    given
+}
+
 /// Where each screen goes, in the list's order. `operator` are the displays the operator works
 /// on (the home window's and the one with the menu bar), which Automatic never takes. A display
 /// is filled by one screen only, an NDI name is used once, and a DeckLink output plays one
@@ -693,6 +726,73 @@ mod tests {
         let automatic = [screen("A", Output::Automatic)];
         assert_eq!(place_all(&automatic, &displays, &[]), [Placed::Window], "not knowing the operator's display");
         assert_eq!(place_all(&automatic, &displays, &[0]), [Placed::Fullscreen(1)]);
+    }
+
+    /// Two monitors on Windows as `display_list` lists them: the main one, and a TV that gives
+    /// its own name; and a third that gives none.
+    fn windows_displays() -> Vec<DisplayInfo> {
+        let display = |index: usize, name: &str, device: &str| DisplayInfo {
+            index,
+            name: name.to_owned(),
+            old_name: device.to_owned(),
+            main: index == 0,
+            w: 1920,
+            h: 1080,
+            ..Default::default()
+        };
+        vec![
+            display(0, "Philips FTV", r"\\.\DISPLAY1"),
+            display(1, "Mi TV", r"\\.\DISPLAY2"),
+            display(2, r"\\.\DISPLAY3", r"\\.\DISPLAY3"),
+        ]
+    }
+
+    #[test]
+    fn a_screen_saved_under_a_windows_device_name_finds_its_display_and_takes_its_name() {
+        let displays = windows_displays();
+        let mut screens = vec![
+            screen("Audience", Output::Display(r"\\.\DISPLAY2".to_owned())),
+            screen("Stage", Output::Display(r"\\.\DISPLAY3".to_owned())),
+            screen("Lobby", Output::Display(r"\\.\DISPLAY1".to_owned())),
+        ];
+        let placed = place_all(&screens, &displays, &[0]);
+        assert_eq!(placed[..2], [Placed::Fullscreen(1), Placed::Fullscreen(2)]);
+        assert!(matches!(&placed[2], Placed::Nothing(why) if why.contains("main display")), "{placed:?}");
+        // Saved from now on under the names Windows shows; a display with no name of its own
+        // keeps its device name.
+        assert!(give_displays(&mut screens, &displays));
+        let outputs: Vec<&Output> = screens.iter().map(|s| &s.output).collect();
+        assert_eq!(
+            outputs,
+            [
+                &Output::Display("Mi TV".to_owned()),
+                &Output::Display(r"\\.\DISPLAY3".to_owned()),
+                &Output::Display("Philips FTV".to_owned()),
+            ]
+        );
+        assert!(!give_displays(&mut screens, &displays), "nothing more to change");
+        assert_eq!(place_all(&screens, &displays, &[0])[..2], [Placed::Fullscreen(1), Placed::Fullscreen(2)]);
+    }
+
+    #[test]
+    fn a_screen_on_a_monitors_own_name_waits_for_it_and_is_kept() {
+        // Mi TV unplugged: the screen waits, under the same name, and nothing takes its place.
+        let mut displays = windows_displays();
+        displays.remove(1);
+        let mut screens = vec![screen("Audience", Output::Display("Mi TV".to_owned()))];
+        assert!(!give_displays(&mut screens, &displays));
+        assert_eq!(screens[0].output, Output::Display("Mi TV".to_owned()));
+        let placed = place_all(&screens, &displays, &[0]);
+        assert!(matches!(&placed[0], Placed::Nothing(why) if why.contains("Disconnected")), "{placed:?}");
+    }
+
+    #[test]
+    fn automatic_is_given_the_first_free_display_by_its_name() {
+        let displays = windows_displays();
+        let mut screens =
+            vec![screen("Audience", Output::Display(r"\\.\DISPLAY2".to_owned())), screen("Stage", Output::Automatic)];
+        assert!(give_displays(&mut screens, &displays));
+        assert_eq!(screens[1].output, Output::Display(r"\\.\DISPLAY3".to_owned()), "Mi TV is taken");
     }
 
     #[test]

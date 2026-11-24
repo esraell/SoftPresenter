@@ -1100,13 +1100,23 @@ fn work_area(monitor: &winit::monitor::MonitorHandle, scale: f64) -> displays::R
     displays::Rect { x: pos.x, y: pos.y + top as i32, w: size.width, h: size.height.saturating_sub(top + bottom) }
 }
 
-/// The connected displays, named as macOS names them in System Settings, and which is the main
-/// display (`primary`, with the menu bar).
+/// The connected displays, named as the system names them (on a Mac as System Settings does, on
+/// Windows by the names the monitors give themselves, as its display settings show them), and
+/// which is the main display (`primary`, with the menu bar or the taskbar).
 pub(crate) fn display_list(
     monitors: impl Iterator<Item = winit::monitor::MonitorHandle>,
     primary: Option<winit::monitor::MonitorHandle>,
 ) -> Vec<DisplayInfo> {
+    // On a Mac by display id; on Windows by device name, which is the window library's name for
+    // the display (none on Linux, where the window library's names are the system's).
+    #[cfg(target_os = "macos")]
     let names = sp_video::display_names();
+    #[cfg(not(target_os = "macos"))]
+    let names = {
+        static LAST: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+        let mut last = LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        displays::names_or_last(sp_winapi::monitor_names(), &mut last)
+    };
     let mut list: Vec<DisplayInfo> = Vec::new();
     // On Wayland a window's own list of monitors holds each display it was told of at the start
     // twice (winit adds the display again when the system describes it), which listed every
@@ -1126,21 +1136,13 @@ pub(crate) fn display_list(
     for (index, m) in monitors.enumerate() {
         let old_name = m.name().unwrap_or_else(|| "Display".to_owned());
         #[cfg(target_os = "macos")]
-        let named = {
+        let own = {
             use winit::platform::macos::MonitorHandleExtMacOS;
-            let id = m.native_id();
-            names.iter().find(|(have, _)| *have == id).map(|(_, name)| name.clone())
+            displays::own_name(&names, &m.native_id())
         };
         #[cfg(not(target_os = "macos"))]
-        let named: Option<String> = {
-            let _ = &names;
-            None
-        };
-        let mut name = named.unwrap_or_else(|| old_name.clone());
-        let alike = list.iter().filter(|d| d.name == name || d.name.starts_with(&format!("{name} ("))).count();
-        if alike > 0 {
-            name = format!("{name} ({})", alike + 1);
-        }
+        let own = displays::own_name(&names, &old_name);
+        let name = displays::listed_name(own, &old_name, &list);
         list.push(DisplayInfo {
             index,
             name,
@@ -7105,39 +7107,9 @@ impl App {
             let due = seen.at + DisplaysSeen::KEPT_FOR;
             running.next_repaint = Some(running.next_repaint.map_or(due, |at| at.min(due)));
         }
-        // A screen set up as Automatic (no longer offered) is given the first display that isn't
-        // the main one and isn't taken; one saved under a display's old name ("Monitor #0") is
-        // given the name System Settings shows ("3DTV"). Either way it is saved so.
-        let mut given = false;
-        for at in 0..running.home_state.screens.len() {
-            let taken: Vec<String> = running
-                .home_state
-                .screens
-                .iter()
-                .enumerate()
-                .filter(|(other, _)| *other != at)
-                .filter_map(|(_, screen)| match &screen.output {
-                    screens::Output::Display(name) => Some(name.clone()),
-                    _ => None,
-                })
-                .collect();
-            let screen = &mut running.home_state.screens[at];
-            let now = match &screen.output {
-                screens::Output::Automatic => displays
-                    .iter()
-                    .find(|d| !d.main && !taken.iter().any(|name| d.is_named(name)))
-                    .map(|d| d.name.clone()),
-                screens::Output::Display(name) => {
-                    displays.iter().find(|d| d.old_name == *name && d.name != *name).map(|d| d.name.clone())
-                }
-                _ => None,
-            };
-            if let Some(name) = now {
-                screen.output = screens::Output::Display(name);
-                given = true;
-            }
-        }
-        if given {
+        // Screens set up as Automatic, or saved under a display's old name, are given a display's
+        // name as the system shows it, and saved so.
+        if screens::give_displays(&mut running.home_state.screens, &displays) {
             running.home_state.screens_changed = true;
         }
         if displays != running.home_state.displays {
@@ -7165,10 +7137,11 @@ impl App {
                 match place {
                     // Testing aid: SOFTPRESENTER_SCREENS_FILL=<display name> lets a quiet run's
                     // screens fill that one display (a virtual one made for the test, never a
-                    // display anyone looks at), through the same window code as a real run.
+                    // display anyone looks at), through the same window code as a real run. The
+                    // display goes by either of its names, as a saved screen's does.
                     Placed::Fullscreen(index)
                         if std::env::var("SOFTPRESENTER_SCREENS_FILL").is_ok_and(|name| {
-                            displays.iter().any(|d| d.index == *index && d.name == name && !d.main)
+                            displays.iter().any(|d| d.index == *index && d.is_named(&name) && !d.main)
                         }) => {}
                     Placed::Fullscreen(_) => *place = Placed::Window,
                     Placed::Ndi(_) if !ndi_aid => {

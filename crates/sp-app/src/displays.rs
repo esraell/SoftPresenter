@@ -4,11 +4,12 @@
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DisplayInfo {
     pub index: usize,
-    /// Its name as the system shows it ("3DTV", "HP 27f"); a second display of the same name
-    /// gets " (2)" after it.
+    /// Its name as the system shows it ("3DTV", "HP 27f"; on Windows the name the monitor gives
+    /// itself, "Mi TV"), else `old_name`; a second display of the same name gets " (2)" after
+    /// it.
     pub name: String,
-    /// The name the window system gave it before SoftPresenter asked macOS ("Monitor #0"),
-    /// which screens set up then are saved under.
+    /// The window system's own name for it ("Monitor #0" on a Mac, `\\.\DISPLAY2` on Windows),
+    /// which screens set up before SoftPresenter asked the system are saved under.
     pub old_name: String,
     /// The main display, with the menu bar, where the operator works. No screen fills it.
     pub main: bool,
@@ -23,6 +24,37 @@ impl DisplayInfo {
     pub fn is_named(&self, name: &str) -> bool {
         self.name == name || (!self.old_name.is_empty() && self.old_name == name)
     }
+}
+
+/// The name a display is listed under: `own`, the name the system gives it, where it gives one
+/// that isn't blank, else `old_name`, the window system's; with " (2)", " (3)"… after it when a
+/// display already in `list` has that name.
+pub fn listed_name(own: Option<&str>, old_name: &str, list: &[DisplayInfo]) -> String {
+    let name = own.map(str::trim).filter(|own| !own.is_empty()).unwrap_or(old_name);
+    let alike = list.iter().filter(|d| d.name == name || d.name.starts_with(&format!("{name} ("))).count();
+    if alike > 0 { format!("{name} ({})", alike + 1) } else { name.to_owned() }
+}
+
+/// The system's own name for one display, from `names`: each display the system names, by the
+/// key both it and the window system know the display by (on a Mac its display id, on Windows
+/// its device name, `\\.\DISPLAY2`), with that name. A display shown on two monitors at once,
+/// which Windows lists once for each, takes the first one's name.
+pub fn own_name<'a, K: PartialEq>(names: &'a [(K, String)], key: &K) -> Option<&'a str> {
+    names.iter().find(|(have, _)| have == key).map(|(_, name)| name.as_str())
+}
+
+/// The monitors' names as just asked, or, when the answer was empty, the last names that came
+/// (`last` keeps them). Windows can refuse the question for a moment (the computer locked, a
+/// permission prompt up), and a display listed by its device name for that moment would look
+/// unplugged to a screen saved under the monitor's name, which would vanish mid-service.
+// A Mac asks its own names another way (sp_video::display_names), which never fails like this.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn names_or_last(fresh: Vec<(String, String)>, last: &mut Vec<(String, String)>) -> Vec<(String, String)> {
+    if fresh.is_empty() {
+        return last.clone();
+    }
+    last.clone_from(&fresh);
+    fresh
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -201,5 +233,92 @@ mod tests {
     #[test]
     fn no_displays_is_windowed() {
         assert_eq!(choose_output(&[], &[0], None), Ok(Placement::Windowed));
+    }
+
+    /// The displays as `display_list` names them on Windows: `devices` are the window library's
+    /// names for them, in its order (the first is the main display), and `names` what
+    /// `sp_winapi::monitor_names` gives.
+    fn listed_on_windows(devices: &[&str], names: &[(&str, &str)]) -> Vec<DisplayInfo> {
+        let names: Vec<(String, String)> = names.iter().map(|(d, n)| ((*d).to_owned(), (*n).to_owned())).collect();
+        let mut list: Vec<DisplayInfo> = Vec::new();
+        for (index, device) in devices.iter().enumerate() {
+            let old_name = (*device).to_owned();
+            let name = listed_name(own_name(&names, &old_name), &old_name, &list);
+            list.push(DisplayInfo { index, name, old_name, main: index == 0, ..Default::default() });
+        }
+        list
+    }
+
+    fn names_of(list: &[DisplayInfo]) -> Vec<&str> {
+        list.iter().map(|d| d.name.as_str()).collect()
+    }
+
+    #[test]
+    fn a_moment_without_monitor_names_keeps_the_last_ones() {
+        let named = vec![(r"\\.\DISPLAY2".to_owned(), "Mi TV".to_owned())];
+        let mut last = Vec::new();
+        assert_eq!(names_or_last(named.clone(), &mut last), named);
+        // Windows didn't answer: the names stay, so a screen saved as "Mi TV" stays up.
+        assert_eq!(names_or_last(Vec::new(), &mut last), named);
+        // A new answer replaces them.
+        let other = vec![(r"\\.\DISPLAY3".to_owned(), "Projector".to_owned())];
+        assert_eq!(names_or_last(other.clone(), &mut last), other);
+        assert_eq!(last, other);
+    }
+
+    #[test]
+    fn windows_lists_displays_by_the_monitors_own_names_and_keeps_the_device_names() {
+        let list = listed_on_windows(
+            &[r"\\.\DISPLAY1", r"\\.\DISPLAY2"],
+            &[(r"\\.\DISPLAY2", "Mi TV"), (r"\\.\DISPLAY1", "Philips FTV")],
+        );
+        assert_eq!(names_of(&list), ["Philips FTV", "Mi TV"]);
+        assert_eq!(list[1].old_name, r"\\.\DISPLAY2");
+        // A screen saved under either name means the display; never the other display's.
+        assert!(list[1].is_named("Mi TV") && list[1].is_named(r"\\.\DISPLAY2"));
+        assert!(!list[1].is_named(r"\\.\DISPLAY1") && !list[1].is_named("Philips FTV"));
+    }
+
+    #[test]
+    fn a_monitor_that_gives_no_name_is_listed_by_its_device_name() {
+        let list = listed_on_windows(&[r"\\.\DISPLAY1", r"\\.\DISPLAY2"], &[(r"\\.\DISPLAY2", "Mi TV")]);
+        assert_eq!(names_of(&list), [r"\\.\DISPLAY1", "Mi TV"]);
+        assert!(list[0].is_named(r"\\.\DISPLAY1"));
+        // A blank name is no name; one with spaces round it is the name.
+        let list = listed_on_windows(
+            &[r"\\.\DISPLAY1", r"\\.\DISPLAY2"],
+            &[(r"\\.\DISPLAY1", "   "), (r"\\.\DISPLAY2", " Mi TV ")],
+        );
+        assert_eq!(names_of(&list), [r"\\.\DISPLAY1", "Mi TV"]);
+        // Where Windows can't be asked (and on Linux) every display keeps its own name.
+        let list = listed_on_windows(&[r"\\.\DISPLAY1", r"\\.\DISPLAY2"], &[]);
+        assert_eq!(names_of(&list), [r"\\.\DISPLAY1", r"\\.\DISPLAY2"]);
+    }
+
+    #[test]
+    fn monitors_of_the_same_name_are_told_apart_in_order() {
+        let list = listed_on_windows(
+            &[r"\\.\DISPLAY1", r"\\.\DISPLAY2", r"\\.\DISPLAY3"],
+            &[(r"\\.\DISPLAY1", "Philips FTV"), (r"\\.\DISPLAY2", "Philips FTV"), (r"\\.\DISPLAY3", "Philips FTV")],
+        );
+        assert_eq!(names_of(&list), ["Philips FTV", "Philips FTV (2)", "Philips FTV (3)"]);
+        assert!(list[2].is_named(r"\\.\DISPLAY3"));
+    }
+
+    #[test]
+    fn a_display_shown_on_two_monitors_takes_the_first_ones_name() {
+        let list = listed_on_windows(
+            &[r"\\.\DISPLAY1", r"\\.\DISPLAY2"],
+            &[(r"\\.\DISPLAY1", "Philips FTV"), (r"\\.\DISPLAY1", "Mi TV"), (r"\\.\DISPLAY2", "Lobby TV")],
+        );
+        assert_eq!(names_of(&list), ["Philips FTV", "Lobby TV"]);
+    }
+
+    #[test]
+    fn a_macs_displays_are_found_by_display_id() {
+        let names = vec![(5_u32, "3DTV".to_owned()), (1, "HP 27f".to_owned())];
+        assert_eq!(own_name(&names, &1), Some("HP 27f"));
+        assert_eq!(own_name(&names, &7), None);
+        assert_eq!(listed_name(own_name(&names, &5), "Monitor #0", &[]), "3DTV");
     }
 }

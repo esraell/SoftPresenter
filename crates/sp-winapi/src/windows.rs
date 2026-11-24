@@ -1,8 +1,14 @@
 use std::ptr::{null, null_mut};
 
+use windows_sys::Win32::Devices::Display::{
+    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+    DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, DisplayConfigGetDeviceInfo,
+    GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
+};
 use windows_sys::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_SUCCESS, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
-    POINT, RECT,
+    ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER, ERROR_MORE_DATA, ERROR_SUCCESS, GENERIC_READ, GENERIC_WRITE,
+    HANDLE, INVALID_HANDLE_VALUE, LUID, POINT, RECT,
 };
 use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
 use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
@@ -152,4 +158,98 @@ pub fn add_to_user_path(folder: &str) -> Result<bool, String> {
         }
     });
     Ok(true)
+}
+
+pub fn monitor_names() -> Vec<(String, String)> {
+    let Some(paths) = active_paths() else { return Vec::new() };
+    paths
+        .iter()
+        .filter_map(|path| {
+            let device = device_name(path.sourceInfo.adapterId, path.sourceInfo.id)?;
+            let monitor = monitor_name(path.targetInfo.adapterId, path.targetInfo.id)?;
+            let monitor = monitor.trim();
+            (!device.is_empty() && !monitor.is_empty()).then(|| (device, monitor.to_owned()))
+        })
+        .collect()
+}
+
+/// The displays in use now, each joining a display Windows draws (the path's source) to the
+/// monitor that shows it (its target).
+fn active_paths() -> Option<Vec<DISPLAYCONFIG_PATH_INFO>> {
+    // The displays can change between asking how much room the answer needs and asking for it;
+    // Windows then says the room is too small, and it is asked again.
+    for _ in 0..3 {
+        let (mut path_count, mut mode_count) = (0u32, 0u32);
+        // SAFETY: the two counts are u32s that outlive the call, which only writes them.
+        if unsafe { GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut path_count, &mut mode_count) }
+            != ERROR_SUCCESS
+        {
+            return None;
+        }
+        let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); path_count as usize];
+        let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); mode_count as usize];
+        // SAFETY: `paths` and `modes` hold as many elements as the counts say, which is as many
+        // as the call may write, and it lowers the counts to how many it wrote. The topology id
+        // is null, as QDC_ONLY_ACTIVE_PATHS requires.
+        let asked = unsafe {
+            QueryDisplayConfig(
+                QDC_ONLY_ACTIVE_PATHS,
+                &mut path_count,
+                paths.as_mut_ptr(),
+                &mut mode_count,
+                modes.as_mut_ptr(),
+                std::ptr::null_mut(),
+            )
+        };
+        match asked {
+            ERROR_SUCCESS => {
+                paths.truncate(path_count as usize);
+                return Some(paths);
+            }
+            ERROR_INSUFFICIENT_BUFFER => {}
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// The text of a fixed-size wide string, up to its first NUL.
+fn from_wide(text: &[u16]) -> String {
+    let end = text.iter().position(|&c| c == 0).unwrap_or(text.len());
+    String::from_utf16_lossy(&text[..end])
+}
+
+/// The device name of a path's source (`\\.\DISPLAY2`), as GetMonitorInfoW gives it too.
+fn device_name(adapter: LUID, id: u32) -> Option<String> {
+    let mut request = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+        header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+            r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+            size: size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
+            adapterId: adapter,
+            id,
+        },
+        ..Default::default()
+    };
+    // SAFETY: the pointer is to the whole request, whose first field is the header (both are
+    // repr(C)); the header names this kind of request and gives its whole size, and Windows
+    // writes only within that.
+    let answered = unsafe { DisplayConfigGetDeviceInfo((&raw mut request).cast()) } == 0;
+    answered.then(|| from_wide(&request.viewGdiDeviceName))
+}
+
+/// The name a path's target, the monitor, gives itself ("Mi TV"), empty when it gives none.
+fn monitor_name(adapter: LUID, id: u32) -> Option<String> {
+    let mut request = DISPLAYCONFIG_TARGET_DEVICE_NAME {
+        header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+            r#type: DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+            size: size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>() as u32,
+            adapterId: adapter,
+            id,
+        },
+        ..Default::default()
+    };
+    // SAFETY: as in `device_name`: a pointer to the whole request, whose header comes first,
+    // names this kind of request and gives its whole size.
+    let answered = unsafe { DisplayConfigGetDeviceInfo((&raw mut request).cast()) } == 0;
+    answered.then(|| from_wide(&request.monitorFriendlyDeviceName))
 }

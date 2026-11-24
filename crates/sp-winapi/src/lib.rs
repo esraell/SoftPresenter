@@ -60,6 +60,22 @@ pub fn path_with(path: &str, folder: &str) -> Option<String> {
     Some(longer)
 }
 
+/// The names the connected monitors give themselves ("Mi TV", "Philips FTV"), as Windows'
+/// display settings show them, each with the device name of the display it shows
+/// (`\\.\DISPLAY2`, the name the window library gives that display). A monitor that gives no
+/// name is left out. A display shown on two monitors at once (duplicated) is listed once for
+/// each, in the order Windows gives them. Empty where it can't be asked, and on other systems.
+pub fn monitor_names() -> Vec<(String, String)> {
+    #[cfg(windows)]
+    {
+        windows::monitor_names()
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::path_with;

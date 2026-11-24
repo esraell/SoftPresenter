@@ -1304,7 +1304,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   painter does). On the DeckLink side, a solid picture is turned into the card's BGRA or YUV
   frame in a fifth to a quarter of the time it took, and one scaled to a card's other size
   (720p, a 4K mode) in about a third.
-- Screens fill displays by the names System Settings shows ("3DTV", "HP 27f"). The main
+- Screens fill displays by the names System Settings shows ("3DTV", "HP 27f"); on Windows by
+  the names the monitors give themselves, as Windows' display settings show them ("Mi TV",
+  "Philips FTV"), or by the device name (`\\.\DISPLAY2`) for a monitor that gives none. Two of
+  the same name are told apart as "Mi TV" and "Mi TV (2)". A screen saved under the name the
+  window system gave the display before ("Monitor #0" on a Mac, `\\.\DISPLAY2` on Windows)
+  still finds it, and is saved under the system's name from then on. The main
   display, with the menu bar, is never offered and never filled: it is where SoftPresenter's
   own window is. A fresh start puts the first screen on the first other display, or in a
   window on a Mac with one display.

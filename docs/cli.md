@@ -919,7 +919,12 @@ the usual ones.
     columns is 1 to 12.
 
 A screen set to a display that isn't plugged in keeps it by name and waits for it. Displays are
-named as macOS names them (`sp displays`); the main display, with the menu bar, is never filled.
+named as the system names them (`sp displays`): on a Mac as System Settings does, on Windows by
+the name the monitor gives itself, as Windows' display settings show it ("Mi TV"), or by its
+device name (`\\.\DISPLAY2`) where it gives none. A display can still be given by its device
+name (`screen add audience Lobby on display \\.\DISPLAY2`), and a screen saved under one before
+still finds its display; either is saved under the monitor's name from then on. The main
+display, with the menu bar or the taskbar, is never filled.
 
 A screen can play out of a Blackmagic Design DeckLink card, where Blackmagic's Desktop Video (16.0 or
 later) is installed. `sp decklink` lists the outputs as the driver names them (a DeckLink Duo 2
