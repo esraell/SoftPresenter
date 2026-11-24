@@ -48,6 +48,7 @@ mod remote;
 mod removed;
 mod renamed;
 mod running;
+mod samples;
 mod screen_cli;
 mod screens;
 mod service;
@@ -3880,6 +3881,7 @@ impl App {
                 fit: item.fit,
                 looping: item.looping,
                 followed: self.followed_items.contains(&item.id),
+                sample: item.sample.clone(),
             })
             .collect();
         let playlists = self.running.as_ref().map(|r| r.home_state.media_playlists.clone()).unwrap_or_default();
@@ -4079,6 +4081,9 @@ impl App {
         let removed = self.history.step_removed(redo)?;
         let done = if removed.in_a_theme() {
             self.redo_theme_removed(&removed, !redo)
+        } else if let removed::Removed::Samples(added) = &removed {
+            // An add: Undo takes it away, Redo puts it back.
+            self.redo_samples(added, redo)
         } else {
             removed.redo(&mut self.running.as_mut()?.home_state, !redo)
         };
@@ -4313,6 +4318,13 @@ impl App {
                     .unwrap_or_default();
                 for path in chosen {
                     self.add_dropped_file(&path);
+                }
+            }
+            MediaRequest::AddSamples => {
+                if let Err(problem) = self.add_sample_backgrounds()
+                    && let Some(running) = self.running.as_mut()
+                {
+                    running.home_state.notices.refuse(problem);
                 }
             }
             MediaRequest::AddAsSlide(index) => {
@@ -7548,6 +7560,11 @@ impl App {
             if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_PLAYLIST").is_some() {
                 running.home_state.playlist_open = true;
             }
+            // Testing aid: SOFTPRESENTER_CAPTURE_MEDIA_PLAYLIST=1 shows the first media playlist in
+            // the media strip.
+            if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_CAPTURE_MEDIA_PLAYLIST").is_some() {
+                running.home_state.media_playlist_shown = running.home_state.media_playlists.first().map(|p| p.id);
+            }
             // Testing aid: SOFTPRESENTER_CAPTURE_CHOOSER=1 opens the chooser of playlists and
             // libraries in the left column.
             if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_CAPTURE_CHOOSER").is_some() {
@@ -9823,6 +9840,7 @@ fn main() -> ExitCode {
                 fit: sp_model::ImageFit::Fill,
                 looping: true,
                 followed: false,
+                sample: None,
             });
         }
     }
@@ -9843,6 +9861,7 @@ fn main() -> ExitCode {
             id: entry.id,
             fit: entry.fit,
             looping: entry.looping,
+            sample: entry.sample.clone(),
             ..MediaItem::new(name, path.clone())
         });
         app.bin_pictures.read(entry.id, path);

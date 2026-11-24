@@ -5442,45 +5442,10 @@ pub fn media_strip(
         // From the left: the menu of media playlists.
         media_playlist_picker(ui, show, state, label.max.x + 12.0, middle);
         ui.add_space(6.0);
-        // Nothing in it yet: a big place to click, or to drop files on.
+        // Nothing in it yet: a big place to click, or to drop files on, and beside it a smaller
+        // one that adds the sample backgrounds.
         if empty && !crate::file_drop::media_coming(state) {
-            let room = ui.available_size() - vec2(0.0, 2.0);
-            let (place, response) = ui.allocate_exact_size(room, Sense::click());
-            let hot = response.hovered();
-            let painter = ui.painter();
-            painter.rect_filled(place, RADIUS_CARD, if hot { CARD } else { PANEL });
-            dashed_rect(painter, place.shrink(1.0), Stroke::new(1.5, if hot { TEXT_DIM } else { LINE }));
-            // The icon, and beside it what to do and what comes after, centred together.
-            let ink = if hot { TEXT } else { TEXT_DIM };
-            let title = painter.layout_no_wrap(
-                "Click or drag pictures and videos here to add them".to_owned(),
-                semibold(13.0),
-                ink,
-            );
-            let hint = painter.layout_no_wrap(
-                "Then click one to put it behind the words, or drag it onto a slide".to_owned(),
-                FontId::proportional(11.5),
-                TEXT_FAINT,
-            );
-            let (icon_side, gap) = (28.0, 14.0);
-            let text_width = title.size().x.max(hint.size().x);
-            let text_height = title.size().y + 3.0 + hint.size().y;
-            let left = place.center().x - (icon_side + gap + text_width) / 2.0;
-            let middle = place.center().y;
-            icons::paint(
-                painter,
-                Icon::Picture,
-                Rect::from_center_size(pos2(left + icon_side / 2.0, middle), vec2(icon_side, icon_side)),
-                ink,
-            );
-            let text_left = left + icon_side + gap;
-            let top = middle - text_height / 2.0;
-            let title_height = title.size().y;
-            painter.galley(pos2(text_left, top), title, ink);
-            painter.galley(pos2(text_left, top + title_height + 3.0), hint, TEXT_FAINT);
-            if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                state.media_request = Some(crate::home::MediaRequest::Choose);
-            }
+            empty_media_place(ui, show, state);
         }
         if !empty {
             let image_size = vec2(128.0, 72.0);
@@ -5880,6 +5845,86 @@ fn video_bar(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
     shown
 }
 
+/// Where the id of the empty bin's button for the sample backgrounds is kept, so a test finds it.
+pub(crate) fn samples_button_id() -> egui::Id {
+    egui::Id::unique("use the sample backgrounds")
+}
+
+/// The empty media bin: a big place to click for the file picker (or to drop files on), and, while
+/// the sample backgrounds are not in it, a smaller one beside it that adds them.
+fn empty_media_place(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
+    let room = ui.available_size() - vec2(0.0, 2.0);
+    let (whole, _) = ui.allocate_exact_size(room, Sense::hover());
+    let samples = crate::samples::offered(show.media());
+    let words = "Or use the sample backgrounds";
+    let (apart, pad) = (10.0, 22.0);
+    let words_width =
+        if samples { ui.painter().layout_no_wrap(words.to_owned(), semibold(13.0), TEXT).size().x } else { 0.0 };
+    let beside = if samples { words_width + 2.0 * pad + apart } else { 0.0 };
+    let place = Rect::from_min_max(whole.min, pos2((whole.max.x - beside).max(whole.min.x), whole.max.y));
+    let response = ui.interact(place, ui.scope_id().with("add media place"), Sense::click());
+    let hot = response.hovered();
+    let painter = ui.painter().with_clip_rect(place);
+    painter.rect_filled(place, RADIUS_CARD, if hot { CARD } else { PANEL });
+    dashed_rect(&painter, place.shrink(1.0), Stroke::new(1.5, if hot { TEXT_DIM } else { LINE }));
+    let ink = if hot { TEXT } else { TEXT_DIM };
+    // The icon, and beside it what to do and what comes after, centred together; in a narrow
+    // place the icon goes and the words wrap, so none is cut off.
+    let (icon_side, gap) = (28.0, 14.0);
+    let (title_words, hint_words) = (
+        "Click or drag pictures and videos here to add them".to_owned(),
+        "Then click one to put it behind the words, or drag it onto a slide".to_owned(),
+    );
+    let wide = |painter: &egui::Painter| {
+        let title = painter.layout_no_wrap(title_words.clone(), semibold(13.0), ink);
+        let hint = painter.layout_no_wrap(hint_words.clone(), FontId::proportional(11.5), TEXT_FAINT);
+        title.size().x.max(hint.size().x)
+    };
+    let room_for_words = place.width() - 28.0;
+    let with_icon = wide(&painter) + icon_side + gap <= room_for_words;
+    let words_room = if with_icon { room_for_words - icon_side - gap } else { room_for_words };
+    let title = painter.layout(title_words, semibold(13.0), ink, words_room);
+    let hint = painter.layout(hint_words, FontId::proportional(11.5), TEXT_FAINT, words_room);
+    let text_width = title.size().x.max(hint.size().x);
+    let text_height = title.size().y + 3.0 + hint.size().y;
+    let shown = if with_icon { icon_side + gap } else { 0.0 };
+    let left = place.center().x - (shown + text_width) / 2.0;
+    let middle = place.center().y;
+    if with_icon {
+        icons::paint(
+            &painter,
+            Icon::Picture,
+            Rect::from_center_size(pos2(left + icon_side / 2.0, middle), vec2(icon_side, icon_side)),
+            ink,
+        );
+    }
+    let text_left = left + shown;
+    let top = middle - text_height / 2.0;
+    let title_height = title.size().y;
+    painter.galley(pos2(text_left, top), title, ink);
+    painter.galley(pos2(text_left, top + title_height + 3.0), hint, TEXT_FAINT);
+    if response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+        state.media_request = Some(crate::home::MediaRequest::Choose);
+    }
+    if !samples {
+        return;
+    }
+    let button = Rect::from_min_max(pos2(place.max.x + apart, whole.min.y), whole.max);
+    let response = ui.interact(button, samples_button_id(), Sense::click());
+    let hot = response.hovered();
+    let painter = ui.painter();
+    painter.rect_filled(button, RADIUS_CARD, if hot { CARD } else { PANEL });
+    dashed_rect(painter, button.shrink(1.0), Stroke::new(1.5, if hot { TEXT_DIM } else { LINE }));
+    painter.text(button.center(), Align2::CENTER_CENTER, words, semibold(13.0), if hot { TEXT } else { TEXT_DIM });
+    if response
+        .on_hover_text("Seven pictures and a video to put behind the words, in a media playlist of their own")
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+    {
+        state.media_request = Some(crate::home::MediaRequest::AddSamples);
+    }
+}
+
 /// The menu beside MEDIA: all media or one media playlist, a new playlist, and renaming or
 /// deleting the one shown.
 fn media_playlist_picker(ui: &egui::Ui, show: &Show, state: &mut HomeState, left: f32, middle: f32) -> Rect {
@@ -5890,6 +5935,13 @@ fn media_playlist_picker(ui: &egui::Ui, show: &Show, state: &mut HomeState, left
     let label = shown.map_or_else(|| "All Media".to_owned(), |playlist| playlist.name.clone());
     let picker = menu_pill(ui, "media source", left, middle, &label, false).on_hover_text("Choose a media playlist");
     let place = picker.rect;
+    // Testing aid: SOFTPRESENTER_CAPTURE_MEDIA_MENU=1 opens this menu once, for a capture.
+    static MENU_OPENED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if std::env::var_os("SOFTPRESENTER_CAPTURE_MEDIA_MENU").is_some()
+        && !MENU_OPENED.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&picker));
+    }
     media_playlist_menu(show, state, &picker);
     place
 }
@@ -5926,6 +5978,18 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
                 state.media_playlists.push(made);
                 state.media_playlists_changed = true;
                 ui.data_mut(|data| data.insert_temp(ask_name, true));
+            }
+            // Only while one of the seven isn't in the bin.
+            if crate::samples::offered(show.media())
+                && ui
+                    .button("Add the Sample Backgrounds")
+                    .on_hover_text(
+                        "Seven pictures and a video to put behind the words, in a media playlist of their own",
+                    )
+                    .clicked()
+            {
+                state.media_request = Some(crate::home::MediaRequest::AddSamples);
+                ui.close();
             }
             if let Some(at) =
                 state.media_playlist_shown.and_then(|id| state.media_playlists.iter().position(|p| p.id == id))

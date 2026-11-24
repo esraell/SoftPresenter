@@ -1214,12 +1214,15 @@ pub struct MediaItem {
     pub fit: ImageFit,
     /// A video starts again at its end; one that doesn't stays on its last picture.
     pub looping: bool,
+    /// Which of the sample backgrounds the app comes with this is, by the file name it came as
+    /// ("Olive.jpg"); `None` for any other file. It stays when the file is renamed.
+    pub sample: Option<String>,
 }
 
 impl MediaItem {
     /// A file in the media bin, filling the screen and, for a video, looping.
     pub fn new(name: String, path: std::path::PathBuf) -> MediaItem {
-        MediaItem { id: Uuid::new_v4(), name, path, fit: ImageFit::Fill, looping: true }
+        MediaItem { id: Uuid::new_v4(), name, path, fit: ImageFit::Fill, looping: true, sample: None }
     }
 }
 

@@ -1075,8 +1075,22 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - Seven sample backgrounds (five stills, a stand-in for a camera shot and a looping video) come
   with the program, drawn for it and free of any licence ([`assets/backgrounds`](../assets/backgrounds),
   [docs/licences/backgrounds.md](licences/backgrounds.md)). The Mac app carries them in
-  `Contents/Resources/Backgrounds`. They are not in anyone's media bin by themselves, and no
-  screen offers them yet.
+  `Contents/Resources/Backgrounds`. They are not in anyone's media bin by themselves; the
+  media strip offers them (see Media bin). **Add the Sample Backgrounds** is the last item of the
+  menu beside MEDIA, after New Media Playlist…, shown only while any of the seven is not in the
+  bin; an empty bin offers **Or use the sample backgrounds** as a second button beside its big
+  one. The + stays one click to the file picker, and the first-run setup has no step for them.
+  Adding copies each missing one into the library's Media folder as any added file is (so it can
+  be renamed or deleted, and survives an update), puts it in the bin and gathers them in a media
+  playlist called Sample Backgrounds (made if it isn't there), which opens in the bin: Still,
+  First Light, Night Blue, Evening Hills, Olive, Room Out of Focus, Drifting Light, the last a
+  video with loop on. Each item remembers which sample it is, and the playlist is marked as
+  theirs even if renamed, so adding again puts back only the missing ones into the same
+  playlist, never a second one. A file of the church's own with a sample's name is never
+  written over (the copy is numbered). One Undo takes the whole add away (the files copied, the
+  bin items and the playlist, and the strip shows what it showed before); Redo puts it back. The
+  remote page refuses it (the sample backgrounds are added at the computer); `sp media samples`
+  does it.
 - Themes from before templates said what they were for keep working: the template Bible slides
   used is brought into the main theme as its Bible template, looking as it did, the first time
   the app starts.

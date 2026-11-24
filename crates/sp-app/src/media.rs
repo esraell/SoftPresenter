@@ -79,6 +79,11 @@ pub struct Entry {
     /// leaves the bin when its file leaves the folder, unless something else uses it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub followed: bool,
+    /// Which of the sample backgrounds it is, by its file name when it came ("Olive.jpg"); a
+    /// file renamed later is still that sample. Missing from every other item, and from a list
+    /// written before the samples.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample: Option<String>,
 }
 
 fn filled() -> sp_model::ImageFit {
@@ -100,11 +105,15 @@ pub struct Playlist {
     /// date as files come, go and change (such as an announcements video exported from Canva).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<PathBuf>,
+    /// The one that gathers the sample backgrounds (see `samples`); adding them again puts the
+    /// missing ones back into it, whatever it has been renamed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sample: bool,
 }
 
 impl Playlist {
     pub fn new(name: String) -> Playlist {
-        Playlist { id: sp_model::Uuid::new_v4(), name, files: Vec::new(), folder: None }
+        Playlist { id: sp_model::Uuid::new_v4(), name, files: Vec::new(), folder: None, sample: false }
     }
 
     pub fn has(&self, path: &Path) -> bool {
@@ -318,7 +327,14 @@ impl List {
         if let Ok(paths) = serde_json::from_str::<Vec<PathBuf>>(text) {
             let entries = paths
                 .into_iter()
-                .map(|path| Entry { id: sp_model::Uuid::new_v4(), path, fit: filled(), looping: true, followed: false })
+                .map(|path| Entry {
+                    id: sp_model::Uuid::new_v4(),
+                    path,
+                    fit: filled(),
+                    looping: true,
+                    followed: false,
+                    sample: None,
+                })
                 .collect();
             return Some(List { entries, playlists: Vec::new() });
         }
@@ -533,6 +549,7 @@ mod tests {
                     fit: sp_model::ImageFit::Fit,
                     looping: false,
                     followed: false,
+                    sample: None,
                 },
                 Entry {
                     id: sp_model::Uuid::new_v4(),
@@ -540,6 +557,7 @@ mod tests {
                     fit: sp_model::ImageFit::Fill,
                     looping: true,
                     followed: true,
+                    sample: None,
                 },
             ],
             playlists: vec![backgrounds],
@@ -550,6 +568,34 @@ mod tests {
         // A list saved before items said where they came from: every item was added by hand.
         let before = r#"{"entries":[{"id":"6f9619ff-8b86-d011-b42d-00c04fc964ff","path":"/a/sky.png","fit":"fill","looping":true}]}"#;
         assert!(List::from_json(before).is_some_and(|list| !list.entries[0].followed));
+        // ...and before the sample backgrounds: no item is a sample, no playlist is theirs.
+        let list = List::from_json(before).unwrap();
+        assert_eq!((list.entries[0].sample.as_deref(), list.playlists.len()), (None, 0));
+        let old_playlist = r#"{"entries":[],"playlists":[{"id":"6f9619ff-8b86-d011-b42d-00c04fc964ff","name":"Loop","files":["/a/sky.png"]}]}"#;
+        assert!(List::from_json(old_playlist).is_some_and(|list| !list.playlists[0].sample));
+    }
+
+    #[test]
+    fn which_sample_an_item_is_and_which_playlist_is_theirs_are_saved_and_read_back() {
+        let mut theirs = Playlist::new("Sample Backgrounds".to_owned());
+        theirs.sample = true;
+        theirs.files = vec!["/media/Olive.jpg".into()];
+        let sample = Entry {
+            id: sp_model::Uuid::new_v4(),
+            path: "/media/Chapel.jpg".into(),
+            fit: sp_model::ImageFit::Fill,
+            looping: true,
+            followed: false,
+            sample: Some("Olive.jpg".to_owned()),
+        };
+        let other = Entry { sample: None, path: "/media/Sky.png".into(), ..sample.clone() };
+        let list = List { entries: vec![sample, other], playlists: vec![theirs, Playlist::new("Loop".to_owned())] };
+        let text = serde_json::to_string(&list).unwrap();
+        assert_eq!(text.matches("\"sample\"").count(), 2, "only a sample item and their playlist say so");
+        let back = List::from_json(&text).unwrap();
+        assert_eq!(back, list);
+        assert_eq!(back.entries[0].sample.as_deref(), Some("Olive.jpg"), "still that sample under another name");
+        assert!(back.playlists[0].sample && !back.playlists[1].sample);
     }
 
     fn at(seconds: u64) -> SystemTime {

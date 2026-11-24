@@ -1,13 +1,11 @@
 //! The sample backgrounds SoftPresenter comes with (`assets/backgrounds`): five stills, a
 //! stand-in for a camera shot, and a looping video. They are never added to anyone's media bin
-//! by themselves; this finds the folder that holds them, so a screen that offers them can open
-//! the files by path.
+//! by themselves (see `samples`); this finds the folder that holds them, so the files can be
+//! opened by path.
 
 use std::path::{Path, PathBuf};
 
 /// The files, by the names the folder keeps them under.
-// Nothing offers them yet; the screen that will is being designed.
-#[cfg_attr(not(test), allow(dead_code))]
 pub const FILES: [&str; 7] = [
     "Still.jpg",
     "First Light.jpg",
@@ -21,7 +19,6 @@ pub const FILES: [&str; 7] = [
 /// The folder the backgrounds are in: the Mac app's `Contents/Resources/Backgrounds`, a
 /// `Backgrounds` folder beside the program (where other systems' packages can put it), and, in
 /// a development build or a test run, the repository's own `assets/backgrounds`.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn folder() -> Option<PathBuf> {
     let mut places: Vec<PathBuf> = Vec::new();
     if let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) {
@@ -39,9 +36,15 @@ pub fn folder() -> Option<PathBuf> {
 }
 
 /// The path of one background, by its file name from [`FILES`].
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn find(name: &str) -> Option<PathBuf> {
     FILES.contains(&name).then(|| folder().map(|dir| dir.join(name))).flatten()
+}
+
+/// Whether the files are there to be added. Looked for once: the app's files don't move while it
+/// runs, and the media strip asks every time it is drawn.
+pub fn available() -> bool {
+    static FOUND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FOUND.get_or_init(|| folder().is_some())
 }
 
 #[cfg(test)]

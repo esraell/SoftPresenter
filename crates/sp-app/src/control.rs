@@ -955,7 +955,7 @@ Running the show
   view show|edit|bible|themes
 
 Layers and controls
-  media show ITEM | media add FILE… | media delete ITEM --yes
+  media show ITEM | media add FILE… | media samples | media delete ITEM --yes
   media-playlist play NAME | media-playlist stop
   message show NAME | message hide
   prop show NAME | prop hide NAME
@@ -2799,6 +2799,21 @@ impl crate::App {
                     text.push_str(&format!("\n{problem}"));
                 }
                 Ok(Reply::with(text, data))
+            }
+            Some("samples") => {
+                self.only_at_the_computer("Adding the sample backgrounds")?;
+                let added = self.add_sample_backgrounds()?;
+                let names: Vec<&str> = added.items.iter().map(|item| item.name.as_str()).collect();
+                let playlist = self
+                    .running
+                    .as_ref()
+                    .and_then(|r| r.home_state.media_playlists.iter().find(|p| p.id == added.playlist))
+                    .map(|p| p.name.clone())
+                    .unwrap_or_default();
+                Ok(Reply::with(
+                    format!("Added {} sample backgrounds to the media bin, in the playlist {playlist}.", names.len()),
+                    serde_json::json!({"added": names, "playlist": playlist}),
+                ))
             }
             Some("delete") => {
                 let yes = args.iter().any(|w| w == "--yes");

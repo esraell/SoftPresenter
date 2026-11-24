@@ -77,6 +77,9 @@ pub enum Removed {
         name: String,
         files: Vec<(usize, std::path::PathBuf)>,
     },
+    /// Not a delete but an add, kept the same way so one Undo takes it away (and Redo puts it
+    /// back): the sample backgrounds that were added to the media bin, with their playlist.
+    Samples(Box<crate::samples::Added>),
 }
 
 /// Puts `thing` back at `at` in `list` (at its end if the list has since grown shorter).
@@ -108,7 +111,15 @@ impl Removed {
             Removed::Template { template, .. } => ("template", &template.name),
             Removed::Version { version, .. } => ("version", &version.name),
             Removed::MediaPlaylistFiles { name, .. } => ("media playlist", name),
+            Removed::Samples(_) => ("media", crate::samples::PLAYLIST_NAME),
         }
+    }
+
+    /// Whether it is the sample backgrounds added, which the app keeps (they are in its media
+    /// bin): the app takes them away and puts them back (`App::redo_samples`), not
+    /// [`redo`](Self::redo).
+    pub fn is_samples(&self) -> bool {
+        matches!(self, Removed::Samples(_))
     }
 
     /// Whether it was in a theme, which the app keeps: the app puts it back
@@ -137,6 +148,11 @@ impl Removed {
             )),
             _ => None,
         };
+        if self.is_samples() {
+            // An add: Undo (`back`) takes it away, and Redo puts it back.
+            return if back { "Took the sample backgrounds away." } else { "Put the sample backgrounds back." }
+                .to_owned();
+        }
         if let Some((what, name)) = taken_out {
             return if back {
                 format!("Put {what} back in {name}.")
@@ -155,6 +171,7 @@ impl Removed {
             Removed::Items(_) | Removed::MediaPlaylistFiles { .. } => {
                 format!("{name} has changed since, so that can't be undone.")
             }
+            Removed::Samples(_) => "The sample backgrounds have changed since, so that can't be done.".to_owned(),
             _ => format!("The {kind} {name} has changed since, so that can't be undone."),
         }
     }
@@ -304,7 +321,7 @@ impl Removed {
                 true
             }
             // The app keeps the themes, and puts these back itself (see `redo_in_theme`).
-            Removed::Template { .. } | Removed::Version { .. } => false,
+            Removed::Template { .. } | Removed::Version { .. } | Removed::Samples(_) => false,
         }
     }
 

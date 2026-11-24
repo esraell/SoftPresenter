@@ -739,7 +739,7 @@ pub(crate) fn same_file_in(dir: &Path, file: &Path) -> Option<String> {
     })
 }
 
-fn same_contents(a: &Path, b: &Path) -> bool {
+pub(crate) fn same_contents(a: &Path, b: &Path) -> bool {
     let (Ok(a), Ok(b)) = (std::fs::File::open(a), std::fs::File::open(b)) else { return false };
     let (mut a, mut b) = (std::io::BufReader::new(a), std::io::BufReader::new(b));
     let (mut left, mut right) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);

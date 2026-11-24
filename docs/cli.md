@@ -323,6 +323,7 @@ with Continuous on; open it with `playlist go` to run through the playlist.
 | Command | Does |
 |---|---|
 | `media add FILE…` | Adds pictures or videos to the media bin, as dropping them on the window does |
+| `media samples` | Adds the sample backgrounds the bin hasn't got (seven pictures and a looping video that come with the app), copied into the library's Media folder and gathered in a media playlist called Sample Backgrounds, which opens in the bin; run again, it puts back only the missing ones, into the same playlist. `sp undo` takes the whole add away. Not from the remote page |
 | `media show ITEM`, `media next`, `media previous` | A picture or video behind the words; the next or previous one in the bin (it wraps around) |
 | `media set ITEM scaling=fit\|fill\|stretch loop=on\|off` | How an item fills the screen, and whether a video loops |
 | `media delete ITEM --yes` | Takes an item out of the bin (the file stays where it is) |
@@ -333,6 +334,8 @@ with Continuous on; open it with `playlist go` to run through the playlist.
 
     $ sp media add pics/Blue.png pics/Bars.mp4
     Added 2 to the media bin: Blue.png, Bars.mp4.
+    $ sp media samples
+    Added 7 sample backgrounds to the media bin, in the playlist Sample Backgrounds.
     $ sp media show bars
     Showing Bars.mp4.
     $ sp video seek 1.5                  # at once

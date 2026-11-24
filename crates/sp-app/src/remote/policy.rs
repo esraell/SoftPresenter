@@ -132,7 +132,7 @@ pub const CLOSED_SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("voxlive", &["connect", "disconnect"]),
     ("canva", &["connect", "import", "disconnect", "presentation"]),
     ("song", &["import", "export"]),
-    ("media", &["add"]),
+    ("media", &["add", "samples"]),
 ];
 
 /// Why a page in this role may not send this command, in words to show it; `None` when it may.
@@ -182,6 +182,9 @@ fn control_refusal(args: &[String]) -> Option<String> {
             ("song", "export") => "Exporting a song pack is done at the computer, not from the remote page.".to_owned(),
             ("media", "add") => {
                 "Adding pictures and videos is done at the computer, not from the remote page.".to_owned()
+            }
+            ("media", "samples") => {
+                "The sample backgrounds are added at the computer, not from the remote page.".to_owned()
             }
             _ => format!(
                 "The remote page can't use \u{201c}{} {}\u{201d}.",
@@ -342,6 +345,7 @@ mod tests {
             "song text Amazing /etc/hosts",
             "prop new Banner /tmp/x.png",
             "media add /tmp/x.png",
+            "media samples",
             "audio add /tmp/x.mp3",
             "media-playlist follow Loop /Users",
             "bible install /tmp/bible.xml",

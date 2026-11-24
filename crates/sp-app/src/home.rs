@@ -4654,6 +4654,8 @@ pub enum AudioRequest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MediaRequest {
     Choose,
+    /// Add the sample backgrounds the bin hasn't got, in a media playlist of their own.
+    AddSamples,
     /// Take these items out of the bin (the files stay where they are).
     Delete(Vec<usize>),
     /// A slide showing this media item, added to the song shown after its chosen slide.
