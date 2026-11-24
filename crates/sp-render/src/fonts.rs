@@ -469,7 +469,10 @@ impl Fonts {
     /// The names of the font families installed on this computer, sorted, with the default
     /// typeface first.
     pub fn family_names(&mut self) -> Vec<String> {
-        let mut names: Vec<String> = self.font_cx.collection.family_names().map(str::to_owned).collect();
+        // A name beginning with a dot is one of the system's own private faces (a Mac lists
+        // ".Aqua Kana", ".Apple Color Emoji UI"…), not for choosing.
+        let mut names: Vec<String> =
+            self.font_cx.collection.family_names().filter(|name| !name.starts_with('.')).map(str::to_owned).collect();
         names.sort_by_key(|name| name.to_lowercase());
         names.dedup();
         if let Some(at) = names.iter().position(|name| name == DEFAULT_FONT_FAMILY) {

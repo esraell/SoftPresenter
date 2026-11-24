@@ -1632,6 +1632,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Report an issue… (a new issue with the version filled in) and Licences…; a click on the
   readout under the preview goes to the slide on screen (opens its item and brings the slide
   into view). The media strip has its fold button (a chevron at the right of its heading).
+- On Windows the little triangle on menu buttons (Advanced, Shapes, Add, + Add's arrow) is drawn
+  from Segoe UI Symbol; before, it showed as an empty box. The list of fonts no longer shows a
+  Mac's private faces (names beginning with a dot).
 - Importing songs: File › Import Songs › A Library Folder… on Windows and Linux first asks "A
   Folder…" or "Files…" (a Mac's one file window takes both), so a single song document or
   bundle can be chosen as well as a folder of libraries.

@@ -692,8 +692,13 @@ fn load_fonts(ctx: &egui::Context) {
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
     ];
-    const WIDE: [&str; 2] =
-        ["/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "C:\\Windows\\Fonts\\arialuni.ttf"];
+    // Windows 10 and 11 have no Arial Unicode; Segoe UI Symbol has the arrows and shapes (the
+    // little triangle on a menu button, ▾) that Segoe UI itself lacks, which drew as an empty box.
+    const WIDE: [&str; 3] = [
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "C:\\Windows\\Fonts\\arialuni.ttf",
+        "C:\\Windows\\Fonts\\seguisym.ttf",
+    ];
     // The book face the Bible page is read in; each has Cyrillic as well as Latin letters.
     const SERIF: [&str; 5] = [
         "/System/Library/Fonts/Supplemental/Georgia.ttf",

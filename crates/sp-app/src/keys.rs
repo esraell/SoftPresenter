@@ -1,7 +1,7 @@
 //! Keys for getting around the window, which work on every computer (the menu bar is the
 //! Mac's only): Command on a Mac, Ctrl elsewhere, with a letter or a number.
 //!
-//! - With Show Keys on Buttons on (in the Help menu, and in the list of keys), a small amber tag
+//! - With Show Keys on Buttons on (in the list of keys, and in Settings › Key Mappings), a small amber tag
 //!   beside everything that has a key names it, all the time; off (as it starts), never.
 //! - Command-1, 2 and 3 are Show, Bible and Edit. Option-1 to 7 (Alt elsewhere) opens a tool
 //!   tab and numbers what is in it; then 1 to 9 starts that timer, shows that message or prop,
@@ -587,8 +587,8 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
             let bottom = tops[0].max(tops[1]);
             ui.allocate_rect(Rect::from_min_max(origin, pos2(origin.x + width, bottom)), egui::Sense::hover());
         });
-        // The foot: the switch that writes each button's key beside it (on a Mac also in the
-        // Help menu; here for every computer), a note, and Done.
+        // The foot: the switch that writes each button's key beside it (also in Settings ›
+        // Key Mappings), a note, and Done.
         let foot = sheet.max.y - 59.0;
         let label = painter.layout_no_wrap("Show keys on buttons".to_owned(), FontId::proportional(13.0), TEXT);
         let track = Rect::from_min_size(pos2(sheet.min.x + 18.0, foot + 19.5), vec2(30.0, 17.0));
@@ -608,11 +608,7 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
         let knob = if on { track.right_center() - vec2(8.5, 0.0) } else { track.left_center() + vec2(8.5, 0.0) };
         painter.circle_filled(knob, 6.0, if on { TEXT } else { TEXT_DIM });
         painter.galley(pos2(track.max.x + 10.0, track.center().y - label.size().y / 2.0), label, TEXT);
-        let where_else = if cfg!(target_os = "macos") {
-            "Also in the Help menu. Settings \u{203a} Key Mappings has the menu bar's keys."
-        } else {
-            "Settings \u{203a} Key Mappings has the menu keys too."
-        };
+        let where_else = "Also in Settings \u{203a} Key Mappings.";
         let left = switch.max.x + 14.0;
         let note = painter.layout(
             where_else.to_uppercase(),
