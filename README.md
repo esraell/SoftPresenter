@@ -301,5 +301,3 @@ The Bibles keep their own terms ([docs/licences/bibles.md](docs/licences/bibles.
 LGPL build inside the app) runs as a separate program and NDI's runtime is opened at run time, never linked
 ([docs/licences/ffmpeg.md](docs/licences/ffmpeg.md), [docs/licences/ndi.md](docs/licences/ndi.md)).
 NDI® is a registered trademark of Vizrt NDI AB.
-
-SoftPresenter is not affiliated with or endorsed by Renewed Vision, the makers of ProPresenter.
