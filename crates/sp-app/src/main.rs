@@ -9594,6 +9594,10 @@ impl ApplicationHandler<AppEvent> for App {
         }
         if let Some(action) = menubar::action_of(&id) {
             self.menu_action(el, action);
+            #[cfg(target_os = "macos")]
+            if let Some(menu) = self.menu.as_mut() {
+                menu.forget_ticks();
+            }
             self.sync_panels(el);
             for panel in self.running.iter().flat_map(|r| r.panels.iter()) {
                 panel.window.request_redraw();

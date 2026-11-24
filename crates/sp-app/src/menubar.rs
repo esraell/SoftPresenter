@@ -724,7 +724,7 @@ mod mac {
 
     /// What a menu's lines are built into, and what the menu bar keeps of them.
     struct Built {
-        checks: Vec<(Action, CheckMenuItem, bool)>,
+        checks: Vec<(Action, CheckMenuItem, Option<bool>)>,
         items: Vec<(Action, MenuItem, bool)>,
     }
 
@@ -738,7 +738,7 @@ mod mac {
             }
             Entry::Check(action, label, shortcut) => {
                 let item = CheckMenuItem::with_id(id_of(*action), *label, true, false, accelerator(*shortcut));
-                built.checks.push((*action, item.clone(), false));
+                built.checks.push((*action, item.clone(), Some(false)));
                 Box::new(item)
             }
             Entry::Sub(title, entries) => {
@@ -849,7 +849,7 @@ mod mac {
     /// The menu bar, kept alive for as long as the app runs, and its ticked items.
     pub struct MenuBar {
         _menu: Menu,
-        checks: Vec<(Action, CheckMenuItem, bool)>,
+        checks: Vec<(Action, CheckMenuItem, Option<bool>)>,
         /// The items that do something, and whether each is enabled now.
         items: Vec<(Action, MenuItem, bool)>,
     }
@@ -892,10 +892,19 @@ mod mac {
         pub fn set_checked(&mut self, on: impl Fn(Action) -> bool) {
             for (action, item, shown) in &mut self.checks {
                 let now = on(*action);
-                if now != *shown {
+                if *shown != Some(now) {
                     item.set_checked(now);
-                    *shown = now;
+                    *shown = Some(now);
                 }
+            }
+        }
+
+        /// Forgets what the ticks were last set to, so the next `set_checked` sets them all: a
+        /// click on a ticked item flips its tick whatever the app then does (Service, while
+        /// already in the Service view, would have been left unticked).
+        pub fn forget_ticks(&mut self) {
+            for (_, _, shown) in &mut self.checks {
+                *shown = None;
             }
         }
     }
