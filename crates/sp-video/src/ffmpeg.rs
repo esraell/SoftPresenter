@@ -87,10 +87,25 @@ fn info_from(json: &serde_json::Value) -> Option<Info> {
     (width > 0 && height > 0).then_some(Info { width, height, fps, duration, sound })
 }
 
+/// FFmpeg or ffprobe, to be started without a console window. SoftPresenter is a window
+/// program on Windows, and a console program it starts would otherwise open a black window of
+/// its own on the operator's screen, every time a video plays.
+fn quiet(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 /// What a video is: its size, frame rate, length and whether it has sound.
 pub fn probe(path: &Path) -> Result<Info, String> {
     let ffprobe = tool("ffprobe").ok_or_else(|| missing(path))?;
-    let out = Command::new(ffprobe)
+    let out = quiet(ffprobe)
         .args(["-v", "error", "-print_format", "json", "-show_streams", "-show_format"])
         .arg(path)
         .stdin(Stdio::null())
@@ -116,7 +131,7 @@ pub fn still(path: &Path, max_side: u32, at: f64) -> Result<Frame, String> {
     let ffmpeg = tool("ffmpeg").ok_or_else(|| missing(path))?;
     let (w, h) = fitted(&info, max_side, max_side);
     let at = info.duration.map_or(0.0, |length| at.min(length * 0.5));
-    let mut command = Command::new(ffmpeg);
+    let mut command = quiet(ffmpeg);
     command.args(["-nostdin", "-hide_banner", "-loglevel", "error"]);
     // As for playing: the Mac's video hardware where the codec allows (and FFmpeg's own decoder
     // where it doesn't). AV1, which FFmpeg alone decodes only through the hardware, needs it.
@@ -423,7 +438,7 @@ impl Player {
         // The pictures: a fixed rate and size, so each picture's time and length are known.
         let (w, h) = self.size;
         let fps = self.info.fps;
-        let mut pictures = Command::new(&ffmpeg);
+        let mut pictures = quiet(&ffmpeg);
         if cfg!(target_os = "macos") {
             pictures.args(["-hwaccel", "videotoolbox"]);
         }
@@ -521,7 +536,7 @@ impl Player {
 
         // The sound: stereo at 48 kHz, into a queue the sound output drains.
         if let Some(stream) = self.stream.as_ref().filter(|_| self.info.sound) {
-            let mut sound_cmd = Command::new(&ffmpeg);
+            let mut sound_cmd = quiet(&ffmpeg);
             start(&mut sound_cmd, self.looping);
             sound_cmd
                 .args(["-vn", "-sn", "-ac", &CHANNELS.to_string(), "-ar", &RATE.to_string(), "-f", "f32le", "pipe:1"])
