@@ -1407,10 +1407,20 @@ pub fn list_keys(ui: &mut egui::Ui, salt: &str, can: [bool; 5], hints: [&str; 5]
     const ARROW: f32 = 26.0;
     const BETWEEN: f32 = 4.0;
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), TALL + LIST_KEYS_UNDER), Sense::hover());
-    let font = FontId::proportional(12.5);
     let room = row.width() - 16.0 - 2.0 * ARROW - 4.0 * BETWEEN;
-    let words = [ListKey::Add, ListKey::Copy, ListKey::Delete]
-        .map(|key| ui.painter().layout_no_wrap(key.words().to_owned(), font.clone(), TEXT).size().x);
+    let measure = |font: &FontId| {
+        [ListKey::Add, ListKey::Copy, ListKey::Delete]
+            .map(|key| ui.painter().layout_no_wrap(key.words().to_owned(), font.clone(), TEXT).size().x)
+    };
+    let mut font = FontId::proportional(12.5);
+    let mut words = measure(&font);
+    // Where the system's face is wider than the one the column was sized for, the words are set
+    // a little smaller, so that the keys fit with their least padding on every system.
+    let least = 6.0 * 3.0 + 1.0;
+    if words.iter().sum::<f32>() + least > room {
+        font.size *= ((room - least) / words.iter().sum::<f32>()).max(0.5);
+        words = measure(&font);
+    }
     let all_words: f32 = words.iter().sum();
     let pad = ((room - all_words) / 6.0).clamp(3.0, 6.0);
     let spare = (room - all_words - 6.0 * pad).max(0.0) / 3.2;
