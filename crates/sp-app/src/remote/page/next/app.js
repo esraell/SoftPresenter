@@ -318,6 +318,15 @@ const stageLayouts = [
     link('Timer', 'timer', { x: 160, y: 580, w: 1600, h: 300 }, { size: 200, color: '#6ee08a', shadow: false }, { timer: 'Sermon' })] },
 ];
 
+// NDI sources found on the network (the sample; the app's finder lists the real ones). The app's own outputs show greyed, as
+// picking one would show itself.
+const NDI_SOURCES = [
+  { id: 'STREAM-PC (Camera 1)', name: 'Camera 1', host: 'STREAM-PC' },
+  { id: 'STREAM-PC (Pulpit)', name: 'Pulpit', host: 'STREAM-PC' },
+  { id: 'LOBBY-MAC (Lobby screen)', name: 'Lobby screen', host: 'LOBBY-MAC' },
+  { id: 'SOFTPRESENTER (Audience)', name: 'Audience', host: 'This computer', own: true },
+];
+
 const DOC = {
   songs: [light, harbour, steady, evening, carol, notices],
   libraries: [{ id: newId('lib'), name: 'Christmas', songs: [carol.id] }, { id: newId('lib'), name: 'Youth', songs: [steady.id, evening.id] }],
@@ -546,7 +555,7 @@ function renderMenu() {
   el.hidden = false;
   put(el, m.stack.length > 1 ? html`<button class="ui-mi back" data-a="menuBack">${I.back} Back</button>` : '',
     items.map((it, n) => it.sep ? html`<i class="ui-sep"></i>` : it.head ? html`<span class="ui-mh">${it.head}</span>`
-      : html`<button class="ui-mi ${it.dim ? 'dim' : ''}" data-a="menuPick:${n}"><span class="ck">${it.on ? I.check : ''}</span><span class="t">${it.t}</span>${it.sub ? html`<span class="go">${I.next}</span>` : it.k ? html`<kbd>${it.k}</kbd>` : ''}</button>`));
+      : html`<button class="ui-mi ${it.dim ? 'dim' : ''}" data-a="menuPick:${n}"><span class="ck">${it.on ? I.check : ''}</span><span class="t">${it.t}</span>${it.sub ? html`<span class="go">${I.next}</span>` : it.k ? html`<kbd>${keyText(it.k)}</kbd>` : ''}</button>`));
   const w = 232, h = el.offsetHeight;
   el.style.left = Math.max(8, Math.min(m.x, innerWidth - w - 8)) + 'px';
   el.style.top = Math.max(8, Math.min(m.y, innerHeight - h - 8)) + 'px';
@@ -811,6 +820,9 @@ function objHTML(o, ctx, ed) {
   else if (o.kind === 'screen') { const scr = o.source === 'main' ? null : byId(DOC.screens, o.source);      // a live picture of an audience screen, on a stage layout
     return html`<div class="${cls} ob-screen" ${at} ${bd} style="${place}${shadow}"><div class="ob-scr">${screenHTML(scr)}</div><span class="ob-tag">⧉ ${scr ? scr.name : 'Audience screens'}</span>${badge}${handles}</div>`; }
   else if (o.kind === 'web') look = 'background:repeating-linear-gradient(45deg, rgba(255,255,255,.05) 0 6%, transparent 6% 12%);border:.15cqw dashed rgba(255,255,255,.4);';
+  else if (o.kind === 'ndi') { const src = ndiSource(o.source), here = ndiHere(o.source);      // a picture coming in over NDI, as a web page comes in
+    if (!here && !ed) return '';      // on the screens (after the app holds the last picture two seconds) and in the lists, a source that isn't sending isn't there
+    return html`<div class="${cls} ob-ndi ${here ? '' : 'gone'}" ${at} ${bd} style="${place}${shadow}"><span class="ob-tag">NDI · ${src ? src.name : o.source}${here ? '' : ndiState() === 'none' ? ' · NDI isn’t installed' : ' · not found'}</span>${badge}${handles}</div>`; }
   else look = `background:${fillCSS(o)};${CLIP[o.shape] ? `clip-path:${CLIP[o.shape]};` : `border-radius:${o.shape === 'ellipse' ? '50%' : o.shape === 'rounded' ? '3cqw' : '0'};${border}`}`;
   const mark = o.kind === 'web' ? html`<span class="ob-tag">🌐 ${o.url || ''}</span>` : o.kind === 'video' ? html`<span class="ob-tag">▶ VIDEO</span>` : '';
   return html`<div class="${cls}" ${at} ${bd} style="${place}${look}${shadow}">${mark}${badge}${handles}</div>`;
@@ -1087,7 +1099,7 @@ function render() {
 }
 function renderTop() {
   $('brand').textContent = BRAND; put('navToggle', I.list);
-  put('modes', [['show', 'Show', 'S'], ['bible', 'Bible', 'B'], ['edit', 'Edit', 'E']].map(([m, name, k]) => html`<button class="${state.mode === m || (m === 'edit' && state.mode === 'themes') ? 'on' : ''}" data-a="mode:${m}" title="${name} (Option-${k})">${name}<kbd class="kh">⌥${k}</kbd></button>`));
+  put('modes', [['show', 'Show', 'S'], ['bible', 'Bible', 'B'], ['edit', 'Edit', 'E']].map(([m, name, k]) => html`<button class="${state.mode === m || (m === 'edit' && state.mode === 'themes') ? 'on' : ''}" data-a="mode:${m}" title="${name} (${keyText('⌥' + k)})">${name}<kbd class="kh">${keyText('⌥' + k)}</kbd></button>`));
   $('gear').classList.toggle('on', state.mode === 'settings');
   document.body.classList.toggle('show-keys', !!DOC.settings.showKeys);      // key tags: a setting, not a held key
   document.body.classList.toggle('no-left', state.mode === 'bible' && !state.bible.lists);
@@ -1131,6 +1143,19 @@ const renameAt = (el, now, done, title, label = 'Name') => { if (!renameInPlace(
 // too long for its place ends in … on one line.
 const bareName = n => n.replace(/\.[A-Za-z0-9]{1,5}$/, '');
 const mediaLabel = m => DOC.media.some(o => o !== m && !o.deck && bareName(o.name).toLowerCase() === bareName(m.name).toLowerCase()) ? m.name : bareName(m.name);
+
+// Keys as the computer names them (the owner, 23 November): the Mac's symbols (⌃ ⌥ ⇧ ⌘) on a Mac, an iPad or an iPhone; words
+// elsewhere, in the usual order (Ctrl+Alt+Shift+). Every key is written once with the symbols and shown through keyText, in
+// hover hints, menus, the key tags and both lists of keys. Clicks keep their words on every computer ("Shift-click").
+// `?keys=pc` or `?keys=mac` shows the other way, for checking.
+const APPLE = (k => k === 'pc' ? false : k === 'mac' ? true : /mac|iphone|ipad|ipod/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent))(new URLSearchParams(location.search).get('keys'));
+const keyWords = s => String(s).replace(/[⌃⌥⇧⌘]+/g, m => [(m.includes('⌃') || m.includes('⌘')) && 'Ctrl', m.includes('⌥') && 'Alt', m.includes('⇧') && 'Shift'].filter(Boolean).join('+') + '+');
+const keyText = s => APPLE ? String(s) : keyWords(s);
+
+// NDI: what the finder sees ('none' when the NDI runtime isn't installed on this computer), and whether a source is sending now
+const ndiState = () => state.ndi || 'found';
+const ndiSource = id => NDI_SOURCES.find(n => n.id === id);
+const ndiHere = id => ndiState() === 'found' && !!ndiSource(id) && !(state.ndiLost || []).includes(id);
 
 /* ───────── theme versions: one name, every screen that has it ───────── */
 const versionName = id => (byId(DOC.versions || [], id) || { name: '' }).name;
@@ -1199,7 +1224,7 @@ function renderShowLeft() {
   } else if (state.src.type === 'cat') ({ rows, add } = catLeft(hit));
   else rows = html`<div class="sh-none">The church’s VoxLive screens, one slide each. Click one to put its live captions on the screens.</div>`;
   put('left', html`<div class="sect items"><div class="sect-h"><span class="cap">${state.src.type === 'pl' ? 'Playlist' : state.src.type === 'vox' ? 'Integration' : state.src.type === 'cat' ? 'Song catalog' : 'Library'}</span><button class="iconbtn" data-a="menu:importMenu" title="Import songs or slides">${svg('M6.500 2v6.500M4 6l2.500 2.500L9 6M2.500 10.500h8')}</button></div>
-    <button class="plbtn ${state.srcMenu ? 'open' : ''}" data-a="srcMenu" title="Choose a library or playlist (Option-P)"><i class="sh-kind ${state.src.type === 'pl' ? 'pl' : state.src.type === 'cat' ? 'cat' : 'lib'}">${state.src.type === 'pl' ? I.playlist : state.src.type === 'cat' ? I.catalog : I.library}</i><span>${srcName()}</span><span class="chev">${I.chev}</span></button>${panel}${rows}</div>
+    <button class="plbtn ${state.srcMenu ? 'open' : ''}" data-a="srcMenu" title="Choose a library or playlist (${keyText('⌥P')})"><i class="sh-kind ${state.src.type === 'pl' ? 'pl' : state.src.type === 'cat' ? 'cat' : 'lib'}">${state.src.type === 'pl' ? I.playlist : state.src.type === 'cat' ? I.catalog : I.library}</i><span>${srcName()}</span><span class="chev">${I.chev}</span></button>${panel}${rows}</div>
     <div class="sh-foot">${add}<input class="search" placeholder="Filter" data-i="filter" value="${state.filter}"></div>`);
   fitTitles(document.getElementById('left'));
 }
@@ -1541,11 +1566,11 @@ function renderShowCentre() {
       <button class="${tr.kind !== 'Cut' && tr.kind !== 'Dissolve' ? 'on' : ''}" data-a="transSheet" title="Every other transition"><span class="sh-trk">${tr.kind !== 'Cut' && tr.kind !== 'Dissolve' ? tr.kind : 'Advanced'}</span> ▾</button></div>
     <i class="sh-div"></i><button class="btn ${st.continuous ? 'onkey' : ''}" data-a="continuous" title="Next at the end of a song goes on to the next song">Continuous</button>
     ${DOC.versions.length ? html`<button class="btn sh-vbtn ${state.version ? 'lit' : ''}" data-a="menu:version" title="Theme version: ${state.version ? `the ${versionName(state.version.id)} version is on` : 'the usual look'}. Choose a version, such as ${DOC.versions[0].name}, for every screen whose theme has it" aria-label="Theme version">${I.theme}<i class="chev">▾</i></button>` : ''}
-    <i class="sh-div"></i><button class="btn" data-a="undo" ${undoStack.length ? { title: 'Undo (⌘Z)' } : { disabled: true, title: 'Nothing to undo' }}>Undo</button><button class="btn" data-a="redo" ${redoStack.length ? { title: 'Redo (⇧⌘Z)' } : { disabled: true, title: 'Nothing to redo' }}>Redo</button><span class="sp"></span>
+    <i class="sh-div"></i><button class="btn" data-a="undo" ${undoStack.length ? { title: `Undo (${keyText('⌘Z')})` } : { disabled: true, title: 'Nothing to undo' }}>Undo</button><button class="btn" data-a="redo" ${redoStack.length ? { title: `Redo (${keyText('⇧⌘Z')})` } : { disabled: true, title: 'Nothing to redo' }}>Redo</button><span class="sp"></span>
     <div class="seg">${[['grid', I.grid, 'Grid'], ['easy', I.easy, 'Words only'], ['table', I.table, 'Table']].map(([k, ic, t]) => html`<button class="${st.view === k ? 'on' : ''}" data-a="view:${k}" title="${t}">${ic}</button>`)}</div>
     <input type="range" min="130" max="340" value="${st.size}" data-i="size" aria-label="Slide size">`);
   const list = (mv ? mv.items.map(mediaById).filter(Boolean) : DOC.media).filter(m => !m.deck), mt = DOC.mediaTransition;
-  put('media', html`<div class="media-h"><span class="cap">Media</span><kbd class="kh">⌥M then 1–9</kbd><button class="pill" data-a="menu:mediaSrc">${mv ? mv.name : 'All Media'} ▾</button>
+  put('media', html`<div class="media-h"><span class="cap">Media</span><kbd class="kh">${keyText('⌥M')} then 1–9</kbd><button class="pill" data-a="menu:mediaSrc">${mv ? mv.name : 'All Media'} ▾</button>
       ${mv ? html`<button class="btn sm" data-a="playMp:${mv.id}">${I.play} Play this playlist</button>${mv.follow ? html`<span class="pill">Follows ${mv.follow}</span>` : ''}` : ''}
       <span class="sp"></span><button class="pill" data-a="menu:mediaTr">${mt.kind}${mt.kind === 'Cut' ? '' : ' ' + mt.time + 's'} ▾</button><button class="iconbtn" data-a="addMedia" title="Add pictures or videos">${I.plus}</button></div>
     <div class="bin">${list.length ? list.map(m => html`<button class="clip ${state.mediaOn === m.id ? 'on' : ''} ${state.mediaPick.includes(m.id) ? 'pickd' : ''}" data-a="media:${m.id}" data-m="media:${m.id}" draggable="true" data-drag="media:${m.id}">
@@ -1745,7 +1770,7 @@ function renderRight() {
   if (!tabs.includes(state.tab)) state.tab = 'Timers';
   const dots = { Timers: DOC.timers.some(t => t.run), Messages: !!state.message, Props: state.propsOn.length > 0, Audio: state.audio.playing, VoxLive: !!state.vox };
   $('tabs').className = 'tabs lv-tabs';
-  put('tabs', tabs.map((t, n) => html`<button class="${t === state.tab ? 'on' : ''}" data-a="tab:${t}" title="${t} (Option-${n + 1}, then 1 to 9 for what is in it)">${t}${dots[t] ? html`<i></i>` : ''}<kbd class="kh">⌥${n + 1}</kbd></button>`));
+  put('tabs', tabs.map((t, n) => html`<button class="${t === state.tab ? 'on' : ''}" data-a="tab:${t}" title="${t} (${keyText('⌥' + (n + 1))}, then 1 to 9 for what is in it)">${t}${dots[t] ? html`<i></i>` : ''}<kbd class="kh">${keyText('⌥' + (n + 1))}</kbd></button>`));
   put('tabbody', TAB[state.tab]());
   fitAll($('tabbody'));
 }
@@ -2424,9 +2449,23 @@ M.edAdd = () => { const t = edTarget(); return [
   { t: 'Shape', sub: Object.entries(SHAPES).map(([k, n]) => ({ t: n, f: () => edInsert('shape', k) })) },
   { t: 'Picture or Video', sub: DOC.media.map(m => ({ t: m.name, f: () => edInsert('media', m.id) })) },
   { t: 'Web Page…', f: () => ask('Web page', 'Address', 'https://', v => { if (!/^https:\/\//.test(v)) return refuse('Only addresses starting with https:// open'); edInsert('web', v); }) },
+  { t: 'NDI Source…', f: () => A.ndiSheet() },
   { t: 'Linked Text', sub: Object.entries(LINKS).map(([k, n]) => ({ t: n, f: () => edInsert('link', k) })) },
   t.type === 'layout' && { t: 'Screen Picture', sub: [{ t: 'Audience screens (main)', f: () => edInsert('screen', 'main') }, ...DOC.screens.filter(x => x.kind === 'Audience').map(x => ({ t: x.name, f: () => edInsert('screen', x.id) }))] },
   t.type === 'template' && { t: 'A Box for Words', sub: ['main', 'translation', 'verse1', 'ref1', 'verse2', 'ref2'].map(r => ({ t: r, f: () => edInsert('role', r) })) }]; };
+// Picking an NDI source: the sources the finder sees on the network, the computer each is on, and Look again. While it finds
+// none it says so and keeps looking; without the NDI runtime it says what to install. The app's own outputs show greyed: one
+// shown in a slide would show itself. Choosing one adds the object (or, from the inspector, points the picked one at it).
+A.ndiSheet = ([forId] = []) => {
+  const st = ndiState(), found = st === 'found' ? NDI_SOURCES : [];
+  const pick = n => html`<button class="nd-row ${n.own ? 'own' : ''}" ${n.own ? { disabled: true, title: 'SoftPresenter’s own output: shown in a slide it would show itself' } : { 'data-a': `ndiPick:${n.id}${forId ? ',' + forId : ''}` }}><b>${n.name}</b><span>${n.own ? 'This computer · SoftPresenter’s own' : n.host}</span></button>`;
+  openSheet({ title: 'NDI source', body: html`<div class="nd-head"><span class="sub">${st === 'none' ? 'NDI isn’t installed' : found.length ? `${found.filter(n => !n.own).length} found on this network` : 'Looking on this network…'}</span><button class="btn sm" data-a="ndiLook">Look again</button></div>
+    ${st === 'none' ? html`<p class="nd-none">NDI isn’t installed on this computer. SoftPresenter uses the NDI Tools you install yourself, as it does for sending. Once they are in, sources show here.</p>`
+      : found.length ? html`<div class="nd-list">${found.map(pick)}</div>` : html`<p class="nd-none">None found yet. A camera, a computer or another app sending NDI on this network shows here as soon as it starts. This list keeps looking while it is open.</p>`}`,
+    note: 'The picture comes in as a web page does: put it anywhere on the slide, at any size.', buttons: [{ t: 'Cancel' }] });
+};
+A.ndiLook = () => A.ndiSheet();
+A.ndiPick = ([id, forId]) => { closeSheet(); if (forId) { mutate(() => { const o = byId(edTarget().holder.objects, forId); if (o) { o.source = id; o.name = `NDI · ${ndiSource(id).name}`; } }); } else edInsert('ndi', id); };
 function edInsert(kind, arg) {
   mutate(() => {
     const obs = edTarget().holder.objects; let o;
@@ -2437,6 +2476,7 @@ function edInsert(kind, arg) {
     if (kind === 'media') { const m = mediaById(arg); o = obj(m.video ? 'video' : 'image', m.name, { media: arg, scaling: 'Fill', frame: { x: 0, y: 0, w: 1920, h: 1080 } }); }
     if (kind === 'screen') o = obj('screen', 'Screen picture', { source: arg, frame: { x: 1160, y: 40, w: 720, h: 405 } });
     if (kind === 'web') o = obj('web', 'Web page', { url: arg, frame: { x: 260, y: 200, w: 1400, h: 680 } });
+    if (kind === 'ndi') o = obj('ndi', `NDI · ${ndiSource(arg).name}`, { source: arg, scaling: 'Fit', quality: 'Full', sound: 'Off', frame: { x: 260, y: 146, w: 1400, h: 788 } });
     if (kind === 'media') obs.unshift(o); else obs.push(o);        // a picture or video goes behind the words
     state.sels = [o.id]; state.itab = o.kind === 'text' ? 'Text' : 'Shape';
   });
@@ -2528,7 +2568,10 @@ function renderInspector() {
   } else if (state.itab === 'Shape') { const f = o.frame, g = o.gradient, st = o.stroke || { w: 0, color: '#ffffff' };
     body = [row('Place', html`<div class="num4">${['x', 'y', 'w', 'h'].map(p => html`<label>${p.toUpperCase()}${num('frame.' + p, Math.round(f[p]))}</label>`)}</div>`),
       row('Arrange', [['left', 'center', 'right', 'top', 'middle', 'bottom'].map(a => key(I[a], false, `edAlign:${a}`, `Align ${a}${eff.length > 1 ? '' : ' on the slide'}`)), eff.length > 2 ? html`<button class="btn" data-a="edAlign:spreadh">Spread ↔</button><button class="btn" data-a="edAlign:spreadv">Spread ↕</button>` : '']),
-      o.kind === 'image' || o.kind === 'video' ? row('Fits', sel('scaling', ['Fit', 'Fill', 'Stretch'], o.scaling || 'Fill')) : o.kind === 'web' ? row('Address', html`<input class="field" data-c="edIn:url" value="${o.url == null ? '' : o.url}">`) : o.kind === 'screen' ? row('Shows', html`<select class="sel" data-c="edIn:source">${options([['main', 'Audience screens (main)'], ...DOC.screens.filter(x => x.kind === 'Audience').map(x => [x.id, x.name])], o.source)}</select>`)
+      o.kind === 'image' || o.kind === 'video' ? row('Fits', sel('scaling', ['Fit', 'Fill', 'Stretch'], o.scaling || 'Fill')) : o.kind === 'ndi' ? [row('Source', html`<select class="sel" data-c="edIn:source">${options([...NDI_SOURCES.filter(n => !n.own && ndiState() === 'found').map(n => [n.id, `${n.name} · ${n.host}`]), ...(ndiHere(o.source) ? [] : [[o.source, `${ndiSource(o.source) ? ndiSource(o.source).name : o.source} · not found`]])], o.source)}</select><button class="btn" data-a="ndiSheet:${o.id}" title="Look for sources again">Look again</button>`),
+        row('Fits', sel('scaling', ['Fit', 'Fill', 'Stretch'], o.scaling || 'Fit')),
+        row('Quality', html`${sel('quality', ['Full', 'Light'], o.quality || 'Full')}<span class="sub">Light takes the sender’s smaller picture</span>`),
+        row('Sound', html`${sel('sound', ['Off', 'On'], o.sound || 'Off')}<span class="sub">with the video sound</span>`)] : o.kind === 'web' ? row('Address', html`<input class="field" data-c="edIn:url" value="${o.url == null ? '' : o.url}">`) : o.kind === 'screen' ? row('Shows', html`<select class="sel" data-c="edIn:source">${options([['main', 'Audience screens (main)'], ...DOC.screens.filter(x => x.kind === 'Audience').map(x => [x.id, x.name])], o.source)}</select>`)
         : [row('Fill', sw('fill', o.fill, true)), row('Gradient', html`<select class="sel" data-c="edIn:gradient.kind">${options([['', 'None'], ['linear', 'Linear'], ['radial', 'Radial']], g ? g.kind : '')}</select>${g && g.kind === 'linear' ? num('gradient.angle', g.angle, { step: '15' }) : ''}`), g ? row('To', sw('gradient.to', g.to)) : ''],
       row('Outline', [num('stroke.w', st.w, { min: '0', max: '60' }), SWATCHES.slice(0, 5).map(c => html`<button class="swt ${st.color === c ? 'on' : ''}" style="background:${c}" data-a="edSet:stroke.color,${c}"></button>`)]),
       row('Effects', html`<button class="btn ${o.shadow ? 'onkey' : ''}" data-a="edToggle:shadow">Shadow</button><button class="btn ${o.flipH ? 'onkey' : ''}" data-a="edToggle:flipH">Flip ↔</button><button class="btn ${o.flipV ? 'onkey' : ''}" data-a="edToggle:flipV">Flip ↕</button>`),
@@ -2746,7 +2789,7 @@ function renderSettings() {
       html`<button class="btn" data-a="groupAdd">${I.plus} Add a group</button>`); }
   if (sec === 'Keys') body = [card('Running the show', 'These can be changed', Object.entries(KEY_NAMES).map(([a, name]) => stLine(name, html`${st.keys[a].length ? st.keys[a].map(k => html`<span class="st-key mono">${keyLabel(k)}</span>`) : html`<span class="sub">Button only</span>`}<button class="btn" data-a="keyChange:${a}">Change</button>`)),
       html`<button class="btn" data-a="keysReset">Reset</button>`),
-    card('Always the same', 'Fixed keys · press ? anywhere for the whole list', KEYS.filter((_, i) => ![0, 1, 4, 5, 7].includes(i)).map(([k, what]) => stLine(what, k.split(/\s{2,}| (?=[⌘⇧F])/).map(x => html`<span class="st-key mono">${x}</span>`))),
+    card('Always the same', 'Fixed keys · press ? anywhere for the whole list', KEYS.filter((_, i) => ![0, 1, 4, 5, 7].includes(i)).map(([k, what]) => stLine(what, k.split(/\s{2,}| (?=[⌘⇧F])/).map(x => html`<span class="st-key mono">${keyText(x)}</span>`))),
       html`<button class="btn" data-a="keysSheet">Every key</button>`),
     card('Groups', 'A group’s key jumps to it; change them in Groups', html`<div class="st-keygrid">${DOC.groups.filter(g => g.key).map(g => html`<span><span class="st-key mono">${g.key}</span>${g.name}</span>`)}</div>`)];
   if (sec === 'Integrations') { const v = DOC.voxlive;
@@ -3058,7 +3101,7 @@ A.scrAddAsk = () => A.scrAdd(['Audience']);      // what it is for (stage includ
 // The first-run setup and the song catalog it brings (the owner, 23 November: "i want it to look nice and very simple";
 // "make sure all the importatn things are in the onbaording so when theyre done its ready for them to use").
 // Five steps: Languages (with the welcome), Songs, Bibles, Screens, Ready. Each can be skipped; every answer is the same one
-// Settings makes, and the setup can be opened again from the SoftPresenter menu. AWAITING THE OWNER: a design to approve.
+// Settings makes, and the setup can be opened again from the SoftPresenter menu. Approved by the owner on 23 November.
 'use strict';
 
 /* ───────── the song catalog (Worship Leader App) ─────────
@@ -4136,7 +4179,7 @@ A.keysSheet = () => {
     ['Menus and windows', [['↑  ↓', 'Move'], ['→  ←', 'Open a group of choices; go back'], ['Enter', 'Choose'], ['Esc', 'Close']]],
     ['Changing things', [['⌘Z  ⇧⌘Z', 'Undo, redo'], ['⌘C  ⌘X  ⌘V', 'Copy, cut, paste the picked slides (objects in Edit)'], ['Delete', 'Delete what is picked: what Undo brings back goes at once (playlist items, slides, a media playlist’s items); songs in a library, pictures in the bin and screens ask first'], ['⇧↑  ⇧↓  ⌘A', 'Pick several in the left column: grow the pick, or pick them all'], ['T  ⌘D  ⌘A', 'In Edit: a new text box, duplicate, pick everything'], ['Arrows', 'In Edit: nudge the picked object (Shift for one pixel)'], ['⌘B  ⌘I  ⌘U', 'Typing in a box: bold, italic, underlined, for the words selected (or the whole box)']]],
   ];
-  openSheet({ title: 'Keys', wide: true, body: html`<div class="ui-keyson"><b>Show keys on buttons</b><span>A small tag beside each button with its key. In the app this is also in the Help menu.</span>${onoffKeys()}</div><div class="ui-keys">${groups.map(([name, rows]) => html`<section><span class="cap">${name}</span>${rows.map(([k, what]) => html`<div class="ui-key"><span class="ks">${k.split(/\s{2,}/).map(x => html`<kbd class="st-key mono">${x}</kbd>`)}</span><span>${what}</span></div>`)}</section>`)}</div>`,
+  openSheet({ title: 'Keys', wide: true, body: html`<div class="ui-keyson"><b>Show keys on buttons</b><span>A small tag beside each button with its key. In the app this is also in the Help menu.</span>${onoffKeys()}</div><div class="ui-keys">${groups.map(([name, rows]) => html`<section><span class="cap">${name}</span>${rows.map(([k, what]) => html`<div class="ui-key"><span class="ks">${k.split(/\s{2,}/).map(x => html`<kbd class="st-key mono">${keyText(x)}</kbd>`)}</span><span>${what}</span></div>`)}</section>`)}</div>`,
     note: 'The first nine can be changed in Settings › Keys.', buttons: [{ t: 'Done', primary: true }] });
 };
 
@@ -4234,6 +4277,8 @@ const DEMOS = {
   identify: () => { state.mode = 'settings'; state.identify = true; render(); }, ann: () => { state.ann = { song: DOC.songs[5].id, q: 0, left: 8 }; render(); },
 };
 if (DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();
+// The two screen switches are written in the page itself: their keys, as the computer names them
+for (const [id, k] of [['outAudience', '⌥A'], ['outStage', '⌥T']]) { const b = $(id); if (b) { b.title = b.title.replace(k, keyText(k)); const t = b.querySelector('.kh'); if (t) t.textContent = keyText(k); } }
 if (q.has('linktest')) { const sc = document.createElement('script'); sc.src = 'linktest.js'; document.body.appendChild(sc); }      // Testing aid
 if (q.has('selftest')) { const sc = document.createElement('script'); sc.src = 'selftest.js'; document.body.appendChild(sc); }
 if (q.has('remotetest')) { const sc = document.createElement('script'); sc.src = 'remotetest.js'; document.body.appendChild(sc); }      // Testing aid: with ?remote=fixture
@@ -4325,3 +4370,12 @@ Object.assign(DEMOS, {
   samples: () => A.sampleBackgrounds(),
 });
 if (/^samples/.test(q.get('demo') || '') && DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();
+// Testing aid: an NDI source in a slide: the picker, the picker finding nothing or without NDI, the object, and its source lost
+Object.assign(DEMOS, {
+  ndisheet: () => { DEMOS.edit(); setTimeout(() => A.ndiSheet(), 60); },
+  ndinone: () => { state.ndi = 'looking'; NDI_SOURCES.length = 0; DEMOS.edit(); setTimeout(() => A.ndiSheet(), 60); },
+  ndimissing: () => { state.ndi = 'none'; DEMOS.edit(); setTimeout(() => A.ndiSheet(), 60); },
+  ndiobj: () => { DEMOS.edit(); edInsert('ndi', 'STREAM-PC (Camera 1)'); render(); },
+  ndilost: () => { DEMOS.edit(); edInsert('ndi', 'STREAM-PC (Camera 1)'); state.ndiLost = ['STREAM-PC (Camera 1)']; trouble('NDI “Camera 1” stopped sending. Its slides show without it until it is back.'); render(); },
+});
+if (/^ndi/.test(q.get('demo') || '') && DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();
