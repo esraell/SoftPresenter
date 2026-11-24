@@ -179,17 +179,99 @@ impl Frames {
     /// and hands back what `show` made of it. Nothing is copied for a video the system plays
     /// (one wider than 2048 pixels is lent at half size), and FFmpeg's picture goes back to be
     /// filled again: for the thread drawing the screens, which sends the pixels straight to the
-    /// GPU.
-    pub fn next_with<R>(&self, show: impl FnOnce(&Lent<'_>) -> R) -> Option<R> {
+    /// GPU. A player opened to lend [`Lend::Rows`] lends nothing but rows.
+    pub fn next_with<R>(&self, show: impl FnOnce(Lending<'_>) -> R) -> Option<R> {
         match self {
             Frames::Video(video) => match video.now() {
                 #[cfg(target_os = "macos")]
-                Source::System(frames) => frames.next_with(show),
+                Source::System(frames) => frames.next_with(|lent| show(Lending::Rows(lent))),
                 Source::Ffmpeg(frames) => frames.next_with(show),
             },
-            Frames::Web(frames) => frames.next().map(|frame| show(&Lent::rgba(&frame))),
+            Frames::Web(frames) => {
+                frames.next().map(|frame| show(Lending::Rows(&Lent::rgba(frame.width, frame.height, &frame.rgba))))
+            }
         }
     }
+}
+
+/// How a player lends its pictures (see [`Frames::next_with`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Lend {
+    /// Always as rows of four-byte pixels: for pictures copied for every thread that draws (a
+    /// video in a box on a slide, or on the Announcements layer).
+    #[default]
+    Rows,
+    /// As the video's own two planes where FFmpeg plays it and the video allows (see
+    /// [`Planes`]), otherwise as rows: for the thread that sends the video behind the slide
+    /// to the GPU, which turns the planes into colours there.
+    Planes,
+}
+
+/// A picture lent for the length of a call (see [`Frames::next_with`]).
+pub enum Lending<'a> {
+    /// Rows of four-byte pixels.
+    Rows(&'a Lent<'a>),
+    /// A video's own two planes, for the GPU to turn into colours.
+    Planes(&'a Planes<'a>),
+}
+
+impl<'a> Lending<'a> {
+    /// The rows, for a caller that only takes pictures that way: a player opened to lend
+    /// [`Lend::Rows`] never lends planes.
+    pub fn rows(&self) -> Option<&'a Lent<'a>> {
+        match self {
+            Lending::Rows(lent) => Some(lent),
+            Lending::Planes(_) => None,
+        }
+    }
+}
+
+/// A video's picture as FFmpeg decodes most videos (NV12), lent for the length of a call:
+/// every pixel's brightness, a byte each, and the colour of each square of four pixels, its Cb
+/// and Cr bytes side by side, in a plane half the width and half the height (rounded up, so an
+/// odd side's edge has samples of its own). Each plane's rows follow one another with nothing
+/// between. [`Colours`] says how they stand for red, green and blue.
+pub struct Planes<'a> {
+    pub width: u32,
+    pub height: u32,
+    /// `width` bytes a row.
+    pub luma: &'a [u8],
+    /// [`Planes::chroma_row`] bytes a row, `ceil(height / 2)` rows.
+    pub chroma: &'a [u8],
+    pub colours: Colours,
+}
+
+impl Planes<'_> {
+    /// The bytes a picture of this size takes: both planes.
+    pub fn bytes(width: u32, height: u32) -> usize {
+        let (cw, ch) = (width.div_ceil(2) as usize, height.div_ceil(2) as usize);
+        width as usize * height as usize + cw * ch * 2
+    }
+
+    /// How many bytes each row of the colour plane takes: `2 * ceil(width / 2)`.
+    pub fn chroma_row(&self) -> usize {
+        self.width.div_ceil(2) as usize * 2
+    }
+}
+
+/// How a video's planes stand for colours: the standard they were written in, and whether
+/// their bytes use the whole range or broadcast video's limited one (brightness 16 to 235), as
+/// nearly every video does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Colours {
+    pub matrix: Matrix,
+    pub full_range: bool,
+}
+
+/// The standard a video's colours were written in: the ones FFmpeg's own converter has numbers
+/// for, any other (or none named) being taken as BT.601, as FFmpeg takes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Matrix {
+    Bt601,
+    Bt709,
+    Fcc,
+    Smpte240,
+    Bt2020,
 }
 
 /// The order of the four bytes of a lent picture's pixels.
@@ -236,15 +318,8 @@ impl<'a> Lent<'a> {
             })
     }
 
-    fn rgba(frame: &'a Frame) -> Lent<'a> {
-        Lent {
-            width: frame.width,
-            height: frame.height,
-            bytes_per_row: frame.width as usize * 4,
-            bytes: &frame.rgba,
-            order: PixelOrder::Rgba,
-            opaque: false,
-        }
+    fn rgba(width: u32, height: u32, bytes: &'a [u8]) -> Lent<'a> {
+        Lent { width, height, bytes_per_row: width as usize * 4, bytes, order: PixelOrder::Rgba, opaque: false }
     }
 }
 
@@ -269,16 +344,16 @@ macro_rules! either {
 impl Engine {
     /// Opens a video, paused at its start: with the system's player for an MP4 or MOV (on the
     /// main thread), otherwise with FFmpeg.
-    fn open(path: &Path) -> Result<Engine, String> {
+    fn open(path: &Path, lend: Lend) -> Result<Engine, String> {
         #[cfg(target_os = "macos")]
         if system_first(path) {
             return mac::Player::open(path).map(Engine::System);
         }
-        Engine::open_with_ffmpeg(path)
+        Engine::open_with_ffmpeg(path, lend)
     }
 
-    fn open_with_ffmpeg(path: &Path) -> Result<Engine, String> {
-        ffmpeg::Player::open(path).map(|player| Engine::Ffmpeg(Box::new(player)))
+    fn open_with_ffmpeg(path: &Path, lend: Lend) -> Result<Engine, String> {
+        ffmpeg::Player::open(path, lend == Lend::Planes).map(|player| Engine::Ffmpeg(Box::new(player)))
     }
 
     fn source(&self) -> Source {
@@ -361,6 +436,8 @@ pub struct Player {
     source: Arc<Mutex<Source>>,
     /// The file lined up to follow, opened and waiting at its start.
     next: Option<(Engine, PathBuf)>,
+    /// How its pictures are lent, the next file's too.
+    lend: Lend,
     looping: bool,
     volume: f32,
     /// How far in it was when last looked at, to see a looping video go round between two looks.
@@ -371,23 +448,25 @@ pub struct Player {
 
 impl Player {
     /// Opens a video, paused at its start: with the system's player for an MP4 or MOV (on the
-    /// main thread), otherwise with FFmpeg. The error is a sentence for the operator.
-    pub fn open(path: &Path) -> Result<Player, String> {
-        Engine::open(path).map(|engine| Player::with(engine, path))
+    /// main thread), otherwise with FFmpeg. Its pictures are lent as `lend` says, and so are
+    /// those of files lined up to follow it. The error is a sentence for the operator.
+    pub fn open(path: &Path, lend: Lend) -> Result<Player, String> {
+        Engine::open(path, lend).map(|engine| Player::with(engine, path, lend))
     }
 
     /// Opens a video with FFmpeg, for when the system's player has failed on it (an AV1 video
     /// on a Mac without AV1 hardware, say).
-    pub fn open_with_ffmpeg(path: &Path) -> Result<Player, String> {
-        Engine::open_with_ffmpeg(path).map(|engine| Player::with(engine, path))
+    pub fn open_with_ffmpeg(path: &Path, lend: Lend) -> Result<Player, String> {
+        Engine::open_with_ffmpeg(path, lend).map(|engine| Player::with(engine, path, lend))
     }
 
-    fn with(engine: Engine, path: &Path) -> Player {
+    fn with(engine: Engine, path: &Path, lend: Lend) -> Player {
         Player {
             source: Arc::new(Mutex::new(engine.source())),
             engine,
             path: path.to_owned(),
             next: None,
+            lend,
             looping: false,
             volume: 1.0,
             last_position: 0.0,
@@ -399,13 +478,13 @@ impl Player {
         matches!(self.engine, Engine::Ffmpeg(_))
     }
 
-    /// What FFmpeg was asked for, for the log: how to decode (and so what it was asked, not
-    /// what it used: it says nothing more). `None` for the system's player.
+    /// What FFmpeg was asked for, for the log: how to decode, and the pictures it gives (what
+    /// it was asked, not what it used: it says nothing more). `None` for the system's player.
     pub fn ffmpeg_asked(&self) -> Option<String> {
         match &self.engine {
             #[cfg(target_os = "macos")]
             Engine::System(_) => None,
-            Engine::Ffmpeg(player) => Some(player.decoding()),
+            Engine::Ffmpeg(player) => Some(player.asked()),
         }
     }
 
@@ -496,7 +575,7 @@ impl Player {
     /// looping as this one does, at its volume. One lined up before is let go. The error is a
     /// sentence for the operator; this one plays on as it was.
     pub fn play_next(&mut self, path: &Path) -> Result<(), String> {
-        let mut next = Engine::open(path)?;
+        let mut next = Engine::open(path, self.lend)?;
         next.set_looping(self.looping);
         next.set_volume(self.volume);
         // The system's player decodes the first picture once asked for a time: it is ready
@@ -555,7 +634,7 @@ impl Player {
     fn hand_over(&mut self) {
         let Some((mut next, path)) = self.next.take() else { return };
         if let Some(problem) = next.problem() {
-            match Engine::open_with_ffmpeg(&path) {
+            match Engine::open_with_ffmpeg(&path, self.lend) {
                 Ok(mut ffmpeg) if !matches!(next, Engine::Ffmpeg(_)) => {
                     ffmpeg.set_looping(self.looping);
                     ffmpeg.set_volume(self.volume);
@@ -699,7 +778,7 @@ mod tests {
         let (red, blue) = (dir.join("red.mkv"), dir.join("blue.mkv"));
         marker_video(&ffmpeg, &red, true);
         marker_video(&ffmpeg, &blue, false);
-        let mut player = Player::open(&red).expect("FFmpeg opens the red video");
+        let mut player = Player::open(&red, Lend::Rows).expect("FFmpeg opens the red video");
         player.set_looping(true);
         player.set_volume(0.0);
         let frames = player.frames();
@@ -709,7 +788,7 @@ mod tests {
             std::thread::spawn(move || {
                 let (started, mut seen) = (std::time::Instant::now(), Vec::new());
                 while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-                    if let Some(pixel) = frames.next_with(middle) {
+                    if let Some(pixel) = frames.next_with(|lending| lending.rows().map(middle)).flatten() {
                         seen.push((started.elapsed(), pixel));
                     }
                     std::thread::sleep(Duration::from_millis(2));
@@ -765,6 +844,123 @@ mod tests {
             seen.len()
         );
         assert!(gap < Duration::from_millis(120), "the last red picture held only a moment: {gap:?}");
+    }
+
+    /// The first picture of a video, lent as `lend` asks, in red, green and blue: as FFmpeg
+    /// converted it, or for planes, as the GPU sums them (`sp_render::YuvColours`, which
+    /// sp-render's golden test checks the GPU against), with the colours they came with.
+    fn first_picture(path: &Path, lend: Lend) -> (u32, u32, Vec<[u8; 3]>, Option<Colours>) {
+        let player = Player::open(path, lend).expect("FFmpeg opens the video");
+        let frames = player.frames();
+        let started = std::time::Instant::now();
+        while started.elapsed() < Duration::from_secs(10) {
+            let taken = frames.next_with(|lending| match lending {
+                Lending::Rows(lent) => {
+                    assert_eq!(lent.bytes_per_row, lent.width as usize * 4);
+                    let rgb = lent.bytes.as_chunks::<4>().0.iter().map(|[r, g, b, _]| [*r, *g, *b]).collect();
+                    (lent.width, lent.height, rgb, None)
+                }
+                Lending::Planes(planes) => {
+                    let matrix = match planes.colours.matrix {
+                        Matrix::Bt601 => sp_render::YuvMatrix::Bt601,
+                        Matrix::Bt709 => sp_render::YuvMatrix::Bt709,
+                        Matrix::Fcc => sp_render::YuvMatrix::Fcc,
+                        Matrix::Smpte240 => sp_render::YuvMatrix::Smpte240,
+                        Matrix::Bt2020 => sp_render::YuvMatrix::Bt2020,
+                    };
+                    let sums = sp_render::YuvColours { matrix, full_range: planes.colours.full_range };
+                    let (w, h) = (planes.width as usize, planes.height as usize);
+                    assert_eq!(planes.luma.len(), w * h);
+                    assert_eq!(planes.chroma.len(), planes.chroma_row() * h.div_ceil(2));
+                    let rgb = (0..h)
+                        .flat_map(|y| (0..w).map(move |x| (x, y)))
+                        .map(|(x, y)| {
+                            let at = y / 2 * planes.chroma_row() + x / 2 * 2;
+                            sums.rgb(planes.luma[y * w + x], planes.chroma[at], planes.chroma[at + 1])
+                        })
+                        .collect();
+                    (planes.width, planes.height, rgb, Some(planes.colours))
+                }
+            });
+            if let Some(taken) = taken {
+                return taken;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("no picture came from {}", path.display());
+    }
+
+    /// The video behind the slide comes from FFmpeg as planes, and the colours the GPU makes of
+    /// them are the ones FFmpeg itself made of the same video as RGBA, as it was asked before
+    /// (so nothing shifts colour): for video named BT.709 or BT.601, video naming nothing (taken
+    /// as BT.601 and limited range, at HD size too), and full range. Two videos FFmpeg must
+    /// scale for RGBA (an odd size, which planes keep, and one larger than the screens, which
+    /// both ways scale) are one flat colour, which the planes keep: FFmpeg's RGBA of a scaled
+    /// picture comes out a step or three darker than its own unscaled conversion.
+    #[test]
+    fn ffmpegs_planes_make_the_colours_ffmpeg_made_as_rgba() {
+        let Some(ffmpeg) = ffmpeg::tool("ffmpeg") else {
+            eprintln!("FFmpeg isn't on this computer: the colours weren't checked");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("softpresenter-planes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let limited = |matrix| Colours { matrix, full_range: false };
+        let clips: [(&str, &str, &[&str], Colours); 6] = [
+            ("bt709", "testsrc2=s=1280x720", &["-colorspace", "bt709", "-color_range", "tv"], limited(Matrix::Bt709)),
+            (
+                "bt601",
+                "testsrc2=s=720x480",
+                &["-colorspace", "smpte170m", "-color_range", "tv"],
+                limited(Matrix::Bt601),
+            ),
+            ("named-nothing", "testsrc2=s=1280x720", &[], limited(Matrix::Bt601)),
+            (
+                "full",
+                "testsrc2=s=640x360",
+                &["-colorspace", "bt709", "-color_range", "pc"],
+                Colours { matrix: Matrix::Bt709, full_range: true },
+            ),
+            ("odd", "color=c=0x3080C0:s=321x181", &["-colorspace", "bt709"], limited(Matrix::Bt709)),
+            ("larger", "color=c=0x3080C0:s=2560x1440", &["-colorspace", "bt709"], limited(Matrix::Bt709)),
+        ];
+        for (name, source, tags, colours) in clips {
+            let path = dir.join(format!("{name}.mkv"));
+            let made = std::process::Command::new(&ffmpeg)
+                .args(["-v", "error", "-y", "-f", "lavfi", "-i"])
+                .arg(format!("{source}:r=30:d=1"))
+                .args(["-pix_fmt", "yuv420p"])
+                .args(tags)
+                .args(["-c:v", "ffv1"])
+                .arg(&path)
+                .status()
+                .expect("FFmpeg runs");
+            assert!(made.success(), "the {name} video is made");
+            let (pw, ph, from_planes, came) = first_picture(&path, Lend::Planes);
+            assert_eq!(came, Some(colours), "{name}: planes, in the colours the video names");
+            let (rw, rh, from_rgba, _) = first_picture(&path, Lend::Rows);
+            if source.starts_with("color=") {
+                let sizes = if name == "odd" { (321, 181, 320, 180) } else { (1920, 1080, 1920, 1080) };
+                assert_eq!(
+                    (pw, ph, rw, rh),
+                    sizes,
+                    "{name}: planes keep an odd size; RGBA is asked for with even sides"
+                );
+                let colour = [0x30, 0x80, 0xC0];
+                let off = from_planes.iter().position(|rgb| rgb.iter().zip(colour).any(|(a, b)| a.abs_diff(b) > 2));
+                assert!(off.is_none(), "{name}: pixel {off:?} is {:?}, not {colour:?}", off.map(|i| from_planes[i]));
+                eprintln!("{name}: planes {:?}, FFmpeg's RGBA {:?}, of {colour:?}", from_planes[0], from_rgba[0]);
+                continue;
+            }
+            assert_eq!((pw, ph), (rw, rh), "{name}: the same size either way");
+            let apart = |(a, b): (&[u8; 3], &[u8; 3])| a.iter().zip(b).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+            let worst = from_planes.iter().zip(&from_rgba).map(apart).max().unwrap_or(0);
+            let shades: std::collections::HashSet<&[u8; 3]> = from_rgba.iter().collect();
+            eprintln!("{name}: at most {worst} apart over {} colours", shades.len());
+            assert!(shades.len() > 100, "{name}: a picture of many colours");
+            assert!(worst <= 2, "{name}: the planes' colours are FFmpeg's, within 2: {worst} apart");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -824,7 +1020,8 @@ mod tests {
         let page = web::WebFrames::default();
         page.put(Frame { width: 1, height: 2, rgba: vec![1, 2, 3, 4, 5, 6, 7, 8] });
         let frames = Frames::Web(page);
-        let seen = frames.next_with(|lent| {
+        let seen = frames.next_with(|lending| {
+            let lent = lending.rows().expect("a web page lends rows");
             (lent.width, lent.height, lent.bytes_per_row, lent.bytes.to_vec(), lent.order, lent.opaque)
         });
         assert_eq!(seen, Some((1, 2, 4, vec![1, 2, 3, 4, 5, 6, 7, 8], PixelOrder::Rgba, false)));

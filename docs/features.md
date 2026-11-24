@@ -458,10 +458,16 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   zip `scripts/windows-package.sh` makes. FFmpeg decodes on the graphics chip where the codec
   allows: the Mac's video hardware, or Direct3D 11's video decoder on Windows; a video it can't
   decode that way (no graphics driver, say) plays with FFmpeg's own decoder on the processor,
-  and the log says so. A video the Mac's player plays
+  and the log says so. A video FFmpeg plays behind the words comes as the decoder's own two
+  planes (brightness, and colour at a quarter of the pixels), which the GPU turns into colours,
+  in the standard and range the video names (BT.601 and limited range where it names none, as
+  FFmpeg takes it): the processor no longer converts every pixel, and a third of the bytes cross
+  from FFmpeg to the app. A video with clear parts, of RGB pixels, or with colour at more than a
+  quarter of the pixels comes as RGBA, converted by FFmpeg, as before; so does a video in a box
+  on a slide or on the Announcements layer. A video the Mac's player plays
   behind the words goes to the screens as the decoder's own picture memory, with no copy through
-  the processor (a video whose format can carry clear parts, everything FFmpeg plays, and a video
-  in a box on a slide or on the Announcements layer are still copied).
+  the processor (a video whose format can carry clear parts, and a video in a box on a slide or
+  on the Announcements layer, are still copied).
   In the preview block, a video on screen has one row of keys
   under the slide's number and name: a round Play or Pause, Start Over, Forward 10 seconds, a
   slim bar to click or drag through (the time a click goes to shows over it), the time left,

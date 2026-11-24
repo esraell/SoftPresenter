@@ -1012,6 +1012,80 @@ fn a_texture_sent_on_the_gpu_draws_the_same_pixels_as_rows_sent_from_the_cpu() {
     assert!(drawn(&mut painter, &from_gpu) == cpu);
 }
 
+/// A video's two planes, sent to the GPU to be turned into colours there, are drawn in the
+/// colours the processor would have turned them into, for SD and HD video in limited and full
+/// range, at an odd size (whose last column and row have colour samples of their own) and with
+/// rows longer than their pixels.
+#[test]
+fn a_videos_planes_are_drawn_in_the_colours_the_processor_makes_of_them() {
+    use sp_render::{PixelOrder, YuvColours, YuvMatrix, YuvPlanes};
+    let (w, h) = (13u32, 7u32);
+    let (cw, ch) = YuvPlanes::chroma_size(w, h);
+    let (device, queue) = gpu();
+    // Every pixel's brightness different, and colour samples spread over every byte (each
+    // row padded with bytes nothing should read).
+    let (luma_row, chroma_row) = (w as usize + 3, cw as usize * 2 + 4);
+    let luma: Vec<u8> = (0..h as usize * luma_row).map(|n| (n * 37 % 251) as u8).collect();
+    let chroma: Vec<u8> = (0..ch as usize * chroma_row).map(|n| (n * 101 % 256) as u8).collect();
+    let texture = target_texture(device, w, h);
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut cpu_painter = Painter::new(device).expect("painter");
+    let mut painter = Painter::new(device).expect("painter");
+    painter.prepare_planes(device);
+    let from_cpu = cpu_painter.moving_picture(device, w, h, PixelOrder::Rgba).expect("moving picture");
+    let from_gpu = painter.moving_picture(device, w, h, PixelOrder::Rgba).expect("moving picture");
+    let drawn = |painter: &mut Painter, moving: &sp_render::MovingPicture| {
+        painter.paint(device, queue, &media_scene(&moving.picture(), w, h), &view, w, h).expect("paint");
+        read_pixels(device, queue, &texture).expect("read back")
+    };
+    for matrix in [YuvMatrix::Bt601, YuvMatrix::Bt709] {
+        for full_range in [false, true] {
+            let colours = YuvColours { matrix, full_range };
+            // The processor's way: each pixel's colours worked out, its square's colour sample
+            // used as it is, and sent as rows.
+            let rgba: Vec<u8> = (0..h as usize)
+                .flat_map(|y| (0..w as usize).map(move |x| (x, y)))
+                .flat_map(|(x, y)| {
+                    let at = y / 2 * chroma_row + x / 2 * 2;
+                    let [r, g, b] = colours.rgb(luma[y * luma_row + x], chroma[at], chroma[at + 1]);
+                    [r, g, b, 255]
+                })
+                .collect();
+            assert!(cpu_painter.show_rows(queue, &from_cpu, &rgba, w as usize * 4));
+            let planes = YuvPlanes { width: w, height: h, luma: &luma, luma_row, chroma: &chroma, chroma_row, colours };
+            assert!(painter.show_planes(device, queue, &from_gpu, &planes));
+            let (cpu, gpu) = (drawn(&mut cpu_painter, &from_cpu), drawn(&mut painter, &from_gpu));
+            let worst = cpu.iter().zip(&gpu).map(|(a, b)| a.abs_diff(*b)).max();
+            let first = cpu.iter().zip(&gpu).position(|(a, b)| a.abs_diff(*b) > 1);
+            assert!(
+                first.is_none(),
+                "{colours:?}: the GPU's colours are the processor's: first difference at pixel {:?}: {:?} vs {:?}",
+                first.map(|i| i / 4),
+                first.map(|i| &cpu[i / 4 * 4..i / 4 * 4 + 4]),
+                first.map(|i| &gpu[i / 4 * 4..i / 4 * 4 + 4])
+            );
+            let shades: std::collections::HashSet<&[u8]> = cpu.chunks(4).collect();
+            assert!(shades.len() > 40, "{colours:?}: a picture of many colours, not one flat one: {}", shades.len());
+            eprintln!("{colours:?}: at most {worst:?} apart, {} colours", shades.len());
+        }
+    }
+    // Planes short of bytes, of another size, or for a picture made for BGRA bytes are refused,
+    // and nothing changes.
+    let colours = YuvColours { matrix: YuvMatrix::Bt709, full_range: true };
+    let planes = YuvPlanes { width: w, height: h, luma: &luma, luma_row, chroma: &chroma, chroma_row, colours };
+    let before = drawn(&mut painter, &from_gpu);
+    assert!(!painter.show_planes(
+        device,
+        queue,
+        &from_gpu,
+        &YuvPlanes { chroma: &chroma[..chroma.len() - 5], ..planes }
+    ));
+    assert!(!painter.show_planes(device, queue, &from_gpu, &YuvPlanes { width: w - 1, ..planes }));
+    let bgra = painter.moving_picture(device, w, h, PixelOrder::Bgra).expect("moving picture");
+    assert!(!painter.show_planes(device, queue, &bgra, &planes), "a picture made for BGRA bytes isn't sent planes");
+    assert!(drawn(&mut painter, &from_gpu) == before);
+}
+
 /// A texture sent with `show_texture` is held by the painter until the GPU says it has finished
 /// with it, and no more than a few at a time are held however far behind the GPU is.
 #[test]

@@ -912,14 +912,19 @@ fn copied(lent: &sp_video::Lent<'_>) -> Option<Picture> {
 }
 
 /// The picture a playing video lends, sent into its texture on the GPU (made, or made again for
-/// another size), to draw as the media; a copy where that can't be done.
+/// another size), to draw as the media: four-byte pixels as they are, a copy where that can't be
+/// done, or a video's two planes, which the GPU turns into colours.
 fn into_texture(
-    lent: &sp_video::Lent<'_>,
+    lending: sp_video::Lending<'_>,
     painter: &mut Painter,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     video_texture: &mut Option<MovingPicture>,
 ) -> Option<Picture> {
+    let lent = match lending {
+        sp_video::Lending::Rows(lent) => lent,
+        sp_video::Lending::Planes(planes) => return planes_into_texture(planes, painter, device, queue, video_texture),
+    };
     // The GPU draws each pixel's fourth byte as its alpha. A picture shown opaque whatever those
     // bytes say goes there as it is only when every one is full (as the system's player decodes
     // all but a video with clear parts); a picture where one isn't is drawn from a copy made
@@ -938,6 +943,45 @@ fn into_texture(
         .map(MovingPicture::picture)
         // A picture too large for a texture is drawn from a copy.
         .or_else(|| copied(lent))
+}
+
+/// A video's two planes, sent to the GPU, which turns them into colours in the moving picture's
+/// texture (made, or made again for another size). `None` when it could not be done (planes
+/// too large for a texture, which FFmpeg is never asked for).
+fn planes_into_texture(
+    planes: &sp_video::Planes<'_>,
+    painter: &mut Painter,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    video_texture: &mut Option<MovingPicture>,
+) -> Option<Picture> {
+    let (width, height) = (planes.width, planes.height);
+    let order = sp_render::PixelOrder::Rgba;
+    if !video_texture.as_ref().is_some_and(|kept| kept.fits(width, height, order)) {
+        *video_texture = painter.moving_picture(device, width, height, order);
+    }
+    let sent = sp_render::YuvPlanes {
+        width,
+        height,
+        luma: planes.luma,
+        luma_row: width as usize,
+        chroma: planes.chroma,
+        chroma_row: planes.chroma_row(),
+        colours: yuv_colours(planes.colours),
+    };
+    video_texture.as_ref().filter(|kept| painter.show_planes(device, queue, kept, &sent)).map(MovingPicture::picture)
+}
+
+/// The colours a video's planes stand for, as the GPU's pass takes them.
+fn yuv_colours(colours: sp_video::Colours) -> sp_render::YuvColours {
+    let matrix = match colours.matrix {
+        sp_video::Matrix::Bt601 => sp_render::YuvMatrix::Bt601,
+        sp_video::Matrix::Bt709 => sp_render::YuvMatrix::Bt709,
+        sp_video::Matrix::Fcc => sp_render::YuvMatrix::Fcc,
+        sp_video::Matrix::Smpte240 => sp_render::YuvMatrix::Smpte240,
+        sp_video::Matrix::Bt2020 => sp_render::YuvMatrix::Bt2020,
+    };
+    sp_render::YuvColours { matrix, full_range: colours.full_range }
 }
 
 /// The picture a playing video's decoder made, as a GPU texture over the decoder's own memory,
@@ -965,9 +1009,10 @@ fn decoded_into_texture(
 fn copied_from(frames: &sp_video::Frames, held: &mut Held) -> Option<Picture> {
     let fetching = Instant::now();
     let mut copying = Duration::ZERO;
-    let picture = frames.next_with(|lent| {
+    // The videos copied this way are opened to lend rows (`sp_video::Lend::Rows`).
+    let picture = frames.next_with(|lending| {
         let began = Instant::now();
-        let picture = copied(lent);
+        let picture = lending.rows().and_then(copied);
         copying = began.elapsed();
         picture
     });
@@ -1206,10 +1251,12 @@ fn run(
         Ok(painter) => painter,
         Err(e) => return eprintln!("The output cannot draw on this computer: {e}"),
     };
-    // Videos the system plays reach the GPU through a small compute pass: compiled now, not when
-    // the first video's first picture comes.
+    // Videos the system plays reach the GPU through a small compute pass, and the planes FFmpeg
+    // gives are turned into colours by another: compiled now, not when the first video's first
+    // picture comes.
     #[cfg(target_os = "macos")]
     painter.prepare_texture_copy(&device);
+    painter.prepare_planes(&device);
     // Testing aid: SOFTPRESENTER_OUTPUT_ROOM (see `output_room`).
     if let Some(room) = std::env::var("SOFTPRESENTER_OUTPUT_ROOM").ok().as_deref().and_then(output_room) {
         painter.keep_scratch_at(Some(room));
@@ -2987,9 +3034,9 @@ impl Output {
                     }
                 });
             let mut by_copy = || {
-                frames.next_with(|lent| {
+                frames.next_with(|lending| {
                     let began = Instant::now();
-                    let shown = into_texture(lent, painter, device, queue, video_texture);
+                    let shown = into_texture(lending, painter, device, queue, video_texture);
                     copying = began.elapsed();
                     shown
                 })

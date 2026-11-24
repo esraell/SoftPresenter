@@ -83,6 +83,7 @@ person:
 | `SOFTPRESENTER_SLOW_PAGES=<ms>` | Each page of a PDF being made into slides takes that many milliseconds longer, to try a quit part way through (the pictures are drawn at the next start) or to see "Page N…" |
 | `SOFTPRESENTER_HIDE_PICTURE_APPS=1` | Behave as on a Mac where no app can open a presentation to draw it (the import sheet greys As Pictures) |
 | `SOFTPRESENTER_VIDEO_COPY=1` | Videos the system plays reach the GPU as copies of their pixels, as on a computer where they can't go as the decoder's own memory (to compare the two ways) |
+| `SOFTPRESENTER_VIDEO_RGBA=1` | The video FFmpeg plays behind the words comes as RGBA pixels FFmpeg converts on the processor, as before, instead of as planes the GPU turns into colours (to compare the two ways, or go back with no new build) |
 | `SOFTPRESENTER_NDI_LOSE=<n>` or `<n>@<place>` | The next n NDI pictures somebody is watching for count as lost on their way back from the GPU (with a place, only that picture of each drawing: 1 is the first) |
 | `SOFTPRESENTER_NDI=<name>` | Also send over NDI under this name, this run only |
 | `SOFTPRESENTER_HIDE_DECKLINK=1` | Behave as on a computer without Desktop Video (the DeckLink driver) |

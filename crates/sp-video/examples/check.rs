@@ -47,7 +47,7 @@ fn main() {
             Ok(frame) => println!("{arg}: still {frame:?}"),
             Err(e) => println!("{arg}: {e}"),
         }
-        let mut player = match sp_video::Player::open(path) {
+        let mut player = match sp_video::Player::open(path, sp_video::Lend::Rows) {
             Ok(player) => player,
             Err(e) => {
                 println!("{arg}: {e}");
@@ -60,7 +60,8 @@ fn main() {
             // The lowest and highest fourth byte of any pixel of any picture.
             let mut fourth = (u8::MAX, u8::MIN);
             while started.elapsed() < Duration::from_millis(*RUN_MS) {
-                let lent = frames.next_with(|lent| {
+                let lent = frames.next_with(|lending| {
+                    let lent = lending.rows().expect("a player opened for rows lends rows");
                     let row = lent.width as usize * 4;
                     for line in lent.bytes.chunks(lent.bytes_per_row).take(lent.height as usize) {
                         for pixel in line[..row].as_chunks::<4>().0 {
@@ -116,7 +117,7 @@ fn main() {
 /// Plays `first` looping, lines `next` up after 0.3 s, and says what the screens' pictures did
 /// around the hand-over.
 fn handover(first: &Path, next: &Path) {
-    let mut player = match sp_video::Player::open(first) {
+    let mut player = match sp_video::Player::open(first, sp_video::Lend::Rows) {
         Ok(player) => player,
         Err(e) => return println!("{}: {e}", first.display()),
     };
@@ -130,7 +131,8 @@ fn handover(first: &Path, next: &Path) {
         std::thread::spawn(move || {
             let (started, mut seen) = (Instant::now(), Vec::new());
             while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-                let middle = frames.next_with(|lent| {
+                let middle = frames.next_with(|lending| {
+                    let lent = lending.rows().expect("a player opened for rows lends rows");
                     let at = (lent.height as usize / 2) * lent.bytes_per_row + (lent.width as usize / 2) * 4;
                     let pixel = &lent.bytes[at..at + 4];
                     match lent.order {

@@ -2341,7 +2341,9 @@ impl App {
         let loops = self.loops_now(&item);
         let quiet = self.quiet();
         let Some(running) = self.running.as_mut() else { return };
-        match sp_video::Player::open(&item.path) {
+        // The video behind the slide goes to the GPU from this thread only (the screens'), so
+        // FFmpeg may give its pictures as planes the GPU turns into colours.
+        match sp_video::Player::open(&item.path, sp_video::Lend::Planes) {
             Ok(mut player) => {
                 let engine = match player.ffmpeg_asked() {
                     Some(asked) => format!("FFmpeg ({asked})"),
@@ -2435,7 +2437,7 @@ impl App {
                 continue;
             }
             let Some(path) = images::resolve(&file) else { continue };
-            match sp_video::Player::open(&path) {
+            match sp_video::Player::open(&path, sp_video::Lend::Rows) {
                 Ok(mut player) => {
                     applog::event("video", &format!("playing {} in a box on the slide", path.display()));
                     player.set_looping(true);
@@ -2969,7 +2971,8 @@ impl App {
             if player.problem().is_none() || player.uses_ffmpeg() || self.slide_video_refused.contains(file) {
                 continue;
             }
-            let fallback = images::resolve(file).map(|path| (sp_video::Player::open_with_ffmpeg(&path), path));
+            let fallback = images::resolve(file)
+                .map(|path| (sp_video::Player::open_with_ffmpeg(&path, sp_video::Lend::Rows), path));
             let Some((Ok(mut fallback), path)) = fallback else {
                 self.slide_video_refused.insert(file.clone());
                 continue;
@@ -3035,7 +3038,7 @@ impl App {
                 let loops = self.loops_now(&item);
                 let quiet = self.quiet();
                 let running = self.running.as_mut()?;
-                match sp_video::Player::open_with_ffmpeg(&item.path) {
+                match sp_video::Player::open_with_ffmpeg(&item.path, sp_video::Lend::Planes) {
                     Ok(mut fallback) => {
                         let asked = fallback.ffmpeg_asked().unwrap_or_default();
                         applog::event(

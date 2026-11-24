@@ -9,6 +9,7 @@ mod picture;
 mod pictures;
 mod scene;
 mod see_through;
+mod yuv;
 
 pub use fade_blend::{FadeBlend, Weights, blend_weights};
 pub use fonts::{Fonts, copy_large_fonts_into_caches};
@@ -29,3 +30,4 @@ pub use scene::{
 pub use see_through::{Solid, SolidPass, see_through_transition};
 pub use vello;
 pub use vello::wgpu;
+pub use yuv::{YuvColours, YuvMatrix, YuvPlanes};

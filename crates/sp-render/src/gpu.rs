@@ -7,7 +7,8 @@ use vello::peniko::{Blob, Color, ImageAlphaType, ImageData};
 use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene, wgpu};
 
 use crate::picture::rows_hold;
-use crate::{Picture, PixelOrder};
+use crate::yuv::ToColours;
+use crate::{Picture, PixelOrder, YuvPlanes};
 
 /// Paints scenes into GPU textures. One per thread that draws.
 pub struct Painter {
@@ -19,6 +20,9 @@ pub struct Painter {
     /// Copies a BGRA texture that is already on the GPU into a moving picture's: made the first
     /// time one is shown, or by [`Painter::prepare_texture_copy`].
     swizzle: Option<Swizzle>,
+    /// Turns a video's two planes into a moving picture's pixels: made the first time a video
+    /// is shown that way, or by [`Painter::prepare_planes`].
+    to_colours: Option<ToColours>,
     /// Textures [`Painter::show_texture`] sent to the GPU that it may not have finished with,
     /// each with what says it has.
     in_flight: VecDeque<(wgpu::Texture, Arc<AtomicBool>)>,
@@ -169,6 +173,7 @@ impl Painter {
                 moving: Vec::new(),
                 paints: 0,
                 swizzle: None,
+                to_colours: None,
                 in_flight: VecDeque::new(),
             })
             .map_err(|e| e.to_string())
@@ -310,6 +315,37 @@ impl Painter {
         }
         self.renderer.mark_override_image_dirty(&moving.picture.image);
         true
+    }
+
+    /// Sends a moving picture its new pixels as a video's two planes (see [`YuvPlanes`]), which
+    /// the GPU turns into colours: the moving picture must have the planes' size and have been
+    /// made for [`PixelOrder::Rgba`] (the GPU writes red first, so the picture is the very bytes
+    /// [`Painter::show_rows`] would have sent had the processor turned them into colours, and is
+    /// drawn the same). Everything drawn with its picture from now on shows them. False, with
+    /// nothing changed, when the planes lack bytes or aren't of that size.
+    pub fn show_planes(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        moving: &MovingPicture,
+        planes: &YuvPlanes<'_>,
+    ) -> bool {
+        if moving.picture.image.format != PixelOrder::Rgba.format() {
+            return false;
+        }
+        let to_colours = self.to_colours.get_or_insert_with(|| ToColours::new(device));
+        if !to_colours.convert(device, queue, planes, &moving.texture) {
+            return false;
+        }
+        self.renderer.mark_override_image_dirty(&moving.picture.image);
+        true
+    }
+
+    /// Gets the compute pass [`Painter::show_planes`] uses ready, which takes a moment (the GPU's
+    /// compiler works on it), so that the first picture of a video doesn't. Does nothing the
+    /// second time.
+    pub fn prepare_planes(&mut self, device: &wgpu::Device) {
+        self.to_colours.get_or_insert_with(|| ToColours::new(device));
     }
 
     /// Gets the compute pass [`Painter::show_texture`] uses ready, which takes a moment (the

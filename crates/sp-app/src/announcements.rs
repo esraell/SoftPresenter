@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sp_model::{Slide, Theme, Uuid};
+use sp_video::Lend;
 
 use crate::output::{Announcement, OutputMsg};
 
@@ -305,8 +306,11 @@ impl crate::App {
         looping: bool,
         with_ffmpeg: bool,
     ) -> Result<sp_video::Player, String> {
-        let mut player =
-            if with_ffmpeg { sp_video::Player::open_with_ffmpeg(path) } else { sp_video::Player::open(path) }?;
+        let mut player = if with_ffmpeg {
+            sp_video::Player::open_with_ffmpeg(path, Lend::Rows)
+        } else {
+            sp_video::Player::open(path, Lend::Rows)
+        }?;
         player.set_looping(looping);
         if self.quiet() {
             player.set_volume(0.0);

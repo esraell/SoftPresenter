@@ -85,7 +85,7 @@ mod mac {
     }
 
     fn open(path: &Path) -> Player {
-        let mut player = Player::open(path).expect("the system's player opens the clip");
+        let mut player = Player::open(path, sp_video::Lend::Rows).expect("the system's player opens the clip");
         assert!(!player.uses_ffmpeg(), "the system's player plays it");
         player.set_volume(0.0);
         player
@@ -97,7 +97,8 @@ mod mac {
         let until = Instant::now() + Duration::from_secs(3);
         while Instant::now() < until {
             player.tick();
-            let taken = frames.next_with(|lent| {
+            let taken = frames.next_with(|lending| {
+                let lent = lending.rows().expect("the system's player lends rows");
                 assert_eq!(lent.order, sp_video::PixelOrder::Bgra);
                 let row = lent.width as usize * 4;
                 let rows: Vec<u8> = lent

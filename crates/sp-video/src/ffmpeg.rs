@@ -5,6 +5,12 @@
 //! pausing simply stops reading, and FFmpeg waits on its full pipe. Only a seek starts FFmpeg
 //! again. Where the codec allows, FFmpeg decodes on the graphics chip: the Mac's video hardware,
 //! or Direct3D 11's video decoder on Windows (see [`HARDWARE`]).
+//!
+//! The video behind the slide comes as the decoder's own two planes (NV12), which the GPU turns
+//! into colours, where the video allows (see [`colours_of`]); everything else comes as RGBA
+//! pixels FFmpeg converts on the processor. Planes are three eighths of RGBA's bytes, and the
+//! decoder makes them anyway: with the graphics chip decoding, FFmpeg does nothing to them at
+//! all but hand them over.
 
 use std::collections::VecDeque;
 use std::io::Read;
@@ -15,7 +21,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::Frame;
+use crate::{Colours, Frame, Lending, Matrix, Planes};
 
 /// The largest picture asked of FFmpeg: the screens are 1080p.
 const MAX_W: u32 = 1920;
@@ -75,6 +81,37 @@ pub struct Info {
     pub fps: f64,
     pub duration: Option<f64>,
     pub sound: bool,
+    /// How its pictures stand for colours, when they can go to the GPU as their own planes
+    /// (see [`colours_of`]).
+    pub colours: Option<Colours>,
+}
+
+/// How a video's pictures stand for colours, when they can go to the GPU as their own planes:
+/// pictures in 4:2:0 YUV with no alpha (as nearly every video is: H.264, HEVC, VP9, AV1 and the
+/// rest, 8-bit or deeper, which FFmpeg brings down to 8 bits), in a standard FFmpeg's converter
+/// has numbers for. Its standard is the one the stream names, or BT.601 where it names none,
+/// as FFmpeg's converter takes it then; its range is the whole of each byte only where the
+/// stream says so (or its pixel format is the JPEG one), limited otherwise, as FFmpeg takes it.
+///
+/// `None` for anything else: pictures with clear parts or of RGB pixels, colour kept for every
+/// pixel or every two (which planes of a quarter would lose), or a standard of another kind.
+/// Those come as RGBA, converted by FFmpeg, as before.
+fn colours_of(video: &serde_json::Value) -> Option<Colours> {
+    let format = video["pix_fmt"].as_str()?;
+    let quarter = ["yuv420p", "yuvj420p", "nv12", "nv21", "p010", "p012", "p016"];
+    if !quarter.iter().any(|kind| format.starts_with(kind)) {
+        return None;
+    }
+    let matrix = match video["color_space"].as_str().unwrap_or("unknown") {
+        "bt709" => Matrix::Bt709,
+        "fcc" => Matrix::Fcc,
+        "smpte240m" => Matrix::Smpte240,
+        "bt2020nc" | "bt2020c" => Matrix::Bt2020,
+        "bt470bg" | "smpte170m" | "unknown" | "unspecified" | "reserved" => Matrix::Bt601,
+        _ => return None,
+    };
+    let full_range = format.starts_with("yuvj") || matches!(video["color_range"].as_str(), Some("pc" | "jpeg"));
+    Some(Colours { matrix, full_range })
 }
 
 /// A rate written as FFmpeg writes it, "30000/1001", as a number.
@@ -99,7 +136,8 @@ fn info_from(json: &serde_json::Value) -> Option<Info> {
         .clamp(1.0, 60.0);
     let duration = json["format"]["duration"].as_str().and_then(|text| text.parse::<f64>().ok());
     let sound = streams.iter().any(|stream| stream["codec_type"] == "audio");
-    (width > 0 && height > 0).then_some(Info { width, height, fps, duration, sound })
+    let colours = colours_of(video);
+    (width > 0 && height > 0).then_some(Info { width, height, fps, duration, sound, colours })
 }
 
 /// FFmpeg or ffprobe, to be started without a console window. SoftPresenter is a window
@@ -313,18 +351,26 @@ pub struct Frames {
     slot: Arc<Mutex<Slot>>,
 }
 
+/// A picture as FFmpeg gave it: RGBA pixels, or (with its colours) the two planes.
+struct Decoded {
+    width: u32,
+    height: u32,
+    bytes: Vec<u8>,
+    planes: Option<Colours>,
+}
+
 /// The newest picture, waiting to be taken, and the room of one already shown, to fill again.
 #[derive(Default)]
 struct Slot {
-    frame: Option<Frame>,
+    frame: Option<Decoded>,
     spare: Option<Vec<u8>>,
 }
 
 impl Slot {
     /// Puts the newest picture in, keeping the room of one never taken to fill again.
-    fn put(&mut self, frame: Frame) {
+    fn put(&mut self, frame: Decoded) {
         if let Some(missed) = self.frame.replace(frame) {
-            self.spare = Some(missed.rgba);
+            self.spare = Some(missed.bytes);
         }
     }
 
@@ -335,21 +381,39 @@ impl Slot {
 }
 
 impl Frames {
-    /// The newest picture, if one has come since the last was taken.
+    /// The newest picture, if one has come since the last was taken, as RGBA pixels. Pictures
+    /// that come as planes (a player opened to lend them) are only lent, by
+    /// [`Frames::next_with`]: this takes them and gives nothing.
     pub fn next(&self) -> Option<Frame> {
-        self.slot.lock().ok()?.frame.take()
+        let decoded = self.slot.lock().ok()?.frame.take()?;
+        decoded.planes.is_none().then_some(Frame { width: decoded.width, height: decoded.height, rgba: decoded.bytes })
     }
 
     /// Lends the newest picture, as [`crate::Frames::next_with`] says; its room is then filled
     /// with a later picture, not let go.
-    pub fn next_with<R>(&self, show: impl FnOnce(&crate::Lent<'_>) -> R) -> Option<R> {
-        let frame = self.next()?;
-        let made = show(&crate::Lent::rgba(&frame));
+    pub fn next_with<R>(&self, show: impl FnOnce(Lending<'_>) -> R) -> Option<R> {
+        let decoded = self.slot.lock().ok()?.frame.take()?;
+        let (width, height) = (decoded.width, decoded.height);
+        let made = match decoded.planes {
+            None => show(Lending::Rows(&crate::Lent::rgba(width, height, &decoded.bytes))),
+            Some(colours) => {
+                let (luma, chroma) = decoded.bytes.split_at_checked(width as usize * height as usize)?;
+                show(Lending::Planes(&Planes { width, height, luma, chroma, colours }))
+            }
+        };
         if let Ok(mut slot) = self.slot.lock() {
-            slot.spare = Some(frame.rgba);
+            slot.spare = Some(decoded.bytes);
         }
         Some(made)
     }
+}
+
+/// Testing aid: SOFTPRESENTER_VIDEO_RGBA=1 has FFmpeg give the video behind the slide as RGBA
+/// pixels it converts on the processor, as before, rather than as planes the GPU turns into
+/// colours: to compare the two ways, or to go back to the old one with no new build.
+fn rgba_forced() -> bool {
+    static FORCED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FORCED.get_or_init(|| std::env::var_os("SOFTPRESENTER_VIDEO_RGBA").is_some_and(|value| value != "0"))
 }
 
 /// One run of FFmpeg from a point in the video: its programs and the threads reading them.
@@ -392,6 +456,8 @@ pub struct Player {
     path: PathBuf,
     info: Info,
     size: (u32, u32),
+    /// The colours of its pictures when they come as planes; `None` when they come as RGBA.
+    planes: Option<Colours>,
     looping: bool,
     paused: bool,
     volume: f32,
@@ -406,8 +472,9 @@ pub struct Player {
 }
 
 impl Player {
-    /// Opens a video, playing from its start. The error is a sentence for the operator.
-    pub fn open(path: &Path) -> Result<Player, String> {
+    /// Opens a video, playing from its start, its pictures as planes where `planes` asks for
+    /// them and the video allows (see [`colours_of`]). The error is a sentence for the operator.
+    pub fn open(path: &Path, planes: bool) -> Result<Player, String> {
         tool("ffmpeg").ok_or_else(|| missing(path))?;
         let info = probe(path)?;
         let stream = if info.sound {
@@ -420,10 +487,18 @@ impl Player {
         } else {
             None
         };
+        let planes = info.colours.filter(|_| planes && !rgba_forced());
+        // Planes take any size, odd sides too; one that fits is asked for as it is, so FFmpeg
+        // has nothing to scale.
+        let size = match planes {
+            Some(_) if info.width <= MAX_W && info.height <= MAX_H => (info.width, info.height),
+            _ => fitted(&info, MAX_W, MAX_H),
+        };
         let mut player = Player {
             path: path.to_owned(),
             info,
-            size: fitted(&info, MAX_W, MAX_H),
+            size,
+            planes,
             looping: false,
             paused: true,
             volume: 1.0,
@@ -471,7 +546,16 @@ impl Player {
         };
 
         // The pictures: a fixed rate and size, so each picture's time and length are known.
+        // Planes are asked for in the range their colours are taken in: the one the video says,
+        // so FFmpeg has nothing to convert (a picture in another is converted to it).
         let (w, h) = self.size;
+        let (scale, format, frame_len) = match self.planes {
+            Some(colours) => {
+                let range = if colours.full_range { "pc" } else { "tv" };
+                (format!("scale={w}:{h}:out_range={range}"), "nv12", Planes::bytes(w, h))
+            }
+            None => (format!("scale={w}:{h}"), "rgba", (w as usize) * (h as usize) * 4),
+        };
         let fps = self.info.fps;
         let mut pictures = quiet(&ffmpeg);
         if let Some(decoder) = self.hardware {
@@ -485,8 +569,8 @@ impl Player {
         }
         start(&mut pictures, self.looping);
         pictures
-            .args(["-an", "-sn", "-vf", &format!("fps={fps:.4},scale={w}:{h},setsar=1")])
-            .args(["-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1"])
+            .args(["-an", "-sn", "-vf", &format!("fps={fps:.4},{scale},setsar=1")])
+            .args(["-pix_fmt", format, "-f", "rawvideo", "pipe:1"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = pictures.spawn().map_err(|e| format!("FFmpeg could not be started: {e}"))?;
@@ -514,14 +598,14 @@ impl Player {
         });
         let sound_drives = self.info.sound && self.stream.is_some();
         let slot = self.slot.clone();
-        let (looping, frame_len) = (self.looping, (w as usize) * (h as usize) * 4);
+        let (looping, planes) = (self.looping, self.planes);
         let (clock_v, stop_v, ended_v) = (clock.clone(), stop.clone(), ended.clone());
         let on_hardware = self.hardware.is_some();
         run.threads.push(std::thread::spawn(move || {
             let mut shown: u64 = 0;
             loop {
-                let mut rgba = slot.lock().map_or_else(|_| vec![0u8; frame_len], |mut slot| slot.room(frame_len));
-                if out.read_exact(&mut rgba).is_err() {
+                let mut bytes = slot.lock().map_or_else(|_| vec![0u8; frame_len], |mut slot| slot.room(frame_len));
+                if out.read_exact(&mut bytes).is_err() {
                     if shown == 0 && !stop_v.load(Ordering::Relaxed) {
                         // FFmpeg has stopped, so what it said is all read in a moment.
                         let _ = drained.join();
@@ -571,7 +655,7 @@ impl Player {
                     eprintln!("sync picture {due:.3}s clock {clock:.3}s");
                 }
                 if let Ok(mut slot) = slot.lock() {
-                    slot.put(Frame { width: w, height: h, rgba });
+                    slot.put(Decoded { width: w, height: h, bytes, planes });
                 }
             }
         }));
@@ -716,13 +800,22 @@ impl Player {
         self.run.as_ref().and_then(|run| run.problem.lock().ok().and_then(|problem| problem.clone()))
     }
 
-    /// How FFmpeg is asked to decode, for the log: on the graphics chip (where the codec
-    /// allows), or with its own decoder on the processor.
-    pub fn decoding(&self) -> String {
-        match self.hardware {
+    /// What FFmpeg is asked for, for the log: to decode on the graphics chip (where the codec
+    /// allows) or with its own decoder on the processor, and the pictures it gives.
+    pub fn asked(&self) -> String {
+        let decoding = match self.hardware {
             Some(decoder) => format!("decoding asked of the graphics chip ({decoder}) where the codec allows"),
             None => "decoding on the processor".to_owned(),
-        }
+        };
+        let (w, h) = self.size;
+        let pictures = match self.planes {
+            Some(Colours { matrix, full_range }) => {
+                let range = if full_range { "full" } else { "limited" };
+                format!("pictures {w} x {h} as NV12 planes the GPU turns into colours ({matrix:?}, {range} range)")
+            }
+            None => format!("pictures {w} x {h} as RGBA, converted by FFmpeg"),
+        };
+        format!("{decoding}; {pictures}")
     }
 
     /// Something to say in the log once, if there is something new.
@@ -770,7 +863,10 @@ mod tests {
             "format": {"duration": "12.5"}
         });
         let info = info_from(&json).unwrap();
-        assert_eq!(info, Info { width: 3840, height: 2160, fps: 25.0, duration: Some(12.5), sound: true });
+        assert_eq!(
+            info,
+            Info { width: 3840, height: 2160, fps: 25.0, duration: Some(12.5), sound: true, colours: None }
+        );
         assert_eq!(fitted(&info, MAX_W, MAX_H), (1920, 1080));
         // A tall video fits the box by its height, with even sides.
         let tall = Info { width: 1081, height: 1921, ..info };
@@ -798,7 +894,7 @@ mod tests {
             .status()
             .expect("FFmpeg runs");
         assert!(made.success(), "the video is made");
-        let mut player = Player::open(&path).expect("FFmpeg opens the video");
+        let mut player = Player::open(&path, false).expect("FFmpeg opens the video");
         player.hardware = Some("no-such-decoder");
         player.start_at(0.0).unwrap();
         let (started, mut note, mut picture) = (Instant::now(), None, None);
@@ -811,7 +907,47 @@ mod tests {
         assert!(picture.is_some(), "a picture came with FFmpeg's own decoder");
         assert_eq!(player.problem(), None);
         assert!(note.is_some_and(|note| note.contains("no-such-decoder")), "the log was told");
-        assert_eq!(player.decoding(), "decoding on the processor");
+        assert!(player.asked().starts_with("decoding on the processor;"), "{}", player.asked());
+    }
+
+    /// Which videos come as planes, and in what colours: as FFmpeg's converter takes them.
+    #[test]
+    fn videos_of_quarter_colour_with_no_alpha_come_as_planes_in_the_colours_they_name() {
+        let colours = |stream: serde_json::Value| colours_of(&stream);
+        let limited = |matrix| Some(Colours { matrix, full_range: false });
+        assert_eq!(
+            colours(serde_json::json!({"pix_fmt": "yuv420p", "color_space": "bt709", "color_range": "tv"})),
+            limited(Matrix::Bt709)
+        );
+        // Named nothing: BT.601 and limited range, as FFmpeg's converter takes it, HD or not.
+        assert_eq!(colours(serde_json::json!({"pix_fmt": "yuv420p"})), limited(Matrix::Bt601));
+        assert_eq!(
+            colours(serde_json::json!({"pix_fmt": "yuv420p", "color_space": "unknown"})),
+            limited(Matrix::Bt601)
+        );
+        assert_eq!(colours(serde_json::json!({"pix_fmt": "nv12", "color_space": "smpte170m"})), limited(Matrix::Bt601));
+        assert_eq!(
+            colours(serde_json::json!({"pix_fmt": "yuv420p10le", "color_space": "bt2020nc"})),
+            limited(Matrix::Bt2020)
+        );
+        assert_eq!(colours(serde_json::json!({"pix_fmt": "p010le", "color_space": "fcc"})), limited(Matrix::Fcc));
+        // Full range where the stream says so, or the pixel format is the JPEG one.
+        let full = Some(Colours { matrix: Matrix::Bt709, full_range: true });
+        assert_eq!(
+            colours(serde_json::json!({"pix_fmt": "yuv420p", "color_space": "bt709", "color_range": "pc"})),
+            full
+        );
+        assert_eq!(
+            colours(serde_json::json!({"pix_fmt": "yuvj420p"})),
+            Some(Colours { matrix: Matrix::Bt601, full_range: true })
+        );
+        // Clear parts, RGB pixels, more colour than a quarter, or another kind of standard: RGBA.
+        for format in ["yuva420p", "rgb24", "gbrp", "bgra", "yuv422p10le", "yuv444p", "pal8", "gray"] {
+            assert_eq!(colours(serde_json::json!({"pix_fmt": format})), None, "{format}");
+        }
+        assert_eq!(colours(serde_json::json!({"pix_fmt": "yuv420p", "color_space": "ycgco"})), None);
+        assert_eq!(colours(serde_json::json!({"pix_fmt": "yuv420p", "color_space": "gbr"})), None);
+        assert_eq!(colours(serde_json::json!({})), None, "a format FFmpeg doesn't name");
     }
 
     #[test]
