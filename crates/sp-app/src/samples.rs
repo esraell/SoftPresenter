@@ -15,12 +15,33 @@ use crate::media::Playlist;
 /// The name of the media playlist that gathers them, until a church renames it.
 pub const PLAYLIST_NAME: &str = "Sample Backgrounds";
 
-/// The sample backgrounds the bin hasn't got, by file name, in the order they are added.
+/// The sample backgrounds the bin hasn't got and this computer can play, by file name, in the
+/// order they are added.
 pub fn missing(bin: &[MediaItem]) -> Vec<&'static str> {
+    missing_unless(bin, &cannot_play)
+}
+
+/// As [`missing`], leaving out the samples `skip` names.
+fn missing_unless(bin: &[MediaItem], skip: &dyn Fn(&str) -> bool) -> Vec<&'static str> {
+    not_in_bin(bin).into_iter().filter(|name| !skip(name)).collect()
+}
+
+/// A sample video can't be played here while FFmpeg isn't on this computer.
+fn cannot_play(name: &str) -> bool {
+    crate::media::needs_missing_ffmpeg(Path::new(name))
+}
+
+fn not_in_bin(bin: &[MediaItem]) -> Vec<&'static str> {
     backgrounds::FILES
         .into_iter()
         .filter(|name| !bin.iter().any(|item| item.sample.as_deref() == Some(*name)))
         .collect()
+}
+
+/// The sample videos the bin hasn't got and can't be given here, because FFmpeg isn't on this
+/// computer: left out of an add, and said so.
+pub fn needing_ffmpeg(bin: &[MediaItem]) -> Vec<&'static str> {
+    not_in_bin(bin).into_iter().filter(|name| cannot_play(name)).collect()
 }
 
 /// Whether the media bin's menu and its empty place offer to add them: at least one is missing,
@@ -58,9 +79,30 @@ pub fn add(
     shown: &mut Option<Uuid>,
     again: Option<&Added>,
 ) -> Result<Added, String> {
-    let wanted = missing(bin);
+    add_unless(media, bin, playlists, shown, again, &cannot_play)
+}
+
+/// As [`add`], leaving out the samples `skip` names (the video, where FFmpeg isn't).
+fn add_unless(
+    media: &Path,
+    bin: &[MediaItem],
+    playlists: &mut Vec<Playlist>,
+    shown: &mut Option<Uuid>,
+    again: Option<&Added>,
+    skip: &dyn Fn(&str) -> bool,
+) -> Result<Added, String> {
+    let wanted = missing_unless(bin, skip);
     if wanted.is_empty() {
-        return Err("The sample backgrounds are all in the media bin already.".to_owned());
+        let video = needing_ffmpeg(bin);
+        return Err(if video.is_empty() {
+            "The sample backgrounds are all in the media bin already.".to_owned()
+        } else {
+            format!(
+                "The sample pictures are in the media bin already. {} needs FFmpeg, which isn't on this computer. {}",
+                video.join(", "),
+                crate::media::ffmpeg_advice()
+            )
+        });
     }
     std::fs::create_dir_all(media).map_err(|e| format!("Could not make the Media folder: {e}"))?;
     let in_bin = |path: &Path| bin.iter().any(|item| item.path == path);
@@ -278,6 +320,17 @@ mod tests {
         }
     }
 
+    /// Every sample, whether or not this computer could play the video.
+    fn add_all(
+        media: &Path,
+        bin: &[MediaItem],
+        playlists: &mut Vec<Playlist>,
+        shown: &mut Option<Uuid>,
+        again: Option<&Added>,
+    ) -> Result<Added, String> {
+        add_unless(media, bin, playlists, shown, again, &|_| false)
+    }
+
     fn sorted(names: &[&str]) -> Vec<String> {
         let mut names: Vec<String> = names.iter().map(|name| (*name).to_owned()).collect();
         names.sort();
@@ -289,28 +342,33 @@ mod tests {
         assert!(backgrounds::available(), "the samples are found in a development build");
         let mut bin = Vec::new();
         assert!(offered(&bin));
-        assert_eq!(missing(&bin), backgrounds::FILES);
+        assert_eq!(missing_unless(&bin, &|_| false), backgrounds::FILES);
         for name in backgrounds::FILES {
             let mut item = MediaItem::new(name.to_owned(), PathBuf::from("/media").join(name));
             item.sample = Some(name.to_owned());
             bin.push(item);
-            assert_eq!(offered(&bin), bin.len() < 7, "{} of 7 in the bin", bin.len());
+            assert_eq!(
+                offered(&bin),
+                bin.len() < backgrounds::FILES.len() - needing_ffmpeg(&[]).len(),
+                "{} of 7 in the bin",
+                bin.len()
+            );
         }
-        assert!(missing(&bin).is_empty());
+        assert!(missing_unless(&bin, &|_| false).is_empty());
         // Another file with a sample's name isn't that sample; the item's own word is what counts.
         bin.pop();
         bin.push(MediaItem::new("Drifting Light.mp4".to_owned(), "/other/Drifting Light.mp4".into()));
-        assert_eq!(missing(&bin), ["Drifting Light.mp4"]);
+        assert_eq!(missing_unless(&bin, &|_| false), ["Drifting Light.mp4"]);
         // A sample renamed on disk is still that sample.
         bin[0].name = "Chapel.jpg".to_owned();
-        assert_eq!(missing(&bin), ["Drifting Light.mp4"]);
+        assert_eq!(missing_unless(&bin, &|_| false), ["Drifting Light.mp4"]);
     }
 
     #[test]
     fn adding_all_seven_makes_one_playlist_in_order_with_the_video_looping() {
         let folder = Folder::new();
         let (mut playlists, mut shown) = (Vec::new(), None);
-        let added = add(&folder.0, &[], &mut playlists, &mut shown, None).unwrap();
+        let added = add_all(&folder.0, &[], &mut playlists, &mut shown, None).unwrap();
         let names: Vec<&str> = added.items.iter().filter_map(|item| item.sample.as_deref()).collect();
         assert_eq!(names, backgrounds::FILES);
         assert_eq!(
@@ -330,15 +388,31 @@ mod tests {
         assert!(added.made && added.joined.is_empty() && added.copied.len() == 7);
         // With all seven in the bin, there is nothing to add.
         let bin = added.items.clone();
-        assert!(add(&folder.0, &bin, &mut playlists, &mut shown, None).is_err());
+        assert!(add_all(&folder.0, &bin, &mut playlists, &mut shown, None).is_err());
         assert_eq!(playlists.len(), 1);
+    }
+
+    #[test]
+    fn a_video_left_out_for_want_of_ffmpeg_is_not_counted_and_not_added_on_the_next_run() {
+        let folder = Folder::new();
+        let (mut playlists, mut shown) = (Vec::new(), None);
+        let no_video = |name: &str| name.ends_with(".mp4");
+        let added = add_unless(&folder.0, &[], &mut playlists, &mut shown, None, &no_video).unwrap();
+        assert_eq!(added.items.len(), 6, "only what reached the bin is counted");
+        assert!(added.items.iter().all(|item| !crate::media::is_video(&item.path)));
+        assert_eq!(folder.files().len(), 6, "the video wasn't copied either");
+        // The next run has nothing left to add: it doesn't say "Added 1" again.
+        let bin = added.items.clone();
+        assert!(missing_unless(&bin, &no_video).is_empty());
+        assert!(add_unless(&folder.0, &bin, &mut playlists, &mut shown, None, &no_video).is_err());
+        assert_eq!(playlists[0].files.len(), 6);
     }
 
     #[test]
     fn adding_again_after_deleting_two_puts_back_only_those_in_the_same_playlist() {
         let folder = Folder::new();
         let (mut playlists, mut shown) = (Vec::new(), None);
-        let first = add(&folder.0, &[], &mut playlists, &mut shown, None).unwrap();
+        let first = add_all(&folder.0, &[], &mut playlists, &mut shown, None).unwrap();
         let playlist = playlists[0].id;
         // The church renames the playlist and leaves the strip on All Media; Night Blue and Olive
         // go from the bin, and Olive's file from the disk too.
@@ -352,7 +426,7 @@ mod tests {
             .collect();
         let olive = first.items.iter().find(|item| item.sample.as_deref() == Some("Olive.jpg")).unwrap();
         std::fs::remove_file(&olive.path).unwrap();
-        let second = add(&folder.0, &bin, &mut playlists, &mut shown, None).unwrap();
+        let second = add_all(&folder.0, &bin, &mut playlists, &mut shown, None).unwrap();
         let names: Vec<&str> = second.items.iter().filter_map(|item| item.sample.as_deref()).collect();
         assert_eq!(names, ["Night Blue.jpg", "Olive.jpg"], "only the missing ones, in order");
         assert_eq!(playlists.len(), 1, "never a second playlist");
@@ -374,7 +448,7 @@ mod tests {
         std::fs::create_dir_all(&folder.0).unwrap();
         std::fs::write(folder.0.join("Olive.jpg"), b"the church's own picture").unwrap();
         let (mut playlists, mut shown) = (Vec::new(), None);
-        let added = add(&folder.0, &[], &mut playlists, &mut shown, None).unwrap();
+        let added = add_all(&folder.0, &[], &mut playlists, &mut shown, None).unwrap();
         let olive = added.items.iter().find(|item| item.sample.as_deref() == Some("Olive.jpg")).unwrap();
         assert_eq!(olive.name, "Olive 2.jpg");
         assert_eq!(std::fs::read(folder.0.join("Olive.jpg")).unwrap(), b"the church's own picture");
@@ -387,13 +461,13 @@ mod tests {
     fn one_undo_takes_the_whole_add_away_and_redo_puts_it_back_as_it_was() {
         let folder = Folder::new();
         let (mut playlists, mut shown) = (Vec::new(), None);
-        let added = add(&folder.0, &[], &mut playlists, &mut shown, None).unwrap();
+        let added = add_all(&folder.0, &[], &mut playlists, &mut shown, None).unwrap();
         let ids = added.take_back(&mut playlists, &mut shown);
         assert_eq!(ids, added.items.iter().map(|item| item.id).collect::<Vec<_>>(), "every bin item");
         assert!(playlists.is_empty(), "the playlist is gone");
         assert!(folder.files().is_empty(), "the files are gone");
         assert_eq!(shown, None, "All Media is shown again");
-        let again = add(&folder.0, &[], &mut playlists, &mut shown, Some(&added)).unwrap();
+        let again = add_all(&folder.0, &[], &mut playlists, &mut shown, Some(&added)).unwrap();
         assert_eq!(again, added, "the same ids and the same playlist");
         assert_eq!(folder.files(), sorted(&backgrounds::FILES));
     }
@@ -402,13 +476,13 @@ mod tests {
     fn undoing_a_second_add_leaves_the_first_one_and_its_playlist() {
         let folder = Folder::new();
         let (mut playlists, mut shown) = (Vec::new(), None);
-        let first = add(&folder.0, &[], &mut playlists, &mut shown, None).unwrap();
+        let first = add_all(&folder.0, &[], &mut playlists, &mut shown, None).unwrap();
         let bin: Vec<MediaItem> =
             first.items.iter().filter(|item| item.sample.as_deref() != Some("Still.jpg")).cloned().collect();
         // Still's file stays on the disk, but is taken off the playlist.
         playlists[0].files.retain(|file| *file != first.items[0].path);
         shown = None;
-        let second = add(&folder.0, &bin, &mut playlists, &mut shown, None).unwrap();
+        let second = add_all(&folder.0, &bin, &mut playlists, &mut shown, None).unwrap();
         assert!(!second.made && second.joined == [first.items[0].path.clone()] && second.copied.is_empty());
         assert_eq!(playlists[0].files.len(), 7);
         let ids = second.take_back(&mut playlists, &mut shown);
@@ -425,7 +499,7 @@ mod tests {
         let mut other = Playlist::new(PLAYLIST_NAME.to_owned());
         other.files.push("/a/b.jpg".into());
         let (mut playlists, mut shown) = (vec![other], Some(Uuid::new_v4()));
-        let added = add(&folder.0, &[], &mut playlists, &mut shown, None).unwrap();
+        let added = add_all(&folder.0, &[], &mut playlists, &mut shown, None).unwrap();
         assert_eq!(playlists.len(), 2);
         assert_eq!(playlists[1].name, "Sample Backgrounds 2", "a playlist of the church's own keeps its name");
         assert!(added.made && playlists[1].sample && !playlists[0].sample);

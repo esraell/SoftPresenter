@@ -417,6 +417,24 @@ pub fn is_video(path: &Path) -> bool {
     VIDEOS.contains(&extension(path).as_str())
 }
 
+/// True for a video this computer can't play because FFmpeg isn't here: any video, except on a
+/// Mac, where the system's own player plays MP4 and MOV.
+pub fn needs_missing_ffmpeg(path: &Path) -> bool {
+    let system = cfg!(target_os = "macos") && ["mp4", "mov", "m4v", "3gp"].contains(&extension(path).as_str());
+    is_video(path) && !system && !sp_video::ffmpeg_found()
+}
+
+/// How to get FFmpeg on this system, for the end of a sentence about a video that needs it.
+pub fn ffmpeg_advice() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "MP4 and MOV videos play without it."
+    } else if cfg!(windows) {
+        "Put ffmpeg.exe in the same folder as the program."
+    } else {
+        "Install FFmpeg (for example: sudo apt install ffmpeg)."
+    }
+}
+
 /// Reads and decodes a picture file for the screens (no larger than [`screen_side`]); for a
 /// video, a still from it. The error is a plain sentence for the operator.
 pub fn load_picture(path: &Path) -> Result<Picture, String> {

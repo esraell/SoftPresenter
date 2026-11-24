@@ -2806,6 +2806,7 @@ impl crate::App {
                     match self.add_media_file(file) {
                         Ok(true) => added.push(name),
                         Ok(false) => problems.push(format!("{name} is already in the media bin.")),
+                        Err(problem) if problem.starts_with(&format!("{name}: ")) => problems.push(problem),
                         Err(problem) => problems.push(format!("{name}: {problem}")),
                     }
                 }
@@ -2832,10 +2833,20 @@ impl crate::App {
                     .and_then(|r| r.home_state.media_playlists.iter().find(|p| p.id == added.playlist))
                     .map(|p| p.name.clone())
                     .unwrap_or_default();
-                Ok(Reply::with(
-                    format!("Added {} sample backgrounds to the media bin, in the playlist {playlist}.", names.len()),
-                    serde_json::json!({"added": names, "playlist": playlist}),
-                ))
+                let skipped = crate::samples::needing_ffmpeg(self.show.media());
+                let mut text = format!(
+                    "Added {} sample background{} to the media bin, in the playlist {playlist}.",
+                    names.len(),
+                    if names.len() == 1 { "" } else { "s" }
+                );
+                if !skipped.is_empty() {
+                    text.push_str(&format!(
+                        "\nNot added: {}. It is a video, and FFmpeg isn't on this computer. {}",
+                        skipped.join(", "),
+                        crate::media::ffmpeg_advice()
+                    ));
+                }
+                Ok(Reply::with(text, serde_json::json!({"added": names, "playlist": playlist, "skipped": skipped})))
             }
             Some("delete") => {
                 let yes = args.iter().any(|w| w == "--yes");
