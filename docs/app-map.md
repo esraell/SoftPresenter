@@ -414,7 +414,7 @@ picture came:
   `SOFTPRESENTER_CAPTURE_OUTPUT=FILE.png` saves the first screen's picture.
 - Testing aids (environment variables) open a view or do something at start:
   `SOFTPRESENTER_GO_LIVE=1` (a slide on screen), `_GO_LIVE_MEDIA=1` (the first media item),
-  `_CAPTURE_EDITOR`, `_CAPTURE_BIBLE`, `_CAPTURE_THEMES` (`=version` shows the theme's first
+  `_CAPTURE_EDITOR` (`=selected-typing`: the song in front, its words being typed in), `_CAPTURE_BIBLE` (with `_BIBLE_LOOKUP=REFERENCE`, and `_BIBLE_GO_LIVE=1` to put the verse picked on screen), `_CAPTURE_THEMES` (`=version` shows the theme's first
   version, `=add-version` opens the sheet that adds one), `_CAPTURE_SETTINGS`,
   `_PLAYLIST`, `_OPEN_ITEM=N`, `_MENU=ItemId,ItemId`, `_DROP=FILES` (files dropped on the
   window, separated as in PATH), `_HOVER=FILES` (files kept over the window, for a picture of

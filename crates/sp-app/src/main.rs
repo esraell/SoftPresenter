@@ -7636,6 +7636,14 @@ impl App {
                     }
                 }
             }
+            // Testing aid: SOFTPRESENTER_BIBLE_GO_LIVE=1 puts the verse picked on screen, as Enter
+            // does, once SOFTPRESENTER_BIBLE_LOOKUP has looked its passage up.
+            if running.frames == GO_LIVE_AT + 8
+                && std::env::var_os("SOFTPRESENTER_BIBLE_GO_LIVE").is_some()
+                && let Some(at) = running.home_state.pick(&self.show)
+            {
+                commands.push(Command::GoTo(at));
+            }
             // Testing aid: as if Command-N had been pressed.
             if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_NEW_SONG").is_some() {
                 running.home_state.new_song = true;
@@ -7704,7 +7712,9 @@ impl App {
                 }
                 state.edit_kind_request = Some(home::EditKind::Props);
             }
-            let picked = std::env::var("SOFTPRESENTER_CAPTURE_EDITOR").as_deref() == Ok("selected");
+            // Testing aid: `selected-typing` is both: the song chosen, its words being typed in.
+            let editor_capture = std::env::var("SOFTPRESENTER_CAPTURE_EDITOR").unwrap_or_default();
+            let picked = editor_capture == "selected" || editor_capture == "selected-typing";
             if running.frames == GO_LIVE_AT + if picked { 6 } else { 2 }
                 && std::env::var_os("SOFTPRESENTER_CAPTURE_EDITOR").is_some()
                 && !on_props
@@ -7719,7 +7729,7 @@ impl App {
                     draft.selected = if picked { draft.slide.objects.last() } else { draft.slide.objects.first() }
                         .map(|object| object.id);
                     // Testing aid: as if the box had been double-clicked.
-                    if std::env::var("SOFTPRESENTER_CAPTURE_EDITOR").as_deref() == Ok("typing") {
+                    if editor_capture == "typing" || editor_capture == "selected-typing" {
                         draft.typing = draft.selected;
                         draft.typing_started = true;
                         // Testing aid: SOFTPRESENTER_CAPTURE_SELECT=FROM-TO also selects those
