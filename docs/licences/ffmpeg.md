@@ -49,6 +49,28 @@ What the LGPL asks, and how the app meets it:
   put their own build of `ffmpeg` and `ffprobe` in their place.
 - **No FFmpeg code is in SoftPresenter itself**, so SoftPresenter's licence is its own.
 
+## In the Windows package
+
+`scripts/windows-package.sh` builds the same FFmpeg 9.0.2 for 64-bit Windows with
+`scripts/build-ffmpeg.sh windows`, cross-compiling on a Mac with the mingw-w64 toolchain, from
+the same source file and checksum. `ffmpeg.exe` and `ffprobe.exe` sit beside `SoftPresenter.exe`,
+which looks there first, and the zip's `Licences` folder holds `COPYING.LGPLv2.1`,
+`FFmpeg-LICENSE.md` and `FFmpeg-SOURCE.txt` (the exact source, checksum and configuration).
+
+- **LGPL 2.1 or later,** as on the Mac: no `--enable-gpl`, `--enable-version3` or
+  `--enable-nonfree`, `--disable-autodetect`, and the script refuses a build that says otherwise.
+- **Needs nothing but Windows:** linked statically (`-static`), so the only DLLs are Windows' own
+  (the Universal C Runtime, `KERNEL32`, `bcrypt` and a few more). The script refuses a build that
+  needs the toolchain's own DLLs.
+- **Hardware decoding:** Direct3D 11 and DXVA2 decoders for H.264, HEVC, VP9 and AV1 are built
+  in; they use Windows' own headers only.
+- **Without nasm** (not installed on the building Mac) the build has no hand-written x86
+  assembly (`--disable-x86asm`): it works the same, but scales and decodes more slowly. With
+  nasm installed the script uses it.
+- **No zlib or bzip2** (the toolchain has neither, and `--disable-autodetect` leaves outside
+  libraries out), so the few Matroska files with compressed headers, and PNG pictures inside a
+  video, don't play. Ordinary video and sound don't need them.
+
 ## Rules
 
 - Never copy Homebrew's FFmpeg into the app: it is a GPL build (with x264, x265 and others) and

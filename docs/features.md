@@ -449,7 +449,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   WMV, FLV, MPEG, TS and others, or an MP4 the Mac's player can't decode) through FFmpeg,
   played as it is, never converted first. FFmpeg comes inside the app (an LGPL build of FFmpeg
   9.0.2, with its licence and source in the app's Resources), so nothing needs installing; AV1
-  plays on Macs whose video hardware decodes it (M3 and later). A video the Mac's player plays
+  plays on Macs whose video hardware decodes it (M3 and later). On Windows every video plays
+  through FFmpeg, whose LGPL build (`ffmpeg.exe`, `ffprobe.exe`) sits beside the program in the
+  zip `scripts/windows-package.sh` makes. A video the Mac's player plays
   behind the words goes to the screens as the decoder's own picture memory, with no copy through
   the processor (a video whose format can carry clear parts, everything FFmpeg plays, and a video
   in a box on a slide or on the Announcements layer are still copied).

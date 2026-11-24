@@ -145,6 +145,16 @@ SHA-256) and builds the LGPL FFmpeg that plays MKV, WebM, AVI and other videos
 (`scripts/build-ffmpeg.sh`, about a minute); later builds reuse it. Without it the app still
 builds, and uses an FFmpeg installed on the computer.
 
+For a Windows 10 or 11 (64-bit) package, built on a Mac with `brew install mingw-w64` and
+`rustup target add x86_64-pc-windows-gnu`:
+
+    scripts/windows-package.sh
+
+It leaves `target/windows-package/SoftPresenter-Windows.zip`: `SoftPresenter.exe`, the LGPL
+FFmpeg for Windows (`ffmpeg.exe`, `ffprobe.exe`), the sample backgrounds, the licences and a
+READ ME. The program isn't signed yet, so Windows asks the first time ("More info", then "Run
+anyway").
+
 The first start opens a short setup: the screens, bringing songs in, which Bibles to show, and
 what macOS will ask permission for and why. SoftPresenter › Set Up SoftPresenter… opens it
 again.
