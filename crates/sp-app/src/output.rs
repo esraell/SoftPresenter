@@ -2698,6 +2698,16 @@ impl Output {
                             let began = Instant::now();
                             let shown = decoded_into_texture(texture, painter, device, queue, video_texture);
                             copying = began.elapsed();
+                            if shown.is_none() {
+                                // The GPU side couldn't take it: this picture is lost, and the
+                                // ones after it are copied, as when the decoder's memory can't be
+                                // made a texture, rather than each failing the same way.
+                                frames.copy_from_now();
+                                crate::applog::event(
+                                    "video",
+                                    "A picture couldn't go to the GPU without a copy; this video's pictures are copied from now on.",
+                                );
+                            }
                             Some(Some(shown))
                         }
                         sp_video::GpuNext::Nothing => Some(None),

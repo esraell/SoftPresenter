@@ -151,6 +151,17 @@ impl Frames {
         }
     }
 
+    /// From now on this video's pictures are copied, as [`Frames::next_with`] does, and none goes
+    /// to the GPU as the decoder's own memory: for when one taken that way couldn't be shown.
+    #[cfg(target_os = "macos")]
+    pub fn copy_from_now(&self) {
+        if let Frames::Video(video) = self
+            && let Source::System(frames) = video.now()
+        {
+            frames.copy_from_now();
+        }
+    }
+
     /// Lends the picture to show now to `show`, if there is a new one since the last was taken,
     /// and hands back what `show` made of it. Nothing is copied for a video the system plays
     /// (one wider than 2048 pixels is lent at half size), and FFmpeg's picture goes back to be

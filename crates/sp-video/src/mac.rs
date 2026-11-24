@@ -367,6 +367,13 @@ impl Frames {
         GpuNext::Unavailable
     }
 
+    /// From now on this video's pictures are copied: for when a texture made of the decoder's
+    /// memory was taken but the GPU side couldn't show it, so later pictures don't fail the same
+    /// way.
+    pub fn copy_from_now(&self) {
+        self.zero_copy.store(false, Ordering::Relaxed);
+    }
+
     /// The picture to show now, if there is a new one since the last was taken.
     pub fn next(&self) -> Option<Frame> {
         let buffer = self.newest()?;
