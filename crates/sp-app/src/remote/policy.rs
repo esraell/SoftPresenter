@@ -88,6 +88,7 @@ pub const OPEN: &[&str] = &[
     "redo",
     "menu",
     "notices",
+    "catalog",
 ];
 
 /// Commands never open to a page: Remote Control's own (switching it, its password).
@@ -100,6 +101,7 @@ pub const CLOSED: &[&str] = &["remote"];
 pub const OPEN_SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("voxlive", &["", "screens", "show", "look", "refresh"]),
     ("canva", &["", "status", "sync", "pages", "divider"]),
+    ("catalog", &["", "status", "languages", "search", "list", "add", "newer", "use-newer", "keep-mine"]),
     ("settings", &["", "set"]),
     ("screen", &["add", "set", "delete"]),
     (
@@ -131,6 +133,7 @@ pub const OPEN_SUBCOMMANDS: &[(&str, &[&str])] = &[
 pub const CLOSED_SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("voxlive", &["connect", "disconnect"]),
     ("canva", &["connect", "import", "disconnect", "presentation"]),
+    ("catalog", &["download", "check", "remove", "sizes"]),
     ("song", &["import", "export"]),
     ("media", &["add", "samples"]),
 ];
@@ -177,6 +180,10 @@ fn control_refusal(args: &[String]) -> Option<String> {
             ("voxlive", _) => "Connecting VoxLive is done at the computer, not from the remote page.".to_owned(),
             ("canva", _) => {
                 "Canva Sync's sign-in and presentation are set at the computer, not from the remote page.".to_owned()
+            }
+            ("catalog", _) => {
+                "Downloading, checking for and removing catalog songs is done at the computer, not from the remote page."
+                    .to_owned()
             }
             ("song", "import") => "Importing songs is done at the computer, not from the remote page.".to_owned(),
             ("song", "export") => "Exporting a song pack is done at the computer, not from the remote page.".to_owned(),
@@ -325,6 +332,13 @@ mod tests {
             "menu",
             "voxlive",
             "canva sync",
+            "catalog",
+            "catalog search grace",
+            "catalog list ru 0 20",
+            "catalog add ru:song~1a2b3c4d --second en",
+            "catalog newer",
+            "catalog use-newer Amazing",
+            "catalog keep-mine Amazing",
             "undo",
         ] {
             assert!(!refused(line), "{line} should be open");
@@ -355,6 +369,11 @@ mod tests {
             "canva connect ID SECRET",
             "canva import",
             "canva disconnect --yes",
+            "catalog download ru",
+            "catalog check",
+            "catalog remove ru --yes",
+            "catalog sizes --ask",
+            "catalog frobnicate",
             "menu Quit",
             "status --wait 5",
             "slide web Amazing 2 http://127.0.0.1:8080",

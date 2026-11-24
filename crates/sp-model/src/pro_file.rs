@@ -315,6 +315,7 @@ fn read(bytes: &[u8], fallback: &str) -> Result<ProDocument, &'static str> {
         arrangement: chosen,
         loops: false,
         transition: None,
+        catalog: None,
     };
     Ok(ProDocument { song, media })
 }

@@ -239,6 +239,9 @@ Refused before they reach the app, with words saying so (read as the app would r
   Hymn"]`, never read as a file); the app refuses them again where each would open a file;
 - **keys, sign-ins and links**: `voxlive connect|disconnect`, `canva connect|import|disconnect`,
   `canva presentation`;
+- **downloads and removals of the song catalog**: `catalog download|check|remove|sizes` (each
+  fetches from the internet or takes songs off the computer); `catalog search`, `list`, `add`,
+  `newer`, `use-newer` and `keep-mine` are open;
 - the **menu bar**: `menu ITEM` (`menu` alone lists it);
 - **a web page on a slide** (`slide web … URL`): a page runs its own scripts in the computer's
   web view, on the screens, so it is put up at the computer; `slide web SONG N off` is open;
@@ -247,7 +250,7 @@ Refused before they reach the app, with words saying so (read as the app would r
 - `song reload` without a song (reads every song again), and `status --wait`;
 - **Remote Control itself**: `remote …`;
 - anything the server doesn't know: a command, **or a sub-command** of `voxlive`, `canva`,
-  `settings`, `screen`, `song` or `media`, added to the app later is closed to pages until it is
+  `settings`, `screen`, `song`, `catalog` or `media`, added to the app later is closed to pages until it is
   looked at and listed (`crates/sp-app/src/remote/policy.rs`).
 
 And to keep the app responsive: every message a page sends counts, whatever it is: twenty a

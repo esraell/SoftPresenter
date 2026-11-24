@@ -11,6 +11,8 @@ mod bible_store;
 mod bin_pictures;
 mod bundle;
 mod canva;
+mod catalog;
+mod catalog_cli;
 mod clock;
 mod control;
 mod convert;
@@ -556,6 +558,8 @@ enum AppEvent {
     DeckLink,
     /// Canva Sync's thread has something to tell (see `canva`).
     Canva,
+    /// A song catalog download or check finished on its thread (see `catalog_cli`).
+    CatalogDone,
 }
 
 /// The most web pages kept running at once: those on screen, then those loaded ahead. Each is a
@@ -1390,6 +1394,8 @@ struct App {
     voxlive: voxlive::Client,
     /// Canva Sync: the church's Canva sign-in, its design, and a sync under way.
     canva: canva::Client,
+    /// The song catalog: downloaded songs, kept apart from the library (see `catalog_cli`).
+    catalog: catalog_cli::CatalogState,
     /// The preview of a VoxLive screen's look being changed, while its page is open.
     voxlive_preview: Option<LookPreview>,
     /// How the last save of a VoxLive look went, for `sp voxlive`.
@@ -5618,6 +5624,7 @@ impl App {
             arrangement: None,
             loops: false,
             transition: None,
+            catalog: None,
         };
         self.add_new_song(song);
     }
@@ -9023,6 +9030,10 @@ impl ApplicationHandler<AppEvent> for App {
                 self.finish_packs();
                 return;
             }
+            AppEvent::CatalogDone => {
+                self.tick_catalog();
+                return;
+            }
             AppEvent::MediaRead => {
                 self.take_media_read();
                 return;
@@ -9490,6 +9501,7 @@ impl ApplicationHandler<AppEvent> for App {
         let web_at = self.tick_web();
         let voxlive_at = self.tick_voxlive();
         let canva_at = self.tick_canva();
+        let catalog_at = self.tick_catalog();
         let audio_at = self.tick_audio();
         let announce_at = self.tick_announcements();
         let cycle_at = self.tick_media_cycle();
@@ -9542,6 +9554,7 @@ impl ApplicationHandler<AppEvent> for App {
             web_at,
             voxlive_at,
             canva_at,
+            catalog_at,
             audio_at,
             announce_at,
             cycle_at,
@@ -9738,6 +9751,7 @@ fn main() -> ExitCode {
             arrangement: None,
             loops: false,
             transition: None,
+            catalog: None,
         });
         sources.push(None);
     }
@@ -9877,6 +9891,7 @@ fn main() -> ExitCode {
             });
             canva::Client::new(canva::Places::for_app(), Some(wake))
         },
+        catalog: catalog_cli::CatalogState::default(),
         voxlive_preview: None,
         voxlive_said: None,
         media_playlists: Vec::new(),

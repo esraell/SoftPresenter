@@ -229,6 +229,29 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   read in the background; the notice says when its songs are in. Its pictures keep their own
   file names in the Media folder (numbered when the name is taken), so the media bin shows those
   names.
+- **The song catalog** (the engine and `sp catalog`; its windows are being built): free songs
+  from Worship Leader App, a songbook for each language, downloaded from the source by each
+  church and kept in `Catalog/worshipleaderapp/<language>/` of the data folder, apart from the
+  library. The pack is kept as downloaded (about 1.3 MB for Ukrainian, 16 MB for Russian), with an
+  index made once from it: a search of 14,000 songs takes a third of a millisecond, and reading
+  the index at a start under twenty. Search finds words in a title or in the first line of a
+  section, in Cyrillic or Latin, whatever the case, with ё as е, stress marks and punctuation
+  ignored, and leaves out songs already in the library. A song **joins the library** (a library
+  named Worship Leader App, made the first time) as an ordinary song, marked with where it came
+  from; its other-language versions can go under its words, group by group by the group's name,
+  and the groups with no partner are listed (a group only the other language has is left out).
+  The source gives songs no number or id, so a song's key is its language, its title folded for
+  searching and eight letters of its first section's words. The songs are untrusted files: the zip
+  is bounded, a song file that isn't well-formed XML is left out and counted (one of the 924
+  Ukrainian files), and a pack that would empty most of the catalog is not believed. About once a month,
+  and never while anything is on screen, the app asks the source whether a language changed (with
+  the ETag and Last-Modified of the last download, so no change means no download). Songs
+  nobody has touched are brought up to date quietly; **a song the church changed in any way is
+  never overwritten**: a newer version is offered (`sp catalog use-newer`, which Undo takes
+  back, or `keep-mine`), with one notice for each check. A song the source drops stays in the
+  library, noted as gone. Every catalog song carries the credit "From Worship Leader App" and the
+  source's site. Downloading, checking and removing are done at the computer, not from the remote
+  page. See [cli.md](cli.md#the-song-catalog) and [licences/song-catalog.md](licences/song-catalog.md).
 - **Dropping files from the Finder lands them where the pointer is.** Song files of every
   kind (song documents and bundles, text, lyric and ChordPro files, songbooks, song packs,
   folders of songs) always go to the songs, never into the media bin: dropped on a playlist (a

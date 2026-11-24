@@ -47,6 +47,7 @@ pub fn parse_song_text(title: &str, text: &str) -> Presentation {
         arrangement: None,
         loops: false,
         transition: None,
+        catalog: None,
     }
 }
 

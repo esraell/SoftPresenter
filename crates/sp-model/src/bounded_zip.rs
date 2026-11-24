@@ -48,6 +48,17 @@ pub fn for_each_entry(
     wanted: impl Fn(&str) -> bool,
     mut visit: impl FnMut(String, Vec<u8>, &mut u64) -> Result<(), ZipRefusal>,
 ) -> Result<(), ZipRefusal> {
+    for_each_entry_at(bytes, limits, wanted, |_, name, read, unpacked| visit(name, read, unpacked))
+}
+
+/// [`for_each_entry`], also handing `visit` each entry's place in the zip (its number in the
+/// zip's own list), which [`read_entry`] can read it again by.
+pub fn for_each_entry_at(
+    bytes: &[u8],
+    limits: &ZipLimits,
+    wanted: impl Fn(&str) -> bool,
+    mut visit: impl FnMut(usize, String, Vec<u8>, &mut u64) -> Result<(), ZipRefusal>,
+) -> Result<(), ZipRefusal> {
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|_| ZipRefusal::Damaged)?;
     if zip.len() > limits.entries {
         return Err(ZipRefusal::TooMany);
@@ -84,7 +95,34 @@ pub fn for_each_entry(
             unpacked += read.len() as u64;
             continue;
         }
-        visit(entry_name, read, &mut unpacked)?;
+        visit(at, entry_name, read, &mut unpacked)?;
     }
     Ok(())
+}
+
+/// Reads one entry of a zip again by its place in the zip (as [`for_each_entry_at`] gave it),
+/// for a zip that was checked whole when it was first taken in: the entry is read only up to
+/// `most` bytes (never by what it says about its size), and a folder, a link, an encrypted
+/// entry or a zip inside the zip is refused.
+pub fn read_entry<R: std::io::Read + std::io::Seek>(
+    zip: &mut zip::ZipArchive<R>,
+    at: usize,
+    most: u64,
+) -> Result<Vec<u8>, ZipRefusal> {
+    {
+        let raw = zip.by_index_raw(at).map_err(|_| ZipRefusal::Damaged)?;
+        if raw.is_dir() || raw.is_symlink() || raw.encrypted() {
+            return Err(ZipRefusal::Damaged);
+        }
+    }
+    let mut entry = zip.by_index(at).map_err(|_| ZipRefusal::Damaged)?;
+    let mut read = Vec::new();
+    entry.by_ref().take(most + 1).read_to_end(&mut read).map_err(|_| ZipRefusal::Damaged)?;
+    if read.len() as u64 > most {
+        return Err(ZipRefusal::UnpacksTooMuch);
+    }
+    if is_zip(&read) {
+        return Err(ZipRefusal::Damaged);
+    }
+    Ok(read)
 }

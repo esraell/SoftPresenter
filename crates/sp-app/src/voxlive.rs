@@ -242,6 +242,7 @@ pub fn item(screens: &[Screen]) -> sp_model::Presentation {
         arrangement: None,
         loops: false,
         transition: None,
+        catalog: None,
     }
 }
 

@@ -699,6 +699,39 @@ pub struct Presentation {
     /// chosen for all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition: Option<crate::Transition>,
+    /// Where the song came from when it was copied out of the song catalog; `None` for the
+    /// church's own songs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<Box<CatalogOrigin>>,
+}
+
+/// What a song copied out of the song catalog remembers of where it came from, so a later
+/// update can tell a song nobody has touched from one the church has changed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogOrigin {
+    /// The catalog it came from (`worshipleaderapp`).
+    pub source: String,
+    /// The catalog's key for the song (see `catalog::key`).
+    pub key: String,
+    /// The catalog's language the song is in (`ru`, `uk`…).
+    pub language: String,
+    /// The language of the translation that was put under the song's words, if one was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub second: Option<String>,
+    /// A fingerprint of the catalog's text the copy was made from.
+    pub text_hash: String,
+    /// A fingerprint of the song as the catalog last wrote it: the song is unchanged while it
+    /// still has this fingerprint, and any edit gives it another.
+    pub made_hash: String,
+    /// When the copy was made, as a date (year-month-day).
+    pub added: String,
+    /// The fingerprint of a newer version of the song's text, which the catalog has and the
+    /// church's changed copy has not taken.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub newer: Option<String>,
+    /// The catalog no longer has the song.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gone: bool,
 }
 
 /// An order to play a song's groups in. A group can come more than once, and a group left out
@@ -987,6 +1020,7 @@ impl Presentation {
             arrangement: self.arrangement,
             loops: self.loops,
             transition: self.transition,
+            catalog: self.catalog.clone(),
         }
     }
 
@@ -1259,6 +1293,7 @@ mod tests {
             arrangement: None,
             loops: false,
             transition: None,
+            catalog: None,
         };
         let verse = song.groups[0].id;
         let chorus = song.groups[1].id;
@@ -1394,6 +1429,7 @@ mod tests {
             arrangement: None,
             loops: false,
             transition: None,
+            catalog: None,
         };
         let (first, at) = empty.with_slide_added();
         assert_eq!((first.slide_count(), at), (1, 0));

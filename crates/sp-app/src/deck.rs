@@ -113,6 +113,7 @@ fn presentation(title: String, slides: Vec<sp_model::Slide>) -> Presentation {
         arrangement: None,
         loops: false,
         transition: None,
+        catalog: None,
     }
 }
 

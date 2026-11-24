@@ -177,6 +177,7 @@ pub fn from_softprojector(number: Option<i64>, title: &str, words: &str, music: 
         arrangement,
         loops: false,
         transition: None,
+        catalog: None,
     }
 }
 

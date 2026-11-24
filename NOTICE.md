@@ -218,6 +218,13 @@ The project drew them with its own script, `assets/backgrounds/make_backgrounds.
 them and the script under CC0 1.0 Universal (public domain).
 [`docs/licences/backgrounds.md`](docs/licences/backgrounds.md) explains.
 
+### Song catalog
+
+Song catalog: Worship Leader App, [worshipleaderapp.com](https://worshipleaderapp.com). The
+songs are the source's, not SoftPresenter's, and none comes with the app: a church downloads
+the languages it chooses from the source's own server
+([docs/licences/song-catalog.md](docs/licences/song-catalog.md)).
+
 ### Other libraries
 
 SoftPresenter is built from many open-source Rust libraries, each under its own licence (MIT,

@@ -467,6 +467,7 @@ pub fn build_passage(
         arrangement: None,
         loops: false,
         transition: None,
+        catalog: None,
     })
 }
 

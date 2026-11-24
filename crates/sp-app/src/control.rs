@@ -650,6 +650,9 @@ pub fn only_reads(args: &[String]) -> bool {
         "audio" => alone || (args.len() == 2 && word(1) == "playlists"),
         "voxlive" => alone || (args.len() == 2 && word(1) == "screens"),
         "canva" => alone || (args.len() == 2 && word(1) == "status"),
+        "catalog" => {
+            alone || matches!(word(1).as_str(), "status" | "languages" | "search" | "list" | "newer" | "sizes")
+        }
         "remote" => alone || (args.len() == 2 && word(1) == "status"),
         "notices" => alone,
         // `playlist [NAME]`, not `playlist add …`.
@@ -823,6 +826,7 @@ const COMMANDS: &[&str] = &[
     "menu",
     "remote",
     "notices",
+    "catalog",
 ];
 
 /// True when `word` starts a command.
@@ -1038,6 +1042,21 @@ Songs, libraries and playlists
   search WORDS                 songs with those words in their title or slides
   song arrangements SONG | song arrangement SONG use NAME|none
   song arrangement SONG set NAME GROUP… | song arrangement SONG delete NAME
+
+Song catalog (free songs from Worship Leader App, kept apart from the library)
+  catalog                      the languages downloaded: songs, sizes, when fetched and checked
+  catalog search WORDS [--limit N]   songs of the catalog with those words in their title or
+                               first lines (not the ones already in the library), with keys
+  catalog list LANG [FROM [COUNT]]   a language's songs in title order
+  catalog add KEY [--second LANG]    put a song in the library (the library Worship Leader App),
+                               with its version in LANG under its words; KEY may be its start
+  catalog newer                songs of the library with a newer version waiting, or dropped
+  catalog use-newer SONG | catalog keep-mine SONG   take the newer version (Undo brings yours
+                               back), or keep yours and not be offered it again
+  catalog download LANG | catalog check | catalog remove LANG --yes
+                               fetch a language (a job: --wait waits), ask the source now
+                               whether the ones here changed, or take a language off this computer
+  catalog sizes [LANG…] [--ask]      songs, download size and room on disk, per language
 
 Themes
   themes | theme templates THEME | theme main THEME
@@ -1286,6 +1305,7 @@ impl crate::App {
             "media-playlist" => self.ctl_media_playlist(args),
             "voxlive" => self.ctl_voxlive(args),
             "canva" => self.ctl_canva(args),
+            "catalog" => self.ctl_catalog(args),
             "themes" => Ok(self.ctl_named_list("themes", |s| s.theme_names.clone())),
             "screens" => Ok(self.ctl_screens()),
             "timers" => Ok(self.ctl_timers()),

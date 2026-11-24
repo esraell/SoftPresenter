@@ -15,7 +15,8 @@ change, as everything else may (see the README).
   [running the show](#running-the-show) ·
   [media and video](#media-and-video) ·
   [messages, props, timers, macros](#messages-props-timers-and-macros) · [audio](#audio) ·
-  [the Bible](#the-bible) · [songs](#songs) · [changing a slide](#changing-a-slide) ·
+  [the Bible](#the-bible) · [songs](#songs) · [the song catalog](#the-song-catalog) ·
+  [changing a slide](#changing-a-slide) ·
   [playlists and libraries](#playlists-and-libraries) · [themes](#themes) ·
   [screens and settings](#screens-and-settings) ·
   [undo, jobs and the menu bar](#undo-jobs-and-the-menu-bar) · [notices](#notices) · [Remote Control](#remote-control)
@@ -575,6 +576,60 @@ else is refused, with the list of what is read.
     Blessed Assurance: arrangement Short: Verse 1, Chorus, Verse 3, Chorus.
     $ sp song delete "Old Hymn" --yes
     Deleted Old Hymn.
+
+## The song catalog
+
+Free songs from Worship Leader App, one songbook per language, kept apart from the library until
+a song is added to it. A language is downloaded once from the source; about once a month, and never
+while anything is on screen, the app asks the source whether it changed (with the ETag and
+Last-Modified of the last download, so a check that finds nothing new downloads nothing).
+
+| Command | Does |
+|---|---|
+| `catalog` | The languages downloaded: songs, the download's size, the room on disk, when fetched and last checked, songs the source dropped, files in the pack left out; how many songs of the catalog are in the library and how many have a newer version waiting. `--json` also gives the ETag and Last-Modified, and how far a download under way has got |
+| `catalog search WORDS [--limit N]` | Songs of the catalog whose title, or the first line of a section, holds every word (in Cyrillic or Latin; case, ё and е, stress marks and punctuation make no difference). Titles that are the words come first, then titles that start with them, then titles that hold them, then lines. Songs already in the library are left out. Each hit has its key, language, title, first line, the languages it is also in, and the credit |
+| `catalog list LANG [FROM [COUNT]]` | A language's songs in title order |
+| `catalog add KEY [--second LANG]` | Puts a song in the library, in a library named Worship Leader App (made the first time), as an ordinary song marked with where it came from. KEY is the key `catalog search` shows, or the start of it when only one song has it. `--second en` puts the song's English version under its words, group by group by the group's name; the reply says which groups the other language has no partner for ("shows one language only") and the app leaves out a group only that language has. A song already joined is not made again |
+| `catalog newer` | Songs of the library with a newer version waiting (the church changed the song, so it was not replaced), and songs the source no longer has (the copy stays) |
+| `catalog use-newer SONG` | Takes the newer version in place of the church's changed copy: it can be undone with `sp undo`, which brings the church's version back with its note |
+| `catalog keep-mine SONG` | Keeps the church's song, and the same newer version is not offered again (a still newer one is) |
+| `catalog download LANG` | Downloads a language (a background job: `--wait` waits, or `sp job N`); with the language already here it asks the source whether it changed, as the monthly check does, and downloads only if so. At the computer only |
+| `catalog check` | Asks the source now about every language downloaded (a job), then brings the library's copies up to date. At the computer only |
+| `catalog remove LANG --yes` | Takes a language off this computer; songs already in the library stay. At the computer only |
+| `catalog sizes [LANG…] [--ask]` | For setup: per language the songs, the download's size and the room on disk. A language not downloaded is asked about at the source (a request that downloads nothing) with `--ask`, as a job. At the computer only |
+
+An update never overwrites what the church changed. A song nobody has touched since it was added
+(not a word, a title, a detail, a theme, an arrangement or a slide's look) is brought up to date
+quietly when the source has newer text, without a step for Undo; a song the church changed only
+gets a note that a newer version exists, and one notice for each check says how many of each. A song
+the source drops is marked gone in the catalog and noted on its copy, which stays.
+
+    $ sp catalog download uk --wait
+    Downloaded the Ukrainian songs: 916 songs. 1 files in the pack could not be read and were left out. (0.1 s)
+    $ sp catalog
+    Song catalog: songs from Worship Leader App (https://worshipleaderapp.com).
+      uk  Ukrainian  916 songs, download 1.3 MB, 1.5 MB on disk, fetched 2026-11-24, checked 2026-11-24, 1 files left out
+    $ sp catalog search "благодать" --limit 2
+    4 found in the catalog for “благодать” (showing 2):
+      uk  Твоя благодать, мені дає, в житті надію  —  …  [uk:твоя-благодать-мені-дає-в-житті-надію~540dc342]  also in pt
+      uk  Це благодать Твоя  —  …  [uk:це-благодать-твоя~7197101c]
+    $ sp catalog add "uk:чудова-благодать~ef2beb3b.0449" --second ru
+    “Чудова благодать” is in your library now, in the library Worship Leader App. With its Russian version below.
+    $ sp catalog check --wait
+    The Ukrainian songs are up to date (916 songs); nothing was downloaded.
+    $ sp catalog newer
+      Чудова благодать  has a newer version in Worship Leader App; yours is kept
+      Благодаттю Божою  is no longer in Worship Leader App (yours stays)
+    $ sp catalog use-newer "Чудова благодать"
+    Чудова благодать now has the newer version from Worship Leader App. Undo brings your version back.
+
+The first lines the search shows are the songs' own words, left out here. A song's **key** has
+no number in it, because the source gives songs none: the language, the title as a search folds
+it, `~` and eight hex letters of the first section's words (`uk:це-благодать-твоя~7197101c`).
+Songs of a language with the same title and first section have `.` and four more letters, of
+their file's name in the pack. Correcting a song's words after its first section changes neither
+the key nor the song's place in the library; changing its title or first section is a new song in
+the catalog, and the old one is marked gone.
 
 ## Changing a slide
 
