@@ -2563,3 +2563,86 @@ fn video_picture_step_cost() {
     time("slide drawn whole each time   ", &whole);
     time("slide kept in a texture       ", cached.scene());
 }
+
+/// A window's picture for the close mark to go over, as the screens' windows have them (RGBA):
+/// light grey to the left of `split`, black to its right, so one mark shows over both.
+fn split_picture(w: u32, h: u32, split: u32) -> wgpu::Texture {
+    let (device, queue) = gpu();
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("a window's picture"),
+        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let pixels: Vec<u8> =
+        (0..w * h).flat_map(|at| if at % w < split { [200, 200, 200, 255] } else { [0, 0, 0, 255] }).collect();
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &pixels,
+        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: Some(h) },
+        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+    );
+    texture
+}
+
+/// Lays the close mark over a split picture and reads it back.
+fn with_close_mark(look: &sp_render::MarkLook, square: sp_render::Square, w: u32, h: u32, split: u32) -> Vec<u8> {
+    let (device, queue) = gpu();
+    let picture = split_picture(w, h, split);
+    let mark = sp_render::CloseMark::new(device, wgpu::TextureFormat::Rgba8Unorm);
+    assert_eq!(mark.format(), wgpu::TextureFormat::Rgba8Unorm);
+    let view = picture.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    mark.draw(queue, &mut encoder, &view, (w, h), square, look);
+    queue.submit([encoder.finish()]);
+    read_pixels(device, queue, &picture).expect("read back")
+}
+
+/// The X a screen's window shows over its picture when the pointer moves over it (the app's
+/// `close_button`): a dark plate the picture shows through, a faint light ring that keeps it in
+/// sight on black, and a light X in the middle. Nothing outside its round plate changes, and at
+/// strength 0 nothing at all. The colours are the app's (its panel grey, its light text).
+#[test]
+fn the_close_mark_lies_over_the_picture_in_its_corner_and_nowhere_else() {
+    let (w, h, split) = (400, 120, 340);
+    let square = sp_render::Square { x: 304.0, y: 24.0, side: 72.0 };
+    let look = sp_render::MarkLook {
+        plate: [25.0 / 255.0, 25.0 / 255.0, 25.0 / 255.0, 0.72],
+        ring: [243.0 / 255.0, 243.0 / 255.0, 239.0 / 255.0, 0.22],
+        cross: [185.0 / 255.0, 185.0 / 255.0, 178.0 / 255.0, 0.95],
+        strength: 1.0,
+    };
+    let before = {
+        let (device, queue) = gpu();
+        read_pixels(device, queue, &split_picture(w, h, split)).expect("read back")
+    };
+    let none = with_close_mark(&sp_render::MarkLook { strength: 0.0, ..look }, square, w, h, split);
+    assert!(none == before, "at strength 0 nothing changes");
+    let marked = with_close_mark(&look, square, w, h, split);
+    assert_matches_golden("close_mark", &marked, w, h);
+    // Outside the plate (the square's corners, and everything beyond it), the picture as it was.
+    for (x, y) in [(10, 10), (302, 60), (378, 60), (340, 22), (340, 98), (307, 27), (372, 27), (307, 92), (372, 92)] {
+        assert_eq!(pixel(&marked, w, x, y), pixel(&before, w, x, y), "({x}, {y}) is outside the plate");
+    }
+    // The middle of the X is light; the plate darkens the light picture between its arms, which
+    // shows through it; the ring shows on black.
+    let middle = pixel(&marked, w, 340, 60);
+    assert!(middle[0] >= 170, "the X is light: {middle:?}");
+    let plate = pixel(&marked, w, 316, 60);
+    assert!(plate[0] < 120 && plate[0] > 40, "a dark plate the grey shows through: {plate:?}");
+    let ring = pixel(&marked, w, 375, 60);
+    assert!(ring[0] > 20, "the ring shows on black: {ring:?}");
+    assert!(marked.chunks(4).all(|p| p[3] == 255), "the window stays solid");
+    // A square partly outside the picture draws nothing (the app never asks for one).
+    let outside = with_close_mark(&look, sp_render::Square { x: 360.0, ..square }, w, h, split);
+    assert!(outside == before);
+}

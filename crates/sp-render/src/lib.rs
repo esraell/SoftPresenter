@@ -2,6 +2,7 @@
 //! thumbnails and previews, so the operator sees what the audience sees. Knows nothing about
 //! windows.
 
+mod close_mark;
 mod fade_blend;
 mod fonts;
 mod gpu;
@@ -11,6 +12,7 @@ mod scene;
 mod see_through;
 mod yuv;
 
+pub use close_mark::{CloseMark, MarkLook, Square};
 pub use fade_blend::{FadeBlend, Weights, blend_weights};
 pub use fonts::{Fonts, copy_large_fonts_into_caches};
 pub use gpu::{CachedSide, MovingPicture, PaintError, Painter, read_pixels, read_pixels_gently, target_texture};

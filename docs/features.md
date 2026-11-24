@@ -1357,6 +1357,20 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   never changes the Mac's menu bar or Dock on the operator's display. On Windows it is a
   borderless window on the monitor's rectangle, which Windows shows at once and which hides the
   taskbar on that monitor.
+- A screen that fills a display can be switched off from that display. When the pointer keeps
+  moving over its window for half a second (one only crossing the church's TV shows nothing;
+  on a Mac a click on the window does too), a large X fades in at its top-right corner: a
+  translucent dark round plate, 72 points across and 24 from the edges, with a faint light ring
+  and a light X, brighter under the pointer, and the pointer shows over the window while it
+  does. It fades out 3 seconds after the pointer stops (1 second after it leaves the window),
+  and stays while the pointer rests on it. Clicking it, once it has been up for 0.4 s, sets that
+  screen's Output to Off, saves the screens and closes the window, and the notices say "“Screen
+  1” was turned off from its own display. Choose its display again in Settings › Screens." So a
+  screen put on the operator's own display (chosen by mistake, or where the system doesn't say
+  which display the operator works on) never leaves the operator stuck. The X is drawn only
+  into that window's own picture: never on NDI, DeckLink, a key, a stage screen's picture of
+  it, the operator's preview or a capture; screens in an ordinary window (they have a frame to
+  close) don't show it.
 - Switching the audience (or stage) screens off hides their windows at once, so the display
   shows what is behind them, not black; NDI goes on sending black (all clear, for a see-through
   screen), so a stream keeps its source. A

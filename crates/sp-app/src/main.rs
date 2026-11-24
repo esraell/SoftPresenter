@@ -18,6 +18,7 @@ mod canva;
 mod catalog;
 mod catalog_cli;
 mod clock;
+mod close_button;
 mod control;
 mod convert;
 mod deck;
@@ -947,6 +948,24 @@ fn screen_name(state: &HomeState, id: Uuid) -> &str {
     state.screens.iter().find(|screen| screen.id == id).map_or("A screen", |screen| screen.name.as_str())
 }
 
+/// Switches a screen off whose X was pressed on its own window (see `close_button`), as closing
+/// its window does: it stays in the list, and `sync_screens` saves the list and closes the
+/// window. The operator is told how to bring it back.
+fn switch_off_by_its_x(running: &mut Running, screen: Uuid) {
+    let name = screen_name(&running.home_state, screen).to_owned();
+    if let Some(closed) = running.home_state.screens.iter_mut().find(|have| have.id == screen) {
+        closed.output = screens::Output::Off;
+    }
+    running.home_state.screens_changed = true;
+    applog::event("screens", &format!("{name}: switched off with the close button on its own window"));
+    running.home_state.notices.info(i18n::tf(
+        "screens.closed_from_display",
+        "{screen} was turned off from its own display. Choose its display again in Settings \u{203a} Screens.",
+        &[("screen", &i18n::quoted(&name))],
+    ));
+    running.home_window.request_redraw();
+}
+
 /// The connected displays as the window system lists them.
 /// Notes in the log where a screen's window was asked to go and which display it is on, so a
 /// screen on the wrong display can be seen from the log.
@@ -1530,6 +1549,18 @@ struct ScreenWindow {
     tries: u8,
     /// Made as a macOS window that covers a display (see `put_on_display`).
     cover: bool,
+    /// The X it shows when the pointer moves over it, while it fills a display, and how the
+    /// screens' thread was last told to draw it (see `close_button`).
+    close: close_button::CloseButton,
+    close_sent: Option<close_button::Drawn>,
+}
+
+impl ScreenWindow {
+    /// True when the window has the X: shown, and filling a display (or, with the testing aid,
+    /// in an ordinary window).
+    fn has_close_button(&self) -> bool {
+        !self.hidden && close_button::has_close_button(&self.placed, close_button::in_windows_too())
+    }
 }
 
 struct App {
@@ -7188,6 +7219,89 @@ impl App {
         self.options.capture_home.is_some() || std::env::var_os("SOFTPRESENTER_QUIET").is_some()
     }
 
+    /// Testing aid: SOFTPRESENTER_CLOSE_BUTTON_PLAY=1 plays the pointer over the first screen's
+    /// window that has the X, through the same steps as the window's own events: moving across
+    /// it for 1.2 seconds, resting on its X for 0.6, then pressing it, once (`=move` only moves,
+    /// and leaves the X to go by itself). For a quiet run with
+    /// SOFTPRESENTER_CLOSE_BUTTON_IN_WINDOWS=1, where nobody moves the pointer there. When to play
+    /// the next step.
+    fn play_pointer(&mut self) -> Option<Instant> {
+        static STARTED: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        // Testing aid: SOFTPRESENTER_CLOSE_BUTTON_PLAY (see above).
+        let asked = std::env::var_os("SOFTPRESENTER_CLOSE_BUTTON_PLAY")?;
+        if DONE.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        let running = self.running.as_mut()?;
+        let have = running.screen_windows.iter_mut().find(|have| have.has_close_button())?;
+        let now = Instant::now();
+        let gone = now.saturating_duration_since(*STARTED.get_or_init(|| now)).as_secs_f64();
+        let (size, scale) = (have.window.inner_size(), have.window.scale_factor());
+        let square = close_button::square(size.width, scale);
+        let on_x = f64::from(square.x + square.side / 2.0);
+        let at = match gone {
+            ..1.2 => (f64::from(size.width) * (0.1 + 0.4 * gone / 1.2), f64::from(size.height) / 2.0),
+            _ if asked == "move" => {
+                DONE.store(true, std::sync::atomic::Ordering::Relaxed);
+                return None;
+            }
+            ..1.8 => (on_x, f64::from(square.y + square.side / 2.0)),
+            _ => {
+                DONE.store(true, std::sync::atomic::Ordering::Relaxed);
+                let press = have.close.pressed(now, close_button::SHOWS_ON_PRESS);
+                applog::event("screens", &format!("{}: testing aid: the played pointer pressed: {press:?}", have.name));
+                if press == close_button::Press::SwitchOff {
+                    let screen = have.screen;
+                    switch_off_by_its_x(running, screen);
+                }
+                return None;
+            }
+        };
+        have.close.moved(now, at, size.width, scale);
+        Some(now + close_button::STEP)
+    }
+
+    /// The X on each screen's window that fills a display (see `close_button`): lets it go once
+    /// it has faded, tells the screens' thread how to draw it whenever that changes (nothing
+    /// while it only stays), and shows the pointer over the window while it shows. When to look
+    /// again: a step later while one comes or goes, when one starts to go.
+    fn tick_close_buttons(&mut self) -> Option<Instant> {
+        let played = self.play_pointer();
+        let Running { screen_windows, output, .. } = self.running.as_mut()?;
+        let now = Instant::now();
+        let mut next: Option<Instant> = played;
+        for have in screen_windows.iter_mut() {
+            // A window hidden, or no longer filling a display, has no X.
+            if !have.has_close_button() {
+                have.close = close_button::CloseButton::default();
+            }
+            have.close.settle(now);
+            let drawn = have.close.drawn(now, have.window.scale_factor());
+            if drawn != have.close_sent {
+                if let Some(output) = output.as_ref() {
+                    output.send(OutputMsg::CloseButton { id: have.screen, drawn });
+                }
+                // The pointer shows over the window while the X does; a window that fills a
+                // display hides it otherwise.
+                match (have.close_sent.is_some(), drawn.is_some()) {
+                    (false, true) => {
+                        have.window.set_cursor_visible(true);
+                        applog::event("screens", &format!("{}: the close button shows on its window", have.name));
+                    }
+                    (true, false) => {
+                        have.window.set_cursor_visible(!matches!(have.placed, Placed::Fullscreen(_)));
+                        applog::event("screens", &format!("{}: the close button has gone", have.name));
+                    }
+                    _ => {}
+                }
+                have.close_sent = drawn;
+            }
+            next = [next, have.close.next_change(now)].into_iter().flatten().min();
+        }
+        next
+    }
+
     /// Brings the screens' windows and NDI sources in line with the list of screens and the
     /// displays connected now: opens, moves and closes windows, starts, renames and stops NDI,
     /// and says what each screen is doing. Cheap when nothing has changed, so it runs every
@@ -7557,6 +7671,8 @@ impl App {
                 put_on,
                 tries: 0,
                 cover: covering && cfg!(target_os = "macos"),
+                close: close_button::CloseButton::default(),
+                close_sent: None,
             });
             opened = true;
         }
@@ -9838,6 +9954,37 @@ impl ApplicationHandler<AppEvent> for App {
                         }
                     }
                 }
+                // The pointer over a window that fills a display shows its X (see
+                // `close_button`); `tick_close_buttons` draws it as its clock runs.
+                WindowEvent::CursorMoved { position, .. } => {
+                    if let Some(have) = running.screen_windows.iter_mut().find(|have| have.window.id() == id)
+                        && have.has_close_button()
+                    {
+                        let (w, scale) = (have.window.inner_size().width, have.window.scale_factor());
+                        have.close.moved(Instant::now(), (position.x, position.y), w, scale);
+                    }
+                }
+                WindowEvent::CursorLeft { .. } => {
+                    if let Some(have) = running.screen_windows.iter_mut().find(|have| have.window.id() == id) {
+                        have.close.left(Instant::now());
+                    }
+                }
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: winit::event::MouseButton::Left,
+                    ..
+                } => {
+                    let press = match running.screen_windows.iter_mut().find(|have| have.window.id() == id) {
+                        Some(have) if have.has_close_button() => {
+                            have.close.pressed(Instant::now(), close_button::SHOWS_ON_PRESS)
+                        }
+                        _ => close_button::Press::Nothing,
+                    };
+                    if press == close_button::Press::SwitchOff {
+                        switch_off_by_its_x(running, screen);
+                        check_displays = true;
+                    }
+                }
                 _ => {}
             }
             if check_displays {
@@ -10176,6 +10323,8 @@ impl ApplicationHandler<AppEvent> for App {
         // operator's display by a change nobody was told of (the loop sleeps while idle, and
         // macOS doesn't draw a window that is covered, so nothing else would look).
         let looked_at = self.look_at_displays(el);
+        // The X on the screens' windows, as it comes and goes.
+        let close_at = self.tick_close_buttons();
         // Songs changed in the Edit view are written once typing has paused for a second.
         const SAVE_AFTER: Duration = Duration::from_secs(1);
         let save_at = self.unsaved_since.map(|since| since + SAVE_AFTER);
@@ -10227,6 +10376,7 @@ impl ApplicationHandler<AppEvent> for App {
             waiting_at,
             remote_at,
             looked_at,
+            close_at,
         ];
         match wake.into_iter().flatten().min() {
             Some(at) => {

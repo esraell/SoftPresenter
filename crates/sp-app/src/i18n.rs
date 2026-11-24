@@ -435,7 +435,6 @@ pub fn seconds(value: f64) -> String {
 
 /// Puts a name or phrase in the language's quotation marks (“…” in English and Spanish, «…» in
 /// Russian and Ukrainian).
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn quoted(text: &str) -> String {
     let format = format_of(current());
     format!("{}{text}{}", format.open, format.close)

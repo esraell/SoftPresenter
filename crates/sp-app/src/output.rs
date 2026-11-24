@@ -145,6 +145,13 @@ pub enum OutputMsg {
     /// (its own theme and layers), or with `None` at what the room sees. Only the preview is
     /// drawn again: it is the same one picture, drawn for another screen.
     PreviewScreen(Option<Uuid>),
+    /// How a screen's window is to draw its X now (see `close_button`), or `None` for no X. Only
+    /// that window is shown again, with the picture it has: nothing is painted, and nothing
+    /// else (NDI, a key, a stage screen, the preview) ever has the X.
+    CloseButton {
+        id: Uuid,
+        drawn: Option<crate::close_button::Drawn>,
+    },
     Shutdown,
 }
 
@@ -215,6 +222,12 @@ const GIVEN_UP_AGAIN_AFTER: Duration = Duration::from_secs(5);
 /// which is what paces a fade, a build or scrolling words; without it they would spin. About
 /// one refresh of a 60 Hz screen.
 const UNDRAWN_PAUSE: Duration = Duration::from_millis(16);
+
+/// How long a window's X that couldn't be shown (the window wasn't given its next picture in
+/// time, say) waits before it is shown again, and how many times it is tried: an X left behind
+/// would stay on the room's screen until the next slide.
+const CLOSE_AGAIN_AFTER: Duration = Duration::from_millis(100);
+const CLOSE_TRIES: u8 = 5;
 
 /// Why a screen is not showing what it was last asked to show.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -895,6 +908,13 @@ struct Target {
     /// Since when the window has been passed over, its next picture not having come in time
     /// (see `output/next_picture.rs`).
     passed_over: Option<Instant>,
+    /// The X the window is to show over its picture, the X it last showed, and what lays it
+    /// there (see `close_button`), shared by the windows of its format.
+    close: Option<crate::close_button::Drawn>,
+    close_shown: Option<crate::close_button::Drawn>,
+    close_mark: Arc<sp_render::CloseMark>,
+    /// How many times the X as it is now couldn't be shown (see `CLOSE_TRIES`).
+    close_tries: u8,
 }
 
 impl Target {
@@ -1236,6 +1256,10 @@ struct Output {
     /// meanwhile a stage screen's picture of one of them is made from the frame, not taken from
     /// the window, which still holds the last drawing's.
     windows_behind: bool,
+    /// What draws the windows' X, one for each format of window (see `add_surface`), and when
+    /// an X that couldn't be shown is tried again.
+    close_marks: Vec<Arc<sp_render::CloseMark>>,
+    close_again_at: Option<Instant>,
 }
 
 fn run(
@@ -1346,6 +1370,8 @@ fn run(
         preview_fade: None,
         preview_screen: None,
         windows_behind: false,
+        close_marks: Vec::new(),
+        close_again_at: None,
         device,
         queue,
     };
@@ -1363,6 +1389,10 @@ fn run(
         let polled = Instant::now();
         let _ = output.device.poll(wgpu::PollType::Poll);
         output.held.since(Part::Poll, For::Nothing, polled);
+        // A window's X that couldn't be shown a moment ago is tried again.
+        if output.close_again_at.is_some_and(|at| at <= Instant::now()) {
+            output.show_close_buttons();
+        }
         // What the operator has asked for meanwhile comes first: it is drawn below, in place
         // of a picture that was due to be drawn again.
         let waiting = match rx.try_recv() {
@@ -1517,10 +1547,13 @@ fn run(
         let mut new_picture = false;
         // Whether NDI receivers came or went, and whether that is all these messages say.
         let (mut receivers_changed, mut nothing_else) = (false, true);
-        // Whether the live preview now looks at another screen.
-        let mut preview_again = false;
+        // Whether the live preview now looks at another screen, whether that or the NDI receivers
+        // were asked about at all, and whether a window's X is to look different.
+        let (mut preview_again, mut ndi_or_preview, mut close_changed) = (false, false, false);
         while let Some(msg) = next {
-            nothing_else &= matches!(msg, OutputMsg::NdiReceivers | OutputMsg::PreviewScreen(_));
+            nothing_else &=
+                matches!(msg, OutputMsg::NdiReceivers | OutputMsg::PreviewScreen(_) | OutputMsg::CloseButton { .. });
+            ndi_or_preview |= matches!(msg, OutputMsg::NdiReceivers | OutputMsg::PreviewScreen(_));
             match msg {
                 OutputMsg::Show(frame) => {
                     let now = Instant::now();
@@ -1656,6 +1689,13 @@ fn run(
                         preview_again = true;
                     }
                 }
+                OutputMsg::CloseButton { id, drawn } => {
+                    if let Some(target) = output.targets.iter_mut().find(|target| target.id == id) {
+                        target.close = drawn;
+                        target.close_tries = 0;
+                        close_changed = true;
+                    }
+                }
                 OutputMsg::Shutdown => return,
             }
             next = rx.try_recv().ok();
@@ -1678,11 +1718,15 @@ fn run(
             // Drawing the windows too would cut short a fade under way in them, for something
             // the audience in the room has no part in.
             let owed = output.ndi_state != Shown::default() || output.ndi_lost.owed();
-            if ndi_count_needs_drawing(&output.ndi_seen(), &output.ndi_drawn_for, owed) {
+            if ndi_or_preview && ndi_count_needs_drawing(&output.ndi_seen(), &output.ndi_drawn_for, owed) {
                 output.draw_ndi();
             }
         } else {
             output.draw(new_picture);
+        }
+        // A window whose X is to look different, and wasn't drawn just now, is shown again.
+        if close_changed {
+            output.show_close_buttons();
         }
     }
 }
@@ -1833,6 +1877,17 @@ impl Output {
         };
         let configured = configure(&self.device, &surface, &config);
         let next = NextPicture::new(Arc::new(surface));
+        // What draws the X over the window's picture (see `close_button`): made with the first
+        // window of each format, as it is set up, never as the X first shows (making it holds
+        // the thread as long as setting a window up does).
+        let close_mark = match self.close_marks.iter().find(|mark| mark.format() == format) {
+            Some(mark) => mark.clone(),
+            None => {
+                let mark = Arc::new(sp_render::CloseMark::new(&self.device, format));
+                self.close_marks.push(mark.clone());
+                mark
+            }
+        };
         // A screen has one window: a new one takes the old one's place.
         self.targets.retain(|target| target.id != id);
         self.targets.push(Target {
@@ -1849,6 +1904,10 @@ impl Output {
             trouble: crate::applog::Lasting::default(),
             state: Shown::default(),
             passed_over: None,
+            close: None,
+            close_shown: None,
+            close_mark,
+            close_tries: 0,
         });
     }
 
@@ -3338,10 +3397,16 @@ impl Output {
 
     /// How long the thread may sleep with nothing to draw before it must look again: not at
     /// all (`None`) unless the GPU still holds memory the painter gave back (`rested` is
-    /// false), or a picture the GPU was too slow with is waiting to be drawn again.
+    /// false), a picture the GPU was too slow with is waiting to be drawn again, or a window's
+    /// X that couldn't be shown is to be tried again.
     fn look_again_in(&self, rested: bool) -> Option<Duration> {
         let for_memory = (!rested).then_some(GPU_LOOK_AGAIN);
-        [for_memory, self.draw_again_in()].into_iter().flatten().min()
+        [for_memory, self.draw_again_in(), self.close_again_in()].into_iter().flatten().min()
+    }
+
+    /// How long until a window's X that couldn't be shown is tried again, if one is to be.
+    fn close_again_in(&self) -> Option<Duration> {
+        self.close_again_at.map(|at| at.saturating_duration_since(Instant::now()))
     }
 
     /// How long until a picture the GPU was too slow with, or NDI pictures lost on their way
@@ -3429,6 +3494,41 @@ impl Output {
         // window does.)
         self.present_keys_of(index);
         true
+    }
+
+    /// Shows again, in each window whose X is to look different from the X it shows, the picture
+    /// it already has, with the X as it is to look now: one copy into the window, nothing painted
+    /// (see `close_button`). Not in a window that is fading, whose steps show it; nor in one with
+    /// no picture painted yet, which shows it with its first. One that couldn't be shown is tried
+    /// again a few times, a moment apart.
+    fn show_close_buttons(&mut self) {
+        self.close_again_at = None;
+        for index in 0..self.targets.len() {
+            let target = &self.targets[index];
+            if target.close == target.close_shown || target.fade.is_some() || target.close_tries >= CLOSE_TRIES {
+                continue;
+            }
+            // A key shows its fill's picture as a key; any other window its own picture, solid
+            // if it is see-through.
+            let id = target.id;
+            let (from, solid) = match self.window_fill(id) {
+                Some(fill) => (fill, Some(Solid::Key)),
+                None => (index, self.see_through(id).map(solid_fill)),
+            };
+            let Some(source) = self.targets.get(from) else { continue };
+            if source.shown.is_none() || source.state != Shown::default() {
+                continue;
+            }
+            let picture = source.texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let Output { device, queue, targets, held, close_again_at, .. } = self;
+            let target = &mut targets[index];
+            if !show_in_window(device, queue, target, &picture, solid, held) {
+                target.close_tries += 1;
+                if target.close_tries < CLOSE_TRIES {
+                    *close_again_at = Some(Instant::now() + CLOSE_AGAIN_AFTER);
+                }
+            }
+        }
     }
 
     /// Shows, in the windows of the screens that are its key, the key of the picture just
@@ -3671,10 +3771,25 @@ fn show_in_window_timed(
                     (Some(_), Some(pass)) => pass.draw(device, &mut encoder, picture, &surface_view),
                     _ => target.blitter.copy(device, &mut encoder, picture, &surface_view),
                 }
+                // The X over it, in this window's picture only: never in the texture the
+                // picture came from, which keys, stage screens and fades are made from.
+                if let Some(drawn) = target.close {
+                    let size = (target.config.width, target.config.height);
+                    let square = crate::close_button::square(size.0, drawn.scale);
+                    target.close_mark.draw(queue, &mut encoder, &surface_view, size, square, &drawn.look());
+                }
                 queue.submit([encoder.finish()]);
                 let presenting = held.since(Part::Blit, window, after);
                 queue.present(frame);
                 held.since(Part::Present, window, presenting);
+                // Said once each time the X comes, so a test of it can see it reached the window.
+                if target.close_shown.is_none() && target.close.is_some() {
+                    crate::applog::event(
+                        "output",
+                        &format!("The window of \"{}\" shows its close button.", target.name),
+                    );
+                }
+                target.close_shown = target.close;
                 return true;
             }
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost if attempt == 0 => {
