@@ -156,8 +156,8 @@ READ ME. The program isn't signed yet, so Windows asks the first time ("More inf
 anyway").
 
 The first start opens a short setup: the screens, bringing songs in, which Bibles to show, and
-what macOS will ask permission for and why. SoftPresenter › Set Up SoftPresenter… opens it
-again.
+what the system will ask permission for and why (macOS, or Windows' firewall; nothing asks on
+Linux). Settings › Set Up SoftPresenter… opens it again.
 
 Two things are optional:
 

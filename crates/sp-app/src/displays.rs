@@ -11,7 +11,8 @@ pub struct DisplayInfo {
     /// The window system's own name for it ("Monitor #0" on a Mac, `\\.\DISPLAY2` on Windows),
     /// which screens set up before SoftPresenter asked the system are saved under.
     pub old_name: String,
-    /// The main display, with the menu bar, where the operator works. No screen fills it.
+    /// The main display, with the menu bar, where the operator works. No screen fills it. On
+    /// Wayland no display is the main one: the window system doesn't say.
     pub main: bool,
     pub x: i32,
     pub y: i32,
@@ -65,14 +66,52 @@ pub enum Placement {
     Windowed,
 }
 
+/// Why no screen may fill a display: the operator works there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kept {
+    /// It is the only display connected: a computer with one display has only the operator's.
+    Only,
+    /// It is the main display, with the menu bar (or the taskbar).
+    Main,
+    /// The window system doesn't say which display is the main one (Wayland), and SoftPresenter's
+    /// own window is on this one.
+    HomeWindow,
+}
+
+/// Whether the display at `index` is the operator's, so no screen fills it, and why. `operator`
+/// are the displays the operator works on (the one holding the home window, and the main one),
+/// by index, as far as the window system says; they count only where no display is known as
+/// the main one, so a home window dragged onto a chosen display on a Mac or Windows never takes
+/// the screen off it mid-service.
+pub fn kept_for_operator(displays: &[DisplayInfo], operator: &[usize], index: usize) -> Option<Kept> {
+    let display = displays.iter().find(|d| d.index == index)?;
+    if displays.len() == 1 {
+        Some(Kept::Only)
+    } else if display.main {
+        Some(Kept::Main)
+    } else if !displays.iter().any(|d| d.main) && operator.contains(&index) {
+        Some(Kept::HomeWindow)
+    } else {
+        None
+    }
+}
+
+/// The displays a screen left to choose for itself (Automatic) may fill, in order: each that
+/// isn't the operator's (see `kept_for_operator`) and doesn't hold the home window. None when it
+/// isn't known which display the operator is on (`operator` is empty): a guess that was wrong
+/// would cover the operator's screen and leave them nothing to work with.
+pub fn for_automatic<'a>(displays: &'a [DisplayInfo], operator: &'a [usize]) -> impl Iterator<Item = &'a DisplayInfo> {
+    displays.iter().filter(move |d| {
+        !operator.is_empty() && !operator.contains(&d.index) && kept_for_operator(displays, operator, d.index).is_none()
+    })
+}
+
 /// Picks where the output goes. `operator` are the displays the operator works on: the one
 /// holding the home window and the one with the menu bar (they are usually the same).
 ///
-/// A requested display is used if it exists. Otherwise the output takes the first display that
-/// is none of the operator's, and falls back to a window when there is no other display. When
-/// it isn't known which display is the operator's (`operator` is empty) and there are several,
-/// it uses a window too: an output that guessed wrong would cover the operator's screen and
-/// leave them nothing to work with.
+/// A requested display is used if it exists. Otherwise the output takes the first display
+/// `for_automatic` gives, and falls back to a window when there is none: with one display, or
+/// when it isn't known which display is the operator's.
 pub fn choose_output(
     displays: &[DisplayInfo],
     operator: &[usize],
@@ -85,15 +124,7 @@ pub fn choose_output(
             Err(format!("There is no display {wanted}; run with --list-displays."))
         };
     }
-    if operator.is_empty() {
-        return Ok(Placement::Windowed);
-    }
-    Ok(displays
-        .iter()
-        .map(|d| d.index)
-        .filter(|index| !operator.contains(index) && !displays.iter().any(|d| d.index == *index && d.main))
-        .min()
-        .map_or(Placement::Windowed, Placement::Fullscreen))
+    Ok(for_automatic(displays, operator).map(|d| d.index).min().map_or(Placement::Windowed, Placement::Fullscreen))
 }
 
 /// A rectangle of pixels: where a window or a display is.
@@ -320,5 +351,44 @@ mod tests {
         assert_eq!(own_name(&names, &1), Some("HP 27f"));
         assert_eq!(own_name(&names, &7), None);
         assert_eq!(listed_name(own_name(&names, &5), "Monitor #0", &[]), "3DTV");
+    }
+
+    #[test]
+    fn a_lone_display_is_the_operators_whatever_the_system_says() {
+        // Wayland: nothing is the main display, and the home window's display may not be known.
+        let one = displays(1);
+        for operator in [&[][..], &[0]] {
+            assert_eq!(kept_for_operator(&one, operator, 0), Some(Kept::Only));
+            assert_eq!(for_automatic(&one, operator).count(), 0);
+            assert_eq!(choose_output(&one, operator, None), Ok(Placement::Windowed));
+        }
+        // A Mac or Windows: the one display is the main one too; it is still the only one.
+        let mut main = displays(1);
+        main[0].main = true;
+        assert_eq!(kept_for_operator(&main, &[0], 0), Some(Kept::Only));
+    }
+
+    #[test]
+    fn with_a_known_main_display_only_it_is_kept() {
+        let mut three = displays(3);
+        three[0].main = true;
+        assert_eq!(kept_for_operator(&three, &[0], 0), Some(Kept::Main));
+        // The home window moved to display 1: a screen chosen for that display keeps it, so an
+        // operator dragging the window across never drops the audience screen mid-service;
+        // Automatic doesn't take it.
+        assert_eq!(kept_for_operator(&three, &[1, 0], 1), None);
+        assert_eq!(for_automatic(&three, &[1, 0]).map(|d| d.index).collect::<Vec<_>>(), [2]);
+    }
+
+    #[test]
+    fn with_no_known_main_display_the_home_windows_stands_for_it() {
+        let two = displays(2);
+        assert_eq!(kept_for_operator(&two, &[0], 0), Some(Kept::HomeWindow));
+        assert_eq!(kept_for_operator(&two, &[0], 1), None);
+        assert_eq!(for_automatic(&two, &[0]).map(|d| d.index).collect::<Vec<_>>(), [1]);
+        assert_eq!(choose_output(&two, &[0], None), Ok(Placement::Fullscreen(1)));
+        // Not known where the home window is: nothing is kept, and Automatic takes nothing.
+        assert_eq!(kept_for_operator(&two, &[], 0), None);
+        assert_eq!(for_automatic(&two, &[]).count(), 0);
     }
 }

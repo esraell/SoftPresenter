@@ -7107,11 +7107,11 @@ impl App {
             let due = seen.at + DisplaysSeen::KEPT_FOR;
             running.next_repaint = Some(running.next_repaint.map_or(due, |at| at.min(due)));
         }
-        // Screens set up as Automatic, or saved under a display's old name, are given a display's
-        // name as the system shows it, and saved so.
-        if screens::give_displays(&mut running.home_state.screens, &displays) {
+        // Automatic screens given a display, and old display names made new, saved so.
+        if screens::settle(&mut running.home_state.screens, &displays, &operator) {
             running.home_state.screens_changed = true;
         }
+        running.home_state.operator_displays.clone_from(&operator);
         if displays != running.home_state.displays {
             // Said in the log: a display that goes or comes back, or changes size, can hold up the
             // screens' windows on it (see `output/held.rs`).

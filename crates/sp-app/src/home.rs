@@ -429,6 +429,9 @@ pub struct HomeState {
     pub settings_open: bool,
     /// The displays connected now, kept up to date by the app.
     pub displays: Vec<DisplayInfo>,
+    /// The displays the operator works on (the home window's and the main one), by their
+    /// index, as far as the window system says; see `displays::kept_for_operator`.
+    pub operator_displays: Vec<usize>,
     /// The audience screens, in order. The Screens window changes this list and sets
     /// `screens_changed`; the app then saves it and moves the pictures.
     pub screens: Vec<Screen>,
@@ -1712,6 +1715,7 @@ impl Default for HomeState {
             bible_open: false,
             settings_open: false,
             displays: Vec::new(),
+            operator_displays: Vec::new(),
             view_request: None,
             preferences_open: false,
             preferences_pane: 0,
@@ -4436,17 +4440,21 @@ fn output_label(output: &Output, displays: &[DisplayInfo]) -> String {
     }
 }
 
-/// The outputs a screen can be given: each connected display but the main one (where the
-/// operator works), a window, NDI, each DeckLink output that can play (none without Desktop
-/// Video), off.
+/// The outputs a screen can be given: each connected display but the operator's (the main one,
+/// the only one, or where the home window is: `displays::kept_for_operator`), a window, NDI, each
+/// DeckLink output that can play (none without Desktop Video), off.
 fn output_choices(
     current: &Output,
     screen_name: &str,
     displays: &[DisplayInfo],
+    operator: &[usize],
     decklink: &sp_decklink::Found,
 ) -> Vec<Output> {
-    let mut choices: Vec<Output> =
-        displays.iter().filter(|display| !display.main).map(|display| Output::Display(display.name.clone())).collect();
+    let mut choices: Vec<Output> = displays
+        .iter()
+        .filter(|display| crate::displays::kept_for_operator(displays, operator, display.index).is_none())
+        .map(|display| Output::Display(display.name.clone()))
+        .collect();
     choices.push(Output::Window);
     // Choosing NDI again keeps the name already given.
     choices.push(match current {
@@ -5572,7 +5580,11 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
                     vec2(ui.available_width(), 28.0),
                     egui::Button::new(egui::RichText::new("Set Up SoftPresenter\u{2026}").size(12.0)),
                 )
-                .on_hover_text("Run the first-start setup again: screens, songs, Bibles, permissions")
+                .on_hover_text(if crate::setup::System::THIS == crate::setup::System::Linux {
+                    "Run the first-start setup again: screens, songs, Bibles"
+                } else {
+                    "Run the first-start setup again: screens, songs, Bibles, permissions"
+                })
                 .clicked()
             {
                 state.preferences_open = false;
@@ -5964,7 +5976,13 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                     .selected_text(output_label(&screen.output, &state.displays))
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
-                        for choice in output_choices(&screen.output, &screen.name, &state.displays, &state.decklink) {
+                        for choice in output_choices(
+                            &screen.output,
+                            &screen.name,
+                            &state.displays,
+                            &state.operator_displays,
+                            &state.decklink,
+                        ) {
                             let is_ndi = matches!(choice, Output::Ndi(_));
                             let label = output_label(&choice, &state.displays);
                             let on = match (&choice, &screen.output) {

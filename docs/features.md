@@ -1215,14 +1215,20 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 ![The theme editor: the Built-in theme's Two languages template with its main box selected, and a second theme, Lower Third, in the list](images/themes.png)
 
 ## Getting started
-- The first start on a Mac (and the first start after updating, on a Mac set up before there
-  was a setup) opens a short setup: which display the congregation sees (by name, never the
-  main display; the screen goes there at once, and Identify shows each screen's name) and an
-  optional stage display, or a window or NDI on a Mac with one display; bringing songs in (one
-  click for a library of `.pro` song documents found on the Mac, "Look for a Song Library", or
-  song files); which Bible goes on top
-  and which below; and what macOS will ask permission for and why. SoftPresenter › Set Up
-  SoftPresenter… opens it again.
+- The first start (and the first start after updating, on a Mac set up before there was a
+  setup) opens a short setup: which display the congregation sees (by name, never the main
+  display; the screen goes there at once, and Identify shows each screen's name) and an
+  optional stage display; with one display, which is where the operator works and is never
+  offered, the audience screen shows in a window until a TV or projector is plugged in (it
+  then fills it at once), or goes over NDI; bringing songs in (one click for a library of
+  `.pro` song documents found in the Documents folder, "Look for a Song Library", or song
+  files); which Bible goes on top and which below; and what the system will ask permission
+  for and why: on a Mac the local network, the Documents folder and the app that draws a
+  presentation as pictures; on Windows the firewall, the first time a screen is sent over NDI
+  or Remote Control is switched on (choose Allow for private networks). Linux asks nothing, so
+  the setup has no such step there. Its words fit the system: no Mac names, menus or Word files
+  off a Mac. Settings › Set Up SoftPresenter… (and SoftPresenter › Set Up SoftPresenter… on a
+  Mac) opens it again.
 
 ## Screens
 - Any number of audience screens, each sent to a display, a window, the network over NDI, or
@@ -1311,8 +1317,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   window system gave the display before ("Monitor #0" on a Mac, `\\.\DISPLAY2` on Windows)
   still finds it, and is saved under the system's name from then on. The main
   display, with the menu bar, is never offered and never filled: it is where SoftPresenter's
-  own window is. A fresh start puts the first screen on the first other display, or in a
-  window on a Mac with one display.
+  own window is. Nor is a computer's only display, on any system: one display is the
+  operator's. Where the window system doesn't say which display is the main one (Linux on
+  Wayland), the display SoftPresenter's own window is on stands for it, once that is known; a
+  screen chosen for it shows nowhere and says why. A fresh start puts the first screen on the
+  first other display that doesn't hold SoftPresenter's own window, or in a window while there
+  is none (one display, or not yet knowing which display the window is on), and fills a TV or
+  projector the moment one is plugged in.
 - A screen takes over its display at once, and gives it back at once, with no animation. On a
   Mac it is a plain borderless window put exactly on the display's frame, above the menu bar
   and Dock on that display, on every Space and staying put when Spaces change, and out of

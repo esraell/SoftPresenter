@@ -134,7 +134,9 @@ pub fn plan(
                     match displays.iter().find(|d| d.is_named(name)) {
                         None => hide_or_idle(window, Why::Disconnected),
                         Some(display) if display.main => hide_or_idle(window, Why::Operator),
-                        // Another screen has the display: this one has no window.
+                        // Another screen has the display, or the operator works on it (the only
+                        // display, or the home window's where none is known as the main one):
+                        // this one has no window.
                         Some(_) => {
                             if window.is_some() {
                                 Step::Close
