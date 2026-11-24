@@ -233,8 +233,10 @@ complete enough for a large Sunday service, simple enough for a volunteer, light
 old laptop, and open to scripts and AI. First on the list: bringing playlists and media across
 from a church's existing software, and fixing a slide's words from the Show view. After that
 come the whole app in a browser (Remote Control's API is in place; its fuller page is still
-being designed) with a phone remote, and an MCP server for AI assistants. Windows and Linux are
-in testing; releasing them is the other big step.
+being designed) with a phone remote, and an MCP server for AI assistants. Planned with
+[TimelyChurch](https://timelychurch.com): setlists planned there for a service arriving in
+SoftPresenter by themselves. Windows and Linux are in testing; releasing them is the other big
+step.
 
 The full plan, about 170 features with their size and how much each matters on a Sunday, is in
 [docs/roadmap.md](docs/roadmap.md). Nothing in it is promised by a date.
