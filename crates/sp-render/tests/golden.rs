@@ -157,10 +157,11 @@ fn bilingual_1920x1080() {
         Some("Свет встаёт над тихими холмами\nІ ранок знову співає: їжак, ґанок, є"),
     );
     let px = render(Some(&s), 1920, 1080);
-    // White main-language text and orange translation text are both really there.
+    // White main-language text and stone-grey translation text (#D2CEC6) are both really there.
     assert!(count_lit(&px) > 20_000, "expected white text");
-    let orange = px.chunks(4).filter(|p| p[0] > 230 && (120..180).contains(&p[1]) && p[2] < 80).count();
-    assert!(orange > 10_000, "expected orange text, found {orange} pixels");
+    let stone =
+        px.chunks(4).filter(|p| p[0].abs_diff(210) < 6 && p[1].abs_diff(206) < 6 && p[2].abs_diff(198) < 6).count();
+    assert!(stone > 10_000, "expected stone-grey text, found {stone} pixels");
     assert_matches_golden("bilingual_1920x1080", &px, 1920, 1080);
 }
 

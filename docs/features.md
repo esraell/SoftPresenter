@@ -1068,6 +1068,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Bible slides (the Russian Synodal verse and its reference on top, the King James Version and
   its reference below, in Linux Biolinum on black; its settings live in
   `crates/sp-model/themes/bible.sptheme`). It can be changed and saved, and not deleted.
+- The built-in theme's words are white and bold for the main language and a warm light grey
+  ("Stone", `#D2CEC6`) for the second, each with a thin black outline (2) and a soft black
+  shadow falling straight down, so they hold on a bright or busy picture and stay quiet on a
+  dark one. The reference line has the same outline and shadow. Saved themes keep their own look.
+- Seven sample backgrounds (five stills, a stand-in for a camera shot and a looping video) come
+  with the program, drawn for it and free of any licence ([`assets/backgrounds`](../assets/backgrounds),
+  [docs/licences/backgrounds.md](licences/backgrounds.md)). The Mac app carries them in
+  `Contents/Resources/Backgrounds`. They are not in anyone's media bin by themselves, and no
+  screen offers them yet.
 - Themes from before templates said what they were for keep working: the template Bible slides
   used is brought into the main theme as its Bible template, looking as it did, the first time
   the app starts.

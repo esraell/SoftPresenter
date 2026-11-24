@@ -352,6 +352,13 @@ impl Default for Shadow {
     }
 }
 
+/// The shadow under the built-in theme's words: black, falling straight down (270 degrees) by 4
+/// slide units, spread 18. The design asked for a blur of 18 at 0.6; a blur thins thin letters'
+/// shadow to a third or so of its opacity, but the renderer's six widening layers stay at full
+/// opacity all the way out, so the same look takes 0.3 here (checked by eye on dark, bright and
+/// busy pictures).
+const BUILTIN_SHADOW: Shadow = Shadow { color: Rgba::BLACK, opacity: 0.3, angle: 270.0, offset: 4.0, blur: 18.0 };
+
 /// The typeface slides are set in unless a theme or a slide names another: SoftPresenter Sans,
 /// which the program carries inside it, so every computer has it. A saved theme always names
 /// its font, so changing this changes only themes made from now on.
@@ -733,7 +740,7 @@ impl ThemeTemplate {
 }
 
 impl Theme {
-    /// The theme the app starts with: a large white main language above a smaller orange
+    /// The theme the app starts with: a large white main language above a smaller warm grey
     /// translation, both outlined and shadowed, with a small line for a Bible reference; and
     /// a second template for slides with one language, where the main language is centred.
     /// The theme Bible slides start with: the verse in one language above the same verse in
@@ -759,7 +766,7 @@ impl Theme {
             outline_width: outline,
             outline_color: Rgba::BLACK,
             shadow: true,
-            shadow_look: Shadow::default(),
+            shadow_look: BUILTIN_SHADOW,
             valign: VAlign::Middle,
             caps: Caps::None,
             underline: false,
@@ -777,14 +784,14 @@ impl Theme {
             gradient: Gradient::default(),
         };
         let main =
-            base(Role::primary(), SlideRect { x: 120.0, y: 170.0, w: 1680.0, h: 400.0 }, 96.0, 40.0, Rgba::WHITE, 6.0);
+            base(Role::primary(), SlideRect { x: 120.0, y: 170.0, w: 1680.0, h: 400.0 }, 96.0, 40.0, Rgba::WHITE, 2.0);
         let translation = base(
             Role::translation(),
             SlideRect { x: 120.0, y: 610.0, w: 1680.0, h: 320.0 },
             64.0,
             30.0,
-            Rgba::rgb(255, 150, 40),
-            4.0,
+            Rgba::rgb(210, 206, 198),
+            2.0,
         );
         // Where a Bible verse is from, small along the bottom. Songs do not use it.
         let reference = BoxStyle {
@@ -1643,7 +1650,7 @@ mod tests {
         let theme = Theme::builtin();
         let main = theme.style_for(&Role::primary()).unwrap().clone();
         let mut translation = theme.style_for(&Role::translation()).unwrap().clone();
-        let orange = translation.fill;
+        let own_colour = translation.fill;
         let mut changed = main.clone();
         changed.italic = true;
         changed.size = 120.0;
@@ -1651,7 +1658,7 @@ mod tests {
         // What changed is taken; its own colour, place and role are kept.
         assert!(translation.italic);
         assert_eq!(translation.size, 120.0);
-        assert_eq!(translation.fill, orange);
+        assert_eq!(translation.fill, own_colour);
         assert_eq!(translation.role, Role::translation());
         assert_eq!(translation.rect, theme.style_for(&Role::translation()).unwrap().rect);
     }
