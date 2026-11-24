@@ -42,8 +42,8 @@ pub use theme::{
 };
 pub use transition::{Direction, Transition, TransitionKind};
 pub use types::{
-    Arrangement, CatalogOrigin, Copyright, Group, ImageFit, MOST_TIMES, MediaItem, Object, ObjectKind, Pass,
-    Presentation, Rgba, Role, Run, Shape, Slide, StageShows, StrokeLook, Sung,
+    Arrangement, CatalogOrigin, Copyright, Group, ImageFit, MOST_TIMES, MediaItem, NdiQuality, Object, ObjectKind,
+    Pass, Presentation, Rgba, Role, Run, Shape, Slide, StageShows, StrokeLook, Sung, ndi_computer, ndi_short_name,
 };
 pub use uuid::Uuid;
 

@@ -272,7 +272,7 @@ The code is a Rust workspace:
     crates/sp-engine   what is live and the commands that change it (no windows)
     crates/sp-render   draws slides on the GPU: screens, thumbnails, preview
     crates/sp-bible    Bible files, references, search, verse numbering
-    crates/sp-ndi      NDI output
+    crates/sp-ndi      NDI output and input
     crates/sp-decklink DeckLink output (a small C++ bridge to Blackmagic's driver)
     crates/sp-video    videos (macOS's AVFoundation, then FFmpeg), system picture formats, and
                        web pages drawn off-screen (macOS's web view)

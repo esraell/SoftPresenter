@@ -546,6 +546,7 @@ fn object_name(object: &Object) -> String {
         (Some(role), _) => role.label(),
         (None, ObjectKind::Text { .. }) => "Text".to_owned(),
         (None, ObjectKind::Web { .. }) => "Web page".to_owned(),
+        (None, ObjectKind::Ndi { .. }) => "NDI source".to_owned(),
         (None, _) => "Object".to_owned(),
     }
 }
@@ -906,6 +907,18 @@ fn describe(slide: &Slide, number: usize, object: &Object, theme: &Theme) -> (St
             ));
             data["kind"] = serde_json::json!("web");
             data["url"] = serde_json::json!(url);
+        }
+        ObjectKind::Ndi { source, scaling, quality, sound } => {
+            let shown = if source.is_empty() { "no source chosen" } else { source.as_str() };
+            text.push_str(&format!(
+                ": {shown}\n    at x={:.0} y={:.0} w={:.0} h={:.0} ({whose_place})",
+                place.x, place.y, place.w, place.h
+            ));
+            data["kind"] = serde_json::json!("ndi");
+            data["source"] = serde_json::json!(source);
+            data["scaling"] = serde_json::to_value(scaling).unwrap_or_default();
+            data["quality"] = serde_json::to_value(quality).unwrap_or_default();
+            data["sound"] = serde_json::json!(sound);
         }
         _ => {
             text.push_str(&format!(

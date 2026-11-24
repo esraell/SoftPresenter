@@ -648,6 +648,7 @@ the catalog, and the old one is marked gone.
 | `slide enable\|disable SONG N` | A switched-off slide is passed over by Next |
 | `slide transition SONG N KIND [SECONDS]\|none`, `slide template SONG N TEMPLATE\|auto`, `slide media SONG N ITEM\|none` | A slide's own transition, template, and the media it puts behind the words |
 | `slide web SONG N URL\|off` | A live web page on the slide: the address of its web page box, or a new box filling the slide, behind the words, if it has none (`off` takes it away). Only `https://` addresses (a bare name gets `https://` in front); `sp slide SONG N` lists the box as `Web page: URL`, and its JSON has `"kind": "web"` and `"url"` |
+| (an NDI source box) | `sp slide SONG N` lists an NDI source box as `NDI source: COMPUTER (Source)` (or `no source chosen`), and its JSON has `"kind": "ndi"`, `"source"`, `"scaling"` (`fit`, `fill`, `stretch`), `"quality"` (`full`, `light`) and `"sound"`. There is no command to add one: it is added in the editor (NDI Source), so it is also not available from the remote page |
 
 Every change is saved at once, can be undone step by step, redraws the slide's picture, reloads
 it in an editor that has it open, and shows at once on a slide that is on screen.

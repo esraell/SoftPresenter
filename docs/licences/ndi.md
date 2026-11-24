@@ -14,6 +14,14 @@ publishing or selling anything that includes NDI.
 - Distribute the parts of the SDK that its documentation marks as redistributable (the NDI
   runtime), and only in the way that documentation says.
 
+## Receiving
+
+NDI sources in slides are received with the same runtime, opened the same way as for sending
+(the user's own NDI Tools install; nothing from the SDK is in this repository). The few
+receiving and finding functions are declared in `sp-ndi`'s `runtime` module following
+`Processing.NDI.Find.h` and `Processing.NDI.Recv.h`, under the same MIT notice as the sending
+ones. The app asks for the picture only, never audio, and shows it as it arrives.
+
 ## What we must not do
 
 - Put any other SDK file in this repository or in a download: no headers, examples, tools or

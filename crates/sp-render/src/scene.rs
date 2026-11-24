@@ -214,6 +214,7 @@ fn draw_objects(
             ObjectKind::Shape { .. }
             | ObjectKind::Image { .. }
             | ObjectKind::Web { .. }
+            | ObjectKind::Ndi { .. }
             | ObjectKind::Screen { .. } => rect,
         };
         // Turn the object about its own centre.
@@ -235,7 +236,11 @@ fn draw_objects(
                 let radius = f64::from(corner.min(rect.w.min(rect.h) / 2.0));
                 RoundedRect::new(x, y, x + f64::from(rect.w), y + f64::from(rect.h), radius).to_path(0.1)
             }
-            ObjectKind::Text { .. } | ObjectKind::Image { .. } | ObjectKind::Web { .. } | ObjectKind::Screen { .. } => {
+            ObjectKind::Text { .. }
+            | ObjectKind::Image { .. }
+            | ObjectKind::Web { .. }
+            | ObjectKind::Ndi { .. }
+            | ObjectKind::Screen { .. } => {
                 let (x, y) = (f64::from(rect.x), f64::from(rect.y));
                 Rect::new(x, y, x + f64::from(rect.w), y + f64::from(rect.h)).to_path(0.1)
             }
@@ -275,6 +280,9 @@ fn draw_objects(
         }
         if let ObjectKind::Web { .. } = &object.kind {
             draw_web(scene, placed, object_web_url(object), rect, &outline);
+        }
+        if let ObjectKind::Ndi { source, scaling, .. } = &object.kind {
+            draw_ndi(scene, fonts, placed, source, *scaling, template, rect, &outline);
         }
         if let ObjectKind::Screen { screen, label, .. } = &object.kind {
             draw_screen(scene, placed, *screen, rect, &outline);
@@ -468,6 +476,110 @@ fn draw_web(scene: &mut Scene, placed: Affine, url: &str, rect: SlideRect, outli
     equator.move_to((centre.0 - radius, centre.1));
     equator.line_to((centre.0 + radius, centre.1));
     scene.stroke(&line, placed, ink, None, &equator);
+}
+
+/// An NDI source box. On the screens: the source's newest picture, fitted as asked, whole while it
+/// is sending and held for two seconds after it stops, then faded out over half a second (and
+/// faded back in when it returns); before it has sent anything, nothing. No tag. In the
+/// operator's window (the editor, thumbnails): its newest picture with a small tag at its foot;
+/// a plain dashed box where there is none yet; an amber one, tagged "not sending", where the
+/// source is not there.
+#[allow(clippy::too_many_arguments)]
+fn draw_ndi(
+    scene: &mut Scene,
+    fonts: &mut Fonts,
+    placed: Affine,
+    source: &str,
+    fit: ImageFit,
+    template: &sp_model::ThemeTemplate,
+    rect: SlideRect,
+    outline: &BezPath,
+) {
+    let operator = PLACEHOLDERS.with(std::cell::Cell::get);
+    let shown = crate::pictures::ndi_shown(source);
+    if !operator {
+        if let Some(picture) = shown.picture.filter(|_| shown.visible > 0.0) {
+            if shown.visible < 1.0 {
+                scene.push_layer(Fill::NonZero, Mix::Normal, shown.visible, placed, outline);
+                paint_picture(scene, placed, &picture, fit, rect, outline);
+                scene.pop_layer();
+            } else {
+                paint_picture(scene, placed, &picture, fit, rect, outline);
+            }
+        }
+        return;
+    }
+    let name = sp_model::ndi_short_name(source);
+    let amber = Color::from_rgba8(255, 196, 0, 255);
+    let (tag, stopped) = match source {
+        "" => ("NDI \u{b7} choose a source".to_owned(), false),
+        _ if shown.stopped => (format!("NDI \u{b7} {name} \u{b7} not sending"), true),
+        _ => (format!("NDI \u{b7} {name}"), false),
+    };
+    let picture = shown.picture.filter(|_| !stopped);
+    match picture {
+        Some(picture) => paint_picture(scene, placed, &picture, fit, rect, outline),
+        None => {
+            let ink = if stopped { amber } else { Color::from_rgba8(150, 150, 156, 255) };
+            if stopped {
+                scene.fill(Fill::NonZero, placed, Color::from_rgba8(60, 44, 0, 150), None, outline);
+            }
+            let dashed = Stroke::new(4.0).with_dashes(0.0, [18.0, 12.0]);
+            scene.stroke(&dashed, placed, ink, None, outline);
+        }
+    }
+    draw_ndi_tag(scene, fonts, placed, &tag, stopped, template, rect, outline);
+}
+
+/// A small tag at the foot of an NDI box, on a dark strip, amber when the source is not sending.
+#[allow(clippy::too_many_arguments)]
+fn draw_ndi_tag(
+    scene: &mut Scene,
+    fonts: &mut Fonts,
+    placed: Affine,
+    tag: &str,
+    amber: bool,
+    template: &sp_model::ThemeTemplate,
+    rect: SlideRect,
+    outline: &BezPath,
+) {
+    let Some(base) = template.box_for(None) else { return };
+    let size = (rect.h * 0.032).clamp(18.0, 30.0);
+    let margin = size * 0.5;
+    let width = (tag.chars().count() as f32 * size * 0.62 + size * 1.2).min(rect.w - margin * 2.0);
+    let height = size * 1.6;
+    let band = SlideRect { x: rect.x + margin, y: rect.y + rect.h - height - margin, w: width, h: height };
+    let look = BoxStyle {
+        size,
+        min_size: size * 0.5,
+        weight: 500,
+        italic: false,
+        fill: if amber { Rgba { r: 255, g: 196, b: 0, a: 255 } } else { Rgba::WHITE },
+        align: sp_model::Align::Left,
+        valign: VAlign::Middle,
+        outline_width: 0.0,
+        shadow: false,
+        caps: sp_model::Caps::None,
+        underline: false,
+        strike: false,
+        scaling: Scaling::TextDown,
+        line_transform: sp_model::LineTransform::None,
+        letter_spacing: 0.0,
+        margins: [size * 0.5, 0.0, size * 0.5, 0.0],
+        line_fill: sp_model::LineFill::default(),
+        list: sp_model::ListStyle::None,
+        scroll: sp_model::Scroll::None,
+        paragraph_spacing: 0.0,
+        baseline: 0.0,
+        gradient: sp_model::Gradient::default(),
+        ..base.clone()
+    };
+    let (x, y) = (f64::from(band.x), f64::from(band.y));
+    scene.push_clip_layer(Fill::NonZero, placed, outline);
+    let strip = RoundedRect::new(x, y, x + f64::from(band.w), y + f64::from(band.h), f64::from(size * 0.3));
+    scene.fill(Fill::NonZero, placed, Color::from_rgba8(0, 0, 0, 190), None, &strip);
+    draw_text_box(scene, fonts, placed, (tag, &[]), &look, band, 0.0, None);
+    scene.pop_layer();
 }
 
 /// A picture object's picture in its place, fitted as it says. A picture that can't be read is

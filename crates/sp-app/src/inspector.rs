@@ -658,6 +658,86 @@ fn web_address(ui: &mut egui::Ui, object: sp_model::Uuid, url: &mut String) {
     ui.label(words.size(11.5));
 }
 
+/// An NDI source box's settings, shaped like [`web_address`]: the Source menu (the sources the
+/// finder sees, less this app's own outputs) with Look again beside it, one line saying what
+/// happens, then how the picture fits, which stream is received and whether sound is wanted.
+fn ndi_source(
+    ui: &mut egui::Ui,
+    object: sp_model::Uuid,
+    (source, scaling, quality, sound): (&mut String, &mut sp_model::ImageFit, &mut sp_model::NdiQuality, &mut bool),
+    view: &mut crate::ndi_in::NdiView,
+    installed: bool,
+) {
+    ui.label(egui::RichText::new("NDI Source").size(12.5).strong().color(INK));
+    ui.add_space(2.0);
+    let stopped = !source.is_empty() && view.stopped.contains(source);
+    let runtime = installed && !view.unavailable;
+    ui.horizontal(|ui| {
+        let shown = if source.is_empty() {
+            "Choose a source\u{2026}".to_owned()
+        } else if stopped {
+            format!("{} \u{b7} not sending", sp_model::ndi_short_name(source))
+        } else {
+            crate::ndi_in::menu_name(source)
+        };
+        // The menu is kept to its room, a long name cut short, so Look again stays in view.
+        let chooser = ui
+            .allocate_ui_with_layout(vec2(INNER - 100.0, ROW), Layout::left_to_right(Align::Center), |ui| {
+                egui::ComboBox::from_id_salt(("ndi source", object))
+                    .selected_text(shown)
+                    .width(INNER - 112.0)
+                    .wrap_mode(egui::TextWrapMode::Truncate)
+                    .show_ui(ui, |ui| {
+                        // The one chosen stays in the list while it is away.
+                        if !source.is_empty() && !view.sources.contains(source) {
+                            let name = crate::ndi_in::menu_name(source);
+                            ui.selectable_value(source, source.clone(), name);
+                        }
+                        for found in &view.sources {
+                            ui.selectable_value(source, found.clone(), crate::ndi_in::menu_name(found));
+                        }
+                        if view.sources.is_empty() {
+                            ui.label(egui::RichText::new("None found yet").size(11.5).color(crate::studio::TEXT_DIM));
+                        }
+                    })
+            })
+            .inner;
+        if ui.data_mut(|data| data.remove_temp::<bool>(egui::Id::unique("ndi source focus"))).is_some() {
+            chooser.response.request_focus();
+        }
+        if ui.button("Look again").on_hover_text("Look for NDI sources on the network again").clicked() {
+            view.look_again = true;
+        }
+    });
+    let (words, amber) = crate::ndi_in::line(runtime, view.sources.len(), source, stopped);
+    let ink = if amber { crate::studio::CARE } else { crate::studio::TEXT_DIM };
+    ui.label(egui::RichText::new(words).size(11.5).color(ink));
+    ui.add_space(4.0);
+    let row = |ui: &mut egui::Ui, label: &str, add: &mut dyn FnMut(&mut egui::Ui)| {
+        ui.horizontal(|ui| {
+            ui.allocate_ui_with_layout(vec2(56.0, ROW), Layout::left_to_right(Align::Center), |ui| {
+                ui.set_min_width(56.0);
+                ui.label(egui::RichText::new(label).size(12.5).strong().color(INK));
+            });
+            add(ui);
+        });
+    };
+    let fits: Vec<(sp_model::ImageFit, &str)> = sp_model::ImageFit::ALL.iter().map(|fit| (*fit, fit.name())).collect();
+    row(ui, "Fits", &mut |ui| choice(ui, "ndi fits", 120.0, scaling, &fits));
+    let qualities: Vec<(sp_model::NdiQuality, &str)> =
+        sp_model::NdiQuality::ALL.iter().map(|q| (*q, q.name())).collect();
+    row(ui, "Quality", &mut |ui| choice(ui, "ndi quality", 120.0, quality, &qualities));
+    ui.label(
+        egui::RichText::new("Light is the sender\u{2019}s smaller picture").size(11.0).color(crate::studio::TEXT_DIM),
+    );
+    let sounds = [(false, "Off"), (true, "On")];
+    row(ui, "Sound", &mut |ui| {
+        choice(ui, "ndi sound", 120.0, sound, &sounds);
+        ui.label(egui::RichText::new("Sound comes later").size(11.0).color(crate::studio::TEXT_DIM))
+            .on_hover_text("The setting is kept. SoftPresenter has no way yet to play a source\u{2019}s sound.");
+    });
+}
+
 fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let stage = state.editing.as_ref().is_some_and(crate::stage_editor::is_stage) && state.theme_edit.is_none();
     let for_theme = state.theme_edit.is_some() || stage;
@@ -666,6 +746,7 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let history = (state.can_undo(false), state.can_undo(true));
     let menu_asked = &mut state.menu_asked;
     let lock_shape = &mut state.inspector.lock_shape;
+    let (ndi_view, ndi_installed) = (&mut state.ndi, state.ndi_available);
     let Some(draft) = state.editing.as_mut() else { return };
     let themed = draft.selected_object().map(|object| object_frame(&draft.slide, object, theme));
     let (Some(frame), Some(object)) = (themed, draft.selected_object_mut()) else {
@@ -788,6 +869,12 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let object_id = object.id;
     if let sp_model::ObjectKind::Web { url } = &mut object.kind {
         web_address(ui, object_id, url);
+        rule(ui);
+    }
+
+    // An NDI source: which one, and how its picture is received and shown.
+    if let sp_model::ObjectKind::Ndi { source, scaling, quality, sound } = &mut object.kind {
+        ndi_source(ui, object_id, (source, scaling, quality, sound), ndi_view, ndi_installed);
         rule(ui);
     }
 

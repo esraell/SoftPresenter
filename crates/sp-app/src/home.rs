@@ -550,6 +550,8 @@ pub struct HomeState {
     pub ndi_draft: Option<(sp_model::Uuid, String)>,
     /// True when this build includes NDI.
     pub ndi_available: bool,
+    /// The NDI sources found, and which are wanted and not sending (for the inspector).
+    pub ndi: crate::ndi_in::NdiView,
     /// The DeckLink devices found, and how the driver stands (no devices without it).
     pub decklink: sp_decklink::Found,
     /// The Edit view's right-hand panel.
@@ -1859,6 +1861,7 @@ impl Default for HomeState {
             ndi_draft: None,
             // Assumed until it has been looked for.
             ndi_available: true,
+            ndi: crate::ndi_in::NdiView::default(),
             decklink: sp_decklink::Found { driver: sp_decklink::Driver::Looking, devices: Vec::new() },
             inspector: crate::inspector::InspectorState::default(),
             theme_edit: None,
@@ -2928,6 +2931,7 @@ fn edit_view(
                             sp_model::ObjectKind::Image { .. } => "▣",
                             sp_model::ObjectKind::Shape { .. } => "◆",
                             sp_model::ObjectKind::Web { .. } => "🌐",
+                            sp_model::ObjectKind::Ndi { .. } => "◉",
                             sp_model::ObjectKind::Screen { .. } => "",
                         };
                         if mark.is_empty() {
@@ -3557,7 +3561,7 @@ fn edit_view(
         // They are centred on the slide as drawn when it fits (not on the area round it, whose
         // rulers take room at the left, and not moved by a zoomed slide's scrolling). In the
         // Theme Editor they stand at the right, leaving the left for what is on the canvas.
-        let tool_row = if theme_mode { inner.max.x - 256.0 + TOOL_STEP / 2.0 } else { fitted_centre.x };
+        let tool_row = if theme_mode { inner.max.x - 256.0 } else { fitted_centre.x };
         let tools = tool_bars(tool_row, inner.min.y + 22.0);
         if theme_mode {
             theme_canvas_title(ui, state, inner, tools[0].min.x - 14.0);
@@ -3590,8 +3594,26 @@ fn edit_view(
             && let Some(draft) = state.editing.as_mut()
         {
             draft.add_web();
-            // The inspector's address field takes the keyboard, ready for the address.
+            // The inspector's Shape tab, where the address field is, and it takes the keyboard,
+            // ready for the address.
+            state.inspector.tab = crate::inspector::InspectorTab::Shape;
             ui.data_mut(|data| data.insert_temp(egui::Id::unique("web address focus"), true));
+        }
+        // A live NDI source, in a box, set up the same way.
+        let ndi_bar = tools[4];
+        let ndi = ui.interact(ndi_bar, ui.scope_id().with("add ndi source"), Sense::click());
+        crate::studio::paint_button(ui.painter(), ndi_bar, ndi.hovered());
+        ui.painter().text(ndi_bar.center(), Align2::CENTER_CENTER, "NDI Source", crate::studio::semibold(12.5), crate::studio::TEXT);
+        if ndi
+            .on_hover_text("Put a live NDI source on the slide, in a box (it shows while the slide is on screen)")
+            .clicked()
+            && let Some(draft) = state.editing.as_mut()
+        {
+            draft.add_ndi();
+            // The inspector's Shape tab, where the Source field is, and it takes the keyboard,
+            // ready for a choice.
+            state.inspector.tab = crate::inspector::InspectorTab::Shape;
+            ui.data_mut(|data| data.insert_temp(egui::Id::unique("ndi source focus"), true));
         }
         let shapes_bar = tools[1];
         let shapes = ui.interact(shapes_bar, ui.scope_id().with("add shape"), Sense::click());
@@ -7947,10 +7969,10 @@ fn bible_row_extras(
 /// How far apart the object tools' centres are.
 const TOOL_STEP: f32 = 104.0;
 
-/// The object tools of the Edit view (Add Text, Shapes, Media…, Web Page), left to right, in a
+/// The object tools of the Edit view (Add Text, Shapes, Media…, Web Page, NDI Source), left to right, in a
 /// row centred on `centre_x`, their middles `y` down.
-fn tool_bars(centre_x: f32, y: f32) -> [Rect; 4] {
-    [-1.5, -0.5, 0.5, 1.5].map(|n| Rect::from_center_size(pos2(centre_x + n * TOOL_STEP, y), vec2(96.0, 28.0)))
+fn tool_bars(centre_x: f32, y: f32) -> [Rect; 5] {
+    [-2.0, -1.0, 0.0, 1.0, 2.0].map(|n| Rect::from_center_size(pos2(centre_x + n * TOOL_STEP, y), vec2(96.0, 28.0)))
 }
 
 /// The Edit view's canvas in an `area` (the middle column's room, with `ruler` taken at the top
@@ -8509,7 +8531,7 @@ mod tests {
             let (inner, room, fit) = canvas_room(area, 16.0);
             let slide = Rect::from_center_size(fitted_slide_centre(inner, room, fit), vec2(fit, fit * 9.0 / 16.0));
             let tools = tool_bars(fitted_slide_centre(inner, room, fit).x, inner.min.y + 22.0);
-            let row = Rect::from_min_max(tools[0].min, tools[3].max);
+            let row = Rect::from_min_max(tools[0].min, tools[4].max);
             assert!((row.center().x - slide.center().x).abs() < 0.01, "{area:?}: {row:?} against {slide:?}");
             assert!(tools.windows(2).all(|pair| pair[0].max.x < pair[1].min.x), "in a row, apart");
         }

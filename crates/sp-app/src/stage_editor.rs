@@ -398,6 +398,10 @@ pub fn add_menu(ui: &mut egui::Ui, draft: &mut EditDraft, screens: &[(sp_model::
         draft.add_web();
         ui.close();
     }
+    if ui.button("NDI Source").clicked() {
+        draft.add_ndi();
+        ui.close();
+    }
     ui.separator();
     ui.label(egui::RichText::new("SHOWS LIVE").font(crate::studio::fixed_semibold(11.0)).color(TEXT_FAINT));
     for (role, name, _) in ITEMS {

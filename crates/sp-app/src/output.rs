@@ -41,6 +41,10 @@ pub struct Frame {
     /// from: each new one is shown in the box in place of its still.
     /// The videos in boxes on the slide, by their files, each with where its pictures come from.
     pub slide_video: Vec<(String, sp_video::Frames)>,
+    /// The NDI sources the slide on screen, its layout and the stage layouts show: their
+    /// receivers put each new picture where every drawing thread finds it, so the screens only
+    /// look for news (`sp_render::ndi_changes`).
+    pub ndi: Vec<String>,
     pub slide: Option<Arc<Slide>>,
     pub theme: Arc<Theme>,
     /// The theme version the screens are in (see `versions`): a screen whose theme has it draws
@@ -64,7 +68,7 @@ pub struct Frame {
 impl Frame {
     /// True while a video plays, as the media or in a box on the slide.
     fn plays_video(&self) -> bool {
-        self.video.is_some() || !self.slide_video.is_empty()
+        self.video.is_some() || !self.slide_video.is_empty() || !self.ndi.is_empty()
     }
 }
 
@@ -1098,6 +1102,9 @@ struct Output {
     /// When a video last gave a new picture, or a message last came (so a video just shown is
     /// looked at often from the start).
     video_moved_at: Instant,
+    /// `sp_render::ndi_changes` as last drawn, and how visible each NDI source then was.
+    ndi_seen: u64,
+    ndi_visible_seen: Vec<f32>,
     /// The live preview's whole picture, and a fade under way in it: from, to.
     preview_shown: Option<vello::Scene>,
     preview_fade: Option<(vello::Scene, vello::Scene)>,
@@ -1138,6 +1145,7 @@ fn run(
             video: None,
             media_fit: sp_model::ImageFit::Fill,
             slide_video: Vec::new(),
+            ndi: Vec::new(),
             slide: None,
             theme,
             version: None,
@@ -1196,6 +1204,8 @@ fn run(
         preview_targets: Vec::new(),
         previewed_at: Instant::now(),
         video_moved_at: Instant::now(),
+        ndi_seen: 0,
+        ndi_visible_seen: Vec::new(),
         preview_shown: None,
         preview_fade: None,
         preview_screen: None,
@@ -1824,6 +1834,7 @@ impl Output {
             // A stage layout's own videos are among the slide's (see `sync_slide_video`).
             return self.stage_on
                 && (!self.frame.slide_video.is_empty()
+                    || !self.frame.ndi.is_empty()
                     || layout
                         .templates
                         .first()
@@ -1840,7 +1851,7 @@ impl Output {
         let look = self.look_of(id);
         let playing = Playing {
             behind: self.frame.video.is_some() || self.video_picture.is_some(),
-            in_boxes: !self.frame.slide_video.is_empty(),
+            in_boxes: !self.frame.slide_video.is_empty() || !self.frame.ndi.is_empty(),
             announced: self
                 .announcement
                 .as_ref()
@@ -2740,6 +2751,20 @@ impl Output {
                 let showing = Instant::now();
                 sp_render::show_picture(file, picture);
                 self.held.since(Part::VideoCopy, For::Nothing, showing);
+                self.video_pictures += 1;
+                new = true;
+            }
+        }
+        // An NDI source's receiver has already put its newest picture where the drawing threads
+        // find it; all that is left is to see whether a new one has come, or a fade has moved
+        // on (a source that stopped holds its picture two seconds, then fades out over half a
+        // second, which no picture announces).
+        if !self.frame.ndi.is_empty() {
+            let changes = sp_render::ndi_changes();
+            let visible = sp_render::ndi_visibility(&self.frame.ndi);
+            if changes != self.ndi_seen || visible != self.ndi_visible_seen {
+                self.ndi_seen = changes;
+                self.ndi_visible_seen = visible;
                 self.video_pictures += 1;
                 new = true;
             }

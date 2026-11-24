@@ -632,6 +632,19 @@ impl EditDraft {
         self.slide.objects.push(object);
     }
 
+    /// Puts an NDI source box on the slide, selected, its source to be chosen.
+    pub fn add_ndi(&mut self) {
+        self.record();
+        let same = self.slide.objects.iter().filter(|o| matches!(o.kind, ObjectKind::Ndi { .. })).count();
+        let mut object = Object::ndi(String::new());
+        if same > 0 {
+            object.name = format!("NDI source {}", same + 1);
+        }
+        self.selected = Some(object.id);
+        self.also.clear();
+        self.slide.objects.push(object);
+    }
+
     /// Every selected object: the first selected, then the rest.
     pub fn selection(&self) -> Vec<Uuid> {
         self.selected.into_iter().chain(self.also.iter().copied()).collect()
@@ -1207,6 +1220,33 @@ mod tests {
     fn draft() -> EditDraft {
         let show = Show::new(vec![Arc::new(parse_song_text("S", "Main words\n--\nПеревод\n"))]);
         EditDraft::of(&show, SlideRef { presentation: 0, slide: 0 }).unwrap()
+    }
+
+    #[test]
+    fn an_ndi_source_box_is_added_as_a_web_page_box_is_named_picked_and_in_front() {
+        let mut d = draft();
+        let before = d.slide.objects.len();
+        d.add_ndi();
+        let first = d.selected_object().unwrap();
+        assert_eq!(first.name, "NDI source");
+        assert!(matches!(&first.kind, ObjectKind::Ndi { source, scaling, quality, sound }
+            if source.is_empty() && *scaling == sp_model::ImageFit::Fit && *quality == sp_model::NdiQuality::Full && !sound));
+        let frame = first.frame.unwrap();
+        assert_eq!((frame.w, frame.h), (1400.0, 788.0), "16:9");
+        assert_eq!(
+            (frame.x + frame.w / 2.0, frame.y + frame.h / 2.0),
+            (sp_model::SLIDE_WIDTH / 2.0, sp_model::SLIDE_HEIGHT / 2.0)
+        );
+        assert_eq!(d.slide.objects.len(), before + 1);
+        assert_eq!(d.slide.objects.last().map(|o| o.id), d.selected, "in front, and the one picked");
+        d.add_ndi();
+        assert_eq!(d.selected_object().unwrap().name, "NDI source 2");
+        // A web page box beside them is counted on its own.
+        d.add_web();
+        assert_eq!(d.selected_object().unwrap().name, "Web page");
+        // One step back takes the last one away.
+        d.undo();
+        assert_eq!(d.slide.objects.len(), before + 2);
     }
 
     #[test]

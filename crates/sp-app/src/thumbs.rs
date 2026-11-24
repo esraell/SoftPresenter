@@ -445,6 +445,8 @@ pub fn web_pages(slide: Option<&Slide>, theme: &Theme) -> Vec<String> {
         .chain(behind)
         .filter_map(|object| match &object.kind {
             sp_model::ObjectKind::Web { url } => Some(url.clone()),
+            // A thumbnail is drawn again when its NDI source's first picture comes.
+            sp_model::ObjectKind::Ndi { source, .. } if !source.is_empty() => Some(format!("ndi:{source}")),
             _ => None,
         })
         .collect()

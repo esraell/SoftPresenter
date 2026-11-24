@@ -385,6 +385,8 @@ pub fn describe(object: &Object, screens: &[crate::screens::Screen]) -> String {
         (ObjectKind::Shape { shape }, None) => format!("a shape ({})", shape.name().to_lowercase()),
         (ObjectKind::Image { file, .. }, None) => format!("a picture ({file})"),
         (ObjectKind::Web { url }, None) => format!("a web page ({url})"),
+        (ObjectKind::Ndi { source, .. }, None) if source.is_empty() => "an NDI source (none chosen)".to_owned(),
+        (ObjectKind::Ndi { source, .. }, None) => format!("an NDI source ({})", sp_model::ndi_short_name(source)),
     }
 }
 

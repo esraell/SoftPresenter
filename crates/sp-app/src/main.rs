@@ -39,6 +39,7 @@ mod make_cli;
 mod media;
 mod menubar;
 mod messages;
+mod ndi_in;
 mod notices;
 mod output;
 mod outside;
@@ -1390,6 +1391,11 @@ struct App {
     web_refused: Vec<String>,
     /// Testing aid: when the web pages' state was last logged (SOFTPRESENTER_TRACE_WEB).
     web_traced: Option<Instant>,
+    /// The NDI sources slides on screen or being edited show: finding and receiving them.
+    ndi: ndi_in::Inputs,
+    /// `sp_render::ndi_changes` as the editor's picture was last drawn for it, and when.
+    ndi_seen: u64,
+    ndi_drawn: Option<Instant>,
     /// The connection to the church's VoxLive account.
     voxlive: voxlive::Client,
     /// Canva Sync: the church's Canva sign-in, its design, and a sync under way.
@@ -2363,13 +2369,15 @@ impl App {
     /// operator's window: the editor and thumbnails). Says when to look again.
     fn tick_web(&mut self) -> Option<Instant> {
         self.sync_web_pages();
-        if self.web_pages.is_empty() {
-            return None;
+        let (ndi_first, ndi_fresh, ndi_at) = self.tick_ndi();
+        if self.web_pages.is_empty() && ndi_first.is_empty() && ndi_fresh.is_empty() {
+            return ndi_at;
         }
         let now = Instant::now();
-        // The addresses of the pages with a new picture, and of those with their first.
-        let mut fresh: Vec<String> = Vec::new();
-        let mut first: Vec<String> = Vec::new();
+        // The addresses of the pages with a new picture, and of those with their first (an NDI
+        // source's is `ndi:` and its name, as `thumbs::web_pages` says it).
+        let mut fresh: Vec<String> = ndi_fresh.iter().map(|source| format!("ndi:{source}")).collect();
+        let mut first: Vec<String> = ndi_first.iter().map(|source| format!("ndi:{source}")).collect();
         let editing = self.running.as_ref().is_some_and(|running| running.home_state.editing.is_some());
         for web in &mut self.web_pages {
             // A page runs while it is on the screens, until its first picture (for the
@@ -2449,7 +2457,98 @@ impl App {
                 );
             }
         }
-        self.web_pages.iter().map(|web| web.asked.unwrap_or(now) + web.every()).min()
+        let web_at = self.web_pages.iter().map(|web| web.asked.unwrap_or(now) + web.every()).min();
+        [web_at, ndi_at].into_iter().flatten().min()
+    }
+
+    /// The NDI sources the audience screens show now (the slide on screen, its layout behind it,
+    /// and the stage layouts), each with whether every box showing it wants the light stream.
+    fn live_ndi_wanted(&self) -> Vec<(String, bool)> {
+        let mut wanted = Vec::new();
+        if let Some((_, slide)) = self.show.live_slide() {
+            ndi_in::wanted_in(&slide.objects, &mut wanted);
+            if let Some(behind) = self.live_layout_objects() {
+                ndi_in::wanted_in(&behind.objects, &mut wanted);
+            }
+        }
+        if let Some(running) = self.running.as_ref() {
+            ndi_in::wanted_in(&stage::shown_objects(&running.home_state), &mut wanted);
+        }
+        wanted
+    }
+
+    /// Starts receiving the NDI sources the slide on screen or being edited shows, and stops
+    /// receiving the rest; keeps what the inspector shows of NDI, and tells the operator when a
+    /// source stops. Nothing is received (and nothing looked for) while no such slide is shown.
+    fn sync_ndi(&mut self) -> ndi_in::Report {
+        let mut wanted = self.live_ndi_wanted();
+        let Some(running) = self.running.as_mut() else { return ndi_in::Report::default() };
+        let mut choosing = false;
+        if let Some(draft) = running.home_state.editing.as_ref() {
+            ndi_in::wanted_in(&draft.slide.objects, &mut wanted);
+            choosing = draft.selected_object().is_some_and(|o| matches!(o.kind, sp_model::ObjectKind::Ndi { .. }));
+        }
+        if std::mem::take(&mut running.home_state.ndi.look_again) {
+            self.ndi.look_again();
+        }
+        let mut own: Vec<String> = running
+            .home_state
+            .screens
+            .iter()
+            .filter_map(|screen| match &screen.output {
+                screens::Output::Ndi(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        // Testing aid: SOFTPRESENTER_NDI also sends under a name, which is no source to show.
+        own.extend(std::env::var("SOFTPRESENTER_NDI").ok());
+        let (view, report) = self.ndi.sync(&wanted, choosing, &own, Instant::now());
+        running.home_state.ndi = view;
+        for source in &report.stopped_now {
+            applog::event("ndi", &format!("{} stopped sending", sp_model::ndi_short_name(source)));
+            running.home_state.notices.trouble(ndi_in::stopped_notice(source));
+        }
+        for source in &report.first {
+            applog::event("ndi", &format!("receiving {}", sp_model::ndi_short_name(source)));
+        }
+        for source in &report.dropped {
+            applog::event("ndi", &format!("no longer receiving {}", sp_model::ndi_short_name(source)));
+        }
+        report
+    }
+
+    /// Keeps NDI sources going for the editor and the thumbnails: the sources whose first
+    /// picture has come (their thumbnails are drawn again), the sources with a new picture the
+    /// editor shows (at most thirty times a second), and when to look again.
+    fn tick_ndi(&mut self) -> (Vec<String>, Vec<String>, Option<Instant>) {
+        let report = self.sync_ndi();
+        let now = Instant::now();
+        let changes = sp_render::ndi_changes();
+        let editing = self.running.as_ref().is_some_and(|running| {
+            running.home_state.editing.as_ref().is_some_and(|draft| {
+                draft
+                    .slide
+                    .objects
+                    .iter()
+                    .any(|o| matches!(&o.kind, sp_model::ObjectKind::Ndi { source, .. } if !source.is_empty()))
+            })
+        });
+        let mut fresh = Vec::new();
+        if changes != self.ndi_seen {
+            if !editing {
+                self.ndi_seen = changes;
+            } else if self.ndi_drawn.is_none_or(|at| now.duration_since(at) >= Duration::from_millis(33)) {
+                self.ndi_seen = changes;
+                self.ndi_drawn = Some(now);
+                fresh = self.ndi.receiving_sources();
+            }
+        }
+        let at = match (self.ndi.receiving_any(), editing) {
+            (false, _) => None,
+            (true, true) => Some(now + Duration::from_millis(33)),
+            (true, false) => Some(now + Duration::from_millis(200)),
+        };
+        (report.first, fresh, at)
     }
 
     /// Does what Settings › Integrations asked of VoxLive, keeps the connection going, and shows
@@ -3281,6 +3380,8 @@ impl App {
             .map(|(file, player)| (file.clone(), player.frames()))
             .chain(self.web_pages.iter().filter(|web| web.live).map(|web| (web.key.clone(), web.page.frames())))
             .collect();
+        self.sync_ndi();
+        let ndi: Vec<String> = self.live_ndi_wanted().into_iter().map(|(source, _)| source).collect();
         let media_fit = self.live_media_fit();
         let theme = self.show.live().map_or(&self.theme, |at| self.theme_of(at.presentation)).clone();
         let about = self.stage_about();
@@ -3304,6 +3405,7 @@ impl App {
                 video,
                 media_fit,
                 slide_video,
+                ndi,
                 slide: slide.clone(),
                 theme: theme.clone(),
                 version: running.home_state.version_switch.version(),
@@ -9881,6 +9983,9 @@ fn main() -> ExitCode {
         web_pages: Vec::new(),
         web_refused: Vec::new(),
         web_traced: None,
+        ndi: ndi_in::Inputs::default(),
+        ndi_seen: 0,
+        ndi_drawn: None,
         voxlive: voxlive::Client::new(),
         canva: {
             let proxy = std::sync::Mutex::new(event_loop.create_proxy());

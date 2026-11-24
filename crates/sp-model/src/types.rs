@@ -90,6 +90,21 @@ pub enum ObjectKind {
     /// A live web page in the object's place, laid out at the object's size. `url` is an
     /// `https` address (the app opens nothing else).
     Web { url: String },
+    /// A live NDI source in the object's place, received while the slide is on screen or being
+    /// edited. `source` is the name NDI gives it (`COMPUTER (Source)`); empty until one is chosen.
+    Ndi {
+        #[serde(default)]
+        source: String,
+        /// How the picture sits in the box.
+        #[serde(default)]
+        scaling: ImageFit,
+        /// The full stream, or the sender's lighter one.
+        #[serde(default)]
+        quality: NdiQuality,
+        /// Whether the source's sound is wanted too. Kept as a setting; sound isn't played yet.
+        #[serde(default, skip_serializing_if = "is_false")]
+        sound: bool,
+    },
     /// On a stage layout: what one of the audience screens shows, live, scaled into the
     /// object's place. Drawn only on a stage screen (anywhere else it shows nothing, or a
     /// stand-in in the operator's window).
@@ -132,6 +147,16 @@ enum ObjectKindIn {
     Web {
         url: String,
     },
+    Ndi {
+        #[serde(default)]
+        source: String,
+        #[serde(default)]
+        scaling: ImageFit,
+        #[serde(default)]
+        quality: NdiQuality,
+        #[serde(default)]
+        sound: bool,
+    },
     Screen {
         #[serde(default)]
         screen: Option<Uuid>,
@@ -153,6 +178,9 @@ impl From<ObjectKindIn> for ObjectKind {
             ObjectKindIn::Shape { shape } => ObjectKind::Shape { shape },
             ObjectKindIn::Image { file, fit } => ObjectKind::Image { file, fit },
             ObjectKindIn::Web { url } => ObjectKind::Web { url },
+            ObjectKindIn::Ndi { source, scaling, quality, sound } => {
+                ObjectKind::Ndi { source, scaling, quality, sound }
+            }
             ObjectKindIn::Screen { screen, corner, label } => ObjectKind::Screen { screen, corner, label },
         }
     }
@@ -210,6 +238,46 @@ impl ImageFit {
             ImageFit::Fill => "Fill",
             ImageFit::Stretch => "Stretch",
         }
+    }
+}
+
+/// Which of an NDI source's streams a slide receives.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NdiQuality {
+    /// The full picture.
+    #[default]
+    Full,
+    /// The sender's smaller picture: less of the network and of this computer.
+    Light,
+}
+
+impl NdiQuality {
+    pub const ALL: [NdiQuality; 2] = [NdiQuality::Full, NdiQuality::Light];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            NdiQuality::Full => "Full",
+            NdiQuality::Light => "Light",
+        }
+    }
+}
+
+/// The name of an NDI source without its computer's: `Camera 1` of `STREAM-PC (Camera 1)`. A name
+/// not in that shape is its own. The last ` (` begins it, as a computer's own name may hold one
+/// (`MacBook Pro (2) (Camera 1)`).
+pub fn ndi_short_name(source: &str) -> &str {
+    match (source.rfind(" ("), source.strip_suffix(')')) {
+        (Some(open), Some(inside)) => &inside[open + 2..],
+        _ => source,
+    }
+}
+
+/// The computer of an NDI source's name: `STREAM-PC` of `STREAM-PC (Camera 1)`.
+pub fn ndi_computer(source: &str) -> Option<&str> {
+    match (source.rfind(" ("), source.ends_with(')')) {
+        (Some(open), true) => Some(&source[..open]),
+        _ => None,
     }
 }
 
@@ -469,6 +537,19 @@ impl Object {
         }
     }
 
+    /// An NDI source box, 16:9, in the middle of the slide. With no source chosen it shows an
+    /// empty box until one is.
+    pub fn ndi(source: String) -> Object {
+        let (w, h) = (1400.0, 788.0);
+        Object {
+            name: "NDI source".to_owned(),
+            frame: Some(SlideRect { x: (crate::SLIDE_WIDTH - w) / 2.0, y: (crate::SLIDE_HEIGHT - h) / 2.0, w, h }),
+            fill: None,
+            kind: ObjectKind::Ndi { source, scaling: ImageFit::Fit, quality: NdiQuality::Full, sound: false },
+            ..Object::shape(Shape::Rectangle)
+        }
+    }
+
     /// A picture of what an audience screen shows, for a stage layout: the first audience
     /// screen's, a third of the stage wide, in its top right corner.
     pub fn screen(screen: Option<Uuid>) -> Object {
@@ -489,6 +570,7 @@ impl Object {
             ObjectKind::Shape { .. }
             | ObjectKind::Image { .. }
             | ObjectKind::Web { .. }
+            | ObjectKind::Ndi { .. }
             | ObjectKind::Screen { .. } => None,
         }
     }
@@ -500,6 +582,7 @@ impl Object {
             ObjectKind::Shape { .. }
             | ObjectKind::Image { .. }
             | ObjectKind::Web { .. }
+            | ObjectKind::Ndi { .. }
             | ObjectKind::Screen { .. } => None,
         }
     }
@@ -545,6 +628,7 @@ impl Object {
             ObjectKind::Shape { .. }
             | ObjectKind::Image { .. }
             | ObjectKind::Web { .. }
+            | ObjectKind::Ndi { .. }
             | ObjectKind::Screen { .. } => None,
         }
     }
@@ -646,6 +730,7 @@ impl Slide {
                     other @ (ObjectKind::Shape { .. }
                     | ObjectKind::Image { .. }
                     | ObjectKind::Web { .. }
+                    | ObjectKind::Ndi { .. }
                     | ObjectKind::Screen { .. }) => other.clone(),
                 };
                 Object { id: Uuid::new_v4(), kind, ..object.clone() }
@@ -1566,5 +1651,20 @@ mod arrangement_tests {
         assert_eq!(reflowed.groups[2].id, chorus);
         assert_eq!(reflowed.order(), [1, 2, 3, 1, 2]);
         assert_eq!(reflowed.arrangements, song.arrangements);
+    }
+}
+
+#[cfg(test)]
+mod ndi_name_tests {
+    use super::*;
+
+    #[test]
+    fn an_ndi_name_splits_into_its_source_and_its_computer_even_when_the_computer_has_brackets() {
+        assert_eq!(ndi_short_name("STREAM-PC (Camera 1)"), "Camera 1");
+        assert_eq!(ndi_computer("STREAM-PC (Camera 1)"), Some("STREAM-PC"));
+        assert_eq!(ndi_short_name("MacBook Pro (2) (Camera 1)"), "Camera 1");
+        assert_eq!(ndi_computer("MacBook Pro (2) (Camera 1)"), Some("MacBook Pro (2)"));
+        assert_eq!(ndi_short_name("plain"), "plain");
+        assert_eq!(ndi_computer("plain"), None);
     }
 }

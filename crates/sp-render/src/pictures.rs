@@ -423,3 +423,217 @@ mod tests {
         assert_eq!(kept.bytes, 0);
     }
 }
+
+// ---- NDI sources ----------------------------------------------------------------------------
+
+/// How long a source that has stopped sending keeps its last picture on the screens.
+pub const NDI_HOLD: Duration = Duration::from_secs(2);
+/// How long the picture then takes to fade out, and to fade back in when the source returns.
+pub const NDI_FADE: Duration = Duration::from_millis(500);
+
+/// What is known of one NDI source's pictures (see [`show_ndi`]).
+#[derive(Clone, Copy)]
+struct NdiTiming {
+    /// When its newest picture arrived.
+    last: Instant,
+    /// After a gap long enough for the picture to have begun fading out: when the new picture
+    /// came, and how visible the old one then was, from where it fades back in.
+    back: Option<(Instant, f32)>,
+    /// True while the app is receiving the source.
+    receiving: bool,
+    /// The app says the source isn't there (not on the network, or not answering).
+    missing: bool,
+}
+
+static NDI: Mutex<Option<HashMap<String, NdiTiming>>> = Mutex::new(None);
+static NDI_CHANGES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The name an NDI source's newest picture is kept under.
+fn ndi_key(source: &str) -> String {
+    format!("ndi:{source}")
+}
+
+/// How visible an NDI source's picture is: whole while pictures keep coming and for
+/// [`NDI_HOLD`] after the last, then fading to nothing over [`NDI_FADE`]; after a gap that
+/// began the fade, fading back in over [`NDI_FADE`] from where it had got to.
+fn ndi_visible(last: Instant, back: Option<(Instant, f32)>, now: Instant) -> f32 {
+    let quiet = now.saturating_duration_since(last);
+    let out = if quiet <= NDI_HOLD {
+        1.0
+    } else {
+        (1.0 - (quiet - NDI_HOLD).as_secs_f32() / NDI_FADE.as_secs_f32()).clamp(0.0, 1.0)
+    };
+    let back_in = back.map_or(1.0, |(at, from)| {
+        let t = (now.saturating_duration_since(at).as_secs_f32() / NDI_FADE.as_secs_f32()).clamp(0.0, 1.0);
+        from + (1.0 - from) * t
+    });
+    out.min(back_in)
+}
+
+/// An NDI source's newest picture, as its receiver's thread hands it over: every box showing the
+/// source shows it from now on. Says the source is sending, and that the screens must draw again.
+pub fn show_ndi(source: &str, picture: Picture) {
+    show_picture(&ndi_key(source), picture);
+    let now = Instant::now();
+    if let Ok(mut all) = NDI.lock() {
+        let all = all.get_or_insert_with(HashMap::new);
+        let back = all.get(source).and_then(|was| {
+            let visible = ndi_visible(was.last, was.back, now);
+            (now.saturating_duration_since(was.last) > NDI_HOLD).then_some((now, visible))
+        });
+        let receiving = all.get(source).is_none_or(|was| was.receiving);
+        all.insert(source.to_owned(), NdiTiming { last: now, back, receiving, missing: false });
+    }
+    NDI_CHANGES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Says whether the app is receiving a source now, and whether it knows the source isn't there.
+/// Not receiving, a source's last picture stays (small) for the editor and thumbnails and
+/// nothing is called missing.
+pub fn set_ndi_receiving(source: &str, receiving: bool, missing: bool) {
+    let mut starts = false;
+    if let Ok(mut all) = NDI.lock() {
+        let all = all.get_or_insert_with(HashMap::new);
+        let now = Instant::now();
+        let timing =
+            all.entry(source.to_owned()).or_insert(NdiTiming { last: now, back: None, receiving: false, missing });
+        let changed = timing.receiving != receiving || timing.missing != missing;
+        if receiving && !timing.receiving {
+            // Starting afresh: what was kept from the last time is not what the source is
+            // sending now, so it isn't shown while the first picture is awaited.
+            starts = true;
+            timing.last = now;
+            timing.back = None;
+        }
+        timing.receiving = receiving;
+        timing.missing = missing;
+        if changed {
+            NDI_CHANGES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    if starts {
+        forget_picture(&ndi_key(source));
+    }
+    if !receiving {
+        let key = ndi_key(source);
+        if let Some(kept) = KEPT.get()
+            && let Ok(mut kept) = timed_lock(kept)
+            && let Some(Some(picture)) = kept.pictures.get(&key).map(|(picture, _)| picture.clone())
+            && picture.width().max(picture.height()) > SMALL_SIDE
+        {
+            let small = picture.shrunk(SMALL_SIDE);
+            kept.insert(&key, Some(small));
+            kept.live.insert(key);
+        }
+    }
+}
+
+/// Forgets what is kept of a source's pictures.
+pub fn forget_ndi(source: &str) {
+    forget_picture(&ndi_key(source));
+    if let Ok(mut all) = NDI.lock()
+        && let Some(all) = all.as_mut()
+    {
+        all.remove(source);
+    }
+}
+
+/// What one NDI box needs to be drawn.
+pub(crate) struct NdiShown {
+    pub picture: Option<Picture>,
+    /// 0 to 1, how visible it is on the screens.
+    pub visible: f32,
+    /// True when the source is, as far as the app knows, not sending.
+    pub stopped: bool,
+}
+
+pub(crate) fn ndi_shown(source: &str) -> NdiShown {
+    let now = Instant::now();
+    let timing = NDI.lock().ok().and_then(|all| all.as_ref().and_then(|all| all.get(source).copied()));
+    let picture = shown(&ndi_key(source));
+    match timing {
+        None => NdiShown { visible: if picture.is_some() { 1.0 } else { 0.0 }, picture, stopped: false },
+        Some(timing) => {
+            let quiet = now.saturating_duration_since(timing.last) > NDI_HOLD;
+            NdiShown {
+                visible: if picture.is_some() { ndi_visible(timing.last, timing.back, now) } else { 0.0 },
+                stopped: timing.receiving && (timing.missing || quiet),
+                picture,
+            }
+        }
+    }
+}
+
+/// How long a source being received has gone without a picture (from when it was first wanted, if
+/// none has come); `None` when it isn't being received.
+pub fn ndi_quiet(source: &str) -> Option<Duration> {
+    let all = NDI.lock().ok()?;
+    let timing = all.as_ref()?.get(source)?;
+    timing.receiving.then(|| Instant::now().saturating_duration_since(timing.last))
+}
+
+/// A number that changes whenever an NDI picture arrives or a source starts or stops being
+/// received: the screens draw again when it has moved.
+pub fn ndi_changes() -> u64 {
+    NDI_CHANGES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// How visible each of these sources' pictures is now, in the order given: the screens draw
+/// again when one has moved on from what they last drew (during a fade, which no picture
+/// announces).
+pub fn ndi_visibility(sources: &[String]) -> Vec<f32> {
+    let now = Instant::now();
+    let all = NDI.lock().ok();
+    sources
+        .iter()
+        .map(|source| {
+            all.as_ref()
+                .and_then(|all| all.as_ref().and_then(|all| all.get(source)))
+                .map_or(0.0, |timing| ndi_visible(timing.last, timing.back, now))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod ndi_tests {
+    use super::*;
+
+    #[test]
+    fn a_source_that_stops_holds_its_picture_two_seconds_then_fades_over_half_of_one() {
+        let began = Instant::now();
+        let at = |seconds: f32| ndi_visible(began, None, began + Duration::from_secs_f32(seconds));
+        assert_eq!(at(0.0), 1.0);
+        assert_eq!(at(1.99), 1.0, "a hiccup passes unseen");
+        assert_eq!(at(2.0), 1.0);
+        assert!((at(2.25) - 0.5).abs() < 0.01, "half way through the fade");
+        assert_eq!(at(2.5), 0.0);
+        assert_eq!(at(60.0), 0.0, "never a frozen face");
+    }
+
+    #[test]
+    fn a_source_that_returns_fades_back_in_from_where_it_was() {
+        let began = Instant::now();
+        let back = Some((began + Duration::from_secs(10), 0.0));
+        let at = |seconds: f32| {
+            ndi_visible(began + Duration::from_secs(10), back, began + Duration::from_secs_f32(10.0 + seconds))
+        };
+        assert_eq!(at(0.0), 0.0);
+        assert!((at(0.25) - 0.5).abs() < 0.01);
+        assert_eq!(at(0.5), 1.0);
+        // Back during the fade-out, at 0.4: it rises from there.
+        let partway = Some((began, 0.4));
+        assert!((ndi_visible(began, partway, began) - 0.4).abs() < 0.01);
+    }
+
+    #[test]
+    fn one_source_shared_by_two_boxes_is_one_picture_with_one_timing() {
+        let source = "TEST-PC (shared one)";
+        show_ndi(source, Picture::from_rgba(2, 2, vec![255; 16]).unwrap());
+        let (a, b) = (ndi_shown(source), ndi_shown(source));
+        assert!(a.picture.as_ref().unwrap().same(b.picture.as_ref().unwrap()));
+        assert_eq!((a.visible, b.visible), (1.0, 1.0));
+        assert!(!a.stopped);
+        forget_ndi(source);
+        assert!(ndi_shown(source).picture.is_none());
+    }
+}

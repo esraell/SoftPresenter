@@ -243,6 +243,9 @@ Refused before they reach the app, with words saying so (read as the app would r
   fetches from the internet or takes songs off the computer); `catalog search`, `list`, `add`,
   `newer`, `use-newer` and `keep-mine` are open;
 - the **menu bar**: `menu ITEM` (`menu` alone lists it);
+- **an NDI source on a slide** can't be added from a page: there is no command for it (a
+  box already on a slide is drawn in the slide's pictures as the screens draw it; `slide SONG N
+  --json` lists it with `"kind": "ndi"`, `source`, `scaling`, `quality` and `sound`);
 - **a web page on a slide** (`slide web … URL`): a page runs its own scripts in the computer's
   web view, on the screens, so it is put up at the computer; `slide web SONG N off` is open;
 - **NDI**: `screen add … on ndi NAME`, `screen set … output=ndi:…` (NDI sends to anyone on the

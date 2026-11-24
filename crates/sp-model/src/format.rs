@@ -12,10 +12,11 @@ const FORMAT_NAME: &str = "softpresenter-presentation";
 /// What songs saved before the project was renamed say they are; they still open.
 const OLD_FORMAT_NAME: &str = "presentercraft-presentation";
 /// The newest version of the format this build writes and understands. A song is written as
-/// version 3 only when a slide has a web page box (version 3 added them); as version 2 when a
+/// version 4 only when a slide has an NDI source box, as version 3 only when it has a web page
+/// box (version 3 added them); as version 2 when a
 /// slide has a "go to song" action, which since version 2 names the song by its id; any other
 /// song is still written as version 1, which older builds read.
-pub const FORMAT_VERSION: u32 = 3;
+pub const FORMAT_VERSION: u32 = 4;
 
 #[derive(Serialize, Deserialize)]
 struct File {
@@ -33,7 +34,12 @@ pub fn to_json(presentation: &Presentation) -> String {
     let shows_web = presentation
         .slides()
         .any(|(_, slide)| slide.objects.iter().any(|object| matches!(object.kind, crate::ObjectKind::Web { .. })));
-    let version = if shows_web {
+    let shows_ndi = presentation
+        .slides()
+        .any(|(_, slide)| slide.objects.iter().any(|object| matches!(object.kind, crate::ObjectKind::Ndi { .. })));
+    let version = if shows_ndi {
+        4
+    } else if shows_web {
         3
     } else if goes_to_songs {
         2
@@ -180,6 +186,43 @@ mod tests {
         let text = to_json(&web);
         assert!(text.contains(r#""version": 3"#) && text.contains(r#""kind": "web""#), "{text}");
         assert_eq!(from_json(&text).unwrap(), web);
+    }
+
+    #[test]
+    fn a_song_with_an_ndi_source_box_is_written_as_version_4_and_comes_back() {
+        let mut ndi = song();
+        let mut object = crate::Object::ndi("STREAM-PC (Camera 1)".to_owned());
+        if let crate::ObjectKind::Ndi { scaling, quality, sound, .. } = &mut object.kind {
+            *scaling = crate::ImageFit::Fill;
+            *quality = crate::NdiQuality::Light;
+            *sound = true;
+        }
+        ndi.groups[0].slides[0].objects.push(object);
+        let text = to_json(&ndi);
+        assert!(text.contains(r#""version": 4"#) && text.contains(r#""kind": "ndi""#), "{text}");
+        assert!(text.contains(r#""source": "STREAM-PC (Camera 1)""#));
+        assert!(text.contains(r#""scaling": "fill""#) && text.contains(r#""quality": "light""#));
+        assert_eq!(from_json(&text).unwrap(), ndi);
+        // The box a fresh Add gives, and no sound, writes no `sound`.
+        let mut plain = song();
+        plain.groups[0].slides[0].objects.push(crate::Object::ndi(String::new()));
+        assert!(!to_json(&plain).contains("sound"));
+        assert_eq!(from_json(&to_json(&plain)).unwrap(), plain);
+    }
+
+    #[test]
+    fn a_file_without_any_ndi_box_loads_unchanged_and_is_not_written_as_newer() {
+        let text = to_json(&song());
+        assert!(text.contains(r#""version": 1"#), "older builds still read it");
+        assert_eq!(to_json(&from_json(&text).unwrap()), text);
+        // A box with only its kind and source (as an earlier note of the format would have it)
+        // reads with the starting settings.
+        let mut ndi = song();
+        ndi.groups[0].slides[0].objects.push(crate::Object::ndi("A (B)".to_owned()));
+        let thin = to_json(&ndi).replace(r#""scaling": "fit","#, "").replace(r#""quality": "full""#, r#""x": 1"#);
+        let read = from_json(&thin).unwrap();
+        assert!(matches!(&read.groups[0].slides[0].objects.last().unwrap().kind,
+            crate::ObjectKind::Ndi { scaling, quality, .. } if *scaling == crate::ImageFit::Fit && *quality == crate::NdiQuality::Full));
     }
 
     #[test]

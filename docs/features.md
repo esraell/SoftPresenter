@@ -1058,6 +1058,35 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   SoftPresenters say to update. Pages are drawn by macOS's own web view on the Mac (moving
   content such as a scrolling ticker can look uneven; a smoother engine is planned), and not
   yet on other systems.
+- **NDI sources** on slides (NDI Source, right after Web Page above the slide, in slides,
+  props and stage layouts): a box, 16:9 and in the middle, that shows a live NDI source from
+  the network. It is set up as a web page box is: adding one picks it and gives the inspector's
+  Source menu the keyboard. The menu lists the sources found (as "Camera 1 · STREAM-PC"), with
+  Look again beside it; SoftPresenter's own NDI outputs are never offered (a source shown in
+  a slide would show itself). One line under it says what is so: how many are found, that it is
+  still looking, that NDI isn't installed (SoftPresenter uses the NDI Tools you install
+  yourself, as for sending), or, in amber, that the chosen source isn't sending. Then Fits
+  (Fit, Fill or Stretch), Quality (Full, or Light: the sender's smaller picture, less network
+  and less of the computer) and Sound (Off or On; the setting is kept, and the box says
+  "Sound comes later": the app has no way yet to play a source's sound, so none is faked).
+  On the screens only the picture shows, with no tag, fitted to the box among the slide's
+  objects in their order; in the editor and on thumbnails it has a small tag at its foot
+  ("NDI · Camera 1"), a plain dashed box tagged "NDI · choose a source" before one is chosen.
+  Always the newest picture: nothing is queued, so it never lags behind the room.
+  *Receiving* starts when a slide with the box goes on screen (the slide, its layout behind it,
+  a stage layout) or is opened in the editor, and stops when it has left both; a slide that is
+  only in a list receives nothing and shows the small copy of the last picture the app saw
+  (if any). A source in several boxes is received once, on a thread of its own, never the
+  thread that draws the screens; looking for sources runs only while a box is selected in the
+  editor or a source is being received, and for ten seconds after. *When a source stops* the
+  screens hold its last picture for two seconds (a hiccup passes unseen), fade it out over half
+  a second and show the slide without it, never a frozen picture; it fades back in when the
+  source returns. The operator gets an amber notice ("NDI "Camera 1" stopped sending. Its
+  slides show without it until it is back."), and the editor shows an amber dashed box tagged
+  "· not sending". The runtime is the one NDI Tools installs, opened as for sending. The
+  remote page shows the box as drawn and can't add one (there is no remote command for it).
+  Songs with an NDI box are saved as version 4 of the song file; older SoftPresenters say to
+  update. Not yet: sound, and `sp` has no command to add one (`sp slide SONG N` lists it).
 - **Builds** (the inspector's Build tab): an object can come on with a Dissolve, Fly In from
   any side, or Zoom, with the slide (after its transition and a delay) or on a click of Next,
   and leave with a Dissolve, Fly Out or Zoom on a click. Next sets a slide's click builds going
