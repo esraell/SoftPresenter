@@ -65,6 +65,65 @@ const PROGRESSIVE: c_int = 1;
 /// `NDIlib_send_timecode_synthesize`: NDI makes the timecode.
 const SYNTHESIZE_TIMECODE: i64 = i64::MAX;
 
+/// `NDIlib_source_t`: a source's name and, in the second pointer, its address (which this app
+/// leaves to NDI).
+#[repr(C)]
+struct SourceT {
+    name: *const c_char,
+    url: *const c_char,
+}
+
+/// `NDIlib_find_create_t`.
+#[repr(C)]
+struct FindCreate {
+    show_local_sources: bool,
+    groups: *const c_char,
+    extra_ips: *const c_char,
+}
+
+/// `NDIlib_recv_create_v3_t`.
+#[repr(C)]
+struct RecvCreate {
+    source: SourceT,
+    color_format: c_int,
+    bandwidth: c_int,
+    allow_video_fields: bool,
+    name: *const c_char,
+}
+
+/// `NDIlib_recv_color_format_RGBX_RGBA`: red, green, blue first, with an ignored fourth byte for
+/// a source with no alpha and the alpha for one with.
+const COLOR_RGBX_RGBA: c_int = 2;
+/// `NDIlib_recv_bandwidth_video_only_highest` and `_lowest`: the picture only, full or lighter.
+const BANDWIDTH_FULL: c_int = 101;
+const BANDWIDTH_LIGHT: c_int = 1;
+/// `NDIlib_frame_type_video` and `NDIlib_frame_type_error`.
+const FRAME_VIDEO: c_int = 1;
+const FRAME_ERROR: c_int = 4;
+
+type FindCreateFn = unsafe extern "C" fn(*const FindCreate) -> *mut c_void;
+type FindDestroy = unsafe extern "C" fn(*mut c_void);
+type FindWait = unsafe extern "C" fn(*mut c_void, u32) -> bool;
+type FindCurrent = unsafe extern "C" fn(*mut c_void, *mut u32) -> *const SourceT;
+type RecvCreateFn = unsafe extern "C" fn(*const RecvCreate) -> *mut c_void;
+type RecvDestroy = unsafe extern "C" fn(*mut c_void);
+type RecvCapture = unsafe extern "C" fn(*mut c_void, *mut VideoFrame, *mut c_void, *mut c_void, u32) -> c_int;
+type RecvFreeVideo = unsafe extern "C" fn(*mut c_void, *const VideoFrame);
+type RecvConnections = unsafe extern "C" fn(*mut c_void) -> c_int;
+
+/// The functions that find and receive sources. A runtime without them can still send.
+struct Receiving {
+    find_create: FindCreateFn,
+    find_destroy: FindDestroy,
+    find_wait: FindWait,
+    find_current: FindCurrent,
+    recv_create: RecvCreateFn,
+    recv_destroy: RecvDestroy,
+    recv_capture: RecvCapture,
+    recv_free_video: RecvFreeVideo,
+    recv_connections: RecvConnections,
+}
+
 type Initialize = unsafe extern "C" fn() -> bool;
 type SendCreateFn = unsafe extern "C" fn(*const SendCreate) -> *mut c_void;
 type SendDestroy = unsafe extern "C" fn(*mut c_void);
@@ -81,6 +140,8 @@ pub struct Runtime {
     /// `NDIlib_send_get_no_connections`, if this runtime has it. Without it a source can't tell
     /// whether anyone is watching, and sends all the time.
     send_connections: Option<SendConnections>,
+    /// The functions for finding and receiving, if this runtime has them all.
+    receiving: Option<Receiving>,
 }
 
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
@@ -192,12 +253,30 @@ fn open(places: &[PathBuf]) -> Result<Runtime, String> {
     // `Processing.NDI.Send.h`. A runtime without it is still used; its sources send all the time.
     let send_connections =
         unsafe { library.get::<SendConnections>(b"NDIlib_send_get_no_connections\0") }.ok().map(|function| *function);
+    // SAFETY: as above: each is a function the runtime exports, read as its signature in
+    // `Processing.NDI.Find.h` or `Processing.NDI.Recv.h`. A runtime without one of them still
+    // sends; it can't receive.
+    let receiving = unsafe {
+        (|| {
+            Some(Receiving {
+                find_create: *library.get::<FindCreateFn>(b"NDIlib_find_create_v2\0").ok()?,
+                find_destroy: *library.get::<FindDestroy>(b"NDIlib_find_destroy\0").ok()?,
+                find_wait: *library.get::<FindWait>(b"NDIlib_find_wait_for_sources\0").ok()?,
+                find_current: *library.get::<FindCurrent>(b"NDIlib_find_get_current_sources\0").ok()?,
+                recv_create: *library.get::<RecvCreateFn>(b"NDIlib_recv_create_v3\0").ok()?,
+                recv_destroy: *library.get::<RecvDestroy>(b"NDIlib_recv_destroy\0").ok()?,
+                recv_capture: *library.get::<RecvCapture>(b"NDIlib_recv_capture_v2\0").ok()?,
+                recv_free_video: *library.get::<RecvFreeVideo>(b"NDIlib_recv_free_video_v2\0").ok()?,
+                recv_connections: *library.get::<RecvConnections>(b"NDIlib_recv_get_no_connections\0").ok()?,
+            })
+        })()
+    };
     // SAFETY: NDIlib_initialize takes nothing and may be called more than once; the library it
     // lives in is open.
     if !unsafe { initialize() } {
         return Err("NDI can't run on this computer's processor.".to_owned());
     }
-    Ok(Runtime { _library: library, send_create, send_destroy, send_video, send_connections })
+    Ok(Runtime { _library: library, send_create, send_destroy, send_video, send_connections, receiving })
 }
 
 /// An NDI source on the network. Dropping it takes the source away.
@@ -272,6 +351,190 @@ impl Drop for Source {
     fn drop(&mut self) {
         // SAFETY: the instance came from NDIlib_send_create and is destroyed only here, once.
         unsafe { (self.runtime.send_destroy)(self.instance) };
+    }
+}
+
+impl Runtime {
+    fn receiving(&self) -> Result<&Receiving, String> {
+        self.receiving.as_ref().ok_or_else(|| "The NDI runtime is too old to receive from other sources.".to_owned())
+    }
+}
+
+/// Looks for sources on the network. Dropping it stops looking.
+pub struct Finder {
+    runtime: &'static Runtime,
+    instance: *mut c_void,
+}
+
+impl Finder {
+    pub fn new(runtime: &'static Runtime) -> Result<Finder, String> {
+        let receiving = runtime.receiving()?;
+        let settings = FindCreate { show_local_sources: true, groups: std::ptr::null(), extra_ips: std::ptr::null() };
+        // SAFETY: `settings` is a valid NDIlib_find_create_t for the length of the call; the
+        // groups and extra addresses may be null.
+        let instance = unsafe { (receiving.find_create)(&settings) };
+        if instance.is_null() {
+            return Err("NDI could not start looking for sources.".to_owned());
+        }
+        Ok(Finder { runtime, instance })
+    }
+
+    /// Waits up to `ms` for the list to change; true when it has.
+    pub fn wait(&self, ms: u32) -> bool {
+        let Ok(receiving) = self.runtime.receiving() else { return false };
+        // SAFETY: the instance is a live finder from NDIlib_find_create_v2.
+        unsafe { (receiving.find_wait)(self.instance, ms) }
+    }
+
+    /// The names of the sources found now (`"COMPUTER (Source)"`).
+    pub fn sources(&self) -> Vec<String> {
+        let Ok(receiving) = self.runtime.receiving() else { return Vec::new() };
+        let mut count: u32 = 0;
+        // SAFETY: the instance is a live finder; `count` is written. The list it returns stays
+        // valid until the next call on this finder, and is only read here, before any other.
+        let list = unsafe { (receiving.find_current)(self.instance, &mut count) };
+        if list.is_null() {
+            return Vec::new();
+        }
+        (0..count as usize)
+            .filter_map(|at| {
+                // SAFETY: `list` holds `count` sources (see above); each name, when set, is a
+                // NUL-terminated string NDI owns for as long as the list stays valid.
+                let name = unsafe { (*list.add(at)).name };
+                if name.is_null() {
+                    return None;
+                }
+                // SAFETY: `name` is non-null, so a NUL-terminated string (as above).
+                Some(unsafe { std::ffi::CStr::from_ptr(name) }.to_string_lossy().into_owned())
+            })
+            .collect()
+    }
+}
+
+impl Drop for Finder {
+    fn drop(&mut self) {
+        if let Ok(receiving) = self.runtime.receiving() {
+            // SAFETY: the instance came from NDIlib_find_create_v2 and is destroyed only here.
+            unsafe { (receiving.find_destroy)(self.instance) };
+        }
+    }
+}
+
+/// One picture received, valid only inside the call that is handed it.
+pub struct VideoRef<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub bytes_per_row: usize,
+    /// Rows of red, green, blue and a fourth byte: the alpha when `alpha`, else to be ignored.
+    pub rows: &'a [u8],
+    pub alpha: bool,
+}
+
+/// What a wait for the next thing from a source brought.
+pub enum Captured {
+    Video,
+    Nothing,
+    Error,
+}
+
+/// Receives one source's pictures. Dropping it lets go of the connection.
+pub struct Receiver {
+    runtime: &'static Runtime,
+    instance: *mut c_void,
+    _name: CString,
+}
+
+impl Receiver {
+    /// Connects to a source by its name, for the picture only: the full stream, or `light`.
+    pub fn new(runtime: &'static Runtime, source: &str, light: bool) -> Result<Receiver, String> {
+        let receiving = runtime.receiving()?;
+        let name = CString::new(source).map_err(|_| "An NDI name can't contain a zero byte.".to_owned())?;
+        let settings = RecvCreate {
+            source: SourceT { name: name.as_ptr(), url: std::ptr::null() },
+            color_format: COLOR_RGBX_RGBA,
+            bandwidth: if light { BANDWIDTH_LIGHT } else { BANDWIDTH_FULL },
+            allow_video_fields: false,
+            name: std::ptr::null(),
+        };
+        // SAFETY: `settings` is a valid NDIlib_recv_create_v3_t for the call; the source's name
+        // is a NUL-terminated string (kept in `_name`); its address and the receiver's own name
+        // may be null.
+        let instance = unsafe { (receiving.recv_create)(&settings) };
+        if instance.is_null() {
+            return Err("NDI could not connect to the source.".to_owned());
+        }
+        Ok(Receiver { runtime, instance, _name: name })
+    }
+
+    /// Waits up to `ms` for the next picture, and lends it to `with`.
+    pub fn capture(&self, ms: u32, with: impl FnOnce(&VideoRef<'_>)) -> Captured {
+        let Ok(receiving) = self.runtime.receiving() else { return Captured::Error };
+        let mut frame = VideoFrame {
+            xres: 0,
+            yres: 0,
+            four_cc: 0,
+            frame_rate_n: 0,
+            frame_rate_d: 0,
+            picture_aspect_ratio: 0.0,
+            frame_format_type: 0,
+            timecode: 0,
+            data: std::ptr::null_mut(),
+            line_stride_in_bytes: 0,
+            metadata: std::ptr::null(),
+            timestamp: 0,
+        };
+        // SAFETY: the instance is a live receiver; `frame` is a valid NDIlib_video_frame_v2_t
+        // for NDI to fill; audio and metadata are not asked for (null).
+        let kind = unsafe {
+            (receiving.recv_capture)(self.instance, &mut frame, std::ptr::null_mut(), std::ptr::null_mut(), ms)
+        };
+        match kind {
+            FRAME_VIDEO => {
+                if let (Ok(width), Ok(height), Ok(stride)) =
+                    (u32::try_from(frame.xres), u32::try_from(frame.yres), usize::try_from(frame.line_stride_in_bytes))
+                    && !frame.data.is_null()
+                    && width > 0
+                    && height > 0
+                    && stride >= width as usize * 4
+                    && matches!(frame.four_cc, FOUR_CC_RGBX | FOUR_CC_RGBA)
+                {
+                    // The last row needs only its pixels, not the padding after them.
+                    let len = stride * (height as usize - 1) + width as usize * 4;
+                    // SAFETY: NDI says `data` holds `height` rows `stride` bytes apart, each
+                    // with `width` four-byte pixels (checked above to fit within them); it
+                    // stays valid until the frame is freed just below, after `with` is done.
+                    let rows = unsafe { std::slice::from_raw_parts(frame.data, len) };
+                    with(&VideoRef {
+                        width,
+                        height,
+                        bytes_per_row: stride,
+                        rows,
+                        alpha: frame.four_cc == FOUR_CC_RGBA,
+                    });
+                }
+                // SAFETY: the frame was filled by this receiver's capture and is freed once.
+                unsafe { (receiving.recv_free_video)(self.instance, &frame) };
+                Captured::Video
+            }
+            FRAME_ERROR => Captured::Error,
+            _ => Captured::Nothing,
+        }
+    }
+
+    /// How many senders this receiver is connected to (0 or 1): 0 while the source is away.
+    pub fn connections(&self) -> i32 {
+        let Ok(receiving) = self.runtime.receiving() else { return 0 };
+        // SAFETY: the instance is a live receiver; the call only reads a count.
+        unsafe { (receiving.recv_connections)(self.instance) }
+    }
+}
+
+impl Drop for Receiver {
+    fn drop(&mut self) {
+        if let Ok(receiving) = self.runtime.receiving() {
+            // SAFETY: the instance came from NDIlib_recv_create_v3 and is destroyed only here.
+            unsafe { (receiving.recv_destroy)(self.instance) };
+        }
     }
 }
 
