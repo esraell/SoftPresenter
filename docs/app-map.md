@@ -299,6 +299,12 @@ each of those has its place in the window. Windows and Linux have no menu bar.
   rows above whatever the language, and choosing one makes nothing again. Chapter and verse
   numbers are the first row's. The rule is in `bible_language.rs` (`Reading`); the computer's
   language is read once at start in `system_language.rs`.
+- **The app's own language** (not the Bible's): `i18n.rs` holds the language in use
+  (`Choice`: the computer's, or English, Spanish, Russian, Ukrainian; kept in `Prefs.language`),
+  `t`/`ts`/`tf`/`tn` look words up by place key with the English as the fallback, and the tables
+  are `crates/sp-app/locales/<language>/<area>.json` (listed by `build.rs`). The Language card is
+  `home.rs` (`language_card`, `language_menu`), also used by the setup's first step.
+  `SOFTPRESENTER_LANGUAGE=es` stands in for the computer's language in a test copy.
 - Command line: `bible REFERENCE [--show]`, `bible view page|slides`, `bible books keypad|lists`,
   `bible language auto|en|ru|uk`.
 

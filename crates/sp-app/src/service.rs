@@ -811,6 +811,10 @@ pub struct Prefs {
     /// True when each button's key is written beside it (Help › Show Keys on Buttons).
     #[serde(default)]
     pub keys_on_buttons: bool,
+    /// The language of the app's own words: `auto` (the computer's, the default), or `en`, `es`,
+    /// `ru` or `uk`.
+    #[serde(default)]
+    pub language: String,
     /// How each kind of presentation file was last brought in (`pptx`: `slides` or `pictures`).
     #[serde(default)]
     pub import_as: std::collections::BTreeMap<String, String>,
@@ -878,6 +882,7 @@ impl Default for Prefs {
             playlist_in_front: false,
             song_order: "listed".to_owned(),
             keys_on_buttons: false,
+            language: String::new(),
             import_as: std::collections::BTreeMap::new(),
         }
     }

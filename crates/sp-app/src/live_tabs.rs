@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use egui::{Align2, Color32, FontId, Rect, Sense, pos2, vec2};
 
 use crate::home::HomeState;
+use crate::i18n::{t, tf};
 use crate::icons::Icon;
 use crate::messages::Message;
 use crate::screens::Kind;
@@ -29,13 +30,25 @@ pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeStat
     // VoxLive's tab, once it is connected and has screens.
     let voxlive =
         state.voxlive_slot.and_then(|slot| show.presentations().get(slot)).is_some_and(|item| item.slide_count() > 0);
-    const NAMES: [&str; 7] = ["Timers", "Messages", "Props", "Macros", "Stage", "Audio", "VoxLive"];
+    let names: [&str; 7] = [
+        t("right.tab.timers", "Timers"),
+        t("right.tab.messages", "Messages"),
+        t("right.tab.props", "Props"),
+        t("right.tab.macros", "Macros"),
+        t("right.tab.stage", "Stage"),
+        t("right.tab.audio", "Audio"),
+        t("right.tab.voxlive", "VoxLive"),
+    ];
+    let names = &names;
     // Each tab's key opens it and numbers what is in it (see `keys`).
-    let hints: Vec<String> =
-        NAMES.iter().enumerate().map(|(at, name)| crate::keys::tab_hint(&format!("{name}, numbered"), at)).collect();
+    let hints: Vec<String> = names
+        .iter()
+        .enumerate()
+        .map(|(at, name)| crate::keys::tab_hint(&tf("right.tab.numbered", "{tab}, numbered", &[("tab", name)]), at))
+        .collect();
     let hints: Vec<&str> = hints.iter().map(String::as_str).collect();
     let tags: Vec<String> =
-        if crate::keys::tags_shown(state) { (0..NAMES.len()).map(crate::keys::tab_key).collect() } else { Vec::new() };
+        if crate::keys::tags_shown(state) { (0..names.len()).map(crate::keys::tab_key).collect() } else { Vec::new() };
     let count = if voxlive { 7 } else { 6 };
     if state.live_tab >= count {
         state.live_tab = 0;
@@ -55,7 +68,7 @@ pub fn live_tabs(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeStat
         hints: &hints[..count],
         dots: &dots[..count],
         tags: &tags[..tags.len().min(count)],
-        ..Tabs::plain(&NAMES[..count])
+        ..Tabs::plain(&names[..count])
     };
     let (place, _) = ui.allocate_exact_size(vec2(width, tab_switch_height(&tabs)), Sense::hover());
     let (block, chosen) = tab_switch(ui, "live tabs", place.min, width, &tabs, Some(state.live_tab));

@@ -12,6 +12,7 @@ use sp_render::object_frame;
 
 use crate::displays::DisplayInfo;
 use crate::editor::EditDraft;
+use crate::i18n::{t, tf};
 use crate::screens::{Kind, Output, Screen};
 
 use crate::icons::{self, Icon};
@@ -2133,6 +2134,7 @@ impl HomeState {
             playlist_in_front: self.playlist_open,
             song_order: self.song_order.name().to_owned(),
             keys_on_buttons: self.keys_on_buttons,
+            language: crate::i18n::choice().code().to_owned(),
             import_as: self.import_as.clone(),
             ..crate::service::Prefs::default()
         }
@@ -2171,6 +2173,7 @@ impl HomeState {
         self.playlist_open = prefs.playlist_in_front;
         self.song_order = crate::kept::SongOrder::named(&prefs.song_order);
         self.keys_on_buttons = prefs.keys_on_buttons;
+        crate::i18n::set_choice(crate::i18n::Choice::from_code(&prefs.language));
         self.import_as = prefs.import_as.clone();
     }
 
@@ -5481,6 +5484,71 @@ fn command_line_card(ui: &mut egui::Ui, state: &mut HomeState) {
     }
 }
 
+/// Settings › General › Language, the first card: the words of SoftPresenter itself. The
+/// computer's language first (named in that language), then each language written in itself.
+/// A choice shows at once, in this window and every other.
+fn language_card(ui: &mut egui::Ui) {
+    use crate::studio::{TEXT_DIM, caption};
+    caption(ui, &t("settings.language", "Language").to_uppercase());
+    ui.label(t("settings.language.about", "The words of SoftPresenter itself"));
+    language_menu(ui);
+    ui.add_space(2.0);
+    ui.label(
+        egui::RichText::new(t("settings.language.detail", "Buttons, menus and messages. Changes at once."))
+            .size(11.5)
+            .color(TEXT_DIM),
+    );
+    ui.add_space(6.0);
+    ui.label(
+        egui::RichText::new(t(
+            "settings.language.not_this",
+            "The languages your songs and Bibles show in are set in Setup \u{203a} Languages; the Bible page has its own reading language.",
+        ))
+        .size(11.5)
+        .color(TEXT_DIM),
+    );
+}
+
+/// The menu that chooses the app's language, on the Language card and in the setup's first step.
+/// It grows to its longest choice.
+pub(crate) fn language_menu(ui: &mut egui::Ui) {
+    use crate::i18n::Choice;
+    let now = crate::i18n::choice();
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let widest = Choice::ALL
+        .iter()
+        .map(|choice| {
+            ui.painter().layout_no_wrap(language_choice_name(*choice), font.clone(), egui::Color32::WHITE).size().x
+        })
+        .fold(0.0, f32::max);
+    egui::ComboBox::from_id_salt("app language").selected_text(language_choice_name(now)).width(widest + 44.0).show_ui(
+        ui,
+        |ui| {
+            for choice in Choice::ALL {
+                if ui.add(egui::Button::selectable(now == choice, language_choice_name(choice))).clicked() {
+                    crate::i18n::set_choice(choice);
+                }
+            }
+        },
+    );
+}
+
+/// How the Language card writes a choice: "The computer's language (Español)" for the first
+/// (in the language the computer is in, or the one in use), each language in its own name.
+pub fn language_choice_name(choice: crate::i18n::Choice) -> String {
+    match choice {
+        crate::i18n::Choice::Computer => {
+            let named = crate::i18n::computer().unwrap_or(crate::i18n::Language::English);
+            tf(
+                "settings.language.computer",
+                "The computer\u{2019}s language ({language})",
+                &[("language", named.own_name())],
+            )
+        }
+        crate::i18n::Choice::Is(language) => language.own_name().to_owned(),
+    }
+}
+
 /// The Settings window's contents: its panes down the left, the chosen one on the right.
 pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
     use crate::studio::{ACCENT, HOVER, PANEL, TEXT, TEXT_DIM};
@@ -5554,6 +5622,8 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
             }
             "Remote Control" => crate::remote::pane::pane(ui, &mut state.remote),
             "General" => {
+                language_card(ui);
+                ui.add_space(18.0);
                 crate::studio::caption(ui, "COPYRIGHT");
                 ui.label("Show a song's copyright line on the audience screens:");
                 for choice in crate::service::CopyrightShow::ALL {
@@ -8578,7 +8648,11 @@ pub(crate) fn dragged_to(rows: &[Rect], from: usize, y: f32) -> Option<usize> {
 
 /// Why Undo (or, with `redo`, Redo) is greyed: the history in force has no step to take.
 pub fn nothing_to(redo: bool) -> &'static str {
-    if redo { "Nothing to redo" } else { "Nothing to undo" }
+    if redo {
+        crate::i18n::t("dock.nothing_to_redo", "Nothing to redo")
+    } else {
+        crate::i18n::t("dock.nothing_to_undo", "Nothing to undo")
+    }
 }
 
 /// Why Paste Style is greyed: no look has been copied.

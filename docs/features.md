@@ -1401,6 +1401,18 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 <img src="images/screens.png" alt="The Screens window" width="620">
 
 ## Copyright and settings
+- **The app in other languages** (`i18n.rs`, tables in `crates/sp-app/locales/`; how to add words:
+  [docs/translating.md](translating.md)). Settings › General opens with a Language card: the
+  computer's language (named in that language, "El idioma del ordenador (Español)"), then English,
+  Español, Русский and Українська, each written in itself; the setup's first step has the same
+  choice. A choice shows at once, with no restart, and is kept with the preferences (`language`).
+  Spanish is written for the top bar, the keys sheet, the left column (libraries and playlists),
+  the slides area and the bar under it, and the right column's preview, layer keys, Clear All and
+  tool tabs; the rest of the window is still English, and a word with no translation yet shows in
+  English. Russian and Ukrainian have the number and quotation rules and the plural forms, and
+  their words come next. Controls take the width of their words in the language set, and a place
+  with a fixed room (a layer key, the find box, All Songs) uses a short form when the usual word
+  is too long. Songs, Bible text and the `sp` command line stay as they are.
 - Each song's Artist, Author, Publisher, Year and CCLI Song # (the Info icon at the right of its header, beside Edit Words, Arrangement and Notes), and a
   copyright line on the screens on a song's first slide, last slide or every slide, with the
   church's CCLI licence number, chosen in Settings.

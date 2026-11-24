@@ -1,0 +1,8 @@
+{
+  "_note": "Español de España; see topbar.json. Only the Language card is here so far; the rest of Settings is the next area.",
+  "settings.language": "Idioma",
+  "settings.language.about": "Los textos del propio SoftPresenter",
+  "settings.language.computer": "El idioma del ordenador ({language})",
+  "settings.language.detail": "Botones, menús y mensajes. Cambia al momento.",
+  "settings.language.not_this": "Los idiomas de tus canciones y Biblias se eligen en Configuración › Idiomas; la página de la Biblia tiene su propio idioma de lectura."
+}

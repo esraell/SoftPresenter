@@ -27,6 +27,7 @@ mod file_drop;
 mod find;
 mod followed;
 mod home;
+mod i18n;
 mod icons;
 mod images;
 mod inspector;

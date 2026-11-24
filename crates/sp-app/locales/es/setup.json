@@ -1,0 +1,11 @@
+{
+  "_note": "Español de España; see topbar.json. Only the first step's words and the buttons are here so far.",
+  "setup.welcome.title": "Te damos la bienvenida a SoftPresenter",
+  "setup.welcome.about": "Un minuto para dejarlo todo listo para el domingo: qué pantalla ve la congregación, traer tus canciones y tus Biblias. Todo se puede cambiar después, en la ventana Pantallas, en el menú Archivo y en la página de la Biblia.",
+  "setup.welcome.language": "Idioma de SoftPresenter",
+  "setup.skip": "Omitir la configuración",
+  "setup.back": "Atrás",
+  "setup.get_started": "Empezar",
+  "setup.start_using": "Empezar a usar SoftPresenter",
+  "setup.continue": "Continuar"
+}

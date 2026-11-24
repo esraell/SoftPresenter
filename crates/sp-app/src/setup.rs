@@ -10,6 +10,7 @@ use egui::{Align, Align2, Color32, Frame, Layout, RichText, Sense, Stroke, vec2}
 use sp_engine::{Command, Show, SlideRef};
 
 use crate::home::HomeState;
+use crate::i18n::t;
 use crate::screens::{Kind, Output, Screen};
 use crate::studio::{CARD, HOVER, READY, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
 
@@ -112,18 +113,18 @@ pub fn setup_ui(ctx: &egui::Context, show: &Show, state: &mut HomeState, command
             let at = STEPS.iter().position(|step| *step == setup.step).unwrap_or(0);
             ui.horizontal(|ui| {
                 if at == 0 {
-                    if link(ui, "Skip setup").clicked() {
+                    if link(ui, t("setup.skip", "Skip setup")).clicked() {
                         open = false;
                     }
-                } else if button(ui, "Back", false).clicked() {
+                } else if button(ui, t("setup.back", "Back"), false).clicked() {
                     setup.step = STEPS[at - 1];
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let last = at + 1 == STEPS.len();
                     let label = match setup.step {
-                        Step::Welcome => "Get Started",
-                        _ if last => "Start Using SoftPresenter",
-                        _ => "Continue",
+                        Step::Welcome => t("setup.get_started", "Get Started"),
+                        _ if last => t("setup.start_using", "Start Using SoftPresenter"),
+                        _ => t("setup.continue", "Continue"),
                     };
                     if button(ui, label, true).clicked() {
                         if last {
@@ -235,12 +236,19 @@ fn choice(ui: &mut egui::Ui, chosen: bool, label: &str, detail: &str) -> egui::R
 }
 
 fn welcome(ui: &mut egui::Ui) {
-    title(ui, "Welcome to SoftPresenter");
+    title(ui, t("setup.welcome.title", "Welcome to SoftPresenter"));
     say(
         ui,
-        "A minute to get ready for Sunday: which screen the congregation sees, bringing your songs in, and your Bibles. \
-         Everything can be changed later, in the Screens window, the File menu and the Bible page.",
+        t(
+            "setup.welcome.about",
+            "A minute to get ready for Sunday: which screen the congregation sees, bringing your songs in, and your Bibles. Everything can be changed later, in the Screens window, the File menu and the Bible page.",
+        ),
     );
+    // The words of the app itself, first of all, so the rest of the setup is read in them.
+    ui.add_space(12.0);
+    ui.label(t("setup.welcome.language", "Language of SoftPresenter"));
+    ui.add_space(4.0);
+    crate::home::language_menu(ui);
 }
 
 /// Which display the congregation sees, and a stage display for the band if there is another.

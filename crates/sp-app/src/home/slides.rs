@@ -14,6 +14,7 @@ use egui::style::ScrollAnimation;
 use sp_model::{Presentation, Uuid};
 
 use super::*;
+use crate::i18n::{t, tf, tn};
 use crate::outside::Waiting;
 use crate::service::{Item, SavedPassage};
 use crate::studio::{
@@ -1014,15 +1015,15 @@ pub fn slide_scroll(
                         at.is_some_and(|at| show.media().get(at).is_some_and(|m| crate::media::is_video(&m.path)));
                     let live = at.is_some() && *at == show.live_media();
                     let words = match at {
-                        None => "Gone from the media strip",
-                        Some(_) if live => "On screen",
-                        Some(_) => "Click to show it",
+                        None => t("slides.media.gone", "Gone from the media strip"),
+                        Some(_) if live => t("slides.media.live", "On screen"),
+                        Some(_) => t("slides.media.show", "Click to show it"),
                     };
                     let pictures: Vec<Option<TextureId>> =
                         at.iter().map(|at| thumb(ThumbOf::Media(*at)).map(|(texture, _)| texture)).collect();
                     let response = item_tile(ui, &sheet, tile, ("media tile", *item), &pictures, words, live, video);
                     if let Some(at) = at
-                        && response.on_hover_text("Show it on the screens").clicked()
+                        && response.on_hover_text(t("slides.media.show_hint", "Show it on the screens")).clicked()
                     {
                         state.services.chosen = Some(*item);
                         commands.push(Command::ShowMedia(*at));
@@ -1032,14 +1033,19 @@ pub fn slide_scroll(
                     let tile = sheet.tile(place, 0);
                     let live = state.media_playing == Some(*id);
                     let words = if *gone {
-                        "Gone".to_owned()
+                        t("slides.playlist.gone", "Gone").to_owned()
                     } else if *count == 0 {
-                        "Nothing in it yet".to_owned()
+                        t("slides.playlist.empty", "Nothing in it yet").to_owned()
                     } else if live {
-                        "Playing round and round".to_owned()
+                        t("slides.playlist.playing", "Playing round and round").to_owned()
                     } else {
-                        let items = if *count == 1 { "1 item".to_owned() } else { format!("{count} items") };
-                        format!("{items} \u{b7} click to play them round")
+                        tn(
+                            "slides.playlist.click",
+                            *count as u64,
+                            "{n} item \u{b7} click to play them round",
+                            "{n} items \u{b7} click to play them round",
+                            &[],
+                        )
                     };
                     let pictures: Vec<Option<TextureId>> =
                         shown.iter().map(|at| thumb(ThumbOf::Media(*at)).map(|(texture, _)| texture)).collect();
@@ -1048,7 +1054,10 @@ pub fn slide_scroll(
                     if !*gone
                         && *count > 0
                         && response
-                            .on_hover_text("Play its pictures (8 seconds each) and videos in turn, round and round")
+                            .on_hover_text(t(
+                                "slides.playlist.hint",
+                                "Play its pictures (8 seconds each) and videos in turn, round and round",
+                            ))
                             .clicked()
                     {
                         state.services.chosen = Some(*item);
@@ -1080,7 +1089,7 @@ pub fn slide_scroll(
                 ui.painter().text(
                     place.center(),
                     Align2::CENTER_CENTER,
-                    "Drop to add as a slide",
+                    t("slides.drop_slide", "Drop to add as a slide"),
                     FontId::proportional(13.0),
                     TEXT_DIM,
                 );
@@ -1158,15 +1167,23 @@ fn draw_slides(
         .filter(|id| state.versions.iter().any(|version| version.id == *id));
     if matches!(body, Body::Line) {
         let at = pos2(sheet.left + INSET, sheet.y(place.body_top()) + INSET + LIST_ROW / 2.0);
-        ui.painter().text(at, Align2::LEFT_CENTER, "No slides yet.", FontId::proportional(12.5), TEXT_FAINT);
+        ui.painter().text(
+            at,
+            Align2::LEFT_CENTER,
+            t("slides.none", "No slides yet."),
+            FontId::proportional(12.5),
+            TEXT_FAINT,
+        );
         return;
     }
     // The table's headings.
     if view == SlideView::Table {
         let middle = sheet.y(place.body_top()) + TABLE_HEAD / 2.0;
-        for (x, words) in
-            [(sheet.columns.group.min, "Group"), (sheet.columns.words.min, "Words"), (sheet.columns.notes.min, "Notes")]
-        {
+        for (x, words) in [
+            (sheet.columns.group.min, t("slides.table.group", "Group")),
+            (sheet.columns.words.min, t("slides.table.words", "Words")),
+            (sheet.columns.notes.min, t("slides.table.notes", "Notes")),
+        ] {
             crate::studio::paint_spaced(
                 ui,
                 pos2(x, middle),
@@ -1195,7 +1212,7 @@ fn draw_slides(
             ui,
             pos2(line.min.x, line.center().y + 2.0),
             Align2::LEFT_CENTER,
-            "NOT IN THIS ARRANGEMENT \u{b7} STILL THERE TO CLICK",
+            &t("slides.left_out", "Not in this arrangement \u{b7} still there to click").to_uppercase(),
             fixed_semibold(11.5),
             TEXT_FAINT,
             0.6,
@@ -1437,7 +1454,7 @@ fn draw_slides(
                     pencil.map_or(if has_menu { more.min.x } else { rect.max.x - 3.0 }, |pencil| pencil.min.x) - 4.0;
                 let mut tags = slide_tags(slide);
                 if entry.again {
-                    tags.insert(0, Tag::new("AGAIN", TagLook::Plain));
+                    tags.insert(0, Tag::new(t("slides.tag.again", "Again").to_uppercase(), TagLook::Plain));
                 }
                 for tag in tags.into_iter().rev() {
                     let (fill, ink) = match tag.look {
@@ -1584,7 +1601,7 @@ fn draw_slides(
         if let (Some(place), Some(here)) = (pencil, here) {
             let strength = if near { 1.0 } else { 0.5 };
             let button = icon_button(ui, place, id.with("pencil"), Icon::Pencil, strength, false);
-            if button.on_hover_text("Edit this slide").clicked() {
+            if button.on_hover_text(t("slides.edit_this", "Edit this slide")).clicked() {
                 state.editing = EditDraft::of(show, here);
             }
         }
@@ -1668,17 +1685,27 @@ pub(super) fn slide_tags(slide: &Slide) -> Vec<Tag> {
         tags.push(Tag::new(format!("{seconds:.0}S"), TagLook::Plain));
     }
     if !slide.actions.is_empty() {
-        tags.push(Tag::new(format!("{} ACT", slide.actions.len()), TagLook::Plain));
+        tags.push(Tag::new(
+            tf("slides.tag.actions", "{n} act", &[("n", &slide.actions.len().to_string())]).to_uppercase(),
+            TagLook::Plain,
+        ));
     }
     if let Some(own) = slide.transition {
         tags.push(Tag::new(own.kind.name().to_uppercase(), TagLook::Plain));
     }
     if !slide.enabled {
-        tags.push(Tag::new("OFF", TagLook::Plain));
+        tags.push(Tag::new(t("slides.tag.off", "Off").to_uppercase(), TagLook::Plain));
     }
     if let Some(why) = slide.check.as_deref() {
-        let hover = format!("Check this slide: {why}. Mark as Checked, in its menu, takes this tag off.");
-        tags.push(Tag { hover: Some(hover), ..Tag::new("CHECK", TagLook::Check) });
+        let hover = tf(
+            "slides.tag.check.hint",
+            "Check this slide: {why}. Mark as Checked, in its menu, takes this tag off.",
+            &[("why", why)],
+        );
+        tags.push(Tag {
+            hover: Some(hover),
+            ..Tag::new(t("slides.tag.check", "Check").to_uppercase(), TagLook::Check)
+        });
     }
     tags
 }
@@ -1777,7 +1804,11 @@ fn placeholder_tile(
         (Stroke::new(1.0, LINE), TEXT_DIM)
     };
     ui.painter().rect_stroke(tile, ROUND, edge, StrokeKind::Inside);
-    let words = ui.painter().layout_no_wrap("Choose a song\u{2026}".to_owned(), FontId::proportional(13.0), ink);
+    let words = ui.painter().layout_no_wrap(
+        t("slides.choose_song", "Choose a song\u{2026}").to_owned(),
+        FontId::proportional(13.0),
+        ink,
+    );
     let left = tile.center().x - (words.size().x + 20.0) / 2.0;
     crate::icons::paint(
         ui.painter(),
@@ -1794,7 +1825,8 @@ fn placeholder_tile(
         crate::studio::fill_placeholder(state, item, filled);
     }
     // Or a song chosen from a list.
-    let response = response.on_hover_text("Fill the placeholder with a song from the library");
+    let response =
+        response.on_hover_text(t("slides.placeholder.hint", "Fill the placeholder with a song from the library"));
     let mut picked = None;
     egui::Popup::from_toggle_button_response(&response)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
@@ -1871,21 +1903,36 @@ fn item_bar(
         x += 14.0;
     }
     let (title, kind, faint) = match deck {
-        Deck::Slides(slides) if slides.bible => (slides.deck.title.as_str(), Some("Bible"), false),
-        Deck::Slides(slides) if slides.made => (slides.deck.title.as_str(), Some("Live captions"), false),
-        Deck::Slides(slides) => (slides.deck.title.as_str(), slides.deck.loops.then_some("Loops"), false),
+        Deck::Slides(slides) if slides.bible => {
+            (slides.deck.title.as_str(), Some(t("slides.kind.bible", "Bible")), false)
+        }
+        Deck::Slides(slides) if slides.made => {
+            (slides.deck.title.as_str(), Some(t("slides.kind.captions", "Live captions")), false)
+        }
+        Deck::Slides(slides) => {
+            (slides.deck.title.as_str(), slides.deck.loops.then_some(t("slides.kind.loops", "Loops")), false)
+        }
         Deck::Media { at, name, .. } => {
             let video = at.is_some_and(|at| show.media().get(at).is_some_and(|m| crate::media::is_video(&m.path)));
             let kind = match at {
-                None => "Gone",
-                Some(_) if video => "Video",
-                Some(_) => "Picture",
+                None => t("slides.kind.gone", "Gone"),
+                Some(_) if video => t("slides.kind.video", "Video"),
+                Some(_) => t("slides.kind.picture", "Picture"),
             };
             (name.as_str(), Some(kind), at.is_none())
         }
-        Deck::MediaPlaylist { name, gone, .. } => (name.as_str(), Some("Media playlist"), *gone),
-        Deck::Placeholder { name, .. } => (name.as_str(), Some("Placeholder"), false),
-        Deck::Note { title, kind, .. } => (title.as_str(), Some(*kind), true),
+        Deck::MediaPlaylist { name, gone, .. } => {
+            (name.as_str(), Some(t("slides.kind.media_playlist", "Media playlist")), *gone)
+        }
+        Deck::Placeholder { name, .. } => (name.as_str(), Some(t("slides.kind.placeholder", "Placeholder")), false),
+        Deck::Note { title, kind, .. } => {
+            let kind = match *kind {
+                "Bible" => t("slides.kind.bible", "Bible"),
+                "Missing" => t("slides.kind.missing", "Missing"),
+                other => other,
+            };
+            (title.as_str(), Some(kind), true)
+        }
         Deck::Heading { name, .. } => (name.as_str(), None, false),
     };
     // The name; for the song chosen a double click turns it into a field to retype it.
@@ -1895,7 +1942,7 @@ fn item_bar(
     if renaming && let (Some(typed), Some((at, song))) = (state.renaming_song.as_mut(), song) {
         // The field takes the room the title had, so the tools after it stay where they were;
         // a longer title scrolls inside it.
-        let shown = if song.title.is_empty() { "Untitled" } else { song.title.as_str() };
+        let shown = if song.title.is_empty() { t("left.untitled", "Untitled") } else { song.title.as_str() };
         let wide = painter.layout_no_wrap(shown.to_owned(), font.clone(), TEXT).size().x;
         let look = crate::studio::Lettering::plain(font, TEXT);
         let field = crate::studio::rename_field_at(ui, typed, &look, pos2(x, middle), (x + wide).min(right));
@@ -1915,14 +1962,17 @@ fn item_bar(
         x += wide;
     } else {
         let ink = if faint { TEXT_FAINT } else { TEXT };
-        let words = if title.is_empty() { "Untitled" } else { title };
+        let words = if title.is_empty() { t("left.untitled", "Untitled") } else { title };
         let drawn = painter.text(pos2(x, middle), Align2::LEFT_CENTER, words, font, ink);
         if let Some((at, song)) = song {
             let slides = song.slide_count();
-            let count = if slides == 1 { "1 slide".to_owned() } else { format!("{slides} slides") };
-            let name = ui
-                .interact(drawn.intersect(bar), id.with("name"), Sense::click())
-                .on_hover_text(format!("{count} \u{b7} double-click to rename"));
+            let name = ui.interact(drawn.intersect(bar), id.with("name"), Sense::click()).on_hover_text(tn(
+                "slides.name.hint",
+                slides as u64,
+                "{n} slide \u{b7} double-click to rename",
+                "{n} slides \u{b7} double-click to rename",
+                &[],
+            ));
             if name.double_clicked() {
                 state.renaming_song = Some(song.title.clone());
                 state.rename_started = true;
@@ -1955,7 +2005,11 @@ fn item_bar(
     let mut menu = |ui: &mut egui::Ui, state: &mut HomeState| match (item, song) {
         (Some(item), _) => crate::studio::item_menu(ui, show, state, commands, item, ask, asks),
         (None, Some((at, _))) => {
-            if ui.button("Add Slide").on_hover_text("Add a slide laid out like the last one").clicked() {
+            if ui
+                .button(t("slides.add_slide", "Add Slide"))
+                .on_hover_text(t("slides.add_slide.hint", "Add a slide laid out like the last one"))
+                .clicked()
+            {
                 state.add_slide = Some(at);
                 ui.close();
             }
@@ -1974,7 +2028,7 @@ fn item_bar(
             rect.intersect(bar)
         };
         let info = icon_button(ui, place(), id.with("details"), Icon::Status, strength, false)
-            .on_hover_text("Details: the song's writer, publisher and CCLI number");
+            .on_hover_text(t("slides.details", "Details: the song's writer, publisher and CCLI number"));
         egui::Popup::from_toggle_button_response(&info)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .show(|ui| {
@@ -1982,11 +2036,11 @@ fn item_bar(
                 let mut details = song.copyright.clone();
                 egui::Grid::new("song info").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                     for (label, value) in [
-                        ("Artist", &mut details.artist),
-                        ("Author", &mut details.author),
-                        ("Publisher", &mut details.publisher),
-                        ("Year", &mut details.year),
-                        ("CCLI Song #", &mut details.ccli_song),
+                        (t("slides.details.artist", "Artist"), &mut details.artist),
+                        (t("slides.details.author", "Author"), &mut details.author),
+                        (t("slides.details.publisher", "Publisher"), &mut details.publisher),
+                        (t("slides.details.year", "Year"), &mut details.year),
+                        (t("slides.details.ccli", "CCLI Song #"), &mut details.ccli_song),
                     ] {
                         ui.label(egui::RichText::new(label).color(DIM));
                         ui.add(egui::TextEdit::singleline(value).desired_width(200.0));
@@ -1995,9 +2049,12 @@ fn item_bar(
                 });
                 ui.add_space(4.0);
                 ui.label(
-                    egui::RichText::new("Settings, General says when the copyright line is shown.")
-                        .size(11.5)
-                        .color(DIM),
+                    egui::RichText::new(t(
+                        "slides.details.copyright",
+                        "Settings, General says when the copyright line is shown.",
+                    ))
+                    .size(11.5)
+                    .color(DIM),
                 );
                 if details != song.copyright {
                     state.copyright_request = Some((at, details));
@@ -2005,8 +2062,10 @@ fn item_bar(
             });
         // Control-R is the Mac menu bar's key for it.
         let words_hint = match crate::keys::words_key() {
-            Some(key) => format!("Edit Words: the song's words as text, to change ({key})"),
-            None => "Edit Words: the song's words as text, to change".to_owned(),
+            Some(key) => {
+                tf("slides.words.hint_key", "Edit Words: the song's words as text, to change ({key})", &[("key", &key)])
+            }
+            None => t("slides.words.hint", "Edit Words: the song's words as text, to change").to_owned(),
         };
         let words = icon_button(ui, place(), id.with("words"), Icon::Reflow, strength, false).on_hover_text(words_hint);
         if words.clicked() {
@@ -2014,13 +2073,13 @@ fn item_bar(
         }
         let arranged = song.active_arrangement().is_some();
         let arrangement = icon_button(ui, place(), id.with("arrangement"), Icon::Arrangement, strength, arranged)
-            .on_hover_text("Arrangement: play the song's groups in another order");
+            .on_hover_text(t("slides.arrangement", "Arrangement: play the song's groups in another order"));
         arrangement_menu(at, song, state, &arrangement);
         if let Some(item) = item.filter(|item| crate::studio::can_show_with(state, *item)) {
             version_button(ui, show, state, place(), id.with("version"), item, strength);
         }
         let notes = icon_button(ui, place(), id.with("notes"), Icon::Notes, strength, state.show_notes)
-            .on_hover_text("Notes: show the notes of the slide on screen");
+            .on_hover_text(t("slides.notes", "Notes: show the notes of the slide on screen"));
         if notes.clicked() {
             state.show_notes = !state.show_notes;
         }
@@ -2104,14 +2163,24 @@ fn version_button(
     icons::paint(ui.painter(), Icon::Theme, Rect::from_center_size(rect.center(), egui::Vec2::splat(14.0)), ink);
     let hint = match &set {
         Some((_, name, keep)) => {
-            let kept = if *keep { ", kept after it" } else { "" };
-            format!("Shows with the {name} version{kept}. Click to change")
+            if *keep {
+                tf(
+                    "slides.version.set_kept",
+                    "Shows with the {name} version, kept after it. Click to change",
+                    &[("name", name)],
+                )
+            } else {
+                tf("slides.version.set", "Shows with the {name} version. Click to change", &[("name", name)])
+            }
         }
-        None => {
-            let example =
-                state.versions.first().map_or_else(String::new, |version| format!(", such as {}", version.name));
-            format!("Show this with a theme version{example}")
-        }
+        None => match state.versions.first() {
+            Some(version) => tf(
+                "slides.version.example",
+                "Show this with a theme version, such as {example}",
+                &[("example", &version.name)],
+            ),
+            None => t("slides.version.none", "Show this with a theme version").to_owned(),
+        },
     };
     let response = response.on_hover_text(hint);
     egui::Popup::menu(&response).show(|ui| crate::studio::show_with_menu(ui, state, item, true));
@@ -2408,7 +2477,7 @@ fn arrangement_strip(
         let arrow_ink = if on { Color32::WHITE } else { TEXT_DIM };
         let arrow_strength = if arrow_response.hovered() { 1.0 } else { 0.6 };
         icons::paint(ui.painter(), Icon::ChevronDown, arrow, arrow_ink.gamma_multiply(arrow_strength));
-        egui::Popup::menu(&arrow_response.on_hover_text("Times, move or remove")).show(|ui| {
+        egui::Popup::menu(&arrow_response.on_hover_text(t("slides.chip.arrow", "Times, move or remove"))).show(|ui| {
             if let Some(changed) = piece_menu(ui, arrangement, chip, count) {
                 groups = Some(changed);
             }
@@ -2417,8 +2486,10 @@ fn arrangement_strip(
         if response.drag_started() {
             response.dnd_set_drag_payload(PieceDrag { song: index, start: place.run.start });
         }
-        let response =
-            response.on_hover_text("Click to go there \u{b7} drag to move \u{b7} the arrow sets how many times");
+        let response = response.on_hover_text(t(
+            "slides.chip.hint",
+            "Click to go there \u{b7} drag to move \u{b7} the arrow sets how many times",
+        ));
         if response.clicked() {
             commands.push(Command::GoToStep { presentation: index, step: place.first });
             if deck.item.is_some() {
@@ -2453,7 +2524,7 @@ fn arrangement_strip(
         ui.ctx().request_repaint();
     }
     let add = icon_button(ui, layout.add.translate(origin.to_vec2()), id.with("add"), Icon::Plus, 1.0, false)
-        .on_hover_text("Add a group to the end");
+        .on_hover_text(t("slides.add_group", "Add a group to the end"));
     egui::Popup::menu(&add).show(|ui| {
         for group in &song.groups {
             if ui.button(group.name.as_str()).clicked() {
@@ -2502,9 +2573,11 @@ pub fn slide_area(
             egui::Panel::top("operator notes").resizable(false).frame(strip).show(ui, |ui| {
                 let (text, ink) = match notes {
                     Some(notes) => (notes, TEXT),
-                    None => {
-                        ("No notes for this slide. Add them in the editor with Slide Notes.".to_owned(), TEXT_FAINT)
-                    }
+                    None => (
+                        t("slides.no_notes", "No notes for this slide. Add them in the editor with Slide Notes.")
+                            .to_owned(),
+                        TEXT_FAINT,
+                    ),
                 };
                 ui.label(egui::RichText::new(text).size(13.0).color(ink));
             });
@@ -2553,14 +2626,22 @@ fn nothing_open(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     let playlist = state.playlist_open;
     let (title, words) = if playlist {
         (
-            format!("{} is empty", state.services.front().name),
-            "A playlist is the running order of a service: songs, Bible passages, pictures and videos, in the \
-             order they come.",
+            tf("slides.empty.playlist", "{list} is empty", &[("list", &state.services.front().name)]),
+            t(
+                "slides.empty.playlist.about",
+                "A playlist is the running order of a service: songs, Bible passages, pictures and videos, in the order they come.",
+            ),
         )
     } else if show.presentations().is_empty() {
-        ("No songs yet".to_owned(), "Make a song, or import some.")
+        (
+            t("slides.empty.no_songs", "No songs yet").to_owned(),
+            t("slides.empty.no_songs.about", "Make a song, or import some."),
+        )
     } else {
-        ("No song is open".to_owned(), "Pick a song on the left to see its slides.")
+        (
+            t("slides.empty.no_song_open", "No song is open").to_owned(),
+            t("slides.empty.no_song_open.about", "Pick a song on the left to see its slides."),
+        )
     };
     ui.vertical_centered(|ui| {
         ui.add_space((ui.available_height() * 0.3).max(40.0));
@@ -2574,29 +2655,32 @@ fn nothing_open(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
         let wide = if playlist { 300.0 } else { 190.0 };
         ui.allocate_ui_with_layout(vec2(wide, 30.0), Layout::left_to_right(Align::Center), |ui| {
             if playlist {
-                if ui.button("Add a Bible passage").clicked() {
+                if ui.button(t("slides.empty.add_bible", "Add a Bible passage")).clicked() {
                     state.bible_open = true;
                     state.bible.focus_lookup = true;
                 }
-                if ui.button("Add a header").clicked() {
+                if ui.button(t("slides.empty.add_header", "Add a header")).clicked() {
                     state.services.add(Item::Header { name: "Header".to_owned() });
                     let at = state.services.front().items.len() - 1;
                     state.renaming_header = Some((at, "Header".to_owned()));
                     state.rename_started = true;
                 }
-            } else if ui.button("New song").clicked() {
+            } else if ui.button(t("left.new_song", "New song")).clicked() {
                 state.new_song = true;
             }
-            if ui.button("Import\u{2026}").clicked() {
+            if ui.button(t("slides.empty.import", "Import\u{2026}")).clicked() {
                 state.menu_asked = Some(Action::ImportSongs);
             }
         });
         if playlist {
             ui.add_space(8.0);
             ui.label(
-                egui::RichText::new("Songs are added with Add to playlist, at the foot of the left column.")
-                    .size(12.0)
-                    .color(TEXT_FAINT),
+                egui::RichText::new(t(
+                    "slides.empty.add_hint",
+                    "Songs are added with Add to playlist, at the foot of the left column.",
+                ))
+                .size(12.0)
+                .color(TEXT_FAINT),
             );
         }
     });

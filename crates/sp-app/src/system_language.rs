@@ -89,8 +89,8 @@ fn read_system() -> Option<String> {
 /// The computer's language, read once.
 #[derive(Clone, Debug, Default)]
 pub struct SystemLanguage {
-    /// The Bible language it stands for, once read.
-    read: Arc<OnceLock<&'static str>>,
+    /// The computer's first language as the system wrote it (`es-ES`), once read.
+    read: Arc<OnceLock<String>>,
 }
 
 impl SystemLanguage {
@@ -100,28 +100,33 @@ impl SystemLanguage {
         if cfg!(test) {
             return;
         }
-        // Testing aid: SOFTPRESENTER_LANGUAGE=ru (or uk, en) stands in for the computer's
-        // language, so a test copy can start as a Russian or Ukrainian computer would.
+        // Testing aid: SOFTPRESENTER_LANGUAGE=ru (or uk, es, en) stands in for the computer's
+        // language, so a test copy can start as a Russian, Ukrainian or Spanish computer would
+        // (the Bible view and the app's own words both follow it, unless the Language setting
+        // chose one).
         if let Ok(tag) = std::env::var("SOFTPRESENTER_LANGUAGE") {
-            let _ = self.read.set(bible_language(&tag));
+            crate::i18n::set_computer(&tag);
+            let _ = self.read.set(tag);
             return;
         }
         let read = self.read.clone();
         let _ = std::thread::Builder::new().name("system language".to_owned()).spawn(move || {
-            let _ = read.set(bible_language(&read_system().unwrap_or_default()));
+            let tag = read_system().unwrap_or_default();
+            crate::i18n::set_computer(&tag);
+            let _ = read.set(tag);
         });
     }
 
     /// `en`, `ru` or `uk`, once the computer has answered.
     pub fn get(&self) -> Option<&'static str> {
-        self.read.get().copied()
+        self.read.get().map(|tag| bible_language(tag))
     }
 
     /// As if the computer had answered this (for tests).
     #[cfg(test)]
     pub fn answered(tag: &str) -> SystemLanguage {
         let language = SystemLanguage::default();
-        let _ = language.read.set(bible_language(tag));
+        let _ = language.read.set(tag.to_owned());
         language
     }
 }

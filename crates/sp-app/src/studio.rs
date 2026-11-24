@@ -15,6 +15,7 @@ use sp_engine::{Command, Layer, Show, SlideRef};
 
 use crate::editor::EditDraft;
 use crate::home::{HomeState, SlideView, ThumbOf, matches_filter};
+use crate::i18n::{t, tf, tk, tn, ts};
 use crate::icons::{self, Icon};
 
 // A dark, quiet window built like a piece of equipment: greys in steps, each thing that sits on
@@ -144,6 +145,36 @@ fn spaced_in(ctx: &egui::Context, text: &str, font: FontId, ink: Color32, spacin
     let format = egui::TextFormat { font_id: font, color: ink, extra_letter_spacing: spacing, ..Default::default() };
     job.append(text, 0.0, format);
     ctx.fonts_mut(|fonts| fonts.layout_job(job))
+}
+
+/// The words of a place with a fixed room (a layer key, a bar's one line): the language's usual
+/// words when they fit in `room`, otherwise their short form (`key.short` in the table), so
+/// nothing shrinks and nothing ends in "...". `capitals` sets them in capitals, as the small
+/// labels are.
+pub fn within(
+    ui: &egui::Ui,
+    key: &'static str,
+    english: &'static str,
+    font: FontId,
+    spacing: f32,
+    room: f32,
+    capitals: bool,
+) -> String {
+    let set = |words: &str| if capitals { words.to_uppercase() } else { words.to_owned() };
+    let usual = set(t(key, english));
+    if spaced(ui, &usual, font, TEXT, spacing).size().x <= room {
+        return usual;
+    }
+    set(ts(key, english))
+}
+
+/// How wide the widest of `wordings` is in `font`: for a place that must keep one width
+/// whatever it says (Show and Hide, On and Off) in whichever language is set.
+pub fn widest(ui: &egui::Ui, wordings: &[&str], font: &FontId) -> f32 {
+    wordings
+        .iter()
+        .map(|words| ui.painter().layout_no_wrap((*words).to_owned(), font.clone(), TEXT).size().x)
+        .fold(0.0, f32::max)
 }
 
 /// Paints one line set with [`spaced`], anchored at `at`. Returns where it was drawn.
@@ -391,14 +422,20 @@ pub fn tab_switch(
     let reach = ((LEAST_CLICK - tall) / 2.0).clamp(0.0, INSET);
     let mut clicked = None;
     for (row, names) in labels.chunks(TABS_IN_A_ROW).enumerate() {
-        let each = (width - 2.0 * INSET - BETWEEN * (names.len() - 1) as f32) / names.len() as f32;
+        // The tabs of a row share its width evenly, except that a tab whose words need more
+        // than its share takes it from the tabs that have room to spare (no width comes from
+        // English: Temporizadores is wider than Timers).
+        let room = width - 2.0 * INSET - BETWEEN * (names.len() - 1) as f32;
+        let widths = shared_widths(
+            room,
+            &names.iter().map(|label| widest(ui, &[*label], &font) + 2.0 * TAB_PAD).collect::<Vec<f32>>(),
+        );
+        let mut across = block.min.x + INSET;
         for (place, label) in names.iter().enumerate() {
             let index = row * TABS_IN_A_ROW + place;
-            let corner = pos2(
-                block.min.x + INSET + (each + BETWEEN) * place as f32,
-                block.min.y + INSET + (tall + BETWEEN) * row as f32,
-            );
-            let cell = Rect::from_min_size(corner, vec2(each, tall));
+            let corner = pos2(across, block.min.y + INSET + (tall + BETWEEN) * row as f32);
+            across += widths[place] + BETWEEN;
+            let cell = Rect::from_min_size(corner, vec2(widths[place], tall));
             let is_off = off.get(index).copied().unwrap_or(false);
             let sense = if is_off { Sense::hover() } else { Sense::click() };
             let mut response = ui.interact(cell.expand2(vec2(0.0, reach)), ui.scope_id().with((salt, index)), sense);
@@ -428,6 +465,27 @@ pub fn tab_switch(
         }
     }
     (block, clicked)
+}
+
+/// The room either side of a tab's words.
+const TAB_PAD: f32 = 8.0;
+
+/// How a row of `needs.len()` tabs shares `room`: evenly, unless a tab needs more than its even
+/// share, which it then takes from the tabs with room to spare, in proportion to what they have
+/// spare. When the words need more than the whole row, each gets its need, scaled to fit.
+pub fn shared_widths(room: f32, needs: &[f32]) -> Vec<f32> {
+    let count = needs.len().max(1) as f32;
+    let even = room / count;
+    let short: f32 = needs.iter().map(|need| (need - even).max(0.0)).sum();
+    let spare: f32 = needs.iter().map(|need| (even - need).max(0.0)).sum();
+    if short <= 0.0 {
+        return needs.iter().map(|_| even).collect();
+    }
+    if short > spare {
+        let total: f32 = needs.iter().sum();
+        return needs.iter().map(|need| room * need / total).collect();
+    }
+    needs.iter().map(|need| if *need > even { *need } else { even - (even - need) * short / spare }).collect()
 }
 
 /// How far a raised key stands above what it is on, and so how far it goes down when pressed.
@@ -912,16 +970,21 @@ pub fn find_box_id() -> egui::Id {
 /// One of the two keys that switch the screens on and off: a light, the name, and ON or OFF
 /// (which keeps the room of the longer word, so the key is always as wide). Its right edge
 /// goes at `right`. Returns the key's response and its left edge.
-fn screens_key(ui: &egui::Ui, bar: Rect, right: f32, name: &str, on: bool) -> (egui::Response, f32) {
+fn screens_key(ui: &egui::Ui, bar: Rect, right: f32, id: &str, name: &str, on: bool) -> (egui::Response, f32) {
     const PAD: f32 = 12.0;
     const BETWEEN: f32 = 8.0;
     let font = FontId::proportional(13.0);
     let state_font = fixed_semibold(11.0);
     let name_wide = ui.painter().layout_no_wrap(name.to_owned(), font.clone(), TEXT).size().x;
-    let state_wide = spaced(ui, "OFF", state_font.clone(), TEXT, 0.6).size().x;
+    let (on_word, off_word) =
+        (t("topbar.screens.on", "On").to_uppercase(), t("topbar.screens.off", "Off").to_uppercase());
+    let state_wide = spaced(ui, &on_word, state_font.clone(), TEXT, 0.6)
+        .size()
+        .x
+        .max(spaced(ui, &off_word, state_font.clone(), TEXT, 0.6).size().x);
     let wide = PAD + 7.0 + BETWEEN + name_wide + BETWEEN + state_wide + PAD;
     let rect = Rect::from_min_size(pos2(right - wide, bar.center().y - 16.0), vec2(wide, 32.0));
-    let response = ui.interact(rect, ui.scope_id().with(("screens key", name)), Sense::click());
+    let response = ui.interact(rect, ui.scope_id().with(("screens key", id)), Sense::click());
     let fill = match (on, response.hovered()) {
         (true, false) => SCREENS_ON,
         (true, true) => SCREENS_ON_HOVER,
@@ -933,8 +996,8 @@ fn screens_key(ui: &egui::Ui, bar: Rect, right: f32, name: &str, on: bool) -> (e
     let y = rect.center().y;
     paint_light(painter, pos2(rect.min.x + PAD + 3.5, y), on.then_some(READY));
     painter.text(pos2(rect.min.x + PAD + 7.0 + BETWEEN, y), Align2::LEFT_CENTER, name, font, TEXT);
-    let (word, ink) = if on { ("ON", READY) } else { ("OFF", TEXT_FAINT) };
-    paint_spaced(ui, pos2(rect.max.x - PAD - state_wide, y), Align2::LEFT_CENTER, word, state_font, ink, 0.6);
+    let (word, ink) = if on { (on_word, READY) } else { (off_word, TEXT_FAINT) };
+    paint_spaced(ui, pos2(rect.max.x - PAD - state_wide, y), Align2::LEFT_CENTER, &word, state_font, ink, 0.6);
     (response, rect.min.x)
 }
 
@@ -983,21 +1046,30 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             0
         };
         let hints = [
-            crate::keys::hint("Service", "1", false),
-            format!(
-                "{}; {} too",
-                crate::keys::hint("Bible, ready for a reference", "2", false),
-                crate::keys::hint_key("B")
+            crate::keys::hint(t("topbar.view.service.hint", "Service"), "1", false),
+            tf(
+                "topbar.view.bible.hint",
+                "{bible}; {key} too",
+                &[
+                    (
+                        "bible",
+                        &crate::keys::hint(t("topbar.view.bible.ready", "Bible, ready for a reference"), "2", false),
+                    ),
+                    ("key", &crate::keys::hint_key("B")),
+                ],
             ),
-            crate::keys::hint("Edit", "3", false),
+            crate::keys::hint(t("topbar.view.edit.hint", "Edit"), "3", false),
         ];
         let hints: Vec<&str> = hints.iter().map(String::as_str).collect();
         let at = pos2(name.max.x + 14.0, middle - 16.45);
+        // Nine letters at most: the mode tabs have a budget (Culto, Biblia, Editar).
+        let views =
+            [t("topbar.view.service", "Service"), t("topbar.view.bible", "Bible"), t("topbar.view.edit", "Edit")];
         let (switch, clicked) = pill_switch(
             ui,
             "views",
             at,
-            &["Service", "Bible", "Edit"],
+            &views,
             &hints,
             ORDER.iter().position(|shown| *shown == view),
             &SwitchLook::views(),
@@ -1005,7 +1077,7 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         // With Show Keys on Buttons: each view's key beside it (Command-1, 2 and 3; Ctrl
         // elsewhere).
         if crate::keys::tags_shown(state) {
-            let cells = pill_cells(ui, at, &["Service", "Bible", "Edit"], &SwitchLook::views());
+            let cells = pill_cells(ui, at, &views, &SwitchLook::views());
             for (cell, key) in cells.iter().zip(["1", "2", "3"]) {
                 crate::keys::corner_tag(ui.painter(), *cell, &crate::keys::with_modifier(key));
             }
@@ -1043,7 +1115,7 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             ui.painter().rect_filled(gear, RADIUS, CARD);
         }
         icons::paint(ui.painter(), Icon::Gear, Rect::from_center_size(gear.center(), vec2(16.0, 16.0)), TEXT_DIM);
-        let hint = crate::keys::hint("Settings", ",", false);
+        let hint = crate::keys::hint(t("topbar.settings", "Settings"), ",", false);
         if response.on_hover_text(hint).clicked() {
             state.preferences_open = !state.preferences_open;
         }
@@ -1057,24 +1129,36 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         );
         ui.painter().circle_filled(keys, 14.0, if response.hovered() { HOVER } else { CARD });
         ui.painter().text(keys, Align2::CENTER_CENTER, "?", fixed_semibold(13.0), TEXT_DIM);
-        if response.on_hover_text("Every key (press ?)").clicked() {
+        if response.on_hover_text(t("topbar.keys", "Every key (press ?)")).clicked() {
             state.key_sheet = true;
         }
 
         let stage_on = state.stage_on;
-        let (response, left) = screens_key(ui, bar, keys.x - 14.0 - 10.0, "Stage", stage_on);
+        let (response, left) =
+            screens_key(ui, bar, keys.x - 14.0 - 10.0, "Stage", t("topbar.screens.stage", "Stage"), stage_on);
         if crate::keys::tags_shown(state) {
             crate::keys::corner_tag(ui.painter(), response.rect, &crate::keys::stage_key());
         }
-        if response.on_hover_text(crate::keys::hint("Stage screens on or off", "2", true)).clicked() {
+        if response
+            .on_hover_text(crate::keys::hint(t("topbar.screens.stage.hint", "Stage screens on or off"), "2", true))
+            .clicked()
+        {
             state.stage_on = !stage_on;
         }
         let on = show.output_enabled();
-        let (response, left) = screens_key(ui, bar, left - 10.0, "Audience", on);
+        let (response, left) =
+            screens_key(ui, bar, left - 10.0, "Audience", t("topbar.screens.audience", "Audience"), on);
         if crate::keys::tags_shown(state) {
             crate::keys::corner_tag(ui.painter(), response.rect, &crate::keys::audience_key());
         }
-        if response.on_hover_text(crate::keys::hint("Audience screens on or off", "1", true)).clicked() {
+        if response
+            .on_hover_text(crate::keys::hint(
+                t("topbar.screens.audience.hint", "Audience screens on or off"),
+                "1",
+                true,
+            ))
+            .clicked()
+        {
             commands.push(Command::SetOutputEnabled(!on));
         }
 
@@ -1138,7 +1222,11 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
                 let at = pos2((right - galley.size().x).max(room.min.x), middle - galley.size().y / 2.0);
                 let shown = ui.interact(room, ui.scope_id().with("running timer"), Sense::hover());
                 ui.painter().with_clip_rect(room).galley(at, galley, READY);
-                shown.on_hover_text(format!("{words} (the Timers tab: {})", crate::keys::with_modifier("1")));
+                shown.on_hover_text(tf(
+                    "topbar.timer.hint",
+                    "{timer} (the Timers tab: {key})",
+                    &[("timer", &words), ("key", &crate::keys::with_modifier("1"))],
+                ));
             }
         } else if let Some(words) = state.canva.quiet.clone() {
             // Otherwise, in the same room, what Canva Sync is doing (an export, a download); how
@@ -1153,7 +1241,14 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
                 let shown = ui.interact(room, ui.scope_id().with("canva sync line"), Sense::click());
                 ui.painter().with_clip_rect(room).galley(at, galley, colour);
                 let detail = state.canva.said.as_ref().map_or_else(|| words.clone(), |(said, _)| said.clone());
-                if shown.on_hover_text(format!("{detail} (Settings › Integrations › Canva Sync)")).clicked() {
+                if shown
+                    .on_hover_text(tf(
+                        "topbar.canva.hint",
+                        "{detail} (Settings › Integrations › Canva Sync)",
+                        &[("detail", &detail)],
+                    ))
+                    .clicked()
+                {
                     state.preferences_open = true;
                     state.preferences_pane =
                         crate::home::PANES.iter().position(|pane| *pane == "Integrations").unwrap_or(0);
@@ -1164,13 +1259,26 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             // Otherwise, while Remote Control is on, that it is and how many pages are connected.
             // A click opens its page in Settings.
             let mut words = match state.remote.pages.len() {
-                0 => "Remote on".to_owned(),
-                pages => format!("Remote on \u{b7} {pages} connected"),
+                0 => t("topbar.remote.on", "Remote on").to_owned(),
+                pages => tn(
+                    "topbar.remote.connected",
+                    pages as u64,
+                    "Remote on \u{b7} {n} connected",
+                    "Remote on \u{b7} {n} connected",
+                    &[],
+                ),
             };
             // Wrong passwords coming again and again: somebody may be guessing.
             let guessing = state.remote.wrong >= 3;
             if guessing {
-                words.push_str(&format!(" \u{b7} {} wrong passwords", state.remote.wrong));
+                words.push_str(" \u{b7} ");
+                words.push_str(&tn(
+                    "topbar.remote.wrong",
+                    state.remote.wrong as u64,
+                    "{n} wrong password",
+                    "{n} wrong passwords",
+                    &[],
+                ));
             }
             let ink = if guessing { TALLY } else { TEXT_DIM };
             let right = clock.min.x - 10.0;
@@ -1182,8 +1290,14 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
                 let shown = ui.interact(room, ui.scope_id().with("remote control line"), Sense::click());
                 ui.painter().with_clip_rect(room).galley(at, galley, ink);
                 let hint = state.remote.address.as_ref().map_or_else(
-                    || "Settings › Remote Control".to_owned(),
-                    |address| format!("Open {address} on another device (Settings › Remote Control)"),
+                    || t("topbar.remote.settings", "Settings › Remote Control").to_owned(),
+                    |address| {
+                        tf(
+                            "topbar.remote.open",
+                            "Open {address} on another device (Settings › Remote Control)",
+                            &[("address", address)],
+                        )
+                    },
                 );
                 if shown.on_hover_text(hint).clicked() {
                     state.preferences_open = true;
@@ -1241,7 +1355,11 @@ fn open_edit_kind(show: &Show, state: &mut HomeState) {
 /// Why there are no slides to edit: said when the Edit view is asked for slides, and the hover
 /// of the Slides switch, greyed.
 fn no_song_to_edit() -> String {
-    format!("There is no song to edit yet. Make one with New Song ({}), or import some.", crate::keys::hint_key("N"))
+    tf(
+        "edit.no_song",
+        "There is no song to edit yet. Make one with New Song ({key}), or import some.",
+        &[("key", &crate::keys::hint_key("N"))],
+    )
 }
 
 /// A prop opened in the editor, as a slide of its own.
@@ -1614,9 +1732,21 @@ fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
     let text = state.library_search.as_mut().map_or(&mut none, |(words, _)| words);
     let inner =
         Rect::from_min_max(pos2(find.min.x + 16.0, find.min.y + 2.0), pos2(find.max.x - 44.0, find.max.y - 2.0));
+    let find_words = tk("topbar.find", "Find a song, a line, or a verse");
     let field = egui::TextEdit::singleline(text)
         .id(id)
-        .hint_text(egui::RichText::new("Find a song, a line, or a verse").color(TEXT_FAINT))
+        .hint_text(
+            egui::RichText::new(within(
+                ui,
+                find_words.0,
+                find_words.1,
+                FontId::proportional(13.0),
+                0.0,
+                inner.width(),
+                false,
+            ))
+            .color(TEXT_FAINT),
+        )
         .font(FontId::proportional(13.0))
         .background_color(Color32::TRANSPARENT)
         .frame(Frame::new())
@@ -1635,9 +1765,10 @@ fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
         ui.painter().rect_filled(cap, 5.0, CARD);
         ui.painter().text(cap.center(), Align2::CENTER_CENTER, "/", fixed(11.0), TEXT_DIM);
     }
-    let hint = format!(
-        "Find a song by its title or a line of its words, or a Bible passage or verse (press /, or {})",
-        crate::keys::hint_key("F")
+    let hint = tf(
+        "topbar.find.hint",
+        "Find a song by its title or a line of its words, or a Bible passage or verse (press /, or {key})",
+        &[("key", &crate::keys::hint_key("F"))],
     );
     response.on_hover_text(hint);
     state.find_rect = Some(find);
@@ -2276,7 +2407,11 @@ fn found_added_to_playlist(
             carry_out_item_ask(show, state, commands, ItemAsk::Open(place));
         }
         if !added {
-            state.notices.refuse(format!("{name} is already in {playlist_name}."));
+            state.notices.refuse(tf(
+                "left.already_in",
+                "{item} is already in {list}.",
+                &[("item", name), ("list", &playlist_name)],
+            ));
         }
     } else if added {
         state.notices.info(format!("Added {name} to {playlist_name}."));
@@ -2291,9 +2426,13 @@ fn found_added_to_library(ctx: &egui::Context, state: &mut HomeState, id: sp_mod
     crate::home::end_search(ctx, state);
     let library = state.libraries.iter().find(|library| library.id == id).map_or_else(String::new, |l| l.name.clone());
     if added {
-        state.notices.info(format!("Added {name} to {library}."));
+        state.notices.info(tf("left.added", "Added {item} to {list}.", &[("item", name), ("list", &library)]));
     } else {
-        state.notices.refuse(format!("{name} is already in {library}."));
+        state.notices.refuse(tf(
+            "left.already_in",
+            "{item} is already in {list}.",
+            &[("item", name), ("list", &library)],
+        ));
     }
 }
 
@@ -2410,12 +2549,12 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         let width = ui.available_width();
         // The label, with the button that brings songs and slides in.
         let (head, _) = ui.allocate_exact_size(vec2(width, 36.0), Sense::hover());
-        let label = if state.playlist_open { "Playlist" } else { "Library" };
+        let label = if state.playlist_open { t("left.playlist", "Playlist") } else { t("left.library", "Library") };
         cap(ui, pos2(head.min.x + 8.0, head.min.y + 14.0), Align2::LEFT_CENTER, label, TEXT_DIM);
         let place =
             Rect::from_min_size(pos2(head.max.x - 8.0 - ICON_BUTTON, head.min.y), egui::Vec2::splat(ICON_BUTTON));
         let import = icon_button(ui, place, ui.scope_id().with("import"), Icon::Import, 1.0, false)
-            .on_hover_text("Import songs or slides");
+            .on_hover_text(t("left.import", "Import songs or slides"));
         // File › Import… of the menu bar opens this menu.
         if std::mem::take(&mut state.import_menu_request) {
             egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&import));
@@ -2423,14 +2562,27 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         egui::Popup::menu(&import).show(|ui| {
             use crate::menubar::Action;
             // Songs by kind of file, as File › Import Songs has them; then slides.
-            crate::live_tabs::menu_heading(ui, "Import Songs");
+            crate::live_tabs::menu_heading(ui, t("left.import.songs", "Import Songs"));
             for entry in crate::menubar::IMPORT_SONGS {
-                let crate::menubar::Entry::Do(action, words, _) = *entry else { continue };
+                let crate::menubar::Entry::Do(action, _, _) = *entry else { continue };
                 let hint = match action {
-                    Action::ImportLibraryFolder => "A folder of song documents; each folder in it becomes a library",
-                    Action::ImportBundle => "Song bundles and song packs: songs with the pictures and videos they show",
-                    Action::ImportWords => "Text, rich-text and Word files: a song from each",
-                    _ => "Song documents, ChordPro and lyric files, and songbooks",
+                    Action::ImportLibraryFolder => {
+                        t("left.import.folder.hint", "A folder of song documents; each folder in it becomes a library")
+                    }
+                    Action::ImportBundle => t(
+                        "left.import.bundle.hint",
+                        "Song bundles and song packs: songs with the pictures and videos they show",
+                    ),
+                    Action::ImportWords => {
+                        t("left.import.words.hint", "Text, rich-text and Word files: a song from each")
+                    }
+                    _ => t("left.import.documents.hint", "Song documents, ChordPro and lyric files, and songbooks"),
+                };
+                let words = match action {
+                    Action::ImportLibraryFolder => t("left.import.folder", "A Library Folder\u{2026}"),
+                    Action::ImportBundle => t("left.import.bundle", "A Song Bundle\u{2026}"),
+                    Action::ImportWords => t("left.import.words", "Words from Text\u{2026}"),
+                    _ => t("left.import.documents", "Song Files\u{2026}"),
                 };
                 if ui.button(words).on_hover_text(hint).clicked() {
                     state.menu_asked = Some(action);
@@ -2439,8 +2591,11 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             }
             ui.separator();
             if ui
-                .button("Slides\u{2026}")
-                .on_hover_text("Pictures as slides, or a presentation (.pptx, .ppsx, .key, .odp, .ppt, .pps or a PDF)")
+                .button(t("left.import.slides", "Slides\u{2026}"))
+                .on_hover_text(t(
+                    "left.import.slides.hint",
+                    "Pictures as slides, or a presentation (.pptx, .ppsx, .key, .odp, .ppt, .pps or a PDF)",
+                ))
                 .clicked()
             {
                 state.menu_asked = Some(Action::ImportSlides);
@@ -2461,16 +2616,24 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         let chevron = Rect::from_center_size(pos2(row.max.x - 8.0 - 6.5, middle), vec2(13.0, 13.0));
         let arrow = if state.chooser_open { Icon::ChevronUp } else { Icon::ChevronDown };
         icons::paint(ui.painter(), arrow, chevron, if name.hovered() { TEXT } else { TEXT_FAINT });
-        let title = source_name(state);
         let ink = if state.chooser_open { TEXT_DIM } else { TEXT };
         let clip = Rect::from_min_max(pos2(row.min.x + 32.0, row.min.y), pos2(chevron.min.x - 8.0, row.max.y));
+        // All Songs is the app's own words, so in a language where they are long it has a short
+        // form; a library or playlist is a name of content and is cut to fit.
+        let title = if !state.playlist_open
+            && state.library_shown.and_then(|id| state.libraries.iter().find(|library| library.id == id)).is_none()
+        {
+            within(ui, "left.all_songs", "All Songs", semibold(19.0), -0.38, clip.width(), false)
+        } else {
+            source_name(state)
+        };
         let galley = spaced(ui, &title, semibold(19.0), ink, -0.38);
         ui.painter().with_clip_rect(clip).galley(pos2(clip.min.x, middle - galley.size().y / 2.0), galley, ink);
         if crate::keys::tags_shown(state) {
             let tag_at = Rect::from_min_max(pos2(chevron.min.x - 30.0, name.rect.min.y + 6.0), chevron.max);
             crate::keys::corner_tag(ui.painter(), tag_at, &crate::keys::with_modifier("P"));
         }
-        let hint = crate::keys::hint("Choose a playlist or a library", "P", false);
+        let hint = crate::keys::hint(t("left.choose", "Choose a playlist or a library"), "P", false);
         if name.on_hover_text(hint).clicked() {
             state.chooser_open = !state.chooser_open;
         }
@@ -2522,9 +2685,9 @@ fn source_name(state: &HomeState) -> String {
     }
     let library = state.library_shown.and_then(|id| state.libraries.iter().find(|library| library.id == id));
     match library {
-        Some(library) if library.name.trim().is_empty() => "Untitled".to_owned(),
+        Some(library) if library.name.trim().is_empty() => t("left.untitled", "Untitled").to_owned(),
         Some(library) => library.name.clone(),
-        None => "All Songs".to_owned(),
+        None => t("left.all_songs", "All Songs").to_owned(),
     }
 }
 
@@ -2543,12 +2706,21 @@ fn left_foot(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &m
         let mut top = area.min.y + 8.0;
         if library {
             let row = Rect::from_min_size(pos2(area.min.x, top), vec2(area.width(), 26.8));
-            let label = cap(ui, pos2(row.min.x, row.center().y), Align2::LEFT_CENTER, "Order", TEXT_DIM);
+            let label =
+                cap(ui, pos2(row.min.x, row.center().y), Align2::LEFT_CENTER, t("left.order", "Order"), TEXT_DIM);
             let track = Rect::from_min_max(pos2(label.max.x + 8.0, row.min.y), row.max);
             let orders = crate::kept::SongOrder::ALL;
             let chosen = orders.iter().position(|order| *order == state.song_order);
-            let hints = ["As the library has them", "By title", "The songs with the most slides first"];
-            let labels = ["As listed", "A\u{2013}Z", "Longest"];
+            let hints = [
+                t("left.order.listed.hint", "As the library has them"),
+                t("left.order.az.hint", "By title"),
+                t("left.order.longest.hint", "The songs with the most slides first"),
+            ];
+            let labels = [
+                t("left.order.listed", "As listed"),
+                t("left.order.az", "A\u{2013}Z"),
+                t("left.order.longest", "Longest"),
+            ];
             if let Some(at) = even_switch(ui, "song order", track, &labels, &hints, chosen, FontId::proportional(11.0))
             {
                 state.song_order = orders[at];
@@ -2557,8 +2729,15 @@ fn left_foot(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &m
         }
         let add = Rect::from_min_size(pos2(area.min.x, top), vec2(area.width(), 30.0));
         if library {
-            let button = labelled_button(ui, add, ui.scope_id().with("new song"), "New song", Some(Icon::Plus), false);
-            if button.on_hover_text(crate::keys::hint("New song", "N", false)).clicked() {
+            let button = labelled_button(
+                ui,
+                add,
+                ui.scope_id().with("new song"),
+                t("left.new_song", "New song"),
+                Some(Icon::Plus),
+                false,
+            );
+            if button.on_hover_text(crate::keys::hint(t("left.new_song", "New song"), "N", false)).clicked() {
                 state.new_song = true;
             }
         } else {
@@ -2566,7 +2745,7 @@ fn left_foot(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &m
                 ui,
                 add,
                 ui.scope_id().with("add to playlist"),
-                "Add to playlist",
+                t("left.add_to_playlist", "Add to playlist"),
                 Some(Icon::Plus),
                 false,
             );
@@ -2580,7 +2759,7 @@ fn left_foot(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &m
             .scope_builder(egui::UiBuilder::new().max_rect(inner).layout(Layout::left_to_right(Align::Center)), |ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut state.filter)
-                        .hint_text("Filter")
+                        .hint_text(t("left.filter", "Filter"))
                         .frame(Frame::NONE)
                         .background_color(Color32::TRANSPARENT)
                         .margin(egui::Margin::ZERO)
@@ -2602,7 +2781,7 @@ fn left_foot(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &m
 fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
     use crate::service::Item;
     let mut made: Option<(Item, bool)> = None;
-    ui.menu_button("A Song", |ui| {
+    ui.menu_button(t("left.add.song", "A Song"), |ui| {
         if let Some(song) = song_picker(ui, show, state)
             && let (Some(key), Some(found)) = (state.song_keys.get(song), show.presentations().get(song))
         {
@@ -2611,29 +2790,36 @@ fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, c
         }
     });
     if ui
-        .button("A Bible Passage\u{2026}")
-        .on_hover_text("Opens the Bible page: look the passage up there, then Add to the playlist")
+        .button(t("left.add.bible", "A Bible Passage\u{2026}"))
+        .on_hover_text(t(
+            "left.add.bible.hint",
+            "Opens the Bible page: look the passage up there, then Add to the playlist",
+        ))
         .clicked()
     {
         state.bible_open = true;
         state.bible.focus_lookup = true;
         ui.close();
     }
-    if ui.button("A Header").on_hover_text("A heading over the items under it").clicked() {
+    if ui
+        .button(t("left.add.header", "A Header"))
+        .on_hover_text(t("left.add.header.hint", "A heading over the items under it"))
+        .clicked()
+    {
         made = Some((Item::Header { name: "Header".to_owned() }, true));
         ui.close();
     }
     if ui
-        .button("A Placeholder")
-        .on_hover_text("A place kept for something to come, such as the sermon slides")
+        .button(t("left.add.placeholder", "A Placeholder"))
+        .on_hover_text(t("left.add.placeholder.hint", "A place kept for something to come, such as the sermon slides"))
         .clicked()
     {
         made = Some((Item::Placeholder { name: "Placeholder".to_owned() }, true));
         ui.close();
     }
-    ui.menu_button("A Picture or Video", |ui| {
+    ui.menu_button(t("left.add.media", "A Picture or Video"), |ui| {
         if show.media().is_empty() {
-            ui.label(egui::RichText::new("The media bin is empty.").color(TEXT_DIM));
+            ui.label(egui::RichText::new(t("left.add.media.empty", "The media bin is empty.")).color(TEXT_DIM));
         }
         for media in show.media() {
             if ui.button(media.name.as_str()).clicked() {
@@ -2642,10 +2828,14 @@ fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, c
             }
         }
     });
-    ui.menu_button("A Media Playlist", |ui| {
+    ui.menu_button(t("left.add.media_playlist", "A Media Playlist"), |ui| {
         if state.media_playlists.is_empty() {
             ui.label(
-                egui::RichText::new("No media playlists yet. Make one from the menu beside MEDIA.").color(TEXT_DIM),
+                egui::RichText::new(t(
+                    "left.add.media_playlist.empty",
+                    "No media playlists yet. Make one from the menu beside Media.",
+                ))
+                .color(TEXT_DIM),
             );
         }
         for playlist in &state.media_playlists {
@@ -2661,7 +2851,10 @@ fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, c
     if screens > 0
         && ui
             .button("VoxLive")
-            .on_hover_text("Your VoxLive screens, a slide each: a click on one puts its captions on the screens")
+            .on_hover_text(t(
+                "left.add.voxlive.hint",
+                "Your VoxLive screens, a slide each: a click on one puts its captions on the screens",
+            ))
             .clicked()
     {
         made = Some((Item::song(crate::voxlive::ITEM_KEY.to_owned(), "VoxLive".to_owned()), false));
@@ -2694,7 +2887,7 @@ fn chooser_row(
     tint: Color32,
     name: &str,
     count: usize,
-    counted: &str,
+    counted: &dyn Fn(u64) -> String,
     on: bool,
     menu: bool,
     target: &crate::file_drop::DropTarget,
@@ -2727,10 +2920,9 @@ fn chooser_row(
     let font = if on { semibold(14.0) } else { FontId::proportional(14.0) };
     let clip = Rect::from_min_max(pos2(start.x, row.min.y), pos2(right, row.max.y));
     painter.with_clip_rect(clip).text(start, Align2::LEFT_CENTER, name, font, TEXT);
-    let noun = if count == 1 { counted.to_owned() } else { format!("{counted}s") };
     let more = menu
         .then(|| Rect::from_center_size(pos2(row.max.x - ICON_BUTTON / 2.0, middle), egui::Vec2::splat(ICON_BUTTON)));
-    (response.on_hover_text(format!("{count} {noun}")), more, start, right)
+    (response.on_hover_text(counted(count as u64)), more, start, right)
 }
 
 /// A heading of the chooser with a + at its right; `second` sets it apart from the rows above
@@ -2758,7 +2950,7 @@ fn chooser_head(ui: &mut egui::Ui, text: &str, add_hint: &str, second: bool) -> 
 fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
     use crate::service::Item;
     ui.spacing_mut().item_spacing = vec2(0.0, 1.0);
-    if chooser_head(ui, "Playlists", "New playlist", false) {
+    if chooser_head(ui, t("left.playlists", "Playlists"), t("left.playlists.new", "New playlist"), false) {
         state.services.add_service();
         state.playlist_open = true;
         state.renaming_service = Some((state.services.front_at(), state.services.front().name.clone()));
@@ -2781,7 +2973,8 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
         let target = crate::file_drop::DropTarget::Playlist { index, after: None };
         let (response, more, start, right) = ui
             .push_id(("playlist", index), |ui| {
-                chooser_row(ui, Icon::Playlist, PLAYLIST_TINT, shown, *count, "item", on, true, &target)
+                let items = |n| tn("left.items", n, "{n} item", "{n} items", &[]);
+                chooser_row(ui, Icon::Playlist, PLAYLIST_TINT, shown, *count, &items, on, true, &target)
             })
             .inner;
         crate::file_drop::offer(ui, state, crate::file_drop::Place::onto(response.rect, target.clone()));
@@ -2830,19 +3023,25 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
         let several = playlists.len() > 1;
         let mut menu = |ui: &mut egui::Ui| {
             // Renamed where it is: the playlist in front stays in front.
-            if ui.button("Rename").clicked() {
+            if ui.button(t("left.rename", "Rename")).clicked() {
                 state.chooser_open = true;
                 state.renaming_service = Some((index, name.clone()));
                 state.rename_started = true;
                 ui.close();
             }
-            if ui.button("Export\u{2026}").on_hover_text("Save the playlist and its songs as a song pack").clicked() {
+            if ui
+                .button(t("left.export", "Export\u{2026}"))
+                .on_hover_text(t("left.export.hint", "Save the playlist and its songs as a song pack"))
+                .clicked()
+            {
                 state.export_request = Some(crate::home::ExportRequest::Playlist(index));
                 ui.close();
             }
             ui.separator();
-            let delete_playlist = ui.add_enabled(several, egui::Button::new("Delete Playlist"));
-            if delete_playlist.on_disabled_hover_text("There is always one playlist").clicked() {
+            let delete_playlist =
+                ui.add_enabled(several, egui::Button::new(t("left.playlist.delete", "Delete Playlist")));
+            if delete_playlist.on_disabled_hover_text(t("left.playlist.last", "There is always one playlist")).clicked()
+            {
                 delete = Some(index);
                 ui.close();
             }
@@ -2858,7 +3057,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
     if let Some(index) = delete {
         state.delete_playlist(index);
     }
-    if chooser_head(ui, "Song libraries", "New library", true) {
+    if chooser_head(ui, t("left.libraries", "Song libraries"), t("left.libraries.new", "New library"), true) {
         let made = crate::libraries::Library::new(crate::libraries::new_name(&state.libraries));
         state.renaming_library = Some((made.id, made.name.clone()));
         state.rename_started = true;
@@ -2874,7 +3073,18 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
     let everything = crate::file_drop::DropTarget::Library(None);
     let (all, ..) = ui
         .push_id("all songs", |ui| {
-            chooser_row(ui, Icon::Library, LIBRARY_TINT, "All Songs", songs, "song", on, false, &everything)
+            let songs_in = |n| tn("left.songs", n, "{n} song", "{n} songs", &[]);
+            chooser_row(
+                ui,
+                Icon::Library,
+                LIBRARY_TINT,
+                t("left.all_songs", "All Songs"),
+                songs,
+                &songs_in,
+                on,
+                false,
+                &everything,
+            )
         })
         .inner;
     crate::file_drop::offer_library_row(ui, state, all.rect, None);
@@ -2893,14 +3103,15 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
         let shown = if renaming {
             ""
         } else if name.trim().is_empty() {
-            "Untitled"
+            t("left.untitled", "Untitled")
         } else {
             name.as_str()
         };
         let target = crate::file_drop::DropTarget::Library(Some(id));
         let (response, more, start, right) = ui
             .push_id(("library", id), |ui| {
-                chooser_row(ui, Icon::Library, LIBRARY_TINT, shown, count, "song", on, true, &target)
+                let songs_in = |n| tn("left.songs", n, "{n} song", "{n} songs", &[]);
+                chooser_row(ui, Icon::Library, LIBRARY_TINT, shown, count, &songs_in, on, true, &target)
             })
             .inner;
         crate::file_drop::offer_library_row(ui, state, response.rect, Some(id));
@@ -2950,14 +3161,18 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
             }
         }
         let mut menu = |ui: &mut egui::Ui| {
-            if ui.button("Rename").clicked() {
+            if ui.button(t("left.rename", "Rename")).clicked() {
                 state.chooser_open = true;
                 state.renaming_library = Some((id, name.clone()));
                 state.rename_started = true;
                 ui.close();
             }
             ui.separator();
-            if ui.button("Delete Library").on_hover_text("The songs stay in All Songs").clicked() {
+            if ui
+                .button(t("left.library.delete", "Delete Library"))
+                .on_hover_text(t("left.library.delete.hint", "The songs stay in All Songs"))
+                .clicked()
+            {
                 delete = Some(id);
                 ui.close();
             }
@@ -3091,14 +3306,33 @@ pub fn add_items(state: &mut HomeState, playlist: usize, items: Vec<crate::servi
     let already: Vec<&str> = titles.iter().zip(&went).filter(|(_, went)| !**went).map(|(t, _)| t.as_str()).collect();
     let there = match already.as_slice() {
         [] => None,
-        [one] => Some(format!("{one} is already in {name}.")),
-        many => Some(format!("{} of them are already in {name}.", many.len())),
+        [one] => Some(tf("left.already_in", "{item} is already in {list}.", &[("item", one), ("list", &name)])),
+        many => Some(tn(
+            "left.some_already_in",
+            many.len() as u64,
+            "{n} of them is already in {list}.",
+            "{n} of them are already in {list}.",
+            &[("list", &name)],
+        )),
     };
     let out_of_sight = match added.as_slice() {
         [] => None,
         _ if playlist_in_sight(state, playlist) => None,
-        [one] => Some(format!("Added {one} to {name}.")),
-        many => Some(format!("Added {} {} to {name}.", many.len(), if songs { "songs" } else { "items" })),
+        [one] => Some(tf("left.added", "Added {item} to {list}.", &[("item", one), ("list", &name)])),
+        many if songs => Some(tn(
+            "left.added_songs",
+            many.len() as u64,
+            "Added {n} song to {list}.",
+            "Added {n} songs to {list}.",
+            &[("list", &name)],
+        )),
+        many => Some(tn(
+            "left.added_items",
+            many.len() as u64,
+            "Added {n} item to {list}.",
+            "Added {n} items to {list}.",
+            &[("list", &name)],
+        )),
     };
     match (out_of_sight, there) {
         (Some(said), _) => state.notices.info(said),
@@ -3290,15 +3524,18 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
         });
         if total == 0 {
             let empty = if in_library {
-                "No songs here yet. Make one, import some, or drag songs onto this library\u{2019}s name."
+                t(
+                    "left.empty.library",
+                    "No songs here yet. Make one, import some, or drag songs onto this library\u{2019}s name.",
+                )
             } else {
-                "No songs yet. Make one, or import some."
+                t("left.empty.all", "No songs yet. Make one, or import some.")
             };
             ui.add_space(12.0);
             ui.label(egui::RichText::new(empty).size(12.5).color(TEXT_FAINT));
         } else if shown.is_empty() {
             ui.add_space(12.0);
-            ui.label(egui::RichText::new("No songs match.").size(12.5).color(TEXT_FAINT));
+            ui.label(egui::RichText::new(t("left.empty.filter", "No songs match.")).size(12.5).color(TEXT_FAINT));
         }
     });
     heights.tops = tops;
@@ -4194,7 +4431,11 @@ pub fn carry_out_item_ask(show: &Show, state: &mut HomeState, commands: &mut Vec
 pub fn fill_placeholder(state: &mut HomeState, index: usize, item: crate::service::Item) -> bool {
     let front = state.services.front_at();
     if state.services.place_of(front, &item).is_some_and(|was| was != index) {
-        state.notices.refuse(format!("{} is already in {}.", item.title(), state.services.front().name));
+        state.notices.refuse(tf(
+            "left.already_in",
+            "{item} is already in {list}.",
+            &[("item", item.title()), ("list", &state.services.front().name)],
+        ));
         return false;
     }
     state.services.fill(index, item)
@@ -4585,7 +4826,11 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 crate::home::end_search(ui.ctx(), state);
                 let refused = onto.is_none() && state.services.front().items.len() == count;
                 if refused {
-                    state.notices.refuse(format!("{} is already in {}.", found.name, state.services.front().name));
+                    state.notices.refuse(tf(
+                        "left.already_in",
+                        "{item} is already in {list}.",
+                        &[("item", &found.name), ("list", &state.services.front().name)],
+                    ));
                 }
                 ask = state.services.chosen.map(ItemAsk::Open);
             }
@@ -4727,19 +4972,44 @@ pub fn right_column(
         let each = (width - 2.0 * 7.0) / 3.0;
         let hint = crate::keys::clear_hint;
         let layers = [
-            ("SLIDE", Layer::Slides, slide, hint("Clear the slide: take the words off the screens", "F2")),
-            ("MEDIA", Layer::Media, media, hint("Clear the media: take the picture or video off the screens", "F3")),
-            ("PROPS", Layer::Props, props, hint("Clear the props: take them off the screens", "F4")),
-            ("MESSAGES", Layer::Messages, message, hint("Clear the message: take it off the screens", "F6")),
-            ("AUDIO", Layer::Audio, audio, hint("Clear the audio: stop it playing", "F5")),
             (
-                "ANNOUNCE",
+                tk("right.layer.slide", "Slide"),
+                Layer::Slides,
+                slide,
+                hint(t("right.layer.slide.clear", "Clear the slide: take the words off the screens"), "F2"),
+            ),
+            (
+                tk("right.layer.media", "Media"),
+                Layer::Media,
+                media,
+                hint(t("right.layer.media.clear", "Clear the media: take the picture or video off the screens"), "F3"),
+            ),
+            (
+                tk("right.layer.props", "Props"),
+                Layer::Props,
+                props,
+                hint(t("right.layer.props.clear", "Clear the props: take them off the screens"), "F4"),
+            ),
+            (
+                tk("right.layer.messages", "Messages"),
+                Layer::Messages,
+                message,
+                hint(t("right.layer.messages.clear", "Clear the message: take it off the screens"), "F6"),
+            ),
+            (
+                tk("right.layer.audio", "Audio"),
+                Layer::Audio,
+                audio,
+                hint(t("right.layer.audio.clear", "Clear the audio: stop it playing"), "F5"),
+            ),
+            (
+                tk("right.layer.announce", "Announce"),
                 Layer::Announcements,
                 announcing,
-                "Clear the announcements: take them off the screens".to_owned(),
+                t("right.layer.announce.clear", "Clear the announcements: take them off the screens").to_owned(),
             ),
         ];
-        for (place, (name, layer, lit, hint)) in layers.into_iter().enumerate() {
+        for (place, ((name_key, name_english), layer, lit, hint)) in layers.into_iter().enumerate() {
             let corner = pos2(left + (each + 7.0) * (place % 3) as f32, keys_top + 54.0 * (place / 3) as f32);
             let rect = Rect::from_min_size(corner, vec2(each, 44.0));
             let (fill, edge) = if lit { (KEY_LIT, KEY_LIT_EDGE) } else { (BUTTON, KEY_EDGE) };
@@ -4747,8 +5017,14 @@ pub fn right_column(
             paint_light(ui.painter(), pos2(face.min.x + 12.5, face.center().y), lit.then_some(TALLY));
             let ink = if lit { TEXT } else { TEXT_FAINT };
             let at = pos2(face.min.x + 23.0, face.center().y);
-            paint_spaced(ui, at, Align2::LEFT_CENTER, name, fixed_semibold(11.0), ink, 0.6);
-            if response.on_hover_text(if lit { hint.as_str() } else { "Nothing showing" }).clicked() {
+            // A layer key's word never shrinks and never ends in "...": where the language's
+            // usual word is too long for the key, its short form stands in.
+            let name = within(ui, name_key, name_english, fixed_semibold(11.0), 0.6, face.max.x - 8.0 - at.x, true);
+            paint_spaced(ui, at, Align2::LEFT_CENTER, &name, fixed_semibold(11.0), ink, 0.6);
+            if response
+                .on_hover_text(if lit { hint.as_str() } else { t("right.layer.idle", "Nothing showing") })
+                .clicked()
+            {
                 commands.push(Command::Clear(layer));
             }
         }
@@ -4760,8 +5036,11 @@ pub fn right_column(
         let (fill, edge, ink) =
             if any_live { (TALLY, CLEAR_ALL_EDGE, Color32::WHITE) } else { (BUTTON, KEY_EDGE, TEXT_FAINT) };
         let (response, face) = raised_key(ui, rect, ui.scope_id().with("clear all"), fill, edge);
-        ui.painter().text(face.center(), Align2::CENTER_CENTER, "Clear All", semibold(15.0), ink);
-        if response.on_hover_text("Clear All: take everything off the screens (Escape)").clicked() {
+        ui.painter().text(face.center(), Align2::CENTER_CENTER, t("right.clear_all", "Clear All"), semibold(15.0), ink);
+        if response
+            .on_hover_text(t("right.clear_all.hint", "Clear All: take everything off the screens (Escape)"))
+            .clicked()
+        {
             commands.push(Command::ClearAll);
         }
 
@@ -4806,8 +5085,11 @@ fn preview_block(
         ui,
         "preview of",
         pos2(inner.min.x + 18.0, head - 10.5),
-        &["AUDIENCE", "STAGE"],
-        &["Show what the audience screens show", "Show what the stage screens show"],
+        &[&t("right.preview.audience", "Audience").to_uppercase(), &t("right.preview.stage", "Stage").to_uppercase()],
+        &[
+            t("right.preview.audience.hint", "Show what the audience screens show"),
+            t("right.preview.stage.hint", "Show what the stage screens show"),
+        ],
         Some(usize::from(state.preview_stage)),
         &SwitchLook::small_capitals(),
     );
@@ -4831,16 +5113,17 @@ fn preview_block(
         }
         let ink = if lit || response.hovered() { TEXT } else { SCREEN_DIM };
         icons::paint(ui.painter(), Icon::ChevronDown, Rect::from_center_size(arrow.center(), vec2(12.0, 12.0)), ink);
-        let response = response.on_hover_text("Look at one screen, as it draws the show");
+        let response = response.on_hover_text(t("right.preview.look_at", "Look at one screen, as it draws the show"));
         egui::Popup::menu(&response).show(|ui| look_at_menu(ui, state));
     }
     // Set from the right, so the longer wording takes its room to the left and nothing moves.
     let (words, ink) = match (on, on_screen) {
-        (false, _) => ("OUTPUT OFF", CARE),
-        (true, true) => ("ON SCREEN", TALLY),
-        (true, false) => ("CLEAR", SCREEN_DIM),
+        (false, _) => (t("right.preview.output_off", "Output off"), CARE),
+        (true, true) => (t("right.preview.on_screen", "On screen"), TALLY),
+        (true, false) => (t("right.preview.clear", "Clear"), SCREEN_DIM),
     };
-    paint_spaced(ui, pos2(inner.max.x - 3.0, head), Align2::RIGHT_CENTER, words, fixed_semibold(11.0), ink, 0.9);
+    let words = words.to_uppercase();
+    paint_spaced(ui, pos2(inner.max.x - 3.0, head), Align2::RIGHT_CENTER, &words, fixed_semibold(11.0), ink, 0.9);
 
     // The picture: as wide as the block allows, 16 to 9, in the middle of its room.
     let room = Rect::from_min_max(pos2(inner.min.x, block.min.y + 46.0), pos2(inner.max.x, block.max.y - 90.0));
@@ -4867,7 +5150,11 @@ fn preview_block(
         ui.painter().galley(picture.center() - galley.size() / 2.0, galley, ink);
     };
     if state.output_stopped {
-        over_picture(ui, "The output has stopped. Restart SoftPresenter to bring it back.", CARE);
+        over_picture(
+            ui,
+            t("right.preview.stopped", "The output has stopped. Restart SoftPresenter to bring it back."),
+            CARE,
+        );
     } else if let Some(undrawn) = preview.undrawn.filter(|_| on) {
         // A screen that could not draw what is live shows the picture before it, whatever the
         // preview shows: the operator must know.
@@ -4875,7 +5162,7 @@ fn preview_block(
     } else if let Some(said) = looked_at(state).and_then(|screen| screen_not_showing(state, screen)) {
         over_picture(ui, &said, TEXT_DIM);
     } else if !on && !state.preview_stage {
-        over_picture(ui, "The audience screens are off", TEXT_DIM);
+        over_picture(ui, t("right.preview.audience_off", "The audience screens are off"), TEXT_DIM);
     }
     let ring = if on_screen { Stroke::new(2.0, TALLY) } else { Stroke::new(1.0, Color32::from_rgb(0x2a, 0x2a, 0x2a)) };
     ui.painter().rect_stroke(picture, CORNER, ring, StrokeKind::Outside);
@@ -4890,7 +5177,11 @@ fn preview_block(
     // (the menu bar's Go to the Slide on Screen, for every system).
     if at.is_some() {
         let go = ui.interact(readout, ui.scope_id().with("readout go"), Sense::click());
-        if go.on_hover_text("Go to the slide on screen").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+        if go
+            .on_hover_text(t("right.preview.go_live", "Go to the slide on screen"))
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+        {
             state.menu_asked = Some(crate::menubar::Action::ShowLiveSong);
         }
     }
@@ -4922,8 +5213,17 @@ fn preview_block(
     // or how far the slide's click builds have got.
     let builds = show.live_slide().map_or(0, |(_, slide)| slide.click_steps().len());
     let second = match looked_at(state) {
-        Some(screen) => Some(format!("LOOKING AT {}", screen.name.to_uppercase())),
-        None if builds > 0 => Some(format!("BUILD {}/{builds}", show.build_step())),
+        Some(screen) => {
+            Some(tf("right.preview.looking_at", "Looking at {screen}", &[("screen", &screen.name)]).to_uppercase())
+        }
+        None if builds > 0 => Some(
+            tf(
+                "right.preview.build",
+                "Build {step}/{of}",
+                &[("step", &show.build_step().to_string()), ("of", &builds.to_string())],
+            )
+            .to_uppercase(),
+        ),
         None => None,
     };
     let first_y = if second.is_some() { words.center().y - 8.0 } else { words.center().y };
@@ -4940,8 +5240,12 @@ fn preview_block(
             painter.galley(pos2(after.x, first_y - title.size().y / 2.0), title, SCREEN_DIM);
         }
         _ => {
-            let words_now = if anything_shows { "NO SLIDE ON SCREEN" } else { "NOTHING ON SCREEN" };
-            let line = spaced(ui, words_now, label.clone(), SCREEN_DIM, 0.7);
+            let words_now = if anything_shows {
+                t("right.preview.no_slide", "No slide on screen")
+            } else {
+                t("right.preview.nothing", "Nothing on screen")
+            };
+            let line = spaced(ui, &words_now.to_uppercase(), label.clone(), SCREEN_DIM, 0.7);
             painter.galley(pos2(words.min.x, first_y - line.size().y / 2.0), line, SCREEN_DIM);
         }
     }
@@ -4959,26 +5263,40 @@ fn preview_block(
         if playing_line(
             ui,
             row,
-            "Identifying the screens:",
-            "the room sees it",
-            "Stop",
-            "Take each screen's name and colour off it",
+            t("right.playing.identify", "Identifying the screens:"),
+            t("right.playing.identify_room", "the room sees it"),
+            t("right.playing.stop", "Stop"),
+            t("right.playing.identify_stop", "Take each screen's name and colour off it"),
         ) {
             state.identify = false;
         }
     } else if let Some(video) = state.video_live.clone() {
         video_row(ui, state, &video, row);
     } else if let Some((_, name)) = state.announcement_live.clone() {
-        if playing_line(ui, row, "Announcements:", &name, "Clear", "Take the announcements off the screens") {
+        if playing_line(
+            ui,
+            row,
+            t("right.playing.announcements", "Announcements:"),
+            &name,
+            t("right.playing.clear", "Clear"),
+            t("right.playing.announcements_clear", "Take the announcements off the screens"),
+        ) {
             commands.push(Command::Clear(Layer::Announcements));
         }
     } else if let Some(pattern) = state.test_pattern {
         let name = match pattern {
-            crate::props::TestPattern::ColorBars => "Colour bars",
-            crate::props::TestPattern::Grid => "Grid",
-            crate::props::TestPattern::White => "White",
+            crate::props::TestPattern::ColorBars => t("right.playing.bars", "Colour bars"),
+            crate::props::TestPattern::Grid => t("right.playing.grid", "Grid"),
+            crate::props::TestPattern::White => t("right.playing.white", "White"),
         };
-        if playing_line(ui, row, "Test pattern:", name, "Off", "Take the test pattern off the audience screens") {
+        if playing_line(
+            ui,
+            row,
+            t("right.playing.pattern", "Test pattern:"),
+            name,
+            t("right.playing.off", "Off"),
+            t("right.playing.pattern_off", "Take the test pattern off the audience screens"),
+        ) {
             state.test_pattern = None;
         }
     }
@@ -4995,9 +5313,9 @@ fn looked_at(state: &HomeState) -> Option<&crate::screens::Screen> {
 fn screen_not_showing(state: &HomeState, screen: &crate::screens::Screen) -> Option<String> {
     use crate::screens::Output;
     match &screen.output {
-        Output::Off => Some(format!("{} is switched off", screen.name)),
+        Output::Off => Some(tf("right.screen.off", "{screen} is switched off", &[("screen", &screen.name)])),
         Output::Display(name) if !state.displays.iter().any(|display| &display.name == name) => {
-            Some(format!("{} is not connected", screen.name))
+            Some(tf("right.screen.gone", "{screen} is not connected", &[("screen", &screen.name)]))
         }
         _ => None,
     }
@@ -5012,20 +5330,22 @@ fn look_at_menu(ui: &mut egui::Ui, state: &mut HomeState) {
     let heading = |ui: &mut egui::Ui, words: &str| {
         ui.label(egui::RichText::new(words).size(11.5).color(TEXT_FAINT));
     };
-    heading(ui, "Audience");
+    heading(ui, t("right.look_at.audience", "Audience"));
     let everyone = state.preview_screen.is_none() && !state.preview_stage;
-    if ui.add(egui::Button::selectable(everyone, "What the room sees")).clicked() {
+    if ui.add(egui::Button::selectable(everyone, t("right.look_at.room", "What the room sees"))).clicked() {
         chosen = Some((None, false));
     }
     for stage in [false, true] {
         if stage {
             ui.separator();
-            heading(ui, "Stage");
+            heading(ui, t("right.look_at.stage", "Stage"));
         }
         for screen in state.screens.iter().filter(|screen| (screen.kind == Kind::Stage) == stage) {
             let words = match screen_not_showing(state, screen) {
-                Some(_) if screen.output == crate::screens::Output::Off => format!("{} \u{b7} off", screen.name),
-                Some(_) => format!("{} \u{b7} not connected", screen.name),
+                Some(_) if screen.output == crate::screens::Output::Off => {
+                    tf("right.look_at.off", "{screen} \u{b7} off", &[("screen", &screen.name)])
+                }
+                Some(_) => tf("right.look_at.gone", "{screen} \u{b7} not connected", &[("screen", &screen.name)]),
                 None => screen.name.clone(),
             };
             let on = state.preview_screen == Some(screen.id);
@@ -5077,7 +5397,11 @@ fn video_row(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
         Sense::click(),
     );
     ui.painter().circle_filled(play_at, 14.0, if big.hovered() { Color32::WHITE } else { TEXT });
-    let (play, words) = if video.playing { (Icon::Pause, "Pause") } else { (Icon::Play, "Play") };
+    let (play, words) = if video.playing {
+        (Icon::Pause, t("right.video.pause", "Pause"))
+    } else {
+        (Icon::Play, t("right.video.play", "Play"))
+    };
     let nudge = if video.playing { 0.0 } else { 1.0 };
     let glyph = Rect::from_center_size(play_at + vec2(nudge, 0.0), egui::Vec2::splat(12.0));
     icons::paint(ui.painter(), play, glyph, Color32::from_gray(17));
@@ -5088,14 +5412,14 @@ fn video_row(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
     let start_at = pos2(row.min.x + 45.0, y);
     let start = round_key(ui, start_at, 26.0, "video start", dark, false);
     icons::paint(ui.painter(), Icon::ToStart, Rect::from_center_size(start_at, egui::Vec2::splat(12.0)), TEXT);
-    if start.on_hover_text("Start over, from the beginning").clicked() {
+    if start.on_hover_text(t("right.video.restart", "Start over, from the beginning")).clicked() {
         state.video_request = Some(VideoRequest::Restart);
     }
     let forward_at = pos2(row.min.x + 75.0, y);
     let forward = round_key(ui, forward_at, 26.0, "video forward", dark, false);
     // The arrow that turns clockwise (the icon named Back is drawn that way).
     icons::paint(ui.painter(), Icon::Back, Rect::from_center_size(forward_at, egui::Vec2::splat(15.0)), TEXT);
-    if forward.on_hover_text("Forward 10 seconds").clicked()
+    if forward.on_hover_text(t("right.video.forward", "Forward 10 seconds")).clicked()
         && let Some(length) = length
     {
         state.video_request = Some(VideoRequest::Seek((video.position + VIDEO_STEP).min(length)));
@@ -5103,9 +5427,9 @@ fn video_row(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
     // Sound and Loop, from the right: each the lighter grey while it is on.
     let sound_at = pos2(row.max.x - 13.0, y);
     let (sound, sound_hint) = if video.muted {
-        (Icon::Muted, "Muted. Click to play its sound")
+        (Icon::Muted, t("right.video.muted", "Muted. Click to play its sound"))
     } else {
-        (Icon::Sound, "Its sound plays. Click to mute")
+        (Icon::Sound, t("right.video.sound", "Its sound plays. Click to mute"))
     };
     let response = round_key(ui, sound_at, 26.0, "video sound", dark, !video.muted);
     let ink = if video.muted { TEXT_FAINT } else { TEXT };
@@ -5115,9 +5439,9 @@ fn video_row(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
     }
     let loop_at = pos2(row.max.x - 43.0, y);
     let loop_hint = if video.looping {
-        "Looping: it starts again at the end. Click to stop looping"
+        t("right.video.looping", "Looping: it starts again at the end. Click to stop looping")
     } else {
-        "Not looping: it stops at the end. Click to loop"
+        t("right.video.not_looping", "Not looping: it stops at the end. Click to loop")
     };
     let response = round_key(ui, loop_at, 26.0, "video loop", dark, video.looping);
     let ink = if video.looping { TEXT } else { TEXT_FAINT };
@@ -5163,43 +5487,60 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
         let middle = bar.min.y + 10.0 + 15.1;
         let (left, right) = (bar.min.x + 20.0, bar.max.x - 20.0);
         // What there is room for, the least needed first to go.
-        const SWITCH: f32 = 210.7;
         const VIEWS: f32 = 3.0 * 30.0 + 2.0 * 2.0 + 6.0;
-        const UNDO: f32 = 58.0;
         const SLIDER: f32 = 86.0;
+        // Nothing here is as wide as English made it: each control is as wide as the longest of
+        // its words in the language that is set.
+        let font = FontId::proportional(12.0);
+        let cut_words = t("dock.cut", "Cut");
+        let dissolve_words = t("dock.dissolve", "Dissolve");
+        let advanced_words = t("dock.advanced", "Advanced");
+        let names: Vec<&str> = std::iter::once(advanced_words)
+            .chain(sp_model::TransitionKind::ALL.iter().map(|kind| transition_name(*kind)))
+            .collect();
+        let cut_wide = widest(ui, &[cut_words], &font) + 22.0;
+        let dissolve_wide = widest(ui, &[dissolve_words], &font) + 22.0;
+        let third_wide = widest(ui, &names, &font) + 10.0 + 20.0;
+        let switch_wide = 3.0 + cut_wide + 2.0 + dissolve_wide + 2.0 + third_wide + 3.0;
+        let continuous_font = FontId::proportional(12.5);
+        let continuous_button = widest(ui, &[t("dock.continuous", "Continuous")], &continuous_font) + 36.0;
+        let undo_words = [t("dock.undo", "Undo"), t("dock.redo", "Redo")];
+        let undo_wide = widest(ui, &undo_words, &continuous_font) + 24.0;
+        let switch = switch_wide;
+        let undo = undo_wide;
         // Continuous, with the version button beside it once a theme has a version.
         let versions = !state.versions.is_empty();
-        let continuous_wide: f32 = 94.0 + if versions { 8.0 + VERSION_BUTTON.x } else { 0.0 };
+        let continuous_wide: f32 = continuous_button + if versions { 8.0 + VERSION_BUTTON.x } else { 0.0 };
         let room = right - left;
-        let with_continuous = room >= SWITCH + 13.0 + continuous_wide + 12.0 + VIEWS;
-        let with_undo = room >= SWITCH + 13.0 + continuous_wide + 13.0 + 2.0 * UNDO + 8.0 + 12.0 + VIEWS;
+        let with_continuous = room >= switch + 13.0 + continuous_wide + 12.0 + VIEWS;
+        let with_undo = room >= switch + 13.0 + continuous_wide + 13.0 + 2.0 * undo + 8.0 + 12.0 + VIEWS;
         let with_slider = room
-            >= SWITCH
+            >= switch
                 + 12.0
                 + VIEWS
                 + 12.0
                 + 60.0
                 + if with_continuous { 13.0 + continuous_wide } else { 0.0 }
-                + if with_undo { 13.0 + 2.0 * UNDO + 8.0 } else { 0.0 };
+                + if with_undo { 13.0 + 2.0 * undo + 8.0 } else { 0.0 };
         // The transition: one switch of a fixed width, so nothing beside it moves when the
         // name in its third part changes.
         let kind = state.transition.kind;
-        let track = Rect::from_min_size(pos2(left, middle - 15.1), vec2(SWITCH.min(room), 30.2));
+        let track = Rect::from_min_size(pos2(left, middle - 15.1), vec2(switch.min(room), 30.2));
         ui.painter().rect_filled(track, 15.1, CARD);
         let other = !matches!(kind, K::Cut | K::Dissolve);
-        let third = if other { kind.name() } else { "Advanced" };
+        let third = if other { transition_name(kind) } else { advanced_words };
         let mut x = track.min.x + 3.0;
         let mut more = None;
         for (index, label, width, on, hint) in [
-            (0, "Cut", 40.4, kind == K::Cut, "Slides switch at once"),
-            (1, "Dissolve", 68.5, kind == K::Dissolve, "Each slide fades into the next"),
+            (0, cut_words, cut_wide, kind == K::Cut, t("dock.cut.hint", "Slides switch at once")),
             (
-                2,
-                third,
-                track.max.x - 3.0 - (track.min.x + 3.0 + 40.4 + 2.0 + 68.5 + 2.0),
-                other,
-                "Every other transition, and how long it takes",
+                1,
+                dissolve_words,
+                dissolve_wide,
+                kind == K::Dissolve,
+                t("dock.dissolve.hint", "Each slide fades into the next"),
             ),
+            (2, third, third_wide, other, t("dock.advanced.hint", "Every other transition, and how long it takes")),
         ] {
             let cell = Rect::from_min_size(pos2(x, track.min.y + 3.0), vec2(width, 24.2));
             x += width + 2.0;
@@ -5248,13 +5589,22 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
         if with_continuous {
             dock_divider(ui, x + 6.5, middle);
             x += 13.0;
-            let place = Rect::from_min_size(pos2(x, middle - 15.0), vec2(94.0, 30.0));
-            let button =
-                labelled_button(ui, place, ui.scope_id().with("continuous"), "Continuous", None, state.continuous);
-            if button.on_hover_text("Next at the end of a song goes on to the next song").clicked() {
+            let place = Rect::from_min_size(pos2(x, middle - 15.0), vec2(continuous_button, 30.0));
+            let button = labelled_button(
+                ui,
+                place,
+                ui.scope_id().with("continuous"),
+                t("dock.continuous", "Continuous"),
+                None,
+                state.continuous,
+            );
+            if button
+                .on_hover_text(t("dock.continuous.hint", "Next at the end of a song goes on to the next song"))
+                .clicked()
+            {
                 state.continuous = !state.continuous;
             }
-            x += 94.0;
+            x += continuous_button;
             if versions {
                 version_switch_button(ui, state, Rect::from_min_size(pos2(x + 8.0, middle - 15.0), VERSION_BUTTON));
                 x += 8.0 + VERSION_BUTTON.x;
@@ -5264,19 +5614,24 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
             use crate::menubar::Action;
             dock_divider(ui, x + 6.5, middle);
             x += 13.0;
-            let hints = [crate::keys::hint("Undo", "Z", false), crate::keys::hint("Redo", "Z", true)];
-            for ((label, action), hint) in [("Undo", Action::Undo), ("Redo", Action::Redo)].into_iter().zip(&hints) {
+            let hints = [
+                crate::keys::hint(t("dock.undo.hint", "Undo"), "Z", false),
+                crate::keys::hint(t("dock.redo.hint", "Redo"), "Z", true),
+            ];
+            for ((label, action), hint) in
+                [(undo_words[0], Action::Undo), (undo_words[1], Action::Redo)].into_iter().zip(&hints)
+            {
                 // Greyed when the history in force has nothing to take back, saying so.
                 let redo = action == Action::Redo;
                 let enabled = state.can_undo(redo);
-                let place = Rect::from_min_size(pos2(x, middle - 15.0), vec2(UNDO, 30.0));
+                let place = Rect::from_min_size(pos2(x, middle - 15.0), vec2(undo, 30.0));
                 let font = FontId::proportional(12.5);
                 let button = flat_button(ui, place, ui.scope_id().with(label), label, font, Flat::Plain, enabled);
                 let why = crate::home::nothing_to(redo);
                 if button.on_hover_text(if enabled { hint.as_str() } else { why }).clicked() {
                     state.menu_asked = Some(action);
                 }
-                x += UNDO + 8.0;
+                x += undo + 8.0;
             }
         }
         // From the right: the slide size, then the three views.
@@ -5295,7 +5650,7 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
                     },
                 )
                 .inner;
-            if slider.on_hover_text("Slide size").changed() {
+            if slider.on_hover_text(t("dock.size", "Slide size")).changed() {
                 state.columns = 7 - size;
             }
             edge -= wide + 12.0;
@@ -5303,9 +5658,9 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
         let views = Rect::from_min_size(pos2(edge - VIEWS, middle - 15.1), vec2(VIEWS, 30.2));
         ui.painter().rect_filled(views, 15.1, CARD);
         for (index, (view, icon, hint)) in [
-            (SlideView::Grid, Icon::Grid, "Grid"),
-            (SlideView::Easy, Icon::Rows, "Words Only"),
-            (SlideView::Table, Icon::Table, "Table"),
+            (SlideView::Grid, Icon::Grid, t("dock.view.grid", "Grid")),
+            (SlideView::Easy, Icon::Rows, t("dock.view.words", "Words Only")),
+            (SlideView::Table, Icon::Table, t("dock.view.table", "Table")),
         ]
         .into_iter()
         .enumerate()
@@ -5351,33 +5706,44 @@ fn version_switch_button(ui: &mut egui::Ui, state: &mut HomeState, place: Rect) 
     ui.painter().text(arrow, Align2::CENTER_CENTER, "\u{25be}", FontId::proportional(12.5), TEXT_FAINT);
     let example = state.versions.first().map(|version| version.name.clone()).unwrap_or_default();
     let now = match &name {
-        Some(name) => format!("the {name} version is on"),
-        None => "the usual look".to_owned(),
+        Some(name) => tf("dock.version.is_on", "the {name} version is on", &[("name", name)]),
+        None => t("dock.version.usual", "the usual look").to_owned(),
     };
-    let hint =
-        format!("Theme version: {now}. Choose a version, such as {example}, for every screen whose theme has it");
+    let hint = tf(
+        "dock.version.hint",
+        "Theme version: {now}. Choose a version, such as {example}, for every screen whose theme has it",
+        &[("now", &now), ("example", &example)],
+    );
     let response = response.on_hover_text(hint);
     egui::Popup::menu(&response).show(|ui| {
-        crate::live_tabs::menu_heading(ui, "Show the screens in");
+        crate::live_tabs::menu_heading(ui, t("dock.version.show_in", "Show the screens in"));
         let keep = on.is_some_and(|on| on.keep);
         let mut asked = None;
-        if ui.add(egui::Button::selectable(on.is_none(), "The usual look")).clicked() {
+        if ui.add(egui::Button::selectable(on.is_none(), t("dock.version.the_usual", "The usual look"))).clicked() {
             asked = Some(Ask::Use { version: None, keep: false });
         }
         for version in &state.versions {
             let chosen = on.is_some_and(|on| on.version == version.id);
-            if ui.add(egui::Button::selectable(chosen, format!("The {} version", version.name))).clicked() {
+            let words = tf("dock.version.the", "The {name} version", &[("name", &version.name)]);
+            if ui.add(egui::Button::selectable(chosen, words)).clicked() {
                 asked = Some(Ask::Use { version: Some(version.id), keep });
             }
         }
         ui.separator();
         let kept = ui
-            .add_enabled(on.is_some(), egui::Button::selectable(keep, "Keep It Until Switched Back"))
-            .on_hover_text("The version stays on when the next item goes on screen");
+            .add_enabled(
+                on.is_some(),
+                egui::Button::selectable(keep, t("dock.version.keep", "Keep It Until Switched Back")),
+            )
+            .on_hover_text(t("dock.version.keep.hint", "The version stays on when the next item goes on screen"));
         if kept.clicked() {
             asked = Some(Ask::Keep(!keep));
         }
-        if ui.button("Make or Change Versions\u{2026}").on_hover_text("Edit \u{203a} Themes").clicked() {
+        if ui
+            .button(t("dock.version.make", "Make or Change Versions\u{2026}"))
+            .on_hover_text(t("dock.version.make.hint", "Edit \u{203a} Themes"))
+            .clicked()
+        {
             state.menu_asked = Some(crate::menubar::Action::ThemesView);
             ui.close();
         }
@@ -5782,13 +6148,43 @@ fn scroll_strip_at_ends(ui: &mut egui::Ui, bin: Rect, at: egui::Pos2) {
     }
 }
 
+/// A transition's name, in the language that is set.
+pub fn transition_name(kind: sp_model::TransitionKind) -> &'static str {
+    use sp_model::TransitionKind as K;
+    match kind {
+        K::Cut => t("dock.transition.cut", "Cut"),
+        K::Dissolve => t("dock.transition.dissolve", "Dissolve"),
+        K::Fade => t("dock.transition.fade", "Fade"),
+        K::FadeBlack => t("dock.transition.fade_black", "Fade Black"),
+        K::FadeWhite => t("dock.transition.fade_white", "Fade White"),
+        K::Push => t("dock.transition.push", "Push"),
+        K::MoveIn => t("dock.transition.move_in", "Move In"),
+        K::Reveal => t("dock.transition.reveal", "Reveal"),
+        K::FlyIn => t("dock.transition.fly_in", "Fly In"),
+        K::ZoomIn => t("dock.transition.zoom_in", "Zoom In"),
+        K::Door => t("dock.transition.door", "Door"),
+        K::Flip => t("dock.transition.flip", "Flip"),
+        K::Swap => t("dock.transition.swap", "Swap"),
+        K::Wipe => t("dock.transition.wipe", "Wipe"),
+        K::Split => t("dock.transition.split", "Split"),
+        K::Blinds => t("dock.transition.blinds", "Blinds"),
+        K::Iris => t("dock.transition.iris", "Iris"),
+        K::Clock => t("dock.transition.clock", "Clock"),
+        K::Checkerboard => t("dock.transition.checkerboard", "Checkerboard"),
+    }
+}
+
 /// The choice in a Transition menu that follows what is set above it, naming what that is:
 /// "Usual (Dissolve, 0.4 s)", or "Usual (Cut)".
 pub fn usual_transition(look: sp_model::Transition) -> String {
     if look.kind == sp_model::TransitionKind::Cut {
-        format!("Usual ({})", look.kind.name())
+        tf("dock.usual.cut", "Usual ({kind})", &[("kind", transition_name(look.kind))])
     } else {
-        format!("Usual ({}, {:.1} s)", look.kind.name(), look.seconds)
+        tf(
+            "dock.usual",
+            "Usual ({kind}, {time})",
+            &[("kind", transition_name(look.kind)), ("time", &crate::i18n::seconds(f64::from(look.seconds)))],
+        )
     }
 }
 
@@ -5798,11 +6194,20 @@ pub fn transition_picker(ui: &mut egui::Ui, look: &mut sp_model::Transition, id:
     use sp_model::TransitionKind as K;
     ui.set_width(330.0);
     for category in ["Dissolves", "Movements", "Objects", "Wipes", "None"] {
-        caption(ui, &category.to_uppercase());
+        let shown = match category {
+            "Dissolves" => t("dock.category.dissolves", "Dissolves"),
+            "Movements" => t("dock.category.movements", "Movements"),
+            "Objects" => t("dock.category.objects", "Objects"),
+            "Wipes" => t("dock.category.wipes", "Wipes"),
+            _ => t("dock.category.none", "None"),
+        };
+        caption(ui, &shown.to_uppercase());
         ui.horizontal_wrapped(|ui| {
             for kind in K::ALL.into_iter().filter(|kind| kind.category() == category) {
                 let on = look.kind == kind;
-                if ui.add(egui::Button::selectable(on, kind.name()).min_size(vec2(100.0, 28.0))).clicked() && !on {
+                if ui.add(egui::Button::selectable(on, transition_name(kind)).min_size(vec2(100.0, 28.0))).clicked()
+                    && !on
+                {
                     // A newly chosen kind keeps the direction, and takes its usual time.
                     *look = sp_model::Transition { direction: look.direction, ..sp_model::Transition::of(kind) };
                 }
@@ -5817,12 +6222,12 @@ pub fn transition_picker(ui: &mut egui::Ui, look: &mut sp_model::Transition, id:
 /// The chosen transition's settings: its direction, if it moves, and how long it takes.
 fn transition_settings(ui: &mut egui::Ui, look: &mut sp_model::Transition, id: &str) {
     if look.kind == sp_model::TransitionKind::Cut {
-        ui.label(egui::RichText::new("Cut switches at once.").color(TEXT_DIM));
+        ui.label(egui::RichText::new(t("dock.cut_at_once", "Cut switches at once.")).color(TEXT_DIM));
         return;
     }
     egui::Grid::new(("transition settings", id)).num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
         if look.kind.has_direction() {
-            ui.label(egui::RichText::new("Direction").color(TEXT_DIM));
+            ui.label(egui::RichText::new(t("dock.direction", "Direction")).color(TEXT_DIM));
             egui::ComboBox::from_id_salt(("transition direction", id)).selected_text(look.direction.name()).show_ui(
                 ui,
                 |ui| {
@@ -5833,11 +6238,15 @@ fn transition_settings(ui: &mut egui::Ui, look: &mut sp_model::Transition, id: &
             );
             ui.end_row();
         }
-        ui.label(egui::RichText::new("Duration").color(TEXT_DIM));
-        ui.add(egui::Slider::new(&mut look.seconds, 0.0..=5.0).suffix(" s").max_decimals(1));
+        ui.label(egui::RichText::new(t("dock.duration", "Duration")).color(TEXT_DIM));
+        ui.add(
+            egui::Slider::new(&mut look.seconds, 0.0..=5.0)
+                .suffix(format!(" {}", t("common.seconds_unit", "s")))
+                .max_decimals(1),
+        );
         ui.end_row();
     });
-    if ui.button("Reset to Default Parameters").clicked() {
+    if ui.button(t("dock.reset_parameters", "Reset to Default Parameters")).clicked() {
         *look = sp_model::Transition::of(look.kind);
     }
 }

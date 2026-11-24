@@ -1,0 +1,8 @@
+{
+  "_note": "How Ukrainian writes numbers and quotation marks: 13 613 with a no-break space, a decimal comma, «…».",
+  "decimal": ",",
+  "group": "\u00a0",
+  "group_from": 4,
+  "quote_open": "«",
+  "quote_close": "»"
+}

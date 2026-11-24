@@ -16,6 +16,7 @@
 use egui::{Align2, Color32, FontId, Key, Rect, Stroke, StrokeKind, pos2, vec2};
 
 use crate::home::HomeState;
+use crate::i18n::t;
 use crate::studio::{CARE, LINE, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, fixed, fixed_semibold, semibold};
 
 /// How long the numbers after modifier-1 to 7 (or Shift-modifier-M) stay.
@@ -58,8 +59,13 @@ pub fn modifier() -> &'static str {
 }
 
 /// Shift with the modifier.
-pub fn shift_modifier() -> &'static str {
-    if cfg!(target_os = "macos") { "\u{21e7}\u{2318}" } else { "Ctrl+Shift+" }
+pub fn shift_modifier() -> String {
+    if cfg!(target_os = "macos") { "\u{21e7}\u{2318}".to_owned() } else { format!("Ctrl+{}+", shift_word()) }
+}
+
+/// The word for the Shift key off a Mac, as the language's keyboards print it (Mayús in Spanish).
+fn shift_word() -> &'static str {
+    t("keys.cap.shift", "Shift")
 }
 
 /// A key with the modifier: `⌘S` on a Mac, `Ctrl+S` elsewhere.
@@ -89,6 +95,7 @@ fn clear_hint_on(what: &str, f_key: &str, f_keys: bool) -> String {
 }
 
 /// What the list of keys says in place of a key for something only a button does.
+#[cfg(test)]
 pub const BUTTON_ONLY: &str = "Button only";
 
 /// The modifier the tool tabs' keys use: Option on a Mac, Alt elsewhere.
@@ -135,9 +142,10 @@ fn chord_on(mac: bool, control: bool, option: bool, shift: bool, command: bool, 
         }
     } else {
         // Off a Mac the command key is Ctrl, so Control and Command are one key there.
-        for (on, word) in [(control || command, "Ctrl+"), (option, "Alt+"), (shift, "Shift+")] {
+        for (on, word) in [(control || command, "Ctrl"), (option, "Alt"), (shift, shift_word())] {
             if on {
                 chord.push_str(word);
+                chord.push('+');
             }
         }
     }
@@ -400,20 +408,26 @@ fn every_key_on(f_keys: bool) -> Vec<(&'static str, Vec<Row>)> {
         (
             "Running the slides",
             vec![
-                row(keys(&["Space", "\u{2192}"]), "Next slide"),
-                row(one("\u{2190}"), "Previous slide"),
+                row(keys(&[t("keys.cap.space", "Space"), "\u{2192}"]), t("keys.running.1", "Next slide")),
+                row(one("\u{2190}"), t("keys.running.2", "Previous slide")),
                 row(
                     keys(&["\u{2191}", "\u{2193}"]),
-                    "The item above or below; in Bible, pick the verse before or after",
+                    t("keys.running.3", "The item above or below; in Bible, pick the verse before or after"),
                 ),
                 row(
-                    one("Enter"),
-                    "The slide picked goes on screen (found with / or looked up, or picked in Bible); else the open item, from its first slide",
+                    one(t("keys.cap.enter", "Enter")),
+                    t(
+                        "keys.running.4",
+                        "The slide picked goes on screen (found with / or looked up, or picked in Bible); else the open item, from its first slide",
+                    ),
                 ),
-                row(keys(&["Home", "End"]), "First or last slide of the song"),
+                row(keys(&["Home", "End"]), t("keys.running.5", "First or last slide of the song")),
                 row(
-                    one("A letter"),
-                    "Jump to a group (C for the chorus), or a slide\u{2019}s own hot key; in Bible, start the next reference",
+                    one(t("keys.cap.letter", "A letter")),
+                    t(
+                        "keys.running.6",
+                        "Jump to a group (C for the chorus), or a slide\u{2019}s own hot key; in Bible, start the next reference",
+                    ),
                 ),
             ],
         ),
@@ -421,15 +435,21 @@ fn every_key_on(f_keys: bool) -> Vec<(&'static str, Vec<Row>)> {
             "Clearing",
             if f_keys {
                 vec![
-                    row(keys(&["Esc", "F1"]), "Clear everything"),
-                    row(keys(&["F2", "F3", "F4", "F5", "F6"]), "Clear the slide, media, props, audio, message"),
+                    row(keys(&["Esc", "F1"]), t("keys.clearing.1", "Clear everything")),
+                    row(
+                        keys(&["F2", "F3", "F4", "F5", "F6"]),
+                        t("keys.clearing.2", "Clear the slide, media, props, audio, message"),
+                    ),
                 ]
             } else {
                 vec![
-                    row(one("Esc"), "Clear everything"),
+                    row(one("Esc"), t("keys.clearing.3", "Clear everything")),
                     row(
-                        one(BUTTON_ONLY),
-                        "Clear the slide, media, props, messages, audio or announcements: the layer keys under the preview",
+                        one(t("keys.cap.button_only", "Button only")),
+                        t(
+                            "keys.clearing.4",
+                            "Clear the slide, media, props, messages, audio or announcements: the layer keys under the preview",
+                        ),
                     ),
                 ]
             },
@@ -437,12 +457,12 @@ fn every_key_on(f_keys: bool) -> Vec<(&'static str, Vec<Row>)> {
         (
             "Going places",
             vec![
-                row(vec![m("1"), m("2"), m("3")], "Show, Bible (ready for a reference), Edit"),
-                row(one(&m("B")), "Bible, too (Bold while editing a slide)"),
-                row(one(&m(",")), "Settings"),
-                row(one(&m("P")), "Playlists and libraries"),
-                row(vec!["/".to_owned(), m("F")], "Find a song, a line or a verse"),
-                row(one("?"), "This list (its foot has Show keys on buttons)"),
+                row(vec![m("1"), m("2"), m("3")], t("keys.places.1", "Show, Bible (ready for a reference), Edit")),
+                row(one(&m("B")), t("keys.places.2", "Bible, too (Bold while editing a slide)")),
+                row(one(&m(",")), t("keys.places.3", "Settings")),
+                row(one(&m("P")), t("keys.places.4", "Playlists and libraries")),
+                row(vec!["/".to_owned(), m("F")], t("keys.places.5", "Find a song, a line or a verse")),
+                row(one("?"), t("keys.places.6", "This list (its foot has Show keys on buttons)")),
             ],
         ),
         (
@@ -450,41 +470,73 @@ fn every_key_on(f_keys: bool) -> Vec<(&'static str, Vec<Row>)> {
             vec![
                 row(
                     vec![format!("{} \u{2026} {}", tab_key(0), tab_key(6))],
-                    "Open Timers, Messages, Props, Macros, Stage, Audio, VoxLive",
+                    t("keys.live.1", "Open Timers, Messages, Props, Macros, Stage, Audio, VoxLive"),
                 ),
                 row(
-                    one("then 1 \u{2026} 9"),
-                    "Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track",
+                    one(t("keys.cap.then", "then 1 \u{2026} 9")),
+                    t(
+                        "keys.live.2",
+                        "Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track",
+                    ),
                 ),
-                row(vec![media_key(), "then 1 \u{2026} 9".to_owned()], "Show that picture or video"),
-                row(vec![audience_key(), stage_key()], "Audience screens, stage screens, on or off"),
-                row(one(&m("O")), "The menu for the slide on screen"),
+                row(
+                    vec![media_key(), t("keys.cap.then", "then 1 \u{2026} 9").to_owned()],
+                    t("keys.live.3", "Show that picture or video"),
+                ),
+                row(vec![audience_key(), stage_key()], t("keys.live.4", "Audience screens, stage screens, on or off")),
+                row(one(&m("O")), t("keys.live.5", "The menu for the slide on screen")),
             ],
         ),
         (
             "Menus and windows",
             vec![
-                row(keys(&["\u{2191}", "\u{2193}"]), "Move"),
-                row(keys(&["\u{2192}", "\u{2190}"]), "Open a group of choices; go back"),
-                row(one("Enter"), "Choose"),
-                row(one("Esc"), "Close"),
+                row(keys(&["\u{2191}", "\u{2193}"]), t("keys.menus.1", "Move")),
+                row(keys(&["\u{2192}", "\u{2190}"]), t("keys.menus.2", "Open a group of choices; go back")),
+                row(one(t("keys.cap.enter", "Enter")), t("keys.menus.3", "Choose")),
+                row(one("Esc"), t("keys.menus.4", "Close")),
             ],
         ),
         (
             "Changing things",
             vec![
-                row(vec![m("Z"), with_shift("Z")], "Undo, redo"),
-                row(vec![m("C"), m("X"), m("V")], "Copy, cut, paste the picked slides (objects in Edit)"),
+                row(vec![m("Z"), with_shift("Z")], t("keys.changing.1", "Undo, redo")),
                 row(
-                    one("Delete"),
-                    "Delete what is picked: what Undo brings back goes at once (playlist items, slides, a media playlist's items); songs in a library, pictures in the bin and screens ask first",
+                    vec![m("C"), m("X"), m("V")],
+                    t("keys.changing.2", "Copy, cut, paste the picked slides (objects in Edit)"),
                 ),
-                row(one(&m("N")), "A new song"),
-                row(vec!["T".to_owned(), m("D"), m("A")], "In Edit: a new text box, duplicate, pick everything"),
-                row(one("Arrows"), "In Edit: nudge the picked object (Shift for one pixel)"),
+                row(
+                    one(t("keys.cap.delete", "Delete")),
+                    t(
+                        "keys.changing.3",
+                        "Delete what is picked: what Undo brings back goes at once (playlist items, slides, a media playlist's items); songs in a library, pictures in the bin and screens ask first",
+                    ),
+                ),
+                row(one(&m("N")), t("keys.changing.4", "A new song")),
+                row(
+                    vec!["T".to_owned(), m("D"), m("A")],
+                    t("keys.changing.5", "In Edit: a new text box, duplicate, pick everything"),
+                ),
+                row(
+                    one(t("keys.cap.arrows", "Arrows")),
+                    t("keys.changing.6", "In Edit: nudge the picked object (Shift for one pixel)"),
+                ),
             ],
         ),
     ]
+}
+
+/// A group of the list of keys, in the language that is set (the list itself keeps English
+/// names for them, which the tests and the code look groups up by).
+pub fn group_title(group: &str) -> &'static str {
+    match group {
+        "Running the slides" => t("keys.group.running", "Running the slides"),
+        "Clearing" => t("keys.group.clearing", "Clearing"),
+        "Going places" => t("keys.group.places", "Going places"),
+        "The live tools" => t("keys.group.live", "The live tools"),
+        "Menus and windows" => t("keys.group.menus", "Menus and windows"),
+        "Changing things" => t("keys.group.changing", "Changing things"),
+        _ => "",
+    }
 }
 
 /// The list of every key, as a sheet over the dimmed window: groups in two columns, a note at
@@ -515,7 +567,13 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
         painter.rect_filled(sheet.translate(vec2(0.0, 30.0)).expand(30.0), 48.0, Color32::from_black_alpha(40));
         painter.rect_filled(sheet, 18.0, Color32::from_rgb(0x1f, 0x1f, 0x1f));
         painter.rect_stroke(sheet, 18.0, Stroke::new(1.0, LINE), StrokeKind::Inside);
-        painter.text(pos2(sheet.min.x + 18.0, sheet.min.y + 29.0), Align2::LEFT_CENTER, "Keys", semibold(15.0), TEXT);
+        painter.text(
+            pos2(sheet.min.x + 18.0, sheet.min.y + 29.0),
+            Align2::LEFT_CENTER,
+            t("keys.title", "Keys"),
+            semibold(15.0),
+            TEXT,
+        );
         let close = Rect::from_min_size(pos2(sheet.max.x - 12.0 - 30.0, sheet.min.y + 14.0), vec2(30.0, 30.0));
         let close_response = ui.interact(close, ui.scope_id().with("close keys"), egui::Sense::click());
         if close_response.hovered() {
@@ -527,7 +585,7 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
             Rect::from_center_size(close.center(), vec2(14.0, 14.0)),
             TEXT_DIM,
         );
-        if close_response.on_hover_text("Close (Esc)").clicked() {
+        if close_response.on_hover_text(t("keys.close", "Close (Esc)")).clicked() {
             state.key_sheet = false;
         }
         // Two columns of groups, in a body that scrolls when the window is too short for all.
@@ -548,7 +606,7 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
                 }
                 let left = origin.x + 18.0 + side as f32 * (column + 28.0);
                 let mut y = tops[side];
-                let heading = &group.to_uppercase();
+                let heading = &group_title(group).to_uppercase();
                 let font = fixed_semibold(11.5);
                 crate::studio::paint_spaced(
                     ui,
@@ -590,7 +648,14 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
         // The foot: the switch that writes each button's key beside it (also in Settings ›
         // Key Mappings), a note, and Done.
         let foot = sheet.max.y - 59.0;
-        let label = painter.layout_no_wrap("Show keys on buttons".to_owned(), FontId::proportional(13.0), TEXT);
+        // Done is as wide as its word in the language that is set.
+        let done_wide =
+            painter.layout_no_wrap(t("keys.done", "Done").to_owned(), FontId::proportional(12.5), TEXT).size().x + 30.0;
+        let label = painter.layout_no_wrap(
+            t("keys.show_on_buttons", "Show keys on buttons").to_owned(),
+            FontId::proportional(13.0),
+            TEXT,
+        );
         let track = Rect::from_min_size(pos2(sheet.min.x + 18.0, foot + 19.5), vec2(30.0, 17.0));
         let switch = Rect::from_min_max(
             track.min - vec2(4.0, 6.0),
@@ -608,23 +673,24 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
         let knob = if on { track.right_center() - vec2(8.5, 0.0) } else { track.left_center() + vec2(8.5, 0.0) };
         painter.circle_filled(knob, 6.0, if on { TEXT } else { TEXT_DIM });
         painter.galley(pos2(track.max.x + 10.0, track.center().y - label.size().y / 2.0), label, TEXT);
-        let where_else = "Also in Settings \u{203a} Key Mappings.";
+        let where_else = t("keys.also_in", "Also in Settings \u{203a} Key Mappings.");
         let left = switch.max.x + 14.0;
         let note = painter.layout(
             where_else.to_uppercase(),
             fixed(11.0),
             TEXT_FAINT,
-            (sheet.max.x - 18.0 - 70.0 - left).max(60.0),
+            (sheet.max.x - 18.0 - done_wide - 12.0 - left).max(60.0),
         );
         painter.galley(pos2(left, track.center().y - note.size().y / 2.0), note, TEXT_FAINT);
-        switch_response.on_hover_text("Write each button's key beside it, all the time");
-        let done = Rect::from_min_size(pos2(sheet.max.x - 18.0 - 57.3, foot + 12.5), vec2(57.3, 30.0));
+        switch_response
+            .on_hover_text(t("keys.show_on_buttons.hint", "Write each button's key beside it, all the time"));
+        let done = Rect::from_min_size(pos2(sheet.max.x - 18.0 - done_wide, foot + 12.5), vec2(done_wide, 30.0));
         let done_response = ui.interact(done, ui.scope_id().with("done keys"), egui::Sense::click());
         painter.rect_filled(done, 9.0, if done_response.hovered() { Color32::WHITE } else { TEXT });
         painter.text(
             done.center(),
             Align2::CENTER_CENTER,
-            "Done",
+            t("keys.done", "Done"),
             FontId::proportional(12.5),
             Color32::from_rgb(0x19, 0x19, 0x19),
         );

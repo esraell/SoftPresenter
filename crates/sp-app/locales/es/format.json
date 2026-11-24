@@ -1,0 +1,8 @@
+{
+  "_note": "How Spanish writes numbers and quotation marks. A whole number is grouped from five figures (1234 but 13.613), the decimal is a comma, and the quotation marks are the owner's choice, “…”.",
+  "decimal": ",",
+  "group": ".",
+  "group_from": 5,
+  "quote_open": "“",
+  "quote_close": "”"
+}
