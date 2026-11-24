@@ -1622,6 +1622,19 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   week, never while a song pack is being opened, and it stops if a song or setting is saved while
   it works. A half-saved file stays if it may be the only copy of what was being saved. The log
   names every file moved; the window says how many went, only when some did.
+- **What the menu bar did is in the window too, on every system** (Windows and Linux have no menu
+  bar; the design has none either): Settings › Screens has Identify and the test patterns (Off,
+  Colour bars, Grid, White: everyone watching sees them); Settings › General has Song files ›
+  Reload songs; Settings › Key Mappings has Show keys on buttons; Settings has Set Up
+  SoftPresenter… under its sections (Settings steps aside so the setup opens over the home
+  window); Settings › Integrations has Command line (Install… on a Mac or Linux; on Windows it
+  says to type softpresenter.exe); Settings › About has the version, What's new, Open the guide,
+  Report an issue… (a new issue with the version filled in) and Licences…; a click on the
+  readout under the preview goes to the slide on screen (opens its item and brings the slide
+  into view). The media strip has its fold button (a chevron at the right of its heading).
+- Importing songs: File › Import Songs › A Library Folder… on Windows and Linux first asks "A
+  Folder…" or "Files…" (a Mac's one file window takes both), so a single song document or
+  bundle can be chosen as well as a folder of libraries.
 - A menu bar with the usual menus and shortcuts (New Song, Import Songs by kind of file, Undo, Cut/Copy/Paste, the views,
   Clear, Audience Screens and Stage Screens on/off with Shift-Cmd-1 and Shift-Cmd-2, Configure Screens), showing
   only what works: what acts on objects in the editor (Edit › Duplicate, the Format, Arrange and

@@ -43,7 +43,7 @@ sources) drawn by their own thread.
 | Audience ON/OFF | The audience screens on or off (Shift-Command-1; Ctrl+Shift+1 on other computers) | `audience on\|off` |
 | Stage ON/OFF | The stage screens on or off (Shift-Command-2) | `stage on\|off` |
 | ? | The list of every key (the `?` key opens it too; Escape, Enter or Done close it) (`keys.rs`) | |
-| ⚙ | Settings: General, Screens, Groups, Key Mappings, Integrations, Remote Control (Command-comma) | `menu Settings` |
+| ⚙ | Settings: General (with Song files › Reload songs), Screens (Configure Screens…, Identify and the test patterns), Groups, Key Mappings (with Show keys on buttons), Integrations (with the Command line card), Remote Control, About (version, What's new, the guide, Report an issue…, Licences…); Set Up SoftPresenter… under the panes (Command-comma) | `menu Settings` |
 
 ### Left column: a playlist or a library
 

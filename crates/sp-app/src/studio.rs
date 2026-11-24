@@ -4877,6 +4877,14 @@ fn preview_block(
     // A key refused is said under the readout (see `notices::paint_cue`).
     state.notices.readout = Some(readout);
     let at = show.live();
+    // A click on it goes to the slide on screen: opens its item and brings the slide into view
+    // (the menu bar's Go to the Slide on Screen, for every system).
+    if at.is_some() {
+        let go = ui.interact(readout, ui.scope_id().with("readout go"), Sense::click());
+        if go.on_hover_text("Go to the slide on screen").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            state.menu_asked = Some(crate::menubar::Action::ShowLiveSong);
+        }
+    }
     let song = at.and_then(|at| show.presentations().get(at.presentation));
     // The place in the song's play order, which an arrangement can make longer.
     let place = match (show.position(), at, song) {

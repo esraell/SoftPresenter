@@ -6675,28 +6675,53 @@ impl App {
         self.import_songs(&paths);
     }
 
-    /// Import Songs › A Library Folder…: asks for a library folder or the folder of libraries
-    /// (on a Mac, song documents and bundles too), and imports them, each folder becoming a
-    /// library. Opens at the usual place for such libraries, when that folder is there.
+    /// Import Songs › A Library Folder…: asks for a library folder or the folder of libraries,
+    /// or for song documents and bundles, and imports them, each folder becoming a library.
+    /// Opens at the usual place for such libraries, when that folder is there. A Mac's file
+    /// window takes song documents and folders at once; elsewhere a file window takes one kind
+    /// or the other, so first a question says which (as the song pack's question does).
     fn choose_library_folder_to_import(&mut self) {
         let documents = [load::PRO_ENDING, load::PRO_BUNDLE_ENDINGS[0], load::PRO_BUNDLE_ENDINGS[1]];
         let mut dialog = rfd::FileDialog::new()
             .set_title("Import a Library Folder")
             .add_filter(load::filter_name("Song documents and bundles", &documents), &documents);
-        if let Some(home) = std::env::var_os("HOME") {
+        if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
             let libraries = PathBuf::from(home).join("Documents").join("ProPresenter").join("Libraries");
             if libraries.is_dir() {
                 dialog = dialog.set_directory(libraries);
             }
         }
-        // A Mac's file window takes song documents and folders at once; elsewhere, a folder (of
-        // one library, or of all of them) is chosen.
         #[cfg(target_os = "macos")]
         let chosen = dialog.pick_files_or_folders();
         #[cfg(not(target_os = "macos"))]
-        let chosen = dialog.pick_folders();
+        let chosen = match Self::ask_files_or_folder() {
+            Some(true) => dialog.pick_files(),
+            Some(false) => dialog.pick_folders(),
+            None => None,
+        };
         if let Some(chosen) = chosen {
             self.import_songs(&chosen);
+        }
+    }
+
+    /// Where a Mac's one file window offers song documents and folders together: a question,
+    /// in the words of the window's other questions. `Some(true)` for files, `Some(false)` for a
+    /// folder, `None` when it was cancelled.
+    #[cfg(not(target_os = "macos"))]
+    fn ask_files_or_folder() -> Option<bool> {
+        let answer = rfd::MessageDialog::new()
+            .set_title("Import a Library Folder")
+            .set_description("Import a folder of song documents (each folder in it becomes a library), or song documents and bundles themselves?")
+            .set_buttons(rfd::MessageButtons::YesNoCancelCustom(
+                "A Folder\u{2026}".to_owned(),
+                "Files\u{2026}".to_owned(),
+                "Cancel".to_owned(),
+            ))
+            .show();
+        match pack::three_way(answer, ["A Folder\u{2026}", "Files\u{2026}", "Cancel"]) {
+            Some(0) => Some(false),
+            Some(1) => Some(true),
+            _ => None,
         }
     }
 
@@ -7954,7 +7979,12 @@ impl App {
                         running.home_state.preferences_pane =
                             home::PANES.iter().position(|pane| *pane == "Remote Control").unwrap_or(0);
                     }
-                    _ => {}
+                    // Any pane by its name ("Key Mappings", "groups").
+                    other => {
+                        if let Some(at) = home::PANES.iter().position(|pane| pane.eq_ignore_ascii_case(other)) {
+                            running.home_state.preferences_pane = at;
+                        }
+                    }
                 }
             }
             // Testing aid: open Settings.
@@ -9168,13 +9198,11 @@ impl App {
             A::KeysOnButtons => state.keys_on_buttons = !state.keys_on_buttons,
             A::Website | A::WhatsNew | A::ReportIssue => {
                 let page = match action {
-                    A::WhatsNew => "https://github.com/esraell/SoftPresenter/commits/master",
-                    A::ReportIssue => "https://github.com/esraell/SoftPresenter/issues/new",
-                    _ => "https://github.com/esraell/SoftPresenter#readme",
+                    A::WhatsNew => home::Page::WhatsNew,
+                    A::ReportIssue => home::Page::ReportIssue,
+                    _ => home::Page::Guide,
                 };
-                if let Err(e) = std::process::Command::new("open").arg(page).spawn() {
-                    state.notices.trouble(format!("Could not open the web page: {e}"));
-                }
+                home::open_page(state, page);
             }
         }
         running.home_window.request_redraw();

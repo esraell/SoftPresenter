@@ -1243,8 +1243,8 @@ fn wait_for_answer(listener: std::net::TcpListener, state: &str, cancel: &Atomic
     }
 }
 
-/// Opens an address in the computer's own browser.
-fn open_in_browser(url: &str) -> Result<(), String> {
+/// Opens an address in the computer's own browser (the Help menu's pages, and Canva's sign-in).
+pub(crate) fn open_page(url: &str) -> std::io::Result<()> {
     let mut command = if cfg!(target_os = "macos") {
         std::process::Command::new("open")
     } else if cfg!(windows) {
@@ -1254,7 +1254,11 @@ fn open_in_browser(url: &str) -> Result<(), String> {
     } else {
         std::process::Command::new("xdg-open")
     };
-    command.arg(url).spawn().map(|_| ()).map_err(|_| "The browser couldn't be opened for the sign-in.".to_owned())
+    command.arg(url).spawn().map(|_| ())
+}
+
+fn open_in_browser(url: &str) -> Result<(), String> {
+    open_page(url).map_err(|_| "The browser couldn't be opened for the sign-in.".to_owned())
 }
 
 /// Testing aid: follows a stand-in's sign-in page as a browser would (its answer is a redirect
