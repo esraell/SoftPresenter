@@ -1799,6 +1799,9 @@ const TITLE_LINES: usize = 2;
 /// The version's pill under the title block: the gap, then the pill.
 const PILL_GAP: f32 = 3.0;
 const PILL_HEIGHT: f32 = 15.0;
+/// A one-line row with a version's pill keeps the height it had before titles could take two
+/// lines (the design measures it so); two lines with a pill are built from their parts.
+const ROW_WITH_PILL: f32 = 46.2;
 
 /// Where a row's small tag goes, after the title.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1918,7 +1921,11 @@ fn row_shape(ctx: &egui::Context, look: &ListRow, width: f32) -> RowShape {
     };
     let mut shape = RowShape { title: title_galley, lines, tag, hover, left, room, height: LIST_ROW };
     let pill = look.version.is_some();
-    shape.height = LIST_ROW.max(2.0 * ROW_PAD + shape.block_height(pill));
+    shape.height = if pill && shape.block_lines() == 1 {
+        ROW_WITH_PILL
+    } else {
+        LIST_ROW.max(2.0 * ROW_PAD + shape.block_height(pill))
+    };
     shape
 }
 
@@ -2052,7 +2059,10 @@ impl SongRowHeights {
                 library.songs.hash(&mut hasher);
             }
         }
-        let key = (Arc::as_ptr(list) as usize, width.to_bits(), in_library, hasher.finish(), state.lists.songs.epoch());
+        // The list by what it holds, never by where it lives: a list made again can land where
+        // an old one was, and its heights would then be taken for the old list's.
+        list.shown.hash(&mut hasher);
+        let key = (list.shown.len(), width.to_bits(), in_library, hasher.finish(), state.lists.songs.epoch());
         if self.key != Some(key) {
             let mut first_library: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
             if !in_library {
@@ -3182,7 +3192,8 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
     if let Some(row) = scroll_to.filter(|row| *row < shown.len()) {
         let id = ui.make_persistent_id("song list");
         let offset = egui::scroll_area::State::load(ui.ctx(), id).map_or(0.0, |state| state.clamped_offset().y);
-        let (top, bottom, height) = (tops[row], tops[row + 1], list.height());
+        let (top, bottom, height) =
+            (tops.get(row).copied().unwrap_or_default(), tops.get(row + 1).copied().unwrap_or_default(), list.height());
         if top < offset {
             scroll = scroll.vertical_scroll_offset(top);
         } else if bottom > offset + height {
@@ -3192,7 +3203,10 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
     scroll.show_viewport(ui, |ui, viewport| {
         ui.spacing_mut().item_spacing.y = 0.0;
         let (first, end) = rows_in_view(&tops, viewport);
-        ui.add_space(tops[first]);
+        // Never past the list, whatever the heights say.
+        let end = end.min(shown.len());
+        let first = first.min(end);
+        ui.add_space(tops.get(first).copied().unwrap_or_default());
         let in_view = first..end;
         let several = state.picked_songs.len() > 1;
         let mut rows: Vec<(usize, Rect)> = Vec::new();
@@ -7123,7 +7137,7 @@ pub mod tests {
         // A version's pill adds its gap and its height under the title block.
         let pilled = |title| ListRow { version: Some(("Youth", false)), ..item_look(title) };
         assert_eq!(row_shape(&ctx, &pilled(two_title()), ROW_WIDTH).height, 7.0 + 34.0 + 3.0 + 15.0 + 7.0);
-        assert_eq!(row_shape(&ctx, &pilled("Blessed Assurance"), ROW_WIDTH).height, 7.0 + 17.0 + 3.0 + 15.0 + 7.0);
+        assert_eq!(row_shape(&ctx, &pilled("Blessed Assurance"), ROW_WIDTH).height, ROW_WITH_PILL, "as before");
     }
 
     #[test]
