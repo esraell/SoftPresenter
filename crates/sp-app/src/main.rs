@@ -953,11 +953,13 @@ fn log_placement(screen: &str, place: &Placed, window: &Window, displays: &[Disp
     let on = window
         .current_monitor()
         .and_then(|m| displays.iter().find(|d| d.x == m.position().x && d.y == m.position().y).map(|d| d.name.clone()));
-    let at = window.outer_position().map(|p| format!("{},{}", p.x, p.y)).unwrap_or_default();
-    applog::event(
-        "screens",
-        &format!("{screen}: asked for {asked}; the window is on {} at {at}", on.as_deref().unwrap_or("?")),
-    );
+    let on = on.as_deref().unwrap_or("a display not named yet");
+    // Wayland gives no window a position: the line then says so instead of ending in "at ".
+    let place = match window.outer_position() {
+        Ok(p) => format!("{screen}: asked for {asked}; the window is on {on} at {},{}", p.x, p.y),
+        Err(_) => format!("{screen}: asked for {asked}; the window is on {on} (the window system doesn't say where)"),
+    };
+    applog::event("screens", &place);
 }
 
 /// The displays as last asked of the system: when, the displays connected then, and what
@@ -1010,6 +1012,21 @@ pub(crate) fn display_list(
 ) -> Vec<DisplayInfo> {
     let names = sp_video::display_names();
     let mut list: Vec<DisplayInfo> = Vec::new();
+    // On Wayland a window's own list of monitors holds each display it was told of at the start
+    // twice (winit adds the display again when the system describes it), which listed every
+    // display as "DP-1" and "DP-1 (2)". The event loop's list has each once, and in the same
+    // order, so the places of the displays agree.
+    #[cfg(target_os = "linux")]
+    let monitors = {
+        let mut seen: Vec<winit::monitor::MonitorHandle> = Vec::new();
+        monitors.filter(move |m| {
+            let new = !seen.contains(m);
+            if new {
+                seen.push(m.clone());
+            }
+            new
+        })
+    };
     for (index, m) in monitors.enumerate() {
         let old_name = m.name().unwrap_or_else(|| "Display".to_owned());
         #[cfg(target_os = "macos")]
@@ -9663,6 +9680,16 @@ impl ApplicationHandler<AppEvent> for App {
             }
             _ => {}
         }
+    }
+
+    /// On Linux, the windows (and with them their clipboards) go while the window system's
+    /// connection is still open. Each window's clipboard has a thread of its own that holds
+    /// Wayland objects from the event loop's connection and destroys them when the clipboard
+    /// is dropped; dropped after `run_app` returns, the connection is gone and that thread
+    /// crashed the process on every quit (exit 139).
+    #[cfg(target_os = "linux")]
+    fn exiting(&mut self, _el: &ActiveEventLoop) {
+        drop(self.running.take());
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
