@@ -10455,9 +10455,9 @@ fn main() -> ExitCode {
     let remote = remote::Remote::open();
     start_steps::mark("remote control read");
     // Commands from `softpresenter ctl` come in on the control socket. Without it (another copy
-    // has it, say) the app runs as usual. It is set up on a thread of its own: keeping its folder
-    // private runs Windows' own tools several times, which took 25 seconds on a busy PC, and the
-    // window doesn't wait for that; commands are answered a moment after it opens.
+    // has it, say) the app runs as usual. It is set up on a thread of its own, so the window never
+    // waits for it (keeping its folder private once ran Windows' own tools, which took up to a
+    // minute on a busy PC); commands are answered a moment after it opens.
     let control: std::sync::Arc<std::sync::Mutex<Option<control::Listening>>> = std::sync::Arc::default();
     {
         let kept = control.clone();

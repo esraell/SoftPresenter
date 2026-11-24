@@ -3961,12 +3961,7 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(to, link).expect("a link");
         #[cfg(windows)]
-        {
-            let made = private_folder::run(
-                private_folder::tool("cmd.exe").expect("cmd").arg("/C").arg("mklink").arg("/J").arg(link).arg(to),
-            );
-            made.expect("a junction");
-        }
+        run(tool("cmd.exe").expect("cmd").arg("/C").arg("mklink").arg("/J").arg(link).arg(to)).expect("a junction");
     }
 
     #[test]
@@ -4018,11 +4013,36 @@ mod tests {
         }
     }
 
+    /// One of Windows' own tools, from its own folder, run without a console window of its own.
+    #[cfg(windows)]
+    fn tool(name: &str) -> Result<std::process::Command, String> {
+        use std::os::windows::process::CommandExt;
+        const NO_WINDOW: u32 = 0x0800_0000;
+        let root = std::env::var_os("SystemRoot")
+            .filter(|root| !root.is_empty())
+            .ok_or("could not find Windows' own folder (SystemRoot is not set)")?;
+        let mut tool = std::process::Command::new(Path::new(&root).join("System32").join(name));
+        tool.creation_flags(NO_WINDOW).stdin(std::process::Stdio::null());
+        Ok(tool)
+    }
+
+    /// Runs a tool and gives what it printed; an error says what it printed when it failed.
+    #[cfg(windows)]
+    fn run(tool: &mut std::process::Command) -> Result<String, String> {
+        let name = tool.get_program().to_string_lossy().into_owned();
+        let output = tool.output().map_err(|e| format!("could not run {name}: {e}"))?;
+        let printed = String::from_utf8_lossy(&output.stdout).into_owned();
+        if !output.status.success() {
+            let problem = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("{name} failed: {} {}", printed.trim(), problem.trim()).trim().to_owned());
+        }
+        Ok(printed)
+    }
+
     /// Changes an access list with Windows' own tool, as somebody at the computer could.
     #[cfg(windows)]
     fn icacls(path: &Path, change: &[&str]) {
-        let changed = private_folder::run(private_folder::tool("icacls.exe").expect("icacls").arg(path).args(change));
-        changed.expect("the access list changed");
+        run(tool("icacls.exe").expect("icacls").arg(path).args(change)).expect("the access list changed");
     }
 
     /// The socket kind itself works on this Windows, before anything is kept private: when the
@@ -4053,34 +4073,47 @@ mod tests {
         let _ = std::fs::remove_dir_all(&folder);
     }
 
-    /// Each step of keeping a folder private, one at a time, so a failure names the step.
+    /// Each step of keeping a folder private, one at a time, so a failure names the step: for a
+    /// folder made for the socket, and for one made the ordinary way beforehand, which takes on
+    /// the list of the folder above until it is kept private.
     #[cfg(windows)]
     #[test]
     fn windows_keeps_the_sockets_folder_to_this_user() {
-        let user = private_folder::user().expect("which user this is");
+        let user = sp_winapi::current_user().expect("which user this is");
         assert!(user.starts_with("S-1-"), "{user}");
-        let folder = socket_folder("kept");
-        private_folder::keep_private(&folder).expect("kept private");
-        let list = private_folder::access_list(&folder, &folder).expect("its access list");
-        assert!(list.contains("D:P"), "closed to the folder above: {list}");
-        assert!(!list.contains(";WD)") && !list.contains(";BU)") && !list.contains(";AU)"), "{list}");
-        // A file made in it takes the same list.
-        let inside = folder.join("inside.txt");
-        std::fs::write(&inside, "x").expect("a file inside");
-        let list = private_folder::access_list(&inside, &folder).expect("the file's access list");
-        assert!(!list.contains(";WD)") && !list.contains(";BU)") && !list.contains(";AU)"), "{list}");
-        // A note left by a copy that was stopped is cleared at the next start, and the notes
-        // of this reading are gone: only the file made above is left.
-        let left = folder.join("softpresenter-access-note-1-0000000000000000.txt");
-        std::fs::write(&left, "left behind").expect("a note left behind");
-        private_folder::keep_private(&folder).expect("kept private again");
-        let names: Vec<String> = std::fs::read_dir(&folder)
-            .expect("the folder")
-            .flatten()
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(names, ["inside.txt"], "no note is left in the folder");
-        let _ = std::fs::remove_dir_all(&folder);
+        let made = socket_folder("kept");
+        let ordinary = socket_folder("plain");
+        std::fs::create_dir_all(&ordinary).expect("a folder made the ordinary way");
+        for folder in [&made, &ordinary] {
+            let kept = private_folder::keep_private(folder).expect("kept private");
+            let security = sp_winapi::security_of(folder).expect("its owner and access list");
+            assert_eq!(security.owner.as_deref(), Some(user.as_str()), "it belongs to this user");
+            let list = security.list;
+            assert!(list.starts_with("D:P"), "closed to the folder above: {list}");
+            assert!(!list.contains(";WD)") && !list.contains(";BU)") && !list.contains(";AU)"), "{list}");
+            // While it is kept private nobody can rename it (and so put another in its place);
+            // once it is let go, it can be, which shows the refusal came from holding it.
+            let moved = folder.with_extension("moved");
+            assert!(std::fs::rename(folder, &moved).is_err(), "a folder being kept private can't be renamed");
+            drop(kept);
+            std::fs::rename(folder, &moved).expect("renamed once let go");
+            std::fs::rename(&moved, folder).expect("renamed back");
+            // A file made in it takes the same list.
+            let inside = folder.join("inside.txt");
+            std::fs::write(&inside, "x").expect("a file inside");
+            let list = sp_winapi::security_of(&inside).expect("the file's access list").list;
+            assert!(!list.contains(";WD)") && !list.contains(";BU)") && !list.contains(";AU)"), "{list}");
+            // Kept private again, as at the next start: nothing is left in the folder but the
+            // file made above.
+            private_folder::keep_private(folder).expect("kept private again");
+            let names: Vec<String> = std::fs::read_dir(folder)
+                .expect("the folder")
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(names, ["inside.txt"], "nothing else is left in the folder");
+            let _ = std::fs::remove_dir_all(folder);
+        }
     }
 
     #[cfg(windows)]
@@ -4131,8 +4164,7 @@ mod tests {
     /// out must not be run from one: it runs its program through `runas` without those rights.
     #[cfg(windows)]
     fn runs_elevated() -> bool {
-        let groups =
-            private_folder::run(private_folder::tool("whoami.exe").expect("whoami").args(["/groups", "/fo", "csv"]));
+        let groups = run(tool("whoami.exe").expect("whoami").args(["/groups", "/fo", "csv"]));
         groups.is_ok_and(|groups| groups.contains("S-1-16-12288"))
     }
 
@@ -4169,7 +4201,7 @@ mod tests {
             out.display()
         );
         let result = std::fs::write(&script, text).map_err(|e| e.to_string()).and_then(|()| {
-            private_folder::run(private_folder::tool("runas.exe")?.arg("/trustlevel:0x20000").arg(&script))?;
+            run(tool("runas.exe")?.arg("/trustlevel:0x20000").arg(&script))?;
             let waiting = std::time::Instant::now();
             loop {
                 let said = std::fs::read_to_string(&out).unwrap_or_default();
@@ -4209,8 +4241,7 @@ mod tests {
             return;
         };
         // S-1-16-4096 is the label Windows gives a program run with low rights.
-        let groups =
-            private_folder::run(private_folder::tool("whoami.exe").expect("whoami").args(["/groups", "/fo", "csv"]));
+        let groups = run(tool("whoami.exe").expect("whoami").args(["/groups", "/fo", "csv"]));
         let level = match groups {
             Ok(groups) if groups.contains("S-1-16-4096") => "low".to_owned(),
             Ok(_) => "not low".to_owned(),
@@ -4290,7 +4321,7 @@ mod tests {
         let asks = |path: &Path| run_ordinary(&this, &helper, &[("SP_TEST_CONNECT", path)]).expect("the helper ran");
         let first = asks(&path);
         assert!(first.contains("helper connect: connected"), "let in at first: {first}");
-        let user = private_folder::user().expect("which user this is");
+        let user = sp_winapi::current_user().expect("which user this is");
         icacls(&path, &["/deny", &format!("*{user}:F"), "/L"]);
         let said = asks(&path);
         assert!(said.contains("helper connect: refused"), "refused once the file's list refuses this user: {said}");

@@ -1,4 +1,5 @@
-//! The few Windows calls SoftPresenter makes itself. On other systems they do nothing.
+//! The few Windows calls SoftPresenter makes itself. On other systems they do nothing (and the
+//! ones about who may open a file exist only on Windows).
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
@@ -75,6 +76,13 @@ pub fn monitor_names() -> Vec<(String, String)> {
         Vec::new()
     }
 }
+
+/// Who owns a file or folder and who may open it, read and set with Windows' own security
+/// calls, and the user this program runs as: what keeps the control socket's folder to one
+/// user. Access lists go in and out written down as Windows writes them (SDDL); what they mean
+/// is for the caller to decide.
+#[cfg(windows)]
+pub use windows::security::{HeldFolder, Security, current_user, make_folder, security_of};
 
 #[cfg(test)]
 mod tests {

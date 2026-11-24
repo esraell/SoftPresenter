@@ -1,20 +1,29 @@
 //! Keeping the control socket's folder to the user the app runs as.
 //!
 //! The socket (`control`) can drive the whole app, so it sits in a folder nobody else may use.
-//! On a Mac and on Linux that is a folder with mode 0700. On Windows it is a folder whose
-//! access list names only this user (and, if they were already named there, the system and the
-//! administrators, who can reach any file anyway): the list is set, then read back, and so is
-//! the socket file's own list once it is made, because on Windows it is the file's list that
-//! decides who may connect. If either can't be set or read, or names anybody else, the app does
-//! not listen.
+//! On a Mac and on Linux that is a folder with mode 0700. On Windows it is a folder this user
+//! owns, whose access list takes nothing from the folder above and names only this user (and,
+//! if they were already named there, the system and the administrators, who can reach any file
+//! anyway). A folder made here has that owner and list from the moment it is made; one that
+//! was already there is given them, unless its list names somebody else or refuses somebody,
+//! which is left as it is. The owner and the list are then read back, and so is the socket
+//! file's own list once it is made, because on Windows it is the file's list that decides who
+//! may connect. If any of them can't be set or read, or names anybody else, the app does not
+//! listen. It is all done with Windows' own security calls (in `sp_winapi`), on the folder
+//! held open: what is looked at and changed is the folder itself, never what a link or a
+//! junction put in its place points to, and nobody can rename or remove it until the socket
+//! has been made in it and checked.
 //!
 //! Known limits on Windows, all resting on the folder above being the user's own (as it is in
 //! the usual place, the user's profile, which this code does not check):
-//! - The folder is made first and its list set a moment later, so somebody who could already
-//!   write in the folder above might get in between, or put another folder in its place after
-//!   it was looked at. The folder is not held open against that.
-//! - The owner is set, and the tool's word is taken that it was; it is not read back.
-//! - The command line does not check the folder before it sends: it trusts the path.
+//! - A folder that was already there and not yet private is made private when it is found.
+//!   Somebody who opened it before that keeps what they opened it for, as Windows checks a list
+//!   when a file is opened, not afterwards. A folder made here has no such moment.
+//! - The folder is held only while the socket is set up. Once the app listens, somebody who can
+//!   write in the folder above could rename the folder and put another in its place; and the
+//!   command line does not check the folder before it sends: it trusts the path.
+//! - The socket file's owner is not checked, only its list: the owner is whoever's token made
+//!   it (this user, or the administrators for a program with an administrator's full token).
 //! - A program run by the same user with fewer rights than usual (low integrity) is not kept
 //!   out by anything set here. Windows keeps it out by itself, which a test in `control`
 //!   shows on Windows (with a socket marked for such programs, which lets it in, beside).
@@ -23,10 +32,6 @@
 //!   a full administrator's token (what an ssh login to an administrator's account has),
 //!   which is let in whatever they say, as it could read the file anyway. The tests in
 //!   `control` therefore ask through `runas` without those rights when they are run from one.
-//!
-//! Windows offers no way to do this without `unsafe` code except through its own tools, so the
-//! lists are set and read with `icacls.exe` and the user is found with `whoami.exe`, both taken
-//! from the system's own folder.
 
 use std::path::Path;
 
@@ -35,9 +40,9 @@ pub struct Private {
     /// The user the app runs as, as Windows writes it (S-1-5-21-…).
     #[cfg(windows)]
     user: String,
-    /// The folder itself: once private, the place for the notes access lists are read through.
+    /// The folder, held open so that nobody can rename or remove it while this lasts.
     #[cfg(windows)]
-    folder: std::path::PathBuf,
+    _held: sp_winapi::HeldFolder,
 }
 
 /// Whether a file is a socket: one left by an app that stopped may be removed, anything else
@@ -99,129 +104,41 @@ pub fn is_socket(meta: &std::fs::Metadata) -> bool {
     meta.file_attributes() & REPARSE_POINT != 0 && !meta.is_dir() && !meta.file_type().is_symlink()
 }
 
-/// A real folder: not a link or a junction to somewhere else.
-#[cfg(windows)]
-fn real_folder(folder: &Path) -> Result<(), String> {
-    use std::os::windows::fs::MetadataExt;
-    let meta = std::fs::symlink_metadata(folder).map_err(|e| e.to_string())?;
-    if !meta.is_dir() || meta.file_attributes() & REPARSE_POINT != 0 {
-        return Err(format!("{} is not a folder.", folder.display()));
-    }
-    Ok(())
-}
-
-/// One of Windows' own tools, from its own folder, run without a console window of its own.
-#[cfg(windows)]
-pub(crate) fn tool(name: &str) -> Result<std::process::Command, String> {
-    use std::os::windows::process::CommandExt;
-    const NO_WINDOW: u32 = 0x0800_0000;
-    let root = std::env::var_os("SystemRoot")
-        .filter(|root| !root.is_empty())
-        .ok_or("could not find Windows' own folder (SystemRoot is not set)")?;
-    let mut tool = std::process::Command::new(Path::new(&root).join("System32").join(name));
-    tool.creation_flags(NO_WINDOW).stdin(std::process::Stdio::null());
-    Ok(tool)
-}
-
-/// Runs a tool and gives what it printed; an error says what it printed when it failed.
-#[cfg(windows)]
-pub(crate) fn run(tool: &mut std::process::Command) -> Result<String, String> {
-    let name = tool.get_program().to_string_lossy().into_owned();
-    let output = tool.output().map_err(|e| format!("could not run {name}: {e}"))?;
-    let printed = String::from_utf8_lossy(&output.stdout).into_owned();
-    if !output.status.success() {
-        let problem = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("{name} failed: {} {}", printed.trim(), problem.trim()).trim().to_owned());
-    }
-    Ok(printed)
-}
-
-/// The user the app runs as, as Windows writes it.
-#[cfg(windows)]
-pub(crate) fn user() -> Result<String, String> {
-    let printed = run(tool("whoami.exe")?.args(["/user", "/fo", "csv", "/nh"]))?;
-    user_in(&printed).ok_or_else(|| format!("could not tell which user this is from: {}", printed.trim()))
-}
-
-/// How the notes access lists are read through are named: nothing like a socket's name, so one
-/// left behind is known for what it is.
-#[cfg(windows)]
-const NOTE: &str = "softpresenter-access-note-";
-
-/// The access list of a file or folder, read through a note `icacls` writes in `notes`, under
-/// a name nobody can guess beforehand. The note is removed as soon as it is read, whatever
-/// went wrong.
-#[cfg(windows)]
-pub(crate) fn access_list(of: &Path, notes: &Path) -> Result<String, String> {
-    use std::hash::{BuildHasher, Hasher};
-    let unguessable = std::collections::hash_map::RandomState::new().build_hasher().finish();
-    let note = notes.join(format!("{NOTE}{}-{unguessable:016x}.txt", std::process::id()));
-    // /L: of the thing itself, never of what a link points to.
-    let saved = run(tool("icacls.exe")?.arg(of).arg("/save").arg(&note).arg("/L"));
-    let read = std::fs::read(&note);
-    let _ = std::fs::remove_file(&note);
-    saved?;
-    let bytes = read.map_err(|e| format!("could not read the access list of {}: {e}", of.display()))?;
-    saved_list(&bytes).ok_or_else(|| format!("could not read the access list of {}", of.display()))
-}
-
 /// Makes the folder if it isn't there, and lets only this user in: this user owns it, its
-/// access list comes from nowhere else and names this user, and everything made in it gets the
-/// same list. The list is then read back, and anybody else on it is a reason not to listen.
+/// access list takes nothing from the folder above and names this user, and everything made in
+/// it gets the same list. The owner and list are read back, and anybody else on the list is a
+/// reason not to listen.
 #[cfg(windows)]
 pub fn keep_private(folder: &Path) -> Result<Private, String> {
-    if !folder.exists() {
-        std::fs::create_dir_all(folder).map_err(|e| format!("Could not make {}: {e}", folder.display()))?;
-    }
-    real_folder(folder)?;
     let private = |problem: String| format!("Could not keep {} private: {problem}", folder.display());
-    let user = user().map_err(private)?;
-    // Owning it, as on Unix: an owner can always change the list, so nobody else may be it.
-    run(tool("icacls.exe").map_err(private)?.arg(folder).arg("/setowner").arg(format!("*{user}")).arg("/L"))
-        .map_err(private)?;
-    // /inheritance:r: nothing comes from the folder above. (OI)(CI): files and folders made in
-    // here get the same list. F: this user may do everything.
-    run(tool("icacls.exe")
-        .map_err(private)?
-        .arg(folder)
-        .arg("/inheritance:r")
-        .arg("/grant:r")
-        .arg(format!("*{user}:(OI)(CI)F"))
-        .arg("/L"))
-    .map_err(private)?;
-    // The list is read back twice, through notes in two places, and both must show a private
-    // folder. A note is a file, and whoever can change it can make the list look private:
-    // somebody still let into this folder could change a note kept here, and on a computer
-    // whose temporary folder is shared somebody else might change one kept there. Nobody but
-    // this user can do both unless both places are already theirs to write in. The temporary
-    // folder comes first, so nothing is written here until one reading says it is private.
-    for notes in [std::env::temp_dir().as_path(), folder] {
-        let list = access_list(folder, notes).map_err(private)?;
-        only_this_user(&list, &user, true).map_err(|who| others_in_folder(folder, &who))?;
+    let user = sp_winapi::current_user().map_err(private)?;
+    if !a_person(&user) {
+        return Err(private(format!("it would be kept to {user}, which is not one person's account")));
     }
-    // From here on the notes are kept in the folder, which is this user's alone. One left by a
-    // copy that was stopped half-way is cleared: only plain files with a note's name, never a
-    // socket.
-    clear_notes(folder);
-    // Still the folder that was looked at, not a link put in its place meanwhile.
-    real_folder(folder)?;
-    Ok(Private { user, folder: folder.to_owned() })
-}
-
-/// Removes notes left in the folder by a copy that was stopped before it could.
-#[cfg(windows)]
-fn clear_notes(folder: &Path) {
-    use std::os::windows::fs::MetadataExt;
-    let Ok(entries) = std::fs::read_dir(folder) else { return };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        let plain = std::fs::symlink_metadata(entry.path())
-            .is_ok_and(|meta| meta.is_file() && meta.file_attributes() & REPARSE_POINT == 0);
-        if plain && name.starts_with(NOTE) && name.ends_with(".txt") {
-            let _ = std::fs::remove_file(entry.path());
+    // Made with its owner and list, so there is no moment when it has any other. Something
+    // already there by that name (made a moment ago by somebody else, say) is looked at below,
+    // as any folder that was already there is.
+    if std::fs::symlink_metadata(folder).is_err() {
+        let could_not = |problem: String| format!("Could not make {}: {problem}", folder.display());
+        if let Some(above) = folder.parent() {
+            std::fs::create_dir_all(above).map_err(|e| could_not(e.to_string()))?;
         }
+        sp_winapi::make_folder(folder, &private_security(&user, "")).map_err(could_not)?;
     }
+    // Held from here on: a real folder, not a link or a junction to somewhere else, and still
+    // the same folder when the socket is made in it.
+    let held = sp_winapi::HeldFolder::open(folder).map_err(private)?;
+    if !held.is_real_folder().map_err(private)? {
+        return Err(format!("{} is not a folder.", folder.display()));
+    }
+    let found = held.security().map_err(private)?;
+    if folder_is_private(found.owner.as_deref(), &found.list, &user).is_err() {
+        let wanted = private_from(&found.list, &user).map_err(|who| others_in_folder(folder, &who))?;
+        held.set_security(&wanted).map_err(private)?;
+        let now = held.security().map_err(private)?;
+        folder_is_private(now.owner.as_deref(), &now.list, &user).map_err(|who| others_in_folder(folder, &who))?;
+    }
+    Ok(Private { user, _held: held })
 }
 
 #[cfg(windows)]
@@ -229,9 +146,9 @@ impl Private {
     /// The socket just made is for this user only: its own access list decides who may
     /// connect, so it is read back too.
     pub fn check_socket(&self, socket: &Path) -> Result<(), String> {
-        let list = access_list(socket, &self.folder)
+        let found = sp_winapi::security_of(socket)
             .map_err(|problem| format!("Could not keep {} private: {problem}", socket.display()))?;
-        only_this_user(&list, &self.user, false).map_err(|who| others(socket, &who))
+        only_this_user(&found.list, &self.user, false).map_err(|who| others(socket, &who))
     }
 
     /// A socket that was already there keeps the access list it had, whatever the folder's is
@@ -239,9 +156,9 @@ impl Private {
     /// not replaced: it is in the way.
     pub fn check_existing(&self, socket: &Path) -> Result<(), String> {
         let in_the_way = |why: String| format!("{} is in the way of the control socket: {why}", socket.display());
-        let list = access_list(socket, &self.folder)
+        let found = sp_winapi::security_of(socket)
             .map_err(|problem| in_the_way(format!("its access list can't be read ({problem}).")))?;
-        only_this_user(&list, &self.user, false)
+        only_this_user(&found.list, &self.user, false)
             .map_err(|who| in_the_way(format!("it is not private ({who}). Delete it, then start SoftPresenter again.")))
     }
 }
@@ -263,17 +180,13 @@ fn others_in_folder(folder: &Path, who: &str) -> String {
     )
 }
 
-/// The user in what `whoami /user /fo csv /nh` prints: the last field of its line, which must
-/// be written the way Windows writes a person's account (S-1-5-21-… with four numbers after
-/// it, or S-1-12-1-… for an account kept by an organisation's directory in the cloud) or the
-/// system's own (S-1-5-18). The field before it holds the computer's and the account's names,
-/// which somebody else may have chosen, so nothing is looked for in there.
+/// Whether a SID is one person's account, the only kind of user a folder is kept to: written
+/// the way Windows writes a person's account (S-1-5-21-… with four numbers after it, or
+/// S-1-12-1-… for an account kept by an organisation's directory in the cloud) or the system's
+/// own (S-1-5-18). An account that many programs share (S-1-5-19, a local service) is not one.
 #[cfg(any(windows, test))]
-fn user_in(printed: &str) -> Option<String> {
-    let line = printed.lines().map(str::trim).rfind(|line| !line.is_empty())?;
-    let (_names, field) = line.rsplit_once(',')?;
-    let field = field.trim().strip_prefix('"')?.strip_suffix('"')?;
-    let parts: Vec<&str> = field.split('-').collect();
+fn a_person(sid: &str) -> bool {
+    let parts: Vec<&str> = sid.split('-').collect();
     let numbers =
         parts.iter().skip(2).all(|part| (1..=10).contains(&part.len()) && part.bytes().all(|b| b.is_ascii_digit()));
     let shape = match parts.as_slice() {
@@ -281,22 +194,56 @@ fn user_in(printed: &str) -> Option<String> {
         ["S", "1", "5", "21", rest @ ..] | ["S", "1", "12", "1", rest @ ..] => rest.len() == 4,
         _ => false,
     };
-    (numbers && shape).then(|| field.to_owned())
+    numbers && shape
 }
 
-/// The access list in a note `icacls /save` wrote: its last line, whether the note is in
-/// Windows' two-byte letters or not.
+/// The owner and access list to give a folder, written as Windows writes them down: this user
+/// owns it, nothing is taken from the folder above, the entries in `kept` stay, and this user
+/// may do everything in it, which passes on to the files and folders made inside.
 #[cfg(any(windows, test))]
-fn saved_list(note: &[u8]) -> Option<String> {
-    let two_byte = note.starts_with(&[0xff, 0xfe]) || note.iter().skip(1).step_by(2).take(8).any(|byte| *byte == 0);
-    let text = if two_byte {
-        let units: Vec<u16> = note.as_chunks::<2>().0.iter().map(|pair| u16::from_le_bytes(*pair)).collect();
-        String::from_utf16_lossy(&units)
-    } else {
-        String::from_utf8_lossy(note).into_owned()
-    };
-    let line = text.lines().map(|line| line.trim().trim_start_matches('\u{feff}')).rfind(|line| !line.is_empty())?;
-    line.contains("D:").then(|| line.to_owned())
+fn private_security(user: &str, kept: &str) -> String {
+    format!("O:{user}D:P{kept}(A;OICI;FA;;;{user})")
+}
+
+/// What to give a folder that was already there and isn't private, from the access list it
+/// has: what it takes from the folder above goes, its own entries for the system and the
+/// administrators stay, and its own entries for this user are replaced by one that gives them
+/// the whole of it. An entry of its own for anybody else, or one that refuses somebody, is not
+/// taken off (it may have been put there on purpose): the error says who else is let in, or
+/// what is wrong, and nothing is changed.
+#[cfg(any(windows, test))]
+fn private_from(list: &str, user: &str) -> Result<String, String> {
+    let (_closed, entries) = entries(list).ok_or_else(|| format!("its access list can't be read: {list}"))?;
+    let mut kept = String::new();
+    for entry in &entries {
+        if entry.passed_on.as_bytes().chunks(2).any(|flag| flag == b"ID") {
+            continue;
+        }
+        if entry.kind != "A" {
+            return Err(format!("its access list has an entry of a kind not expected, {}", entry.kind));
+        }
+        if is_this_user(entry.who, user) {
+            continue;
+        }
+        if !may_also_open(entry.who) {
+            return Err(format!("{} may open it too", entry.who));
+        }
+        kept.push('(');
+        kept.push_str(entry.text);
+        kept.push(')');
+    }
+    Ok(private_security(user, &kept))
+}
+
+/// Checks that a folder is private: this user owns it (an owner can always change the list, so
+/// nobody else may be it), and its access list is what [`only_this_user`] wants of a folder's.
+#[cfg(any(windows, test))]
+fn folder_is_private(owner: Option<&str>, list: &str, user: &str) -> Result<(), String> {
+    match owner {
+        None => Err("it has no owner".to_owned()),
+        Some(owner) if owner != user => Err(format!("it belongs to {owner}")),
+        Some(_) => only_this_user(list, user, true),
+    }
 }
 
 /// One line of an access list: who, and what it lets them do.
@@ -304,10 +251,13 @@ fn saved_list(note: &[u8]) -> Option<String> {
 struct Entry<'a> {
     /// `A` lets in; anything else (refusing, auditing, conditions) is not expected here.
     kind: &'a str,
-    /// Two letters each: `OI` and `CI` pass the entry on to files and folders made inside.
+    /// Two letters each: `OI` and `CI` pass the entry on to files and folders made inside, and
+    /// `ID` marks one taken on from the folder above.
     passed_on: &'a str,
     rights: &'a str,
     who: &'a str,
+    /// The whole line as written, without its brackets.
+    text: &'a str,
 }
 
 /// The entries of an access list written the way Windows writes one down
@@ -325,15 +275,33 @@ fn entries(list: &str) -> Option<(bool, Vec<Entry<'_>>)> {
     let mut found = Vec::new();
     while let Some(inside) = rest.strip_prefix('(') {
         let end = inside.find(')')?;
-        let parts: Vec<&str> = inside[..end].split(';').collect();
-        if parts.len() < 6 || inside[..end].contains('(') {
+        let text = &inside[..end];
+        let parts: Vec<&str> = text.split(';').collect();
+        if parts.len() < 6 || text.contains('(') {
             return None;
         }
-        found.push(Entry { kind: parts[0], passed_on: parts[1], rights: parts[2], who: parts[5] });
+        found.push(Entry { kind: parts[0], passed_on: parts[1], rights: parts[2], who: parts[5], text });
         rest = &inside[end + 1..];
     }
     // Nothing may follow but the system's own labels (S:…).
     (rest.is_empty() || rest.starts_with("S:")).then_some((marks.contains('P'), found))
+}
+
+/// Whether the one an entry is for is this user. Windows writes the first administrator
+/// account of a computer as LA, and the system's own account (which a service may run as) as
+/// SY.
+#[cfg(any(windows, test))]
+fn is_this_user(who: &str, user: &str) -> bool {
+    who == user
+        || (who == "LA" && user.starts_with("S-1-5-21-") && user.ends_with("-500"))
+        || (who == "SY" && user == "S-1-5-18")
+}
+
+/// The system and the administrators, who may be on a list beside this user: they can reach
+/// any file anyway.
+#[cfg(any(windows, test))]
+fn may_also_open(who: &str) -> bool {
+    matches!(who, "SY" | "BA" | "S-1-5-18" | "S-1-5-32-544")
 }
 
 /// Checks that an access list lets in this user and nobody but this user, the system and the
@@ -346,24 +314,17 @@ fn only_this_user(list: &str, user: &str, folder: bool) -> Result<(), String> {
     if folder && !closed {
         return Err("it takes on the access list of the folder above".to_owned());
     }
-    // Windows writes the first administrator account of a computer as LA, and the system's own
-    // account (which a service may run as) as SY.
-    let this_user = |who: &str| {
-        who == user
-            || (who == "LA" && user.starts_with("S-1-5-21-") && user.ends_with("-500"))
-            || (who == "SY" && user == "S-1-5-18")
-    };
     let mut lets_user_in = false;
     for entry in &entries {
         if entry.kind != "A" {
             return Err(format!("its access list has an entry of a kind not expected, {}", entry.kind));
         }
-        if this_user(entry.who) {
+        if is_this_user(entry.who, user) {
             let passed_on: Vec<&[u8]> = entry.passed_on.as_bytes().chunks(2).collect();
             let to_files = passed_on.contains(&b"OI".as_slice());
             let all = entry.rights == "FA" || entry.rights.eq_ignore_ascii_case("0x1f01ff");
             lets_user_in |= all && (to_files || !folder);
-        } else if !matches!(entry.who, "SY" | "BA" | "S-1-5-18" | "S-1-5-32-544") {
+        } else if !may_also_open(entry.who) {
             return Err(format!("{} may open it too", entry.who));
         }
     }
@@ -380,58 +341,33 @@ mod tests {
     const USER: &str = "S-1-5-21-1111-2222-3333-1001";
 
     #[test]
-    fn the_user_is_found_in_what_whoami_prints() {
-        assert_eq!(user_in("\"desk\\operator\",\"S-1-5-21-1111-2222-3333-1001\"\r\n").as_deref(), Some(USER));
-        assert_eq!(user_in("\"nt authority\\system\",\"S-1-5-18\"\r\n").as_deref(), Some("S-1-5-18"));
-        assert_eq!(user_in("\"cloud\\operator\",\"S-1-12-1-11-22-33-44\"").as_deref(), Some("S-1-12-1-11-22-33-44"));
-        for not_a_user in [
+    fn only_a_persons_account_is_a_user_to_keep_a_folder_to() {
+        for person in [USER, "S-1-5-18", "S-1-12-1-11-22-33-44", "S-1-5-21-1-2-3-500"] {
+            assert!(a_person(person), "{person}");
+        }
+        for not_a_person in [
+            "",
             "nothing of the kind",
-            "\"x\",\"S-1-\"",
-            "\"x\",\"\"",
-            // Not in the last field, or not a field at all.
-            "desk\\operator S-1-5-21-1111-2222-3333-1001",
-            "\"S-1-5-21-1111-2222-3333-1001\"",
-            "\"S-1-5-21-1111-2222-3333-1001\",\"operator\"",
-            // A group everybody is in, a list's short names, too few or too many numbers, rubbish.
-            "\"x\",\"S-1-1-0\"",
-            "\"x\",\"S-1-5-32-544\"",
-            "\"x\",\"WD\"",
-            "\"x\",\"S-1-5-21-1111-2222-3333\"",
-            "\"x\",\"S-1-5-21-1111-2222-3333-1001-5\"",
-            "\"x\",\"S-1-5-21-1111-2222-3333-1001 \"",
-            "\"x\",\"S-1-5-21-1111-2222-3333-1001:(OI)(CI)F\"",
-            "\"x\",\"S-1-5-21-1111--3333-1001\"",
-            "\"x\",S-1-5-21-1111-2222-3333-1001",
+            "S-1-",
+            // A group everybody is in, the administrators, an account services share, a list's
+            // short names.
+            "S-1-1-0",
+            "S-1-5-32-544",
+            "S-1-5-19",
+            "WD",
+            "LA",
+            // Too few or too many numbers, or not numbers.
+            "S-1-5-21-1111-2222-3333",
+            "S-1-5-21-1111-2222-3333-1001-5",
+            "S-1-5-21-1111--3333-1001",
+            "S-1-5-21-1111-2222-3333-12345678901",
+            "S-1-5-21-1111-2222-3333-1001 ",
+            // Anything that would add to a written access list.
+            "S-1-5-21-1111-2222-3333-1001)(A;;FA;;;WD",
+            "S-1-5-21-1111-2222-3333-1001:(OI)(CI)F",
         ] {
-            assert_eq!(user_in(not_a_user), None, "{not_a_user}");
+            assert!(!a_person(not_a_person), "{not_a_person}");
         }
-    }
-
-    /// The names in front are somebody else's to choose; an account written into them is not
-    /// taken for the user.
-    #[test]
-    fn a_computer_or_account_named_like_a_user_is_not_taken_for_one() {
-        for names in ["S-1-5-21-9-9-9-500\\operator", "desk\\S-1-5-18", "S-1-1-0\\S-1-5-21-9-9-9-500"] {
-            let printed = format!("\"{names}\",\"{USER}\"\r\n");
-            assert_eq!(user_in(&printed).as_deref(), Some(USER), "{printed}");
-            // And with no proper last field there is no user at all, rather than the name's.
-            assert_eq!(user_in(&format!("\"{names}\",\"\"")), None);
-            assert_eq!(user_in(&format!("\"{names}\"")), None);
-        }
-    }
-
-    #[test]
-    fn a_saved_access_list_is_read_in_either_kind_of_letters() {
-        let text = "control\r\nD:PAI(A;OICI;FA;;;S-1-5-21-1111-2222-3333-1001)\r\n";
-        let wanted = "D:PAI(A;OICI;FA;;;S-1-5-21-1111-2222-3333-1001)";
-        assert_eq!(saved_list(text.as_bytes()).as_deref(), Some(wanted));
-        let two_byte: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
-        assert_eq!(saved_list(&two_byte).as_deref(), Some(wanted));
-        let mut marked = vec![0xff, 0xfe];
-        marked.extend(&two_byte);
-        assert_eq!(saved_list(&marked).as_deref(), Some(wanted));
-        assert_eq!(saved_list(b"control\r\n"), None);
-        assert_eq!(saved_list(b""), None);
     }
 
     #[test]
@@ -459,6 +395,7 @@ mod tests {
             (format!("D:P(XA;OICI;FA;;;{USER};(@User.x == 1))(A;OICI;FA;;;WD)"), "can't be read"),
             ("D:NO_ACCESS_CONTROL".to_owned(), "can't be read"),
             ("D:P".to_owned(), "doesn't give this user"),
+            ("".to_owned(), "can't be read"),
             (format!("D:P(A;OICI;FA;;;{USER})rubbish"), "can't be read"),
             ("nothing".to_owned(), "can't be read"),
         ] {
@@ -474,5 +411,111 @@ mod tests {
         assert_eq!(only_this_user(&list, USER, false), Ok(()));
         let list = format!("D:AI(A;ID;FA;;;{USER})(A;ID;0x1200a9;;;WD)");
         assert!(only_this_user(&list, USER, false).is_err());
+    }
+
+    /// The owner can always change the list, so a folder must belong to this user too.
+    #[test]
+    fn a_private_folder_belongs_to_this_user() {
+        let list = format!("D:PAI(A;OICI;FA;;;{USER})");
+        assert_eq!(folder_is_private(Some(USER), &list, USER), Ok(()));
+        for (owner, why) in [
+            (None, "it has no owner"),
+            (Some("S-1-5-21-1111-2222-3333-1002"), "it belongs to S-1-5-21-1111-2222-3333-1002"),
+            (Some("S-1-5-32-544"), "it belongs to S-1-5-32-544"),
+            (Some("S-1-1-0"), "it belongs to S-1-1-0"),
+        ] {
+            assert_eq!(folder_is_private(owner, &list, USER), Err(why.to_owned()));
+        }
+        // And belonging to this user does not make a list that lets others in private.
+        let open = format!("D:P(A;OICI;FA;;;{USER})(A;OICI;FA;;;WD)");
+        assert!(folder_is_private(Some(USER), &open, USER).is_err());
+    }
+
+    /// What a folder is made with is private as it stands.
+    #[test]
+    fn a_folder_is_made_private() {
+        let made = private_security(USER, "");
+        assert_eq!(made, format!("O:{USER}D:P(A;OICI;FA;;;{USER})"));
+        assert_eq!(folder_is_private(Some(USER), &made, USER), Ok(()));
+    }
+
+    /// Windows makes the folder with its owner and list, rather than with what the folder above
+    /// would give it (which `keep_private` would then set right, so a test of that alone could
+    /// not tell).
+    #[cfg(windows)]
+    #[test]
+    fn windows_makes_a_folder_private_from_the_start() {
+        let user = sp_winapi::current_user().expect("which user this is");
+        let folder = std::env::temp_dir().join(format!("sp-made-private-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        assert_eq!(sp_winapi::make_folder(&folder, &private_security(&user, "")), Ok(true), "made");
+        let made = sp_winapi::security_of(&folder).expect("its owner and access list");
+        let _ = std::fs::remove_dir_all(&folder);
+        assert_eq!(made.owner.as_deref(), Some(user.as_str()), "it belongs to this user");
+        assert!(made.list.starts_with("D:P"), "closed to the folder above: {}", made.list);
+        let (_, entries) = entries(&made.list).expect("a list that can be read");
+        assert!(
+            entries.iter().all(|entry| !entry.passed_on.as_bytes().chunks(2).any(|flag| flag == b"ID")),
+            "nothing taken from the folder above: {}",
+            made.list
+        );
+        assert_eq!(folder_is_private(made.owner.as_deref(), &made.list, &user), Ok(()), "{}", made.list);
+        // Asked to make it again, it says it is there already and leaves it.
+        std::fs::create_dir_all(&folder).expect("a folder in the way");
+        assert_eq!(sp_winapi::make_folder(&folder, &private_security(&user, "")), Ok(false));
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_folder_already_there_is_given_only_this_user() {
+        for (list, wanted) in [
+            // What a folder made the ordinary way takes from the folder above goes.
+            (
+                format!("D:AI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;FA;;;{USER})(A;OICIIOID;GA;;;CO)"),
+                format!("O:{USER}D:P(A;OICI;FA;;;{USER})"),
+            ),
+            // Even when what it takes lets others in: it comes from the folder above, which is
+            // this user's (see the module's limits).
+            (format!("D:AI(A;OICIID;FA;;;WD)(A;OICIID;FA;;;{USER})"), format!("O:{USER}D:P(A;OICI;FA;;;{USER})")),
+            // The system's and the administrators' own entries stay; this user's are replaced.
+            (
+                format!("D:(A;OICI;FA;;;SY)(A;;0x1200a9;;;{USER})(A;OICI;FA;;;S-1-5-32-544)(A;OICIID;FA;;;BA)"),
+                format!("O:{USER}D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;S-1-5-32-544)(A;OICI;FA;;;{USER})"),
+            ),
+            // A list with nothing in it, or already closed.
+            ("D:".to_owned(), format!("O:{USER}D:P(A;OICI;FA;;;{USER})")),
+            (format!("D:P(A;;FA;;;{USER})"), format!("O:{USER}D:P(A;OICI;FA;;;{USER})")),
+        ] {
+            let given = private_from(&list, USER).expect(&list);
+            assert_eq!(given, wanted, "{list}");
+            assert_eq!(folder_is_private(Some(USER), &given, USER), Ok(()), "{given}");
+        }
+        // A computer's first administrator account, written LA, is the user's own entry.
+        let admin = "S-1-5-21-1-2-3-500";
+        let given = private_from("D:AI(A;OICI;FA;;;LA)(A;OICIID;FA;;;SY)", admin).expect("given");
+        assert_eq!(given, format!("O:{admin}D:P(A;OICI;FA;;;{admin})"));
+    }
+
+    /// Entries a folder has of its own for anybody else, or that refuse somebody, are not taken
+    /// off: the folder is refused and nothing is set.
+    #[test]
+    fn a_folder_already_there_that_others_may_open_is_refused() {
+        for (list, why) in [
+            (format!("D:AI(A;OICI;FA;;;WD)(A;OICIID;FA;;;{USER})"), "WD may open it too"),
+            (format!("D:(A;OICI;FA;;;{USER})(A;;0x1200a9;;;S-1-5-21-1111-2222-3333-1002)"), "1002 may open it too"),
+            (format!("D:(A;OICIIO;GA;;;CO)(A;OICI;FA;;;{USER})"), "CO may open it too"),
+            (format!("D:(D;OICI;FA;;;WD)(A;OICI;FA;;;{USER})"), "not expected, D"),
+            (format!("D:(D;;FA;;;{USER})(A;OICI;FA;;;{USER})"), "not expected, D"),
+            (format!("D:(OA;;FA;00000000-0000-0000-0000-000000000000;;{USER})"), "not expected, OA"),
+            (format!("D:(XA;OICI;FA;;;{USER};(@User.x == 1))"), "can't be read"),
+            // No list, or an empty one, lets everybody in: somebody may have done anything there.
+            ("D:NO_ACCESS_CONTROL".to_owned(), "can't be read"),
+            ("".to_owned(), "can't be read"),
+            ("nothing".to_owned(), "can't be read"),
+            (format!("D:(A;OICI;FA;;;{USER})rubbish"), "can't be read"),
+        ] {
+            let said = private_from(&list, USER).expect_err(&list);
+            assert!(said.contains(why), "{list}: {said}");
+        }
     }
 }

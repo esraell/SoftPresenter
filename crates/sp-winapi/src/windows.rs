@@ -1,3 +1,5 @@
+pub mod security;
+
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Devices::Display::{

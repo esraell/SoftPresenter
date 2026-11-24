@@ -102,9 +102,11 @@ message.
 - **`unsafe` code** is allowed only in `sp-video`'s two macOS modules (`mac` for videos and
   pictures, with its `gpu` part that hands a decoded picture's memory to wgpu through wgpu's
   Metal interface and its `cover` part that puts a screen's window on its display and listens for
-  the displays changing, `web_mac` for web pages), `sp-ndi`'s `runtime` module, `sp-winapi`'s `windows` module (a few Windows calls: joining
-  the console a command was typed in, asking a monitor for its work area, and asking Windows the
-  names the monitors give themselves) and `sp-decklink`'s `ffi`
+  the displays changing, `web_mac` for web pages), `sp-ndi`'s `runtime` module, `sp-winapi`'s `windows` module (the few Windows calls the
+  app needs: joining the console a command was typed in, asking a monitor for its work area,
+  asking Windows the names the monitors give themselves, putting a folder on the user's PATH,
+  and, in its `security` part, reading and setting who owns and may open the control socket's
+  folder and finding the user the app runs as) and `sp-decklink`'s `ffi`
   module, and every block says why it is sound. `web_mac` also calls two web view settings outside Apple's published interface
   (window occlusion detection and the page background), only when the web view answers to them;
   the owner agreed to that on 2026-11-20. Anywhere else, find a safe way or ask the owner.

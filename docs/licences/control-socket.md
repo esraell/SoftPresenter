@@ -19,5 +19,6 @@ The other crates it needs (`windows-sys`, `getrandom`, `once_cell`, `rustix`, `a
 already part of the app. All can be combined with the GNU GPL version 3, as NOTICE.md's "Other
 libraries" says; `cargo metadata` lists each with its licence.
 
-Keeping the socket's folder to one user on Windows uses no library: the app runs Windows' own
-`icacls.exe` and `whoami.exe` (`crates/sp-app/src/private_folder.rs`).
+Keeping the socket's folder to one user on Windows uses no new library: the app calls Windows'
+own security functions through `windows-sys`, which was already part of it
+(`crates/sp-winapi/src/windows/security.rs`, used by `crates/sp-app/src/private_folder.rs`).

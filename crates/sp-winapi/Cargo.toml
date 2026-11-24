@@ -5,19 +5,22 @@ edition.workspace = true
 publish.workspace = true
 license.workspace = true
 
-# The Windows calls the app can't make safely: finding a parent console to print to, asking a
-# monitor for the part of it the taskbar leaves free, asking Windows the names the monitors give
-# themselves, and putting a folder on the user's PATH. windows-sys is already in the build (winit
-# and others use it); this adds no crate.
+# The few Windows calls the app can't make safely: finding a parent console to print to, asking
+# a monitor for the part of it the taskbar leaves free, asking Windows the names the monitors give
+# themselves, putting a folder on the user's PATH, and reading and setting who may open the
+# control socket's folder. windows-sys is already in the build (winit and others use it); this
+# adds no crate.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Devices_Display",
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Security",
+    "Win32_Security_Authorization",
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
     "Win32_System_Registry",
+    "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
 ] }
 
