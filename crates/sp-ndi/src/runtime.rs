@@ -199,6 +199,9 @@ fn places() -> Vec<PathBuf> {
     } else {
         "libndi.so.6"
     };
+    // NDI 5's runtime has the same functions this app uses (create, send, destroy, the
+    // connection count) and the same frame layouts, so it works as well as NDI 6's.
+    let name_v5 = if cfg!(target_os = "linux") { "libndi.so.5" } else { name };
     let mut places = Vec::new();
     // Testing aid: behave as on a computer without NDI.
     if std::env::var_os("SOFTPRESENTER_HIDE_NDI").is_some() {
@@ -206,6 +209,9 @@ fn places() -> Vec<PathBuf> {
     }
     if let Some(folder) = std::env::var_os("NDI_RUNTIME_DIR_V6") {
         places.push(PathBuf::from(folder).join(name));
+    }
+    if let Some(folder) = std::env::var_os("NDI_RUNTIME_DIR_V5") {
+        places.push(PathBuf::from(folder).join(name_v5));
     }
     if let Some(app) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|dir| dir.to_path_buf())) {
         places.push(app.join("../Frameworks").join(name));
@@ -218,11 +224,81 @@ fn places() -> Vec<PathBuf> {
         // each app and install nothing in /usr/local/lib, so a Mac with NDI Tools would
         // otherwise count as having no NDI. Only NDI's own apps are looked in.
         places.extend(ndi_tools_runtimes(std::path::Path::new("/Applications"), name));
-    } else if !cfg!(windows) {
+    } else if cfg!(windows) {
+        if let Some(program_files) = std::env::var_os("ProgramFiles") {
+            places.extend(windows_runtimes(&PathBuf::from(program_files).join("NDI"), name));
+        }
+    } else {
         places.push(PathBuf::from("/usr/lib").join(name));
         places.push(PathBuf::from("/usr/local/lib").join(name));
+        places.push(PathBuf::from("/usr/lib").join(name_v5));
+        places.push(PathBuf::from("/usr/local/lib").join(name_v5));
     }
     places
+}
+
+/// The runtime inside each of NDI's folders in `<Program Files>\NDI` ("NDI 6 Runtime\v6",
+/// "NDI 6 Tools\Runtime", "NDI 5 Tools\Runtime"…), newest name first, whatever the version is
+/// called: the folder names are read, not listed.
+fn windows_runtimes(ndi: &std::path::Path, name: &str) -> Vec<PathBuf> {
+    let subfolders = |dir: &std::path::Path| -> Vec<PathBuf> {
+        let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
+            .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
+            .unwrap_or_default();
+        found.sort();
+        found.reverse();
+        found
+    };
+    let mut found = Vec::new();
+    for folder in subfolders(ndi) {
+        if !folder.file_name().is_some_and(|n| n.to_string_lossy().starts_with("NDI ")) {
+            continue;
+        }
+        found.push(folder.join("Runtime").join(name));
+        // The runtime installer's own folder is "v6" (or "v5") inside.
+        for inner in subfolders(&folder) {
+            let versioned = inner.file_name().is_some_and(|n| {
+                let n = n.to_string_lossy();
+                n.strip_prefix('v').and_then(|rest| rest.chars().next()).is_some_and(|c| c.is_ascii_digit())
+            });
+            if versioned {
+                found.push(inner.join(name));
+            }
+        }
+        found.push(folder.join(name));
+    }
+    found
+}
+
+#[cfg(test)]
+mod places_tests {
+    use super::*;
+
+    #[test]
+    fn finds_the_runtime_in_every_ndi_folder_newest_first() {
+        let root = std::env::temp_dir().join(format!("sp-ndi-places-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for dir in ["NDI 5 Tools/Runtime", "NDI 6 Runtime/v6", "NDI 6.1 Tools/Runtime", "Other/Runtime"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        let found = windows_runtimes(&root, "Processing.NDI.Lib.x64.dll");
+        let shown: Vec<String> =
+            found.iter().map(|p| p.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/")).collect();
+        let at = |s: &str| shown.iter().position(|p| p == s).unwrap_or_else(|| panic!("{s} missing in {shown:?}"));
+        assert!(
+            at("NDI 6.1 Tools/Runtime/Processing.NDI.Lib.x64.dll") < at("NDI 6 Runtime/v6/Processing.NDI.Lib.x64.dll")
+        );
+        assert!(
+            at("NDI 6 Runtime/v6/Processing.NDI.Lib.x64.dll") < at("NDI 5 Tools/Runtime/Processing.NDI.Lib.x64.dll")
+        );
+        assert!(shown.iter().all(|p| !p.starts_with("Other")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_missing_folder_gives_nothing() {
+        assert!(windows_runtimes(std::path::Path::new("/no/such/folder"), "x").is_empty());
+    }
 }
 
 /// Opens the first runtime found in `places` and starts it.
