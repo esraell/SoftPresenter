@@ -231,7 +231,7 @@ fn open_panel_window(
     quiet: bool,
     kind: Panel,
 ) -> Result<PanelWindow, String> {
-    let attrs = Window::default_attributes()
+    let attrs = app_window(Window::default_attributes())
         .with_title(kind.title())
         .with_inner_size(match kind {
             Panel::Screens => winit::dpi::LogicalSize::new(780.0, 640.0),
@@ -1653,7 +1653,7 @@ impl App {
         let work = first_monitor.as_ref().map(|m| work_area(m, scale));
         let (frame_w, frame_h) = ((16.0 * scale) as u32, (40.0 * scale) as u32);
         let wanted_inner = ((width * scale) as u32, (height * scale) as u32);
-        let mut home_attrs = Window::default_attributes().with_title("SoftPresenter");
+        let mut home_attrs = app_window(Window::default_attributes()).with_title("SoftPresenter");
         let min_inner = (1100.0 * scale, 700.0 * scale);
         match work {
             Some(work) => {
@@ -7359,7 +7359,7 @@ impl App {
                 }
             }
             // Open a window: for a screen with none, or one that couldn't be used again.
-            let attrs = Window::default_attributes().with_title(format!("{} — SoftPresenter", screen.name));
+            let attrs = app_window(Window::default_attributes()).with_title(format!("{} — SoftPresenter", screen.name));
             let covering = matches!(place, Placed::Fullscreen(_));
             let attrs = match place {
                 // Opened on the display first, as large as it, and put to fill it once it is
@@ -10131,6 +10131,50 @@ impl ApplicationHandler<AppEvent> for App {
             None => el.set_control_flow(ControlFlow::Wait),
         }
     }
+}
+
+/// The app's icon, for its windows' title bars and the taskbar where the system takes it from
+/// the window (a Mac takes it from the app bundle instead): on Windows the icon built into the
+/// program, every size of it; on Linux a 256-pixel picture.
+fn window_icon() -> Option<winit::window::Icon> {
+    #[cfg(windows)]
+    {
+        use winit::platform::windows::IconExtWindows;
+        // Resource 1: the icon build.rs puts into the program.
+        winit::window::Icon::from_resource(1, None).ok()
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let picture = image::load_from_memory_with_format(
+            include_bytes!("../../../assets/icons/SoftPresenter-256.png"),
+            image::ImageFormat::Png,
+        )
+        .ok()?
+        .into_rgba8();
+        let (width, height) = picture.dimensions();
+        winit::window::Icon::from_rgba(picture.into_raw(), width, height).ok()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        None
+    }
+}
+
+/// What every window of the app shares: its icon, the taskbar's icon on Windows, and on Linux
+/// the name a desktop entry is matched by (`softpresenter`, as `softpresenter.desktop`).
+fn app_window(attrs: winit::window::WindowAttributes) -> winit::window::WindowAttributes {
+    let attrs = attrs.with_window_icon(window_icon());
+    #[cfg(windows)]
+    let attrs = {
+        use winit::platform::windows::WindowAttributesExtWindows;
+        attrs.with_taskbar_icon(window_icon())
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let attrs = {
+        use winit::platform::wayland::WindowAttributesExtWayland;
+        WindowAttributesExtWayland::with_name(attrs, "softpresenter", "softpresenter")
+    };
+    attrs
 }
 
 /// A graphics error nobody asked to catch, written in the log (a window program on Windows has no

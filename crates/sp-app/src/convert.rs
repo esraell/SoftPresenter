@@ -118,20 +118,23 @@ impl Program {
     /// Asks a program SoftPresenter started to quit, when its script didn't get to (it was
     /// stopped for taking too long, or failed part way).
     fn quit(self) {
-        if self == Program::Headless {
-            return;
+        #[cfg(any(target_os = "macos", windows))]
+        if self != Program::Headless {
+            #[cfg(target_os = "macos")]
+            {
+                let script = format!("tell application \"{}\" to quit", self.process());
+                let _ = run_for(osascript(&script, &[]), Duration::from_secs(15));
+            }
+            #[cfg(windows)]
+            {
+                let mut command = windows_tool("taskkill.exe");
+                command.args(["/IM", self.process()]);
+                let _ = run_for(command, Duration::from_secs(15));
+            }
         }
-        #[cfg(target_os = "macos")]
-        {
-            let script = format!("tell application \"{}\" to quit", self.process());
-            let _ = run_for(osascript(&script, &[]), Duration::from_secs(15));
-        }
-        #[cfg(windows)]
-        {
-            let mut command = windows_tool("taskkill.exe");
-            command.args(["/IM", self.process()]);
-            let _ = run_for(command, Duration::from_secs(15));
-        }
+        // Elsewhere only the headless app runs, and it quits by itself.
+        #[cfg(not(any(target_os = "macos", windows)))]
+        let _ = self;
     }
 
     /// Installed, on a system whose PDFs SoftPresenter can draw (not Linux yet).
