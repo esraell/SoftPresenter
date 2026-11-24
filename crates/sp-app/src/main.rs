@@ -1573,6 +1573,14 @@ impl App {
             if (put.x, put.y) != (at.x, at.y) {
                 home_window.set_outer_position(winit::dpi::PhysicalPosition::new(put.x, put.y));
             }
+            let (w, h) = (size.width, size.height);
+            applog::event(
+                "window",
+                &format!(
+                    "home window {w}x{h} at {},{} (asked for {},{}); work area {}x{} at {},{}",
+                    at.x, at.y, put.x, put.y, work.w, work.h, work.x, work.y
+                ),
+            );
         }
         let operator = operator_displays(&monitors, home_window.current_monitor(), el.primary_monitor());
 
@@ -6884,7 +6892,11 @@ impl App {
         // Whether NDI is installed, looked at again every few seconds (a few file checks), so
         // installing it while the app runs is noticed.
         if running.ndi_checked.is_none_or(|at| at.elapsed() >= Duration::from_secs(3)) {
-            running.home_state.ndi_available = sp_ndi::installed();
+            let found = sp_ndi::installed();
+            if running.ndi_checked.is_none() || found != running.home_state.ndi_available {
+                applog::event("ndi", if found { "the NDI runtime was found" } else { "the NDI runtime was not found" });
+            }
+            running.home_state.ndi_available = found;
             running.ndi_checked = Some(Instant::now());
         }
         // The DeckLink devices as last found (never waits on the driver).
