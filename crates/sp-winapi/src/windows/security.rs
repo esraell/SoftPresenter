@@ -20,8 +20,9 @@ use windows_sys::Win32::Security::{
 };
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_EXISTING, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_EXISTING, READ_CONTROL,
+    WRITE_DAC, WRITE_OWNER,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows_sys::core::{BOOL, PWSTR};
@@ -312,12 +313,15 @@ pub fn make_folder(path: &Path, security: &str) -> Result<bool, String> {
 pub struct HeldFolder(Handle);
 
 impl HeldFolder {
-    /// Opens what is at a path to read and set its owner and access list, and holds it. It asks
-    /// to read nothing inside (only what kind of thing it is), so a program that has the folder
-    /// open to look inside does not stand in the way; one that has it open to delete or rename
-    /// it does (opening fails), and while it is held nobody can open it to do either.
+    /// Opens what is at a path to read and set its owner and access list, and holds it: while
+    /// it is held nobody can open it to delete or rename it, and one that has it open to do
+    /// either stands in the way (opening fails). It asks to list the folder as well, because
+    /// Windows leaves a handle that only reads attributes or sets security out of its sharing
+    /// rules, so without that the hold would keep nobody out (a test on Windows showed it). A
+    /// program that has the folder open to look inside, sharing it for reading, doesn't stand in
+    /// the way.
     pub fn open(path: &Path) -> Result<HeldFolder, String> {
-        let access = READ_CONTROL | WRITE_DAC | WRITE_OWNER | FILE_READ_ATTRIBUTES;
+        let access = READ_CONTROL | WRITE_DAC | WRITE_OWNER | FILE_READ_ATTRIBUTES | FILE_LIST_DIRECTORY;
         open(path, access, FILE_SHARE_READ | FILE_SHARE_WRITE).map(HeldFolder)
     }
 
