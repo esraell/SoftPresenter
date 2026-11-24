@@ -74,6 +74,7 @@ mod system_language;
 mod theme_cli;
 mod theme_store;
 mod thumbs;
+mod timelychurch;
 mod timers;
 mod versions;
 mod voxlive;

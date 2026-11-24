@@ -232,7 +232,9 @@ rather than a feature, but no church on Windows can use the app without them.
 
 Ideas of our own, beyond the lists above:
 
-- TimelyChurch songs and schedules.
+- TimelyChurch songs and schedules: a church's upcoming setlists and plans as playlists, and
+  their songs with translations, kept in step ([design](timelychurch.md); the mapping is built,
+  the connection waits for TimelyChurch's device interface).
 - VoxLive live translation shown on a screen.
 - An API over the network with a stream of changes, and MCP for AI agents. The command line
   `sp` already controls the running app; see [cli.md](cli.md).

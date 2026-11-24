@@ -29,6 +29,7 @@ pub use fetch::{Have, Progress, Reply, base_url};
 pub use fold::fold;
 pub use present::{
     CREDIT, Credit, Pairing, Presented, Source, Verdict, fingerprint, judge, kept, marked, present, refreshed,
+    refreshed_song,
 };
 pub use read::{KEY_VERSION, Section, Song, Version, read_pack, song_key, text_hash};
 pub use search::{Found, Hit, search_indexes};

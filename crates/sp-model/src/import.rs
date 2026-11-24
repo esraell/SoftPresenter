@@ -22,7 +22,7 @@
 use crate::{Copyright, Presentation, parse_song_text};
 
 /// The most lines a slide gets when a section's lines run on without a blank line.
-const MOST_LINES: usize = 4;
+pub const MOST_LINES: usize = 4;
 
 /// One line of a song being imported.
 #[derive(Debug, PartialEq)]
@@ -75,7 +75,7 @@ fn is_song_text(text: &str) -> bool {
 }
 
 /// The section a line names, tidied ("CHORUS:" gives "Chorus"), or `None` for a line of words.
-fn section_name(line: &str) -> Option<String> {
+pub fn section_name(line: &str) -> Option<String> {
     const NAMES: [&str; 33] = [
         "verse",
         "chorus",
@@ -171,6 +171,13 @@ fn copyright_text(line: &str) -> Option<&str> {
         .map(str::trim)
 }
 
+/// A copyright line ("© 2019 A Publisher", or the same without the mark) as its year and its
+/// publisher; the year is empty when the line doesn't give one first.
+pub fn year_and_publisher(line: &str) -> (String, String) {
+    let line = line.trim();
+    year_and_owner(copyright_text(line).unwrap_or(line))
+}
+
 /// "2019 A Publisher" as its year and owner; the year is empty when the line doesn't start
 /// with one.
 fn year_and_owner(text: &str) -> (String, String) {
@@ -188,7 +195,7 @@ fn to_song_text(lines: impl Iterator<Item = Line>) -> String {
     let mut out = String::new();
     let mut stretch: Vec<String> = Vec::new();
     let flush = |stretch: &mut Vec<String>, out: &mut String| {
-        for slide in share_out(stretch) {
+        for slide in share_out(stretch, MOST_LINES) {
             out.push_str(&slide.join("\n"));
             out.push_str("\n\n");
         }
@@ -210,12 +217,13 @@ fn to_song_text(lines: impl Iterator<Item = Line>) -> String {
     out
 }
 
-/// A stretch of lines as slides of at most [`MOST_LINES`], as equal as they can be.
-fn share_out(lines: &[String]) -> Vec<&[String]> {
+/// A stretch of lines as slides of at most `most` lines (at least one), as equal as they can be:
+/// with four, nine lines make slides of three, three and three.
+pub fn share_out(lines: &[String], most: usize) -> Vec<&[String]> {
     if lines.is_empty() {
         return Vec::new();
     }
-    let slides = lines.len().div_ceil(MOST_LINES);
+    let slides = lines.len().div_ceil(most.max(1));
     let (base, extra) = (lines.len() / slides, lines.len() % slides);
     let mut out = Vec::new();
     let mut at = 0;
@@ -268,9 +276,7 @@ fn from_chordpro(fallback: &str, text: &str) -> Presentation {
                 "artist" | "composer" | "lyricist" | "subtitle" | "st" if details.author.is_empty() => {
                     details.author = value.to_owned();
                 }
-                "copyright" => {
-                    (details.year, details.publisher) = year_and_owner(copyright_text(value).unwrap_or(value))
-                }
+                "copyright" => (details.year, details.publisher) = year_and_publisher(value),
                 "ccli" => details.ccli_song = value.chars().filter(char::is_ascii_digit).collect(),
                 "soc" | "start_of_chorus" => lines.push(Line::Section(label(value, "Chorus"))),
                 "sob" | "start_of_bridge" => lines.push(Line::Section(label(value, "Bridge"))),
@@ -316,7 +322,7 @@ fn label(value: &str, usual: &str) -> String {
 
 /// A line of ChordPro words without the chords in square brackets, and without the spaces
 /// left where a chord stood alone.
-fn without_chords(line: &str) -> String {
+pub fn without_chords(line: &str) -> String {
     let mut out = String::new();
     let mut in_chord = false;
     for c in line.chars() {
@@ -479,10 +485,13 @@ mod tests {
     #[test]
     fn long_stretches_share_out_evenly() {
         let lines: Vec<String> = (1..=9).map(|n| n.to_string()).collect();
-        let sizes = |n: usize| share_out(&lines[..n]).iter().map(|s| s.len()).collect::<Vec<_>>();
+        let sizes = |n: usize| share_out(&lines[..n], MOST_LINES).iter().map(|s| s.len()).collect::<Vec<_>>();
         assert_eq!(sizes(9), vec![3, 3, 3]);
         assert_eq!(sizes(5), vec![3, 2]);
         assert_eq!(sizes(4), vec![4]);
+        // Another most: six lines a slide keep eight lines as two of four.
+        assert_eq!(share_out(&lines[..8], 6).iter().map(|s| s.len()).collect::<Vec<_>>(), vec![4, 4]);
+        assert_eq!(share_out(&lines[..3], 0).len(), 3, "a slide has at least one line");
     }
 
     #[test]

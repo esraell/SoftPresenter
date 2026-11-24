@@ -784,21 +784,23 @@ pub struct Presentation {
     /// chosen for all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition: Option<crate::Transition>,
-    /// Where the song came from when it was copied out of the song catalog; `None` for the
-    /// church's own songs.
+    /// Where the song came from when it was copied out of the song catalog or another outside
+    /// source (TimelyChurch); `None` for the church's own songs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog: Option<Box<CatalogOrigin>>,
 }
 
-/// What a song copied out of the song catalog remembers of where it came from, so a later
-/// update can tell a song nobody has touched from one the church has changed.
+/// What a song copied out of the song catalog, or made from another outside source such as
+/// TimelyChurch, remembers of where it came from, so a later update can tell a song nobody has
+/// touched from one the church has changed. Whoever reads it checks `source` first.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogOrigin {
-    /// The catalog it came from (`worshipleaderapp`).
+    /// The source it came from (`worshipleaderapp`, `timelychurch`).
     pub source: String,
-    /// The catalog's key for the song (see `catalog::key`).
+    /// The source's key for the song (see `catalog::song_key`, `timelychurch::song_key`).
     pub key: String,
-    /// The catalog's language the song is in (`ru`, `uk`…).
+    /// The language the song is in at the source (`ru`, `uk`…); empty when the source doesn't
+    /// say.
     pub language: String,
     /// The language of the translation that was put under the song's words, if one was.
     #[serde(default, skip_serializing_if = "Option::is_none")]

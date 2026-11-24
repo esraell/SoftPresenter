@@ -283,7 +283,13 @@ pub fn marked(song: &Presentation, verdict: &Verdict) -> Option<Presentation> {
 /// theme, its transition and whether it loops. The result is the catalog's to the letter, so
 /// it is unchanged again.
 pub fn refreshed(old: &Presentation, fresh: Presented) -> Presentation {
-    let mut song = fresh.song;
+    refreshed_song(old, fresh.song)
+}
+
+/// [`refreshed`] for any song made from an outside source and marked with where it came from
+/// (the catalog, TimelyChurch): `fresh` is the same song made again now.
+pub fn refreshed_song(old: &Presentation, fresh: Presentation) -> Presentation {
+    let mut song = fresh;
     song.id = old.id;
     song.theme = old.theme;
     song.transition = old.transition;

@@ -20,7 +20,9 @@ mod types;
 pub use action::{Announced, ClearWhat, ShowAction, TimerDo};
 pub use build::{Build, BuildClock, BuildEffect};
 pub use format::{FORMAT_VERSION, from_json, to_json};
-pub use import::{decode_text, import_song_text};
+pub use import::{
+    MOST_LINES, decode_text, import_song_text, section_name, share_out, without_chords, year_and_publisher,
+};
 pub use link::TextLink;
 #[cfg(any(test, feature = "test-documents"))]
 #[doc(hidden)]
