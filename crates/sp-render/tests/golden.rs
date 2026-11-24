@@ -5,20 +5,57 @@
 //! pictures are the same on every computer. They need a GPU.
 
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 
 use sp_model::{Object, ObjectKind, Role, Slide, Theme};
 use sp_render::vello::ScratchSizes;
 use sp_render::vello::util::RenderContext;
 use sp_render::{Fonts, Painter, build_scene, read_pixels, target_texture, wgpu};
 
+/// An instance and a device that are never destroyed, made one at a time. Tests run on many
+/// threads, and a driver does not have to stand many instances and devices being made and
+/// destroyed at once: on Linux with an NVIDIA card (driver 595, RTX 2080 Ti) four such tests
+/// hung inside the driver with every thread waiting, and two crashed in the Vulkan loader.
+/// The app makes its one device once, and shares it between its threads, as these tests do.
+fn lasting_context() -> &'static RenderContext {
+    static MAKING: Mutex<()> = Mutex::new(());
+    let _one_at_a_time = MAKING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cx = if cfg!(target_os = "linux") {
+        // A test build asks Vulkan for its debug names and checks. With many threads naming
+        // pipelines at once the Vulkan loader (1.4.341) crashed in vkSetDebugUtilsObjectNameEXT,
+        // on one device as on many. The app's own builds do not ask for them.
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            display: None,
+            backends: wgpu::Backends::from_env().unwrap_or_default(),
+            flags: wgpu::InstanceFlags::empty().with_env(),
+            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+            backend_options: wgpu::BackendOptions::from_env_or_default(),
+        });
+        RenderContext { instance, devices: Vec::new() }
+    } else {
+        RenderContext::new()
+    };
+    pollster::block_on(cx.device(None)).expect("these tests need a GPU");
+    Box::leak(Box::new(cx))
+}
+
+/// The instance and device nearly every test draws with: made when the first test asks.
+fn context() -> &'static RenderContext {
+    static CONTEXT: OnceLock<&'static RenderContext> = OnceLock::new();
+    CONTEXT.get_or_init(lasting_context)
+}
+
+fn gpu() -> (&'static wgpu::Device, &'static wgpu::Queue) {
+    let handle = &context().devices[0];
+    (&handle.device, &handle.queue)
+}
+
 fn render(slide: Option<&Slide>, w: u32, h: u32) -> Vec<u8> {
     render_with(slide, &Theme::builtin(), w, h)
 }
 
 fn render_with(slide: Option<&Slide>, theme: &Theme, w: u32, h: u32) -> Vec<u8> {
-    let mut cx = RenderContext::new();
-    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-    let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+    let (device, queue) = gpu();
     let mut painter = Painter::new(device).expect("painter");
     let built = build_scene(&mut Fonts::bundled_only(), slide, theme, w, h);
     let texture = target_texture(device, w, h);
@@ -259,9 +296,7 @@ fn odd_width_reads_back_without_padding() {
 }
 
 fn render_layers(media: Option<&sp_render::Picture>, slide: Option<&Slide>, w: u32, h: u32) -> Vec<u8> {
-    let mut cx = RenderContext::new();
-    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-    let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+    let (device, queue) = gpu();
     let mut painter = Painter::new(device).expect("painter");
     let layers = sp_render::Layers {
         media_fit: sp_model::ImageFit::Fill,
@@ -402,9 +437,7 @@ fn a_cross_fade_blends_two_pictures() {
     use sp_model::Rgba;
     use sp_render::cross_fade;
     let (w, h) = (64, 36);
-    let mut cx = RenderContext::new();
-    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-    let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+    let (device, queue) = gpu();
     let mut painter = Painter::new(device).expect("painter");
     let black = build_scene(&mut Fonts::bundled_only(), None, &Theme::builtin(), w, h).scene;
     let mut white_theme = Theme::builtin();
@@ -430,9 +463,7 @@ fn a_cross_fade_blends_two_pictures() {
 fn transitions_put_each_picture_where_it_belongs() {
     use sp_model::{Direction, Rgba, TransitionKind};
     let (w, h) = (64, 36);
-    let mut cx = RenderContext::new();
-    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-    let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+    let (device, queue) = gpu();
     let mut painter = Painter::new(device).expect("painter");
     let black = build_scene(&mut Fonts::bundled_only(), Some(&Slide::new(Vec::new())), &Theme::builtin(), w, h).scene;
     let mut white_theme = Theme::builtin();
@@ -460,9 +491,7 @@ fn transitions_put_each_picture_where_it_belongs() {
 fn every_transition_starts_on_the_old_picture_and_ends_on_the_new() {
     use sp_model::{Direction, Rgba, TransitionKind};
     let (w, h) = (160, 90);
-    let mut cx = RenderContext::new();
-    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-    let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+    let (device, queue) = gpu();
     let mut painter = Painter::new(device).expect("painter");
     let black = build_scene(&mut Fonts::bundled_only(), Some(&Slide::new(Vec::new())), &Theme::builtin(), w, h).scene;
     let mut white_theme = Theme::builtin();
@@ -552,9 +581,7 @@ fn scrolling_text_starts_in_its_box_and_moves_with_time() {
     style.shadow = Some(false);
     style.outline_width = Some(0.0);
     let draw = |time: f32| {
-        let mut cx = RenderContext::new();
-        let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-        let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+        let (device, queue) = gpu();
         let mut painter = Painter::new(device).expect("painter");
         let layers = sp_render::Layers {
             media_fit: sp_model::ImageFit::Fill,
@@ -589,9 +616,7 @@ fn a_themes_picture_is_behind_its_slides_until_media_shows() {
     let mut theme = Theme::builtin();
     theme.background_picture = Some("church.png".to_owned());
     let draw = |media: Option<&sp_render::Picture>| {
-        let mut cx = RenderContext::new();
-        let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-        let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+        let (device, queue) = gpu();
         let mut painter = Painter::new(device).expect("painter");
         let empty = Slide::new(Vec::new());
         let layers = sp_render::Layers {
@@ -618,9 +643,7 @@ fn a_themes_picture_is_behind_its_slides_until_media_shows() {
 #[test]
 fn a_screens_colour_fills_the_empty_room_and_its_covered_edges() {
     use sp_model::Rgba;
-    let mut cx = RenderContext::new();
-    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-    let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+    let (device, queue) = gpu();
     let mut painter = Painter::new(device).expect("painter");
     let white = flat(16, 9, [255, 255, 255]);
     let teal = Rgba::rgb(0, 128, 128);
@@ -654,9 +677,7 @@ fn transition_sheet() {
     use sp_model::{Direction, Rgba, TransitionKind};
     let Ok(dir) = std::env::var("SHEET_DIR") else { return };
     let (w, h) = (320, 180);
-    let mut cx = RenderContext::new();
-    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-    let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+    let (device, queue) = gpu();
     let mut painter = Painter::new(device).expect("painter");
     let coloured = |rgba: Rgba, words: &str| {
         let mut theme = Theme::builtin();
@@ -730,9 +751,7 @@ fn a_gradient_fill_runs_from_one_colour_to_the_other() {
 /// 0.12 threw its picture atlas away on a scene of plain fills only).
 #[test]
 fn a_picture_still_shows_after_a_blank_drawing() {
-    let mut cx = RenderContext::new();
-    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-    let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+    let (device, queue) = gpu();
     let mut painter = Painter::new(device).expect("painter");
     let photo = flat(1600, 1200, [230, 30, 30]);
     let mut draw = |media: Option<&sp_render::Picture>| {
@@ -811,9 +830,7 @@ fn two_halves(left: [u8; 4], right: [u8; 4]) -> (Vec<u8>, usize) {
 fn a_moving_picture_shows_the_pixels_sent_last_in_their_true_colours() {
     use sp_render::PixelOrder;
     let (w, h) = (64, 36);
-    let mut cx = RenderContext::new();
-    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-    let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+    let (device, queue) = gpu();
     let mut painter = Painter::new(device).expect("painter");
     let texture = target_texture(device, w, h);
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -873,9 +890,7 @@ fn a_moving_picture_shows_the_pixels_sent_last_in_their_true_colours() {
 fn a_moving_picture_let_go_leaves_no_texture_behind() {
     use sp_render::PixelOrder;
     let (w, h) = (64, 36);
-    let mut cx = RenderContext::new();
-    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-    let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+    let (device, queue) = gpu();
     let mut painter = Painter::new(device).expect("painter");
     let texture = target_texture(device, w, h);
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -910,9 +925,7 @@ fn a_moving_picture_let_go_leaves_no_texture_behind() {
 fn two_moving_pictures_keep_their_own_pixels() {
     use sp_render::PixelOrder;
     let (w, h) = (64, 36);
-    let mut cx = RenderContext::new();
-    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-    let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+    let (device, queue) = gpu();
     let mut painter = Painter::new(device).expect("painter");
     let (red, blue, green) = ([200, 40, 10], [10, 40, 220], [20, 200, 60]);
     let bgra = |rgb: [u8; 3]| [rgb[2], rgb[1], rgb[0], 255];
@@ -940,9 +953,7 @@ fn two_moving_pictures_keep_their_own_pixels() {
 fn a_moving_picture_with_alpha_lets_what_is_behind_it_show() {
     use sp_render::PixelOrder;
     let (w, h) = (64, 36);
-    let mut cx = RenderContext::new();
-    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-    let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+    let (device, queue) = gpu();
     let mut painter = Painter::new(device).expect("painter");
     let moving = painter.moving_picture(device, 8, 4, PixelOrder::Rgba).expect("moving picture");
     let (rows, stride) = two_halves([200, 40, 10, 255], [10, 40, 220, 0]);
@@ -1076,11 +1087,19 @@ struct Easel {
 
 impl Easel {
     fn new() -> Easel {
-        let mut cx = RenderContext::new();
-        let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-        let (device, queue) = (cx.devices[id].device.clone(), cx.devices[id].queue.clone());
+        let (device, queue) = gpu();
+        let (device, queue) = (device.clone(), queue.clone());
         let painter = Painter::new(&device).expect("painter");
         Easel { device, queue, painter }
+    }
+
+    /// A painter on a device no other test draws with, for a test that looks at when the GPU
+    /// finishes its own work: another thread asking the shared device how far it has got would
+    /// finish that work for it.
+    fn on_a_device_of_its_own() -> Easel {
+        let handle = &lasting_context().devices[0];
+        let painter = Painter::new(&handle.device).expect("painter");
+        Easel { device: handle.device.clone(), queue: handle.queue.clone(), painter }
     }
 
     /// Another painter drawing with the same device.
@@ -1554,7 +1573,7 @@ fn a_picture_the_gpu_is_too_slow_with_is_given_up_and_drawn_when_asked_again() {
     assert_eq!(name, "reading");
     let expected = Easel::kept_at(ROOMY).paint(&reading, w, h).expect("paint with plenty of room");
 
-    let mut easel = Easel::new();
+    let mut easel = Easel::on_a_device_of_its_own();
     let texture = target_texture(&easel.device, w, h);
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     easel.painter.wait_at_most(Some(Duration::ZERO));
@@ -1652,7 +1671,7 @@ fn a_painter_has_not_rested_while_the_gpu_holds_memory_a_picture_gave_back() {
     let (w, h) = (3840, 2160);
     let mut heavy = sp_render::vello::Scene::new();
     cover_many_times(&mut heavy, 300, w, h);
-    let mut easel = Easel::new();
+    let mut easel = Easel::on_a_device_of_its_own();
     let texture = target_texture(&easel.device, w, h);
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     easel.painter.paint(&easel.device, &easel.queue, &heavy, &view, w, h).expect("paint");
@@ -1845,10 +1864,9 @@ fn the_graphics_are_chosen_deliberately() {
     if ["WGPU_BACKEND", "WGPU_ADAPTER_NAME", "WGPU_POWER_PREF"].iter().any(|name| std::env::var_os(name).is_some()) {
         return;
     }
-    let mut cx = RenderContext::new();
+    let cx = context();
     let adapters = pollster::block_on(cx.instance.enumerate_adapters(wgpu::Backends::all()));
-    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
-    let chosen = cx.devices[id].adapter().get_info();
+    let chosen = cx.devices[0].adapter().get_info();
     eprintln!("chosen: {} ({:?}, {:?})", chosen.name, chosen.backend, chosen.device_type);
     for adapter in &adapters {
         let info = adapter.get_info();
