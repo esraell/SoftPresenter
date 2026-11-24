@@ -1034,7 +1034,7 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             ui.painter().rect_filled(gear, RADIUS, CARD);
         }
         icons::paint(ui.painter(), Icon::Gear, Rect::from_center_size(gear.center(), vec2(16.0, 16.0)), TEXT_DIM);
-        let hint = if cfg!(target_os = "macos") { "Settings (Command-comma)" } else { "Settings (Ctrl-comma)" };
+        let hint = crate::keys::hint("Settings", ",", false);
         if response.on_hover_text(hint).clicked() {
             state.preferences_open = !state.preferences_open;
         }
@@ -1626,11 +1626,10 @@ fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
         ui.painter().rect_filled(cap, 5.0, CARD);
         ui.painter().text(cap.center(), Align2::CENTER_CENTER, "/", fixed(11.0), TEXT_DIM);
     }
-    let hint = if cfg!(target_os = "macos") {
-        "Find a song by its title or a line of its words, or a Bible passage or verse (press /, or Command-F)"
-    } else {
-        "Find a song by its title or a line of its words, or a Bible passage or verse (press /, or Ctrl+F)"
-    };
+    let hint = format!(
+        "Find a song by its title or a line of its words, or a Bible passage or verse (press /, or {})",
+        crate::keys::hint_key("F")
+    );
     response.on_hover_text(hint);
     state.find_rect = Some(find);
 }

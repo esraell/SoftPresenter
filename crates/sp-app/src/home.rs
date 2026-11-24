@@ -4954,33 +4954,43 @@ fn find_drag_step(
 
 /// Testing aid: SOFTPRESENTER_POINTER_DRAG=X,Y@X,Y presses at the first point and drags to the
 /// second over a few frames, then holds it there, for a picture of a drag in progress (a song
-/// pulled out of the list, say); `X,Y@X,Y,drop` lets go there too. The window's own pointer is
-/// moved, not the mouse. It starts some frames into the run, once the window has settled, and
+/// pulled out of the list, say); `X,Y@X,Y,drop` lets go there too; `X,Y@hover` only moves the
+/// pointer to the first point and leaves it there, for a picture of a hover hint. The window's
+/// own pointer is moved, not the mouse. It starts some frames into the run, once the window has settled, and
 /// is for a capture run (`--capture-home`), whose window is drawn wherever it is.
 /// Returns the pointer's events for this frame, to go in with the window's own.
 pub fn pointer_drag_events(ctx: &egui::Context) -> Vec<egui::Event> {
-    type Asked = Option<(egui::Pos2, egui::Pos2, bool)>;
+    type Asked = Option<(egui::Pos2, egui::Pos2, bool, bool)>;
     fn asked() -> &'static Asked {
         static ASKED: std::sync::OnceLock<Asked> = std::sync::OnceLock::new();
         ASKED.get_or_init(|| {
             let asked = std::env::var("SOFTPRESENTER_POINTER_DRAG").ok()?;
             let (from, rest) = asked.split_once('@')?;
+            if rest == "hover" {
+                let (x, y) = from.split_once(',')?;
+                let at = pos2(x.trim().parse().ok()?, y.trim().parse().ok()?);
+                // Pressing never happens: a drag that goes nowhere and is not pressed is a hover.
+                return Some((at, at, false, true));
+            }
             let point = |text: &str| -> Option<egui::Pos2> {
                 let (x, y) = text.split_once(',')?;
                 Some(pos2(x.trim().parse().ok()?, y.trim().parse().ok()?))
             };
             let drop = rest.ends_with(",drop");
-            Some((point(from)?, point(rest.trim_end_matches(",drop"))?, drop))
+            Some((point(from)?, point(rest.trim_end_matches(",drop"))?, drop, false))
         })
     }
     /// Frames since the window first drew; the drag waits a while for the lists to settle.
     static STEP: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     const SETTLE: u32 = 40;
-    let Some((from, to, drop)) = asked() else { return Vec::new() };
+    let Some((from, to, drop, hover)) = asked() else { return Vec::new() };
     let step = STEP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     ctx.request_repaint();
     if step < SETTLE {
         return Vec::new();
+    }
+    if *hover {
+        return if step == SETTLE { vec![egui::Event::PointerMoved(*from)] } else { Vec::new() };
     }
     pointer_drag(step - SETTLE, *from, *to, *drop).unwrap_or_default()
 }
@@ -5426,10 +5436,9 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
             }
             "Screens" => {
                 // Its key is the Mac menu bar's.
-                let hint = if cfg!(target_os = "macos") {
-                    "Configure Screens (Option-Command-1)"
-                } else {
-                    "Configure Screens"
+                let hint = match crate::keys::screens_key() {
+                    Some(key) => format!("Configure Screens ({key})"),
+                    None => "Configure Screens".to_owned(),
                 };
                 if ui.button("Configure Screens…").on_hover_text(hint).clicked() {
                     state.settings_open = true;

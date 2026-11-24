@@ -2004,10 +2004,9 @@ fn item_bar(
                 }
             });
         // Control-R is the Mac menu bar's key for it.
-        let words_hint = if cfg!(target_os = "macos") {
-            "Edit Words: the song's words as text, to change (Control-R)"
-        } else {
-            "Edit Words: the song's words as text, to change"
+        let words_hint = match crate::keys::words_key() {
+            Some(key) => format!("Edit Words: the song's words as text, to change ({key})"),
+            None => "Edit Words: the song's words as text, to change".to_owned(),
         };
         let words = icon_button(ui, place(), id.with("words"), Icon::Reflow, strength, false).on_hover_text(words_hint);
         if words.clicked() {

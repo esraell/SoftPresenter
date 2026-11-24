@@ -117,25 +117,52 @@ pub fn media_key() -> String {
     with_shift("M")
 }
 
-/// A key with the modifier, in words: "Command-2" on a Mac, "Ctrl+2" elsewhere.
+/// A key with the modifier, written into a sentence: "⌘" and the key on a Mac, "Ctrl+" and
+/// the key elsewhere.
 pub fn hint_key(key: &str) -> String {
-    if cfg!(target_os = "macos") { format!("Command-{key}") } else { format!("Ctrl+{key}") }
+    with_modifier(key)
 }
 
-/// A key said in a tooltip: "Show (Command-1)" on a Mac, "Show (Ctrl+1)" elsewhere.
-pub fn hint(what: &str, key: &str, shift: bool) -> String {
-    let mac = cfg!(target_os = "macos");
-    match (mac, shift) {
-        (true, false) => format!("{what} (Command-{key})"),
-        (true, true) => format!("{what} (Shift-Command-{key})"),
-        (false, false) => format!("{what} (Ctrl+{key})"),
-        (false, true) => format!("{what} (Ctrl+Shift+{key})"),
+/// Every key the window writes in words goes through here: the Mac's symbols in the Mac's order
+/// (⌃ ⌥ ⇧ ⌘, then the key), or the words Windows and Linux use ("Ctrl+Alt+Shift+").
+fn chord_on(mac: bool, control: bool, option: bool, shift: bool, command: bool, key: &str) -> String {
+    let mut chord = String::new();
+    if mac {
+        for (on, mark) in [(control, "\u{2303}"), (option, "\u{2325}"), (shift, "\u{21e7}"), (command, "\u{2318}")] {
+            if on {
+                chord.push_str(mark);
+            }
+        }
+    } else {
+        // Off a Mac the command key is Ctrl, so Control and Command are one key there.
+        for (on, word) in [(control || command, "Ctrl+"), (option, "Alt+"), (shift, "Shift+")] {
+            if on {
+                chord.push_str(word);
+            }
+        }
     }
+    chord.push_str(key);
+    chord
 }
 
-/// A tool tab's key said in a tooltip: "Timers (Option-1)" on a Mac, "Timers (Alt+1)" elsewhere.
+/// A key said in a tooltip: "Show (⌘1)" on a Mac, "Show (Ctrl+1)" elsewhere.
+pub fn hint(what: &str, key: &str, shift: bool) -> String {
+    format!("{what} ({})", chord_on(cfg!(target_os = "macos"), false, false, shift, true, key))
+}
+
+/// A tool tab's key said in a tooltip: "Timers (℥1)" on a Mac, "Timers (Alt+1)" elsewhere.
 pub fn tab_hint(what: &str, tab: usize) -> String {
-    if cfg!(target_os = "macos") { format!("{what} (Option-{})", tab + 1) } else { format!("{what} (Alt+{})", tab + 1) }
+    format!("{what} ({})", chord_on(cfg!(target_os = "macos"), false, true, false, false, &(tab + 1).to_string()))
+}
+
+/// The Mac menu bar's keys for the Edit Words and Configure Screens buttons, which have none
+/// elsewhere: ⌃R and ⌥⌘1.
+pub fn words_key() -> Option<String> {
+    cfg!(target_os = "macos").then(|| chord_on(true, true, false, false, false, "R"))
+}
+
+pub fn screens_key() -> Option<String> {
+    cfg!(target_os = "macos").then(|| chord_on(true, false, true, false, true, "1"))
 }
 
 /// Whether the tags beside things with keys show: Show Keys on Buttons is on (or a testing aid
@@ -614,6 +641,31 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keys_in_words_use_the_macs_symbols_in_its_order_and_other_computers_words() {
+        // ⌃ ⌥ ⇧ ⌘ then the key, as the Mac's own menus write them.
+        assert_eq!(chord_on(true, false, false, false, true, "1"), "\u{2318}1");
+        assert_eq!(chord_on(true, false, false, true, true, "E"), "\u{21e7}\u{2318}E");
+        assert_eq!(chord_on(true, true, true, true, true, "K"), "\u{2303}\u{2325}\u{21e7}\u{2318}K");
+        assert_eq!(chord_on(true, false, true, false, false, "3"), "\u{2325}3");
+        assert_eq!(chord_on(false, false, false, false, true, "1"), "Ctrl+1");
+        assert_eq!(chord_on(false, true, true, true, true, "K"), "Ctrl+Alt+Shift+K");
+        // What the window says in a hover hint or a notice goes through it.
+        let (show, shifted, tab) = (hint("Show", "1", false), hint("Screens", "1", true), tab_hint("Timers", 0));
+        if cfg!(target_os = "macos") {
+            assert_eq!(
+                (show.as_str(), shifted.as_str(), tab.as_str()),
+                ("Show (\u{2318}1)", "Screens (\u{21e7}\u{2318}1)", "Timers (\u{2325}1)")
+            );
+            assert_eq!(hint_key("N"), "\u{2318}N");
+        } else {
+            assert_eq!(
+                (show.as_str(), shifted.as_str(), tab.as_str()),
+                ("Show (Ctrl+1)", "Screens (Ctrl+Shift+1)", "Timers (Alt+1)")
+            );
+        }
+    }
 
     fn press(
         ctx: &egui::Context,

@@ -674,7 +674,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Mac, and a switch at the foot of the list of keys on every computer; kept with the
   preferences, off at first) writes each thing's key beside it in a small amber tag, all the
   time: Command-1, 2 and 3 on the views, Option-1 to 7 on the tool tabs, and the rest; holding
-  Command or Option no longer shows them. `?` (or the `?` in the top bar) lists every key. In an open menu the arrows move
+  Command or Option no longer shows them. Wherever the window writes a key (hover hints, the list of keys, notices) a Mac gets its symbols in its order, such as ⌘1 or ⇧⌘1 and ⌥1, and other computers get words ("Ctrl+1", "Alt+1"); they are all made in `keys.rs`. `?` (or the `?` in the top bar) lists every key. In an open menu the arrows move
   between its choices, Right opens a group of them, Left goes back, Enter chooses and Escape
   closes; Space and the arrows don't run the show while a menu is open. After a slider or a
   menu is used, the keyboard goes back to running the show.
