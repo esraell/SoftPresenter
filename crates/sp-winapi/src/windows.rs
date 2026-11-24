@@ -1,11 +1,20 @@
-use std::ptr::null;
+use std::ptr::{null, null_mut};
 
-use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, POINT, RECT};
+use windows_sys::Win32::Foundation::{
+    ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_SUCCESS, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+    POINT, RECT,
+};
 use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
 use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
 use windows_sys::Win32::System::Console::{
     ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
     SetStdHandle,
+};
+use windows_sys::Win32::System::Registry::{
+    HKEY_CURRENT_USER, REG_EXPAND_SZ, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegGetValueW, RegSetKeyValueW,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    HWND_BROADCAST, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_SETTINGCHANGE,
 };
 
 fn usable(handle: HANDLE) -> bool {
@@ -65,4 +74,82 @@ pub fn work_area_at(x: i32, y: i32) -> Option<(i32, i32, u32, u32)> {
     }
     let work = info.rcWork;
     Some((work.left, work.top, (work.right - work.left).max(0) as u32, (work.bottom - work.top).max(0) as u32))
+}
+
+/// The user's own PATH as saved (`%…%` left as written), or an empty one when they have none.
+fn user_path() -> Result<String, String> {
+    let (key, name) = (wide("Environment"), wide("Path"));
+    let flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND;
+    let mut room = 0u32;
+    // The value may grow between asking its size and reading it: then ask again.
+    for _ in 0..3 {
+        let mut data = vec![0u16; (room as usize).div_ceil(2).max(1)];
+        let mut bytes = (data.len() * 2) as u32;
+        // SAFETY: the key and value names are NUL-terminated and live through the call; `data`
+        // has room for `bytes` bytes, which the call is told and writes no more than.
+        let status = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                key.as_ptr(),
+                name.as_ptr(),
+                flags,
+                null_mut(),
+                data.as_mut_ptr().cast(),
+                &mut bytes,
+            )
+        };
+        match status {
+            ERROR_SUCCESS => {
+                data.truncate(bytes as usize / 2);
+                while data.last() == Some(&0) {
+                    data.pop();
+                }
+                return Ok(String::from_utf16_lossy(&data));
+            }
+            ERROR_FILE_NOT_FOUND => return Ok(String::new()),
+            ERROR_MORE_DATA => room = bytes,
+            other => return Err(format!("the PATH could not be read (error {other})")),
+        }
+    }
+    Err("the PATH kept changing while it was read".to_owned())
+}
+
+pub fn add_to_user_path(folder: &str) -> Result<bool, String> {
+    let Some(longer) = crate::path_with(&user_path()?, folder) else { return Ok(false) };
+    let (key, name, data) = (wide("Environment"), wide("Path"), wide(&longer));
+    // SAFETY: the key and value names are NUL-terminated; `data` is the NUL-terminated value and
+    // its length in bytes, NUL included, is what the call is told.
+    let status = unsafe {
+        RegSetKeyValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            name.as_ptr(),
+            REG_EXPAND_SZ,
+            data.as_ptr().cast(),
+            (data.len() * 2) as u32,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return Err(format!("the PATH could not be saved (error {status})"));
+    }
+    // Tell running programs (Explorer, which starts new terminals) on a thread of its own: each
+    // window may take a moment to answer, and the person who pressed the button needn't wait.
+    std::thread::spawn(|| {
+        let what = wide("Environment");
+        let mut answer = 0usize;
+        // SAFETY: a broadcast whose text is NUL-terminated and lives through the call, which
+        // returns within the time given; a window that has stopped answering is passed over.
+        unsafe {
+            SendMessageTimeoutW(
+                HWND_BROADCAST,
+                WM_SETTINGCHANGE,
+                0,
+                what.as_ptr() as isize,
+                SMTO_ABORTIFHUNG,
+                2000,
+                &mut answer,
+            );
+        }
+    });
+    Ok(true)
 }

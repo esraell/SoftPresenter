@@ -5464,22 +5464,11 @@ pub fn open_page(state: &mut HomeState, page: Page) {
 /// Settings › Integrations › Command line: the `sp` command, which controls the running app from
 /// a terminal or a script, and the button that installs it (where it can be).
 fn command_line_card(ui: &mut egui::Ui, state: &mut HomeState) {
-    use crate::studio::TEXT_DIM;
     ui.add_space(18.0);
     crate::studio::caption(ui, "COMMAND LINE");
     ui.label("The sp command controls SoftPresenter from a terminal or a script.");
     ui.add_space(4.0);
-    if cfg!(windows) {
-        ui.label(
-            egui::RichText::new("On Windows, type softpresenter.exe and the command; there is nothing to install.")
-                .size(11.5)
-                .color(TEXT_DIM),
-        );
-    } else if ui
-        .button("Install\u{2026}")
-        .on_hover_text("Puts sp (and softpresenter) where a terminal finds it")
-        .clicked()
-    {
+    if ui.button("Install\u{2026}").on_hover_text("Puts sp (and softpresenter) where a terminal finds it").clicked() {
         state.menu_asked = Some(crate::menubar::Action::InstallCommandLine);
     }
 }

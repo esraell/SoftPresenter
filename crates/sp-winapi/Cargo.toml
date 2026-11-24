@@ -5,8 +5,8 @@ edition.workspace = true
 publish.workspace = true
 license.workspace = true
 
-# The two Windows calls the app can't make safely: finding a parent console to print to, and
-# asking a monitor for the part of it the taskbar leaves free. windows-sys is already in the
+# The Windows calls the app can't make safely: finding a parent console to print to, asking a
+# monitor for the part of it the taskbar leaves free, and putting a folder on the user's PATH. windows-sys is already in the
 # build (winit and others use it); this adds no crate.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
@@ -15,6 +15,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
+    "Win32_System_Registry",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 # Calling Windows needs `unsafe`; this crate allows it only in its `windows` module. Every

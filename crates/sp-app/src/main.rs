@@ -9091,12 +9091,7 @@ impl App {
             A::Settings => state.preferences_open = true,
             A::InstallCommandLine => {
                 // Written files, out of sight: said in the list.
-                state.notices.outcome(control::install_command().map(|link| {
-                    format!(
-                        "Installed the sp command at {} (and softpresenter beside it). In Terminal, try: sp status",
-                        link.display()
-                    )
-                }));
+                state.notices.outcome(control::install_command().map(|link| installed_words(&link)));
             }
             A::ConfigureScreens => state.settings_open = true,
             A::SetUp => state.setup = Some(setup::Setup::new()),
@@ -10134,6 +10129,21 @@ impl ApplicationHandler<AppEvent> for App {
     }
 }
 
+/// What is said once the sp command is installed: where it is, and what to type to try it.
+fn installed_words(link: &std::path::Path) -> String {
+    if cfg!(windows) {
+        format!(
+            "Installed the sp command ({}) and put its folder on your PATH. In a new Command Prompt, try: sp status. In PowerShell, where sp already means something else, type softpresenter status.",
+            link.display()
+        )
+    } else {
+        format!(
+            "Installed the sp command at {} (and softpresenter beside it). In Terminal, try: sp status",
+            link.display()
+        )
+    }
+}
+
 /// The app's icon, for its windows' title bars and the taskbar where the system takes it from
 /// the window (a Mac takes it from the app bundle instead): on Windows the icon built into the
 /// program, every size of it; on Linux a 256-pixel picture.
@@ -10244,7 +10254,7 @@ fn main() -> ExitCode {
         Some("install-cli") => {
             return match control::install_command() {
                 Ok(link) => {
-                    println!("Installed {} (and softpresenter beside it). Try: sp status", link.display());
+                    println!("{}", installed_words(&link));
                     ExitCode::SUCCESS
                 }
                 Err(problem) => {

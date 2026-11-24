@@ -29,8 +29,11 @@ change, as everything else may (see the README).
 ## Install
 
 Choose **Settings › Integrations › Command line › Install…** (or run the app's program with
-`install-cli`). It puts `sp`, and its full name `softpresenter`, in `~/.local/bin` (or Homebrew's
-`bin` folder) as links to the app; no administrator password is needed.
+`install-cli`). On a Mac and on Linux it puts `sp`, and its full name `softpresenter`, in
+`~/.local/bin` (or Homebrew's `bin` folder) as links to the app; on Windows it writes `sp.cmd` and
+`softpresenter.cmd` in `%LOCALAPPDATA%\SoftPresenter\bin` and puts that folder on your own PATH
+(open a new terminal afterwards). No administrator password is needed. Press Install again after
+moving the app.
 
     sp                  # what is on screen; starts SoftPresenter first if it isn't running
     sp go "Blessed Assurance" 3
@@ -40,9 +43,10 @@ Choose **Settings › Integrations › Command line › Install…** (or run the
 `softpresenter COMMAND` and `sp ctl COMMAND` do the same as `sp COMMAND`. From the source,
 `cargo run --release -- COMMAND`.
 
-On Windows (which has no tested build yet) there is no installer for `sp`: the commands are
-typed after the program itself, `softpresenter.exe COMMAND`, and `sp` alone does not start the
-app.
+On Windows, `sp` alone opens the app (it doesn't print what is on screen). PowerShell already
+uses `sp` for one of its own commands, so in PowerShell type `softpresenter` (or `sp.cmd`);
+Command Prompt takes `sp`. Without installing, the commands can be typed after the program
+itself: `SoftPresenter.exe COMMAND`.
 
 On Windows the program is a window program, so no console opens beside the app. A command typed
 in a console still prints its answer there: with a command, the program joins the console it
