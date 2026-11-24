@@ -27,14 +27,14 @@ the shapes are recorded here. The device interface may name or shape things diff
 | Song Sync devices | name, status (`paired`), last seen; for the church: stand link issued, PIN required, PIN mode `self`, enrolment open and until when, 180 days of lookahead | No address, code or token is shown. |
 | Setlist | id, name, date, team, song count, linked calendar event, next rehearsal, active | A church can have several setlists per week, one for each team. |
 | Setlist song | order, song id, title, arrangement, target key, capo, Nashville flag, notes, worship spot | It has **no id of its own**: its place and its song identify it. `arrangement` was `null` every time (meaning the song's default). |
-| Service plan | id, title, series, type, date, time, status, event, item count, total duration | Every plan seen was a `draft`. One title came HTML-escaped (`&amp;`). |
-| Plan item | order, type, title, description, song id and title, key, capo, duration, leader, scripture reference, notes, worship spot | Types seen: `song`, `worship`, `section`, `scripture`, `prayer`, `sermon`, `offering`, `announcement`. No item had a song or a scripture reference: the plans were templates, and **the songs were in the setlists**. A `worship` item carries a worship-spot label. |
-| Song | id, title, artist, composer, CCLI number, copyright, default key, tempo, BPM, time signature, status, tags, themes, notes, plain lyrics, arrangements, attachments, recent use | The plain `lyrics` have no section names. They can be missing, can carry ChordPro directives (`{title: …}`), and repeat the chart's typos. |
-| Arrangement | id, name, key, available keys, BPM, default flag, chart format (`chordpro` or `chords_above`) | An arrangement is **a chart in a key, not an order of sections**. Most songs have one, named "Default Arrangement". |
+| Service plan | id, title, series, type, date, time, status, event, item count, total duration | Titles may carry HTML entities (`&amp;`): decode them before showing. |
+| Plan item | order, type, title, description, song id and title, key, capo, duration, leader, scripture reference, notes, worship spot | Types seen: `song`, `worship`, `section`, `scripture`, `prayer`, `sermon`, `offering`, `announcement`. A plan can be a template whose song slots name no song; then **the songs are in the setlists**. A `worship` item carries a worship-spot label. |
+| Song | id, title, artist, composer, CCLI number, copyright, default key, tempo, BPM, time signature, status, tags, themes, notes, plain lyrics, arrangements, attachments, recent use | The plain `lyrics` have no section names. They can be missing, can carry ChordPro directives (`{title: …}`). |
+| Arrangement | id, name, key, available keys, BPM, default flag, chart format (`chordpro` or `chords_above`) | An arrangement is **a chart in a key, not an order of sections**. A song usually has one default arrangement. |
 | Chart | the arrangement's sections in order: a name and lines with chords in square brackets; as stored, `[Verse 1]` lines start sections | Section names are free text (Verse 1, Chorus, Bridge 1, Final Chorus, Half Chorus, Припев, куплет 1). See [how a chart writes a song](#how-a-chart-writes-a-song). |
-| Translation | language, status, translated title, sections of `{source, translated}` rows, languages | Its sections are **pieces of at most six rows** (the slide style's lines per slide): a section's name can repeat, and a piece can cross a verse's blank line. The rows have no chords. A line nobody translated has `translated: ""`. Every song looked at (14) had no translated line, no status, no translated title and an empty list of languages, so **a filled translation has not been seen**. Asking for any language returns the song's rows with empty translations. |
-| Congregation slide style | background, original and translation colours, sizes, gap, offsets, layout (`original_first`), lines per slide (6), and whether the church ever saved one | The church looked at had never saved one. |
-| Song use | when, the key used, the plan (`null` every time) | A song's use count and last-used date were empty even when uses were listed. Several uses fell on one day. |
+| Translation | language, status, translated title, sections of `{source, translated}` rows, languages | Its sections are **pieces of at most six rows** (the slide style's lines per slide): a section's name can repeat, and a piece can cross a verse's blank line. The rows have no chords. A line nobody translated has `translated: ""`. |
+| Congregation slide style | background, original and translation colours, sizes, gap, offsets, layout (`original_first`), lines per slide (6), and whether the church ever saved one | A church may never have saved one (`has_default` false): then SoftPresenter's own look applies. |
+| Song use | when, the key used, the plan (`null` every time) | Several uses can fall on one day. |
 
 **Identity and change:** every id is an integer, unique in one church. No resource carries an
 `updated_at`, a version or an ETag. Setlist songs and plan items have no ids.
@@ -241,7 +241,7 @@ VoxLive's:
 | R7 | Attachments | Type, file name, size, and whether it is a link elsewhere | Whether a device can fetch a background picture or video |
 | R8 | Identity and versions | Integer ids; no `updated_at` anywhere; no ids for setlist songs or plan items | Whether ids last, and a version on each resource |
 | S1–S4 | Changes, deletions, push or poll, limits | Nothing for any of them | All four |
-| W1 | Song use | Uses are recorded with a date and key; the use count and last-used date stay empty | The endpoint, and an idempotency key |
+| W1 | Song use | Uses are recorded with a date and key | The endpoint, and an idempotency key |
 | W2, W3 | What's live; heartbeat | Devices show a last-seen time | Both |
 | X1–X6 | Test church, versions, errors, plans, naming, licensing | — | All six; a test church with translated songs matters most |
 
