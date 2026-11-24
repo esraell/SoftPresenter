@@ -744,7 +744,7 @@ impl Theme {
     /// translation, both outlined and shadowed, with a small line for a Bible reference; and
     /// a second template for slides with one language, where the main language is centred.
     /// The theme Bible slides start with: the verse in one language above the same verse in
-    /// another, each with its reference, in Linux Biolinum on black. It is kept as a theme file
+    /// another, each with its reference, in SoftPresenter Sans on black. It is kept as a theme file
     /// beside the code, `themes/bible.sptheme`, so it can be changed in the app and saved back.
     pub fn builtin_bible() -> Theme {
         // The file is part of the program and is checked by a test, so it always reads.

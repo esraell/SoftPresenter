@@ -1131,7 +1131,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   that names another font keeps it. It comes first in the Text tab's font list.
 - The built-in theme has a template for each: two languages and one for songs, and one for
   Bible slides (the Russian Synodal verse and its reference on top, the King James Version and
-  its reference below, in Linux Biolinum on black; its settings live in
+  its reference below, in SoftPresenter Sans on black; its settings live in
   `crates/sp-model/themes/bible.sptheme`). It can be changed and saved, and not deleted.
 - The built-in theme's words are white and bold for the main language and a warm light grey
   ("Stone", `#D2CEC6`) for the second, each with a thin black outline (2) and a soft black

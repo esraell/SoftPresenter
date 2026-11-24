@@ -17,7 +17,7 @@
               "w": 1790.3,
               "h": 378.5
             },
-            "font_family": "Linux Biolinum",
+            "font_family": "SoftPresenter Sans",
             "weight": 400,
             "italic": false,
             "size": 96.0,
@@ -96,7 +96,7 @@
               "w": 1790.35,
               "h": 109.80002
             },
-            "font_family": "Linux Biolinum",
+            "font_family": "SoftPresenter Sans",
             "weight": 700,
             "italic": false,
             "size": 44.0,
@@ -175,7 +175,7 @@
               "w": 1790.3,
               "h": 378.5
             },
-            "font_family": "Linux Biolinum",
+            "font_family": "SoftPresenter Sans",
             "weight": 400,
             "italic": false,
             "size": 96.0,
@@ -254,7 +254,7 @@
               "w": 1790.35,
               "h": 109.79999
             },
-            "font_family": "Linux Biolinum",
+            "font_family": "SoftPresenter Sans",
             "weight": 700,
             "italic": false,
             "size": 44.0,
