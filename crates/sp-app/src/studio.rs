@@ -4394,9 +4394,14 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 let found = state.versions.iter().find(|version| version.id == wanted.version)?;
                 Some((found.name.as_str(), live && state.version_switch.lights(index, found.id)))
             });
+            // A picture or video goes by its name without the ending (the mark says which it is).
+            let media_label = match item {
+                Item::Media { name, .. } => Some(crate::media::label(name, show.media())),
+                _ => None,
+            };
             let look = ListRow {
                 number: Some(number),
-                title: item.title(),
+                title: media_label.as_deref().unwrap_or_else(|| item.title()),
                 renaming,
                 chosen,
                 lit: state.item_picks.several() && state.item_picks.places.contains(&index),
@@ -5580,7 +5585,7 @@ pub fn media_strip(
                             let label = Rect::from_min_max(pos2(rect.min.x, image.max.y + 6.0), rect.max);
                             let (font, ink) =
                                 if live { (fixed_semibold(12.0), TALLY) } else { (fixed(12.0), TEXT_DIM) };
-                            let name = spaced(ui, &item.name.to_uppercase(), font, ink, 0.6);
+                            let name = tile_name(ui.ctx(), &item.name, show.media(), label.width(), font, ink);
                             ui.painter().with_clip_rect(label).galley(
                                 pos2(label.min.x, label.center().y - name.size().y / 2.0),
                                 name,
@@ -5843,6 +5848,22 @@ fn video_bar(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
         }
     }
     shown
+}
+
+/// A media tile's label: the file's name without its ending (see `media::label`), in capitals, on
+/// one line that ends in "…" when it is too long for the tile. The tile's hover text has the
+/// whole file name.
+fn tile_name(
+    ctx: &egui::Context,
+    name: &str,
+    bin: &[sp_model::MediaItem],
+    width: f32,
+    font: FontId,
+    ink: Color32,
+) -> Arc<egui::Galley> {
+    let words = crate::media::label(name, bin).to_uppercase();
+    let fits = |text: &str| spaced_in(ctx, text, font.clone(), ink, 0.6).size().x <= width;
+    spaced_in(ctx, &crate::media::ellipsize(&words, fits), font.clone(), ink, 0.6)
 }
 
 /// Where the id of the empty bin's button for the sample backgrounds is kept, so a test finds it.
@@ -6229,6 +6250,42 @@ pub mod tests {
     /// Every row of the list the tests' rows are in, in order.
     fn order() -> Vec<usize> {
         rows().iter().map(|(index, _)| *index).collect()
+    }
+
+    #[test]
+    fn a_media_tile_names_the_file_without_its_ending_on_one_line_that_ends_in_an_ellipsis() {
+        let ctx = egui::Context::default();
+        ctx.run_ui(RawInput::default(), |_| {
+            let bin: Vec<sp_model::MediaItem> = crate::backgrounds::FILES
+                .iter()
+                .map(|name| sp_model::MediaItem::new((*name).to_owned(), std::path::PathBuf::from("/m").join(name)))
+                .collect();
+            let shown: Vec<String> = bin
+                .iter()
+                .map(|item| tile_name(&ctx, &item.name, &bin, 128.0, fixed(12.0), TEXT_DIM).text().to_owned())
+                .collect();
+            assert_eq!(
+                shown,
+                [
+                    "STILL",
+                    "FIRST LIGHT",
+                    "NIGHT BLUE",
+                    "EVENING HILLS",
+                    "OLIVE",
+                    "ROOM OUT OF FOC\u{2026}",
+                    "DRIFTING LIGHT"
+                ]
+            );
+            // The same name in two formats keeps both endings.
+            let pair = [
+                sp_model::MediaItem::new("Logo.png".to_owned(), "/m/Logo.png".into()),
+                sp_model::MediaItem::new("logo.JPG".to_owned(), "/m/logo.JPG".into()),
+            ];
+            assert_eq!(tile_name(&ctx, "Logo.png", &pair, 128.0, fixed(12.0), TEXT_DIM).text(), "LOGO.PNG");
+        })
+        .drop_without_applying_deltas();
+        // Menus keep the whole file name, as the tile's hover text does.
+        assert_eq!(crate::backgrounds::FILES[5], "Room Out of Focus.jpg");
     }
 
     #[test]
@@ -6800,7 +6857,7 @@ pub mod tests {
             output.drop_without_applying_deltas();
         }
         let mut names: Vec<(String, egui::Pos2)> =
-            names.into_iter().filter(|(text, _)| text.ends_with(".PNG")).collect();
+            names.into_iter().filter(|(text, _)| matches!(text.as_str(), "A" | "B" | "C")).collect();
         names.sort_by(|a, b| a.1.x.total_cmp(&b.1.x));
         names
     }
@@ -6809,10 +6866,10 @@ pub mod tests {
     fn a_media_playlists_view_shows_its_items_in_the_order_they_play() {
         let (show, mut state) = strip_with_a_playlist(&["c.png", "a.png"]);
         let names: Vec<String> = names_in_strip(&show, &mut state).into_iter().map(|(name, _)| name).collect();
-        assert_eq!(names, ["C.PNG", "A.PNG"], "the playlist's order, not the bin's");
+        assert_eq!(names, ["C", "A"], "the playlist's order, not the bin's");
         state.media_playlist_shown = None;
         let names: Vec<String> = names_in_strip(&show, &mut state).into_iter().map(|(name, _)| name).collect();
-        assert_eq!(names, ["A.PNG", "B.PNG", "C.PNG"], "All Media is the bin's order");
+        assert_eq!(names, ["A", "B", "C"], "All Media is the bin's order");
         // What the menu offers there in place of Delete…, for one or several picked.
         assert_eq!(remove_words(&[2], "Loop"), "Remove from \u{201c}Loop\u{201d}");
         assert_eq!(remove_words(&[2, 0], "Loop"), "Remove 2 Items from \u{201c}Loop\u{201d}");

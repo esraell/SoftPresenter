@@ -444,6 +444,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   nothing is moved or taken out of it there. The menu beside MEDIA shows All Media or one
   media playlist, and makes (New Media Playlist…, shown at once with its name ready to type),
   renames and deletes them. ("Playlist" alone is the running order.)
+- A picture or video is named by its file's name **without the ending** ("Evening Hills", not
+  "Evening Hills.jpg"; the VIDEO badge and the row's mark say what kind it is): on its tile in
+  the strip, in its row in a playlist and in the heading over it. Two files in the bin with the
+  same name in two formats (Logo.png and Logo.jpg, any case) keep their endings, to be told
+  apart. A name too long for its tile is one line ending in "…" (Room Out of Foc…), never cut
+  inside an ending; the tile's hover text and every menu and sheet where a file is chosen give
+  the whole file name.
 
 ![The media bin: three pictures and a video, the picture on screen outlined in red](images/media.png)
 

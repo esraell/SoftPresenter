@@ -180,6 +180,39 @@ pub fn new_playlist_name(playlists: &[Playlist]) -> String {
         .unwrap_or_default()
 }
 
+/// The name a media item goes by where it is named in the media strip, a playlist's row and the
+/// heading over it: the file's name without its ending ("Evening Hills"; the VIDEO badge or the
+/// row's mark says what kind it is). Two files in the bin with the same name in two formats
+/// ("Logo.png" and "Logo.jpg", compared ignoring case) keep their endings, to be told apart.
+/// Menus and sheets, where a file is chosen, show the whole name.
+pub fn label(name: &str, bin: &[sp_model::MediaItem]) -> String {
+    let stem = |name: &str| -> String {
+        match Path::new(name).file_stem() {
+            Some(stem) => stem.to_string_lossy().into_owned(),
+            None => name.to_owned(),
+        }
+    };
+    let mine = stem(name).to_lowercase();
+    let shared =
+        bin.iter().any(|other| !other.name.eq_ignore_ascii_case(name) && stem(&other.name).to_lowercase() == mine);
+    if shared { name.to_owned() } else { stem(name) }
+}
+
+/// `text` as it is if it fits (as `fits` says), else cut to what leaves room for "…" at the end:
+/// one line, never cut more than it must.
+pub fn ellipsize(text: &str, fits: impl Fn(&str) -> bool) -> String {
+    if fits(text) {
+        return text.to_owned();
+    }
+    for (end, _) in text.char_indices().rev() {
+        let cut = format!("{}\u{2026}", text[..end].trim_end());
+        if fits(&cut) {
+            return cut;
+        }
+    }
+    "\u{2026}".to_owned()
+}
+
 /// Where the media bin item at `at` is once the one at `removed` has been taken out: one place
 /// up if it was after it, nowhere if it was that one.
 pub fn place_after_removal(at: usize, removed: usize) -> Option<usize> {
@@ -596,6 +629,37 @@ mod tests {
         assert_eq!(back, list);
         assert_eq!(back.entries[0].sample.as_deref(), Some("Olive.jpg"), "still that sample under another name");
         assert!(back.playlists[0].sample && !back.playlists[1].sample);
+    }
+
+    fn bin(names: &[&str]) -> Vec<sp_model::MediaItem> {
+        names.iter().map(|name| sp_model::MediaItem::new((*name).to_owned(), PathBuf::from("/m").join(name))).collect()
+    }
+
+    #[test]
+    fn a_media_name_drops_its_ending_unless_another_file_has_the_same_name_in_another_format() {
+        let samples = bin(&["Evening Hills.jpg", "Drifting Light.mp4", "Still.jpg"]);
+        assert_eq!(label("Evening Hills.jpg", &samples), "Evening Hills");
+        assert_eq!(label("Drifting Light.mp4", &samples), "Drifting Light");
+        assert_eq!(label("Countdown.mp4", &[]), "Countdown", "a playlist row's name, its file not in the bin");
+        assert_eq!(label("No ending", &samples), "No ending");
+        assert_eq!(label("Version 1.2 final.png", &samples), "Version 1.2 final");
+        // The same name in two formats, whatever the case: both keep their endings.
+        let pair = bin(&["Logo.png", "LOGO.jpg", "Sky.png"]);
+        assert_eq!(label("Logo.png", &pair), "Logo.png");
+        assert_eq!(label("LOGO.jpg", &pair), "LOGO.jpg");
+        assert_eq!(label("Sky.png", &pair), "Sky");
+        let video = bin(&["Welcome.png", "Welcome.mp4"]);
+        assert_eq!(label("Welcome.png", &video), "Welcome.png");
+        assert_eq!(label("Welcome.mp4", &video), "Welcome.mp4");
+    }
+
+    #[test]
+    fn a_name_too_long_ends_in_an_ellipsis_and_one_that_fits_is_left_alone() {
+        let ten = |text: &str| text.chars().count() <= 10;
+        assert_eq!(ellipsize("Olive", ten), "Olive");
+        assert_eq!(ellipsize("Room Out of Focus", ten), "Room Out\u{2026}");
+        assert_eq!(ellipsize("Evening Hills.jpg", ten), "Evening H\u{2026}");
+        assert_eq!(ellipsize("abcdefghijkl", |text| text.chars().count() <= 1), "\u{2026}");
     }
 
     fn at(seconds: u64) -> SystemTime {

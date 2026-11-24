@@ -527,6 +527,8 @@ pub fn decks(show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) ->
         .map(|(item, (entry, at))| match (entry, at) {
             (Item::Header { name }, _) => Deck::Heading { item, name },
             (Item::Media { id, name }, _) => {
+                // Its heading names it without the ending, as the playlist's row does.
+                let name = crate::media::label(&name, show.media());
                 Deck::Media { item, at: show.media().iter().position(|media| media.id == id), name }
             }
             (Item::MediaPlaylist { id, name }, _) => {
