@@ -75,9 +75,16 @@ Everything is marked `SoftPresenter:` in the source. Removed from the published 
     (`PollType::Poll`), again and again; the renderer never waits inside the device. A wait
     with a time limit for one submission, which an earlier version of this change made, trips
     an assertion inside wgpu 30 when another thread submits and polls the same device (tried
-    by itself, within five hundred waits). One call waits 0.4 seconds at most, over all the
-    runs of its frame, and then gives the frame up with `Error::GpuTooSlow`, keeping the room
-    found so far for the next try. The longest whole call seen in the tests, for a heavy 4K
+    by itself, within five hundred waits). A Mac's or a discrete GPU is given 0.4 seconds
+    for each run of a frame (an integrated or other PC GPU four times that, one that runs on
+    the processor sixteen times: an Intel UHD 770 took 0.54 seconds for a heavy 4K slide's
+    first two runs and 1.4 seconds for one of four runs, with its shaders still being built),
+    a run the GPU finishes gives the next its own wait, and a call as a whole ends after four
+    waits, with `Error::GpuTooSlow`, keeping the room found so far for the next try. A call
+    that gave up leaves a note with the queue (`Queue::on_submitted_work_done`); when the next
+    call finds the GPU has finished that work (slow, not stuck), it is given twice the wait
+    the one before had, up to four seconds. A GPU that has not finished it changes nothing,
+    so behind a stuck one a call still gives up after the usual wait. The longest whole call seen in the tests, for a heavy 4K
     slide run again, with other threads working the same device as hard as they could, was
     about 100 ms (103 ms).
   - Vello's own single pass is kept as `Renderer::render_to_texture_unchecked`, and is still
@@ -116,7 +123,15 @@ Everything is marked `SoftPresenter:` in the source. Removed from the published 
   - `SIZE_CLASS_BITS` is 2, not 1: a buffer is at most a quarter larger than asked for, not a
     half, which matters for buffers of tens of megabytes.
 - **`src/util.rs`:** `RenderContext` asks the GPU for its largest storage buffer sizes (up to
-  1 GiB) in place of the default 128 MiB, so that a heavy frame's buffers are allowed.
+  1 GiB) in place of the default 128 MiB, so that a heavy frame's buffers are allowed. On
+  Windows it also chooses the adapter itself, unless `WGPU_BACKEND`, `WGPU_ADAPTER_NAME` or
+  `WGPU_POWER_PREF` is set: the best kind (a discrete GPU, then an integrated one, the
+  others, one that runs on the processor), and within a kind Vulkan, then DirectX 12, then
+  OpenGL, trying the next adapter if one cannot make a device. Elsewhere wgpu's own choice
+  is kept.
+- **`src/lib.rs`, wait for the GPU:** see the account of `Renderer::render_to_texture` above
+  (a wait for each run, longer for a GPU that is not a Mac's or a discrete one, and
+  learnt from a GPU seen to finish what a call gave up on).
 
 The crate has one `unsafe` block, upstream's own: creating the shader modules as trusted, in
 `wgpu_engine.rs`. SoftPresenter's changes add none; the bounds checks are turned on inside

@@ -1514,6 +1514,15 @@ impl App {
         let device_id = pollster::block_on(context.device(Some(&home_surface)))
             .ok_or("No graphics device was found that SoftPresenter can use.")?;
         let handle = &context.devices[device_id];
+        // Which graphics the app drew with, for the log of a computer that draws slowly.
+        let chosen = handle.adapter().get_info();
+        applog::event(
+            "gpu",
+            &format!(
+                "{} ({:?}, {:?}, driver {} {})",
+                chosen.name, chosen.backend, chosen.device_type, chosen.driver, chosen.driver_info
+            ),
+        );
         let gpu = Gpu { device: handle.device.clone(), queue: handle.queue.clone() };
         // By default a graphics error ends the program; in a service it is better to say so and carry on.
         gpu.device.on_uncaptured_error(Arc::new(|error| eprintln!("Graphics error: {error}")));

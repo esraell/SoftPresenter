@@ -1104,11 +1104,19 @@ impl Easel {
         read_pixels(&self.device, &self.queue, &texture)
     }
 
-    /// Lets the painter give memory back, and waits until the GPU has let it go.
+    /// Lets the painter give memory back, and waits until the GPU has let it go: within five
+    /// seconds of the GPU finishing what it was sent, however long a slow GPU takes over that.
     fn rest(&mut self) {
-        let started = std::time::Instant::now();
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let finished = std::sync::Arc::new(AtomicBool::new(false));
+        let said = finished.clone();
+        self.queue.on_submitted_work_done(move || said.store(true, Ordering::Release));
+        let mut idle_since = None;
         while !self.painter.rest(&self.device, &self.queue) {
-            assert!(started.elapsed() < std::time::Duration::from_secs(5), "the GPU lets the memory go");
+            if finished.load(Ordering::Acquire) {
+                let since = *idle_since.get_or_insert_with(std::time::Instant::now);
+                assert!(since.elapsed() < std::time::Duration::from_secs(5), "the GPU lets the memory go");
+            }
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
     }
@@ -1322,9 +1330,12 @@ fn a_picture_too_heavy_to_draw_is_refused_and_the_next_one_is_drawn() {
 
     let after = easel.paint(&over_photo, w, h).expect("a picture that fits is drawn after one that did not");
     assert_same_picture("after a refusal", &after, &expected);
+    // The picture that fitted took as many runs as the GPU's room made it (one or more).
+    let sent = easel.painter.runs() - runs;
+    assert!(sent >= 1, "the picture that fitted was sent to the GPU");
     // The same once more, and the refusal is still remembered.
     assert_eq!(refuse(&mut easel), Err(sp_render::PaintError::TooHeavy), "still too heavy");
-    assert_eq!(easel.painter.runs(), runs + 1, "only the picture that fitted was sent to the GPU");
+    assert_eq!(easel.painter.runs(), runs + sent, "only the picture that fitted was sent to the GPU");
     let after = easel.paint(&over_photo, w, h).expect("paint");
     assert_same_picture("after a second refusal", &after, &expected);
     easel.rest();
@@ -1383,9 +1394,14 @@ fn threads_draw_with_one_device(for_how_long: std::time::Duration) {
     let light_easel = Easel::new();
     let heavy_easel = Easel::sharing_the_device_of(&light_easel);
     let until = Instant::now() + for_how_long;
-    let draw = |name: &'static str, mut easel: Easel, scenes: &[Sized], expected: &[Vec<u8>]| {
+    // Each thread draws until the time is up, and past it until it has drawn the pictures it must
+    // (a slow GPU draws few heavy ones in the time), for two minutes at most.
+    let going = |drawn: usize, least: usize| {
+        Instant::now() < until || (drawn < least && Instant::now() < until + Duration::from_secs(120))
+    };
+    let draw = |name: &'static str, least: usize, mut easel: Easel, scenes: &[Sized], expected: &[Vec<u8>]| {
         let (mut drawn, mut longest) = (0usize, Duration::ZERO);
-        while Instant::now() < until {
+        while going(drawn, least) {
             let i = drawn % scenes.len();
             let (w, h, scene) = &scenes[i];
             let texture = target_texture(&easel.device, *w, *h);
@@ -1411,7 +1427,7 @@ fn threads_draw_with_one_device(for_how_long: std::time::Duration) {
         let mut drawn = 0usize;
         let texture = target_texture(&tiny_easel.device, 64, 36);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        while Instant::now() < until {
+        while going(drawn, 6) {
             let i = drawn % tiny.len();
             tiny_easel.painter.paint(&tiny_easel.device, &tiny_easel.queue, &tiny[i].2, &view, 64, 36).expect("paint");
             if drawn.is_multiple_of(100) {
@@ -1435,8 +1451,8 @@ fn threads_draw_with_one_device(for_how_long: std::time::Duration) {
         asked
     };
     let (light_done, heavy_done, scribbled, asked) = std::thread::scope(|threads| {
-        let light_thread = threads.spawn(|| draw("light", light_easel, &light, &light_expected));
-        let heavy_thread = threads.spawn(|| draw("heavy", heavy_easel, &heavy, &heavy_expected));
+        let light_thread = threads.spawn(|| draw("light", 6, light_easel, &light, &light_expected));
+        let heavy_thread = threads.spawn(|| draw("heavy", 3, heavy_easel, &heavy, &heavy_expected));
         let scribbling = threads.spawn(scribble);
         let pestering = threads.spawn(pester);
         (light_thread.join(), heavy_thread.join(), scribbling.join(), pestering.join())
@@ -1817,4 +1833,43 @@ fn a_see_through_transition_cross_fades_clear_and_solid_truly() {
     }
     assert_eq!(alpha_at(TransitionKind::FadeBlack, 0.5), [0, 0, 0, 0], "through clear, not black");
     assert_eq!(alpha_at(TransitionKind::Cut, 0.3), [0, 0, 255, 255]);
+}
+
+/// The graphics are chosen by the app, not left to the order a system lists them in: of the
+/// adapters there are, one of the best kind (a discrete GPU, then an integrated one), and on
+/// Windows the Vulkan one before the DirectX 12 one of the same chip, which was about eighty
+/// times slower to start in a service session and eight in the signed-in user's, on an Intel
+/// UHD 770. Left alone when the person asked for a backend or an adapter themselves.
+#[test]
+fn the_graphics_are_chosen_deliberately() {
+    if ["WGPU_BACKEND", "WGPU_ADAPTER_NAME", "WGPU_POWER_PREF"].iter().any(|name| std::env::var_os(name).is_some()) {
+        return;
+    }
+    let mut cx = RenderContext::new();
+    let adapters = pollster::block_on(cx.instance.enumerate_adapters(wgpu::Backends::all()));
+    let id = pollster::block_on(cx.device(None)).expect("these tests need a GPU");
+    let chosen = cx.devices[id].adapter().get_info();
+    eprintln!("chosen: {} ({:?}, {:?})", chosen.name, chosen.backend, chosen.device_type);
+    for adapter in &adapters {
+        let info = adapter.get_info();
+        eprintln!("  there is {} ({:?}, {:?})", info.name, info.backend, info.device_type);
+    }
+    let kind = |info: &wgpu::AdapterInfo| match info.device_type {
+        wgpu::DeviceType::DiscreteGpu => 0,
+        wgpu::DeviceType::IntegratedGpu => 1,
+        wgpu::DeviceType::VirtualGpu => 2,
+        wgpu::DeviceType::Other => 3,
+        wgpu::DeviceType::Cpu => 4,
+    };
+    let best = adapters.iter().map(|adapter| kind(&adapter.get_info())).min().expect("an adapter");
+    assert_eq!(kind(&chosen), best, "an adapter of the best kind is chosen");
+    if cfg!(windows) {
+        let has_vulkan = adapters.iter().any(|adapter| {
+            let info = adapter.get_info();
+            kind(&info) == best && info.backend == wgpu::Backend::Vulkan
+        });
+        if has_vulkan {
+            assert_eq!(chosen.backend, wgpu::Backend::Vulkan, "Vulkan is chosen before DirectX 12");
+        }
+    }
 }

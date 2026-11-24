@@ -192,8 +192,9 @@ const GPU_LOOK_AGAIN: Duration = Duration::from_millis(20);
 
 /// After a drawing of the screens in which the GPU was too slow to work a picture out, they
 /// are drawn again this long after, up to this many times one after another. Each try may
-/// itself wait four tenths of a second for the GPU, so that is up to about three seconds in
-/// all, with the picture before on the screens meanwhile.
+/// itself wait four tenths of a second for the GPU (more on a slow one, which is seen to
+/// finish what it was given: see `Painter::paint`), so that is up to about three seconds in
+/// all on a Mac, with the picture before on the screens meanwhile.
 const DRAW_AGAIN_AFTER: Duration = Duration::from_millis(150);
 const DRAW_AGAIN_TRIES: u8 = 5;
 

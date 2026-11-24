@@ -381,6 +381,14 @@ pub struct Renderer {
     longest_wait: std::time::Duration,
     most_runs: usize,
     frames_to_drop: u32,
+    // SoftPresenter: whether a test set `longest_wait` (it is then kept to as it was set, with
+    // no allowance for a slow GPU); the longest wait the renderer has learnt it needs, from a
+    // frame the GPU finished after one call had given it up; and the work such a call left
+    // behind, which says so when the GPU has finished it, with the wait that call had.
+    usual_wait: std::time::Duration,
+    explicit_wait: bool,
+    learnt_wait: std::time::Duration,
+    left_behind: Option<(std::sync::Arc<AtomicBool>, std::time::Duration)>,
     // SoftPresenter: how long this renderer has waited for the GPU, in all, reading back the
     // counters of frames it had to check (see `gpu_waited`).
     gpu_waited: std::time::Duration,
@@ -471,15 +479,37 @@ impl Default for RendererOptions {
     }
 }
 
-/// SoftPresenter: the longest one call to `render_to_texture` waits for the GPU, over all the
-/// runs of its frame, before it gives the frame up with [`Error::GpuTooSlow`]; and how often
-/// the device is looked at meanwhile.
+/// SoftPresenter: the longest one call to `render_to_texture` waits for the GPU, for each run of
+/// its frame, before it gives the frame up with [`Error::GpuTooSlow`]; and how often the
+/// device is looked at meanwhile.
 ///
 /// The wait is for the coarse stages only. A thread that draws for an audience must not stand
 /// still for long behind a GPU that is stuck, so this is a few times the longest wait seen
-/// with a GPU that is merely busy, and no more (`PROVENANCE.md` has the measurements).
+/// with a GPU that is merely busy, and no more (`PROVENANCE.md` has the measurements). That
+/// is for a Mac's GPU and a discrete one, which are held to it; a weaker one waits longer
+/// (see [`wait_factor`]) and may be given more still when it is seen to be slow and not stuck
+/// (see `Renderer::allowed_wait`).
 #[cfg(feature = "wgpu")]
 const GPU_WAIT: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// SoftPresenter: the most a wait for the GPU is ever allowed to grow to, from one learnt to
+/// be needed by a GPU that finishes what it is given, only slowly.
+#[cfg(feature = "wgpu")]
+const MOST_LEARNT_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// SoftPresenter: how many times [`GPU_WAIT`] a GPU is given for each run of a frame. A Mac's
+/// GPU and a discrete one get one: a frame that takes 100 ms there is a heavy one. An integrated
+/// or other GPU of a PC (an Intel UHD 770 takes up to half a second for the first run of a
+/// heavy 4K slide, with its shaders still being built) gets four, and one that runs on the
+/// processor sixteen.
+#[cfg(feature = "wgpu")]
+fn wait_factor(info: &wgpu::AdapterInfo) -> u32 {
+    match (info.backend, info.device_type) {
+        (wgpu::Backend::Metal, _) | (_, wgpu::DeviceType::DiscreteGpu) => 1,
+        (_, wgpu::DeviceType::Cpu) => 16,
+        _ => 4,
+    }
+}
 #[cfg(feature = "wgpu")]
 const GPU_LOOK: std::time::Duration = std::time::Duration::from_micros(200);
 
@@ -527,9 +557,13 @@ impl Renderer {
             scratch: scratch::Scratch::new(largest_buffer),
             coarse_runs: 0,
             giving_back: None,
-            longest_wait: GPU_WAIT,
+            longest_wait: GPU_WAIT * wait_factor(&device.adapter_info()),
             most_runs: RUNS,
             frames_to_drop: 0,
+            usual_wait: GPU_WAIT * wait_factor(&device.adapter_info()),
+            explicit_wait: false,
+            learnt_wait: std::time::Duration::ZERO,
+            left_behind: None,
             gpu_waited: std::time::Duration::ZERO,
             #[cfg(feature = "debug_layers")]
             debug,
@@ -579,7 +613,9 @@ impl Renderer {
         if self.engine.use_cpu {
             return self.render_to_texture_unchecked(device, queue, scene, texture, params);
         }
+        let waited_before = self.gpu_waited;
         self.render_checked(device, queue, scene, texture, params)?;
+        self.ease_learnt_wait(waited_before);
         #[cfg(feature = "wgpu-profiler")]
         {
             self.profiler.end_frame().unwrap();
@@ -603,8 +639,13 @@ impl Renderer {
         texture: &TextureView,
         params: &RenderParams,
     ) -> Result<()> {
+        self.learn_from_work_left_behind(device);
         let now = std::time::Instant::now();
-        let give_up_at = now + self.longest_wait;
+        let allowed = self.allowed_wait();
+        // A test's wait is for the whole call. Otherwise each run of the frame that the GPU
+        // finishes gives the next its own wait: a GPU that goes on finishing runs is slow and
+        // not stuck. The call as a whole still ends in four waits, whatever it is given.
+        let hard_stop = if self.explicit_wait { now + allowed } else { now + allowed * 4 };
         if !self.scratch.allows(params.width, params.height) {
             return Err(Error::SceneTooHeavy);
         }
@@ -612,6 +653,11 @@ impl Renderer {
         // The room an earlier run of this frame found it needs.
         let mut found = None;
         for run in 0..self.most_runs {
+            let give_up_at = if self.explicit_wait {
+                hard_stop
+            } else {
+                (std::time::Instant::now() + allowed).min(hard_stop)
+            };
             let mut render = Render::new();
             let coarse = render.render_encoding_coarse(
                 scene.encoding(),
@@ -726,13 +772,14 @@ impl Renderer {
             // The buffers that were too small are of no more use.
             self.engine.release_spare();
             match verdict {
-                Ok(scratch::Verdict::Again(more)) if std::time::Instant::now() < give_up_at => {
+                Ok(scratch::Verdict::Again(more)) if std::time::Instant::now() < hard_stop => {
                     found = Some(more);
                     room = self.scratch.room_to_run_again(more);
                 }
                 // Out of time between two runs: the next frame starts with the room found.
                 Ok(scratch::Verdict::Again(more)) => {
                     self.scratch.keep(more, now);
+                    self.note_work_left_behind(queue, allowed);
                     return Err(Error::GpuTooSlow);
                 }
                 Ok(_) => return Err(Error::SceneTooHeavy),
@@ -742,6 +789,9 @@ impl Renderer {
                     }
                     if matches!(e, Error::FrameDropped) {
                         self.forget_pictures(device, queue);
+                    }
+                    if matches!(e, Error::GpuTooSlow) {
+                        self.note_work_left_behind(queue, allowed);
                     }
                     return Err(e);
                 }
@@ -753,7 +803,64 @@ impl Renderer {
         if let Some(more) = found {
             self.scratch.keep(more, now);
         }
+        self.note_work_left_behind(queue, allowed);
         Err(Error::GpuTooSlow)
+    }
+
+    /// SoftPresenter: the longest one run of a frame may be waited for now: the usual wait for
+    /// this GPU, or longer, if the GPU has been seen to finish what one call gave up on (see
+    /// `learn_from_work_left_behind`). A wait a test set is never changed.
+    fn allowed_wait(&self) -> std::time::Duration {
+        if self.explicit_wait {
+            self.longest_wait
+        } else {
+            self.longest_wait.max(self.learnt_wait)
+        }
+    }
+
+    /// SoftPresenter: after a call that drew its frame, lets a learnt wait shrink again when the
+    /// GPU was quick: if it waited less than the usual wait in all, the learnt wait is halved
+    /// (and dropped once it is no more than the usual), so one heavy slide does not leave a slow
+    /// GPU waiting long for every one after it.
+    fn ease_learnt_wait(&mut self, waited_before: std::time::Duration) {
+        if self.learnt_wait.is_zero() || self.gpu_waited - waited_before >= self.longest_wait {
+            return;
+        }
+        self.learnt_wait /= 2;
+        if self.learnt_wait <= self.longest_wait {
+            self.learnt_wait = std::time::Duration::ZERO;
+        }
+    }
+
+    /// SoftPresenter: after a call gave a frame up for the GPU's slowness, asks the queue to say
+    /// when everything sent so far has finished, so that the next call can tell a GPU that is
+    /// slow from one that is stuck.
+    fn note_work_left_behind(&mut self, queue: &Queue, allowed: std::time::Duration) {
+        // Only for a GPU that is given longer than a Mac's: a Mac's or a discrete one is held to
+        // the usual wait whatever has happened, so that a GPU that hung and came back is not
+        // waited for longer behind afterwards.
+        if self.explicit_wait || self.left_behind.is_some() || self.usual_wait <= GPU_WAIT {
+            return;
+        }
+        let finished = std::sync::Arc::new(AtomicBool::new(false));
+        let say = finished.clone();
+        queue.on_submitted_work_done(move || say.store(true, std::sync::atomic::Ordering::Release));
+        self.left_behind = Some((finished, allowed));
+    }
+
+    /// SoftPresenter: if the work an earlier call gave up on has since been finished by the GPU,
+    /// that frame was heavy for this GPU and not lost, so a call is given twice the wait that
+    /// one had, up to `MOST_LEARNT_WAIT`, and a heavy slide is drawn within a few tries, later
+    /// if need be. A GPU that has not finished it (stuck, or still at it) changes nothing: the
+    /// thread is never made to wait longer behind a GPU that shows no sign of life. Only a GPU
+    /// that is given more than the usual wait to begin with (see `wait_factor`) learns.
+    fn learn_from_work_left_behind(&mut self, device: &Device) {
+        let Some((finished, allowed)) = &self.left_behind else { return };
+        let _ = device.poll(wgpu::PollType::Poll);
+        if finished.load(std::sync::atomic::Ordering::Acquire) {
+            self.learnt_wait = (*allowed * 2).min(MOST_LEARNT_WAIT);
+            self.left_behind = None;
+        }
     }
 
     /// SoftPresenter: after a frame the GPU dropped. The resolver counts a picture as being in
@@ -831,7 +938,8 @@ impl Renderer {
     /// tests of what happens when the GPU is too slow: with no time at all, every frame that
     /// has to be waited for is given up.
     pub fn set_longest_wait(&mut self, wait: Option<std::time::Duration>) {
-        self.longest_wait = wait.unwrap_or(GPU_WAIT);
+        self.explicit_wait = wait.is_some();
+        self.longest_wait = wait.unwrap_or(self.usual_wait);
     }
 
     /// SoftPresenter: sets the most times one call to `render_to_texture` runs a frame before

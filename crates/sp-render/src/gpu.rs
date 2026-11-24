@@ -241,9 +241,12 @@ impl Painter {
     ///
     /// Two things are taken on trust. A picture that was painted at this size before and had
     /// room (a playing video, frame after frame) is not looked at again. And the wait is short:
-    /// for at most four tenths of a second in all, after which the picture is given up with
+    /// four tenths of a second for each run of the picture on a Mac's or a discrete GPU (four
+    /// times that on an integrated one of a PC, sixteen on one that runs on the processor),
+    /// and four of those at most, after which the picture is given up with
     /// [`PaintError::NotNow`], so that a thread drawing for an audience is never held for long
-    /// by a GPU that is stuck.
+    /// by a GPU that is stuck. A GPU seen to finish what was given up, only slowly, is given
+    /// longer the next time, up to four seconds a run, so a heavy slide appears, later.
     pub fn paint(
         &mut self,
         device: &wgpu::Device,

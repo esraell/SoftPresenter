@@ -160,10 +160,69 @@ impl RenderContext {
 
     /// Creates a compatible device handle id.
     async fn new_device(&mut self, compatible_surface: Option<&Surface<'_>>) -> Option<usize> {
-        let adapter =
-            wgpu::util::initialize_adapter_from_env_or_default(&self.instance, compatible_surface)
-                .await
-                .ok()?;
+        for adapter in self.adapters_to_try(compatible_surface).await {
+            if let Some(id) = self.new_device_on(adapter).await {
+                return Some(id);
+            }
+        }
+        None
+    }
+
+    /// SoftPresenter: the adapters to make a device from, best first, each to be tried if the
+    /// one before it can't make one. wgpu's own choice is kept on a Mac and on Linux, and
+    /// everywhere when the person asks for something themselves (`WGPU_BACKEND`,
+    /// `WGPU_ADAPTER_NAME` or `WGPU_POWER_PREF`). On Windows the choice is made here, so that it
+    /// is never left to the order the system lists its graphics in: a discrete GPU, then an
+    /// integrated one, then the others, then one that runs on the processor; and within a kind
+    /// Vulkan, then DirectX 12, then OpenGL. On an Intel UHD 770 the same tests took 30 seconds
+    /// through Vulkan and 235 through DirectX 12 in the signed-in user's session (20 and 72 in a
+    /// service session).
+    async fn adapters_to_try(&self, compatible_surface: Option<&Surface<'_>>) -> Vec<Adapter> {
+        use wgpu::{Backend, DeviceType};
+        let asked = ["WGPU_BACKEND", "WGPU_ADAPTER_NAME", "WGPU_POWER_PREF"]
+            .iter()
+            .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()));
+        // Only Windows lists graphics in an order that cannot be relied on (Vulkan, DirectX 12
+        // and OpenGL for one chip); a Mac and Linux keep wgpu's own choice.
+        if asked || !cfg!(windows) {
+            return wgpu::util::initialize_adapter_from_env_or_default(
+                &self.instance,
+                compatible_surface,
+            )
+            .await
+            .into_iter()
+            .collect();
+        }
+        let mut adapters: Vec<Adapter> = self
+            .instance
+            .enumerate_adapters(wgpu::Backends::all())
+            .await
+            .into_iter()
+            .filter(|adapter| compatible_surface.is_none_or(|s| adapter.is_surface_supported(s)))
+            .collect();
+        adapters.sort_by_key(|adapter| {
+            let info = adapter.get_info();
+            let kind = match info.device_type {
+                DeviceType::DiscreteGpu => 0,
+                DeviceType::IntegratedGpu => 1,
+                DeviceType::VirtualGpu => 2,
+                DeviceType::Other => 3,
+                DeviceType::Cpu => 4,
+            };
+            let backend = match info.backend {
+                Backend::Metal => 0,
+                Backend::Vulkan => 1,
+                Backend::Dx12 => 2,
+                Backend::Gl => 3,
+                _ => 4,
+            };
+            (kind, backend)
+        });
+        adapters
+    }
+
+    /// Makes a device from this adapter and keeps it, or `None` if the adapter can't make one.
+    async fn new_device_on(&mut self, adapter: Adapter) -> Option<usize> {
         let features = adapter.features();
         // SoftPresenter: a heavy scene's scratch buffers can pass the default 128 MiB a stage may
         // use of one buffer (and 256 MiB a buffer may be), so ask for what the GPU offers, up to
