@@ -78,6 +78,19 @@ pub fn time_writing() -> std::time::Duration {
     WRITING.with(std::cell::Cell::get)
 }
 
+/// Words with every path in them as a person writes it. Windows hands back full paths in its
+/// "verbatim" form (`\\?\C:\Music\a.mp3`, `\\?\UNC\server\share`), which means the same but
+/// looks like a mistake. Used wherever a path is written for people (the log, notices); a path
+/// used to open a file is never changed.
+pub fn plain_paths(text: &str) -> std::borrow::Cow<'_, str> {
+    const VERBATIM: &str = "\\\\?\\";
+    const VERBATIM_UNC: &str = "\\\\?\\UNC\\";
+    if !text.contains(VERBATIM) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    std::borrow::Cow::Owned(text.replace(VERBATIM_UNC, "\\\\").replace(VERBATIM, ""))
+}
+
 /// Writes one line: the clock time, the seconds since the start, what part of the app it is
 /// about, and what happened.
 pub fn event(area: &str, message: &str) {
@@ -87,6 +100,7 @@ pub fn event(area: &str, message: &str) {
 }
 
 fn write_event(area: &str, message: &str) {
+    let message = plain_paths(message);
     let Some(Ok(mut guard)) = FILE.get().map(Mutex::lock) else { return };
     let Some((file, path)) = guard.as_mut() else { return };
     let since = STARTED.get().map_or(0.0, |started| started.elapsed().as_secs_f64());
@@ -195,6 +209,13 @@ impl Timing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paths_are_written_without_windows_verbatim_prefix() {
+        assert_eq!(plain_paths("added \\\\?\\C:\\Music\\a.mp3 in 3ms"), "added C:\\Music\\a.mp3 in 3ms");
+        assert_eq!(plain_paths("\\\\?\\UNC\\server\\share\\a.mp3"), "\\\\server\\share\\a.mp3");
+        assert_eq!(plain_paths("/Users/a/b.mp3 and C:\\x"), "/Users/a/b.mp3 and C:\\x");
+    }
 
     #[test]
     fn timings_count_average_and_keep_the_longest() {

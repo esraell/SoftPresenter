@@ -141,7 +141,7 @@ impl Notices {
     /// opened is tried every frame): one entry, raised once; seen, it stays seen while it is in
     /// the list, so closing the list quiets the button.
     pub fn lasting_trouble(&mut self, text: impl Into<String>) {
-        let text = text.into();
+        let text = crate::applog::plain_paths(&text.into()).into_owned();
         if !self.list.iter().any(|notice| notice.kind == Kind::Trouble && notice.text == text.trim()) {
             self.trouble(text);
         }
@@ -150,7 +150,7 @@ impl Notices {
     /// Something about security, in the list like any other, but kept from a remote page's
     /// `notices seen` and `notices clear` until the operator has seen it in the app.
     pub fn secure(&mut self, kind: Kind, text: impl Into<String>) {
-        let text = text.into();
+        let text = crate::applog::plain_paths(&text.into()).into_owned();
         self.push(kind, text.clone(), None, Vec::new());
         if let Some(notice) = self.list.iter_mut().find(|notice| notice.kind == kind && notice.text == text.trim()) {
             notice.secure = true;
@@ -212,6 +212,7 @@ impl Notices {
     /// a key. Better still is a control greyed so nothing is refused.
     pub fn refuse(&mut self, text: impl Into<String>) {
         let text = text.into();
+        let text = crate::applog::plain_paths(&text).into_owned();
         crate::applog::event("refused", &text);
         self.said += 1;
         self.last_said = Some(text.clone());
@@ -314,7 +315,7 @@ impl Notices {
     /// entry and one line in the log); seen, they come back as new, at the head. Past [`KEPT`],
     /// the oldest go (never a question).
     fn push(&mut self, kind: Kind, text: String, about: Option<Waiting>, actions: Vec<Action>) {
-        let text = text.trim().to_owned();
+        let text = crate::applog::plain_paths(text.trim()).into_owned();
         if text.is_empty() {
             return;
         }
