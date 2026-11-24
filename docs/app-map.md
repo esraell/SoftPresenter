@@ -162,7 +162,7 @@ Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can 
   Move Up and Move Down) retypes the group's name in the strip; dragging moves a slide (and
   those picked out with it) to the ink line. The pictures are 224 wide, the props' and
   layouts' 204: the design's slides view sits 10 in from the column's sides, not 20.
-- **Canvas**: Add Text, Shapes, Media… (a picture or a video, which plays in its box when the
+- **Canvas**: Add Text, Shapes, Media… (the row is centred on the slide, `tool_bars` in `home.rs`) (a picture or a video, which plays in its box when the
   slide is on screen), Web Page (a box showing a live web page; its address is typed in the
   Shape tab); pictures and videos can be dropped on it from the Finder. Double-click a
   text box to type in it. The letter keys add objects (T for a text box, one key per shape).

@@ -3208,11 +3208,9 @@ fn edit_view(
         });
         let area = ui.available_rect_before_wrap();
         let ruler = 16.0;
-        let inner = Rect::from_min_max(area.min + vec2(ruler, ruler), area.max).shrink(28.0);
         // Fitted, the slide fills the room under the tools; zoomed, it is its own size, moved by
         // scrolling. A pinch zooms from wherever it is.
-        let room = Rect::from_min_max(pos2(inner.min.x, inner.min.y + 44.0), inner.max);
-        let fit_width = inner.width().min(room.height() * 16.0 / 9.0).max(1.0);
+        let (inner, room, fit_width) = canvas_room(area, ruler);
         let pixels = ui.ctx().pixels_per_point();
         let canvas_area = Rect::from_min_max(area.min + vec2(ruler, ruler), area.max);
         if ui.rect_contains_pointer(canvas_area) {
@@ -3226,7 +3224,7 @@ fn edit_view(
             }
         }
         let width = if state.edit_zoom > 0.0 { sp_model::SLIDE_WIDTH * state.edit_zoom / pixels } else { fit_width };
-        let fitted_centre = pos2(inner.center().x, room.min.y + fit_width * 9.0 / 32.0);
+        let fitted_centre = fitted_slide_centre(inner, room, fit_width);
         if state.edit_zoom <= 0.0 {
             state.edit_pan = egui::Vec2::ZERO;
         }
@@ -3556,15 +3554,16 @@ fn edit_view(
         } else {
         // The object tools, the same for a song's slide and a theme's layout: a text box, the
         // shapes, and pictures and videos.
-        let offset = -104.0;
-        // In the Theme Editor they stand at the right, leaving the left for what is on the canvas.
-        let anchor = if theme_mode { inner.max.x - 256.0 } else { inner.center().x };
+        // They are centred on the slide as drawn when it fits (not on the area round it, whose
+        // rulers take room at the left, and not moved by a zoomed slide's scrolling). In the
+        // Theme Editor they stand at the right, leaving the left for what is on the canvas.
+        let tool_row = if theme_mode { inner.max.x - 256.0 + TOOL_STEP / 2.0 } else { fitted_centre.x };
+        let tools = tool_bars(tool_row, inner.min.y + 22.0);
         if theme_mode {
-            theme_canvas_title(ui, state, inner, anchor + offset - 48.0 - 14.0);
+            theme_canvas_title(ui, state, inner, tools[0].min.x - 14.0);
         }
         // A picture from a file.
-        let picture_bar =
-            Rect::from_center_size(pos2(anchor + 104.0, inner.min.y + 22.0), vec2(96.0, 28.0));
+        let picture_bar = tools[2];
         let picture = ui.interact(picture_bar, ui.scope_id().with("add picture"), Sense::click());
         crate::studio::paint_button(ui.painter(), picture_bar, picture.hovered());
         ui.painter().text(
@@ -3581,7 +3580,7 @@ fn edit_view(
             state.picture_request = true;
         }
         // A live web page, in a box.
-        let web_bar = Rect::from_center_size(pos2(anchor + 208.0, inner.min.y + 22.0), vec2(96.0, 28.0));
+        let web_bar = tools[3];
         let web = ui.interact(web_bar, ui.scope_id().with("add web page"), Sense::click());
         crate::studio::paint_button(ui.painter(), web_bar, web.hovered());
         ui.painter().text(web_bar.center(), Align2::CENTER_CENTER, "Web Page", crate::studio::semibold(12.5), crate::studio::TEXT);
@@ -3594,7 +3593,7 @@ fn edit_view(
             // The inspector's address field takes the keyboard, ready for the address.
             ui.data_mut(|data| data.insert_temp(egui::Id::unique("web address focus"), true));
         }
-        let shapes_bar = Rect::from_center_size(pos2(anchor, inner.min.y + 22.0), vec2(96.0, 28.0));
+        let shapes_bar = tools[1];
         let shapes = ui.interact(shapes_bar, ui.scope_id().with("add shape"), Sense::click());
         crate::studio::paint_button(ui.painter(), shapes_bar, shapes.hovered());
         ui.painter().text(
@@ -3614,7 +3613,7 @@ fn edit_view(
                 }
             }
         });
-        let bar = Rect::from_center_size(pos2(anchor + offset, inner.min.y + 22.0), vec2(96.0, 28.0));
+        let bar = tools[0];
         let add = ui.interact(bar, ui.scope_id().with("add text"), Sense::click());
         crate::studio::paint_button(ui.painter(), bar, add.hovered());
         ui.painter().text(
@@ -7936,6 +7935,30 @@ fn bible_row_extras(
     }
 }
 
+/// How far apart the object tools' centres are.
+const TOOL_STEP: f32 = 104.0;
+
+/// The object tools of the Edit view (Add Text, Shapes, Media…, Web Page), left to right, in a
+/// row centred on `centre_x`, their middles `y` down.
+fn tool_bars(centre_x: f32, y: f32) -> [Rect; 4] {
+    [-1.5, -0.5, 0.5, 1.5].map(|n| Rect::from_center_size(pos2(centre_x + n * TOOL_STEP, y), vec2(96.0, 28.0)))
+}
+
+/// The Edit view's canvas in an `area` (the middle column's room, with `ruler` taken at the top
+/// and left): the room inside its margins, the part of that under the tools, and the width a
+/// slide fitted to it has.
+fn canvas_room(area: Rect, ruler: f32) -> (Rect, Rect, f32) {
+    let inner = Rect::from_min_max(area.min + vec2(ruler, ruler), area.max).shrink(28.0);
+    let room = Rect::from_min_max(pos2(inner.min.x, inner.min.y + 44.0), inner.max);
+    let fit_width = inner.width().min(room.height() * 16.0 / 9.0).max(1.0);
+    (inner, room, fit_width)
+}
+
+/// Where the middle of a slide fitted to the canvas is.
+fn fitted_slide_centre(inner: Rect, room: Rect, fit_width: f32) -> egui::Pos2 {
+    pos2(inner.center().x, room.min.y + fit_width * 9.0 / 32.0)
+}
+
 /// The rulers along the top and left of the Edit view's canvas, in the slide's own pixels: a
 /// mark every 100, numbered as often as there is room for, with the selected object's extent
 /// shown on each.
@@ -8465,6 +8488,23 @@ mod tests {
     use sp_model::parse_song_text;
 
     use super::*;
+
+    #[test]
+    fn the_editors_object_tools_are_centred_on_the_slide_whatever_the_room() {
+        // Wide and narrow rooms, as a window of any size or the inspector's room taken from
+        // it leaves: the middle of the four tools is the middle of the slide as drawn.
+        for (left, width, height) in
+            [(0.0, 1000.0, 700.0), (370.0, 760.0, 640.0), (370.0, 420.0, 900.0), (12.0, 1500.0, 500.0)]
+        {
+            let area = Rect::from_min_size(pos2(left, 70.0), vec2(width, height));
+            let (inner, room, fit) = canvas_room(area, 16.0);
+            let slide = Rect::from_center_size(fitted_slide_centre(inner, room, fit), vec2(fit, fit * 9.0 / 16.0));
+            let tools = tool_bars(fitted_slide_centre(inner, room, fit).x, inner.min.y + 22.0);
+            let row = Rect::from_min_max(tools[0].min, tools[3].max);
+            assert!((row.center().x - slide.center().x).abs() < 0.01, "{area:?}: {row:?} against {slide:?}");
+            assert!(tools.windows(2).all(|pair| pair[0].max.x < pair[1].min.x), "in a row, apart");
+        }
+    }
 
     #[test]
     fn removing_a_bible_no_row_shows_keeps_every_translations_boxes() {
