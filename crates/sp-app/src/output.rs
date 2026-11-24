@@ -828,6 +828,15 @@ struct Fade {
     cache: Option<(sp_render::CachedSide, sp_render::CachedSide)>,
 }
 
+/// The slide above a playing video, kept in a texture (see `Output::steady_scene`).
+struct Steady {
+    id: Uuid,
+    size: (u32, u32),
+    /// The picture of the video that the part below the slide was made with.
+    video: Picture,
+    side: sp_render::CachedSide,
+}
+
 /// What a window is shown: a scene painted by the renderer, or the plain blend of the two sides of
 /// a cached fade (`sp_render::FadeBlend`).
 enum Draw<'a> {
@@ -1053,6 +1062,8 @@ struct Output {
     /// Whether a fade draws each slide once into a texture and then only blends (see
     /// `cache_sides`); false draws both slides again at every step, as it always did.
     fade_cache: bool,
+    /// The slides kept in textures over a playing video, for the screens that show one.
+    steady: Vec<Steady>,
     /// The fade under way's pictures drawn so far, whether any window's was from textures, and
     /// the fade's start they are of, for the log line each fade ends with.
     fade_drawn: Option<(Instant, u32, bool)>,
@@ -1243,6 +1254,7 @@ fn run(
         round: Round::default(),
         pretend_slow: std::env::var("SOFTPRESENTER_GPU_TOO_SLOW").ok().as_deref().and_then(PretendSlow::parse),
         fade_cache: fade_cache_wanted(),
+        steady: Vec::new(),
         fade_drawn: None,
         blend: sp_render::FadeBlend::new(&device),
         started: Instant::now(),
@@ -2017,6 +2029,16 @@ impl Output {
     /// colour and its covered edges; for a see-through screen, without what would cover the
     /// whole picture (see `see_through_content`), clear where nothing is drawn.
     fn show_for(&mut self, id: Uuid, frame: &Frame, w: u32, h: u32) -> vello::Scene {
+        let see_through = self.see_through(id).is_some();
+        let mask = if self.is_stage(id) { crate::screens::Look::default().mask } else { self.look_of(id).mask };
+        let scene = self.show_with(id, frame, |fonts, layers, theme| build_layers(fonts, layers, theme, w, h).scene);
+        // Covered with clear is not covered at all: a see-through screen's edges are cut away.
+        if see_through { cut_covered_edges(scene, mask, w, h) } else { scene }
+    }
+
+    /// Lays out what a screen shows now for a target of a size, as [`Output::show_for`] does, and
+    /// has `build` make of it what it needs: the whole picture, or only a part of it.
+    fn show_with<R>(&mut self, id: Uuid, frame: &Frame, build: impl FnOnce(&mut Fonts, &Layers, &Theme) -> R) -> R {
         let content = self.content_for(id, frame);
         let see_through = self.see_through(id).is_some();
         let (media, slide, overlay, theme, announcement) = if see_through {
@@ -2046,9 +2068,71 @@ impl Output {
         // A stage screen's screen pictures show those screens' own pictures of this moment.
         let pictures = self.screen_pictures(id, frame);
         let fonts = &mut self.fonts;
-        let scene = sp_render::with_screen_pictures(pictures, || build_layers(fonts, &layers, &theme, w, h)).scene;
-        // Covered with clear is not covered at all: a see-through screen's edges are cut away.
-        if see_through { cut_covered_edges(scene, look.mask, w, h) } else { scene }
+        sp_render::with_screen_pictures(pictures, || build(fonts, &layers, &theme))
+    }
+
+    /// Whether the slide on a screen can be drawn once into a texture and laid over the video
+    /// behind it by each of the video's pictures (see `steady_scene`): an ordinary audience
+    /// screen with a video playing behind a slide that nothing else moves on.
+    fn steady_wanted(&self, id: Uuid, frame: &Frame) -> bool {
+        self.fade_cache
+            && !self.round.slow
+            && self.fading.is_none()
+            && frame.enabled
+            && frame.video.is_some()
+            && self.video_picture.is_some()
+            && frame.slide_video.is_empty()
+            && frame.ndi.is_empty()
+            && self.announcement.as_ref().is_none_or(|shown| shown.video.is_none())
+            && self.overlay.test_pattern.is_none()
+            && self.identify.is_empty()
+            && !self.is_stage(id)
+            && self.key_of(id).is_none()
+            && self.see_through(id).is_none()
+    }
+
+    /// What an audience screen shows while a video plays behind its slide and nothing else has
+    /// changed since the last whole drawing (`draw_video` says so with `moving_only`): the slide
+    /// above the video is drawn once into a texture (`Painter::cache_split`), and each picture of
+    /// the video is that texture laid over the video's, instead of laying out and drawing the
+    /// slide's words, outlines and shadows again. `None` when the screen must be drawn whole.
+    ///
+    /// Valid until the next whole drawing (which is made for anything that could change the
+    /// slide: a new slide, a message, a build step, the time on a clock, a new size), when the
+    /// textures are let go (`draw_now`).
+    fn steady_scene(&mut self, id: Uuid, frame: &Frame, w: u32, h: u32) -> Option<vello::Scene> {
+        if !self.steady_wanted(id, frame) {
+            return None;
+        }
+        let picture = self.video_picture.clone()?;
+        if let Some(at) = self.steady.iter().position(|steady| steady.id == id && steady.size == (w, h)) {
+            if !self.steady[at].video.same_as(&picture) {
+                // The video was given another picture to draw (its texture was made again, or its
+                // pictures are copies): the part below the slide is made again.
+                let under = self.show_with(id, frame, |_, layers, theme| sp_render::build_under(layers, theme, w, h));
+                let entry = &mut self.steady[at];
+                entry.side.set_under(under);
+                entry.video = picture;
+            }
+            return Some(self.steady[at].side.scene().clone());
+        }
+        let building = self.held.scene_begins();
+        let parts =
+            self.show_with(id, frame, |fonts, layers, theme| sp_render::build_layer_parts(fonts, layers, theme, w, h));
+        self.held.scene_built(building, For::Screen(id));
+        let sp_render::Parts { under, over, .. } = parts;
+        let side = self.cache_with(For::Screen(id), |painter, device, queue| {
+            painter.cache_split(device, queue, under, &over, w, h)
+        })?;
+        let scene = side.scene().clone();
+        crate::applog::event(
+            "output",
+            &format!(
+                "The slide over the playing video is drawn once into a texture ({w} x {h}); each picture of the video is laid under it"
+            ),
+        );
+        self.steady.push(Steady { id, size: (w, h), video: picture, side });
+        Some(scene)
     }
 
     /// True while the wash over identified screens is still breathing, so they are drawn at
@@ -2083,6 +2167,11 @@ impl Output {
         self.finish_ndi();
         if self.ndi.is_empty() && self.decklink.is_empty() {
             return;
+        }
+        // The slides kept over a video are good for as long as only the video moves.
+        let only_video = moving_only;
+        if !only_video {
+            self.steady.clear();
         }
         let seen = self.ndi_seen();
         // Only the pictures that show a video are drawn for its new picture when all is as it
@@ -2151,7 +2240,8 @@ impl Output {
             // A see-through screen's picture is painted on clear, and goes with its alpha; its
             // keys are made from these same pixels, on their sources' own threads.
             let see_through = self.see_through(group.of);
-            let scene = self.scene_for(group.of, frame, w, h);
+            let steady = if only_video { self.steady_scene(group.of, frame, w, h) } else { None };
+            let scene = steady.unwrap_or_else(|| self.scene_for(group.of, frame, w, h));
             let target = self.ndi_target.get_or_insert_with(|| target_texture(&self.device, w, h)).clone();
             let view = target.create_view(&wgpu::TextureViewDescriptor::default());
             if let Err(e) = self.paint(&scene, &view, w, h, see_through.is_some(), For::Ndi(group.of)) {
@@ -2573,6 +2663,11 @@ impl Output {
         // Cheap copies: the picture and the slide are shared, not duplicated.
         let frame = self.frame.clone();
         self.windows_behind = true;
+        // A whole drawing is made for anything that could change a slide: the slides kept over
+        // a video are made again from what is shown now.
+        if !moving_only {
+            self.steady.clear();
+        }
         self.send_ndi_of(&frame, NdiChange::Any, moving_only);
         self.capture(&frame);
         // How far a fade already under way has got, before the clock is started again.
@@ -2603,7 +2698,8 @@ impl Output {
             if moving_only && !self.shows_video(id) && self.targets[index].up_to_date() {
                 continue;
             }
-            let scene = self.scene_for(id, &frame, w, h);
+            let steady = if moving_only { self.steady_scene(id, &frame, w, h) } else { None };
+            let scene = steady.unwrap_or_else(|| self.scene_for(id, &frame, w, h));
             // Stage screens change at once: the people on stage need the words now. So does a
             // key with no fill to follow, which is black.
             let at_once = self.is_stage(id) || self.key_of(id).is_some();
@@ -2714,19 +2810,30 @@ impl Output {
         {
             return None;
         }
+        self.cache_with(what, |painter, device, queue| {
+            let old = painter.cache_whole(device, queue, from, w, h)?;
+            Ok((old, painter.cache_whole(device, queue, to, w, h)?))
+        })
+    }
+
+    /// Has the painter draw pictures into textures, as `paint` has it draw a picture: a GPU
+    /// pretended to be slow, the time held, and how it went told to the drawing under way. `None`
+    /// when it could not be done; the caller draws the picture as it always did.
+    fn cache_with<T>(
+        &mut self,
+        what: For,
+        make: impl FnOnce(&mut Painter, &wgpu::Device, &wgpu::Queue) -> Result<T, sp_render::PaintError>,
+    ) -> Option<T> {
         let pretending =
             self.pretend_slow.as_ref().is_some_and(|slow| slow.left > 0 && self.started.elapsed() >= slow.after);
         if self.pretend_slow.is_some() {
             self.painter.wait_at_most(pretending.then_some(Duration::ZERO));
         }
         let caching = Instant::now();
-        let both = self
-            .painter
-            .cache_whole(&self.device, &self.queue, from, w, h)
-            .and_then(|old| Ok((old, self.painter.cache_whole(&self.device, &self.queue, to, w, h)?)));
+        let made = make(&mut self.painter, &self.device, &self.queue);
         self.held.since(Part::Paint, what, caching);
-        self.paint_noted(pretending, &both);
-        both.ok()
+        self.paint_noted(pretending, &made);
+        made.ok()
     }
 
     /// Ends a drawing, of all the screens or some: sets them to be drawn again if the GPU was

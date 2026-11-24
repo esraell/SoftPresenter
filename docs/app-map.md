@@ -424,6 +424,17 @@ fade as a `Fade`: the two scenes, and, when the fade is cached, a texture of eac
   or a video box is on screen (they move during it); one the GPU was too slow for, or too heavy; and
   the operator's live preview, which is small. `SOFTPRESENTER_FADE_CACHE=0` (or a file
   `fade-cache-off` in the data folder) chooses this for everything.
+- **A slide over a playing video** (`Output::steady_scene`): the screens used to lay out and draw the
+  whole picture again for every picture of the video. Now, once only the video is moving (the
+  drawing `draw_video` asks for with `moving_only`), the part above the media (`sp_render::build_layer_parts`:
+  the words, outlines, shadows, props and message) is drawn once on clear into a texture
+  (`Painter::cache_split`), and each picture of the video is the video's own part (`build_under`,
+  which holds the video's moving picture and so shows each new picture as it comes) with that texture
+  drawn over it. It is kept per screen and size, for the audience windows and the NDI and
+  DeckLink pictures, until the next whole drawing (any message, a click, the second a clock ticks, a
+  new size). Not used while the slide has a video, NDI or web box, the Announcements layer has a
+  video, the slide builds or scrolls, screens are identified, or on stage, see-through and key
+  screens.
 - NDI and DeckLink outputs never fade (they get the new picture at once), and stage screens change
   at once, so none of them is touched.
 

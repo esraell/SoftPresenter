@@ -32,6 +32,12 @@ impl std::fmt::Debug for Picture {
 }
 
 impl Picture {
+    /// True when both are the same picture: the same pixels, shared (a moving picture is the
+    /// same picture whatever pixels it has been sent).
+    pub fn same_as(&self, other: &Picture) -> bool {
+        self.image.data.id() == other.image.data.id()
+    }
+
     /// Makes a picture from rows of RGBA pixels with straight (not premultiplied) alpha.
     /// Returns `None` if either side is zero or the pixel count does not match the size.
     pub fn from_rgba(width: u32, height: u32, rgba: Vec<u8>) -> Option<Picture> {

@@ -2365,3 +2365,110 @@ fn save_the_middle_of_a_dissolve() {
     assert!(blend.draw(device, queue, &a, &b, weights, &texture));
     write_png(&folder.join("dissolve-blend.png"), &read_pixels(device, queue, &texture).expect("read"), w, h);
 }
+
+/// A slide with outlined, shadowed words and a translation line, over a picture that changes
+/// (a playing video's pictures), is the same drawn whole each time and drawn from a texture of
+/// the slide above the picture laid over the picture's own: the way the app draws a video's
+/// pictures behind a slide that nothing else moves on.
+#[test]
+fn a_slide_kept_in_a_texture_over_a_changing_picture_matches_the_slide_drawn_whole() {
+    let (w, h) = (960, 540);
+    let (device, queue) = gpu();
+    let mut painter = Painter::new(device).expect("painter");
+    let mut fonts = Fonts::bundled_only();
+    let theme = outlined_theme();
+    let moving = painter.moving_picture(device, w, h, sp_render::PixelOrder::Rgba).expect("moving picture");
+    let video = moving.picture();
+    let words = slide("Glory to God in the highest", Some("Слава Богу в вышних"));
+    let layers = layers_of(&video, &words);
+    let whole = sp_render::build_layers(&mut fonts, &layers, &theme, w, h).scene;
+    let parts = sp_render::build_layer_parts(&mut fonts, &layers, &theme, w, h);
+    // The two parts one after the other are the whole (to a level, which is all the GPU promises).
+    let mut one_after_the_other = parts.under.clone();
+    one_after_the_other.append(&parts.over, None);
+    let frame_of = |shade: u8| {
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let bright = (((x * 255 / w) as u8) / 2).saturating_add(shade);
+                let stripe = if (x / 30 + y / 30) % 2 == 0 { 40 } else { 0 };
+                rgba.extend_from_slice(&[bright, bright.saturating_sub(stripe), 255 - bright, 255]);
+            }
+        }
+        rgba
+    };
+    let mut cached = painter.cache_split(device, queue, parts.under, &parts.over, w, h).expect("cache");
+    assert!(cached.is_split());
+    let mut report = String::new();
+    let mut failures = Vec::new();
+    for shade in [0u8, 60, 120, 200] {
+        let rows = frame_of(shade);
+        assert!(painter.show_rows(queue, &moving, &rows, (w * 4) as usize));
+        let (a, b, c) = (
+            paint_to_pixels(&mut painter, &whole, w, h),
+            paint_to_pixels(&mut painter, cached.scene(), w, h),
+            paint_to_pixels(&mut painter, &one_after_the_other, w, h),
+        );
+        assert!(compare(&a, &c, 0).1 <= 1, "the two parts one after the other are the whole");
+        let (mean, worst, far) = compare(&a, &b, 3);
+        report.push_str(&format!("picture {shade}: mean {mean:.4} worst {worst} off by more than 3: {far}\n"));
+        if mean > 0.02 || worst > 2 || far > 0 {
+            failures.push(format!("picture {shade}: mean {mean:.4} worst {worst} far {far}"));
+        }
+    }
+    // The part below the slide is made again when the video is given another picture to draw.
+    let other = sp_render::Picture::from_rgba(w, h, frame_of(30)).expect("picture");
+    assert!(!other.same_as(&video) && video.same_as(&moving.picture()));
+    let under = sp_render::build_under(&layers_of(&other, &words), &theme, w, h);
+    cached.set_under(under);
+    let after = paint_to_pixels(&mut painter, cached.scene(), w, h);
+    let again = sp_render::build_layers(&mut fonts, &layers_of(&other, &words), &theme, w, h).scene;
+    let (mean, worst, _) = compare(&paint_to_pixels(&mut painter, &again, w, h), &after, 3);
+    report.push_str(&format!("another picture: mean {mean:.4} worst {worst}\n"));
+    if mean > 0.02 || worst > 2 {
+        failures.push(format!("another picture: mean {mean:.4} worst {worst}"));
+    }
+    eprintln!("{report}");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Not a check: times one picture of a video behind a slide at 1920 by 1080, drawn whole (as each
+/// picture of the video was) and from the slide's texture laid over the video's. Run it by name.
+#[test]
+#[ignore = "a timing, not a check: run with --ignored --nocapture"]
+fn video_picture_step_cost() {
+    use std::time::Instant;
+    let (w, h) = (1920, 1080);
+    let (device, queue) = gpu();
+    let mut painter = Painter::new(device).expect("painter");
+    let mut fonts = Fonts::bundled_only();
+    let theme = outlined_theme();
+    let moving = painter.moving_picture(device, w, h, sp_render::PixelOrder::Rgba).expect("moving picture");
+    let video = moving.picture();
+    let words =
+        slide("Glory to God in the highest, and on earth peace to people of good will", Some("Слава Богу в вышних"));
+    let layers = layers_of(&video, &words);
+    let whole = sp_render::build_layers(&mut fonts, &layers, &theme, w, h).scene;
+    let parts = sp_render::build_layer_parts(&mut fonts, &layers, &theme, w, h);
+    let cached = painter.cache_split(device, queue, parts.under, &parts.over, w, h).expect("cache");
+    let rows = vec![90u8; (w * h * 4) as usize];
+    let texture = target_texture(device, w, h);
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut time = |label: &str, scene: &sp_render::vello::Scene| {
+        for _ in 0..4 {
+            painter.show_rows(queue, &moving, &rows, (w * 4) as usize);
+            painter.paint(device, queue, scene, &view, w, h).expect("paint");
+        }
+        read_pixels(device, queue, &texture).expect("read back");
+        let began = Instant::now();
+        let steps = 40;
+        for _ in 0..steps {
+            painter.show_rows(queue, &moving, &rows, (w * 4) as usize);
+            painter.paint(device, queue, scene, &view, w, h).expect("paint");
+        }
+        read_pixels(device, queue, &texture).expect("read back");
+        eprintln!("{label}: {:.2} ms a picture", began.elapsed().as_secs_f64() * 1000.0 / steps as f64);
+    };
+    time("slide drawn whole each time   ", &whole);
+    time("slide kept in a texture       ", cached.scene());
+}

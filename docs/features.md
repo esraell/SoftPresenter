@@ -123,7 +123,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   changing from one picture or video to the next. Dissolve, Fade, Fade Black, Fade White, Wipe,
   Split, Blinds, Iris, Clock and Checkerboard on an ordinary screen draw each slide once and then only
   blend the two (far less work for the graphics card, so a slow one keeps up); the others, and any fade
-  over a playing video, redraw both slides at each step.
+  over a playing video, redraw both slides at each step. A slide over a playing video is drawn once and the
+  video's pictures laid under it, rather than the slide drawn again for each picture.
 - New Song (Command-N, or + over the song list) asks for the song's title and theme, and takes
   its words pasted in (a line in square brackets starts a group, a blank line a new slide; a
   lyric file pasted in whole gives its sections and details, as an import does).
