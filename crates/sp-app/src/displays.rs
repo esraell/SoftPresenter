@@ -48,14 +48,112 @@ pub fn own_name<'a, K: PartialEq>(names: &'a [(K, String)], key: &K) -> Option<&
 /// (`last` keeps them). Windows can refuse the question for a moment (the computer locked, a
 /// permission prompt up), and a display listed by its device name for that moment would look
 /// unplugged to a screen saved under the monitor's name, which would vanish mid-service.
-// A Mac asks its own names another way (sp_video::display_names), which never fails like this.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+// Only Windows is asked this way; a Mac and Linux read their names in ways that never fail
+// like this.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn names_or_last(fresh: Vec<(String, String)>, last: &mut Vec<(String, String)>) -> Vec<(String, String)> {
     if fresh.is_empty() {
         return last.clone();
     }
     last.clone_from(&fresh);
     fresh
+}
+
+/// A monitor's own name from its EDID (the name it gives itself), or `None` when it gives none.
+/// A name that is only a model number ("28E850") gets its maker's three-letter code in front
+/// ("AOC 28E850"); a name with a maker in it ("HP 27f", "LG ULTRAGEAR") is kept as it is.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn edid_name(edid: &[u8]) -> Option<String> {
+    if edid.len() < 128 || edid[..8] != [0, 255, 255, 255, 255, 255, 255, 0] {
+        return None;
+    }
+    let name = [54usize, 72, 90, 108].iter().find_map(|&at| {
+        let block = &edid[at..at + 18];
+        (block[0] == 0 && block[1] == 0 && block[3] == 0xFC).then(|| {
+            let text: String =
+                block[5..].iter().take_while(|&&b| b != 0x0A && b != 0).map(|&b| char::from(b)).collect();
+            text.trim().to_owned()
+        })
+    })?;
+    if name.is_empty() {
+        return None;
+    }
+    if !name.starts_with(|c: char| c.is_ascii_digit()) {
+        return Some(name);
+    }
+    let code = u16::from_be_bytes([edid[8], edid[9]]);
+    let maker: String = [(code >> 10) & 31, (code >> 5) & 31, code & 31]
+        .iter()
+        .filter(|&&letter| (1..=26).contains(&letter))
+        .map(|&letter| char::from(b'A' - 1 + letter as u8))
+        .collect();
+    Some(if maker.len() == 3 { format!("{maker} {name}") } else { name })
+}
+
+/// A display connector's kind and number, alike however a system writes them: Linux's own
+/// ("HDMI-A-1", "Unknown-2", "DP-1") and the window systems' ("HDMI-1", "None-2", "HDMI-0").
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn connector_parts(name: &str) -> Option<(String, &str)> {
+    let (kind, number) = name.rsplit_once('-')?;
+    if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let kind = kind.to_ascii_lowercase();
+    let kind = match kind.as_str() {
+        "hdmi-a" | "hdmi-b" => "hdmi".to_owned(),
+        "unknown" | "none" => "none".to_owned(),
+        "displayport" => "dp".to_owned(),
+        "dvi-i" | "dvi-d" | "dvi-a" => "dvi".to_owned(),
+        _ => kind,
+    };
+    Some((kind, number))
+}
+
+/// Each display the window system names on Linux, with the name of the monitor connected to
+/// the same connector (`connected`: Linux's connector names, each with the monitor's EDID name).
+/// The same kind and number match; failing that, the only one of its kind on both sides (X11
+/// counts from 0 where Linux counts from 1). Displays with no match keep the window system's
+/// name.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn linux_names(window_names: &[String], connected: &[(String, String)]) -> Vec<(String, String)> {
+    let mut names = Vec::new();
+    for window_name in window_names {
+        let Some((kind, number)) = connector_parts(window_name) else { continue };
+        let same = connected.iter().find(|(connector, _)| connector_parts(connector) == Some((kind.clone(), number)));
+        let only = || {
+            let of_kind = |name: &&String| connector_parts(name).is_some_and(|(k, _)| k == kind);
+            let theirs: Vec<&(String, String)> = connected.iter().filter(|(c, _)| of_kind(&c)).collect();
+            (theirs.len() == 1 && window_names.iter().filter(of_kind).count() == 1).then(|| theirs[0])
+        };
+        if let Some((_, name)) = same.or_else(only) {
+            names.push((window_name.clone(), name.clone()));
+        }
+    }
+    names
+}
+
+/// The monitors Linux lists as connected, each by its connector ("HDMI-A-1") with the name
+/// from its EDID.
+#[cfg(target_os = "linux")]
+pub fn connected_monitors() -> Vec<(String, String)> {
+    let Ok(entries) = std::fs::read_dir("/sys/class/drm") else { return Vec::new() };
+    let mut found: Vec<(String, String)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let folder = entry.path();
+            let file = entry.file_name().to_string_lossy().into_owned();
+            // "card1-HDMI-A-1": the connector is what follows the card.
+            let connector = file.strip_prefix("card")?.split_once('-')?.1.to_owned();
+            let status = std::fs::read_to_string(folder.join("status")).ok()?;
+            if status.trim() != "connected" {
+                return None;
+            }
+            let name = edid_name(&std::fs::read(folder.join("edid")).ok()?)?;
+            Some((connector, name))
+        })
+        .collect();
+    found.sort();
+    found
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -282,6 +380,59 @@ mod tests {
 
     fn names_of(list: &[DisplayInfo]) -> Vec<&str> {
         list.iter().map(|d| d.name.as_str()).collect()
+    }
+
+    /// An EDID's first block with a name in its last descriptor, from maker code `maker`.
+    fn edid(maker: [u8; 2], name: &[u8]) -> Vec<u8> {
+        let mut block = vec![0u8; 128];
+        block[..8].copy_from_slice(&[0, 255, 255, 255, 255, 255, 255, 0]);
+        block[8..10].copy_from_slice(&maker);
+        block[108..113].copy_from_slice(&[0, 0, 0, 0xFC, 0]);
+        let mut text = name.to_vec();
+        text.push(0x0A);
+        text.resize(13, b' ');
+        block[113..126].copy_from_slice(&text);
+        block
+    }
+
+    #[test]
+    fn a_monitors_name_is_read_from_its_edid_with_its_maker_before_a_bare_model() {
+        // AOC is 0x05E3, HP's HPN is 0x2223: the codes' letters, five bits each.
+        assert_eq!(edid_name(&edid([0x05, 0xE3], b"28E850")).as_deref(), Some("AOC 28E850"));
+        assert_eq!(edid_name(&edid([0x22, 0x23], b"HP 27f")).as_deref(), Some("HP 27f"));
+        assert_eq!(edid_name(&edid([0x1E, 0x6D], b"LG ULTRAGEAR")).as_deref(), Some("LG ULTRAGEAR"));
+        assert_eq!(edid_name(&edid([0x05, 0xE3], b"   ")), None);
+        assert_eq!(edid_name(&[0u8; 128]), None, "not an EDID");
+        assert_eq!(edid_name(&[0u8; 10]), None);
+    }
+
+    #[test]
+    fn linux_displays_take_the_name_of_the_monitor_on_their_connector() {
+        let connected = vec![
+            ("DP-1".to_owned(), "HP 27f".to_owned()),
+            ("Unknown-2".to_owned(), "AOC 28E850".to_owned()),
+            ("HDMI-A-1".to_owned(), "Lobby TV".to_owned()),
+        ];
+        // Wayland on GNOME: "None" for a connector the driver calls Unknown, "HDMI" for HDMI-A.
+        let window = vec!["DP-1".to_owned(), "None-2".to_owned(), "HDMI-1".to_owned(), "DP-3".to_owned()];
+        let names = linux_names(&window, &connected);
+        assert_eq!(
+            names,
+            [
+                ("DP-1".to_owned(), "HP 27f".to_owned()),
+                ("None-2".to_owned(), "AOC 28E850".to_owned()),
+                ("HDMI-1".to_owned(), "Lobby TV".to_owned()),
+            ],
+            "DP-3 has no monitor of its own: it keeps its name"
+        );
+        // X11 with NVIDIA's driver counts from 0: the only HDMI on both sides still matches,
+        // but not when there are two of a kind.
+        let x11 = vec!["DP-0".to_owned(), "HDMI-0".to_owned()];
+        let names = linux_names(&x11, &connected);
+        assert!(names.contains(&("HDMI-0".to_owned(), "Lobby TV".to_owned())), "{names:?}");
+        assert!(names.contains(&("DP-0".to_owned(), "HP 27f".to_owned())), "{names:?}");
+        let two = vec![("DP-1".to_owned(), "A".to_owned()), ("DP-2".to_owned(), "B".to_owned())];
+        assert!(linux_names(&["DP-0".to_owned()], &two).is_empty());
     }
 
     #[test]

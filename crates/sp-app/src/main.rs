@@ -1190,10 +1190,10 @@ pub(crate) fn display_list(
     primary: Option<winit::monitor::MonitorHandle>,
 ) -> Vec<DisplayInfo> {
     // On a Mac by display id; on Windows by device name, which is the window library's name for
-    // the display (none on Linux, where the window library's names are the system's).
+    // the display; on Linux by the connector the window system names ("DP-1", "None-2").
     #[cfg(target_os = "macos")]
     let names = sp_video::display_names();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let names = {
         static LAST: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
         let mut last = LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1215,7 +1215,13 @@ pub(crate) fn display_list(
             new
         })
     };
-    for (index, m) in monitors.enumerate() {
+    let monitors: Vec<winit::monitor::MonitorHandle> = monitors.collect();
+    #[cfg(target_os = "linux")]
+    let names = {
+        let window_names: Vec<String> = monitors.iter().filter_map(winit::monitor::MonitorHandle::name).collect();
+        displays::linux_names(&window_names, &displays::connected_monitors())
+    };
+    for (index, m) in monitors.into_iter().enumerate() {
         let old_name = m.name().unwrap_or_else(|| "Display".to_owned());
         #[cfg(target_os = "macos")]
         let own = {
