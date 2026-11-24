@@ -117,7 +117,7 @@ pub enum SetupRequest {
     ChooseSongFiles,
 }
 
-/// The ProPresenter libraries folder in the home folder, if it is there, with how many song
+/// The other presentation program's libraries folder in the home folder, if it is there, with how many song
 /// documents it holds and in how many libraries. (Windows names the home folder USERPROFILE.)
 fn library_found() -> Option<(PathBuf, usize, usize)> {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
