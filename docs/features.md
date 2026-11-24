@@ -418,8 +418,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   played as it is, never converted first. FFmpeg comes inside the app (an LGPL build of FFmpeg
   9.0.2, with its licence and source in the app's Resources), so nothing needs installing; AV1
   plays on Macs whose video hardware decodes it (M3 and later). A video the Mac's player plays
-  goes to the screens as the decoder's own picture memory, with no copy through the processor
-  (a video whose format can carry clear parts, and everything FFmpeg plays, is still copied).
+  behind the words goes to the screens as the decoder's own picture memory, with no copy through
+  the processor (a video whose format can carry clear parts, everything FFmpeg plays, and a video
+  in a box on a slide or on the Announcements layer are still copied).
   In the preview block, a video on screen has one row of keys
   under the slide's number and name: a round Play or Pause, Start Over, Forward 10 seconds, a
   slim bar to click or drag through (the time a click goes to shows over it), the time left,

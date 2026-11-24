@@ -254,8 +254,9 @@ impl Painter {
 
     /// Sends a moving picture its new pixels from a texture already on the GPU (a decoded video
     /// picture's own memory), with no copy through the CPU: the texture is 32-bit BGRA with
-    /// the picture's size, and the moving picture must have been made for [`PixelOrder::Rgba`]
-    /// (the GPU turns the order of the bytes as it copies). Everything drawn with its picture
+    /// the picture's size, and the moving picture must have been made for [`PixelOrder::Bgra`]
+    /// (the GPU writes the bytes into it in the order they had, so the picture is the very
+    /// bytes [`Painter::show_rows`] would have sent). Everything drawn with its picture
     /// from now on shows them. False, with nothing changed, when the texture isn't of that
     /// kind.
     ///
