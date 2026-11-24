@@ -78,6 +78,38 @@ pub fn build_scene(fonts: &mut Fonts, slide: Option<&Slide>, theme: &Theme, targ
 /// slide's words, all fitted inside the 16:9 slide area.
 pub fn build_layers(fonts: &mut Fonts, layers: &Layers, theme: &Theme, target_w: u32, target_h: u32) -> Built {
     let mut scene = Scene::new();
+    paint_under(&mut scene, layers, theme, target_w, target_h);
+    let overflow = paint_over(&mut scene, fonts, layers, theme, target_w, target_h);
+    Built { scene, overflow }
+}
+
+/// The layers of [`build_layers`] in two scenes that drawn one after the other make the same
+/// picture: `under` is what lies below the slide's own objects (the backdrop, the theme's
+/// colour and the media or theme picture), and `over` is everything above it. A fade can keep
+/// a picture of `over` and draw `under` live, when the media is a playing video.
+pub struct Parts {
+    pub under: Scene,
+    pub over: Scene,
+    pub overflow: bool,
+}
+
+/// Draws every layer as [`build_layers`] does, but in the two parts of [`Parts`].
+pub fn build_layer_parts(fonts: &mut Fonts, layers: &Layers, theme: &Theme, target_w: u32, target_h: u32) -> Parts {
+    let under = build_under(layers, theme, target_w, target_h);
+    let mut over = Scene::new();
+    let overflow = paint_over(&mut over, fonts, layers, theme, target_w, target_h);
+    Parts { under, over, overflow }
+}
+
+/// Only the lower part of [`Parts`].
+pub fn build_under(layers: &Layers, theme: &Theme, target_w: u32, target_h: u32) -> Scene {
+    let mut scene = Scene::new();
+    paint_under(&mut scene, layers, theme, target_w, target_h);
+    scene
+}
+
+/// The backdrop, the theme's colour under the media, and the media (or the theme's picture).
+fn paint_under(scene: &mut Scene, layers: &Layers, theme: &Theme, target_w: u32, target_h: u32) {
     let whole = Rect::new(0.0, 0.0, f64::from(target_w), f64::from(target_h));
     let backdrop = layers.backdrop.map_or(Color::BLACK, color);
     scene.fill(Fill::NonZero, Affine::IDENTITY, backdrop, None, &whole);
@@ -119,14 +151,28 @@ pub fn build_layers(fonts: &mut Fonts, layers: &Layers, theme: &Theme, target_w:
         );
         scene.pop_layer();
     }
+}
 
+/// Everything above the media: the layout's objects, the slide's, the announcement, the props
+/// and message, and the covered edges. True when a box's text did not fit.
+fn paint_over(
+    scene: &mut Scene,
+    fonts: &mut Fonts,
+    layers: &Layers,
+    theme: &Theme,
+    target_w: u32,
+    target_h: u32,
+) -> bool {
+    let backdrop = layers.backdrop.map_or(Color::BLACK, color);
+    let (x, y, w, _) = fit_rect(target_w, target_h);
+    let to_target = Affine::translate((x, y)) * Affine::scale(w / f64::from(SLIDE_WIDTH));
     let mut overflow = false;
     if let Some(slide) = layers.slide {
         // The layout's own shapes, pictures and videos, behind the slide's words.
         if let Some(behind) = layout_objects(slide, theme) {
-            draw_objects(&mut scene, fonts, to_target, &behind, theme, layers.time);
+            draw_objects(scene, fonts, to_target, &behind, theme, layers.time);
         }
-        overflow |= draw_objects(&mut scene, fonts, to_target, slide, theme, layers.time);
+        overflow |= draw_objects(scene, fonts, to_target, slide, theme, layers.time);
     }
     if let Some((announcement, own_theme)) = layers.announcement {
         // Its theme's background covers what is under it, as an announcement takes the screen.
@@ -135,12 +181,12 @@ pub fn build_layers(fonts: &mut Fonts, layers: &Layers, theme: &Theme, target_w:
             scene.fill(Fill::NonZero, to_target, color(background), None, &slide_area);
         }
         if let Some(behind) = layout_objects(announcement, own_theme) {
-            draw_objects(&mut scene, fonts, to_target, &behind, own_theme, layers.time);
+            draw_objects(scene, fonts, to_target, &behind, own_theme, layers.time);
         }
-        draw_objects(&mut scene, fonts, to_target, announcement, own_theme, layers.time);
+        draw_objects(scene, fonts, to_target, announcement, own_theme, layers.time);
     }
     if let Some(overlay) = layers.overlay {
-        draw_objects(&mut scene, fonts, to_target, overlay, theme, layers.time);
+        draw_objects(scene, fonts, to_target, overlay, theme, layers.time);
     }
     // The covered edges, over everything.
     let [left, top, right, bottom] = layers.mask.map(|edge| f64::from(edge.max(0.0)));
@@ -155,7 +201,7 @@ pub fn build_layers(fonts: &mut Fonts, layers: &Layers, theme: &Theme, target_w:
             scene.fill(Fill::NonZero, to_target, backdrop, None, &edge);
         }
     }
-    Built { scene, overflow }
+    overflow
 }
 
 /// The shapes, pictures and videos a slide's layout puts behind its words, as a slide to draw;
@@ -679,6 +725,28 @@ pub fn cross_fade(from: &Scene, to: &Scene, amount: f32, target_w: u32, target_h
     scene.append(to, None);
     scene.pop_layer();
     scene
+}
+
+/// Whether a transition of this kind may be drawn from textures of its two pictures (see
+/// [`Painter::cache_whole`](crate::Painter::cache_whole)), blended by [`transition`]. The kinds
+/// that only fade, or show one picture through a clip, put each texel where the picture had it;
+/// the ones that move or scale a picture sample the texture between texels, a little softer than
+/// drawing the slide again at the new place.
+pub fn fade_cacheable(kind: sp_model::TransitionKind) -> bool {
+    use sp_model::TransitionKind as K;
+    matches!(
+        kind,
+        K::Dissolve
+            | K::Fade
+            | K::FadeBlack
+            | K::FadeWhite
+            | K::Wipe
+            | K::Split
+            | K::Iris
+            | K::Clock
+            | K::Blinds
+            | K::Checkerboard
+    )
 }
 
 /// One picture giving way to another by a transition, `amount` of the way through (0 is all

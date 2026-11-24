@@ -1997,3 +1997,371 @@ fn the_graphics_are_chosen_deliberately() {
         }
     }
 }
+
+// ---- Fades drawn from textures of their two pictures ----------------------------------------
+
+/// A busy picture to put behind the slides: diagonal bands and a bright blob, so a wrong shift
+/// or blur shows.
+fn busy_picture(w: u32, h: u32) -> sp_render::Picture {
+    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let band = ((x + y) / 40) % 2 == 0;
+            let (dx, dy) = (f64::from(x) - f64::from(w) * 0.7, f64::from(y) - f64::from(h) * 0.3);
+            let glow = (255.0 * (-(dx * dx + dy * dy) / 40_000.0).exp()) as u8;
+            let base = if band { [30, 60, 120] } else { [90, 40, 70] };
+            rgba.extend_from_slice(&[base[0].max(glow), base[1].max(glow), base[2], 255]);
+        }
+    }
+    sp_render::Picture::from_rgba(w, h, rgba).expect("picture")
+}
+
+/// A theme whose words have a green outline and a shadow, so both are in the fade.
+fn outlined_theme() -> Theme {
+    use sp_model::Rgba;
+    let mut theme = Theme::builtin();
+    for style in theme.templates.iter_mut().flat_map(|template| &mut template.boxes) {
+        style.outline_color = Rgba::rgb(0, 255, 0);
+        style.outline_width = 6.0;
+        style.fill = Rgba::rgb(250, 240, 200);
+        style.shadow = true;
+    }
+    theme
+}
+
+fn layers_of<'a>(media: &'a sp_render::Picture, slide: &'a Slide) -> sp_render::Layers<'a> {
+    sp_render::Layers {
+        media_fit: sp_model::ImageFit::Fill,
+        media: Some(media),
+        slide: Some(slide),
+        overlay: None,
+        time: 0.0,
+        backdrop: None,
+        mask: [0.0; 4],
+        announcement: None,
+    }
+}
+
+fn paint_to_pixels(painter: &mut Painter, scene: &sp_render::vello::Scene, w: u32, h: u32) -> Vec<u8> {
+    let (device, queue) = gpu();
+    let texture = target_texture(device, w, h);
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    painter.paint(device, queue, scene, &view, w, h).expect("paint");
+    read_pixels(device, queue, &texture).expect("read back")
+}
+
+/// The mean difference of the colour bytes, the largest difference of any colour byte, and how
+/// many pixels differ by more than `loose` anywhere.
+fn compare(a: &[u8], b: &[u8], loose: u8) -> (f64, u8, usize) {
+    let (mut total, mut worst, mut far) = (0u64, 0u8, 0usize);
+    for (p, q) in a.chunks(4).zip(b.chunks(4)) {
+        let d = (0..3).map(|i| p[i].abs_diff(q[i])).max().unwrap_or(0);
+        total += (0..3).map(|i| u64::from(p[i].abs_diff(q[i]))).sum::<u64>();
+        worst = worst.max(d);
+        far += usize::from(d > loose);
+    }
+    (total as f64 / (a.len() / 4 * 3) as f64, worst, far)
+}
+
+const FADE_PROGRESS: [f32; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+
+/// Every kind of transition, at five points through it, drawn from textures of its two pictures
+/// (each painted once) beside drawn from the pictures themselves (the way fades always were),
+/// with outlined, shadowed words and a translation line over a picture. The kinds the app
+/// caches (`fade_cacheable`: the fades and the clipped ones) are held to a mean difference of
+/// 0.05 and no colour byte more than 2 off; the others, which move or scale a picture and so
+/// sample the texture between its texels, are measured and reported (and drawn from the
+/// slides in the app).
+#[test]
+fn a_fade_from_textures_matches_a_fade_drawn_from_the_slides() {
+    use sp_model::{Direction, TransitionKind};
+    let (w, h) = (960, 540);
+    let (device, queue) = gpu();
+    let mut painter = Painter::new(device).expect("painter");
+    let mut fonts = Fonts::bundled_only();
+    let theme = outlined_theme();
+    let picture = busy_picture(w, h);
+    let first = slide("Glory to God in the highest", Some("Слава Богу в вышних"));
+    let second = slide("And on earth peace", Some("И на земле мир"));
+    let from = sp_render::build_layers(&mut fonts, &layers_of(&picture, &first), &theme, w, h).scene;
+    let to = sp_render::build_layers(&mut fonts, &layers_of(&picture, &second), &theme, w, h).scene;
+    let cached_from = painter.cache_whole(device, queue, &from, w, h).expect("cache from");
+    let cached_to = painter.cache_whole(device, queue, &to, w, h).expect("cache to");
+    let mut report = String::new();
+    let mut failures = Vec::new();
+    for kind in TransitionKind::ALL.into_iter().filter(|kind| *kind != TransitionKind::Cut) {
+        for direction in [Direction::FromLeft, Direction::FromTop] {
+            for amount in FADE_PROGRESS {
+                let plain = sp_render::transition(kind, direction, &from, &to, amount, w, h);
+                let cached =
+                    sp_render::transition(kind, direction, cached_from.scene(), cached_to.scene(), amount, w, h);
+                let (a, b) =
+                    (paint_to_pixels(&mut painter, &plain, w, h), paint_to_pixels(&mut painter, &cached, w, h));
+                let (mean, worst, far) = compare(&a, &b, 24);
+                report.push_str(&format!("{kind:?} {direction:?} {amount}: mean {mean:.3} worst {worst} far {far}\n"));
+                if sp_render::fade_cacheable(kind) && (mean > 0.05 || worst > 2 || far > 0) {
+                    failures.push(format!("{kind:?} {direction:?} at {amount}: mean {mean:.3}, {far} far"));
+                }
+            }
+        }
+    }
+    eprintln!("{report}");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Not a check: times one dissolve step at 1920 by 1080, drawn from the slides (as fades always
+/// were), from textures of them through the renderer (as the app now does), and from textures by
+/// a plain two-texture blend of its own, which only does dissolves. Each picture is read back, so
+/// the time is the GPU's as well as the processor's. Run it by name to see the numbers.
+#[test]
+#[ignore = "a timing, not a check: run with --ignored --nocapture"]
+fn dissolve_step_cost() {
+    use sp_model::{Direction, TransitionKind};
+    use std::time::Instant;
+    let (w, h) = (1920, 1080);
+    let (device, queue) = gpu();
+    let mut painter = Painter::new(device).expect("painter");
+    let mut fonts = Fonts::bundled_only();
+    let theme = outlined_theme();
+    let picture = busy_picture(w, h);
+    let first = slide("Glory to God in the highest", Some("Слава Богу в вышних"));
+    let second = slide("And on earth peace", Some("И на земле мир"));
+    let from = sp_render::build_layers(&mut fonts, &layers_of(&picture, &first), &theme, w, h).scene;
+    let to = sp_render::build_layers(&mut fonts, &layers_of(&picture, &second), &theme, w, h).scene;
+    let cached_from = painter.cache_whole(device, queue, &from, w, h).expect("cache from");
+    let cached_to = painter.cache_whole(device, queue, &to, w, h).expect("cache to");
+    let texture = target_texture(device, w, h);
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let one_pixel = |texture: &wgpu::Texture| {
+        // A readback of the whole texture is the sync point; it costs the same for each way.
+        read_pixels(device, queue, texture).expect("read back")
+    };
+    let steps = 40;
+    let mut time = |label: &str, make: &mut dyn FnMut(f32) -> sp_render::vello::Scene| {
+        for step in 0..4 {
+            let scene = make(step as f32 / 40.0);
+            painter.paint(device, queue, &scene, &view, w, h).expect("paint");
+        }
+        one_pixel(&texture);
+        let (mut scene_time, mut paint_time) = (0.0, 0.0);
+        let began = Instant::now();
+        for step in 0..steps {
+            let a = Instant::now();
+            let scene = make(step as f32 / steps as f32);
+            scene_time += a.elapsed().as_secs_f64();
+            let b = Instant::now();
+            painter.paint(device, queue, &scene, &view, w, h).expect("paint");
+            paint_time += b.elapsed().as_secs_f64();
+        }
+        one_pixel(&texture);
+        let total = began.elapsed().as_secs_f64();
+        eprintln!(
+            "{label}: {:.2} ms a step in all ({:.2} ms building the scene, {:.2} ms in paint)",
+            total * 1000.0 / steps as f64,
+            scene_time * 1000.0 / steps as f64,
+            paint_time * 1000.0 / steps as f64
+        );
+    };
+    time("from the slides  ", &mut |a| {
+        sp_render::transition(TransitionKind::Dissolve, Direction::FromLeft, &from, &to, a, w, h)
+    });
+    let (cf, ct) = (cached_from.scene().clone(), cached_to.scene().clone());
+    time("from textures    ", &mut |a| {
+        sp_render::transition(TransitionKind::Dissolve, Direction::FromLeft, &cf, &ct, a, w, h)
+    });
+    // A plain blend: one triangle, two textures, a mix.
+    let pictures = [&from, &to].map(|scene| {
+        let t = target_texture(device, w, h);
+        let v = t.create_view(&wgpu::TextureViewDescriptor::default());
+        painter.paint(device, queue, scene, &v, w, h).expect("paint");
+        v
+    });
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: None,
+        source: wgpu::ShaderSource::Wgsl(
+            "struct Out { @builtin(position) p: vec4<f32>, @location(0) uv: vec2<f32> }
+@vertex fn vs(@builtin(vertex_index) i: u32) -> Out {
+    var o: Out;
+    let c = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
+    o.p = vec4<f32>(c * 2.0 - 1.0, 0.0, 1.0);
+    o.uv = vec2<f32>(c.x, 1.0 - c.y);
+    return o;
+}
+@group(0) @binding(0) var a: texture_2d<f32>;
+@group(0) @binding(1) var b: texture_2d<f32>;
+@group(0) @binding(2) var s: sampler;
+struct Mixing { amount: f32 }
+@group(0) @binding(3) var<uniform> m: Mixing;
+@fragment fn fs(i: Out) -> @location(0) vec4<f32> {
+    return mix(textureSample(a, s, i.uv), textureSample(b, s, i.uv), m.amount);
+}"
+            .into(),
+        ),
+    });
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+    let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: 16,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let target_format = wgpu::TextureFormat::Rgba8Unorm;
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: None,
+        layout: None,
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        primitive: Default::default(),
+        depth_stencil: None,
+        multisample: Default::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs"),
+            compilation_options: Default::default(),
+            targets: &[Some(target_format.into())],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: target_format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&pictures[0]) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&pictures[1]) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&sampler) },
+            wgpu::BindGroupEntry { binding: 3, resource: uniform.as_entire_binding() },
+        ],
+    });
+    let blend_step = |amount: f32| {
+        queue.write_buffer(&uniform, 0, &amount.to_le_bytes().repeat(4));
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        queue.submit([encoder.finish()]);
+    };
+    for step in 0..4 {
+        blend_step(step as f32 / 40.0);
+    }
+    one_pixel(&target);
+    let began = Instant::now();
+    for step in 0..steps {
+        blend_step(step as f32 / steps as f32);
+    }
+    one_pixel(&target);
+    eprintln!("two-texture blend : {:.2} ms a step in all", began.elapsed().as_secs_f64() * 1000.0 / steps as f64);
+}
+
+/// The plain two-texture blend (`FadeBlend`), which the app uses for the fades that are a sum of
+/// the two pictures, gives the same pictures as drawing them from the slides: at the ends exactly
+/// the old and the new picture, and between them within a level or two, at many points through
+/// the fade (the app's own fades are eased, so any point may come).
+#[test]
+fn the_plain_blend_matches_a_fade_drawn_from_the_slides() {
+    use sp_model::{Direction, TransitionKind};
+    let (w, h) = (960, 540);
+    let (device, queue) = gpu();
+    let mut painter = Painter::new(device).expect("painter");
+    let blend = sp_render::FadeBlend::new(device);
+    let mut fonts = Fonts::bundled_only();
+    let theme = outlined_theme();
+    let picture = busy_picture(w, h);
+    let first = slide("Glory to God in the highest", Some("Слава Богу в вышних"));
+    let second = slide("And on earth peace", Some("И на земле мир"));
+    let from = sp_render::build_layers(&mut fonts, &layers_of(&picture, &first), &theme, w, h).scene;
+    let to = sp_render::build_layers(&mut fonts, &layers_of(&picture, &second), &theme, w, h).scene;
+    let cached_from = painter.cache_whole(device, queue, &from, w, h).expect("cache from");
+    let cached_to = painter.cache_whole(device, queue, &to, w, h).expect("cache to");
+    let (old, new) = (paint_to_pixels(&mut painter, &from, w, h), paint_to_pixels(&mut painter, &to, w, h));
+    let mut report = String::new();
+    let mut failures = Vec::new();
+    for kind in [TransitionKind::Dissolve, TransitionKind::Fade, TransitionKind::FadeBlack, TransitionKind::FadeWhite] {
+        for step in 0..=20 {
+            let amount = step as f32 / 20.0;
+            let plain = sp_render::transition(kind, Direction::FromLeft, &from, &to, amount, w, h);
+            let want = paint_to_pixels(&mut painter, &plain, w, h);
+            let weights = sp_render::blend_weights(kind, amount).expect("a sum of the two");
+            let texture = target_texture(device, w, h);
+            assert!(blend.draw(device, queue, &cached_from, &cached_to, weights, &texture));
+            let got = read_pixels(device, queue, &texture).expect("read back");
+            let (mean, worst, _) = compare(&want, &got, 2);
+            report.push_str(&format!("{kind:?} {amount}: mean {mean:.3} worst {worst}\n"));
+            // The renderer rounds to a whole level after each layer, the blend once: one level off.
+            if mean > 0.5 || worst > 1 {
+                failures.push(format!("{kind:?} at {amount}: mean {mean:.3} worst {worst}"));
+            }
+            if step == 0 && kind == TransitionKind::Dissolve {
+                assert_eq!(compare(&old, &got, 0).1, 0, "the first step is the old picture");
+            }
+            if step == 20 && kind == TransitionKind::Dissolve {
+                assert_eq!(compare(&new, &got, 0).1, 0, "the last step is the new picture");
+            }
+        }
+    }
+    eprintln!("{report}");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Not a check: saves the middle of a dissolve drawn from the slides and drawn from textures as
+/// pictures, into the folder named by SOFTPRESENTER_FADE_PICTURES, to look at.
+#[test]
+#[ignore = "saves pictures to look at: set SOFTPRESENTER_FADE_PICTURES=folder and run with --ignored"]
+fn save_the_middle_of_a_dissolve() {
+    use sp_model::{Direction, TransitionKind};
+    let Some(folder) = std::env::var_os("SOFTPRESENTER_FADE_PICTURES").map(PathBuf::from) else { return };
+    let (w, h) = (960, 540);
+    let (device, queue) = gpu();
+    let mut painter = Painter::new(device).expect("painter");
+    let blend = sp_render::FadeBlend::new(device);
+    let mut fonts = Fonts::bundled_only();
+    let theme = outlined_theme();
+    let picture = busy_picture(w, h);
+    let first = slide("Glory to God in the highest", Some("Слава Богу в вышних"));
+    let second = slide("And on earth peace", Some("И на земле мир"));
+    let from = sp_render::build_layers(&mut fonts, &layers_of(&picture, &first), &theme, w, h).scene;
+    let to = sp_render::build_layers(&mut fonts, &layers_of(&picture, &second), &theme, w, h).scene;
+    let (a, b) = (
+        painter.cache_whole(device, queue, &from, w, h).expect("cache"),
+        painter.cache_whole(device, queue, &to, w, h).expect("cache"),
+    );
+    let plain = sp_render::transition(TransitionKind::Dissolve, Direction::FromLeft, &from, &to, 0.4, w, h);
+    write_png(&folder.join("dissolve-plain.png"), &paint_to_pixels(&mut painter, &plain, w, h), w, h);
+    let texture = target_texture(device, w, h);
+    let weights = sp_render::blend_weights(TransitionKind::Dissolve, 0.4).expect("weights");
+    assert!(blend.draw(device, queue, &a, &b, weights, &texture));
+    write_png(&folder.join("dissolve-blend.png"), &read_pixels(device, queue, &texture).expect("read"), w, h);
+}

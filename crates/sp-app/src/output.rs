@@ -818,6 +818,46 @@ impl Announcement {
 }
 
 /// A window a screen is drawn in.
+/// A fade under way in one window: the two whole pictures it goes between, and, when the fade
+/// is cached, a texture of each (see `Output::cache_sides`). A cached fade draws each slide once
+/// and then only blends the two textures, with the same `transition` as one that is not cached,
+/// which draws both slides again at every step.
+struct Fade {
+    from: vello::Scene,
+    to: vello::Scene,
+    cache: Option<(sp_render::CachedSide, sp_render::CachedSide)>,
+}
+
+/// What a window is shown: a scene painted by the renderer, or the plain blend of the two sides of
+/// a cached fade (`sp_render::FadeBlend`).
+enum Draw<'a> {
+    Scene(&'a vello::Scene),
+    Blend(&'a sp_render::CachedSide, &'a sp_render::CachedSide, sp_render::Weights),
+}
+
+impl Fade {
+    /// The two textures and weights to blend, for a cached fade whose kind is a plain sum of its
+    /// two pictures (`sp_render::blend_weights`); `None` when the renderer must draw it.
+    fn blend(
+        &self,
+        look: sp_model::Transition,
+        amount: f32,
+    ) -> Option<(&sp_render::CachedSide, &sp_render::CachedSide, sp_render::Weights)> {
+        let (from, to) = self.cache.as_ref()?;
+        Some((from, to, sp_render::blend_weights(look.kind, amount)?))
+    }
+
+    /// The picture `amount` of the way through the fade, as a scene to paint.
+    fn mixed(&self, look: sp_model::Transition, amount: f32, w: u32, h: u32) -> vello::Scene {
+        match &self.cache {
+            Some((from, to)) => {
+                sp_render::transition(look.kind, look.direction, from.scene(), to.scene(), amount, w, h)
+            }
+            None => sp_render::transition(look.kind, look.direction, &self.from, &self.to, amount, w, h),
+        }
+    }
+}
+
 struct Target {
     id: Uuid,
     /// The screen's name when its window opened, for the log.
@@ -834,7 +874,7 @@ struct Target {
     /// The picture now in the window in full, kept so the next one can fade in over it.
     shown: Option<vello::Scene>,
     /// A fade under way: the picture it started from and the one it ends at.
-    fade: Option<(vello::Scene, vello::Scene)>,
+    fade: Option<Fade>,
     /// False when setting the window's surface up failed (the GPU too busy, say); it is tried
     /// again before each frame, and the window is skipped until it works.
     configured: bool,
@@ -1010,6 +1050,14 @@ struct Output {
     /// When the transition under way began, and which it is. Every window follows this one
     /// clock, so they stay in step.
     fading: Option<(Instant, sp_model::Transition)>,
+    /// Whether a fade draws each slide once into a texture and then only blends (see
+    /// `cache_sides`); false draws both slides again at every step, as it always did.
+    fade_cache: bool,
+    /// The fade under way's pictures drawn so far, whether any window's was from textures, and
+    /// the fade's start they are of, for the log line each fade ends with.
+    fade_drawn: Option<(Instant, u32, bool)>,
+    /// Blends the textures of a cached fade (see `Draw`).
+    blend: sp_render::FadeBlend,
     /// The NDI sources that are switched on, and the texture their picture is drawn into.
     ndi: Vec<(Uuid, NdiOutput)>,
     /// A way into this thread's own messages, a copy of which each NDI source is started with
@@ -1107,7 +1155,7 @@ struct Output {
     ndi_visible_seen: Vec<f32>,
     /// The live preview's whole picture, and a fade under way in it: from, to.
     preview_shown: Option<vello::Scene>,
-    preview_fade: Option<(vello::Scene, vello::Scene)>,
+    preview_fade: Option<Fade>,
     /// The audience screen the live preview is drawn as, when the operator looks at one.
     preview_screen: Option<Uuid>,
     /// True in a drawing of every screen until the windows other than the stage's are drawn:
@@ -1194,6 +1242,9 @@ fn run(
         preview_state: Shown::default(),
         round: Round::default(),
         pretend_slow: std::env::var("SOFTPRESENTER_GPU_TOO_SLOW").ok().as_deref().and_then(PretendSlow::parse),
+        fade_cache: fade_cache_wanted(),
+        fade_drawn: None,
+        blend: sp_render::FadeBlend::new(&device),
         started: Instant::now(),
         timing: crate::applog::Timing::new("screen drawings"),
         video_pictures: 0,
@@ -1566,6 +1617,19 @@ struct Playing {
 fn changes_with_video(look: &crate::screens::Look, see_through: bool, playing: Playing) -> bool {
     // A see-through screen leaves out the media behind the words.
     (look.media && !see_through && playing.behind) || playing.in_boxes || (look.announcements && playing.announced)
+}
+
+/// Whether fades draw each slide once and then blend (see `Output::cache_sides`).
+///
+/// Testing aid, and the way back to the old drawing if a fade ever looks wrong:
+/// SOFTPRESENTER_FADE_CACHE=0 (or `off`) draws both slides again at every step of a fade, as
+/// the output did before; a file named `fade-cache-off` in the data folder does the same without
+/// setting anything. Read once, as the screens' thread starts.
+fn fade_cache_wanted() -> bool {
+    if let Ok(asked) = std::env::var("SOFTPRESENTER_FADE_CACHE") {
+        return !matches!(asked.trim().to_ascii_lowercase().as_str(), "0" | "off" | "no" | "false");
+    }
+    !crate::bible_store::data_dir().is_some_and(|folder| folder.join("fade-cache-off").exists())
 }
 
 /// How far in a fade is, from 0 to 1, eased so it starts and ends gently.
@@ -2409,19 +2473,22 @@ impl Output {
         let (w, h) = LIVE_PREVIEW_SIZE;
         let scene = self.scene_for(self.preview_screen.unwrap_or(Uuid::nil()), frame, w, h);
         // A video's new picture during a fade: the fade goes on, towards the newer picture.
-        if !new_picture && let Some((from, _)) = self.preview_fade.take() {
-            self.preview_fade = Some((from, scene));
+        if !new_picture && let Some(fade) = self.preview_fade.take() {
+            // (Nothing is cached while a video plays, so this fade draws both pictures again.)
+            self.preview_fade = Some(Fade { from: fade.from, to: scene, cache: None });
             return self.step_live_preview(None);
         }
-        let before = self.preview_fade.take().map(|(_, to)| to).or_else(|| self.preview_shown.take());
+        let before = self.preview_fade.take().map(|fade| fade.to).or_else(|| self.preview_shown.take());
         match before {
             Some(from) if new_picture && self.fading.is_some() => {
-                self.preview_fade = Some((from, scene));
+                let looking = self.preview_screen.unwrap_or(Uuid::nil());
+                let cache = self.cache_sides(For::Preview, self.see_through(looking).is_some(), &from, &scene, w, h);
+                self.preview_fade = Some(Fade { from, to: scene, cache });
                 self.step_live_preview(Some(0.0));
             }
             // A picture that was not painted is not the one the preview shows.
             before => {
-                let painted = self.paint_live_preview(&scene);
+                let painted = self.paint_live_preview(Draw::Scene(&scene));
                 self.preview_shown = if painted { Some(scene) } else { before };
             }
         }
@@ -2430,26 +2497,31 @@ impl Output {
     /// Moves a fade in the live preview on to `amount` (as far as the screens' fade has got
     /// when `None`); at the end it shows the whole new picture.
     fn step_live_preview(&mut self, amount: Option<f32>) {
-        let Some((from, to)) = self.preview_fade.take() else { return };
+        let Some(fade) = self.preview_fade.take() else { return };
         let amount =
             amount.unwrap_or_else(|| self.fading.map_or(1.0, |(started, look)| fade_amount(started, look.duration())));
         if amount >= 1.0 {
-            let painted = self.paint_live_preview(&to);
+            let Fade { from, to, .. } = fade;
+            let painted = self.paint_live_preview(Draw::Scene(&to));
             self.preview_shown = Some(if painted { to } else { from });
             return;
         }
         let (w, h) = LIVE_PREVIEW_SIZE;
         let look = self.fading.map_or(sp_model::Transition::default(), |(_, look)| look);
-        let mixing = Instant::now();
-        let mixed = sp_render::transition(look.kind, look.direction, &from, &to, amount, w, h);
-        self.held.since(Part::Scene, For::Preview, mixing);
-        self.paint_live_preview(&mixed);
-        self.preview_fade = Some((from, to));
+        if let Some((from, to, weights)) = fade.blend(look, amount) {
+            self.paint_live_preview(Draw::Blend(from, to, weights));
+        } else {
+            let mixing = Instant::now();
+            let mixed = fade.mixed(look, amount, w, h);
+            self.held.since(Part::Scene, For::Preview, mixing);
+            self.paint_live_preview(Draw::Scene(&mixed));
+        }
+        self.preview_fade = Some(fade);
     }
 
     /// Paints a picture into the live preview texture the window isn't showing, then tells the
     /// window to show it; true when it was painted.
-    fn paint_live_preview(&mut self, scene: &vello::Scene) -> bool {
+    fn paint_live_preview(&mut self, draw: Draw<'_>) -> bool {
         use std::sync::atomic::Ordering::{Acquire, Release};
         self.previewed_at = Instant::now();
         if self.round.slow {
@@ -2459,7 +2531,20 @@ impl Output {
         let (w, h) = LIVE_PREVIEW_SIZE;
         let back = 1 - self.live_preview.front.load(Acquire).min(1);
         let view = self.preview_targets[back].create_view(&wgpu::TextureViewDescriptor::default());
-        if let Err(e) = self.paint(scene, &view, w, h, false, For::Preview) {
+        let painted = match draw {
+            Draw::Scene(scene) => self.paint(scene, &view, w, h, false, For::Preview),
+            Draw::Blend(from, to, weights) => {
+                let blending = Instant::now();
+                let drawn = self.blend.draw(&self.device, &self.queue, from, to, weights, &self.preview_targets[back]);
+                self.held.since(Part::Paint, For::Preview, blending);
+                if drawn {
+                    Ok(())
+                } else {
+                    Err(sp_render::PaintError::Failed("the fade's pictures are not the preview's size".to_owned()))
+                }
+            }
+        };
+        if let Err(e) = painted {
             self.preview_state.failed(&e);
             return false;
         }
@@ -2526,12 +2611,13 @@ impl Output {
             // one of its two whole pictures.
             let target = &mut self.targets[index];
             let before = match target.fade.take() {
-                Some((from, to)) => Some(fade_start(from, to, amount.unwrap_or(1.0), new_picture)),
+                Some(fade) => Some(fade_start(fade.from, fade.to, amount.unwrap_or(1.0), new_picture)),
                 None => target.shown.take(),
             };
             match before {
                 Some(from) if new_picture && self.look.duration() > 0.0 && !at_once => {
-                    target.fade = Some((from, scene));
+                    let cache = self.cache_sides(For::Window(id), self.see_through(id).is_some(), &from, &scene, w, h);
+                    self.targets[index].fade = Some(Fade { from, to: scene, cache });
                     fading = true;
                 }
                 // A picture that could not be painted was never shown: the next fade starts
@@ -2582,6 +2668,13 @@ impl Output {
             self.painter.paint(&self.device, &self.queue, scene, view, w, h)
         };
         self.held.since(Part::Paint, what, painting);
+        self.paint_noted(pretending, &painted);
+        painted
+    }
+
+    /// Notes how one painting went: a picture that was given up counts against a pretended slow
+    /// GPU, and the drawing under way hears of any trouble.
+    fn paint_noted<T>(&mut self, pretending: bool, painted: &Result<T, sp_render::PaintError>) {
         // Only a picture that was given up counts: one drawn before is not waited for.
         if pretending
             && painted.as_ref().is_err_and(sp_render::PaintError::worth_trying_again)
@@ -2589,8 +2682,51 @@ impl Output {
         {
             slow.left -= 1;
         }
-        self.round.note(&painted);
-        painted
+        self.round.note(&painted.as_ref().map(|_| ()).map_err(Clone::clone));
+    }
+
+    /// Draws the two sides of a fade once each into textures of their own, so that the fade's
+    /// steps only blend them (see `Fade`); `None` when the fade should draw both slides at
+    /// every step as it always did:
+    /// - the switch is off (`fade_cache_wanted`);
+    /// - the GPU was too slow with a picture of this drawing (the wait is not asked for again);
+    /// - the screen is see-through (its pictures keep their transparency);
+    /// - something on the screens moves by itself: a playing video, a video or NDI picture in a
+    ///   box on the slide or on the Announcements layer;
+    /// - the GPU could not draw one of the pictures into a texture.
+    ///
+    /// A GPU that was too slow is said to the drawing under way as for any picture.
+    fn cache_sides(
+        &mut self,
+        what: For,
+        see_through: bool,
+        from: &vello::Scene,
+        to: &vello::Scene,
+        w: u32,
+        h: u32,
+    ) -> Option<(sp_render::CachedSide, sp_render::CachedSide)> {
+        if !self.fade_cache
+            || self.round.slow
+            || see_through
+            || !sp_render::fade_cacheable(self.look.kind)
+            || self.plays_video()
+            || self.video_picture.is_some()
+        {
+            return None;
+        }
+        let pretending =
+            self.pretend_slow.as_ref().is_some_and(|slow| slow.left > 0 && self.started.elapsed() >= slow.after);
+        if self.pretend_slow.is_some() {
+            self.painter.wait_at_most(pretending.then_some(Duration::ZERO));
+        }
+        let caching = Instant::now();
+        let both = self
+            .painter
+            .cache_whole(&self.device, &self.queue, from, w, h)
+            .and_then(|old| Ok((old, self.painter.cache_whole(&self.device, &self.queue, to, w, h)?)));
+        self.held.since(Part::Paint, what, caching);
+        self.paint_noted(pretending, &both);
+        both.ok()
     }
 
     /// Ends a drawing, of all the screens or some: sets them to be drawn again if the GPU was
@@ -2836,11 +2972,11 @@ impl Output {
             let shown = window.and_then(|target| {
                 let (w, h) = (target.config.width, target.config.height);
                 let scene = match (&target.fade, self.fading) {
-                    (Some((from, to)), Some((started, look))) => {
+                    (Some(fade), Some((started, look))) => {
                         let amount = fade_amount(started, look.duration());
-                        sp_render::transition(look.kind, look.direction, from, to, amount, w, h)
+                        fade.mixed(look, amount, w, h)
                     }
-                    (Some((from, _)), None) => from.clone(),
+                    (Some(fade), None) => fade.from.clone(),
                     (None, _) => target.shown.clone()?,
                 };
                 Some((scene, w, h))
@@ -2918,6 +3054,10 @@ impl Output {
     fn fade_step(&mut self) {
         let Some((started, look)) = self.fading else { return };
         let amount = fade_amount(started, look.duration());
+        let cached = self.targets.iter().any(|target| target.fade.as_ref().is_some_and(|fade| fade.cache.is_some()));
+        let (_, steps, was_cached) =
+            self.fade_drawn.filter(|(since, ..)| *since == started).unwrap_or((started, 0, false));
+        self.fade_drawn = Some((started, steps + 1, was_cached || cached));
         // A video playing behind the new slide keeps moving through the fade: each new picture
         // of it builds the picture being faded to again.
         if self.take_video_picture() {
@@ -2929,8 +3069,11 @@ impl Output {
                 };
                 if self.targets[index].fade.is_some() {
                     let fresh = self.scene_for(id, &frame, w, h);
-                    if let Some((_, to)) = self.targets[index].fade.as_mut() {
-                        *to = fresh;
+                    if let Some(fade) = self.targets[index].fade.as_mut() {
+                        // A video came after the fade began (the sides are cached only while
+                        // nothing moves): it draws both slides again at each step, as before.
+                        fade.cache = None;
+                        fade.to = fresh;
                     }
                 }
             }
@@ -2938,25 +3081,34 @@ impl Output {
         // Stage screens showing a picture of a screen that is fading are drawn again with it.
         let following = self.stage_following_fades();
         for index in 0..self.targets.len() {
-            let Some((from, to)) = self.targets[index].fade.take() else { continue };
+            let Some(fade) = self.targets[index].fade.take() else { continue };
             if amount >= 1.0 {
                 // A last picture that could not be painted was never shown: the window keeps
-                // the one the fade started from, for the next fade to start from.
+                // the one the fade started from, for the next fade to start from. (The
+                // textures of a cached fade go with it.)
+                let Fade { from, to, .. } = fade;
                 let painted = self.present(index, &to);
                 self.targets[index].shown = Some(if painted { to } else { from });
             } else {
                 let (id, w, h) =
                     (self.targets[index].id, self.targets[index].config.width, self.targets[index].config.height);
                 // On a see-through screen, a true cross-fade (see `see_through_transition`).
-                let mixing = Instant::now();
-                let scene = if self.see_through(id).is_some() {
-                    see_through_transition(look.kind, &from, &to, amount, w, h)
+                // A cached fade that is a plain sum of its two pictures is one pass over their
+                // textures; any other is drawn by the renderer (from the textures if cached).
+                let plain = if self.see_through(id).is_some() { None } else { fade.blend(look, amount) };
+                if let Some((from, to, weights)) = plain {
+                    self.present_draw(index, Draw::Blend(from, to, weights));
                 } else {
-                    sp_render::transition(look.kind, look.direction, &from, &to, amount, w, h)
-                };
-                self.held.since(Part::Scene, For::Window(id), mixing);
-                self.present(index, &scene);
-                self.targets[index].fade = Some((from, to));
+                    let mixing = Instant::now();
+                    let scene = if self.see_through(id).is_some() {
+                        see_through_transition(look.kind, &fade.from, &fade.to, amount, w, h)
+                    } else {
+                        fade.mixed(look, amount, w, h)
+                    };
+                    self.held.since(Part::Scene, For::Window(id), mixing);
+                    self.present(index, &scene);
+                }
+                self.targets[index].fade = Some(fade);
             }
         }
         for index in following {
@@ -2972,6 +3124,18 @@ impl Output {
         }
         self.step_live_preview(Some(amount));
         if amount >= 1.0 || self.targets.iter().all(|target| target.fade.is_none()) {
+            if let Some((since, steps, cached)) = self.fade_drawn.take().filter(|(since, ..)| *since == started) {
+                let seconds = since.elapsed().as_secs_f32().max(0.001);
+                crate::applog::event(
+                    "output",
+                    &format!(
+                        "A {} fade of {seconds:.1} s drew {steps} pictures ({:.0} a second), {}",
+                        look.kind.name(),
+                        steps as f32 / seconds,
+                        if cached { "from textures of the two slides" } else { "from the slides" }
+                    ),
+                );
+            }
             self.fading = None;
             // An NDI picture that could not be drawn as the fade began, or during it, had no
             // drawing to be tried again in: the steps of a fade draw the windows only, and the
@@ -3034,6 +3198,11 @@ impl Output {
     /// for as long as that lasts. (Too heavy stays too heavy; too slow may pass, and the end
     /// of the drawing sets the screens to be drawn again.)
     fn present(&mut self, index: usize, scene: &vello::Scene) -> bool {
+        self.present_draw(index, Draw::Scene(scene))
+    }
+
+    /// Paints or blends a picture and shows it in one window, as `present` says.
+    fn present_draw(&mut self, index: usize, draw: Draw<'_>) -> bool {
         let Some(target) = self.targets.get(index) else { return false };
         let (id, w, h) = (target.id, target.config.width, target.config.height);
         let view = target.texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -3045,7 +3214,19 @@ impl Output {
         }
         // A see-through screen is painted on clear, and shown solid as its alpha says.
         let see_through = self.see_through(id);
-        let painted = self.paint(scene, &view, w, h, see_through.is_some(), For::Window(id));
+        let painted = match draw {
+            Draw::Scene(scene) => self.paint(scene, &view, w, h, see_through.is_some(), For::Window(id)),
+            Draw::Blend(from, to, weights) => {
+                let blending = Instant::now();
+                let drawn = self.blend.draw(&self.device, &self.queue, from, to, weights, &self.targets[index].texture);
+                self.held.since(Part::Paint, For::Window(id), blending);
+                if drawn {
+                    Ok(())
+                } else {
+                    Err(sp_render::PaintError::Failed("the fade's pictures are not this window's size".to_owned()))
+                }
+            }
+        };
         let Output { device, queue, targets, round, held, .. } = self;
         let target = &mut targets[index];
         if let Err(e) = painted {

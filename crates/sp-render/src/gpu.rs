@@ -199,7 +199,10 @@ impl Painter {
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
             // Pixels are written by the queue (`show_rows`) or by a compute pass (`show_texture`).
-            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::STORAGE_BINDING,
+            usage: wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         // The renderer takes the pixels from the texture, by the picture's name. The picture's
@@ -530,6 +533,7 @@ pub fn target_texture(device: &wgpu::Device, w: u32, h: u32) -> wgpu::Texture {
         format: wgpu::TextureFormat::Rgba8Unorm,
         usage: wgpu::TextureUsages::STORAGE_BINDING
             | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::RENDER_ATTACHMENT
             | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     })
@@ -618,4 +622,116 @@ fn read_back(
         pixels.extend_from_slice(&padded[..row]);
     }
     Ok(pixels)
+}
+
+/// One side of a fade (the picture it starts from, or the one it ends at) kept as a picture in
+/// a GPU texture, so a fade draws each slide once and then only blends: see
+/// [`Painter::cache_whole`] and [`Painter::cache_split`]. Drawn with [`CachedSide::scene`],
+/// which stands in for the scene the picture was made from in [`transition`](crate::transition).
+/// Its texture goes when it is let go (and the painter has next painted).
+pub struct CachedSide {
+    picture: MovingPicture,
+    /// The part drawn live over which the picture lies, if the side was cached in two parts.
+    under: Option<Scene>,
+    scene: Scene,
+}
+
+impl CachedSide {
+    /// What draws this side.
+    pub fn scene(&self) -> &Scene {
+        &self.scene
+    }
+
+    /// True when the side's lower part is drawn live (see [`Painter::cache_split`]).
+    pub fn is_split(&self) -> bool {
+        self.under.is_some()
+    }
+
+    /// Puts a newer lower part under the picture of a side cached in two parts (a playing
+    /// video's picture that was copied, not sent into its texture). Does nothing for another.
+    pub fn set_under(&mut self, under: Scene) {
+        if self.under.is_some() {
+            self.scene = Self::compose(Some(&under), &self.picture);
+            self.under = Some(under);
+        }
+    }
+
+    fn compose(under: Option<&Scene>, picture: &MovingPicture) -> Scene {
+        let mut scene = under.cloned().unwrap_or_default();
+        scene.draw_image(&picture.picture.image, vello::kurbo::Affine::IDENTITY);
+        scene
+    }
+
+    /// The side's size in pixels.
+    pub fn size(&self) -> (u32, u32) {
+        (self.picture.picture.width(), self.picture.picture.height())
+    }
+
+    /// A view of the side's texture, for [`FadeBlend`](crate::FadeBlend). Only a whole side (not
+    /// a split one, whose texture is clear where the picture below shows) is a picture by itself.
+    pub(crate) fn view(&self) -> wgpu::TextureView {
+        self.picture.texture.create_view(&wgpu::TextureViewDescriptor::default())
+    }
+
+    /// The bytes of GPU memory the side's own texture takes (the renderer keeps a copy of its
+    /// own as well, while the side is drawn).
+    pub fn texture_bytes(&self) -> u64 {
+        u64::from(self.picture.picture.width()) * u64::from(self.picture.picture.height()) * 4
+    }
+}
+
+impl Painter {
+    /// Paints a scene into a moving picture's texture, which has the target's size, on black
+    /// (`transparent` false) or on clear, and has the renderer take the new pixels.
+    fn paint_into(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        scene: &Scene,
+        into: &MovingPicture,
+        transparent: bool,
+    ) -> Result<(), PaintError> {
+        let view = into.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let (w, h) = (into.picture.width(), into.picture.height());
+        let base = if transparent { Color::TRANSPARENT } else { Color::BLACK };
+        self.paint_on(device, queue, scene, &view, w, h, base)?;
+        self.renderer.mark_override_image_dirty(&into.picture.image);
+        Ok(())
+    }
+
+    fn cache_texture(&mut self, device: &wgpu::Device, w: u32, h: u32) -> Result<MovingPicture, PaintError> {
+        self.moving_picture(device, w, h, PixelOrder::Rgba)
+            .ok_or_else(|| PaintError::Failed("a picture this size cannot be kept on the GPU".to_owned()))
+    }
+
+    /// Paints a whole picture (as [`build_layers`](crate::build_layers) makes it, solid) once
+    /// into a texture, to be drawn from it for as long as a fade lasts.
+    pub fn cache_whole(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        scene: &Scene,
+        w: u32,
+        h: u32,
+    ) -> Result<CachedSide, PaintError> {
+        let picture = self.cache_texture(device, w, h)?;
+        self.paint_into(device, queue, scene, &picture, false)?;
+        Ok(CachedSide { scene: CachedSide::compose(None, &picture), picture, under: None })
+    }
+
+    /// Paints the part of a picture above its media (`over`, see [`Parts`](crate::Parts)) once
+    /// into a texture on clear, to be drawn over `under`, which is drawn live each time.
+    pub fn cache_split(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        under: Scene,
+        over: &Scene,
+        w: u32,
+        h: u32,
+    ) -> Result<CachedSide, PaintError> {
+        let picture = self.cache_texture(device, w, h)?;
+        self.paint_into(device, queue, over, &picture, true)?;
+        Ok(CachedSide { scene: CachedSide::compose(Some(&under), &picture), picture, under: Some(under) })
+    }
 }

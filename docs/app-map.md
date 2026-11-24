@@ -404,6 +404,32 @@ picture came:
 | `sp-bible` | Bibles: references, verse numbering (and judging it from a Bible's chapters), search, and reading Bibles in other programs' formats (`import`: Zefania, OSIS, Beblia, `<b>`/`<c>`/`<v>` XML, USFM, USX, zipped or not, with limits for untrusted files) |
 | `sp-app` | The app: the window (egui), the screens' thread (`output.rs`), the views (`home.rs`, `studio.rs`, `editor.rs`, `inspector.rs`), the stage layouts (`stage.rs` for what they hold and show, `stage_editor.rs` for their parts of the Edit view), the command line (`control.rs`, and `slide_cli.rs` for changing slides), the song catalog (`catalog/`: reading the song pack (`read.rs`), the files (`store.rs`), search (`search.rs`, `fold.rs`), the conditional download (`fetch.rs`), making a song and judging an update (`present.rs`); `catalog_cli.rs` is the app's side: the `catalog` commands, joining the library, use the newer version, and the check on the idle loop), styled words in a box (`sp-model`'s `spans.rs`, and `text_map.rs` for following them through caps, lists and line changes; drawn in `sp-render`'s `scene.rs`), the menu bar (`menubar.rs`), theme versions while the show runs and their commands (`versions.rs`), what was deleted that Undo puts back (`removed.rs`), the sample backgrounds and how they are added to the media bin (`backgrounds.rs` finds the files, `samples.rs` adds them as one step for Undo), the notices and their status button (`notices.rs`), Remote Control (`remote.rs` and `remote/`: the HTTPS and WebSocket server on its own thread (`server.rs`), sign-in and devices (`auth.rs`), the certificate (`cert.rs`), which commands a page may send (`policy.rs`), the versioned state (`hub.rs`, published by `state.rs`), its Settings pane (`pane.rs`) and the page and its sign-in built in (`page/`: `index.html`, `app.js`, `style.css`, `fonts/`, `login.html`, `login.js`, from the design work); the API is in `docs/remote-api.md`) |
 
+### How a fade is drawn
+
+A fade is two whole pictures (`sp_render::build_layers` for the screen's size, built once when the
+new slide goes on) and a transition from `sp_render::transition`, which lays them one over the
+other with a share each, a clip or a move. The screens' thread (`output.rs`) keeps each window's
+fade as a `Fade`: the two scenes, and, when the fade is cached, a texture of each.
+
+- **Cached** (the default): when a fade starts, `Output::cache_sides` paints each of the two
+  scenes once into a texture of the window's size (`Painter::cache_whole`, a `CachedSide`). Each step
+  then only blends the textures. The kinds that are a plain sum of the two pictures (Dissolve, Fade,
+  Fade Black, Fade White: `sp_render::blend_weights`) are one pass over the two textures
+  (`sp_render::FadeBlend`, no scene at all); the kinds that clip (Wipe, Split, Iris, Clock, Blinds,
+  Checkerboard: `sp_render::fade_cacheable`) are drawn by the renderer from two image scenes
+  (`CachedSide::scene`) through the same `transition`. Both textures are let go when the fade ends,
+  and the last step is the real new scene, painted as before.
+- **Drawn from the slides, as before:** every other kind (those that move or scale a picture would
+  sample the texture between its texels); a see-through screen; a fade while a video, an NDI picture
+  or a video box is on screen (they move during it); one the GPU was too slow for, or too heavy; and
+  the operator's live preview, which is small. `SOFTPRESENTER_FADE_CACHE=0` (or a file
+  `fade-cache-off` in the data folder) chooses this for everything.
+- NDI and DeckLink outputs never fade (they get the new picture at once), and stage screens change
+  at once, so none of them is touched.
+
+`crates/sp-render/tests/golden.rs` compares each kind through five points of a fade, cached against
+drawn from the slides, with outlined, shadowed words and a translation line over a picture.
+
 ## Trying the app safely (for agents and tests)
 
 - Every test run sets `SOFTPRESENTER_QUIET=1`: its windows open behind everything, its screens
