@@ -28,6 +28,7 @@ pub struct WebFrames(Arc<Mutex<Newest>>);
 struct Newest {
     frame: Option<Frame>,
     /// The last picture kept, by its size and a fingerprint of its pixels, and when it came.
+    #[cfg(any(target_os = "macos", test))]
     last: Option<(u32, u32, u64)>,
     changed_at: Option<Instant>,
 }
@@ -36,6 +37,7 @@ impl WebFrames {
     /// Keeps a new picture, in place of one not yet taken; one the same as the last is let go,
     /// so a page that isn't moving (most caption pages, most of the time) isn't drawn again on
     /// every screen thirty times a second.
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn put(&self, frame: Frame) {
         let seen = (frame.width, frame.height, fingerprint(&frame.rgba));
         if let Ok(mut newest) = self.0.lock()
@@ -65,6 +67,7 @@ impl WebFrames {
 
 /// A fingerprint of a picture's pixels (FNV-1a over eight bytes at a time): fast, and two
 /// different pictures all but never share one.
+#[cfg(any(target_os = "macos", test))]
 fn fingerprint(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let (words, rest) = bytes.as_chunks::<8>();
@@ -154,16 +157,16 @@ impl WebPage {
         if !allowed(address) {
             return Err(format!("{address} isn't a web address SoftPresenter opens (it must start with https://)."));
         }
-        let (width, height) = (width.clamp(64, 3840), height.clamp(64, 2160));
         let frames = WebFrames::default();
         #[cfg(target_os = "macos")]
         {
+            let (width, height) = (width.clamp(64, 3840), height.clamp(64, 2160));
             let page = crate::web_mac::Page::open(address, width, height, frames.clone())?;
             Ok(WebPage { page, frames, address: address.to_owned(), size: (width, height) })
         }
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = frames;
+            let _ = (frames, width, height);
             Err("Web pages on slides need macOS for now.".to_owned())
         }
     }

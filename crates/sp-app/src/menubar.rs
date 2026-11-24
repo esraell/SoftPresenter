@@ -2,6 +2,7 @@
 //! menus is plain data, so it can be checked on any computer; building the real menus needs
 //! macOS.
 
+#[cfg(any(target_os = "macos", test))]
 use winit::keyboard::{KeyCode, ModifiersState};
 
 /// What a menu item does.
@@ -450,6 +451,7 @@ pub fn action_of(id: &str) -> Option<Action> {
 }
 
 /// The key on the keyboard a shortcut's character is.
+#[cfg(any(target_os = "macos", test))]
 pub fn key_code(key: char) -> Option<KeyCode> {
     const LETTERS: [KeyCode; 26] = [
         KeyCode::KeyA,
@@ -505,6 +507,7 @@ pub fn key_code(key: char) -> Option<KeyCode> {
 }
 
 /// The actions that change the objects selected in the editor, and only work there.
+#[cfg(any(target_os = "macos", test))]
 pub fn needs_editor(action: Action) -> bool {
     use Action as A;
     matches!(
@@ -540,6 +543,7 @@ pub fn needs_editor(action: Action) -> bool {
 }
 
 /// What decides which of the menus' items are greyed now (see [`enabled`]).
+#[cfg(any(target_os = "macos", test))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Greying {
     /// Something is open in the editor (a slide, a template, a prop or a stage layout).
@@ -559,6 +563,7 @@ pub struct Greying {
 /// as the field's own undo may have something); Paste Style is greyed until a look is copied.
 /// A Mac menu item has no hover, so these say nothing more than their grey; the buttons in the
 /// window that do the same say why.
+#[cfg(any(target_os = "macos", test))]
 pub fn enabled(action: Action, now: &Greying) -> bool {
     use Action as A;
     match action {
@@ -574,6 +579,7 @@ pub fn enabled(action: Action, now: &Greying) -> bool {
 /// greyed out elsewhere and leaves its key to the window there (Command-B is Bold in the
 /// editor and the Bible page elsewhere). Undo, Redo and Paste Style, greyed when they have
 /// nothing to do, keep their keys: then the key does nothing, as the item would.
+#[cfg(any(target_os = "macos", test))]
 pub fn claims(key: KeyCode, held: ModifiersState, editing: bool) -> bool {
     let wanted = |action: &Action| editing || !needs_editor(*action);
     items().filter(|(action, _)| wanted(action)).filter_map(|(_, shortcut)| shortcut).any(|shortcut| {

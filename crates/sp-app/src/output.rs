@@ -2725,16 +2725,18 @@ impl Output {
                         sp_video::GpuNext::Unavailable => None,
                     }
                 });
-            #[cfg(not(target_os = "macos"))]
-            let by_texture: Option<Option<Option<Picture>>> = None;
-            let shown = by_texture.unwrap_or_else(|| {
+            let mut by_copy = || {
                 frames.next_with(|lent| {
                     let began = Instant::now();
                     let shown = into_texture(lent, painter, device, queue, video_texture);
                     copying = began.elapsed();
                     shown
                 })
-            });
+            };
+            #[cfg(target_os = "macos")]
+            let shown = by_texture.unwrap_or_else(&mut by_copy);
+            #[cfg(not(target_os = "macos"))]
+            let shown = by_copy();
             held.add(Part::VideoFetch, For::Nothing, fetching.elapsed().saturating_sub(copying));
             if let Some(shown) = shown {
                 held.add(Part::VideoCopy, For::Nothing, copying);

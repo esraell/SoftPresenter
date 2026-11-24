@@ -559,6 +559,7 @@ impl std::fmt::Debug for Frame {
 }
 
 /// Turns premultiplied RGBA into straight RGBA, in place.
+#[cfg(any(target_os = "macos", test))]
 fn unpremultiply(rgba: &mut [u8]) {
     for pixel in rgba.as_chunks_mut::<4>().0 {
         let alpha = u32::from(pixel[3]);
@@ -573,6 +574,7 @@ fn unpremultiply(rgba: &mut [u8]) {
 
 /// Copies rows of BGRA pixels into RGBA, opaque. Every second pixel and row is taken when the
 /// picture is wider than `max_width`, so a 4K video is copied at 1080p.
+#[cfg(any(target_os = "macos", test))]
 fn bgra_rows_to_rgba(bytes: &[u8], width: usize, height: usize, bytes_per_row: usize, max_width: usize) -> Frame {
     let step = if width > max_width { 2 } else { 1 };
     let (out_w, out_h) = (width / step, height / step);

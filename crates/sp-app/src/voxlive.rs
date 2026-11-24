@@ -811,10 +811,10 @@ mod store {
     pub fn forget() {
         if let Some(file) = test_file() {
             let _ = std::fs::remove_file(file);
-            return;
+        } else {
+            #[cfg(target_os = "macos")]
+            let _ = security_framework::passwords::delete_generic_password(SERVICE, "church API key");
         }
-        #[cfg(target_os = "macos")]
-        let _ = security_framework::passwords::delete_generic_password(SERVICE, "church API key");
     }
 }
 
