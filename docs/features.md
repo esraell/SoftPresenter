@@ -1586,7 +1586,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   slide view and size; what happens at start is a macro's, `macro startup NAME on`); `view words
   [SONG]` (Edit Words; `view reflow` too); and `help COMMAND` for one command's help, without the app running. Bible downloads
   started from the command line have a job number, for `--wait` and `sp job N`.
-- `sp …` (full name `softpresenter`), installed from SoftPresenter › Install Command Line Tool…,
+- `sp …` (full name `softpresenter`), installed from Settings › Integrations › Command line › Install…,
   controls the running app from a terminal, a script or an AI agent (`sp status`, `sp next`):
   what is on screen, the lists, going to slides, clearing, media, messages, props, timers,
   macros, announcements, audio, the Bible and songs, and every menu bar item. A quick fix
@@ -1635,7 +1635,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - Importing songs: File › Import Songs › A Library Folder… on Windows and Linux first asks "A
   Folder…" or "Files…" (a Mac's one file window takes both), so a single song document or
   bundle can be chosen as well as a folder of libraries.
-- A menu bar with the usual menus and shortcuts (New Song, Import Songs by kind of file, Undo, Cut/Copy/Paste, the views,
-  Clear, Audience Screens and Stage Screens on/off with Shift-Cmd-1 and Shift-Cmd-2, Configure Screens), showing
-  only what works: what acts on objects in the editor (Edit › Duplicate, the Format, Arrange and
-  Insert items) is greyed outside it.
+- A Mac's menu bar has six short menus, only what a Mac user expects: SoftPresenter (About,
+  Settings…, Services, Hide, Quit), File (New Song, Import…, which opens the import menu over the
+  left column, Close Window), Edit (Undo, Redo, Cut, Copy, Paste, Paste and Match Style, Delete,
+  Select All, Find…), View (Service, Bible, Edit, with ⌘1, ⌘2, ⌘3, and Enter Full Screen), Window
+  (the system's) and Help (SoftPresenter Help, Keys…, Report an Issue…). Format, Arrange, Insert,
+  Presentation and Screens went, and so did the View menu's Control-letter keys (⌃T ⌃C ⌃M ⌃P ⌃⇧M
+  ⇧⌘S ⌃A ⌃V): their jobs are in the window (the inspector, Edit's Add, the right column's tabs
+  with ⌥1 to ⌥7, the bar under the slides, the media strip's fold button, Settings). Keys that
+  stay work in the window itself: ⌘B, I and U (the words typed in, or the picked objects' text), T,
+  ⌘D, the arrows, ⇧⌘1 and ⇧⌘2, ⇧⌘M, ⌘P. Escape in the editor lets go of the picked objects.
+  `sp menu` still lists and chooses every command by id, the old ones too, so scripts keep
+  working. The key list shows the menu's keys as the computer writes them (Ctrl+N off a Mac).

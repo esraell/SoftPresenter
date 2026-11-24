@@ -110,7 +110,7 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | Shift-Command-1, -2 | Audience screens, stage screens, on or off |
 | Command-O | The menu of the slide on screen (a verse or caption on screen has none, and a refusal's cue says so) |
 | ? | Every key, as a list; the switch at its foot is Show keys on buttons |
-| Help › Show Keys on Buttons (a Mac's menu bar; the key list's switch everywhere) | A small amber tag beside everything that has a key, all the time; off, never (kept with the preferences; holding Command no longer shows them) (`keys.rs`) |
+| Show Keys on Buttons (the key list's foot and Settings › Key Mappings) | A small amber tag beside everything that has a key, all the time; off, never (kept with the preferences; holding Command no longer shows them) (`keys.rs`) |
 | SoftPresenter › Set Up SoftPresenter… | The setup a fresh install starts with: screens, songs, Bibles, permissions |
 | File › Import Songs › Song Files…, Words from Text… (or drop song files on the window) | Import songs from song files (SoftPresenter's own, `.pro` documents, ChordPro and lyric files, songbooks) or words in text, rich-text or Word files (`load.rs` lists each kind's endings) |
 | File › Import Songs › A Song Bundle… | `.proBundle` bundles (every song in one, in its order; their pictures and videos go into the media bin, `bundle.rs`) and song packs |
@@ -118,8 +118,10 @@ the tabs. Nothing from the preview down to Clear All moves, whatever is on scree
 | File › Import Slides… and Import › Slides… beside the songs (`HomeState::slides_sheet`; or drop one, or a folder of pictures) | The sheet **Import Slides**: two cards, Pictures as slides (a picture dialog) and A presentation (a file dialog for `.pptx`, `.ppsx`, `.key`, `.odp`, `.ppt`, `.pps` and PDF). A presentation file then opens the sheet **Import “Sermon.pptx”** (`home/import_sheet.rs`, `HomeState::ask_import`; one file at a time, the rest in `AskImport::later`): As Slides (editable, read from the file: `pptx.rs`) or As Pictures (picture slides from an app on this computer that opens it: `convert.rs`); the ringed card is what that kind of file came in as last time (`HomeState::import_as`, kept with the settings), else As Slides; greyed cards give their reason; Enter, a click, Escape and Cancel as the sheet says; the sheets count in `alert_open`, so no key reaches the show. A PDF or pictures are one picture slide each, made on threads, their slides there at once and pictures filling in (`deck.rs`). A deck's pictures still to draw are written down first (`deck::write_job`, in `Pictures to draw` in the data folder) and taken up again at the next start if a quit came first (`Decks::resume`, from `handle_decks`); until a page is drawn its strip reads "Page N…" (`HomeState::pages_waiting`). After As Slides the notice names the slides to check, each wearing an amber Check tag in its strip (`Slide::check`, kept in the saved slide), whose menu has Mark as Checked |
 | Command-L | Back to the song on screen |
 
-Every menu bar item, with its shortcut, is listed by `sp menu`; any of them can be chosen with
-`sp menu ITEM`.
+Every command, with its words, is listed by `sp menu`; any of them can be chosen with
+`sp menu ITEM`. The Mac's menu bar (`menubar.rs`: `MENUS`) holds six menus of the standard items
+(SoftPresenter, File, Edit, View, Window, Help); `COMMANDS` is the longer list `sp menu` uses, and
+each of those has its place in the window. Windows and Linux have no menu bar.
 
 ## The Edit view (slides, themes, props, stage)
 

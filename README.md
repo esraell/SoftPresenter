@@ -256,8 +256,8 @@ The full plan, about 170 features with their size and how much each matters on a
 SoftPresenter is open to scripts and AI: most of what the operator does during a service, a
 script or an AI agent can do too. `sp` (full name `softpresenter`) controls the running app from
 the command line (`sp status`, `sp next`, `sp clear all`, and slides, media, messages, timers,
-macros, the Bible and every menu item); install it from SoftPresenter › Install Command Line
-Tool…. Remote Control sends the same commands from a page.
+macros, the Bible and every command); install it from Settings › Integrations › Command line.
+Remote Control sends the same commands from a page.
 
 - [docs/app-map.md](docs/app-map.md) maps every view, panel and window, what each part does, the
   command-line command that does the same, where the files are, and how to try the app safely.

@@ -104,6 +104,10 @@ pub enum Action {
     /// Each button's key written beside it, all the time, or never (the key list has the same
     /// switch, for computers without this menu bar).
     KeysOnButtons,
+    /// File › Import…: opens the import menu over the left column (songs by kind of file, slides).
+    Import,
+    /// Help › Keys…: the list of every key, as the top bar's ? opens it.
+    KeysSheet,
 }
 
 /// A keyboard shortcut. Every one has Command or Control in it, so none is ever taken from
@@ -180,8 +184,10 @@ pub const IMPORT_SONGS: &[Entry] = &[
 
 use Entry::{Check, Do, Line};
 
-/// The menus, in order. The first is the app's own menu.
-pub const MENUS: &[(&str, &[Entry])] = &[
+/// Every command, grouped as the menu bar once had them. `sp menu` lists and chooses by these (so
+/// a script can still do any of them), and each has its place in the window; the menu bar itself
+/// is the shorter `MENUS`.
+pub const COMMANDS: &[(&str, &[Entry])] = &[
     (
         "SoftPresenter",
         &[
@@ -207,6 +213,7 @@ pub const MENUS: &[(&str, &[Entry])] = &[
             Do(Action::NewSlide, "Add Slide", shift_cmd('N')),
             Entry::Sub("Import Songs", IMPORT_SONGS),
             Do(Action::ImportSlides, "Import Slides…", None),
+            Do(Action::Import, "Import…", None),
             Line,
             Do(Action::ExportSongs, "Export Songs…", None),
             Do(Action::ReloadSongs, "Reload Songs from Their Files", None),
@@ -371,11 +378,101 @@ pub const MENUS: &[(&str, &[Entry])] = &[
             Do(Action::WhatsNew, "What's New in SoftPresenter", None),
             Line,
             Check(Action::KeysOnButtons, "Show Keys on Buttons", None),
+            Do(Action::KeysSheet, "Keys…", None),
             Line,
             Do(Action::ReportIssue, "Report an Issue…", None),
         ],
     ),
 ];
+
+/// The menu bar: six menus with what a Mac user expects (the owner, 24 November: "keep only whats
+/// needed and expected"). Everything else is in the window (`COMMANDS` names it all), and its keys
+/// are read by the window (`Entry::System` items are the system's own).
+pub const MENUS: &[(&str, &[Entry])] = &[
+    (
+        "SoftPresenter",
+        &[
+            Entry::System(System::About),
+            Line,
+            Do(Action::Settings, "Settings…", cmd(',')),
+            Line,
+            Entry::System(System::Services),
+            Line,
+            Entry::System(System::Hide),
+            Entry::System(System::HideOthers),
+            Entry::System(System::ShowAll),
+            Line,
+            Do(Action::Quit, "Quit SoftPresenter", cmd('Q')),
+        ],
+    ),
+    (
+        "File",
+        &[
+            Do(Action::NewSong, "New Song", cmd('N')),
+            Do(Action::Import, "Import…", None),
+            Line,
+            Do(Action::CloseWindow, "Close Window", cmd('W')),
+        ],
+    ),
+    (
+        "Edit",
+        &[
+            Do(Action::Undo, "Undo", cmd('Z')),
+            Do(Action::Redo, "Redo", shift_cmd('Z')),
+            Line,
+            Do(Action::Cut, "Cut", cmd('X')),
+            Do(Action::Copy, "Copy", cmd('C')),
+            Do(Action::Paste, "Paste", cmd('V')),
+            Do(Action::PasteMatchStyle, "Paste and Match Style", option_shift_cmd('V')),
+            Do(Action::Delete, "Delete", None),
+            Do(Action::SelectAll, "Select All", cmd('A')),
+            Line,
+            Do(Action::Find, "Find…", cmd('F')),
+        ],
+    ),
+    (
+        "View",
+        &[
+            Check(Action::ShowView, "Service", cmd('1')),
+            Check(Action::BibleView, "Bible", cmd('2')),
+            Check(Action::EditView, "Edit", cmd('3')),
+            Line,
+            Entry::System(System::FullScreen),
+        ],
+    ),
+    (
+        "Window",
+        &[Entry::System(System::Minimize), Entry::System(System::Zoom), Line, Entry::System(System::BringAllToFront)],
+    ),
+    (
+        "Help",
+        &[
+            Do(Action::Website, "SoftPresenter Help", None),
+            Do(Action::KeysSheet, "Keys…", None),
+            Line,
+            Do(Action::ReportIssue, "Report an Issue…", None),
+        ],
+    ),
+];
+
+/// Every item of the menu bar that does something, with its shortcut.
+#[cfg(any(target_os = "macos", test))]
+fn menu_items() -> Vec<(Action, Option<Shortcut>)> {
+    fn add(entries: &[Entry], into: &mut Vec<(Action, Option<Shortcut>)>) {
+        for entry in entries {
+            match entry {
+                Do(action, _, shortcut) | Check(action, _, shortcut) => into.push((*action, *shortcut)),
+                Entry::Sub(_, inside) => add(inside, into),
+                _ => {}
+            }
+        }
+    }
+    let mut every = Vec::new();
+    for (_, entries) in MENUS {
+        add(entries, &mut every);
+    }
+    every
+}
 
 /// Every line of the menus, with its menu, in menu order; a group's choices follow it.
 fn every_entry() -> Vec<(&'static str, &'static Entry)> {
@@ -388,7 +485,7 @@ fn every_entry() -> Vec<(&'static str, &'static Entry)> {
         }
     }
     let mut every = Vec::new();
-    for (menu, entries) in MENUS {
+    for (menu, entries) in COMMANDS {
         add(menu, entries, &mut every);
     }
     every
@@ -427,17 +524,41 @@ impl Shortcut {
     }
 }
 
-/// Every menu item that has a shortcut, with its menu, its name and the shortcut, in menu order.
-pub fn shortcuts() -> Vec<(&'static str, &'static str, String)> {
-    every_entry()
-        .into_iter()
-        .filter_map(|(menu, entry)| match entry {
-            Entry::Do(_, label, Some(shortcut)) | Entry::Check(_, label, Some(shortcut)) => {
-                Some((menu, *label, shortcut.text()))
+impl Shortcut {
+    /// The shortcut as Windows and Linux write it: "Ctrl+Shift+F" (there the Command key is Ctrl,
+    /// and a Control shortcut is Ctrl too).
+    pub fn words(self) -> String {
+        let mut out = String::new();
+        for (on, word) in [(self.command || self.control, "Ctrl+"), (self.option, "Alt+"), (self.shift, "Shift+")] {
+            if on {
+                out.push_str(word);
             }
-            _ => None,
-        })
-        .collect()
+        }
+        out.push(self.key);
+        out
+    }
+}
+
+/// Every menu bar item that has a shortcut, with its menu, its name and the shortcut as this
+/// computer writes it, in menu order (the list of keys shows them).
+pub fn shortcuts() -> Vec<(&'static str, &'static str, String)> {
+    fn add(menu: &'static str, entries: &'static [Entry], into: &mut Vec<(&'static str, &'static str, String)>) {
+        for entry in entries {
+            match entry {
+                Entry::Do(_, label, Some(shortcut)) | Entry::Check(_, label, Some(shortcut)) => {
+                    let text = if cfg!(target_os = "macos") { shortcut.text() } else { shortcut.words() };
+                    into.push((menu, *label, text));
+                }
+                Entry::Sub(_, inside) => add(menu, inside, into),
+                _ => {}
+            }
+        }
+    }
+    let mut every = Vec::new();
+    for (menu, entries) in MENUS {
+        add(menu, entries, &mut every);
+    }
+    every
 }
 
 /// The id a menu item is known by.
@@ -582,7 +703,7 @@ pub fn enabled(action: Action, now: &Greying) -> bool {
 #[cfg(any(target_os = "macos", test))]
 pub fn claims(key: KeyCode, held: ModifiersState, editing: bool) -> bool {
     let wanted = |action: &Action| editing || !needs_editor(*action);
-    items().filter(|(action, _)| wanted(action)).filter_map(|(_, shortcut)| shortcut).any(|shortcut| {
+    menu_items().into_iter().filter(|(action, _)| wanted(action)).filter_map(|(_, shortcut)| shortcut).any(|shortcut| {
         key_code(shortcut.key) == Some(key)
             && shortcut.command == held.super_key()
             && shortcut.control == held.control_key()
@@ -811,13 +932,9 @@ mod tests {
 
     #[test]
     fn import_songs_offers_each_kind_of_file() {
-        let file = MENUS.iter().find(|(menu, _)| *menu == "File").expect("a File menu").1;
-        let inside = file.iter().find_map(|entry| match entry {
-            Entry::Sub("Import Songs", inside) => Some(*inside),
-            _ => None,
-        });
-        let words: Vec<&str> = inside
-            .expect("File › Import Songs")
+        // The import menu over the left column (and `sp menu`) offers them by kind of file; the
+        // menu bar's File menu has the one Import… that opens it.
+        let words: Vec<&str> = IMPORT_SONGS
             .iter()
             .filter_map(|entry| if let Do(_, label, _) = entry { Some(*label) } else { None })
             .collect();
@@ -829,11 +946,47 @@ mod tests {
         assert_eq!(action_of("ImportBundle"), Some(Action::ImportBundle));
         assert_eq!(action_of("ImportWords"), Some(Action::ImportWords));
         assert_eq!(action_of("ImportLibraryFolder"), Some(Action::ImportLibraryFolder));
+        assert_eq!(action_of("Import"), Some(Action::Import));
+    }
+
+    #[test]
+    fn the_menu_bar_is_six_short_menus_of_what_a_mac_user_expects() {
+        let titles: Vec<&str> = MENUS.iter().map(|(title, _)| *title).collect();
+        assert_eq!(titles, ["SoftPresenter", "File", "Edit", "View", "Window", "Help"]);
+        let labels = |menu: &str| -> Vec<&str> {
+            MENUS
+                .iter()
+                .find(|(title, _)| *title == menu)
+                .expect(menu)
+                .1
+                .iter()
+                .filter_map(|entry| match entry {
+                    Do(_, label, _) | Check(_, label, _) => Some(*label),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(labels("File"), ["New Song", "Import\u{2026}", "Close Window"]);
+        assert_eq!(labels("View"), ["Service", "Bible", "Edit"]);
+        assert_eq!(labels("Help"), ["SoftPresenter Help", "Keys\u{2026}", "Report an Issue\u{2026}"]);
+        // None of the View menu's Control keys (or anything else's) is left.
+        assert!(menu_items().iter().filter_map(|(_, shortcut)| *shortcut).all(|shortcut| !shortcut.control));
+        // Every menu item is one of the commands `sp menu` knows, with the same words and key.
+        for (action, shortcut) in menu_items() {
+            let command = every_entry().into_iter().find_map(|(_, entry)| match entry {
+                Do(have, label, key) | Check(have, label, key) if *have == action => Some((*label, *key)),
+                _ => None,
+            });
+            assert!(command.is_some(), "{action:?} is in the menu bar but not among the commands");
+            assert_eq!(command.map(|(_, key)| key), Some(shortcut), "{action:?}");
+        }
     }
 
     #[test]
     fn no_menu_has_two_dividers_together_or_one_at_an_end() {
-        for (menu, entries) in MENUS.iter().copied().chain([("Import Songs", IMPORT_SONGS)]) {
+        for (menu, entries) in
+            MENUS.iter().copied().chain(COMMANDS.iter().copied()).chain([("Import Songs", IMPORT_SONGS)])
+        {
             assert!(!matches!(entries.first(), Some(Entry::Line)), "{menu} starts with a divider");
             assert!(!matches!(entries.last(), Some(Entry::Line)), "{menu} ends with a divider");
             for pair in entries.windows(2) {
@@ -859,24 +1012,25 @@ mod tests {
         assert!(claims(KeyCode::KeyZ, command));
         assert!(claims(KeyCode::KeyZ, command | ModifiersState::SHIFT));
         assert!(claims(KeyCode::Comma, command));
-        assert!(claims(KeyCode::Digit1, command | ModifiersState::ALT));
-        assert!(claims(KeyCode::KeyT, ModifiersState::CONTROL));
-        assert!(!claims(KeyCode::KeyS, ModifiersState::CONTROL), "Show is Command-1 now");
-        assert!(claims(KeyCode::BracketLeft, command | ModifiersState::SHIFT));
-        assert!(claims(KeyCode::KeyF, command | ModifiersState::SHIFT | ModifiersState::ALT));
+        assert!(claims(KeyCode::KeyV, command | ModifiersState::SHIFT | ModifiersState::ALT), "Paste and Match Style");
         // Plain keys belong to typing and the show.
         assert!(!claims(KeyCode::KeyZ, ModifiersState::empty()));
         assert!(!claims(KeyCode::KeyS, ModifiersState::empty()));
         assert!(!claims(KeyCode::ArrowRight, ModifiersState::empty()));
         // Command-S is not a menu shortcut.
         assert!(!claims(KeyCode::KeyS, command));
-        // Command-1, 2 and 3 are Show, Bible and Edit; 4 to 7 nothing; Option-1 to 7 (no
-        // Command) the tool tabs', which the window reads; Shift-Command-1 and 2 the screens.
+        // Command-1, 2 and 3 are Service, Bible and Edit; 4 to 7 nothing.
         assert!(claims(KeyCode::Digit1, command) && claims(KeyCode::Digit3, command));
         assert!(!claims(KeyCode::Digit4, command));
+        // The keys that went with the other menus are the window's own now, or gone: the tool
+        // tabs' Option-1 to 7, Shift-Command-1 and 2 (the screens), Command-B, I, U and D (the
+        // editor's), and the Control letters (View's, gone).
         assert!(!claims(KeyCode::Digit1, ModifiersState::ALT));
-        assert!(claims(KeyCode::Digit1, command | ModifiersState::SHIFT));
-        assert!(claims(KeyCode::Digit2, command | ModifiersState::SHIFT));
+        assert!(!claims(KeyCode::Digit1, command | ModifiersState::SHIFT));
+        assert!(!claims(KeyCode::Digit2, command | ModifiersState::SHIFT));
+        assert!(!claims(KeyCode::KeyB, command) && !claims(KeyCode::KeyD, command));
+        assert!(!claims(KeyCode::KeyT, ModifiersState::CONTROL));
+        assert!(!claims(KeyCode::KeyM, command | ModifiersState::SHIFT), "Command-Shift-M is the media's numbers");
     }
 
     #[test]
@@ -913,13 +1067,12 @@ mod tests {
     }
 
     #[test]
-    fn an_editor_only_shortcut_is_left_to_the_window_outside_the_editor() {
+    fn what_only_works_in_the_editor_is_not_in_the_menu_bar_and_its_keys_are_the_windows() {
         let command = ModifiersState::SUPER;
-        assert!(claims(KeyCode::KeyB, command, true), "Bold in the editor");
-        assert!(!claims(KeyCode::KeyB, command, false), "the Bible page elsewhere");
-        // Duplicate only works on objects in the editor: elsewhere it is greyed.
-        assert!(needs_editor(Action::Duplicate));
-        assert!(claims(KeyCode::KeyD, command, true) && !claims(KeyCode::KeyD, command, false));
+        // Bold and Duplicate act on objects in the editor; the editor reads their keys itself.
+        assert!(needs_editor(Action::Duplicate) && needs_editor(Action::Bold));
+        assert!(menu_items().iter().all(|(action, _)| !needs_editor(*action)));
+        assert!(!claims(KeyCode::KeyB, command, true) && !claims(KeyCode::KeyD, command, true));
         assert!(claims(KeyCode::KeyZ, command, false), "Undo is everywhere");
     }
 

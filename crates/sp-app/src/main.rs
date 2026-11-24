@@ -9136,6 +9136,12 @@ impl App {
                     running.egui_state.egui_input_mut().events.push(egui::Event::Paste(text.replace("\r\n", "\n")));
                 }
             }
+            // The import menu over the left column, in the Service view.
+            A::Import => {
+                state.view_request = Some(0);
+                state.import_menu_request = true;
+            }
+            A::KeysSheet => state.key_sheet = true,
             A::ShowView => state.view_request = Some(0),
             A::EditView => state.view_request = Some(1),
             // Control-B: the Bible page, with the cursor in Scripture Lookup and its words

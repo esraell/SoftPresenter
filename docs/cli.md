@@ -28,7 +28,7 @@ change, as everything else may (see the README).
 
 ## Install
 
-Choose **SoftPresenter › Install Command Line Tool…** (or run the app's program with
+Choose **Settings › Integrations › Command line › Install…** (or run the app's program with
 `install-cli`). It puts `sp`, and its full name `softpresenter`, in `~/.local/bin` (or Homebrew's
 `bin` folder) as links to the app; no administrator password is needed.
 
@@ -159,7 +159,7 @@ mistake impossible:
 | `screens`, `displays`, `decklink`, `stage layouts` | Each screen and what it is doing (for a screen on NDI, how many receivers are watching it, or that nobody is; for one on DeckLink, the format it plays in, or why it isn't playing, and where its format comes from), and whether it is see-through (with its alpha) or the key of another (and why it shows black, if it does); the connected displays; the DeckLink outputs, numbered, with their formats and keying and the format a new output starts in, with where it comes from (or why there are none); the stage layouts and the screens that use them |
 | `groups` | The group names that have a jump key, with their colours |
 | `settings` | The app's settings |
-| `menu` | Every menu bar item: its id and its words |
+| `menu` | Every command the menu bar once held, and the few it holds now: its id and its words |
 
     $ sp status
     On screen: Blessed Assurance, slide 2 of 7 (Verse 1).
@@ -1146,7 +1146,7 @@ The list under the status button (≡) after the find box: information, trouble 
 |---|---|
 | `undo`, `redo` | Undoes or redoes the last change to a song or slide, or puts back what was last deleted that Undo brings back (items taken out of a playlist, a playlist, a library, an audio playlist, a timer, message, prop or macro; redo deletes it again), whatever the window shows, and says what it was ("Put the timer Countdown back.") |
 | `job N` | How a background job (a pack with videos, a large pack import, a Bible download) went, or "still going" |
-| `menu`, `menu ITEM` | Lists the menu bar items; chooses one by id (`ClearAll`, `NewSong`) or words ("Clear All"), as a click does |
+| `menu`, `menu ITEM` | Lists the commands (every one the window has a place for, though the Mac's menu bar holds only a few of them); chooses one by id (`ClearAll`, `NewSong`) or words ("Clear All"), as a click does |
 
     $ sp undo
     Undid a change to River Song, slide 2.

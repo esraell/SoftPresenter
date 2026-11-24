@@ -2411,6 +2411,10 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             Rect::from_min_size(pos2(head.max.x - 8.0 - ICON_BUTTON, head.min.y), egui::Vec2::splat(ICON_BUTTON));
         let import = icon_button(ui, place, ui.scope_id().with("import"), Icon::Import, 1.0, false)
             .on_hover_text("Import songs or slides");
+        // File › Import… of the menu bar opens this menu.
+        if std::mem::take(&mut state.import_menu_request) {
+            egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&import));
+        }
         egui::Popup::menu(&import).show(|ui| {
             use crate::menubar::Action;
             // Songs by kind of file, as File › Import Songs has them; then slides.

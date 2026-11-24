@@ -352,6 +352,8 @@ pub struct HomeState {
     pub key_tags_for_capture: bool,
     /// The list of every key is open.
     pub key_sheet: bool,
+    /// File › Import… was chosen: the import menu over the left column opens (once it is drawn).
+    pub import_menu_request: bool,
     /// Open the menu of the slide on screen, as its "more" button does (modifier-O): the frame
     /// it was asked in, as the slide may first need to be scrolled into view.
     pub live_menu: Option<u64>,
@@ -1803,6 +1805,7 @@ impl Default for HomeState {
             import_as: std::collections::BTreeMap::new(),
             key_tags_for_capture: false,
             key_sheet: false,
+            import_menu_request: false,
             live_menu: None,
 
             media_playlists: Vec::new(),
@@ -2676,6 +2679,29 @@ fn edit_view(
             draft.add_image(picture);
         }
     }
+    // Command-B, I and U change the selected objects' text (the typing field has its own, above).
+    if !keys_taken && state.editing.is_some() && state.edit_request.is_none() {
+        state.edit_request = ui.input(|input| {
+            [
+                (egui::Key::B, EditRequest::Bold),
+                (egui::Key::I, EditRequest::Italic),
+                (egui::Key::U, EditRequest::Underline),
+            ]
+            .into_iter()
+            .find(|(key, _)| command_key(input, *key, false))
+            .map(|(_, request)| request)
+        });
+    }
+    // Escape lets go of the objects picked (Edit › Deselect All of the old menu bar), unless it is
+    // for something over the editor.
+    if !keys_taken
+        && state.edit_request.is_none()
+        && state.editing.as_ref().is_some_and(|draft| draft.selected.is_some())
+        && !state.escape_taken_above(ui.ctx())
+        && ui.input(|input| input.key_pressed(egui::Key::Escape))
+    {
+        state.edit_request = Some(EditRequest::DeselectAll);
+    }
     // A change asked for from the menu bar.
     if let (Some(request), Some(draft)) = (state.edit_request.take(), state.editing.as_mut()) {
         match request {
@@ -3519,8 +3545,8 @@ fn edit_view(
                     // What was typed goes in as an edit, so words styled one by one keep their
                     // looks.
                     object.set_text(&typed);
-                    // Command-B, I and U where there is no menu bar to take them.
-                    if !cfg!(target_os = "macos") && field.has_focus() {
+                    // Command-B, I and U change the words typed in (no menu bar takes them).
+                    if field.has_focus() {
                         let key = ui.input(|input| {
                             [(egui::Key::B, EditRequest::Bold), (egui::Key::I, EditRequest::Italic), (egui::Key::U, EditRequest::Underline)]
                                 .into_iter()
