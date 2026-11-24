@@ -1481,8 +1481,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Español, Русский and Українська, each written in itself; the setup's first step has the same
   choice. A choice shows at once, with no restart, and is kept with the preferences (`language`).
   Spanish is written for the top bar, the keys sheet, the left column (libraries and playlists),
-  the slides area and the bar under it, and the right column's preview, layer keys, Clear All and
-  tool tabs; the rest of the window is still English, and a word with no translation yet shows in
+  the slides area and the bar under it, the media strip under it (its menus, and what adding
+  pictures and videos says), and the right column's preview, layer keys, Clear All and tool tabs;
+  the rest of the window is still English, and a word with no translation yet shows in
   English. Russian and Ukrainian have the number and quotation rules and the plural forms, and
   their words come next. Controls take the width of their words in the language set, and a place
   with a fixed room (a layer key, the find box, All Songs) uses a short form when the usual word

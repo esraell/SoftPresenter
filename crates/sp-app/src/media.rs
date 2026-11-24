@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::SystemTime;
 
+use crate::i18n::{t, tf};
 use sp_model::Uuid;
 use sp_render::Picture;
 
@@ -174,8 +175,9 @@ pub fn next_in_cycle(items: &[usize], at: usize, shown: usize) -> usize {
 /// ("Playlist" alone is the running order).
 pub fn new_playlist_name(playlists: &[Playlist]) -> String {
     let taken = |name: &str| playlists.iter().any(|playlist| playlist.name == name);
-    std::iter::once("New Media Playlist".to_owned())
-        .chain((2..).map(|n| format!("New Media Playlist {n}")))
+    let base = t("media.new_playlist.name", "New Media Playlist");
+    std::iter::once(base.to_owned())
+        .chain((2..).map(|n| format!("{base} {n}")))
         .find(|name| !taken(name))
         .unwrap_or_default()
 }
@@ -385,14 +387,17 @@ pub fn load_list() -> List {
 
 /// Remembers the media bin, for the next start.
 pub fn save_list(list: &List) -> Result<(), String> {
-    let path = list_file().ok_or_else(|| "Could not find where to keep settings on this computer.".to_owned())?;
+    let path = list_file()
+        .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Could not make the app's folder: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+        })?;
     }
     let partial = path.with_extension("json.part");
     std::fs::write(&partial, serde_json::to_string_pretty(list).unwrap_or_default())
         .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| format!("Could not save the media list: {e}"))
+        .map_err(|e| tf("media.not_saved", "Could not save the media list: {error}", &[("error", &e.to_string())]))
 }
 /// Videos by their names. macOS's own player plays MP4 and MOV; FFmpeg plays the rest (and any
 /// MP4 or MOV the system's player can't).
@@ -441,11 +446,11 @@ pub fn needs_missing_ffmpeg(path: &Path) -> bool {
 /// How to get FFmpeg on this system, for the end of a sentence about a video that needs it.
 pub fn ffmpeg_advice() -> &'static str {
     if cfg!(target_os = "macos") {
-        "MP4 and MOV videos play without it."
+        t("media.ffmpeg.mac", "MP4 and MOV videos play without it.")
     } else if cfg!(windows) {
-        "Put ffmpeg.exe in the same folder as the program."
+        t("media.ffmpeg.windows", "Put ffmpeg.exe in the same folder as the program.")
     } else {
-        "Install FFmpeg (for example: sudo apt install ffmpeg)."
+        t("media.ffmpeg.linux", "Install FFmpeg (for example: sudo apt install ffmpeg).")
     }
 }
 
@@ -464,7 +469,7 @@ pub fn load_picture_at(path: &Path, max_side: u32) -> Result<Picture, String> {
     let from_system = |frame: Result<sp_video::Frame, String>| {
         let frame = frame?;
         Picture::from_rgba(frame.width, frame.height, frame.rgba)
-            .ok_or_else(|| format!("{name}: the picture is empty."))
+            .ok_or_else(|| tf("media.picture_empty", "{name}: the picture is empty.", &[("name", &name)]))
     };
     if VIDEOS.contains(&ext.as_str()) {
         return from_system(sp_video::still(path, max_side.min(VIDEO_STILL_SIDE)));
@@ -473,8 +478,10 @@ pub fn load_picture_at(path: &Path, max_side: u32) -> Result<Picture, String> {
         return from_system(sp_video::picture(path, max_side));
     }
     if !OWN_PICTURES.contains(&ext.as_str()) {
-        return Err(format!(
-            "{name}: not a picture or video SoftPresenter can open (such as PNG, JPEG, HEIC, TIFF, MP4 or MOV)."
+        return Err(tf(
+            "media.not_media",
+            "{name}: not a picture or video SoftPresenter can open (such as PNG, JPEG, HEIC, TIFF, MP4 or MOV).",
+            &[("name", &name)],
         ));
     }
     // The Mac's system first; the decoders here are the way on other systems, and the way left
@@ -483,7 +490,9 @@ pub fn load_picture_at(path: &Path, max_side: u32) -> Result<Picture, String> {
     if let Ok(picture) = from_system(sp_video::picture(path, max_side)) {
         return Ok(picture);
     }
-    decode_here(path, max_side).map_err(|e| format!("{name}: could not be opened ({e})."))
+    decode_here(path, max_side).map_err(|e| {
+        tf("media.not_opened", "{name}: could not be opened ({error}).", &[("name", &name), ("error", &e)])
+    })
 }
 
 fn shown_name(path: &Path) -> String {
@@ -506,7 +515,8 @@ fn decode_here(path: &Path, max_side: u32) -> Result<Picture, String> {
     small.apply_orientation(orientation);
     let rgba = small.into_rgba8();
     let (width, height) = rgba.dimensions();
-    Picture::from_rgba(width, height, rgba.into_raw()).ok_or_else(|| "the picture is empty".to_owned())
+    Picture::from_rgba(width, height, rgba.into_raw())
+        .ok_or_else(|| t("media.empty_inside", "the picture is empty").to_owned())
 }
 
 /// A picture scaled to no more than `max_side` on its longer side; one that is not larger is

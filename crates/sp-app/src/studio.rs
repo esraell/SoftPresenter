@@ -4211,7 +4211,7 @@ pub fn item_menu(
             _ => false,
         };
         let hint = "It goes round by itself over the slides until it is cleared";
-        announce_button(ui, state, what, hint, empty.then_some(NOTHING_TO_PLAY));
+        announce_button(ui, state, what, hint, empty.then_some(nothing_to_play()));
         ui.separator();
     }
     version_section(ui, state, index);
@@ -4292,9 +4292,12 @@ pub fn announce_button(
 ) {
     let announcing = state.announcement_live.as_ref().is_some_and(|(live, _)| *live == what);
     let (label, hint) = if announcing {
-        ("Stop Announcements", "Take it off the Announcements layer")
+        (
+            t("media.announce.stop", "Stop Announcements"),
+            t("media.announce.stop.hint", "Take it off the Announcements layer"),
+        )
     } else {
-        ("Play on Announcements Layer", hint)
+        (t("media.announce.play", "Play on Announcements Layer"), hint)
     };
     let can = announcing || nothing.is_none();
     let button = ui.add_enabled(can, egui::Button::new(label)).on_hover_text(hint);
@@ -4305,7 +4308,9 @@ pub fn announce_button(
 }
 
 /// Why a media playlist's Play is greyed, in the words the app refuses with.
-pub const NOTHING_TO_PLAY: &str = "That media playlist has nothing in it to play";
+pub fn nothing_to_play() -> &'static str {
+    t("media.nothing_to_play", "That media playlist has nothing in it to play")
+}
 
 /// Why a song's Play on Announcements Layer is greyed, in the words the app refuses with.
 const NO_SLIDE_ON: &str = "That song has no slide that is on";
@@ -5923,11 +5928,11 @@ pub fn media_strip(
         }
         let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
         let middle = head.center().y;
-        let label = cap(ui, pos2(head.min.x, middle), Align2::LEFT_CENTER, "Media", TEXT_DIM);
+        let label = cap(ui, pos2(head.min.x, middle), Align2::LEFT_CENTER, t("media.title", "Media"), TEXT_DIM);
         // Holding the modifier: the key that numbers the pictures and videos, after the label.
         let mut label = label;
         if crate::keys::tags_shown(state) {
-            let words = format!("{} then 1\u{2013}9", crate::keys::media_key());
+            let words = tf("media.key_tag", "{key} then 1\u{2013}9", &[("key", &crate::keys::media_key())]);
             let wide = crate::keys::tag_width(ui.painter(), &words);
             let tag = crate::keys::tag(ui.painter(), label.max.x + 8.0 + wide, middle, &words);
             label.max.x = tag.max.x;
@@ -5936,13 +5941,12 @@ pub fn media_strip(
             let count = show.media().len();
             let words = match count {
                 0 => String::new(),
-                1 => "1 item".to_owned(),
-                n => format!("{n} items"),
+                n => tn("media.items", n as u64, "{n} item", "{n} items", &[]),
             };
             ui.painter().text(pos2(label.max.x + 12.0, middle), Align2::LEFT_CENTER, words, fixed(11.0), TEXT_FAINT);
             let place = Rect::from_center_size(pos2(head.max.x - 15.0, middle), egui::Vec2::splat(ICON_BUTTON));
             let open = icon_button(ui, place, ui.scope_id().with("unfold media"), Icon::ChevronUp, 1.0, false);
-            if open.on_hover_text("Show the media strip").clicked() {
+            if open.on_hover_text(t("media.unfold", "Show the media strip")).clicked() {
                 state.media_hidden = false;
             }
             return;
@@ -5951,17 +5955,23 @@ pub fn media_strip(
         // strip away, and how one picture or video gives way to the next.
         let place = Rect::from_center_size(pos2(head.max.x - 15.0, middle), egui::Vec2::splat(30.0));
         let add = icon_button(ui, place, ui.scope_id().with("add media"), Icon::Plus, 1.0, false);
-        if add.on_hover_text("Add pictures or videos").clicked() {
+        if add.on_hover_text(t("media.add", "Add pictures or videos")).clicked() {
             state.media_request = Some(crate::home::MediaRequest::Choose);
         }
         let place = place.translate(vec2(-32.0, 0.0));
         let fold = icon_button(ui, place, ui.scope_id().with("fold media"), Icon::ChevronDown, 0.6, false);
-        if fold.on_hover_text("Hide the media strip").clicked() {
+        if fold.on_hover_text(t("media.fold", "Hide the media strip")).clicked() {
             state.media_hidden = true;
         }
-        let transition =
-            menu_pill(ui, "media transition", place.min.x - 8.0, middle, &state.media_transition.label(), true)
-                .on_hover_text("How one picture or video gives way to the next");
+        let transition = menu_pill(
+            ui,
+            "media transition",
+            place.min.x - 8.0,
+            middle,
+            &transition_chip(state.media_transition),
+            true,
+        )
+        .on_hover_text(t("media.transition.hint", "How one picture or video gives way to the next"));
         egui::Popup::from_toggle_button_response(&transition)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .show(|ui| transition_picker(ui, &mut state.media_transition, "media"));
@@ -6135,7 +6145,7 @@ pub fn media_strip(
             painter.text(
                 area.center(),
                 Align2::CENTER_CENTER,
-                "Drop to add",
+                t("media.drop", "Drop to add"),
                 FontId::proportional(15.0),
                 Color32::WHITE,
             );
@@ -6210,7 +6220,7 @@ fn sweep_media(
             paint_tiles_moving(ui.painter(), &tiles, |place| moving.contains(&placed[place].0), slot, SHELF);
             let words = match moving.as_slice() {
                 [one] => show.media().get(*one).map(|item| item.name.clone()).unwrap_or_default(),
-                many => format!("{} items", many.len()),
+                many => tn("media.items", many.len() as u64, "{n} item", "{n} items", &[]),
             };
             paint_carried(ui.ctx(), &words);
             scroll_strip_at_ends(ui, bin, at);
@@ -6284,6 +6294,26 @@ pub fn transition_name(kind: sp_model::TransitionKind) -> &'static str {
     }
 }
 
+/// The way a moving transition comes in, in the language that is set.
+pub fn direction_name(direction: sp_model::Direction) -> &'static str {
+    use sp_model::Direction as D;
+    match direction {
+        D::FromLeft => t("dock.from_left", "From Left"),
+        D::FromRight => t("dock.from_right", "From Right"),
+        D::FromTop => t("dock.from_top", "From Top"),
+        D::FromBottom => t("dock.from_bottom", "From Bottom"),
+    }
+}
+
+/// The media strip's chip for how one picture or video gives way to the next: "Dissolve: 1.0s".
+fn transition_chip(look: sp_model::Transition) -> String {
+    tf(
+        "media.transition",
+        "{kind}: {seconds}s",
+        &[("kind", transition_name(look.kind)), ("seconds", &crate::i18n::number(f64::from(look.seconds), 1))],
+    )
+}
+
 /// The choice in a Transition menu that follows what is set above it, naming what that is:
 /// "Usual (Dissolve, 0.4 s)", or "Usual (Cut)".
 pub fn usual_transition(look: sp_model::Transition) -> String {
@@ -6338,14 +6368,13 @@ fn transition_settings(ui: &mut egui::Ui, look: &mut sp_model::Transition, id: &
     egui::Grid::new(("transition settings", id)).num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
         if look.kind.has_direction() {
             ui.label(egui::RichText::new(t("dock.direction", "Direction")).color(TEXT_DIM));
-            egui::ComboBox::from_id_salt(("transition direction", id)).selected_text(look.direction.name()).show_ui(
-                ui,
-                |ui| {
+            egui::ComboBox::from_id_salt(("transition direction", id))
+                .selected_text(direction_name(look.direction))
+                .show_ui(ui, |ui| {
                     for direction in sp_model::Direction::ALL {
-                        ui.selectable_value(&mut look.direction, direction, direction.name());
+                        ui.selectable_value(&mut look.direction, direction, direction_name(direction));
                     }
-                },
-            );
+                });
             ui.end_row();
         }
         ui.label(egui::RichText::new(t("dock.duration", "Duration")).color(TEXT_DIM));
@@ -6433,7 +6462,7 @@ fn empty_media_place(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     let room = ui.available_size() - vec2(0.0, 2.0);
     let (whole, _) = ui.allocate_exact_size(room, Sense::hover());
     let samples = crate::samples::offered(show.media());
-    let words = "Or use the sample backgrounds";
+    let words = t("media.samples", "Or use the sample backgrounds");
     let (apart, pad) = (10.0, 22.0);
     let words_width =
         if samples { ui.painter().layout_no_wrap(words.to_owned(), semibold(13.0), TEXT).size().x } else { 0.0 };
@@ -6449,8 +6478,8 @@ fn empty_media_place(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     // place the icon goes and the words wrap, so none is cut off.
     let (icon_side, gap) = (28.0, 14.0);
     let (title_words, hint_words) = (
-        "Click or drag pictures and videos here to add them".to_owned(),
-        "Then click one to put it behind the words, or drag it onto a slide".to_owned(),
+        t("media.empty", "Click or drag pictures and videos here to add them").to_owned(),
+        t("media.empty.then", "Then click one to put it behind the words, or drag it onto a slide").to_owned(),
     );
     let wide = |painter: &egui::Painter| {
         let title = painter.layout_no_wrap(title_words.clone(), semibold(13.0), ink);
@@ -6494,7 +6523,10 @@ fn empty_media_place(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     dashed_rect(painter, button.shrink(1.0), Stroke::new(1.5, if hot { TEXT_DIM } else { LINE }));
     painter.text(button.center(), Align2::CENTER_CENTER, words, semibold(13.0), if hot { TEXT } else { TEXT_DIM });
     if response
-        .on_hover_text("Seven pictures and a video to put behind the words, in a media playlist of their own")
+        .on_hover_text(t(
+            "media.samples.hint",
+            "Seven pictures and a video to put behind the words, in a media playlist of their own",
+        ))
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
     {
@@ -6509,8 +6541,9 @@ fn media_playlist_picker(ui: &egui::Ui, show: &Show, state: &mut HomeState, left
     if shown.is_none() {
         state.media_playlist_shown = None;
     }
-    let label = shown.map_or_else(|| "All Media".to_owned(), |playlist| playlist.name.clone());
-    let picker = menu_pill(ui, "media source", left, middle, &label, false).on_hover_text("Choose a media playlist");
+    let label = shown.map_or_else(|| t("media.all", "All Media").to_owned(), |playlist| playlist.name.clone());
+    let picker = menu_pill(ui, "media source", left, middle, &label, false)
+        .on_hover_text(t("media.choose", "Choose a media playlist"));
     let place = picker.rect;
     // Testing aid: SOFTPRESENTER_CAPTURE_MEDIA_MENU=1 opens this menu once, for a capture.
     static MENU_OPENED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -6529,13 +6562,20 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.set_min_width(200.0);
-            if ui.add(egui::Button::selectable(state.media_playlist_shown.is_none(), "All Media")).clicked() {
+            if ui
+                .add(egui::Button::selectable(state.media_playlist_shown.is_none(), t("media.all", "All Media")))
+                .clicked()
+            {
                 state.media_playlist_shown = None;
                 ui.close();
             }
             for playlist in &state.media_playlists {
                 let on = state.media_playlist_shown == Some(playlist.id);
-                let name = if playlist.name.trim().is_empty() { "Untitled" } else { playlist.name.as_str() };
+                let name = if playlist.name.trim().is_empty() {
+                    t("left.untitled", "Untitled")
+                } else {
+                    playlist.name.as_str()
+                };
                 if ui.add(egui::Button::selectable(on, name)).clicked() {
                     state.media_playlist_shown = Some(playlist.id);
                     ui.close();
@@ -6546,8 +6586,8 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
             let name_field = egui::Id::unique("media playlist name");
             let ask_name = egui::Id::unique("media playlist name asked");
             if ui
-                .button("New Media Playlist\u{2026}")
-                .on_hover_text("Add media to it from an item's right-click menu")
+                .button(t("media.new_playlist", "New Media Playlist\u{2026}"))
+                .on_hover_text(t("media.new_playlist.hint", "Add media to it from an item's right-click menu"))
                 .clicked()
             {
                 let made = crate::media::Playlist::new(crate::media::new_playlist_name(&state.media_playlists));
@@ -6559,10 +6599,11 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
             // Only while one of the seven isn't in the bin.
             if crate::samples::offered(show.media())
                 && ui
-                    .button("Add the Sample Backgrounds")
-                    .on_hover_text(
+                    .button(t("media.add_samples", "Add the Sample Backgrounds"))
+                    .on_hover_text(t(
+                        "media.samples.hint",
                         "Seven pictures and a video to put behind the words, in a media playlist of their own",
-                    )
+                    ))
                     .clicked()
             {
                 state.media_request = Some(crate::home::MediaRequest::AddSamples);
@@ -6575,8 +6616,15 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
                 ui.separator();
                 let front = state.services.front().name.clone();
                 if ui
-                    .button(format!("Add to Playlist \u{201c}{front}\u{201d}"))
-                    .on_hover_text("Put it in the running order of the playlist in front, to play it from there")
+                    .button(tf(
+                        "media.add_to_playlist",
+                        "Add to Playlist {name}",
+                        &[("name", &crate::i18n::quoted(&front))],
+                    ))
+                    .on_hover_text(t(
+                        "media.add_to_playlist.play",
+                        "Put it in the running order of the playlist in front, to play it from there",
+                    ))
                     .clicked()
                 {
                     let name = state.media_playlists[at].name.clone();
@@ -6587,14 +6635,17 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
                 // reason, while it has nothing in it to play.
                 let empty = crate::media::playlist_places(&state.media_playlists[at].files, show.media()).is_empty();
                 if state.media_playing == Some(id) {
-                    if ui.button("Stop Playing").clicked() {
+                    if ui.button(t("media.stop_playing", "Stop Playing")).clicked() {
                         state.media_request = Some(crate::home::MediaRequest::PlayPlaylist(None));
                         ui.close();
                     }
                 } else if ui
-                    .add_enabled(!empty, egui::Button::new("Play This Playlist"))
-                    .on_hover_text("Its pictures (8 seconds each) and videos (to their end) in turn, round and round")
-                    .on_disabled_hover_text(NOTHING_TO_PLAY)
+                    .add_enabled(!empty, egui::Button::new(t("media.play_playlist", "Play This Playlist")))
+                    .on_hover_text(t(
+                        "media.play_playlist.hint",
+                        "Its pictures (8 seconds each) and videos (to their end) in turn, round and round",
+                    ))
+                    .on_disabled_hover_text(nothing_to_play())
                     .clicked()
                 {
                     state.media_request = Some(crate::home::MediaRequest::PlayPlaylist(Some(id)));
@@ -6604,26 +6655,36 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
                     ui,
                     state,
                     crate::announcements::Announce::MediaPlaylist(id),
-                    "Its pictures and videos in turn over the slides, round and round, until it is cleared",
-                    empty.then_some(NOTHING_TO_PLAY),
+                    t(
+                        "media.announce_playlist.hint",
+                        "Its pictures and videos in turn over the slides, round and round, until it is cleared",
+                    ),
+                    empty.then_some(nothing_to_play()),
                 );
                 // A folder it follows: what is in the folder is in the playlist.
                 match state.media_playlists[at].folder.clone() {
                     Some(folder) => {
                         ui.label(
-                            egui::RichText::new(format!("Follows {}", folder.display())).size(11.5).color(TEXT_DIM),
+                            egui::RichText::new(tf(
+                                "media.follows",
+                                "Follows {folder}",
+                                &[("folder", &folder.display().to_string())],
+                            ))
+                            .size(11.5)
+                            .color(TEXT_DIM),
                         );
-                        if ui.button("Stop Following the Folder").clicked() {
+                        if ui.button(t("media.unfollow", "Stop Following the Folder")).clicked() {
                             state.media_request = Some(crate::home::MediaRequest::WatchFolder(id, false));
                             ui.close();
                         }
                     }
                     None => {
                         if ui
-                            .button("Follow a Folder…")
-                            .on_hover_text(
+                            .button(t("media.follow", "Follow a Folder…"))
+                            .on_hover_text(t(
+                                "media.follow.hint",
                                 "The pictures and videos in a folder join this playlist as they come and change",
-                            )
+                            ))
                             .clicked()
                         {
                             state.media_request = Some(crate::home::MediaRequest::WatchFolder(id, true));
@@ -6633,7 +6694,7 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
                 }
                 ui.separator();
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Name").color(TEXT_DIM));
+                    ui.label(egui::RichText::new(t("media.name", "Name")).color(TEXT_DIM));
                     let field = ui.add(
                         egui::TextEdit::singleline(&mut state.media_playlists[at].name)
                             .id(name_field)
@@ -6653,7 +6714,11 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
                         }
                     }
                 });
-                if ui.button("Delete Playlist").on_hover_text("The media stays in All Media").clicked() {
+                if ui
+                    .button(t("media.delete_playlist", "Delete Playlist"))
+                    .on_hover_text(t("media.delete_playlist.hint", "The media stays in All Media"))
+                    .clicked()
+                {
                     state.media_playlists.remove(at);
                     state.media_playlist_shown = None;
                     state.media_playlists_changed = true;
@@ -6668,11 +6733,23 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
 /// playlist's own view, Remove from that playlist instead, at once.
 fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index: usize, item: &sp_model::MediaItem) {
     use crate::home::MediaRequest;
-    ui.menu_button("Scaling", |ui| {
+    ui.menu_button(t("media.scaling", "Scaling"), |ui| {
         for (fit, name, hint) in [
-            (sp_model::ImageFit::Fill, "Scale to Fill", "Fill the screen, cutting off what hangs over"),
-            (sp_model::ImageFit::Fit, "Scale to Fit", "Show all of it, with bars where its shape differs"),
-            (sp_model::ImageFit::Stretch, "Stretch to Fill", "Stretch it to the screen's shape"),
+            (
+                sp_model::ImageFit::Fill,
+                t("media.scaling.fill", "Scale to Fill"),
+                t("media.scaling.fill.hint", "Fill the screen, cutting off what hangs over"),
+            ),
+            (
+                sp_model::ImageFit::Fit,
+                t("media.scaling.fit", "Scale to Fit"),
+                t("media.scaling.fit.hint", "Show all of it, with bars where its shape differs"),
+            ),
+            (
+                sp_model::ImageFit::Stretch,
+                t("media.scaling.stretch", "Stretch to Fill"),
+                t("media.scaling.stretch.hint", "Stretch it to the screen's shape"),
+            ),
         ] {
             if ui.add(egui::Button::selectable(item.fit == fit, name)).on_hover_text(hint).clicked() {
                 state.media_request = Some(MediaRequest::Look(index, fit, item.looping));
@@ -6682,16 +6759,19 @@ fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index:
     });
     if crate::media::is_video(&item.path)
         && ui
-            .add(egui::Button::selectable(item.looping, "Loop"))
-            .on_hover_text("Start again at the end; otherwise stay on the last picture")
+            .add(egui::Button::selectable(item.looping, t("media.loop", "Loop")))
+            .on_hover_text(t("media.loop.hint", "Start again at the end; otherwise stay on the last picture"))
             .clicked()
     {
         state.media_request = Some(MediaRequest::Look(index, item.fit, !item.looping));
         ui.close();
     }
     if ui
-        .button("Add to Song as Slide")
-        .on_hover_text("A slide that shows this when it goes on screen, after the song's chosen slide")
+        .button(t("media.add_as_slide", "Add to Song as Slide"))
+        .on_hover_text(t(
+            "media.add_as_slide.hint",
+            "A slide that shows this when it goes on screen, after the song's chosen slide",
+        ))
         .clicked()
     {
         state.media_request = Some(MediaRequest::AddAsSlide(index));
@@ -6699,23 +6779,30 @@ fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index:
     }
     let front = state.services.front().name.clone();
     if ui
-        .button(format!("Add to Playlist \u{201c}{front}\u{201d}"))
-        .on_hover_text("Put it in the running order of the playlist in front, to show it from there")
+        .button(tf("media.add_to_playlist", "Add to Playlist {name}", &[("name", &crate::i18n::quoted(&front))]))
+        .on_hover_text(t(
+            "media.add_to_playlist.show",
+            "Put it in the running order of the playlist in front, to show it from there",
+        ))
         .clicked()
     {
         state.services.add(crate::service::Item::Media { id: item.id, name: item.name.clone() });
         ui.close();
     }
     let hint = if crate::media::is_video(&item.path) {
-        "Over the slides, looping, until it is cleared"
+        t("media.announce_video.hint", "Over the slides, looping, until it is cleared")
     } else {
-        "Over the slides until it is cleared"
+        t("media.announce_picture.hint", "Over the slides until it is cleared")
     };
     announce_button(ui, state, crate::announcements::Announce::Media(item.id), hint, None);
-    ui.menu_button("Media Playlists", |ui| {
+    ui.menu_button(t("media.playlists", "Media Playlists"), |ui| {
         if state.media_playlists.is_empty() {
             ui.label(
-                egui::RichText::new("No media playlists yet. Make one from the menu beside MEDIA.").color(TEXT_DIM),
+                egui::RichText::new(t(
+                    "media.playlists.none",
+                    "No media playlists yet. Make one from the menu beside MEDIA.",
+                ))
+                .color(TEXT_DIM),
             );
         }
         for playlist in &mut state.media_playlists {
@@ -6733,14 +6820,18 @@ fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index:
         Some(playlist) => {
             let words = remove_words(&these, &playlist.name);
             if !playlist.arranged_by_hand() {
-                ui.add_enabled(false, egui::Button::new(words)).on_disabled_hover_text(FOLLOWS_A_FOLDER);
-            } else if ui.button(words).on_hover_text("Taken out of this media playlist only").clicked() {
+                ui.add_enabled(false, egui::Button::new(words)).on_disabled_hover_text(follows_a_folder());
+            } else if ui
+                .button(words)
+                .on_hover_text(t("media.remove.hint", "Taken out of this media playlist only"))
+                .clicked()
+            {
                 remove_from_media_playlist(show, state, &these);
                 ui.close();
             }
         }
         None => {
-            if ui.button("Delete…").clicked() {
+            if ui.button(t("media.delete", "Delete…")).clicked() {
                 state.confirm_delete_media = these;
                 ui.close();
             }
@@ -6749,14 +6840,21 @@ fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index:
 }
 
 /// Why nothing is taken out of, or moved in, a media playlist that follows a folder.
-const FOLLOWS_A_FOLDER: &str = "It follows a folder: what is in the folder is in it, by name";
+fn follows_a_folder() -> &'static str {
+    t("media.follows_a_folder", "It follows a folder: what is in the folder is in it, by name")
+}
 
 /// What taking items out of a media playlist is called: "Remove from “Loop”", or with several
 /// "Remove 2 Items from “Loop”".
 fn remove_words(these: &[usize], playlist: &str) -> String {
+    let name = crate::i18n::quoted(playlist);
     match these.len() {
-        1 => format!("Remove from \u{201c}{playlist}\u{201d}"),
-        many => format!("Remove {many} Items from \u{201c}{playlist}\u{201d}"),
+        1 => tf("media.remove", "Remove from {name}", &[("name", &name)]),
+        many => tf(
+            "media.remove_some",
+            "Remove {n} Items from {name}",
+            &[("n", &crate::i18n::count(many as u64)), ("name", &name)],
+        ),
     }
 }
 

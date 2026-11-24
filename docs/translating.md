@@ -92,12 +92,13 @@ start with `_` (`"_note"`) are comments.
 | `slides` | the slides area: item bars, tiles, tags, empty states |
 | `dock` | the bar under the slides: transitions, Continuous, Undo, Redo, views; theme versions |
 | `right` | the right column: preview, layer keys, Clear All, tool tabs |
+| `media` | the media strip under the slides: its menus, the empty strip, what adding pictures and videos says |
 | `common` | words several areas share |
 | `format` | numbers and quotation marks (not words) |
 
 The next areas, each a file of its own for one agent: `editor` and `inspector`; `settings`,
 `setup` and `screens`; `bible`; `notices`, `messages` and `dialogs`; `stage` and the remaining
-views (media strip, props, timers, macros, announcements).
+views (props, timers, macros, announcements).
 
 When you finish an area, add its file name to `SPANISH_DONE` in `i18n.rs`, so a string wrapped
 later without its Spanish fails the tests.

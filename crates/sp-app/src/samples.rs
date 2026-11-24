@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use sp_model::{ImageFit, MediaItem, Uuid};
 
 use crate::backgrounds;
+use crate::i18n::{t, tf};
 use crate::media::Playlist;
 
 /// The name of the media playlist that gathers them, until a church renames it.
@@ -95,21 +96,26 @@ fn add_unless(
     if wanted.is_empty() {
         let video = needing_ffmpeg(bin);
         return Err(if video.is_empty() {
-            "The sample backgrounds are all in the media bin already.".to_owned()
+            t("media.samples.all_in", "The sample backgrounds are all in the media bin already.").to_owned()
         } else {
-            format!(
-                "The sample pictures are in the media bin already. {} needs FFmpeg, which isn't on this computer. {}",
-                video.join(", "),
-                crate::media::ffmpeg_advice()
+            tf(
+                "media.samples.need_ffmpeg",
+                "The sample pictures are in the media bin already. {videos} needs FFmpeg, which isn't on this computer. {advice}",
+                &[("videos", &video.join(", ")), ("advice", crate::media::ffmpeg_advice())],
             )
         });
     }
-    std::fs::create_dir_all(media).map_err(|e| format!("Could not make the Media folder: {e}"))?;
+    std::fs::create_dir_all(media).map_err(|e| {
+        tf("media.samples.no_folder", "Could not make the Media folder: {error}", &[("error", &e.to_string())])
+    })?;
     let in_bin = |path: &Path| bin.iter().any(|item| item.path == path);
     let (mut items, mut copied) = (Vec::new(), Vec::new());
     for name in wanted {
         let placed = backgrounds::find(name)
-            .ok_or_else(|| "The sample backgrounds didn't come with this copy of SoftPresenter.".to_owned())
+            .ok_or_else(|| {
+                t("media.samples.missing", "The sample backgrounds didn't come with this copy of SoftPresenter.")
+                    .to_owned()
+            })
             .and_then(|from| place(&from, media, name, &in_bin));
         let (path, fresh) = match placed {
             Ok(placed) => placed,
@@ -184,8 +190,9 @@ impl Added {
 /// "Sample Backgrounds", or with a number when a playlist has that name already.
 fn unused_name(playlists: &[Playlist]) -> String {
     let taken = |name: &str| playlists.iter().any(|playlist| playlist.name == name);
-    std::iter::once(PLAYLIST_NAME.to_owned())
-        .chain((2..).map(|n| format!("{PLAYLIST_NAME} {n}")))
+    let base = t("media.samples.playlist", "Sample Backgrounds");
+    std::iter::once(base.to_owned())
+        .chain((2..).map(|n| format!("{base} {n}")))
         .find(|name| !taken(name))
         .unwrap_or_default()
 }
@@ -212,16 +219,16 @@ fn place(from: &Path, media: &Path, name: &str, in_bin: &dyn Fn(&Path) -> bool) 
             return Ok((path, false));
         }
     }
-    Err(format!("Could not find a name for {name} in the Media folder."))
+    Err(tf("media.samples.no_name", "Could not find a name for {name} in the Media folder.", &[("name", name)]))
 }
 
 impl crate::App {
     /// Adds the sample backgrounds the bin hasn't got (see [`add`]), shows the playlist that
     /// gathers them, and keeps the add as one step for Undo.
     pub(crate) fn add_sample_backgrounds(&mut self) -> Result<Added, String> {
-        let media = crate::bible_store::data_dir()
-            .map(|dir| dir.join("Media"))
-            .ok_or_else(|| "Could not find where to keep pictures on this computer.".to_owned())?;
+        let media = crate::bible_store::data_dir().map(|dir| dir.join("Media")).ok_or_else(|| {
+            t("media.samples.no_place", "Could not find where to keep pictures on this computer.").to_owned()
+        })?;
         let bin = self.show.media().to_vec();
         let running = self.running.as_mut().ok_or_else(|| "The window isn't open.".to_owned())?;
         let state = &mut running.home_state;

@@ -55,5 +55,9 @@
   "dock.version.keep": "Mantenerla hasta volver atrás",
   "dock.version.keep.hint": "La versión sigue activa cuando el siguiente elemento pasa a pantalla",
   "dock.version.make": "Crear o cambiar versiones…",
-  "dock.version.make.hint": "Editar › Temas"
+  "dock.version.make.hint": "Editar › Temas",
+  "dock.from_left": "Desde la izquierda",
+  "dock.from_right": "Desde la derecha",
+  "dock.from_top": "Desde arriba",
+  "dock.from_bottom": "Desde abajo"
 }

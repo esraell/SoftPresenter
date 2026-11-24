@@ -742,7 +742,7 @@ mod tests {
 
     // The areas that are translated in full. An area joins the list when its agent has wrapped
     // it and written its Spanish; from then on a string wrapped without Spanish fails here.
-    const SPANISH_DONE: &[&str] = &["topbar", "left", "right", "slides", "dock", "keys", "common"];
+    const SPANISH_DONE: &[&str] = &["topbar", "left", "right", "slides", "dock", "keys", "common", "media"];
 
     #[test]
     fn the_finished_areas_have_all_their_spanish() {
