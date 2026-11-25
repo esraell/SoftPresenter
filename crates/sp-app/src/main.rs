@@ -1282,6 +1282,24 @@ fn put_on_display(
     }
 }
 
+/// How the GPU device hands out memory: wgpu's own way unless a test asks for another. On
+/// DirectX 12 and Vulkan (Windows and Linux) wgpu places textures and buffers in blocks it
+/// reserves ahead: by default 128 to 256 MB of the GPU's memory and 64 to 128 MB of memory the
+/// processor can reach, one at least of each kind kept once made, whatever is in it, which on a
+/// PC whose graphics share the computer's memory all counts as the app's. wgpu's small blocks
+/// (8 to 64 MB and 4 to 32 MB) would hold less, but then a 4K screen's picture (33 MB) gets a
+/// block of its own each time it is made, as the two pictures of every fade are, on the screens'
+/// thread: so they are only tried, on a PC, before anything is decided. A Mac's Metal makes each
+/// texture and buffer on its own and takes no notice of either.
+fn gpu_memory_hints() -> wgpu::MemoryHints {
+    // Testing aid: SOFTPRESENTER_GPU_MEMORY=small asks for wgpu's small memory blocks, with no
+    // new build, to compare memory and the screens' timing on a PC.
+    match std::env::var("SOFTPRESENTER_GPU_MEMORY").as_deref() {
+        Ok("small") => wgpu::MemoryHints::MemoryUsage,
+        _ => wgpu::MemoryHints::Performance,
+    }
+}
+
 /// Makes the surface a window is drawn on and gives it to the output thread. False (with the
 /// reason in the notices) when it can't be made.
 fn add_surface(
@@ -2028,6 +2046,7 @@ impl App {
         choose_output(&displays, &operator, self.options.output_display)?;
 
         let mut context = RenderContext::new();
+        context.memory_hints = gpu_memory_hints();
         let home_surface = context
             .instance
             .create_surface(home_window.clone())
@@ -2040,8 +2059,13 @@ impl App {
         applog::event(
             "gpu",
             &format!(
-                "{} ({:?}, {:?}, driver {} {})",
-                chosen.name, chosen.backend, chosen.device_type, chosen.driver, chosen.driver_info
+                "{} ({:?}, {:?}, driver {} {}; memory {:?})",
+                chosen.name,
+                chosen.backend,
+                chosen.device_type,
+                chosen.driver,
+                chosen.driver_info,
+                context.memory_hints
             ),
         );
         let gpu = Gpu { device: handle.device.clone(), queue: handle.queue.clone() };

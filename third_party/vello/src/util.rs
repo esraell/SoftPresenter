@@ -16,6 +16,9 @@ use crate::{Error, Result};
 pub struct RenderContext {
     pub instance: Instance,
     pub devices: Vec<DeviceHandle>,
+    /// SoftPresenter: how the devices made from now on hand out GPU memory: wgpu's default
+    /// unless the caller sets another before asking for a device (see `new_device_on`).
+    pub memory_hints: wgpu::MemoryHints,
 }
 
 pub struct DeviceHandle {
@@ -45,6 +48,7 @@ impl RenderContext {
         Self {
             instance,
             devices: Vec::new(),
+            memory_hints: wgpu::MemoryHints::default(),
         }
     }
 
@@ -244,6 +248,8 @@ impl RenderContext {
                 label: None,
                 required_features: features & maybe_features,
                 required_limits: limits,
+                // SoftPresenter: the caller's choice (`RenderContext::memory_hints`).
+                memory_hints: self.memory_hints.clone(),
                 ..Default::default()
             })
             .await

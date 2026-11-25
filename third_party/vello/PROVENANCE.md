@@ -128,7 +128,9 @@ Everything is marked `SoftPresenter:` in the source. Removed from the published 
   `WGPU_POWER_PREF` is set: the best kind (a discrete GPU, then an integrated one, the
   others, one that runs on the processor), and within a kind Vulkan, then DirectX 12, then
   OpenGL, trying the next adapter if one cannot make a device. Elsewhere wgpu's own choice
-  is kept.
+  is kept. `RenderContext` has a `memory_hints` field, wgpu's default unless the caller sets
+  another, which the devices it makes are asked for with (so SoftPresenter can try smaller
+  memory blocks on DirectX 12 and Vulkan).
 - **`src/lib.rs`, wait for the GPU:** see the account of `Renderer::render_to_texture` above
   (a wait for each run, longer for a GPU that is not a Mac's or a discrete one, and
   learnt from a GPU seen to finish what a call gave up on).

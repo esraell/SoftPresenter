@@ -31,7 +31,7 @@ fn lasting_context() -> &'static RenderContext {
             memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
             backend_options: wgpu::BackendOptions::from_env_or_default(),
         });
-        RenderContext { instance, devices: Vec::new() }
+        RenderContext { instance, devices: Vec::new(), memory_hints: wgpu::MemoryHints::default() }
     } else {
         RenderContext::new()
     };
