@@ -1628,13 +1628,15 @@ impl crate::App {
         }
     }
 
-    /// What a presentation is, in replies: a song, a Bible passage (the Bible page's), or the
-    /// VoxLive item.
+    /// What a presentation is, in replies: a song, a Bible passage (the Bible page's), the
+    /// VoxLive item, or a song of the song catalog being looked at (not in the library).
     pub(crate) fn kind_of(&self, at: usize) -> &'static str {
         if self.bible_slots.contains(&at) {
             "passage"
         } else if at == self.voxlive_slot {
             "voxlive"
+        } else if self.catalog_slots.contains(&at) {
+            "catalog"
         } else {
             "song"
         }

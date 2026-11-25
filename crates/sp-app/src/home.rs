@@ -568,6 +568,8 @@ pub struct HomeState {
     pub setup_done: bool,
     /// The song catalog's songbooks as the setup and Settings show them (`songbooks`).
     pub songbooks: crate::songbooks::View,
+    /// The song catalog's songs in the find box and the slides area (`catalog_songs`).
+    pub catalog: crate::catalog_songs::CatalogSongs,
     /// An NDI name being typed in the Screens window, and the screen it is for. It is used
     /// when the field is left, so NDI is not restarted at every letter.
     pub ndi_draft: Option<(sp_model::Uuid, String)>,
@@ -1907,6 +1909,7 @@ impl Default for HomeState {
             setup_request: None,
             setup_done: false,
             songbooks: crate::songbooks::View::default(),
+            catalog: crate::catalog_songs::CatalogSongs::default(),
             ndi_draft: None,
             // Assumed until it has been looked for.
             ndi_available: true,
@@ -1966,10 +1969,12 @@ impl HomeState {
             || if redo { draft.can_redo() } else { draft.can_undo() }
     }
 
-    /// True for a presentation the app makes itself (a Bible passage, the VoxLive item): shown,
-    /// never edited, moved or deleted.
+    /// True for a presentation the app makes itself (a Bible passage, the VoxLive item, a song
+    /// of the song catalog being looked at): shown, never edited, moved or deleted.
     pub fn app_made(&self, presentation: usize) -> bool {
-        self.bible.slots.is_some_and(|slots| slots.contains(&presentation)) || self.voxlive_slot == Some(presentation)
+        self.bible.slots.is_some_and(|slots| slots.contains(&presentation))
+            || self.voxlive_slot == Some(presentation)
+            || self.catalog.holds(presentation)
     }
 
     /// Puts a song's copy (Duplicate) beside it: next in the song list, just after it in each
@@ -1993,11 +1998,13 @@ impl HomeState {
         }
     }
 
-    /// The presentations kept out of the song lists: the Bible page's two and the VoxLive item
-    /// (which has its own row under LIBRARY).
-    pub fn hidden_slots(&self) -> [usize; 3] {
+    /// The presentations kept out of the song lists: the Bible page's two, the VoxLive item
+    /// (which has its own row under LIBRARY) and the two places for a song of the song catalog
+    /// being looked at.
+    pub fn hidden_slots(&self) -> [usize; 5] {
         let [first, second] = self.bible.slots.unwrap_or([usize::MAX; 2]);
-        [first, second, self.voxlive_slot.unwrap_or(usize::MAX)]
+        let [one, two] = self.catalog.slots.unwrap_or([usize::MAX; 2]);
+        [first, second, self.voxlive_slot.unwrap_or(usize::MAX), one, two]
     }
 
     /// Whether the Bible view is open, or asked for this frame (the switch comes in the next).
@@ -4860,22 +4867,34 @@ pub struct MediaDrag(pub usize);
 /// playlist keeps for it (a song, or a Bible passage or verse with the Bible view's
 /// translations and choices as they were when the drag began), the song by its place among
 /// the songs (none for a passage or verse, which no library takes), its name, which follows the
-/// pointer, and which result it is, so that its row goes faint while it is carried.
+/// pointer, and which result it is, so that its row goes faint while it is carried. A song of
+/// the song catalog carries itself, as made: it is kept under the key it is filed under, and
+/// joins the library once it is dropped (see [`found_placed`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FoundDrag {
     pub item: crate::service::Item,
     pub song: Option<usize>,
+    pub catalog: Option<std::sync::Arc<sp_model::Presentation>>,
     pub name: String,
     pub from: Found,
 }
 
 /// One result of the find box, by what it is rather than its place in the list (a passage can
-/// arrive above the songs while one of them is carried): a song and the slide found in it, or
-/// a Bible passage or verse by what it looks up.
+/// arrive above the songs while one of them is carried): a song and the slide found in it, a
+/// song of the song catalog by its key, or a Bible passage or verse by what it looks up.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Found {
     Song(usize, usize),
+    Catalog(String),
     Bible(String),
+}
+
+/// A result of the find box has been put in a playlist or a library where it was dropped: a
+/// song of the song catalog joins the library now (see `catalog_songs`).
+pub fn found_placed(state: &mut HomeState, found: &FoundDrag) {
+    if let Some(song) = &found.catalog {
+        state.catalog.join(song, crate::catalog_songs::Then::Nothing);
+    }
 }
 
 /// Slides being dragged to another place in their song: the song, and the slides' places.
@@ -5069,6 +5088,11 @@ fn search_songs(show: &Show, listed: impl Fn(usize) -> bool, query: &str) -> Vec
 
 /// How many songs the find box lists.
 const SONGS_LISTED: usize = 6;
+/// How many of the song catalog's songs it lists at least: more while the church's own leave
+/// room, up to [`SONGS_LISTED`] songs in all.
+const CATALOG_LEAST: usize = 2;
+/// How tall the heading over the catalog's songs is.
+const CATALOG_HEADING: f32 = 24.0;
 
 /// Testing aid: SOFTPRESENTER_FIND_RETURN=WORDS types the words in the find box when the window
 /// first draws, and presses Return once something is listed and the Bibles have answered, as an
@@ -5218,10 +5242,14 @@ pub fn pointer_drag(step: u32, from: egui::Pos2, to: egui::Pos2, drop: bool) -> 
 
 /// What the find box in the top bar finds for the words typed in it, listed under it: a Bible
 /// passage first, when the words are a reference; then songs (titles first, then lines of their
-/// words); then Bible verses that hold the words. Return, or a click, opens the one picked: a
-/// song in the Service view, a passage or verse in the Bible view. Nothing goes on the screens.
-/// With Command (Ctrl elsewhere), Return adds it to the playlist in front instead.
+/// words); then songs of the song catalog's songbooks on this computer, as a group of their own
+/// (see `catalog_songs`); then Bible verses that hold the words. Return, or a click, opens the
+/// one picked: a song in the Service view (a catalog song from a place of its own, not in the
+/// library), a passage or verse in the Bible view. Nothing goes on the screens. With Command
+/// (Ctrl elsewhere), Return adds it to the playlist in front instead (a catalog song then joins
+/// the library).
 fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
+    use crate::studio::FoundKind;
     let hidden = state.hidden_slots();
     // A Bible the search read for the first time stays read.
     for (id, bible) in state.finder.take_read() {
@@ -5255,14 +5283,29 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         let readers = || rows.iter().filter_map(|row| shelf.reader(row.bible?)).collect();
         state.finder.rows(typed, &in_use, &reading, readers, ui.ctx())
     };
-    let answered = bible_rows.is_some();
+    // The song catalog's part comes the same way, from a thread of its own; the catalog's songs
+    // the library has already are left out.
+    let removed = &state.removed_songs;
+    let skip = || {
+        crate::catalog_songs::copies(show.presentations(), |at| hidden.contains(&at) || removed.contains(&at))
+            .into_iter()
+            .filter_map(|(_, song)| song.catalog.as_ref().map(|origin| origin.key.clone()))
+            .collect()
+    };
+    let catalog_rows = state.catalog.found(typed, &state.songbooks.known.installed, epoch, skip, ui.ctx());
+    let (bibles_answered, catalog_answered) = (bible_rows.is_some(), catalog_rows.is_some());
+    let answered = bibles_answered && catalog_answered;
     let bible_rows = bible_rows.unwrap_or(&[]);
+    // As many as there is room for under the church's own songs, and always a few.
+    let catalog_rows = catalog_rows.unwrap_or(&[]);
+    let room = SONGS_LISTED.saturating_sub(songs.len()).max(CATALOG_LEAST);
+    let catalog_rows = &catalog_rows[..catalog_rows.len().min(room)];
     // A passage stands before the songs; verses found by their words after them.
     let (passage, verses) = match bible_rows.first() {
         Some(first) if first.passage => (bible_rows, &[][..]),
         _ => (&[][..], bible_rows),
     };
-    let total = passage.len() + songs.len() + verses.len();
+    let total = passage.len() + songs.len() + catalog_rows.len() + verses.len();
     *picked = (*picked).min(total.saturating_sub(1));
     let (up, down, enter, command, escape) = ui.input(|input| {
         (
@@ -5288,9 +5331,10 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     }
     let picked = *picked;
     // What a place in the list holds: a song by its place and the slide found (and whether it
-    // was found by its title), or a Bible passage or verse.
+    // was found by its title), a song of the song catalog, or a Bible passage or verse.
     enum Pick<'a> {
         Song(usize, usize, bool),
+        Catalog(&'a crate::catalog_songs::Row),
         Bible(&'a crate::find::BibleRow),
     }
     let at = |place: usize| -> Option<Pick<'_>> {
@@ -5301,7 +5345,11 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         if let Some((index, slide, line)) = songs.get(place) {
             return Some(Pick::Song(*index, *slide, line.is_none()));
         }
-        verses.get(place - songs.len()).map(Pick::Bible)
+        let place = place - songs.len();
+        if let Some(row) = catalog_rows.get(place) {
+            return Some(Pick::Catalog(row));
+        }
+        verses.get(place - catalog_rows.len()).map(Pick::Bible)
     };
     let mut clicked = None;
     // A result can be dragged onto the left column (a playlist, or a library for a song): the
@@ -5332,11 +5380,11 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             frame.show(ui, |ui| {
                 ui.set_width(wide - 12.0);
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                // One result: the mark of its kind (a song or the Bible), its name, what it is
-                // at the right in its kind's tint, and a line of its words under.
+                // One result: the mark of its kind (a song, a catalog song or the Bible), its
+                // name, what it is at the right in its kind's tint, and a line of its words under.
                 let mut row = |ui: &mut egui::Ui,
                                place: usize,
-                               bible: bool,
+                               kind: FoundKind,
                                title: &str,
                                tag: &str,
                                line: Option<&str>,
@@ -5350,14 +5398,15 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                         ui.painter().rect_filled(rect, 9.0, CARD);
                     }
                     let first = if line.is_some() { rect.min.y + 16.0 } else { rect.center().y };
-                    let (icon, tint) = crate::studio::found_look(bible);
+                    let (icon, tint) = crate::studio::found_look(kind);
                     let mark = Rect::from_center_size(pos2(rect.min.x + 19.0, rect.center().y), vec2(16.0, 16.0));
                     crate::icons::paint(ui.painter(), icon, mark, tint);
                     let left = mark.max.x + 12.0;
                     let tag_at = pos2(rect.max.x - 10.0, first);
                     let font = crate::studio::fixed(11.0);
-                    // The Bible's tag is dim, so its title reads first; a song's is in its tint.
-                    let tag_ink = if bible { DIM } else { tint };
+                    // The Bible's tag and a catalog song's are dim, so their titles read first; a
+                    // song's is in its tint.
+                    let tag_ink = if kind == FoundKind::Song { tint } else { DIM };
                     let tagged = crate::studio::paint_spaced(ui, tag_at, Align2::RIGHT_CENTER, tag, font, tag_ink, 0.6);
                     let words = Rect::from_min_max(pos2(left, rect.min.y), pos2(tagged.min.x - 10.0, rect.max.y));
                     ui.painter().with_clip_rect(words).text(
@@ -5390,7 +5439,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 let faint = |found: Found| carried.as_ref() == Some(&found);
                 for (place, found) in passage.iter().enumerate() {
                     let faint = faint(Found::Bible(found.lookup.clone()));
-                    row(ui, place, true, &found.title, &found.tag, Some(&found.line), faint);
+                    row(ui, place, FoundKind::Bible, &found.title, &found.tag, Some(&found.line), faint);
                 }
                 // A song found by its title, or each slide found by its words: its group at the
                 // right ("SONG · CHORUS"), the line found under.
@@ -5403,16 +5452,37 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                         _ => t("find.tag.song", "SONG").to_owned(),
                     };
                     let faint = faint(Found::Song(*index, *slide));
-                    row(ui, passage.len() + place, false, &song.title, &tag, line.as_deref(), faint);
+                    row(ui, passage.len() + place, FoundKind::Song, &song.title, &tag, line.as_deref(), faint);
+                }
+                // The catalog's songs, a group of their own under a quiet heading that says where
+                // they are from: each with its songbook's language at the right ("SONG ·
+                // ESPAÑOL") and its first line under.
+                if !catalog_rows.is_empty() {
+                    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), CATALOG_HEADING), Sense::hover());
+                    let heading = t("find.catalog.from", "From Worship Leader App").to_uppercase();
+                    let at = pos2(rect.min.x + 10.0, rect.center().y + 2.0);
+                    let font = crate::studio::fixed(10.5);
+                    crate::studio::paint_spaced(ui, at, Align2::LEFT_CENTER, &heading, font, TEXT_FAINT, 0.6);
+                }
+                for (place, found) in catalog_rows.iter().enumerate() {
+                    let language = found.songbook().to_uppercase();
+                    let tag = tf("find.tag.catalog", "SONG \u{b7} {language}", &[("language", &language)]);
+                    let line = found.line();
+                    let line = Some(line.as_str()).filter(|line| !line.is_empty());
+                    let (place, faint) =
+                        (passage.len() + songs.len() + place, faint(Found::Catalog(found.hit.key.clone())));
+                    row(ui, place, FoundKind::Catalog, &found.hit.title, &tag, line, faint);
                 }
                 for (place, found) in verses.iter().enumerate() {
-                    let (place, faint) =
-                        (passage.len() + songs.len() + place, faint(Found::Bible(found.lookup.clone())));
-                    row(ui, place, true, &found.title, &found.tag, Some(&found.line), faint);
+                    let place = passage.len() + songs.len() + catalog_rows.len() + place;
+                    let faint = faint(Found::Bible(found.lookup.clone()));
+                    row(ui, place, FoundKind::Bible, &found.title, &found.tag, Some(&found.line), faint);
                 }
                 if total == 0 {
                     let words = if answered {
                         t("find.nothing", "Nothing found")
+                    } else if bibles_answered {
+                        t("find.looking.songbooks", "Looking in the songbooks…")
                     } else {
                         t("find.looking", "Looking in the Bibles…")
                     };
@@ -5443,18 +5513,27 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         list = Some(shown.response.rect);
     }
     // A result dragged away is carried as what a playlist would keep for it: a song (a slide
-    // found by its words carries its song, as playlists hold songs), or a passage or verse with
-    // the Bible view's translations and choices, as Command-Return adds it.
+    // found by its words carries its song, as playlists hold songs; a catalog song, the key it
+    // will be filed under), or a passage or verse with the Bible view's translations and
+    // choices, as Command-Return adds it.
     if let Some(place) = dragged {
         let carry = match at(place) {
             Some(Pick::Song(index, slide, _)) => {
                 state.song_keys.get(index).zip(show.presentations().get(index)).map(|(key, song)| FoundDrag {
                     item: crate::service::Item::song(key.clone(), song.title.clone()),
                     song: Some(index),
+                    catalog: None,
                     name: song.title.clone(),
                     from: Found::Song(index, slide),
                 })
             }
+            Some(Pick::Catalog(row)) => Some(FoundDrag {
+                item: crate::service::Item::song(crate::catalog_songs::key_of(&row.song), row.song.title.clone()),
+                song: None,
+                catalog: Some(row.song.clone()),
+                name: row.song.title.clone(),
+                from: Found::Catalog(row.hit.key.clone()),
+            }),
             Some(Pick::Bible(row)) => Some(FoundDrag {
                 item: crate::service::Item::Passage(crate::service::SavedPassage {
                     lookup: row.kept.clone(),
@@ -5462,6 +5541,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                     ..state.bible.settings()
                 }),
                 song: None,
+                catalog: None,
                 name: row.title.clone(),
                 from: Found::Bible(row.lookup.clone()),
             }),
@@ -5480,6 +5560,8 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     enum Do {
         /// A song, and the slide found in it.
         Song(usize, usize, bool),
+        /// A song of the song catalog, as made.
+        Catalog(std::sync::Arc<sp_model::Presentation>),
         /// What to look up (as the first Bible names it), the language it was typed or found in,
         /// and what a playlist keeps for it (named and numbered in that language) with its
         /// numbering.
@@ -5490,6 +5572,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         Some((
             match at(place)? {
                 Pick::Song(index, slide, by_title) => Do::Song(index, slide, by_title),
+                Pick::Catalog(row) => Do::Catalog(row.song.clone()),
                 Pick::Bible(row) => {
                     Do::Passage(row.lookup.clone(), row.language.clone(), (row.kept.clone(), row.numbering))
                 }
@@ -5511,6 +5594,21 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 let item = crate::service::Item::song(key.clone(), song.title.clone());
                 crate::studio::add_items(state, state.services.front_at(), vec![item]);
             }
+        }
+        // Into the playlist in front, under the key it is filed under: it joins the library.
+        Some((Do::Catalog(song), true)) => {
+            let item = crate::service::Item::song(crate::catalog_songs::key_of(&song), song.title.clone());
+            if crate::studio::add_items(state, state.services.front_at(), vec![item]) > 0 {
+                state.catalog.join(&song, crate::catalog_songs::Then::Nothing);
+            }
+        }
+        // Shown in the slides area from a place of its own, its first slide picked, as a song of
+        // the library is (the app puts it there after this frame); it is not in the library.
+        Some((Do::Catalog(song), false)) => {
+            state.editing = None;
+            state.bible_open = false;
+            state.reflow = None;
+            state.catalog.look_at(show.live().map(|at| at.presentation), song);
         }
         // The song, with the view brought to the slide found, lit for a moment; nothing goes on
         // the screens. The slide found by its words is picked, or for a song found by its title
@@ -11792,6 +11890,28 @@ mod tests {
                 show.apply(Command::GoTo(SlideRef { presentation: slot, slide }));
             }
         }
+        // A song of the song catalog to look at goes into its place; songs put to use are filed
+        // (as `catalog_cli` does, under the key the window gave them).
+        use crate::catalog_songs::{copies, joined, key_of, put_in_place};
+        if let Some((place, song)) = state.catalog.look.take()
+            && let Some((slot, _)) = put_in_place(show, state, place, song)
+        {
+            show.apply(Command::Select(slot));
+        }
+        for join in std::mem::take(&mut state.catalog.joins) {
+            let key = join.song.catalog.as_ref().map(|mark| mark.key.clone());
+            let have = copies(show.presentations(), |at| state.app_made(at) || state.removed_songs.contains(&at))
+                .into_iter()
+                .find(|(_, song)| song.catalog.as_ref().map(|mark| &mark.key) == key.as_ref())
+                .map(|(at, _)| at);
+            let index = have.unwrap_or_else(|| {
+                state.song_keys.push(key_of(&join.song));
+                show.add_presentation(join.song.clone())
+            });
+            if let Some(chosen) = joined(show, state, &join.song, index, have.is_some(), join.then) {
+                show.apply(Command::Select(chosen));
+            }
+        }
     }
 
     /// One frame of the window with these events, then what the app does after it. Returns
@@ -13977,6 +14097,213 @@ mod tests {
         nothing_went_live(&show, &commands);
     }
 
+    /// `find_drag_setting` with the song catalog offered: Spanish and English songbooks written
+    /// for the tests on the computer (`catalog_songs::tests::engine`), and the catalog's two
+    /// places for a song looked at, after the Bible view's.
+    fn catalog_setting(name: &str) -> (Show, HomeState) {
+        use crate::catalog_songs::{CatalogSongs, SLOT_KEYS, tests};
+        let (show, mut state) = find_drag_setting();
+        let mut all = show.presentations().to_vec();
+        for _ in 0..2 {
+            all.push(Arc::new(sp_model::Presentation {
+                id: sp_model::Uuid::new_v4(),
+                title: crate::catalog::SOURCE_NAME.to_owned(),
+                groups: Vec::new(),
+                ..(*all[0]).clone()
+            }));
+        }
+        let mut show = Show::new(all);
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        state.catalog = CatalogSongs::new(Some(tests::engine(name)), [5, 6]);
+        state.songbooks.known.installed = tests::installed();
+        state.song_keys.extend(SLOT_KEYS.map(str::to_owned));
+        (show, state)
+    }
+
+    /// Where these words were drawn right of the left column (the find box's list, the slides).
+    fn drawn_right(drawn: &Drawn, words: &str) -> Rect {
+        drawn
+            .texts
+            .iter()
+            .find(|(text, rect)| text == words && rect.min.x > crate::studio::LEFT_WIDTH + 20.0)
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{words} is drawn right of the left column"))
+    }
+
+    /// The song of the catalog the window filed last, if one joined: its place and key.
+    fn filed_catalog_song(show: &Show, state: &HomeState) -> Option<(usize, String)> {
+        let at = show.presentations().len().checked_sub(1).filter(|at| *at > 6)?;
+        show.presentations()[at].catalog.as_ref()?;
+        Some((at, state.song_keys[at].clone()))
+    }
+
+    #[test]
+    fn a_catalog_song_found_comes_after_the_churchs_own_and_opens_without_joining_the_library() {
+        let (mut show, mut state) = catalog_setting("look");
+        let before = (state.services.list.clone(), state.libraries.clone());
+        let (ctx, mut commands, mut time) = (egui::Context::default(), Vec::new(), 0.0);
+        // "lantern": a line of Gamma's, and an English catalog song's title.
+        state.library_search = Some(("lantern".to_owned(), 0));
+        found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        time += 0.1;
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        let place = |words: &str| drawn_right(&drawn, words);
+        let (gamma, heading, title) = (place("Gamma"), place("FROM WORSHIP LEADER APP"), place("Lantern of the bay"));
+        assert!(gamma.max.y < heading.min.y && heading.max.y < title.min.y, "the church's own first, then the group");
+        let tag = place("SONG \u{b7} ENGLISH");
+        assert!(
+            (tag.center().y - title.center().y).abs() < 2.0 && tag.min.x > title.max.x,
+            "its songbook at the right"
+        );
+        // Its first line as its slide shows it.
+        place("A lantern line made up for a test");
+        // The second result (the heading is none), before the Bibles' verses.
+        assert!(state.find_rows[1].contains(title.center()), "{:?}", state.find_rows);
+        // Down to it and Return: shown from the catalog's first place, its first slide picked,
+        // and nothing else: not in the library, not on screen.
+        for events in [pressed(Key::ArrowDown, Modifiers::NONE), pressed(Key::Enter, Modifiers::NONE), vec![]] {
+            time += 0.1;
+            found_step(&ctx, &mut show, &mut state, events, time, &mut commands);
+        }
+        let shown = &show.presentations()[5];
+        assert_eq!((show.selected(), shown.title.as_str()), (5, "Lantern of the bay"));
+        assert!(shown.catalog.is_some() && state.catalog.held[0].is_some());
+        assert_eq!(state.pick(&show), Some(SlideRef { presentation: 5, slide: 0 }));
+        assert_eq!(show.presentations().len(), 7, "nothing new among the songs");
+        assert!(state.catalog.joins.is_empty() && state.library_search.is_none());
+        assert_eq!((state.services.list.clone(), state.libraries.clone()), before);
+        nothing_went_live(&show, &commands);
+        // Its bar says where it is from. A click on its slide puts it on screen, and still adds
+        // nothing to the library.
+        time += 0.1;
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        let bar = drawn_right(&drawn, "Lantern of the bay");
+        assert!(drawn_right(&drawn, crate::catalog::SOURCE_NAME).min.x > bar.max.x);
+        let slide = state.slide_rects.iter().find(|(at, _)| at.presentation == 5).expect("its slides are shown").1;
+        click_holding(&ctx, (&mut show, &mut state), slide.center(), Modifiers::NONE, &mut time, &mut commands);
+        assert_eq!(show.live(), Some(SlideRef { presentation: 5, slide: 0 }), "on screen from its place");
+        assert_eq!(show.presentations().len(), 7);
+        assert!(state.catalog.joins.is_empty() && filed_catalog_song(&show, &state).is_none());
+        assert_eq!((state.services.list.clone(), state.libraries.clone()), before);
+        // Another looked at goes into the other place, leaving the one on screen as it is.
+        state.library_search = Some(("zelora".to_owned(), 0));
+        for events in [vec![], pressed(Key::Enter, Modifiers::NONE), vec![]] {
+            time += 0.1;
+            found_step(&ctx, &mut show, &mut state, events, time, &mut commands);
+        }
+        assert_eq!(show.selected(), 6);
+        assert_eq!(show.presentations()[5].title, "Lantern of the bay", "the place on screen is left alone");
+        assert_eq!(show.live(), Some(SlideRef { presentation: 5, slide: 0 }));
+    }
+
+    #[test]
+    fn a_catalog_song_joins_the_library_when_command_return_adds_it_to_the_playlist() {
+        use crate::service::Item;
+        let (mut show, mut state) = catalog_setting("command-return");
+        let (ctx, mut commands) = (egui::Context::default(), Vec::new());
+        state.library_search = Some(("lantern".to_owned(), 0));
+        found_step(&ctx, &mut show, &mut state, vec![], 0.0, &mut commands);
+        found_step(&ctx, &mut show, &mut state, pressed(Key::ArrowDown, Modifiers::NONE), 0.1, &mut commands);
+        step_holding(
+            &ctx,
+            &mut show,
+            &mut state,
+            pressed(Key::Enter, Modifiers::COMMAND),
+            Modifiers::COMMAND,
+            0.2,
+            &mut commands,
+        );
+        let (at, key) = filed_catalog_song(&show, &state).expect("it joined the library");
+        assert_eq!(show.presentations()[at].title, "Lantern of the bay");
+        assert_eq!(key, show.presentations()[at].id.to_string(), "filed under its id");
+        // After the open item, as Command-Return puts a song of the library.
+        let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
+        assert_eq!(titles, ["Alpha", "Lantern of the bay", "Beta"]);
+        let items = &state.services.front().items;
+        assert!(matches!(&items[1], Item::Song { key: named, .. } if *named == key), "{items:?}");
+        assert_eq!(crate::studio::playlist_song(&show, &state, &key), Some(at), "the item names the song filed");
+        assert!(state.notices.newest().is_some_and(|said| said.contains("is in your library now")));
+        // The item put in is the open one, as for a song of the library, and names the song
+        // filed; nothing went on the screens.
+        assert_eq!((state.services.chosen, show.selected()), (Some(1), at));
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn a_catalog_song_joins_the_library_when_dropped_in_a_playlist_and_is_opened_there() {
+        use crate::service::Item;
+        let (mut show, mut state) = catalog_setting("drop");
+        // After Beta, at the end.
+        let (commands, ..) = drag_found(&mut show, &mut state, "lantern", 1, |drawn| {
+            let beta = drawn.left("Beta");
+            pos2(beta.center().x, beta.center().y + 8.0)
+        });
+        let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
+        assert_eq!(titles, ["Alpha", "Beta", "Lantern of the bay"]);
+        let (at, key) = filed_catalog_song(&show, &state).expect("it joined the library");
+        assert!(matches!(state.services.front().items.last(), Some(Item::Song { key: named, .. }) if *named == key));
+        // Opened where it went, as a click on its row opens it (once it is filed).
+        assert_eq!((state.services.chosen, show.selected()), (Some(2), at));
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn a_catalog_song_dropped_in_the_library_listed_joins_it_and_one_let_go_elsewhere_doesnt() {
+        let (mut show, mut state) = catalog_setting("library");
+        let before = state.services.list.clone();
+        // Let go over the slides, where it can't go: nothing joins, the search goes on.
+        let (commands, ..) = drag_found(&mut show, &mut state, "lantern", 1, |_| pos2(800.0, 450.0));
+        assert!(filed_catalog_song(&show, &state).is_none() && state.catalog.joins.is_empty());
+        assert!(state.libraries[0].songs.is_empty() && state.library_search.is_some());
+        nothing_went_live(&show, &commands);
+        // Into Hymns, listed: it joins the library, and Hymns has it.
+        state.playlist_open = false;
+        state.library_shown = Some(state.libraries[0].id);
+        let (commands, ..) = drag_found(&mut show, &mut state, "lantern", 1, |_| pos2(120.0, 600.0));
+        let (_, key) = filed_catalog_song(&show, &state).expect("it joined the library");
+        assert_eq!(state.libraries[0].songs, [key]);
+        assert_eq!(state.services.list, before, "no playlist changed");
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn a_catalog_song_looked_at_joins_the_library_to_have_its_words_edited() {
+        let (mut show, mut state) = catalog_setting("edit");
+        let (ctx, mut commands, mut time) = (egui::Context::default(), Vec::new(), 0.0);
+        state.library_search = Some(("lantern".to_owned(), 0));
+        for events in [vec![], pressed(Key::ArrowDown, Modifiers::NONE), pressed(Key::Enter, Modifiers::NONE), vec![]] {
+            found_step(&ctx, &mut show, &mut state, events, time, &mut commands);
+            time += 0.1;
+        }
+        assert_eq!(show.selected(), 5);
+        assert!(filed_catalog_song(&show, &state).is_none(), "looking at it adds nothing");
+        // Its bar's menu, from a right-click: Edit Words.
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        let bar = drawn_right(&drawn, "Lantern of the bay").center();
+        let right = |pressed| Event::PointerButton {
+            pos: bar,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut menu = None;
+        for events in [vec![Event::PointerMoved(bar)], vec![right(true)], vec![right(false)], vec![], vec![]] {
+            time += 0.1;
+            menu = Some(found_step(&ctx, &mut show, &mut state, events, time, &mut commands));
+        }
+        let menu = menu.expect("drawn");
+        let front = state.services.front().name.clone();
+        drawn_right(&menu, &format!("Add to {front}"));
+        let words = drawn_right(&menu, "Edit Words").center();
+        click_holding(&ctx, (&mut show, &mut state), words, Modifiers::NONE, &mut time, &mut commands);
+        let (at, _) = filed_catalog_song(&show, &state).expect("it joined the library");
+        assert_eq!(show.selected(), at, "the song filed is chosen in place of the one looked at");
+        assert!(
+            state.reflow.as_ref().is_some_and(|(song, words)| *song == at && words.contains("lantern line made up"))
+        );
+        nothing_went_live(&show, &commands);
+    }
+
     /// Five songs, Alpha to Epsilon, all in the playlist in front, which is listed; and the
     /// Bible view's two places; nothing on screen yet but Alpha's first slide.
     fn picking_setting() -> (Show, HomeState) {
@@ -14278,8 +14605,11 @@ mod tests {
     #[test]
     fn songs_and_the_bible_in_the_find_box_each_have_their_mark_and_tint() {
         use crate::studio::{SONG_TINT, TEXT, TEXT_DIM};
-        assert_eq!(crate::studio::found_look(false), (crate::icons::Icon::Note, SONG_TINT));
-        assert_eq!(crate::studio::found_look(true), (crate::icons::Icon::Book, TEXT));
+        assert_eq!(crate::studio::found_look(crate::studio::FoundKind::Song), (crate::icons::Icon::Note, SONG_TINT));
+        assert_eq!(crate::studio::found_look(crate::studio::FoundKind::Bible), (crate::icons::Icon::Book, TEXT));
+        // A song of the song catalog, in no library yet: the song's mark, in a quieter ink.
+        let catalog = crate::studio::found_look(crate::studio::FoundKind::Catalog);
+        assert_eq!(catalog, (crate::icons::Icon::Note, TEXT_DIM));
         // Drawn: each tag in its kind's tint, and the marks (drawn in lines) in the same tints.
         let ctx = egui::Context::default();
         let show = Show::new(vec![

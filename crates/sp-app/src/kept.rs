@@ -18,7 +18,7 @@ use sp_engine::Show;
 pub struct SongsSeen {
     version: u64,
     keys: Vec<String>,
-    hidden: [usize; 3],
+    hidden: [usize; 5],
     removed: Vec<usize>,
     epoch: u64,
 }
@@ -26,7 +26,7 @@ pub struct SongsSeen {
 impl SongsSeen {
     /// Looks at the songs again; called at the start of each frame. Cheap when nothing has
     /// changed: the keys and the songs taken out are compared, nothing is copied.
-    pub fn check(&mut self, show: &Show, keys: &[String], hidden: [usize; 3], removed: &[usize]) {
+    pub fn check(&mut self, show: &Show, keys: &[String], hidden: [usize; 5], removed: &[usize]) {
         let same = self.epoch > 0
             && self.version == show.version()
             && self.hidden == hidden
@@ -185,26 +185,26 @@ mod tests {
         let mut show = Show::new(vec![Arc::new(sp_model::parse_song_text("One", "A\n"))]);
         let mut seen = SongsSeen::default();
         let keys = vec!["one".to_owned()];
-        seen.check(&show, &keys, [usize::MAX; 3], &[]);
+        seen.check(&show, &keys, [usize::MAX; 5], &[]);
         let first = seen.epoch();
-        seen.check(&show, &keys, [usize::MAX; 3], &[]);
+        seen.check(&show, &keys, [usize::MAX; 5], &[]);
         assert_eq!(seen.epoch(), first);
         show.add_presentation(Arc::new(sp_model::parse_song_text("Two", "B\n")));
-        seen.check(&show, &keys, [usize::MAX; 3], &[]);
+        seen.check(&show, &keys, [usize::MAX; 5], &[]);
         let added = seen.epoch();
         assert_ne!(added, first);
         let keys = vec!["one".to_owned(), "two".to_owned()];
-        seen.check(&show, &keys, [usize::MAX; 3], &[]);
+        seen.check(&show, &keys, [usize::MAX; 5], &[]);
         assert_ne!(seen.epoch(), added);
         let renamed = vec!["one".to_owned(), "three".to_owned()];
         let before = seen.epoch();
-        seen.check(&show, &renamed, [usize::MAX; 3], &[]);
+        seen.check(&show, &renamed, [usize::MAX; 5], &[]);
         assert_ne!(seen.epoch(), before, "a key changed in place is seen");
         let before = seen.epoch();
-        seen.check(&show, &renamed, [usize::MAX; 3], &[1]);
+        seen.check(&show, &renamed, [usize::MAX; 5], &[1]);
         assert_ne!(seen.epoch(), before, "a song taken out is seen");
         let before = seen.epoch();
-        seen.check(&show, &renamed, [0, usize::MAX, usize::MAX], &[1]);
+        seen.check(&show, &renamed, [0, usize::MAX, usize::MAX, usize::MAX, usize::MAX], &[1]);
         assert_ne!(seen.epoch(), before, "a slot hidden is seen");
     }
 

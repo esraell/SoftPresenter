@@ -1808,9 +1808,23 @@ const LIBRARY_TINT: Color32 = Color32::from_rgb(0xc3, 0xa6, 0xff);
 pub const SONG_TINT: Color32 = LIBRARY_TINT;
 
 /// The mark and tint of a result in the find box: an open book in ink for the Bible, a note in
-/// the songs' tint for a song (or a slide of one).
-pub fn found_look(bible: bool) -> (Icon, Color32) {
-    if bible { (Icon::Book, TEXT) } else { (Icon::Note, SONG_TINT) }
+/// the songs' tint for a song (or a slide of one), and a note in a quieter ink for a song of the
+/// song catalog, which lives in no library until it joins one.
+pub fn found_look(kind: FoundKind) -> (Icon, Color32) {
+    match kind {
+        FoundKind::Song => (Icon::Note, SONG_TINT),
+        FoundKind::Catalog => (Icon::Note, TEXT_DIM),
+        FoundKind::Bible => (Icon::Book, TEXT),
+    }
+}
+
+/// What a result of the find box is: a song of the library, a song of the song catalog (not
+/// the church's until it joins the library), or a Bible passage or verse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FoundKind {
+    Song,
+    Catalog,
+    Bible,
 }
 /// A row under the pointer: a little lighter than the panel, darker than a chosen row.
 pub const ROW_HOVER: Color32 = Color32::from_rgb(0x1f, 0x1f, 0x1f);
@@ -2321,7 +2335,7 @@ impl Carried {
         match self {
             Carried::Songs(_) => Kind::Song,
             Carried::Media(_) => Kind::Media,
-            Carried::Found(found) if found.song.is_some() => Kind::Song,
+            Carried::Found(found) if found.song.is_some() || found.catalog.is_some() => Kind::Song,
             Carried::Found(_) => Kind::Passage,
         }
     }
@@ -2353,14 +2367,17 @@ impl Carried {
         }
     }
 
-    /// The songs a library takes from it, by the names they are kept by.
+    /// The songs a library takes from it, by the names they are kept by: a song found with the
+    /// find box by the name its item keeps (a catalog song's, the one it is filed under).
     fn song_keys(&self, state: &HomeState) -> Vec<String> {
-        let places = match self {
-            Carried::Songs(songs) => songs.clone(),
-            Carried::Found(found) => found.song.into_iter().collect(),
+        match self {
+            Carried::Songs(songs) => songs.iter().filter_map(|at| state.song_keys.get(*at).cloned()).collect(),
+            Carried::Found(found) => match &found.item {
+                crate::service::Item::Song { key, .. } => vec![key.clone()],
+                _ => Vec::new(),
+            },
             Carried::Media(_) => Vec::new(),
-        };
-        places.iter().filter_map(|at| state.song_keys.get(*at).cloned()).collect()
+        }
     }
 
     /// A result of the find box: dropped where it lands, it ends the search.
@@ -2417,10 +2434,11 @@ fn add_to_library(state: &mut HomeState, id: sp_model::Uuid, keys: &[String]) ->
     added
 }
 
-/// A result of the find box has been dropped on a playlist (`index` among the playlists) and
-/// `item` added at its end (`added`), or found there already. The search ends. In the playlist
-/// listed in the left column the item is opened, as a click on its row opens it (nothing goes
-/// on the screens); in another playlist, an entry in the notices says where it went.
+/// A result of the find box (`found`) has been dropped on a playlist (`index` among the
+/// playlists) and `item` added at its end (`added`), or found there already. The search ends.
+/// In the playlist listed in the left column the item is opened, as a click on its row opens it
+/// (nothing goes on the screens); in another playlist, an entry in the notices says where it
+/// went. A song of the song catalog that went in joins the library.
 #[allow(clippy::too_many_arguments)]
 fn found_added_to_playlist(
     ctx: &egui::Context,
@@ -2430,9 +2448,13 @@ fn found_added_to_playlist(
     index: usize,
     item: &crate::service::Item,
     added: bool,
-    name: &str,
+    found: &crate::home::FoundDrag,
 ) {
     crate::home::end_search(ctx, state);
+    if added {
+        crate::home::found_placed(state, found);
+    }
+    let name = found.name.as_str();
     let Some(playlist) = state.services.list.get(index) else { return };
     let playlist_name = playlist.name.clone();
     let place = if added {
@@ -2463,10 +2485,21 @@ fn found_added_to_playlist(
     }
 }
 
-/// A song found with the find box has been dropped on a library (`added` to it, or there
-/// already): the search ends, and the notices say where it went (or a cue that it was there).
-fn found_added_to_library(ctx: &egui::Context, state: &mut HomeState, id: sp_model::Uuid, added: bool, name: &str) {
+/// A song found with the find box (`found`) has been dropped on a library (`added` to it, or
+/// there already): the search ends, and the notices say where it went (or a cue that it was
+/// there). A song of the song catalog that went in joins the library.
+fn found_added_to_library(
+    ctx: &egui::Context,
+    state: &mut HomeState,
+    id: sp_model::Uuid,
+    added: bool,
+    found: &crate::home::FoundDrag,
+) {
     crate::home::end_search(ctx, state);
+    if added {
+        crate::home::found_placed(state, found);
+    }
+    let name = found.name.as_str();
     let library = state.libraries.iter().find(|library| library.id == id).map_or_else(String::new, |l| l.name.clone());
     if added {
         state.notices.info(tf("left.added", "Added {item} to {list}.", &[("item", name), ("list", &library)]));
@@ -3070,7 +3103,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
             let items = carried.items(show, state);
             let added: Vec<bool> = items.iter().map(|item| state.services.add_to(index, item.clone())).collect();
             if let (Some(found), Some(item)) = (carried.found(), items.first()) {
-                found_added_to_playlist(ui.ctx(), show, state, commands, index, item, added == [true], &found.name);
+                found_added_to_playlist(ui.ctx(), show, state, commands, index, item, added == [true], found);
             }
         }
         let several = playlists.len() > 1;
@@ -3210,7 +3243,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
         if let Some(carried) = dropped_on(&response, &target) {
             let added = add_to_library(state, id, &carried.song_keys(state));
             if let Some(found) = carried.found() {
-                found_added_to_library(ui.ctx(), state, id, added > 0, &found.name);
+                found_added_to_library(ui.ctx(), state, id, added > 0, found);
             }
         }
         let mut menu = |ui: &mut egui::Ui| {
@@ -3618,7 +3651,7 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
                 state.bible_open = false;
                 state.services.chosen = None;
             }
-            found_added_to_library(ui.ctx(), state, id, added > 0, &found.name);
+            found_added_to_library(ui.ctx(), state, id, added > 0, found);
         }
     }
     // Songs being dragged say what they are beside the pointer from the first move, and until
@@ -3651,8 +3684,11 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
 /// The song a playlist names, among the open songs: found by the name its file gave it, or by
 /// its title for one saved before it had a file. `None` when it isn't open (or is hidden).
 pub fn playlist_song(show: &Show, state: &HomeState, key: &str) -> Option<usize> {
+    // Never a Bible passage or a catalog song being looked at (the VoxLive item has a key of its
+    // own, which playlists name).
     let hidden = state.bible.slots.unwrap_or([usize::MAX; 2]);
-    let listed = |index: usize| !hidden.contains(&index) && !state.removed_songs.contains(&index);
+    let listed =
+        |index: usize| !hidden.contains(&index) && !state.catalog.holds(index) && !state.removed_songs.contains(&index);
     let by_title = key.strip_prefix("title:");
     // An id finds its song even where the song is known by another key (the built-in sample,
     // which has no file, is known by its title).
@@ -4937,22 +4973,25 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         if ui.input(|input| input.pointer.any_released()) {
             egui::DragAndDrop::clear_payload(ui.ctx());
             let count = state.services.front().items.len();
-            match onto {
-                Some((_, place)) => {
-                    fill_placeholder(state, *place, item.clone());
-                }
+            let placed = match onto {
+                Some((_, place)) => fill_placeholder(state, *place, item.clone()),
                 None => {
                     // `slot` counts rows shown, which are every item while nothing filters.
                     let place = row_items.get(slot).copied().unwrap_or(items.len());
                     state.services.insert(place, item.clone());
+                    state.services.front().items.len() > count
                 }
-            }
+            };
             // A result of the find box ends the search, and what it put in the playlist (or
             // the song already there, which isn't added twice) is opened, as a click on its
-            // row opens it: nothing goes on the screens.
+            // row opens it: nothing goes on the screens. A song of the song catalog that went
+            // in joins the library.
             if let Some(found) = carried.found() {
                 crate::home::end_search(ui.ctx(), state);
-                let refused = onto.is_none() && state.services.front().items.len() == count;
+                if placed {
+                    crate::home::found_placed(state, found);
+                }
+                let refused = onto.is_none() && !placed;
                 if refused {
                     state.notices.refuse(tf(
                         "left.already_in",

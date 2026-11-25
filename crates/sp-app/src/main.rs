@@ -17,6 +17,7 @@ mod bundle;
 mod canva;
 mod catalog;
 mod catalog_cli;
+mod catalog_songs;
 mod clock;
 mod close_button;
 mod control;
@@ -1676,6 +1677,9 @@ struct App {
     bible_slots: [usize; 2],
     /// Where the VoxLive item is among the presentations (see `voxlive::item`).
     voxlive_slot: usize,
+    /// The two presentations kept for a song of the song catalog being looked at (see
+    /// `catalog_songs`).
+    catalog_slots: [usize; 2],
     /// The VoxLive screens the item in its place was last made from, and that item.
     voxlive_item_from: Option<(Vec<voxlive::Screen>, Arc<sp_model::Presentation>)>,
     /// The slide on screen, the item it was put on screen from and the open item when the
@@ -2065,12 +2069,19 @@ impl App {
                     .map(|(at, (source, song))| {
                         if at == self.voxlive_slot {
                             voxlive::ITEM_KEY.to_owned()
+                        } else if let Some(place) = self.catalog_slots.iter().position(|slot| *slot == at) {
+                            catalog_songs::SLOT_KEYS[place].to_owned()
                         } else {
                             song_ids::key_for(source.as_deref(), song.id, &song.title)
                         }
                     })
                     .collect(),
                 voxlive_slot: Some(self.voxlive_slot),
+                // The window looks in the song catalog where it is offered.
+                catalog: catalog_songs::CatalogSongs::new(
+                    self.catalog.catalog.clone().filter(|_| catalog::offered()),
+                    self.catalog_slots,
+                ),
                 theme_for_bible: self.bible_theme,
                 bible: home::BiblePage {
                     slots: Some(self.bible_slots),
@@ -7323,27 +7334,28 @@ impl App {
     /// and returns its place and the key the song list knows it by.
     fn store_song(&mut self, song: sp_model::Presentation) -> (usize, String) {
         let (id, title) = (song.id, song.title.clone());
-        // New songs live in the app's Songs folder, each in a file named by its id, so two
-        // songs with one title never collide.
-        let path = bible_store::data_dir().map(|dir| dir.join("Songs").join(format!("{id}.{}", load::SONG_EXTENSION)));
+        // New songs live in the app's Songs folder, each in a file named by its id.
+        let path = song_ids::library_path(id);
         if let Some(folder) = path.as_ref().and_then(|path| path.parent()) {
             let _ = std::fs::create_dir_all(folder);
         }
         let index = self.show.add_presentation(Arc::new(song));
-        self.sources.push(path.clone());
+        self.sources.push(path);
         self.unsaved.push(index);
         self.unsaved_since = Some(Instant::now());
-        let key = song_ids::key_for(path.as_deref(), id, &title);
+        let key = song_ids::library_key(id, &title);
         if let Some(running) = self.running.as_mut() {
             running.home_state.song_keys.push(key.clone());
         }
         (index, key)
     }
 
-    /// True for a presentation the app makes itself (a Bible passage, the VoxLive item): shown,
-    /// never saved, edited, read again or put in a pack.
+    /// True for a presentation the app makes itself (a Bible passage, the VoxLive item, a song of
+    /// the song catalog being looked at): shown, never saved, edited, read again or put in a pack.
     pub(crate) fn app_made(&self, presentation: usize) -> bool {
-        self.bible_slots.contains(&presentation) || presentation == self.voxlive_slot
+        self.bible_slots.contains(&presentation)
+            || presentation == self.voxlive_slot
+            || self.catalog_slots.contains(&presentation)
     }
 
     /// The theme a presentation's slides are drawn with: the Bible theme for a Bible passage,
@@ -9371,18 +9383,17 @@ impl App {
                         }
                     }
                 }
-                let path = bible_store::data_dir()
-                    .map(|dir| dir.join("Songs").join(format!("{}.{}", copy.id, load::SONG_EXTENSION)));
+                let path = song_ids::library_path(copy.id);
                 if let Some(folder) = path.as_ref().and_then(|path| path.parent()) {
                     let _ = std::fs::create_dir_all(folder);
                 }
                 let (id, title) = (copy.id, copy.title.clone());
                 let at = self.show.add_presentation(Arc::new(copy));
-                self.sources.push(path.clone());
+                self.sources.push(path);
                 self.unsaved.push(at);
                 self.save_unsaved();
                 if let Some(running) = self.running.as_mut() {
-                    let key = song_ids::key_for(path.as_deref(), id, &title);
+                    let key = song_ids::library_key(id, &title);
                     running.home_state.song_keys.push(key.clone());
                     running.home_state.copy_beside(index, at, &key, item, &title);
                 }
@@ -9771,10 +9782,7 @@ impl App {
                     (None, None) if state.props_editor_open => usize::MAX,
                     _ => self.show.selected(),
                 };
-                if !self.bible_slots.contains(&song)
-                    && song != self.voxlive_slot
-                    && song < self.show.presentations().len()
-                {
+                if !state.app_made(song) && song < self.show.presentations().len() {
                     state.add_slide = Some(song);
                 }
             }
@@ -9826,8 +9834,10 @@ impl App {
             A::Find => state.library_search = Some((String::new(), 0)),
             A::ReflowView => {
                 let song = self.show.selected();
-                if !self.bible_slots.contains(&song)
-                    && song != self.voxlive_slot
+                // A song of the song catalog being looked at joins the library to be changed.
+                if let Some(held) = state.catalog.held_at(song).cloned() {
+                    state.catalog.join(&held, catalog_songs::Then::Words);
+                } else if !state.app_made(song)
                     && let Some(presentation) = self.show.presentations().get(song)
                 {
                     state.editing = None;
@@ -10652,6 +10662,7 @@ impl ApplicationHandler<AppEvent> for App {
                 self.handle_slides_choice();
                 self.handle_setup();
                 self.handle_songbooks();
+                self.handle_catalog_songs();
                 // The Bible page's set-up (translations, boxes, options) is remembered the
                 // moment it changes, so it is as it was left at the next start.
                 if let Some(running) = self.running.as_mut() {
@@ -11160,6 +11171,24 @@ fn main() -> ExitCode {
     let voxlive_slot = songs.len();
     songs.push(voxlive::item(&[]));
     sources.push(None);
+    // Two more hold a song of the song catalog while it is looked at, before it joins the library
+    // (if it ever does). They have no file.
+    let catalog_slots = [songs.len(), songs.len() + 1];
+    for _ in catalog_slots {
+        songs.push(sp_model::Presentation {
+            id: sp_model::Uuid::new_v4(),
+            title: catalog::SOURCE_NAME.to_owned(),
+            groups: Vec::new(),
+            copyright: sp_model::Copyright::default(),
+            theme: None,
+            arrangements: Vec::new(),
+            arrangement: None,
+            loops: false,
+            transition: None,
+            catalog: None,
+        });
+        sources.push(None);
+    }
 
     start_steps::mark("songs read");
     note_program_file();
@@ -11301,6 +11330,7 @@ fn main() -> ExitCode {
         sources,
         bible_slots,
         voxlive_slot,
+        catalog_slots,
         voxlive_item_from: None,
         version_seen: None,
         decks: deck::Decks::default(),

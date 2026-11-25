@@ -596,7 +596,10 @@ else is refused, with the list of what is read.
 Free songs from Worship Leader App, one songbook per language, kept apart from the library until
 a song is added to it. A language is downloaded once from the source; about once a month, and never
 while anything is on screen, the app asks the source whether it changed (with the ETag and
-Last-Modified of the last download, so a check that finds nothing new downloads nothing).
+Last-Modified of the last download, so a check that finds nothing new downloads nothing). In a
+development build the window's find box lists its songs too; one shown from there and put on
+screen is `"kind": "catalog"` in `status`, and joins the library only when it is added to a
+playlist, dragged into one or edited, as `catalog add` does here.
 
 | Command | Does |
 |---|---|
@@ -1375,7 +1378,7 @@ the command's facts where it has any:
 
 | Command | `data` |
 |---|---|
-| `status` | `token`, for [`--wait --since`](#waiting-for-a-change) (with `--wait`, also `changed`: the parts that changed since the token); `live` (null when nothing is on screen): `song`, `slide`, `slides`, `words`, `kind` (`song`, `passage` or `voxlive`), the song's `id` and its `number` in `sp songs` (null for a passage), and the `playlist` and `item` number it was opened from (null when it wasn't); `next_slide`, `media`, `message`, `props`, `announcements`, `media_playlist`, `timers` (each `name`, `kind`, `shows`, `running`), `audio` (`track`, `paused`, `seconds`, `length`, `volume`), `playlist` (`name`, `item_last_opened` and its number `item`, `listed`), `audience_on`, `stage_on`, `continuous`, `identify`, `main_theme`, `selected_song` |
+| `status` | `token`, for [`--wait --since`](#waiting-for-a-change) (with `--wait`, also `changed`: the parts that changed since the token); `live` (null when nothing is on screen): `song`, `slide`, `slides`, `words`, `kind` (`song`, `passage`, `voxlive`, or `catalog` for a song of the song catalog shown from the find box and not in the library), the song's `id` and its `number` in `sp songs` (null for a passage or a catalog song), and the `playlist` and `item` number it was opened from (null when it wasn't); `next_slide`, `media`, `message`, `props`, `announcements`, `media_playlist`, `timers` (each `name`, `kind`, `shows`, `running`), `audio` (`track`, `paused`, `seconds`, `length`, `volume`), `playlist` (`name`, `item_last_opened` and its number `item`, `listed`), `audience_on`, `stage_on`, `continuous`, `identify`, `main_theme`, `selected_song` |
 | `playlists`, `media`, `themes`, `timers`, `messages`, `props`, `macros`, `audio` | An array of names, in their numbered order |
 | `songs` | `[{"number": 2, "title": "River Song", "id": "829a…", "changed_outside": false}]`: the number is the place in the list, the id is the song's own and stays when the library moves or songs are added |
 | `playlist [NAME]` | An object for each item: `item`, `uid` (the item's own id: kept when items are moved, when the playlist is saved and when the app opens again; `--aim` takes it in place of the number), `kind`, `title`, `missing`, `text`, and `id`, `number`, `media_type` or `bibles` by its kind ([above](#playlists-and-libraries)) |

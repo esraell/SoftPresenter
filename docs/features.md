@@ -233,7 +233,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   read in the background; the notice says when its songs are in. Its pictures keep their own
   file names in the Media folder (numbered when the name is taken), so the media bin shows those
   names.
-- **The song catalog** (the engine and `sp catalog`; its find box and chooser are being built):
+- **The song catalog** (the engine, `sp catalog`, and in development builds the find box):
   free songs from Worship Leader App, a songbook for each language, downloaded from the source
   by each church and kept in `Catalog/worshipleaderapp/<language>/` of the data folder, apart
   from the library. **In development builds only**, until Worship Leader App has answered: the
@@ -252,9 +252,24 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   index made once from it: a search of 14,000 songs takes a third of a millisecond, and reading
   the index at a start under twenty. Search finds words in a title or in the first line of a
   section, in Cyrillic or Latin, whatever the case, with ё as е, stress marks and punctuation
-  ignored, and leaves out songs already in the library. A song **joins the library** (a library
+  ignored, and leaves out songs already in the library. **In development builds, with a
+  songbook on the computer, the find box looks in the songbooks too**, on a thread of its own
+  (results come as they are ready; "Looking in the songbooks…" until then): after the church's
+  own songs, under a quiet heading "From Worship Leader App", up to as many as the church's own
+  leave room for among six songs, and always two, the operator's and the church's languages
+  first. Each has its title, its first line as its slide shows it, its songbook's language
+  ("Song · Español") and a note mark in a quieter ink than the library's lilac. Return or a
+  click shows it in the slides area, from one of two places kept for it (never the one on
+  screen, so the screens keep what they show), its first slide picked, with "Worship Leader
+  App" by its title and its own tools (Add to the playlist in front, Edit Words, and a menu
+  with Edit); it goes on screen like any song, and **looking at it or putting it on screen adds
+  nothing to the library**. A song **joins the library** (a library
   named Worship Leader App, made the first time) as an ordinary song, marked with where it came
-  from; its other-language versions can go under its words, group by group by the group's name,
+  from, when it is added to a playlist (Command-Return in the find box, Add on its bar), dragged
+  from the find box into a playlist or a library, or edited (Edit Words, its key, or Edit on its
+  bar): the song filed then takes the place of the one looked at, and a notice says where it
+  went; the monthly check updates it like any other (`sp catalog add` joins one too). From the
+  command line its other-language versions can go under its words, group by group by the group's name,
   and the groups with no partner are listed (a group only the other language has is left out).
   The source gives songs no number or id, so a song's key is its language, its title folded for
   searching and eight letters of its first section's words. The songs are untrusted files: the zip
@@ -711,7 +726,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   find box (press `/`, or Command-F: it finds songs by title and then each slide whose words
   have what is typed, tagged with its group ("Song · Chorus"), a slide picked being brought into view and
   ringed in ink for a moment, a Bible passage when a reference is typed (named and quoted in the language it was
-  typed in), and verses that hold the words, from the Bibles in use written in the words'
+  typed in), songs of the song catalog's songbooks after the library's in a development build
+  (see the song catalog), and verses that hold the words, from the Bibles in use written in the words'
   alphabet, each saying which Bible it is from ("Bible · KJV"); each result has a small mark at its left, so songs and the Bible read apart at a glance: a note in the libraries' lilac for songs, with its tag in lilac too, and an open book in ink for the Bible, with its tag dim so its title reads first (slides the app makes, Bible passages and live captions, have an ink dot too; only the playlist's blue and the libraries' lilac mark a kind by colour); Return opens what is picked without putting anything on the screens,
   with its first slide or verse picked for Enter (see "A slide picked waits for Enter"), and
   Command-Return adds it to the playlist in front. Any result can also be **dragged** (a press

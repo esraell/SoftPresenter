@@ -3,42 +3,9 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use super::fixtures::{pack, xml};
 use super::read::{self, LIMITS, Refused};
 use super::*;
-
-/// A song file written for these tests.
-fn xml(title: &str, sections: &[(&str, &str)], versions: &[(&str, &[(&str, &str)])]) -> String {
-    let part = |sections: &[(&str, &str)]| {
-        sections
-            .iter()
-            .map(|(name, words)| {
-                format!("<section title=\"{name}\" capitalise=\"true\"><lyrics>{words}\n</lyrics></section>")
-            })
-            .collect::<String>()
-    };
-    let more: String = versions
-        .iter()
-        .map(|(lang, sections)| {
-            format!("<translationoptions><lang>{lang}</lang><lyrics>{}</lyrics></translationoptions>", part(sections))
-        })
-        .collect();
-    format!("<song><title>{title}</title><author>Автор</author><lyrics>{}</lyrics>{more}</song>", part(sections))
-}
-
-/// A song pack (a zip) of these files.
-fn pack(files: &[(String, String)]) -> Vec<u8> {
-    let mut out = Vec::new();
-    {
-        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut out));
-        let options = zip::write::SimpleFileOptions::default();
-        for (name, body) in files {
-            zip.start_file(format!("uk/{name}"), options).expect("start");
-            zip.write_all(body.as_bytes()).expect("write");
-        }
-        zip.finish().expect("finish");
-    }
-    out
-}
 
 fn simple(title: &str, first: &str) -> (String, String) {
     (format!("{title}.xml"), xml(title, &[("Verse 1", first), ("Chorus 1", "общий припев")], &[]))

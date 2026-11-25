@@ -767,7 +767,9 @@ fn shape_of(ui: &egui::Ui, state: &mut HomeState, deck: &Deck, sheet_grid: &Grid
         Deck::Slides(slides) => {
             let count = slides.deck.slide_count();
             let tools = slides.at.is_some() && !slides.made;
-            let bar = match (slides.bar, tools) {
+            // A song of the song catalog being looked at has tools of its own (see `item_bar`).
+            let catalog = slides.at.is_some_and(|at| state.catalog.holds(at));
+            let bar = match (slides.bar, tools || catalog) {
                 (false, _) => 0.0,
                 (true, true) => SONG_BAR,
                 (true, false) => ITEM_BAR,
@@ -1905,6 +1907,8 @@ fn item_bar(
     };
     // The song whose tools the bar carries: one the show holds and the app didn't make.
     let song = slides.filter(|slides| !slides.made).and_then(|slides| Some((slides.at?, &slides.deck)));
+    // Or a song of the song catalog being looked at, as made, whose tools put it to use.
+    let catalog = slides.and_then(|slides| state.catalog.held_at(slides.at?)).cloned();
     let id = ui.scope_id().with(("bar", item, slides.and_then(|slides| slides.at)));
     let response = ui.interact(bar, id, Sense::click());
     // A picture or video dropped on a song's bar becomes a slide of its own at the song's end
@@ -1932,6 +1936,10 @@ fn item_bar(
     let (title, kind, faint) = match deck {
         Deck::Slides(slides) if slides.bible => {
             (slides.deck.title.as_str(), Some(t("slides.kind.bible", "Bible")), false)
+        }
+        // Where it is from, by name: it isn't the church's yet.
+        Deck::Slides(slides) if catalog.is_some() => {
+            (slides.deck.title.as_str(), Some(crate::catalog::SOURCE_NAME), false)
         }
         Deck::Slides(slides) if slides.made => {
             (slides.deck.title.as_str(), Some(t("slides.kind.captions", "Live captions")), false)
@@ -2016,7 +2024,17 @@ fn item_bar(
         x = drawn.max.x;
     }
     if let Some(kind) = kind {
-        x = pill(ui, &painter, pos2(x + 10.0, middle), kind).max.x;
+        let drawn = pill(ui, &painter, pos2(x + 10.0, middle), kind);
+        x = drawn.max.x;
+        // A catalog song's says what becomes of it.
+        if catalog.is_some() {
+            let hint = tf(
+                "slides.catalog.hint",
+                "From {source}, not in your library: it joins it, in {library}, once you add it to a playlist or change it. Putting it on screen adds nothing.",
+                &[("source", crate::catalog::SOURCE_NAME), ("library", crate::catalog::LIBRARY_NAME)],
+            );
+            ui.interact(drawn.intersect(bar), id.with("catalog"), Sense::hover()).on_hover_text(hint);
+        }
     }
     // A passage's version button, after its kind.
     if let (Deck::Slides(slides), Some(item)) = (deck, item)
@@ -2043,8 +2061,46 @@ fn item_bar(
             ui.separator();
             crate::studio::song_menu(ui, show, state, commands, at, asks, None);
         }
-        (None, None) => {}
+        (None, None) => {
+            if let Some(held) = &catalog {
+                catalog_menu(ui, state, held);
+            }
+        }
     };
+    // A catalog song's tools, each of which makes it join the library: Add to the playlist in
+    // front, and Edit Words; the rest in its menu.
+    if let Some(held) = &catalog {
+        let strength = if near { 1.0 } else { 0.6 };
+        x += 10.0;
+        let mut place = || {
+            let rect = Rect::from_center_size(pos2(x + ICON_BUTTON / 2.0, middle), egui::Vec2::splat(ICON_BUTTON));
+            x += ICON_BUTTON + 1.0;
+            rect.intersect(bar)
+        };
+        let front = state.services.front().name.clone();
+        let library: &[(&str, &str)] = &[("list", &front), ("library", crate::catalog::LIBRARY_NAME)];
+        let add_hint =
+            tf("slides.catalog.add.hint", "Add to {list}: the song joins your library, in {library}", library);
+        let words_hint = tf(
+            "slides.catalog.words.hint",
+            "Edit Words: the song joins your library, in {library}, to be changed",
+            library,
+        );
+        if icon_button(ui, place(), id.with("catalog add"), Icon::Plus, strength, false)
+            .on_hover_text(add_hint)
+            .clicked()
+        {
+            catalog_add(state, held);
+        }
+        if icon_button(ui, place(), id.with("catalog words"), Icon::Reflow, strength, false)
+            .on_hover_text(words_hint)
+            .clicked()
+        {
+            state.catalog.join(held, crate::catalog_songs::Then::Words);
+        }
+        let more = more_button(ui, place(), id.with("more"), near);
+        egui::Popup::menu(&more).show(|ui| menu(ui, state));
+    }
     if let Some((at, song)) = song {
         // The song's tools: at part strength until the pointer is on the bar.
         let strength = if near { 1.0 } else { 0.6 };
@@ -2149,6 +2205,35 @@ fn item_bar(
     response.context_menu(|ui| menu(ui, state));
     if let Some(name) = name_response {
         name.context_menu(|ui| menu(ui, state));
+    }
+}
+
+/// The menu of a song of the song catalog being looked at (from its bar's "more" button or a
+/// right-click): the ways to use it, each of which makes it join the library.
+fn catalog_menu(ui: &mut egui::Ui, state: &mut HomeState, held: &Arc<Presentation>) {
+    use crate::catalog_songs::Then;
+    let front = state.services.front().name.clone();
+    if ui.button(tf("left.song.add_to", "Add to {list}", &[("list", &front)])).clicked() {
+        catalog_add(state, held);
+        ui.close();
+    }
+    ui.separator();
+    if ui.button(t("left.song.edit_words", "Edit Words")).clicked() {
+        state.catalog.join(held, Then::Words);
+        ui.close();
+    }
+    if ui.button(t("slides.menu.edit", "Edit")).clicked() {
+        state.catalog.join(held, Then::Edit);
+        ui.close();
+    }
+}
+
+/// Adds a song of the song catalog being looked at to the playlist in front, after the open
+/// item, under the key it is filed under: it joins the library.
+fn catalog_add(state: &mut HomeState, held: &Arc<Presentation>) {
+    let item = Item::song(crate::catalog_songs::key_of(held), held.title.clone());
+    if crate::studio::add_items(state, state.services.front_at(), vec![item]) > 0 {
+        state.catalog.join(held, crate::catalog_songs::Then::Nothing);
     }
 }
 

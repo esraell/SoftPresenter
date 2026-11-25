@@ -306,7 +306,7 @@ command. Numbers are counted from 1, as `sp` counts them.
 **`live`** — what is on screen, and the switches beside it: `sp status --json`'s `data` less what
 ticks (`timers`, `audio`, `token`), plus:
 
-    {"live": {"song": "River Song", "slide": 2, "slides": 6, "words": "…", "kind": "song|passage|voxlive",
+    {"live": {"song": "River Song", "slide": 2, "slides": 6, "words": "…", "kind": "song|passage|voxlive|catalog",
               "id": "<song id>", "number": 4, "playlist": "Sunday", "item": 3},
      "next_slide": 3, "media": "Waves.mp4", "message": "Welcome", "props": ["Logo"],
      "audience_on": true, "stage_on": true, "selected_song": "…", "announcements": "…",
@@ -323,8 +323,9 @@ ticks (`timers`, `audio`, `token`), plus:
 window would), `live_item` which item went on screen (also when a page started it with
 `--aim`). `build` is the click build step; `advance_at` when the slide goes on by itself (null
 if it doesn't); `captions` whether VoxLive's captions are on screen; `version_id` the theme
-version the screens draw in. A Bible passage on screen is `kind: "passage"`, its title in
-`song`.
+version the screens draw in. A Bible passage on screen is `kind: "passage"`, and a song of the
+song catalog shown from the find box and not in the library `kind: "catalog"` (with no `id` or
+`number`), each with its title in `song`.
 
 **`playlist`** — the playlist in front: `{"name", "number", "rev", "live_item", "items": […]}`,
 the items as `sp playlist --json` lists them. Each has `item` (its place in the playlist: the

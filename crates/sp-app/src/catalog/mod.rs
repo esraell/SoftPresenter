@@ -4,25 +4,28 @@
 //!
 //! Downloaded songs are kept apart from the church's library (`store`), searched from the find
 //! box (`search`), and **join the library** (a library named "Worship Leader App") only when a
-//! person adds one to a playlist, drags it in or edits it (`present`, and `catalog_cli` for the
-//! app's side). About once a month the app asks the source whether a language has changed (a
-//! conditional request: `fetch`), never while anything is on screen; songs nobody has touched
-//! are brought up to date, and a song the church changed is never overwritten, a newer version
-//! is offered instead.
+//! person adds one to a playlist, drags it in or edits it (`present`; `catalog_songs` for the
+//! window's side and `catalog_cli` for the app's). About once a month the app asks the source
+//! whether a language has changed (a conditional request: `fetch`), never while anything is on
+//! screen; songs nobody has touched are brought up to date, and a song the church changed is
+//! never overwritten, a newer version is offered instead.
 //!
 //! This module is the engine, with no window of its own: `books` (the songbooks the source
 //! publishes, and which to recommend), `read` (the song pack), `fold` (searching alike), `store`
 //! (the files), `search`, `fetch` (the network), `present` (making a song and judging an
 //! update). The windows that show it (the setup's Free Songs step, Settings › Integrations) are
-//! in `songbooks`, and are offered only in development builds for now ([`offered`]).
+//! in `songbooks`, and its songs in the find box and the slides area in `catalog_songs`; all are
+//! offered only in development builds for now ([`offered`]).
 
-// The window's find box and chooser are built on this engine next; until they are, the commands
-// and the songbook windows use part of it and the rest (the whole of `Catalog`'s API for a
-// window) is tested only.
+// Part of the engine's API (some of what is re-exported below, `refreshed_song`, `is_gone`, a
+// song's credit, the counts in `Installed`…) is for windows still to come (a chooser of the
+// catalog's songs, the newer versions offered), and tested only until they use it.
 #![allow(dead_code, unused_imports)]
 
 mod books;
 mod fetch;
+#[cfg(test)]
+pub(crate) mod fixtures;
 mod fold;
 mod present;
 mod read;

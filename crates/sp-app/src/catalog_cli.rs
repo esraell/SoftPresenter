@@ -235,17 +235,7 @@ impl crate::App {
     /// The copies of catalog songs in the library: their places and their marks.
     fn catalog_copies(&self) -> Vec<(usize, &Presentation)> {
         let removed = self.running.as_ref().map(|r| r.home_state.removed_songs.clone()).unwrap_or_default();
-        self.show
-            .presentations()
-            .iter()
-            .enumerate()
-            .filter(|(at, song)| {
-                song.catalog.as_ref().is_some_and(|origin| origin.source == catalog::SOURCE)
-                    && !self.app_made(*at)
-                    && !removed.contains(at)
-            })
-            .map(|(at, song)| (at, song.as_ref()))
-            .collect()
+        crate::catalog_songs::copies(self.show.presentations(), |at| self.app_made(at) || removed.contains(&at))
     }
 
     /// The keys of the catalog songs already in the library, which the find box shows as the
@@ -254,26 +244,38 @@ impl crate::App {
         self.catalog_copies().into_iter().filter_map(|(_, song)| song.catalog.as_ref().map(|o| o.key.clone())).collect()
     }
 
+    /// The copy the library has of a catalog song, as a song that has joined already.
+    fn catalog_joined(&self, key: &str) -> Option<Joined> {
+        let (index, song) =
+            self.catalog_copies().into_iter().find(|(_, song)| song.catalog.as_ref().is_some_and(|o| o.key == key))?;
+        Some(Joined {
+            index,
+            title: song.title.clone(),
+            library: catalog::LIBRARY_NAME.to_owned(),
+            already: true,
+            pairing: catalog::Pairing::default(),
+        })
+    }
+
     /// Puts a catalog song in the library as an ordinary song, in a library named after the
     /// catalog (made the first time), marked with where it came from. `second` is the language
     /// of the version to put under its words. A song already joined is not made again.
     pub(crate) fn join_catalog_song(&mut self, key: &str, second: Option<&str>) -> Result<Joined, String> {
         let engine = self.catalog_engine()?;
-        let keep =
-            self.catalog_copies().into_iter().find(|(_, song)| song.catalog.as_ref().is_some_and(|o| o.key == key));
-        if let Some((index, song)) = keep {
-            let title = song.title.clone();
-            return Ok(Joined {
-                index,
-                title,
-                library: catalog::LIBRARY_NAME.to_owned(),
-                already: true,
-                pairing: catalog::Pairing::default(),
-            });
+        if let Some(joined) = self.catalog_joined(key) {
+            return Ok(joined);
         }
         let made = engine.present(key, second, now())?;
-        let title = made.song.title.clone();
-        let (index, library_key) = self.store_song(made.song);
+        self.catalog_file(made.song, made.pairing)
+    }
+
+    /// Files a song made from the catalog (and marked so) in the library, and in the library
+    /// named after the catalog, made the first time: how every catalog song joins, from the
+    /// command line or the window.
+    fn catalog_file(&mut self, song: Presentation, pairing: catalog::Pairing) -> Result<Joined, String> {
+        let key = song.catalog.as_ref().map(|origin| origin.key.clone()).unwrap_or_default();
+        let title = song.title.clone();
+        let (index, library_key) = self.store_song(song);
         let Some(running) = self.running.as_mut() else { return Err("The window isn't open yet.".to_owned()) };
         let state = &mut running.home_state;
         let at = match state.libraries.iter().position(|library| library.name == catalog::LIBRARY_NAME) {
@@ -283,10 +285,67 @@ impl crate::App {
                 state.libraries.len() - 1
             }
         };
-        state.libraries[at].songs.push(library_key);
+        if !state.libraries[at].has(&library_key) {
+            state.libraries[at].songs.push(library_key);
+        }
         state.libraries_changed = true;
         crate::applog::event("catalog", &format!("{title} joined the library from the song catalog ({key})"));
-        Ok(Joined { index, title, library: catalog::LIBRARY_NAME.to_owned(), already: false, pairing: made.pairing })
+        Ok(Joined { index, title, library: catalog::LIBRARY_NAME.to_owned(), already: false, pairing })
+    }
+
+    /// Carries out what the window asked of the catalog's songs in the last frame (see
+    /// `catalog_songs`): a song to look at goes into its place, and songs put to use join the
+    /// library. Called after each drawing of the window.
+    pub(crate) fn handle_catalog_songs(&mut self) {
+        let Some(running) = self.running.as_mut() else { return };
+        let catalog = &mut running.home_state.catalog;
+        let (look, joins) = (catalog.look.take(), std::mem::take(&mut catalog.joins));
+        if let Some((place, song)) = look {
+            self.look_at_catalog_song(place, song);
+        }
+        for join in joins {
+            self.join_window_song(&join.song, join.then);
+        }
+    }
+
+    /// Shows a catalog song in the slides area from one of the two places kept for it (see
+    /// `catalog_songs::put_in_place`), and chooses it. It is not in the library.
+    fn look_at_catalog_song(&mut self, place: usize, song: Arc<Presentation>) {
+        let Some(running) = self.running.as_mut() else { return };
+        let Some((slot, was)) =
+            crate::catalog_songs::put_in_place(&mut self.show, &mut running.home_state, place, song)
+        else {
+            return;
+        };
+        for id in was {
+            running.thumbs.forget(id, &mut running.egui_renderer);
+        }
+        running.home_window.request_redraw();
+        self.apply(vec![sp_engine::Command::Select(slot)]);
+    }
+
+    /// Files a catalog song the window put to use, under the key the window already put in a
+    /// playlist or a library for it; if a copy of it joined the library since it was made, that
+    /// copy is the one used. What the window does then is `catalog_songs::joined`.
+    fn join_window_song(&mut self, song: &Presentation, then: crate::catalog_songs::Then) {
+        let Some(origin) = song.catalog.as_ref() else { return };
+        let joined = match self.catalog_joined(&origin.key) {
+            Some(joined) => joined,
+            None => match self.catalog_file(song.clone(), catalog::Pairing::default()) {
+                Ok(joined) => joined,
+                Err(problem) => {
+                    crate::applog::problem("catalog", &format!("{} could not join the library: {problem}", song.title));
+                    return;
+                }
+            },
+        };
+        let Some(running) = self.running.as_mut() else { return };
+        let chosen =
+            crate::catalog_songs::joined(&self.show, &mut running.home_state, song, joined.index, joined.already, then);
+        running.home_window.request_redraw();
+        if let Some(index) = chosen {
+            self.apply(vec![sp_engine::Command::Select(index)]);
+        }
     }
 
     /// Takes a catalog song's newer version in place of the church's changed copy, as a change

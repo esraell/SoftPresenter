@@ -177,6 +177,7 @@
   "notices.catalog.downloaded": "Se descargaron las canciones en {language}: {songs} canciones.",
   "notices.catalog.malformed": "{n} archivos de la colección no se pudieron leer y se dejaron fuera.",
   "notices.catalog.updated": ["Se actualizó {n} canción de {source}", "Se actualizaron {n} canciones de {source}"],
+  "notices.catalog.joined": "{song} ya está en tu biblioteca, en {library}.",
   "notices.catalog.offered": ["{n} canción que cambiaste tiene una versión más nueva en {source}; se mantiene la tuya", "{n} canciones que cambiaste tienen una versión más nueva en {source}; se mantienen las tuyas"],
   "notices.catalog.not_checked": "No se pudieron comprobar las canciones en {language}: {error}",
   "notices.catalog.lang.en": "inglés",

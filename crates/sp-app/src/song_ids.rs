@@ -29,6 +29,21 @@ pub fn key_for(source: Option<&Path>, id: Uuid, title: &str) -> String {
     }
 }
 
+/// Where a song new to the library is kept: in the Songs folder, in a file named by its id, so
+/// two songs with one title never collide.
+pub fn library_path(id: Uuid) -> Option<PathBuf> {
+    let songs = crate::bible_store::data_dir()?.join("Songs");
+    Some(songs.join(format!("{id}.{}", crate::load::SONG_EXTENSION)))
+}
+
+/// The key a song new to the library is known by once it is kept at [`library_path`]: its id
+/// (its title where there is no data folder). The window knows it before the song is filed (a
+/// song of the song catalog put in a playlist joins the library right after; see
+/// `catalog_songs`), and the app files it under the same key.
+pub fn library_key(id: Uuid, title: &str) -> String {
+    key_for(library_path(id).as_deref(), id, title)
+}
+
 /// The library's songs, as `settle` matches old names against them.
 struct Songs {
     /// By the name of their file, without the ending.

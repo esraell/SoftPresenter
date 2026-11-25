@@ -3,9 +3,10 @@
 //! lists verses holding the words as they are typed.
 //!
 //! Reading a Bible for the first time and searching all its verses take too long for the thread
-//! that draws the window, so both are done on a thread of the find box's own. The window asks
-//! with what is typed and takes the answer when it comes; meanwhile it shows the songs found.
-//! The reference is read, and the verses searched, by `sp-bible`, as the Bible view does.
+//! that draws the window, so both are done on a thread of the find box's own ([`Asker`], which
+//! the song catalog's part of the find box uses too). The window asks with what is typed and
+//! takes the answer when it comes; meanwhile it shows the songs found. The reference is read,
+//! and the verses searched, by `sp-bible`, as the Bible view does.
 
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -225,7 +226,6 @@ type Search<T> = fn(&str, &[(String, Arc<Bible>)], &Reading) -> T;
 
 /// An answer from a finder's thread.
 struct Answer<T> {
-    asked: Asked,
     rows: T,
     /// Bibles read for the first time on the way, for the shelf to keep.
     read: Vec<(String, Arc<Bible>)>,
@@ -234,7 +234,6 @@ struct Answer<T> {
 struct Job<T> {
     asked: Asked,
     bibles: Vec<BibleReader>,
-    wake: egui::Context,
     search: Search<T>,
 }
 
@@ -251,19 +250,14 @@ fn answer<T>(job: Job<T>) -> Answer<T> {
             bibles.push((short, bible));
         }
     }
-    Answer { rows: (job.search)(&job.asked.0, &bibles, &job.asked.2), asked: job.asked, read }
+    Answer { rows: (job.search)(&job.asked.0, &bibles, &job.asked.2), read }
 }
 
 /// Bible results found on a thread of their own, asked for as the words change and taken when
 /// they come: the find box's (by default), or the Bible view's Search's (`Finder::new` with
 /// [`search_page`]).
 pub struct Finder<T = Vec<BibleRow>> {
-    /// What was last asked for.
-    asked: Option<Asked>,
-    /// The latest answer, once the window has taken it.
-    have: Option<Answer<T>>,
-    arrived: Arc<Mutex<Option<Answer<T>>>>,
-    jobs: Option<Sender<Job<T>>>,
+    asker: Asker<Asked, Answer<T>>,
     search: Search<T>,
 }
 
@@ -290,7 +284,7 @@ impl Finder {
 impl<T: Send + 'static> Finder<T> {
     /// A finder that answers with `search`.
     pub fn new(search: Search<T>) -> Finder<T> {
-        Finder { asked: None, have: None, arrived: Arc::new(Mutex::new(None)), jobs: None, search }
+        Finder { asker: Asker::new("find"), search }
     }
 
     /// The results for what is typed, or `None` while they are still being found. Asks for
@@ -305,55 +299,105 @@ impl<T: Send + 'static> Finder<T> {
         wake: &egui::Context,
     ) -> Option<&T> {
         let current = |asked: &Asked| asked.0 == typed && asked.1 == in_use && asked.2 == *reading;
-        if !self.asked.as_ref().is_some_and(current) {
+        let search = self.search;
+        let ask = || {
             let asked: Asked = (typed.to_owned(), in_use.to_vec(), reading.clone());
-            self.asked = Some(asked.clone());
-            let job = Job { asked, bibles: bibles(), wake: wake.clone(), search: self.search };
-            if cfg!(test) {
-                // Tests have their answer at once, on their own thread.
-                self.have = Some(answer(job));
-            } else {
-                self.send(job);
-            }
-        }
-        if let Some(answer) = self.arrived.lock().ok().and_then(|mut arrived| arrived.take()) {
-            self.have = Some(answer);
-        }
-        self.have.as_ref().filter(|answer| current(&answer.asked)).map(|answer| &answer.rows)
+            let job = Job { asked: asked.clone(), bibles: bibles(), search };
+            (asked, Box::new(move || answer(job)) as Work<Answer<T>>)
+        };
+        self.asker.answer(current, ask, wake).map(|answer| &answer.rows)
     }
 
     /// The Bibles read for the first time by the last answer, for the shelf to keep so they are
     /// not read again.
     pub fn take_read(&mut self) -> Vec<(String, Arc<Bible>)> {
-        self.have.as_mut().map(|answer| std::mem::take(&mut answer.read)).unwrap_or_default()
+        self.asker.have.as_mut().map(|(_, answer)| std::mem::take(&mut answer.read)).unwrap_or_default()
+    }
+}
+
+/// What works out a question's answer, on the asker's thread.
+pub type Work<T> = Box<dyn FnOnce() -> T + Send>;
+
+/// A question for an asker's thread: what is asked, the work that answers it, and the window
+/// to wake when it is answered.
+struct Question<Q, T> {
+    asked: Q,
+    work: Work<T>,
+    wake: egui::Context,
+}
+
+/// Answers worked out on a thread of their own, for a window that must never wait: asked for
+/// when the question changes and taken when they come. The thread sleeps between questions,
+/// answers only the newest of those waiting, and ends when the window does. The find box's
+/// Bible results ([`Finder`]) and the song catalog's songs (`catalog_songs`) are each found this
+/// way, each on a thread of its own.
+pub struct Asker<Q, T> {
+    /// The thread's name.
+    name: &'static str,
+    /// What was last asked.
+    asked: Option<Q>,
+    /// The latest answer, once the window has taken it, with the question it answers.
+    have: Option<(Q, T)>,
+    arrived: Arc<Mutex<Option<(Q, T)>>>,
+    questions: Option<Sender<Question<Q, T>>>,
+}
+
+impl<Q: Clone + Send + 'static, T: Send + 'static> Asker<Q, T> {
+    /// An asker whose thread, once started, is named `name`.
+    pub fn new(name: &'static str) -> Asker<Q, T> {
+        Asker { name, asked: None, have: None, arrived: Arc::new(Mutex::new(None)), questions: None }
     }
 
-    /// Hands a job to the thread, starting it the first time. The thread sleeps between jobs,
-    /// answers only the newest of those waiting, and ends when the window does.
-    fn send(&mut self, job: Job<T>) {
-        if self.jobs.is_none() {
-            let (jobs, waiting) = channel::<Job<T>>();
+    /// The answer to the question `current` recognises, or `None` while it is still being
+    /// worked out. When the question last asked is another, `ask` gives this one and the work
+    /// that answers it (it is called only then). Never waits.
+    pub fn answer(
+        &mut self,
+        current: impl Fn(&Q) -> bool,
+        ask: impl FnOnce() -> (Q, Work<T>),
+        wake: &egui::Context,
+    ) -> Option<&mut T> {
+        if !self.asked.as_ref().is_some_and(&current) {
+            let (asked, work) = ask();
+            self.asked = Some(asked.clone());
+            if cfg!(test) {
+                // Tests have their answer at once, on their own thread.
+                self.have = Some((asked, work()));
+            } else {
+                self.send(Question { asked, work, wake: wake.clone() });
+            }
+        }
+        if let Some(answer) = self.arrived.lock().ok().and_then(|mut arrived| arrived.take()) {
+            self.have = Some(answer);
+        }
+        self.have.as_mut().filter(|(asked, _)| current(asked)).map(|(_, answer)| answer)
+    }
+
+    /// Hands a question to the thread, starting it the first time.
+    fn send(&mut self, question: Question<Q, T>) {
+        if self.questions.is_none() {
+            let (questions, waiting) = channel::<Question<Q, T>>();
             let arrived = self.arrived.clone();
-            let spawned = std::thread::Builder::new().name("find".to_owned()).spawn(move || {
-                while let Ok(mut job) = waiting.recv() {
-                    // What was typed since is all that matters.
+            let spawned = std::thread::Builder::new().name(self.name.to_owned()).spawn(move || {
+                while let Ok(mut question) = waiting.recv() {
+                    // What was asked since is all that matters.
                     while let Ok(newer) = waiting.try_recv() {
-                        job = newer;
+                        question = newer;
                     }
-                    let wake = job.wake.clone();
-                    let found = answer(job);
+                    let Question { asked, work, wake } = question;
+                    let found = work();
                     if let Ok(mut arrived) = arrived.lock() {
-                        *arrived = Some(found);
+                        *arrived = Some((asked, found));
                     }
                     wake.request_repaint();
                 }
             });
             if spawned.is_ok() {
-                self.jobs = Some(jobs);
+                self.questions = Some(questions);
             }
         }
-        if let Some(jobs) = &self.jobs {
-            let _ = jobs.send(job);
+        if let Some(questions) = &self.questions {
+            let _ = questions.send(question);
         }
     }
 }

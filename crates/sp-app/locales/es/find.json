@@ -1,9 +1,12 @@
 {
-  "_note": "Español de España; see topbar.json. The find box's list of results: the SONG tag, nothing found, looking in the Bibles, and the keys line at its foot (Spanish keyboards print Intro for Enter, as keys.json says).",
+  "_note": "Español de España; see topbar.json. The find box's list of results: the SONG tag, the song catalog's group (its heading names Worship Leader App, which is a name and stays as it is), nothing found, looking in the Bibles and the songbooks, and the keys line at its foot (Spanish keyboards print Intro for Enter, as keys.json says).",
   "find.tag.song": "CANCIÓN",
   "find.tag.song_group": "CANCIÓN · {group}",
   "find.nothing": "No se encontró nada",
   "find.looking": "Buscando en las Biblias…",
+  "find.looking.songbooks": "Buscando en los cancioneros…",
+  "find.catalog.from": "De Worship Leader App",
+  "find.tag.catalog": "CANCIÓN · {language}",
   "find.keys.mac": "↵ Abrir    ⌘↵ Añadir a la lista    esc Cerrar",
   "find.keys": "Intro: Abrir    Ctrl+Intro: Añadir a la lista    Esc: Cerrar"
 }
