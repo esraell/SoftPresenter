@@ -34,22 +34,27 @@ other programs' settings, and they change only when you click or type it.
 
 ### In one click
 
-**Settings › Integrations › AI assistants (MCP)** lists each assistant app found on this computer
-with **Add** (and **Remove** once it is there), and says where SoftPresenter stands in it: not
-added yet, added, or added starting another program (another copy of SoftPresenter, say), which
-**Replace** points at this one. Then quit and reopen the app. An app made for this system but not
-found on it is named in one faint line; adding SoftPresenter lets nothing in by itself, and the
+**Settings › Integrations › AI assistants (MCP)** has one tile for each company, **Claude**,
+**ChatGPT**, **Gemini** and **Grok**, and the other apps (Cursor, VS Code) under **More**, one
+tile each. A tile's line says which of its apps are on this computer and where SoftPresenter
+stands in them ("Found: Claude Desktop and Claude Code. Not added yet.", "Added to Claude Desktop
+and Claude Code.", "Added to Claude Desktop; not yet to Claude Code.", or not found). **Add** adds
+SoftPresenter to every app of the tile found here; once it is in, **Remove** takes it out of each
+app it is in (an entry by that name that starts another program is left to that app); when such
+an entry is there (another copy of SoftPresenter, say), **Replace** points it at this one. Then
+quit and reopen the app. **Copy setup**, on every tile, copies the settings to add by hand, with
+this computer's path to `sp` filled in. Adding SoftPresenter lets nothing in by itself, and the
 card says so while **Let AI assistants use SoftPresenter** is off.
 
-| App | Found when | What Add does |
+| Tile: app | Found when | What Add does |
 |---|---|---|
-| Claude Desktop (Mac, Windows) | its folder is there (`~/Library/Application Support/Claude`, `%APPDATA%\Claude`) | `mcpServers.softpresenter` in its `claude_desktop_config.json` |
-| Claude Code | `claude` is found | `claude mcp add --scope user softpresenter -- PROGRAM mcp` |
-| ChatGPT / Codex (the ChatGPT app, Codex's command line and editor extensions share one setting) | `codex` is found | `codex mcp add softpresenter -- PROGRAM mcp`, which writes `~/.codex/config.toml` |
-| Cursor | `~/.cursor` is there | `mcpServers.softpresenter` in `~/.cursor/mcp.json` |
-| VS Code / GitHub Copilot | `~/.copilot` (or `COPILOT_HOME`) is there | `mcpServers.softpresenter` in its `mcp-config.json`, with `"type": "stdio"` and `"tools": ["*"]` |
-| Antigravity (Gemini) | `~/.gemini/antigravity`, `~/.gemini/antigravity-cli` or `~/.gemini/config` is there | `mcpServers.softpresenter` in `~/.gemini/config/mcp_config.json` |
-| Grok Build | `grok` is found | `grok mcp add -s user softpresenter -- PROGRAM mcp`, which writes `~/.grok/config.toml` |
+| Claude: Claude Desktop (Mac, Windows) | its folder is there (`~/Library/Application Support/Claude`, `%APPDATA%\Claude`) | `mcpServers.softpresenter` in its `claude_desktop_config.json` |
+| Claude: Claude Code | `claude` is found | `claude mcp add --scope user softpresenter -- PROGRAM mcp` |
+| ChatGPT: Codex (the ChatGPT app, Codex's command line and editor extensions share its setting) | `codex` is found | `codex mcp add softpresenter -- PROGRAM mcp`, which writes `~/.codex/config.toml` |
+| More: Cursor | `~/.cursor` is there | `mcpServers.softpresenter` in `~/.cursor/mcp.json` |
+| More: VS Code / GitHub Copilot | `~/.copilot` (or `COPILOT_HOME`) is there | `mcpServers.softpresenter` in its `mcp-config.json`, with `"type": "stdio"` and `"tools": ["*"]` |
+| Gemini: Antigravity (which took the Gemini command line's place) | `~/.gemini/antigravity`, `~/.gemini/antigravity-cli` or `~/.gemini/config` is there | `mcpServers.softpresenter` in `~/.gemini/config/mcp_config.json` |
+| Grok: Grok Build | `grok` is found | `grok mcp add -s user softpresenter -- PROGRAM mcp`, which writes `~/.grok/config.toml` |
 
 PROGRAM is this computer's path to `sp` (the installed `sp` when it opens this copy; on Windows
 the program itself, `SoftPresenter.exe`, since an assistant starts a program, not a batch file).
@@ -78,18 +83,17 @@ first. Claude Code's own settings are never touched by SoftPresenter (Claude Cod
 copies). How each app writes its file is up to the app: Grok Build's own command drops comments
 from `config.toml`.
 
-`sp mcp connect APP`, `sp mcp disconnect APP` and `sp mcp status` do the same from a terminal
-([cli.md](cli.md#ai-assistants-mcp)).
+`sp mcp connect WHICH`, `sp mcp disconnect WHICH` and `sp mcp status` (`--json` for a script)
+do the same from a terminal ([cli.md](cli.md#ai-assistants-mcp)).
 
 Apps that only reach servers on the internet can't start one on this computer: ChatGPT in a
 browser, and the Grok and Gemini apps. SoftPresenter isn't put on the internet for them.
 
 ### By hand
 
-**Add it yourself**, under the list (open by itself when no app is found), has the line for
-Claude Code, the `mcpServers` settings for Claude Desktop, Cursor, Antigravity and most others,
-and the `config.toml` table for Codex and Grok Build, each with this computer's path to `sp`
-filled in and a Copy button.
+**Copy setup** on each tile copies what to add by hand, with this computer's path to `sp`
+filled in: the line for Claude Code, the `mcpServers` settings for Claude Desktop, Cursor, VS
+Code, Antigravity and most others, and the `config.toml` table for Codex and Grok Build.
 
 #### Claude Code
 

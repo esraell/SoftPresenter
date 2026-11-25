@@ -9,17 +9,17 @@ use std::sync::mpsc::Receiver;
 use egui::{RichText, Sense, vec2};
 
 use super::Switches;
-use super::connect::{self, App, Done, Place, Stands};
+use super::connect::{self, App, Company, Done, Place, Stands};
 use crate::cli_install::Tone;
 use crate::i18n::{t, tf};
 
-/// The card's state: the switches (kept in `ai-assistants.json`), the assistant apps, and what
-/// was said last.
+/// The card's state: the switches (kept in `ai-assistants.json`), the assistants' tiles, and
+/// what was said last.
 #[derive(Debug, Default)]
 pub struct View {
     pub switches: Switches,
-    /// What the last Copy (or a switch that couldn't be saved) said: whether it went wrong, and
-    /// the words.
+    /// What the last Copy setup (or a switch that couldn't be saved) said: whether it went
+    /// wrong, and the words.
     said: Option<(bool, String)>,
     /// The program an assistant starts, found again each time the card comes into view.
     program: Option<PathBuf>,
@@ -27,21 +27,22 @@ pub struct View {
     drawn: Option<u64>,
     /// Scroll the pane to the card when next drawn (a capture run's, `SOFTPRESENTER_CAPTURE_PREFERENCES=mcp`).
     pub reveal: bool,
-    /// Scroll on to the list of apps when next drawn (`SOFTPRESENTER_CAPTURE_PREFERENCES=mcp-apps`).
+    /// Scroll on to the tiles when next drawn (`SOFTPRESENTER_CAPTURE_PREFERENCES=mcp-apps`),
+    /// with More open.
     pub reveal_apps: bool,
-    /// The apps found on this computer, each with where SoftPresenter stands in it.
-    rows: Vec<Row>,
-    /// The apps made for this system that aren't found on it.
-    absent: Vec<App>,
+    /// One tile for each company (Claude, ChatGPT, Gemini, Grok), then one for each other app
+    /// (under More).
+    tiles: Vec<Tile>,
 }
 
-/// An app found on this computer.
+/// A tile: a company's apps, or one other app.
 #[derive(Debug)]
-struct Row {
-    app: App,
-    place: Place,
-    /// Where SoftPresenter stands, once looked at.
-    stands: Option<Stands>,
+struct Tile {
+    company: Option<Company>,
+    /// The apps it covers that are made for this system.
+    apps: Vec<App>,
+    /// Those found on this computer, each with where SoftPresenter stands once looked at.
+    found: Vec<(App, Place, Option<Stands>)>,
     /// What the last click did, in place of where it stands.
     said: Option<(Tone, String)>,
     /// A look or a click under way, on a thread of its own (never the window's: an app's own
@@ -49,16 +50,16 @@ struct Row {
     job: Option<Receiver<Answer>>,
 }
 
-/// What a row's thread found.
+/// What a tile's thread found.
 #[derive(Debug)]
 enum Answer {
-    /// Where SoftPresenter stands, when the card came into view.
-    Stands(Stands),
-    /// What a click did, and where it stands after it.
-    Clicked(Result<Done, String>, Stands),
+    /// Where SoftPresenter stands in each app found, when the card came into view.
+    Stands(Vec<Stands>),
+    /// What a click did to each app, and where it stands in each after it.
+    Clicked(Vec<(App, Result<Done, String>)>, Vec<Stands>),
 }
 
-/// A click on one of an app's buttons.
+/// A click on one of a tile's buttons.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Click {
     Add,
@@ -131,8 +132,8 @@ pub fn card(ui: &mut egui::Ui, view: &mut View) {
         came_into_view(ui.ctx(), view);
     }
     view.drawn = Some(pass);
-    for row in &mut view.rows {
-        collect(row);
+    for tile in &mut view.tiles {
+        collect(tile);
     }
 
     let before = view.switches;
@@ -186,7 +187,7 @@ pub fn card(ui: &mut egui::Ui, view: &mut View) {
 
     if let Some(program) = view.program.clone() {
         ui.add_space(6.0);
-        if std::mem::take(&mut view.reveal_apps) {
+        if view.reveal_apps {
             ui.scroll_to_cursor(Some(egui::Align::TOP));
         }
         // Adding an assistant lets nothing in by itself: the switch above does.
@@ -201,11 +202,21 @@ pub fn card(ui: &mut egui::Ui, view: &mut View) {
             );
         }
         let ctx = ui.ctx().clone();
-        for row in &mut view.rows {
-            row_part(ui, &ctx, row, &program);
+        let more = std::mem::take(&mut view.reveal_apps);
+        for tile in view.tiles.iter_mut().filter(|tile| tile.company.is_some()) {
+            tile_part(ui, &ctx, tile, &program, &mut view.said);
         }
-        others(ui, view);
-        by_hand(ui, view, &program);
+        ui.add_space(8.0);
+        faint(ui, connect::internet_only_words());
+        ui.add_space(4.0);
+        egui::CollapsingHeader::new(RichText::new(t("mcp.more", "More")).size(12.0))
+            .id_salt("mcp.more")
+            .open(more.then_some(true))
+            .show(ui, |ui| {
+                for tile in view.tiles.iter_mut().filter(|tile| tile.company.is_none()) {
+                    tile_part(ui, &ctx, tile, &program, &mut view.said);
+                }
+            });
     }
     if let Some((trouble, words)) = view.said.clone() {
         ui.add_space(2.0);
@@ -218,28 +229,32 @@ pub fn card(ui: &mut egui::Ui, view: &mut View) {
 }
 
 /// The card has just come into view: the program and each app's place are found again (quick:
-/// a few files looked at), and each app found is asked where SoftPresenter stands, on a thread
-/// of its own.
+/// a few files looked at), and each tile's apps found are asked where SoftPresenter stands, on
+/// a thread of its own.
 fn came_into_view(ctx: &egui::Context, view: &mut View) {
     view.program = connect::program();
     view.said = None;
-    // A row with a click under way keeps it, and the answer it will bring.
-    let mut busy: Vec<Row> = view.rows.drain(..).filter(|row| row.job.is_some()).collect();
-    view.absent.clear();
-    for app in App::here() {
-        if let Some(at) = busy.iter().position(|row| row.app == app) {
-            view.rows.push(busy.remove(at));
+    // A tile with a click under way keeps it, and the answer it will bring.
+    let mut busy: Vec<Tile> = view.tiles.drain(..).filter(|tile| tile.job.is_some()).collect();
+    let groups: Vec<(Option<Company>, Vec<App>)> = Company::ALL
+        .into_iter()
+        .map(|company| (Some(company), company.apps()))
+        .chain(App::others().into_iter().map(|app| (None, vec![app])))
+        .collect();
+    for (company, apps) in groups {
+        if let Some(at) = busy.iter().position(|tile| tile.company == company && tile.apps == apps) {
+            view.tiles.push(busy.remove(at));
             continue;
         }
-        let Some(place) = connect::place(app) else {
-            view.absent.push(app);
-            continue;
-        };
-        let job = view.program.clone().map(|program| {
-            let place = place.clone();
-            on_a_thread(ctx, move || Answer::Stands(connect::status(app, &place, &program)))
+        let found: Vec<(App, Place, Option<Stands>)> =
+            apps.iter().filter_map(|app| connect::place(*app).map(|place| (*app, place, None))).collect();
+        let job = view.program.clone().filter(|_| !found.is_empty()).map(|program| {
+            let places: Vec<(App, Place)> = found.iter().map(|(app, place, _)| (*app, place.clone())).collect();
+            on_a_thread(ctx, move || {
+                Answer::Stands(places.iter().map(|(app, place)| connect::status(*app, place, &program)).collect())
+            })
         });
-        view.rows.push(Row { app, place, stands: None, said: None, job });
+        view.tiles.push(Tile { company, apps, found, said: None, job });
     }
 }
 
@@ -254,58 +269,78 @@ fn on_a_thread(ctx: &egui::Context, work: impl FnOnce() -> Answer + Send + 'stat
     receive
 }
 
-/// Takes what a row's thread found, once it is done.
-fn collect(row: &mut Row) {
-    let Some(job) = &row.job else { return };
-    match job.try_recv() {
-        Ok(Answer::Stands(stands)) => {
-            row.stands = Some(stands);
-            row.job = None;
-        }
+/// Takes what a tile's thread found, once it is done.
+fn collect(tile: &mut Tile) {
+    let Some(job) = &tile.job else { return };
+    let stands = match job.try_recv() {
+        Ok(Answer::Stands(stands)) => stands,
         Ok(Answer::Clicked(done, stands)) => {
-            let word = match &done {
-                Ok(done) => done.log_word(),
-                Err(_) => "not changed",
-            };
-            crate::applog::event("mcp", &format!("{}: {word}", row.app.name()));
-            row.said = Some(match done {
-                Ok(done) => connect::done_words(row.app, &done, &row.place, false),
-                Err(why) => (Tone::Trouble, why),
-            });
-            row.stands = Some(stands);
-            row.job = None;
+            for (app, done) in &done {
+                let word = match done {
+                    Ok(done) => done.log_word(),
+                    Err(_) => "not changed",
+                };
+                crate::applog::event("mcp", &format!("{}: {word}", app.name()));
+            }
+            let places: Vec<(App, Place)> = tile.found.iter().map(|(app, place, _)| (*app, place.clone())).collect();
+            tile.said = Some(connect::group_done_words(&done, &places, false));
+            stands
         }
-        Err(std::sync::mpsc::TryRecvError::Empty) => {}
-        Err(std::sync::mpsc::TryRecvError::Disconnected) => row.job = None,
+        Err(std::sync::mpsc::TryRecvError::Empty) => return,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Vec::new(),
+    };
+    for ((_, _, now), stands) in tile.found.iter_mut().zip(stands) {
+        *now = Some(stands);
     }
+    tile.job = None;
 }
 
-/// An app found: its name and the buttons that fit where SoftPresenter stands (Add; Replace when
-/// an entry by its name starts another program; Remove), and a line saying where it stands, or
-/// what the last click did.
-fn row_part(ui: &mut egui::Ui, ctx: &egui::Context, row: &mut Row, program: &Path) {
-    let busy = row.job.is_some();
-    let stands = row.stands.clone();
-    let present = matches!(stands, Some(Stands::Added | Stands::Other { .. }));
-    let other = matches!(stands, Some(Stands::Other { .. }));
-    let add_hint = match connect::add_line(row.app, &row.place, program) {
-        Some(line) => tf("mcp.add.runs", "Runs: {command}", &[("command", &line)]),
-        None => tf(
-            "mcp.add.file",
-            "Adds SoftPresenter to {file}, changing nothing else in it, and keeps the file as it was beside it",
-            &[("file", &row.place.shown())],
-        ),
+/// A tile: its name and the buttons that fit where SoftPresenter stands in its apps found (Add
+/// while one hasn't got it; Replace when an entry by its name starts another program; Remove
+/// once one has it), Copy setup always, and a line saying what was found and where it stands,
+/// or what the last click did.
+fn tile_part(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    tile: &mut Tile,
+    program: &Path,
+    copied: &mut Option<(bool, String)>,
+) {
+    let busy = tile.job.is_some();
+    let known: Option<Vec<(App, Place, Stands)>> = tile
+        .found
+        .iter()
+        .map(|(app, place, stands)| stands.clone().map(|stands| (*app, place.clone(), stands)))
+        .collect();
+    let any = |wanted: fn(&Stands) -> bool| known.as_ref().is_some_and(|known| known.iter().any(|(_, _, s)| wanted(s)));
+    let add = !tile.found.is_empty() && any(|s| matches!(s, Stands::Missing | Stands::Trouble(_)));
+    let replace = any(|s| matches!(s, Stands::Other { .. }));
+    let remove = any(|s| *s == Stands::Added);
+    let name = tile.company.map_or_else(|| tile.apps.first().map_or("", |app| app.name()), Company::name);
+    let setup = match tile.company {
+        Some(company) => company.setup(program),
+        None => tile.apps.iter().map(|app| connect::app_setup(*app, program)).collect::<Vec<_>>().join("\n\n"),
     };
     let mut clicked = None;
-    ui.add_space(6.0);
+    ui.add_space(8.0);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(row.app.name()).strong());
+        ui.label(RichText::new(name).strong());
         ui.add_space(6.0);
         ui.add_enabled_ui(!busy, |ui| {
-            if !present && stands.is_some() && ui.button(t("mcp.add", "Add")).on_hover_text(add_hint).clicked() {
+            let names: Vec<&str> = tile.found.iter().map(|(app, _, _)| app.name()).collect();
+            if add
+                && ui
+                    .button(t("mcp.add", "Add"))
+                    .on_hover_text(tf(
+                        "mcp.add.hint",
+                        "Adds SoftPresenter to {apps}, changing nothing else in their settings",
+                        &[("apps", &names.join(", "))],
+                    ))
+                    .clicked()
+            {
                 clicked = Some(Click::Add);
             }
-            if other
+            if replace
                 && ui
                     .button(t("mcp.replace", "Replace"))
                     .on_hover_text(t("mcp.replace.hint", "Points the entry at this copy of SoftPresenter"))
@@ -313,93 +348,63 @@ fn row_part(ui: &mut egui::Ui, ctx: &egui::Context, row: &mut Row, program: &Pat
             {
                 clicked = Some(Click::Replace);
             }
-            if present
+            if remove
                 && ui
-                    .add(
-                        egui::Button::new(RichText::new(t("mcp.remove", "Remove")).color(crate::studio::TEXT_DIM))
-                            .frame(false),
-                    )
+                    .button(t("mcp.remove", "Remove"))
                     .on_hover_text(t("mcp.remove.hint", "Takes SoftPresenter out again, and nothing else"))
                     .clicked()
             {
                 clicked = Some(Click::Remove);
             }
         });
+        if ui
+            .add(
+                egui::Button::new(RichText::new(t("mcp.copy_setup", "Copy setup")).color(crate::studio::TEXT_DIM))
+                    .frame(false),
+            )
+            .on_hover_text(t(
+                "mcp.copy_setup.hint",
+                "Copies the settings to add by hand, with this computer\u{2019}s path to sp",
+            ))
+            .clicked()
+        {
+            ui.ctx().copy_text(setup);
+            *copied = Some((false, t("mcp.copied", "Copied.").to_owned()));
+        }
     });
     if let Some(click) = clicked {
-        let (app, place, program) = (row.app, row.place.clone(), program.to_owned());
-        row.said = None;
-        row.job = Some(on_a_thread(ctx, move || {
+        let places: Vec<(App, Place)> = tile.found.iter().map(|(app, place, _)| (*app, place.clone())).collect();
+        let program = program.to_owned();
+        tile.said = None;
+        tile.job = Some(on_a_thread(ctx, move || {
             let done = match click {
-                Click::Add => connect::add(app, &place, &program, false),
-                Click::Replace => connect::add(app, &place, &program, true),
-                Click::Remove => connect::remove(app, &place, &program),
+                Click::Add => connect::add_all(&places, &program, false),
+                Click::Replace => connect::add_all(&places, &program, true),
+                Click::Remove => connect::remove_ours(&places, &program),
             };
-            Answer::Clicked(done, connect::status(app, &place, &program))
+            let stands = places.iter().map(|(app, place)| connect::status(*app, place, &program)).collect();
+            Answer::Clicked(done, stands)
         }));
     }
-    let said = if row.job.is_some() {
+    let said = if tile.job.is_some() {
         Some((Tone::Plain, t("mcp.looking", "Looking\u{2026}").to_owned()))
+    } else if tile.found.is_empty() {
+        Some((Tone::Plain, connect::not_found_words().to_owned()))
     } else {
-        row.said
-            .clone()
-            .or_else(|| stands.as_ref().map(|stands| connect::stands_words(row.app, stands, &row.place, false)))
+        tile.said.clone().or_else(|| known.as_ref().map(|known| connect::group_words(known, false)))
     };
     if let Some((tone, words)) = said {
         line(ui, tone, &words);
     }
-}
-
-/// The apps made for this system that aren't on it, and those that only reach the internet, in
-/// one faint line each.
-fn others(ui: &mut egui::Ui, view: &View) {
-    ui.add_space(8.0);
-    if !view.absent.is_empty() {
-        let names: Vec<&str> = view.absent.iter().map(|app| app.name()).collect();
-        faint(ui, &tf("mcp.absent", "Not found on this computer: {apps}.", &[("apps", &names.join(", "))]));
-        if view.absent.contains(&App::ClaudeCode) {
-            ui.horizontal(|ui| {
-                ui.add_space(14.0);
-                ui.hyperlink_to(
-                    RichText::new(t("mcp.get_claude_code", "Get Claude Code")).size(11.5),
-                    connect::GET_CLAUDE_CODE,
-                );
-            });
-        }
-    }
-    faint(ui, connect::internet_only_words());
-}
-
-/// The line to type and the settings to paste, with Copy: open by itself when no app is found
-/// to add SoftPresenter to with a click.
-fn by_hand(ui: &mut egui::Ui, view: &mut View, program: &Path) {
-    ui.add_space(6.0);
-    egui::CollapsingHeader::new(RichText::new(t("mcp.by_hand", "Add it yourself")).size(12.0))
-        .id_salt("mcp.by_hand")
-        .default_open(view.rows.is_empty())
-        .show(ui, |ui| {
-            let code = claude_code_line(program, cfg!(windows));
-            snippet(ui, view, t("mcp.claude_code", "Claude Code: type this in a terminal"), &code);
-            let config = claude_desktop_config(program);
-            snippet(
-                ui,
-                view,
-                t(
-                    "mcp.json_config",
-                    "Claude Desktop, Cursor, Antigravity and most others: add this to the app\u{2019}s MCP settings file (mcpServers), then open the app again",
-                ),
-                &config,
-            );
-            snippet(
-                ui,
-                view,
-                t(
-                    "mcp.toml_config",
-                    "ChatGPT and Codex (~/.codex/config.toml), Grok Build (~/.grok/config.toml): add this, then open the app again",
-                ),
-                &toml_config(program),
+    if tile.company == Some(Company::Claude) && !tile.found.iter().any(|(app, _, _)| *app == App::ClaudeCode) {
+        ui.horizontal(|ui| {
+            ui.add_space(14.0);
+            ui.hyperlink_to(
+                RichText::new(t("mcp.get_claude_code", "Get Claude Code")).size(11.5),
+                connect::GET_CLAUDE_CODE,
             );
         });
+    }
 }
 
 /// A line saying where something stands, or what a click did, beside a dot of its colour.
@@ -444,23 +449,6 @@ fn detail(ui: &mut egui::Ui, words: &str) {
         });
     });
     ui.add_space(4.0);
-}
-
-/// A line to copy: what it is for, the words in a fixed-width face, and Copy.
-fn snippet(ui: &mut egui::Ui, view: &mut View, label: &str, words: &str) {
-    ui.add_space(6.0);
-    ui.label(RichText::new(label).size(12.0).color(crate::studio::TEXT_DIM));
-    ui.horizontal_top(|ui| {
-        let room = (ui.available_width() - 80.0).clamp(160.0, 560.0);
-        ui.scope(|ui| {
-            ui.set_max_width(room);
-            ui.add(egui::Label::new(RichText::new(words).monospace().size(11.5)).wrap());
-        });
-        if ui.button(t("mcp.copy", "Copy")).clicked() {
-            ui.ctx().copy_text(words.to_owned());
-            view.said = Some((false, t("mcp.copied", "Copied.").to_owned()));
-        }
-    });
 }
 
 #[cfg(test)]

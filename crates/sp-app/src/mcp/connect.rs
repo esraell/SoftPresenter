@@ -144,34 +144,84 @@ impl App {
             App::Codex => "ChatGPT / Codex",
             App::Cursor => "Cursor",
             App::Copilot => "VS Code / GitHub Copilot",
-            App::Antigravity => "Antigravity (Gemini)",
+            App::Antigravity => "Antigravity",
             App::Grok => "Grok Build",
         }
     }
 
-    /// The word `sp mcp connect` takes for it; [`App::from_word`] takes a few more.
+    /// The word `sp mcp connect` takes for it alone (a company's word takes all its apps);
+    /// [`App::from_word`] takes a few more.
     pub fn word(self) -> &'static str {
         match self {
             App::ClaudeDesktop => "desktop",
             App::ClaudeCode => "code",
-            App::Codex => "chatgpt",
+            App::Codex => "codex",
             App::Cursor => "cursor",
-            App::Copilot => "copilot",
+            App::Copilot => "vscode",
             App::Antigravity => "antigravity",
-            App::Grok => "grok",
+            App::Grok => "grok-build",
         }
     }
 
     pub fn from_word(word: &str) -> Option<App> {
         match word.to_lowercase().as_str() {
             "desktop" | "claude-desktop" => Some(App::ClaudeDesktop),
-            "code" | "claude-code" | "claude" => Some(App::ClaudeCode),
-            "chatgpt" | "codex" => Some(App::Codex),
+            "code" | "claude-code" => Some(App::ClaudeCode),
+            "codex" => Some(App::Codex),
             "cursor" => Some(App::Cursor),
-            "copilot" | "vscode" | "vs-code" => Some(App::Copilot),
-            "antigravity" | "gemini" => Some(App::Antigravity),
-            "grok" => Some(App::Grok),
+            "vscode" | "vs-code" | "copilot" => Some(App::Copilot),
+            "antigravity" => Some(App::Antigravity),
+            "grok-build" => Some(App::Grok),
             _ => None,
+        }
+    }
+
+    /// The company whose tile the app is under; `None` for the other apps (Cursor, VS Code).
+    pub fn company(self) -> Option<Company> {
+        match self {
+            App::ClaudeDesktop | App::ClaudeCode => Some(Company::Claude),
+            App::Codex => Some(Company::ChatGpt),
+            App::Antigravity => Some(Company::Gemini),
+            App::Grok => Some(Company::Grok),
+            App::Cursor | App::Copilot => None,
+        }
+    }
+
+    /// The other apps, under More, made for this system.
+    pub fn others() -> Vec<App> {
+        App::here().into_iter().filter(|app| app.company().is_none()).collect()
+    }
+
+    /// What Copy setup copies for the app: where it goes, and what.
+    fn setup(self, program: &Path) -> String {
+        let json = super::pane::claude_desktop_config(program);
+        let toml = super::pane::toml_config(program);
+        let file = |file: &str| tf("mcp.setup.file", "In {file}:", &[("file", file)]);
+        match self {
+            App::ClaudeDesktop => format!("{}\n{json}", file("claude_desktop_config.json")),
+            App::ClaudeCode => format!(
+                "{}\n{}",
+                t("mcp.setup.terminal", "In a terminal:"),
+                super::pane::claude_code_line(program, cfg!(windows))
+            ),
+            App::Codex => format!(
+                "{}\n{toml}",
+                tf(
+                    "mcp.setup.codex",
+                    "In {file}, or in the ChatGPT app\u{2019}s Settings \u{203a} MCP servers:",
+                    &[("file", "~/.codex/config.toml")]
+                )
+            ),
+            App::Grok => format!("{}\n{toml}", file("~/.grok/config.toml")),
+            App::Antigravity => format!("{}\n{json}", file("~/.gemini/config/mcp_config.json")),
+            App::Cursor => format!("{}\n{json}", file("~/.cursor/mcp.json")),
+            App::Copilot => {
+                let entry = entry_text(&self.fields(&program.to_string_lossy()), Some("    "), "  ", "\n");
+                format!(
+                    "{}\n{{\n  \"mcpServers\": {{\n    \"softpresenter\": {entry}\n  }}\n}}",
+                    file("~/.copilot/mcp-config.json")
+                )
+            }
         }
     }
 
@@ -199,6 +249,172 @@ impl App {
         }
         fields
     }
+}
+
+/// A company whose assistant apps the card shows together, as one tile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Company {
+    Claude,
+    ChatGpt,
+    Gemini,
+    Grok,
+}
+
+impl Company {
+    pub const ALL: [Company; 4] = [Company::Claude, Company::ChatGpt, Company::Gemini, Company::Grok];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Company::Claude => "Claude",
+            Company::ChatGpt => "ChatGPT",
+            Company::Gemini => "Gemini",
+            Company::Grok => "Grok",
+        }
+    }
+
+    /// The word `sp mcp connect` takes for all its apps.
+    pub fn word(self) -> &'static str {
+        match self {
+            Company::Claude => "claude",
+            Company::ChatGpt => "chatgpt",
+            Company::Gemini => "gemini",
+            Company::Grok => "grok",
+        }
+    }
+
+    pub fn from_word(word: &str) -> Option<Company> {
+        Company::ALL.into_iter().find(|company| company.word().eq_ignore_ascii_case(word))
+    }
+
+    /// Its apps SoftPresenter can add itself to, made for this system: Claude Desktop and
+    /// Claude Code; Codex (which the ChatGPT app shares); Antigravity (which took the Gemini
+    /// command line's place); Grok Build.
+    pub fn apps(self) -> Vec<App> {
+        App::here().into_iter().filter(|app| app.company() == Some(self)).collect()
+    }
+
+    /// What Copy setup copies: each of its apps' settings, with this program's path filled in.
+    pub fn setup(self, program: &Path) -> String {
+        self.apps().into_iter().map(|app| app.setup(program)).collect::<Vec<_>>().join("\n\n")
+    }
+}
+
+/// What Copy setup copies for one app.
+pub fn app_setup(app: App, program: &Path) -> String {
+    app.setup(program)
+}
+
+/// Names as one list: "Claude Desktop and Claude Code".
+fn and_list(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [rest @ .., last] => tf("mcp.and", "{first} and {last}", &[("first", &rest.join(", ")), ("last", last)]),
+    }
+}
+
+/// Where SoftPresenter stands in a tile's apps found here, in one line (`cli`: for `sp`).
+pub fn group_words(found: &[(App, Place, Stands)], cli: bool) -> (Tone, String) {
+    if found.is_empty() {
+        return (Tone::Plain, not_found_words().to_owned());
+    }
+    if let Some((app, place, stands)) =
+        found.iter().find(|(_, _, stands)| matches!(stands, Stands::Trouble(_) | Stands::Other { .. }))
+    {
+        let (tone, words) = stands_words(*app, stands, place, cli);
+        return if matches!(stands, Stands::Trouble(_)) && found.len() > 1 {
+            (tone, format!("{}: {words}", app.name()))
+        } else {
+            (tone, words)
+        };
+    }
+    let names = |added: bool| -> Vec<&str> {
+        found
+            .iter()
+            .filter(|(_, _, stands)| (*stands == Stands::Added) == added)
+            .map(|(app, _, _)| app.name())
+            .collect()
+    };
+    let (added, missing) = (names(true), names(false));
+    match (added.is_empty(), missing.is_empty()) {
+        (false, true) => (Tone::Good, tf("mcp.group.added", "Added to {apps}.", &[("apps", &and_list(&added))])),
+        (false, false) => (
+            Tone::Plain,
+            tf(
+                "mcp.group.partly",
+                "Added to {added}; not yet to {missing}.",
+                &[("added", &and_list(&added)), ("missing", &and_list(&missing))],
+            ),
+        ),
+        _ => (Tone::Plain, tf("mcp.group.found", "Found: {apps}. Not added yet.", &[("apps", &and_list(&missing))])),
+    }
+}
+
+/// Adds SoftPresenter to each app found (with `replace`, pointing entries that start another
+/// program at this one): what each did.
+pub fn add_all(found: &[(App, Place)], program: &Path, replace: bool) -> Vec<(App, Result<Done, String>)> {
+    found.iter().map(|(app, place)| (*app, add(*app, place, program, replace))).collect()
+}
+
+/// Takes SoftPresenter's own entries (those starting this program) out of each app found; an
+/// entry starting another program is left for that app: what each did.
+pub fn remove_ours(found: &[(App, Place)], program: &Path) -> Vec<(App, Result<Done, String>)> {
+    found
+        .iter()
+        .map(|(app, place)| {
+            let done = match status(*app, place, program) {
+                Stands::Added => remove(*app, place, program),
+                _ => Ok(Done::NotThere),
+            };
+            (*app, done)
+        })
+        .collect()
+}
+
+/// What a click on a tile (or a command for a company) did to its apps, in one line.
+pub fn group_done_words(done: &[(App, Result<Done, String>)], places: &[(App, Place)], cli: bool) -> (Tone, String) {
+    let place = |app: App| places.iter().find(|(have, _)| *have == app).map(|(_, place)| place.clone());
+    if let Some((app, Err(why))) = done.iter().find(|(_, done)| done.is_err()) {
+        return (Tone::Trouble, if done.len() > 1 { format!("{}: {why}", app.name()) } else { why.clone() });
+    }
+    if let Some((app, Ok(taken @ Done::Taken { .. }))) =
+        done.iter().find(|(_, done)| matches!(done, Ok(Done::Taken { .. })))
+    {
+        return done_words(*app, taken, &place(*app).unwrap_or(Place::File(PathBuf::new())), cli);
+    }
+    let named = |kinds: &[Done]| -> Vec<&str> {
+        done.iter()
+            .filter(|(_, done)| done.as_ref().is_ok_and(|done| kinds.contains(done)))
+            .map(|(app, _)| app.name())
+            .collect()
+    };
+    let changed = named(&[Done::Added, Done::Replaced]);
+    let removed = named(&[Done::Removed]);
+    let name = |names: &[&str]| [("app", and_list(names))];
+    if !changed.is_empty() {
+        let args = name(&changed);
+        return (Tone::Good, tf("mcp.done.added", "Added. Quit and reopen {app} to use it.", &[("app", &args[0].1)]));
+    }
+    if !removed.is_empty() {
+        let args = name(&removed);
+        return (
+            Tone::Plain,
+            tf("mcp.done.removed", "Removed. Quit and reopen {app} for it to go.", &[("app", &args[0].1)]),
+        );
+    }
+    let already = named(&[Done::Already]);
+    if !already.is_empty() {
+        let args = name(&already);
+        return (
+            Tone::Good,
+            tf(
+                "mcp.done.already",
+                "It was there already. If {app} doesn\u{2019}t show SoftPresenter, quit and reopen it.",
+                &[("app", &args[0].1)],
+            ),
+        );
+    }
+    (Tone::Plain, t("mcp.done.nothing", "There was nothing to remove.").to_owned())
 }
 
 /// Which system's places to use, as a value so that each system's rules can be tried on any.
@@ -1234,18 +1450,6 @@ fn remove_with(app: App, tool: &Path, scope: &str) -> Result<(), String> {
     if said.ok { Ok(()) } else { Err(said_words(app, &said)) }
 }
 
-/// What Add runs, as the button's hint shows it (`None` for an app whose file SoftPresenter
-/// changes itself).
-pub fn add_line(app: App, place: &Place, program: &Path) -> Option<String> {
-    let Place::Program { program: tool, .. } = place else { return None };
-    let command = program.to_string_lossy();
-    let words: Vec<String> = add_words(app, &command)
-        .into_iter()
-        .map(|word| super::pane::shell_word(Path::new(word), cfg!(windows)))
-        .collect();
-    Some(format!("{} {}", super::pane::shell_word(tool, cfg!(windows)), words.join(" ")))
-}
-
 // ---------------------------------------------------------------------------------------------
 // Words.
 
@@ -1314,9 +1518,10 @@ pub fn internet_only_words() -> &'static str {
 // ---------------------------------------------------------------------------------------------
 // `sp mcp status|connect|disconnect`: answered by this program, in English, without the app.
 
-const USAGE: &str = "Use: sp mcp status | sp mcp connect APP [--replace] | sp mcp disconnect APP\n\
-     APP: desktop (Claude Desktop), code (Claude Code), chatgpt (ChatGPT / Codex), cursor,\n\
-     copilot (VS Code / GitHub Copilot), antigravity (Gemini), grok (Grok Build)";
+const USAGE: &str = "Use: sp mcp status [--json] | sp mcp connect WHICH [--replace] | sp mcp disconnect WHICH\n\
+     WHICH: claude (Claude Desktop and Claude Code), chatgpt (Codex, which the ChatGPT app shares),\n\
+     gemini (Antigravity), grok (Grok Build), cursor, vscode (VS Code / GitHub Copilot),\n\
+     or one app alone: desktop, code, codex, antigravity, grok-build";
 
 /// Carries out `sp mcp …` (the words after `mcp`; `mcp` alone is the server, and any other word
 /// after it a mistake), printing the answer.
@@ -1334,6 +1539,15 @@ pub fn run_cli(args: &[String]) -> ExitCode {
     }
 }
 
+/// The apps a word names: a company's (those made for this system), or one app.
+fn apps_named(word: &str) -> Option<(String, Vec<App>)> {
+    match (Company::from_word(word), App::from_word(word)) {
+        (Some(company), _) => Some((company.name().to_owned(), company.apps())),
+        (None, Some(app)) => Some((app.name().to_owned(), vec![app])),
+        _ => None,
+    }
+}
+
 fn answer(args: &[String]) -> Result<String, (u8, String)> {
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     let mistake = |what: String| -> Result<String, (u8, String)> { Err((2, format!("{what}\n{USAGE}"))) };
@@ -1341,62 +1555,98 @@ fn answer(args: &[String]) -> Result<String, (u8, String)> {
     let (verb, rest) = words.split_first().map_or(("", &[][..]), |(verb, rest)| (*verb, rest));
     match verb {
         "status" if rest.is_empty() => Ok(status_text(&program)),
+        "status" if rest == ["--json"] => Ok(serde_json::to_string_pretty(&status_json(&program)).unwrap_or_default()),
         "connect" | "disconnect" => {
             let replace = rest.contains(&"--replace");
             let which: Vec<&str> = rest.iter().copied().filter(|word| *word != "--replace").collect();
-            let Some(app) = (if let [word] = which.as_slice() { App::from_word(word) } else { None }) else {
-                return mistake(format!("sp mcp {verb}: which app?"));
+            let Some((name, apps)) = (if let [word] = which.as_slice() { apps_named(word) } else { None }) else {
+                return mistake(format!("sp mcp {verb}: which assistant?"));
             };
             if replace && verb == "disconnect" {
                 return mistake("sp mcp disconnect takes no --replace.".to_owned());
             }
-            let place = place(app).ok_or_else(|| (1, format!("{}: {}", app.name(), not_reached(app))))?;
-            // The settings file, and whether it was there before (so a copy of it is kept).
-            let file = match &place {
-                Place::File(file) => Some(file.clone()),
-                Place::Program { settings, .. } => settings.clone(),
-            };
-            let existed = file.as_deref().is_some_and(Path::exists);
-            let done =
-                if verb == "connect" { add(app, &place, &program, replace) } else { remove(app, &place, &program) };
-            match done {
-                Ok(done) => {
-                    let (tone, mut words) = done_words(app, &done, &place, true);
-                    if let (Done::Added | Done::Replaced | Done::Removed, Some(file)) = (&done, file) {
-                        let what = if matches!(place, Place::File(_)) { "Changed" } else { "Its settings are in" };
-                        words.push_str(&if existed {
-                            format!(
-                                "\n{what} {}; the file as it was is beside it, as {}.",
-                                shown(&file),
-                                backup_of(&file).file_name().unwrap_or_default().to_string_lossy()
-                            )
-                        } else {
-                            format!("\n{what} {} (new).", shown(&file))
-                        });
-                    }
-                    if tone == Tone::Care { Err((1, words)) } else { Ok(words) }
-                }
-                Err(why) => Err((1, why)),
+            let found: Vec<(App, Place)> =
+                apps.iter().filter_map(|app| place(*app).map(|place| (*app, place))).collect();
+            if found.is_empty() {
+                return Err((1, format!("{name}: {}", not_reached(&apps))));
             }
+            // Each settings file, and whether it was there before (so a copy of it is kept).
+            let files: Vec<Option<(PathBuf, bool, bool)>> = found
+                .iter()
+                .map(|(_, place)| match place {
+                    Place::File(file) => Some((file.clone(), file.exists(), true)),
+                    Place::Program { settings, .. } => {
+                        settings.clone().map(|file| (file.clone(), file.exists(), false))
+                    }
+                })
+                .collect();
+            let done =
+                if verb == "connect" { add_all(&found, &program, replace) } else { remove_ours(&found, &program) };
+            let (tone, mut said) = group_done_words(&done, &found, true);
+            let changed: Vec<App> = done
+                .iter()
+                .filter(|(_, done)| matches!(done, Ok(Done::Added | Done::Replaced | Done::Removed)))
+                .map(|(app, _)| *app)
+                .collect();
+            for ((app, _), file) in found.iter().zip(&files).filter(|((app, _), _)| changed.contains(app)) {
+                let Some((file, existed, ours)) = file else { continue };
+                let what = if *ours { "Changed" } else { "Its settings are in" };
+                said.push_str(&if *existed {
+                    format!(
+                        "\n{}: {what} {}; the file as it was is beside it, as {}.",
+                        app.name(),
+                        shown(file),
+                        backup_of(file).file_name().unwrap_or_default().to_string_lossy()
+                    )
+                } else {
+                    format!("\n{}: {what} {} (new).", app.name(), shown(file))
+                });
+            }
+            if matches!(tone, Tone::Care | Tone::Trouble) { Err((1, said)) } else { Ok(said) }
         }
         "" => mistake("sp mcp: which command?".to_owned()),
         other => mistake(format!("sp mcp: no command called '{other}'.")),
     }
 }
 
-/// Why `sp` can't reach an app here.
-fn not_reached(app: App) -> String {
+/// Why `sp` can't reach these apps here.
+fn not_reached(apps: &[App]) -> String {
     if test_copy() && var_path("SOFTPRESENTER_ASSISTANTS_HOME").is_none() {
         "a test copy looks for assistants only under SOFTPRESENTER_ASSISTANTS_HOME.".to_owned()
-    } else if !app.made_for(System::here()) {
+    } else if apps.is_empty() {
         "not made for this system.".to_owned()
     } else {
         not_found_words().to_lowercase()
     }
 }
 
-/// `sp mcp status`: the two switches, where SoftPresenter stands in each app, and the program
-/// they start.
+/// Each tile (the companies, then the other apps), with its apps found here and where
+/// SoftPresenter stands in each.
+/// A tile for `sp mcp status`: its name, its company (none for an other app), its apps made for
+/// this system, and those found here with where SoftPresenter stands in each.
+type StatusTile = (String, Option<Company>, Vec<App>, Vec<(App, Place, Stands)>);
+
+fn tiles(program: &Path) -> Vec<StatusTile> {
+    let found = |apps: &[App]| -> Vec<(App, Place, Stands)> {
+        apps.iter()
+            .filter_map(|app| place(*app).map(|place| (*app, place.clone(), status(*app, &place, program))))
+            .collect()
+    };
+    let mut tiles: Vec<_> = Company::ALL
+        .into_iter()
+        .map(|company| {
+            let apps = company.apps();
+            (company.name().to_owned(), Some(company), apps.clone(), found(&apps))
+        })
+        .collect();
+    for app in App::others() {
+        tiles.push((app.name().to_owned(), None, vec![app], found(&[app])));
+    }
+    tiles
+}
+
+/// `sp mcp status`: the two switches, where SoftPresenter stands in each tile's apps, and the
+/// program they start.
 fn status_text(program: &Path) -> String {
     let switches = super::Switches::load();
     let mut lines = vec![if switches.allowed {
@@ -1405,16 +1655,86 @@ fn status_text(program: &Path) -> String {
         "AI assistants: off. An assistant can do nothing until Settings \u{203a} Integrations \u{203a} AI assistants (MCP) lets them in.".to_owned()
     }];
     lines.push(format!("Changing the screens: {}", if switches.screens { "on" } else { "off" }));
-    for app in App::here() {
-        let said = match place(app) {
-            Some(place) => stands_words(app, &status(app, &place, program), &place, true).1,
-            None => not_reached(app),
-        };
-        lines.push(format!("{} ({}): {said}", app.name(), app.word()));
+    for (name, company, apps, found) in tiles(program) {
+        let said = if found.is_empty() { not_reached(&apps) } else { group_words(&found, true).1 };
+        let word = company.map_or_else(|| apps.first().map_or("", |app| app.word()), Company::word);
+        lines.push(format!("{name} ({word}): {said}"));
+        if found.len() > 1 {
+            for (app, place, stands) in &found {
+                lines.push(format!("  {} ({}): {}", app.name(), app.word(), stands_words(*app, stands, place, true).1));
+            }
+        }
     }
     lines.push(internet_only_words().to_owned());
     lines.push(format!("Assistants start: {} mcp", shown(program)));
     lines.join("\n")
+}
+
+/// The word for where SoftPresenter stands, in JSON.
+fn stands_word(stands: &Stands) -> &'static str {
+    match stands {
+        Stands::Missing => "not_added",
+        Stands::Added => "added",
+        Stands::Other { .. } => "other_command",
+        Stands::Trouble(_) => "trouble",
+    }
+}
+
+/// `sp mcp status --json`: the same, for a script (or another window) to read. Each tile has
+/// its apps, each app whether it is found here, where SoftPresenter stands and why; a tile's
+/// state is `not_found`, `not_added`, `added` (all found), `partly`, `other_command` or
+/// `trouble`.
+fn status_json(program: &Path) -> Value {
+    let switches = super::Switches::load();
+    let tiles: Vec<Value> = tiles(program)
+        .into_iter()
+        .map(|(name, company, apps, found)| {
+            let state = if found.is_empty() {
+                "not_found"
+            } else if found.iter().any(|(_, _, stands)| matches!(stands, Stands::Trouble(_))) {
+                "trouble"
+            } else if found.iter().any(|(_, _, stands)| matches!(stands, Stands::Other { .. })) {
+                "other_command"
+            } else if found.iter().all(|(_, _, stands)| *stands == Stands::Added) {
+                "added"
+            } else if found.iter().any(|(_, _, stands)| *stands == Stands::Added) {
+                "partly"
+            } else {
+                "not_added"
+            };
+            let listed: Vec<Value> = apps
+                .iter()
+                .map(|app| match found.iter().find(|(have, _, _)| have == app) {
+                    Some((_, place, stands)) => json!({
+                        "id": app.word(),
+                        "name": app.name(),
+                        "found": true,
+                        "place": place.shown(),
+                        "state": stands_word(stands),
+                        "command": match stands { Stands::Other { command } => Value::from(command.clone()), _ => Value::Null },
+                        "said": stands_words(*app, stands, place, true).1,
+                    }),
+                    None => json!({"id": app.word(), "name": app.name(), "found": false, "state": "not_found"}),
+                })
+                .collect();
+            let word = company.map_or_else(|| apps.first().map_or("", |app| app.word()), Company::word);
+            json!({
+                "id": word,
+                "name": name,
+                "company": company.is_some(),
+                "state": state,
+                "said": if found.is_empty() { not_reached(&apps) } else { group_words(&found, true).1 },
+                "apps": listed,
+            })
+        })
+        .collect();
+    json!({
+        "allowed": switches.allowed,
+        "screens": switches.screens,
+        "program": program.to_string_lossy(),
+        "tiles": tiles,
+        "internet_only": internet_only_words(),
+    })
 }
 
 #[cfg(test)]
@@ -1430,6 +1750,12 @@ mod tests {
     }
 
     const SP: &str = "/home/someone/.local/bin/sp";
+
+    /// Runs a test's checks with the window's words in English (another test may switch the
+    /// language while this one runs).
+    fn english(checks: fn()) {
+        crate::i18n::with_language(crate::i18n::Language::English, checks);
+    }
 
     fn read(file: &Path) -> String {
         std::fs::read_to_string(file).expect("the file")
@@ -1605,6 +1931,10 @@ mod tests {
 
     #[test]
     fn a_file_that_isnt_valid_json_is_left_untouched() {
+        english(a_file_that_isnt_valid_json_is_left_untouched_in_english);
+    }
+
+    fn a_file_that_isnt_valid_json_is_left_untouched_in_english() {
         let base = scratch("invalid");
         let file = base.join("mcp.json");
         for text in [
@@ -1635,6 +1965,10 @@ mod tests {
 
     #[test]
     fn an_entry_starting_another_program_is_asked_about_first() {
+        english(an_entry_starting_another_program_is_asked_about_first_in_english);
+    }
+
+    fn an_entry_starting_another_program_is_asked_about_first_in_english() {
         let base = scratch("other");
         let file = base.join("claude_desktop_config.json");
         let before =
@@ -1663,6 +1997,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_link_is_never_written_through() {
+        english(a_link_is_never_written_through_in_english);
+    }
+
+    #[cfg(unix)]
+    fn a_link_is_never_written_through_in_english() {
         let base = scratch("link");
         let real = base.join("dotfiles.json");
         std::fs::write(&real, "{}").unwrap();
@@ -1778,6 +2117,10 @@ mod tests {
     /// The apps' answers, as Claude Code 2.1, Codex 0.169 and Grok Build 1.0 wrote them.
     #[test]
     fn each_apps_answers_are_read_and_anything_else_is_trouble() {
+        english(each_apps_answers_are_read_and_anything_else_is_trouble_in_english);
+    }
+
+    fn each_apps_answers_are_read_and_anything_else_is_trouble_in_english() {
         let said = |ok: bool, words: &str| Said { ok, out: words.to_owned(), words: words.to_owned() };
         let claude = |scope: &str, command: &str| {
             said(
@@ -1878,6 +2221,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn each_apps_command_is_asked_with_each_word_apart() {
+        english(each_apps_command_is_asked_with_each_word_apart_in_english);
+    }
+
+    #[cfg(unix)]
+    fn each_apps_command_is_asked_with_each_word_apart_in_english() {
         let sp = "/opt/it's here/sp";
         for (app, add, remove, get) in [
             (
@@ -1942,6 +2290,10 @@ mod tests {
 
     #[test]
     fn the_words_name_the_app_and_are_said_in_spanish_too() {
+        english(the_words_name_the_app_and_are_said_in_spanish_too_in_english);
+    }
+
+    fn the_words_name_the_app_and_are_said_in_spanish_too_in_english() {
         let place = Place::File(PathBuf::from("/x/mcp.json"));
         let (_, words) = crate::i18n::with_language(crate::i18n::Language::Spanish, || {
             done_words(App::Cursor, &Done::Added, &place, false)
@@ -1950,11 +2302,87 @@ mod tests {
         assert!(words.contains("Cursor"), "{words}");
         let (tone, words) = done_words(App::Grok, &Done::Taken { command: "/Old/sp".to_owned() }, &place, true);
         assert_eq!(tone, Tone::Care);
-        assert!(words.ends_with("sp mcp connect grok --replace points it at this copy."), "{words}");
+        assert!(words.ends_with("sp mcp connect grok-build --replace points it at this copy."), "{words}");
         for app in App::ALL {
             assert_eq!(App::from_word(app.word()), Some(app));
         }
-        assert_eq!(App::from_word("ChatGPT"), Some(App::Codex));
-        assert_eq!(App::from_word("gemini"), Some(App::Antigravity));
+        for company in Company::ALL {
+            assert_eq!(Company::from_word(company.word()), Some(company));
+        }
+        assert_eq!(Company::from_word("ChatGPT"), Some(Company::ChatGpt));
+        assert_eq!(App::from_word("gemini"), None);
+    }
+
+    #[test]
+    fn a_companys_tile_covers_its_apps_and_says_how_they_stand_together() {
+        english(tile_words_in_english);
+    }
+
+    fn tile_words_in_english() {
+        assert_eq!(Company::Claude.apps().last(), Some(&App::ClaudeCode));
+        assert_eq!(Company::ChatGpt.apps(), [App::Codex]);
+        assert_eq!(Company::Gemini.apps(), [App::Antigravity]);
+        assert_eq!(Company::Grok.apps(), [App::Grok]);
+        assert!(App::others().contains(&App::Cursor) && App::others().contains(&App::Copilot));
+        let file = |name: &str| Place::File(PathBuf::from(format!("/x/{name}")));
+        let tool = Place::Program { program: PathBuf::from("/x/claude"), settings: None };
+        let desktop = (App::ClaudeDesktop, file("claude_desktop_config.json"));
+        let code = (App::ClaudeCode, tool);
+        let with = |pairs: &[((App, Place), Stands)]| -> Vec<(App, Place, Stands)> {
+            pairs.iter().map(|((app, place), stands)| (*app, place.clone(), stands.clone())).collect()
+        };
+        assert_eq!(group_words(&[], false), (Tone::Plain, "Not found on this computer.".to_owned()));
+        assert_eq!(
+            group_words(&with(&[(desktop.clone(), Stands::Missing), (code.clone(), Stands::Missing)]), false),
+            (Tone::Plain, "Found: Claude Desktop and Claude Code. Not added yet.".to_owned())
+        );
+        assert_eq!(
+            group_words(&with(&[(desktop.clone(), Stands::Added), (code.clone(), Stands::Missing)]), false),
+            (Tone::Plain, "Added to Claude Desktop; not yet to Claude Code.".to_owned())
+        );
+        assert_eq!(
+            group_words(&with(&[(desktop.clone(), Stands::Added), (code.clone(), Stands::Added)]), false),
+            (Tone::Good, "Added to Claude Desktop and Claude Code.".to_owned())
+        );
+        let other = group_words(
+            &with(&[(desktop.clone(), Stands::Added), (code.clone(), Stands::Other { command: "/o".to_owned() })]),
+            false,
+        );
+        assert_eq!(other.0, Tone::Care);
+        assert!(other.1.starts_with("Claude Code has a \u{201c}softpresenter\u{201d} entry"), "{}", other.1);
+        // What a click did to them, in one line.
+        let places = [desktop.clone(), code.clone()];
+        assert_eq!(
+            group_done_words(
+                &[(App::ClaudeDesktop, Ok(Done::Added)), (App::ClaudeCode, Ok(Done::Added))],
+                &places,
+                false
+            )
+            .1,
+            "Added. Quit and reopen Claude Desktop and Claude Code to use it."
+        );
+        assert_eq!(
+            group_done_words(
+                &[(App::ClaudeDesktop, Ok(Done::Removed)), (App::ClaudeCode, Ok(Done::NotThere))],
+                &places,
+                false
+            )
+            .1,
+            "Removed. Quit and reopen Claude Desktop for it to go."
+        );
+        assert_eq!(
+            group_done_words(
+                &[(App::ClaudeDesktop, Ok(Done::Added)), (App::ClaudeCode, Err("No.".to_owned()))],
+                &places,
+                false
+            ),
+            (Tone::Trouble, "Claude Code: No.".to_owned())
+        );
+        // Copy setup: each app's settings, with the path filled in.
+        let setup = Company::Claude.setup(Path::new(SP));
+        assert!(setup.contains(&format!("claude mcp add --scope user softpresenter -- {SP} mcp")), "{setup}");
+        assert!(setup.contains("\"mcpServers\"") || cfg!(target_os = "linux"), "{setup}");
+        assert!(Company::Grok.setup(Path::new(SP)).contains("[mcp_servers.softpresenter]"));
+        assert!(app_setup(App::Copilot, Path::new(SP)).contains("\"tools\": [\"*\"]"));
     }
 }

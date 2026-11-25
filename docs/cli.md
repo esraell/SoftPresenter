@@ -1351,13 +1351,13 @@ are (only when typed; never by an assistant or a remote page):
 
 | Command | Does |
 |---|---|
-| `sp mcp status` | The two switches, and for each assistant app made for this system whether it has SoftPresenter (not added yet, added, added starting another program, or not found) |
-| `sp mcp connect APP [--replace]` | Adds SoftPresenter to the app, as Add does: `desktop` (Claude Desktop), `code` (Claude Code), `chatgpt` or `codex` (ChatGPT / Codex), `cursor`, `copilot` or `vscode` (VS Code / GitHub Copilot), `antigravity` or `gemini`, `grok` (Grok Build). An entry starting another program is left as it is (exit code 1) unless `--replace` |
-| `sp mcp disconnect APP` | Takes SoftPresenter out of the app again, and nothing else |
+| `sp mcp status [--json]` | The two switches, and for each tile (Claude, ChatGPT, Gemini, Grok, then Cursor and VS Code) and each of its apps whether it is found here and has SoftPresenter (not added yet, added, added starting another program). With `--json`: `allowed`, `screens`, `program`, and `tiles`, each with `id`, `name`, `state` (`not_found`, `not_added`, `added`, `partly`, `other_command`, `trouble`), `said` and its `apps` (`id`, `name`, `found`, `place`, `state`, `command`, `said`) |
+| `sp mcp connect WHICH [--replace]` | Adds SoftPresenter to every app of a tile found here, as its Add does: `claude` (Claude Desktop and Claude Code), `chatgpt` (Codex), `gemini` (Antigravity), `grok` (Grok Build), `cursor`, `vscode`; or one app alone: `desktop`, `code`, `codex`, `antigravity`, `grok-build`. An entry starting another program is left as it is (exit code 1) unless `--replace` |
+| `sp mcp disconnect WHICH` | Takes SoftPresenter's own entries out of those apps again, and nothing else |
 
-    $ sp mcp connect desktop
-    Added. Quit and reopen Claude Desktop to use it.
-    Changed ~/Library/Application Support/Claude/claude_desktop_config.json; the file as it was is beside it, as claude_desktop_config.json.before-softpresenter.
+    $ sp mcp connect claude
+    Added. Quit and reopen Claude Desktop and Claude Code to use it.
+    Claude Desktop: Changed ~/Library/Application Support/Claude/claude_desktop_config.json; the file as it was is beside it, as claude_desktop_config.json.before-softpresenter.
     $ sp mcp connect code
     Claude Code has a “softpresenter” entry that starts another program (/Applications/Old/sp). sp mcp connect code --replace points it at this copy.
 

@@ -1905,15 +1905,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Context Protocol server in the app's own program, which Claude Code or Claude Desktop starts
   and which passes each request to the running app as `sp` commands (it never starts the app:
   with it closed, every tool says "SoftPresenter isn't open"). Off until **Settings ›
-  Integrations › AI assistants (MCP)** lets assistants in. The card lists the assistant apps found
-  on this computer (Claude Desktop, Claude Code, ChatGPT / Codex, Cursor, VS Code / GitHub
-  Copilot, Antigravity, Grok Build) with **Add**, **Remove**, and **Replace** for an entry that
-  starts another program, and where SoftPresenter stands in each; only on a click, changing only
-  SoftPresenter's entry, through the app's own command where it has one, with a copy of the
-  settings file as it was kept beside it, and never a file that isn't valid JSON (`sp mcp
-  connect|disconnect|status` do the same). Apps that only reach the internet (ChatGPT in a
-  browser, the Grok and Gemini apps) are named as such. **Add it yourself** has the line and the
-  settings to copy, with this computer's path to `sp` filled in. With the first switch on, an assistant can see what is on
+  Integrations › AI assistants (MCP)** lets assistants in. The card has a tile for Claude (Claude
+  Desktop and Claude Code), ChatGPT (Codex, which the ChatGPT app shares), Gemini (Antigravity)
+  and Grok (Grok Build), and under More one each for Cursor and VS Code / GitHub Copilot, saying
+  which apps are found and where SoftPresenter stands, with **Add** (every app of the tile found
+  here), **Remove**, **Replace** for an entry that starts another program, and **Copy setup**;
+  only on a click, changing only SoftPresenter's entry, through the app's own command where it
+  has one, with a copy of the settings file as it was kept beside it, and never a file that isn't
+  valid JSON (`sp mcp connect|disconnect|status [--json]` do the same). Apps that only reach the
+  internet (ChatGPT in a browser, the Grok and Gemini apps) are named as such. With the first switch on, an assistant can see what is on
   the screens and each screen, search songs and read their words, look up and search the Bible
   (leaving the Bible page as the operator has it), list the playlists, media, messages and
   Bibles, make a song from lyrics (sections, slides, and a translation under each slide's
