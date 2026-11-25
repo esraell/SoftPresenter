@@ -218,8 +218,9 @@ coalesced: at most about twenty a second, and none while nothing changes. The st
 from what the app already keeps, never by looking at its window.
 
 **When the app's language changes** (Settings › General › Language, the setup's first step,
-`sp settings set language=es`, or the computer's language answering while the setting follows
-it), one change carries `app` with the new language **and every part whose words changed with
+`sp settings set language=es` at the computer, or the computer's language answering while the
+setting follows it; a page can't change it: `settings set language=…` from a page is refused),
+one change carries `app` with the new language **and every part whose words changed with
 it**: each part with a [built-in name](#built-in-names) (`live`, `playlist`, `playlists` today)
 and the `playlist` part's item `text`s, all under one version. Apply the whole change before
 drawing, and switch the page's own words by `app.language` at the same time, so the page never

@@ -341,6 +341,11 @@ fn control_refusal(args: &[String]) -> Option<String> {
         {
             at_computer(AtComputer::Ndi)
         }
+        // The window's language is the operator's: a phone never changes it.
+        ("settings", "set") if args.iter().skip(2).any(|word| word.to_lowercase().starts_with("language=")) => Some(
+            t("remote.at_computer.language", "The app's language is chosen at the computer, not from the remote page.")
+                .to_owned(),
+        ),
         // Reading every song again from its file: one song at a time from a page. The command
         // reads what is left of the words, less `--now`, as the song's name: nothing, or "all",
         // reads them all (so `--now` alone, a blank word and "ALL" are refused too).
@@ -495,6 +500,8 @@ mod tests {
             "song frobnicate x",
             "media import x",
             "settings reset",
+            "settings set language=es",
+            "settings set continuous=on LANGUAGE=en",
             "notices forget 3",
             "remote off",
             "remote password",

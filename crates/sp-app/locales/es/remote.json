@@ -102,6 +102,7 @@
   "remote.at_computer.export": "Exportar un paquete de canciones se hace en el ordenador, no desde la página remota.",
   "remote.at_computer.media": "Añadir imágenes y vídeos se hace en el ordenador, no desde la página remota.",
   "remote.at_computer.samples": "Los fondos de muestra se añaden en el ordenador, no desde la página remota.",
+  "remote.at_computer.language": "El idioma de la aplicación se elige en el ordenador, no desde la página remota.",
   "remote.at_computer.words_file": "Leer la letra de una canción desde un archivo se hace en el ordenador, no desde la página remota.",
   "remote.item.missing": "{title} (falta)",
   "remote.item.video": "{title} (vídeo)",
