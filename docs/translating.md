@@ -129,7 +129,7 @@ start with `_` (`"_note"`) are comments.
 | `find` | the find box's list of results |
 | `notices` | the notices list, every notice and refusal the window says, errors shown in the window, window titles, import and export messages, a slide's Check reasons |
 | `menubar` | the Mac's menu bar: the menus' titles and items as drawn (`sp menu` keeps the English names) |
-| `mcp` | Settings › Integrations › AI assistants (MCP): its two switches and how to connect Claude Code and Claude Desktop (what `sp mcp` says to an assistant stays English, as `sp` does) |
+| `mcp` | Settings › Integrations › AI assistants (MCP): its two switches, adding SoftPresenter to each assistant app (Add, Replace, Remove, where it stands, why a settings file was left alone) and the lines to copy (what `sp mcp` says to an assistant, and the replies of `sp mcp connect`, stay English, as `sp` does); app names stay as they are |
 | `common` | words several areas share |
 | `format` | numbers and quotation marks (not words) |
 

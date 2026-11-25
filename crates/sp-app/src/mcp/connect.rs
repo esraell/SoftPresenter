@@ -317,7 +317,14 @@ fn place_in(app: App, around: &Around) -> Option<Place> {
         App::Copilot => {
             file_in(around.copilot_home.clone().unwrap_or_else(|| home.join(".copilot")), &["mcp-config.json"])
         }
-        App::Antigravity => file_in(home.join(".gemini"), &["config", "mcp_config.json"]),
+        // Its own folders (the Gemini command line's `~/.gemini` alone isn't Antigravity).
+        App::Antigravity => {
+            let gemini = home.join(".gemini");
+            ["antigravity", "antigravity-cli", "config"]
+                .iter()
+                .any(|folder| gemini.join(folder).is_dir())
+                .then(|| Place::File(gemini.join("config").join("mcp_config.json")))
+        }
         App::ClaudeCode | App::Codex | App::Grok => {
             let program = program_places(app, around).into_iter().find(|place| runnable(place))?;
             let settings = match app {
@@ -970,10 +977,12 @@ fn splice(text: &str, fields: Option<&[(&str, Value)]>) -> Option<String> {
 // ---------------------------------------------------------------------------------------------
 // An app's own command.
 
-/// What a run of an app's command said: whether it went well, and what it wrote (both outputs).
+/// What a run of an app's command said: whether it went well, what it wrote on its standard
+/// output (where its answers in JSON are), and both outputs together (for its words).
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Said {
     ok: bool,
+    out: String,
     words: String,
 }
 
@@ -1044,9 +1053,10 @@ fn run(app: App, tool: &Path, args: &[&str]) -> Result<Said, String> {
     let words = |pipe: std::sync::mpsc::Receiver<Vec<u8>>| {
         String::from_utf8_lossy(&pipe.recv_timeout(Duration::from_secs(2)).unwrap_or_default()).into_owned()
     };
-    let words = format!("{}\n{}", words(out), words(err)).trim().to_owned();
+    let out = words(out);
+    let words = format!("{out}\n{}", words(err)).trim().to_owned();
     match status {
-        Some(status) => Ok(Said { ok: status.success(), words }),
+        Some(status) => Ok(Said { ok: status.success(), out, words }),
         None => Err(tf(
             "mcp.command.too_long",
             "{app} didn\u{2019}t answer within 30 seconds, so SoftPresenter stopped waiting.",
@@ -1110,7 +1120,7 @@ fn read_answer(app: App, said: &Said, command: &str, windows: bool) -> (Stands, 
         }
         // {"name": …, "transport": {"type": "stdio", "command": …, "args": […]}, …}
         App::Codex => {
-            let Ok(read) = serde_json::from_str::<Value>(&said.words) else { return unknown() };
+            let Ok(read) = serde_json::from_str::<Value>(&said.out) else { return unknown() };
             let transport = &read["transport"];
             match transport["command"].as_str() {
                 Some(written) => (judged(written, transport["args"] == json!(["mcp"])), "user"),
@@ -1119,7 +1129,7 @@ fn read_answer(app: App, said: &Said, command: &str, windows: bool) -> (Stands, 
         }
         // [{"name": …, "command": …, "args": […], "scope": "user"|"project", …}, …]
         _ => {
-            let Ok(Value::Array(servers)) = serde_json::from_str::<Value>(&said.words) else { return unknown() };
+            let Ok(Value::Array(servers)) = serde_json::from_str::<Value>(&said.out) else { return unknown() };
             let ours: Vec<&Value> = servers.iter().filter(|server| server["name"] == NAME).collect();
             let Some(entry) = ours.iter().find(|server| server["scope"] == "user").or(ours.first()) else {
                 return (Stands::Missing, "user");
@@ -1180,6 +1190,10 @@ fn command_add(
     let done = match state {
         Stands::Added => return Ok(Done::Already),
         Stands::Other { command } if !replace => return Ok(Done::Taken { command }),
+        // Codex's and Grok Build's `add` replace an entry without asking, so when where
+        // SoftPresenter stands couldn't be read, nothing is added unless Replace was chosen
+        // (Claude Code's refuses to add over one).
+        Stands::Trouble(why) if !replace && app != App::ClaudeCode => return Err(why),
         Stands::Other { .. } => Done::Replaced,
         Stands::Missing | Stands::Trouble(_) => Done::Added,
     };
@@ -1694,8 +1708,16 @@ mod tests {
         for app in App::ALL {
             assert_eq!(place_in(app, &around(System::Mac, &home)), None, "{app:?}");
         }
-        for folder in ["Library/Application Support/Claude", ".cursor", ".copilot", ".gemini", "AppData/Roaming/Claude"]
-        {
+        // The Gemini command line's folder alone isn't Antigravity.
+        std::fs::create_dir_all(home.join(".gemini")).unwrap();
+        assert_eq!(place_in(App::Antigravity, &around(System::Mac, &home)), None);
+        for folder in [
+            "Library/Application Support/Claude",
+            ".cursor",
+            ".copilot",
+            ".gemini/antigravity",
+            "AppData/Roaming/Claude",
+        ] {
             std::fs::create_dir_all(home.join(folder)).unwrap();
         }
         let file = |app: App, system: System| match place_in(app, &around(system, &home)) {
@@ -1756,7 +1778,7 @@ mod tests {
     /// The apps' answers, as Claude Code 2.1, Codex 0.169 and Grok Build 1.0 wrote them.
     #[test]
     fn each_apps_answers_are_read_and_anything_else_is_trouble() {
-        let said = |ok: bool, words: &str| Said { ok, words: words.to_owned() };
+        let said = |ok: bool, words: &str| Said { ok, out: words.to_owned(), words: words.to_owned() };
         let claude = |scope: &str, command: &str| {
             said(
                 true,
@@ -1802,6 +1824,9 @@ mod tests {
         );
         assert_eq!(read(App::Grok, &said(true, &grok)), (Stands::Added, "project"));
         assert_eq!(read(App::Grok, &said(true, "[]")), (Stands::Missing, "user"));
+        // A notice on the error output doesn't spoil the answer on the standard one.
+        let noticed = Said { ok: true, out: grok.clone(), words: format!("{grok}\nA new version is out") };
+        assert_eq!(read_answer(App::Grok, &noticed, SP, false).0, Stands::Added);
         assert!(matches!(read(App::Grok, &said(true, "{}")).0, Stands::Trouble(_)));
         assert_eq!(
             said_words(
@@ -1888,6 +1913,26 @@ mod tests {
             assert_eq!(added(false), Ok(Done::Taken { command: "/Old/sp".to_owned() }), "{app:?}");
             assert_eq!(added(true), Ok(Done::Replaced), "{app:?}");
             assert_eq!(read(&entry), sp);
+            // An answer that can't be read: Codex and Grok Build (whose own add would replace
+            // another program's entry without asking) add nothing unless Replace was chosen.
+            std::fs::write(&entry, "/Old/sp").unwrap();
+            let log_before = read(&log);
+            std::fs::write(
+                &tool,
+                format!(
+                    "#!/bin/sh\nprintf '%s|' \"$@\" >> '{}'\necho >> '{}'\necho 'not JSON'\n",
+                    log.display(),
+                    log.display()
+                ),
+            )
+            .unwrap();
+            if app == App::ClaudeCode {
+                assert_eq!(added(false), Ok(Done::Added), "Claude Code's own add refuses over an entry");
+            } else {
+                assert!(matches!(added(false), Err(why) if why.contains("not JSON")), "{app:?}");
+                assert!(!read(&log)[log_before.len()..].contains("|add|"), "{app:?}");
+            }
+            assert_eq!(read(&entry), "/Old/sp");
             // What it says when it refuses comes back plain.
             std::fs::write(&tool, "#!/bin/sh\necho 'Something \u{202e}went wrong' >&2\nexit 3\n").unwrap();
             assert_eq!(added(false), Err(format!("{} said: Something went wrong", app.name())), "{app:?}");

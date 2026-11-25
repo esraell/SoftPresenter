@@ -48,7 +48,7 @@ card says so while **Let AI assistants use SoftPresenter** is off.
 | ChatGPT / Codex (the ChatGPT app, Codex's command line and editor extensions share one setting) | `codex` is found | `codex mcp add softpresenter -- PROGRAM mcp`, which writes `~/.codex/config.toml` |
 | Cursor | `~/.cursor` is there | `mcpServers.softpresenter` in `~/.cursor/mcp.json` |
 | VS Code / GitHub Copilot | `~/.copilot` (or `COPILOT_HOME`) is there | `mcpServers.softpresenter` in its `mcp-config.json`, with `"type": "stdio"` and `"tools": ["*"]` |
-| Antigravity (Gemini) | `~/.gemini` is there | `mcpServers.softpresenter` in `~/.gemini/config/mcp_config.json` |
+| Antigravity (Gemini) | `~/.gemini/antigravity`, `~/.gemini/antigravity-cli` or `~/.gemini/config` is there | `mcpServers.softpresenter` in `~/.gemini/config/mcp_config.json` |
 | Grok Build | `grok` is found | `grok mcp add -s user softpresenter -- PROGRAM mcp`, which writes `~/.grok/config.toml` |
 
 PROGRAM is this computer's path to `sp` (the installed `sp` when it opens this copy; on Windows
