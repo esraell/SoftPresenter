@@ -3,6 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::i18n::{t, tf};
+
 /// The Images folder in the app's data folder.
 pub(crate) fn folder() -> Option<PathBuf> {
     crate::bible_store::data_dir().map(|dir| dir.join("Images"))
@@ -60,8 +62,12 @@ pub fn import(path: &Path) -> Result<Imported, String> {
         return Ok(Imported { file, name, width: still.width(), height: still.height() });
     }
     let (width, height) = measure(path)?;
-    let dir = folder().ok_or_else(|| "Could not find where to keep pictures on this computer.".to_owned())?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Could not make the Images folder: {e}"))?;
+    let dir = folder().ok_or_else(|| {
+        t("notices.images.no_place", "Could not find where to keep pictures on this computer.").to_owned()
+    })?;
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        tf("notices.images.no_folder", "Could not make the Images folder: {error}", &[("error", &e.to_string())])
+    })?;
     let ending = path.extension().map_or_else(String::new, |e| format!(".{}", e.to_string_lossy().to_lowercase()));
     let file = format!("{}{ending}", sp_model::Uuid::new_v4());
     copy_into(path, &dir, &file)?;
@@ -73,7 +79,13 @@ pub fn import(path: &Path) -> Result<Imported, String> {
 /// the system reads (HEIC, TIFF...) is measured by decoding a copy of it.
 pub fn measure(path: &Path) -> Result<(u32, u32), String> {
     let shown = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
-    crate::media::picture_size(path).map_err(|e| format!("{shown}: not a picture SoftPresenter can open ({e})."))
+    crate::media::picture_size(path).map_err(|e| {
+        tf(
+            "notices.images.not_picture",
+            "{name}: not a picture SoftPresenter can open ({error}).",
+            &[("name", &shown), ("error", &e.to_string())],
+        )
+    })
 }
 
 /// Copies a picture into a folder under a name.
@@ -82,9 +94,13 @@ pub fn copy_into(path: &Path, folder: &Path, file: &str) -> Result<(), String> {
     // Copied under another name and then renamed, so a quit part way never leaves a picture that
     // is there but cut short.
     let writing = folder.join(format!("{file}.tmp"));
-    std::fs::copy(path, &writing)
-        .and_then(|_| std::fs::rename(&writing, folder.join(file)))
-        .map_err(|e| format!("Could not copy {shown}: {e}"))
+    std::fs::copy(path, &writing).and_then(|_| std::fs::rename(&writing, folder.join(file))).map_err(|e| {
+        tf(
+            "notices.images.not_copied",
+            "Could not copy {name}: {error}",
+            &[("name", &shown), ("error", &e.to_string())],
+        )
+    })
 }
 
 #[cfg(test)]

@@ -15,6 +15,7 @@ use sp_model::Presentation;
 
 use crate::catalog::{self, Catalog, Hit, Outcome, Progress, Verdict};
 use crate::control::Reply;
+use crate::i18n::{t, tf, tn};
 
 /// How long after the app starts before it first looks at what is due: the start is left alone.
 const FIRST_LOOK_AFTER: Duration = Duration::from_secs(90);
@@ -130,6 +131,39 @@ pub fn language_name(code: &str) -> String {
     .to_owned()
 }
 
+/// A language's name as the window's notices say it, in the language set (in English as
+/// [`language_name`] says it); the code itself for one not known.
+fn language_shown(code: &str) -> String {
+    let base = code.split('-').next().unwrap_or(code);
+    match base {
+        "en" => t("notices.catalog.lang.en", "English"),
+        "ru" => t("notices.catalog.lang.ru", "Russian"),
+        "uk" => t("notices.catalog.lang.uk", "Ukrainian"),
+        "es" => t("notices.catalog.lang.es", "Spanish"),
+        "de" => t("notices.catalog.lang.de", "German"),
+        "fr" => t("notices.catalog.lang.fr", "French"),
+        "pt" => t("notices.catalog.lang.pt", "Portuguese"),
+        "ro" => t("notices.catalog.lang.ro", "Romanian"),
+        "pl" => t("notices.catalog.lang.pl", "Polish"),
+        "cs" => t("notices.catalog.lang.cs", "Czech"),
+        "sk" => t("notices.catalog.lang.sk", "Slovak"),
+        "bg" => t("notices.catalog.lang.bg", "Bulgarian"),
+        "hu" => t("notices.catalog.lang.hu", "Hungarian"),
+        "tr" => t("notices.catalog.lang.tr", "Turkish"),
+        "kk" => t("notices.catalog.lang.kk", "Kazakh"),
+        "ky" => t("notices.catalog.lang.ky", "Kyrgyz"),
+        "uz" => t("notices.catalog.lang.uz", "Uzbek"),
+        "az" => t("notices.catalog.lang.az", "Azerbaijani"),
+        "mn" => t("notices.catalog.lang.mn", "Mongolian"),
+        "ar" => t("notices.catalog.lang.ar", "Arabic"),
+        "ko" => t("notices.catalog.lang.ko", "Korean"),
+        "sv" => t("notices.catalog.lang.sv", "Swedish"),
+        "be" => t("notices.catalog.lang.be", "Belarusian"),
+        _ => return code.to_owned(),
+    }
+    .to_owned()
+}
+
 fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
@@ -156,22 +190,42 @@ fn size(bytes: u64) -> String {
 
 /// What a download or a check of a language did, in a sentence.
 fn outcome_words(lang: &str, outcome: &Outcome) -> String {
-    let name = language_name(lang);
+    let name = language_shown(lang);
+    let count = |n: usize| crate::i18n::count(n as u64);
     match outcome {
-        Outcome::Unchanged { songs } => {
-            format!("The {name} songs are up to date ({} songs); nothing was downloaded.", number(*songs))
-        }
+        Outcome::Unchanged { songs } => tf(
+            "notices.catalog.up_to_date",
+            "The {language} songs are up to date ({songs} songs); nothing was downloaded.",
+            &[("language", &name), ("songs", &count(*songs))],
+        ),
         Outcome::Installed(done) => {
-            let mut said = format!("Downloaded the {name} songs: {} songs", number(done.songs));
-            if done.added + done.changed + done.gone > 0 {
-                said.push_str(&format!(
-                    " ({} new, {} changed, {} gone from the source)",
-                    done.added, done.changed, done.gone
-                ));
-            }
-            said.push('.');
+            let songs = count(done.songs);
+            let mut said = if done.added + done.changed + done.gone > 0 {
+                tf(
+                    "notices.catalog.downloaded_changes",
+                    "Downloaded the {language} songs: {songs} songs ({added} new, {changed} changed, {gone} gone from the source).",
+                    &[
+                        ("language", &name),
+                        ("songs", &songs),
+                        ("added", &count(done.added)),
+                        ("changed", &count(done.changed)),
+                        ("gone", &count(done.gone)),
+                    ],
+                )
+            } else {
+                tf(
+                    "notices.catalog.downloaded",
+                    "Downloaded the {language} songs: {songs} songs.",
+                    &[("language", &name), ("songs", &songs)],
+                )
+            };
             if done.malformed > 0 {
-                said.push_str(&format!(" {} files in the pack could not be read and were left out.", done.malformed));
+                said.push(' ');
+                said.push_str(&tf(
+                    "notices.catalog.malformed",
+                    "{n} files in the pack could not be read and were left out.",
+                    &[("n", &count(done.malformed))],
+                ));
             }
             said
         }
@@ -458,22 +512,23 @@ impl crate::App {
     /// a newer version waiting. A song gone from the source is noted on the song, quietly.
     fn say_catalog_applied(&mut self, done: &Applied) {
         let mut parts = Vec::new();
+        let source: &[(&str, &str)] = &[("source", catalog::SOURCE_NAME)];
         if done.updated > 0 {
-            parts.push(format!(
-                "{} song{} from {} brought up to date",
-                done.updated,
-                if done.updated == 1 { "" } else { "s" },
-                catalog::SOURCE_NAME
+            parts.push(tn(
+                "notices.catalog.updated",
+                done.updated as u64,
+                "{n} song from {source} brought up to date",
+                "{n} songs from {source} brought up to date",
+                source,
             ));
         }
         if done.offered > 0 {
-            parts.push(format!(
-                "{} song{} you changed {} a newer version in {}; yours {} kept",
-                done.offered,
-                if done.offered == 1 { "" } else { "s" },
-                if done.offered == 1 { "has" } else { "have" },
-                catalog::SOURCE_NAME,
-                if done.offered == 1 { "is" } else { "are" }
+            parts.push(tn(
+                "notices.catalog.offered",
+                done.offered as u64,
+                "{n} song you changed has a newer version in {source}; yours is kept",
+                "{n} songs you changed have a newer version in {source}; yours are kept",
+                source,
             ));
         }
         if parts.is_empty() {
@@ -697,7 +752,8 @@ impl crate::App {
             let outcome = engine.download(&named, now(), progress.first().map(|(_, p)| p.as_ref()));
             let installed = matches!(outcome, Ok(Outcome::Installed(_)));
             let result = outcome.map(|outcome| {
-                format!("{} ({:.1} s)", outcome_words(&named, &outcome), started.elapsed().as_secs_f32())
+                let took = crate::i18n::number(f64::from(started.elapsed().as_secs_f32()), 1);
+                format!("{} ({took} {})", outcome_words(&named, &outcome), t("common.seconds_unit", "s"))
             });
             (result, installed)
         })?;
@@ -875,7 +931,11 @@ fn check_langs(engine: &Catalog, langs: &[String]) -> (Result<String, String>, b
             }
             Err(problem) => {
                 failed += 1;
-                said.push(format!("The {} songs could not be checked: {problem}", language_name(&lang)));
+                said.push(tf(
+                    "notices.catalog.not_checked",
+                    "The {language} songs could not be checked: {error}",
+                    &[("language", &language_shown(&lang)), ("error", &problem)],
+                ));
             }
         }
     }

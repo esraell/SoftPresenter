@@ -2,6 +2,7 @@
 //! pictures and videos, media playlists and placeholders in the order they will be used, so
 //! everything is one click away during it.
 
+use crate::i18n::{t, tf};
 use serde::{Deserialize, Serialize};
 use sp_model::Uuid;
 
@@ -647,7 +648,9 @@ impl Services {
 
     /// Makes a new, empty service and brings it to the front.
     pub fn add_service(&mut self) {
-        let name = (1..).map(|n| format!("Playlist {n}")).find(|name| self.list.iter().all(|s| &s.name != name));
+        let name = (1..)
+            .map(|n| tf("notices.new_playlist.name", "Playlist {n}", &[("n", &n.to_string())]))
+            .find(|name| self.list.iter().all(|s| &s.name != name));
         self.list.push(Service { name: name.unwrap_or_default(), items: Vec::new(), uids: Default::default() });
         self.current = self.list.len() - 1;
         self.chosen = None;
@@ -902,14 +905,17 @@ pub fn load_prefs() -> Prefs {
 
 /// Remembers the choices for the next start.
 pub fn save_prefs(prefs: &Prefs) -> Result<(), String> {
-    let path = prefs_file().ok_or_else(|| "Could not find where to keep settings on this computer.".to_owned())?;
+    let path = prefs_file()
+        .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Could not make the app's folder: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+        })?;
     }
     let partial = path.with_extension("json.part");
     std::fs::write(&partial, serde_json::to_string_pretty(prefs).unwrap_or_default())
         .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| format!("Could not save the settings: {e}"))
+        .map_err(|e| tf("notices.save.settings", "Could not save the settings: {error}", &[("error", &e.to_string())]))
 }
 
 fn bible_page_file() -> Option<std::path::PathBuf> {
@@ -943,20 +949,22 @@ fn load_history_from(path: &std::path::Path) -> Vec<HistoryEntry> {
 
 /// Keeps the passages that were on screen, for the next start.
 pub fn save_bible_history(history: &[HistoryEntry]) -> Result<(), String> {
-    let path =
-        bible_history_file().ok_or_else(|| "Could not find where to keep settings on this computer.".to_owned())?;
+    let path = bible_history_file()
+        .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     save_history_in(&path, history)
 }
 
 fn save_history_in(path: &std::path::Path, history: &[HistoryEntry]) -> Result<(), String> {
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Could not make the app's folder: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+        })?;
     }
     let text = serde_json::to_string_pretty(history).unwrap_or_default();
     let partial = path.with_extension("json.part");
-    std::fs::write(&partial, text)
-        .and_then(|()| std::fs::rename(&partial, path))
-        .map_err(|e| format!("Could not save the Bible history: {e}"))
+    std::fs::write(&partial, text).and_then(|()| std::fs::rename(&partial, path)).map_err(|e| {
+        tf("notices.save.bible_history", "Could not save the Bible history: {error}", &[("error", &e.to_string())])
+    })
 }
 
 /// How the Bible page was last set up: its translations, boxes and slide options.
@@ -967,15 +975,18 @@ pub fn load_bible_page() -> Option<SavedPassage> {
 
 /// Remembers how the Bible page is set up, for the next start.
 pub fn save_bible_page(page: &SavedPassage) -> Result<(), String> {
-    let path = bible_page_file().ok_or_else(|| "Could not find where to keep settings on this computer.".to_owned())?;
+    let path = bible_page_file()
+        .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Could not make the app's folder: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+        })?;
     }
     let text = serde_json::to_string_pretty(page).unwrap_or_default();
     let partial = path.with_extension("json.part");
-    std::fs::write(&partial, text)
-        .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| format!("Could not save the Bible page's settings: {e}"))
+    std::fs::write(&partial, text).and_then(|()| std::fs::rename(&partial, &path)).map_err(|e| {
+        tf("notices.save.bible_page", "Could not save the Bible page's settings: {error}", &[("error", &e.to_string())])
+    })
 }
 
 fn file() -> Option<std::path::PathBuf> {
@@ -1012,14 +1023,18 @@ pub fn set_aside(path: &std::path::Path, problem: &str) {
 
 /// Writes the services to their file. The error is a plain sentence.
 pub fn save(services: &Services) -> Result<(), String> {
-    let path = file().ok_or_else(|| "Could not find where to keep services on this computer.".to_owned())?;
+    let path = file().ok_or_else(|| {
+        t("notices.save.no_place_services", "Could not find where to keep services on this computer.").to_owned()
+    })?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Could not make the app's folder: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+        })?;
     }
     let partial = path.with_extension("json.part");
     std::fs::write(&partial, services.to_json())
         .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| format!("Could not save the services: {e}"))
+        .map_err(|e| tf("notices.save.services", "Could not save the services: {error}", &[("error", &e.to_string())]))
 }
 
 #[cfg(test)]

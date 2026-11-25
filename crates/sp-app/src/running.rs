@@ -17,6 +17,7 @@
 //! Nothing here knows about the window: the app says what the playlist holds and where the
 //! show is, and carries out what comes back.
 
+use crate::i18n::{t, tf};
 use sp_engine::{Command, SlideRef};
 
 /// One item of the playlist in front, as the keys see it.
@@ -106,7 +107,11 @@ pub struct Said {
 /// say how; with something on screen, `None`: they go on with it.
 pub fn held_for_enter(picked: Option<&str>, showing: bool) -> Option<Do> {
     let what = picked.filter(|_| !showing)?;
-    Some(Do::Say(format!("Press Enter to put the picked {what} on screen.")))
+    Some(Do::Say(match what {
+        "verse" => t("notices.enter.verse", "Press Enter to put the picked verse on screen.").to_owned(),
+        "slide" => t("notices.enter.slide", "Press Enter to put the picked slide on screen.").to_owned(),
+        what => tf("notices.enter.other", "Press Enter to put the picked {what} on screen.", &[("what", what)]),
+    }))
 }
 
 /// What Next (`forward`) or Previous does.
@@ -204,7 +209,7 @@ pub fn move_pick(
     down: bool,
 ) -> Result<Option<usize>, &'static str> {
     if count == 0 {
-        return Err("Look a passage up first.");
+        return Err(t("notices.bible.look_up_first", "Look a passage up first."));
     }
     Ok(match picked.or(live).filter(|at| *at < count) {
         Some(at) if down => (at + 1 < count).then_some(at + 1),

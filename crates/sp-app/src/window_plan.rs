@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use sp_model::Uuid;
 
 use crate::displays::{DisplayInfo, Rect};
+use crate::i18n::tf;
 use crate::screens::{Kind, Output, Placed, Screen};
 
 /// How often a window may be put back on its display, when it is found somewhere else, before it
@@ -171,16 +172,19 @@ pub fn away(screens: &[Screen], on: &[bool], displays: &[DisplayInfo]) -> BTreeM
             if !*on || displays.iter().any(|d| d.is_named(name)) {
                 return None;
             }
-            let kind = match screen.kind {
-                Kind::Audience => "audience",
-                Kind::Stage => "stage",
-            };
-            Some((
-                screen.id,
-                format!(
-                    "The {kind} display ({name}) was disconnected. The {kind} screen will come back when it returns."
+            let said = match screen.kind {
+                Kind::Audience => tf(
+                    "notices.screens.away.audience",
+                    "The audience display ({name}) was disconnected. The audience screen will come back when it returns.",
+                    &[("name", name)],
                 ),
-            ))
+                Kind::Stage => tf(
+                    "notices.screens.away.stage",
+                    "The stage display ({name}) was disconnected. The stage screen will come back when it returns.",
+                    &[("name", name)],
+                ),
+            };
+            Some((screen.id, said))
         })
         .collect()
 }

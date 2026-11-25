@@ -17,6 +17,7 @@
 //! The list is plain data ([`Notice`]: kind, text, time, seen, actions), so it can be sent as it
 //! is to a web page. Every entry and every refusal goes in the log as well.
 
+use crate::i18n::t;
 use crate::outside::Waiting;
 use crate::studio::{CARD, CARE, LINE, TEXT, TEXT_DIM, TEXT_FAINT};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
@@ -180,8 +181,8 @@ impl Notices {
             return;
         }
         let actions = vec![
-            Action { id: RELOAD.to_owned(), label: "Reload".to_owned() },
-            Action { id: KEEP_MINE.to_owned(), label: "Keep mine".to_owned() },
+            Action { id: RELOAD.to_owned(), label: t("notices.ask.reload", "Reload").to_owned() },
+            Action { id: KEEP_MINE.to_owned(), label: t("notices.ask.keep_mine", "Keep mine").to_owned() },
         ];
         self.push(Kind::Question, text.into(), Some(about), actions);
     }
@@ -440,10 +441,10 @@ pub fn button(ui: &mut egui::Ui, state: &mut crate::home::HomeState, rect: Rect,
         painter.circle_filled(pos2(beside_at.x + 3.5, beside_at.y), 3.5, TEXT_DIM);
     }
     let hint = match look {
-        Look::Question => "A question is waiting: click to answer it",
-        Look::Trouble(_) => "Something went wrong: click to see",
-        Look::New => "New notices",
-        Look::Quiet => "Notices",
+        Look::Question => t("notices.button.question", "A question is waiting: click to answer it"),
+        Look::Trouble(_) => t("notices.button.trouble", "Something went wrong: click to see"),
+        Look::New => t("notices.button.new", "New notices"),
+        Look::Quiet => t("notices.title", "Notices"),
     };
     let response = if open { response } else { response.on_hover_text(hint) };
     let frame = egui::Frame::new()
@@ -475,17 +476,18 @@ fn list(ui: &mut egui::Ui, state: &mut crate::home::HomeState, form: &crate::clo
     ui.painter().text(
         pos2(head.min.x + 14.0, head.center().y),
         Align2::LEFT_CENTER,
-        "Notices",
+        t("notices.title", "Notices"),
         crate::studio::semibold(14.0),
         TEXT,
     );
     let font = FontId::proportional(12.0);
-    let wide = crate::studio::flat_button_width(ui, &["Clear All"], &font, 10.0);
+    let clear_all = t("notices.clear_all", "Clear All");
+    let wide = crate::studio::flat_button_width(ui, &[clear_all], &font, 10.0);
     let clear = Rect::from_min_size(pos2(head.max.x - 14.0 - wide, head.center().y - 12.0), vec2(wide, 24.0));
     let clearable = state.notices.clearable();
     let flat = crate::studio::Flat::Plain;
-    if crate::studio::flat_button(ui, clear, list_id().with("clear"), "Clear All", font, flat, clearable)
-        .on_hover_text("Empty the list (a question stays until it is answered)")
+    if crate::studio::flat_button(ui, clear, list_id().with("clear"), clear_all, font, flat, clearable)
+        .on_hover_text(t("notices.clear_all.hint", "Empty the list (a question stays until it is answered)"))
         .clicked()
     {
         state.notices.clear_all();
@@ -496,8 +498,10 @@ fn list(ui: &mut egui::Ui, state: &mut crate::home::HomeState, form: &crate::clo
     egui::ScrollArea::vertical().max_height(LIST_HIGH - head.height()).auto_shrink([false, true]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         if entries.is_empty() {
-            let words = "Nothing to tell you. Trouble, questions, and what happens out of sight (added to another \
-                         playlist, a file read or written) come here.";
+            let words = t(
+                "notices.empty",
+                "Nothing to tell you. Trouble, questions, and what happens out of sight (added to another playlist, a file read or written) come here.",
+            );
             let galley =
                 ui.painter().layout(words.to_owned(), FontId::proportional(12.5), TEXT_FAINT, LIST_WIDE - 28.0);
             let (room, _) = ui.allocate_exact_size(vec2(LIST_WIDE, galley.size().y + 28.0), Sense::hover());
@@ -573,8 +577,12 @@ fn row(ui: &mut egui::Ui, notice: &Notice, line_above: bool, form: &crate::clock
 }
 
 /// What a song changed outside SoftPresenter asks under its title bar, with room for all of it.
-pub const CHANGED_OUTSIDE: &str =
-    "This song was changed outside SoftPresenter. Read it again from its file, or keep SoftPresenter's version?";
+pub fn changed_outside() -> &'static str {
+    t(
+        "notices.changed_outside",
+        "This song was changed outside SoftPresenter. Read it again from its file, or keep SoftPresenter's version?",
+    )
+}
 
 /// The strip asking under a song's title bar: the room above and below it, its padding, and
 /// its fill (the amber mixed 12% into a card's grey).
@@ -588,10 +596,11 @@ const STRIP_BUTTON_HIGH: f32 = 24.0;
 /// widths (Reload, Keep mine).
 fn strip_layout(ui: &egui::Ui, width: f32) -> (std::sync::Arc<egui::Galley>, [f32; 2]) {
     let font = FontId::proportional(12.0);
-    let buttons = ["Reload", "Keep mine"].map(|words| crate::studio::flat_button_width(ui, &[words], &font, 10.0));
+    let buttons = [t("notices.ask.reload", "Reload"), t("notices.ask.keep_mine", "Keep mine")]
+        .map(|words| crate::studio::flat_button_width(ui, &[words], &font, 10.0));
     let text_wide = (width - 2.0 * STRIP_PAD.x - 16.0 - 10.0 - buttons[0] - buttons[1] - 2.0 * 10.0).max(120.0);
     let mut job = egui::text::LayoutJob::simple(
-        CHANGED_OUTSIDE.to_owned(),
+        changed_outside().to_owned(),
         FontId::proportional(13.0),
         Color32::PLACEHOLDER,
         text_wide,
@@ -629,16 +638,32 @@ pub fn ask_strip(ui: &egui::Ui, state: &mut crate::home::HomeState, band: Rect, 
     let reload =
         Rect::from_min_size(pos2(keep.min.x - 10.0 - reload_wide, keep.min.y), vec2(reload_wide, STRIP_BUTTON_HIGH));
     let main = crate::studio::Flat::Main;
-    if crate::studio::flat_button(ui, reload, strip_answer_id(about, RELOAD), "Reload", font.clone(), main, true)
-        .on_hover_text("Take the file's version (SoftPresenter's changes to it go)")
-        .clicked()
+    if crate::studio::flat_button(
+        ui,
+        reload,
+        strip_answer_id(about, RELOAD),
+        t("notices.ask.reload", "Reload"),
+        font.clone(),
+        main,
+        true,
+    )
+    .on_hover_text(t("notices.ask.reload.hint", "Take the file's version (SoftPresenter's changes to it go)"))
+    .clicked()
     {
         state.waiting_choice = Some((about, true));
     }
     let plain = crate::studio::Flat::Plain;
-    if crate::studio::flat_button(ui, keep, strip_answer_id(about, KEEP_MINE), "Keep mine", font, plain, true)
-        .on_hover_text("Save SoftPresenter's version over the file")
-        .clicked()
+    if crate::studio::flat_button(
+        ui,
+        keep,
+        strip_answer_id(about, KEEP_MINE),
+        t("notices.ask.keep_mine", "Keep mine"),
+        font,
+        plain,
+        true,
+    )
+    .on_hover_text(t("notices.ask.keep_mine.hint", "Save SoftPresenter's version over the file"))
+    .clicked()
     {
         state.waiting_choice = Some((about, false));
     }

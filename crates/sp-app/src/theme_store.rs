@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::i18n::{t, tf};
 use sp_model::{Theme, Uuid};
 
 fn folder() -> Option<PathBuf> {
@@ -106,18 +107,22 @@ fn load_from(folder: &Path) -> Vec<Theme> {
 
 /// Writes a theme to its file. The error is a plain sentence.
 pub fn save(theme: &Theme) -> Result<(), String> {
-    let folder = folder().ok_or_else(|| "Could not find where to keep themes on this computer.".to_owned())?;
+    let folder = folder().ok_or_else(|| {
+        t("notices.save.no_place_themes", "Could not find where to keep themes on this computer.").to_owned()
+    })?;
     save_in(&folder, theme)
 }
 
 fn save_in(folder: &Path, theme: &Theme) -> Result<(), String> {
-    std::fs::create_dir_all(folder).map_err(|e| format!("Could not make the Themes folder: {e}"))?;
+    std::fs::create_dir_all(folder).map_err(|e| {
+        tf("notices.save.no_themes_folder", "Could not make the Themes folder: {error}", &[("error", &e.to_string())])
+    })?;
     let path = folder.join(format!("{}.sptheme", theme.id));
     // Write beside it and rename, so a half-written file is never left under the real name.
     let partial = path.with_extension("sptheme.part");
     std::fs::write(&partial, theme.to_json())
         .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| format!("Could not save the theme: {e}"))?;
+        .map_err(|e| tf("notices.save.theme", "Could not save the theme: {error}", &[("error", &e.to_string())]))?;
     // The same theme saved before the rename is replaced by the new file, not left beside it.
     let _ = std::fs::remove_file(folder.join(format!("{}.pctheme", theme.id)));
     Ok(())
@@ -131,7 +136,13 @@ pub fn delete(theme: &Theme) -> Result<(), String> {
         match std::fs::remove_file(folder.join(format!("{}.{ending}", theme.id))) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("Could not delete the theme: {e}")),
+            Err(e) => {
+                return Err(tf(
+                    "notices.delete.theme",
+                    "Could not delete the theme: {error}",
+                    &[("error", &e.to_string())],
+                ));
+            }
         }
     }
     Ok(())

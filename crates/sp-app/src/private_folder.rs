@@ -59,20 +59,31 @@ pub fn keep_private(folder: &Path) -> Result<Private, String> {
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 
     if !folder.exists() {
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(folder)
-            .map_err(|e| format!("Could not make {}: {e}", folder.display()))?;
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(folder).map_err(|e| {
+            crate::i18n::tf(
+                "notices.private.not_made",
+                "Could not make {folder}: {error}",
+                &[("folder", &folder.display().to_string()), ("error", &e.to_string())],
+            )
+        })?;
     }
     // Only this user may enter the folder. It must be a real folder, not a link to somewhere
     // else; and setting its permissions fails unless this user owns it.
     let meta = std::fs::symlink_metadata(folder).map_err(|e| e.to_string())?;
     if !meta.is_dir() {
-        return Err(format!("{} is not a folder.", folder.display()));
+        return Err(crate::i18n::tf(
+            "notices.private.not_folder",
+            "{folder} is not a folder.",
+            &[("folder", &folder.display().to_string())],
+        ));
     }
-    std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o700))
-        .map_err(|e| format!("Could not keep {} private: {e}", folder.display()))?;
+    std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o700)).map_err(|e| {
+        crate::i18n::tf(
+            "notices.private.not_private",
+            "Could not keep {folder} private: {error}",
+            &[("folder", &folder.display().to_string()), ("error", &e.to_string())],
+        )
+    })?;
     Ok(Private {})
 }
 

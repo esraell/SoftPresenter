@@ -32,6 +32,7 @@ use std::path::{Path, PathBuf};
 
 use sp_model::{Presentation, ProMedia, ShowAction, Uuid};
 
+use crate::i18n::{t, tf, tn};
 use crate::pack::{self, shown};
 
 /// A song bundle's file ending (written `.proBundle`; read in any case).
@@ -115,7 +116,9 @@ pub fn read_words(path: &Path) -> Result<Presentation, String> {
     let found = entries(&mut zip, &name, &Limits::NORMAL)?;
     let (at, entry) = &found.songs[0];
     let bytes = read_song(&mut zip, *at, Limits::NORMAL.song).map_err(|why| song_problem(&name, &why))?;
-    sp_model::read_pro_file(&bytes, &title_of(entry)).map_err(|why| format!("{name} could not be read ({why})."))
+    sp_model::read_pro_file(&bytes, &title_of(entry)).map_err(|why| {
+        tf("notices.import.unreadable", "{name} could not be read ({error}).", &[("name", &name), ("error", &why)])
+    })
 }
 
 pub fn open_with(path: &Path, staging: &Path, limits: &Limits) -> Result<Opened, String> {
@@ -138,19 +141,36 @@ pub fn open_with(path: &Path, staging: &Path, limits: &Limits) -> Result<Opened,
             Ok(document) => documents.push(document),
             Err(why) if only => return Err(song_problem(&name, &why)),
             Err(why) if why == TOO_LARGE || why == TOO_MANY_WORDS => {
-                unread.push(format!("{} ({why})", shown(file_part(entry))));
+                unread.push(format!("{} ({})", shown(file_part(entry)), why_shown(&why)));
             }
-            Err(why) => unread.push(format!("{} (could not be read: {why})", shown(file_part(entry)))),
+            Err(why) => unread.push(tf(
+                "notices.bundle.unread_entry",
+                "{name} (could not be read: {error})",
+                &[("name", &shown(file_part(entry))), ("error", &why)],
+            )),
         }
     }
     if documents.is_empty() {
         let more = unread.len().saturating_sub(10);
         let named = unread[..unread.len() - more].join(", ");
-        let more = if more > 0 { format!(" and {more} more") } else { String::new() };
-        return Err(format!("None of the songs in {name} could be read: {named}{more}."));
+        return Err(if more > 0 {
+            tf(
+                "notices.bundle.none_read_more",
+                "None of the songs in {name} could be read: {list} and {more} more.",
+                &[("name", &name), ("list", &named), ("more", &crate::i18n::count(more as u64))],
+            )
+        } else {
+            tf(
+                "notices.bundle.none_read",
+                "None of the songs in {name} could be read: {list}.",
+                &[("name", &name), ("list", &named)],
+            )
+        });
     }
     left_out.extend(unread);
-    std::fs::create_dir_all(staging).map_err(|e| format!("Could not make room for the bundle: {e}"))?;
+    std::fs::create_dir_all(staging).map_err(|e| {
+        tf("notices.bundle.no_room", "Could not make room for the bundle: {error}", &[("error", &e.to_string())])
+    })?;
     let room = pack::free_space(staging).map_or(u64::MAX, |free| free.saturating_sub(limits.keep_free));
     let mut opened = Opened { songs: Vec::new(), files: Vec::new(), left_out, staging: staging.to_path_buf() };
     // Each entry taken out once, however many slides (and songs) show it; and an entry that
@@ -186,11 +206,11 @@ pub fn open_with(path: &Path, staging: &Path, limits: &Limits) -> Result<Opened,
     for label in labels.iter().filter(|label| !taken.contains_key(&label.at)) {
         let file = file_part(&label.name);
         let why = if Path::new(file).extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) {
-            "a PDF, which doesn't come in with a bundle's songs"
+            t("notices.bundle.pdf", "a PDF, which doesn't come in with a bundle's songs")
         } else if crate::media::is_media(Path::new(file)) {
-            "no song in the bundle shows it"
+            t("notices.bundle.unshown", "no song in the bundle shows it")
         } else {
-            "not a song, picture or video"
+            t("notices.bundle.not_media", "not a song, picture or video")
         };
         opened.left_out.push(format!("{} ({why})", shown(file)));
     }
@@ -202,12 +222,26 @@ pub fn open_with(path: &Path, staging: &Path, limits: &Limits) -> Result<Opened,
 const TOO_LARGE: &str = "too large to be a song";
 const TOO_MANY_WORDS: &str = "the bundle's songs are too large together";
 
+/// Why a song wasn't read, as the window says it: [`TOO_LARGE`] and [`TOO_MANY_WORDS`] in the
+/// language set, anything else as it is.
+fn why_shown(why: &str) -> String {
+    match why {
+        TOO_LARGE => t("notices.bundle.too_large", "too large to be a song").to_owned(),
+        TOO_MANY_WORDS => t("notices.bundle.too_many_words", "the bundle's songs are too large together").to_owned(),
+        other => other.to_owned(),
+    }
+}
+
 /// What is said when a bundle's only song can't be read.
 fn song_problem(name: &str, why: &str) -> String {
     if why == TOO_LARGE {
-        format!("{name}: its song is too large to be a song.")
+        tf("notices.bundle.song_too_large", "{name}: its song is too large to be a song.", &[("name", name)])
     } else {
-        format!("{name} could not be read ({why}).")
+        tf(
+            "notices.import.unreadable",
+            "{name} could not be read ({error}).",
+            &[("name", name), ("error", &why_shown(why))],
+        )
     }
 }
 
@@ -235,13 +269,13 @@ fn take_out(
     let path = Path::new(&file);
     let refuse = |opened: &mut Opened, why: &str| opened.left_out.push(format!("{} ({why})", shown(&file)));
     if !crate::media::is_media(path) {
-        refuse(opened, "not a picture or video SoftPresenter shows");
+        refuse(opened, t("notices.bundle.not_shown_media", "not a picture or video SoftPresenter shows"));
         return None;
     }
     let video = crate::media::is_video(path);
     let left = room.saturating_sub(*written);
     if label.size > left {
-        refuse(opened, "not enough room on this disk");
+        refuse(opened, t("notices.bundle.disk_full", "not enough room on this disk"));
         return None;
     }
     let cap = left.min(if video { limits.video } else { limits.picture });
@@ -250,7 +284,7 @@ fn take_out(
     let mut entry = match zip.by_index(label.at) {
         Ok(entry) => entry,
         Err(_) => {
-            refuse(opened, "damaged");
+            refuse(opened, t("notices.bundle.damaged", "damaged"));
             return None;
         }
     };
@@ -366,7 +400,7 @@ fn file_name(path: &Path) -> String {
 }
 
 fn not_a_bundle(name: &str) -> String {
-    format!("{name} isn't a song bundle SoftPresenter can read.")
+    tf("notices.bundle.not_bundle", "{name} isn't a song bundle SoftPresenter can read.", &[("name", name)])
 }
 
 /// An entry of a bundle that might be a picture or video: its place, its name (a label only)
@@ -391,7 +425,11 @@ struct Entries {
 /// Looks through a bundle's entries (see [`Entries`]).
 fn entries(zip: &mut Zip, name: &str, limits: &Limits) -> Result<Entries, String> {
     if zip.len() > limits.entries {
-        return Err(format!("{name} has too many files in it to be a song bundle."));
+        return Err(tf(
+            "notices.bundle.too_many_files",
+            "{name} has too many files in it to be a song bundle.",
+            &[("name", name)],
+        ));
     }
     let mut found = Entries { songs: Vec::new(), labels: Vec::new(), left_out: Vec::new() };
     let mut more_songs = 0;
@@ -402,7 +440,11 @@ fn entries(zip: &mut Zip, name: &str, limits: &Limits) -> Result<Entries, String
             continue;
         }
         if entry.is_symlink() || entry.encrypted() || climbs(&raw) {
-            found.left_out.push(format!("{} (not a plain file in the bundle)", shown(file_part(&raw))));
+            found.left_out.push(tf(
+                "notices.bundle.not_plain",
+                "{name} (not a plain file in the bundle)",
+                &[("name", &shown(file_part(&raw)))],
+            ));
             continue;
         }
         if is_song(&raw) {
@@ -416,13 +458,16 @@ fn entries(zip: &mut Zip, name: &str, limits: &Limits) -> Result<Entries, String
         found.labels.push(Label { at, name: raw, size: entry.size() });
     }
     if found.songs.is_empty() {
-        return Err(format!("{name} has no song in it."));
+        return Err(tf("notices.bundle.no_song", "{name} has no song in it.", &[("name", name)]));
     }
     if more_songs > 0 {
-        found.left_out.push(format!(
-            "{more_songs} more song{} (a bundle brings in at most {} songs)",
-            if more_songs == 1 { "" } else { "s" },
-            limits.songs
+        let most = crate::i18n::count(limits.songs as u64);
+        found.left_out.push(tn(
+            "notices.bundle.more_songs",
+            more_songs as u64,
+            "{n} more song (a bundle brings in at most {most} songs)",
+            "{n} more songs (a bundle brings in at most {most} songs)",
+            &[("most", &most)],
         ));
     }
     Ok(found)

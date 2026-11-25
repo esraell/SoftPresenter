@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sp_model::{ObjectKind, Presentation, ShowAction, Theme, Uuid};
 
+use crate::i18n::{t, tf, tn};
 use crate::service::Item;
 
 /// A song pack's file ending.
@@ -296,7 +297,7 @@ impl Export {
             Ok(()) => Ok(self.summary(to)),
             Err(e) => {
                 let _ = std::fs::remove_file(&partial);
-                Err(format!("The song pack could not be written: {e}"))
+                Err(tf("notices.pack.not_written", "The song pack could not be written: {error}", &[("error", &e)]))
             }
         }
     }
@@ -349,29 +350,57 @@ impl Export {
 
     /// What the pack holds, in words.
     pub fn summary(&self, to: &Path) -> String {
-        let count = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
-        let mut parts = vec![count(self.songs.len(), "song", "songs")];
+        let mut parts = vec![tn("notices.pack.songs", self.songs.len() as u64, "{n} song", "{n} songs", &[])];
         if !self.themes.is_empty() {
-            parts.push(count(self.themes.len(), "theme", "themes"));
+            parts.push(tn("notices.pack.themes", self.themes.len() as u64, "{n} theme", "{n} themes", &[]));
         }
         if !self.pictures.is_empty() {
-            parts.push(count(self.pictures.len(), "picture", "pictures"));
+            parts.push(tn("notices.pack.pictures", self.pictures.len() as u64, "{n} picture", "{n} pictures", &[]));
         }
         if !self.videos.is_empty() {
-            parts.push(format!("{} ({})", count(self.videos.len(), "video", "videos"), size_words(self.video_bytes())));
+            let size = size_words(self.video_bytes());
+            let videos = self.videos.len() as u64;
+            parts.push(tn(
+                "notices.pack.videos",
+                videos,
+                "{n} video ({size})",
+                "{n} videos ({size})",
+                &[("size", &size)],
+            ));
         }
-        let mut text = format!("Saved {}: {}", file_name(to), parts.join(", "));
-        if let Some(playlist) = &self.playlist {
-            text.push_str(&format!(", and the playlist {}", playlist.name));
-        }
-        text.push('.');
+        let (file, list) = (file_name(to), parts.join(", "));
+        let mut text = match &self.playlist {
+            Some(playlist) => tf(
+                "notices.pack.saved_with_playlist",
+                "Saved {file}: {list}, and the playlist {playlist}.",
+                &[("file", &file), ("list", &list), ("playlist", &playlist.name)],
+            ),
+            None => tf("notices.pack.saved", "Saved {file}: {list}.", &[("file", &file), ("list", &list)]),
+        };
         if !self.videos_left_out.is_empty() {
-            text.push_str(&format!(" {} left out.", count(self.videos_left_out.len(), "video", "videos")));
+            let left = self.videos_left_out.len() as u64;
+            text.push(' ');
+            text.push_str(&tn(
+                "notices.pack.videos_left_out",
+                left,
+                "{n} video left out.",
+                "{n} videos left out.",
+                &[],
+            ));
         }
         if self.missing > 0 {
+            text.push(' ');
             text.push_str(&match self.missing {
-                1 => " A picture or video the songs name couldn't go in (not on this computer, or not a picture or video).".to_owned(),
-                n => format!(" {n} pictures or videos the songs name couldn't go in (not on this computer, or not pictures or videos)."),
+                1 => t(
+                    "notices.pack.missing_one",
+                    "A picture or video the songs name couldn't go in (not on this computer, or not a picture or video).",
+                )
+                .to_owned(),
+                n => tf(
+                    "notices.pack.missing_many",
+                    "{n} pictures or videos the songs name couldn't go in (not on this computer, or not pictures or videos).",
+                    &[("n", &crate::i18n::count(n as u64))],
+                ),
             });
         }
         text
@@ -381,7 +410,7 @@ impl Export {
 /// A size in words: "1.2 GB", "340 MB".
 pub fn size_words(bytes: u64) -> String {
     let mb = bytes as f64 / (1024.0 * 1024.0);
-    if mb >= 1024.0 { format!("{:.1} GB", mb / 1024.0) } else { format!("{:.0} MB", mb.max(1.0)) }
+    if mb >= 1024.0 { format!("{} GB", crate::i18n::number(mb / 1024.0, 1)) } else { format!("{:.0} MB", mb.max(1.0)) }
 }
 
 fn file_name(path: &Path) -> String {
@@ -432,7 +461,7 @@ fn classify(name: &str) -> Option<Entry> {
 /// A name from a pack as it may be shown: no control characters, not too long.
 pub(crate) fn shown(name: &str) -> String {
     let clean: String = name.chars().filter(|c| !c.is_control()).take(80).collect();
-    if clean.is_empty() { "(an entry with no name)".to_owned() } else { clean }
+    if clean.is_empty() { t("notices.pack.no_name", "(an entry with no name)").to_owned() } else { clean }
 }
 
 /// A pack read and checked, its pictures and videos put in a folder of the app's own.
@@ -458,11 +487,21 @@ pub struct Opened {
 /// notes say. The error is a sentence for the operator.
 pub fn open(path: &Path, staging: &Path) -> Result<Opened, String> {
     let name = file_name(path);
-    let not_a_pack = || format!("{name} isn't a SoftPresenter song pack.");
-    let file = std::fs::File::open(path).map_err(|e| format!("{name} could not be opened: {e}"))?;
+    let not_a_pack = || tf("notices.pack.not_pack", "{name} isn't a SoftPresenter song pack.", &[("name", &name)]);
+    let file = std::fs::File::open(path).map_err(|e| {
+        tf(
+            "notices.pack.not_opened",
+            "{name} could not be opened: {error}",
+            &[("name", &name), ("error", &e.to_string())],
+        )
+    })?;
     let mut zip = zip::ZipArchive::new(std::io::BufReader::new(file)).map_err(|_| not_a_pack())?;
     if zip.len() > MOST_ENTRIES {
-        return Err(format!("{name} has too many files in it to be a song pack."));
+        return Err(tf(
+            "notices.pack.too_many_files",
+            "{name} has too many files in it to be a song pack.",
+            &[("name", &name)],
+        ));
     }
     // First, what each entry is, and the room the pictures and videos say they need.
     let mut kinds = Vec::new();
@@ -480,7 +519,7 @@ pub fn open(path: &Path, staging: &Path) -> Result<Opened, String> {
         let kind = match kind {
             Some(kind) if seen.insert(raw.to_lowercase()) => Some(kind),
             Some(_) => {
-                ignored.push(format!("{} (twice)", shown(&raw)));
+                ignored.push(tf("notices.pack.twice", "{name} (twice)", &[("name", &shown(&raw))]));
                 None
             }
             None => {
@@ -496,14 +535,16 @@ pub fn open(path: &Path, staging: &Path) -> Result<Opened, String> {
     if !kinds.contains(&Some(Entry::Manifest)) {
         return Err(not_a_pack());
     }
-    std::fs::create_dir_all(staging).map_err(|e| format!("Could not make room for the pack: {e}"))?;
+    std::fs::create_dir_all(staging).map_err(|e| {
+        tf("notices.pack.no_room", "Could not make room for the pack: {error}", &[("error", &e.to_string())])
+    })?;
     // What may be written, whatever the entries say about their size.
     let room = free_space(staging).map_or(u64::MAX, |free| free.saturating_sub(KEEP_FREE));
     if said_size > room {
-        return Err(format!(
-            "{name} needs {} free, and this disk has {}.",
-            size_words(said_size + KEEP_FREE),
-            size_words(room + KEEP_FREE)
+        return Err(tf(
+            "notices.pack.needs_room",
+            "{name} needs {needed} free, and this disk has {free}.",
+            &[("name", &name), ("needed", &size_words(said_size + KEEP_FREE)), ("free", &size_words(room + KEEP_FREE))],
         ));
     }
     let mut opened = Opened {
@@ -527,7 +568,11 @@ pub fn open(path: &Path, staging: &Path) -> Result<Opened, String> {
         if !matches!(kind, Entry::Picture(_) | Entry::Video(_)) {
             words_read = words_read.saturating_add(entry.size().min(LARGEST_TEXT));
             if words_read > MOST_WORDS {
-                return Err(format!("{name} holds more songs and themes than a song pack can."));
+                return Err(tf(
+                    "notices.pack.too_much",
+                    "{name} holds more songs and themes than a song pack can.",
+                    &[("name", &name)],
+                ));
             }
         }
         match kind {
@@ -535,12 +580,20 @@ pub fn open(path: &Path, staging: &Path) -> Result<Opened, String> {
             Entry::Playlist => {
                 match read_words(&mut entry).and_then(|text| serde_json::from_str(&text).map_err(|e| e.to_string())) {
                     Ok(playlist) => opened.playlist = Some(playlist),
-                    Err(why) => opened.ignored.push(format!("the playlist ({why})")),
+                    Err(why) => opened.ignored.push(tf(
+                        "notices.pack.bad_playlist",
+                        "the playlist ({error})",
+                        &[("error", &why)],
+                    )),
                 }
             }
             Entry::Song => match read_words(&mut entry).and_then(|text| sp_model::from_json(&text)) {
                 Ok(song) if opened.songs.iter().any(|have| have.id == song.id) => {
-                    opened.ignored.push(format!("{} (a second copy of a song)", shown(&raw)));
+                    opened.ignored.push(tf(
+                        "notices.pack.second_copy",
+                        "{name} (a second copy of a song)",
+                        &[("name", &shown(&raw))],
+                    ));
                 }
                 Ok(song) => opened.songs.push(song),
                 Err(why) => opened.ignored.push(format!("{} ({why})", shown(&raw))),
@@ -580,8 +633,10 @@ pub fn open(path: &Path, staging: &Path) -> Result<Opened, String> {
     }
     let version = manifest.get("version").and_then(serde_json::Value::as_u64).unwrap_or(0);
     if version == 0 || version > VERSION {
-        return Err(format!(
-            "{name} was made by a newer SoftPresenter (pack version {version}); update SoftPresenter to open it."
+        return Err(tf(
+            "notices.pack.newer",
+            "{name} was made by a newer SoftPresenter (pack version {version}); update SoftPresenter to open it.",
+            &[("name", &name), ("version", &version.to_string())],
         ));
     }
     opened.media_items = manifest
@@ -600,9 +655,9 @@ fn read_words(entry: &mut impl Read) -> Result<String, String> {
     let mut bytes = Vec::new();
     entry.take(LARGEST_TEXT + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     if bytes.len() as u64 > LARGEST_TEXT {
-        return Err("too large".to_owned());
+        return Err(t("notices.pack.too_large", "too large").to_owned());
     }
-    String::from_utf8(bytes).map_err(|_| "not text".to_owned())
+    String::from_utf8(bytes).map_err(|_| t("notices.pack.not_text", "not text").to_owned())
 }
 
 /// Copies a picture or video out of the pack into `into`: at most `cap` bytes, whatever the
@@ -614,7 +669,7 @@ pub(crate) fn put_file(entry: &mut impl Read, into: &Path, cap: u64) -> Result<u
         Ok(size) if size <= cap => Ok(size),
         Ok(_) => {
             let _ = std::fs::remove_file(into);
-            Err("too large".to_owned())
+            Err(t("notices.pack.too_large", "too large").to_owned())
         }
         Err(e) => {
             let _ = std::fs::remove_file(into);

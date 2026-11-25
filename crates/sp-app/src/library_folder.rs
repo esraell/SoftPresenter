@@ -18,6 +18,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use crate::i18n::{t, tf};
+
 /// A file in the library in Documents that says it is SoftPresenter's, so that a folder of that
 /// name the owner made for something else is never taken for it.
 pub const MARKER: &str = ".softpresenter-library";
@@ -66,7 +68,11 @@ pub fn move_to_documents() -> Vec<String> {
         Ok(Moved::Done(lines)) => {
             done.extend(lines);
             // The log says where the old folder is kept.
-            set_notice(Ok("Your library moved to Documents \u{203a} SoftPresenter; the old one is kept.".to_owned()));
+            set_notice(Ok(t(
+                "notices.library.moved",
+                "Your library moved to Documents \u{203a} SoftPresenter; the old one is kept.",
+            )
+            .to_owned()));
         }
         Ok(Moved::Blocked(why)) | Err(why) => {
             done.push(why.clone());
@@ -86,7 +92,10 @@ pub fn move_to_documents() -> Vec<String> {
         && let Err(e) = std::fs::read_dir(&new)
         && e.kind() == std::io::ErrorKind::PermissionDenied
     {
-        let why = "SoftPresenter isn't allowed into your Documents folder, where its library is. Allow it in System Settings \u{203a} Privacy & Security \u{203a} Files and Folders, then open SoftPresenter again.";
+        let why = t(
+            "notices.library.not_allowed",
+            "SoftPresenter isn't allowed into your Documents folder, where its library is. Allow it in System Settings \u{203a} Privacy & Security \u{203a} Files and Folders, then open SoftPresenter again.",
+        );
         done.push(why.to_owned());
         set_notice(Err(why.to_owned()));
     }
@@ -122,23 +131,31 @@ pub fn move_library(old: &Path, new: &Path) -> Result<Moved, String> {
         if new.join(MARKER).is_file() {
             return Ok(Moved::Nothing);
         }
-        return Ok(Moved::Blocked(format!(
-            "There is already a folder called SoftPresenter in Documents that isn't SoftPresenter's library, so the library stays in {}. Rename that folder, then open SoftPresenter again to move the library there.",
-            shown(old)
+        return Ok(Moved::Blocked(tf(
+            "notices.library.name_taken",
+            "There is already a folder called SoftPresenter in Documents that isn't SoftPresenter's library, so the library stays in {folder}. Rename that folder, then open SoftPresenter again to move the library there.",
+            &[("folder", &shown(old))],
         )));
     }
-    let parent = new.parent().ok_or("The library's new place has no folder around it.")?;
+    let parent =
+        new.parent().ok_or(t("notices.library.no_parent", "The library's new place has no folder around it."))?;
     let copy = parent.join("SoftPresenter (moving)");
     // A copy left by a crash is ours to clear; anything else of that name is left alone.
     if std::fs::symlink_metadata(&copy).is_ok() {
         if !copy.join(COPYING).is_file() {
-            return Ok(Moved::Blocked(format!(
-                "A folder called \u{201c}SoftPresenter (moving)\u{201d} is in the way in Documents, so the library stays in {}.",
-                shown(old)
+            return Ok(Moved::Blocked(tf(
+                "notices.library.moving_in_way",
+                "A folder called {moving} is in the way in Documents, so the library stays in {folder}.",
+                &[("moving", &crate::i18n::quoted("SoftPresenter (moving)")), ("folder", &shown(old))],
             )));
         }
-        std::fs::remove_dir_all(&copy)
-            .map_err(|e| format!("Could not clear an unfinished copy of the library: {e}"))?;
+        std::fs::remove_dir_all(&copy).map_err(|e| {
+            tf(
+                "notices.library.not_cleared",
+                "Could not clear an unfinished copy of the library: {error}",
+                &[("error", &e.to_string())],
+            )
+        })?;
     }
     let result = make_copy(old, new, &copy);
     if result.is_err() {
@@ -147,7 +164,11 @@ pub fn move_library(old: &Path, new: &Path) -> Result<Moved, String> {
     let mut done = result?;
     std::fs::rename(&copy, new).map_err(|e| {
         let _ = std::fs::remove_dir_all(&copy);
-        format!("Could not put the library's copy in place in Documents ({e}); it stays in {}.", shown(old))
+        tf(
+            "notices.library.not_placed",
+            "Could not put the library's copy in place in Documents ({error}); it stays in {folder}.",
+            &[("error", &e.to_string()), ("folder", &shown(old))],
+        )
     })?;
     done.push(format!("moved the library from {} to {}", shown(old), shown(new)));
     // The old folder is kept, renamed, as the backup.
@@ -168,8 +189,13 @@ pub fn move_library(old: &Path, new: &Path) -> Result<Moved, String> {
 /// Copies the library into `copy`, checks the copy, points its paths at `new`, names its songs
 /// by id and marks it as SoftPresenter's.
 fn make_copy(old: &Path, new: &Path, copy: &Path) -> Result<Vec<String>, String> {
-    let could_not =
-        |e: std::io::Error| format!("Could not copy the library to Documents ({e}); it stays where it was.");
+    let could_not = |e: std::io::Error| {
+        tf(
+            "notices.library.not_copied",
+            "Could not copy the library to Documents ({error}); it stays where it was.",
+            &[("error", &e.to_string())],
+        )
+    };
     std::fs::create_dir_all(copy).map_err(could_not)?;
     std::fs::write(copy.join(COPYING), "").map_err(could_not)?;
     let mut done = Vec::new();
@@ -179,9 +205,10 @@ fn make_copy(old: &Path, new: &Path, copy: &Path) -> Result<Vec<String>, String>
         let inside = from.strip_prefix(old).map_err(|e| e.to_string())?;
         let there = std::fs::metadata(copy.join(inside)).map(|meta| meta.len()).ok();
         if there != Some(*size) {
-            return Err(format!(
-                "The copy of the library didn't match ({} is missing or a different size); the library stays where it was.",
-                inside.display()
+            return Err(tf(
+                "notices.library.copy_differs",
+                "The copy of the library didn't match ({file} is missing or a different size); the library stays where it was.",
+                &[("file", &inside.display().to_string())],
             ));
         }
     }

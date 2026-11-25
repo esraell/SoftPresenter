@@ -24,6 +24,7 @@ use sp_engine::Command;
 use sp_model::Uuid;
 
 use crate::announcements::Announce;
+use crate::i18n::tf;
 use crate::{applog, file_name, media};
 
 /// How long the last picture stays up when the file on screen has left its folder and nothing
@@ -393,14 +394,19 @@ impl crate::App {
             .and_then(|running| running.home_state.media_playlists.iter().find(|p| p.id == from.playlist))
             .map(|playlist| playlist.name.clone())
             .unwrap_or_default();
-        let which = match layer {
-            OnLayer::Media => "The media layer",
-            OnLayer::Announcements => "The Announcements layer",
+        let file = file_name(&from.path);
+        let said = match layer {
+            OnLayer::Media => tf(
+                "notices.followed.media_stopped",
+                "The media layer stopped: {file} left the folder that {playlist} follows, and nothing came in its place.",
+                &[("file", &file), ("playlist", &playlist)],
+            ),
+            OnLayer::Announcements => tf(
+                "notices.followed.announcements_stopped",
+                "The Announcements layer stopped: {file} left the folder that {playlist} follows, and nothing came in its place.",
+                &[("file", &file), ("playlist", &playlist)],
+            ),
         };
-        let said = format!(
-            "{which} stopped: {} left the folder that {playlist} follows, and nothing came in its place.",
-            file_name(&from.path)
-        );
         applog::event(layer.area(), &said);
         match layer {
             OnLayer::Media => {

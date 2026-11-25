@@ -24,6 +24,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use crate::i18n::{t, tf};
+
 /// An app that can turn presentations into PDFs, by how it is asked to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Program {
@@ -206,22 +208,41 @@ pub fn program_for(path: &Path) -> Option<Program> {
 pub fn none_installed(path: &Path) -> String {
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     let ending = path.extension().map_or_else(String::new, |e| format!(".{}", e.to_string_lossy().to_lowercase()));
-    let instead = if matches!(crate::deck::kind_of(path), "pptx") {
-        " Bring it in as slides instead (it needs no app), or export it as a PDF and drop that here."
+    let quoted = crate::i18n::quoted(&name);
+    let args: &[(&str, &str)] = &[("ending", &ending), ("name", &quoted)];
+    if matches!(crate::deck::kind_of(path), "pptx") {
+        tf(
+            "notices.convert.no_app_pptx",
+            "No app on this computer can open {ending} files to draw them, so {name} can\u{2019}t come in as pictures. Bring it in as slides instead (it needs no app), or export it as a PDF and drop that here.",
+            args,
+        )
     } else {
-        " Saved as .pptx it could come in as slides, or export it as a PDF and drop that here."
-    };
-    format!(
-        "No app on this computer can open {ending} files to draw them, so \u{201c}{name}\u{201d} can\u{2019}t come in as pictures.{instead}"
-    )
+        tf(
+            "notices.convert.no_app",
+            "No app on this computer can open {ending} files to draw them, so {name} can\u{2019}t come in as pictures. Saved as .pptx it could come in as slides, or export it as a PDF and drop that here.",
+            args,
+        )
+    }
 }
 
 /// Turns a presentation file into a PDF in `folder`, with the installed program best for it,
 /// trying the next when one fails. Returns the PDF and the program that made it.
 pub fn to_pdf(path: &Path, folder: &Path) -> Result<(PathBuf, Program), String> {
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    let full = plain(&path.canonicalize().map_err(|e| format!("{name} could not be found ({e})."))?);
-    std::fs::create_dir_all(folder).map_err(|e| format!("Could not make a folder to work in: {e}"))?;
+    let full = plain(&path.canonicalize().map_err(|e| {
+        tf(
+            "notices.import.not_found",
+            "{name} could not be found ({error}).",
+            &[("name", &name), ("error", &e.to_string())],
+        )
+    })?);
+    std::fs::create_dir_all(folder).map_err(|e| {
+        tf(
+            "notices.convert.no_work_folder",
+            "Could not make a folder to work in: {error}",
+            &[("error", &e.to_string())],
+        )
+    })?;
     let mut problems = Vec::new();
     for program in programs_for(path).iter().copied().filter(|p| p.installed()) {
         let was_running = program.running();
@@ -233,7 +254,7 @@ pub fn to_pdf(path: &Path, folder: &Path) -> Result<(PathBuf, Program), String> 
         };
         match made {
             Ok(pdf) if pdf.is_file() => return Ok((pdf, program)),
-            Ok(_) => problems.push("it made no PDF".to_owned()),
+            Ok(_) => problems.push(t("notices.convert.no_pdf", "it made no PDF").to_owned()),
             Err(problem) => problems.push(problem),
         }
         // A program this started stays out of the way: closed again if it didn't close itself.
@@ -244,9 +265,10 @@ pub fn to_pdf(path: &Path, folder: &Path) -> Result<(PathBuf, Program), String> 
     if problems.is_empty() {
         return Err(none_installed(path));
     }
-    Err(format!(
-        "{name} could not be drawn as pictures (the app that opened it said: {}). Export it as a PDF and drop that here.",
-        problems.join("; ")
+    Err(tf(
+        "notices.convert.not_drawn",
+        "{name} could not be drawn as pictures (the app that opened it said: {said}). Export it as a PDF and drop that here.",
+        &[("name", &name), ("said", &problems.join("; "))],
     ))
 }
 
@@ -296,7 +318,7 @@ end run"#;
 /// The saving app: open, save as a PDF, close. It may only write inside its own folder
 /// without asking the person, so the PDF is made there and read from there.
 fn by_saving(path: &Path) -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or("no home folder")?;
+    let home = std::env::var_os("HOME").ok_or(t("notices.convert.no_home", "no home folder"))?;
     let folder =
         PathBuf::from(home).join("Library/Containers/com.microsoft.Powerpoint/Data/Library/Caches/SoftPresenter");
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
@@ -360,7 +382,7 @@ try {
 
 #[cfg(not(windows))]
 fn by_saving_on_windows(_path: &Path, _folder: &Path) -> Result<PathBuf, String> {
-    Err("it runs on Windows only".to_owned())
+    Err(t("notices.convert.windows_only", "it runs on Windows only").to_owned())
 }
 
 /// A path as other programs take it: on Windows without the `\\?\` that `canonicalize` puts in
@@ -379,7 +401,7 @@ fn plain(path: &Path) -> PathBuf {
 
 /// The headless app, without a window.
 fn by_headless(path: &Path, folder: &Path) -> Result<PathBuf, String> {
-    let app = Program::Headless.app().ok_or("it isn't installed")?;
+    let app = Program::Headless.app().ok_or(t("notices.convert.not_installed", "it isn't installed"))?;
     let soffice = if cfg!(target_os = "macos") { app.join("Contents/MacOS/soffice") } else { app };
     #[cfg_attr(not(windows), allow(unused_mut))]
     let mut command = Command::new(soffice);
@@ -414,12 +436,9 @@ fn run(command: Command) -> Result<(), String> {
 
 /// Runs a program for at most `allowed`, and says in plain words why it failed.
 fn run_for(mut command: Command, allowed: Duration) -> Result<(), String> {
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("could not be started ({e})"))?;
+    let mut child = command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().map_err(|e| {
+        tf("notices.convert.not_started", "could not be started ({error})", &[("error", &e.to_string())])
+    })?;
     let mut stderr = child.stderr.take();
     let reader = std::thread::spawn(move || {
         let mut said = String::new();
@@ -436,7 +455,7 @@ fn run_for(mut command: Command, allowed: Duration) -> Result<(), String> {
             None if started.elapsed() > allowed => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err("it took too long".to_owned());
+                return Err(t("notices.convert.too_long", "it took too long").to_owned());
             }
             None => std::thread::sleep(Duration::from_millis(50)),
         }
@@ -447,13 +466,18 @@ fn run_for(mut command: Command, allowed: Duration) -> Result<(), String> {
     }
     // macOS refuses with -1743 until the person allows SoftPresenter to control the program.
     if said.contains("-1743") || said.contains("Not authorized") {
-        return Err(
-            "SoftPresenter isn't allowed to use it yet. Allow it in System Settings › Privacy & Security › Automation"
-                .to_owned(),
-        );
+        return Err(t(
+            "notices.convert.not_allowed",
+            "SoftPresenter isn't allowed to use it yet. Allow it in System Settings › Privacy & Security › Automation",
+        )
+        .to_owned());
     }
     let said = said.lines().last().unwrap_or("").trim().to_owned();
-    Err(if said.is_empty() { format!("it stopped ({status})") } else { said })
+    Err(if said.is_empty() {
+        tf("notices.convert.stopped", "it stopped ({status})", &[("status", &status.to_string())])
+    } else {
+        said
+    })
 }
 
 #[cfg(test)]

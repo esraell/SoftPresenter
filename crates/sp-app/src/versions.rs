@@ -6,6 +6,7 @@
 
 use sp_model::Uuid;
 
+use crate::i18n::{t, tf};
 use crate::service::ShowWith;
 
 /// Something asked about theme versions from the window, a macro or the command line, for the
@@ -188,11 +189,15 @@ impl crate::App {
         match ask {
             Ask::Use { version, keep } => {
                 let name = match version {
-                    Some(id) => Some(name_of(&self.themes, id).ok_or("No theme has that version now.")?),
+                    Some(id) => Some(
+                        name_of(&self.themes, id)
+                            .ok_or(t("notices.versions.gone", "No theme has that version now."))?,
+                    ),
                     None => None,
                 };
                 let showing = self.showing();
-                let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
+                let state =
+                    &mut self.running.as_mut().ok_or(t("notices.not_ready", "The app isn't ready."))?.home_state;
                 state.version_switch.use_version(version, keep, showing);
                 crate::applog::event("version", name.as_deref().unwrap_or("the usual look"));
                 self.refresh_output();
@@ -206,8 +211,12 @@ impl crate::App {
                 })
             }
             Ask::Keep(keep) => {
-                let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
-                let on = state.version_switch.on.ok_or("No version is on: the screens show the usual look.")?;
+                let state =
+                    &mut self.running.as_mut().ok_or(t("notices.not_ready", "The app isn't ready."))?.home_state;
+                let on = state
+                    .version_switch
+                    .on
+                    .ok_or(t("notices.versions.none_on", "No version is on: the screens show the usual look."))?;
                 state.version_switch.set_keep(keep);
                 let name = state.versions.iter().find(|v| v.id == on.version).map_or("", |v| v.name.as_str());
                 Ok(if keep {
@@ -219,7 +228,7 @@ impl crate::App {
             Ask::Add { theme, name, from } => {
                 let typed = name.trim();
                 if typed.is_empty() {
-                    return Err("A version needs a name.".to_owned());
+                    return Err(t("notices.versions.needs_name", "A version needs a name.").to_owned());
                 }
                 // The same name as another theme's version is that version, so the screens
                 // switch together.
@@ -227,17 +236,27 @@ impl crate::App {
                     .into_iter()
                     .find(|have| have.name.to_lowercase() == typed.to_lowercase())
                     .unwrap_or_else(|| sp_model::Version { id: Uuid::new_v4(), name: typed.to_owned() });
-                let target = self.themes.get_mut(theme).ok_or("That theme is gone.")?;
+                let target = self.themes.get_mut(theme).ok_or(t("notices.theme_gone", "That theme is gone."))?;
                 if target.has_version(version.id) {
-                    return Err(format!("{} has the {} version already.", target.name, version.name));
+                    return Err(tf(
+                        "notices.versions.has_already",
+                        "{theme} has the {version} version already.",
+                        &[("theme", &target.name), ("version", &version.name)],
+                    ));
                 }
                 if from.is_empty() {
-                    return Err("Choose a template for the version to start from.".to_owned());
+                    return Err(t(
+                        "notices.versions.choose_template",
+                        "Choose a template for the version to start from.",
+                    )
+                    .to_owned());
                 }
                 let copied: Vec<String> =
                     from.iter().filter_map(|at| target.templates.get(*at)).map(|t| t.name.clone()).collect();
                 if !target.add_version(&version, &from) {
-                    return Err("Those templates are not in the theme.".to_owned());
+                    return Err(
+                        t("notices.versions.templates_missing", "Those templates are not in the theme.").to_owned()
+                    );
                 }
                 let said =
                     format!("{} has the {} version: copies of {}.", target.name, version.name, copied.join(", "));
@@ -245,23 +264,30 @@ impl crate::App {
                 Ok(said)
             }
             Ask::AddCopy { theme, version, from } => {
-                let target = self.themes.get_mut(theme).ok_or("That theme is gone.")?;
+                let target = self.themes.get_mut(theme).ok_or(t("notices.theme_gone", "That theme is gone."))?;
                 let copied = target.templates.get(from).map(|t| t.name.clone()).unwrap_or_default();
-                let at = target.add_copy_to_version(version, from).ok_or("That template is not in the theme.")?;
+                let at = target
+                    .add_copy_to_version(version, from)
+                    .ok_or(t("notices.versions.template_missing", "That template is not in the theme."))?;
                 self.versions_saved(&[theme], Some((Some(version), at)));
                 Ok(format!("Added a copy of {copied} to the version."))
             }
             Ask::Rename { version, name } => {
                 let name = name.trim().to_owned();
                 if name.is_empty() {
-                    return Err("A version needs a name.".to_owned());
+                    return Err(t("notices.versions.needs_name", "A version needs a name.").to_owned());
                 }
-                let old = name_of(&self.themes, version).ok_or("No theme has that version now.")?;
+                let old = name_of(&self.themes, version)
+                    .ok_or(t("notices.versions.gone", "No theme has that version now."))?;
                 let taken = sp_model::all_versions(&self.themes)
                     .iter()
                     .any(|have| have.id != version && have.name.to_lowercase() == name.to_lowercase());
                 if taken {
-                    return Err(format!("Another version is called {name} already."));
+                    return Err(tf(
+                        "notices.versions.name_taken",
+                        "Another version is called {name} already.",
+                        &[("name", &name)],
+                    ));
                 }
                 let changed: Vec<usize> =
                     (0..self.themes.len()).filter(|at| self.themes[*at].rename_version(version, &name)).collect();
@@ -270,13 +296,18 @@ impl crate::App {
             }
             // At once, asking nothing: Undo puts it back, with its templates.
             Ask::Remove { theme, version } => {
-                let old = name_of(&self.themes, version).ok_or("No theme has that version now.")?;
-                let target = self.themes.get_mut(theme).ok_or("That theme is gone.")?;
+                let old = name_of(&self.themes, version)
+                    .ok_or(t("notices.versions.gone", "No theme has that version now."))?;
+                let target = self.themes.get_mut(theme).ok_or(t("notices.theme_gone", "That theme is gone."))?;
                 let theme_name = target.name.clone();
                 let place = target.versions.iter().position(|have| have.id == version);
                 let Some(gone) = place.map(|at| target.versions[at].clone()).filter(|_| target.remove_version(version))
                 else {
-                    return Err(format!("{theme_name} has no {old} version."));
+                    return Err(tf(
+                        "notices.versions.not_in_theme",
+                        "{theme} has no {version} version.",
+                        &[("theme", &theme_name), ("version", &old)],
+                    ));
                 };
                 let removed =
                     crate::removed::Removed::Version { theme: target.id, at: place.unwrap_or(0), version: gone };

@@ -766,6 +766,7 @@ mod tests {
         "bible",
         "dialogs",
         "find",
+        "notices",
     ];
 
     #[test]

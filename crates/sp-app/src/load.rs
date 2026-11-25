@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::i18n::{t, tf};
 use sp_model::{
     LARGEST_PRO_FILE, Presentation, decode_text, from_json, import_song_text, read_pro_file, rtf_to_text, to_json,
 };
@@ -75,9 +76,21 @@ fn sqlite_rows(full: &Path, query: &str) -> Option<String> {
 /// songs. Read with macOS's own SQLite tool, opened read-only, with fixed queries.
 pub fn import_songbook(path: &Path) -> Result<Vec<(Presentation, Option<String>)>, String> {
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    let full = path.canonicalize().map_err(|e| format!("{name} could not be found ({e})."))?;
-    let tables = sqlite_rows(&full, "SELECT name FROM sqlite_master WHERE type = 'table'")
-        .ok_or_else(|| format!("{name} isn't a SoftProjector songbook SoftPresenter can read."))?;
+    let full = path.canonicalize().map_err(|e| {
+        tf(
+            "notices.import.not_found",
+            "{name} could not be found ({error}).",
+            &[("name", &name), ("error", &e.to_string())],
+        )
+    })?;
+    let not_songbook = || {
+        tf(
+            "notices.import.not_songbook",
+            "{name} isn't a SoftProjector songbook SoftPresenter can read.",
+            &[("name", &name)],
+        )
+    };
+    let tables = sqlite_rows(&full, "SELECT name FROM sqlite_master WHERE type = 'table'").ok_or_else(not_songbook)?;
     let query = if tables.contains("\"Songbooks\"") {
         "SELECT s.number AS number, s.title AS title, s.words AS words, s.music AS music, s.song_text AS text, \
          b.name AS book FROM Songs s LEFT JOIN Songbooks b ON b.id = s.songbook_id ORDER BY b.name, s.number"
@@ -85,14 +98,20 @@ pub fn import_songbook(path: &Path) -> Result<Vec<(Presentation, Option<String>)
         "SELECT s.number AS number, s.title AS title, s.words AS words, s.music AS music, s.song_text AS text, \
          (SELECT title FROM SongBook LIMIT 1) AS book FROM Songs s ORDER BY s.number"
     } else {
-        return Err(format!("{name} isn't a SoftProjector songbook SoftPresenter can read."));
+        return Err(not_songbook());
     };
-    let text = sqlite_rows(&full, query).ok_or_else(|| format!("{name} could not be read."))?;
+    let text = sqlite_rows(&full, query)
+        .ok_or_else(|| tf("notices.import.unreadable_plain", "{name} could not be read.", &[("name", &name)]))?;
     if text.trim().is_empty() {
-        return Err(format!("{name} has no songs in it."));
+        return Err(tf("notices.import.no_songs", "{name} has no songs in it.", &[("name", &name)]));
     }
-    let rows: Vec<serde_json::Value> =
-        serde_json::from_str(&text).map_err(|e| format!("{name} could not be read ({e})."))?;
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&text).map_err(|e| {
+        tf(
+            "notices.import.unreadable",
+            "{name} could not be read ({error}).",
+            &[("name", &name), ("error", &e.to_string())],
+        )
+    })?;
     let field = |row: &serde_json::Value, key: &str| row.get(key).and_then(|v| v.as_str()).unwrap_or("").to_owned();
     Ok(rows
         .iter()
@@ -189,23 +208,34 @@ pub fn filter_name(kind: &str, endings: &[&str]) -> String {
 /// import brings its pictures and videos, see `bundle.rs`), or (on macOS) a Word or
 /// OpenDocument file. The error is a plain sentence for the operator.
 pub fn import_file(path: &Path) -> Result<Presentation, String> {
-    let name = path.file_name().map_or_else(|| "The file".into(), |n| n.to_string_lossy().into_owned());
-    let size = std::fs::metadata(path).map_err(|e| format!("{name} could not be read ({e})."))?.len();
+    let name = path
+        .file_name()
+        .map_or_else(|| t("notices.import.the_file", "The file").to_owned(), |n| n.to_string_lossy().into_owned());
+    let unreadable = |error: &str| {
+        tf("notices.import.unreadable", "{name} could not be read ({error}).", &[("name", &name), ("error", error)])
+    };
+    let size = std::fs::metadata(path).map_err(|e| unreadable(&e.to_string()))?.len();
     if is_songbook(path) {
-        return Err(format!(
-            "{name} holds many songs: import it with File › Import Songs › Song Files… or by dropping it on the window."
+        return Err(tf(
+            "notices.import.many_songs",
+            "{name} holds many songs: import it with File › Import Songs › Song Files… or by dropping it on the window.",
+            &[("name", &name)],
         ));
     }
     // Only the kinds of file songs come in: a sound, a picture or anything else is not read as
     // words.
     if !is_importable(path) && !is_song_file(path) {
         if crate::audio::is_audio(path) {
-            return Err(format!("{name} is a sound: sounds go in the Audio tab."));
+            return Err(tf(
+                "notices.import.sound",
+                "{name} is a sound: sounds go in the Audio tab.",
+                &[("name", &name)],
+            ));
         }
-        return Err(format!(
-            "{name} isn't a kind of file songs come in. Songs come from text, lyric and ChordPro files, rich text, \
-             Word and OpenDocument files, .pro and .proBundle files, .sps and .sqlite songbooks and SoftPresenter songs; PDFs, \
-             presentation files (.pptx, .ppsx, .key, .odp, .ppt, .pps) and folders of pictures come in as slides."
+        return Err(tf(
+            "notices.import.not_song_kind",
+            "{name} isn't a kind of file songs come in. Songs come from text, lyric and ChordPro files, rich text, Word and OpenDocument files, .pro and .proBundle files, .sps and .sqlite songbooks and SoftPresenter songs; PDFs, presentation files (.pptx, .ppsx, .key, .odp, .ppt, .pps) and folders of pictures come in as slides.",
+            &[("name", &name)],
         ));
     }
     if crate::bundle::is_bundle(path) {
@@ -214,27 +244,33 @@ pub fn import_file(path: &Path) -> Result<Presentation, String> {
     let pro = has_extension(path, PRO_ENDING);
     let largest = if pro { LARGEST_PRO_FILE as u64 } else { LARGEST_SONG_FILE };
     if size > largest {
-        return Err(format!("{name} is too large to be a song."));
+        return Err(tf("notices.import.too_large", "{name} is too large to be a song.", &[("name", &name)]));
     }
-    let title = path.file_stem().map_or_else(|| "Untitled".to_owned(), |s| s.to_string_lossy().into_owned());
-    let read = || std::fs::read(path).map_err(|e| format!("{name} could not be read ({e})."));
+    let title = path
+        .file_stem()
+        .map_or_else(|| t("left.untitled", "Untitled").to_owned(), |s| s.to_string_lossy().into_owned());
+    let read = || std::fs::read(path).map_err(|e| unreadable(&e.to_string()));
     let song = if pro {
-        read_pro_file(&read()?, &title).map_err(|reason| format!("{name} could not be read ({reason})."))?
+        read_pro_file(&read()?, &title).map_err(|reason| unreadable(&reason))?
     } else {
         let text = if has_extension(path, RICH_TEXT_ENDING) {
             rtf_to_text(&read()?)
         } else if DOCUMENT_ENDINGS.iter().any(|ending| has_extension(path, ending)) {
-            document_text(path).map_err(|reason| format!("{name} could not be read ({reason})."))?
+            document_text(path).map_err(|reason| unreadable(&reason))?
         } else {
             decode_text(&read()?)
         };
         if !looks_like_text(&text) {
-            return Err(format!("{name} doesn't read as text (is it the right file?)."));
+            return Err(tf(
+                "notices.import.not_text",
+                "{name} doesn't read as text (is it the right file?).",
+                &[("name", &name)],
+            ));
         }
         import_song_text(&title, &text)
     };
     if song.slide_count() == 0 {
-        return Err(format!("{name} has no words in it."));
+        return Err(tf("notices.import.no_words", "{name} has no words in it.", &[("name", &name)]));
     }
     Ok(song)
 }
@@ -265,7 +301,7 @@ fn document_text(path: &Path) -> Result<String, String> {
         .spawn()
         .map_err(|e| e.to_string())?;
     // Read while it runs, so a long document can't fill the pipe and stall it.
-    let mut stdout = child.stdout.take().ok_or("no output")?;
+    let mut stdout = child.stdout.take().ok_or(t("notices.import.no_output", "no output"))?;
     let reader = std::thread::spawn(move || {
         let mut bytes = Vec::new();
         let _ = stdout.by_ref().take(LARGEST_SONG_FILE * 4).read_to_end(&mut bytes);
@@ -278,28 +314,32 @@ fn document_text(path: &Path) -> Result<String, String> {
             None if started.elapsed() > Duration::from_secs(10) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err("it took too long to read".to_owned());
+                return Err(t("notices.import.too_long", "it took too long to read").to_owned());
             }
             None => std::thread::sleep(Duration::from_millis(10)),
         }
     };
-    let bytes = reader.join().map_err(|_| "the converter failed".to_owned())?;
+    let bytes = reader.join().map_err(|_| t("notices.import.converter_failed", "the converter failed").to_owned())?;
     if !status.success() {
-        return Err("macOS could not read it as a document".to_owned());
+        return Err(t("notices.import.not_document", "macOS could not read it as a document").to_owned());
     }
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 #[cfg(not(target_os = "macos"))]
 fn document_text(_path: &Path) -> Result<String, String> {
-    Err("Word files can be imported on macOS for now; save the song as a .txt or .rtf file".to_owned())
+    Err(t(
+        "notices.import.word_mac_only",
+        "Word files can be imported on macOS for now; save the song as a .txt or .rtf file",
+    )
+    .to_owned())
 }
 
 /// Reads one of SoftPresenter's own song files.
 pub fn read_song_file(path: &Path) -> Result<Presentation, String> {
     let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
     if size > LARGEST_SONG_FILE * 4 {
-        return Err("too large to be a song file".to_owned());
+        return Err(t("notices.import.too_large_file", "too large to be a song file").to_owned());
     }
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     from_json(&text)
@@ -332,9 +372,13 @@ pub fn save_song(path: &Path, song: &Presentation) -> Result<PathBuf, String> {
     let target = song_file_for(path);
     let name = target.file_name().map_or_else(|| "song".into(), |n| n.to_string_lossy().into_owned());
     let temporary = target.with_file_name(format!(".{name}.saving"));
-    std::fs::write(&temporary, to_json(song))
-        .and_then(|()| std::fs::rename(&temporary, &target))
-        .map_err(|e| format!("{}: could not be saved ({e}).", target.display()))?;
+    std::fs::write(&temporary, to_json(song)).and_then(|()| std::fs::rename(&temporary, &target)).map_err(|e| {
+        tf(
+            "notices.song.not_saved",
+            "{file}: could not be saved ({error}).",
+            &[("file", &target.display().to_string()), ("error", &e.to_string())],
+        )
+    })?;
     Ok(target)
 }
 
@@ -348,7 +392,11 @@ pub fn load_songs(paths: &[PathBuf]) -> (Vec<Loaded>, Vec<String>) {
     for path in paths {
         if path.is_dir() {
             match text_files_in(path) {
-                Ok(files) if files.is_empty() => problems.push(format!("{}: no songs in this folder", path.display())),
+                Ok(files) if files.is_empty() => problems.push(tf(
+                    "notices.import.empty_folder",
+                    "{folder}: no songs in this folder",
+                    &[("folder", &path.display().to_string())],
+                )),
                 Ok(files) => files.iter().for_each(|f| load_one(f, &mut songs, &mut problems)),
                 Err(reason) => problems.push(format!("{}: {reason}", path.display())),
             }
@@ -387,7 +435,11 @@ fn load_one(path: &Path, songs: &mut Vec<Loaded>, problems: &mut Vec<String>) {
         Err(reason) => return problems.push(format!("{}: {reason}", path.display())),
     };
     if song.slide_count() == 0 {
-        return problems.push(format!("{}: no slides found", path.display()));
+        return problems.push(tf(
+            "notices.import.no_slides",
+            "{file}: no slides found",
+            &[("file", &path.display().to_string())],
+        ));
     }
     songs.push(Loaded { song, path: path.to_owned() });
 }

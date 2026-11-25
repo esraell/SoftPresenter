@@ -2,6 +2,7 @@
 //! can be in any number of them; a library only lists songs, by their keys (a library song's
 //! id). Kept in `libraries.json`, which before version 2 was a bare list naming songs by path.
 
+use crate::i18n::{t, tf};
 use serde::{Deserialize, Serialize};
 use sp_model::Uuid;
 
@@ -35,8 +36,9 @@ impl Library {
 /// A name no library has: "New Library", "New Library 2", and so on.
 pub fn new_name(libraries: &[Library]) -> String {
     let taken = |name: &str| libraries.iter().any(|library| library.name == name);
-    std::iter::once("New Library".to_owned())
-        .chain((2..).map(|n| format!("New Library {n}")))
+    let base = t("notices.new_library.name", "New Library");
+    std::iter::once(base.to_owned())
+        .chain((2..).map(|n| format!("{base} {n}")))
         .find(|name| !taken(name))
         .unwrap_or_default()
 }
@@ -94,14 +96,17 @@ pub fn load() -> Vec<Library> {
 }
 
 pub fn save(libraries: &[Library]) -> Result<(), String> {
-    let path = file().ok_or_else(|| "Could not find where to keep settings on this computer.".to_owned())?;
+    let path = file()
+        .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Could not make the app's folder: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+        })?;
     }
     let partial = path.with_extension("json.part");
-    std::fs::write(&partial, to_json(libraries))
-        .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| format!("Could not save the libraries: {e}"))
+    std::fs::write(&partial, to_json(libraries)).and_then(|()| std::fs::rename(&partial, &path)).map_err(|e| {
+        tf("notices.save.libraries", "Could not save the libraries: {error}", &[("error", &e.to_string())])
+    })
 }
 
 #[cfg(test)]

@@ -197,22 +197,31 @@ impl Reloaded {
         let list = |names: &[String]| names.join(", ");
         let mut parts = Vec::new();
         if !self.read.is_empty() {
-            parts.push(format!("Read again: {}.", list(&self.read)));
+            parts.push(crate::i18n::tf("notices.reload.read", "Read again: {names}.", &[("names", &list(&self.read))]));
         }
         if !self.added.is_empty() {
-            parts.push(format!("Added: {}.", list(&self.added)));
+            parts.push(crate::i18n::tf("notices.reload.added", "Added: {names}.", &[("names", &list(&self.added))]));
         }
         if !self.waiting.is_empty() {
-            parts.push(format!(
-                "Waiting on Reload or Keep mine (in use, or with changes not saved): {}.",
-                list(&self.waiting)
+            parts.push(crate::i18n::tf(
+                "notices.reload.waiting",
+                "Waiting on Reload or Keep mine (in use, or with changes not saved): {names}.",
+                &[("names", &list(&self.waiting))],
             ));
         }
         if !self.gone.is_empty() {
-            parts.push(format!("Their file is gone (Keep mine saves it again): {}.", list(&self.gone)));
+            parts.push(crate::i18n::tf(
+                "notices.reload.gone",
+                "Their file is gone (Keep mine saves it again): {names}.",
+                &[("names", &list(&self.gone))],
+            ));
         }
         parts.extend(self.problems.iter().cloned());
-        if parts.is_empty() { "Every song is as its file has it.".to_owned() } else { parts.join(" ") }
+        if parts.is_empty() {
+            crate::i18n::t("notices.reload.nothing", "Every song is as its file has it.").to_owned()
+        } else {
+            parts.join(" ")
+        }
     }
 }
 
@@ -247,12 +256,20 @@ fn open_panel_window(
     } else {
         attrs
     };
-    let window = Arc::new(el.create_window(attrs).map_err(|e| format!("Could not open the Screens window: {e}"))?);
-    let surface = running
-        .context
-        .instance
-        .create_surface(window.clone())
-        .map_err(|e| format!("Could not draw the Screens window: {e}"))?;
+    let window = Arc::new(el.create_window(attrs).map_err(|e| {
+        crate::i18n::tf(
+            "notices.panel.not_opened",
+            "Could not open the Screens window: {error}",
+            &[("error", &e.to_string())],
+        )
+    })?);
+    let surface = running.context.instance.create_surface(window.clone()).map_err(|e| {
+        crate::i18n::tf(
+            "notices.panel.not_drawn",
+            "Could not draw the Screens window: {error}",
+            &[("error", &e.to_string())],
+        )
+    })?;
     let format = surface_format(&surface, running.context.devices[running.device_id].adapter())?;
     let size = window.inner_size();
     let config = wgpu::SurfaceConfiguration {
@@ -352,20 +369,34 @@ fn describe_opening(show: &Show, state: &home::HomeState, step: &sp_model::ShowA
         sp_model::ShowAction::Announce { what: sp_model::Announced::Song { key } } => {
             let title = studio::playlist_song(show, state, key).map(|at| show.presentations()[at].title.clone());
             match title {
-                Some(title) => format!("the song \u{201c}{title}\u{201d}"),
-                None => "a song that is no longer in the library, so nothing plays until you choose what it plays"
-                    .to_owned(),
+                Some(title) => crate::i18n::tf(
+                    "notices.opening.song",
+                    "the song {title}",
+                    &[("title", &crate::i18n::quoted(&title))],
+                ),
+                None => crate::i18n::t(
+                    "notices.opening.song_gone",
+                    "a song that is no longer in the library, so nothing plays until you choose what it plays",
+                )
+                .to_owned(),
             }
         }
         sp_model::ShowAction::Announce { what: sp_model::Announced::MediaPlaylist { id } } => {
             let name = state.media_playlists.iter().find(|p| p.id == *id).map(|p| p.name.clone());
             match name {
-                Some(name) => format!("the media playlist \u{201c}{name}\u{201d}"),
-                None => "a media playlist that is no longer there, so nothing plays until you choose what it plays"
-                    .to_owned(),
+                Some(name) => crate::i18n::tf(
+                    "notices.opening.media_playlist",
+                    "the media playlist {name}",
+                    &[("name", &crate::i18n::quoted(&name))],
+                ),
+                None => crate::i18n::t(
+                    "notices.opening.media_playlist_gone",
+                    "a media playlist that is no longer there, so nothing plays until you choose what it plays",
+                )
+                .to_owned(),
             }
         }
-        _ => "what it was set to".to_owned(),
+        _ => crate::i18n::t("notices.opening.as_set", "what it was set to").to_owned(),
     }
 }
 
@@ -437,11 +468,18 @@ fn do_state_action(state: &mut home::HomeState, action: &sp_model::ShowAction, n
                         .macros
                         .iter()
                         .find(|made| made.actions.contains(action))
-                        .map(|made| format!(" in the macro \u{201c}{}\u{201d}", made.name))
+                        .map(|made| {
+                            crate::i18n::tf(
+                                "notices.macro.in",
+                                " in the macro {macro}",
+                                &[("macro", &crate::i18n::quoted(&made.name))],
+                            )
+                        })
                         .unwrap_or_default();
-                    state.notices.trouble(format!(
-                        "Nothing plays on the Announcements layer: the song a step{holder} plays is no longer in the \
-                         library. Open the macro in the Macros tab and choose what it plays."
+                    state.notices.trouble(crate::i18n::tf(
+                        "notices.macro.song_gone",
+                        "Nothing plays on the Announcements layer: the song a step{holder} plays is no longer in the library. Open the macro in the Macros tab and choose what it plays.",
+                        &[("holder", &holder)],
                     ));
                 }
             }
@@ -818,7 +856,9 @@ struct Imported {
 }
 
 /// How the sentence saying a song imported is in the library already ends.
-const ALREADY: &str = " is already in the library.";
+fn already() -> &'static str {
+    crate::i18n::t("notices.import.already", " is already in the library.")
+}
 
 /// Where the pointer is in the window, in its points, while files are dragged over it: asked of
 /// the system, as the window library doesn't say (see `file_drop.rs`). `None` where the system
@@ -1436,8 +1476,8 @@ impl Panel {
 
     fn title(self) -> &'static str {
         match self {
-            Panel::Screens => "Screens",
-            Panel::Settings => "Settings",
+            Panel::Screens => crate::i18n::t("notices.window.screens", "Screens"),
+            Panel::Settings => crate::i18n::t("notices.window.settings", "Settings"),
         }
     }
 
@@ -2197,7 +2237,10 @@ impl App {
         self.check_folders(true);
         let Some(first) = self.playlist_media(id).first().copied() else {
             if let Some(running) = self.running.as_mut() {
-                running.home_state.notices.refuse("That media playlist has nothing in it to play.");
+                running.home_state.notices.refuse(crate::i18n::t(
+                    "notices.media_playlist.empty",
+                    "That media playlist has nothing in it to play.",
+                ));
                 running.home_window.request_redraw();
             }
             return;
@@ -3027,7 +3070,7 @@ impl App {
                 match outcome {
                     Ok(saved) => {
                         look.take(&saved);
-                        look.outcome = Some("Saved to VoxLive.".to_owned());
+                        look.outcome = Some(crate::i18n::t("notices.voxlive.saved", "Saved to VoxLive.").to_owned());
                     }
                     Err(voxlive::Saving::Changed(now)) => look.changed_there = Some(*now),
                     Err(voxlive::Saving::Failed(why)) => look.outcome = Some(why),
@@ -4094,7 +4137,11 @@ impl App {
         if let Some(name) = name
             && !studio::playlist_in_sight(&running.home_state, index)
         {
-            running.home_state.notices.info(format!("Added {} to the playlist {name}.", item.name));
+            running.home_state.notices.info(crate::i18n::tf(
+                "notices.added_to_playlist",
+                "Added {item} to the playlist {list}.",
+                &[("item", &item.name), ("list", &name)],
+            ));
         }
     }
 
@@ -4130,13 +4177,19 @@ impl App {
             ),
             bible_store::Work::Install { imported, .. } => imported.file_name.clone(),
         };
-        let said = format!("Reading {shown}…");
+        let said = crate::i18n::tf("notices.bible.reading", "Reading {name}…", &[("name", &shown)]);
         let known = self.running.as_ref().map(|running| running.home_state.bible.shelf.known()).unwrap_or_default();
         let (tx, waker) = (self.bible_tx.clone(), self.waker.clone());
         let started = std::thread::Builder::new().name("bible file".to_owned()).spawn(move || {
             // A panic in reading a file (ours, or a library's) ends this work, never the app.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bible_store::run(work, &known)))
-                .unwrap_or_else(|_| Err(format!("SoftPresenter couldn't read {shown}.")));
+                .unwrap_or_else(|_| {
+                    Err(crate::i18n::tf(
+                        "notices.bible.unreadable",
+                        "SoftPresenter couldn't read {name}.",
+                        &[("name", &shown)],
+                    ))
+                });
             let _ = tx.send(BibleWork { job, result });
             if let Some(waker) = waker {
                 let _ = waker.send_event(AppEvent::BibleRead);
@@ -4211,7 +4264,9 @@ impl App {
             return;
         }
         // Any file may be a Bible, whatever its ending: what it holds decides.
-        let chosen = rfd::FileDialog::new().set_title("Choose a Bible File").pick_file();
+        let chosen = rfd::FileDialog::new()
+            .set_title(crate::i18n::t("notices.dialog.bible_file", "Choose a Bible File"))
+            .pick_file();
         if let Some(path) = chosen {
             self.install_bible(&path);
         }
@@ -4237,9 +4292,10 @@ impl App {
         let result = if already {
             Ok(None)
         } else if no_ffmpeg {
-            Err(format!(
-                "This video needs FFmpeg to play, and FFmpeg isn't on this computer. {}",
-                media::ffmpeg_advice()
+            Err(crate::i18n::tf(
+                "notices.media.needs_ffmpeg",
+                "This video needs FFmpeg to play, and FFmpeg isn't on this computer. {advice}",
+                &[("advice", media::ffmpeg_advice())],
             ))
         } else {
             media::load_small(path).map(Some)
@@ -4263,7 +4319,10 @@ impl App {
                     self.show.add_media(item);
                     applog::event("media", &format!("added {} in {:?}", path.display(), started.elapsed()));
                 } else {
-                    running.home_state.notices.refuse("That file is already in the media bin.");
+                    running.home_state.notices.refuse(crate::i18n::t(
+                        "notices.media.already_in_bin",
+                        "That file is already in the media bin.",
+                    ));
                 }
                 // Added while a media playlist is shown, it goes into that playlist, so it shows.
                 let state = &mut running.home_state;
@@ -4805,8 +4864,8 @@ impl App {
         let Some(running) = self.running.as_mut() else { return };
         if std::mem::take(&mut running.home_state.theme_picture_request) {
             let chosen = rfd::FileDialog::new()
-                .set_title("Choose a Picture for the Theme")
-                .add_filter("Pictures", &media::PICTURES)
+                .set_title(crate::i18n::t("notices.dialog.theme_picture", "Choose a Picture for the Theme"))
+                .add_filter(crate::i18n::t("notices.dialog.filter.pictures", "Pictures"), &media::PICTURES)
                 .pick_file();
             let state = &mut running.home_state;
             match chosen.map(|path| images::import(&path)) {
@@ -4826,8 +4885,8 @@ impl App {
             return;
         }
         let chosen = rfd::FileDialog::new()
-            .set_title("Choose a Picture or Video")
-            .add_filter("Pictures and Videos", &media::PICTURE_ENDINGS)
+            .set_title(crate::i18n::t("notices.dialog.picture_or_video", "Choose a Picture or Video"))
+            .add_filter(crate::i18n::t("notices.dialog.filter.media", "Pictures and Videos"), &media::PICTURE_ENDINGS)
             .pick_file();
         let state = &mut running.home_state;
         match chosen.map(|path| images::import(&path)) {
@@ -4849,7 +4908,9 @@ impl App {
             MediaRequest::PlayPlaylist(None) => self.stop_media_playlist(),
             MediaRequest::WatchFolder(id, follow) => {
                 let folder = if follow {
-                    let Some(folder) = rfd::FileDialog::new().set_title("Choose a Folder to Follow").pick_folder()
+                    let Some(folder) = rfd::FileDialog::new()
+                        .set_title(crate::i18n::t("notices.dialog.follow_folder", "Choose a Folder to Follow"))
+                        .pick_folder()
                     else {
                         return;
                     };
@@ -4870,8 +4931,11 @@ impl App {
             MediaRequest::Choose => {
                 // The system's own window for choosing files, as any Mac app has.
                 let chosen = rfd::FileDialog::new()
-                    .set_title("Add Pictures and Videos")
-                    .add_filter("Pictures and Videos", &media::PICTURE_ENDINGS)
+                    .set_title(crate::i18n::t("notices.dialog.add_media", "Add Pictures and Videos"))
+                    .add_filter(
+                        crate::i18n::t("notices.dialog.filter.media", "Pictures and Videos"),
+                        &media::PICTURE_ENDINGS,
+                    )
                     .pick_files()
                     .unwrap_or_default();
                 for path in chosen {
@@ -5011,7 +5075,13 @@ impl App {
                     self.stamps.note(&written);
                     self.sources[index] = Some(written);
                 }
-                Err(e) => problem = Some(format!("The change was not saved. {e}")),
+                Err(e) => {
+                    problem = Some(crate::i18n::tf(
+                        "notices.song.change_not_saved",
+                        "The change was not saved. {error}",
+                        &[("error", &e)],
+                    ))
+                }
             }
         }
         for index in std::mem::take(&mut self.themes_unsaved) {
@@ -5048,24 +5118,30 @@ impl App {
     /// it is answered; it never opens the list by itself.
     fn wait_on(&mut self, what: outside::Waiting) {
         let name = match what {
-            outside::Waiting::Song(index) => self
-                .show
-                .presentations()
-                .get(index)
-                .map_or_else(|| "A song".to_owned(), |song| format!("\u{201c}{}\u{201d}", song.title)),
-            outside::Waiting::Theme(index) => self
-                .themes
-                .get(index)
-                .map_or_else(|| "A theme".to_owned(), |theme| format!("The theme \u{201c}{}\u{201d}", theme.name)),
+            outside::Waiting::Song(index) => self.show.presentations().get(index).map_or_else(
+                || crate::i18n::t("notices.ask.a_song", "A song").to_owned(),
+                |song| crate::i18n::quoted(&song.title),
+            ),
+            outside::Waiting::Theme(index) => self.themes.get(index).map_or_else(
+                || crate::i18n::t("notices.ask.a_theme", "A theme").to_owned(),
+                |theme| {
+                    crate::i18n::tf(
+                        "notices.ask.the_theme",
+                        "The theme {name}",
+                        &[("name", &crate::i18n::quoted(&theme.name))],
+                    )
+                },
+            ),
         };
         if let Some(running) = self.running.as_mut()
             && !running.home_state.notices.asks_about(what)
         {
             running.home_state.notices.ask(
                 what,
-                format!(
-                    "{name} was changed outside SoftPresenter. Read it again from its file, or keep SoftPresenter's \
-                     version and write it over the file?"
+                crate::i18n::tf(
+                    "notices.ask.changed_outside",
+                    "{name} was changed outside SoftPresenter. Read it again from its file, or keep SoftPresenter's version and write it over the file?",
+                    &[("name", &name)],
                 ),
             );
             running.home_window.request_redraw();
@@ -5179,15 +5255,25 @@ impl App {
     /// its undo history, and the editor on it starts again from the file. Returns its title.
     fn reload_song(&mut self, index: usize) -> Result<String, String> {
         let title = self.show.presentations().get(index).map(|song| song.title.clone()).unwrap_or_default();
-        let path = self.sources.get(index).cloned().flatten().ok_or_else(|| format!("{title} has no file to read."))?;
+        let path = self.sources.get(index).cloned().flatten().ok_or_else(|| {
+            crate::i18n::tf("notices.reload.no_file", "{title} has no file to read.", &[("title", &title)])
+        })?;
         let target = load::song_file_for(&path);
         if !target.is_file() {
-            return Err(format!("{title}'s file is gone; Keep mine saves it again."));
+            return Err(crate::i18n::tf(
+                "notices.reload.file_gone",
+                "{title}'s file is gone; Keep mine saves it again.",
+                &[("title", &title)],
+            ));
         }
         let (mut loaded, problems) = load::load_songs(std::slice::from_ref(&target));
         let song = loaded.pop().map(|loaded| loaded.song).ok_or_else(|| {
             let why = problems.join(" ").replace(&target.display().to_string(), &file_name(&target));
-            format!("{title} could not be read again ({why}); SoftPresenter's version is kept.")
+            crate::i18n::tf(
+                "notices.reload.unreadable",
+                "{title} could not be read again ({why}); SoftPresenter's version is kept.",
+                &[("title", &title), ("why", &why)],
+            )
         })?;
         let key = song_ids::key_for(Some(&target), song.id, &song.title);
         let title = song.title.clone();
@@ -5224,10 +5310,10 @@ impl App {
     /// Writes the app's version of a song over its file, which changed outside the app.
     fn keep_song(&mut self, index: usize) -> Result<String, String> {
         if self.running.as_ref().is_some_and(|r| r.home_state.removed_songs.contains(&index)) {
-            return Err("That song was deleted.".to_owned());
+            return Err(crate::i18n::t("notices.keep.song_deleted", "That song was deleted.").to_owned());
         }
         let (Some(Some(path)), Some(song)) = (self.sources.get(index), self.show.presentations().get(index)) else {
-            return Err("That song has no file.".to_owned());
+            return Err(crate::i18n::t("notices.keep.no_file", "That song has no file.").to_owned());
         };
         let title = song.title.clone();
         let written = load::save_song(path, song)?;
@@ -5242,16 +5328,35 @@ impl App {
     /// Takes a theme's file's version in place of the app's.
     fn reload_theme(&mut self, index: usize) -> Result<String, String> {
         if self.running.as_ref().is_some_and(|r| r.home_state.theme_edit.is_some()) {
-            return Err("Close the Theme editor first, then reload the theme.".to_owned());
+            return Err(crate::i18n::t(
+                "notices.reload.theme_editor_open",
+                "Close the Theme editor first, then reload the theme.",
+            )
+            .to_owned());
         }
-        let theme = self.themes.get(index).ok_or("That theme is gone.")?;
-        let file = theme_store::file_of(theme).ok_or("The theme has no file.")?;
-        let text =
-            std::fs::read_to_string(&file).map_err(|e| format!("The theme {} could not be read: {e}", theme.name))?;
-        let read = sp_model::Theme::from_json(&text)
-            .map_err(|e| format!("The theme {} could not be read: {e}", theme.name))?;
+        let theme = self.themes.get(index).ok_or(crate::i18n::t("notices.theme_gone", "That theme is gone."))?;
+        let file = theme_store::file_of(theme)
+            .ok_or(crate::i18n::t("notices.reload.theme_no_file", "The theme has no file."))?;
+        let text = std::fs::read_to_string(&file).map_err(|e| {
+            crate::i18n::tf(
+                "notices.theme.unreadable",
+                "The theme {name} could not be read: {error}",
+                &[("name", &theme.name), ("error", &e.to_string())],
+            )
+        })?;
+        let read = sp_model::Theme::from_json(&text).map_err(|e| {
+            crate::i18n::tf(
+                "notices.theme.unreadable",
+                "The theme {name} could not be read: {error}",
+                &[("name", &theme.name), ("error", &e.to_string())],
+            )
+        })?;
         if read.id != theme.id {
-            return Err(format!("The file of the theme {} now holds another theme.", theme.name));
+            return Err(crate::i18n::tf(
+                "notices.theme.other_inside",
+                "The file of the theme {name} now holds another theme.",
+                &[("name", &theme.name)],
+            ));
         }
         let name = read.name.clone();
         self.themes[index] = read;
@@ -5266,7 +5371,7 @@ impl App {
 
     /// Writes the app's version of a theme over its file, which changed outside the app.
     fn keep_theme(&mut self, index: usize) -> Result<String, String> {
-        let theme = self.themes.get(index).ok_or("That theme is gone.")?;
+        let theme = self.themes.get(index).ok_or(crate::i18n::t("notices.theme_gone", "That theme is gone."))?;
         theme_store::save(theme)?;
         let name = theme.name.clone();
         if let Some(file) = theme_store::file_of(theme) {
@@ -5287,8 +5392,14 @@ impl App {
         };
         // The answer is noted in the list (a problem with it too, and the question stays).
         let said = match result {
-            Ok(name) if reload => Ok(format!("Read {name} again from its file.")),
-            Ok(name) => Ok(format!("Saved SoftPresenter's version of {name}.")),
+            Ok(name) if reload => {
+                Ok(crate::i18n::tf("notices.outside.reloaded", "Read {name} again from its file.", &[("name", &name)]))
+            }
+            Ok(name) => Ok(crate::i18n::tf(
+                "notices.outside.kept",
+                "Saved SoftPresenter's version of {name}.",
+                &[("name", &name)],
+            )),
             Err(problem) => Err(problem),
         };
         applog::event("outside", said.as_ref().unwrap_or_else(|problem| problem));
@@ -5415,12 +5526,20 @@ impl App {
                         if !self.held_themes.contains(&index) && !self.themes_unsaved.contains(&index) =>
                     {
                         match self.reload_theme(index) {
-                            Ok(name) => done.read.push(format!("the theme {name}")),
+                            Ok(name) => done.read.push(crate::i18n::tf(
+                                "notices.reload.the_theme",
+                                "the theme {name}",
+                                &[("name", &name)],
+                            )),
                             Err(problem) => done.problems.push(problem),
                         }
                     }
                     _ => {
-                        done.waiting.push(format!("the theme {}", self.themes[index].name));
+                        done.waiting.push(crate::i18n::tf(
+                            "notices.reload.the_theme",
+                            "the theme {name}",
+                            &[("name", &self.themes[index].name)],
+                        ));
                         self.wait_on(outside::Waiting::Theme(index));
                     }
                 }
@@ -5451,12 +5570,16 @@ impl App {
 
     /// Plans a song pack of the songs at `indices`, or of a playlist's songs and the playlist.
     fn plan_pack(&self, indices: &[usize], playlist: Option<usize>) -> Result<pack::Export, String> {
-        let running = self.running.as_ref().ok_or("The app isn't ready.")?;
+        let running = self.running.as_ref().ok_or(crate::i18n::t("notices.not_ready", "The app isn't ready."))?;
         let state = &running.home_state;
         let mut indices: Vec<usize> = indices.to_vec();
         let playlist_file = match playlist {
             Some(at) => {
-                let list = state.services.list.get(at).ok_or("No such playlist.")?;
+                let list = state
+                    .services
+                    .list
+                    .get(at)
+                    .ok_or(crate::i18n::t("notices.pack.no_playlist", "No such playlist."))?;
                 for item in &list.items {
                     if let service::Item::Song { key, .. } = item
                         && let Some(index) = studio::playlist_song(&self.show, state, key)
@@ -5475,7 +5598,7 @@ impl App {
             .filter_map(|index| self.show.presentations().get(*index).map(|song| (**song).clone()))
             .collect();
         if songs.is_empty() && playlist_file.is_none() {
-            return Err("No songs to pack.".to_owned());
+            return Err(crate::i18n::t("notices.pack.no_songs", "No songs to pack.").to_owned());
         }
         let media_of = |id: Uuid| {
             self.show
@@ -5523,7 +5646,11 @@ impl App {
                 let _ = waker.send_event(AppEvent::PackDone);
             }
         });
-        Ok(format!("Writing {name}, with its videos ({size}); the window says when it is done."))
+        Ok(crate::i18n::tf(
+            "notices.pack.writing",
+            "Writing {name}, with its videos ({size}); the window says when it is done.",
+            &[("name", &name), ("size", &size)],
+        ))
     }
 
     /// Makes a song pack from the window: asks whether to put the videos in (with their size)
@@ -5535,23 +5662,39 @@ impl App {
                 if !export.videos.is_empty() {
                     let size = pack::size_words(export.video_bytes());
                     let keep = rfd::MessageDialog::new()
-                        .set_title("Export Songs")
-                        .set_description(format!(
-                            "The songs use {} ({size}). Put them in the song pack?",
-                            if export.videos.len() == 1 {
-                                "a video".to_owned()
-                            } else {
-                                format!("{} videos", export.videos.len())
-                            }
+                        .set_title(crate::i18n::t("notices.export.title", "Export Songs"))
+                        .set_description(crate::i18n::tf(
+                            "notices.export.ask_videos",
+                            "The songs use {videos} ({size}). Put them in the song pack?",
+                            &[
+                                (
+                                    "videos",
+                                    &if export.videos.len() == 1 {
+                                        crate::i18n::t("notices.export.a_video", "a video").to_owned()
+                                    } else {
+                                        crate::i18n::tf(
+                                            "notices.export.videos",
+                                            "{n} videos",
+                                            &[("n", &crate::i18n::count(export.videos.len() as u64))],
+                                        )
+                                    },
+                                ),
+                                ("size", &size),
+                            ],
                         ))
                         .set_buttons(rfd::MessageButtons::YesNoCancelCustom(
-                            format!("Include Videos ({size})"),
-                            "Leave Them Out".to_owned(),
-                            "Cancel".to_owned(),
+                            crate::i18n::tf("notices.export.include", "Include Videos ({size})", &[("size", &size)]),
+                            crate::i18n::t("notices.export.leave_out", "Leave Them Out").to_owned(),
+                            crate::i18n::t("notices.dialog.cancel", "Cancel").to_owned(),
                         ))
                         .show();
-                    let include = format!("Include Videos ({size})");
-                    match pack::three_way(keep, [include.as_str(), "Leave Them Out", "Cancel"]) {
+                    let include =
+                        crate::i18n::tf("notices.export.include", "Include Videos ({size})", &[("size", &size)]);
+                    let leave_out = crate::i18n::t("notices.export.leave_out", "Leave Them Out");
+                    match pack::three_way(
+                        keep,
+                        [include.as_str(), leave_out, crate::i18n::t("notices.dialog.cancel", "Cancel")],
+                    ) {
                         Some(0) => {}
                         Some(1) => export.leave_out_videos(),
                         _ => return,
@@ -5562,14 +5705,19 @@ impl App {
                         self.running.as_ref().and_then(|r| r.home_state.services.list.get(at)).map(|l| l.name.clone())
                     }
                     None if export.songs.len() == 1 => export.songs.first().map(|song| song.title.clone()),
-                    None => Some("Songs".to_owned()),
+                    None => Some(crate::i18n::t("notices.export.file_name", "Songs").to_owned()),
                 };
-                let file =
-                    format!("{}.{}", pack::safe_file_name(&name.unwrap_or_else(|| "Songs".to_owned())), pack::ENDING);
+                let file = format!(
+                    "{}.{}",
+                    pack::safe_file_name(
+                        &name.unwrap_or_else(|| crate::i18n::t("notices.export.file_name", "Songs").to_owned())
+                    ),
+                    pack::ENDING
+                );
                 let Some(to) = rfd::FileDialog::new()
-                    .set_title("Export Songs")
+                    .set_title(crate::i18n::t("notices.export.title", "Export Songs"))
                     .set_file_name(file)
-                    .add_filter("Song pack", &[pack::ENDING])
+                    .add_filter(crate::i18n::t("notices.dialog.filter.pack", "Song pack"), &[pack::ENDING])
                     .save_file()
                 else {
                     return;
@@ -5594,7 +5742,7 @@ impl App {
         now: bool,
     ) -> Result<String, String> {
         let Some(dir) = bible_store::data_dir() else {
-            return Err("Could not find the library folder.".to_owned());
+            return Err(crate::i18n::t("notices.no_library_folder", "Could not find the library folder.").to_owned());
         };
         let staging = dir.join(format!(".opening-pack-{}", Uuid::new_v4()));
         let small = std::fs::metadata(&path).is_ok_and(|meta| meta.len() <= PACK_READ_AT_ONCE);
@@ -5625,7 +5773,11 @@ impl App {
                 let _ = waker.send_event(AppEvent::PackDone);
             }
         });
-        Ok(format!("Opening {name}; the window says when its songs are in."))
+        Ok(crate::i18n::tf(
+            "notices.pack.opening",
+            "Opening {name}; the window says when its songs are in.",
+            &[("name", &name)],
+        ))
     }
 
     /// Numbers a song pack job started in the background (the last 50 are kept).
@@ -5751,7 +5903,7 @@ impl App {
         library: Option<Uuid>,
     ) -> Result<String, String> {
         let Some(dir) = bible_store::data_dir() else {
-            return Err("Could not find the library folder.".to_owned());
+            return Err(crate::i18n::t("notices.no_library_folder", "Could not find the library folder.").to_owned());
         };
         let removed = self.running.as_ref().map(|r| r.home_state.removed_songs.clone()).unwrap_or_default();
         let existing = |show: &sp_engine::Show, id: Uuid, bible: &[usize; 2]| {
@@ -5768,19 +5920,28 @@ impl App {
             None if already == 0 => pack::Same::Skip,
             None => {
                 let answer = rfd::MessageDialog::new()
-                    .set_title("Import Song Pack")
-                    .set_description(format!(
-                        "{} in the pack {} already here. Replace them with the pack's, keep both, or skip them?",
-                        if already == 1 { "1 song".to_owned() } else { format!("{already} songs") },
-                        if already == 1 { "is" } else { "are" }
+                    .set_title(crate::i18n::t("notices.pack.import_title", "Import Song Pack"))
+                    .set_description(crate::i18n::tn(
+                        "notices.pack.ask_same",
+                        already as u64,
+                        "{n} song in the pack is already here. Replace them with the pack's, keep both, or skip them?",
+                        "{n} songs in the pack are already here. Replace them with the pack's, keep both, or skip them?",
+                        &[],
                     ))
                     .set_buttons(rfd::MessageButtons::YesNoCancelCustom(
-                        "Replace".to_owned(),
-                        "Keep Both".to_owned(),
-                        "Skip".to_owned(),
+                        crate::i18n::t("notices.pack.replace", "Replace").to_owned(),
+                        crate::i18n::t("notices.pack.keep_both", "Keep Both").to_owned(),
+                        crate::i18n::t("notices.pack.skip", "Skip").to_owned(),
                     ))
                     .show();
-                match pack::three_way(answer, ["Replace", "Keep Both", "Skip"]) {
+                match pack::three_way(
+                    answer,
+                    [
+                        crate::i18n::t("notices.pack.replace", "Replace"),
+                        crate::i18n::t("notices.pack.keep_both", "Keep Both"),
+                        crate::i18n::t("notices.pack.skip", "Skip"),
+                    ],
+                ) {
                     Some(0) => pack::Same::Replace,
                     Some(1) => pack::Same::KeepBoth,
                     _ => pack::Same::Skip,
@@ -6029,66 +6190,112 @@ impl App {
         let list = |names: &[String]| names.join(", ");
         let mut parts = Vec::new();
         if !added.is_empty() {
-            parts.push(format!(
-                "Imported {}: {}.",
-                if added.len() == 1 { "1 song".to_owned() } else { format!("{} songs", added.len()) },
-                list(&added)
+            parts.push(crate::i18n::tn(
+                "notices.pack.imported",
+                added.len() as u64,
+                "Imported {n} song: {names}.",
+                "Imported {n} songs: {names}.",
+                &[("names", &list(&added))],
             ));
         }
         if !replaced.is_empty() {
-            parts.push(format!("Replaced: {}.", list(&replaced)));
+            parts.push(crate::i18n::tf("notices.pack.replaced", "Replaced: {names}.", &[("names", &list(&replaced))]));
         }
         if !skipped.is_empty() {
-            parts.push(format!("Skipped, already here: {}.", list(&skipped)));
+            parts.push(crate::i18n::tf(
+                "notices.pack.skipped",
+                "Skipped, already here: {names}.",
+                &[("names", &list(&skipped))],
+            ));
         }
         if !waiting.is_empty() {
-            parts.push(format!(
-                "Written, waiting on Reload or Keep mine (in use or holding changes): {}.",
-                list(&waiting)
+            parts.push(crate::i18n::tf(
+                "notices.pack.waiting",
+                "Written, waiting on Reload or Keep mine (in use or holding changes): {names}.",
+                &[("names", &list(&waiting))],
             ));
         }
         let playlist_in = playlist_name.is_some();
         match playlist_name {
             Some(name) if name.ends_with("(here already)") => {
-                parts.push(format!("The playlist {} is here already.", name.trim_end_matches(" (here already)")));
+                parts.push(crate::i18n::tf(
+                    "notices.pack.playlist_here",
+                    "The playlist {name} is here already.",
+                    &[("name", name.trim_end_matches(" (here already)"))],
+                ));
             }
-            Some(name) => parts.push(format!("Added the playlist {name}.")),
+            Some(name) => parts.push(crate::i18n::tf(
+                "notices.pack.playlist_added",
+                "Added the playlist {name}.",
+                &[("name", &name)],
+            )),
             None => {}
         }
         if new_themes > 0 {
-            parts.push(format!("Added {} theme{}.", new_themes, if new_themes == 1 { "" } else { "s" }));
+            parts.push(crate::i18n::tn(
+                "notices.pack.themes_added",
+                new_themes as u64,
+                "Added {n} theme.",
+                "Added {n} themes.",
+                &[],
+            ));
         }
         if media_playlists_added > 0 {
-            parts.push(format!(
-                "Added {} media playlist{}.",
-                media_playlists_added,
-                if media_playlists_added == 1 { "" } else { "s" }
+            parts.push(crate::i18n::tn(
+                "notices.pack.media_playlists_added",
+                media_playlists_added as u64,
+                "Added {n} media playlist.",
+                "Added {n} media playlists.",
+                &[],
             ));
         }
         let (pictures, videos) = (brought.pictures, brought.videos);
         let things: Vec<String> = [(pictures, "picture"), (videos, "video")]
             .into_iter()
             .filter(|(n, _)| *n > 0)
-            .map(|(n, what)| format!("{n} {what}{}", if n == 1 { "" } else { "s" }))
+            .map(|(n, what)| match what {
+                "picture" => crate::i18n::tn("notices.pack.pictures", n as u64, "{n} picture", "{n} pictures", &[]),
+                _ => crate::i18n::tn("notices.pack.videos_plain", n as u64, "{n} video", "{n} videos", &[]),
+            })
             .collect();
         if !things.is_empty() {
-            parts.push(format!("Brought {}.", things.join(" and ")));
+            parts.push(crate::i18n::tf(
+                "notices.pack.brought",
+                "Brought {what}.",
+                &[("what", &things.join(crate::i18n::t("notices.list.and", " and ")))],
+            ));
         }
         if lost_actions > 0 {
             parts.push(if lost_actions == 1 {
-                "1 slide action points at a message, prop, timer or media item this computer doesn't have; kept, shown as missing.".to_owned()
+                crate::i18n::t(
+                    "notices.pack.lost_action",
+                    "1 slide action points at a message, prop, timer or media item this computer doesn't have; kept, shown as missing.",
+                )
+                .to_owned()
             } else {
-                format!("{lost_actions} slide actions point at messages, props, timers or media items this computer doesn't have; kept, shown as missing.")
+                crate::i18n::tf(
+                    "notices.pack.lost_actions",
+                    "{n} slide actions point at messages, props, timers or media items this computer doesn't have; kept, shown as missing.",
+                    &[("n", &crate::i18n::count(lost_actions as u64))],
+                )
             });
         }
         if !opened.ignored.is_empty() {
-            parts.push(format!("Left out of the pack: {}.", list(&opened.ignored)));
+            parts.push(crate::i18n::tf(
+                "notices.pack.left_out",
+                "Left out of the pack: {names}.",
+                &[("names", &list(&opened.ignored))],
+            ));
         }
         // Nothing usable in the pack (only things left out) is a failure; songs skipped because
         // they are here already are not.
         let anything =
             !added.is_empty() || !replaced.is_empty() || !skipped.is_empty() || !waiting.is_empty() || playlist_in;
-        let said = if parts.is_empty() { "The pack had no songs in it.".to_owned() } else { parts.join(" ") };
+        let said = if parts.is_empty() {
+            crate::i18n::t("notices.pack.empty", "The pack had no songs in it.").to_owned()
+        } else {
+            parts.join(" ")
+        };
         if anything { Ok(said) } else { Err(said) }
     }
 
@@ -6218,7 +6425,11 @@ impl App {
             } else if deck::is_presentation_file(path) {
                 let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
                 if to.deck_as == Some(deck::ImportAs::Slides) && !deck::reads_as_slides(path) {
-                    done.problems.push(format!("{name} can only come in as pictures: it isn't a .pptx file."));
+                    done.problems.push(crate::i18n::tf(
+                        "notices.import.pictures_only",
+                        "{name} can only come in as pictures: it isn't a .pptx file.",
+                        &[("name", &name)],
+                    ));
                     continue;
                 }
                 match self.deck_mode(path, to.deck_as) {
@@ -6231,7 +6442,11 @@ impl App {
                         Some(_) => {
                             let source =
                                 deck::Source::Presentation { path: path.clone(), mode: deck::ImportAs::Pictures };
-                            done.decks.push(format!("{} (as pictures)", source.name()));
+                            done.decks.push(crate::i18n::tf(
+                                "notices.import.as_pictures",
+                                "{name} (as pictures)",
+                                &[("name", &source.name())],
+                            ));
                             self.start_deck(source);
                         }
                         None => done.problems.push(convert::none_installed(path)),
@@ -6312,7 +6527,8 @@ impl App {
         done: &mut Imported,
     ) -> Option<SongRead> {
         let Some(dir) = bible_store::data_dir() else {
-            done.problems.push("Could not find the library folder.".to_owned());
+            done.problems
+                .push(crate::i18n::t("notices.no_library_folder", "Could not find the library folder.").to_owned());
             return None;
         };
         // Beside the song packs being opened, so a folder left by a crash is tidied with theirs.
@@ -6399,10 +6615,26 @@ impl App {
                         const NAMED: usize = 10;
                         let more = lost.len().saturating_sub(NAMED);
                         lost.truncate(NAMED);
-                        let more = if more > 0 { format!(" and {more} more (see the log)") } else { String::new() };
+                        let more = if more > 0 {
+                            crate::i18n::tf(
+                                "notices.bundle.more_in_log",
+                                " and {n} more (see the log)",
+                                &[("n", &crate::i18n::count(more as u64))],
+                            )
+                        } else {
+                            String::new()
+                        };
                         done.notes.push(match opened.songs.as_slice() {
-                            [one] => format!("{}: left out of the bundle: {}{more}.", one.song.title, lost.join(", ")),
-                            _ => format!("Left out of {}: {}{more}.", file_name(&path), lost.join(", ")),
+                            [one] => crate::i18n::tf(
+                                "notices.bundle.left_out_song",
+                                "{title}: left out of the bundle: {list}{more}.",
+                                &[("title", &one.song.title), ("list", &lost.join(", ")), ("more", &more)],
+                            ),
+                            _ => crate::i18n::tf(
+                                "notices.bundle.left_out",
+                                "Left out of {file}: {list}{more}.",
+                                &[("file", &file_name(&path)), ("list", &lost.join(", ")), ("more", &more)],
+                            ),
                         });
                     }
                     // Its own folder goes once its songs are in (or aren't coming).
@@ -6440,7 +6672,7 @@ impl App {
     ) {
         let look = import_key(&song);
         if let Some(at) = already_here(&song, have, ids, self.show.presentations()) {
-            done.problems.push(format!("{}{ALREADY}", song.title));
+            done.problems.push(format!("{}{}", song.title, already()));
             done.first.get_or_insert(at);
             done.landed.push(at);
             // A song in two of the folders imported goes into both their libraries; one dropped
@@ -6545,12 +6777,18 @@ impl App {
             if added != (0, 0) {
                 self.save_media_list();
             }
-            bringing.failed.extend(failed.into_iter().map(|name| format!("{name} (couldn't be read)")));
+            bringing.failed.extend(failed.into_iter().map(|name| {
+                crate::i18n::tf("notices.bundle.unreadable_media", "{name} (couldn't be read)", &[("name", &name)])
+            }));
             done.pictures += added.0;
             done.videos += added.1;
         }
         if !read.missing.is_empty() {
-            done.notes.push(format!("{title}: not in the bundle: {}.", read.missing.join(", ")));
+            done.notes.push(crate::i18n::tf(
+                "notices.bundle.missing",
+                "{title}: not in the bundle: {list}.",
+                &[("title", &title), ("list", &read.missing.join(", "))],
+            ));
         }
     }
 
@@ -6585,70 +6823,132 @@ impl App {
             applog::event("songs", &format!("not imported: {problem}"));
         }
         let into = match done.libraries_used.as_slice() {
-            [] => done.library.as_ref().map_or_else(String::new, |name| format!(" into the library {name}")),
-            [one] => format!(" into the library {one}"),
-            many => format!(" into {} libraries", many.len()),
+            [] => done.library.as_ref().map_or_else(String::new, |name| {
+                crate::i18n::tf("notices.import.into_library", " into the library {name}", &[("name", name)])
+            }),
+            [one] => crate::i18n::tf("notices.import.into_library", " into the library {name}", &[("name", one)]),
+            many => crate::i18n::tf(
+                "notices.import.into_libraries",
+                " into {n} libraries",
+                &[("n", &crate::i18n::count(many.len() as u64))],
+            ),
         };
         let busy = !done.decks.is_empty() || !done.opening.is_empty() || !done.packs.is_empty();
         // Several songs here already (a bundle's, say) are said together.
-        let all_here = done.problems.len() > 1 && done.problems.iter().all(|problem| problem.ends_with(ALREADY));
+        let all_here = done.problems.len() > 1 && done.problems.iter().all(|problem| problem.ends_with(already()));
         let said = match (done.titles.as_slice(), done.problems.as_slice()) {
             ([], []) if busy => None,
-            ([], []) => Some("There were no songs to import there.".to_owned()),
-            ([one], []) => Some(format!("Imported {one}{into}.")),
-            (many, []) => Some(format!("Imported {} songs{into}.", many.len())),
+            ([], []) => {
+                Some(crate::i18n::t("notices.import.nothing", "There were no songs to import there.").to_owned())
+            }
+            ([one], []) => Some(crate::i18n::tf(
+                "notices.import.imported_one",
+                "Imported {title}{into}.",
+                &[("title", one), ("into", &into)],
+            )),
+            (many, []) => Some(crate::i18n::tf(
+                "notices.import.imported_many",
+                "Imported {n} songs{into}.",
+                &[("n", &crate::i18n::count(many.len() as u64)), ("into", &into)],
+            )),
             ([], [problem]) => Some(problem.clone()),
-            ([], rest) if all_here => Some(format!("All {} songs are already in the library.", rest.len())),
-            ([], rest) => Some(format!(
-                "No songs imported. {}{}",
-                rest[0],
-                if rest.len() > 1 { format!(" (and {} more; see the log)", rest.len() - 1) } else { String::new() }
+            ([], rest) if all_here => Some(crate::i18n::tf(
+                "notices.import.all_here",
+                "All {n} songs are already in the library.",
+                &[("n", &crate::i18n::count(rest.len() as u64))],
             )),
-            (imported, rest) if all_here => Some(format!(
-                "Imported {} of {} songs{into}; the other {} are already in the library.",
-                imported.len(),
-                imported.len() + rest.len(),
-                rest.len()
+            ([], rest) => Some(if rest.len() > 1 {
+                crate::i18n::tf(
+                    "notices.import.none_more",
+                    "No songs imported. {problem} (and {more} more; see the log)",
+                    &[("problem", &rest[0]), ("more", &crate::i18n::count(rest.len() as u64 - 1))],
+                )
+            } else {
+                crate::i18n::tf("notices.import.none", "No songs imported. {problem}", &[("problem", &rest[0])])
+            }),
+            (imported, rest) if all_here => Some(crate::i18n::tf(
+                "notices.import.some_here",
+                "Imported {n} of {total} songs{into}; the other {rest} are already in the library.",
+                &[
+                    ("n", &crate::i18n::count(imported.len() as u64)),
+                    ("total", &crate::i18n::count((imported.len() + rest.len()) as u64)),
+                    ("into", &into),
+                    ("rest", &crate::i18n::count(rest.len() as u64)),
+                ],
             )),
-            (imported, rest) => Some(format!(
-                "Imported {} of {} songs{into}. {}{}",
-                imported.len(),
-                imported.len() + rest.len(),
-                rest[0],
-                if rest.len() > 1 { format!(" (and {} more; see the log)", rest.len() - 1) } else { String::new() }
-            )),
+            (imported, rest) => Some(if rest.len() > 1 {
+                crate::i18n::tf(
+                    "notices.import.some_more",
+                    "Imported {n} of {total} songs{into}. {problem} (and {more} more; see the log)",
+                    &[
+                        ("n", &crate::i18n::count(imported.len() as u64)),
+                        ("total", &crate::i18n::count((imported.len() + rest.len()) as u64)),
+                        ("into", &into),
+                        ("problem", &rest[0]),
+                        ("more", &crate::i18n::count(rest.len() as u64 - 1)),
+                    ],
+                )
+            } else {
+                crate::i18n::tf(
+                    "notices.import.some",
+                    "Imported {n} of {total} songs{into}. {problem}",
+                    &[
+                        ("n", &crate::i18n::count(imported.len() as u64)),
+                        ("total", &crate::i18n::count((imported.len() + rest.len()) as u64)),
+                        ("into", &into),
+                        ("problem", &rest[0]),
+                    ],
+                )
+            }),
         };
         let mut words: Vec<String> = said.into_iter().collect();
         words.extend(done.packs.iter().cloned());
         let things: Vec<String> = [(done.pictures, "picture"), (done.videos, "video")]
             .into_iter()
             .filter(|(n, _)| *n > 0)
-            .map(|(n, what)| format!("{n} {what}{}", if n == 1 { "" } else { "s" }))
+            .map(|(n, what)| match what {
+                "picture" => crate::i18n::tn("notices.pack.pictures", n as u64, "{n} picture", "{n} pictures", &[]),
+                _ => crate::i18n::tn("notices.pack.videos_plain", n as u64, "{n} video", "{n} videos", &[]),
+            })
             .collect();
         if !things.is_empty() {
-            words.push(format!("Brought {} into the media bin.", things.join(" and ")));
+            words.push(crate::i18n::tf(
+                "notices.import.brought",
+                "Brought {what} into the media bin.",
+                &[("what", &things.join(crate::i18n::t("notices.list.and", " and ")))],
+            ));
         }
         words.extend(done.notes.iter().cloned());
         if let Some(name) = &done.playlist {
-            words.push(format!("Added to the playlist {name}."));
+            words.push(crate::i18n::tf(
+                "notices.import.to_playlist",
+                "Added to the playlist {name}.",
+                &[("name", name)],
+            ));
         }
         // Songs here already, dropped on a library: they are in it now.
         if let Some(name) = done.library.as_ref().filter(|_| done.titles.is_empty() && !done.landed.is_empty()) {
-            words.push(format!("Put into the library {name}."));
+            words.push(crate::i18n::tf("notices.import.to_library", "Put into the library {name}.", &[("name", name)]));
         }
         if !done.decks.is_empty() {
-            words.push(format!("Making slides from {}\u{2026}", done.decks.join(", ")));
+            words.push(crate::i18n::tf(
+                "notices.import.making_slides",
+                "Making slides from {names}\u{2026}",
+                &[("names", &done.decks.join(", "))],
+            ));
         }
         if !done.opening.is_empty() {
-            words.push(format!(
-                "Opening {}; the window says when {} songs are in.",
-                done.opening.join(", "),
-                if done.opening.len() == 1 { "its" } else { "their" }
+            words.push(crate::i18n::tn(
+                "notices.import.opening",
+                done.opening.len() as u64,
+                "Opening {names}; the window says when its songs are in.",
+                "Opening {names}; the window says when their songs are in.",
+                &[("names", &done.opening.join(", "))],
             ));
         }
         let text = words.join(" ");
         if let Some(running) = self.running.as_mut() {
-            if done.problems.iter().any(|problem| !problem.ends_with(ALREADY)) {
+            if done.problems.iter().any(|problem| !problem.ends_with(already())) {
                 running.home_state.notices.trouble(text.clone());
             } else {
                 running.home_state.notices.info(text.clone());
@@ -6733,7 +7033,13 @@ impl App {
                     applog::event("slides", &format!("made {count} slides from {name}"));
                     self.add_song(made.presentation, false);
                     Ok(made.said.unwrap_or_else(|| {
-                        format!("Made {count} slide{} from {name}.", if count == 1 { "" } else { "s" })
+                        crate::i18n::tn(
+                            "notices.deck.made",
+                            count as u64,
+                            "Made {n} slide from {name}.",
+                            "Made {n} slides from {name}.",
+                            &[("name", &name)],
+                        )
                     }))
                 }
                 Err(problem) => {
@@ -6765,11 +7071,13 @@ impl App {
                             running.home_state.pages_waiting.remove(slide);
                         }
                         if failed > 0 {
-                            let plural = if failed == 1 { "" } else { "s" };
-                            running
-                                .home_state
-                                .notices
-                                .trouble(format!("{failed} picture{plural} of {name} could not be drawn."));
+                            running.home_state.notices.trouble(crate::i18n::tn(
+                                "notices.deck.not_drawn",
+                                failed as u64,
+                                "{n} picture of {name} could not be drawn.",
+                                "{n} pictures of {name} could not be drawn.",
+                                &[("name", &name)],
+                            ));
                         }
                         running.home_window.request_redraw();
                     }
@@ -6854,8 +7162,8 @@ impl App {
     /// Asks for pictures to make slides of: the pictures chosen together become one presentation.
     fn choose_pictures_to_import(&mut self) {
         let Some(chosen) = rfd::FileDialog::new()
-            .set_title("Import Pictures as Slides")
-            .add_filter("Pictures", &media::PICTURES)
+            .set_title(crate::i18n::t("notices.dialog.import_pictures", "Import Pictures as Slides"))
+            .add_filter(crate::i18n::t("notices.dialog.filter.pictures", "Pictures"), &media::PICTURES)
             .pick_files()
         else {
             return;
@@ -6873,8 +7181,8 @@ impl App {
         let mut endings = deck::DECK_ENDINGS.to_vec();
         endings.push(deck::PDF_ENDING);
         let Some(files) = rfd::FileDialog::new()
-            .set_title("Import a Presentation")
-            .add_filter("Presentations and PDFs", &endings)
+            .set_title(crate::i18n::t("notices.dialog.import_presentation", "Import a Presentation"))
+            .add_filter(crate::i18n::t("notices.dialog.filter.presentations", "Presentations and PDFs"), &endings)
             .pick_files()
         else {
             return;
@@ -6885,19 +7193,31 @@ impl App {
     /// Import Songs › Song Files…: asks which song files to import (songs saved by SoftPresenter,
     /// song documents, ChordPro and lyric files, songbooks), and imports them.
     fn choose_songs_to_import(&mut self) {
-        self.choose_to_import("Import Song Files", "Song files", &load::song_file_endings());
+        self.choose_to_import(
+            crate::i18n::t("notices.dialog.import_song_files", "Import Song Files"),
+            crate::i18n::t("notices.dialog.filter.song_files", "Song files"),
+            &load::song_file_endings(),
+        );
     }
 
     /// Import Songs › A Song Bundle…: asks for song bundles and song packs (songs with the
     /// pictures and videos they show), and imports them.
     fn choose_bundles_to_import(&mut self) {
-        self.choose_to_import("Import a Song Bundle", "Song bundles and song packs", &load::bundle_endings());
+        self.choose_to_import(
+            crate::i18n::t("notices.dialog.import_bundle", "Import a Song Bundle"),
+            crate::i18n::t("notices.dialog.filter.bundles", "Song bundles and song packs"),
+            &load::bundle_endings(),
+        );
     }
 
     /// Import Songs › Words from Text…: asks for text, rich-text and Word files, and makes a song
     /// of each one's words.
     fn choose_words_to_import(&mut self) {
-        self.choose_to_import("Import Words from Text", "Text, rich-text and Word files", &load::words_endings());
+        self.choose_to_import(
+            crate::i18n::t("notices.dialog.import_words", "Import Words from Text"),
+            crate::i18n::t("notices.dialog.filter.words", "Text, rich-text and Word files"),
+            &load::words_endings(),
+        );
     }
 
     /// Asks for files with these endings, under a window title and the kind of file the filter
@@ -6919,8 +7239,14 @@ impl App {
     fn choose_library_folder_to_import(&mut self) {
         let documents = [load::PRO_ENDING, load::PRO_BUNDLE_ENDINGS[0], load::PRO_BUNDLE_ENDINGS[1]];
         let mut dialog = rfd::FileDialog::new()
-            .set_title("Import a Library Folder")
-            .add_filter(load::filter_name("Song documents and bundles", &documents), &documents);
+            .set_title(crate::i18n::t("notices.dialog.import_folder", "Import a Library Folder"))
+            .add_filter(
+                load::filter_name(
+                    crate::i18n::t("notices.dialog.filter.documents", "Song documents and bundles"),
+                    &documents,
+                ),
+                &documents,
+            );
         if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
             let libraries = PathBuf::from(home).join("Documents").join("ProPresenter").join("Libraries");
             if libraries.is_dir() {
@@ -6946,15 +7272,25 @@ impl App {
     #[cfg(not(target_os = "macos"))]
     fn ask_files_or_folder() -> Option<bool> {
         let answer = rfd::MessageDialog::new()
-            .set_title("Import a Library Folder")
-            .set_description("Import a folder of song documents (each folder in it becomes a library), or song documents and bundles themselves?")
+            .set_title(crate::i18n::t("notices.dialog.import_folder", "Import a Library Folder"))
+            .set_description(crate::i18n::t(
+                "notices.dialog.folder_or_files",
+                "Import a folder of song documents (each folder in it becomes a library), or song documents and bundles themselves?",
+            ))
             .set_buttons(rfd::MessageButtons::YesNoCancelCustom(
-                "A Folder\u{2026}".to_owned(),
-                "Files\u{2026}".to_owned(),
-                "Cancel".to_owned(),
+                crate::i18n::t("notices.dialog.a_folder", "A Folder\u{2026}").to_owned(),
+                crate::i18n::t("notices.dialog.files", "Files\u{2026}").to_owned(),
+                crate::i18n::t("notices.dialog.cancel", "Cancel").to_owned(),
             ))
             .show();
-        match pack::three_way(answer, ["A Folder\u{2026}", "Files\u{2026}", "Cancel"]) {
+        match pack::three_way(
+            answer,
+            [
+                crate::i18n::t("notices.dialog.a_folder", "A Folder\u{2026}"),
+                crate::i18n::t("notices.dialog.files", "Files\u{2026}"),
+                crate::i18n::t("notices.dialog.cancel", "Cancel"),
+            ],
+        ) {
             Some(0) => Some(false),
             Some(1) => Some(true),
             _ => None,
@@ -7139,7 +7475,7 @@ impl App {
             Some(ThemeRequest::Duplicate(index)) if index < count => {
                 let mut theme = self.themes[index].clone();
                 theme.id = Uuid::new_v4();
-                theme.name = format!("{} copy", theme.name);
+                theme.name = crate::i18n::tf("notices.copy_name", "{name} copy", &[("name", &theme.name)]);
                 self.themes.push(theme);
                 self.themes_unsaved.push(self.themes.len() - 1);
                 self.unsaved_since = Some(Instant::now());
@@ -7149,7 +7485,7 @@ impl App {
             Some(ThemeRequest::New) => {
                 let mut theme = (*self.theme).clone();
                 theme.id = Uuid::new_v4();
-                theme.name = "New Theme".to_owned();
+                theme.name = crate::i18n::t("notices.theme.new_name", "New Theme").to_owned();
                 self.themes.push(theme);
                 self.themes_unsaved.push(self.themes.len() - 1);
                 self.unsaved_since = Some(Instant::now());
@@ -9005,7 +9341,7 @@ impl App {
             SongRequest::Duplicate { item } => {
                 let mut copy = (*song).clone();
                 copy.id = Uuid::new_v4();
-                copy.title = format!("{} copy", song.title);
+                copy.title = crate::i18n::tf("notices.copy_name", "{name} copy", &[("name", &song.title)]);
                 for group in &mut copy.groups {
                     group.id = Uuid::new_v4();
                     for slide in &mut group.slides {
@@ -9041,7 +9377,11 @@ impl App {
                     && path.exists()
                     && let Err(e) = sweep::to_trash(path)
                 {
-                    problem = Some(format!("Could not move the song to the Trash: {e}"));
+                    problem = Some(crate::i18n::tf(
+                        "notices.song.not_trashed",
+                        "Could not move the song to the Trash: {error}",
+                        &[("error", &e.to_string())],
+                    ));
                 }
                 if problem.is_none() {
                     if self.show.live().is_some_and(|live| live.presentation == index) {
@@ -9616,14 +9956,17 @@ impl App {
         // A refresh of the Canva sign-in in flight is waited for (its new token must be kept),
         // here in the event loop, so the window still answers (and isn't taken for hung).
         if !self.canva.may_close(self.quitting.unwrap_or_else(Instant::now)) {
-            const KEEPING: &str = "Keeping the Canva sign-in… SoftPresenter closes as soon as it is kept.";
+            let keeping = crate::i18n::t(
+                "notices.canva.keeping",
+                "Keeping the Canva sign-in… SoftPresenter closes as soon as it is kept.",
+            );
             // Said once, though the loop comes back here until the sign-in is kept.
             static KEEPING_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
             if let Some(running) = self.running.as_mut()
                 && self.canva.refreshing()
                 && !KEEPING_SAID.swap(true, std::sync::atomic::Ordering::Relaxed)
             {
-                running.home_state.notices.info(KEEPING);
+                running.home_state.notices.info(keeping);
                 running.home_window.request_redraw();
             }
             return;
@@ -9688,14 +10031,20 @@ impl ApplicationHandler<AppEvent> for App {
                 if let Some(step) = macros::from_opening_choice(&mut running.home_state.macros, &opening) {
                     let saved = macros::save(&running.home_state.macros);
                     let what = describe_opening(&self.show, &running.home_state, &step);
-                    let mut said = format!(
-                        "What played when SoftPresenter opened is now the macro \u{201c}{}\u{201d} in the Macros tab, \
-                         with Run When SoftPresenter Opens ticked. It plays {what} on the Announcements layer.",
-                        macros::OPENING_MACRO
+                    let mut said = crate::i18n::tf(
+                        "notices.opening.macro",
+                        "What played when SoftPresenter opened is now the macro {macro} in the Macros tab, with Run When SoftPresenter Opens ticked. It plays {what} on the Announcements layer.",
+                        &[("macro", &crate::i18n::quoted(macros::OPENING_MACRO)), ("what", &what)],
                     );
-                    said.push_str(" It goes off when a slide goes on screen, until it is started again.");
+                    said.push_str(crate::i18n::t(
+                        "notices.opening.goes_off",
+                        " It goes off when a slide goes on screen, until it is started again.",
+                    ));
                     if matches!(opening, service::StartWith::MediaPlaylist { .. }) {
-                        said.push_str(" (The media playlist used to play behind the slides.)");
+                        said.push_str(crate::i18n::t(
+                            "notices.opening.was_behind",
+                            " (The media playlist used to play behind the slides.)",
+                        ));
                     }
                     if let Err(problem) = saved {
                         said.push_str(&format!(" {problem}"));
@@ -9704,10 +10053,10 @@ impl ApplicationHandler<AppEvent> for App {
                     running.home_state.notices.info(said);
                 }
                 if macros::from_audience_off(&mut running.home_state.macros, audience_off_before) {
-                    let mut said = format!(
-                        "Starting with the audience screens off is now the step Audience Screens Off in the \
-                         macro \u{201c}{}\u{201d} in the Macros tab, run when SoftPresenter opens.",
-                        macros::OPENING_MACRO
+                    let mut said = crate::i18n::tf(
+                        "notices.opening.audience_off",
+                        "Starting with the audience screens off is now the step Audience Screens Off in the macro {macro} in the Macros tab, run when SoftPresenter opens.",
+                        &[("macro", &crate::i18n::quoted(macros::OPENING_MACRO))],
                     );
                     if let Err(problem) = macros::save(&running.home_state.macros) {
                         said.push_str(&format!(" {problem}"));
@@ -10471,14 +10820,16 @@ impl ApplicationHandler<AppEvent> for App {
 /// What is said once the sp command is installed: where it is, and what to type to try it.
 fn installed_words(link: &std::path::Path) -> String {
     if cfg!(windows) {
-        format!(
-            "Installed the sp command ({}) and put its folder on your PATH. In a new Command Prompt, try: sp status. In PowerShell, where sp already means something else, type softpresenter status.",
-            link.display()
+        crate::i18n::tf(
+            "notices.command.installed_windows",
+            "Installed the sp command ({path}) and put its folder on your PATH. In a new Command Prompt, try: sp status. In PowerShell, where sp already means something else, type softpresenter status.",
+            &[("path", &link.display().to_string())],
         )
     } else {
-        format!(
-            "Installed the sp command at {} (and softpresenter beside it). In Terminal, try: sp status",
-            link.display()
+        crate::i18n::tf(
+            "notices.command.installed",
+            "Installed the sp command at {path} (and softpresenter beside it). In Terminal, try: sp status",
+            &[("path", &link.display().to_string())],
         )
     }
 }

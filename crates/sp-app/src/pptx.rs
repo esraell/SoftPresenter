@@ -21,6 +21,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::i18n::{t, tf};
 use roxmltree::{Document, Node};
 use sp_model::bounded_zip::{ZipLimits, ZipRefusal};
 use sp_model::{
@@ -74,19 +75,31 @@ fn wanted(name: &str) -> bool {
 
 fn refusal(name: &str, why: ZipRefusal) -> String {
     match why {
-        ZipRefusal::Damaged => format!("{name} is a damaged file."),
-        ZipRefusal::Overlap => format!("{name} is a damaged file: its parts overlap."),
-        ZipRefusal::TooMany => format!("{name} has too many parts in it to be a presentation."),
-        ZipRefusal::UnpacksTooMuch => format!("{name} unpacks to more than any presentation, so it wasn't read."),
+        ZipRefusal::Damaged => tf("notices.pptx.damaged", "{name} is a damaged file.", &[("name", name)]),
+        ZipRefusal::Overlap => {
+            tf("notices.pptx.overlap", "{name} is a damaged file: its parts overlap.", &[("name", name)])
+        }
+        ZipRefusal::TooMany => {
+            tf("notices.pptx.too_many", "{name} has too many parts in it to be a presentation.", &[("name", name)])
+        }
+        ZipRefusal::UnpacksTooMuch => tf(
+            "notices.pptx.unpacks_too_much",
+            "{name} unpacks to more than any presentation, so it wasn't read.",
+            &[("name", name)],
+        ),
     }
 }
 
 fn open_package(bytes: &[u8], name: &str) -> Result<Package, String> {
     if bytes.len() as u64 > LIMITS.file {
-        return Err(format!("{name} is larger than any presentation, so it wasn't read."));
+        return Err(tf(
+            "notices.pptx.too_large",
+            "{name} is larger than any presentation, so it wasn't read.",
+            &[("name", name)],
+        ));
     }
     if !sp_model::bounded_zip::is_zip(bytes) {
-        return Err(format!("{name} isn't a .pptx file (it isn't a zip)."));
+        return Err(tf("notices.pptx.not_zip", "{name} isn't a .pptx file (it isn't a zip).", &[("name", name)]));
     }
     let mut package = Package { xml: HashMap::new(), media: HashMap::new() };
     let mut too_big = false;
@@ -106,10 +119,18 @@ fn open_package(bytes: &[u8], name: &str) -> Result<Package, String> {
     })
     .map_err(|why| refusal(name, why))?;
     if too_big {
-        return Err(format!("{name} has a part larger than any presentation's, so it wasn't read."));
+        return Err(tf(
+            "notices.pptx.part_too_large",
+            "{name} has a part larger than any presentation's, so it wasn't read.",
+            &[("name", name)],
+        ));
     }
     if !package.xml.contains_key("ppt/presentation.xml") {
-        return Err(format!("{name} isn't a .pptx file (it has no presentation in it)."));
+        return Err(tf(
+            "notices.pptx.no_presentation",
+            "{name} isn't a .pptx file (it has no presentation in it).",
+            &[("name", name)],
+        ));
     }
     Ok(package)
 }
@@ -725,6 +746,29 @@ struct Look {
     stroke: Option<StrokeLook>,
 }
 
+/// What [`frame_kind`] says (or "something"), as a slide's reason to be checked says it, in the
+/// language set.
+fn kind_shown(kind: &str) -> String {
+    match kind {
+        "a table" => t("notices.pptx.kind.table", "a table").to_owned(),
+        "a chart" => t("notices.pptx.kind.chart", "a chart").to_owned(),
+        "a diagram" => t("notices.pptx.kind.diagram", "a diagram").to_owned(),
+        "an embedded object" => t("notices.pptx.kind.embedded", "an embedded object").to_owned(),
+        "something" => t("notices.pptx.kind.something", "something").to_owned(),
+        other => other.to_owned(),
+    }
+}
+
+/// A reason to check a slide: an object came in as its picture.
+fn came_in_as_picture(kind: &str) -> String {
+    tf("notices.pptx.as_picture", "{what} came in as its picture", &[("what", &kind_shown(kind))])
+}
+
+/// A reason to check a slide: an object couldn't come in.
+fn could_not_come_in(kind: &str) -> String {
+    tf("notices.pptx.not_in", "{what} couldn't come in", &[("what", &kind_shown(kind))])
+}
+
 /// What a frame or the newer form of an object holds, in a few words: a table, a chart, a
 /// diagram or an embedded object.
 fn frame_kind(frame: Node) -> &'static str {
@@ -794,7 +838,7 @@ impl<'a, 'p> SlideCx<'a, 'p> {
                 let path = rels.get(&id).map(|(_, p)| p.clone());
                 match path.and_then(|p| self.picture_object("Background", whole, &p, None)) {
                     Some(object) => self.objects.push(object),
-                    None => self.flag("a background picture couldn't be read"),
+                    None => self.flag(t("notices.pptx.background_unread", "a background picture couldn't be read")),
                 }
             }
         }
@@ -862,7 +906,7 @@ impl<'a, 'p> SlideCx<'a, 'p> {
     /// coordinates).
     fn shapes(&mut self, tree: Node, parts: &Parts, place: Place, is_slide: bool, depth: usize) {
         if depth > MOST_GROUP_DEPTH {
-            self.flag("shapes inside too many groups were left out");
+            self.flag(t("notices.pptx.too_deep", "shapes inside too many groups were left out"));
             return;
         }
         for shape in tree.children().filter(Node::is_element) {
@@ -909,10 +953,10 @@ impl<'a, 'p> SlideCx<'a, 'p> {
             (None, Some(f)) => {
                 // What the object was, from what the newer form of it held.
                 let what = child(content, "Choice").map_or("something", frame_kind);
-                self.flag(&format!("{what} came in as its picture"));
+                self.flag(&came_in_as_picture(what));
                 self.shapes(f, parts, place, is_slide, depth + 1);
             }
-            (None, None) => self.flag("something couldn't come in"),
+            (None, None) => self.flag(&could_not_come_in("something")),
         }
     }
 
@@ -921,7 +965,7 @@ impl<'a, 'p> SlideCx<'a, 'p> {
         let what = frame_kind(frame);
 
         let Some(boxed) = child(frame, "xfrm").and_then(box_of) else {
-            self.flag(&format!("{what} couldn't come in"));
+            self.flag(&could_not_come_in(what));
             return;
         };
         let embed = frame
@@ -932,9 +976,9 @@ impl<'a, 'p> SlideCx<'a, 'p> {
         match embed.and_then(|path| self.picture_object(what, rect, &path, None)) {
             Some(object) => {
                 self.objects.push(object);
-                self.flag(&format!("{what} came in as its picture"));
+                self.flag(&came_in_as_picture(what));
             }
-            None => self.flag(&format!("{what} couldn't come in")),
+            None => self.flag(&could_not_come_in(what)),
         }
     }
 
@@ -958,11 +1002,11 @@ impl<'a, 'p> SlideCx<'a, 'p> {
             (c.iter().any(|v| *v > 0.0) && c[0] + c[2] < 1.0 && c[1] + c[3] < 1.0).then_some(c)
         });
         if shape.descendants().any(|n| matches!(n.tag_name().name(), "videoFile" | "audioFile" | "wavAudioFile")) {
-            self.flag("embedded sound or video didn't come in");
+            self.flag(t("notices.pptx.media_left_out", "embedded sound or video didn't come in"));
         }
         let name = name_of(shape);
         let Some(mut object) = path.and_then(|p| self.picture_object(&name, rect, &p, crop)) else {
-            self.flag("a picture couldn't be read");
+            self.flag(t("notices.pptx.picture_unread", "a picture couldn't be read"));
             return;
         };
         if let Some(own) = xfrm_of(shape) {
@@ -1065,7 +1109,7 @@ impl<'a, 'p> SlideCx<'a, 'p> {
                     object.kind = ObjectKind::Shape { shape: kind };
                     self.objects.push(object);
                 }
-                None => self.flag("a shape couldn't be drawn"),
+                None => self.flag(t("notices.pptx.shape_not_drawn", "a shape couldn't be drawn")),
             }
         }
         if let Some(mut text) = self.text(&chain, key.as_ref(), parts, frame) {
@@ -1345,8 +1389,9 @@ fn colour_map(document: Option<&Document>, over: bool) -> Option<HashMap<String,
 pub fn read(bytes: &[u8], name: &str, most: usize, save: &mut Save<'_>) -> Result<Read, String> {
     let package = open_package(bytes, name)?;
     let reader = Reader { package: &package, docs: RefCell::new(HashMap::new()), kept: RefCell::new(HashMap::new()) };
-    let presentation =
-        reader.doc("ppt/presentation.xml").ok_or_else(|| format!("{name} isn't a .pptx SoftPresenter can read."))?;
+    let presentation = reader.doc("ppt/presentation.xml").ok_or_else(|| {
+        tf("notices.pptx.unreadable", "{name} isn't a .pptx SoftPresenter can read.", &[("name", name)])
+    })?;
     let presentation_rels = reader.rels("ppt/presentation.xml");
     let size = presentation.descendants().find(|n| is(*n, "sldSz"));
     let (cx, cy) = size
@@ -1386,7 +1431,7 @@ pub fn read(bytes: &[u8], name: &str, most: usize, save: &mut Save<'_>) -> Resul
 
         let Some(slide_doc) = reader.doc(path) else {
             result.slides.push(Slide::new(Vec::new()));
-            result.check.push((number, vec!["the slide couldn't be read".to_owned()]));
+            result.check.push((number, vec![t("notices.pptx.slide_unread", "the slide couldn't be read").to_owned()]));
             continue;
         };
         let mut map = colour_map(master_doc.as_deref(), false).unwrap_or_default();

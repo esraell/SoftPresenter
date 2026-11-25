@@ -7,7 +7,28 @@
 use sp_model::{ThemeTemplate, ThemeVersion, Uuid};
 
 use crate::home::HomeState;
+use crate::i18n::{t, tf};
 use crate::service::{Item, Service};
+
+/// A kind of thing, as [`Removed::named`] gives it, in the language set: for what the window
+/// says.
+fn kind_shown(kind: &'static str) -> &'static str {
+    match kind {
+        "playlist" => t("notices.undo.kind.playlist", "playlist"),
+        "library" => t("notices.undo.kind.library", "library"),
+        "audio playlist" => t("notices.undo.kind.audio_playlist", "audio playlist"),
+        "timer" => t("notices.undo.kind.timer", "timer"),
+        "message" => t("notices.undo.kind.message", "message"),
+        "prop" => t("notices.undo.kind.prop", "prop"),
+        "macro" => t("notices.undo.kind.macro", "macro"),
+        "stage layout" => t("notices.undo.kind.stage_layout", "stage layout"),
+        "template" => t("notices.undo.kind.template", "template"),
+        "version" => t("notices.undo.kind.version", "version"),
+        "media playlist" => t("notices.undo.kind.media_playlist", "media playlist"),
+        "media" => t("notices.undo.kind.media", "media"),
+        _ => kind,
+    }
+}
 
 /// Items taken out of a playlist: the playlist (by its place, and its name, so that a playlist
 /// since renamed or deleted is left alone), and each item with the place it had.
@@ -169,10 +190,17 @@ impl Removed {
         let (kind, name) = self.named();
         match self {
             Removed::Items(_) | Removed::MediaPlaylistFiles { .. } => {
-                format!("{name} has changed since, so that can't be undone.")
+                tf("notices.undo.changed", "{name} has changed since, so that can't be undone.", &[("name", name)])
             }
-            Removed::Samples(_) => "The sample backgrounds have changed since, so that can't be done.".to_owned(),
-            _ => format!("The {kind} {name} has changed since, so that can't be undone."),
+            Removed::Samples(_) => {
+                t("notices.undo.samples_changed", "The sample backgrounds have changed since, so that can't be done.")
+                    .to_owned()
+            }
+            _ => tf(
+                "notices.undo.kind_changed",
+                "The {kind} {name} has changed since, so that can't be undone.",
+                &[("kind", kind_shown(kind)), ("name", name)],
+            ),
         }
     }
 

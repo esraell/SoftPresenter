@@ -26,6 +26,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use crate::i18n::{tf, tn};
 use serde_json::Value;
 
 const DAY: Duration = Duration::from_secs(24 * 60 * 60);
@@ -201,23 +202,48 @@ impl Outcome {
     pub fn notice(&self) -> Option<String> {
         let count = self.moved.len();
         let videos = self.moved.iter().filter(|(path, _)| crate::media::is_video(path)).count();
+        let bytes: u64 = self.moved.iter().map(|(_, size)| size).sum();
+        let shown = size_words(bytes);
+        let size: &[(&str, &str)] = &[("size", &shown)];
         let media = match (count - videos, videos) {
             (0, 0) => None,
-            (1, 0) => Some("1 unused picture".to_owned()),
-            (n, 0) => Some(format!("{n} unused pictures")),
-            (0, 1) => Some("1 unused video".to_owned()),
-            (0, n) => Some(format!("{n} unused videos")),
-            _ => Some(format!("{count} unused pictures and videos")),
+            (n, 0) => Some(tn(
+                "notices.tidy.pictures",
+                n as u64,
+                "{n} unused picture ({size})",
+                "{n} unused pictures ({size})",
+                size,
+            )),
+            (0, n) => Some(tn(
+                "notices.tidy.videos",
+                n as u64,
+                "{n} unused video ({size})",
+                "{n} unused videos ({size})",
+                size,
+            )),
+            _ => Some(tn(
+                "notices.tidy.media",
+                count as u64,
+                "{n} unused pictures and videos ({size})",
+                "{n} unused pictures and videos ({size})",
+                size,
+            )),
         };
-        let bytes: u64 = self.moved.iter().map(|(_, size)| size).sum();
-        let media = media.map(|media| format!("{media} ({})", size_words(bytes)));
         let left = match self.leftovers.len() {
             0 => None,
-            1 => Some("1 leftover file".to_owned()),
-            n => Some(format!("{n} leftover files")),
+            n => Some(tn("notices.tidy.leftovers", n as u64, "{n} leftover file", "{n} leftover files", &[])),
         };
-        let parts: Vec<String> = [media, left].into_iter().flatten().collect();
-        (!parts.is_empty()).then(|| format!("Tidied the library: {} went to the Trash.", parts.join(" and ")))
+        match (media, left) {
+            (Some(media), Some(left)) => Some(tf(
+                "notices.tidy.both",
+                "Tidied the library: {media} and {left} went to the Trash.",
+                &[("media", &media), ("left", &left)],
+            )),
+            (Some(what), None) | (None, Some(what)) => {
+                Some(tf("notices.tidy.one", "Tidied the library: {what} went to the Trash.", &[("what", &what)]))
+            }
+            (None, None) => None,
+        }
     }
 }
 
@@ -229,7 +255,7 @@ fn size_words(bytes: u64) -> String {
     } else if kb < 1024.0 * 1024.0 {
         format!("{:.0} MB", kb / 1024.0)
     } else {
-        format!("{:.1} GB", kb / (1024.0 * 1024.0))
+        format!("{} GB", crate::i18n::number(kb / (1024.0 * 1024.0), 1))
     }
 }
 

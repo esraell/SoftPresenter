@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 
+use crate::i18n::{t, tf, tn};
 use serde::{Deserialize, Serialize};
 use sp_model::{Group, Object, Presentation, SlideRect, Uuid};
 
@@ -247,7 +248,9 @@ pub fn lay_out(source: &Source) -> Result<Laid, String> {
         Source::Pictures { title, files } => (title.clone(), files.clone()),
         Source::File(path) if path.is_dir() => {
             let title = path.file_name().map_or_else(|| "Slides".to_owned(), |n| n.to_string_lossy().into_owned());
-            let pictures = pictures_in(path).ok_or_else(|| format!("{title} has no pictures in it."))?;
+            let pictures = pictures_in(path).ok_or_else(|| {
+                tf("notices.deck.no_pictures", "{title} has no pictures in it.", &[("title", &title)])
+            })?;
             (title, pictures)
         }
         Source::Presentation { path, mode: ImportAs::Slides } => return lay_out_pptx(path),
@@ -483,13 +486,27 @@ pub fn make(source: &Source) -> Result<Finished, String> {
 fn lay_out_pptx(path: &Path) -> Result<Laid, String> {
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     let title = path.file_stem().map_or_else(|| "Slides".to_owned(), |s| s.to_string_lossy().into_owned());
-    let size = std::fs::metadata(path).map_err(|e| format!("{name} could not be read ({e})."))?.len();
+    let unreadable = |e: std::io::Error| {
+        tf(
+            "notices.import.unreadable",
+            "{name} could not be read ({error}).",
+            &[("name", &name), ("error", &e.to_string())],
+        )
+    };
+    let size = std::fs::metadata(path).map_err(unreadable)?.len();
     if size > crate::pptx::LARGEST_FILE {
-        return Err(format!("{name} is larger than any presentation, so it wasn't read."));
+        return Err(tf(
+            "notices.pptx.too_large",
+            "{name} is larger than any presentation, so it wasn't read.",
+            &[("name", &name)],
+        ));
     }
-    let bytes = std::fs::read(path).map_err(|e| format!("{name} could not be read ({e})."))?;
-    let folder = crate::images::folder().ok_or("Could not find where to keep pictures on this computer.")?;
-    std::fs::create_dir_all(&folder).map_err(|e| format!("Could not make the Images folder: {e}"))?;
+    let bytes = std::fs::read(path).map_err(unreadable)?;
+    let folder = crate::images::folder()
+        .ok_or(t("notices.images.no_place", "Could not find where to keep pictures on this computer."))?;
+    std::fs::create_dir_all(&folder).map_err(|e| {
+        tf("notices.images.no_folder", "Could not make the Images folder: {error}", &[("error", &e.to_string())])
+    })?;
     let mut save = |bytes: &[u8], ending: &str, crop: Option<[f32; 4]>| keep_picture(&folder, bytes, ending, crop);
     let read = crate::pptx::read(&bytes, &name, MOST_SLIDES, &mut save)?;
     let mut slides = read.slides;
@@ -512,8 +529,14 @@ pub fn mark_to_check(slides: &mut [sp_model::Slide], check: &[(usize, Vec<String
 /// its picture; a table came in as its picture." Reasons are named once
 /// however many slides have them; the slide's own tag says which it has.
 pub fn came_in_note(title: &str, count: usize, check: &[(usize, Vec<String>)]) -> String {
-    let plural = if count == 1 { "" } else { "s" };
-    let mut said = format!("\u{201c}{title}\u{201d} came in as {count} slide{plural}.");
+    let quoted = crate::i18n::quoted(title);
+    let mut said = tn(
+        "notices.deck.came_in",
+        count as u64,
+        "{title} came in as {n} slide.",
+        "{title} came in as {n} slides.",
+        &[("title", &quoted)],
+    );
     if check.is_empty() {
         return said;
     }
@@ -522,8 +545,16 @@ pub fn came_in_note(title: &str, count: usize, check: &[(usize, Vec<String>)]) -
     let more = check.len().saturating_sub(NAMED);
     let which = match (numbers.as_slice(), more) {
         ([one], 0) => one.clone(),
-        (numbers, 0) => format!("{} and {}", numbers[..numbers.len() - 1].join(", "), numbers[numbers.len() - 1]),
-        (numbers, more) => format!("{} and {more} more", numbers.join(", ")),
+        (numbers, 0) => tf(
+            "notices.deck.which_and",
+            "{list} and {last}",
+            &[("list", &numbers[..numbers.len() - 1].join(", ")), ("last", &numbers[numbers.len() - 1])],
+        ),
+        (numbers, more) => tf(
+            "notices.deck.which_more",
+            "{list} and {more} more",
+            &[("list", &numbers.join(", ")), ("more", &more.to_string())],
+        ),
     };
     let mut reasons: Vec<&str> = Vec::new();
     for reason in check.iter().flat_map(|(_, why)| why.iter()) {
@@ -531,8 +562,15 @@ pub fn came_in_note(title: &str, count: usize, check: &[(usize, Vec<String>)]) -
             reasons.push(reason);
         }
     }
-    let plural = if check.len() == 1 { "" } else { "s" };
-    said.push_str(&format!(" Check slide{plural} {which}: {}.", reasons.join("; ")));
+    let reasons = reasons.join("; ");
+    said.push(' ');
+    said.push_str(&tn(
+        "notices.deck.check",
+        check.len() as u64,
+        "Check slide {which}: {reasons}.",
+        "Check slides {which}: {reasons}.",
+        &[("which", &which), ("reasons", &reasons)],
+    ));
     said
 }
 
@@ -583,7 +621,7 @@ fn keep_picture(
 fn lay_out_by_program(path: &Path) -> Result<Laid, String> {
     let title = path.file_stem().map_or_else(|| "Slides".to_owned(), |s| s.to_string_lossy().into_owned());
     let work = crate::bible_store::data_dir()
-        .ok_or("Could not find where to work on this computer.")?
+        .ok_or(t("notices.deck.no_work_place", "Could not find where to work on this computer."))?
         .join("Converting")
         .join(Uuid::new_v4().to_string());
     match crate::convert::to_pdf(path, &work) {
@@ -600,9 +638,17 @@ fn lay_out_by_program(path: &Path) -> Result<Laid, String> {
 /// A PDF's pages as slides, in a presentation with this title; their pictures are drawn by
 /// [`fill`]. `then_delete` is a folder removed once they are.
 fn lay_out_pdf(path: &Path, title: String, then_delete: Option<PathBuf>) -> Result<Laid, String> {
-    let size = std::fs::metadata(path).map_err(|e| format!("{title} could not be read ({e}).")).map(|m| m.len())?;
+    let size = std::fs::metadata(path)
+        .map_err(|e| {
+            tf(
+                "notices.import.unreadable",
+                "{name} could not be read ({error}).",
+                &[("name", &title), ("error", &e.to_string())],
+            )
+        })
+        .map(|m| m.len())?;
     if size > LARGEST_PDF {
-        return Err(format!("{title} is too large to make slides of."));
+        return Err(tf("notices.deck.pdf_too_large", "{title} is too large to make slides of.", &[("title", &title)]));
     }
     let sizes = sp_video::pdf_sizes(path, PAGE_SIZE.0, PAGE_SIZE.1, MOST_SLIDES)?;
     let mut slides = Vec::new();

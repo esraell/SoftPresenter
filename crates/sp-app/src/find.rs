@@ -14,6 +14,7 @@ use sp_bible::Bible;
 
 use crate::bible::BibleReader;
 use crate::bible_language::Reading;
+use crate::i18n::{t, tf};
 
 /// How many verses a search for words lists.
 pub const VERSES_LISTED: usize = 3;
@@ -91,7 +92,7 @@ pub fn search_bibles(typed: &str, bibles: &[(String, Arc<Bible>)], reading: &Rea
         let kept = typed_in.as_deref().map_or_else(|| lookup.clone(), |in_| named(in_, false));
         return vec![BibleRow {
             title: named(&languages[reader], true),
-            tag: "BIBLE".to_owned(),
+            tag: t("notices.find.bible_tag", "BIBLE").to_owned(),
             line: line.to_owned(),
             kept,
             numbering,
@@ -115,7 +116,7 @@ pub fn search_bibles(typed: &str, bibles: &[(String, Arc<Bible>)], reading: &Rea
             let named = sp_bible::convert(there, lead.info.numbering, bibles[quoted].1.info.numbering);
             rows.push(BibleRow {
                 title: sp_bible::reading_label(&languages[quoted], named, named),
-                tag: format!("BIBLE \u{b7} {}", short.to_uppercase()),
+                tag: tf("notices.find.bible_tag.from", "BIBLE \u{b7} {bible}", &[("bible", &short.to_uppercase())]),
                 line: line.to_owned(),
                 lookup: lead.label(there, there),
                 kept: sp_bible::label_in(&languages[at], place, place),
@@ -208,8 +209,8 @@ pub fn search_page(typed: &str, bibles: &[(String, Arc<Bible>)], reading: &Readi
     }
     if found.verses.is_empty() {
         found.message = Some(match searched.as_slice() {
-            [one] => format!("Nothing in the {one} has those words."),
-            _ => "None of the Bibles in use has those words.".to_owned(),
+            [one] => tf("notices.find.nothing_in", "Nothing in the {bible} has those words.", &[("bible", one)]),
+            _ => t("notices.find.nothing", "None of the Bibles in use has those words.").to_owned(),
         });
     }
     found

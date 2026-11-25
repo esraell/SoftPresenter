@@ -108,6 +108,7 @@ start with `_` (`"_note"`) are comments.
 | `bible` | the Bible view's bar, its Options and translations, and its history's dates |
 | `dialogs` | confirmation sheets and small windows: delete a song, media or theme, New Song, missing fonts |
 | `find` | the find box's list of results |
+| `notices` | the notices list, every notice and refusal the window says, errors shown in the window, window titles, import and export messages, a slide's Check reasons |
 | `common` | words several areas share |
 | `format` | numbers and quotation marks (not words) |
 
