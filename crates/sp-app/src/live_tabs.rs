@@ -2266,7 +2266,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             {
                 let pick = |count: usize| (sp_model::Uuid::new_v4().as_u128() % count as u128) as usize;
                 let after = match current {
-                    Some(id) if loaded => state.audio.after(id, pick).map(|track| track.id),
+                    Some(id) if loaded => state.audio.next_by_hand(id, pick).map(|track| track.id),
                     _ => Some(list[(at + 1) % list.len()]),
                 };
                 if let Some(after) = after {
@@ -2354,11 +2354,25 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             let shuffle_wide = flat_button_width(ui, &[shuffle_words], &small, 9.0);
             let shuffle = Rect::from_min_size(pos2(through.max.x + 6.0, y - 12.0), vec2(shuffle_wide, 24.0));
             let look = if state.audio.shuffle { Flat::On } else { Flat::Plain };
-            if flat_button(ui, shuffle, egui::Id::unique("audio shuffle"), shuffle_words, small, look, true)
+            if flat_button(ui, shuffle, egui::Id::unique("audio shuffle"), shuffle_words, small.clone(), look, true)
                 .on_hover_text(t("tools.audio.shuffle.hint", "Play the tracks in a random order"))
                 .clicked()
             {
                 state.audio.shuffle = !state.audio.shuffle;
+                state.audio_changed = true;
+            }
+            let loop_words = t("tools.audio.loop", "Loop");
+            let loop_wide = flat_button_width(ui, &[loop_words], &small, 9.0);
+            let looping = Rect::from_min_size(pos2(shuffle.max.x + 6.0, y - 12.0), vec2(loop_wide, 24.0));
+            let look = if state.audio.looping { Flat::On } else { Flat::Plain };
+            if flat_button(ui, looping, egui::Id::unique("audio loop"), loop_words, small, look, true)
+                .on_hover_text(t(
+                    "tools.audio.loop.hint",
+                    "Keep playing until stopped: after the last track, start again from the first (with Play through off, play this track again)",
+                ))
+                .clicked()
+            {
+                state.audio.looping = !state.audio.looping;
                 state.audio_changed = true;
             }
             let fade = state.audio.crossfade;
@@ -2370,15 +2384,21 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 }
             };
             let select = Rect::from_min_size(pos2(options.max.x - 70.0, y - 12.0), vec2(70.0, 24.0));
-            paint_spaced(
-                ui,
-                pos2(select.min.x - 8.0, y),
-                Align2::RIGHT_CENTER,
-                t("tools.audio.crossfade", "CROSSFADE"),
-                fixed_semibold(11.5),
-                TEXT_FAINT,
-                0.6,
-            );
+            // The word goes where there is room for it beside the switches (the list's hover
+            // hint says what it is either way).
+            let caption = t("tools.audio.crossfade", "CROSSFADE");
+            let caption_wide = crate::studio::spaced(ui, caption, fixed_semibold(11.5), TEXT_FAINT, 0.6).size().x;
+            if looping.max.x + 8.0 + caption_wide <= select.min.x - 8.0 {
+                paint_spaced(
+                    ui,
+                    pos2(select.min.x - 8.0, y),
+                    Align2::RIGHT_CENTER,
+                    caption,
+                    fixed_semibold(11.5),
+                    TEXT_FAINT,
+                    0.6,
+                );
+            }
             let picker = small_select(ui, select, egui::Id::unique("audio crossfade"), &fade_words(fade))
                 .on_hover_text(t("tools.audio.crossfade.hint", "How long one track fades into the next"));
             egui::Popup::menu(&picker).show(|ui| {

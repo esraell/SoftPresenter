@@ -433,6 +433,7 @@ impl crate::App {
         let playing = state.audio_playing;
         let track = playing.track.and_then(|id| state.audio.track(id)).map(|t| t.name.clone());
         let (shuffle, through, crossfade) = (state.audio.shuffle, state.audio.through, state.audio.crossfade);
+        let looping = state.audio.looping;
         let volume = (state.audio_volume * 100.0).round() as u32;
         let going = playing.track.is_some() && !playing.paused;
         let started_at = going.then(|| self.remote.looks.anchor(AUDIO, now, playing.position));
@@ -448,6 +449,7 @@ impl crate::App {
             "mute": volume == 0,
             "shuffle": shuffle,
             "through": through,
+            "loop": looping,
             "crossfade": crossfade,
         })
     }

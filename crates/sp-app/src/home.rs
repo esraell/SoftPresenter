@@ -4967,6 +4967,8 @@ pub enum AudioRequest {
     TogglePause,
     Stop,
     Skip(f32),
+    /// Go to a place in the track, playing or paused.
+    Seek(std::time::Duration),
     Volume(f32),
     Remove(sp_model::Uuid),
 }

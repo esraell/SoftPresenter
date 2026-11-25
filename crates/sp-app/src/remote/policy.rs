@@ -476,6 +476,10 @@ mod tests {
             "songbooks",
             "songbook",
             "undo",
+            "audio loop on",
+            "audio seek 1:23",
+            "audio seek -15",
+            "audio",
         ] {
             assert!(!refused(line), "{line} should be open");
         }

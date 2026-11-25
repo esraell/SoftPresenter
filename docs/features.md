@@ -791,12 +791,22 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   track's name, a line to drag through the track with the time gone and left, Previous (the
   start of the track first, then the one before), back 15 seconds, Play or Pause, forward 15
   seconds and Next, the volume (up to 150%) with Mute and the level in numbers, then Play
-  through to the next track, Shuffle, and a crossfade of up to ten seconds from one track into
-  the next. Then the tracks, with how many and Add tracks…: a click plays one, a drag moves it
-  to another place, and its ⋯ has Play, Move Up, Move Down, Rename and Remove. Removing the track
-  that is playing (or deleting its playlist) lets it play to its end, its name still shown; then,
-  with Play through on, the playlist goes on as it now stands, from the place it had. The Audio
-  key (off a Mac, F5 too) or Clear All stops it.
+  through to the next track, Shuffle (a random order, each track once before any plays again),
+  Loop, and a crossfade of up to ten seconds from one track into the next. Loop keeps walk-in
+  music going until it is stopped: after the last track the first plays again (with Shuffle, a
+  fresh order, never the track that has just played unless it is the only one), crossfading as
+  between any two tracks; with Play through off it plays the same track again; a playlist of one
+  track goes round on its own. Without Loop, Play through stops after the last track. A playlist
+  saved before Loop came takes it from Play through, which went round then. A track that can't
+  be played is passed over, each tried once: if none after it can be played the audio stops, and
+  the notice says so once however often it comes round. Next and the `sp audio next` command go
+  round to the first track after the last whatever Loop says. Then the tracks, with how many and
+  Add tracks…: a click plays one, a drag moves it to another place, and its ⋯ has Play, Move Up,
+  Move Down, Rename and Remove. Removing the track that is playing (or deleting its playlist)
+  lets it play to its end, its name still shown; then, with Play through on, the playlist goes
+  on as it now stands, from the place it had (back to the first only with Loop, if it was the
+  last; with Play through off nothing follows a track taken out). The Audio key (off a Mac, F5
+  too) or Clear All stops it.
 - **Stage**: with more than one stage screen, a chooser of which (All stage screens to begin
   with); then every stage layout as a tile with a picture of what the stage would show in it
   now (drawn by the screens' renderer, again when the slide, the stage message or the clock's
@@ -2002,8 +2012,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   (`prop new NAME [PICTURE]`, `prop delete`), macros (`macro new`, `macro add NAME STEP then
   STEP…` in the slide-action words, `macro step NAME N STEP` to change a step where it is,
   `macro move NAME N to M`, `macro remove`, `macro delete`), audio (`audio add FILE…
-  [to PLAYLIST]`, `audio playlist new|delete`, `audio next|previous`, `audio shuffle|through
-  on|off`, `audio crossfade SECONDS`) and media playlists (`media-playlist new`, `add ITEM… to`,
+  [to PLAYLIST]`, `audio playlist new|delete`, `audio next|previous`, `audio shuffle|through|loop
+  on|off`, `audio crossfade SECONDS`, `audio seek TIME`) and media playlists (`media-playlist new`, `add ITEM… to`,
   `remove ITEM… from`, `follow NAME FOLDER|off`, `delete`). `stage layouts` lists the stage
   layouts and the screens showing each.
 - The Bible page, themes and arrangements from the command line: `bible text REF` (a passage's

@@ -690,7 +690,7 @@ impl crate::App {
             "add" => self.audio_add(words),
             "next" => self.audio_step(true),
             "previous" | "prev" | "back" => self.audio_step(false),
-            "shuffle" | "through" => {
+            "shuffle" | "through" | "loop" => {
                 let on = match words.first().map(|w| w.to_lowercase()).as_deref() {
                     Some("on") => Ok(true),
                     Some("off") => Ok(false),
@@ -698,16 +698,35 @@ impl crate::App {
                 };
                 on.and_then(|on| {
                     let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
-                    let said = if word == "shuffle" {
-                        state.audio.shuffle = on;
-                        if on {
-                            "After a track, a random other one of its playlist plays."
-                        } else {
-                            "Tracks play in order."
+                    let said = match word.as_str() {
+                        "shuffle" => {
+                            state.audio.shuffle = on;
+                            if on {
+                                "Tracks play in a random order, each once before any plays again."
+                            } else {
+                                "Tracks play in order."
+                            }
                         }
-                    } else {
-                        state.audio.through = on;
-                        if on { "After a track, the next one plays." } else { "Each track stops at its end." }
+                        "loop" => {
+                            state.audio.looping = on;
+                            match (on, state.audio.through) {
+                                (true, true) => "The playlist goes round: after the last track, the first plays again.",
+                                (true, false) => {
+                                    "The track playing plays again at its end (Play through is off, so it doesn't go on to the next)."
+                                }
+                                (false, true) => "The audio stops after the last track.",
+                                (false, false) => "Each track stops at its end.",
+                            }
+                        }
+                        _ => {
+                            state.audio.through = on;
+                            match (on, state.audio.looping) {
+                                (true, true) => "After a track, the next one plays, and after the last, the first.",
+                                (true, false) => "After a track, the next one plays, up to the last.",
+                                (false, true) => "Each track plays again at its end (Loop is on).",
+                                (false, false) => "Each track stops at its end.",
+                            }
+                        }
                     };
                     state.audio_changed = true;
                     Ok(Reply::done(said))
@@ -799,14 +818,15 @@ impl crate::App {
         if tracks.is_empty() {
             return Err("The track playing isn't in a playlist.".to_owned());
         }
-        // From one taken out while it plays, the track now at its place is the next.
-        let listed = tracks.iter().any(|track| track.id == playing);
-        let next = match (forward, listed) {
-            (true, true) => (at + 1) % tracks.len(),
-            (true, false) => at % tracks.len(),
-            (false, _) => (at + tracks.len() - 1) % tracks.len(),
+        // Forward as the Next key goes (with shuffle, the next of this time round's order);
+        // back, the one before in the playlist.
+        let pick = |count: usize| (sp_model::Uuid::new_v4().as_u128() % count as u128) as usize;
+        let next = match forward {
+            true => state.audio.next_by_hand(playing, pick),
+            false => Some(&tracks[(at + tracks.len() - 1) % tracks.len()]),
         };
-        let (id, name) = (tracks[next].id, tracks[next].name.clone());
+        let next = next.ok_or("The track playing isn't in a playlist.")?;
+        let (id, name) = (next.id, next.name.clone());
         self.with_state(|state| state.audio_request = Some(crate::home::AudioRequest::Play(id)));
         self.handle_audio();
         Ok(Reply::done(format!("Playing {name}.")))

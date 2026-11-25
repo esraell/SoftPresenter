@@ -3445,6 +3445,7 @@ impl App {
             Some(AudioRequest::TogglePause) => self.player.toggle_pause(),
             Some(AudioRequest::Stop) => self.player.stop(),
             Some(AudioRequest::Skip(seconds)) => self.player.skip(seconds),
+            Some(AudioRequest::Seek(to)) => self.player.seek(to),
             Some(AudioRequest::Volume(volume)) => self.player.set_volume(volume),
             // The track playing plays on to its end; then the playlist goes on as it now stands.
             Some(AudioRequest::Remove(id)) => {
@@ -3461,38 +3462,59 @@ impl App {
         self.tick_audio();
     }
 
-    /// Keeps the audio going by the clock: fades finish, and with Play Through on the next track
-    /// starts as one ends (fading in over its end, if a crossfade is set). Tells the Audio tab
-    /// what is playing, and says when to look again.
+    /// Keeps the audio going by the clock: fades finish, and with Play Through or Loop on the
+    /// next track (or the same one again) starts as one ends, fading in over its end if a
+    /// crossfade is set. Tells the Audio tab what is playing, and says when to look again.
     fn tick_audio(&mut self) -> Option<Instant> {
         let fading = self.player.tick();
         let running = self.running.as_mut()?;
         let state = &mut running.home_state;
         let fade = Duration::from_secs_f32(state.audio.crossfade.clamp(0.0, 10.0));
-        let pick = |count: usize| (Uuid::new_v4().as_u128() % count as u128) as usize;
-        if let Some(ended) = self.player.ended() {
+        let goes_on = state.audio.through || state.audio.looping;
+        let follow = if let Some(ended) = self.player.ended() {
             let name = state.audio.track(ended).map_or("", |track| track.name.as_str());
             applog::event("audio", &format!("ended {name}"));
-            if state.audio.through
-                && let Some(next) = state.audio.after(ended, pick)
-                && let Err(problem) = self.player.play(next)
-            {
-                state.notices.trouble(problem);
-            }
+            goes_on.then_some((ended, Duration::ZERO))
         } else if let playing = self.player.playing()
-            && state.audio.through
+            && goes_on
             && !fade.is_zero()
             && !playing.paused
             && let Some(id) = playing.track
             // A track too short to crossfade from just plays to its end.
             && playing.length.is_some_and(|length| length > fade * 2)
             && self.player.left().is_some_and(|left| left <= fade)
-            && let Some(next) = state.audio.after(id, pick)
-            && let Err(problem) = self.player.play_fading(next, fade)
         {
-            state.notices.trouble(problem);
+            Some((id, fade))
+        } else {
+            None
+        };
+        if let Some((from, fade)) = follow
+            && self.player.may_follow(from)
+        {
+            let followed = self.player.follow_on(&state.audio, from, fade);
+            if let Some(next) = followed.played.and_then(|id| state.audio.track(id)) {
+                applog::event("audio", &format!("play {} (follows on, crossfade {fade:?})", next.path.display()));
+            }
+            // Said once however often it comes round.
+            for problem in &followed.problems {
+                state.notices.lasting_trouble(problem.clone());
+            }
+            if followed.played.is_none() && !followed.problems.is_empty() {
+                let name = state.audio.track(from).map_or_else(String::new, |track| track.name.clone());
+                state.notices.lasting_trouble(crate::i18n::tf(
+                    "tools.audio.stopped_none_played",
+                    "The audio stopped: no track after {name} could be played.",
+                    &[("name", &name)],
+                ));
+            }
         }
         let playing = self.player.playing();
+        // Shuffle's order counts each track that begins.
+        if let Some(id) = playing.track
+            && playing.track != state.audio_playing.track
+        {
+            state.audio.started(id, state.audio_playing.track.is_none());
+        }
         // A track taken out while it played is let go once something else plays, or nothing.
         state.audio.forget_leaving(playing.track);
         let shown = |p: &audio::Playing| (p.track, p.position.as_secs(), p.paused);

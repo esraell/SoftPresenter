@@ -421,7 +421,10 @@ untouched first playlist). A playlist's items come on demand: `["playlist", "NAM
      "announcements": {"words", "step", "item", "since", "on_slide_screens"}}
 
 **`audio`** — `{"track", "track_id", "playing", "paused", "length_ms", "started_at",
-"position_ms", "volume" (0–100), "mute", "shuffle", "through", "crossfade" (seconds)}`.
+"position_ms", "volume" (0–100), "mute", "shuffle", "through", "loop", "crossfade" (seconds)}`.
+`loop` is the Audio tab's Loop: after the last track the first plays again (with `through`
+false, the track playing plays again). `audio loop on|off` and `audio seek TIME` are open to
+the page like the rest of `audio`.
 
 **`timers`** — `[{"id", "name", "kind", "words", "overrun", "running", "counted_ms", "started_at"}]`.
 `kind` is one of `{"type": "countdown", "seconds": 300}`, `{"type": "countdown_to", "hour": 10,

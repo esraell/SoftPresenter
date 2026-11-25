@@ -466,8 +466,11 @@ deleted)".
 
 | Command | Does |
 |---|---|
-| `audio play TRACK`, `audio pause`, `audio stop`, `audio next`, `audio previous` | The audio player (next and previous stay in the playing track's playlist) |
-| `audio volume 0-100`, `audio shuffle on\|off`, `audio through on\|off`, `audio crossfade SECONDS` | Volume; a random or the next track after one ends; a crossfade of 0 to 12 seconds |
+| `audio` | What plays, where it is in the track and how long the track is; Play through, Shuffle, Loop, the crossfade and the volume; then every track, numbered (`--json`: the tracks' names, as before; `status --json` has the player) |
+| `audio play TRACK`, `audio pause`, `audio stop`, `audio next`, `audio previous` | The audio player (next and previous stay in the playing track's playlist; next goes round to the first after the last, and with Shuffle to the next of this time round's order) |
+| `audio volume 0-100`, `audio shuffle on\|off`, `audio through on\|off`, `audio crossfade SECONDS` | Volume; a random order (each track once before any plays again) or the next track after one ends; a crossfade of 0 to 12 seconds |
+| `audio loop on\|off` | After the last track, the first again (with Shuffle, a fresh order); with Play through off, the same track again. Off, Play through stops after the last track |
+| `audio seek TIME` | Goes to a place in the track playing or paused: `1:23`, `83` (seconds), `+15` or `-15` from where it is (back past the start: the start). Past the end is refused, with the track's length |
 | `audio add FILE… [to PLAYLIST]` | Adds sound files |
 | `audio playlists`, `audio playlist new NAME`, `audio playlist delete NAME` | Audio playlists (deleting one, at once, leaves the files and `sp undo` puts it back; the last one stays; a track of it that is playing plays on to its end) |
 
@@ -479,6 +482,17 @@ deleted)".
     Playing Welcome.
     $ sp audio crossfade 4
     The next track fades in over the last 4 s of the one before.
+    $ sp audio loop on
+    The playlist goes round: after the last track, the first plays again.
+    $ sp audio seek 1:23
+    Welcome: at 1:23 of 3:07.
+    $ sp audio seek 4:00
+    The track is 3:07 long; 4:00 is past its end.
+    $ sp audio
+    Playing: Welcome, at 1:23 of 3:07
+    Play through: on   Shuffle: off   Loop: on   Crossfade: 4 s   Volume: 80
+    1. Welcome
+    2. two
     $ sp audio volume 150
     The volume goes from 0 to 100, not 150.
 
@@ -1593,7 +1607,7 @@ the command's facts where it has any:
 
 | Command | `data` |
 |---|---|
-| `status` | `token`, for [`--wait --since`](#waiting-for-a-change) (with `--wait`, also `changed`: the parts that changed since the token); `live` (null when nothing is on screen): `song`, `slide`, `slides`, `words`, `kind` (`song`, `passage`, `voxlive`, or `catalog` for a song of the song catalog shown from the find box and not in the library), the song's `id` and its `number` in `sp songs` (null for a passage or a catalog song), and the `playlist` and `item` number it was opened from (null when it wasn't); `next_slide`, `media`, `message`, `props`, `announcements`, `media_playlist`, `timers` (each `name`, `kind`, `shows`, `running`), `audio` (`track`, `paused`, `seconds`, `length`, `volume`), `playlist` (`name`, `item_last_opened` and its number `item`, `listed`), `audience_on`, `stage_on`, `continuous`, `identify`, `main_theme`, `selected_song` |
+| `status` | `token`, for [`--wait --since`](#waiting-for-a-change) (with `--wait`, also `changed`: the parts that changed since the token); `live` (null when nothing is on screen): `song`, `slide`, `slides`, `words`, `kind` (`song`, `passage`, `voxlive`, or `catalog` for a song of the song catalog shown from the find box and not in the library), the song's `id` and its `number` in `sp songs` (null for a passage or a catalog song), and the `playlist` and `item` number it was opened from (null when it wasn't); `next_slide`, `media`, `message`, `props`, `announcements`, `media_playlist`, `timers` (each `name`, `kind`, `shows`, `running`), `audio` (`track`, `paused`, `seconds`, `length`, `volume`, `through`, `shuffle`, `loop`), `playlist` (`name`, `item_last_opened` and its number `item`, `listed`), `audience_on`, `stage_on`, `continuous`, `identify`, `main_theme`, `selected_song` |
 | `playlists`, `media`, `themes`, `audio` | An array of names, in their numbered order |
 | `messages` | An object for each, in their numbered order: `[{"name": "Parking", "text": "Car park full", "showing": false, "leaves_after": 30}]` (`text` with tokens such as `{timer:Sermon}` as written; `leaves_after` in seconds, null when it stays until cleared) |
 | `timers` | An object for each, in their numbered order: `name`, `kind`, `shows` (what it shows now), `running` |

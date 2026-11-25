@@ -997,6 +997,8 @@ Layers and controls
   announce SONG | announce media ITEM | announce media-playlist NAME | announce stop
   audio play TRACK | audio pause | audio stop | audio volume 0-100
   audio next|previous | audio shuffle on|off | audio through on|off | audio crossfade SECONDS
+  audio loop on|off            after the last track, the first again (Play through off: the same one)
+  audio seek TIME              go to 1:23, 83 (seconds), +15 or -15 in the track playing or paused
   audio add FILE… [to PLAYLIST] | audio playlists | audio playlist new NAME | delete NAME
   media-playlist new NAME | media-playlist add ITEM… to NAME | remove ITEM… from NAME
   media-playlist follow NAME FOLDER|off | media-playlist delete NAME --yes
@@ -1761,7 +1763,8 @@ impl crate::App {
         let audio = self.audio_state();
         if let Some(track) = audio["track"].as_str() {
             let how = if audio["paused"].as_bool() == Some(true) { "paused" } else { "playing" };
-            lines.push(format!("Audio: {track} ({how}), volume {}", audio["volume"]));
+            let looping = if audio["loop"].as_bool() == Some(true) { ", loop on" } else { "" };
+            lines.push(format!("Audio: {track} ({how}), volume {}{looping}", audio["volume"]));
         }
         let open = state.map(|s| {
             let list = s.services.front();
@@ -1964,6 +1967,9 @@ impl crate::App {
             "seconds": playing.position.as_secs(),
             "length": playing.length.map(|l| l.as_secs()),
             "volume": (state.audio_volume * 100.0).round() as u32,
+            "through": state.audio.through,
+            "shuffle": state.audio.shuffle,
+            "loop": state.audio.looping,
         })
     }
 
@@ -3169,6 +3175,19 @@ impl crate::App {
                 (AudioRequest::TogglePause, "Paused the audio, or played it on if it was paused.".to_owned())
             }
             Some("stop") => (AudioRequest::Stop, "Stopped the audio.".to_owned()),
+            Some("seek") => {
+                let playing = state.audio_playing;
+                let id = playing.track.ok_or("No track is playing or paused.")?;
+                let typed = rest(args, 2);
+                if typed.trim().is_empty() {
+                    return Err("audio seek TIME   (1:23, 83 for seconds, +15 or -15)".to_owned());
+                }
+                let to = crate::audio::seek_to(&typed, playing.position, playing.length)?;
+                let name = state.audio.track(id).map_or_else(String::new, |track| track.name.clone());
+                let of =
+                    playing.length.map_or_else(String::new, |length| format!(" of {}", crate::audio::clock(length)));
+                (AudioRequest::Seek(to), format!("{name}: at {}{of}.", crate::audio::clock(to)))
+            }
             Some("volume") => {
                 let level: f32 = args.get(2).and_then(|w| w.parse().ok()).ok_or("audio volume 0-100")?;
                 if !(0.0..=100.0).contains(&level) {
@@ -3177,8 +3196,31 @@ impl crate::App {
                 (AudioRequest::Volume(level / 100.0), format!("Volume {level}."))
             }
             _ => {
+                // What the player has and how tracks follow on, then every track, numbered.
+                let playing = state.audio_playing;
+                let track = playing.track.and_then(|id| state.audio.track(id)).map(|track| track.name.clone());
+                let at = |position| {
+                    let length = playing.length.map_or_else(String::new, |l| format!(" of {}", crate::audio::clock(l)));
+                    format!("{}{length}", crate::audio::clock(position))
+                };
+                let now = match (track, playing.paused) {
+                    (Some(name), false) => format!("Playing: {name}, at {}", at(playing.position)),
+                    (Some(name), true) => format!("Paused: {name}, at {}", at(playing.position)),
+                    (None, _) => "Nothing playing".to_owned(),
+                };
+                let on = |on: bool| if on { "on" } else { "off" };
+                let fade = state.audio.crossfade;
+                let switches = format!(
+                    "Play through: {}   Shuffle: {}   Loop: {}   Crossfade: {}   Volume: {}",
+                    on(state.audio.through),
+                    on(state.audio.shuffle),
+                    on(state.audio.looping),
+                    if fade > 0.0 { format!("{fade} s") } else { "off".to_owned() },
+                    (state.audio_volume * 100.0).round() as u32,
+                );
                 let names: Vec<String> = tracks.into_iter().map(|(_, name)| name).collect();
-                return Ok(Reply::with(numbered(&names), serde_json::json!(names)));
+                let text = format!("{now}\n{switches}\n{}", numbered(&names));
+                return Ok(Reply::with(text, serde_json::json!(names)));
             }
         };
         self.with_state(|state| state.audio_request = Some(request));
