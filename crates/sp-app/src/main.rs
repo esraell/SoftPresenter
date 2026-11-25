@@ -3465,6 +3465,18 @@ impl App {
                 state.audio_volume = volume;
                 self.player.set_volume(volume);
             }
+            // Mute keeps the level to come back to, in the place the Audio tab's Mute keeps it.
+            Some(AudioRequest::Mute(on)) => {
+                if on {
+                    if state.audio_volume > 0.0 {
+                        state.audio_muted_from = Some(state.audio_volume);
+                    }
+                    state.audio_volume = 0.0;
+                } else if state.audio_volume == 0.0 {
+                    state.audio_volume = state.audio_muted_from.take().unwrap_or(1.0);
+                }
+                self.player.set_volume(state.audio_volume);
+            }
             // The track playing plays on to its end; then the playlist goes on as it now stands.
             Some(AudioRequest::Remove(id)) => {
                 state.audio.remove_track(id, state.audio_playing.track);

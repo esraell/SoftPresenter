@@ -468,7 +468,7 @@ deleted)".
 |---|---|
 | `audio` | What plays, where it is in the track and how long the track is; Play through, Shuffle, Loop, the crossfade and the volume; then every track, numbered (`--json`: the tracks' names, as before; `status --json` has the player) |
 | `audio play TRACK`, `audio pause`, `audio stop`, `audio next`, `audio previous` | The audio player (next and previous stay in the playing track's playlist; next goes round to the first after the last, and with Shuffle to the next of this time round's order). A track that can't be played is refused with why (`ok: false`), and what played goes on |
-| `audio volume 0-100`, `audio shuffle on\|off`, `audio through on\|off`, `audio crossfade SECONDS` | Volume; a random order (each track once before any plays again) or the next track after one ends; a crossfade of 0 to 12 seconds |
+| `audio volume 0-100`, `audio mute on\|off` (off brings back the level it had, as the Audio tab's Mute does), `audio shuffle on\|off`, `audio through on\|off`, `audio crossfade SECONDS` | Volume; a random order (each track once before any plays again) or the next track after one ends; a crossfade of 0 to 12 seconds |
 | `audio loop on\|off` | After the last track, the first again (with Shuffle, a fresh order); with Play through off, the same track again. Off, Play through stops after the last track |
 | `audio seek TIME` | Goes to a place in the track playing or paused: `1:23`, `83` (seconds), `+15` or `-15` from where it is (back past the start: the start). Past the end is refused, with the track's length |
 | `audio add FILE… [to PLAYLIST]` | Adds sound files: any that can't be played (by the app or FFmpeg) are added all the same, with a warning saying why |

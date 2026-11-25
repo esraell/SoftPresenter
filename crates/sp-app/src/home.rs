@@ -513,6 +513,9 @@ pub struct HomeState {
     pub video_request: Option<VideoRequest>,
     pub audio_playing: crate::audio::Playing,
     pub audio_volume: f32,
+    /// While muted, the level the sound comes back to: one place for the Audio tab's Mute and
+    /// `sp audio mute`, so either brings back what the other turned down.
+    pub audio_muted_from: Option<f32>,
     /// The tab open under the Program panel: 0 Timers, 1 Messages, 2 Props, 3 Macros, 4 Stage,
     /// 5 Audio.
     pub live_tab: usize,
@@ -1923,6 +1926,7 @@ impl Default for HomeState {
             video_request: None,
             audio_playing: crate::audio::Playing::default(),
             audio_volume: 1.0,
+            audio_muted_from: None,
             macros_changed: false,
             macro_rename: None,
             actions_to_run: Vec::new(),
@@ -4970,6 +4974,8 @@ pub enum AudioRequest {
     /// Go to a place in the track, playing or paused.
     Seek(std::time::Duration),
     Volume(f32),
+    /// Mute (true), keeping the level to come back to, or bring the sound back (false).
+    Mute(bool),
     Remove(sp_model::Uuid),
 }
 

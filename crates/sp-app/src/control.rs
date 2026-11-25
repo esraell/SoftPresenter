@@ -995,7 +995,7 @@ Layers and controls
   macro startup NAME on|off    run it when SoftPresenter opens, or not
   macro run NAME
   announce SONG | announce media ITEM | announce media-playlist NAME | announce stop
-  audio play TRACK | audio pause | audio stop | audio volume 0-100
+  audio play TRACK | audio pause | audio stop | audio volume 0-100 | audio mute on|off
   audio next|previous | audio shuffle on|off | audio through on|off | audio crossfade SECONDS
   audio loop on|off            after the last track, the first again (Play through off: the same one)
   audio seek TIME              go to 1:23, 83 (seconds), +15 or -15 in the track playing or paused
@@ -3188,6 +3188,20 @@ impl crate::App {
                     playing.length.map_or_else(String::new, |length| format!(" of {}", crate::audio::clock(length)));
                 (AudioRequest::Seek(to), format!("{name}: at {}{of}.", crate::audio::clock(to)))
             }
+            Some("mute") => match args.get(2).map(String::as_str) {
+                Some("on") if state.audio_volume == 0.0 => {
+                    (AudioRequest::Mute(true), "The audio is muted already.".to_owned())
+                }
+                Some("on") => (AudioRequest::Mute(true), "Muted the audio.".to_owned()),
+                Some("off") if state.audio_volume > 0.0 => {
+                    (AudioRequest::Mute(false), "The audio isn't muted.".to_owned())
+                }
+                Some("off") => {
+                    let back = state.audio_muted_from.unwrap_or(1.0);
+                    (AudioRequest::Mute(false), format!("The audio is back, at volume {}.", (back * 100.0).round()))
+                }
+                _ => return Err("audio mute on|off".to_owned()),
+            },
             Some("volume") => {
                 let level: f32 = args.get(2).and_then(|w| w.parse().ok()).ok_or("audio volume 0-100")?;
                 if !(0.0..=100.0).contains(&level) {

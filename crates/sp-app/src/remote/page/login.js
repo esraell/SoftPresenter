@@ -24,11 +24,13 @@ const REMOTE_WORDS = {
    "Add a Bible passage": "Añadir un pasaje de la Biblia",
    "Add a header": "Añadir un encabezado",
    "Add a song": "Añadir una canción",
+   "Add a track to this playlist": "Añade una pista a esta lista",
    "Add pictures or videos": "Añadir imágenes o vídeos",
    "Add pictures or videos to show behind the words": "Añade imágenes o vídeos para mostrarlos detrás de la letra",
    "Add Slide": "Añadir diapositiva",
    "Add the Sample Backgrounds": "Añadir los fondos de ejemplo",
    "Add to playlist": "Añadir a la lista",
+   "Adding music is done at the computer for now.": "Por ahora, la música se añade en el ordenador.",
    "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Añadir imágenes y vídeos desde aquí llegará en el próximo paso. Por ahora, añádelos en el ordenador.",
    "Advanced": "Más",
    "All Media": "Todo",
@@ -39,6 +41,8 @@ const REMOTE_WORDS = {
    "Audience screens on or off (⇧⌘1)": "Pantallas del público: encender o apagar (⇧⌘1)",
    "Audience screens, stage screens, on or off": "Pantallas del público y del escenario, encender o apagar",
    "Audio": "Audio",
+   "Audio playlist": "lista de audio",
+   "Back 15 seconds": "Retroceder 15 segundos",
    "Bible": "Biblia",
    "Bible, too (Bold while editing a slide)": "También Biblia (Negrita al editar una diapositiva)",
    "Cancel": "Cancelar",
@@ -66,6 +70,7 @@ const REMOTE_WORDS = {
    "Copy Style": "Copiar estilo",
    "Copy, cut, paste the picked slides (objects in Edit)": "Copiar, cortar y pegar las diapositivas elegidas (objetos en Editar)",
    "Could not sign in.": "No se pudo iniciar sesión.",
+   "Crossfade": "Fundido",
    "Cut": {
     "in": [
      [
@@ -114,6 +119,7 @@ const REMOTE_WORDS = {
    "Find a song, a line or a verse": "Buscar una canción, una línea o un versículo",
    "Find a song, a line, or a verse": "Buscar canción, línea o versículo",
    "First or last slide of the song": "Primera o última diapositiva de la canción",
+   "Forward 15 seconds": "Adelantar 15 segundos",
    "Go to Next": "Pasar a la siguiente",
    "Go to the slide on screen": "Ir a la diapositiva que está en pantalla",
    "Going places": "Ir a sitios",
@@ -122,6 +128,7 @@ const REMOTE_WORDS = {
    "Hide": "Ocultar",
    "Hide the media strip": "Ocultar la tira multimedia",
    "Hot Key…": "Tecla rápida…",
+   "How long one track fades into the next": "Cuánto tarda una pista en fundirse con la siguiente",
    "Import Songs": "Importar canciones",
    "Import songs or slides": "Importar canciones o diapositivas",
    "Import…": "Importar…",
@@ -129,11 +136,21 @@ const REMOTE_WORDS = {
    "In Edit: nudge the picked object (Shift for one pixel)": "En Editar: mover el objeto elegido (con Mayús, un píxel)",
    "is empty": "está vacía",
    "Jump to a group (C for the chorus), or a slide’s own hot key": "Saltar a un grupo (C para el coro), o a la tecla propia de una diapositiva",
+   "Keep playing until stopped: after the last track, start again from the first (with Play through off, play this track again)": "Seguir sonando hasta que lo pares: tras la última pista, volver a empezar por la primera (con Continuo apagado, repetir esta pista)",
    "Keys": "Teclas",
    "Label": "Etiqueta",
    "Library": "Biblioteca",
    "Longest": "Más largas",
    "Looking up the Bible comes to the remote page with the next step. Use the Bible page at the computer for now.": "Buscar en la Biblia llegará a esta página en el próximo paso. Por ahora, usa la página de la Biblia en el ordenador.",
+   "Loop": {
+    "in": [
+     [
+      ".lv-audio",
+      "Repetir"
+     ]
+    ],
+    "else": "En bucle"
+   },
    "Macros": "Macros",
    "Media": "Multimedia",
    "Media Playlists": "Listas multimedia",
@@ -143,6 +160,8 @@ const REMOTE_WORDS = {
    "Move": "Moverse",
    "Move Down": "Bajar",
    "Move Up": "Subir",
+   "Mute": "Silenciar",
+   "Mute is at the computer for now. Turn the volume down here.": "Por ahora, silenciar se hace en el ordenador. Aquí puedes bajar el volumen.",
    "New": "Temporizador nuevo",
    "New library": "Biblioteca nueva",
    "New Media Playlist…": "Lista multimedia nueva…",
@@ -151,12 +170,15 @@ const REMOTE_WORDS = {
    "Next": "Siguiente",
    "Next at the end of a song goes on to the next song": "Al final de una canción, Siguiente pasa a la siguiente canción",
    "Next slide": "Diapositiva siguiente",
+   "Next track": "Pista siguiente",
    "No song is open": "No hay ninguna canción abierta",
    "No songs here yet. Make one, import some, or drag songs onto this library’s name.": "Aún no hay canciones aquí. Crea una, importa algunas o arrastra canciones sobre el nombre de esta biblioteca.",
+   "No tracks yet. Add music files from this computer.": "Aún no hay pistas. Añade archivos de música de este ordenador.",
    "Not connected to SoftPresenter.": "No hay conexión con SoftPresenter.",
    "Notes": "Notas",
    "Nothing found": "No se encontró nada",
    "Nothing showing": "No se muestra nada",
+   "Nothing to play": "Nada que reproducir",
    "Nothing to redo": "Nada que rehacer",
    "Nothing to tell you. Trouble, questions, and what happens out of sight (added to another playlist, a file read or written) come here.": "Nada que contarte. Aquí llegan los problemas, las preguntas y lo que pasa fuera de la vista (algo añadido a otra lista, un archivo leído o guardado).",
    "Nothing to undo": "Nada que deshacer",
@@ -183,10 +205,15 @@ const REMOTE_WORDS = {
    "Password": "Contraseña",
    "Paste": "Pegar",
    "Paste Style": "Pegar estilo",
+   "Pause": "Pausa",
    "Pick several in the left column: grow the pick, or pick them all": "Elegir varios en la columna izquierda: ampliar la selección o elegirlos todos",
    "Picture": "Imagen",
    "Placeholder": "Hueco",
+   "Play": "Reproducir",
    "Play on Announcements Layer": "Reproducir en la capa de anuncios",
+   "Play the tracks in a random order": "Reproducir las pistas en orden aleatorio",
+   "Play through": "Continuo",
+   "Playing": "Sonando",
    "Playlist": "Lista",
    "Playlists": "Listas",
    "Playlists and libraries": "Listas y bibliotecas",
@@ -195,6 +222,7 @@ const REMOTE_WORDS = {
    "Previous": "Anterior",
    "Previous slide": "Diapositiva anterior",
    "Props": "Gráficos",
+   "Ready": "Listo",
    "Reconnecting…": "Reconectando…",
    "Redo": "Rehacer",
    "Remote Control": "Control remoto",
@@ -202,6 +230,7 @@ const REMOTE_WORDS = {
    "Rename": "Renombrar",
    "Reset": "Reiniciar",
    "Running the slides": "Las diapositivas",
+   "s": "s",
    "Scaling": "Tamaño",
    "Service": "Culto",
    "Service (⌥S)": "Culto (⌥S)",
@@ -212,6 +241,7 @@ const REMOTE_WORDS = {
    "Show a message": "Mostrar un mensaje",
    "Show keys on buttons": "Teclas en los botones",
    "Show that picture or video": "Mostrar esa imagen o ese vídeo",
+   "Shuffle": "Aleatorio",
    "Sign In": "Iniciar sesión",
    "Sign Out of This Device…": "Cerrar sesión en este dispositivo…",
    "Signing in…": "Iniciando sesión…",
@@ -228,7 +258,6 @@ const REMOTE_WORDS = {
    "Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track": "Iniciar ese temporizador, mostrar ese mensaje o gráfico, ejecutar esa macro, poner el escenario en ese diseño, reproducir esa pista",
    "Table": "Tabla",
    "Template": "Plantilla",
-   "The audio player": "El reproductor de audio",
    "The car with the lights on, please": "El coche con las luces encendidas, por favor",
    "The computer didn't answer.": "El ordenador no respondió.",
    "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "La diapositiva o el versículo marcado pasa a pantalla (después de una búsqueda, o con ↑ ↓)",
@@ -242,13 +271,16 @@ const REMOTE_WORDS = {
    "This list": "Esta lista (al pie tiene Teclas en los botones)",
    "This sample only has": "Esta muestra solo tiene",
    "Timers": "Temporizadores",
+   "track": "Pista",
    "Transition": "Transición",
    "Typing in a box: bold, italic, underlined, for the words selected (or the whole box)": "Al escribir en un cuadro: negrita, cursiva, subrayado, para el texto elegido (o todo el cuadro)",
    "Undo": "Deshacer",
    "Undo, redo": "Deshacer, rehacer",
+   "Volume": "Volumen",
    "VoxLive": "VoxLive",
    "Waiting for SoftPresenter": "Esperando a SoftPresenter",
    "Waiting for SoftPresenter to answer. Try again in a moment.": "Esperando la respuesta de SoftPresenter. Vuelve a intentarlo en un momento.",
+   "When a track ends, go on to the next": "Al terminar una pista, pasar a la siguiente",
    "With nothing on screen, move the cue; Space or Enter puts it on": "Sin nada en pantalla, mueve la marca; Espacio o Intro la pone en pantalla",
    "Words": {
     "in": [
@@ -262,7 +294,8 @@ const REMOTE_WORDS = {
    "Words from Text…": "Letra desde texto…",
    "Words once…": "Texto una vez…",
    "Words only": "Solo letra",
-   "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Dejar que un teléfono, iPad o Mac muestre su pantalla se decide en el ordenador, no desde la página remota."
+   "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Dejar que un teléfono, iPad o Mac muestre su pantalla se decide en el ordenador, no desde la página remota.",
+   "There is no track to play. Add music at the computer.": "No hay ninguna pista para reproducir. Añade música en el ordenador."
   },
   "patterns": [
    {
@@ -296,6 +329,11 @@ const REMOTE_WORDS = {
     "key": "page.notices.one"
    },
    {
+    "re": "^(\\d+(?:\\.\\d+)?) s$",
+    "to": "{1} s",
+    "key": "common.seconds_unit"
+   },
+   {
     "re": "^(\\d+(?:\\.\\d+)?)s$",
     "to": "{1} s",
     "key": "common.seconds_unit"
@@ -311,6 +349,11 @@ const REMOTE_WORDS = {
     "key": "left.song.add_to"
    },
    {
+    "re": "^(.+?) tracks$",
+    "to": "{1} pistas",
+    "key": "tools.audio.tracks"
+   },
+   {
     "re": "^Song · (.+)$",
     "to": "Canción · {1}",
     "key": "find.tag.song_group"
@@ -324,6 +367,11 @@ const REMOTE_WORDS = {
     "re": "^(.+?) songs$",
     "to": "{1} canciones",
     "key": "integrations.songbooks.songs"
+   },
+   {
+    "re": "^(.+?) track$",
+    "to": "{1} pista",
+    "key": "tools.audio.tracks"
    },
    {
     "re": "^Start (.+?)$",
@@ -357,7 +405,7 @@ const UI_LANGS = ['en', 'es', 'ru', 'uk'];
 // What is content: langtool's list (less the keys: a key's name is a word of the page's, "Space" is Espacio, Shift is
 // Mayús), and the remote page's own (a message's words, a header's name, a group's name on a
 // slide, the running timer's name and time). The harvest of the page's words reads this same line.
-const UI_CONTENT = '.thumb, #canvas, .canvas, .ob, .sl-words, .tt, .clip .nm, .grp-h b, .verse, .vt, input, textarea, select option[value=""] ~ option, .st-key, .readout .txtline, #found .t, .ed-songs .t, .plbtn > span, .sh-src .t, .mono.num, .item .num, script, style, svg, .cat-words, .bi-hit, .lv-name, .card .t b, .card .t span, .sh-hrow .hn, .sh-head, .strip .lbl:not(.say), #found .fd-row b, #found .fd-row em, #runTimer, #remotetest, #selftest, .rm-content';
+const UI_CONTENT = '.thumb, #canvas, .canvas, .ob, .sl-words, .tt, .clip .nm, .grp-h b, .verse, .vt, input, textarea, select option[value=""] ~ option, .st-key, .readout .txtline, #found .t, .ed-songs .t, .plbtn > span, .sh-src .t, .mono.num, .item .num, script, style, svg, .cat-words, .bi-hit, .lv-name, .lv-tname, .lv-track .t, [data-c="audioPl"] option, .card .t b, .card .t span, .sh-hrow .hn, .sh-head, .strip .lbl:not(.say), #found .fd-row b, #found .fd-row em, #runTimer, #remotetest, #selftest, .rm-content';
 const UI_ATTRS = ['title', 'placeholder', 'aria-label'];
 
 const UI = (() => {

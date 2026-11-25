@@ -1780,6 +1780,8 @@ function syncVideo() {
 
 function renderRight() {
   const on = anythingOn(), s = state.on, rv = rowVideo(), v = rv ? rv.v : state.video, vm = rv && rv.m, vk = rv ? rv.key : 'video', m = state.mediaOn && mediaById(state.mediaOn);
+  // In the Edit view the column is the inspector alone, from the top (the owner, 25 November: "Remove it entirely"; the app, e4713a6)
+  document.querySelector('.right').classList.toggle('editing', state.mode === 'edit' || state.mode === 'themes');
   $('program').className = 'program' + (on ? ' on' : '');
   const mp = state.mediaPl && byId(DOC.mediaPlaylists, state.mediaPl.id);
   put('pgHead', html`<div class="pg-h"><i class="dot"></i>${seg(['Audience', 'Stage'], state.monitor, 'monitor')}${DOC.screens.length > 2 ? html`<button class="iconbtn lv-monpick ${monScreen() ? 'lit' : ''}" data-a="menu:monPick" title="Look at one screen" aria-label="Look at one screen"><span class="sc-chev">${I.chev}</span></button>` : ''}<span class="state">${on ? 'ON SCREEN' : 'CLEAR'}</span></div>`);
@@ -1919,25 +1921,33 @@ A.editLayouts = () => editOther('layout', DOC.stageLayouts[0].id);
 
 const audioPl = () => byId(DOC.audio, state.audio.pl) || DOC.audio[0];
 // Audio: the player first (what is playing, where in it, the keys, the level), then the list it plays from.
-TAB.Audio = () => { const a = state.audio, pl = audioPl(), tr = pl && pl.tracks[a.track], total = pl ? pl.tracks.reduce((n, t) => n + t.length, 0) : 0;
+TAB.Audio = () => { const a = state.audio, pl = audioPl(), tr = pl && pl.tracks[a.track], total = pl && pl.tracks.every(t => t.length) ? pl.tracks.reduce((n, t) => n + t.length, 0) : 0;
   const player = html`<div class="lv-audio ${a.playing ? 'playing' : ''}">
-      <div class="lv-now"><span class="cap">${a.playing ? 'Playing' : tr ? 'Ready' : 'Nothing to play'}</span><b>${tr ? tr.name : 'Add a track to this playlist'}</b>${tr && !tr.url ? html`<span class="sub">A sample track: it runs, but makes no sound</span>` : ''}</div>
+      <div class="lv-now"><span class="cap">${a.playing ? 'Playing' : tr ? 'Ready' : 'Nothing to play'}</span><b class="${tr ? 'lv-tname' : ''}">${tr ? tr.name : 'Add a track to this playlist'}</b>${tr && !tr.url && !(typeof REMOTE === 'object' && REMOTE.on) ? html`<span class="sub">A sample track: it runs, but makes no sound</span>` : ''}</div>
       <div class="lv-seek"><span class="tm mono" id="aGone">${mmss(a.pos)}</span><input type="range" id="aSeek" min="0" max="${tr ? tr.length : 0}" value="${a.pos}" data-i="seek" aria-label="Where in the track" ${{ disabled: !tr }} style="--p:${tr && tr.length ? a.pos / tr.length * 100 : 0}%"><span class="tm mono" id="aLeft">${tr ? '−' + mmss(Math.max(0, tr.length - a.pos)) : '0:00'}</span></div>
       <div class="lv-keys"><button class="vk" data-a="audio:prev" title="Previous track">${I.prev}</button><button class="vk wide" data-a="audio:back" title="Back 15 seconds">−15</button><button class="vk big" data-a="audio:play" title="${a.playing ? 'Pause' : 'Play'}" aria-label="${a.playing ? 'Pause' : 'Play'}">${a.playing ? I.pause : I.play}</button>
         <button class="vk wide" data-a="audio:fwd" title="Forward 15 seconds">+15</button><button class="vk" data-a="audio:next" title="Next track">${I.next}</button></div>
       <div class="lv-vol"><button class="iconbtn ${a.muted ? 'lit' : ''}" data-a="audio:mute" title="${a.muted ? 'Sound back on' : 'Mute'}" aria-label="Mute">${a.muted ? I.mute : I.sound}</button><input type="range" min="0" max="100" value="${a.volume}" data-i="volume" aria-label="Volume" style="--p:${a.volume}%"><span class="tm mono" id="aVol">${a.muted ? 'Muted' : a.volume + '%'}</span></div>
-      <div class="lv-opts"><button class="btn sm ${a.through ? 'onkey' : ''}" data-a="audio:through" title="When a track ends, go on to the next">Play through</button><button class="btn sm ${a.shuffle ? 'onkey' : ''}" data-a="audio:shuffle" title="Play through in a random order">Shuffle</button><span class="sp"></span>
-        <span class="cap">Crossfade</span><select class="sel sm" data-c="crossfade" aria-label="Crossfade">${options([0, 1, 3, 5, 10].map(n => [n, n ? `${n} s` : 'Off']), a.crossfade)}</select></div></div>`;
-  const list = pl ? html`<div class="lv-h lv-listh"><span class="cap">${pl.tracks.length} track${pl.tracks.length === 1 ? '' : 's'} · ${mmss(total)}</span><button class="btn sm" data-a="audio:add">${I.plus} Add tracks</button></div>${
-      pl.tracks.length ? pl.tracks.map((t, n) => html`<div class="lv-track ${n === a.track ? 'cur' : ''} ${n === a.track && a.playing ? 'on' : ''}" draggable="true" data-drag="track:${pl.id},${n}" data-m="track:${n}"><button class="lv-tplay" data-a="audio:track,${n}" title="Play this track"><span class="mono n">${n === a.track && a.playing ? I.play : two(n + 1)}</span><span class="t">${t.name}</span><span class="mono len">${mmss(t.length)}</span></button>${more('track', n)}</div>`)
+      <div class="lv-opts"><button class="btn sm ${a.through ? 'onkey' : ''}" data-a="audio:through" title="When a track ends, go on to the next">Play through</button><button class="btn sm ${a.shuffle ? 'onkey' : ''}" data-a="audio:shuffle" title="Play the tracks in a random order">Shuffle</button><button class="btn sm ${a.loop ? 'onkey' : ''}" data-a="audio:loop" title="Keep playing until stopped: after the last track, start again from the first (with Play through off, play this track again)">Loop</button></div>
+      <div class="lv-opts"><span class="cap">Crossfade</span><select class="sel sm" data-c="crossfade" aria-label="Crossfade" title="How long one track fades into the next">${options([0, 1, 3, 5, 10].map(n => [n, n ? `${n} s` : 'Off']), a.crossfade)}</select></div></div>`;
+  const list = pl ? html`<div class="lv-h lv-listh"><span class="cap">${pl.tracks.length} track${pl.tracks.length === 1 ? '' : 's'}${total ? html` · ${mmss(total)}` : ''}</span><button class="btn sm" data-a="audio:add">${I.plus} Add tracks</button></div>${
+      pl.tracks.length ? pl.tracks.map((t, n) => html`<div class="lv-track ${n === a.track ? 'cur' : ''} ${n === a.track && a.playing ? 'on' : ''}" draggable="true" data-drag="track:${pl.id},${n}" data-m="track:${n}"><button class="lv-tplay" data-a="audio:track,${n}" title="Play this track"><span class="mono n">${n === a.track && a.playing ? I.play : two(n + 1)}</span><span class="t">${t.name}</span><span class="mono len">${t.length ? mmss(t.length) : ''}</span></button>${more('track', n)}</div>`)
         : html`<div class="sh-none">No tracks yet. Add music files from this computer.</div>`}` : '';
   return html`${head('Audio', 'audioNew', html`<select class="sel sm" data-c="audioPl" aria-label="Audio playlist">${options(DOC.audio.map(p => [p.id, p.name]), pl && pl.id)}</select>${pl ? more('audioPl', pl.id) : ''}`)}${player}${list}`; };
+// A track has ended (the app, 9bc1cc6). Play through goes on to the next and stops after the last; with Loop it starts
+// again from the first (shuffled: a fresh order each pass, never the same track twice across the wrap). Loop with Play
+// through off plays this track again.
+function audioEnded(a, pl) { a.pos = 0; const n = pl.tracks.length;
+  if (!a.through) { if (!a.loop) a.playing = false; return; }
+  a.played = (a.played || []).concat(a.track); let left = [...Array(n).keys()].filter(k => !a.played.includes(k));
+  if (!left.length) { a.played = []; if (!a.loop) { a.playing = false; return; } left = [...Array(n).keys()].filter(k => n === 1 || k !== a.track); }
+  a.track = a.shuffle ? left[Math.floor(Math.random() * left.length)] : left.includes(a.track + 1) ? a.track + 1 : left[0]; }
 A.audio = ([what, n]) => { const a = state.audio, pl = audioPl(); if (!pl) return;
   const to = k => { a.track = (k + pl.tracks.length) % pl.tracks.length; a.pos = 0; };
   if (what === 'track') { to(+n); a.playing = true; } if (what === 'play') a.playing = !a.playing && pl.tracks.length > 0;
   if (what === 'next') to(a.track + 1); if (what === 'prev') { if (a.pos > 3) a.pos = 0; else to(a.track - 1); }      // Previous first goes back to the start of the track, as players do
   if (what === 'fwd' || what === 'back') a.pos = Math.max(0, Math.min((pl.tracks[a.track] || { length: 0 }).length, a.pos + (what === 'fwd' ? 15 : -15)));
-  if (what === 'through' || what === 'shuffle' || what === 'mute') a[what === 'mute' ? 'muted' : what] = !a[what === 'mute' ? 'muted' : what];
+  if (what === 'through' || what === 'shuffle' || what === 'loop' || what === 'mute') a[what === 'mute' ? 'muted' : what] = !a[what === 'mute' ? 'muted' : what];
   if (what === 'add') return pickFiles('audio/*', addAudioFiles);
   syncAudio(); render(); };
 // a track's own menu, and the playlist's
@@ -2794,12 +2804,43 @@ A.edLayoutOp = ([what]) => { const l = edTarget().layout, L = DOC.stageLayouts;
   if (what === 'del') { if (L.length === 1) return refuse('Keep at least one stage layout'); return undoable(`Delete “${l.name}”?`, 'Stage screens using it take the first layout.', 'Delete', () => mutate(() => { L.splice(L.indexOf(l), 1); DOC.screens.forEach(x => { if (x.layout === l.id) x.layout = L[0].id; }); state.edit.target = { type: 'layout', id: L[0].id }; })); }
   mutate(() => moveIn(L, l, what === 'up' ? -1 : 1)); };
 
+/* ═════════ logos.js ═════════ */
+// Pictures for Settings: the list's small icons, a flag for each language of the app's own words, and the logos of the
+// services and assistants. A logo is here only when it is the owner's own (VoxLive, TimelyChurch) or its company's terms
+// allow it and are recorded in handoff/logos.md; without one, a card shows the service's initials.
+'use strict';
+const ST_ICON = { Screens: svg('M1.500 2.500h10v6.500h-10zM4.500 11.500h4'), 'Phone Screens': svg('M4 1.500h5v10H4zM6 9.800h1'), Sound: svg('M2 5v3h2l3 2.500V2.500L4 5zM9.200 4.500a3 3 0 0 1 0 4'),
+  Slides: svg('M1.500 3h10v7h-10zM4 6h5M5 8h3'), Groups: svg('M3 6.500h.010M6.500 6.500h.010M10 6.500h.010', 2.4), Language: svg('M6.500 1.500a5 5 0 1 0 0 10a5 5 0 0 0 0-10M1.500 6.500h10M6.500 1.500c-2 2-2 8 0 10c2-2 2-8 0-10', 1.2),
+  Integrations: svg('M5 8l3-3M4.200 6.300L3 7.500a2 2 0 0 0 2.800 2.800L7 9.100M6.200 4l1.200-1.200a2 2 0 0 1 2.800 2.800L9 6.800'), 'AI assistants': svg('M6.500 1.500l1.200 3.800 3.800 1.200-3.800 1.200-1.200 3.800-1.200-3.800-3.800-1.200 3.800-1.200z', 1.2),
+  'Phone remote': svg('M3.500 1.500h4v10h-4zM9.500 4.500a3 3 0 0 1 0 4'), Keys: svg('M1.500 3.500h10v6h-10zM3.500 5.500h.010M6.500 5.500h.010M9.500 5.500h.010M4.500 7.500h4', 1.2), 'Command line': svg('M2 3.500l3 3-3 3M6.500 9.500h4.500'),
+  'Song files': svg('M3 1.500h4.500l2.500 2.500v7.500H3zM7.500 1.500V4H10'), About: svg('M6.500 1.500a5 5 0 1 0 0 10a5 5 0 0 0 0-10M6.500 6v3M6.500 4h.010', 1.2), Coverage: svg('M2.500 6.500l3 3 5-6') };
+// A flag stands for a language here, not a country: the one most people know that language by.
+const FLAGS = { en: html`<svg class="st-flag" viewBox="0 0 24 16" aria-hidden="true"><rect y="0.0" width="24" height="2.29" fill="#b22234"/><rect y="2.29" width="24" height="2.29" fill="#fff"/><rect y="4.57" width="24" height="2.29" fill="#b22234"/><rect y="6.86" width="24" height="2.29" fill="#fff"/><rect y="9.14" width="24" height="2.29" fill="#b22234"/><rect y="11.43" width="24" height="2.29" fill="#fff"/><rect y="13.71" width="24" height="2.29" fill="#b22234"/><rect width="10.5" height="9.14" fill="#3c3b6e"/></svg>`, es: html`<svg class="st-flag" viewBox="0 0 24 16" aria-hidden="true"><rect width="24" height="16" fill="#aa151b"/><rect y="4" width="24" height="8" fill="#f1bf00"/></svg>`, ru: html`<svg class="st-flag" viewBox="0 0 24 16" aria-hidden="true"><rect width="24" height="16" fill="#fff"/><rect y="5.33" width="24" height="5.34" fill="#0039a6"/><rect y="10.67" width="24" height="5.33" fill="#d52b1e"/></svg>`, uk: html`<svg class="st-flag" viewBox="0 0 24 16" aria-hidden="true"><rect width="24" height="8" fill="#0057b7"/><rect y="8" width="24" height="8" fill="#ffd700"/></svg>`,
+  auto: html`<svg class="st-flag plain" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="1.500" width="16" height="10" rx="1.500"/><path d="M9 14.500h6"/></svg>` };
+const LOGOS = { vox: html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none"><g transform="translate(15 24)" stroke="#F3F0E8" stroke-linecap="round" fill="none"><path d="M0 -8 Q6 0 0 8" stroke-width="2.2"/><path d="M6 -11 Q14 0 6 11" stroke-width="2"/><path d="M13 -14 Q23 0 13 14" stroke-width="1.8" opacity="0.55"/></g><circle cx="13" cy="24" r="2.4" fill="#D4A24A"/></svg>`, timely: html`<img alt="" src="logos/timelychurch.png">`,
+  grok: html`<img alt="" src="logos/grok.svg">`, canva: html`<img alt="" src="logos/canva.svg">` };      // each as its company provides it, unaltered (handoff/logos.md)
+
 /* ═════════ settings.js ═════════ */
 // Settings: a page of its own behind the gear. The on-screen column stays.
 'use strict';
 
 VIEWS.settings = { left: renderSettingsLeft, centre: renderSettings };
-const SECTIONS = ['Screens', 'Phone Screens', 'Sound', 'General', 'Groups', 'Keys', 'Integrations', 'Web control', 'About', 'Coverage'];
+// Regrouped by what the operator came to do (the owner, 25 November: "when i open the general tab it says, this is too much";
+// "yes lets regroup"). The room: what shows and sounds. On screen: how slides look and behave. Connect: other services,
+// assistants and phones. Advanced: the rest, out of everyone else's way. General and Integrations' long lists are gone.
+const GROUPS = [['The room', ['Screens', 'Phone Screens', 'Sound']], ['On screen', ['Slides', 'Groups', 'Language']], ['Connect', ['Integrations', 'AI assistants', 'Phone remote']], ['Advanced', ['Keys', 'Command line', 'Song files', 'About', 'Coverage']]];
+const SECTIONS = GROUPS.flatMap(g => g[1]), SEC_WAS = { General: 'Slides', 'Web control': 'Phone remote' };
+const UI_LANG_OWN = { en: 'English', es: 'Español', ru: 'Русский', uk: 'Українська' };
+// What a row says at its end, so a problem shows before anything is opened: [words, lit]
+const secState = x => { const st = DOC.settings;
+  if (x === 'Screens') { const n = DOC.screens.filter(goingOut).length; return [`${n} of ${DOC.screens.length} on`, n > 0]; }
+  if (x === 'Phone Screens') return [mirrorSet().on ? 'On' : 'Off', mirrorSet().on];
+  if (x === 'Slides') return [st.transition.kind, false];
+  if (x === 'Language') return [UI_LANG_OWN[st.uiLang] || 'Auto', false];
+  if (x === 'Integrations') { const n = INTEGRATIONS.filter(i => integState(i).tone === 'on').length; return [`${n} connected`, n > 0]; }
+  if (x === 'AI assistants') return [{ off: 'Off', prep: 'Can prepare', run: 'Runs screens' }[mcpLevel()], mcpLevel() !== 'off'];
+  if (x === 'Phone remote') return [st.remote ? `${PEOPLE.length} people` : 'Off', !!st.remote];
+  return null; };
 const PEOPLE = [{ who: 'This browser', can: 'Control', me: true }, { who: 'iPad in the front row', can: 'Watch' }];
 const KEYS = [['Space  →', 'Next slide'], ['←', 'Previous slide'], ['↑  ↓', 'The item above or below in the playlist; in Bible, the verse before or after'], ['Home  End', 'First or last slide of the song'], ['Esc', 'Clear all'], ['F2 F3 F4 F5 F6', 'Clear the slide, media, props, audio, message'],
   ['A letter', 'The slide with that hot key, or the group it stands for'], ['/', 'Find a song, a line or a verse'], ['⌘B', 'The Bible page, ready for a reference'], ['⌘Z  ⇧⌘Z', 'Undo and redo'], ['⌘C ⌘X ⌘V', 'Copy, cut and paste slides, or objects in Edit'],
@@ -2807,12 +2848,17 @@ const KEYS = [['Space  →', 'Next slide'], ['←', 'Previous slide'], ['↑  �
 
 function renderSettingsLeft() {
   put('left', html`<div class="sect"><div class="sect-h"><span class="cap">Settings</span></div>
-    ${SECTIONS.map(x => html`<button class="rowbtn ${x === state.section ? 'on' : ''}" data-a="section:${x}"><span class="t">${x}</span></button>`)}
+    ${GROUPS.map(([g, xs]) => html`<div class="st-navg"><span class="cap">${g}</span>${xs.map(x => { const sa = secState(x);
+      return html`<button class="rowbtn ${x === state.section ? 'on' : ''}" data-a="section:${x}"><span class="st-ni" aria-hidden="true">${ST_ICON[x] || ''}</span><span class="t">${x}</span>${sa ? html`${sa[1] ? html`<i class="led lit"></i>` : ''}<span class="st-rd mono">${sa[0]}</span>` : ''}</button>`; })}</div>`)}
     <button class="btn sh-add" data-a="setup" style="margin-top:14px">Set up SoftPresenter…</button></div>`);
 }
-A.section = ([s]) => { state.section = s; render(); };
+A.section = ([s]) => { state.section = SEC_WAS[s] || s; state.integ = null; render(); };
 // why: a reason the row does nothing now; the row is greyed and the reason takes the note's place
 const stLine = (label, ctl, note = '', why = '') => html`<div class="${why ? 'sline dis' : 'sline'}"><div><b>${label}</b>${why || note ? html`<span>${why || note}</span>` : ''}</div><div class="ctl">${ctl}</div></div>`;
+// A choice among a few, shown: a flat key with its light (lit when chosen), a small picture, a name and a line
+const pick = (on, a, pic, name, sub = '') => html`<button class="st-pick ${on ? 'on' : ''}" role="radio" aria-checked="${on ? 'true' : 'false'}" data-a="${a}"><i class="led"></i>${pic}<span class="n">${name}</span>${sub ? html`<span class="s">${sub}</span>` : ''}</button>`;
+A.setPick = ([k, v]) => mutate(() => { DOC.settings[k] = v; });
+A.transPick = ([k]) => mutate(() => { const t = DOC.settings.transition; DOC.settings.transition = { ...t, kind: k, time: t.time || .5 }; });
 const onoff = (on, a) => html`<button class="btn ${on ? 'onkey' : ''}" data-a="${a}">${sw(on, 'On', 'Off')}</button>`;
 
 function renderSettings() {
@@ -2830,24 +2876,28 @@ function renderSettings() {
         <span class="cap">Test pattern</span>${seg([['off', 'Off'], ['bars', 'Colour bars'], ['grid', 'Grid'], ['white', 'White']], state.test, 'test')}<span class="sub">Everyone watching sees these</span></div>`;
     body = scrCardsHTML(top);      // what plays at start is a macro now: Macros › “Run when SoftPresenter opens” (the owner, 22 November)
   }
-  if (sec === 'General') { const eg = DOC.songs.find(s => copyrightLine(s) && s.info && (s.info.author || s.info.ccli)) || DOC.songs[0];
-    // The app's own words (designed 23 November): the computer's language when the app has it, else English; or one chosen here.
-    // Each language is named in itself. Songs and Bibles keep their own languages (setup, Languages); the Bible page has its own
-    // reading language. The remote page follows this choice, so a team uses the same words.
-    body = [card('Language', 'The words of SoftPresenter itself', html`
-      ${stLine('Language', uiLangMenu(), 'Buttons, menus and messages. Changes at once.')}
-      <div class="st-eg"><span class="cap">Not this</span><span>The languages your songs and Bibles show in are set in Setup › Languages; the Bible page has its own reading language (Аа).</span></div>`),
-      card('Copyright', 'The line under a song’s words', html`
-      ${stLine('Where it shows', html`<select class="sel" data-c="setVal:copyrightAt">${options([['first', 'On a song’s first slide'], ['last', 'On its last slide'], ['every', 'On every slide'], ['none', 'Nowhere']], st.copyrightAt)}</select>`)}
-      ${stLine('CCLI licence number', html`<input class="field" data-c="setVal:ccliLicence" value="${st.ccliLicence ?? ''}">`, 'The church’s own')}
-      <div class="st-eg"><span class="cap">How it reads</span><span>${copyrightLine(eg) || 'Fill in a song’s details to see its line'}</span></div>`),
-    card('Running a service', 'How slides come and go', html`
-      ${stLine('Transition for all slides', html`<button class="btn" data-a="transSheet">${st.transition.kind}${st.transition.kind === 'Cut' ? '' : ' · ' + st.transition.time + 's'}</button>`, 'A song or a slide can have its own')}
-      ${stLine('Continuous playlist', onoff(st.continuous, 'continuous'), 'Next at the end of a song goes on to the next item')}
-      ${stLine('Slides are shown as', seg([['grid', 'Grid'], ['easy', 'Words only'], ['table', 'Table']], st.view, 'view'))}`),
-    card('Song files', 'Songs are plain files that can be changed outside the app', html`
+  if (sec === 'Slides') { const eg = DOC.songs.find(s => copyrightLine(s) && s.info && (s.info.author || s.info.ccli)) || DOC.songs[0], at = st.copyrightAt, tr = st.transition;
+    // What the room sees with every song, shown: the copyright line drawn on a slide, the transition as keys with a picture
+    const strip = k => html`<span class="st-strip" aria-hidden="true">${[0, 1, 2].map(i => html`<i class="${k === 'every' || (k === 'first' && i === 0) || (k === 'last' && i === 2) ? 'has' : ''}"></i>`)}</span>`;
+    const three = TRANSITIONS.slice(0, 3), other = !three.includes(tr.kind);
+    body = [card('Copyright line', 'Where the small line under a song’s words shows', html`<div class="st-show">
+        <div class="st-slide" role="img" aria-label="A slide, with the copyright line where it shows"><div class="w">${String(slideWords(eg.slides[0]) || eg.title).split('\n').slice(0, 2).map(l => html`<span>${l}</span>`)}</div>${at === 'none' ? '' : html`<div class="c">${copyrightLine(eg) || 'Fill in a song’s details to see its line'}</div>`}</div>
+        <div class="st-side"><div class="st-picks c4" role="radiogroup" aria-label="Where the copyright line shows">${[['first', 'First slide'], ['last', 'Last slide'], ['every', 'Every slide'], ['none', 'Nowhere']].map(([k, n]) => pick(k === at, `setPick:copyrightAt,${k}`, strip(k), n))}</div>
+          <label class="st-ccli"><span>Your church’s CCLI licence</span><input class="field mono" data-c="setVal:ccliLicence" value="${st.ccliLicence ?? ''}"></label></div></div>`),
+    card('Between slides', 'How one slide gives way to the next', html`
+      <div class="st-picks c4" role="radiogroup" aria-label="Transition for all slides">${three.map(k => pick(k === tr.kind, `transPick:${k}`, html`<span class="st-tr ${k.toLowerCase()}" aria-hidden="true"><i></i><i></i></span>`, k, k === 'Cut' ? 'At once' : k === tr.kind ? tr.time + ' s' : ''))}
+        ${pick(other, 'transSheet', html`<span class="st-tr more" aria-hidden="true">${I.dots || '⋯'}</span>`, other ? tr.kind : 'More…', other ? tr.time + ' s' : 'Every kind, its time and direction')}</div>
+      ${stLine('Carry on to the next item', onoff(st.continuous, 'continuous'), 'Next at the end of a song opens the one after it')}`, html`<span class="sub">A song or a slide can have its own</span>`),
+    card('In your window', 'How a song’s slides are laid out for you. The room never sees this', html`
+      ${stLine('Slides are shown as', seg([['grid', 'Grid'], ['easy', 'Words only'], ['table', 'Table']], st.view, 'view'))}`)]; }
+  if (sec === 'Language') { const cur = st.uiLang || 'auto', auto = UI_LANG_OWN[(navigator.language || 'en').slice(0, 2)] || 'English';
+    // The app's own words (designed 23 November). Each language is named in itself; the remote page follows this choice.
+    body = card('Language', 'The words of SoftPresenter itself: buttons, menus and messages. Changes at once', html`
+      <div class="st-picks c5" role="radiogroup" aria-label="Language">${pick(cur === 'auto', 'setPick:uiLang,auto', FLAGS.auto, 'This computer’s', auto)}${Object.entries(UI_LANG_OWN).map(([k, n]) => pick(cur === k, `setPick:uiLang,${k}`, FLAGS[k], n))}</div>
+      <p class="sc-note">Songs and Bibles keep their own languages: Set up SoftPresenter › Languages. The Bible page has its own reading language (Аа).</p>`); }
+  if (sec === 'Song files') body = card('Song files', 'Songs are plain files that can be changed outside the app', html`
       ${stLine('Read them again', html`<button class="btn" data-a="say:Every changed song and theme was read again">Reload songs</button>`, 'Brings in songs and themes changed outside the app')}
-      ${stLine('When a song was changed elsewhere', html`<button class="btn" data-a="outsideDemo">Show what happens</button>`, 'A bar offers Reload or Keep mine; nothing is swapped unasked')}`)]; }
+      ${stLine('When a song was changed elsewhere', html`<button class="btn" data-a="outsideDemo">Show what happens</button>`, 'A bar offers Reload or Keep mine; nothing is swapped unasked')}`);
   if (sec === 'Groups') { const used = name => DOC.songs.reduce((n, s) => n + s.slides.filter(sl => sl.group === name).length, 0);
     body = card('Groups', 'A song’s parts: their names, colours and jump keys', html`<div class="st-groups"><span class="cap"></span><span class="cap">Name</span><span class="cap">Key</span><span class="cap">Used on</span><span></span>
       ${DOC.groups.map((g, n) => html`<button class="swt" style="background:${g.color}" data-a="menu:groupColour,${n}" title="Colour"></button>
@@ -2861,7 +2911,7 @@ function renderSettings() {
     card('Always the same', 'Fixed keys · press ? anywhere for the whole list', KEYS.filter((_, i) => ![0, 1, 4, 5, 7].includes(i)).map(([k, what]) => stLine(what, k.split(/\s{2,}| (?=[⌘⇧F])/).map(x => html`<span class="st-key mono">${keyText(x)}</span>`))),
       html`<button class="btn" data-a="keysSheet">Every key</button>`),
     card('Groups', 'A group’s key jumps to it; change them in Groups', html`<div class="st-keygrid">${DOC.groups.filter(g => g.key).map(g => html`<span><span class="st-key mono">${g.key}</span>${g.name}</span>`)}</div>`)];
-  if (sec === 'Integrations') { const v = DOC.voxlive;
+  if (sec === 'Command line') {
     // The command line: the sp command, for scripts and AI agents. As built (24 November, 7557fd8) the card shows sp's
     // state and the result of a press inline, with no notice; the app installs sp by itself at its first start from an
     // installed place (?demo=spready shows that notice). States: ?sp=missing, here, notfound, elsewhere, gone.
@@ -2874,22 +2924,47 @@ function renderSettings() {
     const spBtns = html`${sp === 'missing' || sp === 'notfound' ? html`<button class="btn" data-a="cliDo:install" title="Puts sp (and softpresenter) where a terminal finds it">Install</button>` : ''}${sp === 'elsewhere' || sp === 'gone' ? html`<button class="btn" data-a="cliDo:use">Use This Copy</button>` : ''}${sp !== 'missing' ? html`<button class="btn ${sp === 'here' ? 'quiet' : ''}" data-a="cliDo:remove" title="Takes sp and softpresenter away again, with anything SoftPresenter added for them">Remove</button>` : ''}`;
     const cli = card('Command line', 'The sp command controls SoftPresenter from a terminal or a script.', html`
       ${stLine('The sp command', spBtns, spLine)}${state.cliSaid ? html`<p class="sc-note">${state.cliSaid}</p>` : ''}`);
-    // AI assistants (as built, 25 November, 8934701..94d7e2f; the owner: "implement mcp that way the app can talk to the agent"):
-    // off until switched on; changing the screens is a second switch, and the assistant asks the person first, each time
-    const mc = mcpSet(), prog = mcpProgram(), snip = (label, words, which) => html`<div class="st-code"><span class="st-codeh">${label}</span><div class="st-coderow"><pre class="mono">${words}</pre><button class="btn sm" data-a="mcpCopy:${which}">Copy</button></div></div>`;
-    const mcp = card('AI Assistants (MCP)', 'For Claude and other assistants', html`
-      <p class="sc-note">Let Claude and other AI assistants work with SoftPresenter: find songs and Bible passages, prepare playlists and, if you allow it, run the screens.</p>
-      ${stLine('Let AI assistants use SoftPresenter', onoff(mc.allow, 'mcpAllow'), 'They can read your songs, Bibles and playlists, and make songs and playlists. Nothing on the screens changes.')}
-      ${stLine('Let them change what’s on the screens', html`<button class="btn ${mc.screens ? 'onkey' : ''}" data-a="mcpScreens" ${{ disabled: !mc.allow, title: mc.allow ? null : 'Let AI assistants use SoftPresenter first' }}>${sw(mc.screens, 'On', 'Off')}</button>`, 'The assistant asks you first, each time. Leave this off unless someone is watching it.')}
-      ${snip('Claude Code: type this in a terminal', mcpCode(prog), 'code')}
-      ${snip('Claude Desktop: add this to its claude_desktop_config.json, then open Claude Desktop again', mcpDesktop(prog), 'desktop')}
-      ${state.mcpSaid ? html`<p class="st-said ${state.mcpSaid.bad ? 'bad' : ''}"><i class="led"></i>${state.mcpSaid.text}</p>` : ''}`);
-    body = [catCard(card), cli, mcp, card('VoxLive', 'Live translation captions on a screen', v.connected
+    body = cli; }
+  if (sec === 'Integrations') { const v = DOC.voxlive, it = INTEGRATIONS.find(x => x.id === state.integ);
+    // Other services, each the same card (the owner, 25 November: "the integration cards should be the same and that goes
+    // for voxlive"): its logo, name, one line, a light with its state, one key. A card opens that service's own page, in
+    // the same order for all: logo and state, what it brings, the account, then More options. A new service is a new card.
+    if (!it) body = html`<p class="sc-sum">Other services SoftPresenter works with. Every one opens the same way.</p><div class="st-integ">${INTEGRATIONS.map(x => { const sa = integState(x);
+        return html`<button class="st-icard ${x.soon ? 'soon' : ''}" data-a="integ:${x.id}" ${{ disabled: !!x.soon }}><span class="itop">${integLogo(x)}<span class="tx"><b>${x.name}</b><span>${x.what}</span></span></span>
+          <span class="ifoot"><i class="led ${sa.tone}"></i><span class="st-rd mono">${sa.text}</span><span class="btn">${x.soon ? 'Soon' : sa.tone === 'off' && x.id !== 'wla' ? 'Connect' : 'Open'}</span></span></button>`; })}
+        <div class="st-icard more"><b>More to come</b><span>A new service is a new card here</span></div></div>`;
+    else { const sa = integState(it);
+      const head = html`<button class="st-back" data-a="integ:">${I.back || '‹'} Integrations</button>
+        <div class="st-ihead">${integLogo(it, 'big')}<div class="tx"><h3>${it.name}</h3><span><i class="led ${sa.tone}"></i><span class="st-rd mono">${sa.text}</span>${it.what}</span></div></div>`;
+      body = [head, it.id === 'wla' ? catCard(card) : it.id === 'vox' ? [card('VoxLive', 'Live translation captions on a screen', v.connected
         ? stLine('API key', html`<span class="st-key mono" style="text-transform:none">${v.key}…</span><button class="btn" data-a="voxDisconnect">Disconnect</button>`, 'Kept in the computer’s keychain; only its first characters are shown')
         : stLine('API key', html`<input class="field" id="voxKey" type="password" placeholder="Paste the key made in VoxLive"><button class="btn primary" data-a="voxConnect">Connect</button>`, 'Made in VoxLive › Settings › API keys, with the screens permissions'),
         html`<span class="pill" style="color:${v.connected ? 'var(--ok)' : 'var(--faint)'}">${v.connected ? 'Connected' : 'Not connected'}</span>`),
       v.connected ? card('Its screens', 'Found again every 30 seconds', [v.screens.map(sc => stLine(sc.name, html`<button class="btn" data-a="voxLook:${sc.id}">Look…</button><button class="btn ${state.vox === sc.id ? 'onkey' : ''}" data-a="vox:${sc.id}">${sw(state.vox === sc.id, 'On screen', 'Show')}</button>`, `${sc.lang ?? ''} · ${sc.mode ?? ''}`)),
-        html`<p class="lede" style="margin:10px 0 12px">They are shown from the VoxLive tab on the right.</p>`]) : '']; }
+        html`<p class="lede" style="margin:10px 0 12px">They are shown from the VoxLive tab on the right.</p>`]) : '']
+        : card('Canva', 'The announcements video, fresh from your Canva presentation', DOC.settings.canva
+          ? [stLine('The presentation', html`<button class="btn" data-a="say:Choosing the presentation is in the app">Choose…</button>`, 'Sunday announcements'), stLine('Sync', html`<button class="btn" data-a="say:Syncing from Canva">Sync Now</button><button class="btn quiet" data-a="canvaSet:">Disconnect</button>`, 'The video in the media bin is replaced when a sync finishes')]
+          : stLine('Account', html`<button class="btn primary" data-a="canvaSet:1">Sign In with Canva</button>`, 'Opens Canva’s sign-in in your browser'))]; } }
+  if (sec === 'AI assistants') { const lv = mcpLevel(), said = state.mcpSaid;
+    // AI assistants (the app's MCP, 25 November), simplified at the owner's ask the same day: "make it simple, like a click to
+    // copy, and have claude chatgpt grok and gemini and the copy will copy the how to connect mcp and explaination to the agent".
+    // The two switches read as one choice of three; each assistant's key copies a message to paste into it.
+    const scr = c => html`<i class="scr ${c}"></i>`, lines = html`<i class="ln"></i>`;
+    body = [card('How much it may do', 'Nothing works until you choose', html`
+      <div class="st-picks c3 tall" role="radiogroup" aria-label="How much an assistant may do">
+        ${pick(lv === 'off', 'mcpLevel:off', html`<span class="st-lv" aria-hidden="true">${scr('')}</span>`, 'Off', 'Nothing can connect')}
+        ${pick(lv === 'prep', 'mcpLevel:prep', html`<span class="st-lv" aria-hidden="true">${lines}${scr('')}</span>`, 'Prepare', 'Songs, Bible and playlists. The screens stay as they are')}
+        ${pick(lv === 'run', 'mcpLevel:run', html`<span class="st-lv" aria-hidden="true">${lines}<b>→</b>${scr('lit')}</span>`, 'Prepare and run the screens', 'It asks you first, every time')}</div>
+      <div class="st-cando"><div><span class="cap">With Prepare it can</span><ul>${['Find and read your songs', 'Look up and search the Bible', 'Make songs and playlists, and add to a playlist'].map(x => html`<li class="yes">${x}</li>`)}</ul></div>
+        <div><span class="cap">It can never</span><ul>${['Delete anything, or open files and web pages', 'Change Settings, keys or the phone remote', 'Quit SoftPresenter'].map(x => html`<li class="no">${x}</li>`)}</ul></div></div>`),
+    card('Connect one', 'Add it on this computer, or copy a message to paste in', html`
+      <div class="st-ai">${AI_ASSISTANTS.map(a => { const added = !!(mcpSet().added || {})[a.id], copied = said && said.id === a.id && said.copied;
+        return html`<div class="st-aicard"><span class="itop">${integLogo(a)}<span class="tx"><b>${a.name}</b><span>${added ? html`<i class="led on"></i>Added to ${a.found}` : a.found ? `${a.found} found` : `For ${a.where}`}</span></span></span>
+          <span class="keys">${a.found ? html`<button class="btn ${added ? 'quiet' : ''}" data-a="mcpAdd:${a.id}" title="${added ? `Takes SoftPresenter out of ${a.found} again` : `Adds SoftPresenter to ${a.found} on this computer`}">${added ? 'Remove' : 'Add'}</button>` : ''}<button class="btn" data-a="mcpCopy:${a.id}" title="Copies a message to paste into ${a.name}: how to connect, and how to use SoftPresenter">${copied ? html`<i class="led on"></i>Copied` : 'Copy setup'}</button></span></div>`; })}</div>
+      <p class="st-said ${said ? '' : 'idle'}">${said ? html`<i class="led"></i>${said.text}` : ''}<span class="sp"></span><span>ChatGPT in a browser and the Grok and Gemini apps only reach servers on the internet, so they can’t connect here.</span></p>
+      <details class="st-fold"><summary>Other apps</summary>${AI_OTHER.map(a => { const added = !!(mcpSet().added || {})[a.id];
+        return stLine(a.name, html`<button class="btn ${added ? 'quiet' : ''}" data-a="mcpAdd:${a.id}">${added ? 'Remove' : 'Add'}</button>`, added ? `Added to ${a.found}` : `${a.found} found`); })}</details>
+      <details class="st-fold" ${{ open: !!(said && said.copied) }}><summary>What gets copied</summary><pre class="mono">${mcpSetup(said ? said.id : 'claude')}</pre></details>`)]; }
   if (sec === 'Sound') { const so = st.sound, dev = id => SOUND_OUT.find(d => d.id === id) || SOUND_OUT[0], main = dev(so.main), au = state.audio, vd = state.video;
     // the outputs this computer has: which is the main one, how many channels, whether it is there
     const outs = SOUND_OUT.map(o => html`<div class="st-out ${o.gone ? 'gone' : ''} ${o.id === so.main ? 'main' : ''}"><i class="st-led ${o.gone ? '' : 'ok'}"></i><div class="nm"><b>${o.name}</b><span>${o.gone ? 'Not connected' : `${o.ch} channels · 48 kHz`}</span></div>
@@ -2931,7 +3006,7 @@ function renderSettings() {
       ${stLine('Help', html`<button class="btn" data-a="say:The guide opens in the browser">Open the guide</button>`, 'How to set up the screens, run a service and more, on the web')}
       ${stLine('Something wrong?', html`<button class="btn" data-a="say:A new issue opens on GitHub, with the version filled in">Report an issue…</button>`, 'Opens a new issue on GitHub, with the version filled in')}
       ${stLine('Licences', html`<button class="btn" data-a="say:The licences open">Licences…</button>`, 'SoftPresenter’s and those of the parts it carries')}`)];
-  if (sec === 'Web control') body = [card('This page', 'Served by the computer that runs the screens, to this network only', html`
+  if (sec === 'Phone remote') body = [card('This page', 'Served by the computer that runs the screens, to this network only', html`
       ${stLine('Control from the network', onoff(st.remote, 'setFlag:remote'), 'Off means nobody can open this page, you included')}
       ${stLine('Address', html`<span class="st-key mono" style="text-transform:none">http://192.168.1.20:4310</span><button class="btn" data-a="say:Address copied">Copy</button>`, 'Open it on any phone, tablet or computer here')}
       ${stLine('It is showing', html`<button class="btn" data-a="menu:link">${typeof LINK !== 'undefined' && LINK.on ? 'Your SoftPresenter' : 'Sample data'} ▾</button>`, 'Sample data, or a SoftPresenter running on this computer')}`),
@@ -2958,19 +3033,56 @@ A.mirror = ([what]) => { const name = state.mirrorAsk || state.mirrorDevice;
 A.mirrorName = () => { const v = ($('mirrorName') || {}).value || ''; if (!v.trim()) return refuse('Devices need a name to find this computer by'); mutate(() => { mirrorSet().name = v.trim(); }); };
 // The menu that chooses the app's own words, on the Language card and in the setup's first step (as built, 24 November):
 // the computer's language first, named in that language, then English, Español, Русский, Українська, each written in itself.
-// AI assistants (MCP), as crates/sp-app/src/mcp/pane.rs: two switches, both off until turned on (switching the first off
-// turns the second off too); the program an assistant starts (the installed sp on a Mac and Linux, the program itself on
-// Windows, where sp is a batch file) written as a shell takes it, and as a JSON string for Claude Desktop
+// Integrations: one entry per service; a new service is a new entry. `soon`: shown greyed until it works.
+const INTEGRATIONS = [{ id: 'wla', name: 'Worship Leader App', what: 'Free songbooks, one for each language' }, { id: 'vox', name: 'VoxLive', what: 'Live translation captions on a screen' },
+  { id: 'canva', name: 'Canva Sync', what: 'The announcements video, fresh from your Canva presentation' }, { id: 'timely', name: 'TimelyChurch', what: 'Service plans and set lists from your church planner', soon: true }];
+const integState = x => { if (x.soon) return { tone: 'soon', text: 'Coming soon' };
+  if (x.id === 'wla') { const n = Object.keys(catHave()).length; return n ? { tone: 'on', text: `${n} songbook${n === 1 ? '' : 's'}` } : { tone: 'off', text: 'None yet' }; }
+  if (x.id === 'vox') return DOC.voxlive.connected ? { tone: 'on', text: `Connected · ${DOC.voxlive.screens.length} screens` } : { tone: 'off', text: 'Not connected' };
+  return DOC.settings.canva ? { tone: 'on', text: 'Signed in' } : { tone: 'off', text: 'Not connected' }; };
+// A service's logo: its own mark when logos.js has one (each used under that company's terms), else its initials
+const integLogo = (x, size = '') => html`<span class="st-logo ${size}" aria-hidden="true">${typeof LOGOS === 'object' && LOGOS[x.id] ? LOGOS[x.id] : x.name.split(/\s+/).map(w => w[0]).join('').slice(0, 2)}</span>`;
+A.integ = ([id]) => { state.integ = id || null; render(); };
+A.canvaSet = ([on]) => mutate(() => { DOC.settings.canva = !!on; });
+// AI assistants (the app's MCP, crates/sp-app/src/mcp): the app keeps two switches (allowed, and changing the screens, which
+// goes off with the first); here they read as one choice of three.
 const mcpSet = () => DOC.settings.mcp || (DOC.settings.mcp = { allow: false, screens: false });
+const mcpLevel = () => { const m = mcpSet(); return !m.allow ? 'off' : m.screens ? 'run' : 'prep'; };
+A.mcpLevel = ([l]) => { state.mcpSaid = null; mutate(() => { const m = mcpSet(); m.allow = l !== 'off'; m.screens = l === 'run'; }); };
+// The program an assistant starts (the installed sp on a Mac and Linux, the program itself on Windows, where sp is a batch
+// file), written as a shell takes it, as pane.rs does
 const mcpProgram = () => WINDOWS ? 'C:\\Program Files\\SoftPresenter\\SoftPresenter.exe' : '/Users/you/.local/bin/sp';
 const shellWord = p => /^[A-Za-z0-9\/._\\:-]+$/.test(p) ? p : WINDOWS ? `"${p}"` : `'${p.replace(/'/g, `'\\''`)}'`;
-const mcpCode = p => `claude mcp add softpresenter -- ${shellWord(p)} mcp`;
 const mcpDesktop = p => `{\n  "mcpServers": {\n    "softpresenter": {\n      "command": ${JSON.stringify(p)},\n      "args": ["mcp"]\n    }\n  }\n}`;
-A.mcpAllow = () => { state.mcpSaid = null; mutate(() => { const m = mcpSet(); m.allow = !m.allow; if (!m.allow) m.screens = false; }); };
-A.mcpScreens = () => { const m = mcpSet(); if (!m.allow) return; state.mcpSaid = null; mutate(() => { m.screens = !m.screens; }); };
-A.mcpCopy = ([which]) => { const p = mcpProgram(), text = which === 'code' ? mcpCode(p) : mcpDesktop(p);
-  if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
-  state.mcpSaid = { text: 'Copied.' }; render(); };
+// Only the versions that run on this computer can start a local program; the websites can't. `add`: that assistant's own way
+// to add a local server (Claude's is the app's; the other three are to be checked against each company's own pages).
+const AI_ASSISTANTS = [{ id: 'claude', name: 'Claude', where: 'the desktop app or Claude Code', found: 'Claude Desktop and Claude Code', add: w => `In Claude Code, run:  claude mcp add --scope user softpresenter -- ${w} mcp\nIn Claude Desktop, which can't run that, tell me to add this to claude_desktop_config.json and open Claude Desktop again:\n${mcpDesktop(mcpProgram())}` },
+  { id: 'chatgpt', name: 'ChatGPT', where: 'the desktop app or Codex', found: 'Codex', add: w => `Run:  codex mcp add softpresenter -- ${w} mcp\nThe ChatGPT desktop app, the Codex CLI and its IDE extension share that configuration.` },
+  { id: 'grok', name: 'Grok', where: 'Grok Build', found: '', add: w => `In Grok Build, run:  grok mcp add -s user softpresenter -- ${w} mcp` },
+  { id: 'gemini', name: 'Gemini', where: 'Antigravity', found: 'Antigravity', add: () => `In Antigravity (which took Gemini CLI's place), add this under mcpServers in ~/.gemini/config/mcp_config.json, leaving the rest of the file as it is:\n${mcpDesktop(mcpProgram())}` }];
+// Other apps the app can add itself to, under More (the app's backend, 25 November): not among the owner's four
+const AI_OTHER = [{ id: 'cursor', name: 'Cursor', found: 'Cursor' }, { id: 'vscode', name: 'VS Code / GitHub Copilot', found: 'VS Code' }];
+// What one click copies: how to connect, then how to use it, written to the assistant
+const mcpSetup = id => { const a = AI_ASSISTANTS.find(x => x.id === id) || AI_ASSISTANTS[0], w = shellWord(mcpProgram());
+  return `Connect to SoftPresenter, the church presentation app running on this computer. It has an MCP server.
+
+To connect
+${a.add(w)}
+If that doesn't match your version: it is a local MCP server over stdio. The command is ${w} and its one argument is mcp.
+
+How to use it
+- Its tools find and read songs, look up and search the Bible, list and make songs and playlists, and add to a playlist. Use them to get a service ready with me.
+- Changing what is on the screens (showing a song, an item or a passage, next, previous, clear, a message) works only when I have allowed it in SoftPresenter's Settings. Ask me first, every time, and say the words that will go up.
+- You can't delete anything, change its settings, open files or web pages, or quit it. If a tool is refused, tell me what it said.
+- Start by asking it what is on screen and which playlist is open.`; };
+// Add: the app writes SoftPresenter into that company's apps on this computer (their own configuration, kept a copy of), and
+// Remove takes it out again (the app session's `sp mcp connect|disconnect`)
+A.mcpAdd = ([id]) => { const a = AI_ASSISTANTS.concat(AI_OTHER).find(x => x.id === id); if (!a || !a.found) return; const m = mcpSet(); m.added = m.added || {};
+  const on = !m.added[id]; mutate(() => { m.added[id] = on; });
+  state.mcpSaid = { id, text: on ? `Added to ${a.found}. Open ${a.found.includes(' and ') ? 'them' : 'it'} again to see SoftPresenter.${mcpLevel() === 'off' ? ' It can connect once you choose Prepare.' : ''}` : `Removed from ${a.found}.` }; render(); };
+A.mcpCopy = ([id]) => { const a = AI_ASSISTANTS.find(x => x.id === id); if (!a) return;
+  if (navigator.clipboard) navigator.clipboard.writeText(mcpSetup(id)).catch(() => {});
+  state.mcpSaid = { id, copied: true, text: `Copied. Paste it into ${a.name}.${mcpLevel() === 'off' ? ' It can connect once you choose Prepare.' : ''}` }; render(); };
 // The sp command's state for the Command line card (?sp= shows one), and what a press there says, inline
 const cliState = () => state.cli || new URLSearchParams(location.search).get('sp') || 'here';
 A.cliDo = ([what]) => { const shell = WINDOWS ? null : '~/.zshrc', folder = WINDOWS ? '%LOCALAPPDATA%\\SoftPresenter\\bin' : '~/.local/bin';
@@ -3794,7 +3906,7 @@ function addPictureSlides(files) {
 
 /* ───────── audio: a real file plays; the sample tracks are silent ───────── */
 const audioEl = new Audio();
-audioEl.addEventListener('ended', () => { const a = state.audio, pl = audioPl(); a.pos = 0; if (a.through && pl) a.track = a.shuffle ? Math.floor(Math.random() * pl.tracks.length) : (a.track + 1) % pl.tracks.length; else a.playing = false; syncAudio(); render(); });
+audioEl.addEventListener('ended', () => { const a = state.audio, pl = audioPl(); if (pl) audioEnded(a, pl); else a.playing = false; syncAudio(); render(); });
 function syncAudio() {
   const a = state.audio, pl = audioPl(), tr = pl && pl.tracks[a.track], real = tr && tr.url;
   if (!real || !a.playing) { if (!audioEl.paused) audioEl.pause(); if (!real) audioEl.removeAttribute('src'); return; }
@@ -3833,11 +3945,13 @@ const REMOTE_WORDS = {
    "Add a Bible passage": "Añadir un pasaje de la Biblia",
    "Add a header": "Añadir un encabezado",
    "Add a song": "Añadir una canción",
+   "Add a track to this playlist": "Añade una pista a esta lista",
    "Add pictures or videos": "Añadir imágenes o vídeos",
    "Add pictures or videos to show behind the words": "Añade imágenes o vídeos para mostrarlos detrás de la letra",
    "Add Slide": "Añadir diapositiva",
    "Add the Sample Backgrounds": "Añadir los fondos de ejemplo",
    "Add to playlist": "Añadir a la lista",
+   "Adding music is done at the computer for now.": "Por ahora, la música se añade en el ordenador.",
    "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Añadir imágenes y vídeos desde aquí llegará en el próximo paso. Por ahora, añádelos en el ordenador.",
    "Advanced": "Más",
    "All Media": "Todo",
@@ -3848,6 +3962,8 @@ const REMOTE_WORDS = {
    "Audience screens on or off (⇧⌘1)": "Pantallas del público: encender o apagar (⇧⌘1)",
    "Audience screens, stage screens, on or off": "Pantallas del público y del escenario, encender o apagar",
    "Audio": "Audio",
+   "Audio playlist": "lista de audio",
+   "Back 15 seconds": "Retroceder 15 segundos",
    "Bible": "Biblia",
    "Bible, too (Bold while editing a slide)": "También Biblia (Negrita al editar una diapositiva)",
    "Cancel": "Cancelar",
@@ -3875,6 +3991,7 @@ const REMOTE_WORDS = {
    "Copy Style": "Copiar estilo",
    "Copy, cut, paste the picked slides (objects in Edit)": "Copiar, cortar y pegar las diapositivas elegidas (objetos en Editar)",
    "Could not sign in.": "No se pudo iniciar sesión.",
+   "Crossfade": "Fundido",
    "Cut": {
     "in": [
      [
@@ -3923,6 +4040,7 @@ const REMOTE_WORDS = {
    "Find a song, a line or a verse": "Buscar una canción, una línea o un versículo",
    "Find a song, a line, or a verse": "Buscar canción, línea o versículo",
    "First or last slide of the song": "Primera o última diapositiva de la canción",
+   "Forward 15 seconds": "Adelantar 15 segundos",
    "Go to Next": "Pasar a la siguiente",
    "Go to the slide on screen": "Ir a la diapositiva que está en pantalla",
    "Going places": "Ir a sitios",
@@ -3931,6 +4049,7 @@ const REMOTE_WORDS = {
    "Hide": "Ocultar",
    "Hide the media strip": "Ocultar la tira multimedia",
    "Hot Key…": "Tecla rápida…",
+   "How long one track fades into the next": "Cuánto tarda una pista en fundirse con la siguiente",
    "Import Songs": "Importar canciones",
    "Import songs or slides": "Importar canciones o diapositivas",
    "Import…": "Importar…",
@@ -3938,11 +4057,21 @@ const REMOTE_WORDS = {
    "In Edit: nudge the picked object (Shift for one pixel)": "En Editar: mover el objeto elegido (con Mayús, un píxel)",
    "is empty": "está vacía",
    "Jump to a group (C for the chorus), or a slide’s own hot key": "Saltar a un grupo (C para el coro), o a la tecla propia de una diapositiva",
+   "Keep playing until stopped: after the last track, start again from the first (with Play through off, play this track again)": "Seguir sonando hasta que lo pares: tras la última pista, volver a empezar por la primera (con Continuo apagado, repetir esta pista)",
    "Keys": "Teclas",
    "Label": "Etiqueta",
    "Library": "Biblioteca",
    "Longest": "Más largas",
    "Looking up the Bible comes to the remote page with the next step. Use the Bible page at the computer for now.": "Buscar en la Biblia llegará a esta página en el próximo paso. Por ahora, usa la página de la Biblia en el ordenador.",
+   "Loop": {
+    "in": [
+     [
+      ".lv-audio",
+      "Repetir"
+     ]
+    ],
+    "else": "En bucle"
+   },
    "Macros": "Macros",
    "Media": "Multimedia",
    "Media Playlists": "Listas multimedia",
@@ -3952,6 +4081,8 @@ const REMOTE_WORDS = {
    "Move": "Moverse",
    "Move Down": "Bajar",
    "Move Up": "Subir",
+   "Mute": "Silenciar",
+   "Mute is at the computer for now. Turn the volume down here.": "Por ahora, silenciar se hace en el ordenador. Aquí puedes bajar el volumen.",
    "New": "Temporizador nuevo",
    "New library": "Biblioteca nueva",
    "New Media Playlist…": "Lista multimedia nueva…",
@@ -3960,12 +4091,15 @@ const REMOTE_WORDS = {
    "Next": "Siguiente",
    "Next at the end of a song goes on to the next song": "Al final de una canción, Siguiente pasa a la siguiente canción",
    "Next slide": "Diapositiva siguiente",
+   "Next track": "Pista siguiente",
    "No song is open": "No hay ninguna canción abierta",
    "No songs here yet. Make one, import some, or drag songs onto this library’s name.": "Aún no hay canciones aquí. Crea una, importa algunas o arrastra canciones sobre el nombre de esta biblioteca.",
+   "No tracks yet. Add music files from this computer.": "Aún no hay pistas. Añade archivos de música de este ordenador.",
    "Not connected to SoftPresenter.": "No hay conexión con SoftPresenter.",
    "Notes": "Notas",
    "Nothing found": "No se encontró nada",
    "Nothing showing": "No se muestra nada",
+   "Nothing to play": "Nada que reproducir",
    "Nothing to redo": "Nada que rehacer",
    "Nothing to tell you. Trouble, questions, and what happens out of sight (added to another playlist, a file read or written) come here.": "Nada que contarte. Aquí llegan los problemas, las preguntas y lo que pasa fuera de la vista (algo añadido a otra lista, un archivo leído o guardado).",
    "Nothing to undo": "Nada que deshacer",
@@ -3992,10 +4126,15 @@ const REMOTE_WORDS = {
    "Password": "Contraseña",
    "Paste": "Pegar",
    "Paste Style": "Pegar estilo",
+   "Pause": "Pausa",
    "Pick several in the left column: grow the pick, or pick them all": "Elegir varios en la columna izquierda: ampliar la selección o elegirlos todos",
    "Picture": "Imagen",
    "Placeholder": "Hueco",
+   "Play": "Reproducir",
    "Play on Announcements Layer": "Reproducir en la capa de anuncios",
+   "Play the tracks in a random order": "Reproducir las pistas en orden aleatorio",
+   "Play through": "Continuo",
+   "Playing": "Sonando",
    "Playlist": "Lista",
    "Playlists": "Listas",
    "Playlists and libraries": "Listas y bibliotecas",
@@ -4004,6 +4143,7 @@ const REMOTE_WORDS = {
    "Previous": "Anterior",
    "Previous slide": "Diapositiva anterior",
    "Props": "Gráficos",
+   "Ready": "Listo",
    "Reconnecting…": "Reconectando…",
    "Redo": "Rehacer",
    "Remote Control": "Control remoto",
@@ -4011,6 +4151,7 @@ const REMOTE_WORDS = {
    "Rename": "Renombrar",
    "Reset": "Reiniciar",
    "Running the slides": "Las diapositivas",
+   "s": "s",
    "Scaling": "Tamaño",
    "Service": "Culto",
    "Service (⌥S)": "Culto (⌥S)",
@@ -4021,6 +4162,7 @@ const REMOTE_WORDS = {
    "Show a message": "Mostrar un mensaje",
    "Show keys on buttons": "Teclas en los botones",
    "Show that picture or video": "Mostrar esa imagen o ese vídeo",
+   "Shuffle": "Aleatorio",
    "Sign In": "Iniciar sesión",
    "Sign Out of This Device…": "Cerrar sesión en este dispositivo…",
    "Signing in…": "Iniciando sesión…",
@@ -4037,7 +4179,6 @@ const REMOTE_WORDS = {
    "Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track": "Iniciar ese temporizador, mostrar ese mensaje o gráfico, ejecutar esa macro, poner el escenario en ese diseño, reproducir esa pista",
    "Table": "Tabla",
    "Template": "Plantilla",
-   "The audio player": "El reproductor de audio",
    "The car with the lights on, please": "El coche con las luces encendidas, por favor",
    "The computer didn't answer.": "El ordenador no respondió.",
    "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "La diapositiva o el versículo marcado pasa a pantalla (después de una búsqueda, o con ↑ ↓)",
@@ -4051,13 +4192,16 @@ const REMOTE_WORDS = {
    "This list": "Esta lista (al pie tiene Teclas en los botones)",
    "This sample only has": "Esta muestra solo tiene",
    "Timers": "Temporizadores",
+   "track": "Pista",
    "Transition": "Transición",
    "Typing in a box: bold, italic, underlined, for the words selected (or the whole box)": "Al escribir en un cuadro: negrita, cursiva, subrayado, para el texto elegido (o todo el cuadro)",
    "Undo": "Deshacer",
    "Undo, redo": "Deshacer, rehacer",
+   "Volume": "Volumen",
    "VoxLive": "VoxLive",
    "Waiting for SoftPresenter": "Esperando a SoftPresenter",
    "Waiting for SoftPresenter to answer. Try again in a moment.": "Esperando la respuesta de SoftPresenter. Vuelve a intentarlo en un momento.",
+   "When a track ends, go on to the next": "Al terminar una pista, pasar a la siguiente",
    "With nothing on screen, move the cue; Space or Enter puts it on": "Sin nada en pantalla, mueve la marca; Espacio o Intro la pone en pantalla",
    "Words": {
     "in": [
@@ -4071,7 +4215,8 @@ const REMOTE_WORDS = {
    "Words from Text…": "Letra desde texto…",
    "Words once…": "Texto una vez…",
    "Words only": "Solo letra",
-   "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Dejar que un teléfono, iPad o Mac muestre su pantalla se decide en el ordenador, no desde la página remota."
+   "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Dejar que un teléfono, iPad o Mac muestre su pantalla se decide en el ordenador, no desde la página remota.",
+   "There is no track to play. Add music at the computer.": "No hay ninguna pista para reproducir. Añade música en el ordenador."
   },
   "patterns": [
    {
@@ -4105,6 +4250,11 @@ const REMOTE_WORDS = {
     "key": "page.notices.one"
    },
    {
+    "re": "^(\\d+(?:\\.\\d+)?) s$",
+    "to": "{1} s",
+    "key": "common.seconds_unit"
+   },
+   {
     "re": "^(\\d+(?:\\.\\d+)?)s$",
     "to": "{1} s",
     "key": "common.seconds_unit"
@@ -4120,6 +4270,11 @@ const REMOTE_WORDS = {
     "key": "left.song.add_to"
    },
    {
+    "re": "^(.+?) tracks$",
+    "to": "{1} pistas",
+    "key": "tools.audio.tracks"
+   },
+   {
     "re": "^Song · (.+)$",
     "to": "Canción · {1}",
     "key": "find.tag.song_group"
@@ -4133,6 +4288,11 @@ const REMOTE_WORDS = {
     "re": "^(.+?) songs$",
     "to": "{1} canciones",
     "key": "integrations.songbooks.songs"
+   },
+   {
+    "re": "^(.+?) track$",
+    "to": "{1} pista",
+    "key": "tools.audio.tracks"
    },
    {
     "re": "^Start (.+?)$",
@@ -4168,7 +4328,7 @@ const UI_LANGS = ['en', 'es', 'ru', 'uk'];
 // What is content: langtool's list (less the keys: a key's name is a word of the page's, "Space" is Espacio, Shift is
 // Mayús), and the remote page's own (a message's words, a header's name, a group's name on a
 // slide, the running timer's name and time). The harvest of the page's words reads this same line.
-const UI_CONTENT = '.thumb, #canvas, .canvas, .ob, .sl-words, .tt, .clip .nm, .grp-h b, .verse, .vt, input, textarea, select option[value=""] ~ option, .st-key, .readout .txtline, #found .t, .ed-songs .t, .plbtn > span, .sh-src .t, .mono.num, .item .num, script, style, svg, .cat-words, .bi-hit, .lv-name, .card .t b, .card .t span, .sh-hrow .hn, .sh-head, .strip .lbl:not(.say), #found .fd-row b, #found .fd-row em, #runTimer, #remotetest, #selftest, .rm-content';
+const UI_CONTENT = '.thumb, #canvas, .canvas, .ob, .sl-words, .tt, .clip .nm, .grp-h b, .verse, .vt, input, textarea, select option[value=""] ~ option, .st-key, .readout .txtline, #found .t, .ed-songs .t, .plbtn > span, .sh-src .t, .mono.num, .item .num, script, style, svg, .cat-words, .bi-hit, .lv-name, .lv-tname, .lv-track .t, [data-c="audioPl"] option, .card .t b, .card .t span, .sh-hrow .hn, .sh-head, .strip .lbl:not(.say), #found .fd-row b, #found .fd-row em, #runTimer, #remotetest, #selftest, .rm-content';
 const UI_ATTRS = ['title', 'placeholder', 'aria-label'];
 
 const UI = (() => {
@@ -4278,6 +4438,7 @@ const SCREEN_LIKE = clone(DOC.screens.find(x => x.kind === 'Audience') || DOC.sc
 
 /* ───────── the socket ───────── */
 function remoteStart(mode = REMOTE_MODE) {
+  remoteSliders();
   REMOTE.mode = mode; REMOTE.on = true; REMOTE.status = 'connecting';
   emptyDoc(); render(); remoteConnect();      // only reads are sent until someone presses something
   clearInterval(REMOTE.watch); REMOTE.watch = setInterval(() => {      // no beat for 30 seconds: the connection is dead, though nobody said so
@@ -4449,8 +4610,7 @@ function remoteLive() {
   state.mediaOn = media.showing ? media.showing.id : null;
   state.message = L.message ? ((DOC.messages.find(m => m.name === L.message) || {}).id || null) : null;
   state.propsOn = (L.props || []).map(n => (DOC.props.find(p => p.name === n) || {}).id).filter(Boolean);
-  const a = REMOTE.parts.audio || {};
-  Object.assign(state.audio, { playing: !!a.playing && !a.paused, volume: a.volume == null ? state.audio.volume : a.volume, shuffle: !!a.shuffle, through: !!a.through, crossfade: a.crossfade || 0 });
+  remoteAudio();
   state.ann = null; state.advanceLeft = 0; state.build = L.build || 0;
 }
 // Nothing that ticks is sent: times are worked out from when things started, on the app's clock.
@@ -4468,7 +4628,39 @@ function remoteTimes() {
   const au = REMOTE.parts.audio || {};
   state.audio.pos = Math.floor((au.started_at ? now - au.started_at : au.position_ms || 0) / 1000);
 }
-function remoteTick() { remoteTimes(); paintClock(); }      // in place, as the sample's clock does: a press is never lost to a redraw
+function remoteTick() { remoteTimes(); remoteAudioPlace(); paintAudio(); paintClock(); }      // in place, as the sample's clock does: a press is never lost to a redraw
+
+// The audio player (the app since 9bc1cc6). The status names the playing track, where it is (from when it started, on the
+// app's clock, or where it was paused) and the switches; the tracks' names come from `audio`, asked for when the track isn't
+// among those known. Only the playing track's length is sent, so the others show none.
+function remoteAudio() {
+  const a = REMOTE.parts.audio || {}, names = REMOTE.tracks || [], at = names.indexOf(a.track);
+  if (a.track && at < 0 && !REMOTE.tracksAsked) { REMOTE.tracksAsked = true;
+    remoteSend(['audio'], true).then(r => { REMOTE.tracksAsked = false; if (r.ok && Array.isArray(r.data)) { REMOTE.tracks = r.data.filter(x => typeof x === 'string'); remoteAudio(); render(); } }); }
+  const list = names.length ? names : a.track ? [a.track] : [];
+  DOC.audio = [{ id: 'app', name: 'Audio', tracks: list.map(n => ({ name: n, length: n === a.track ? Math.round((a.length_ms || 0) / 1000) : 0 })) }];
+  Object.assign(state.audio, { pl: 'app', track: Math.max(0, list.indexOf(a.track)), playing: !!a.playing && !a.paused, muted: !!a.mute, volume: a.volume == null ? state.audio.volume : a.volume,
+    shuffle: !!a.shuffle, through: !!a.through, loop: !!a.loop, crossfade: a.crossfade || 0 });
+  remoteAudioPlace();
+}
+function remoteAudioPlace() { const a = REMOTE.parts.audio || {}, len = Math.round((a.length_ms || 0) / 1000);
+  state.audio.pos = Math.max(0, Math.min(len, Math.floor((a.started_at ? serverNow() - a.started_at : a.position_ms || 0) / 1000))); }
+// its keys send the app's own commands; what they did comes back in the status
+remoteWrapA('audio', (orig, [what, n]) => { const a = state.audio, pl = audioPl(), app = REMOTE.parts.audio || {}, onoff = k => ['audio', k, a[k] ? 'off' : 'on'];
+  if (what === 'track') { const t = pl && pl.tracks[+n]; return t && remoteSend(['audio', 'play', t.name]); }
+  if (what === 'play') { const t = pl && pl.tracks[a.track]; return app.playing || app.paused ? remoteSend(['audio', 'pause']) : t ? remoteSend(['audio', 'play', t.name]) : refuse('There is no track to play. Add music at the computer.'); }
+  if (what === 'next' || what === 'prev') return remoteSend(['audio', what === 'prev' ? 'previous' : 'next']);
+  if (what === 'fwd' || what === 'back') return remoteSend(['audio', 'seek', what === 'fwd' ? '+15' : '-15']);
+  if (what === 'through' || what === 'shuffle' || what === 'loop') return remoteSend(onoff(what));
+  if (what === 'mute') return refuse('Mute is at the computer for now. Turn the volume down here.');
+  return refuse('Adding music is done at the computer for now.'); });
+// a slider is sent once it has settled, not at every step of a drag
+// (wrapped when the page starts as a remote: the sliders' own handlers are defined after this file)
+function remoteSliders() { if (remoteSliders.done) return; remoteSliders.done = true;
+  const later = {}, settle = (k, f) => { clearTimeout(later[k]); later[k] = setTimeout(f, 250); }, seek = TYPED.seek, volume = TYPED.volume, cross = C.crossfade;
+  TYPED.seek = v => { if (!REMOTE.on) return seek(v); state.audio.pos = +v; paintAudio(); settle('seek', () => remoteSend(['audio', 'seek', String(Math.round(+v))])); };
+  TYPED.volume = (v, el) => { volume(v, el); if (REMOTE.on) settle('volume', () => remoteSend(['audio', 'volume', String(Math.round(+v))])); };
+  C.crossfade = v => REMOTE.on ? remoteSend(['audio', 'crossfade', String(+v)]) : cross(v); }
 
 // All Songs: the app's list, each song with its own id (asked for when All Songs is opened, and again when the library changes)
 function remoteFetchSongs() {
@@ -4605,7 +4797,7 @@ function remotePaintPreview() { if (REMOTE.on) renderMonitor(); }
 
 
 // The tabs whose state the page isn't sent yet say so, rather than show anything that isn't the app's.
-for (const [tab, what] of [['Stage', 'Choosing the stage layouts'], ['Audio', 'The audio player'], ['VoxLive', 'VoxLive']]) {
+for (const [tab, what] of [['Stage', 'Choosing the stage layouts'], ['VoxLive', 'VoxLive']]) {
   const orig = TAB[tab];
   TAB[tab] = () => REMOTE.on ? html`<div class="lv-h"><span class="cap">${tab}</span></div><p class="ui-p sub rm-later">${what} comes to the remote page with the next step. Use the computer for now.</p>` : orig();
 }
@@ -4619,10 +4811,18 @@ class FixtureSocket extends EventTarget {
   get mode() { return new URLSearchParams(location.search).get('fixture') || window.SP_FIXTURE || ''; }
   send(text) {
     const m = JSON.parse(text), F = window.REMOTE_FIXTURE, md = this.mode, es = /es$/.test(md), first = /^first/.test(md) && F.firstStart;
-    if (m.type === 'hello') { window.fixtureEmit = key => this.emit(JSON.stringify((first && first[key]) || F[key]));      // a test sends a change or an error
+    const AU = F.audio || {};
+    if (m.type === 'hello') { window.fixtureEmit = key => this.emit(JSON.stringify((first && first[key]) || AU[key] || F[key]));
+      if (md === 'audio' && AU.snapshotAudio) { this.emit(JSON.stringify(AU.snapshotAudio)); if (m.preview) this.picture(); return; }      // a test sends a change or an error
       this.emit(JSON.stringify(first ? (es ? first.snapshotSpanish : first.snapshot) : es && F.snapshotSpanish ? F.snapshotSpanish : F.snapshot)); if (m.preview) this.picture(); return; }
     if (m.type !== 'command') return;
     const a = m.args, reply = r => this.emit(JSON.stringify({ type: 'reply', id: m.id, reply: r }));
+    if (a[0] === 'audio' && AU.snapshotAudio) { const then = (r, change) => { reply(r.reply); if (change) this.emit(JSON.stringify(AU[change])); };
+      if (a.length === 1) return then(AU.replyAudioList);
+      if (a[1] === 'loop' && a[2] === 'on') return then(AU.replyLoopOn, 'changeAfterLoopOn');
+      if (a[1] === 'seek') return a[2] === '+15' ? then(AU.replySeekPlus15, 'changeAfterSeek') : +a[2] > 40 ? then(AU.replySeekPastEnd) : reply({ ok: true, text: 'Done.' });
+      if (a[1] === 'pause') return then(AU.replyPause, 'changeAfterPause');
+      return reply({ ok: true, text: 'Done.' }); }
     if (a[0] === 'menu') return reply(es && F.refusedSpanish ? F.refusedSpanish : F.replies.refused);
     if (a[0] === 'settings' && /^language=/.test(String(a[2] || ''))) return reply(F.refusedLanguageFromPage || { ok: false, text: 'The app’s language is chosen at the computer.' });
     if (first && a[0] === 'playlist' && a[1] === 'open' && a[2] === 'Service') return reply(first.refusedOpenServiceSpanish || { ok: false, text: 'No playlist called “Service”.' });
@@ -4747,6 +4947,12 @@ document.addEventListener('keydown', e => {
     if (cmd && k.toLowerCase() === 'd') { e.preventDefault(); return A.edObj(['dup']); }
     if (cmd && k.toLowerCase() === 'a') { e.preventDefault(); state.sels = t.holder.objects.filter(o => !o.locked).map(o => o.id); return render(); }
     if (cmd) return;
+    // Clearing from the Edit view is by keys alone, since its right column is the inspector (the app, e4713a6): the clear keys
+    // F1–F6 work as in the Service view; Escape clears everything only when the editor has nothing for it to do (nothing
+    // picked, no drag, a fresh press: the first Escape lets go of a picked box, and a held one never clears)
+    { const does = keyAction(k), clears = { clearSlide: 'slide', clearMedia: 'media', clearProps: 'props', clearAudio: 'audio', clearMessages: 'messages' };
+      if (/^F[1-6]$/.test(k) && does && (clears[does] || does === 'clearAll')) { e.preventDefault(); return clear(clears[does] || 'all'); }
+      if (k === 'Escape' && !picked.length && !e.repeat) { e.preventDefault(); return clear('all'); } }
     if (k.toLowerCase() === 't' && !picked.length) return edInsert('text');
     if (!picked.length && (k === 'Delete' || k === 'Backspace')) { e.preventDefault(); return ({ slide: () => A.edSlideOp(['del']), template: () => A.edTplOp(['del']), prop: () => A.edPropOp(['del']), layout: () => A.edLayoutOp(['del']) })[t.type]?.(); }      // with nothing picked on the canvas, Delete acts on the list's picked one, in every list
     if (!picked.length) { if (t.type === 'slide' && (k === 'ArrowUp' || k === 'ArrowDown')) { e.preventDefault(); const n = t.k + (k === 'ArrowUp' ? -1 : 1); if (n >= 0 && n < t.song.slides.length) A.edSlideGo([n]); } return; }
@@ -4936,7 +5142,7 @@ function tick() {
   for (const id of [...state.propsOn]) { const p = byId(DOC.props, id); if (p && p.left > 0 && --p.left === 0) { state.propsOn.splice(state.propsOn.indexOf(id), 1); changed = true; } }
   const a = state.audio, pl = audioPl();
   if (a.playing && pl && pl.tracks[a.track] && pl.tracks[a.track].url) a.pos = Math.floor(audioEl.currentTime);      // a real file keeps its own time
-  else if (a.playing && pl && pl.tracks[a.track]) { a.pos++; if (a.pos >= pl.tracks[a.track].length) { a.pos = 0; if (a.through) a.track = a.shuffle ? Math.floor(Math.random() * pl.tracks.length) : (a.track + 1) % pl.tracks.length; else a.playing = false; changed = true; } }
+  else if (a.playing && pl && pl.tracks[a.track]) { a.pos++; if (a.pos >= pl.tracks[a.track].length) { audioEnded(a, pl); changed = true; } }
   if (state.advanceLeft > 0 && state.on && --state.advanceLeft === 0) return step(1);
   const typing = document.activeElement && document.activeElement.matches('input, textarea, select, [contenteditable]');
   if (changed && !typing && !state.menu && !drag) render(); else paintClock();
@@ -5063,7 +5269,7 @@ Object.assign(DEMOS, {
   catlib: () => { catSample(); DOC.settings.langs = ['ru', 'en']; const s = catDemoSong(); A.src(['lib', DOC.libraries.find(l => l.catalog).id]); A.openSong([s.id]); },
   catinfo: () => { catSample(); DOC.settings.langs = ['ru', 'en']; const s = catDemoSong(); A.src(['lib', DOC.libraries.find(l => l.catalog).id]); A.openSong([s.id]); A.songInfo([s.id]); },
   catchooser: () => { catSample(); state.srcMenu = true; render(); },
-  catset: () => { catSample(); state.mode = 'settings'; state.section = 'Integrations'; render(); },
+  catset: () => { catSample(); state.mode = 'settings'; state.section = 'Integrations'; state.integ = 'wla'; render(); },
 });
 if (/^(su|cat)/.test(q.get('demo') || '') && DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();
 // Testing aid: the sample backgrounds: offered in the media bin's list, offered by an empty bin, and once added

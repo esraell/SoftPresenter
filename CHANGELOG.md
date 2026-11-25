@@ -5,6 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+- The phone Remote Control page has the audio player: the track, Play/Pause, the position, Next and Previous, the volume, Play through, Shuffle, Loop and the crossfade. `sp audio mute on|off` mutes and brings back the level, as the Audio tab's Mute does.
 - The Edit view no longer shows the preview and the clear buttons on the right: the settings there (Shape, Text, Build, and a theme's or a stage layout's own) take the whole column, with far more room. While editing, the keys still clear the screens (Escape, and off a Mac F1 to F6); the buttons are in the Service and Bible views as before.
 - The clearing keys work in the Edit view too: off a Mac F1 to F6, as in the Service view, and Escape once nothing is picked, being typed or open there (a first Escape still lets go of the picked box, puts back words being typed or closes a menu; the next press clears the screens, and holding Escape down never does). Space, the arrows and the letters still never change the screens from the Edit view.
 - Free songbooks shared by churches can be installed from Import Songs › Free Songbooks… or the setup's Free Songs step: Песнь Возрождения 3300 and others in Russian, Ukrainian, Czech, Slovak, German and English. Each is downloaded from the page that shares it only when you choose it, and its songs come into a library of their own, each with its number. Remove takes out again the songs you haven't changed.

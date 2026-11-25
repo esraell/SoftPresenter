@@ -2137,8 +2137,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
     let list: Vec<sp_model::Uuid> =
         found.map_or(shown_tracks.clone(), |(playlist, _)| playlist.tracks.iter().map(|track| track.id).collect());
     let place = found.map(|(_, at)| at);
-    let muted_id = egui::Id::unique("audio muted from");
-    let muted_from = ui.data(|data| data.get_temp::<f32>(muted_id)).filter(|_| state.audio_volume == 0.0);
+    let muted_from = state.audio_muted_from.filter(|_| state.audio_volume == 0.0);
 
     // The player: what plays and how far in, its keys, its level, and how tracks follow on.
     let mut request: Option<AudioRequest> = None;
@@ -2299,10 +2298,10 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                     Some(level) => {
                         state.audio_volume = level;
                         request = Some(AudioRequest::Volume(level));
-                        ui.data_mut(|data| data.remove::<f32>(muted_id));
+                        state.audio_muted_from = None;
                     }
                     None => {
-                        ui.data_mut(|data| data.insert_temp(muted_id, state.audio_volume));
+                        state.audio_muted_from = Some(state.audio_volume);
                         state.audio_volume = 0.0;
                         request = Some(AudioRequest::Volume(0.0));
                     }
@@ -2320,7 +2319,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 let level = (at * LOUDEST * 100.0).round() / 100.0;
                 if level != state.audio_volume || muted_from.is_some() {
                     // Moving the level brings the sound back.
-                    ui.data_mut(|data| data.remove::<f32>(muted_id));
+                    state.audio_muted_from = None;
                     state.audio_volume = level;
                     request = Some(AudioRequest::Volume(level));
                 }
@@ -3575,8 +3574,10 @@ mod tests {
         // Mute turns the level down to nothing, and back to where it was.
         click(&ctx, &show, &mut state, egui::Id::unique("audio mute"), vec2(0.0, 0.0));
         assert_eq!(state.audio_request.take(), Some(AudioRequest::Volume(0.0)));
+        assert_eq!(state.audio_muted_from, Some(0.8), "kept where `sp audio mute off` finds it too");
         click(&ctx, &show, &mut state, egui::Id::unique("audio mute"), vec2(0.0, 0.0));
         assert_eq!(state.audio_request.take(), Some(AudioRequest::Volume(0.8)));
+        assert_eq!(state.audio_muted_from, None);
     }
 
     #[test]
