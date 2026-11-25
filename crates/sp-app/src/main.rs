@@ -29,6 +29,8 @@ mod editor;
 mod file_drop;
 mod find;
 mod followed;
+mod free_songbooks;
+mod free_songbooks_cli;
 mod home;
 mod i18n;
 mod icons;
@@ -643,6 +645,8 @@ enum AppEvent {
     Canva,
     /// A song catalog download or check finished on its thread (see `catalog_cli`).
     CatalogDone,
+    /// A free songbook's download finished on its thread (see `free_songbooks_cli`).
+    SongbookDone,
     /// The system says the displays changed (macOS: a display plugged in or out, the main one
     /// changed, a size or the arrangement changed). Only macOS sends it.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -787,6 +791,9 @@ pub struct SongsTo {
     /// How presentation files come in (as slides, or as pictures), when it was said; otherwise
     /// as each kind was last brought in.
     pub deck_as: Option<deck::ImportAs>,
+    /// Brought in by a download in the background (a free songbook): the window is left as it
+    /// is, with no song chosen and nothing open closed.
+    pub quiet: bool,
 }
 
 /// A place in a playlist: the playlist, by its place in the list and its name (to find it again
@@ -914,6 +921,7 @@ fn window_over_the_window(state: &home::HomeState) -> bool {
         || !state.bible.options.details.is_empty()
         || state.setup.is_some()
         || state.library_search.is_some()
+        || state.free_songbooks.open
 }
 
 /// Whether a pop-up open now takes the keys that run the show (a menu moves with the arrows and
@@ -1808,6 +1816,8 @@ struct App {
     canva: canva::Client,
     /// The song catalog: downloaded songs, kept apart from the library (see `catalog_cli`).
     catalog: catalog_cli::CatalogState,
+    /// The free songbooks shared by churches being downloaded (see `free_songbooks_cli`).
+    free_songbooks: free_songbooks_cli::Installs,
     /// The connection to the church's TimelyChurch: its services as playlists, its songs in the
     /// library, and the songs shown told to it (see `timelychurch`).
     timelychurch: timelychurch::Connection,
@@ -4176,9 +4186,7 @@ impl App {
     /// Where songs dropped on a playlist or library go.
     fn songs_to(&self, target: Option<&file_drop::DropTarget>) -> SongsTo {
         match target {
-            Some(file_drop::DropTarget::Library(library)) => {
-                SongsTo { library: Some(*library), playlist: None, deck_as: None }
-            }
+            Some(file_drop::DropTarget::Library(library)) => SongsTo { library: Some(*library), ..SongsTo::default() },
             Some(file_drop::DropTarget::Playlist { index, after }) => {
                 let name = self
                     .running
@@ -4186,7 +4194,7 @@ impl App {
                     .and_then(|r| r.home_state.services.list.get(*index))
                     .map(|playlist| playlist.name.clone());
                 let playlist = name.map(|name| PlaylistSpot { index: *index, name, after: *after });
-                SongsTo { library: None, playlist, deck_as: None }
+                SongsTo { playlist, ..SongsTo::default() }
             }
             _ => SongsTo::default(),
         }
@@ -6758,10 +6766,14 @@ impl App {
                 }
             }
         }
+        self.add_imported_to_playlist(to, done);
+        // A download that ended in the background leaves the window as the operator has it.
+        if to.quiet {
+            return;
+        }
         if let Some(at) = done.first {
             self.apply(vec![Command::Select(at)]);
         }
-        self.add_imported_to_playlist(to, done);
         if let Some(running) = self.running.as_mut()
             && !done.titles.is_empty()
         {
@@ -9004,6 +9016,11 @@ impl App {
             {
                 running.home_state.library_search = Some((words, 0));
             }
+            // Testing aid: SOFTPRESENTER_FREE_SONGBOOKS=1 opens the Free Songbooks window, as its
+            // item in the import menu does.
+            if running.frames == GO_LIVE_AT + 2 && std::env::var_os("SOFTPRESENTER_FREE_SONGBOOKS").is_some() {
+                running.home_state.free_songbooks.open = true;
+            }
             // Testing aid: open the Reflow editor on the first song.
             if running.frames == GO_LIVE_AT + 2
                 && std::env::var_os("SOFTPRESENTER_REFLOW").is_some()
@@ -10410,6 +10427,10 @@ impl ApplicationHandler<AppEvent> for App {
                 self.tick_catalog();
                 return;
             }
+            AppEvent::SongbookDone => {
+                self.tick_free_songbooks();
+                return;
+            }
             AppEvent::MediaRead => {
                 self.take_media_read();
                 return;
@@ -10842,6 +10863,7 @@ impl ApplicationHandler<AppEvent> for App {
                 self.handle_slides_choice();
                 self.handle_setup();
                 self.handle_songbooks();
+                self.handle_free_songbooks();
                 self.handle_catalog_songs();
                 // The Bible page's set-up (translations, boxes, options) is remembered the
                 // moment it changes, so it is as it was left at the next start.
@@ -10960,6 +10982,7 @@ impl ApplicationHandler<AppEvent> for App {
         let voxlive_at = self.tick_voxlive();
         let canva_at = self.tick_canva();
         let catalog_at = self.tick_catalog();
+        let songbooks_at = self.tick_free_songbooks();
         let timelychurch_at = self.tick_timelychurch();
         let audio_at = self.tick_audio();
         let announce_at = self.tick_announcements();
@@ -11024,6 +11047,7 @@ impl ApplicationHandler<AppEvent> for App {
             voxlive_at,
             canva_at,
             catalog_at,
+            songbooks_at,
             timelychurch_at,
             audio_at,
             announce_at,
@@ -11546,6 +11570,7 @@ fn main() -> ExitCode {
         voxlive,
         canva,
         catalog: catalog_cli::CatalogState::default(),
+        free_songbooks: free_songbooks_cli::Installs::default(),
         timelychurch: timelychurch::Connection::new(timelychurch::gate(), timelychurch::Files::in_data_dir()),
         voxlive_preview: None,
         voxlive_said: None,

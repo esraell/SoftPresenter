@@ -93,6 +93,8 @@ pub const OPEN: &[&str] = &[
     "menu",
     "notices",
     "catalog",
+    "songbooks",
+    "songbook",
 ];
 
 /// Commands never open to a page: Remote Control's own (switching it, its password),
@@ -108,6 +110,9 @@ pub const OPEN_SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("voxlive", &["", "screens", "show", "look", "refresh"]),
     ("canva", &["", "status", "sync", "pages", "divider"]),
     ("catalog", &["", "status", "languages", "search", "list", "add", "newer", "use-newer", "keep-mine"]),
+    // Listing the free songbooks is open; installing one (a download from the internet) and
+    // removing one are done at the computer.
+    ("songbook", &[""]),
     ("settings", &["", "set"]),
     ("screen", &["add", "set", "delete"]),
     (
@@ -140,6 +145,7 @@ pub const CLOSED_SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("voxlive", &["connect", "disconnect"]),
     ("canva", &["connect", "import", "disconnect", "presentation"]),
     ("catalog", &["download", "check", "remove", "sizes"]),
+    ("songbook", &["install", "remove"]),
     ("song", &["import", "export"]),
     ("media", &["add", "samples"]),
 ];
@@ -284,6 +290,8 @@ fn control_refusal(args: &[String]) -> Option<String> {
             ("voxlive", _) => at_computer(AtComputer::VoxLive),
             ("canva", _) => at_computer(AtComputer::Canva),
             ("catalog", _) => at_computer(AtComputer::Catalog),
+            ("songbook", "remove") => at_computer(AtComputer::RemoveSongs),
+            ("songbook", _) => at_computer(AtComputer::DownloadSongs),
             ("song", "import") => at_computer(AtComputer::ImportSongs),
             ("song", "export") => at_computer(AtComputer::ExportPack),
             ("media", "add") => at_computer(AtComputer::AddMedia),
@@ -456,6 +464,8 @@ mod tests {
             "catalog newer",
             "catalog use-newer Amazing",
             "catalog keep-mine Amazing",
+            "songbooks",
+            "songbook",
             "undo",
         ] {
             assert!(!refused(line), "{line} should be open");
@@ -491,6 +501,10 @@ mod tests {
             "catalog remove ru --yes",
             "catalog sizes --ask",
             "catalog frobnicate",
+            "songbook install pv3300",
+            "SONGBOOK INSTALL pv3300",
+            "songbook remove pv3300 --yes",
+            "songbook frobnicate",
             "menu Quit",
             "status --wait 5",
             "slide web Amazing 2 http://127.0.0.1:8080",

@@ -183,6 +183,17 @@ pub fn set_choice(choice: Choice) {
 /// the app has no words in leaves English.
 pub fn set_computer(tag: &str) {
     COMPUTER.store(Language::from_tag(tag).map_or(0, number_of), Ordering::Relaxed);
+    *COMPUTER_TAG.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(tag.to_owned());
+}
+
+// The computer's language as the system wrote it, whether or not the app has words in it.
+static COMPUTER_TAG: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// The computer's language as the system writes it (`cs-CZ`), once it has answered, even one the
+/// app has no words in: the free songbooks recommend a Czech computer's songbooks to an app in
+/// English.
+pub fn computer_tag() -> Option<String> {
+    COMPUTER_TAG.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone().filter(|tag| !tag.is_empty())
 }
 
 /// The language the computer is set to, when the app has words in it.
@@ -976,6 +987,7 @@ mod tests {
         "screens",
         "mirror",
         "mcp",
+        "freesongbooks",
     ];
 
     #[test]

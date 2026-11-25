@@ -2689,6 +2689,15 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
                     ui.close();
                 }
             }
+            // Songbooks shared by churches, downloaded when one is chosen (`free_songbooks`).
+            if ui
+                .button(t("freesongbooks.menu", "Free Songbooks\u{2026}"))
+                .on_hover_text(t("freesongbooks.menu.hint", "Free songbooks shared by churches, to download"))
+                .clicked()
+            {
+                state.free_songbooks.open = true;
+                ui.close();
+            }
             ui.separator();
             if ui
                 .button(t("left.import.slides", "Slides\u{2026}"))

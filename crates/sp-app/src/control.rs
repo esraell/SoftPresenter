@@ -700,7 +700,8 @@ pub fn only_reads(args: &[String]) -> bool {
     let alone = args.len() == 1;
     match word(0).as_str() {
         "" | "help" | "status" | "songs" | "slides" | "playlists" | "libraries" | "themes" | "screens" | "timers"
-        | "messages" | "props" | "macros" | "groups" | "displays" | "decklink" | "bibles" | "search" | "job" => true,
+        | "messages" | "props" | "macros" | "groups" | "displays" | "decklink" | "bibles" | "search" | "job"
+        | "songbooks" => true,
         "media" | "media-playlist" | "settings" | "menu" => alone,
         "version" => alone || (args.len() == 2 && word(1) == "list"),
         "audio" => alone || (args.len() == 2 && word(1) == "playlists"),
@@ -897,6 +898,8 @@ const COMMANDS: &[&str] = &[
     "mirror",
     "notices",
     "catalog",
+    "songbooks",
+    "songbook",
 ];
 
 /// True when `word` starts a command.
@@ -1073,6 +1076,13 @@ Song catalog (free songs from Worship Leader App, kept apart from the library)
                                fetch a language (a job: --wait waits), ask the source now
                                whether the ones here changed, or take a language off this computer
   catalog sizes [LANG…] [--ask]      songs, download size and room on disk, per language
+
+Free songbooks (shared by churches, downloaded from the page that shares them when installed)
+  songbooks                    every one offered: language, songs, size, installed or not
+  songbook install NAME        download one and bring its songs into the library, in a library
+                               of its own (a job: --wait waits); NAME as songbooks lists it
+  songbook remove NAME --yes   take its songs back out (to the Trash), but those you changed
+                               and those a playlist or another library uses, which stay as yours
 
 Themes
   themes | theme templates THEME | theme main THEME
@@ -1352,6 +1362,8 @@ impl crate::App {
             "canva" => self.ctl_canva(args),
             "timelychurch" => self.ctl_timelychurch(args),
             "catalog" => self.ctl_catalog(args),
+            "songbooks" => self.ctl_songbooks(),
+            "songbook" => self.ctl_songbook(args),
             "themes" => Ok(self.ctl_named_list("themes", |s| s.theme_names.clone())),
             "screens" => Ok(self.ctl_screens()),
             "timers" => Ok(self.ctl_timers()),

@@ -141,8 +141,12 @@ impl Export {
         };
         for mut song in songs {
             // A song made from TimelyChurch leaves its mark at home: the mark names the church's
-            // TimelyChurch, whose songs are for that church only. In the pack it is a plain song.
-            if song.catalog.as_ref().is_some_and(|mark| mark.source == crate::timelychurch::SOURCE) {
+            // TimelyChurch, whose songs are for that church only. So does a song from a free
+            // songbook: the mark says the songbook is installed here, and Remove takes such songs
+            // out, which another church's library mustn't think of its own. In the pack each is a
+            // plain song.
+            let home_only = [crate::timelychurch::SOURCE, crate::free_songbooks::SOURCE];
+            if song.catalog.as_ref().is_some_and(|mark| home_only.contains(&mark.source.as_str())) {
                 song.catalog = None;
             }
             for group in &mut song.groups {
@@ -941,7 +945,7 @@ mod tests {
             catalog: Some(Box::new(mark(source))),
         };
         let export = Export::plan(
-            vec![song(crate::timelychurch::SOURCE), song("worshipleaderapp")],
+            vec![song(crate::timelychurch::SOURCE), song("worshipleaderapp"), song(crate::free_songbooks::SOURCE)],
             &[],
             None,
             |_| None,
@@ -950,6 +954,7 @@ mod tests {
         );
         assert_eq!(export.songs[0].catalog, None, "the church's TimelyChurch stays at home");
         assert_eq!(export.songs[1].catalog.as_ref().map(|m| m.source.as_str()), Some("worshipleaderapp"));
+        assert_eq!(export.songs[2].catalog, None, "a songbook installed here stays here");
     }
 
     #[test]

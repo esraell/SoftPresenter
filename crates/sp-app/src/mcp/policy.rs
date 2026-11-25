@@ -171,6 +171,7 @@ fn refusal(args: &[String]) -> String {
         ("voxlive" | "canva" | "timelychurch" | "catalog", _) => {
             at_computer("Connections to other services, and their keys and sign-ins, are made")
         }
+        ("songbooks" | "songbook", _) => at_computer("Free songbooks are looked at, installed and removed"),
         ("song" | "library" | "playlist" | "bible" | "media" | "media-playlist", "delete" | "remove")
             if !(first == "playlist" && second == "remove") =>
         {

@@ -205,9 +205,10 @@ pub fn recommended_now() -> Vec<&'static str> {
 }
 
 /// The setup's Free Songs step: the recommended songbooks ticked, every other language a click
-/// away, and Not Now. True when Not Now was clicked, so the setup goes on with nothing to
-/// download.
-pub fn setup_step(ui: &mut egui::Ui, picked: &mut Picked, view: &mut View) -> bool {
+/// away, and Not Now; `more` draws what follows the list (the free songbooks shared by
+/// churches, `free_songbooks`). True when Not Now was clicked, so the setup goes on with
+/// nothing to download.
+pub fn setup_step(ui: &mut egui::Ui, picked: &mut Picked, view: &mut View, more: impl FnOnce(&mut egui::Ui)) -> bool {
     // Only Continue or Not Now, in this frame, confirms the choice.
     picked.confirmed = false;
     let recommended = recommended_now();
@@ -254,6 +255,8 @@ pub fn setup_step(ui: &mut egui::Ui, picked: &mut Picked, view: &mut View) -> bo
     } else if crate::setup::link(ui, t("setup.free_songs.others", "Other languages\u{2026}")).clicked() {
         picked.others = true;
     }
+    ui.add_space(12.0);
+    more(ui);
     ui.add_space(8.0);
     crate::setup::say(
         ui,
@@ -322,6 +325,22 @@ fn tick_row(ui: &mut egui::Ui, book: &Songbook, picked: &mut Picked, view: &View
     let here = view.known.installed.contains_key(book.code) || view.known.busy.contains_key(book.code);
     let ticked = here || (!view.known.offline && picked.ticked.iter().any(|code| code == book.code));
     let can = !here && !view.known.offline;
+    if tick_card(ui, book.name(), &view.detail(book.code), ticked, here, can).clicked() {
+        picked.toggle(book.code);
+    }
+}
+
+/// A card in a setup list of songbooks (the catalog's, and the free ones shared by churches,
+/// `free_songbooks`): a tick box, the name and what it is. `here` (on this computer, or on its
+/// way) shows a tick that can't be taken away; `can` says a click ticks or unticks it.
+pub(crate) fn tick_card(
+    ui: &mut egui::Ui,
+    name: &str,
+    detail: &str,
+    ticked: bool,
+    here: bool,
+    can: bool,
+) -> egui::Response {
     let width = ui.available_width();
     let (place, response) =
         ui.allocate_exact_size(vec2(width, 40.0), if can { Sense::click() } else { Sense::hover() });
@@ -341,12 +360,11 @@ fn tick_row(ui: &mut egui::Ui, book: &Songbook, picked: &mut Picked, view: &View
         let ink = if can { TEXT_DIM } else { TEXT_FAINT };
         ui.painter().rect_stroke(tick, 4.0, Stroke::new(1.2, ink), egui::StrokeKind::Inside);
     }
-    let detail = view.detail(book.code);
     let (name_at, detail_at) = if detail.is_empty() { (0.0, 0.0) } else { (-7.0, 9.0) };
     ui.painter().text(
         place.left_center() + vec2(40.0, name_at),
         Align2::LEFT_CENTER,
-        book.name(),
+        name,
         semibold(13.0),
         if can || here { TEXT } else { TEXT_FAINT },
     );
@@ -359,25 +377,24 @@ fn tick_row(ui: &mut egui::Ui, book: &Songbook, picked: &mut Picked, view: &View
             TEXT_DIM,
         );
     }
-    if response.clicked() {
-        picked.toggle(book.code);
-    }
+    response
 }
 
 /// A songbook on the Settings page: a card with its name and what it is, and a button (Download
 /// or Remove) when one applies. True when the button was clicked.
 fn button_row(ui: &mut egui::Ui, book: &Songbook, detail: &str, button: Option<&str>) -> bool {
+    button_card(ui, book.name(), detail, button)
+}
+
+/// A card in a list of songbooks to download (the catalog's on its Settings page, and the
+/// Free Songbooks window, `free_songbooks`): the name and what it is, and a button when one
+/// applies. True when the button was clicked.
+pub(crate) fn button_card(ui: &mut egui::Ui, name: &str, detail: &str, button: Option<&str>) -> bool {
     let width = ui.available_width().min(560.0);
     let (place, _) = ui.allocate_exact_size(vec2(width, 44.0), Sense::hover());
     ui.painter().rect_filled(place, 9.0, CARD);
     let (name_at, detail_at) = if detail.is_empty() { (0.0, 0.0) } else { (-8.0, 9.0) };
-    ui.painter().text(
-        place.left_center() + vec2(14.0, name_at),
-        Align2::LEFT_CENTER,
-        book.name(),
-        semibold(13.0),
-        TEXT,
-    );
+    ui.painter().text(place.left_center() + vec2(14.0, name_at), Align2::LEFT_CENTER, name, semibold(13.0), TEXT);
     if !detail.is_empty() {
         ui.painter().text(
             place.left_center() + vec2(14.0, detail_at),

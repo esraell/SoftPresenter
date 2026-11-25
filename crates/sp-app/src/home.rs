@@ -573,6 +573,9 @@ pub struct HomeState {
     pub setup_done: bool,
     /// The song catalog's songbooks as the setup and Settings show them (`songbooks`).
     pub songbooks: crate::songbooks::View,
+    /// The free songbooks shared by churches, as their window and the setup show them
+    /// (`free_songbooks`).
+    pub free_songbooks: crate::free_songbooks::View,
     /// The song catalog's songs in the find box and the slides area (`catalog_songs`).
     pub catalog: crate::catalog_songs::CatalogSongs,
     /// Settings › Integrations › Command line: where the sp command stands, and what it said.
@@ -1957,6 +1960,7 @@ impl Default for HomeState {
             setup_request: None,
             setup_done: false,
             songbooks: crate::songbooks::View::default(),
+            free_songbooks: crate::free_songbooks::View::default(),
             catalog: crate::catalog_songs::CatalogSongs::default(),
             command_line: crate::cli_install::Card::default(),
             mcp: crate::mcp::pane::View::load(),
@@ -2210,6 +2214,7 @@ impl HomeState {
             || self.library_search.is_some()
             || self.setup.is_some()
             || !self.bible.options.details.is_empty()
+            || self.free_songbooks.open
     }
 
     /// Whether an Escape pressed in the Edit view has something there to do, which it does
@@ -2447,6 +2452,10 @@ fn home_view(
         state.new_song_sheet = Some(NewSong { title, focus: true, ..NewSong::default() });
     }
     new_song_sheet(ui, state);
+    // The Free Songbooks window, from the import menu (its downloads go on when it is closed).
+    if state.free_songbooks.open {
+        crate::free_songbooks::window(ui.ctx(), &mut state.free_songbooks);
+    }
     // Bibles finished downloading go on the shelf whether or not the Bibles window is open.
     {
         let bible = &mut state.bible;

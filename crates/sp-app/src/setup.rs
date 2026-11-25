@@ -44,7 +44,8 @@ pub enum Step {
     Welcome,
     Screens,
     Songs,
-    /// Free songbooks from the song catalog, where it is offered (`songbooks`).
+    /// Free songbooks: those shared by churches (`free_songbooks`), and the song catalog's
+    /// where it is offered (`songbooks`).
     FreeSongs,
     Bibles,
     Permissions,
@@ -67,12 +68,10 @@ impl Step {
 }
 
 /// The steps on `system`, in order. Linux has no Permissions step: nothing there asks. Free
-/// Songs follows Songs where the song catalog is offered (`catalog::offered`).
-fn steps(system: System, catalog: bool) -> Vec<Step> {
-    let mut steps = vec![Step::Welcome, Step::Screens, Step::Songs];
-    if catalog {
-        steps.push(Step::FreeSongs);
-    }
+/// Songs follows Songs: the songbooks shared by churches, and the song catalog's too where it is
+/// offered (`catalog::offered`).
+fn steps(system: System) -> Vec<Step> {
+    let mut steps = vec![Step::Welcome, Step::Screens, Step::Songs, Step::FreeSongs];
     steps.push(Step::Bibles);
     if system != System::Linux {
         steps.push(Step::Permissions);
@@ -94,8 +93,10 @@ pub struct Setup {
     pub looked: bool,
     /// What bringing songs in came to, in plain words.
     pub songs_said: Option<String>,
-    /// The songbooks ticked on the Free Songs step.
+    /// The song catalog's songbooks ticked on the Free Songs step.
     pub free_songs: crate::songbooks::Picked,
+    /// The free songbooks shared by churches ticked on the Free Songs step.
+    pub shared: crate::free_songbooks::Picked,
 }
 
 impl Setup {
@@ -106,6 +107,7 @@ impl Setup {
             looked: false,
             songs_said: None,
             free_songs: crate::songbooks::Picked::default(),
+            shared: crate::free_songbooks::Picked::default(),
         }
     }
 
@@ -175,8 +177,8 @@ pub fn setup_ui(ctx: &egui::Context, show: &Show, state: &mut HomeState, command
         .frame(frame)
         .show(ctx, |ui| {
             let system = System::THIS;
-            let steps = steps(system, crate::catalog::offered());
-            // A step this build doesn't offer (Free Songs named by a testing aid) is never shown.
+            let steps = steps(system);
+            // A step this system doesn't have (Permissions on Linux) is never shown.
             if !steps.contains(&setup.step) {
                 setup.step = steps[0];
             }
@@ -188,9 +190,7 @@ pub fn setup_ui(ctx: &egui::Context, show: &Show, state: &mut HomeState, command
                 Step::Welcome => welcome(ui, system),
                 Step::Screens => screens(ui, state),
                 Step::Songs => songs(ui, &mut setup, state, system),
-                Step::FreeSongs => {
-                    not_now = crate::songbooks::setup_step(ui, &mut setup.free_songs, &mut state.songbooks);
-                }
+                Step::FreeSongs => not_now = free_songs(ui, &mut setup, state),
                 Step::Bibles => bibles(ui, state),
                 Step::Permissions => permissions(ui, system),
                 Step::Done => done(ui, show, state, commands),
@@ -219,6 +219,7 @@ pub fn setup_ui(ctx: &egui::Context, show: &Show, state: &mut HomeState, command
                         // Continue on Free Songs: what is ticked downloads once the setup closes.
                         if setup.step == Step::FreeSongs {
                             setup.free_songs.confirmed = true;
+                            setup.shared.confirmed = true;
                         }
                         if last {
                             open = false;
@@ -238,7 +239,27 @@ pub fn setup_ui(ctx: &egui::Context, show: &Show, state: &mut HomeState, command
         state.setup_done = true;
         state.identify = false;
         crate::songbooks::setup_closed(&setup.free_songs, &mut state.songbooks);
+        crate::free_songbooks::setup_closed(&setup.shared, &mut state.free_songbooks);
     }
+}
+
+/// The Free Songs step: the songbooks shared by churches, under the song catalog's where that
+/// is offered. True when Not Now was clicked (nothing of either is downloaded).
+fn free_songs(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState) -> bool {
+    let not_now = if crate::catalog::offered() {
+        setup.shared.confirmed = false;
+        let (shared, view) = (&mut setup.shared, &mut state.free_songbooks);
+        crate::songbooks::setup_step(ui, &mut setup.free_songs, &mut state.songbooks, |ui| {
+            crate::free_songbooks::setup_section(ui, shared, view, true);
+        })
+    } else {
+        crate::free_songbooks::setup_step(ui, &mut setup.shared, &mut state.free_songbooks)
+    };
+    // The catalog's Not Now clears its own ticks; the shared songbooks' go with them.
+    if not_now {
+        setup.shared.not_now();
+    }
+    not_now
 }
 
 /// The dots along the top: one for each step, the one now lit.
@@ -893,7 +914,8 @@ mod tests {
                 words.extend([asks.title, asks.intro, asks.after].map(str::to_owned));
                 words.extend(asks.questions.iter().flat_map(|(what, why)| [what.to_string(), why.to_string()]));
             }
-            words.extend(steps(system, true).iter().map(|step| step.name().to_owned()));
+            words.extend(steps(system).iter().map(|step| step.name().to_owned()));
+            words.push(crate::free_songbooks::later_words().to_owned());
             words.join("\n")
         })
     }
@@ -916,18 +938,17 @@ mod tests {
         for said in ["macOS may ask", "on this Mac", "the File menu", "Word", "What macOS will ask", "Local Network"] {
             assert!(words.contains(said), "a Mac doesn't hear {said:?}:\n{words}");
         }
-        assert_eq!(steps(System::Mac, false).len(), 6);
+        assert_eq!(steps(System::Mac).len(), 7);
     }
 
     #[test]
-    fn free_songs_follows_songs_only_where_the_catalog_is_offered() {
+    fn free_songs_follows_songs_in_every_build() {
+        // The songbooks shared by churches are offered in every build, the song catalog's too
+        // where it is offered: the step follows Songs on every system.
         for system in [System::Mac, System::Windows, System::Linux] {
-            // Not offered (a release): the steps as they always were.
-            assert!(!steps(system, false).contains(&Step::FreeSongs), "{system:?}");
-            let offered = steps(system, true);
-            let songs = offered.iter().position(|step| *step == Step::Songs);
-            assert_eq!(offered.get(songs.map_or(0, |at| at + 1)), Some(&Step::FreeSongs), "{system:?}");
-            assert_eq!(offered.len(), steps(system, false).len() + 1);
+            let steps = steps(system);
+            let songs = steps.iter().position(|step| *step == Step::Songs);
+            assert_eq!(steps.get(songs.map_or(0, |at| at + 1)), Some(&Step::FreeSongs), "{system:?}");
         }
         // A testing aid opens it at a step by name.
         assert_eq!(Setup::opened_at("free-songs").step, Step::FreeSongs);
@@ -943,10 +964,13 @@ mod tests {
             assert!(windows.contains(said), "Windows doesn't hear {said:?}:\n{windows}");
         }
         assert!(windows.contains("this computer") && windows.contains("\u{2193} button in the left column"));
-        assert!(steps(System::Windows, false).contains(&Step::Permissions));
+        assert!(steps(System::Windows).contains(&Step::Permissions));
         // Nothing asks on Linux, so it has no Permissions step.
         assert!(asks(System::Linux).is_none());
-        assert_eq!(steps(System::Linux, false), [Step::Welcome, Step::Screens, Step::Songs, Step::Bibles, Step::Done]);
+        assert_eq!(
+            steps(System::Linux),
+            [Step::Welcome, Step::Screens, Step::Songs, Step::FreeSongs, Step::Bibles, Step::Done]
+        );
         assert!(!all_words(System::Linux).contains("Permissions"));
     }
 

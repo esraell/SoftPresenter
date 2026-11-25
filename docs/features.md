@@ -302,6 +302,36 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   library, noted as gone. Every catalog song carries the credit "From Worship Leader App" and the
   source's site. Downloading, checking and removing are done at the computer, not from the remote
   page. See [cli.md](cli.md#the-song-catalog) and [licences/song-catalog.md](licences/song-catalog.md).
+- **Free songbooks shared by churches**, in every build: fifteen songbooks many people have put
+  together over the years and share free on a public page (Russian: Песнь Возрождения 3300, 3055
+  and 2001, Песнь Возрождения Совета Церквей 2006, Звуки неба 2010; Ukrainian: Євангельські Пісні,
+  Пісні Спасенних, Псалмоспіви; Czech: Kancionály CB, Laudate, Vánoce; Slovak: Slovenské chvály;
+  German: Gemeinschafts Lieder Buch; English: Christian Hymns, Worship Songs). Import Songs ›
+  **Free Songbooks…** (the ↓ button over the library; File › Import… on a Mac) opens a window
+  that lists them by language, the language SoftPresenter speaks and the computer's first (so a
+  Czech, Slovak or German computer sees its songbooks after the English ones), each with its songs
+  and download size, Install (with how far its download has got), or Remove once installed
+  (asking first); under the list, that the songs belong to their writers and a church's licence
+  (such as CCLI) covers showing them. The setup's Free Songs step lists them too, in every build
+  (under the song catalog's in a development build), with the first songbook of the operator's
+  language ticked (Песнь Возрождения 3300 for Russian, Євангельські Пісні for Ukrainian), every
+  other a click away; Continue installs what is ticked once the setup closes, Not Now nothing. A
+  songbook is downloaded **only when chosen**, straight from the site of the page that shares
+  it (SoftPresenter keeps no copy), over HTTPS only (redirects too), on a thread of its own, and
+  installed only when it is byte for byte the file this version expects: a length other than the
+  one expected is refused before it is read, nothing past it is read, and its SHA-256 is checked
+  before anything is written; a file that has changed on the site is refused, saying a copy the
+  church trusts can be brought in with Song Files…. Its songs then come in through the songbook
+  import File › Import Songs uses: a library named after the songbook, each song with its number
+  before its title, a song the library has already (word for word, under the same title) not added
+  twice. They come in once nothing is on screen, without choosing a song or closing anything; a
+  notice says how many. Each song is marked with the songbook it came from, so an installed
+  songbook isn't downloaded again (it says how to remove it first), and Remove takes back out, to
+  the Trash, the songs nobody has changed and no playlist or other library uses (the rest stay as
+  the church's own), and the songbook's library once empty. `sp songbooks`, `sp songbook install
+  NAME` and `sp songbook remove NAME --yes`; installing and removing are done at the computer, not
+  from the remote page or by an AI assistant. See [cli.md](cli.md#free-songbooks) and
+  [licences/free-songbooks.md](licences/free-songbooks.md).
 - **Dropping files from the Finder lands them where the pointer is.** Song files of every
   kind (song documents and bundles, text, lyric and ChordPro files, songbooks, song packs,
   folders of songs) always go to the songs, never into the media bin: dropped on a playlist (a
@@ -1343,7 +1373,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   offered, the audience screen shows in a window until a TV or projector is plugged in (it
   then fills it at once), or goes over NDI; bringing songs in (one click for a library of
   `.pro` song documents found in the Documents folder, "Look for a Song Library", or song
-  files); in a development build, free songbooks to start with (see the song catalog); which
+  files); free songbooks shared by churches to start with (and in a development build the song
+  catalog's); which
   Bible goes on top and which below; and what the system will ask permission
   for and why: on a Mac the local network, the Documents folder and the app that draws a
   presentation as pictures; on Windows the firewall, the first time a screen is sent over NDI

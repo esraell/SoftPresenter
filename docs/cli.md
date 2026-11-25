@@ -684,6 +684,41 @@ their file's name in the pack. Correcting a song's words after its first section
 the key nor the song's place in the library; changing its title or first section is a new song in
 the catalog, and the old one is marked gone.
 
+## Free songbooks
+
+Songbooks shared free by churches (Russian, Ukrainian, Czech, Slovak, German and English), the
+same ones the window offers under Import Songs › Free Songbooks…. A songbook is downloaded from
+the page that shares it only when it is installed, over HTTPS, and installed only when it is byte
+for byte the file this version expects (its size and SHA-256); its songs then come into the
+library as File › Import Songs brings a songbook's: a library named after the songbook, each song
+with its number before its title. They come in once nothing is on screen, and the window is left
+as it is.
+
+| Command | Does |
+|---|---|
+| `songbooks` | Every songbook offered: its short name, language, name, songs, the download's size, and whether it is installed (with the songs in its library), downloading, or waiting for the screens to clear. `--json` also gives each file's size in bytes and SHA-256. Open to remote pages |
+| `songbook install NAME` | Downloads a songbook and brings its songs in (a background job: `--wait` waits, or `sp job N`). NAME is its short name (`pv3300`), its name, or its file's name. A songbook installed already is refused, saying how to remove it first: the file is fixed, so a second download would bring nothing new. A file that isn't the one expected is refused and nothing is written. At the computer only |
+| `songbook remove NAME --yes` | Takes a songbook's songs back out of the library, to the Trash (together, in a folder named after it), and its library once empty. A song you changed, and one a playlist or another library uses, stays as yours. Refused while anything is on screen. At the computer only |
+
+    $ sp songbook install pv3300 --wait
+    Installed Песнь Возрождения 3300: 3,301 songs, in the library Песнь Возрождения 3300.
+    $ sp songbooks
+    Free songbooks shared by churches:
+      kancionaly-cb     Czech      Kancionály CB  578 songs, 570 KB  not installed
+      …
+      pv3300            Russian    Песнь Возрождения 3300  3301 songs, 4.7 MB  installed (3301 songs in its library)
+      …
+    $ sp songbook install pv3300
+    Песнь Возрождения 3300 is installed already (3,301 songs). To install it again, remove it first: Remove in the Free Songbooks window, or sp songbook remove pv3300 --yes.
+    $ sp songbook remove pv3300 --yes
+    Removed Песнь Возрождения 3300: 3,301 songs went to the Trash.
+
+A song brought in from a songbook carries a mark saying which (`catalog` in the song file, with
+`"source": "free-songbooks"`), and a fingerprint of the song as it came, so the app can tell the
+songs the church has changed. Songs the library has already, word for word under the same title
+(the editions of Песнь Возрождения share many), aren't added twice: the one there goes into the
+new songbook's library too, and Remove leaves it while another library uses it.
+
 ## Changing a slide
 
 | Command | Does |
