@@ -100,7 +100,7 @@
   "settings.transition.title": "Между слайдами",
   "settings.transition.about": "Как один слайд сменяется следующим",
   "settings.transition.own": "У песни или слайда может быть свой переход",
-  "settings.transition.cut": "Сразу",
+  "settings.transition.cut": "Мгновенно",
   "settings.transition.more": "Ещё…",
   "settings.transition.more.about": "Все виды, их длительность и направление",
   "settings.continuous": "Переходить к следующему пункту",

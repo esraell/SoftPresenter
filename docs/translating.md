@@ -165,9 +165,9 @@ means. The Ukrainian tables follow the same glossary, so the two read alike.
   never «ты». Sentence case everywhere, Title Case of the English included («Очистить всё»).
   Capitals only where the English has them (the small captions the app sets in capitals are
   written in sentence case). ё is always written.
-- **Punctuation.** «…» round a name, as `format.json` says; only where the English has quotes round
-  the placeholder, because many values come already quoted by `i18n::quoted`. The ellipsis … where
-  the English has it; a dash is « — ».
+- **Punctuation.** «…» round a name, as `format.json` says, but never round a placeholder the code
+  fills already quoted (`i18n::quoted`, as for `{title}` in «Удалить {title}?»): look at the call
+  before adding them. The ellipsis … where the English has it; a dash is « — ».
 - **Names in sentences never take a case ending.** A placeholder gets a head noun («Экран «{screen}»
   выключен», «в список «{list}»») or stands before a colon («{name}: не удалось прочитать»).
 - **Plurals** have three forms, each with `{n}`: `["{n} песня", "{n} песни", "{n} песен"]`. A
