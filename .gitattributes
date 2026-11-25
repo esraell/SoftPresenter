@@ -1,0 +1,20 @@
+# Text files are checked out with LF line endings on every system, whatever git's own setting
+# (`core.autocrlf`, which Git for Windows and GitHub's Windows machines turn on). Many are built
+# into the app (the Remote Control page, the assistants' skills, the translation tables, sample
+# and test files read with `include_str!`), and a Windows build from a Windows checkout must
+# carry the same bytes as one from a Mac: the same page, the same skills with the same checksums.
+* text=auto eol=lf
+
+# Never changed, whatever they hold.
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.ttf binary
+*.woff2 binary
+*.mp4 binary
+*.h264 binary
+*.hevc binary
+*.sps binary
+*.sqlite binary
+*.spbible binary
