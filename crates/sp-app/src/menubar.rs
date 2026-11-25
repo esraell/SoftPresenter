@@ -5,6 +5,8 @@
 #[cfg(any(target_os = "macos", test))]
 use winit::keyboard::{KeyCode, ModifiersState};
 
+use crate::i18n::{t, tk};
+
 /// What a menu item does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -160,7 +162,8 @@ pub enum System {
     BringAllToFront,
 }
 
-/// One line of a menu.
+/// One line of a menu. Its words are in English, the name `sp menu` lists and chooses it by; the
+/// menu bar draws them in the language that is set (`item_words`, `title_words`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Entry {
     /// An item that does something when chosen.
@@ -526,12 +529,15 @@ impl Shortcut {
 
 impl Shortcut {
     /// The shortcut as Windows and Linux write it: "Ctrl+Shift+F" (there the Command key is Ctrl,
-    /// and a Control shortcut is Ctrl too).
+    /// and a Control shortcut is Ctrl too), with Shift as the list of keys writes it, as the
+    /// language's keyboards print it (Mayús in Spanish).
     pub fn words(self) -> String {
         let mut out = String::new();
-        for (on, word) in [(self.command || self.control, "Ctrl+"), (self.option, "Alt+"), (self.shift, "Shift+")] {
+        let shift = t("keys.cap.shift", "Shift");
+        for (on, word) in [(self.command || self.control, "Ctrl"), (self.option, "Alt"), (self.shift, shift)] {
             if on {
                 out.push_str(word);
+                out.push('+');
             }
         }
         out.push(self.key);
@@ -539,15 +545,68 @@ impl Shortcut {
     }
 }
 
-/// Every menu bar item that has a shortcut, with its menu, its name and the shortcut as this
-/// computer writes it, in menu order (the list of keys shows them).
+/// The words of a line of the menu bar: its key in the tables and its English.
+type Words = (&'static str, &'static str);
+
+/// The words the menu bar draws for an item: every item of `MENUS` has them, with the same
+/// English as the table (a test checks it). The items only `sp menu` has are never drawn, and
+/// keep their English.
+fn item_words(action: Action) -> Option<Words> {
+    use Action as A;
+    Some(match action {
+        A::Settings => tk("menubar.app.settings", "Settings…"),
+        A::Quit => tk("menubar.app.quit", "Quit SoftPresenter"),
+        A::NewSong => tk("menubar.file.new_song", "New Song"),
+        A::Import => tk("menubar.file.import", "Import…"),
+        A::CloseWindow => tk("menubar.file.close_window", "Close Window"),
+        A::Undo => tk("menubar.edit.undo", "Undo"),
+        A::Redo => tk("menubar.edit.redo", "Redo"),
+        A::Cut => tk("menubar.edit.cut", "Cut"),
+        A::Copy => tk("menubar.edit.copy", "Copy"),
+        A::Paste => tk("menubar.edit.paste", "Paste"),
+        A::PasteMatchStyle => tk("menubar.edit.paste_match_style", "Paste and Match Style"),
+        A::Delete => tk("menubar.edit.delete", "Delete"),
+        A::SelectAll => tk("menubar.edit.select_all", "Select All"),
+        A::Find => tk("menubar.edit.find", "Find…"),
+        A::ShowView => tk("menubar.view.service", "Service"),
+        A::BibleView => tk("menubar.view.bible", "Bible"),
+        A::EditView => tk("menubar.view.edit", "Edit"),
+        A::Website => tk("menubar.help.website", "SoftPresenter Help"),
+        A::KeysSheet => tk("menubar.help.keys", "Keys…"),
+        A::ReportIssue => tk("menubar.help.report_issue", "Report an Issue…"),
+        _ => return None,
+    })
+}
+
+/// The words the menu bar draws for a menu's title. The code knows a menu by its English (the
+/// Window and Help menus are handed to macOS by it). The first menu has none: macOS writes the
+/// app's name there itself.
+fn title_words(title: &str) -> Option<Words> {
+    Some(match title {
+        "File" => tk("menubar.file", "File"),
+        "Edit" => tk("menubar.edit", "Edit"),
+        "View" => tk("menubar.view", "View"),
+        "Window" => tk("menubar.window", "Window"),
+        "Help" => tk("menubar.help", "Help"),
+        _ => return None,
+    })
+}
+
+/// The words in the language that is set, or `english` where there are none.
+fn drawn(words: Option<Words>, english: &'static str) -> &'static str {
+    words.map_or(english, |(key, english)| t(key, english))
+}
+
+/// Every menu bar item that has a shortcut, with its menu, its name (both as the menu bar draws
+/// them, in the language that is set) and the shortcut as this computer writes it, in menu order
+/// (the list of keys shows them).
 pub fn shortcuts() -> Vec<(&'static str, &'static str, String)> {
     fn add(menu: &'static str, entries: &'static [Entry], into: &mut Vec<(&'static str, &'static str, String)>) {
         for entry in entries {
             match entry {
-                Entry::Do(_, label, Some(shortcut)) | Entry::Check(_, label, Some(shortcut)) => {
+                Entry::Do(action, label, Some(shortcut)) | Entry::Check(action, label, Some(shortcut)) => {
                     let text = if cfg!(target_os = "macos") { shortcut.text() } else { shortcut.words() };
-                    into.push((menu, *label, text));
+                    into.push((menu, drawn(item_words(*action), label), text));
                 }
                 Entry::Sub(_, inside) => add(menu, inside, into),
                 _ => {}
@@ -556,7 +615,7 @@ pub fn shortcuts() -> Vec<(&'static str, &'static str, String)> {
     }
     let mut every = Vec::new();
     for (menu, entries) in MENUS {
-        add(menu, entries, &mut every);
+        add(drawn(title_words(menu), menu), entries, &mut every);
     }
     every
 }
@@ -720,57 +779,126 @@ mod mac {
     use muda::accelerator::{Accelerator, Code, Modifiers};
     use muda::{AboutMetadata, CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 
-    use super::{Action, Entry, Greying, MENUS, Shortcut, System, enabled, id_of};
+    use super::{
+        Action, Entry, Greying, MENUS, Shortcut, System, Words, drawn, enabled, id_of, item_words, title_words,
+    };
+    use crate::i18n::{self, Language, t, tk};
+
+    /// A line of the menus that has words, kept so they can follow the language.
+    enum Worded {
+        Item(MenuItem),
+        Check(CheckMenuItem),
+        Menu(Submenu),
+        System(PredefinedMenuItem),
+    }
+
+    impl Worded {
+        fn set_text(&self, text: &str) {
+            match self {
+                Worded::Item(item) => item.set_text(text),
+                Worded::Check(item) => item.set_text(text),
+                Worded::Menu(menu) => menu.set_text(text),
+                Worded::System(item) => item.set_text(text),
+            }
+        }
+    }
+
+    /// Our words for the items the system runs: muda's own are English. macOS may still name some
+    /// itself (Full Screen, which it calls Enter Full Screen or Exit Full Screen), in its own
+    /// language.
+    fn system_words(system: System) -> Words {
+        match system {
+            System::About => tk("menubar.app.about", "About SoftPresenter"),
+            System::Services => tk("menubar.app.services", "Services"),
+            System::Hide => tk("menubar.app.hide", "Hide SoftPresenter"),
+            System::HideOthers => tk("menubar.app.hide_others", "Hide Others"),
+            System::ShowAll => tk("menubar.app.show_all", "Show All"),
+            System::Minimize => tk("menubar.window.minimize", "Minimize"),
+            System::Zoom => tk("menubar.window.zoom", "Zoom"),
+            System::FullScreen => tk("menubar.view.full_screen", "Toggle Full Screen"),
+            System::BringAllToFront => tk("menubar.window.bring_all_to_front", "Bring All to Front"),
+        }
+    }
 
     /// What a menu's lines are built into, and what the menu bar keeps of them.
     struct Built {
         checks: Vec<(Action, CheckMenuItem, Option<bool>)>,
         items: Vec<(Action, MenuItem, bool)>,
+        /// Every line with words, and its words.
+        words: Vec<(Worded, Words)>,
+    }
+
+    impl Built {
+        fn keep_words(&mut self, line: Worded, words: Option<Words>) {
+            if let Some(words) = words {
+                self.words.push((line, words));
+            }
+        }
     }
 
     /// Builds one line of a menu (a group of choices with its own lines).
     fn item(entry: &Entry, built: &mut Built) -> Result<Box<dyn IsMenuItem>, String> {
         Ok(match entry {
             Entry::Do(action, label, shortcut) => {
-                let item = MenuItem::with_id(id_of(*action), *label, true, accelerator(*shortcut));
+                let words = item_words(*action);
+                let item = MenuItem::with_id(id_of(*action), drawn(words, label), true, accelerator(*shortcut));
                 built.items.push((*action, item.clone(), true));
+                built.keep_words(Worded::Item(item.clone()), words);
                 Box::new(item)
             }
             Entry::Check(action, label, shortcut) => {
-                let item = CheckMenuItem::with_id(id_of(*action), *label, true, false, accelerator(*shortcut));
+                let words = item_words(*action);
+                let item =
+                    CheckMenuItem::with_id(id_of(*action), drawn(words, label), true, false, accelerator(*shortcut));
                 built.checks.push((*action, item.clone(), Some(false)));
+                built.keep_words(Worded::Check(item.clone()), words);
                 Box::new(item)
             }
             Entry::Sub(title, entries) => {
-                let submenu = Submenu::new(*title, true);
+                let words = title_words(title);
+                let submenu = Submenu::new(drawn(words, title), true);
                 for entry in *entries {
                     let inside = item(entry, built)?;
                     submenu.append(inside.as_ref()).map_err(|e| format!("Could not build the menu bar: {e}"))?;
                 }
+                built.keep_words(Worded::Menu(submenu.clone()), words);
                 Box::new(submenu)
             }
             Entry::Line => Box::new(PredefinedMenuItem::separator()),
-            Entry::System(system) => Box::new(match system {
-                System::About => PredefinedMenuItem::about(
-                    Some("About SoftPresenter"),
-                    Some(AboutMetadata {
-                        name: Some("SoftPresenter".to_owned()),
-                        version: Some(env!("CARGO_PKG_VERSION").to_owned()),
-                        comments: Some("A free, open-source presentation app for church services.".to_owned()),
-                        website: Some("https://github.com/esraell/SoftPresenter".to_owned()),
-                        ..AboutMetadata::default()
-                    }),
-                ),
-                System::Services => PredefinedMenuItem::services(None),
-                System::Hide => PredefinedMenuItem::hide(Some("Hide SoftPresenter")),
-                System::HideOthers => PredefinedMenuItem::hide_others(None),
-                System::ShowAll => PredefinedMenuItem::show_all(None),
-                System::Minimize => PredefinedMenuItem::minimize(None),
-                System::Zoom => PredefinedMenuItem::maximize(Some("Zoom")),
-                System::FullScreen => PredefinedMenuItem::fullscreen(None),
-                System::BringAllToFront => PredefinedMenuItem::bring_all_to_front(None),
-            }),
+            Entry::System(system) => {
+                let words = system_words(*system);
+                let label = Some(t(words.0, words.1));
+                let item = system_item(*system, label);
+                built.keep_words(Worded::System(item.clone()), Some(words));
+                Box::new(item)
+            }
         })
+    }
+
+    /// An item the system runs, with our words on it.
+    fn system_item(system: System, label: Option<&str>) -> PredefinedMenuItem {
+        match system {
+            System::About => PredefinedMenuItem::about(
+                label,
+                // The panel macOS shows reads the name and the version; the comments and the
+                // website are other systems'.
+                Some(AboutMetadata {
+                    name: Some("SoftPresenter".to_owned()),
+                    version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+                    comments: Some("A free, open-source presentation app for church services.".to_owned()),
+                    website: Some("https://github.com/esraell/SoftPresenter".to_owned()),
+                    ..AboutMetadata::default()
+                }),
+            ),
+            System::Services => PredefinedMenuItem::services(label),
+            System::Hide => PredefinedMenuItem::hide(label),
+            System::HideOthers => PredefinedMenuItem::hide_others(label),
+            System::ShowAll => PredefinedMenuItem::show_all(label),
+            System::Minimize => PredefinedMenuItem::minimize(label),
+            System::Zoom => PredefinedMenuItem::maximize(label),
+            System::FullScreen => PredefinedMenuItem::fullscreen(label),
+            System::BringAllToFront => PredefinedMenuItem::bring_all_to_front(label),
+        }
     }
 
     fn code(key: char) -> Option<Code> {
@@ -852,20 +980,29 @@ mod mac {
         checks: Vec<(Action, CheckMenuItem, Option<bool>)>,
         /// The items that do something, and whether each is enabled now.
         items: Vec<(Action, MenuItem, bool)>,
+        /// Every line with words (the menus' titles too), and its words.
+        words: Vec<(Worded, Words)>,
+        /// The language the words were last set in.
+        language: Language,
     }
 
     impl MenuBar {
         /// Builds the menus and puts them in the menu bar. Call once the app has started.
         pub fn install() -> Result<MenuBar, String> {
+            // The language is read before the words: should the computer's language come in
+            // while they are built, the next `follow_language` sets them all again.
+            let language = i18n::current();
             let menu = Menu::new();
-            let mut built = Built { checks: Vec::new(), items: Vec::new() };
+            let mut built = Built { checks: Vec::new(), items: Vec::new(), words: Vec::new() };
             for (title, entries) in MENUS {
-                let submenu = Submenu::new(*title, true);
+                let words = title_words(title);
+                let submenu = Submenu::new(drawn(words, title), true);
                 for entry in *entries {
                     let item = item(entry, &mut built)?;
                     submenu.append(item.as_ref()).map_err(|e| format!("Could not build the menu bar: {e}"))?;
                 }
                 menu.append(&submenu).map_err(|e| format!("Could not build the menu bar: {e}"))?;
+                built.keep_words(Worded::Menu(submenu.clone()), words);
                 match *title {
                     "Window" => submenu.set_as_windows_menu_for_nsapp(),
                     "Help" => submenu.set_as_help_menu_for_nsapp(),
@@ -873,7 +1010,20 @@ mod mac {
                 }
             }
             menu.init_for_nsapp();
-            Ok(MenuBar { _menu: menu, checks: built.checks, items: built.items })
+            Ok(MenuBar { _menu: menu, checks: built.checks, items: built.items, words: built.words, language })
+        }
+
+        /// Puts the menus' words in the language that is set, which can change while the app
+        /// runs (Settings › General). Cheap when it hasn't changed.
+        pub fn follow_language(&mut self) {
+            let now = i18n::current();
+            if now == self.language {
+                return;
+            }
+            self.language = now;
+            for (line, (key, english)) in &self.words {
+                line.set_text(t(key, english));
+            }
         }
 
         /// Greys out the items that can't be chosen now (see [`enabled`]). Cheap when nothing
@@ -988,6 +1138,37 @@ mod tests {
             });
             assert!(command.is_some(), "{action:?} is in the menu bar but not among the commands");
             assert_eq!(command.map(|(_, key)| key), Some(shortcut), "{action:?}");
+        }
+    }
+
+    #[test]
+    fn the_menu_bar_draws_every_line_in_the_language_and_sp_menu_keeps_the_english() {
+        use crate::i18n::{Language, with_language};
+        // Every title and item of the menu bar has its words, with the table's English.
+        for (title, entries) in MENUS {
+            if *title != "SoftPresenter" {
+                assert_eq!(title_words(title).map(|(_, english)| english), Some(*title));
+            }
+            for entry in *entries {
+                if let Do(action, label, _) | Check(action, label, _) = entry {
+                    let words = item_words(*action);
+                    assert_eq!(words.map(|(_, english)| english), Some(*label), "{action:?}");
+                    assert!(words.is_some_and(|(key, _)| key.starts_with("menubar.")), "{action:?}");
+                }
+            }
+        }
+        // In Spanish the menu bar's words, and so the keys' list of its shortcuts, change; what
+        // `sp menu` lists and chooses by doesn't.
+        let english = with_language(Language::English, labelled_items);
+        assert_eq!(with_language(Language::Spanish, labelled_items), english);
+        let (english, spanish) =
+            (with_language(Language::English, shortcuts), with_language(Language::Spanish, shortcuts));
+        assert_eq!(english.len(), spanish.len());
+        for (english, spanish) in english.iter().zip(&spanish) {
+            assert_ne!(english.1, spanish.1, "{english:?}");
+            if english.0 != "SoftPresenter" {
+                assert_ne!(english.0, spanish.0, "{english:?}");
+            }
         }
     }
 

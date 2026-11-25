@@ -767,6 +767,7 @@ mod tests {
         "dialogs",
         "find",
         "notices",
+        "menubar",
     ];
 
     #[test]

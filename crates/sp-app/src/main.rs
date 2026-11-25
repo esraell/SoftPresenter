@@ -9911,6 +9911,8 @@ impl App {
             // A field being typed in, or a window of its own with the keyboard (Settings), has
             // an undo of its own: Undo and Redo stay on for it.
             let in_panel = running.panels.iter().any(|panel| Some(panel.window.id()) == self.focused);
+            // The menus' words follow the language set (cheap when it hasn't changed).
+            menu.follow_language();
             menu.set_enabled(&menubar::Greying {
                 editing: state.editing.is_some(),
                 typing: running.egui_ctx.text_edit_focused() || in_panel,
