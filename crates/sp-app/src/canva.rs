@@ -31,6 +31,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{t, tf, tn};
+
 /// Canva's Connect API, and where its sign-in page is.
 pub const LIVE_API: &str = "https://api.canva.com/rest/v1";
 pub const LIVE_AUTHORIZE: &str = "https://www.canva.com/api/oauth/authorize";
@@ -45,7 +47,10 @@ pub const SCOPE: &str = "design:content:read";
 
 /// The folder in the library's `Media` the video goes in, and the media playlist that follows it.
 pub const FOLDER: &str = "Canva Sync";
-pub const PLAYLIST: &str = "Announcements";
+/// The name the media playlist that follows the folder is made with, in the language set then.
+fn playlist() -> &'static str {
+    t("integrations.canva.playlist", "Announcements")
+}
 
 /// The folder Canva Sync puts the video in, in a data folder.
 fn folder_in(data: &Path) -> PathBuf {
@@ -257,53 +262,76 @@ impl Store {
             Store::File(path) => match std::fs::read(path) {
                 Ok(bytes) => bytes,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                Err(_) => return Err("The Canva sign-in kept for this test copy could not be read.".to_owned()),
+                Err(_) => {
+                    return Err(t(
+                        "integrations.canva.test_unreadable",
+                        "The Canva sign-in kept for this test copy could not be read.",
+                    )
+                    .to_owned());
+                }
             },
             #[cfg(target_os = "macos")]
             Store::Keychain => {
                 match security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
                     Ok(bytes) => bytes,
                     Err(e) if e.code() == -25300 => return Ok(None),
-                    Err(_) => return Err("The Canva sign-in could not be read from the Keychain.".to_owned()),
+                    Err(_) => {
+                        return Err(t(
+                            "integrations.canva.keychain_unreadable",
+                            "The Canva sign-in could not be read from the Keychain.",
+                        )
+                        .to_owned());
+                    }
                 }
             }
             #[cfg(not(target_os = "macos"))]
             Store::Keychain => return Ok(None),
         };
-        serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|_| "The Canva sign-in kept is damaged; sign in again.".to_owned())
+        serde_json::from_slice(&bytes).map(Some).map_err(|_| {
+            t("integrations.canva.damaged", "The Canva sign-in kept is damaged; sign in again.").to_owned()
+        })
     }
 
     /// Keeps the sign-in, as one write, and reads it back to be sure it is there. The error is a
     /// sentence.
     pub fn save(&self, secrets: &Secrets) -> Result<(), String> {
-        let bytes = serde_json::to_vec(secrets).map_err(|_| "The Canva sign-in could not be written.".to_owned())?;
+        let bytes = serde_json::to_vec(secrets)
+            .map_err(|_| t("integrations.canva.not_written", "The Canva sign-in could not be written.").to_owned())?;
         match self {
             Store::File(path) => {
                 if let Some(dir) = path.parent() {
                     let _ = std::fs::create_dir_all(dir);
                 }
                 let partial = path.with_extension("json.part");
-                write_private(&partial, &bytes)
-                    .and_then(|()| std::fs::rename(&partial, path))
-                    .map_err(|e| format!("The Canva sign-in could not be kept ({e})."))?;
+                write_private(&partial, &bytes).and_then(|()| std::fs::rename(&partial, path)).map_err(|e| {
+                    tf(
+                        "integrations.canva.not_kept",
+                        "The Canva sign-in could not be kept ({error}).",
+                        &[("error", &e.to_string())],
+                    )
+                })?;
             }
             #[cfg(target_os = "macos")]
             Store::Keychain => {
                 security_framework::passwords::set_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &bytes)
-                    .map_err(|_| "The Canva sign-in could not be kept in the Keychain.".to_owned())?;
+                    .map_err(|_| {
+                        t(
+                            "integrations.canva.not_kept.keychain",
+                            "The Canva sign-in could not be kept in the Keychain.",
+                        )
+                        .to_owned()
+                    })?;
             }
             #[cfg(not(target_os = "macos"))]
             Store::Keychain => {
-                return Err("Keeping the Canva sign-in needs macOS for now (on Windows it would go in the \
-                            Credential Manager, which SoftPresenter doesn't use yet)."
+                return Err(t("integrations.canva.mac_only", "Keeping the Canva sign-in needs macOS for now (on Windows it would go in the Credential Manager, which SoftPresenter doesn't use yet).")
                     .to_owned());
             }
         }
         match self.load() {
             Ok(Some(kept)) if kept == *secrets => Ok(()),
-            _ => Err("The Canva sign-in was written but couldn't be read back.".to_owned()),
+            _ => Err(t("integrations.canva.not_read_back", "The Canva sign-in was written but couldn't be read back.")
+                .to_owned()),
         }
     }
 
@@ -381,7 +409,13 @@ impl Settings {
         let partial = path.with_extension("json.part");
         std::fs::write(&partial, serde_json::to_string_pretty(self).unwrap_or_default())
             .and_then(|()| std::fs::rename(&partial, path))
-            .map_err(|e| format!("Canva Sync's settings could not be saved: {e}"))
+            .map_err(|e| {
+                tf(
+                    "integrations.canva.settings_not_saved",
+                    "Canva Sync's settings could not be saved: {error}",
+                    &[("error", &e.to_string())],
+                )
+            })
     }
 }
 
@@ -403,14 +437,18 @@ impl Failure {
     pub fn words(&self) -> String {
         match self {
             Failure::SignInGone(why) | Failure::Doubtful(why) | Failure::Other(why) => why.clone(),
-            Failure::Cancelled => "Stopped.".to_owned(),
+            Failure::Cancelled => t("integrations.canva.stopped", "Stopped.").to_owned(),
         }
     }
 }
 
 /// What a refresh answered but couldn't be read says.
-const MAYBE_USED_UP: &str =
-    "Canva may have used up the sign-in (its answer couldn't be read): sign in again if the next sync fails.";
+fn maybe_used_up() -> &'static str {
+    t(
+        "integrations.canva.maybe_used_up",
+        "Canva may have used up the sign-in (its answer couldn't be read): sign in again if the next sync fails.",
+    )
+}
 
 fn other(words: impl Into<String>) -> Failure {
     Failure::Other(words.into())
@@ -419,12 +457,12 @@ fn other(words: impl Into<String>) -> Failure {
 /// An HTTP request's failure in words, without the address (a download's address is a key).
 fn plain(e: &ureq::Error) -> &'static str {
     match e {
-        ureq::Error::Timeout(_) => "it took too long",
+        ureq::Error::Timeout(_) => t("integrations.canva.net.timeout", "it took too long"),
         ureq::Error::HostNotFound | ureq::Error::ConnectionFailed | ureq::Error::Io(_) => {
-            "it couldn't be reached (is this computer online?)"
+            t("integrations.canva.net.unreachable", "it couldn't be reached (is this computer online?)")
         }
-        ureq::Error::Tls(_) => "the secure connection failed",
-        _ => "the request failed",
+        ureq::Error::Tls(_) => t("integrations.canva.net.tls", "the secure connection failed"),
+        _ => t("integrations.canva.net.failed", "the request failed"),
     }
 }
 
@@ -459,14 +497,13 @@ fn call(
             .send(body.to_string()),
         None => agent.get(&url).header("Authorization", &auth).header("Accept", "application/json").call(),
     };
-    let mut response = sent.map_err(|e| other(format!("Canva couldn't be asked: {}.", plain(&e))))?;
+    let mut response = sent.map_err(|e| {
+        other(tf("integrations.canva.not_asked", "Canva couldn't be asked: {why}.", &[("why", plain(&e))]))
+    })?;
     let status = response.status().as_u16();
-    let text = response
-        .body_mut()
-        .with_config()
-        .limit(LARGEST_REPLY)
-        .read_to_string()
-        .map_err(|_| other("Canva's answer broke off; the video stays as it was."))?;
+    let text = response.body_mut().with_config().limit(LARGEST_REPLY).read_to_string().map_err(|_| {
+        other(t("integrations.canva.broke_off", "Canva's answer broke off; the video stays as it was."))
+    })?;
     Ok((status, serde_json::from_str(&text).unwrap_or_default()))
 }
 
@@ -486,7 +523,13 @@ fn token_request(places: &Places, secrets: &Secrets, form: &[(&str, &str)]) -> R
         .post(&format!("{}/oauth/token", places.api))
         .header("Authorization", &basic)
         .send_form(form.iter().copied());
-    let mut response = sent.map_err(|e| other(format!("Canva's sign-in couldn't be reached: {}.", plain(&e))))?;
+    let mut response = sent.map_err(|e| {
+        other(tf(
+            "integrations.canva.sign_in_unreachable",
+            "Canva's sign-in couldn't be reached: {why}.",
+            &[("why", plain(&e))],
+        ))
+    })?;
     let status = response.status().as_u16();
     let text = response.body_mut().with_config().limit(LARGEST_REPLY).read_to_string();
     // A refresh Canva answered may have used the token up: an answer that can't be read isn't a
@@ -494,25 +537,30 @@ fn token_request(places: &Places, secrets: &Secrets, form: &[(&str, &str)]) -> R
     let reply: serde_json::Value = match (&text, status) {
         (Ok(text), _) => match serde_json::from_str(text) {
             Ok(reply) => reply,
-            Err(_) if status == 200 => return Err(Failure::Doubtful(MAYBE_USED_UP.to_owned())),
+            Err(_) if status == 200 => return Err(Failure::Doubtful(maybe_used_up().to_owned())),
             Err(_) => serde_json::Value::Null,
         },
-        (Err(_), 200) => return Err(Failure::Doubtful(MAYBE_USED_UP.to_owned())),
-        (Err(_), code) => return Err(other(format!("Canva's sign-in answer broke off ({code})."))),
+        (Err(_), 200) => return Err(Failure::Doubtful(maybe_used_up().to_owned())),
+        (Err(_), code) => {
+            return Err(other(tf(
+                "integrations.canva.sign_in_broke_off",
+                "Canva's sign-in answer broke off ({code}).",
+                &[("code", &code.to_string())],
+            )));
+        }
     };
     match (status, canva_code(&reply)) {
         (200, _) => Ok(reply),
         (_, "invalid_grant") => Err(Failure::SignInGone(
-            "Canva no longer takes this sign-in (it was used elsewhere, or taken back). Sign in again \
-             (Settings › Integrations › Canva Sync)."
+            t("integrations.canva.sign_in_gone", "Canva no longer takes this sign-in (it was used elsewhere, or taken back). Sign in again (Settings › Integrations › Canva Sync).")
                 .to_owned(),
         )),
         (_, "invalid_client" | "unauthorized_client" | "invalid_field") | (401, _) => Err(Failure::SignInGone(
-            "Canva doesn't know that client ID and secret: check them in Canva's developer portal and sign in again."
+            t("integrations.canva.client_unknown", "Canva doesn't know that client ID and secret: check them in Canva's developer portal and sign in again.")
                 .to_owned(),
         )),
-        (429, _) => Err(other("Canva asked to wait a moment before signing in again; try again shortly.")),
-        (code, _) => Err(other(format!("Canva's sign-in answered with a problem ({code})."))),
+        (429, _) => Err(other(t("integrations.canva.sign_in_wait", "Canva asked to wait a moment before signing in again; try again shortly."))),
+        (code, _) => Err(other(tf("integrations.canva.sign_in_problem", "Canva's sign-in answered with a problem ({code}).", &[("code", &code.to_string())]))),
     }
 }
 
@@ -521,7 +569,7 @@ fn token_request(places: &Places, secrets: &Secrets, form: &[(&str, &str)]) -> R
 fn take_tokens(secrets: &mut Secrets, reply: &serde_json::Value) -> Result<(), Failure> {
     let field = |name: &str| reply.get(name).and_then(serde_json::Value::as_str).filter(|v| !v.is_empty());
     let (Some(access), Some(refresh)) = (field("access_token"), field("refresh_token")) else {
-        return Err(Failure::Doubtful(MAYBE_USED_UP.to_owned()));
+        return Err(Failure::Doubtful(maybe_used_up().to_owned()));
     };
     let lasts = reply.get("expires_in").and_then(serde_json::Value::as_i64).unwrap_or(4 * 60 * 60);
     secrets.access_token = Some(access.to_owned());
@@ -546,16 +594,21 @@ fn access_token(
     let lock = take_lock(&places.lock).map_err(other)?;
     // A sign-in this copy couldn't store before is stored first; otherwise the kept one is newest.
     if *unsaved && let Some(mine) = secrets.as_ref() {
-        places
-            .store
-            .save(mine)
-            .map_err(|why| other(format!("{why} The sign-in is held until SoftPresenter quits.")))?;
+        places.store.save(mine).map_err(|why| {
+            other(tf(
+                "integrations.canva.held",
+                "{why} The sign-in is held until SoftPresenter quits.",
+                &[("why", &why)],
+            ))
+        })?;
         *unsaved = false;
     } else if let Ok(Some(kept)) = places.store.load() {
         *secrets = Some(kept);
     }
     let Some(current) = secrets.as_mut() else {
-        return Err(Failure::SignInGone("Canva Sync isn't signed in.".to_owned()));
+        return Err(Failure::SignInGone(
+            t("integrations.canva.not_signed_in", "Canva Sync isn't signed in.").to_owned(),
+        ));
     };
     // It must last as long as a sync can (an export is polled for up to `export_for`).
     let needed = REFRESH_AHEAD + places.export_for.as_secs() as i64;
@@ -569,9 +622,10 @@ fn access_token(
     take_tokens(current, &reply)?;
     if let Err(why) = places.store.save(current) {
         *unsaved = true;
-        return Err(other(format!(
-            "{why} Canva gave a new sign-in, which works only here until SoftPresenter quits: fix the Keychain, \
-             then Sync Now keeps it."
+        return Err(other(tf(
+            "integrations.canva.unsaved",
+            "{why} Canva gave a new sign-in, which works only here until SoftPresenter quits: fix the Keychain, then Sync Now keeps it.",
+            &[("why", &why)],
         )));
     }
     crate::applog::event("canva", "refreshed the sign-in and kept it");
@@ -593,7 +647,11 @@ fn take_lock(path: &Path) -> Result<std::fs::File, String> {
     }
     let file =
         std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path).map_err(|_| {
-            "Canva Sync's lock in the library folder couldn't be opened, so nothing was done.".to_owned()
+            t(
+                "integrations.canva.lock",
+                "Canva Sync's lock in the library folder couldn't be opened, so nothing was done.",
+            )
+            .to_owned()
         })?;
     let until = Instant::now() + Duration::from_secs(60);
     loop {
@@ -603,9 +661,11 @@ fn take_lock(path: &Path) -> Result<std::fs::File, String> {
                 std::thread::sleep(Duration::from_millis(100));
             }
             Err(_) => {
-                return Err(
-                    "Another copy of SoftPresenter is using the Canva sign-in; try again in a moment.".to_owned()
-                );
+                return Err(t(
+                    "integrations.canva.other_copy",
+                    "Another copy of SoftPresenter is using the Canva sign-in; try again in a moment.",
+                )
+                .to_owned());
             }
         }
     }
@@ -650,6 +710,12 @@ impl std::fmt::Debug for Page {
     }
 }
 
+/// What Canva refusing the sign-in for a design says: an access token it took back early, which
+/// is refreshed once (see `sync_steps`).
+fn design_refused() -> &'static str {
+    t("integrations.canva.design_refused", "Canva refused the sign-in for that design.")
+}
+
 /// Every page of the design, in order.
 fn pages(places: &Places, token: &str, design: &str) -> Result<Vec<Page>, Failure> {
     let mut all = Vec::new();
@@ -658,13 +724,32 @@ fn pages(places: &Places, token: &str, design: &str) -> Result<Vec<Page>, Failur
         let (status, reply) = call(places, token, &format!("/designs/{design}/pages?offset={offset}&limit=200"), None)?;
         match status {
             200 => {}
-            401 => return Err(other("Canva refused the sign-in for that design.")),
-            403 => return Err(other("Canva says this sign-in can't see that design (it isn't shared with it).")),
-            404 => return Err(other("Canva doesn't know that design: check its link.")),
-            400 if canva_code(&reply) == "page_not_found" => {
-                return Err(other("That design has no pages (a Canva doc?): use a presentation."));
+            401 => return Err(other(design_refused())),
+            403 => {
+                return Err(other(t(
+                    "integrations.canva.design_hidden",
+                    "Canva says this sign-in can't see that design (it isn't shared with it).",
+                )));
             }
-            code => return Err(other(format!("Canva answered with a problem listing the pages ({code})."))),
+            404 => {
+                return Err(other(t(
+                    "integrations.canva.design_unknown",
+                    "Canva doesn't know that design: check its link.",
+                )));
+            }
+            400 if canva_code(&reply) == "page_not_found" => {
+                return Err(other(t(
+                    "integrations.canva.design_no_pages",
+                    "That design has no pages (a Canva doc?): use a presentation.",
+                )));
+            }
+            code => {
+                return Err(other(tf(
+                    "integrations.canva.pages_problem",
+                    "Canva answered with a problem listing the pages ({code}).",
+                    &[("code", &code.to_string())],
+                )));
+            }
         }
         let items = reply.get("items").and_then(serde_json::Value::as_array).cloned().unwrap_or_default();
         let count = items.len();
@@ -691,13 +776,15 @@ fn pages(places: &Places, token: &str, design: &str) -> Result<Vec<Page>, Failur
 /// The page numbers above the divider page, or why there are none to export.
 pub fn pages_above(pages: &[Page], divider: &str) -> Result<Vec<u32>, String> {
     let Some(at) = pages.iter().find(|page| page.id.as_deref() == Some(divider)) else {
-        return Err("The divider page isn't in the design any more, so the video wasn't made (it would take in the \
-                    pages below it). The video in the media bin stays as it was. Choose the divider again in \
-                    Settings › Integrations › Canva Sync."
+        return Err(t("integrations.canva.divider_gone", "The divider page isn't in the design any more, so the video wasn't made (it would take in the pages below it). The video in the media bin stays as it was. Choose the divider again in Settings › Integrations › Canva Sync.")
             .to_owned());
     };
     if at.number <= 1 {
-        return Err("There are no pages above the divider page; the video in the media bin stays as it was.".to_owned());
+        return Err(t(
+            "integrations.canva.nothing_above",
+            "There are no pages above the divider page; the video in the media bin stays as it was.",
+        )
+        .to_owned());
     }
     Ok((1..at.number).collect())
 }
@@ -712,15 +799,25 @@ fn export(places: &Places, token: &str, design: &str, pages: &[u32], cancel: &At
     let (status, reply) = call(places, token, "/exports", Some(body))?;
     if status != 200 {
         return Err(other(match status {
-            429 => "Canva asked to wait before another export; try again in a few minutes.".to_owned(),
-            code => format!("Canva wouldn't start the export ({code})."),
+            429 => t(
+                "integrations.canva.export_wait",
+                "Canva asked to wait before another export; try again in a few minutes.",
+            )
+            .to_owned(),
+            code => tf(
+                "integrations.canva.export_refused",
+                "Canva wouldn't start the export ({code}).",
+                &[("code", &code.to_string())],
+            ),
         }));
     }
     let job = reply
         .pointer("/job/id")
         .and_then(serde_json::Value::as_str)
         .filter(|id| id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
-        .ok_or_else(|| other("Canva's answer didn't say which export it started."))?
+        .ok_or_else(|| {
+            other(t("integrations.canva.export_unnamed", "Canva's answer didn't say which export it started."))
+        })?
         .to_owned();
     crate::applog::event("canva", &format!("exporting {} pages", pages.len()));
     let started = Instant::now();
@@ -729,30 +826,49 @@ fn export(places: &Places, token: &str, design: &str, pages: &[u32], cancel: &At
             return Err(Failure::Cancelled);
         }
         if started.elapsed() > places.export_for {
-            return Err(other("Canva's export didn't finish in time; the video stays as it was."));
+            return Err(other(t(
+                "integrations.canva.export_slow",
+                "Canva's export didn't finish in time; the video stays as it was.",
+            )));
         }
         let (status, reply) = call(places, token, &format!("/exports/{job}"), None)?;
         if status == 429 {
             continue;
         }
         if status != 200 {
-            return Err(other(format!("Canva answered with a problem about the export ({status}).")));
+            return Err(other(tf(
+                "integrations.canva.export_problem",
+                "Canva answered with a problem about the export ({code}).",
+                &[("code", &status.to_string())],
+            )));
         }
         match reply.pointer("/job/status").and_then(serde_json::Value::as_str) {
             Some("success") => {
-                return reply
-                    .pointer("/job/urls/0")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned)
-                    .ok_or_else(|| other("Canva's finished export had no address to download it from."));
+                return reply.pointer("/job/urls/0").and_then(serde_json::Value::as_str).map(str::to_owned).ok_or_else(
+                    || {
+                        other(t(
+                            "integrations.canva.export_no_address",
+                            "Canva's finished export had no address to download it from.",
+                        ))
+                    },
+                );
             }
             Some("failed") => {
                 let why = match reply.pointer("/job/error/code").and_then(serde_json::Value::as_str) {
-                    Some("license_required") => "a page uses something the church's Canva plan doesn't include",
-                    Some("approval_required") => "the design is waiting for approval in Canva",
-                    _ => "Canva couldn't make the video",
+                    Some("license_required") => t(
+                        "integrations.canva.export.license",
+                        "a page uses something the church's Canva plan doesn't include",
+                    ),
+                    Some("approval_required") => {
+                        t("integrations.canva.export.approval", "the design is waiting for approval in Canva")
+                    }
+                    _ => t("integrations.canva.export.failed_why", "Canva couldn't make the video"),
                 };
-                return Err(other(format!("The export failed: {why}. The video stays as it was.")));
+                return Err(other(tf(
+                    "integrations.canva.export_failed",
+                    "The export failed: {why}. The video stays as it was.",
+                    &[("why", why)],
+                )));
             }
             _ => {}
         }
@@ -791,34 +907,59 @@ fn download(
         .timeout_recv_body(Some(Duration::from_secs(60 * 60)))
         .build()
         .into();
-    let mut response =
-        agent.get(url).call().map_err(|e| other(format!("The video couldn't be downloaded: {}.", plain(&e))))?;
+    let mut response = agent.get(url).call().map_err(|e| {
+        other(tf(
+            "integrations.canva.not_downloaded",
+            "The video couldn't be downloaded: {why}.",
+            &[("why", plain(&e))],
+        ))
+    })?;
     if response.status().as_u16() != 200 {
-        return Err(other(format!("The video couldn't be downloaded ({}).", response.status().as_u16())));
+        return Err(other(tf(
+            "integrations.canva.not_downloaded.code",
+            "The video couldn't be downloaded ({code}).",
+            &[("code", &response.status().as_u16().to_string())],
+        )));
     }
     let total = response.body().content_length();
     let mut reader = response.body_mut().with_config().limit(LARGEST_VIDEO).reader();
     // A new file (never through something already at that name).
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(into)
-        .map_err(|e| other(format!("The video couldn't be saved ({e}).")))?;
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(into).map_err(|e| {
+        other(tf(
+            "integrations.canva.video_not_saved",
+            "The video couldn't be saved ({error}).",
+            &[("error", &e.to_string())],
+        ))
+    })?;
     let (mut done, mut buffer) = (0u64, vec![0u8; 256 * 1024]);
     progress(0, total);
     loop {
         if cancel.load(Ordering::Relaxed) {
             return Err(Failure::Cancelled);
         }
-        let read = reader.read(&mut buffer).map_err(|_| other("The download broke off; the video stays as it was."))?;
+        let read = reader.read(&mut buffer).map_err(|_| {
+            other(t("integrations.canva.download_broke_off", "The download broke off; the video stays as it was."))
+        })?;
         if read == 0 {
             break;
         }
-        file.write_all(&buffer[..read]).map_err(|e| other(format!("The video couldn't be saved ({e}).")))?;
+        file.write_all(&buffer[..read]).map_err(|e| {
+            other(tf(
+                "integrations.canva.video_not_saved",
+                "The video couldn't be saved ({error}).",
+                &[("error", &e.to_string())],
+            ))
+        })?;
         done += read as u64;
         progress(done, total);
     }
-    file.sync_all().map_err(|e| other(format!("The video couldn't be saved ({e}).")))?;
+    file.sync_all().map_err(|e| {
+        other(tf(
+            "integrations.canva.video_not_saved",
+            "The video couldn't be saved ({error}).",
+            &[("error", &e.to_string())],
+        ))
+    })?;
     Ok(done)
 }
 
@@ -829,7 +970,11 @@ pub fn looks_like_video(path: &Path) -> Result<u64, String> {
     let read = std::fs::File::open(path).and_then(|mut file| file.read(&mut head)).unwrap_or(0);
     let mp4 = head[..read].windows(4).any(|four| four == b"ftyp");
     if size < SMALLEST_VIDEO || !mp4 {
-        return Err("What Canva sent isn't a whole video, so it wasn't used; the video stays as it was.".to_owned());
+        return Err(t(
+            "integrations.canva.not_a_video",
+            "What Canva sent isn't a whole video, so it wasn't used; the video stays as it was.",
+        )
+        .to_owned());
     }
     Ok(size)
 }
@@ -844,12 +989,18 @@ pub fn video_name(now: chrono::DateTime<chrono::Local>) -> String {
 /// without ever showing a part-written file there: a rename, or on another disk a copy into a
 /// hidden file there first.
 fn put_in_place(from: &Path, folder: &Path, name: &str) -> Result<PathBuf, String> {
-    std::fs::create_dir_all(folder).map_err(|e| format!("The Canva Sync folder couldn't be made ({e})."))?;
+    std::fs::create_dir_all(folder).map_err(|e| {
+        tf(
+            "integrations.canva.folder_not_made",
+            "The Canva Sync folder couldn't be made ({error}).",
+            &[("error", &e.to_string())],
+        )
+    })?;
     let stem = name.strip_suffix(".mp4").unwrap_or(name);
     let to = std::iter::once(folder.join(name))
         .chain((2..100).map(|n| folder.join(format!("{stem} ({n}).mp4"))))
         .find(|path| !path.exists())
-        .ok_or("The Canva Sync folder has too many videos of that name.")?;
+        .ok_or(t("integrations.canva.folder_full", "The Canva Sync folder has too many videos of that name."))?;
     if std::fs::rename(from, &to).is_ok() {
         return Ok(to);
     }
@@ -863,7 +1014,11 @@ fn put_in_place(from: &Path, folder: &Path, name: &str) -> Result<PathBuf, Strin
     });
     copied.and_then(|()| std::fs::rename(&hidden, &to)).map_err(|e| {
         let _ = std::fs::remove_file(&hidden);
-        format!("The new video couldn't be put in the Canva Sync folder ({e}).")
+        tf(
+            "integrations.canva.not_put_in_place",
+            "The new video couldn't be put in the Canva Sync folder ({error}).",
+            &[("error", &e.to_string())],
+        )
     })?;
     let _ = std::fs::remove_file(from);
     Ok(to)
@@ -932,18 +1087,30 @@ impl Phase {
     pub fn words(&self) -> String {
         match self {
             Phase::Idle => String::new(),
-            Phase::SigningIn => "Waiting for the sign-in in the browser…".to_owned(),
-            Phase::Importing => "Bringing in the old script's sign-in…".to_owned(),
-            Phase::ReadingPages => "Reading the design's pages…".to_owned(),
-            Phase::Starting => "Starting…".to_owned(),
+            Phase::SigningIn => {
+                t("integrations.canva.phase.signing_in", "Waiting for the sign-in in the browser…").to_owned()
+            }
+            Phase::Importing => {
+                t("integrations.canva.phase.importing", "Bringing in the old script's sign-in…").to_owned()
+            }
+            Phase::ReadingPages => t("integrations.canva.phase.reading", "Reading the design's pages…").to_owned(),
+            Phase::Starting => t("integrations.canva.phase.starting", "Starting…").to_owned(),
             Phase::Exporting { since } => {
                 let seconds = since.elapsed().as_secs();
-                format!("Exporting… {}:{:02}", seconds / 60, seconds % 60)
+                tf(
+                    "integrations.canva.phase.exporting",
+                    "Exporting… {time}",
+                    &[("time", &format!("{}:{:02}", seconds / 60, seconds % 60))],
+                )
             }
             Phase::Downloading { done, total: Some(total) } if *total > 0 => {
-                format!("Downloading… {}%", (done * 100 / total).min(100))
+                let percent = crate::i18n::count((done * 100 / total).min(100));
+                tf("integrations.canva.phase.percent", "Downloading… {percent}%", &[("percent", &percent)])
             }
-            Phase::Downloading { done, .. } => format!("Downloading… {:.1} MB", *done as f64 / 1_000_000.0),
+            Phase::Downloading { done, .. } => {
+                let size = crate::i18n::number(*done as f64 / 1_000_000.0, 1);
+                tf("integrations.canva.phase.size", "Downloading… {size} MB", &[("size", &size)])
+            }
         }
     }
 }
@@ -980,7 +1147,7 @@ fn sync_steps(job: &mut SyncJob) -> Result<Synced, Failure> {
     let mut token = access_token(&job.places, &mut job.secrets, &mut job.unsaved, false)?;
     // An access token Canva refuses (taken back early) is refreshed once.
     let listed = match pages(&job.places, &token, &job.design) {
-        Err(Failure::Other(why)) if why.starts_with("Canva refused the sign-in") => {
+        Err(Failure::Other(why)) if why == design_refused() => {
             token = access_token(&job.places, &mut job.secrets, &mut job.unsaved, true)?;
             pages(&job.places, &token, &job.design)
         }
@@ -993,7 +1160,9 @@ fn sync_steps(job: &mut SyncJob) -> Result<Synced, Failure> {
     say(job, Phase::Exporting { since: Instant::now() });
     let url = export(&job.places, &token, &job.design, &above, &job.cancel)?;
     let staging = job.places.staging.join(format!("{DOWNLOADING}{}.mp4.part", base64(&random_bytes(9), URL_SAFE)));
-    std::fs::create_dir_all(&job.places.staging).map_err(|e| other(format!("No room for the download ({e}).")))?;
+    std::fs::create_dir_all(&job.places.staging).map_err(|e| {
+        other(tf("integrations.canva.no_room", "No room for the download ({error}).", &[("error", &e.to_string())]))
+    })?;
     let mut last_said = Instant::now() - Duration::from_secs(1);
     let mut progress = |done: u64, total: Option<u64>| {
         if last_said.elapsed() >= Duration::from_millis(250) || total == Some(done) {
@@ -1174,16 +1343,22 @@ fn request_line(stream: &mut std::net::TcpStream) -> String {
 /// over (it can't end the sign-in for anyone else); anything else asked of the listener is told
 /// it isn't there. The listener is let go when this returns. The code, if the operator agreed.
 fn wait_for_answer(listener: std::net::TcpListener, state: &str, cancel: &AtomicBool) -> Result<String, String> {
-    listener.set_nonblocking(true).map_err(|_| "The sign-in couldn't listen for Canva's answer.".to_owned())?;
+    listener.set_nonblocking(true).map_err(|_| {
+        t("integrations.canva.cant_listen", "The sign-in couldn't listen for Canva's answer.").to_owned()
+    })?;
     let until = Instant::now() + SIGN_IN_WAIT;
     // Said in the log once a sign-in, however many such answers come.
     let mut told_wrong_state = false;
     loop {
         if cancel.load(Ordering::Relaxed) {
-            return Err("The sign-in was stopped.".to_owned());
+            return Err(t("integrations.canva.sign_in_stopped", "The sign-in was stopped.").to_owned());
         }
         if Instant::now() > until {
-            return Err("No answer came from the browser in five minutes; try Sign In again.".to_owned());
+            return Err(t(
+                "integrations.canva.sign_in_timeout",
+                "No answer came from the browser in five minutes; try Sign In again.",
+            )
+            .to_owned());
         }
         let (mut stream, from) = match listener.accept() {
             Ok(accepted) => accepted,
@@ -1227,7 +1402,10 @@ fn wait_for_answer(listener: std::net::TcpListener, state: &str, cancel: &Atomic
             reply(
                 &mut stream,
                 "400 Bad Request",
-                "This answer isn't for SoftPresenter's sign-in. Nothing was changed.",
+                t(
+                    "integrations.canva.page.wrong_state",
+                    "This answer isn't for SoftPresenter's sign-in. Nothing was changed.",
+                ),
             );
             if !std::mem::replace(&mut told_wrong_state, true) {
                 crate::applog::problem(
@@ -1238,17 +1416,36 @@ fn wait_for_answer(listener: std::net::TcpListener, state: &str, cancel: &Atomic
             continue;
         }
         if let Some(error) = query_value(query, "error") {
-            reply(&mut stream, "200 OK", "Canva Sync wasn't signed in. You can close this tab.");
+            reply(
+                &mut stream,
+                "200 OK",
+                t("integrations.canva.page.not_signed_in", "Canva Sync wasn't signed in. You can close this tab."),
+            );
             return Err(match error.as_str() {
-                "access_denied" => "Canva Sync wasn't allowed in Canva; nothing was changed.".to_owned(),
-                _ => "Canva didn't sign Canva Sync in; nothing was changed.".to_owned(),
+                "access_denied" => {
+                    t("integrations.canva.denied", "Canva Sync wasn't allowed in Canva; nothing was changed.")
+                        .to_owned()
+                }
+                _ => t("integrations.canva.not_signed_in.why", "Canva didn't sign Canva Sync in; nothing was changed.")
+                    .to_owned(),
             });
         }
         let Some(code) = query_value(query, "code").filter(|code| !code.is_empty()) else {
-            reply(&mut stream, "400 Bad Request", "Canva's answer had no sign-in in it.");
-            return Err("Canva's answer had no sign-in in it; try again.".to_owned());
+            reply(
+                &mut stream,
+                "400 Bad Request",
+                t("integrations.canva.page.no_code", "Canva's answer had no sign-in in it."),
+            );
+            return Err(t("integrations.canva.no_code", "Canva's answer had no sign-in in it; try again.").to_owned());
         };
-        reply(&mut stream, "200 OK", "Signed in to Canva. You can close this tab and go back to SoftPresenter.");
+        reply(
+            &mut stream,
+            "200 OK",
+            t(
+                "integrations.canva.page.signed_in",
+                "Signed in to Canva. You can close this tab and go back to SoftPresenter.",
+            ),
+        );
         return Ok(code);
     }
 }
@@ -1268,7 +1465,8 @@ pub(crate) fn open_page(url: &str) -> std::io::Result<()> {
 }
 
 fn open_in_browser(url: &str) -> Result<(), String> {
-    open_page(url).map_err(|_| "The browser couldn't be opened for the sign-in.".to_owned())
+    open_page(url)
+        .map_err(|_| t("integrations.canva.no_browser", "The browser couldn't be opened for the sign-in.").to_owned())
 }
 
 /// Testing aid: follows a stand-in's sign-in page as a browser would (its answer is a redirect
@@ -1294,10 +1492,10 @@ fn sign_in(
     cancel: &AtomicBool,
 ) -> Result<Secrets, String> {
     let listener = std::net::TcpListener::bind(("127.0.0.1", places.redirect_port)).map_err(|_| {
-        format!(
-            "Port {} on this computer is in use, so the sign-in can't hear Canva's answer. Quit what uses it, then \
-             try again.",
-            places.redirect_port
+        tf(
+            "integrations.canva.port_busy",
+            "Port {port} on this computer is in use, so the sign-in can't hear Canva's answer. Quit what uses it, then try again.",
+            &[("port", &places.redirect_port.to_string())],
         )
     })?;
     let port = listener.local_addr().map(|at| at.port()).unwrap_or(places.redirect_port);
@@ -1412,18 +1610,36 @@ pub fn switch_off_steps(places: &Places, jobs: &[OldJob]) -> Vec<String> {
                 steps.push(format!("rm {file}"));
             }
             (OldKind::Daemon | OldKind::Agent, None) => {
-                steps.push("# the label of the next job could not be read: unload it by hand first".to_owned());
+                steps.push(
+                    t(
+                        "integrations.canva.step.unreadable",
+                        "# the label of the next job could not be read: unload it by hand first",
+                    )
+                    .to_owned(),
+                );
                 steps.push(format!("# rm {file}").replace('\'', ""));
             }
             (OldKind::Plugin, _) => steps.push(format!("rm {file}")),
         }
     }
     if jobs.is_empty() {
-        steps.push("# switch off whatever starts the old sync script: its LaunchDaemon or LaunchAgent".to_owned());
-        steps.push("# and any menu bar plugin that runs it".to_owned());
+        steps.push(
+            t(
+                "integrations.canva.step.switch_off",
+                "# switch off whatever starts the old sync script: its LaunchDaemon or LaunchAgent",
+            )
+            .to_owned(),
+        );
+        steps.push(t("integrations.canva.step.plugin", "# and any menu bar plugin that runs it").to_owned());
     }
-    steps.push("# when Canva Sync has made a video, delete the old script folder, which still holds".to_owned());
-    steps.push("# the secret of the integration:".to_owned());
+    steps.push(
+        t(
+            "integrations.canva.step.delete",
+            "# when Canva Sync has made a video, delete the old script folder, which still holds",
+        )
+        .to_owned(),
+    );
+    steps.push(t("integrations.canva.step.secret", "# the secret of the integration:").to_owned());
     steps.push(format!("# rm -r {}", for_terminal(&places.old_script)).replace('\'', ""));
     steps
 }
@@ -1453,24 +1669,27 @@ fn import_old(places: &Places) -> Result<Imported, String> {
         std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&lock_path)
     };
     let script_lock = opened.map_err(|_| {
-        "The old sync script's lock couldn't be opened, so its sign-in wasn't brought in (the script may be \
-         running): try again in a few minutes."
+        t("integrations.canva.old.lock", "The old sync script's lock couldn't be opened, so its sign-in wasn't brought in (the script may be running): try again in a few minutes.")
             .to_owned()
     })?;
     if script_lock.try_lock().is_err() {
-        return Err("The old sync script is running right now; try again in a few minutes.".to_owned());
+        return Err(t(
+            "integrations.canva.old.running",
+            "The old sync script is running right now; try again in a few minutes.",
+        )
+        .to_owned());
     }
     let mut notes = Vec::new();
     // A file it was writing when it stopped is left alone (its token may be the one that works).
     if places.old_script.join("tokens.json.tmp").exists() {
         notes.push(
-            "The old script left a half-saved tokens.json.tmp behind; it was left alone. If Canva refuses the \
-             sign-in, sign in again."
+            t("integrations.canva.old.half_saved", "The old script left a half-saved tokens.json.tmp behind; it was left alone. If Canva refuses the sign-in, sign in again.")
                 .to_owned(),
         );
     }
-    let creds = std::fs::read_to_string(places.old_script.join("creds.env"))
-        .map_err(|_| "The old script's creds.env couldn't be read.".to_owned())?;
+    let creds = std::fs::read_to_string(places.old_script.join("creds.env")).map_err(|_| {
+        t("integrations.canva.old.creds_unreadable", "The old script's creds.env couldn't be read.").to_owned()
+    })?;
     let value = |name: &str| {
         creds.lines().map(str::trim).filter(|line| !line.starts_with('#')).find_map(|line| {
             let (key, value) = line.split_once('=')?;
@@ -1478,18 +1697,28 @@ fn import_old(places: &Places) -> Result<Imported, String> {
         })
     };
     let (Some(client_id), Some(client_secret)) = (value("CANVA_CLIENT_ID"), value("CANVA_CLIENT_SECRET")) else {
-        return Err("The old script's creds.env doesn't have a client ID and secret.".to_owned());
+        return Err(t(
+            "integrations.canva.old.creds_empty",
+            "The old script's creds.env doesn't have a client ID and secret.",
+        )
+        .to_owned());
     };
     let tokens: serde_json::Value = std::fs::read(places.old_script.join("tokens.json"))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .ok_or("The old script's tokens.json couldn't be read.")?;
+        .ok_or(t("integrations.canva.old.tokens_unreadable", "The old script's tokens.json couldn't be read."))?;
     let refresh = tokens.get("refresh_token").and_then(serde_json::Value::as_str).filter(|t| !t.is_empty());
     let Some(refresh) = refresh else {
-        return Err("The old script's tokens.json has no refresh token.".to_owned());
+        return Err(
+            t("integrations.canva.old.no_refresh", "The old script's tokens.json has no refresh token.").to_owned()
+        );
     };
     if client_id.is_empty() || client_secret.is_empty() {
-        return Err("The old script's creds.env doesn't have a client ID and secret.".to_owned());
+        return Err(t(
+            "integrations.canva.old.creds_empty",
+            "The old script's creds.env doesn't have a client ID and secret.",
+        )
+        .to_owned());
     }
     let secrets = Secrets { client_id, client_secret, refresh_token: refresh.to_owned(), ..Secrets::default() };
     {
@@ -1501,9 +1730,10 @@ fn import_old(places: &Places) -> Result<Imported, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
         Err(e) => {
             crate::applog::problem("canva", &format!("the old script's token file couldn't be taken away ({e})"));
-            notes.push(format!(
-                "Its token file couldn't be taken away ({e}), so the old script could still refresh the sign-in: \
-                 nothing is synced until you switch it off and click It's Switched Off."
+            notes.push(tf(
+                "integrations.canva.old.token_file_left",
+                "Its token file couldn't be taken away ({error}), so the old script could still refresh the sign-in: nothing is synced until you switch it off and click It's Switched Off.",
+                &[("error", &e.to_string())],
             ));
             true
         }
@@ -1674,7 +1904,11 @@ impl Client {
         work: impl FnOnce(Sender<Event>, Arc<AtomicBool>) + Send + 'static,
     ) -> Result<(), String> {
         if self.phase.busy() {
-            return Err(format!("Canva Sync is busy: {}", self.phase.words()));
+            return Err(tf(
+                "integrations.canva.busy",
+                "Canva Sync is busy: {doing}",
+                &[("doing", &self.phase.words())],
+            ));
         }
         self.cancel = Arc::new(AtomicBool::new(false));
         let (tx, cancel, wake) = (self.tx.clone(), self.cancel.clone(), self.wake.clone());
@@ -1695,7 +1929,7 @@ impl Client {
                 self.version += 1;
                 Ok(())
             }
-            Err(_) => Err("Canva Sync couldn't start.".to_owned()),
+            Err(_) => Err(t("integrations.canva.not_started", "Canva Sync couldn't start.").to_owned()),
         }
     }
 
@@ -1707,7 +1941,11 @@ impl Client {
             || id.chars().any(char::is_whitespace)
             || secret.chars().any(char::is_whitespace)
         {
-            return Err("Give the integration's client ID and its secret, from Canva's developer portal.".to_owned());
+            return Err(t(
+                "integrations.canva.give_client",
+                "Give the integration's client ID and its secret, from Canva's developer portal.",
+            )
+            .to_owned());
         }
         let places = self.places.clone();
         // Testing aid: SOFTPRESENTER_CANVA_BROWSER=fetch, with a stand-in for Canva on this
@@ -1741,14 +1979,18 @@ impl Client {
     /// while a job runs: it may be keeping a refreshed sign-in, which would come back.
     pub fn disconnect(&mut self) -> Result<(), String> {
         if self.phase.busy() {
-            return Err(format!("Canva Sync is busy ({}): stop it first, then disconnect.", self.phase.words()));
+            return Err(tf(
+                "integrations.canva.busy_disconnect",
+                "Canva Sync is busy ({doing}): stop it first, then disconnect.",
+                &[("doing", &self.phase.words())],
+            ));
         }
         self.places.store.forget();
         self.secrets = None;
         self.unsaved = false;
         self.status = Status::NotConnected;
         self.pages.clear();
-        self.say("Canva Sync's sign-in was forgotten on this computer.", true);
+        self.say(t("integrations.canva.forgotten", "Canva Sync's sign-in was forgotten on this computer."), true);
         Ok(())
     }
 
@@ -1763,8 +2005,10 @@ impl Client {
 
     /// Takes a design's link (or id), and reads its pages to choose the divider from.
     pub fn set_design(&mut self, typed: &str) -> Result<(), String> {
-        let design =
-            design_id(typed).ok_or("That isn't a Canva design's link: copy it from the design's Share menu.")?;
+        let design = design_id(typed).ok_or(t(
+            "integrations.canva.not_a_link",
+            "That isn't a Canva design's link: copy it from the design's Share menu.",
+        ))?;
         if self.settings.design.as_deref() != Some(design.as_str()) {
             self.settings.design = Some(design);
             self.settings.divider = None;
@@ -1776,7 +2020,8 @@ impl Client {
 
     /// Reads the design's pages, with their small pictures.
     pub fn read_pages(&mut self) -> Result<(), String> {
-        let design = self.settings.design.clone().ok_or("Give the design's link first.")?;
+        let design =
+            self.settings.design.clone().ok_or(t("integrations.canva.give_link", "Give the design's link first."))?;
         self.signed_in()?;
         let (places, mut secrets, mut unsaved) = (self.places.clone(), self.secrets.clone(), self.unsaved);
         self.start(Phase::ReadingPages, move |tx, cancel| {
@@ -1784,9 +2029,10 @@ impl Client {
                 .and_then(|token| pages(&places, &token, &design))
                 .and_then(|pages| {
                     if pages.iter().any(|page| page.id.is_none()) {
-                        return Err(other(
+                        return Err(other(t(
+                            "integrations.canva.no_page_ids",
                             "Canva doesn't give this design's pages ids, so a divider page can't be kept track of.",
-                        ));
+                        )));
                     }
                     // Stopped (quitting, say) between two pictures, it stops there.
                     let mut views = Vec::with_capacity(pages.len());
@@ -1808,8 +2054,11 @@ impl Client {
 
     /// Makes a page the divider: the pages above it are exported.
     pub fn choose_divider(&mut self, id: &str) -> Result<(), String> {
-        let page =
-            self.pages.iter().find(|page| page.id.as_deref() == Some(id)).ok_or("That page isn't in the design.")?;
+        let page = self
+            .pages
+            .iter()
+            .find(|page| page.id.as_deref() == Some(id))
+            .ok_or(t("integrations.canva.page_not_in_design", "That page isn't in the design."))?;
         self.settings.divider = page.id.clone();
         self.settings.divider_number = Some(page.number);
         self.settings.save(&self.places.settings)?;
@@ -1822,16 +2071,21 @@ impl Client {
     fn signed_in(&self) -> Result<(), String> {
         if self.settings.hold_syncs {
             return Err(
-                "The old sync script could still refresh the sign-in (its token file couldn't be taken away): \
-                        switch it off, then click It's Switched Off in Settings › Integrations › Canva Sync."
+                t("integrations.canva.held_for_old", "The old sync script could still refresh the sign-in (its token file couldn't be taken away): switch it off, then click It's Switched Off in Settings › Integrations › Canva Sync.")
                     .to_owned(),
             );
         }
         match &self.status {
             Status::Connected | Status::Doubtful(_) => Ok(()),
             Status::Refused(why) => Err(why.clone()),
-            Status::Reading => Err("Canva Sync's sign-in is still being read.".to_owned()),
-            Status::NotConnected => Err("Canva Sync isn't signed in: Settings › Integrations › Canva Sync.".to_owned()),
+            Status::Reading => {
+                Err(t("integrations.canva.still_reading", "Canva Sync's sign-in is still being read.").to_owned())
+            }
+            Status::NotConnected => Err(t(
+                "integrations.canva.not_signed_in.where",
+                "Canva Sync isn't signed in: Settings › Integrations › Canva Sync.",
+            )
+            .to_owned()),
         }
     }
 
@@ -1844,9 +2098,11 @@ impl Client {
         }
         self.signed_in()?;
         let (Some(design), Some(divider)) = (self.settings.design.clone(), self.settings.divider.clone()) else {
-            return Err(
-                "Choose the design and its divider page first: Settings › Integrations › Canva Sync.".to_owned()
-            );
+            return Err(t(
+                "integrations.canva.choose_first",
+                "Choose the design and its divider page first: Settings › Integrations › Canva Sync.",
+            )
+            .to_owned());
         };
         let job = SyncJob {
             places: self.places.clone(),
@@ -1911,7 +2167,7 @@ impl Client {
                             self.secrets = Some(secrets);
                             self.unsaved = false;
                             self.status = Status::Connected;
-                            self.say("Signed in to Canva.", true);
+                            self.say(t("integrations.canva.signed_in.said", "Signed in to Canva."), true);
                         }
                         Err(why) => self.say(why, false),
                     }
@@ -1928,8 +2184,11 @@ impl Client {
                             self.settings.old_script_warning = true;
                             self.settings.hold_syncs = imported.token_file_left;
                             let _ = self.settings.save(&self.places.settings);
-                            let mut said =
-                                "Brought in the old sync script's sign-in. Switch the old script off now.".to_owned();
+                            let mut said = t(
+                                "integrations.canva.imported",
+                                "Brought in the old sync script's sign-in. Switch the old script off now.",
+                            )
+                            .to_owned();
                             for note in &imported.notes {
                                 said.push(' ');
                                 said.push_str(note);
@@ -1981,11 +2240,16 @@ impl Client {
                                 self.settings.made.push(name.clone());
                             }
                             let _ = self.settings.save(&self.places.settings);
+                            let size = crate::i18n::number(synced.bytes as f64 / 1_000_000.0, 1);
+                            let pages = synced.pages as u64;
+                            // The English says "1 pages" today; it stays so (only the Spanish has two forms).
                             self.say(
-                                format!(
-                                    "Updated: {name} ({} pages, {:.1} MB).",
-                                    synced.pages,
-                                    synced.bytes as f64 / 1_000_000.0
+                                tn(
+                                    "integrations.canva.updated_video",
+                                    pages,
+                                    "Updated: {name} ({n} pages, {size} MB).",
+                                    "Updated: {name} ({n} pages, {size} MB).",
+                                    &[("name", &name), ("size", &size)],
                                 ),
                                 true,
                             );
@@ -2017,9 +2281,13 @@ impl Client {
     fn broke(&mut self) {
         self.thread = None;
         self.phase = Phase::Idle;
-        self.say("Canva Sync stopped part way through; the video stays as it was. Try again.", false);
+        self.say(
+            t("integrations.canva.broke", "Canva Sync stopped part way through; the video stays as it was. Try again."),
+            false,
+        );
         if self.job.is_some() || self.sync_waiting {
-            self.finished = Some(Err("Canva Sync stopped part way through.".to_owned()));
+            self.finished =
+                Some(Err(t("integrations.canva.broke.short", "Canva Sync stopped part way through.").to_owned()));
         }
     }
 
@@ -2103,8 +2371,10 @@ impl Client {
     /// export, with the time so far; a download, with how far). How it ended goes in the
     /// notices: the video put in place, or why it failed.
     pub fn quiet_line(&self) -> Option<String> {
-        (self.phase.busy() && self.phase != Phase::SigningIn && self.phase != Phase::Importing)
-            .then(|| format!("Canva: {}", self.phase.words().trim_end_matches('…').replace("… ", " ")))
+        (self.phase.busy() && self.phase != Phase::SigningIn && self.phase != Phase::Importing).then(|| {
+            let doing = self.phase.words().trim_end_matches('…').replace("… ", " ");
+            tf("integrations.canva.quiet", "Canva: {doing}", &[("doing", &doing)])
+        })
     }
 }
 
@@ -2267,7 +2537,11 @@ impl crate::App {
     /// `sp canva sync` waiting is told how it went.
     fn canva_finished(&mut self, finished: Result<Synced, String>) {
         let said = match &finished {
-            Ok(synced) => format!("Canva Sync put {} in place.", crate::file_name(&synced.path)),
+            Ok(synced) => tf(
+                "integrations.canva.put_in_place",
+                "Canva Sync put {name} in place.",
+                &[("name", &crate::file_name(&synced.path))],
+            ),
             Err(why) => why.clone(),
         };
         if let Some(job) = self.canva.job.take()
@@ -2278,7 +2552,11 @@ impl crate::App {
         // How it went goes in the notices: the new video put in place out of sight, or why not.
         let Ok(synced) = finished else {
             if let Some(running) = self.running.as_mut() {
-                running.home_state.notices.trouble(format!("Canva Sync: {said}"));
+                running.home_state.notices.trouble(tf(
+                    "integrations.canva.trouble",
+                    "Canva Sync: {said}",
+                    &[("said", &said)],
+                ));
             }
             return;
         };
@@ -2333,9 +2611,10 @@ impl crate::App {
             return;
         }
         let taken = |name: &str| state.media_playlists.iter().any(|playlist| playlist.name == name);
-        let name = [PLAYLIST.to_owned(), format!("{PLAYLIST} (Canva)")]
+        let base = playlist();
+        let name = [base.to_owned(), format!("{base} (Canva)")]
             .into_iter()
-            .chain((2..).map(|n| format!("{PLAYLIST} (Canva {n})")))
+            .chain((2..).map(|n| format!("{base} (Canva {n})")))
             .find(|name| !taken(name))
             .unwrap_or_default();
         let mut playlist = crate::media::Playlist::new(name.clone());

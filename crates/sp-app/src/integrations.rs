@@ -3,6 +3,7 @@
 
 use egui::{Align, Align2, Color32, FontId, Layout, Rect, Sense, Stroke, pos2, vec2};
 
+use crate::i18n::{t, tf, tn};
 use crate::studio::{CARD, HOVER, LINE, TEXT, TEXT_DIM, TEXT_FAINT};
 use crate::voxlive::{Status, View};
 
@@ -59,24 +60,52 @@ fn mark(ui: &mut egui::Ui, size: f32, colour: Color32, letter: &str) {
 /// A dot and a word or two for how a service stands.
 fn state_words(status: &Status) -> (Color32, String) {
     match status {
-        Status::Connected => (GOOD, "Connected".to_owned()),
-        Status::Checking => (TEXT_FAINT, "Connecting…".to_owned()),
-        Status::NoKey => (TEXT_FAINT, "Not connected".to_owned()),
-        Status::Refused(_) => (crate::studio::TALLY, "Key refused".to_owned()),
-        Status::Trouble(_) => (Color32::from_rgb(230, 170, 60), "Can't reach it".to_owned()),
+        Status::Connected => (GOOD, t("integrations.state.connected", "Connected").to_owned()),
+        Status::Checking => (TEXT_FAINT, t("integrations.state.connecting", "Connecting…").to_owned()),
+        Status::NoKey => (TEXT_FAINT, t("integrations.state.not_connected", "Not connected").to_owned()),
+        Status::Refused(_) => (crate::studio::TALLY, t("integrations.voxlive.state.refused", "Key refused").to_owned()),
+        Status::Trouble(_) => {
+            (Color32::from_rgb(230, 170, 60), t("integrations.voxlive.state.trouble", "Can't reach it").to_owned())
+        }
     }
 }
 
 fn list(ui: &mut egui::Ui, view: &mut View, canva: &mut crate::canva::View) {
-    ui.label(egui::RichText::new("Services SoftPresenter works with. Click one to connect it.").color(TEXT_DIM));
+    ui.label(
+        egui::RichText::new(t(
+            "integrations.list.about",
+            "Services SoftPresenter works with. Click one to connect it.",
+        ))
+        .color(TEXT_DIM),
+    );
     ui.add_space(12.0);
-    let voxlive = (VOXLIVE, "V", "VoxLive", "Live translation of the sermon, as captions on your screens");
-    if service_row(ui, voxlive, state_words(&view.status), "Connect VoxLive, or see its screens") {
+    let voxlive = (
+        VOXLIVE,
+        "V",
+        "VoxLive",
+        t("integrations.voxlive.about.short", "Live translation of the sermon, as captions on your screens"),
+    );
+    if service_row(
+        ui,
+        voxlive,
+        state_words(&view.status),
+        t("integrations.voxlive.row.hint", "Connect VoxLive, or see its screens"),
+    ) {
         view.open = true;
     }
     ui.add_space(8.0);
-    let about = (CANVA, "C", "Canva Sync", "The announcements video, fresh from your Canva presentation");
-    if service_row(ui, about, canva_state(canva), "Connect Canva Sync, choose the presentation, or sync now") {
+    let about = (
+        CANVA,
+        "C",
+        "Canva Sync",
+        t("integrations.canva.about.short", "The announcements video, fresh from your Canva presentation"),
+    );
+    if service_row(
+        ui,
+        about,
+        canva_state(canva),
+        t("integrations.canva.row.hint", "Connect Canva Sync, choose the presentation, or sync now"),
+    ) {
         canva.open = true;
     }
 }
@@ -122,7 +151,13 @@ fn service_row(
 }
 
 fn voxlive_page(ui: &mut egui::Ui, view: &mut View) {
-    if ui.add(egui::Button::new(egui::RichText::new("‹ Integrations").color(TEXT_DIM)).frame(false)).clicked() {
+    if ui
+        .add(
+            egui::Button::new(egui::RichText::new(t("integrations.back", "‹ Integrations")).color(TEXT_DIM))
+                .frame(false),
+        )
+        .clicked()
+    {
         view.open = false;
         view.typed.clear();
         view.problem = None;
@@ -146,10 +181,7 @@ fn voxlive_page(ui: &mut egui::Ui, view: &mut View) {
     ui.set_max_width(width);
     ui.label(
         egui::RichText::new(
-            "VoxLive translates the sermon as it is preached, and shows it as captions on its screens. Connected, \
-             SoftPresenter shows your church's VoxLive screens as the slides of a VoxLive item (under LIBRARY, and \
-             in playlists) and in the VoxLive tab beside the screens: one click puts the captions on screen in place \
-             of a verse, and a click on the verse brings it back.",
+            t("integrations.voxlive.about", "VoxLive translates the sermon as it is preached, and shows it as captions on its screens. Connected, SoftPresenter shows your church's VoxLive screens as the slides of a VoxLive item (under LIBRARY, and in playlists) and in the VoxLive tab beside the screens: one click puts the captions on screen in place of a verse, and a click on the verse brings it back."),
         )
         .color(TEXT_DIM),
     );
@@ -162,19 +194,20 @@ fn voxlive_page(ui: &mut egui::Ui, view: &mut View) {
                 ui.add_space(6.0);
             }
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Key").color(TEXT_DIM));
+                ui.label(egui::RichText::new(t("integrations.voxlive.key", "Key")).color(TEXT_DIM));
                 ui.label(egui::RichText::new(hint.as_str()).monospace().color(TEXT));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui
-                        .button("Disconnect")
-                        .on_hover_text(
+                        .button(t("integrations.disconnect", "Disconnect"))
+                        .on_hover_text(t(
+                            "integrations.voxlive.disconnect.hint",
                             "Forget the key on this computer (it stays in VoxLive until you revoke it there)",
-                        )
+                        ))
                         .clicked()
                     {
                         ask_to_disconnect(ui, "voxlive");
                     }
-                    if ui.button("Find Screens Again").clicked() {
+                    if ui.button(t("integrations.voxlive.refresh", "Find Screens Again")).clicked() {
                         view.request = Some(Request::Refresh);
                     }
                 });
@@ -187,8 +220,11 @@ fn voxlive_page(ui: &mut egui::Ui, view: &mut View) {
             screens(ui, view);
         }
     }
-    let note = "The key is forgotten on this computer; it stays in VoxLive until you revoke it there.";
-    if disconnect_answered(ui, "voxlive", "Disconnect VoxLive?", note) {
+    let note = t(
+        "integrations.voxlive.disconnect.note",
+        "The key is forgotten on this computer; it stays in VoxLive until you revoke it there.",
+    );
+    if disconnect_answered(ui, "voxlive", t("integrations.voxlive.disconnect.question", "Disconnect VoxLive?"), note) {
         view.request = Some(Request::Disconnect);
     }
 }
@@ -202,14 +238,18 @@ fn canva_state(view: &crate::canva::View) -> (Color32, String) {
     use crate::canva::Status as S;
     match &view.status {
         S::Reading => (TEXT_FAINT, "…".to_owned()),
-        S::NotConnected => (TEXT_FAINT, "Not connected".to_owned()),
-        S::Refused(_) => (crate::studio::TALLY, "Sign-in refused".to_owned()),
-        S::Doubtful(_) => (Color32::from_rgb(230, 170, 60), "Sign-in in doubt".to_owned()),
-        S::Connected if view.phase.busy() => (Color32::from_rgb(230, 170, 60), "Syncing".to_owned()),
-        S::Connected if view.settings.design.is_none() || view.settings.divider.is_none() => {
-            (GOOD, "Connected: choose the design".to_owned())
+        S::NotConnected => (TEXT_FAINT, t("integrations.state.not_connected", "Not connected").to_owned()),
+        S::Refused(_) => (crate::studio::TALLY, t("integrations.canva.state.refused", "Sign-in refused").to_owned()),
+        S::Doubtful(_) => {
+            (Color32::from_rgb(230, 170, 60), t("integrations.canva.state.doubt", "Sign-in in doubt").to_owned())
         }
-        S::Connected => (GOOD, "Connected".to_owned()),
+        S::Connected if view.phase.busy() => {
+            (Color32::from_rgb(230, 170, 60), t("integrations.canva.state.syncing", "Syncing").to_owned())
+        }
+        S::Connected if view.settings.design.is_none() || view.settings.divider.is_none() => {
+            (GOOD, t("integrations.canva.state.choose", "Connected: choose the design").to_owned())
+        }
+        S::Connected => (GOOD, t("integrations.state.connected", "Connected").to_owned()),
     }
 }
 
@@ -217,7 +257,13 @@ fn canva_state(view: &crate::canva::View) -> (Color32, String) {
 /// and Sync Now.
 fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
     use crate::canva::{Request as R, Status as S};
-    if ui.add(egui::Button::new(egui::RichText::new("‹ Integrations").color(TEXT_DIM)).frame(false)).clicked() {
+    if ui
+        .add(
+            egui::Button::new(egui::RichText::new(t("integrations.back", "‹ Integrations")).color(TEXT_DIM))
+                .frame(false),
+        )
+        .clicked()
+    {
         view.open = false;
         view.typed_secret.clear();
     }
@@ -240,10 +286,7 @@ fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
     ui.set_max_width(width);
     ui.label(
         egui::RichText::new(
-            "Keeps the announcements video fresh from your church's Canva presentation. The pages above a divider \
-             page are exported as a 1080p video into the library's Media › Canva Sync folder, which the media \
-             playlist Announcements follows, so the video joins the media bin by itself. Nothing happens while \
-             SoftPresenter is closed.",
+            t("integrations.canva.about", "Keeps the announcements video fresh from your church's Canva presentation. The pages above a divider page are exported as a 1080p video into the library's Media › Canva Sync folder, which the media playlist Announcements follows, so the video joins the media bin by itself. Nothing happens while SoftPresenter is closed."),
         )
         .color(TEXT_DIM),
     );
@@ -256,7 +299,10 @@ fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
     let mut request = None;
     match &view.status {
         S::Reading => {
-            ui.label(egui::RichText::new("Reading the sign-in kept on this computer…").color(TEXT_FAINT));
+            ui.label(
+                egui::RichText::new(t("integrations.canva.reading", "Reading the sign-in kept on this computer…"))
+                    .color(TEXT_FAINT),
+            );
         }
         S::NotConnected | S::Refused(_) => canva_connect(ui, view, &mut request),
         S::Connected | S::Doubtful(_) => {
@@ -265,16 +311,21 @@ fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
                 ui.add_space(4.0);
             }
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Signed in").color(TEXT_DIM));
+                ui.label(egui::RichText::new(t("integrations.canva.signed_in", "Signed in")).color(TEXT_DIM));
                 if let Some(hint) = &view.client_hint {
-                    ui.label(egui::RichText::new(format!("integration {hint}")).monospace().color(TEXT_FAINT));
+                    ui.label(
+                        egui::RichText::new(tf("integrations.canva.client", "integration {hint}", &[("hint", hint)]))
+                            .monospace()
+                            .color(TEXT_FAINT),
+                    );
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui
-                        .button("Disconnect")
-                        .on_hover_text(
+                        .button(t("integrations.disconnect", "Disconnect"))
+                        .on_hover_text(t(
+                            "integrations.canva.disconnect.hint",
                             "Forget the sign-in on this computer (it stays in Canva until you take it back there)",
-                        )
+                        ))
                         .clicked()
                     {
                         ask_to_disconnect(ui, "canva");
@@ -288,40 +339,54 @@ fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
             ui.add_space(12.0);
             canva_design(ui, view, &mut request);
             ui.add_space(12.0);
-            crate::studio::caption(ui, "SYNC");
+            crate::studio::caption(ui, t("integrations.canva.sync.caption", "SYNC"));
             ui.horizontal(|ui| {
                 let ready =
                     view.settings.design.is_some() && view.settings.divider.is_some() && !view.settings.hold_syncs;
-                if ui.add_enabled(ready && !view.phase.busy(), egui::Button::new("Sync Now")).clicked() {
+                if ui
+                    .add_enabled(
+                        ready && !view.phase.busy(),
+                        egui::Button::new(t("integrations.canva.sync_now", "Sync Now")),
+                    )
+                    .clicked()
+                {
                     request = Some(R::SyncNow);
                 }
                 if view.phase.busy() {
                     ui.label(egui::RichText::new(view.phase.words()).color(CANVA_LIGHT));
-                    if ui.button("Stop").on_hover_text("The video in the media bin stays as it was").clicked() {
+                    if ui
+                        .button(t("integrations.canva.stop", "Stop"))
+                        .on_hover_text(t("integrations.canva.stop.hint", "The video in the media bin stays as it was"))
+                        .clicked()
+                    {
                         request = Some(R::Stop);
                     }
                 }
             });
             if let (Some(at), Some(file)) = (&view.settings.updated_at, &view.settings.updated_file) {
+                let format = t("integrations.canva.updated.format", "%A %-d %B, %-I:%M %p");
                 let when = chrono::DateTime::parse_from_rfc3339(at)
-                    .map(|at| at.with_timezone(&chrono::Local).format("%A %-d %B, %-I:%M %p").to_string())
+                    .map(|at| written(at.with_timezone(&chrono::Local).format(format)))
                     .unwrap_or_default();
-                ui.label(egui::RichText::new(format!("Last updated {when}: {file}")).size(12.0).color(TEXT_DIM));
+                let said =
+                    tf("integrations.canva.updated", "Last updated {when}: {file}", &[("when", &when), ("file", file)]);
+                ui.label(egui::RichText::new(said).size(12.0).color(TEXT_DIM));
             }
             ui.add_space(6.0);
             ui.label(
                 egui::RichText::new(
-                    "To fetch a fresh video each time SoftPresenter opens, make a macro with the step Sync from Canva \
-                     and tick Run When SoftPresenter Opens. A new video replaces the old one; one playing takes the \
-                     new one over at the end of its pass, so the loop carries on.",
+                    t("integrations.canva.macro", "To fetch a fresh video each time SoftPresenter opens, make a macro with the step Sync from Canva and tick Run When SoftPresenter Opens. A new video replaces the old one; one playing takes the new one over at the end of its pass, so the loop carries on."),
                 )
                 .size(11.5)
                 .color(TEXT_FAINT),
             );
         }
     }
-    let note = "The sign-in is forgotten on this computer; it stays in Canva until you take it back there.";
-    if disconnect_answered(ui, "canva", "Disconnect Canva Sync?", note) {
+    let note = t(
+        "integrations.canva.disconnect.note",
+        "The sign-in is forgotten on this computer; it stays in Canva until you take it back there.",
+    );
+    if disconnect_answered(ui, "canva", t("integrations.canva.disconnect.question", "Disconnect Canva Sync?"), note) {
         request = Some(R::Disconnect);
     }
     if request.is_some() {
@@ -347,7 +412,9 @@ fn disconnect_answered(ui: &egui::Ui, service: &str, question: &str, note: &str)
     }
     let note = crate::home::cant_undo(note);
     let icon = crate::icons::Icon::Close;
-    let Some(answer) = crate::studio::alert(ui.ctx(), service, icon, question, &note, "Disconnect") else {
+    let Some(answer) =
+        crate::studio::alert(ui.ctx(), service, icon, question, &note, t("integrations.disconnect", "Disconnect"))
+    else {
         return false;
     };
     ui.data_mut(|data| data.remove::<bool>(disconnecting_id(service)));
@@ -361,29 +428,26 @@ fn canva_connect(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut
         ui.label(egui::RichText::new(why.as_str()).color(crate::studio::TALLY));
         ui.add_space(6.0);
     }
-    crate::studio::caption(ui, "CONNECT");
+    crate::studio::caption(ui, t("integrations.connect.caption", "CONNECT"));
     ui.label(
         egui::RichText::new(
-            "Make an integration of your church's own in Canva's developer portal (canva.com/developers, Your \
-             integrations). Under Scopes tick design:content:read; under Authentication add the redirect URL below; \
-             then copy its client ID and make a secret. The secret and the sign-in are kept in this Mac's Keychain \
-             and sent only to Canva.",
+            t("integrations.canva.connect.about", "Make an integration of your church's own in Canva's developer portal (canva.com/developers, Your integrations). Under Scopes tick design:content:read; under Authentication add the redirect URL below; then copy its client ID and make a secret. The secret and the sign-in are kept in this Mac's Keychain and sent only to Canva."),
         )
         .size(12.0)
         .color(TEXT_DIM),
     );
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(view.redirect.as_str()).monospace().color(TEXT));
-        if ui.small_button("Copy").clicked() {
+        if ui.small_button(t("integrations.copy", "Copy")).clicked() {
             ui.ctx().copy_text(view.redirect.clone());
         }
     });
     ui.add_space(6.0);
     egui::Grid::new("canva connect").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-        ui.label(egui::RichText::new("Client ID").color(TEXT_DIM));
+        ui.label(egui::RichText::new(t("integrations.canva.client_id", "Client ID")).color(TEXT_DIM));
         ui.add(egui::TextEdit::singleline(&mut view.typed_id).desired_width(300.0));
         ui.end_row();
-        ui.label(egui::RichText::new("Client secret").color(TEXT_DIM));
+        ui.label(egui::RichText::new(t("integrations.canva.client_secret", "Client secret")).color(TEXT_DIM));
         ui.add(egui::TextEdit::singleline(&mut view.typed_secret).password(true).desired_width(300.0));
         ui.end_row();
     });
@@ -391,14 +455,17 @@ fn canva_connect(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut
     ui.horizontal(|ui| {
         if view.phase == Phase::SigningIn {
             ui.label(egui::RichText::new(view.phase.words()).color(CANVA_LIGHT));
-            if ui.button("Stop").clicked() {
+            if ui.button(t("integrations.canva.stop", "Stop")).clicked() {
                 *request = Some(R::Stop);
             }
         } else {
             let filled = !view.typed_id.trim().is_empty() && !view.typed_secret.trim().is_empty();
             if ui
-                .add_enabled(filled && !view.phase.busy(), egui::Button::new("Sign In with Canva"))
-                .on_hover_text("Opens Canva's sign-in in your browser")
+                .add_enabled(
+                    filled && !view.phase.busy(),
+                    egui::Button::new(t("integrations.canva.sign_in", "Sign In with Canva")),
+                )
+                .on_hover_text(t("integrations.canva.sign_in.hint", "Opens Canva's sign-in in your browser"))
                 .clicked()
             {
                 *request = Some(R::SignIn(view.typed_id.trim().to_owned(), std::mem::take(&mut view.typed_secret)));
@@ -407,17 +474,21 @@ fn canva_connect(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut
     });
     if view.old_here {
         ui.add_space(12.0);
-        crate::studio::caption(ui, "THE OLD SYNC SCRIPT");
+        crate::studio::caption(ui, t("integrations.canva.old.caption", "THE OLD SYNC SCRIPT"));
         ui.label(
             egui::RichText::new(
-                "This Mac has the sign-in of the old Canva sync script. SoftPresenter can take it over: it reads it \
-                 from there itself, keeps it in the Keychain, and takes the script's token file away. Then switch \
-                 the old script off.",
+                t("integrations.canva.old.about", "This Mac has the sign-in of the old Canva sync script. SoftPresenter can take it over: it reads it from there itself, keeps it in the Keychain, and takes the script's token file away. Then switch the old script off."),
             )
             .size(12.0)
             .color(TEXT_DIM),
         );
-        if ui.add_enabled(!view.phase.busy(), egui::Button::new("Use the Sign-in from the Old Sync Script")).clicked() {
+        if ui
+            .add_enabled(
+                !view.phase.busy(),
+                egui::Button::new(t("integrations.canva.old.use", "Use the Sign-in from the Old Sync Script")),
+            )
+            .clicked()
+        {
             *request = Some(R::Import);
         }
     }
@@ -427,13 +498,9 @@ fn canva_connect(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut
 fn old_script_warning(ui: &mut egui::Ui, view: &crate::canva::View, request: &mut Option<crate::canva::Request>) {
     egui::Frame::new().fill(Color32::from_rgb(60, 32, 30)).corner_radius(8.0).inner_margin(10.0).show(ui, |ui| {
         let words = if view.settings.hold_syncs {
-            "Switch the old sync script off now. It and SoftPresenter can't both use the sign-in: whichever \
-             refreshes it next breaks the other's. Its token file couldn't be taken away, so it could still refresh \
-             it: nothing is synced until you click It's Switched Off. In Terminal on this Mac:"
+            t("integrations.canva.old.warning.held", "Switch the old sync script off now. It and SoftPresenter can't both use the sign-in: whichever refreshes it next breaks the other's. Its token file couldn't be taken away, so it could still refresh it: nothing is synced until you click It's Switched Off. In Terminal on this Mac:")
         } else {
-            "Switch the old sync script off now. It and SoftPresenter can't both use the sign-in: whichever \
-             refreshes it next breaks the other's. Its token file is gone, so it can't refresh any more, but it \
-             should not be left running. In Terminal on this Mac:"
+            t("integrations.canva.old.warning", "Switch the old sync script off now. It and SoftPresenter can't both use the sign-in: whichever refreshes it next breaks the other's. Its token file is gone, so it can't refresh any more, but it should not be left running. In Terminal on this Mac:")
         };
         ui.label(egui::RichText::new(words).color(TEXT));
         ui.add_space(4.0);
@@ -442,10 +509,10 @@ fn old_script_warning(ui: &mut egui::Ui, view: &crate::canva::View, request: &mu
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.button("Copy the Steps").clicked() {
+            if ui.button(t("integrations.canva.old.copy", "Copy the Steps")).clicked() {
                 ui.ctx().copy_text(view.old_steps.join("\n"));
             }
-            if ui.button("It's Switched Off").clicked() {
+            if ui.button(t("integrations.canva.old.off", "It's Switched Off")).clicked() {
                 *request = Some(crate::canva::Request::OldScriptOff);
             }
         });
@@ -455,11 +522,12 @@ fn old_script_warning(ui: &mut egui::Ui, view: &crate::canva::View, request: &mu
 /// The design: its link, its pages to choose the divider from, and where the video goes.
 fn canva_design(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut Option<crate::canva::Request>) {
     use crate::canva::{Phase, Request as R};
-    crate::studio::caption(ui, "THE PRESENTATION");
+    crate::studio::caption(ui, t("integrations.canva.design.caption", "THE PRESENTATION"));
     ui.label(
-        egui::RichText::new(
+        egui::RichText::new(t(
+            "integrations.canva.design.about",
             "Paste the presentation's link (in Canva, Share › Copy link), then choose its divider page.",
-        )
+        ))
         .size(12.0)
         .color(TEXT_DIM),
     );
@@ -469,12 +537,15 @@ fn canva_design(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut 
         let entered = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
         let busy = view.phase.busy();
         if !view.typed_link.trim().is_empty()
-            && (entered || ui.add_enabled(!busy, egui::Button::new("Read Pages")).clicked())
+            && (entered
+                || ui.add_enabled(!busy, egui::Button::new(t("integrations.canva.read", "Read Pages"))).clicked())
         {
             *request = Some(R::Design(std::mem::take(&mut view.typed_link)));
         } else if view.typed_link.trim().is_empty()
             && view.settings.design.is_some()
-            && ui.add_enabled(!busy, egui::Button::new("Read Pages Again")).clicked()
+            && ui
+                .add_enabled(!busy, egui::Button::new(t("integrations.canva.read_again", "Read Pages Again")))
+                .clicked()
         {
             *request = Some(R::ReadPages);
         }
@@ -484,23 +555,37 @@ fn canva_design(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut 
     }
     match (view.settings.divider_number, view.settings.divider.is_some()) {
         (Some(number), true) if number > 1 => {
-            let above = if number == 2 { "Page 1 goes".to_owned() } else { format!("Pages 1–{} go", number - 1) };
-            ui.label(
-                egui::RichText::new(format!(
-                    "Divider: page {number}. {above} in the video; drag old slides below it in Canva."
-                ))
-                .color(TEXT),
-            );
+            let (page, last) = (number.to_string(), (number - 1).to_string());
+            let said = if number == 2 {
+                tf(
+                    "integrations.canva.divider.one",
+                    "Divider: page {number}. Page 1 goes in the video; drag old slides below it in Canva.",
+                    &[("number", &page)],
+                )
+            } else {
+                tf(
+                    "integrations.canva.divider.many",
+                    "Divider: page {number}. Pages 1–{last} go in the video; drag old slides below it in Canva.",
+                    &[("number", &page), ("last", &last)],
+                )
+            };
+            ui.label(egui::RichText::new(said).color(TEXT));
         }
         _ if view.settings.design.is_some() => {
-            ui.label(egui::RichText::new("No divider page chosen yet: read the pages and click it.").color(TEXT_FAINT));
+            ui.label(
+                egui::RichText::new(t(
+                    "integrations.canva.divider.none",
+                    "No divider page chosen yet: read the pages and click it.",
+                ))
+                .color(TEXT_FAINT),
+            );
         }
         _ => {}
     }
     if !view.pages.is_empty() {
         ui.add_space(4.0);
         ui.label(
-            egui::RichText::new("Click the divider page. Canva can't tell SoftPresenter which slides are hidden, so the divider says where the video stops.")
+            egui::RichText::new(t("integrations.canva.divider.about", "Click the divider page. Canva can't tell SoftPresenter which slides are hidden, so the divider says where the video stops."))
                 .size(11.5)
                 .color(TEXT_FAINT),
         );
@@ -550,7 +635,11 @@ fn canva_design(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut 
                 if below {
                     ui.painter().rect_filled(picture, 4.0, Color32::from_black_alpha(140));
                 }
-                let label = if divider { format!("{} · divider", page.number) } else { page.number.to_string() };
+                let label = if divider {
+                    tf("integrations.canva.page.divider", "{number} · divider", &[("number", &page.number.to_string())])
+                } else {
+                    page.number.to_string()
+                };
                 ui.painter().text(
                     pos2(picture.center().x, picture.max.y + 8.0),
                     Align2::CENTER_CENTER,
@@ -558,7 +647,14 @@ fn canva_design(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut 
                     FontId::proportional(11.0),
                     if divider { crate::studio::TALLY } else { TEXT_DIM },
                 );
-                if response.on_hover_text(format!("Make page {} the divider", page.number)).clicked() {
+                if response
+                    .on_hover_text(tf(
+                        "integrations.canva.page.hint",
+                        "Make page {number} the divider",
+                        &[("number", &page.number.to_string())],
+                    ))
+                    .clicked()
+                {
                     chosen = Some(id);
                 }
             }
@@ -568,11 +664,10 @@ fn canva_design(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut 
         }
     }
     ui.add_space(12.0);
-    crate::studio::caption(ui, "WHERE IT GOES");
+    crate::studio::caption(ui, t("integrations.canva.where.caption", "WHERE IT GOES"));
     ui.label(
         egui::RichText::new(
-            "Media › Canva Sync in the library, followed by the media playlist Announcements (made when the divider \
-             is chosen). One video is kept there, named with its day and time so volunteers can read it.",
+            t("integrations.canva.where.about", "Media › Canva Sync in the library, followed by the media playlist Announcements (made when the divider is chosen). One video is kept there, named with its day and time so volunteers can read it."),
         )
         .size(12.0)
         .color(TEXT_DIM),
@@ -581,11 +676,10 @@ fn canva_design(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut 
 
 /// Where the key is pasted, and how to get one.
 fn connect_form(ui: &mut egui::Ui, view: &mut View) {
-    crate::studio::caption(ui, "CONNECT");
+    crate::studio::caption(ui, t("integrations.connect.caption", "CONNECT"));
     ui.label(
         egui::RichText::new(
-            "In VoxLive, open Settings › API keys and make a key with the screens permissions (read and write). \
-             Paste it here. It is kept in this Mac's Keychain and sent only to VoxLive.",
+            t("integrations.voxlive.connect.about", "In VoxLive, open Settings › API keys and make a key with the screens permissions (read and write). Paste it here. It is kept in this Mac's Keychain and sent only to VoxLive."),
         )
         .size(12.0)
         .color(TEXT_DIM),
@@ -600,7 +694,9 @@ fn connect_form(ui: &mut egui::Ui, view: &mut View) {
                 .desired_width(ui.available_width() - 100.0),
         );
         connect |= field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        connect |= ui.add_enabled(!view.typed.trim().is_empty(), egui::Button::new("Connect")).clicked();
+        connect |= ui
+            .add_enabled(!view.typed.trim().is_empty(), egui::Button::new(t("integrations.voxlive.connect", "Connect")))
+            .clicked();
     });
     if connect && !view.typed.trim().is_empty() {
         view.request = Some(Request::Connect(std::mem::take(&mut view.typed)));
@@ -612,11 +708,14 @@ fn connect_form(ui: &mut egui::Ui, view: &mut View) {
 
 /// The church's VoxLive screens, as last found.
 fn screens(ui: &mut egui::Ui, view: &mut View) {
-    crate::studio::caption(ui, "YOUR VOXLIVE SCREENS");
+    crate::studio::caption(ui, t("integrations.voxlive.screens.caption", "YOUR VOXLIVE SCREENS"));
     if view.screens.is_empty() {
         let words = match view.status {
-            Status::Connected => "No screens yet. Make one in VoxLive (Screens), then Find Screens Again.",
-            _ => "Not found yet.",
+            Status::Connected => t(
+                "integrations.voxlive.screens.none",
+                "No screens yet. Make one in VoxLive (Screens), then Find Screens Again.",
+            ),
+            _ => t("integrations.voxlive.screens.not_yet", "Not found yet."),
         };
         ui.label(egui::RichText::new(words).size(12.0).color(TEXT_FAINT));
         return;
@@ -638,10 +737,15 @@ fn screens(ui: &mut egui::Ui, view: &mut View) {
             TEXT,
         );
         let kind = match screen.kind() {
-            "captions" => "Captions",
+            "captions" => t("integrations.voxlive.kind.captions", "Captions"),
+            "Scripture" => t("integrations.voxlive.kind.scripture", "Scripture"),
             other => other,
         };
-        let kind = if can_open { format!("{kind}   Change Look ›") } else { kind.to_owned() };
+        let kind = if can_open {
+            tf("integrations.voxlive.change_look", "{kind}   Change Look ›", &[("kind", kind)])
+        } else {
+            kind.to_owned()
+        };
         ui.painter().text(
             row.right_center() - vec2(4.0, 0.0),
             Align2::RIGHT_CENTER,
@@ -650,7 +754,13 @@ fn screens(ui: &mut egui::Ui, view: &mut View) {
             VOXLIVE_LIGHT,
         );
         ui.painter().hline(row.x_range(), row.max.y, Stroke::new(1.0, LINE));
-        if response.on_hover_text("Change how this screen looks, here; it is saved to VoxLive").clicked() {
+        if response
+            .on_hover_text(t(
+                "integrations.voxlive.change_look.hint",
+                "Change how this screen looks, here; it is saved to VoxLive",
+            ))
+            .clicked()
+        {
             open = Some(screen.id.clone());
         }
     }
@@ -660,8 +770,7 @@ fn screens(ui: &mut egui::Ui, view: &mut View) {
     ui.add_space(6.0);
     ui.label(
         egui::RichText::new(
-            "A screen's live display is opened only on your real screens, where it shows the captions (and can \
-             start that language's translation); previews use its free test pattern.",
+            t("integrations.voxlive.screens.about", "A screen's live display is opened only on your real screens, where it shows the captions (and can start that language's translation); previews use its free test pattern."),
         )
         .size(11.5)
         .color(TEXT_FAINT),
@@ -703,7 +812,7 @@ fn look_page(ui: &mut egui::Ui, view: &mut View) {
             ui.painter().text(
                 place.center(),
                 Align2::CENTER_CENTER,
-                "Preview loading…",
+                t("integrations.look.loading", "Preview loading…"),
                 FontId::proportional(12.0),
                 TEXT_FAINT,
             );
@@ -712,9 +821,12 @@ fn look_page(ui: &mut egui::Ui, view: &mut View) {
     }
     ui.painter().rect_stroke(place, 6.0, Stroke::new(1.0, LINE), egui::StrokeKind::Outside);
     ui.label(
-        egui::RichText::new("Preview, with sample words. Nothing changes on your screens until you save.")
-            .size(11.5)
-            .color(TEXT_FAINT),
+        egui::RichText::new(t(
+            "integrations.look.preview",
+            "Preview, with sample words. Nothing changes on your screens until you save.",
+        ))
+        .size(11.5)
+        .color(TEXT_FAINT),
     );
     ui.add_space(10.0);
     // A control for each setting that applies to the screen's mode.
@@ -741,22 +853,28 @@ fn look_page(ui: &mut egui::Ui, view: &mut View) {
     ui.add_space(12.0);
     let changes = look.changes().len();
     ui.horizontal(|ui| {
-        let save = egui::Button::new(if look.saving { "Saving…" } else { "Save to VoxLive" });
+        let save = egui::Button::new(if look.saving {
+            t("integrations.look.saving", "Saving…")
+        } else {
+            t("integrations.look.save", "Save to VoxLive")
+        });
         if ui
             .add_enabled(changes > 0 && !look.saving, save)
-            .on_hover_text("The screen changes at once, wherever it is showing")
+            .on_hover_text(t("integrations.look.save.hint", "The screen changes at once, wherever it is showing"))
             .clicked()
         {
             request = Some(Request::SaveLook { anyway: false });
         }
-        if ui.add_enabled(changes > 0 && !look.saving, egui::Button::new("Revert")).clicked() {
+        if ui
+            .add_enabled(changes > 0 && !look.saving, egui::Button::new(t("integrations.look.revert", "Revert")))
+            .clicked()
+        {
             look.style = look.base.clone();
             look.outcome = None;
         }
         let words = match changes {
-            0 => "No changes".to_owned(),
-            1 => "1 setting changed".to_owned(),
-            n => format!("{n} settings changed"),
+            0 => t("integrations.look.no_changes", "No changes").to_owned(),
+            n => tn("integrations.look.changed", n as u64, "{n} setting changed", "{n} settings changed", &[]),
         };
         ui.label(egui::RichText::new(words).size(12.0).color(TEXT_FAINT));
     });
@@ -766,20 +884,30 @@ fn look_page(ui: &mut egui::Ui, view: &mut View) {
     if look.changed_there.is_some() {
         ui.add_space(6.0);
         ui.label(
-            egui::RichText::new("This screen's look was changed in VoxLive since you opened it.")
-                .color(crate::studio::TALLY),
+            egui::RichText::new(t(
+                "integrations.look.changed_there",
+                "This screen's look was changed in VoxLive since you opened it.",
+            ))
+            .color(crate::studio::TALLY),
         );
         ui.horizontal(|ui| {
             if ui
-                .button("Use VoxLive's")
-                .on_hover_text("Let your changes go and start from the look VoxLive has now")
+                .button(t("integrations.look.use_theirs", "Use VoxLive's"))
+                .on_hover_text(t(
+                    "integrations.look.use_theirs.hint",
+                    "Let your changes go and start from the look VoxLive has now",
+                ))
                 .clicked()
                 && let Some(now) = look.changed_there.clone()
             {
                 look.take(&now);
                 look.outcome = None;
             }
-            if ui.button("Save Mine Anyway").on_hover_text("Your changed settings go over VoxLive's").clicked() {
+            if ui
+                .button(t("integrations.look.save_mine", "Save Mine Anyway"))
+                .on_hover_text(t("integrations.look.save_mine.hint", "Your changed settings go over VoxLive's"))
+                .clicked()
+            {
                 request = Some(Request::SaveLook { anyway: true });
             }
         });
@@ -792,15 +920,29 @@ fn look_page(ui: &mut egui::Ui, view: &mut View) {
 /// A setting's name from VoxLive's key: "maxLines" is "Lines", "letterSpacing" "Letter spacing".
 fn setting_name(key: &str) -> String {
     let named = match key {
-        "bg" => "Background",
-        "text" => "Text colour",
-        "transparent" => "See-through",
-        "valign" => "Up and down",
-        "align" => "Across",
-        "refPosition" => "Reference",
-        "fitHeight" => "Height used",
-        "maxWidth" => "Width used",
-        "maxLines" => "Lines",
+        "bg" => t("integrations.look.setting.bg", "Background"),
+        "text" => t("integrations.look.setting.text", "Text colour"),
+        "transparent" => t("integrations.look.setting.transparent", "See-through"),
+        "valign" => t("integrations.look.setting.valign", "Up and down"),
+        "align" => t("integrations.look.setting.align", "Across"),
+        "refPosition" => t("integrations.look.setting.ref_position", "Reference"),
+        "fitHeight" => t("integrations.look.setting.fit_height", "Height used"),
+        "maxWidth" => t("integrations.look.setting.max_width", "Width used"),
+        "maxLines" => t("integrations.look.setting.max_lines", "Lines"),
+        // The rest VoxLive has now, as the words made from their keys below say them in English.
+        "mode" => t("integrations.look.setting.mode", "Mode"),
+        "font" => t("integrations.look.setting.font", "Font"),
+        "size" => t("integrations.look.setting.size", "Size"),
+        "weight" => t("integrations.look.setting.weight", "Weight"),
+        "padding" => t("integrations.look.setting.padding", "Padding"),
+        "lineHeight" => t("integrations.look.setting.line_height", "Line height"),
+        "letterSpacing" => t("integrations.look.setting.letter_spacing", "Letter spacing"),
+        "uppercase" => t("integrations.look.setting.uppercase", "Uppercase"),
+        "shadow" => t("integrations.look.setting.shadow", "Shadow"),
+        "edgeSize" => t("integrations.look.setting.edge_size", "Edge size"),
+        "boxOpacity" => t("integrations.look.setting.box_opacity", "Box opacity"),
+        "fade" => t("integrations.look.setting.fade", "Fade"),
+        "passage" => t("integrations.look.setting.passage", "Passage"),
         _ => "",
     };
     if !named.is_empty() {
@@ -877,6 +1019,15 @@ fn setting_control(
             None
         }
     }
+}
+
+/// A time as a table's format writes it; nothing, rather than a stop, if chrono can't read the
+/// format.
+fn written(time: impl std::fmt::Display) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    let _ = write!(out, "{time}");
+    out
 }
 
 /// A colour from VoxLive's "#RGB" … "#RRGGBBAA".

@@ -16,6 +16,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use tokio_rustls::rustls;
+
+use crate::i18n::{t, tf};
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 
 const CERT_FILE: &str = "cert.der";
@@ -158,10 +160,12 @@ pub fn make(folder: &Path, names: &Names, new_key: bool) -> Result<Cert, String>
     };
     let key = match kept {
         Some(key) => key,
-        None => rcgen::KeyPair::generate().map_err(|e| format!("Could not make a key: {e}"))?,
+        None => rcgen::KeyPair::generate()
+            .map_err(|e| tf("remote.cert.no_key", "Could not make a key: {error}", &[("error", &e.to_string())]))?,
     };
-    let mut params =
-        rcgen::CertificateParams::new(names.names.clone()).map_err(|e| format!("Could not make a certificate: {e}"))?;
+    let mut params = rcgen::CertificateParams::new(names.names.clone()).map_err(|e| {
+        tf("remote.cert.not_made", "Could not make a certificate: {error}", &[("error", &e.to_string())])
+    })?;
     let mut name = rcgen::DistinguishedName::new();
     name.push(rcgen::DnType::CommonName, "SoftPresenter Remote Control");
     params.distinguished_name = name;
@@ -176,7 +180,9 @@ pub fn make(folder: &Path, names: &Names, new_key: bool) -> Result<Cert, String>
     let until = today + chrono::Days::new(LASTS_DAYS - 1);
     params.not_before = day(today - chrono::Days::new(1));
     params.not_after = day(until);
-    let cert = params.self_signed(&key).map_err(|e| format!("Could not sign the certificate: {e}"))?;
+    let cert = params.self_signed(&key).map_err(|e| {
+        tf("remote.cert.not_signed", "Could not sign the certificate: {error}", &[("error", &e.to_string())])
+    })?;
     let (cert, key) = (cert.der().to_vec(), key.serialize_der());
     let until_seconds = until.and_hms_opt(0, 0, 0).map_or(0, |at| at.and_utc().timestamp().max(0) as u64);
     let about = Names { names: names.names.clone(), until: until_seconds };
@@ -187,7 +193,7 @@ pub fn make(folder: &Path, names: &Names, new_key: bool) -> Result<Cert, String>
     crate::remote::auth::write_private(folder, KEY_FILE, &key)?;
     crate::remote::auth::write_private(folder, CERT_FILE, &cert)?;
     crate::remote::auth::write_private(folder, ABOUT_FILE, &about)?;
-    from_der(cert, key).ok_or_else(|| "Could not read the key it made.".to_owned())
+    from_der(cert, key).ok_or_else(|| t("remote.cert.unreadable", "Could not read the key it made.").to_owned())
 }
 
 /// The fingerprint of the key kept in a folder, if there is one.

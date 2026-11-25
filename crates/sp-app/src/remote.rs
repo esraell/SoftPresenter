@@ -31,6 +31,7 @@ use sp_model::Uuid;
 use tokio::sync::oneshot;
 
 use crate::control::Reply;
+use crate::i18n::{t, tf};
 
 /// What the server asks of the app's main thread.
 pub enum ToApp {
@@ -272,7 +273,10 @@ impl Remote {
 
     /// Switches Remote Control on (listening at once) or off (every connection closed).
     pub fn switch(&mut self, on: bool, bridge: impl FnOnce() -> Bridge) -> Result<(), String> {
-        let store = self.store.clone().ok_or("There is no data folder to keep Remote Control's settings in.")?;
+        let store = self
+            .store
+            .clone()
+            .ok_or(t("remote.no_folder.settings", "There is no data folder to keep Remote Control's settings in."))?;
         if !on {
             if let Some(running) = self.running.take() {
                 self.stopping = running.stop();
@@ -285,11 +289,11 @@ impl Remote {
             return Ok(());
         }
         let (port, has_password, folder) = {
-            let store = store.lock().map_err(|_| "Busy.")?;
+            let store = store.lock().map_err(|_| t("remote.busy", "Busy."))?;
             (store.saved.port, store.saved.password.is_some(), store.folder().to_owned())
         };
         if !has_password {
-            return Err("Set a password first.".to_owned());
+            return Err(t("remote.password.first", "Set a password first.").to_owned());
         }
         // A server switched off a moment ago is let finish letting its port go.
         if let Some(stopping) = self.stopping.take() {
@@ -307,7 +311,7 @@ impl Remote {
             // Only a different key is news: each device must be checked again.
             if had.is_some_and(|had| had != fingerprint) {
                 self.cert_news = Some(
-                    "Remote Control has a new certificate key. Each device warns once more: check the key fingerprint it shows against Settings › Remote Control."
+                    t("remote.cert.new_key", "Remote Control has a new certificate key. Each device warns once more: check the key fingerprint it shows against Settings › Remote Control.")
                         .to_owned(),
                 );
             }
@@ -338,11 +342,11 @@ impl Remote {
     /// A new port: kept, and listened on at once if Remote Control is on.
     pub fn set_port(&mut self, port: u16, bridge: impl FnOnce() -> Bridge) -> Result<(), String> {
         if port < 1024 {
-            return Err("Choose a port from 1024 up: those below are the system's.".to_owned());
+            return Err(t("remote.port.system", "Choose a port from 1024 up: those below are the system's.").to_owned());
         }
-        let store = self.store.clone().ok_or("There is no data folder.")?;
+        let store = self.store.clone().ok_or(t("remote.no_folder", "There is no data folder."))?;
         {
-            let mut store = store.lock().map_err(|_| "Busy.")?;
+            let mut store = store.lock().map_err(|_| t("remote.busy", "Busy."))?;
             if store.saved.port == port {
                 return Ok(());
             }
@@ -365,12 +369,12 @@ impl Remote {
         self.hashing = true;
         let _ = std::thread::Builder::new().name("remote-password".to_owned()).spawn(move || {
             let outcome = auth::hash_password(&password).and_then(|hash| {
-                store.lock().map_err(|_| "Busy.".to_owned())?.set_password(hash)?;
+                store.lock().map_err(|_| t("remote.busy", "Busy.").to_owned())?.set_password(hash)?;
                 if let Some(shared) = &shared {
                     shared.sign_out_all();
                 }
                 crate::applog::event("remote", "A new password was set; every device was forgotten.");
-                Ok("The password is set. Devices sign in again with it.".to_owned())
+                Ok(t("remote.password.done", "The password is set. Devices sign in again with it.").to_owned())
             });
             if let Ok(mut said) = said.lock() {
                 *said = Some(outcome);
@@ -455,8 +459,11 @@ impl Remote {
     /// Makes a new certificate with a new key; with Remote Control on, it listens again with it
     /// (pages reconnect, and browsers warn again: the fingerprint is new).
     pub fn new_certificate(&mut self, bridge: impl FnOnce() -> Bridge) -> Result<(), String> {
-        let folder =
-            self.store.as_ref().and_then(|s| s.lock().ok().map(|s| s.folder().to_owned())).ok_or("No data folder.")?;
+        let folder = self
+            .store
+            .as_ref()
+            .and_then(|s| s.lock().ok().map(|s| s.folder().to_owned()))
+            .ok_or(t("remote.no_folder.short", "No data folder."))?;
         // On request the key is new too: the operator asked for what an old key can't give.
         let cert = cert::make(&folder, &cert::Names::now(cert::own_name()), true)?;
         self.fingerprint = Some(cert.fingerprint);
@@ -811,8 +818,10 @@ impl crate::App {
                 Request::Switch(on) => self.remote_switch(on).map(|()| None),
                 Request::Port(port) => {
                     let bridge = self.remote_bridge();
-                    let changed =
-                        self.remote.set_port(port, move || bridge).map(|()| Some(format!("Port {port} it is.")));
+                    let changed = self
+                        .remote
+                        .set_port(port, move || bridge)
+                        .map(|()| Some(tf("remote.port.done", "Port {port} it is.", &[("port", &port.to_string())])));
                     self.remote_preview_source();
                     changed
                 }
@@ -837,7 +846,7 @@ impl crate::App {
                     let made = self
                         .remote
                         .new_certificate(move || bridge)
-                        .map(|()| Some("A new certificate is made.".to_owned()));
+                        .map(|()| Some(t("remote.cert.made", "A new certificate is made.").to_owned()));
                     self.remote_preview_source();
                     made
                 }
@@ -871,7 +880,10 @@ impl crate::App {
             if let Some(running) = self.running.as_mut() {
                 running.home_state.notices.secure(
                     crate::notices::Kind::Trouble,
-                    "Wrong Remote Control passwords were tried several times in the last hour. See Settings › Remote Control.",
+                    t(
+                        "remote.wrong.notice",
+                        "Wrong Remote Control passwords were tried several times in the last hour. See Settings › Remote Control.",
+                    ),
                 );
                 running.home_window.request_redraw();
             }

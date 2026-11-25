@@ -18,6 +18,8 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
+use crate::i18n::{t, tf};
+
 /// VoxLive's church API.
 pub const LIVE_API: &str = "https://voxlive.app/api/v1";
 
@@ -433,10 +435,11 @@ impl Client {
     pub fn connect(&mut self, key: &str) -> Result<(), String> {
         let key = key.trim();
         if !looks_like_key(key) {
-            return Err(
-                "That isn't a VoxLive API key: a key starts with vxk_ (make one in VoxLive, Settings › API keys)."
-                    .to_owned(),
-            );
+            return Err(t(
+                "integrations.voxlive.not_a_key",
+                "That isn't a VoxLive API key: a key starts with vxk_ (make one in VoxLive, Settings › API keys).",
+            )
+            .to_owned());
         }
         store::save(key)?;
         self.key = Some(key.to_owned());
@@ -486,12 +489,12 @@ impl Client {
         version: Option<String>,
         changes: serde_json::Map<String, serde_json::Value>,
     ) -> Result<(), String> {
-        let key = self.key.clone().ok_or("VoxLive isn't connected.")?;
+        let key = self.key.clone().ok_or(t("integrations.voxlive.not_connected", "VoxLive isn't connected."))?;
         if !screen.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') || screen.is_empty() {
-            return Err("That isn't a VoxLive screen.".to_owned());
+            return Err(t("integrations.voxlive.not_a_screen", "That isn't a VoxLive screen.").to_owned());
         }
         if self.saving.is_some() {
-            return Err("A look is being saved already.".to_owned());
+            return Err(t("integrations.voxlive.saving_already", "A look is being saved already.").to_owned());
         }
         self.saving = Some(screen.to_owned());
         self.saved = None;
@@ -661,7 +664,9 @@ fn call(
         }
         _ => agent.get(&url).header("Authorization", &auth).header("Accept", "application/json").call(),
     };
-    let mut response = sent.map_err(|e| format!("VoxLive couldn't be reached ({e})."))?;
+    let mut response = sent.map_err(|e| {
+        tf("integrations.voxlive.unreachable", "VoxLive couldn't be reached ({error}).", &[("error", &e.to_string())])
+    })?;
     let status = response.status().as_u16();
     let wait = response
         .headers()
@@ -682,15 +687,24 @@ fn get_screens(base: &str, key: &str) -> Result<Vec<Screen>, Problem> {
             let screens: Vec<Screen> = reply
                 .get("screens")
                 .and_then(|screens| serde_json::from_value(screens.clone()).ok())
-                .ok_or_else(|| Problem::Other("VoxLive's answer didn't list screens.".to_owned()))?;
+                .ok_or_else(|| {
+                    Problem::Other(
+                        t("integrations.voxlive.no_screens_listed", "VoxLive's answer didn't list screens.").to_owned(),
+                    )
+                })?;
             Ok(screens.into_iter().map(|screen| screen.cleaned(base)).filter(|screen| !screen.id.is_empty()).collect())
         }
         401 | 403 => Err(Problem::Refused(refused_words(error))),
         429 if error == "too_many_attempts" => Err(Problem::Refused(refused_words(error))),
-        429 | 503 => {
-            Err(Problem::Wait(wait.unwrap_or(Duration::from_secs(60)), "VoxLive asked to wait a moment.".to_owned()))
-        }
-        other => Err(Problem::Other(format!("VoxLive answered with a problem ({other})."))),
+        429 | 503 => Err(Problem::Wait(
+            wait.unwrap_or(Duration::from_secs(60)),
+            t("integrations.voxlive.wait", "VoxLive asked to wait a moment.").to_owned(),
+        )),
+        other => Err(Problem::Other(tf(
+            "integrations.voxlive.problem",
+            "VoxLive answered with a problem ({code}).",
+            &[("code", &other.to_string())],
+        ))),
     }
 }
 
@@ -698,7 +712,11 @@ fn get_screens(base: &str, key: &str) -> Result<Vec<Screen>, Problem> {
 fn get_schema(base: &str, key: &str) -> Result<Vec<(String, serde_json::Value)>, Problem> {
     let (status, reply, _) = call(base, key, "GET", "/screen-style", None, None).map_err(Problem::Other)?;
     if status != 200 {
-        return Err(Problem::Other(format!("VoxLive didn't describe the look settings ({status}).")));
+        return Err(Problem::Other(tf(
+            "integrations.voxlive.no_schema",
+            "VoxLive didn't describe the look settings ({code}).",
+            &[("code", &status.to_string())],
+        )));
     }
     let fields = reply.get("fields").and_then(serde_json::Value::as_object).cloned().unwrap_or_default();
     Ok(ordered(fields))
@@ -736,34 +754,69 @@ fn patch_look(
     };
     let error = reply.get("error").and_then(serde_json::Value::as_str).unwrap_or("");
     match status {
-        200 => screen_in(&reply).ok_or_else(|| Saving::Failed("VoxLive's answer didn't have the screen.".to_owned())),
+        200 => screen_in(&reply).ok_or_else(|| {
+            Saving::Failed(
+                t("integrations.voxlive.no_screen_back", "VoxLive's answer didn't have the screen.").to_owned(),
+            )
+        }),
         412 => screen_in(&reply)
             .map(|now| Saving::Changed(Box::new(now)))
-            .ok_or_else(|| Saving::Failed("The screen changed in VoxLive since it was opened.".to_owned()))
+            .ok_or_else(|| {
+                Saving::Failed(
+                    t("integrations.voxlive.changed_there", "The screen changed in VoxLive since it was opened.")
+                        .to_owned(),
+                )
+            })
             .and_then(Err),
         400 => {
-            let field = reply.get("field").and_then(serde_json::Value::as_str).unwrap_or("a setting");
-            Err(Saving::Failed(format!("VoxLive didn't take {field} ({error}).")))
+            let field = reply
+                .get("field")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(t("integrations.voxlive.a_setting", "a setting"));
+            Err(Saving::Failed(tf(
+                "integrations.voxlive.not_taken",
+                "VoxLive didn't take {field} ({error}).",
+                &[("field", field), ("error", error)],
+            )))
         }
         401 | 403 => Err(Saving::Failed(refused_words(error))),
-        404 => Err(Saving::Failed("That screen is no longer in VoxLive.".to_owned())),
-        429 | 503 => Err(Saving::Failed("VoxLive asked to wait a moment; try again.".to_owned())),
-        other => Err(Saving::Failed(format!("VoxLive answered with a problem ({other})."))),
+        404 => Err(Saving::Failed(
+            t("integrations.voxlive.screen_gone", "That screen is no longer in VoxLive.").to_owned(),
+        )),
+        429 | 503 => Err(Saving::Failed(
+            t("integrations.voxlive.wait_again", "VoxLive asked to wait a moment; try again.").to_owned(),
+        )),
+        other => Err(Saving::Failed(tf(
+            "integrations.voxlive.problem",
+            "VoxLive answered with a problem ({code}).",
+            &[("code", &other.to_string())],
+        ))),
     }
 }
 
 /// Why VoxLive refused the key, in words.
 fn refused_words(error: &str) -> String {
     match error {
-        "key_revoked" => "VoxLive says that key was revoked: make a new one in VoxLive, Settings › API keys.",
-        "key_expired" => "VoxLive says that key has expired: make a new one in VoxLive, Settings › API keys.",
-        "insufficient_scope" => {
-            "That key can't read screens: make one in VoxLive with the screens permissions (read and write)."
-        }
-        "too_many_attempts" => {
-            "VoxLive has paused requests from this network after too many wrong keys; it lifts within the hour."
-        }
-        _ => "VoxLive doesn't know that key: check it in VoxLive, Settings › API keys.",
+        "key_revoked" => t(
+            "integrations.voxlive.refused.revoked",
+            "VoxLive says that key was revoked: make a new one in VoxLive, Settings › API keys.",
+        ),
+        "key_expired" => t(
+            "integrations.voxlive.refused.expired",
+            "VoxLive says that key has expired: make a new one in VoxLive, Settings › API keys.",
+        ),
+        "insufficient_scope" => t(
+            "integrations.voxlive.refused.scope",
+            "That key can't read screens: make one in VoxLive with the screens permissions (read and write).",
+        ),
+        "too_many_attempts" => t(
+            "integrations.voxlive.refused.paused",
+            "VoxLive has paused requests from this network after too many wrong keys; it lifts within the hour.",
+        ),
+        _ => t(
+            "integrations.voxlive.refused.unknown",
+            "VoxLive doesn't know that key: check it in VoxLive, Settings › API keys.",
+        ),
     }
     .to_owned()
 }
@@ -793,7 +846,13 @@ mod store {
 
     pub fn save(key: &str) -> Result<(), String> {
         if let Some(file) = test_file() {
-            std::fs::write(&file, key).map_err(|e| format!("The key could not be kept: {e}"))?;
+            std::fs::write(&file, key).map_err(|e| {
+                crate::i18n::tf(
+                    "integrations.voxlive.not_kept",
+                    "The key could not be kept: {error}",
+                    &[("error", &e.to_string())],
+                )
+            })?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -802,10 +861,17 @@ mod store {
             return Ok(());
         }
         #[cfg(target_os = "macos")]
-        return security_framework::passwords::set_generic_password(SERVICE, "church API key", key.as_bytes())
-            .map_err(|e| format!("The key could not be kept in the Keychain: {e}"));
+        return security_framework::passwords::set_generic_password(SERVICE, "church API key", key.as_bytes()).map_err(
+            |e| {
+                crate::i18n::tf(
+                    "integrations.voxlive.not_kept.keychain",
+                    "The key could not be kept in the Keychain: {error}",
+                    &[("error", &e.to_string())],
+                )
+            },
+        );
         #[cfg(not(target_os = "macos"))]
-        Err("Keeping a VoxLive key needs macOS for now.".to_owned())
+        Err(crate::i18n::t("integrations.voxlive.mac_only", "Keeping a VoxLive key needs macOS for now.").to_owned())
     }
 
     pub fn forget() {

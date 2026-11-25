@@ -96,6 +96,8 @@ start with `_` (`"_note"`) are comments.
 | `biblepage` | the Bible view's page and left column: Books, History, the keypad and lists |
 | `bibles` | the Bibles window, installing and reading Bibles, and what they say |
 | `setup` | the first-start setup's steps, in each system's wording |
+| `integrations` | Settings › Integrations: VoxLive, Canva Sync and their pages, states and messages |
+| `remote` | Settings › Remote Control and what Remote Control says in the window |
 | `common` | words several areas share |
 | `format` | numbers and quotation marks (not words) |
 

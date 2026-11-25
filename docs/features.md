@@ -1484,7 +1484,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   and the song and playlist item menus), the slides area (with the slide, arrangement and times
   menus) and the bar under it, the media strip under it (its menus, and what adding
   pictures and videos says), the Bible view's page and lists and the Bibles window, the
-  first-start setup, and the right
+  first-start setup, Settings › Integrations (VoxLive, Canva Sync) and Remote Control, and the right
   column's preview, layer keys, Clear All and tool tabs;
   the rest of the window is still English, and a word with no translation yet shows in
   English. Russian and Ukrainian have the number and quotation rules and the plural forms, and

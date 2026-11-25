@@ -17,6 +17,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{t, tf};
+
 /// The shortest password Settings takes.
 pub const SHORTEST_PASSWORD: usize = 10;
 /// The longest: more is refused before it is hashed.
@@ -240,7 +242,11 @@ pub fn write_private(folder: &Path, name: &str, bytes: &[u8]) -> Result<(), Stri
     })();
     written.map_err(|e| {
         let _ = std::fs::remove_file(&partial);
-        format!("Could not write {}: {e}", target.display())
+        tf(
+            "remote.not_written",
+            "Could not write {file}: {error}",
+            &[("file", &target.display().to_string()), ("error", &e.to_string())],
+        )
     })
 }
 
@@ -254,7 +260,7 @@ pub fn now_seconds() -> u64 {
 pub fn random_word(count: usize) -> Result<String, String> {
     let mut bytes = vec![0u8; count];
     ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut bytes)
-        .map_err(|_| "The system's random source didn't answer.".to_owned())?;
+        .map_err(|_| t("remote.no_random", "The system's random source didn't answer.").to_owned())?;
     Ok(base64url(&bytes))
 }
 
@@ -292,14 +298,22 @@ pub fn hash_password(password: &str) -> Result<String, String> {
     use argon2::password_hash::{PasswordHasher, SaltString};
     let chars = password.chars().count();
     if chars < SHORTEST_PASSWORD {
-        return Err(format!("A password needs at least {SHORTEST_PASSWORD} letters, figures or signs."));
+        return Err(tf(
+            "remote.password.needs",
+            "A password needs at least {n} letters, figures or signs.",
+            &[("n", &SHORTEST_PASSWORD.to_string())],
+        ));
     }
     if chars > LONGEST_PASSWORD {
-        return Err(format!("A password may be at most {LONGEST_PASSWORD} long."));
+        return Err(tf(
+            "remote.password.longest",
+            "A password may be at most {n} long.",
+            &[("n", &LONGEST_PASSWORD.to_string())],
+        ));
     }
     let mut salt = [0u8; 16];
     ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut salt)
-        .map_err(|_| "The system's random source didn't answer.".to_owned())?;
+        .map_err(|_| t("remote.no_random", "The system's random source didn't answer.").to_owned())?;
     let salt = SaltString::encode_b64(&salt).map_err(|e| e.to_string())?;
     argon2::Argon2::default()
         .hash_password(password.as_bytes(), &salt)
