@@ -342,6 +342,15 @@ fn control_refusal(args: &[String]) -> Option<String> {
         {
             at_computer(AtComputer::Ndi)
         }
+        // Letting a device on the network show its screen is decided at the computer: a page
+        // can't answer that question.
+        ("notices", "answer") if args.iter().skip(3).any(|word| word.to_lowercase().starts_with("mirror:")) => Some(
+            t(
+                "remote.at_computer.mirror",
+                "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.",
+            )
+            .to_owned(),
+        ),
         // The window's language is the operator's: a phone never changes it.
         ("settings", "set") if args.iter().skip(2).any(|word| word.to_lowercase().starts_with("language=")) => Some(
             t("remote.at_computer.language", "The app's language is chosen at the computer, not from the remote page.")
@@ -502,6 +511,8 @@ mod tests {
             "media import x",
             "settings reset",
             "settings set language=es",
+            "notices answer 3 mirror:allow",
+            "notices answer 3 MIRROR:deny",
             "settings set continuous=on LANGUAGE=en",
             "notices forget 3",
             "remote off",

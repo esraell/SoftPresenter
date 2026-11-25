@@ -1,5 +1,5 @@
 {
-  "_note": "Español de España; see topbar.json. Settings › Phone Screens (an iPhone, iPad or Mac shows its screen in a box on a slide, through its own Screen Mirroring, which Apple's Spanish calls «Duplicar pantalla»), the notices it gives and the inspector's line for a Phone or iPad Screen box. AirPlay keeps its name. mirror.unofficial is the owner's wording: keep all three points (not made by Apple, not supported by Apple, an Apple update may stop it).",
+  "_note": "Español de España; see topbar.json. Settings › Phone Screens (an iPhone, iPad or Mac shows its screen in a box on a slide, through its own Screen Mirroring, which Apple's Spanish calls “Duplicar pantalla”), the notices it gives and the inspector's line for a Phone or iPad Screen box. AirPlay keeps its name. mirror.unofficial is the owner's wording: keep all three points (not made by Apple, not supported by Apple, an Apple update may stop it).",
   "mirror.a_device": "Un dispositivo",
   "mirror.problem.no_program": "La parte de SoftPresenter que recibe las pantallas de los teléfonos (softpresenter-mirror) no está junto a la aplicación.",
   "mirror.problem.no_ffmpeg": "Mostrar la pantalla de un teléfono necesita FFmpeg, y FFmpeg no está en este ordenador.",
@@ -11,7 +11,7 @@
   "mirror.caption": "PANTALLAS DE TELÉFONOS",
   "mirror.turn_on": "Mostrar la pantalla de un iPhone, iPad o Mac",
   "mirror.unofficial": "No oficial: funciona con Duplicar pantalla (AirPlay) desde un iPhone, iPad o Mac, pero no está hecho ni respaldado por Apple, y una actualización de Apple puede hacer que deje de funcionar.",
-  "mirror.how": "En el iPhone o iPad, abre el Centro de control, toca Duplicar pantalla y elige {name}. La pantalla se ve entonces en un cuadro «Pantalla de teléfono o iPad» de la diapositiva que está en pantalla, y en ningún otro sitio.",
+  "mirror.how": "En el iPhone o iPad, abre el Centro de control, toca Duplicar pantalla y elige {name}. La pantalla se ve entonces en un cuadro “Pantalla de teléfono o iPad” de la diapositiva que está en pantalla, y en ningún otro sitio.",
   "mirror.name.caption": "EL NOMBRE QUE VEN LOS DISPOSITIVOS",
   "mirror.name.use": "Usar",
   "mirror.who.caption": "QUIÉN PUEDE CONECTARSE",

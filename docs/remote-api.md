@@ -282,7 +282,10 @@ Refused before they reach the app, with words saying so (read as the app would r
 - **NDI**: `screen add … on ndi NAME`, `screen set … output=ndi:…` (NDI sends to anyone on the
   network who asks, with no password);
 - `song reload` without a song (reads every song again), and `status --wait`;
-- **Remote Control itself**: `remote …`;
+- **Remote Control itself**: `remote …`; **TimelyChurch**: `timelychurch …`;
+- **phone and iPad screens**: `mirror …`, and the answer to "may this device show its screen?"
+  (`notices answer N mirror:allow|mirror:deny`): a device is let onto the screens at the computer;
+- **the app's language**: `settings set language=…`;
 - anything the server doesn't know: a command, **or a sub-command** of `voxlive`, `canva`,
   `settings`, `screen`, `song`, `catalog` or `media`, added to the app later is closed to pages until it is
   looked at and listed (`crates/sp-app/src/remote/policy.rs`).
