@@ -28,7 +28,8 @@ use crate::private_folder;
 
 /// Changes when requests or replies change shape, so an older command line is told so. 2: a
 /// request may carry `mcp` (it comes from an AI assistant); an app from before refuses it, rather
-/// than carrying it out unchecked, as it would if it only ignored the field.
+/// than carrying it out unchecked, as it would if it only ignored the field. This app still takes
+/// version 1 requests without the mark, as they come from an older `sp` at the computer.
 pub const PROTOCOL: u32 = 2;
 
 /// Why a slide named by its number isn't there: "River Song has 6 slides; there is no slide 9.",
@@ -268,7 +269,10 @@ fn answer(stream: UnixStream, deliver: &Deliver) {
             .map_err(|e| format!("Not a request SoftPresenter understands: {e}"))
     }) {
         Err(problem) => Reply::failed(problem),
-        Ok(request) if request.v != PROTOCOL => Reply::failed(format!(
+        // An older command line (version 1) can't carry an assistant's mark, so its requests are
+        // the computer's own and still welcome: `sp menu Quit` from the build before an update.
+        // Only a version 1 request that carries the mark is refused, with any other version.
+        Ok(request) if request.v != PROTOCOL && !(request.v == 1 && request.mcp.is_none()) => Reply::failed(format!(
             "This command line speaks version {} of the protocol, the running app version {PROTOCOL}. Use the same build for both.",
             request.v
         )),
@@ -4000,6 +4004,14 @@ mod tests {
         let reply: Reply = serde_json::from_str(line.trim()).expect("a reply");
         assert!(!reply.ok && reply.text.contains("speaks version 1"), "{}", reply.text);
         assert_eq!(heard.lock().unwrap().len(), 2, "never reached the app");
+        // An older command line's own request, with no mark, still works.
+        let mut stream = UnixStream::connect(&path).expect("connected");
+        stream.write_all(b"{\"v\": 1, \"args\": [\"status\"]}\n").expect("sent");
+        let mut line = String::new();
+        BufReader::new(stream).read_line(&mut line).expect("answered");
+        let reply: Reply = serde_json::from_str(line.trim()).expect("a reply");
+        assert!(reply.ok, "{}", reply.text);
+        assert_eq!(*heard.lock().unwrap().last().unwrap(), None, "taken as the computer's own");
         let _ = std::fs::remove_dir_all(&folder);
     }
 
