@@ -848,6 +848,19 @@ impl WgpuEngine {
         std::mem::take(&mut self.pool.destroyed)
     }
 
+    /// SoftPresenter: lets go of everything a recording still holds: its buffers, the clears
+    /// owed to buffers not made yet, and its textures. For a recording that was stopped
+    /// part-way (a stage run on the processor panicked), whose own commands to free them
+    /// never ran. Between frames the engine holds only the picture atlas, which the caller
+    /// has let go by then (`Renderer::forget_pictures`), so nothing another frame needs is
+    /// lost. The textures are dropped, not destroyed: pixels sent to one are still on their
+    /// way to it until the next commands are handed over.
+    pub(crate) fn forget_stopped_recording(&mut self) {
+        self.bind_map.buf_map.clear();
+        self.bind_map.pending_clears.clear();
+        self.bind_map.image_map.clear();
+    }
+
     /// The bytes of GPU memory held in spare buffers.
     pub(crate) fn spare_bytes(&self) -> u64 {
         self.pool
@@ -1172,12 +1185,49 @@ impl BindMapBuffer {
                 | BufferUsages::COPY_DST
                 | BufferUsages::STORAGE
                 | BufferUsages::INDIRECT;
-            let buf = pool.get_buf(proxy.size, proxy.name, usage, device);
-            queue.write_buffer(&buf, 0, &cpu_buf.borrow());
+            // SoftPresenter: the GPU's buffer is only as long as what the stages on the
+            // processor wrote (see `written_len`), where upstream makes it as long as the
+            // whole buffer and sends it all: Vello's constant sizes are about 80 MB for the
+            // three buffers the last stage reads, nearly all of it zeros, and Windows'
+            // software graphics took 16 seconds over one small picture with them. Every byte
+            // of the shorter buffer is sent, so one used again holds nothing of an earlier
+            // frame.
+            let buf = {
+                let bytes = cpu_buf.borrow();
+                let buf = pool.get_buf(written_len(&bytes) as u64, proxy.name, usage, device);
+                let sent = bytes.len().min(buf.size() as usize);
+                queue.write_buffer(&buf, 0, &bytes[..sent]);
+                buf
+            };
             self.buffer = MaterializedBuffer::Gpu(buf);
         }
     }
 }
+
+/// SoftPresenter: how much of a buffer that stages on the processor filled the GPU needs: all
+/// of it up to the last byte that is not zero, and [`ZERO_TAIL`] bytes after (the whole buffer
+/// if that is shorter). A buffer starts as zeros, so what is left out is zeros, and a stage on
+/// the GPU reads the same from the shorter buffer as from the whole one: the shaders are
+/// compiled with bounds checks, which read the buffer's last element for anything past its
+/// end, and that element is zeros, as what was there in the whole buffer was.
+fn written_len(bytes: &[u8]) -> usize {
+    const BLOCK: usize = 4096;
+    let blocks_of_zeros = bytes
+        .rchunks(BLOCK)
+        .take_while(|block| block.iter().all(|byte| *byte == 0))
+        .count();
+    let within = bytes.len().saturating_sub(blocks_of_zeros * BLOCK);
+    let written = bytes[..within]
+        .iter()
+        .rposition(|byte| *byte != 0)
+        .map_or(0, |last| last + 1);
+    (written + ZERO_TAIL).next_multiple_of(4).min(bytes.len())
+}
+
+/// SoftPresenter: the zeros kept after the last byte written (see [`written_len`]): more than
+/// two of the largest element a stage on the GPU reads from such a buffer (a path segment, 24
+/// bytes), so that the buffer's last whole element is zeros wherever the written part ends.
+const ZERO_TAIL: usize = 256;
 
 impl<'a> TransientBindMap<'a> {
     /// Create new transient bind map, seeded from external resources
@@ -1386,5 +1436,56 @@ impl<'a> TransientBindMap<'a> {
                 ResourceProxy::Image(_) => todo!(),
             })
             .collect()
+    }
+}
+
+// SoftPresenter: an addition.
+#[cfg(test)]
+mod tests {
+    use super::{ZERO_TAIL, written_len};
+
+    /// What the GPU is sent of a buffer filled on the processor ends a little after the last
+    /// byte that is not zero, wherever that byte is, and is never longer than the buffer.
+    #[test]
+    fn a_buffer_filled_on_the_processor_is_sent_up_to_what_was_written() {
+        for len in [0, 4, 252, 256, 4096, 4100, 12_288, 1 << 20] {
+            let mut bytes = vec![0_u8; len];
+            assert_eq!(
+                written_len(&bytes),
+                ZERO_TAIL.min(len),
+                "all zeros, {len} long"
+            );
+            for last in [
+                0,
+                1,
+                3,
+                255,
+                4095,
+                4096,
+                8191,
+                len / 2,
+                len.saturating_sub(1),
+            ] {
+                if last >= len {
+                    continue;
+                }
+                bytes.fill(0);
+                bytes[last] = 7;
+                let sent = written_len(&bytes);
+                assert!(sent <= len && sent % 4 == 0, "{sent} of {len}");
+                assert!(
+                    sent == len || sent >= last + 1 + ZERO_TAIL,
+                    "{sent} for a last byte at {last} of {len}"
+                );
+                assert!(
+                    sent <= last + 1 + ZERO_TAIL + 3,
+                    "no more than is needed: {sent} for {last} of {len}"
+                );
+                assert!(
+                    bytes[sent..].iter().all(|byte| *byte == 0),
+                    "only zeros are left out"
+                );
+            }
+        }
     }
 }

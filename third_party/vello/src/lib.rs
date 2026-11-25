@@ -418,6 +418,9 @@ pub struct Renderer {
     explicit_wait: bool,
     learnt_wait: std::time::Duration,
     left_behind: Option<(std::sync::Arc<AtomicBool>, std::time::Duration)>,
+    // SoftPresenter: how many frames drawn with the early stages on the processor the GPU has
+    // not finished yet (see `Renderer::render_on_processor`).
+    frames_ahead: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     // SoftPresenter: how long this renderer has waited for the GPU, in all, reading back the
     // counters of frames it had to check (see `gpu_waited`).
     gpu_waited: std::time::Duration,
@@ -467,6 +470,10 @@ pub struct RendererOptions {
     ///
     /// This is not a recommended configuration as it is expected to have poor performance,
     /// but it can be useful for debugging.
+    ///
+    /// SoftPresenter: the way to draw where the GPU cannot run those stages (see
+    /// `Renderer::render_on_processor`): the frame is then drawn in Vello's single pass with
+    /// its constant scratch sizes, and a scene that outgrows them is refused.
     // TODO: Consider evolving this so that the CPU stages can be configured dynamically via
     // `RenderParams`.
     pub use_cpu: bool,
@@ -545,6 +552,32 @@ fn wait_factor(info: &wgpu::AdapterInfo) -> u32 {
 #[cfg(feature = "wgpu")]
 const GPU_LOOK: std::time::Duration = std::time::Duration::from_micros(200);
 
+/// SoftPresenter: how many frames drawn with the early stages on the processor the GPU may
+/// still have to finish when the next is begun (see `Renderer::render_on_processor`): two, so
+/// that the two pictures one drawing of the screens makes do not wait for each other.
+#[cfg(feature = "wgpu")]
+const FRAMES_AHEAD: usize = 2;
+
+/// SoftPresenter: one frame the GPU has not finished, counted from when it is made until it is
+/// dropped: by the GPU's word that the frame's work is done, or with that word never given.
+#[cfg(feature = "wgpu")]
+struct FrameAhead(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+#[cfg(feature = "wgpu")]
+impl FrameAhead {
+    fn new(count: &std::sync::Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        count.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Self(count.clone())
+    }
+}
+
+#[cfg(feature = "wgpu")]
+impl Drop for FrameAhead {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
 /// SoftPresenter: the most times one call to `render_to_texture` runs a frame. A stage that
 /// runs out of room still counts all it needed, so each run settles at least the first stage
 /// that was short: five stages, and the segments, which have no flag of their own, are settled
@@ -596,6 +629,7 @@ impl Renderer {
             explicit_wait: false,
             learnt_wait: std::time::Duration::ZERO,
             left_behind: None,
+            frames_ahead: std::sync::Arc::default(),
             gpu_waited: std::time::Duration::ZERO,
             resolving: std::time::Duration::ZERO,
             #[cfg(feature = "debug_layers")]
@@ -644,7 +678,7 @@ impl Renderer {
     ) -> Result<()> {
         // Shaders run on the CPU cannot have their counters read back this way.
         if self.engine.use_cpu {
-            return self.render_to_texture_unchecked(device, queue, scene, texture, params);
+            return self.render_on_processor(device, queue, scene, texture, params);
         }
         let waited_before = self.gpu_waited;
         self.render_checked(device, queue, scene, texture, params)?;
@@ -660,6 +694,124 @@ impl Renderer {
             }
         }
         Ok(())
+    }
+
+    /// SoftPresenter: draws a scene with every stage but the last run on the processor
+    /// (`RendererOptions::use_cpu`), in Vello's single pass with its constant scratch sizes:
+    /// the counters of stages run on the processor cannot be read back as the GPU's are.
+    ///
+    /// Vello's stages for the processor trust that everything fits those sizes: one that runs
+    /// out of room indexes past its buffer and panics. That panic is stopped here, and the
+    /// scene is refused with [`Error::SceneTooHeavy`], as a scene too heavy for the GPU is,
+    /// and remembered, so that the same scene on the same target is refused at once the next
+    /// time, without being run (a scene is known by its bytes as sent, which say where its
+    /// pictures are in the atlas: forgetting the pictures, below, moves them, so a scene with
+    /// pictures may be run, and panic, once more). The frame's last stage, the only one that writes the target,
+    /// had not been handed to the GPU by then (a recording's passes are handed over together,
+    /// after its last command), so the target keeps what it had. What the engine held for the
+    /// frame is let go, and the pictures are forgotten as after a frame the GPU dropped: the
+    /// resolver had counted them as sent. The program's panic hook still hears of each panic.
+    ///
+    /// Nothing in such a frame waits for the GPU, so a GPU slower than the frames come (the
+    /// only one drawn with this way is Windows' software graphics, which takes seconds over a
+    /// large picture) would be handed frame after frame it has not begun, each holding its
+    /// buffers: a video behind the words took 17 MB more every second. So a frame is begun
+    /// only once the GPU has finished all but [`FRAMES_AHEAD`] of the ones before it, and is
+    /// given up with [`Error::GpuTooSlow`] if that takes longer than a run of a frame may be
+    /// waited for. The device is only asked how far it has got, as in `read_bump`.
+    fn render_on_processor(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        scene: &Scene,
+        texture: &TextureView,
+        params: &RenderParams,
+    ) -> Result<()> {
+        use std::sync::atomic::Ordering;
+        let waiting = std::time::Instant::now();
+        let give_up_at = waiting + self.allowed_wait();
+        let in_time = loop {
+            device.poll(wgpu::PollType::Poll)?;
+            if self.frames_ahead.load(Ordering::Acquire) < FRAMES_AHEAD {
+                break true;
+            }
+            if std::time::Instant::now() >= give_up_at {
+                break false;
+            }
+            std::thread::sleep(GPU_LOOK);
+        };
+        self.gpu_waited += waiting.elapsed();
+        if !in_time {
+            return Err(Error::GpuTooSlow);
+        }
+        let mut render = Render::new();
+        let mut recording = render.render_encoding_coarse(
+            scene.encoding(),
+            &mut self.resolver,
+            &self.shaders,
+            &mut self.image_atlas,
+            params,
+            false,
+            None,
+        );
+        let print = render.scene_print();
+        // Known to be too heavy: only its pictures are sent, which the resolver has counted
+        // as sent (as for a scene refused before it is run in `render_checked`).
+        if self.scratch.refused_before(print) {
+            let pictures = render::pictures_only(recording);
+            if !pictures.commands.is_empty() {
+                self.engine.run_recording(
+                    device,
+                    queue,
+                    &pictures,
+                    &[],
+                    "render_to_texture refused",
+                    #[cfg(feature = "wgpu-profiler")]
+                    &mut self.profiler,
+                )?;
+            }
+            return Err(Error::SceneTooHeavy);
+        }
+        let target = render.out_image();
+        render.record_fine(&self.shaders, &mut recording);
+        // Sound to carry on from: everything a stopped recording may have left half-done (the
+        // picture atlas, and the buffers and textures the engine holds for it) is let go below
+        // before anything draws with this renderer again.
+        let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.engine.run_recording(
+                device,
+                queue,
+                &recording,
+                &[ExternalResource::Image(target, texture)],
+                "render_to_texture on the processor",
+                #[cfg(feature = "wgpu-profiler")]
+                &mut self.profiler,
+            )
+        }));
+        // The GPU's buffers are as long as what each frame wrote: one no frame has used for a
+        // while is given back, as after a frame the GPU works out by itself.
+        self.engine.release_idle(
+            std::time::Instant::now(),
+            scratch::KEPT_SPARE,
+            self.scratch.largest_resting_buffer(),
+            scratch::KEPT_LARGE_SPARE,
+        );
+        match drawn {
+            Ok(drawn) => {
+                // Counted until the GPU has finished it, or will never be asked to.
+                if drawn.is_ok() {
+                    let ahead = FrameAhead::new(&self.frames_ahead);
+                    queue.on_submitted_work_done(move || drop(ahead));
+                }
+                drawn
+            }
+            Err(_) => {
+                self.forget_pictures(device, queue);
+                self.engine.forget_stopped_recording();
+                self.scratch.refuse(print);
+                Err(Error::SceneTooHeavy)
+            }
+        }
     }
 
     /// SoftPresenter: draws a scene with scratch buffers sized for it, running it again with

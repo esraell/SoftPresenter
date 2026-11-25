@@ -2061,12 +2061,19 @@ impl App {
         let device_id = pollster::block_on(context.device(Some(&home_surface)))
             .ok_or("No graphics device was found that SoftPresenter can use.")?;
         let handle = &context.devices[device_id];
-        // Which graphics the app drew with, for the log of a computer that draws slowly.
+        // Which graphics the app drew with, for the log of a computer that draws slowly: and
+        // whether they are Windows' software graphics, which the painters take the early stages
+        // of every picture off (`sp_render::early_stages_on_processor`).
         let chosen = handle.adapter().get_info();
+        let stages = if sp_render::early_stages_on_processor(&chosen) {
+            "; software graphics: pictures are worked out on the processor"
+        } else {
+            ""
+        };
         applog::event(
             "gpu",
             &format!(
-                "{} ({:?}, {:?}, driver {} {}; memory {:?})",
+                "{} ({:?}, {:?}, driver {} {}; memory {:?}{stages})",
                 chosen.name,
                 chosen.backend,
                 chosen.device_type,

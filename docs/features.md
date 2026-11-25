@@ -1500,6 +1500,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Screens window (**Option-Command-1**). Its − asks before a screen goes ("Remove the screen
   “Lobby”? Nothing more is sent to it, and its settings go. This can't be undone."), as Undo
   can't bring a screen back.
+- **A PC with no graphics driver.** Where Windows has only its own software graphics to
+  offer (WARP, "Microsoft Basic Render Driver": a PC whose graphics driver is missing or
+  broken, some virtual machines), SoftPresenter still starts and draws, with the processor
+  working out each picture and the software graphics only filling in its pixels: slowly (a
+  full-screen slide can take a few seconds to appear, and a video behind the words moves
+  only as often as that), and the log's `[gpu]` line says so. A slide heavier
+  than the renderer's fixed working memory allows there (a 4K screen full of small outlined
+  text) is refused as too much to draw, as a slide too heavy for a graphics card is. Any real
+  graphics card, a Mac and Linux draw as before.
 - **NDI on Linux.** NDI Tools, which installs NDI's runtime on a Mac and on Windows, doesn't
   exist for Linux, so there, while NDI isn't installed, an NDI screen in the Screens window (and
   an NDI Source box in the inspector) has **Download NDI…** beside the ndi.video link. It

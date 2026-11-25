@@ -624,10 +624,20 @@ impl Scratch {
         true
     }
 
+    /// Remembers a scene found too heavy to draw, by its fingerprint: the newest few are kept.
+    pub(crate) fn refuse(&mut self, print: u64) {
+        self.refused.retain(|known| *known != print);
+        if self.refused.len() >= REFUSED_KEPT {
+            self.refused.remove(0);
+        }
+        self.refused.push(print);
+    }
+
     /// True when a scene with this fingerprint was found too heavy to draw. The same scene on
     /// the same target is too heavy every time, so it need not be sent to the GPU to find out
-    /// again. Only what the counters of a frame really said is remembered here: never a frame
-    /// the GPU dropped or was too slow with.
+    /// again. Only what the counters of a frame really said is remembered here (or a stage run
+    /// on the processor that ran out of room): never a frame the GPU dropped or was too slow
+    /// with.
     pub(crate) fn refused_before(&self, print: u64) -> bool {
         self.refused.contains(&print)
     }
@@ -753,11 +763,7 @@ impl Scratch {
             plan.grown(bump, self.limit)
         };
         let Some(grown) = grown else {
-            self.refused.retain(|known| *known != print);
-            if self.refused.len() >= REFUSED_KEPT {
-                self.refused.remove(0);
-            }
-            self.refused.push(print);
+            self.refuse(print);
             return Verdict::TooHeavy;
         };
         self.reruns += 1;

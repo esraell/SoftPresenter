@@ -15,7 +15,10 @@ mod yuv;
 pub use close_mark::{CloseMark, MarkLook, Square};
 pub use fade_blend::{FadeBlend, Weights, blend_weights};
 pub use fonts::{Fonts, copy_large_fonts_into_caches};
-pub use gpu::{CachedSide, MovingPicture, PaintError, Painter, read_pixels, read_pixels_gently, target_texture};
+pub use gpu::{
+    CachedSide, MovingPicture, PaintError, Painter, early_stages_on_processor, read_pixels, read_pixels_gently,
+    target_texture,
+};
 pub use picture::{Picture, PixelOrder};
 pub use pictures::{MIRROR_SOURCE, forget_mirror, keep_mirror, mirror_quiet, set_mirror_receiving, show_mirror};
 pub use pictures::{

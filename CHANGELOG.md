@@ -12,6 +12,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## 0.9.0-dev.16 — 25 November 2026 (development build)
 
+- On a Windows PC with no working graphics driver (Device Manager shows "Microsoft Basic Display Adapter"), and in some virtual machines, SoftPresenter closed by itself a moment after starting. It now starts there and shows its slides, working the pictures out on the processor: more slowly than with a graphics card (a full-screen slide can take a few seconds to appear), and a 4K slide packed with small text may be refused as too much to draw. Installing the graphics card's own driver is still the way to make it fast.
 - SoftPresenter now sends small anonymous reports of how it runs and what goes wrong (the kind of computer, speeds, crashes), so problems get found and fixed. Never your songs, Bible text, file names or anything about you. They are on unless you turn them off: the setup has a Reports step with the key, and if you already use SoftPresenter a notice says so once, with Turn off beside it; nothing is sent before you have seen one of the two. On a computer whose region is in the European Union, Iceland, Liechtenstein, Norway or the United Kingdom they are off unless you turn them on, and the setup invites you to. Settings › About › Anonymous reports has the On/Off key, See what's sent (the next report, exactly as it would go) and Reset my anonymous id. PRIVACY.md says what is sent, where it goes and that it is kept for 90 days.
 
 ## 0.9.0-dev.15 — 25 November 2026 (development build)

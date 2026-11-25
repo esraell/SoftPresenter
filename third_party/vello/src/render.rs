@@ -270,9 +270,7 @@ impl Render {
         }
         // SoftPresenter: the scratch room a frame uses follows from these bytes and the target's
         // size alone, so a scene seen before is known by them.
-        if scratch.is_some() {
-            self.scene_print = crate::scratch::fingerprint(&packed, params.width, params.height);
-        }
+        self.scene_print = crate::scratch::fingerprint(&packed, params.width, params.height);
         let scene_buf = ResourceProxy::Buffer(recording.upload("vello.scene", packed));
         let config_buf = ResourceProxy::Buffer(
             recording.upload_uniform("vello.config", bytemuck::bytes_of(&cpu_config.gpu)),
@@ -692,8 +690,7 @@ impl Render {
         recording.free_resource(fine.blend_spill_buf);
     }
 
-    /// A fingerprint of the scene as it was sent to the GPU and of the target's size; zero
-    /// when no scratch sizes were chosen for the render.
+    /// A fingerprint of the scene as it was sent to the GPU and of the target's size.
     pub fn scene_print(&self) -> u64 {
         self.scene_print
     }

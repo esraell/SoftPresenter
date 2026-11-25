@@ -137,6 +137,39 @@ Everything is marked `SoftPresenter:` in the source. Removed from the published 
   is kept. `RenderContext` has a `memory_hints` field, wgpu's default unless the caller sets
   another, which the devices it makes are asked for with (so SoftPresenter can try smaller
   memory blocks on DirectX 12 and Vulkan).
+- **`src/lib.rs`, stages on the processor (`RendererOptions::use_cpu`):** Vello can run every
+  stage but the last on the processor, "useful for debugging". SoftPresenter draws that way on
+  Windows' software graphics (WARP, "Microsoft Basic Render Driver"), whose compiler faults
+  the first time `vello.coarse` is run there (an access violation inside `d3d10warp.dll`, in
+  `ComputeShaderTransformer::ConstructLoadStoreSets`, seen in version 10.0.26100.10068, with
+  bounds checks and without; every other stage ran, the last one included), which ends the
+  program. The engine only passes data from the processor to the GPU, never back, so one
+  stage cannot be moved alone. `Renderer::render_on_processor` draws such a frame in Vello's
+  single pass with its constant scratch sizes (counters kept on the processor cannot be read
+  back as the GPU's are). Vello's stages for the processor trust that everything fits: one
+  that runs out of room indexes past its buffer and panics. That panic is caught there, the
+  scene is refused with `Error::SceneTooHeavy` and remembered by its fingerprint
+  (`Scratch::refuse`, so it is not run, and does not panic, each time it is asked for; once
+  more at most, for a scene with pictures, whose place in the atlas has changed), the pictures are
+  forgotten, as after a frame the GPU dropped, and what the engine still held for the stopped
+  recording is let go (`WgpuEngine::forget_stopped_recording`). `Render` now takes the scene's
+  fingerprint for every frame, not only for one given scratch sizes. Nothing in such a frame
+  waits for the GPU, so one is begun only when the GPU has finished all but two of those
+  before it (`FRAMES_AHEAD`; the device is asked, never waited in), and given up with
+  `Error::GpuTooSlow` after the wait a run of a frame may have: without that, a video behind
+  the words handed Windows' software graphics frames faster than it finished them, and the
+  program took 17 MB more every second. Upstream's `use_cpu` has none of this: a scene too
+  heavy for the constant sizes panics, and nothing holds the frames back.
+- **`src/wgpu_engine.rs`, buffers filled on the processor:** when a stage on the GPU needs a
+  buffer the processor's stages filled, upstream makes a GPU buffer of the buffer's whole
+  constant size and sends it all (about 80 MB a frame for the three the last stage reads,
+  nearly all zeros). The copy makes it only as long as what was written, with 256 bytes of
+  zeros after (`written_len`), and sends every byte of it. The last stage reads the same
+  either way: what is left out was zeros, and with bounds checks a read past the end gives
+  the buffer's last element, which is zeros. On Windows' software graphics, on a busy PC, a
+  480 x 270 picture took 16 seconds with the whole buffers and 0.9 with the shorter ones; a
+  1080p one 21 seconds and 6.5. The spare GPU buffers are given back when idle, as after a
+  frame the GPU works out itself.
 - **`src/lib.rs`, wait for the GPU:** see the account of `Renderer::render_to_texture` above
   (a wait for each run, longer for a GPU that is not a Mac's or a discrete one, and
   learnt from a GPU seen to finish what a call gave up on).

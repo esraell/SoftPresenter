@@ -157,11 +157,40 @@ impl MovingPicture {
     }
 }
 
+/// True for graphics that cannot run the renderer's early stages, so that a painter runs them
+/// on the processor instead and leaves the graphics only the last one, which fills in the
+/// pixels: Windows' own software graphics (WARP, "Microsoft Basic Render Driver", which a PC
+/// with no graphics driver, a virtual machine or a remote session draws with). Its compiler
+/// faults on one of those stages the first time it is run (`vello.coarse`: an access violation
+/// in `d3d10warp.dll`, in `ComputeShaderTransformer::ConstructLoadStoreSets`, seen in version
+/// 10.0.26100.10068), which ends the program whatever it does. Every other graphics device
+/// runs all the stages itself, as before.
+pub fn early_stages_on_processor(graphics: &wgpu::AdapterInfo) -> bool {
+    graphics.backend == wgpu::Backend::Dx12 && graphics.device_type == wgpu::DeviceType::Cpu
+}
+
 impl Painter {
     /// Fails if the GPU cannot run the renderer's shaders.
     pub fn new(device: &wgpu::Device) -> Result<Painter, String> {
+        Painter::make(device, early_stages_on_processor(&device.adapter_info()))
+    }
+
+    /// A painter that runs the renderer's early stages on the processor whatever the graphics
+    /// are, as [`Painter::new`] does where [`early_stages_on_processor`] says so: for tests,
+    /// which can then draw that way on any computer.
+    pub fn with_early_stages_on_processor(device: &wgpu::Device) -> Result<Painter, String> {
+        Painter::make(device, true)
+    }
+
+    /// With the early stages on the processor, a picture is worked out in the renderer's
+    /// single pass with its fixed working memory (about 165 MB, made for each picture and let
+    /// go after it): nothing is read back, and a picture that outgrows the fixed sizes is
+    /// refused as [`PaintError::TooHeavy`]. A picture is begun only once the graphics have
+    /// finished all but two of those before it, and given up as [`PaintError::NotNow`] if
+    /// that takes longer than the wait [`Painter::paint`] speaks of.
+    fn make(device: &wgpu::Device, on_processor: bool) -> Result<Painter, String> {
         let options = RendererOptions {
-            use_cpu: false,
+            use_cpu: on_processor,
             antialiasing_support: AaSupport::area_only(),
             // One thread is the renderer's own advice for macOS.
             num_init_threads: std::num::NonZeroUsize::new(1),
@@ -842,5 +871,27 @@ impl Painter {
         let picture = self.cache_texture(device, w, h)?;
         self.paint_into(device, queue, over, &picture, true)?;
         Ok(CachedSide { scene: CachedSide::compose(Some(&under), &picture), picture, under: Some(under) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wgpu::{AdapterInfo, Backend, DeviceType};
+
+    /// Only Windows' software graphics have the renderer's early stages taken off them: its
+    /// DirectX 12 device that runs on the processor. Every real GPU, and the software Vulkan
+    /// that Linux has, keep running every stage themselves.
+    #[test]
+    fn only_windows_software_graphics_leave_the_early_stages_to_the_processor() {
+        assert!(early_stages_on_processor(&AdapterInfo::new(DeviceType::Cpu, Backend::Dx12)));
+        for kind in [DeviceType::DiscreteGpu, DeviceType::IntegratedGpu, DeviceType::VirtualGpu, DeviceType::Other] {
+            assert!(!early_stages_on_processor(&AdapterInfo::new(kind, Backend::Dx12)), "{kind:?} through DirectX 12");
+        }
+        for backend in [Backend::Vulkan, Backend::Metal, Backend::Gl] {
+            for kind in [DeviceType::Cpu, DeviceType::IntegratedGpu, DeviceType::DiscreteGpu] {
+                assert!(!early_stages_on_processor(&AdapterInfo::new(kind, backend)), "{kind:?} through {backend:?}");
+            }
+        }
     }
 }

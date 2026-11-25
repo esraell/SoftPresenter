@@ -152,6 +152,11 @@ a minute on a Mac. One test alone:
   (the updates stand-in), `SOFTPRESENTER_LANGUAGE=en`.
 - **The tests need a graphics device,** as the app does. CI gives them one: Metal on the Mac,
   WARP (DirectX 12 in software) on Windows, and on Linux Mesa's software Vulkan under `xvfb-run`.
+- **To draw with WARP on a PC that has a graphics card** (as a PC with no graphics driver
+  does), set wgpu's own `WGPU_BACKEND=dx12` and `WGPU_ADAPTER_NAME=Microsoft Basic Render Driver`
+  for a test copy. The log's `[gpu]` line then ends "software graphics: pictures are worked out
+  on the processor": the painters run the renderer's early stages themselves there
+  (`sp_render::early_stages_on_processor`), because WARP faults on one of them.
 
 ## Rules
 

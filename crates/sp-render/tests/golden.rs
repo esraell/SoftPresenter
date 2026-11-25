@@ -2769,3 +2769,82 @@ fn the_close_mark_lies_over_the_picture_in_its_corner_and_nowhere_else() {
     let outside = with_close_mark(&look, sp_render::Square { x: 360.0, ..square }, w, h, split);
     assert!(outside == before);
 }
+
+// ---- The early stages on the processor (Windows' software graphics) --------------------------
+
+/// A painter that runs the renderer's early stages on the processor, as the app's does on
+/// Windows' software graphics, here whatever this computer's graphics are.
+fn easel_with_early_stages_on_processor() -> Easel {
+    let mut easel = Easel::new();
+    easel.painter = Painter::with_early_stages_on_processor(&easel.device).expect("painter");
+    easel
+}
+
+/// With the early stages on the processor the pictures are the ones the GPU works out by
+/// itself: words, a dissolve and a wipe half-way through, shapes, and words over a picture.
+#[test]
+fn the_early_stages_on_the_processor_draw_the_same_pictures() {
+    let mut on_gpu = Easel::new();
+    let mut on_processor = easel_with_early_stages_on_processor();
+    for (w, h) in [(1280, 720), (1920, 1080)] {
+        for (name, scene) in heavy_scenes(w, h, 1) {
+            let expected = on_gpu.paint(&scene, w, h).expect("paint");
+            let got = on_processor.paint(&scene, w, h).expect("paint with the early stages on the processor");
+            assert!(count_lit(&got) > 1_000 || name == "shapes", "{name} at {w}x{h} is drawn");
+            assert_same_picture(&format!("{name} at {w}x{h}"), &got, &expected);
+        }
+    }
+    // The GPU memory the last stage's buffers take is used again by the next picture, not
+    // taken anew: over many pictures it never grows (what the lighter pictures above left spare
+    // is given back meanwhile).
+    let (_, scene) = heavy_scenes(1920, 1080, 1).swap_remove(0);
+    on_processor.paint(&scene, 1920, 1080).expect("paint");
+    let kept = on_processor.painter.spare_bytes();
+    for _ in 0..10 {
+        on_processor.paint(&scene, 1920, 1080).expect("paint");
+        let now = on_processor.painter.spare_bytes();
+        assert!(now <= kept, "no more memory after more pictures: {now} bytes, {kept} before");
+    }
+    eprintln!("kept between pictures with the early stages on the processor: {} MB", kept >> 20);
+}
+
+/// A slide that outgrows the fixed working memory the processor's stages have is refused, and
+/// says so, where it would otherwise end the thread that draws it; asked for again and again
+/// it is soon refused at once; and the painter draws the next slides, and their picture, as if
+/// nothing had happened.
+#[test]
+fn a_slide_too_heavy_for_the_processor_stages_is_refused_and_the_next_one_is_drawn() {
+    let mut on_gpu = Easel::new();
+    let mut on_processor = easel_with_early_stages_on_processor();
+    let light = heavy_scenes(1280, 720, 1);
+    let expected: Vec<Vec<u8>> =
+        light.iter().map(|(_, scene)| on_gpu.paint(scene, 1280, 720).expect("paint")).collect();
+    // The picture is in the painter's atlas before the heavy slide is asked for.
+    let before = on_processor.paint(&light[4].1, 1280, 720).expect("paint");
+    assert_same_picture("photo before", &before, &expected[4]);
+
+    let (w, h) = (3840, 2160);
+    // A full reading over a photograph: its picture is on its way to the painter's atlas when
+    // the stages run out of room.
+    let (_, too_heavy) = heavy_scenes(w, h, 9).swap_remove(4);
+    let texture = target_texture(&on_processor.device, w, h);
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let refuse = |easel: &mut Easel| easel.painter.paint(&easel.device, &easel.queue, &too_heavy, &view, w, h);
+    let asked = std::time::Instant::now();
+    assert_eq!(refuse(&mut on_processor), Err(sp_render::PaintError::TooHeavy), "too heavy, and says so");
+    let worked_out = asked.elapsed();
+    // Its picture has a new place in the atlas after that (the pictures were forgotten), so
+    // it is a scene not seen before once more, and no more than once.
+    assert_eq!(refuse(&mut on_processor), Err(sp_render::PaintError::TooHeavy), "still too heavy");
+    let asked_again = std::time::Instant::now();
+    assert_eq!(refuse(&mut on_processor), Err(sp_render::PaintError::TooHeavy), "and again");
+    let at_once = asked_again.elapsed();
+
+    for ((name, scene), expected) in light.iter().zip(&expected) {
+        let got = on_processor.paint(scene, 1280, 720).expect("paint after a slide that was refused");
+        assert_same_picture(&format!("{name} after the refused slide"), &got, expected);
+    }
+    // Not worked out again and again: that ends in a panic that is caught, which the program's
+    // log hears of each time.
+    assert!(at_once < worked_out / 2, "refused at once by then: {at_once:?} after {worked_out:?}");
+}
