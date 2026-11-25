@@ -1089,8 +1089,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   passage showing is lit, however it was looked up. Chapters and verses are numbered as the page
   is read (see above), and what a click opens is kept named in that language.
 - Four Bibles ship with the app (King James, World English, Berean Standard, Russian Synodal)
-  and twenty-four more can be downloaded (among them the Russian Open Bible, a modern Russian
-  translation, and eleven in English). Options › Bibles opens the Bibles window: a search box,
+  and seventy-seven more can be downloaded, in 29 languages (among them the Russian Open Bible,
+  a modern Russian translation, the Chinese Union Version, 개역한글, the Statenvertaling,
+  Károli, Biblia Gdańska, Diodati and Riveduta, and twenty-eight in English). Options › Bibles opens the Bibles window: a search box,
   the Bibles installed (each with Remove, but for the four built in), and every Bible that can
   be downloaded, grouped by language and written in it, with its terms and an Install button
   that shows the download going on. Removing a Bible a translation row shows takes that row
