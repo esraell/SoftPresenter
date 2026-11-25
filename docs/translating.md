@@ -1,9 +1,9 @@
 # Translating SoftPresenter's own words
 
 SoftPresenter's buttons, menus, tooltips and notices exist in English, Spanish, Russian and
-Ukrainian (English and Spanish first). Songs, Bible text and Bible book names are content and keep
-their own languages; the `sp` command line, log lines and dev reports stay in English; the phone's
-remote page has its own tables. The rules for how words may grow are in the design's
+Ukrainian (English, Spanish and Russian in full). Songs, Bible text and Bible book names are
+content and keep their own languages; the `sp` command line, log lines and dev reports stay in
+English; the phone's remote page has its own tables. The rules for how words may grow are in the design's
 `06-languages.md`; this page is how to do the work in the code.
 
 ## Wrapping a string
@@ -133,7 +133,7 @@ start with `_` (`"_note"`) are comments.
 | `common` | words several areas share |
 | `format` | numbers and quotation marks (not words) |
 
-Spanish has every area above. What stays in English is what other crates say in their own words
+Spanish and Russian have every area above. What stays in English is what other crates say in their own words
 when something fails (NDI's, the DeckLink driver's and a video file's reasons, shown as they
 come), and the few errors said at startup before the language is known (the home window can't
 open, no graphics device).
@@ -143,7 +143,8 @@ or hands the crate its words (`sp_render::set_ndi_tag_words`), so the crate and 
 English.
 
 When you finish an area, add its file name to `SPANISH_DONE` in `i18n.rs`, so a string wrapped
-later without its Spanish fails the tests.
+later without its Spanish fails the tests. Russian is held to the same list (`RUSSIAN_DONE` is
+`SPANISH_DONE`), so a string wrapped later needs its Russian as well as its Spanish.
 
 ## Spanish: which Spanish
 
@@ -151,6 +152,85 @@ The drafts follow the design's `lang-tables.js`: Spain's Spanish (ordenador, ví
 sentence case, “…” for quotation marks. A native speaker will review them; the first thing he
 decides is Spain or Latin America, tú or usted. Where the design has no Spanish for a string, write
 it in the same style. `"_note"` at the top of each Spanish file says so.
+
+## Russian: style and glossary
+
+Written for Russian-speaking evangelical (Baptist) churches, which sing from «Песнь Возрождения»:
+plain and friendly, the way a church volunteer talks, in church words, not Orthodox ones and not
+office jargon. Translated from the English in the code; the Spanish only helps with what a string
+means. The Ukrainian tables follow the same glossary, so the two read alike.
+
+- **Form.** Buttons, menu items and tabs are an infinitive or a noun («Очистить», «Добавить
+  песню»); sentences speak to the person with «вы» («Нажмите…», «Выберите…», «ваша библиотека»),
+  never «ты». Sentence case everywhere, Title Case of the English included («Очистить всё»).
+  Capitals only where the English has them (the small captions the app sets in capitals are
+  written in sentence case). ё is always written.
+- **Punctuation.** «…» round a name, as `format.json` says; only where the English has quotes round
+  the placeholder, because many values come already quoted by `i18n::quoted`. The ellipsis … where
+  the English has it; a dash is « — ».
+- **Names in sentences never take a case ending.** A placeholder gets a head noun («Экран «{screen}»
+  выключен», «в список «{list}»») or stands before a colon («{name}: не удалось прочитать»).
+- **Plurals** have three forms, each with `{n}`: `["{n} песня", "{n} песни", "{n} песен"]`. A
+  count that isn't a plural in the code goes in brackets or after a colon («Удалить выбранные
+  песни ({n})?», «Нет шрифтов: {n}»).
+- **Never translated:** product names (SoftPresenter, NDI, DeckLink, VoxLive, Canva, Canva Sync,
+  TimelyChurch, Worship Leader App, Claude, ChatGPT, Grok, Gemini, Bluetooth, iPhone, Mac,
+  FFmpeg…), and keys as their caps print them (Esc, Shift, Enter, Delete, Home, End, ⌘); only
+  Space, the arrows and «a letter», which have no printed name, are Russian (Пробел, Стрелки,
+  Буква). The Mac's menu bar uses the Mac's own Russian (Правка, Справка, Завершить…).
+- **Song group names stay content.** The New Song example keeps `[Verse 1]` and `[Chorus]`, as the
+  Spanish does: those are the names the group keys (C for the chorus) and colours know.
+- **Short forms** (`.short`) where Russian runs long in a fixed room: the layer keys Сообщ. and
+  Объявл., Ветхий З. and Новый З. in the Bible lists, Найти for the find box, Песни for All
+  Songs, and the rest of the rows the Spanish has.
+
+| English | Russian |
+|---|---|
+| Service (the church service, the first playlist, the view's tab) | Служение |
+| Bible (the view) / Edit (the view) | Библия / Редактор |
+| playlist / the service's playlist | список / список служения |
+| playlist item | пункт |
+| header / divider / placeholder (in a playlist) | заголовок / разделитель / пустое место |
+| library / All Songs | библиотека / Все песни |
+| song / slide | песня / слайд |
+| verse / chorus / pre-chorus / bridge / ending / intro / tag | куплет / припев / предприпев / бридж / окончание / вступление / тег |
+| group (of a song) | часть |
+| arrangement | порядок исполнения (short: порядок) |
+| Bible verse / passage / reference / chapter / book | стих / отрывок / ссылка / глава / книга |
+| Bible translation / reading | перевод / чтение |
+| screen / display (a monitor) | экран / монитор |
+| audience screens / Audience (key and tab) | экраны для зала / Зал |
+| stage screens / Stage (key and tab) / stage layout | экраны для сцены / Сцена / макет сцены |
+| the operator's window | окно оператора |
+| Clear / Clear All / take off the screens | Очистить / Очистить всё / убрать с экранов |
+| Show / Hide / On / Off | Показать / Скрыть / Вкл. / Выкл. |
+| layer keys | кнопки слоёв |
+| key (keyboard) / hot key | клавиша / горячая клавиша |
+| key (a video switcher's) / fill | ключ / заливка |
+| media / media bin / media playlist | медиа / медиатека / медиасписок |
+| picture / video / audio / track / audio playlist | картинка / видео / аудио / трек / аудиосписок |
+| props / prop | накладки / накладка |
+| messages / quick message / announcements | сообщения / быстрое сообщение / объявления |
+| timers / macros | таймеры / макросы |
+| theme / theme version / the usual look / template | тема / вариант темы / обычный вид / шаблон |
+| transition / Cut / Dissolve / Continuous | переход / Сразу / Плавно (in the list: Растворение) / Подряд |
+| box (on a slide) / object / shape | блок / объект / фигура |
+| captions / test pattern | субтитры / тестовая картинка |
+| preview / live (on the screens) | предпросмотр / на экране |
+| Settings / Integrations / AI assistants | Настройки / Интеграции / ИИ-помощники |
+| Settings groups: The room / On screen / Connect / Advanced | Зал / На экране / Подключения / Дополнительно |
+| Phone remote / Remote Control / Phone Screens | Пульт на телефоне / Удалённое управление / Экраны телефонов |
+| songbook / free songbooks / song pack / song bundle | сборник / бесплатные сборники / набор песен / пакет песен |
+| notices / setup (first start) | уведомления / первая настройка |
+| name (of a song, list, file) / name (NDI, a person) | название / имя |
+| sign in / sign-in / password / sync | войти / вход / пароль / синхронизация |
+| Import / Export / download / install | Импорт / Экспорт / скачать / установить |
+| Undo / Redo / Cancel / Done | Отменить / Повторить / Отмена / Готово |
+| Delete / Remove (from a list) | Удалить / Убрать |
+| pick / picked | выбрать / выбранные |
+| Trash | Корзина |
+| Command line / terminal | Командная строка / терминал |
+| Identify / Stop identifying | Опознать / Остановить опознание |
 
 ## Checking
 

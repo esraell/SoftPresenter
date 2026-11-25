@@ -9330,7 +9330,7 @@ mod tests {
     fn the_editors_object_tools_fit_their_words_and_take_a_second_row_rather_than_cut_them() {
         use crate::i18n::{Language, with_language};
         let ctx = crate::studio::tests::styled();
-        for language in [Language::English, Language::Spanish] {
+        for language in [Language::English, Language::Spanish, Language::Russian] {
             // Each tool is as wide as its words in the language, with room either side.
             let mut widths = [0.0; 6];
             let mut words = [0.0; 6];

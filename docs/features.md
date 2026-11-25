@@ -1741,7 +1741,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   computer's (a small screen, with the computer's language named in that language under it), then
   English, Español, Русский and Українська, each written in itself with the flag it is best known
   by; the setup's first step has the same choice as a menu ("El idioma del ordenador (Español)"). A choice shows at once, with no restart, and is kept with the preferences (`language`).
-  Spanish is written for the whole window: the top bar, the keys sheet, the
+  Spanish and Russian are written for the whole window: the top bar, the keys sheet, the
   left column (libraries, playlists and their menus), the slides area (with the slide,
   arrangement and times menus), the bar and the media strip under it, the right column (preview,
   layer keys, Clear All, the tool tabs and what is in them), the Bible view, the Bibles window,

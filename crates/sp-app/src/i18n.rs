@@ -999,14 +999,29 @@ mod tests {
         "freesongbooks",
     ];
 
+    // Russian is translated in full too: every area Spanish has finished, Russian has, so a
+    // string wrapped later without its Russian fails here as well.
+    const RUSSIAN_DONE: &[&str] = SPANISH_DONE;
+
+    /// What `language` lacks in the areas `done` lists, as "key (English)".
+    fn lacking_in(language: Language, done: &[&str]) -> Vec<String> {
+        missing(language)
+            .into_iter()
+            .filter(|(key, _)| done.contains(&key.split('.').next().unwrap_or("")))
+            .map(|(key, english)| format!("{key} ({english})"))
+            .collect()
+    }
+
     #[test]
     fn the_finished_areas_have_all_their_spanish() {
-        let lacking: Vec<String> = missing(Language::Spanish)
-            .into_iter()
-            .filter(|(key, _)| SPANISH_DONE.contains(&key.split('.').next().unwrap_or("")))
-            .map(|(key, english)| format!("{key} ({english})"))
-            .collect();
+        let lacking = lacking_in(Language::Spanish, SPANISH_DONE);
         assert!(lacking.is_empty(), "no Spanish yet for: {lacking:#?}");
+    }
+
+    #[test]
+    fn the_finished_areas_have_all_their_russian() {
+        let lacking = lacking_in(Language::Russian, RUSSIAN_DONE);
+        assert!(lacking.is_empty(), "no Russian yet for: {lacking:#?}");
     }
 
     #[test]
