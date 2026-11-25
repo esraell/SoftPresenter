@@ -723,6 +723,44 @@ mod tests {
     }
 
     #[test]
+    fn a_songbook_kept_as_text_comes_in_zipped_or_not() {
+        use std::io::Write;
+        // The layout the songbooks offered for download are in; words written for this test.
+        let text = "##3\n##Пісні для перевірки\n##Написано для тестів\n\
+            2#$#Друга#$#0#$#D#$#Олена#$#Іван#$#Куплет 1 @%Сонце встає@%над полем@$Приспів@%Радій, радій@$Куплет 2@%Вечір настав\n\
+            1#$#Перша#$##$##$##$##$#Куплет 1@%Ранок над полем\n";
+        let dir = TempDir::new("text-songbooks");
+        let check = |book: Songbook| {
+            assert!(book.cautions.is_empty(), "{:?}", book.cautions);
+            let titles: Vec<&str> = book.songs.iter().map(|(song, _)| song.title.as_str()).collect();
+            assert_eq!(titles, ["1. Перша", "2. Друга"]);
+            assert!(book.songs.iter().all(|(_, book)| book.as_deref() == Some("Пісні для перевірки")));
+            let second = &book.songs[1].0;
+            assert_eq!(second.copyright.author, "Олена / Іван");
+            assert_eq!(
+                second.groups.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(),
+                ["Куплет 1", "Приспів", "Куплет 2"]
+            );
+            assert_eq!(second.groups[0].slides[0].text_for(&Role::primary()), Some("Сонце встає\nнад полем"));
+            assert_eq!(second.arrangements[0].groups.len(), 4, "the chorus after each verse");
+        };
+        check(import_songbook(&dir.write("Пісні.sps", text.as_bytes())).unwrap());
+        let zipped = dir.0.join("pisni.zip");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&zipped).unwrap());
+        zip.start_file("Пісні.sps", zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(text.as_bytes()).unwrap();
+        zip.finish().unwrap();
+        // A zip of a songbook is songs, not a Bible and not anything else.
+        assert_eq!(crate::file_drop::kind_of(&zipped), crate::file_drop::Kind::Song);
+        check(import_songbook(&zipped).unwrap());
+        // A songbook saved as XML says it isn't read.
+        let xml = dir.write("New.sps", b"<?xml version=\"1.0\"?><spSongBook version=\"2.0\"></spSongBook>");
+        assert!(
+            import_songbook(&xml).err().unwrap().contains("New.sps could not be read (it is a songbook saved as XML")
+        );
+    }
+
+    #[test]
     fn a_name_inside_a_zip_reads_as_it_was_written() {
         assert_eq!(zip_entry_name("Пісні/Збірка.sps".as_bytes()), "Пісні/Збірка.sps");
         // Not UTF-8: the zip's own old encoding, in which every byte is something.

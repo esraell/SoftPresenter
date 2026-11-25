@@ -21,7 +21,7 @@ Website: [softpresenter.com](https://softpresenter.com)
 - **Works with your stream.** NDI, Blackmagic DeckLink, stage screens, and a screen laid out as a lower third.
 - **Brings your songs and slides with you.** SoftProjector, text, ChordPro, Word, and PowerPoint files as editable slides or as pictures.
 
-> **Coming from SoftProjector?** Its database (`spData.sqlite`) or an exported songbook (`.sps`) comes straight across: each songbook becomes a library, each song keeps its number, its verses and choruses, and an arrangement that repeats the chorus after every verse, as SoftProjector does. Drop the file on the window.
+> **Coming from SoftProjector?** Its database (`spData.sqlite`), an exported songbook (`.sps`) or a downloaded one, zipped or not, comes straight across: each songbook becomes a library, each song keeps its number, its verses and choruses, and an arrangement that repeats the chorus after every verse, as SoftProjector does. Drop the file on the window.
 
 ## What it looks like
 

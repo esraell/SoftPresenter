@@ -64,7 +64,10 @@ SoftPresenter also imports songs from SoftProjector (its `spData.sqlite` databas
 `.sps` songbooks it exports), so a church moving from it keeps its songs. The layout was learnt
 by reading SoftProjector's source code, which is published under the GPL version 3
 (github.com/SoftProjector/softprojector): the names of its tables and columns, and how it splits
-a song's text into verses and choruses. Those are facts about the format; no code was copied.
+a song's text into verses and choruses, and, for the songbooks kept as text that it made before
+its version 2 and still offers for download, which line holds the title and which signs
+separate a song's parts, its verses and its lines. Those are facts about the format; no code was
+copied.
 The files are SQLite databases. SoftPresenter reads them with a small reader of its own
 (`crates/sp-model/src/sqlite_read.rs`), written from the description of the file format that
 SQLite's authors publish (sqlite.org/fileformat2.html); it uses no code from SQLite or from

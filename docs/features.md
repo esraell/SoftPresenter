@@ -197,8 +197,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     short by a quit is never mistaken for a picture.
     Pictures in a folder go in the order people number them (Slide2 before Slide10). A 40-page
     PDF takes about 0.07 seconds where it took 0.4 seconds one page at a time.
-- **Bringing songs across from SoftProjector.** Its database (`spData.sqlite`) or an exported
-  songbook (`.sps`), dropped on the window or chosen in File › Import Songs › Song Files…: each songbook
+- **Bringing songs across from SoftProjector.** Its database (`spData.sqlite`), an exported
+  songbook (`.sps`) or a songbook downloaded for it, dropped on the window or chosen in File › Import Songs › Song Files…: each songbook
   becomes a library of its name, each song keeps its number before its title (so "123" still
   finds it), its lyricist and composer, its verses, choruses and other parts as groups (a
   "&Куплет" part as more slides of its verse), and an arrangement, "As sung", that repeats the
@@ -215,7 +215,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   is named with the reason while the others still come in, and a zip with no songbook in it is
   not taken for songs. The zip is read with limits (its size, how many files it lists, how
   much it unpacks to), nothing in it is written to disk, a zip inside it is not opened, and
-  names in it written before zips used UTF-8 read as they were written.
+  names in it written before zips used UTF-8 read as they were written. The songbooks
+  SoftProjector offers for download (zips such as `pv3300.zip`) hold an `.sps` of an older kind,
+  a text file with a song on each line, and those come in too, zipped or not: the songbook's
+  title from its second line, each song's number, title, lyricist, composer and words, in the
+  order of their numbers, with the same words, to the letter, as the SQLite songbook of the same
+  name gives (so importing both brings each song once). A songbook saved as XML
+  is not read yet, and says so.
 - **Bringing a library across from ProPresenter 7.** File › Import Songs › A Library Folder… opens
   its Libraries folder; choose song documents, one library, or the folder of all of them. Each folder becomes a
   library of the same name. Each song keeps its groups, slides, arrangements (and the one

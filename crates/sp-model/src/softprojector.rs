@@ -1,8 +1,9 @@
 //! Songs from SoftProjector, the open-source presentation program many Russian- and
 //! Ukrainian-speaking churches use. Its songs are kept in an SQLite database (its own
-//! `spData.sqlite`, or a songbook exported as `.sps`); [`read_songbook`] reads the songs out of
-//! either, and [`from_softprojector`] turns one song's text into SoftPresenter's groups and
-//! slides.
+//! `spData.sqlite`, or a songbook exported as `.sps`) or, in songbooks made before its version
+//! 2 (those it offers for download among them), in a text file also ending `.sps`;
+//! [`read_songbook`] reads the songs out of any of the three, and [`from_softprojector`] turns
+//! one song's text into SoftPresenter's groups and slides.
 //!
 //! A song's text is blocks, each starting with a line naming it: a verse ("Куплет 1",
 //! "Verse 2"), the chorus ("Припев", "Приспів", "Chorus"), or a slide of another kind ("Слайд",
@@ -13,7 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, SeekFrom};
 
 use crate::sqlite_read::{Database, Limits, Value, is_database};
 use crate::{Arrangement, Copyright, Group, Object, Presentation, Role, Slide, Uuid, group_color};
@@ -48,8 +49,8 @@ pub enum SongbookProblem {
 /// and the songbook's name.
 type Fields = [Value; 6];
 
-/// Every song in a SoftProjector database or an exported songbook, told by how the file
-/// starts. They come in the songbooks' order by name and, within a songbook, by number; songs
+/// Every song in a SoftProjector database, an exported songbook or a songbook kept as text,
+/// told apart by how the file starts. They come in the songbooks' order by name and, within a songbook, by number; songs
 /// with the same number stay in the order they were kept in.
 pub fn read_songbook<R: Read + Seek>(mut source: R) -> Result<Vec<SongbookSong>, SongbookProblem> {
     let unreadable = |e: std::io::Error| SongbookProblem::Unreadable(format!("it could not be read ({e})"));
@@ -58,7 +59,23 @@ pub fn read_songbook<R: Read + Seek>(mut source: R) -> Result<Vec<SongbookSong>,
     let fields = if is_database(&head) {
         database_songs(source).map_err(|problem| problem.unwrap_or(SongbookProblem::NotSongbook))?
     } else {
-        return Err(SongbookProblem::NotSongbook);
+        source.seek(SeekFrom::Start(0)).map_err(unreadable)?;
+        let mut bytes = Vec::new();
+        source.by_ref().take(LARGEST_TEXT_SONGBOOK + 1).read_to_end(&mut bytes).map_err(unreadable)?;
+        let whole = String::from_utf8_lossy(&bytes);
+        let whole = whole.strip_prefix('\u{feff}').unwrap_or(&whole);
+        if whole.starts_with("<?xml") && whole.contains("spSongBook") {
+            return Err(SongbookProblem::Unreadable(
+                "it is a songbook saved as XML, which SoftPresenter doesn't read yet".to_owned(),
+            ));
+        }
+        if !whole.starts_with("##") {
+            return Err(SongbookProblem::NotSongbook);
+        }
+        if bytes.len() as u64 > LARGEST_TEXT_SONGBOOK {
+            return Err(SongbookProblem::Unreadable("it is larger than any songbook".to_owned()));
+        }
+        text_songs(whole)
     };
     if fields.is_empty() {
         return Err(SongbookProblem::NoSongs);
@@ -82,6 +99,48 @@ pub fn read_songbook<R: Read + Seek>(mut source: R) -> Result<Vec<SongbookSong>,
             book: Some(words(book)).filter(|book| !book.trim().is_empty()),
         })
         .collect())
+}
+
+/// The largest songbook kept as text that is read (the largest there is has four megabytes).
+const LARGEST_TEXT_SONGBOOK: u64 = 64 * 1024 * 1024;
+
+/// The songs of a songbook kept as text, the way SoftProjector kept them before its version 2
+/// (the songbooks it offers for download are still kept so): three lines starting `##` (a
+/// code, the songbook's title, a note about it), then a song a line, its parts separated by
+/// `#$#`: number, title, category, tune, who wrote the words, who wrote the music, and the
+/// text, in which `@$` ends a verse and `@%` ends a line. A line with fewer parts is no song.
+/// They come in the order of their numbers, as they would out of the database SoftProjector
+/// puts them in.
+fn text_songs(whole: &str) -> Vec<Fields> {
+    let mut lines = whole.split('\n');
+    let _code = lines.next();
+    let book = lines.next().unwrap_or("").replace('#', "").trim().to_owned();
+    let _note = lines.next();
+    let mut fields: Vec<Fields> = lines
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.trim_end_matches('\r').split("#$#").collect();
+            let [number, title, _category, _tune, words, music, text, ..] = parts.as_slice() else { return None };
+            // Each verse's lines, then an empty line before the next: the same text, to the
+            // letter, as SoftProjector's own databases hold for these songbooks.
+            let verses: Vec<String> = text
+                .split("@$")
+                .map(|verse| verse.split("@%").collect::<Vec<_>>().join("\n").trim().to_owned())
+                .collect();
+            // A number is kept as a number where it is one, as a column of whole numbers keeps it.
+            let number = number.trim();
+            let number = match (number.parse::<i64>(), number.parse::<f64>()) {
+                (Ok(whole), _) => Value::Integer(whole),
+                (_, Ok(fraction)) if fraction.is_finite() => Value::Real(fraction),
+                _ => Value::Text(number.to_owned()),
+            };
+            let written = |part: &str| Value::Text(part.to_owned());
+            let text = verses.join("\n\n");
+            Some([number, written(title), written(words), written(music), written(text.trim()), written(&book)])
+        })
+        .take(MOST_SONGS)
+        .collect();
+    fields.sort_by(|[a, ..], [b, ..]| sort_order(a, b, &|a: &str, b: &str| a.cmp(b)));
+    fields
 }
 
 /// The most songs one file may give: many times the largest songbook, and few enough that a
@@ -538,6 +597,74 @@ mod tests {
         // A songbook whose songs have lost a column the import needs.
         let narrow = include_bytes!("../tests/songbooks/narrow.sps");
         assert!(matches!(read(narrow), Err(SongbookProblem::Unreadable(why)) if why.contains("no column song_text")));
+    }
+
+    /// A songbook kept as text, written for this test: a song a line, out of order, one with
+    /// the extra parts later versions added, one whose number has a letter, and a line that is
+    /// no song.
+    const TEXT_SONGBOOK: &str = "##7\n##Пісні для перевірки\n##Написано для тестів@%другий рядок\n\
+        2#$#Друга#$#0#$#D#$#Олена#$#Іван#$#Куплет 1@%Сонце встає@%над полем@$Приспів@%Радій, радій@$Куплет 2@%Вечір настав\n\
+        12a#$#A letter in its number#$#0#$##$##$##$#Verse 1@%Twelve and a little more\n\
+        1#$#Перша#$##$##$##$##$#Куплет 1 @%Ранок над полем \n\
+        \n\
+        not a song\n\
+        10#$#The tenth#$#0#$#G#$#Ann#$#Ann#$#Verse 1.@%A lamp in the window@$Chorus@%Come home#$#Arial#$#0#$#sky.png#$#a note\r\n";
+
+    #[test]
+    fn a_songbook_kept_as_text_gives_its_songs_in_the_order_of_their_numbers() {
+        let songs = read(TEXT_SONGBOOK.as_bytes()).unwrap();
+        assert_eq!(songs.iter().map(|song| song.number).collect::<Vec<_>>(), [Some(1), Some(2), Some(10), None]);
+        assert!(songs.iter().all(|song| song.book.as_deref() == Some("Пісні для перевірки")));
+        let second = &songs[1];
+        assert_eq!((second.title.as_str(), second.words.as_str(), second.music.as_str()), ("Друга", "Олена", "Іван"));
+        assert_eq!(second.text, "Куплет 1\nСонце встає\nнад полем\n\nПриспів\nРадій, радій\n\nКуплет 2\nВечір настав");
+        // Spaces at the ends of lines stay, as they do in the database of the same songbook.
+        assert_eq!(songs[0].text, "Куплет 1 \nРанок над полем");
+        // The parts after the text (a font, a picture, a note) are not the song's.
+        assert_eq!(songs[2].text, "Verse 1.\nA lamp in the window\n\nChorus\nCome home");
+        assert_eq!(songs[3].title, "A letter in its number");
+        let song = from_softprojector(second.number, &second.title, &second.words, &second.music, &second.text);
+        assert_eq!(song.title, "2. Друга");
+        assert_eq!(
+            song.groups.iter().map(|group| group.name.as_str()).collect::<Vec<_>>(),
+            ["Куплет 1", "Приспів", "Куплет 2"]
+        );
+        assert_eq!(words(&song)[0].1, "Сонце встає\nнад полем");
+        // With a byte-order mark and Windows line ends it reads the same.
+        let windows = format!("\u{feff}{}", TEXT_SONGBOOK.replace('\n', "\r\n"));
+        assert_eq!(read(windows.as_bytes()).unwrap(), songs);
+        // A songbook with no songs, one saved as XML, and text that is no songbook.
+        assert_eq!(read("##1\n##Empty\n##\n".as_bytes()), Err(SongbookProblem::NoSongs));
+        assert_eq!(read(b"##"), Err(SongbookProblem::NoSongs));
+        let xml = b"<?xml version=\"1.0\"?><spSongBook version=\"2.0\"></spSongBook>";
+        assert!(matches!(read(xml), Err(SongbookProblem::Unreadable(why)) if why.contains("XML")));
+        assert_eq!(read(b"#$#@$@%"), Err(SongbookProblem::NotSongbook));
+        // Bytes that aren't text, and separators with nothing between, are read without harm.
+        let odd = b"##\xff\xfe\n##\n##\n#$##$##$##$##$##$#\n1#$#\xff#$##$##$##$##$#@$@$@%@%\n";
+        let songs = read(odd).unwrap();
+        assert_eq!(songs.len(), 2);
+        assert!(songs.iter().all(|song| song.text.is_empty() && song.book.is_none()));
+    }
+
+    /// Writes the songs real songbooks give as JSON, to compare with what another program
+    /// makes of the same files. Testing aid: `SOFTPRESENTER_SONGBOOK_FILES` names the songbooks
+    /// (separated as in PATH) and `SOFTPRESENTER_SONGBOOK_DUMP` the folder the JSON goes in,
+    /// one file a songbook; run with
+    /// `cargo test -p sp-model the_songs_of_real_songbooks -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "needs songbooks to read"]
+    fn the_songs_of_real_songbooks_written_out() {
+        let files = std::env::var_os("SOFTPRESENTER_SONGBOOK_FILES").expect("SOFTPRESENTER_SONGBOOK_FILES names them");
+        let folder = std::path::PathBuf::from(std::env::var_os("SOFTPRESENTER_SONGBOOK_DUMP").expect("a folder"));
+        for (at, path) in std::env::split_paths(&files).enumerate() {
+            let songs = read_songbook(std::fs::File::open(&path).unwrap()).unwrap();
+            let rows: Vec<serde_json::Value> = songs
+                .iter()
+                .map(|song| serde_json::json!([song.number, song.title, song.words, song.music, song.text, song.book]))
+                .collect();
+            std::fs::write(folder.join(format!("{at}.json")), serde_json::to_vec(&rows).unwrap()).unwrap();
+            println!("{at}: {} songs from {}", songs.len(), path.display());
+        }
     }
 
     /// Compares what real files give with what the system's SQLite gives for the importer's
