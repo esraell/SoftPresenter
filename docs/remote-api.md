@@ -456,8 +456,10 @@ playlist of a first start while nothing has changed it ("Service"). Their files 
 and the window shows them in its language ("Incluido", "Culto"). Wherever such a name reaches the
 page it comes with two more fields:
 
-- `built_in: true` while it is the app's name (a playlist renamed, given an item or written to
-  its file, or a theme renamed, is the church's, and has neither field);
+- `built_in: true` while it is the app's name. The first playlist is the app's only while it is
+  the one playlist, empty and unchanged: making a second playlist, giving it an item, renaming it
+  or writing it to its file makes it the church's for good, with neither field. A renamed theme
+  is the church's too;
 - `label`: the name as the window shows it now, **only when that differs** from the name (so
   never in English).
 
@@ -500,7 +502,7 @@ itself in that language, as the window says it:
 What stays as it is: names and words the church typed (songs, slides, playlists, headers),
 words for the page to read (`kind`, `media_type`, `test_pattern`, `tone`, ids), and an
 `ok: true` reply's `text`, which is as the command made it. `sp` and the log are always in
-English. `["settings", "set", "language=es"]` changes the app's language from a page too.
+English. A page can't change the app's language: `["settings", "set", "language=…"]` is refused.
 
 ## Times
 
