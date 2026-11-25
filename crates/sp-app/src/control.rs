@@ -1208,6 +1208,16 @@ Phone screens (an iPhone, iPad or Mac shows its screen in a box on a slide; unof
   mirror allow [ID] | mirror deny [ID]   answer a device that is waiting
   mirror stop                  end the screen being shown now
 
+AI assistants (answered by sp itself, without the app; docs/mcp.md)
+  mcp                          the MCP server an assistant starts; not for typing
+  mcp status                   the two switches, and whether each assistant app found here has
+                               SoftPresenter (Claude Desktop, Claude Code, ChatGPT / Codex,
+                               Cursor, VS Code / GitHub Copilot, Antigravity, Grok Build)
+  mcp connect APP [--replace]  add SoftPresenter to an app, as the card's Add does: desktop, code,
+                               chatgpt, cursor, copilot, antigravity or grok (--replace points an
+                               entry that starts another program at this copy)
+  mcp disconnect APP           take it out again
+
 Names can be typed in part (\"amazing\" finds \"Amazing Grace\"); a name that fits several
 things lists them instead of guessing. Numbers are as the lists show them, from 1. A song can
 also be named by its id, as song info and the JSON replies give it.

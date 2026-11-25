@@ -378,6 +378,11 @@ mod tests {
         assert!(said(&["song", "export", "Amazing", "--to", "/tmp/x"]).contains("Files"));
         assert!(said(&["slide", "web", "Amazing", "1", "https://example.org"]).contains("Web pages"));
         assert!(said(&["undo"]).contains("only the shapes"));
+        // Adding SoftPresenter to assistant apps (another program's settings) is the person's,
+        // at the computer: `sp` answers it itself, and an assistant's request for it is refused.
+        for shape in [&["mcp", "connect", "desktop"][..], &["mcp", "disconnect", "code"], &["mcp", "status"]] {
+            assert!(kind_of(&words(shape)).is_err(), "{shape:?} should be refused");
+        }
     }
 
     /// A Bible that isn't offered is refused as that, pointing to the list, not as a command

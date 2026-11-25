@@ -34,8 +34,11 @@ careless test run puts a slide in front of whoever is using the computer.
   [docs/cli.md](docs/cli.md#trying-it-safely) has a wrapper that refuses to run without the
   test copy's socket.
 - **`sp mcp` is `sp` too** (the MCP server, [docs/mcp.md](docs/mcp.md)): try it with the test
-  copy's variables set, and never add it to the owner's Claude Code or Claude Desktop setup. A
-  new `sp` command stays closed to assistants until `crates/sp-app/src/mcp/policy.rs` lists it.
+  copy's variables set, and never add it to the owner's Claude Code, Claude Desktop or any other
+  assistant's setup. The card's Add buttons and `sp mcp connect` change those apps' settings: a
+  test copy finds no assistant unless `SOFTPRESENTER_ASSISTANTS_HOME` names a stand-in home
+  folder, with stand-ins for `claude`, `codex` and `grok` that record their words. A new `sp`
+  command stays closed to assistants until `crates/sp-app/src/mcp/policy.rs` lists it.
 - **Quit a test copy through its own socket** (`sp menu Quit` with its variables set), never by
   name or path (`osascript -e 'quit app "SoftPresenter"'`): macOS may send that to the owner's
   copy, or to another session's test copy.
@@ -89,7 +92,8 @@ person:
 | `SOFTPRESENTER_SONGBOOK_URL=<address>` | Fetch the free songbooks from there (a local test server; `http` allowed for 127.0.0.1 and localhost) instead of the site that shares them; each file must still have the size and SHA-256 the app expects |
 | `SOFTPRESENTER_FREE_SONGBOOKS=1` | Open the Free Songbooks window as the app starts, as Import Songs › Free Songbooks… does |
 | `SOFTPRESENTER_TIMELYCHURCH_URL=<base address>` | Offer TimelyChurch (Settings › Integrations › TimelyChurch and `sp timelychurch`), hidden until its Worship API ships, with that address suggested for connecting; without it nothing is ever asked of the network. For the demo church in the tests (`timelychurch/mock.rs`: `cargo test -p sp-app timelychurch::mock::serve -- --ignored --nocapture` serves it at `http://127.0.0.1:4320`, pairing code `DEMO-2026`), `http` is allowed for 127.0.0.1 and localhost only. Never point it at TimelyChurch's real servers from a test copy |
-| `SOFTPRESENTER_CAPTURE_PREFERENCES=<pane>` | Open Settings at a pane in a capture run (`integrations`, `voxlive`, `canva`, `songbooks`, `remote`…); the Settings window is saved beside the picture as `<name>.settings.png` |
+| `SOFTPRESENTER_CAPTURE_PREFERENCES=<pane>` | Open Settings at a pane in a capture run (`integrations`, `voxlive`, `canva`, `songbooks`, `remote`, `mcp` for the AI assistants card, `mcp-apps` for its list of apps…); the Settings window is saved beside the picture as `<name>.settings.png` |
+| `SOFTPRESENTER_ASSISTANTS_HOME=<folder>` | The home folder a test copy looks for assistant apps in (Settings › Integrations › AI assistants, `sp mcp connect`): their settings files (`Library/Application Support/Claude/`, `.cursor/`, `.copilot/`, `.gemini/`, and `AppData/Roaming` for Windows' own) and their programs (`.local/bin/claude`, `.local/bin/codex`, `.grok/bin/grok`), and nowhere else, not the PATH. A test copy without it finds none, so it never reads or changes the owner's |
 | `SOFTPRESENTER_LANGUAGE=<es\|ru\|uk\|en>` | Stands in for the computer's language, so a test copy starts in that language (the app's own words, and the Bible view's reading language), unless the Language setting chose one; for captures and tests |
 | `SOFTPRESENTER_HIDE_NDI=1` | Behave as on a computer without NDI installed |
 | `SOFTPRESENTER_SLOW_PAGES=<ms>` | Each page of a PDF being made into slides takes that many milliseconds longer, to try a quit part way through (the pictures are drawn at the next start) or to see "Page N…" |

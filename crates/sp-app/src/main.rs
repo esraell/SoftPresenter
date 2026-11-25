@@ -8798,6 +8798,11 @@ impl App {
                         running.home_state.preferences_pane = 4;
                         running.home_state.mcp.reveal = true;
                     }
+                    // The same card scrolled on to its list of assistant apps.
+                    "mcp-apps" => {
+                        running.home_state.preferences_pane = 4;
+                        running.home_state.mcp.reveal_apps = true;
+                    }
                     // The songbooks' page, where the song catalog is offered.
                     "songbooks" => {
                         running.home_state.preferences_pane = 4;
@@ -11184,6 +11189,9 @@ fn main() -> ExitCode {
     }
     match args.first().map(String::as_str) {
         Some("ctl") => return control::run_client(args[1..].to_vec()),
+        // `softpresenter mcp status|connect|disconnect …`: adding SoftPresenter to Claude Desktop
+        // or Claude Code, as the card's buttons do, answered here in English without the app.
+        Some("mcp") if args.len() > 1 => return mcp::connect::run_cli(&args[1..]),
         // `softpresenter mcp` (`sp mcp`): the MCP server an AI assistant starts, talking to it
         // over the standard input and output and to the running app over the control socket.
         Some("mcp") => return mcp::serve(),

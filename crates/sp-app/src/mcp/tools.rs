@@ -542,7 +542,7 @@ fn optional_number(args: &Args, key: &str, low: u64, high: u64) -> Result<Option
 /// Whether a character only changes how text around it is shown (right-to-left overrides and
 /// isolates, zero-width spaces and joiners, the soft hyphen, the byte order mark): Unicode's
 /// format characters, which could make words in a question read otherwise than they are.
-fn formats_text(c: char) -> bool {
+pub(super) fn formats_text(c: char) -> bool {
     matches!(
         c,
         '\u{ad}'

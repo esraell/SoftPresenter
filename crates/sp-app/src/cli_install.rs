@@ -268,7 +268,7 @@ fn remember(what: &str) {
 }
 
 /// A path as the window shows it: the home folder as `~` (on a Mac and Linux).
-fn shown(path: &Path) -> String {
+pub(crate) fn shown(path: &Path) -> String {
     #[cfg(unix)]
     if let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty()).map(PathBuf::from) {
         // As written, or with its links resolved, as a program's own path is.

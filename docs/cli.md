@@ -1346,7 +1346,24 @@ calls to the running app as `sp` commands. It never starts SoftPresenter. Nothin
 a second switch there and the person's yes each time. [mcp.md](mcp.md) says how to connect each
 assistant, what each tool does and what is refused.
 
-    claude mcp add softpresenter -- ~/.local/bin/sp mcp
+These are answered by `sp` itself, in English, with the app open or not, as the card's buttons
+are (only when typed; never by an assistant or a remote page):
+
+| Command | Does |
+|---|---|
+| `sp mcp status` | The two switches, and for each assistant app made for this system whether it has SoftPresenter (not added yet, added, added starting another program, or not found) |
+| `sp mcp connect APP [--replace]` | Adds SoftPresenter to the app, as Add does: `desktop` (Claude Desktop), `code` (Claude Code), `chatgpt` or `codex` (ChatGPT / Codex), `cursor`, `copilot` or `vscode` (VS Code / GitHub Copilot), `antigravity` or `gemini`, `grok` (Grok Build). An entry starting another program is left as it is (exit code 1) unless `--replace` |
+| `sp mcp disconnect APP` | Takes SoftPresenter out of the app again, and nothing else |
+
+    $ sp mcp connect desktop
+    Added. Quit and reopen Claude Desktop to use it.
+    Changed ~/Library/Application Support/Claude/claude_desktop_config.json; the file as it was is beside it, as claude_desktop_config.json.before-softpresenter.
+    $ sp mcp connect code
+    Claude Code has a “softpresenter” entry that starts another program (/Applications/Old/sp). sp mcp connect code --replace points it at this copy.
+
+Or by hand:
+
+    claude mcp add --scope user softpresenter -- ~/.local/bin/sp mcp
 
 With `SOFTPRESENTER_DATA` and `SOFTPRESENTER_CONTROL_SOCKET` set, as for `sp`, it reaches that
 test copy only.

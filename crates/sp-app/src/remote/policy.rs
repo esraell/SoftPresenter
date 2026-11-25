@@ -98,9 +98,11 @@ pub const OPEN: &[&str] = &[
 ];
 
 /// Commands never open to a page: Remote Control's own (switching it, its password),
-/// TimelyChurch's (its connection is made and kept at the computer), and the switch that lets
-/// devices on the network show their screens.
-pub const CLOSED: &[&str] = &["remote", "timelychurch", "mirror"];
+/// TimelyChurch's (its connection is made and kept at the computer), the switch that lets
+/// devices on the network show their screens, and `mcp` (adding SoftPresenter to assistant apps
+/// changes their settings on this computer; `sp` answers it itself, so the app never sees it,
+/// and it is closed here too).
+pub const CLOSED: &[&str] = &["remote", "timelychurch", "mirror", "mcp"];
 
 /// For the open commands made of sub-commands, the sub-commands open to Control (`""` for the
 /// command alone); any other is closed, so a sub-command added later, or one taking a key, a
@@ -532,6 +534,10 @@ mod tests {
             "remote off",
             "remote password",
             "install-cli",
+            "mcp connect desktop",
+            "mcp disconnect code",
+            "mcp connect chatgpt --replace",
+            "mcp status",
             "",
         ] {
             assert!(refused(line), "{line} should be refused");

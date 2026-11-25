@@ -9,12 +9,15 @@
 //! - `skills`: the two skills it serves (MCP's Skills extension).
 //! - `policy`: the app's side: which commands an assistant may send, and what each needs.
 //! - `pane`: Settings › Integrations › AI assistants (MCP).
+//! - `connect`: adding SoftPresenter to Claude Desktop and Claude Code with one click (the card's
+//!   buttons) or one command (`sp mcp connect|disconnect|status`).
 //!
 //! The server reaches the running app through the control socket, as `sp` does, marking each
 //! request as an assistant's (`control::McpCall`); `App::mcp_control` checks it against the
 //! switches and the policy before anything is done, and logs each one as `[mcp]` without its
 //! words.
 
+pub mod connect;
 pub mod pane;
 pub mod policy;
 mod protocol;

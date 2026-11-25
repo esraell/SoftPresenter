@@ -5,7 +5,8 @@ through the Model Context Protocol (MCP): the assistant can look at what is on t
 songs and Bible passages, make songs and playlists for a service, and, only when the person at
 the computer has allowed it and says yes each time, run the screens.
 
-- [Connecting](#connecting): Claude Code, Claude Desktop, other assistants
+- [Connecting](#connecting): in one click (Claude Desktop, Claude Code, ChatGPT / Codex, Cursor,
+  VS Code / GitHub Copilot, Antigravity, Grok Build), by hand, other assistants
 - [What the assistant can do](#what-the-assistant-can-do): the tools, what each needs
 - [What is refused, and why](#what-is-refused-and-why)
 - [Skills, questions and long jobs](#skills-questions-and-long-jobs)
@@ -28,22 +29,81 @@ and talks to it over its standard input and output; it passes each request to th
 SoftPresenter through the same socket `sp` uses. It never starts SoftPresenter: with the app
 closed, every tool answers "SoftPresenter isn't open."
 
-The card in Settings shows both of these, with this computer's path to `sp` filled in, and a
-Copy button beside each.
+Nothing is added to any assistant by itself, at install or when SoftPresenter starts: these are
+other programs' settings, and they change only when you click or type it.
 
-### Claude Code
+### In one click
 
-    claude mcp add softpresenter -- ~/.local/bin/sp mcp
+**Settings › Integrations › AI assistants (MCP)** lists each assistant app found on this computer
+with **Add** (and **Remove** once it is there), and says where SoftPresenter stands in it: not
+added yet, added, or added starting another program (another copy of SoftPresenter, say), which
+**Replace** points at this one. Then quit and reopen the app. An app made for this system but not
+found on it is named in one faint line; adding SoftPresenter lets nothing in by itself, and the
+card says so while **Let AI assistants use SoftPresenter** is off.
+
+| App | Found when | What Add does |
+|---|---|---|
+| Claude Desktop (Mac, Windows) | its folder is there (`~/Library/Application Support/Claude`, `%APPDATA%\Claude`) | `mcpServers.softpresenter` in its `claude_desktop_config.json` |
+| Claude Code | `claude` is found | `claude mcp add --scope user softpresenter -- PROGRAM mcp` |
+| ChatGPT / Codex (the ChatGPT app, Codex's command line and editor extensions share one setting) | `codex` is found | `codex mcp add softpresenter -- PROGRAM mcp`, which writes `~/.codex/config.toml` |
+| Cursor | `~/.cursor` is there | `mcpServers.softpresenter` in `~/.cursor/mcp.json` |
+| VS Code / GitHub Copilot | `~/.copilot` (or `COPILOT_HOME`) is there | `mcpServers.softpresenter` in its `mcp-config.json`, with `"type": "stdio"` and `"tools": ["*"]` |
+| Antigravity (Gemini) | `~/.gemini` is there | `mcpServers.softpresenter` in `~/.gemini/config/mcp_config.json` |
+| Grok Build | `grok` is found | `grok mcp add -s user softpresenter -- PROGRAM mcp`, which writes `~/.grok/config.toml` |
+
+PROGRAM is this computer's path to `sp` (the installed `sp` when it opens this copy; on Windows
+the program itself, `SoftPresenter.exe`, since an assistant starts a program, not a batch file).
+`claude`, `codex` and `grok` are looked for where their installers put them (under the home
+folder, Homebrew's folder, `/usr/local/bin`, npm's folder on Windows) and then on the PATH.
+
+When SoftPresenter changes a settings file itself:
+
+- Only `mcpServers.softpresenter` changes. Every other byte stays as it was: other servers, other
+  settings, the order, the spacing, the line endings. The new text is read back before it is
+  written, and must hold exactly what the file held with only that changed.
+- A file that isn't valid JSON (or isn't laid out as an object with `mcpServers` an object) is
+  left untouched, and the card says why. A file with only spaces in it counts as empty.
+- The file as it was is kept beside it first, as `….before-softpresenter` (replaced at each
+  change), with the file's own permissions.
+- The new file is written whole beside it and renamed over it, so it is never half written. A
+  file or folder that is a link is left alone, never written through.
+- A missing file is made, readable only by you.
+
+When the app has its own command (Claude Code, Codex, Grok Build), SoftPresenter runs it, by its
+full path with each word apart (no shell), from your home folder, and stops it after 30 seconds.
+It reads where SoftPresenter stands first (`claude mcp get softpresenter`, `codex mcp get
+softpresenter --json`, `grok mcp list --json`), so an entry starting another program is only
+replaced when you choose Replace, and it copies Codex's and Grok Build's `config.toml` beside it
+first. Claude Code's own settings are never touched by SoftPresenter (Claude Code keeps its own
+copies). How each app writes its file is up to the app: Grok Build's own command drops comments
+from `config.toml`.
+
+`sp mcp connect APP`, `sp mcp disconnect APP` and `sp mcp status` do the same from a terminal
+([cli.md](cli.md#ai-assistants-mcp)).
+
+Apps that only reach servers on the internet can't start one on this computer: ChatGPT in a
+browser, and the Grok and Gemini apps. SoftPresenter isn't put on the internet for them.
+
+### By hand
+
+**Add it yourself**, under the list (open by itself when no app is found), has the line for
+Claude Code, the `mcpServers` settings for Claude Desktop, Cursor, Antigravity and most others,
+and the `config.toml` table for Codex and Grok Build, each with this computer's path to `sp`
+filled in and a Copy button.
+
+#### Claude Code
+
+    claude mcp add --scope user softpresenter -- ~/.local/bin/sp mcp
 
 (`--scope user` makes it available in every folder, not only the one it was added in.) In Claude
 Code, `/mcp` then lists SoftPresenter with its tools, and its two skills appear as
 `softpresenter:preparing-a-service` and `softpresenter:running-the-screens`.
 
-### Claude Desktop
+#### Claude Desktop, Cursor, Antigravity and others
 
-Add SoftPresenter to Claude Desktop's configuration file (on a Mac,
+Add SoftPresenter to the app's MCP settings file (Claude Desktop's is, on a Mac,
 `~/Library/Application Support/Claude/claude_desktop_config.json`; on Windows,
-`%APPDATA%\Claude\claude_desktop_config.json`), then quit and open Claude Desktop again:
+`%APPDATA%\Claude\claude_desktop_config.json`), then quit and open the app again:
 
 ```json
 {
@@ -56,8 +116,19 @@ Add SoftPresenter to Claude Desktop's configuration file (on a Mac,
 }
 ```
 
-The command must be the full path (Claude Desktop doesn't read your shell's PATH). On Windows it
-is the program itself, `SoftPresenter.exe`, wherever it is installed, with `"args": ["mcp"]`.
+The command must be the full path (these apps don't read your shell's PATH). On Windows it is
+the program itself, `SoftPresenter.exe`, wherever it is installed, with `"args": ["mcp"]`.
+
+#### ChatGPT, Codex and Grok Build
+
+In `~/.codex/config.toml` (ChatGPT's app and Codex) or `~/.grok/config.toml` (Grok Build), or in
+the ChatGPT app's Settings › MCP servers:
+
+```toml
+[mcp_servers.softpresenter]
+command = "/Users/you/.local/bin/sp"
+args = ["mcp"]
+```
 
 ### Other assistants
 
@@ -74,6 +145,10 @@ variables ([cli.md](cli.md#trying-it-safely)):
 
     claude mcp add softpresenter-test --env SOFTPRESENTER_DATA=/path/to/test-library \
       --env SOFTPRESENTER_CONTROL_SOCKET=/tmp/sp-test/ctl.sock -- ~/.local/bin/sp mcp
+
+A test copy (quiet, its own data folder, or a capture run) never reads or changes a real
+assistant's settings: the card's list and `sp mcp connect` look only under
+`SOFTPRESENTER_ASSISTANTS_HOME`, a stand-in home folder, and find nothing without it.
 
 ## What the assistant can do
 
@@ -236,6 +311,8 @@ which may hold words meant to steer it and is trusted with nothing.
 | Reading or changing files, keys or settings through the assistant | Refused by the app's list, whatever the tool; an assistant's words are never read as a file |
 | An older SoftPresenter running unchecked commands | The socket's protocol version: an older app refuses the server's requests |
 | Flooding the app | 120 calls a minute; the app answers one command at a time, never on the screens' thread |
+| Adding SoftPresenter breaks an assistant's settings | Only on a click or a typed command; only `mcpServers.softpresenter` changes and the result is checked before it is written; an invalid file is never written; a copy of the file as it was is kept; written whole and renamed, never through a link; an entry starting another program is replaced only on Replace |
+| An assistant (or a remote page) adds itself | `mcp` is answered by `sp` itself, never by the app; the remote page's list and the assistants' list both refuse it |
 
 What the switches don't cover, plainly:
 
