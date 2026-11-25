@@ -134,5 +134,8 @@
   "settings.window.shown_as": "Слайди показано як",
   "settings.window.table": "Таблиця",
   "settings.window.title": "У вашому вікні",
-  "settings.window.words": "Лише слова"
+  "settings.window.words": "Лише слова",
+  "settings.groups.used": "Де використовується",
+  "settings.groups.not_used": "Не використовується",
+  "settings.groups.slides": ["{n} слайд", "{n} слайди", "{n} слайдів"]
 }

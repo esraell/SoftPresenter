@@ -134,5 +134,8 @@
   "settings.screens.about": "Куда идёт картинка каждого экрана и как она выглядит",
   "settings.screens.window": "Каждый экран",
   "settings.screens.window.about": "Его вывод, вид, фон и ключ — в собственном окне экранов",
-  "settings.screens.stage_on.about": "Все экраны для сцены, как кнопка «Сцена» на верхней панели"
+  "settings.screens.stage_on.about": "Все экраны для сцены, как кнопка «Сцена» на верхней панели",
+  "settings.groups.used": "Где используется",
+  "settings.groups.not_used": "Не используется",
+  "settings.groups.slides": ["{n} слайд", "{n} слайда", "{n} слайдов"]
 }

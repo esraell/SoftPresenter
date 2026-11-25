@@ -69,5 +69,7 @@
   "mcp.copied_into": "Скопійовано. Вставте в {assistant}.",
   "mcp.after_prepare": "Підключитися можна буде, коли ви виберете «Підготовка».",
   "mcp.other_apps": "Інші програми",
-  "mcp.what_copied": "Що копіюється"
+  "mcp.what_copied": "Що копіюється",
+  "mcp.for.claude": "Для застосунку або Claude Code",
+  "mcp.for.chatgpt": "Для застосунку або Codex"
 }
