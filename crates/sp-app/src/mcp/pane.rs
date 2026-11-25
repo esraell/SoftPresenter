@@ -809,12 +809,17 @@ mod tests {
         ctx.run_ui(egui::RawInput::default(), |ui| {
             let add = parts::key_size(ui, "Add").x;
             assert!(add < parts::key_size(ui, "Replace").x, "Add is as wide as its own word");
-            // A tile at 1100 has 152 inside: Add and Copy setup side by side, as the design's.
-            let rows = tile_keys(ui, &look(vec![(Click::Add, "Add")], false), 152.0);
+            // Add and Copy setup side by side where they fit; narrower, one above the other.
+            let both = add + KEYS_BETWEEN + copy_width(ui);
+            let rows = tile_keys(ui, &look(vec![(Click::Add, "Add")], false), both);
             assert_eq!(rows.len(), 1, "{rows:?}");
             assert_eq!(rows[0][0].2, add);
-            // Narrower, one above the other.
-            assert_eq!(tile_keys(ui, &look(vec![(Click::Add, "Add")], false), 120.0).len(), 2);
+            assert_eq!(tile_keys(ui, &look(vec![(Click::Add, "Add")], false), both - 1.0).len(), 2);
+            // A tile at 1100 has 152 inside, where the design has them side by side. The design
+            // is drawn in the Mac's face; a wider one (Linux's) puts them one above the other.
+            if cfg!(target_os = "macos") {
+                assert!(both <= 152.0, "Add and Copy setup take {both}");
+            }
             // Remove alone where it applies, and Get Claude Code ↗ a key of its own after Copy setup.
             let rows = tile_keys(ui, &look(vec![(Click::Remove, "Remove")], true), 152.0);
             let words: Vec<&str> = rows.iter().flatten().map(|(_, words, _)| words.as_str()).collect();

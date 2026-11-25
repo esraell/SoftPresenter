@@ -14036,11 +14036,14 @@ mod tests {
         }
     }
 
+    const FIRST_LONG: &str = "Blessed Be the Tie That Binds";
+    const SECOND_LONG: &str = "Love Divine, All Loves Excelling";
+
     /// Hymns whose titles take two lines in the left column, one line, then two again, in the
-    /// playlist in front.
+    /// playlist in front: two lines whole in each system's interface face, wide or narrow.
     fn long_titles_setting() -> (Show, HomeState) {
         use crate::service::Item;
-        let titles = ["Come, Thou Fount of Every Blessing", "Grace", "Tell Me the Story of Jesus and His Love"];
+        let titles = [FIRST_LONG, "Grace", SECOND_LONG];
         let songs = titles.iter().map(|title| Arc::new(parse_song_text(title, "Words written for a test\n")));
         let show = Show::new(songs.collect());
         let mut state = HomeState { playlist_open: true, ..HomeState::default() };
@@ -14067,9 +14070,9 @@ mod tests {
         let (mut show, mut state) = long_titles_setting();
         let (ctx, mut commands) = (crate::studio::tests::styled(), Vec::new());
         let drawn = found_step(&ctx, &mut show, &mut state, vec![], 0.0, &mut commands);
-        let first = title_start(&drawn, "Come, Thou Fount of Every Blessing");
+        let first = title_start(&drawn, FIRST_LONG);
         let second = title_start(&drawn, "Grace");
-        let third = title_start(&drawn, "Tell Me the Story of Jesus and His Love");
+        let third = title_start(&drawn, SECOND_LONG);
         // A title of two lines starts 6.5 into its row (7 less the half pixel the words are
         // raised by), one of a line 12 in; the first row is 48 high, the second 42.
         assert_eq!(second.y - first.y, 48.0 - 6.5 + 12.0);
@@ -14077,8 +14080,8 @@ mod tests {
         // They break the same when one is chosen.
         state.services.chosen = Some(0);
         let chosen = found_step(&ctx, &mut show, &mut state, vec![], 0.1, &mut commands);
-        assert_eq!(title_start(&chosen, "Come, Thou Fount of Every Blessing"), first);
-        assert_eq!(title_start(&chosen, "Tell Me the Story of Jesus and His Love"), third);
+        assert_eq!(title_start(&chosen, FIRST_LONG), first);
+        assert_eq!(title_start(&chosen, SECOND_LONG), third);
     }
 
     #[test]
@@ -14093,11 +14096,11 @@ mod tests {
             modifiers: Modifiers::NONE,
         };
         let drawn = found_step(&ctx, &mut show, &mut state, vec![], 0.0, &mut commands);
-        let from = title_start(&drawn, "Tell Me the Story of Jesus and His Love") + vec2(5.0, 8.0);
+        let from = title_start(&drawn, SECOND_LONG) + vec2(5.0, 8.0);
         // The first row starts 6.5 above its title: 48 high, so the second (42) starts 48 below
         // and its middle is 48 + 21 below. 66 down is above that middle: the third goes after
         // the first, which the same place in rows 42 high all through would not say.
-        let top = title_start(&drawn, "Come, Thou Fount of Every Blessing").y - 6.5;
+        let top = title_start(&drawn, FIRST_LONG).y - 6.5;
         let to = pos2(from.x, top + 66.0);
         let frames = [
             vec![Event::PointerMoved(from)],
@@ -14111,10 +14114,7 @@ mod tests {
             found_step(&ctx, &mut show, &mut state, events, 0.1 * (n + 1) as f64, &mut commands);
         }
         let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
-        assert_eq!(
-            titles[..],
-            ["Come, Thou Fount of Every Blessing", "Tell Me the Story of Jesus and His Love", "Grace"]
-        );
+        assert_eq!(titles[..], [FIRST_LONG, SECOND_LONG, "Grace"]);
     }
 
     #[test]

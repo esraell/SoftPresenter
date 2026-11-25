@@ -8375,8 +8375,11 @@ pub mod tests {
 
     const ROW_WIDTH: f32 = 224.0;
 
+    /// A title that takes two lines of a row, whole, in each system's interface face (SF on a
+    /// Mac, Segoe UI on Windows, DejaVu Sans on Linux, a wide face or a narrow one): a longer
+    /// one is cut in a wide face, a shorter one fits a line of a narrow face.
     fn two_title() -> &'static str {
-        "Come, Thou Fount of Every Blessing"
+        "Blessed Be the Tie That Binds"
     }
 
     /// A row of a playlist's items, numbered, with this title.
@@ -8455,22 +8458,41 @@ pub mod tests {
         let short = song("Grace", "Youth");
         assert!(matches!(place(&short), Some(TagPlace::After(_))), "{:?}", place(&short));
         assert_eq!(short.height, 42.0);
+        // Titles that fill their lines whatever the face (the interface is drawn in the
+        // system's, and a title that fills a line on a Mac leaves room on Windows): the most of
+        // these words a row shows whole in so many lines. The words after the first are short,
+        // so a full line has less room left than the tag needs.
+        let words: Vec<&str> =
+            "Showers of joy for all of us to see and to be in now as we go on day by day so we may see His way"
+                .split(' ')
+                .collect();
+        let bare = |title: &str| row_shape(&ctx, &ListRow { count: Some(3), title, ..ListRow::default() }, ROW_WIDTH);
+        let fullest = |lines: usize| {
+            (1..=words.len())
+                .map(|count| words[..count].join(" "))
+                .take_while(|title| {
+                    let shape = bare(title);
+                    shape.lines.len() <= lines && shape.hover.is_none()
+                })
+                .last()
+                .expect("a title that fits")
+        };
         // A title of one line that fills it: the tag has a line of its own, and the row is 48.
-        let full = song("Showers of Blessing", "Youth");
+        let title = fullest(1);
+        let full = song(&title, "Youth");
         assert_eq!(full.lines.len(), 1, "{:?}", full.lines);
-        assert_eq!(place(&full), Some(TagPlace::OwnLine));
+        assert_eq!(place(&full), Some(TagPlace::OwnLine), "{title}");
         assert_eq!(full.height, 48.0);
         assert!(full.hover.is_none());
         // Two lines, the second too full for the tag: it goes into the hover text.
-        let title = "Come, Thou Fount of Every Blessing, Teach Me Some";
-        let two = song(title, "Youth");
+        let title = fullest(2);
+        let two = song(&title, "Youth");
         assert_eq!(two.lines.len(), 2, "{:?}", two.lines);
-        assert_eq!(place(&two), Some(TagPlace::Hover));
+        assert_eq!(place(&two), Some(TagPlace::Hover), "{title}");
         assert_eq!(two.hover, Some(format!("{title} \u{b7} Youth")));
         assert_eq!(two.height, 48.0);
         // The title breaks the same with or without the tag.
-        let bare = row_shape(&ctx, &ListRow { count: Some(3), title, ..ListRow::default() }, ROW_WIDTH);
-        assert_eq!(bare.lines, two.lines);
+        assert_eq!(bare(&title).lines, two.lines);
     }
 
     #[test]
