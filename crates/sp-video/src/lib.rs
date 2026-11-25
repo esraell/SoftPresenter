@@ -990,7 +990,10 @@ mod tests {
             let shades: std::collections::HashSet<&[u8; 3]> = from_rgba.iter().collect();
             eprintln!("{name}: at most {worst} apart over {} colours", shades.len());
             assert!(shades.len() > 100, "{name}: a picture of many colours");
-            assert!(worst <= 2, "{name}: the planes' colours are FFmpeg's, within 2: {worst} apart");
+            // Within 3: FFmpeg's own conversion rounds a little differently from one version to
+            // the next (Ubuntu's FFmpeg 6 comes 3 apart on bt709, the bundled 9 within 2), while
+            // the wrong colour matrix would be 10 or more apart.
+            assert!(worst <= 3, "{name}: the planes' colours are FFmpeg's, within 3: {worst} apart");
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
