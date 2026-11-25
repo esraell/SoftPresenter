@@ -1375,8 +1375,8 @@ its code. Menu items that open a window or a file chooser open it on the Mac, as
 Check for Updates from the command line: the same check, and the same answer, as SoftPresenter ›
 Check for Updates… on a Mac and the Updates row of Settings › About. A check is made only when
 asked, one at a time: asking while one runs waits for that one. A build from the public source
-asks GitHub for this repository's releases (pre-releases too) and gives up after 10 seconds; a
-development build asks its own update server. Nothing is downloaded or installed from here.
+asks GitHub for this repository's releases (pre-releases too) and gives up after 10 seconds.
+Nothing is downloaded or installed from here.
 Neither command can be sent from a remote page or by an AI assistant.
 
 | Command | Does |

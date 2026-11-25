@@ -2164,9 +2164,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Bibles' releases, tagged `bibles-N`, are passed over) and compares it with its own, sending only
   "SoftPresenter/<version>" as who asks; it gives up after 10 seconds. A newer version gets a row
   of its own with Open the download page, which opens its release page in the browser (only a
-  page of this repository's releases): nothing is downloaded or installed. A development build
-  answers from its own update server instead ("You have the newest development version
-  (0.9.0-dev.14)", or that a newer one is downloading or ready, with Update and restart).
+  page of this repository's releases): nothing is downloaded or installed.
 - The version a build shows (the Mac's About panel, Settings › About, the log's first line, a new
   issue's text, `sp update`, the MCP server's name) is a development build's full one,
   0.9.0-dev.15, where it has one; a release shows 0.9.0. The Mac bundle keeps the plain 0.9.0 as
