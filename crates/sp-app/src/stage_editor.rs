@@ -414,6 +414,10 @@ pub fn add_menu(ui: &mut egui::Ui, draft: &mut EditDraft, screens: &[(sp_model::
         draft.add_ndi();
         ui.close();
     }
+    if ui.button(t("editor.add.mirror", "Phone or iPad Screen")).clicked() {
+        draft.add_mirror();
+        ui.close();
+    }
     ui.separator();
     ui.label(
         egui::RichText::new(t("editor.add.shows_live", "SHOWS LIVE"))

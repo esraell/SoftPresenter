@@ -1277,6 +1277,27 @@ in [remote-api.md](remote-api.md).
     Key fingerprint (SHA-256): 3F:A2:…:9C
     Pages connected: 0   Devices remembered: 0
 
+## Phone screens
+
+An iPhone, iPad or Mac can show its screen in a Phone or iPad Screen box on a slide (its own
+Screen Mirroring; unofficial: it isn't made or supported by Apple, and an Apple update may stop
+it working). These commands do what Settings › Phone Screens does. None of them can be sent from
+a remote page (a remote page can answer the question in the notices).
+
+| Command | Does |
+|---|---|
+| `mirror`, `mirror status` | On or off; the name devices see; who is showing a screen; who is waiting for an answer (`--json`: `on`, `name`, `ask`, `running`, `port`, `video_port`, `announced`, `connected`, `asking` (id and name), `picture` (width, height, codec), `pictures` (how many have come), `problem`) |
+| `mirror on`, `mirror off` | Starts receiving (announced on the network; a quiet test copy listens on this computer only and announces nothing), or stops. Off until switched on; it stays on or off the next time the app opens |
+| `mirror name NAME` | The name devices see |
+| `mirror ask on\|off` | Whether each device is asked about before it is let in (on unless changed) |
+| `mirror allow [ID]`, `mirror deny [ID]` | Answers a device that is waiting, as Allow and Don't Allow in the notices do (`notices answer N mirror:allow` does the same); the id is needed only when several wait |
+| `mirror stop` | Ends the screen being shown now |
+
+    $ sp mirror on
+    Switched on: devices see "SoftPresenter — Front Mac" (port 7100). Nobody is connected.
+    $ sp mirror allow
+    Anna's iPhone may show its screen.
+
 ## Song text
 
 The format `song new`, `song text` and the app's Edit Words use:

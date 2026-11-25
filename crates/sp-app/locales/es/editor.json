@@ -77,5 +77,8 @@
   "editor.screen.label": "Etiqueta",
   "editor.screen.label.none": "Ninguna",
   "editor.hint.keyboard": "Aquí el teclado edita el diseño. Espacio y las flechas no llevan la presentación.",
-  "editor.hint.mouse": "Clic para elegir · Mayús-clic elige más · arrastra para mover · las asas cambian el tamaño · las flechas lo mueven un poco, con Mayús de píxel en píxel"
+  "editor.hint.mouse": "Clic para elegir · Mayús-clic elige más · arrastra para mover · las asas cambian el tamaño · las flechas lo mueven un poco, con Mayús de píxel en píxel",
+  "editor.mirror.name": "Pantalla de teléfono o iPad",
+  "editor.mirror.numbered": "Pantalla de teléfono o iPad {n}",
+  "editor.add.mirror": "Pantalla de teléfono o iPad"
 }

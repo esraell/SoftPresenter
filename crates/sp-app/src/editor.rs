@@ -752,6 +752,22 @@ impl EditDraft {
         self.slide.objects.push(object);
     }
 
+    /// Puts a Phone or iPad Screen box on the slide, selected: whoever is showing their screen
+    /// to this computer shows in it.
+    pub fn add_mirror(&mut self) {
+        self.record();
+        let same = self.slide.objects.iter().filter(|o| matches!(o.kind, ObjectKind::Mirror { .. })).count();
+        let mut object = Object::mirror();
+        object.name = if same > 0 {
+            tgf("editor.mirror.numbered", "Phone or iPad Screen {n}", &[("n", &(same + 1).to_string())])
+        } else {
+            tg("editor.mirror.name", "Phone or iPad Screen").to_owned()
+        };
+        self.selected = Some(object.id);
+        self.also.clear();
+        self.slide.objects.push(object);
+    }
+
     /// Every selected object: the first selected, then the rest.
     pub fn selection(&self) -> Vec<Uuid> {
         self.selected.into_iter().chain(self.also.iter().copied()).collect()

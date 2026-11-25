@@ -12,6 +12,9 @@ cd "$(dirname "$0")/.."
 # says nothing about whose computer made it.
 export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$HOME=~"
 cargo build --release -p sp-app "$@"
+# The program that receives an iPhone's, iPad's or Mac's screen (Screen Mirroring): a separate
+# program under its own licence, started by the app only while that is switched on.
+cargo build --release -p sp-mirror "$@"
 
 # What the app is signed with. A local build is signed with a code-signing identity of its
 # own, when this Mac's keychain has one by this name (or the name in
@@ -53,10 +56,27 @@ if scripts/build-ffmpeg.sh >/dev/null; then
 else
     echo "note: FFmpeg isn't in this build (scripts/build-ffmpeg.sh failed); MP4 and MOV still play"
 fi
+# softpresenter-mirror, which receives phone screens, beside the app's program as FFmpeg is, with
+# its notices: it is GPL-3.0-or-later with a GPL-3.0 part, and the additional permission for NDI
+# and DeckLink does not extend to it (docs/licences/screen-mirroring.md).
+cp target/release/softpresenter-mirror "$app/Contents/MacOS/"
+codesign --force --sign "$sign" "$app/Contents/MacOS/softpresenter-mirror" >/dev/null 2>&1 || true
+mkdir -p "$app/Contents/Resources/ScreenMirroring"
+cp LICENSE "$app/Contents/Resources/ScreenMirroring/GPL-3.0.txt"
+for notice in docs/licences/screen-mirroring.md docs/licences/LGPL-2.1.txt; do
+    if [ -f "$notice" ]; then
+        cp "$notice" "$app/Contents/Resources/ScreenMirroring/"
+    else
+        echo "note: $notice is missing; the app is built without that notice"
+    fi
+done
 # NSAppSleepDisabled: macOS must not slow the app down (App Nap) while its windows are hidden;
 # timed slides and timers run by the clock during a service.
 # NSAppleEventsUsageDescription: why macOS asks to let SoftPresenter use Keynote or PowerPoint,
 # which turn a presentation file into slides on import.
+# NSLocalNetworkUsageDescription and NSBonjourServices: why macOS asks to let SoftPresenter find
+# and be found by devices on the local network, and the two services a phone looks for when it
+# shows its screen.
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -88,6 +108,13 @@ cat > "$app/Contents/Info.plist" <<PLIST
     <true/>
     <key>NSAppleEventsUsageDescription</key>
     <string>SoftPresenter asks Keynote or PowerPoint to turn a presentation into slides when you import one.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>SoftPresenter uses the local network so an iPhone, iPad or Mac can show its screen, and for NDI and Remote Control.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_airplay._tcp</string>
+        <string>_raop._tcp</string>
+    </array>
 </dict>
 </plist>
 PLIST

@@ -413,6 +413,7 @@ pub fn describe(object: &Object, screens: &[crate::screens::Screen]) -> String {
         (ObjectKind::Web { url }, None) => format!("a web page ({url})"),
         (ObjectKind::Ndi { source, .. }, None) if source.is_empty() => "an NDI source (none chosen)".to_owned(),
         (ObjectKind::Ndi { source, .. }, None) => format!("an NDI source ({})", sp_model::ndi_short_name(source)),
+        (ObjectKind::Mirror { .. }, None) => "a phone's or iPad's screen".to_owned(),
     }
 }
 

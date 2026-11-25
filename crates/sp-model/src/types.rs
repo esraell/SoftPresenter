@@ -105,6 +105,14 @@ pub enum ObjectKind {
         #[serde(default, skip_serializing_if = "is_false")]
         sound: bool,
     },
+    /// The screen of an iPhone, iPad or Mac that is showing it to this computer (Screen
+    /// Mirroring), live, in the object's place: whoever is connected, while the slide is on screen
+    /// or being edited. Empty while nobody is.
+    Mirror {
+        /// How the picture sits in the box.
+        #[serde(default)]
+        scaling: ImageFit,
+    },
     /// On a stage layout: what one of the audience screens shows, live, scaled into the
     /// object's place. Drawn only on a stage screen (anywhere else it shows nothing, or a
     /// stand-in in the operator's window).
@@ -157,6 +165,10 @@ enum ObjectKindIn {
         #[serde(default)]
         sound: bool,
     },
+    Mirror {
+        #[serde(default)]
+        scaling: ImageFit,
+    },
     Screen {
         #[serde(default)]
         screen: Option<Uuid>,
@@ -181,6 +193,7 @@ impl From<ObjectKindIn> for ObjectKind {
             ObjectKindIn::Ndi { source, scaling, quality, sound } => {
                 ObjectKind::Ndi { source, scaling, quality, sound }
             }
+            ObjectKindIn::Mirror { scaling } => ObjectKind::Mirror { scaling },
             ObjectKindIn::Screen { screen, corner, label } => ObjectKind::Screen { screen, corner, label },
         }
     }
@@ -550,6 +563,19 @@ impl Object {
         }
     }
 
+    /// A box for the screen of an iPhone, iPad or Mac that is showing it to this computer, 16:9,
+    /// in the middle of the slide. It is empty until one connects.
+    pub fn mirror() -> Object {
+        let (w, h) = (1400.0, 788.0);
+        Object {
+            name: "Phone or iPad Screen".to_owned(),
+            frame: Some(SlideRect { x: (crate::SLIDE_WIDTH - w) / 2.0, y: (crate::SLIDE_HEIGHT - h) / 2.0, w, h }),
+            fill: None,
+            kind: ObjectKind::Mirror { scaling: ImageFit::Fit },
+            ..Object::shape(Shape::Rectangle)
+        }
+    }
+
     /// A picture of what an audience screen shows, for a stage layout: the first audience
     /// screen's, a third of the stage wide, in its top right corner.
     pub fn screen(screen: Option<Uuid>) -> Object {
@@ -571,6 +597,7 @@ impl Object {
             | ObjectKind::Image { .. }
             | ObjectKind::Web { .. }
             | ObjectKind::Ndi { .. }
+            | ObjectKind::Mirror { .. }
             | ObjectKind::Screen { .. } => None,
         }
     }
@@ -583,6 +610,7 @@ impl Object {
             | ObjectKind::Image { .. }
             | ObjectKind::Web { .. }
             | ObjectKind::Ndi { .. }
+            | ObjectKind::Mirror { .. }
             | ObjectKind::Screen { .. } => None,
         }
     }
@@ -629,6 +657,7 @@ impl Object {
             | ObjectKind::Image { .. }
             | ObjectKind::Web { .. }
             | ObjectKind::Ndi { .. }
+            | ObjectKind::Mirror { .. }
             | ObjectKind::Screen { .. } => None,
         }
     }
@@ -731,6 +760,7 @@ impl Slide {
                     | ObjectKind::Image { .. }
                     | ObjectKind::Web { .. }
                     | ObjectKind::Ndi { .. }
+                    | ObjectKind::Mirror { .. }
                     | ObjectKind::Screen { .. }) => other.clone(),
                 };
                 Object { id: Uuid::new_v4(), kind, ..object.clone() }

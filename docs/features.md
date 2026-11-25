@@ -1151,6 +1151,32 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   remote page shows the box as drawn and can't add one (there is no remote command for it).
   Songs with an NDI box are saved as version 4 of the song file; older SoftPresenters say to
   update. Not yet: sound, and `sp` has no command to add one (`sp slide SONG N` lists it).
+- **A phone's, iPad's or Mac's screen** on slides (Phone or iPad Screen, right after NDI Source
+  above the slide, in slides, props and stage layouts): a box, 16:9 and in the middle, that
+  shows the screen of an iPhone, iPad or Mac whose owner chose this computer in Screen Mirroring
+  (Control Centre on the device). **Unofficial:** it works with Screen Mirroring (AirPlay) from
+  an iPhone, iPad or Mac, but isn't made or supported by Apple, and an Apple update may stop it
+  working; Settings says so beside the switch. It is off until switched on in **Settings ›
+  Phone Screens**, where the name devices see ("SoftPresenter — " and the computer's name
+  unless changed), **Ask me each time** (on unless changed), who is connected (with Stop) and
+  the ports are. A device can never put itself on a screen: its picture shows only in a box the
+  operator put on a slide, while that slide is on screen (and in the Edit view and thumbnails).
+  With Ask me each time, a device that wants to show its screen is a question in the notices,
+  "Anna's iPhone wants to show its screen." with **Allow** and **Don't Allow**, in the
+  operator's window only; unanswered for half a minute, the device is turned away and can try
+  again. One device at a time: a second is turned away while the first shows. The box holds
+  the last picture for two seconds when the device goes, then fades, as an NDI Source box does;
+  a screen that isn't moving stays as it is. Fits as a picture does (Fit, Fill, Stretch).
+  Picture only for now: the device's sound is taken and not played. Films from streaming apps
+  may show black. The device and the computer must be on the same network, and one that keeps
+  devices apart (many guest Wi-Fi networks) hides the computer from the device. Everything that
+  speaks to the device runs in a separate program beside the app (`softpresenter-mirror`,
+  started only while this is switched on, under its own licence:
+  [licences/screen-mirroring.md](licences/screen-mirroring.md)), which decodes with FFmpeg. A
+  quiet test run never announces itself and listens on this computer only. From the command
+  line: `sp mirror` ([cli.md](cli.md#phone-screens)). A song with such a box is written as
+  version 5 of the song format, which earlier builds decline to open rather than lose the box.
+  Interface words are in English and Spanish. On a Mac for now.
 - **Builds** (the inspector's Build tab): an object can come on with a Dissolve, Fly In from
   any side, or Zoom, with the slide (after its transition and a delay) or on a click of Next,
   and leave with a Dissolve, Fly Out or Zoom on a click. Next sets a slide's click builds going

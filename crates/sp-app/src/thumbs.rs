@@ -470,6 +470,8 @@ pub fn web_pages(slide: Option<&Slide>, theme: &Theme) -> Vec<String> {
             sp_model::ObjectKind::Web { url } => Some(url.clone()),
             // A thumbnail is drawn again when its NDI source's first picture comes.
             sp_model::ObjectKind::Ndi { source, .. } if !source.is_empty() => Some(format!("ndi:{source}")),
+            // And when a phone's screen shown in a box has its first picture.
+            sp_model::ObjectKind::Mirror { .. } => Some("mirror:".to_owned()),
             _ => None,
         })
         .collect()

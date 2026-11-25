@@ -974,6 +974,7 @@ mod tests {
         "notices",
         "menubar",
         "screens",
+        "mirror",
     ];
 
     #[test]

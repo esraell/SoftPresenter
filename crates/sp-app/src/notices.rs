@@ -39,6 +39,10 @@ pub const CLICK_NEAR: f64 = 0.6;
 pub const RELOAD: &str = "outside:reload";
 pub const KEEP_MINE: &str = "outside:keep";
 
+/// The answers a question about a device that wants to show its screen offers.
+pub const ALLOW: &str = "mirror:allow";
+pub const DONT_ALLOW: &str = "mirror:deny";
+
 /// What kind of entry a notice is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -187,6 +191,21 @@ impl Notices {
         self.push(Kind::Question, text.into(), Some(about), actions);
     }
 
+    /// Asks whether a device may show its screen (Allow, Don't Allow). It waits at the head of
+    /// the list, and the button stays amber, until answered or until the device gives up; it is
+    /// in the operator's window only, never on a screen.
+    pub fn ask_to_show(&mut self, device: u64, text: impl Into<String>) {
+        let about = Waiting::Mirror(device);
+        if self.asks_about(about) {
+            return;
+        }
+        let actions = vec![
+            Action { id: ALLOW.to_owned(), label: t("notices.ask.allow", "Allow").to_owned() },
+            Action { id: DONT_ALLOW.to_owned(), label: t("notices.ask.dont_allow", "Don\u{2019}t Allow").to_owned() },
+        ];
+        self.push(Kind::Question, text.into(), Some(about), actions);
+    }
+
     /// Whether a question about this waits for an answer.
     pub fn asks_about(&self, about: Waiting) -> bool {
         self.list.iter().any(|notice| notice.about == Some(about))
@@ -206,12 +225,16 @@ impl Notices {
         }
     }
 
-    /// What an answer to an entry asks for: the thing it is about, and true for Reload. `None`
-    /// when there is no such question or answer.
+    /// What an answer to an entry asks for: the thing it is about, and true for Reload (or
+    /// Allow). `None` when there is no such question or answer.
     pub fn answer(&self, id: u64, action: &str) -> Option<(Waiting, bool)> {
         let notice = self.list.iter().find(|notice| notice.id == id)?;
         let about = notice.about?;
-        notice.actions.iter().any(|offered| offered.id == action).then_some((about, action == RELOAD))
+        notice
+            .actions
+            .iter()
+            .any(|offered| offered.id == action)
+            .then_some((about, action == RELOAD || action == ALLOW))
     }
 
     /// Why nothing happened ("Look a passage up first."), said at the place of action for a
@@ -808,6 +831,31 @@ mod tests {
         assert_eq!(notices.look(), Look::Question, "a question is never seen: it waits for its answer");
         notices.trouble("Couldn't read Hymns.xml.");
         assert_eq!(notices.look(), Look::Trouble(2), "with trouble too, both are counted");
+    }
+
+    #[test]
+    fn a_device_that_wants_to_show_its_screen_is_a_question_with_allow_and_dont_allow() {
+        let mut notices = Notices::default();
+        notices.ask_to_show(7, "Anna's iPhone wants to show its screen.");
+        // Asked once, however often the device says it.
+        notices.ask_to_show(7, "Anna's iPhone wants to show its screen.");
+        assert_eq!(notices.entries().count(), 1);
+        let question = notices.entries().next().unwrap().clone();
+        assert_eq!(question.kind, Kind::Question);
+        assert_eq!(
+            question.actions.iter().map(|a| a.label.as_str()).collect::<Vec<_>>(),
+            ["Allow", "Don\u{2019}t Allow"]
+        );
+        assert_eq!(notices.answer(question.id, ALLOW), Some((Waiting::Mirror(7), true)));
+        assert_eq!(notices.answer(question.id, DONT_ALLOW), Some((Waiting::Mirror(7), false)));
+        // Not the answers of a file changed outside the app.
+        assert_eq!(notices.answer(question.id, RELOAD), None);
+        // Another device is another question; each goes by itself, and Clear All leaves them.
+        notices.ask_to_show(8, "Tom's iPad wants to show its screen.");
+        notices.clear_all();
+        assert_eq!(notices.entries().count(), 2);
+        notices.settle(Waiting::Mirror(7));
+        assert!(!notices.asks_about(Waiting::Mirror(7)) && notices.asks_about(Waiting::Mirror(8)));
     }
 
     #[test]

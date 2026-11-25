@@ -450,7 +450,7 @@ static NDI_CHANGES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64:
 
 /// The name an NDI source's newest picture is kept under.
 fn ndi_key(source: &str) -> String {
-    format!("ndi:{source}")
+    if source == MIRROR_SOURCE { "mirror:".to_owned() } else { format!("ndi:{source}") }
 }
 
 /// How visible an NDI source's picture is: whole while pictures keep coming and for
@@ -592,6 +592,96 @@ pub fn ndi_visibility(sources: &[String]) -> Vec<f32> {
                 .map_or(0.0, |timing| ndi_visible(timing.last, timing.back, now))
         })
         .collect()
+}
+
+// ---- A phone's, tablet's or computer's screen shown to this computer -------------------------
+
+/// The name the pictures of a mirrored screen (an iPhone, iPad or Mac showing its screen to
+/// this computer) go under, in the list of sources a screen watches beside its NDI sources. It
+/// is no NDI source's name (NDI names hold no such character), and its pictures are kept in a
+/// name space of their own (`mirror:` beside `ndi:`). One sender at a time, so one name.
+pub const MIRROR_SOURCE: &str = "\u{1}mirror";
+
+/// A mirrored screen's newest picture, as the thread reading it hands it over: every Phone or
+/// iPad Screen box shows it from now on, through the same door as an NDI source's
+/// ([`show_ndi`]), so it holds and fades the same way when the sender goes.
+pub fn show_mirror(picture: Picture) {
+    show_ndi(MIRROR_SOURCE, picture);
+}
+
+/// Says whether a slide on screen or being edited has a box for a mirrored screen, and whether
+/// nobody is showing one (see [`set_ndi_receiving`]).
+pub fn set_mirror_receiving(receiving: bool, missing: bool) {
+    set_ndi_receiving(MIRROR_SOURCE, receiving, missing);
+}
+
+/// The sender is still there though no new picture has come: a screen that isn't moving sends
+/// none, and its last picture must stay rather than fade as a source that stopped does. Does
+/// nothing once the picture has begun to fade (the sender was away too long; its next picture
+/// fades it back in).
+pub fn keep_mirror() {
+    let now = Instant::now();
+    if let Ok(mut all) = NDI.lock()
+        && let Some(timing) = all.as_mut().and_then(|all| all.get_mut(MIRROR_SOURCE))
+        && now.saturating_duration_since(timing.last) <= NDI_HOLD
+    {
+        timing.last = now;
+    }
+}
+
+/// How long the mirrored screen has gone without a picture ([`ndi_quiet`]).
+pub fn mirror_quiet() -> Option<Duration> {
+    ndi_quiet(MIRROR_SOURCE)
+}
+
+/// Forgets what is kept of the mirrored screen's pictures: its sender has gone, and the next
+/// one's screen is another's.
+pub fn forget_mirror() {
+    forget_ndi(MIRROR_SOURCE);
+}
+
+#[cfg(test)]
+mod mirror_tests {
+    use super::*;
+
+    /// One test, since the mirrored screen is one name shared by every test in the program.
+    #[test]
+    fn a_mirrored_screen_goes_through_the_ndi_door_under_a_name_of_its_own() {
+        assert_eq!(ndi_key(MIRROR_SOURCE), "mirror:");
+        assert_eq!(ndi_key("PC (Camera)"), "ndi:PC (Camera)");
+        forget_mirror();
+        assert!(ndi_shown(MIRROR_SOURCE).picture.is_none());
+        set_mirror_receiving(true, true);
+        assert!(ndi_shown(MIRROR_SOURCE).stopped, "nobody is showing a screen");
+        let before = ndi_changes();
+        show_mirror(Picture::from_rgba(2, 2, vec![255; 16]).unwrap());
+        assert!(ndi_changes() > before, "the screens are told to draw again");
+        let shown = ndi_shown(MIRROR_SOURCE);
+        assert!(shown.picture.is_some() && shown.visible == 1.0 && !shown.stopped);
+        assert_eq!(ndi_visibility(&[MIRROR_SOURCE.to_owned()]), [1.0]);
+        assert!(mirror_quiet().is_some_and(|quiet| quiet < Duration::from_secs(1)));
+        // No NDI source of any name shows it.
+        assert!(ndi_shown("mirror").picture.is_none() && ndi_shown("").picture.is_none());
+        // A still screen: kept alive, the picture's time moves on and it never starts to fade.
+        if let Ok(mut all) = NDI.lock() {
+            let timing = all.as_mut().unwrap().get_mut(MIRROR_SOURCE).unwrap();
+            timing.last = Instant::now().checked_sub(Duration::from_millis(1500)).unwrap();
+        }
+        keep_mirror();
+        assert!(mirror_quiet().unwrap() < Duration::from_millis(500));
+        // Away longer than the hold: keeping does nothing, and it fades as an NDI source does.
+        if let Ok(mut all) = NDI.lock() {
+            let timing = all.as_mut().unwrap().get_mut(MIRROR_SOURCE).unwrap();
+            timing.last = Instant::now().checked_sub(Duration::from_secs(5)).unwrap();
+        }
+        keep_mirror();
+        assert!(mirror_quiet().unwrap() >= Duration::from_secs(5));
+        assert_eq!(ndi_shown(MIRROR_SOURCE).visible, 0.0);
+        assert!(ndi_shown(MIRROR_SOURCE).stopped);
+        forget_mirror();
+        assert!(ndi_shown(MIRROR_SOURCE).picture.is_none());
+        assert!(mirror_quiet().is_none());
+    }
 }
 
 #[cfg(test)]

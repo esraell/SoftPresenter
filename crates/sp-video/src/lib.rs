@@ -71,6 +71,12 @@ pub fn ffmpeg_found() -> bool {
     ffmpeg::tool("ffmpeg").is_some()
 }
 
+/// Where the FFmpeg program is (the app's own, then one installed on the computer), for the
+/// separate program that receives phone screens, which is handed it to decode with.
+pub fn ffmpeg_program() -> Option<std::path::PathBuf> {
+    ffmpeg::tool("ffmpeg")
+}
+
 /// A still from a video, no larger than `max_side` on its longer side: from the system's player
 /// if it can read the video, otherwise from FFmpeg. Many videos open on black or fade in, so a
 /// dark picture half a second in is passed over for one a little later.

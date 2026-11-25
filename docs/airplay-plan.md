@@ -1,7 +1,9 @@
 # Showing an iPhone, iPad or Mac screen: a plan
 
-A plan to decide on, written 2026-11-24. Nothing here is built. No crate, no vendored code and
-no receiver code was added to write it.
+A plan, written 2026-11-24 before anything was built; the owner approved the list in section 8
+the same day, and **milestone M1 is built** (section 9 says what it found, and how to try it
+with a real iPhone, which has not been done yet). The rest reads as it was written, except the
+held picture in section 4, which is solved.
 
 **What is asked for.** Someone in the church picks SoftPresenter in Screen Mirroring on their
 iPhone, iPad or Mac, and their screen appears in SoftPresenter: in a box on a slide (as an NDI
@@ -410,17 +412,20 @@ one by one at 30 and at 60 a second, each timed in and out; deleted afterwards) 
 | `-fflags nobuffer`, the usual advice | **Produces no pictures at all** with this FFmpeg and a raw H.264 pipe. Don't use it |
 | The size changes mid-stream (a phone turned) | FFmpeg silently stretches the new pictures to the old size. We must see the change and start a new child |
 
-**The held picture is an open problem for M1.** While the phone's screen moves it costs one
-picture's time (17 ms if we ask the sender for 60 a second). But if a sender stops sending
-when its screen is still, which was not found in what was read, the last change would not
-show until the next one: a page turned on the phone would appear one touch late. The ways
-out, in the order to try them: find the FFmpeg setting that releases it (the spike tried five);
-see whether real senders keep sending, which makes it harmless; have the helper decode with
-the system's own decoder where there is one; or carry a small change in our FFmpeg build. M1
-does not count as done with this unsolved.
+**The held picture was the open problem for M1, and M1 solved it with a setting** (the first
+of the ways out this plan listed: a setting, real senders that keep sending, the system's own
+decoder, a change to our FFmpeg). Stage by stage, with FFmpeg's own trace of each picture
+(`-debug_ts`), the picture was found waiting in FFmpeg's *raw-video writer*, not its reader or
+decoder: the "encoder" for raw video runs on several threads by default and keeps each picture
+until the next arrives. **`-threads 1` given as an output option** (after `-i`; as an input
+option it only changes the decoder, which is what the first spike tried) releases it. With
+that and the delimiter after each picture, 60 pictures in are 60 pictures out with the input
+still open, and the newest picture is out about 8 ms after it went in (1080p, this Mac). The
+helper's tests feed the last picture with none after it and require it out.
 
-So the command is, in effect: `ffmpeg -flags low_delay -probesize 32 -analyzeduration 0
--f h264 -i pipe:0 -vf scale=W:H -pix_fmt nv12 -f rawvideo pipe:1` (`-f hevc` for HEVC), with
+So the command is: `ffmpeg -flags low_delay -probesize 32 -analyzeduration 0
+-f h264 -i pipe:0 -an -sn -dn -threads 1 -vf scale=W:H -pix_fmt rgba -f rawvideo pipe:1`
+(`-f hevc` for HEVC; RGBA because the renderer's door takes it), with
 the format always named and never guessed, and W and H taken from the kind-1 packet and capped
 at 1920×1080. A new kind-1 packet with another size ends that child and starts the next; the
 key frame that always follows it is the new child's first picture.
@@ -657,7 +662,7 @@ version's habits, the delay, and sound in step. Each milestone ends with the own
 | `mdns-sd` and the system's responder disagree on some system | Possible | Checked in M1 and M3; `dns-sd` as the Mac fallback |
 | Protected video (films in streaming apps) shows black | Expected of any mirroring; not verified here | Say so in the help |
 | An older PC can't decode 1080p HEVC in time | Possible | Ask the sender for 30 a second; hardware decoding on Windows |
-| FFmpeg's held picture has no clean cure | Possible | The four ways out in section 4; M1 is not done without one |
+| FFmpeg's held picture has no clean cure | It had one | `-threads 1` for the raw-video writer (section 4) |
 | Senders won't wait at `SETUP` for the operator | Unknown | The second way of asking (section 5) |
 | The church's Wi-Fi hides devices from each other | Common on guest networks | Say so in the pane |
 
@@ -711,3 +716,74 @@ used as they are: ring, sha2, httparse, socket2, mio, fastrand, base64, indexmap
 crate for the on-screen code; `md-5` only if a password is preferred to a code.
 
 **No change** to the bundled FFmpeg, and no new `unsafe` anywhere.
+
+## 9. M1 as built (2026-11-24)
+
+**What works, and how it was tried.** `softpresenter-mirror` (crate `sp-mirror`) and the app's
+side (`crates/sp-app/src/mirror.rs`, Settings › Phone Screens, the Phone or iPad Screen box,
+`sp mirror`). Tried with a sender written for the tests, over 127.0.0.1 only: through the
+helper alone (`cargo test -p sp-mirror`: asking, Allow, Don't Allow, a second sender turned
+away, H.264, HEVC, a sender that pairs first, a phone turned on its side, stopping), and
+through a quiet test copy of the app with a box on a live slide, whose audience screen showed
+the sender's test pattern. **No real iPhone, iPad or Mac has been tried**, and nothing was
+announced on the network.
+
+**Measured** (an M-series Mac, the app's FFmpeg 9.0.2, 1920×1080, from the picture leaving the
+sender's socket to the picture on the helper's standard output): H.264 at 30 a second, median
+14 ms (95th 51 ms on a busy computer); at 60 a second, 9 ms; HEVC at 30 a second, 7 ms. The
+app then shows it at the next refresh.
+
+**Differences from the plan above.**
+
+- The helper's Ed25519 key is made afresh each run and never stored: nothing depends on it
+  until devices are remembered (M4), so no key crosses the pipe or sits in a file.
+- Pictures cross the pipes as RGBA (8 MB each at 1080p), as the renderer's door takes them;
+  NV12 would be a third of that and is worth it if a slower computer struggles (M3).
+- Legacy pairing is not advertised (as planned), but a sender that pairs anyway is answered.
+- Limits beyond the plan's: three connections from one address; an address the operator
+  refused is not asked about again for a minute; a picture may change size eight times in ten
+  seconds; a property list may unfold to 2048 values and 256 KB.
+- `sp mirror` exists already (the plan had it in M4), so a test copy can be driven.
+
+**What only a real device answers** (section 7's list): whether an iPhone lists and accepts a
+receiver whose model is `SoftPresenter1,1`; how long it waits at `SETUP` for the operator;
+whether it keeps sending while its screen is still (the app keeps the last picture up either
+way); FairPlay against a real sender; H.264 or HEVC; the delay on glass.
+
+### Trying it with an iPhone (the owner's test)
+
+1. Build a normal copy on this Mac: `scripts/macos-app.sh`, then open
+   `target/release/SoftPresenter.app` (not a quiet copy: a quiet copy never announces itself).
+   The Mac and the iPhone must be on the same Wi-Fi.
+2. Settings › Phone Screens: tick **Show an iPhone, iPad or Mac screen**. macOS may ask to let
+   SoftPresenter find devices on the local network: allow it. The pane shows the ports
+   (7100 and 7101).
+3. In the Edit view add a **Phone or iPad Screen** box to a slide, and put that slide on
+   screen.
+4. On the iPhone: Control Centre › Screen Mirroring. "SoftPresenter — <this Mac's name>" should
+   be in the list within a few seconds. Tap it.
+5. SoftPresenter's notices show "<the iPhone's name> wants to show its screen." Choose
+   **Allow**. The iPhone's screen should appear in the box within a second or two; turn the
+   phone on its side and the picture should follow.
+6. Stop from the iPhone (Stop Mirroring) or with Stop in the pane.
+
+The log (`~/Library/Logs/SoftPresenter/SoftPresenter.log`, lines with `[mirror]`) should say,
+in order: `listening on port 7100 (video 7101), announced to the network`; `a connection from
+<address>`; `GET /info`; `FairPlay: first message, mode N`; `FairPlay: second message`;
+`SETUP …`; `<name> (<model>) asks to show its screen; holding the answer for the operator`;
+`allowed; the sender waited N ms for the answer`; `the sender asked for the video stream`;
+`the video stream connected`; `h264 at WxH, shown at WxH` (or `hevc`); `the first picture came
+out of FFmpeg N ms after it started`; and at the end `the video stream ended (…): N pictures
+in, …`. No line ever carries a key.
+
+If it fails, send back the `[mirror]` lines of the log and what the iPhone showed. Where it
+stops says what to try:
+
+| What happens | What it means, and what to try |
+|---|---|
+| SoftPresenter is not in the iPhone's list, and the log has no `a connection from` | The iPhone does not see the announcement: Local Network permission (System Settings › Privacy & Security › Local Network), a firewall, or a Wi-Fi that keeps devices apart. `dns-sd -B _airplay._tcp` in Terminal on the Mac should list it |
+| It is in the list on a Mac's Screen Mirroring but not an iPhone's, or tapping it fails at once with only `GET /info` in the log | The iPhone may not take a model name that is not Apple's. Quit, start it from Terminal with `SOFTPRESENTER_MIRROR_MODEL=AppleTV3,2 target/release/SoftPresenter.app/Contents/MacOS/softpresenter`, and try again. If that is what it takes, it is the owner's decision whether a build may say so (section 1.2) |
+| The log reaches `asks to show its screen` and the iPhone gives up before Allow is pressed | The iPhone does not wait at `SETUP`: note how long it waited (the log says). The second way of asking (section 5) is then needed |
+| `the video stream connected` but no `first picture`, or `the codec's settings were not understood` | The picture's format differs from what the open receivers describe. Try once with `SOFTPRESENTER_MIRROR_H264_ONLY=1` set the same way, which stops the iPhone choosing HEVC |
+| `a picture could not be read after decrypting` | The key is wrong: the FairPlay step or pairing differs on this iOS version. Send the lines; nothing to try by hand |
+| The picture shows, then stops after about a minute | Something a sender expects is missing (sound packets are taken and dropped; the time is asked every three seconds). Send the last lines |

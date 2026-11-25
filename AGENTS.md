@@ -53,7 +53,7 @@ person:
 
 | Switch | What it does |
 |---|---|
-| `SOFTPRESENTER_QUIET=1` | Windows open behind everything, no full screen, no NDI, no DeckLink card; Remote Control, if switched on, listens on 127.0.0.1 only |
+| `SOFTPRESENTER_QUIET=1` | Windows open behind everything, no full screen, no NDI, no DeckLink card; Remote Control, if switched on, listens on 127.0.0.1 only; so does receiving phone screens, which then announces nothing |
 | `SOFTPRESENTER_DATA=<folder>` | Keep the library, Bibles, settings and log in that folder instead of the owner's |
 | `SOFTPRESENTER_CONTROL_SOCKET=<path>` | Where `sp` and the app meet; a short path for a test copy (a socket file on Windows too) |
 | `SOFTPRESENTER_TEST_ROOT=<folder>` | For test programs built on one computer and run on another (Windows tests built on the Mac): the golden pictures and shipped Bibles are read from that copy of the repository instead of the build's own source folder |
@@ -93,6 +93,7 @@ person:
 | `SOFTPRESENTER_VIDEO_RGBA=1` | The video FFmpeg plays behind the words comes as RGBA pixels FFmpeg converts on the processor, as before, instead of as planes the GPU turns into colours (to compare the two ways, or go back with no new build) |
 | `SOFTPRESENTER_NDI_LOSE=<n>` or `<n>@<place>` | The next n NDI pictures somebody is watching for count as lost on their way back from the GPU (with a place, only that picture of each drawing: 1 is the first) |
 | `SOFTPRESENTER_NDI=<name>` | Also send over NDI under this name, this run only |
+| `SOFTPRESENTER_MIRROR_PORT=<n>` | The port a quiet run's `softpresenter-mirror` listens on (any free one without it), so a test sender knows where to connect. A quiet run's helper listens on 127.0.0.1 only and never announces itself, whatever this says |
 | `SOFTPRESENTER_MIRROR_MODEL=<model>` | `softpresenter-mirror` says it is this model instead of its own (`SoftPresenter1,1`), to find out with a real phone whether a name of our own is accepted. Only the owner decides whether a build may ever say another model |
 | `SOFTPRESENTER_MIRROR_H264_ONLY=1` | `softpresenter-mirror` leaves out the feature bit that lets a sender choose HEVC, to tell a codec problem from a protocol one |
 | `SOFTPRESENTER_HIDE_DECKLINK=1` | Behave as on a computer without Desktop Video (the DeckLink driver) |

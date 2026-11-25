@@ -79,5 +79,6 @@
   "settings.cli.not_removed": "No se pudo quitar {path}: {error}",
   "settings.cli.not_written": "No se pudo cambiar {path}: {error}",
   "settings.cli.path_not_set": "Se creó el comando sp en {folder}, pero {error}.",
-  "settings.cli.path_not_removed": "Se quitó el comando sp, pero {error}."
+  "settings.cli.path_not_removed": "Se quitó el comando sp, pero {error}.",
+  "settings.pane.mirror": "Pantallas de teléfonos"
 }

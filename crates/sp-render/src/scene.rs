@@ -261,6 +261,7 @@ fn draw_objects(
             | ObjectKind::Image { .. }
             | ObjectKind::Web { .. }
             | ObjectKind::Ndi { .. }
+            | ObjectKind::Mirror { .. }
             | ObjectKind::Screen { .. } => rect,
         };
         // Turn the object about its own centre.
@@ -286,6 +287,7 @@ fn draw_objects(
             | ObjectKind::Image { .. }
             | ObjectKind::Web { .. }
             | ObjectKind::Ndi { .. }
+            | ObjectKind::Mirror { .. }
             | ObjectKind::Screen { .. } => {
                 let (x, y) = (f64::from(rect.x), f64::from(rect.y));
                 Rect::new(x, y, x + f64::from(rect.w), y + f64::from(rect.h)).to_path(0.1)
@@ -329,6 +331,9 @@ fn draw_objects(
         }
         if let ObjectKind::Ndi { source, scaling, .. } = &object.kind {
             draw_ndi(scene, fonts, placed, source, *scaling, template, rect, &outline);
+        }
+        if let ObjectKind::Mirror { scaling } = &object.kind {
+            draw_mirror(scene, fonts, placed, *scaling, template, rect, &outline);
         }
         if let ObjectKind::Screen { screen, label, .. } = &object.kind {
             draw_screen(scene, placed, *screen, rect, &outline);
@@ -591,6 +596,42 @@ fn draw_ndi(
         }
     }
     draw_ndi_tag(scene, fonts, placed, &tag, stopped, template, rect, outline);
+}
+
+/// A Phone or iPad Screen box: on the screens, the mirrored screen's newest picture (held and
+/// faded as an NDI source's is when its sender goes) or nothing; in the operator's window, the
+/// picture while somebody is showing one, else a dashed box, with a tag saying what the box is.
+fn draw_mirror(
+    scene: &mut Scene,
+    fonts: &mut Fonts,
+    placed: Affine,
+    fit: ImageFit,
+    template: &sp_model::ThemeTemplate,
+    rect: SlideRect,
+    outline: &BezPath,
+) {
+    let operator = PLACEHOLDERS.with(std::cell::Cell::get);
+    let shown = crate::pictures::ndi_shown(crate::pictures::MIRROR_SOURCE);
+    if !operator {
+        if let Some(picture) = shown.picture.filter(|_| shown.visible > 0.0) {
+            if shown.visible < 1.0 {
+                scene.push_layer(Fill::NonZero, Mix::Normal, shown.visible, placed, outline);
+                paint_picture(scene, placed, &picture, fit, rect, outline);
+                scene.pop_layer();
+            } else {
+                paint_picture(scene, placed, &picture, fit, rect, outline);
+            }
+        }
+        return;
+    }
+    match shown.picture.filter(|_| !shown.stopped) {
+        Some(picture) => paint_picture(scene, placed, &picture, fit, rect, outline),
+        None => {
+            let dashed = Stroke::new(4.0).with_dashes(0.0, [18.0, 12.0]);
+            scene.stroke(&dashed, placed, Color::from_rgba8(150, 150, 156, 255), None, outline);
+        }
+    }
+    draw_ndi_tag(scene, fonts, placed, "Phone or iPad Screen", false, template, rect, outline);
 }
 
 /// A small tag at the foot of an NDI box, on a dark strip, amber when the source is not sending.

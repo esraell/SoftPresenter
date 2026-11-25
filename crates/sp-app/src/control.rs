@@ -680,7 +680,7 @@ pub fn only_reads(args: &[String]) -> bool {
         "catalog" => {
             alone || matches!(word(1).as_str(), "status" | "languages" | "search" | "list" | "newer" | "sizes")
         }
-        "remote" => alone || (args.len() == 2 && word(1) == "status"),
+        "remote" | "mirror" => alone || (args.len() == 2 && word(1) == "status"),
         "notices" => alone,
         // `playlist [NAME]`, not `playlist add …`.
         "playlist" => alone || !PLAYLIST_CHANGES.contains(&word(1).as_str()),
@@ -855,6 +855,7 @@ const COMMANDS: &[&str] = &[
     "version",
     "menu",
     "remote",
+    "mirror",
     "notices",
     "catalog",
 ];
@@ -1130,7 +1131,7 @@ Notices (the list under the status button)
   notices                      the entries: information, trouble and questions, each with its
                                number, time and, for a question, the answers it takes
   notices answer N ANSWER      answer question N with one of its answers (outside:reload,
-                               outside:keep), as its button does
+                               outside:keep, mirror:allow, mirror:deny), as its button does
   notices seen | notices clear mark every entry seen, as closing the list does | Clear All
                                (a question stays until it is answered)
 
@@ -1143,6 +1144,15 @@ Remote Control (a web page on the church's network that runs the show)
   remote port N                the port (1024 up; 4316 unless changed)
   remote forget ID|all         forget a device: it signs in again, and its pages close now
   remote disconnect N          close page N's connection (its device stays remembered)
+
+Phone screens (an iPhone, iPad or Mac shows its screen in a box on a slide; unofficial)
+  mirror [status]              on or off, the name devices see, who is showing a screen, who
+                               is waiting for an answer
+  mirror on | mirror off       start receiving, or stop (off until switched on)
+  mirror name NAME             the name devices see
+  mirror ask on|off            ask before each device is let in (on unless changed)
+  mirror allow [ID] | mirror deny [ID]   answer a device that is waiting
+  mirror stop                  end the screen being shown now
 
 Names can be typed in part (\"amazing\" finds \"Amazing Grace\"); a name that fits several
 things lists them instead of guessing. Numbers are as the lists show them, from 1. A song can
@@ -1378,6 +1388,7 @@ impl crate::App {
             "redo" => self.ctl_undo(el, true),
             "menu" => self.ctl_menu(el, args),
             "remote" => self.ctl_remote(args),
+            "mirror" => self.ctl_mirror(args),
             "notices" => self.ctl_notices(args),
             other => Err(format!("SoftPresenter doesn't know the command \u{201c}{other}\u{201d}. See: sp help")),
         };

@@ -547,6 +547,7 @@ fn object_name(object: &Object) -> String {
         (None, ObjectKind::Text { .. }) => "Text".to_owned(),
         (None, ObjectKind::Web { .. }) => "Web page".to_owned(),
         (None, ObjectKind::Ndi { .. }) => "NDI source".to_owned(),
+        (None, ObjectKind::Mirror { .. }) => "Phone or iPad Screen".to_owned(),
         (None, _) => "Object".to_owned(),
     }
 }
@@ -919,6 +920,14 @@ fn describe(slide: &Slide, number: usize, object: &Object, theme: &Theme) -> (St
             data["scaling"] = serde_json::to_value(scaling).unwrap_or_default();
             data["quality"] = serde_json::to_value(quality).unwrap_or_default();
             data["sound"] = serde_json::json!(sound);
+        }
+        ObjectKind::Mirror { scaling } => {
+            text.push_str(&format!(
+                ": whoever shows their screen\n    at x={:.0} y={:.0} w={:.0} h={:.0} ({whose_place})",
+                place.x, place.y, place.w, place.h
+            ));
+            data["kind"] = serde_json::json!("mirror");
+            data["scaling"] = serde_json::to_value(scaling).unwrap_or_default();
         }
         _ => {
             text.push_str(&format!(

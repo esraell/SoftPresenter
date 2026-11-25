@@ -12,11 +12,12 @@ const FORMAT_NAME: &str = "softpresenter-presentation";
 /// What songs saved before the project was renamed say they are; they still open.
 const OLD_FORMAT_NAME: &str = "presentercraft-presentation";
 /// The newest version of the format this build writes and understands. A song is written as
-/// version 4 only when a slide has an NDI source box, as version 3 only when it has a web page
+/// version 5 only when a slide has a box for a phone's or iPad's screen (version 5 added them),
+/// as version 4 only when a slide has an NDI source box, as version 3 only when it has a web page
 /// box (version 3 added them); as version 2 when a
 /// slide has a "go to song" action, which since version 2 names the song by its id; any other
 /// song is still written as version 1, which older builds read.
-pub const FORMAT_VERSION: u32 = 4;
+pub const FORMAT_VERSION: u32 = 5;
 
 #[derive(Serialize, Deserialize)]
 struct File {
@@ -37,7 +38,12 @@ pub fn to_json(presentation: &Presentation) -> String {
     let shows_ndi = presentation
         .slides()
         .any(|(_, slide)| slide.objects.iter().any(|object| matches!(object.kind, crate::ObjectKind::Ndi { .. })));
-    let version = if shows_ndi {
+    let shows_mirror = presentation
+        .slides()
+        .any(|(_, slide)| slide.objects.iter().any(|object| matches!(object.kind, crate::ObjectKind::Mirror { .. })));
+    let version = if shows_mirror {
+        5
+    } else if shows_ndi {
         4
     } else if shows_web {
         3
@@ -208,6 +214,36 @@ mod tests {
         plain.groups[0].slides[0].objects.push(crate::Object::ndi(String::new()));
         assert!(!to_json(&plain).contains("sound"));
         assert_eq!(from_json(&to_json(&plain)).unwrap(), plain);
+    }
+
+    #[test]
+    fn a_song_with_a_phone_screen_box_is_written_as_version_5_and_comes_back() {
+        let mut mirrored = song();
+        let mut object = crate::Object::mirror();
+        assert_eq!(object.name, "Phone or iPad Screen");
+        assert!(matches!(object.kind, crate::ObjectKind::Mirror { scaling: crate::ImageFit::Fit }));
+        if let crate::ObjectKind::Mirror { scaling } = &mut object.kind {
+            *scaling = crate::ImageFit::Fill;
+        }
+        mirrored.groups[0].slides[0].objects.push(object);
+        // With an NDI box beside it, the newer of the two versions is written.
+        mirrored.groups[0].slides[0].objects.push(crate::Object::ndi("A (B)".to_owned()));
+        let text = to_json(&mirrored);
+        assert!(text.contains(r#""version": 5"#) && text.contains(r#""kind": "mirror""#), "{text}");
+        assert!(text.contains(r#""scaling": "fill""#));
+        assert_eq!(from_json(&text).unwrap(), mirrored);
+        // A box with only its kind reads with the starting setting; it is not text, and an
+        // empty copy of its slide keeps it.
+        let thin = text.replace(r#""scaling": "fill""#, r#""x": 1"#);
+        let read = from_json(&thin).unwrap();
+        let slide = &read.groups[0].slides[0];
+        let boxed =
+            slide.objects.iter().find(|object| matches!(object.kind, crate::ObjectKind::Mirror { .. })).unwrap();
+        assert!(matches!(boxed.kind, crate::ObjectKind::Mirror { scaling: crate::ImageFit::Fit }));
+        assert!(boxed.as_text().is_none() && boxed.text_style().is_none());
+        assert!(
+            slide.empty_copy().objects.iter().any(|object| matches!(object.kind, crate::ObjectKind::Mirror { .. }))
+        );
     }
 
     #[test]

@@ -239,13 +239,21 @@ impl Sender {
 
     /// `GET /info` and the two FairPlay messages; gives the stream's plain key.
     fn begin(&mut self, vector: usize) -> (Vec<u8>, [u8; 16]) {
+        let (ekey, key, name, device_id) = self.begin_with_any(vector);
+        assert_eq!(name, "Test Receiver");
+        assert_eq!(device_id, "AA:BB:CC:DD:EE:01");
+        (ekey, key)
+    }
+
+    /// As [`Sender::begin`], with a receiver of any name: gives the name and device id it says.
+    fn begin_with_any(&mut self, vector: usize) -> (Vec<u8>, [u8; 16], String, String) {
         let (status, body) = self.request("GET", "/info", None, &[]);
         assert_eq!(status, 200);
         let info = Value::from_reader(std::io::Cursor::new(body)).unwrap();
         let info = info.as_dictionary().unwrap();
-        assert_eq!(info.get("name").unwrap().as_string(), Some("Test Receiver"));
+        let name = info.get("name").unwrap().as_string().unwrap().to_owned();
+        let device_id = info.get("deviceID").unwrap().as_string().unwrap().to_owned();
         assert_eq!(info.get("model").unwrap().as_string(), Some("SoftPresenter1,1"));
-        assert_eq!(info.get("deviceID").unwrap().as_string(), Some("AA:BB:CC:DD:EE:01"));
         // Mirroring (bit 7), audio (bit 9), several codecs (bit 42); no legacy pairing (bit 27).
         let features = info.get("features").unwrap().as_unsigned_integer().unwrap();
         assert_eq!(features & (1 << 7 | 1 << 9 | 1 << 27 | 1 << 42), 1 << 7 | 1 << 9 | 1 << 42);
@@ -261,7 +269,7 @@ impl Sender {
         let (status, body) = self.request("POST", "/fp-setup", Some("application/octet-stream"), &message);
         assert_eq!((status, body.len()), (200, 32));
         assert_eq!(&body[12..], &message[144..]);
-        (ekey, key)
+        (ekey, key, name, device_id)
     }
 
     fn setup_session(&mut self, ekey: &[u8], name: &str) {
@@ -772,4 +780,49 @@ fn measure_the_delay_of_a_1080p_stream() {
         sorted[sorted.len() * 95 / 100],
         sorted[sorted.len() - 1],
     );
+}
+
+/// Not part of the usual run: a sender for a receiver that is already running, to try the whole
+/// way through SoftPresenter itself (a quiet test copy with `sp mirror on`; `sp mirror` says
+/// its port). It asks, waits to be allowed, then sends the test pattern over and over.
+///
+/// `SOFTPRESENTER_MIRROR_SEND_TO=<port> cargo test -p sp-mirror -- --ignored --nocapture send_to`
+/// (`SOFTPRESENTER_MIRROR_SEND_SECONDS` is how long, 6 if not given). 127.0.0.1 only.
+#[test]
+#[ignore = "a sender for a receiver started by hand"]
+fn send_to_a_receiver_that_is_running() {
+    let Some(port) = std::env::var("SOFTPRESENTER_MIRROR_SEND_TO").ok().and_then(|port| port.parse::<u16>().ok())
+    else {
+        println!("skipped: SOFTPRESENTER_MIRROR_SEND_TO is not set");
+        return;
+    };
+    let seconds: u64 =
+        std::env::var("SOFTPRESENTER_MIRROR_SEND_SECONDS").ok().and_then(|s| s.parse().ok()).unwrap_or(6);
+    let mut sender = Sender::connect(port);
+    let (ekey, key, name, _) = sender.begin_with_any(8);
+    println!("    the receiver calls itself {name:?}; asking to show a screen");
+    sender.setup_session(&ekey, "A test sender");
+    let (status, _) = sender.answer().expect("an answer to SETUP");
+    assert_eq!(status, 200, "the receiver did not allow the sender");
+    let video_port = sender.setup_streams(31);
+    assert_eq!(sender.request("RECORD", "rtsp://127.0.0.1/1", None, &[]).0, 200);
+    let mut video = VideoOut::connect(video_port, &key, 31);
+    let clip = wide();
+    video.settings(&clip);
+    let until = Instant::now() + Duration::from_secs(seconds);
+    let mut sent = 0;
+    let mut last_feedback = Instant::now();
+    while Instant::now() < until {
+        for picture in &clip.pictures {
+            video.picture(picture);
+            sent += 1;
+            std::thread::sleep(Duration::from_millis(33));
+        }
+        if last_feedback.elapsed() > Duration::from_secs(2) {
+            last_feedback = Instant::now();
+            assert_eq!(sender.request("POST", "/feedback", None, &[]).0, 200);
+        }
+    }
+    assert_eq!(sender.request("TEARDOWN", "rtsp://127.0.0.1/1", None, &[]).0, 200);
+    println!("    sent {sent} pictures of {}x{} in {seconds} s and stopped", clip.width, clip.height);
 }

@@ -428,6 +428,9 @@ pub struct HomeState {
     pub timelychurch: crate::timelychurch::View,
     /// Settings › Remote Control, as the window shows it.
     pub remote: crate::remote::View,
+    /// Settings › Phone Screens, as the window shows it, and what the inspector says of a Phone
+    /// or iPad Screen box.
+    pub mirror: crate::mirror::View,
     /// Where the VoxLive item is among the presentations.
     pub voxlive_slot: Option<usize>,
     /// A VoxLive screen chosen in the VoxLive tab, by its slide in the VoxLive item, to put on
@@ -1765,6 +1768,7 @@ impl Default for HomeState {
             canva: Default::default(),
             timelychurch: Default::default(),
             remote: Default::default(),
+            mirror: Default::default(),
             voxlive_slot: None,
             voxlive_go: None,
             copyright_show: crate::service::CopyrightShow::Never,
@@ -3047,6 +3051,7 @@ fn edit_view(
                             sp_model::ObjectKind::Shape { .. } => "◆",
                             sp_model::ObjectKind::Web { .. } => "🌐",
                             sp_model::ObjectKind::Ndi { .. } => "◉",
+                            sp_model::ObjectKind::Mirror { .. } => "▯",
                             sp_model::ObjectKind::Screen { .. } => "",
                         };
                         if mark.is_empty() {
@@ -3770,6 +3775,22 @@ fn edit_view(
             // ready for a choice.
             state.inspector.tab = crate::inspector::InspectorTab::Shape;
             ui.data_mut(|data| data.insert_temp(egui::Id::unique("ndi source focus"), true));
+        }
+        // The screen of an iPhone, iPad or Mac that is showing it to this computer, in a box.
+        let mirror_bar = tools[5];
+        let mirror = ui.interact(mirror_bar, ui.scope_id().with("add phone screen"), Sense::click());
+        crate::studio::paint_button(ui.painter(), mirror_bar, mirror.hovered());
+        ui.painter().text(mirror_bar.center(), Align2::CENTER_CENTER, tool_words(5), tool_font(), crate::studio::TEXT);
+        if mirror
+            .on_hover_text(t(
+                "edit.tools.mirror.hint",
+                "Put a box on the slide for the screen of an iPhone, iPad or Mac that shows it to this computer (it shows while the slide is on screen)",
+            ))
+            .clicked()
+            && let Some(draft) = state.editing.as_mut()
+        {
+            draft.add_mirror();
+            state.inspector.tab = crate::inspector::InspectorTab::Shape;
         }
         let shapes_bar = tools[1];
         let shapes = ui.interact(shapes_bar, ui.scope_id().with("add shape"), Sense::click());
@@ -5718,8 +5739,8 @@ pub fn end_search(ctx: &egui::Context, state: &mut HomeState) {
 pub const SHAPE_KEYS: [char; 10] = ['O', 'R', 'E', 'G', 'L', 'H', 'P', 'S', 'D', 'A'];
 
 /// The Settings window's panes, in order (`preferences_pane` is a place in it).
-pub const PANES: [&str; 7] =
-    ["General", "Screens", "Groups", "Key Mappings", "Integrations", "Remote Control", "About"];
+pub const PANES: [&str; 8] =
+    ["General", "Screens", "Groups", "Key Mappings", "Integrations", "Remote Control", "Phone Screens", "About"];
 
 /// A pane's name as the window shows it, in the language set. [`PANES`] keeps the English names,
 /// which the code matches on.
@@ -5731,6 +5752,7 @@ fn pane_name(pane: &'static str) -> &'static str {
         "Key Mappings" => t("settings.pane.keys", "Key Mappings"),
         "Integrations" => t("settings.pane.integrations", "Integrations"),
         "Remote Control" => t("settings.pane.remote", "Remote Control"),
+        "Phone Screens" => t("settings.pane.mirror", "Phone Screens"),
         "About" => t("settings.pane.about", "About"),
         other => other,
     }
@@ -6003,6 +6025,7 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
                 }
             }
             "Remote Control" => crate::remote::pane::pane(ui, &mut state.remote),
+            "Phone Screens" => crate::mirror::pane(ui, &mut state.mirror),
             "General" => {
                 language_card(ui);
                 ui.add_space(18.0);
@@ -8911,14 +8934,15 @@ const TOOL_PAD: f32 = 12.0;
 /// layout's always are).
 const TOOLS_ONE_ROW: f32 = 44.0;
 
-/// The words on the Edit view's object tools, left to right: Add Text, Shapes, Media…, Web Page
-/// and NDI Source.
-const TOOL_WORDS: [(&str, &str); 5] = [
+/// The words on the Edit view's object tools, left to right: Add Text, Shapes, Media…, Web Page,
+/// NDI Source and Phone or iPad Screen.
+const TOOL_WORDS: [(&str, &str); 6] = [
     tk("edit.add_text", "Add Text"),
     tk("edit.tools.shapes", "Shapes ▾"),
     tk("edit.tools.media", "Media…"),
     tk("edit.tools.web", "Web Page"),
     tk("edit.tools.ndi", "NDI Source"),
+    tk("edit.tools.mirror", "Phone or iPad Screen"),
 ];
 
 /// The words on the object tool at `place` (see [`TOOL_WORDS`]), in the language set.
@@ -8934,7 +8958,7 @@ fn tool_font() -> FontId {
 
 /// How wide each object tool is in the language set: its words and the room either side of
 /// them, and never narrower than [`TOOL_WIDTH`].
-fn tool_widths(ui: &egui::Ui) -> [f32; 5] {
+fn tool_widths(ui: &egui::Ui) -> [f32; 6] {
     std::array::from_fn(|place| {
         crate::studio::flat_button_width(ui, &[tool_words(place)], &tool_font(), TOOL_PAD).max(TOOL_WIDTH)
     })
@@ -9598,8 +9622,8 @@ mod tests {
         let ctx = crate::studio::tests::styled();
         for language in [Language::English, Language::Spanish] {
             // Each tool is as wide as its words in the language, with room either side.
-            let mut widths = [0.0; 5];
-            let mut words = [0.0; 5];
+            let mut widths = [0.0; 6];
+            let mut words = [0.0; 6];
             let output = ctx.run_ui(RawInput::default(), |ui| {
                 with_language(language, || {
                     widths = tool_widths(ui);
@@ -9621,7 +9645,7 @@ mod tests {
                     let slide =
                         Rect::from_center_size(fitted_slide_centre(inner, room, fit), vec2(fit, fit * 9.0 / 16.0));
                     let at = format!("{language:?} in {area:?}, the name taking {title:?}");
-                    assert_eq!(tools.len(), 5, "{at}");
+                    assert_eq!(tools.len(), 6, "{at}");
                     for (n, tool) in tools.iter().enumerate() {
                         assert!(tool.width() >= words[n] + 2.0 * TOOL_PAD - 0.01, "{at}: tool {n}'s words are cut");
                         assert!(inner.contains_rect(*tool), "{at}: tool {n} {tool:?} out of the room {inner:?}");
@@ -9660,9 +9684,9 @@ mod tests {
                         Some(first) => assert!(first.min.x - inner.min.x >= name - 0.01, "{at}: {first:?}"),
                         None => assert!(name + widths[0] > inner.width(), "{at}: the name alone, with room for a tool"),
                     }
-                    // One row where the room is wide enough for all five beside the name; the
+                    // One row where the room is wide enough for all six beside the name; the
                     // narrow room needs more.
-                    let all = name + widths.iter().sum::<f32>() + 4.0 * TOOL_GAP;
+                    let all = name + widths.iter().sum::<f32>() + 5.0 * TOOL_GAP;
                     assert_eq!(rows.len() == 1 && rows[0].min.y < first_row + 0.01, all <= inner.width(), "{at}");
                     if width == 420.0 {
                         assert!(rows.len() >= 2, "{at}");
@@ -15456,7 +15480,8 @@ mod tests {
         let version = env!("CARGO_PKG_VERSION");
         assert!(page_url(Page::ReportIssue).contains(version));
         assert!(page_url(Page::ReportIssue).starts_with("https://github.com/"));
-        let mut about = HomeState { preferences_open: true, preferences_pane: 6, ..HomeState::default() };
+        let about_pane = PANES.iter().position(|pane| *pane == "About").unwrap();
+        let mut about = HomeState { preferences_open: true, preferences_pane: about_pane, ..HomeState::default() };
         let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings(ui, &mut about));
         let line = format!("Version {version} \u{b7} free and open source, GPL-3.0-or-later");
         assert!(crate::studio::tests::place_of(&drawn, &line).is_some(), "About says the version");

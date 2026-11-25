@@ -47,6 +47,7 @@ mod make_cli;
 mod media;
 mod menubar;
 mod messages;
+mod mirror;
 mod ndi_download;
 mod ndi_in;
 mod notices;
@@ -621,6 +622,8 @@ enum AppEvent {
     /// Something Remote Control's server asks of the main thread: a command from a page (carried
     /// out as `sp`'s are), a slide to draw, the state to publish.
     Remote(remote::ToApp),
+    /// The program that receives phone screens said something, or a device's first picture came.
+    Mirror,
     /// A deck of slides finished on its own thread.
     DeckDone,
     /// A song pack was written or read on its own thread.
@@ -1673,6 +1676,9 @@ struct App {
     _control: std::sync::Arc<std::sync::Mutex<Option<control::Listening>>>,
     /// `status --wait`s held until something changes or their time is up.
     waiting: Vec<control::Waiter>,
+    /// Phone screens: the program that receives an iPhone's, iPad's or Mac's screen, while
+    /// switched on.
+    mirror: mirror::Mirror,
     /// Remote Control: the web page other devices run the show from, while switched on.
     remote: remote::Remote,
     /// Whether Remote Control, left on, has been switched on again since the app opened.
@@ -2823,7 +2829,8 @@ impl App {
     fn tick_web(&mut self) -> Option<Instant> {
         self.sync_web_pages();
         let (ndi_first, ndi_fresh, ndi_at) = self.tick_ndi();
-        if self.web_pages.is_empty() && ndi_first.is_empty() && ndi_fresh.is_empty() {
+        let (mirror_first, mirror_fresh) = self.mirror_pictures();
+        if self.web_pages.is_empty() && ndi_first.is_empty() && ndi_fresh.is_empty() && !mirror_first && !mirror_fresh {
             return ndi_at;
         }
         let now = Instant::now();
@@ -2831,6 +2838,13 @@ impl App {
         // source's is `ndi:` and its name, as `thumbs::web_pages` says it).
         let mut fresh: Vec<String> = ndi_fresh.iter().map(|source| format!("ndi:{source}")).collect();
         let mut first: Vec<String> = ndi_first.iter().map(|source| format!("ndi:{source}")).collect();
+        // A phone's screen in a box is `mirror:`, as `thumbs::web_pages` says it.
+        if mirror_fresh {
+            fresh.push("mirror:".to_owned());
+        }
+        if mirror_first {
+            first.push("mirror:".to_owned());
+        }
         let editing = self.running.as_ref().is_some_and(|running| running.home_state.editing.is_some());
         for web in &mut self.web_pages {
             // A page runs while it is on the screens, until its first picture (for the
@@ -3850,7 +3864,11 @@ impl App {
             .chain(self.web_pages.iter().filter(|web| web.live).map(|web| (web.key.clone(), web.page.frames())))
             .collect();
         self.sync_ndi();
-        let ndi: Vec<String> = self.live_ndi_wanted().into_iter().map(|(source, _)| source).collect();
+        let mut ndi: Vec<String> = self.live_ndi_wanted().into_iter().map(|(source, _)| source).collect();
+        // A phone's screen in a box is watched as an NDI source is, under its own name.
+        if self.live_mirror_wanted() {
+            ndi.push(sp_render::MIRROR_SOURCE.to_owned());
+        }
         let media_fit = self.live_media_fit();
         let theme = self.show.live().map_or(&self.theme, |at| self.theme_of(at.presentation)).clone();
         let about = self.stage_about();
@@ -5148,6 +5166,8 @@ impl App {
     /// it is answered; it never opens the list by itself.
     fn wait_on(&mut self, what: outside::Waiting) {
         let name = match what {
+            // Asked by `mirror`, with the device's name.
+            outside::Waiting::Mirror(_) => return,
             outside::Waiting::Song(index) => self.show.presentations().get(index).map_or_else(
                 || crate::i18n::t("notices.ask.a_song", "A song").to_owned(),
                 |song| crate::i18n::quoted(&song.title),
@@ -5412,11 +5432,21 @@ impl App {
 
     /// Carries out the choice made in the bar that offers Reload and Keep mine.
     fn choose_outside(&mut self, what: outside::Waiting, reload: bool) {
+        // A device that wants to show its screen: Allow or Don't Allow.
+        if let outside::Waiting::Mirror(device) = what {
+            let said = self.mirror_answer(device, reload);
+            if let (Err(problem), Some(running)) = (said, self.running.as_mut()) {
+                running.home_state.notices.info(problem);
+                running.home_window.request_redraw();
+            }
+            return;
+        }
         let result = match (what, reload) {
             (outside::Waiting::Song(index), true) => self.reload_song(index),
             (outside::Waiting::Song(index), false) => self.keep_song(index),
             (outside::Waiting::Theme(index), true) => self.reload_theme(index),
             (outside::Waiting::Theme(index), false) => self.keep_theme(index),
+            (outside::Waiting::Mirror(_), _) => return,
         };
         // The answer is noted in the list (a problem with it too, and the question stays).
         let said = match result {
@@ -8708,6 +8738,10 @@ impl App {
                         running.home_state.preferences_pane =
                             home::PANES.iter().position(|pane| *pane == "Remote Control").unwrap_or(0);
                     }
+                    "mirror" | "phone" => {
+                        running.home_state.preferences_pane =
+                            home::PANES.iter().position(|pane| *pane == "Phone Screens").unwrap_or(0);
+                    }
                     // Any pane by its name ("Key Mappings", "key-mappings", "groups").
                     other => {
                         let named = other.replace(['-', '_'], " ");
@@ -10070,6 +10104,8 @@ impl App {
         self.canva.shut_down();
         // Canva videos replaced while they played go now that nothing plays them.
         self.remove_replaced_canva_videos();
+        // The program that receives phone screens leaves with the app.
+        self.mirror.quit();
         el.exit();
     }
 }
@@ -10316,6 +10352,8 @@ impl ApplicationHandler<AppEvent> for App {
             }
             // Taken in when the loop next waits (`tick_canva`).
             AppEvent::Canva => return,
+            // Taken in when the loop next waits (`tick_mirror`, `tick_web`).
+            AppEvent::Mirror => return,
             AppEvent::Tidied(said) => {
                 if let Some(running) = self.running.as_mut() {
                     running.home_state.notices.info(said);
@@ -10886,6 +10924,9 @@ impl ApplicationHandler<AppEvent> for App {
         // Remote Control: what Settings asked, the state for pages (at most twenty times a
         // second, only while one is connected) and the slides they asked to see.
         let remote_at = self.tick_remote();
+        // Phone screens: what Settings asked, what the receiving program said, and a still
+        // screen's picture kept from fading.
+        let mirror_at = self.tick_mirror();
         let Some(running) = self.running.as_mut() else {
             return;
         };
@@ -10925,6 +10966,7 @@ impl ApplicationHandler<AppEvent> for App {
             folders_at,
             waiting_at,
             remote_at,
+            mirror_at,
             looked_at,
             close_at,
         ];
@@ -11393,6 +11435,7 @@ fn main() -> ExitCode {
         drop_pointer: None,
         bible_jobs: Vec::new(),
         waiting: Vec::new(),
+        mirror: mirror::Mirror::open(),
         remote,
         remote_started: false,
         remote_pages_seen: 0,
