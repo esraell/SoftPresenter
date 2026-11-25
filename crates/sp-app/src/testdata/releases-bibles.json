@@ -1,0 +1,138 @@
+[
+  {
+    "url": "https://api.github.com/repos/esraell/SoftPresenter/releases/104",
+    "assets_url": "https://api.github.com/repos/esraell/SoftPresenter/releases/104/assets",
+    "upload_url": "https://uploads.github.com/repos/esraell/SoftPresenter/releases/104/assets{?name,label}",
+    "html_url": "https://github.com/esraell/SoftPresenter/releases/tag/bibles-4",
+    "id": 104,
+    "node_id": "RE_test104",
+    "tag_name": "bibles-4",
+    "target_commitish": "master",
+    "name": "Bibles 4",
+    "draft": false,
+    "immutable": false,
+    "prerelease": false,
+    "created_at": "2026-11-24T10:00:00Z",
+    "published_at": "2026-11-24T10:05:00Z",
+    "assets": [
+      {
+        "url": "https://api.github.com/repos/esraell/SoftPresenter/releases/assets/1040",
+        "id": 1040,
+        "name": "bibles-4.zip",
+        "label": "",
+        "content_type": "application/octet-stream",
+        "state": "uploaded",
+        "size": 1024,
+        "download_count": 3,
+        "created_at": "2026-11-21T10:00:00Z",
+        "updated_at": "2026-11-21T10:00:00Z",
+        "browser_download_url": "https://github.com/esraell/SoftPresenter/releases/download/bibles-4/bibles-4.zip"
+      }
+    ],
+    "tarball_url": "https://api.github.com/repos/esraell/SoftPresenter/tarball/bibles-4",
+    "zipball_url": "https://api.github.com/repos/esraell/SoftPresenter/zipball/bibles-4",
+    "body": "Written for this test: Bibles 4."
+  },
+  {
+    "url": "https://api.github.com/repos/esraell/SoftPresenter/releases/103",
+    "assets_url": "https://api.github.com/repos/esraell/SoftPresenter/releases/103/assets",
+    "upload_url": "https://uploads.github.com/repos/esraell/SoftPresenter/releases/103/assets{?name,label}",
+    "html_url": "https://github.com/esraell/SoftPresenter/releases/tag/bibles-3",
+    "id": 103,
+    "node_id": "RE_test103",
+    "tag_name": "bibles-3",
+    "target_commitish": "master",
+    "name": "Bibles 3",
+    "draft": false,
+    "immutable": false,
+    "prerelease": false,
+    "created_at": "2026-11-23T10:00:00Z",
+    "published_at": "2026-11-23T10:05:00Z",
+    "assets": [
+      {
+        "url": "https://api.github.com/repos/esraell/SoftPresenter/releases/assets/1030",
+        "id": 1030,
+        "name": "bibles-3.zip",
+        "label": "",
+        "content_type": "application/octet-stream",
+        "state": "uploaded",
+        "size": 1024,
+        "download_count": 3,
+        "created_at": "2026-11-21T10:00:00Z",
+        "updated_at": "2026-11-21T10:00:00Z",
+        "browser_download_url": "https://github.com/esraell/SoftPresenter/releases/download/bibles-3/bibles-3.zip"
+      }
+    ],
+    "tarball_url": "https://api.github.com/repos/esraell/SoftPresenter/tarball/bibles-3",
+    "zipball_url": "https://api.github.com/repos/esraell/SoftPresenter/zipball/bibles-3",
+    "body": "Written for this test: Bibles 3."
+  },
+  {
+    "url": "https://api.github.com/repos/esraell/SoftPresenter/releases/102",
+    "assets_url": "https://api.github.com/repos/esraell/SoftPresenter/releases/102/assets",
+    "upload_url": "https://uploads.github.com/repos/esraell/SoftPresenter/releases/102/assets{?name,label}",
+    "html_url": "https://github.com/esraell/SoftPresenter/releases/tag/bibles-2",
+    "id": 102,
+    "node_id": "RE_test102",
+    "tag_name": "bibles-2",
+    "target_commitish": "master",
+    "name": "Bibles 2",
+    "draft": false,
+    "immutable": false,
+    "prerelease": false,
+    "created_at": "2026-11-22T10:00:00Z",
+    "published_at": "2026-11-22T10:05:00Z",
+    "assets": [
+      {
+        "url": "https://api.github.com/repos/esraell/SoftPresenter/releases/assets/1020",
+        "id": 1020,
+        "name": "bibles-2.zip",
+        "label": "",
+        "content_type": "application/octet-stream",
+        "state": "uploaded",
+        "size": 1024,
+        "download_count": 3,
+        "created_at": "2026-11-21T10:00:00Z",
+        "updated_at": "2026-11-21T10:00:00Z",
+        "browser_download_url": "https://github.com/esraell/SoftPresenter/releases/download/bibles-2/bibles-2.zip"
+      }
+    ],
+    "tarball_url": "https://api.github.com/repos/esraell/SoftPresenter/tarball/bibles-2",
+    "zipball_url": "https://api.github.com/repos/esraell/SoftPresenter/zipball/bibles-2",
+    "body": "Written for this test: Bibles 2."
+  },
+  {
+    "url": "https://api.github.com/repos/esraell/SoftPresenter/releases/101",
+    "assets_url": "https://api.github.com/repos/esraell/SoftPresenter/releases/101/assets",
+    "upload_url": "https://uploads.github.com/repos/esraell/SoftPresenter/releases/101/assets{?name,label}",
+    "html_url": "https://github.com/esraell/SoftPresenter/releases/tag/bibles-1",
+    "id": 101,
+    "node_id": "RE_test101",
+    "tag_name": "bibles-1",
+    "target_commitish": "master",
+    "name": "Bibles 1",
+    "draft": false,
+    "immutable": false,
+    "prerelease": false,
+    "created_at": "2026-11-21T10:00:00Z",
+    "published_at": "2026-11-21T10:05:00Z",
+    "assets": [
+      {
+        "url": "https://api.github.com/repos/esraell/SoftPresenter/releases/assets/1010",
+        "id": 1010,
+        "name": "bibles-1.zip",
+        "label": "",
+        "content_type": "application/octet-stream",
+        "state": "uploaded",
+        "size": 1024,
+        "download_count": 3,
+        "created_at": "2026-11-21T10:00:00Z",
+        "updated_at": "2026-11-21T10:00:00Z",
+        "browser_download_url": "https://github.com/esraell/SoftPresenter/releases/download/bibles-1/bibles-1.zip"
+      }
+    ],
+    "tarball_url": "https://api.github.com/repos/esraell/SoftPresenter/tarball/bibles-1",
+    "zipball_url": "https://api.github.com/repos/esraell/SoftPresenter/zipball/bibles-1",
+    "body": "Written for this test: Bibles 1."
+  }
+]

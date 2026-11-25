@@ -99,10 +99,11 @@ pub const OPEN: &[&str] = &[
 
 /// Commands never open to a page: Remote Control's own (switching it, its password),
 /// TimelyChurch's (its connection is made and kept at the computer), the switch that lets
-/// devices on the network show their screens, and `mcp` (adding SoftPresenter to assistant apps
+/// devices on the network show their screens, `mcp` (adding SoftPresenter to assistant apps
 /// changes their settings on this computer; `sp` answers it itself, so the app never sees it,
-/// and it is closed here too).
-pub const CLOSED: &[&str] = &["remote", "timelychurch", "mirror", "mcp"];
+/// and it is closed here too), and `update` (checking for a newer version asks the internet from
+/// the computer, and is the operator's to ask for).
+pub const CLOSED: &[&str] = &["remote", "timelychurch", "mirror", "mcp", "update"];
 
 /// For the open commands made of sub-commands, the sub-commands open to Control (`""` for the
 /// command alone); any other is closed, so a sub-command added later, or one taking a key, a
@@ -519,6 +520,10 @@ mod tests {
             "songbook remove pv3300 --yes",
             "songbook frobnicate",
             "menu Quit",
+            "menu Check for Updates…",
+            "update",
+            "update check",
+            "UPDATE CHECK",
             "status --wait 5",
             "slide web Amazing 2 http://127.0.0.1:8080",
             "slide web Amazing 2 file:///etc/hosts",

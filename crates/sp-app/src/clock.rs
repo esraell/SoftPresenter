@@ -288,6 +288,12 @@ pub struct SystemClock {
 }
 
 impl SystemClock {
+    /// The way to write the time as last known, without reading the computer's setting (for a
+    /// time written somewhere other than the clock).
+    pub fn known(&self) -> &TimeForm {
+        &self.form
+    }
+
     /// The way to write the time now. Called as the window is drawn (`in_front` says whether it
     /// has the keyboard): it never waits, and starts a reading on a thread of its own when one
     /// is due.

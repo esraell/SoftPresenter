@@ -87,6 +87,7 @@ mod thumbs;
 mod tidy_cli;
 mod timelychurch;
 mod timers;
+mod updates;
 mod versions;
 mod voxlive;
 mod window_plan;
@@ -678,6 +679,8 @@ enum AppEvent {
     /// The library's writer wrote everything handed to it, or a file couldn't be written (see
     /// `writer`).
     Saved,
+    /// Check for Updates has its answer (see `updates`).
+    UpdateChecked,
     /// The system says the displays changed (macOS: a display plugged in or out, the main one
     /// changed, a size or the arrangement changed). Only macOS sends it.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -1773,6 +1776,8 @@ struct App {
     drop_pointer: Option<egui::Pos2>,
     /// Bible downloads started from the command line: each job's number, the Bible's id and name.
     bible_jobs: Vec<(u64, String, String)>,
+    /// `sp update check`s waiting for the check that is running: their job numbers.
+    update_jobs: Vec<u64>,
     /// The socket `softpresenter ctl` reaches the app through, while it listens.
     _control: std::sync::Arc<std::sync::Mutex<Option<control::Listening>>>,
     /// `status --wait`s held until something changes or their time is up.
@@ -10064,6 +10069,15 @@ impl App {
             self.export_from_window(&songs, None);
             return;
         }
+        if action == A::CheckForUpdates {
+            // Settings › About shows that it is checking, and then the answer.
+            if let Some(running) = self.running.as_mut() {
+                running.home_state.preferences_open = true;
+                running.home_state.preferences_pane = home::Pane::About;
+                running.home_window.request_redraw();
+            }
+            return self.check_for_updates(None);
+        }
         if action == A::ReloadSongs {
             let said = self.reload_all().summary();
             if let Some(running) = self.running.as_mut() {
@@ -10207,7 +10221,8 @@ impl App {
             A::StageLayouts => state.edit_kind_request = Some(home::EditKind::Stage),
             A::NewSong => state.new_song = true,
             // Handled above, before the window's state is borrowed.
-            A::ImportSongs
+            A::CheckForUpdates
+            | A::ImportSongs
             | A::ImportLibraryFolder
             | A::ImportBundle
             | A::ImportWords
@@ -10388,6 +10403,7 @@ impl App {
                 can_undo: state.can_undo(false),
                 can_redo: state.can_undo(true),
                 style_copied: state.inspector.copied_style.is_some(),
+                checking_updates: updates::status().checking,
             });
             menu.set_checked(|action| match action {
                 A::Audience => output_on,
@@ -10723,6 +10739,10 @@ impl ApplicationHandler<AppEvent> for App {
                 self.finish_saves();
                 return;
             }
+            AppEvent::UpdateChecked => {
+                self.finish_update_check();
+                return;
+            }
             AppEvent::MediaRead => {
                 self.take_media_read();
                 return;
@@ -10842,6 +10862,13 @@ impl ApplicationHandler<AppEvent> for App {
                 WindowEvent::RedrawRequested => {
                     let commands = self.draw_panel(id);
                     self.apply(commands);
+                    // A key in Settings that does what a menu item does (Check for updates) is
+                    // carried out as the main window draws, as its own menus' are.
+                    if let Some(running) = self.running.as_ref()
+                        && running.home_state.menu_asked.is_some()
+                    {
+                        running.home_window.request_redraw();
+                    }
                     // Settings may have asked for a songbook.
                     self.handle_songbooks();
                     self.sync_screens(el);
@@ -11832,6 +11859,7 @@ fn main() -> ExitCode {
         dropped: Vec::new(),
         drop_pointer: None,
         bible_jobs: Vec::new(),
+        update_jobs: Vec::new(),
         waiting: Vec::new(),
         mirror: mirror::Mirror::open(quiet_run),
         remote,

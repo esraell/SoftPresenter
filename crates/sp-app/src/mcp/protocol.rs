@@ -748,7 +748,7 @@ fn cannot_ask(tool: &Tool) -> String {
 }
 
 fn server_info() -> Value {
-    json!({"name": "softpresenter", "title": "SoftPresenter", "version": env!("CARGO_PKG_VERSION")})
+    json!({"name": "softpresenter", "title": "SoftPresenter", "version": crate::updates::VERSION})
 }
 
 /// `server/discover`'s result.

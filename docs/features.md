@@ -2142,8 +2142,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   aside so the setup opens over the home window); Settings › Command line has the sp command's
   row, saying where it stands, with Install, Use This Copy and Remove (quiet while sp is where it
   should be), and what a click did under it; Settings › About has a card with the version and a
-  row each for What's new, Help (Open the guide), Something wrong? (Report an issue…, a new issue
-  with the version filled in) and Licences…; a click on the
+  row each for Updates (Check for updates, below), What's new, Help (Open the guide), Something
+  wrong? (Report an issue…, a new issue with the version filled in) and Licences…; a click on the
   readout under the preview goes to the slide on screen (opens its item and brings the slide
   into view). The media strip has its fold button (a chevron at the right of its heading).
 - On Windows the little triangle on menu buttons (Advanced, Shapes, Add, + Add's arrow) is drawn
@@ -2152,8 +2152,28 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - Importing songs: File › Import Songs › A Library Folder… on Windows and Linux first asks "A
   Folder…" or "Files…" (a Mac's one file window takes both), so a single song document or
   bundle can be chosen as well as a folder of libraries.
+- **Check for Updates.** SoftPresenter › Check for Updates… on a Mac (under About, as other Mac
+  apps have it), and on every system the Updates row of Settings › About, asks once whether there
+  is a newer version: never in the background, only when asked, one check at a time (a second
+  click, or `sp update check`, joins the one running; the menu item says Checking for Updates…
+  and is greyed, and so is the row's key, Checking…). The menu item opens Settings › About, where
+  the row says what was found and when ("You have the newest version (0.9.0) · checked at 2:07",
+  "SoftPresenter 0.9.1 is available", or "Couldn't check: GitHub took too long to answer"); the
+  answer goes in the notices too. A build of the public source asks GitHub for this repository's
+  releases, pre-releases included (the app is 0.x), takes the highest version among them (the
+  Bibles' releases, tagged `bibles-N`, are passed over) and compares it with its own, sending only
+  "SoftPresenter/<version>" as who asks; it gives up after 10 seconds. A newer version gets a row
+  of its own with Open the download page, which opens its release page in the browser (only a
+  page of this repository's releases): nothing is downloaded or installed. A development build
+  answers from its own update server instead ("You have the newest development version
+  (0.9.0-dev.14)", or that a newer one is downloading or ready, with Update and restart).
+- The version a build shows (the Mac's About panel, Settings › About, the log's first line, a new
+  issue's text, `sp update`, the MCP server's name) is a development build's full one,
+  0.9.0-dev.15, where it has one; a release shows 0.9.0. The Mac bundle keeps the plain 0.9.0 as
+  its version, and the About panel leaves out the bundle's number after it, so it reads 0.9.0-dev.15
+  alone.
 - A Mac's menu bar has six short menus, only what a Mac user expects: SoftPresenter (About,
-  Settings…, Services, Hide, Quit), File (New Song, Import…, which opens the import menu over the
+  Check for Updates…, Settings…, Services, Hide, Quit), File (New Song, Import…, which opens the import menu over the
   left column, Close Window), Edit (Undo, Redo, Cut, Copy, Paste, Paste and Match Style, Delete,
   Select All, Find…), View (Service, Bible, Edit, with ⌘1, ⌘2, ⌘3, and Enter Full Screen), Window
   (the system's) and Help (SoftPresenter Help, Keys…, Report an Issue…). Format, Arrange, Insert,

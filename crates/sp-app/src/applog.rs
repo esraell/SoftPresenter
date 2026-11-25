@@ -59,7 +59,7 @@ pub fn start() {
     let _ = FILE.set(Mutex::new(opened));
     event(
         "start",
-        &format!("SoftPresenter {} on {} {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH),
+        &format!("SoftPresenter {} on {} {}", crate::updates::VERSION, std::env::consts::OS, std::env::consts::ARCH),
     );
     let before = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {

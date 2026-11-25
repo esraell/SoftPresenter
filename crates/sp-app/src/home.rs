@@ -5891,7 +5891,7 @@ pub fn page_url(page: Page) -> String {
         Page::Guide => format!("{REPO}#readme"),
         Page::WhatsNew => format!("{REPO}/commits/master"),
         Page::ReportIssue => {
-            format!("{REPO}/issues/new?body=SoftPresenter%20{}%0A%0A", env!("CARGO_PKG_VERSION"))
+            format!("{REPO}/issues/new?body=SoftPresenter%20{}%0A%0A", crate::updates::VERSION)
         }
         Page::Licences => format!("{REPO}/blob/master/NOTICE.md"),
     }
@@ -15399,7 +15399,7 @@ mod tests {
         assert!(click_word(&ctx, &mut keys, "Show keys on buttons", &settings));
         assert!(keys.keys_on_buttons);
         // Settings > About: the version, and a new issue that carries it.
-        let version = env!("CARGO_PKG_VERSION");
+        let version = crate::updates::VERSION;
         assert!(page_url(Page::ReportIssue).contains(version));
         assert!(page_url(Page::ReportIssue).starts_with("https://github.com/"));
         let mut about = HomeState { preferences_open: true, preferences_pane: Pane::About, ..HomeState::default() };

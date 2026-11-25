@@ -711,7 +711,7 @@ pub fn only_reads(args: &[String]) -> bool {
         "catalog" => {
             alone || matches!(word(1).as_str(), "status" | "languages" | "search" | "list" | "newer" | "sizes")
         }
-        "remote" | "mirror" => alone || (args.len() == 2 && word(1) == "status"),
+        "remote" | "mirror" | "update" => alone || (args.len() == 2 && word(1) == "status"),
         "notices" => alone,
         // `bible text REFERENCE` and `bible search WORDS` leave the Bible page as it is.
         "bible" => matches!(word(1).as_str(), "text" | "search"),
@@ -900,6 +900,7 @@ const COMMANDS: &[&str] = &[
     "catalog",
     "songbooks",
     "songbook",
+    "update",
 ];
 
 /// True when `word` starts a command.
@@ -1186,6 +1187,11 @@ Undo
 Everything on the menu bar
   menu                         list the menu items
   menu ITEM                    choose one, as a click on it does
+
+Updates (asked only when told to; closed to remote pages and AI assistants)
+  update [status]              what the last check found, and when
+  update check                 ask now whether there is a newer version, and wait for the answer:
+                               the newest, or the newer version and its download page
 
 Notices (the list under the status button)
   notices                      the entries: information, trouble and questions, each with its
@@ -1479,6 +1485,7 @@ impl crate::App {
             "remote" => self.ctl_remote(args),
             "mirror" => self.ctl_mirror(args),
             "notices" => self.ctl_notices(args),
+            "update" => self.ctl_update(args),
             other => Err(format!("SoftPresenter doesn't know the command \u{201c}{other}\u{201d}. See: sp help")),
         };
         if let Some(running) = self.running.as_ref() {

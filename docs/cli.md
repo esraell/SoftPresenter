@@ -1370,6 +1370,29 @@ The list under the status button (≡) after the find box: information, trouble 
 Any command that starts a job takes `--wait`, and then prints the job's result and exits with
 its code. Menu items that open a window or a file chooser open it on the Mac, as a click does.
 
+## Updates
+
+Check for Updates from the command line: the same check, and the same answer, as SoftPresenter ›
+Check for Updates… on a Mac and the Updates row of Settings › About. A check is made only when
+asked, one at a time: asking while one runs waits for that one. A build from the public source
+asks GitHub for this repository's releases (pre-releases too) and gives up after 10 seconds; a
+development build asks its own update server. Nothing is downloaded or installed from here.
+Neither command can be sent from a remote page or by an AI assistant.
+
+| Command | Does |
+|---|---|
+| `update`, `update status` | What the last check found and when, or "Not checked yet" (`--json`: `version` (this build's, as it shows it), `checking`, `checked` (seconds since 1970), `newer`, `page`) |
+| `update check` | Checks now and waits for the answer: the newest, or the newer version and its download page; exits with 1 when the check couldn't be made. The answer goes in the notices too |
+
+    $ sp update check
+    You have the newest version (0.9.0)
+    $ sp update check
+    SoftPresenter 0.9.1 is available: https://github.com/esraell/SoftPresenter/releases/tag/v0.9.1
+    $ sp update check
+    Couldn’t check: GitHub took too long to answer
+    $ sp update
+    You have the newest version (0.9.0) · checked at 2:07
+
 ## Remote Control
 
 Remote Control is a web page other devices on the church's network run the show from, served

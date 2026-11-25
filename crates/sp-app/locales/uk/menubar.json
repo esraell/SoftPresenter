@@ -33,5 +33,7 @@
   "menubar.window": "Вікно",
   "menubar.window.bring_all_to_front": "Усі наперед",
   "menubar.window.minimize": "Згорнути",
-  "menubar.window.zoom": "Масштаб"
+  "menubar.window.zoom": "Масштаб",
+  "menubar.app.check_updates": "Перевірити оновлення…",
+  "menubar.app.checking_updates": "Перевірка оновлень…"
 }

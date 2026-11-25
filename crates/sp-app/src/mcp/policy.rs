@@ -168,6 +168,7 @@ fn refusal(args: &[String]) -> String {
             at_computer("Settings, the screens' setup and themes are changed")
         }
         ("remote", _) => at_computer("Remote Control and its password are set"),
+        ("update", _) => at_computer("Checking for a newer version of SoftPresenter is done"),
         ("voxlive" | "canva" | "timelychurch" | "catalog", _) => {
             at_computer("Connections to other services, and their keys and sign-ins, are made")
         }
@@ -368,6 +369,8 @@ mod tests {
         assert!(said(&["menu"]).contains("menu bar"));
         assert!(said(&["settings", "set", "continuous=on"]).contains("Settings"));
         assert!(said(&["remote", "password"]).contains("Remote Control"));
+        assert!(said(&["update", "check"]).contains("newer version"));
+        assert!(said(&["update"]).contains("newer version"));
         assert!(said(&["timelychurch", "connect"]).contains("Connections"));
         assert!(said(&["voxlive", "connect"]).contains("Connections"));
         assert!(said(&["song", "delete", "Amazing", "--yes"]).contains("Deleting"));

@@ -33,5 +33,7 @@
   "menubar.window.bring_all_to_front": "Все окна — на передний план",
   "menubar.help.website": "Справка SoftPresenter",
   "menubar.help.keys": "Клавиши…",
-  "menubar.help.report_issue": "Сообщить о проблеме…"
+  "menubar.help.report_issue": "Сообщить о проблеме…",
+  "menubar.app.check_updates": "Проверить обновления…",
+  "menubar.app.checking_updates": "Проверка обновлений…"
 }

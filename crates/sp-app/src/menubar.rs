@@ -110,6 +110,9 @@ pub enum Action {
     Import,
     /// Help › Keys…: the list of every key, as the top bar's ? opens it.
     KeysSheet,
+    /// SoftPresenter › Check for Updates…: asks once whether there is a newer version, and opens
+    /// Settings › About, where the answer shows (`updates.rs`).
+    CheckForUpdates,
 }
 
 /// A keyboard shortcut. Every one has Command or Control in it, so none is ever taken from
@@ -195,6 +198,7 @@ pub const COMMANDS: &[(&str, &[Entry])] = &[
         "SoftPresenter",
         &[
             Entry::System(System::About),
+            Do(Action::CheckForUpdates, "Check for Updates…", None),
             Line,
             Do(Action::Settings, "Settings…", cmd(',')),
             Do(Action::SetUp, "Set Up SoftPresenter…", None),
@@ -396,6 +400,7 @@ pub const MENUS: &[(&str, &[Entry])] = &[
         "SoftPresenter",
         &[
             Entry::System(System::About),
+            Do(Action::CheckForUpdates, "Check for Updates…", None),
             Line,
             Do(Action::Settings, "Settings…", cmd(',')),
             Line,
@@ -554,6 +559,7 @@ type Words = (&'static str, &'static str);
 fn item_words(action: Action) -> Option<Words> {
     use Action as A;
     Some(match action {
+        A::CheckForUpdates => tk("menubar.app.check_updates", "Check for Updates…"),
         A::Settings => tk("menubar.app.settings", "Settings…"),
         A::Quit => tk("menubar.app.quit", "Quit SoftPresenter"),
         A::NewSong => tk("menubar.file.new_song", "New Song"),
@@ -736,6 +742,8 @@ pub struct Greying {
     pub can_redo: bool,
     /// A look has been copied, for Paste Style.
     pub style_copied: bool,
+    /// Check for Updates is running: its item is greyed, and says so.
+    pub checking_updates: bool,
 }
 
 /// Whether a menu item can be chosen now. An item that only works in the editor is greyed
@@ -750,6 +758,7 @@ pub fn enabled(action: Action, now: &Greying) -> bool {
         A::Undo => now.typing || now.can_undo,
         A::Redo => now.typing || now.can_redo,
         A::PasteStyle => now.editing && now.style_copied,
+        A::CheckForUpdates => !now.checking_updates,
         _ => now.editing || !needs_editor(action),
     }
 }
@@ -801,6 +810,11 @@ mod mac {
                 Worded::System(item) => item.set_text(text),
             }
         }
+    }
+
+    /// What Check for Updates says while a check runs.
+    fn checking_words() -> &'static str {
+        t("menubar.app.checking_updates", "Checking for Updates…")
     }
 
     /// Our words for the items the system runs: muda's own are English. macOS may still name some
@@ -881,10 +895,14 @@ mod mac {
             System::About => PredefinedMenuItem::about(
                 label,
                 // The panel macOS shows reads the name and the version; the comments and the
-                // website are other systems'.
+                // website are other systems'. The version is the one the app shows (a
+                // development build's 0.9.0-dev.15); the build number macOS would add after it in
+                // brackets, the bundle's plain 0.9.0, is left blank (an empty one is, as AppKit
+                // says), so it isn't "0.9.0-dev.15 (0.9.0)".
                 Some(AboutMetadata {
                     name: Some("SoftPresenter".to_owned()),
-                    version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+                    version: Some(crate::updates::VERSION.to_owned()),
+                    short_version: Some(String::new()),
                     comments: Some("A free, open-source presentation app for church services.".to_owned()),
                     website: Some("https://github.com/esraell/SoftPresenter".to_owned()),
                     ..AboutMetadata::default()
@@ -1024,6 +1042,12 @@ mod mac {
             for (line, (key, english)) in &self.words {
                 line.set_text(t(key, english));
             }
+            // Check for Updates says it is checking for as long as it is greyed.
+            for (action, item, shown) in &self.items {
+                if *action == Action::CheckForUpdates && !*shown {
+                    item.set_text(checking_words());
+                }
+            }
         }
 
         /// Greys out the items that can't be chosen now (see [`enabled`]). Cheap when nothing
@@ -1034,6 +1058,14 @@ mod mac {
                 if *shown != wanted {
                     item.set_enabled(wanted);
                     *shown = wanted;
+                    // Greyed, Check for Updates says it is checking.
+                    if *action == Action::CheckForUpdates {
+                        item.set_text(if wanted {
+                            drawn(item_words(*action), "Check for Updates…")
+                        } else {
+                            checking_words()
+                        });
+                    }
                 }
             }
         }
@@ -1125,6 +1157,10 @@ mod tests {
                 })
                 .collect()
         };
+        assert_eq!(labels("SoftPresenter"), ["Check for Updates\u{2026}", "Settings\u{2026}", "Quit SoftPresenter"]);
+        // Check for Updates comes straight after About, as on other Mac apps.
+        let app = MENUS[0].1;
+        assert_eq!(&app[..2], &[Entry::System(System::About), Do(Action::CheckForUpdates, "Check for Updates…", None)]);
         assert_eq!(labels("File"), ["New Song", "Import\u{2026}", "Close Window"]);
         assert_eq!(labels("View"), ["Service", "Bible", "Edit"]);
         assert_eq!(labels("Help"), ["SoftPresenter Help", "Keys\u{2026}", "Report an Issue\u{2026}"]);
@@ -1285,5 +1321,8 @@ mod tests {
         // The rest as before: editor-only items greyed outside the editor, others always on.
         assert!(!enabled(Action::Bold, &Greying::default()) && enabled(Action::Bold, &none));
         assert!(enabled(Action::NewSong, &Greying::default()));
+        // Check for Updates is greyed while a check runs, and only then.
+        assert!(enabled(Action::CheckForUpdates, &Greying::default()));
+        assert!(!enabled(Action::CheckForUpdates, &Greying { checking_updates: true, ..Greying::default() }));
     }
 }
