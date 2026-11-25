@@ -251,12 +251,22 @@ impl crate::App {
                     )
                     .to_owned());
                 }
-                let copied: Vec<String> =
-                    from.iter().filter_map(|at| target.templates.get(*at)).map(|t| t.name.clone()).collect();
+                // The copies have ids of their own, so they take the names the window shows: a
+                // built-in template's in the language set.
+                let copied: Vec<String> = from
+                    .iter()
+                    .filter_map(|at| target.templates.get(*at))
+                    .map(|t| crate::theme_store::shown_name(t).into_owned())
+                    .collect();
                 if !target.add_version(&version, &from) {
                     return Err(
                         t("notices.versions.templates_missing", "Those templates are not in the theme.").to_owned()
                     );
+                }
+                if let Some(added) = target.versions.iter_mut().find(|have| have.id == version.id) {
+                    for (copy, name) in added.templates.iter_mut().zip(&copied) {
+                        copy.name.clone_from(name);
+                    }
                 }
                 let said =
                     format!("{} has the {} version: copies of {}.", target.name, version.name, copied.join(", "));
@@ -265,10 +275,17 @@ impl crate::App {
             }
             Ask::AddCopy { theme, version, from } => {
                 let target = self.themes.get_mut(theme).ok_or(t("notices.theme_gone", "That theme is gone."))?;
-                let copied = target.templates.get(from).map(|t| t.name.clone()).unwrap_or_default();
+                let copied = target
+                    .templates
+                    .get(from)
+                    .map(|t| crate::theme_store::shown_name(t).into_owned())
+                    .unwrap_or_default();
                 let at = target
                     .add_copy_to_version(version, from)
                     .ok_or(t("notices.versions.template_missing", "That template is not in the theme."))?;
+                if let Some(copy) = target.set_mut(Some(version)).and_then(|templates| templates.get_mut(at)) {
+                    copy.name.clone_from(&copied);
+                }
                 self.versions_saved(&[theme], Some((Some(version), at)));
                 Ok(format!("Added a copy of {copied} to the version."))
             }

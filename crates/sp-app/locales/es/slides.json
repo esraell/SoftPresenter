@@ -70,6 +70,7 @@
   "slides.page_waiting": "Página {page}…",
   "slides.arrangement.as_written": "Como está escrita",
   "slides.arrangement.new": "Arreglo nuevo",
+  "slides.arrangement.numbered": "Arreglo {n}",
   "slides.arrangement.new.hint": "Empieza con los grupos tal como están escritos",
   "slides.arrangement.name": "Nombre",
   "slides.arrangement.rename": "Renombrar…",

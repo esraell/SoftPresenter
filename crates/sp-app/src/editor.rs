@@ -305,6 +305,47 @@ pub fn shape_name(shape: sp_model::Shape) -> &'static str {
     }
 }
 
+/// What a box's role is called in the window: the built-in roles (the main language, the
+/// translation, a Bible verse's reference and its translation's) in the language set, any other
+/// by its own name. sp-model keeps the role itself, and its English label for files and the
+/// command line ([`sp_model::Role::label`]).
+pub fn role_label(role: &sp_model::Role) -> String {
+    use sp_model::Role;
+    let words = if *role == Role::primary() {
+        t("editor.role.main", "Main")
+    } else if *role == Role::translation() {
+        t("editor.role.translation", "Translation")
+    } else if *role == Role::reference() {
+        t("editor.role.reference", "Reference")
+    } else if *role == Role::translation_reference() {
+        t("editor.role.translation_reference", "Translation reference")
+    } else {
+        return role.label();
+    };
+    words.to_owned()
+}
+
+/// What an object is called where its name is shown as it is (the Theme Editor's and stage
+/// layouts' Objects lists, a name being retyped, the Shape tab's Name): a box still named after
+/// its role, as a template's boxes are ([`sp_model::ThemeTemplate::as_slide`]), is called what
+/// its role is called in the language set.
+pub fn object_name(object: &sp_model::Object) -> String {
+    match &object.role {
+        Some(role) if object.name == role.label() => role_label(role),
+        _ => object.name.clone(),
+    }
+}
+
+/// The name an object is given when `typed` is typed for it: typed as its role is called in the
+/// window, it keeps its role's own label, which tells a template the box has no name of its
+/// own ([`sp_model::ThemeTemplate::with_slide`]), so no translation is ever saved as a name.
+pub fn typed_object_name(object: &sp_model::Object, typed: &str) -> String {
+    match &object.role {
+        Some(role) if typed == role_label(role) => role.label(),
+        _ => typed.to_owned(),
+    }
+}
+
 /// A number for each draft made, so a change of draft can be told from the same one.
 fn next_draft_serial() -> u64 {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -1239,6 +1280,33 @@ mod tests {
     use std::sync::Arc;
 
     use sp_model::parse_song_text;
+
+    #[test]
+    fn a_boxs_role_is_shown_in_the_language_set_and_its_name_is_never_saved_translated() {
+        use crate::i18n::{Language, with_language};
+        use sp_model::{Object, Role};
+        let roles = [Role::primary(), Role::translation(), Role::reference(), Role::translation_reference()];
+        // In English the window's words are sp-model's labels, which the files keep.
+        for role in &roles {
+            assert_eq!(with_language(Language::English, || super::role_label(role)), role.label());
+        }
+        let spanish: Vec<String> = with_language(Language::Spanish, || roles.iter().map(super::role_label).collect());
+        assert_eq!(spanish, ["Principal", "Traducción", "Referencia", "Referencia de la traducción"]);
+        // A role of a theme's own is called by its name.
+        assert_eq!(
+            with_language(Language::Spanish, || super::role_label(&Role("verse-text".to_owned()))),
+            "Verse text"
+        );
+        // A box named after its role is shown as its role is called; typed back so, it keeps
+        // the English label (no name of its own); a name of its own stays as typed.
+        let mut object = Object::text(Role::primary(), "Text");
+        object.name = Role::primary().label();
+        with_language(Language::Spanish, || {
+            assert_eq!(super::object_name(&object), "Principal");
+            assert_eq!(super::typed_object_name(&object, "Principal"), "Main");
+            assert_eq!(super::typed_object_name(&object, "Coro"), "Coro");
+        });
+    }
 
     use super::*;
 

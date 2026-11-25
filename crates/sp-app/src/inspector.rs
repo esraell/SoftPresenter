@@ -1108,7 +1108,10 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     // Not in the reference layout, but needed until objects can be managed from the slide itself.
     ui.label(egui::RichText::new(t("inspector.object", "OBJECT")).size(10.5).strong().color(DIM));
     let hint = t("inspector.object.name", "Name");
-    ui.add(egui::TextEdit::singleline(&mut object.name).desired_width(f32::INFINITY).hint_text(hint));
+    let mut name = crate::editor::object_name(object);
+    if ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY).hint_text(hint)).changed() {
+        object.name = crate::editor::typed_object_name(object, &name);
+    }
     let follows_theme =
         object.frame.is_none() && object.rotation == 0.0 && object.opacity == 1.0 && object.fill.is_none();
     if let Some(across) = spread {

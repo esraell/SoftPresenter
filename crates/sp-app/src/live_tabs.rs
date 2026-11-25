@@ -609,12 +609,9 @@ fn message_summary(message: &Message) -> String {
     parts.join(" \u{b7} ")
 }
 
-/// The name of the message that words shown once are kept as, as `sp message show --text` keeps
-/// them.
-const QUICK_MESSAGE: &str = "Quick message";
-
 /// "Words once…" in the Messages heading, left of its +: a small box to type words in and show
-/// them over the slides at once. They are kept as the message Quick message, to show again.
+/// them over the slides at once. They are kept as a message ("Quick message", as `sp message
+/// show --text` keeps them), to show again.
 fn words_once(ui: &mut egui::Ui, row: Rect, state: &mut HomeState) {
     let font = FontId::proportional(11.5);
     let words_once = t("tools.message.words_once", "Words once…");
@@ -643,7 +640,7 @@ fn words_once(ui: &mut egui::Ui, row: Rect, state: &mut HomeState) {
                 egui::RichText::new(tf(
                     "tools.message.quick.kept",
                     "Kept as the message {name}, to show again or change.",
-                    &[("name", QUICK_MESSAGE)],
+                    &[("name", &crate::messages::quick_name(&state.messages))],
                 ))
                 .size(11.0)
                 .color(TEXT_FAINT),
@@ -654,13 +651,7 @@ fn words_once(ui: &mut egui::Ui, row: Rect, state: &mut HomeState) {
             let id = egui::Id::unique("words once show");
             if flat_button(ui, show, id, t("tools.show", "Show"), FontId::proportional(12.5), Flat::Main, can).clicked()
             {
-                let at = match state.messages.iter().position(|message| message.name == QUICK_MESSAGE) {
-                    Some(at) => at,
-                    None => {
-                        state.messages.push(Message::new(QUICK_MESSAGE.to_owned()));
-                        state.messages.len() - 1
-                    }
-                };
+                let at = crate::messages::quick_message(&mut state.messages);
                 state.messages[at].text = words.trim().to_owned();
                 state.messages_changed = true;
                 state.message_live = Some((state.messages[at].id, Instant::now()));
@@ -833,8 +824,9 @@ fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         MessageAsk::Cut => state.message_clip = state.delete_message(index),
         MessageAsk::Paste => {
             if let Some(clip) = &state.message_clip {
-                // A pasted message is a new one: it gets an id of its own, so it can be pasted again.
-                let pasted = Message { id: sp_model::Uuid::new_v4(), ..clip.clone() };
+                // A pasted message is a new one: it gets an id of its own, so it can be pasted again,
+                // and is never the one words shown once are kept as.
+                let pasted = Message { id: sp_model::Uuid::new_v4(), quick: false, ..clip.clone() };
                 state.messages.insert(index + 1, pasted);
                 state.messages_changed = true;
             }

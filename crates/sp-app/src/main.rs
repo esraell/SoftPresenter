@@ -881,8 +881,8 @@ fn file_drop_pointer(window: &Window, ctx: &egui::Context) -> Option<egui::Pos2>
 const PACK_READ_AT_ONCE: u64 = 64 * 1024 * 1024;
 
 /// What a theme calls its templates, in order.
-fn template_names(theme: &Theme) -> Vec<String> {
-    theme.templates.iter().map(|template| template.name.clone()).collect()
+fn template_names(theme: &Theme) -> Vec<(Uuid, String)> {
+    theme.templates.iter().map(|template| (template.id, template.name.clone())).collect()
 }
 
 /// Whether Escape has something in the window to close (a pop-up, the Settings window, the
@@ -8670,7 +8670,7 @@ impl App {
                     && song.groups.len() >= 2
                 {
                     let (verse, chorus) = (song.groups[0].id, song.groups[1].id);
-                    let mut arrangement = song.new_arrangement();
+                    let mut arrangement = song.new_arrangement(home::arrangement_name);
                     arrangement.name = "Sunday".to_owned();
                     arrangement.groups = vec![verse, chorus, verse, chorus];
                     let chosen = Some(arrangement.id);
@@ -8940,7 +8940,8 @@ impl App {
                 && std::env::var("SOFTPRESENTER_CAPTURE_THEMES").as_deref() == Ok("rename")
                 && let Some(edit) = running.home_state.theme_edit.as_ref()
             {
-                let template = edit.theme.templates.first().map(|t| t.name.clone()).unwrap_or_default();
+                let template =
+                    edit.theme.templates.first().map(|t| theme_store::shown_name(t).into_owned()).unwrap_or_default();
                 running.home_state.renaming_theme = Some(edit.theme.name.clone());
                 running.home_state.renaming_template = Some((0, template));
             }
@@ -9053,7 +9054,8 @@ impl App {
                     "theme" => state.renaming_theme = state.theme_edit.as_ref().map(|edit| edit.theme.name.clone()),
                     "template" => {
                         let name = state.theme_edit.as_ref().and_then(|edit| edit.theme.templates.first());
-                        state.renaming_template = name.map(|template| (0, template.name.clone()));
+                        state.renaming_template =
+                            name.map(|template| (0, theme_store::shown_name(template).into_owned()));
                     }
                     "stage-layout" => {
                         state.stage_rename = state.stage_layouts.first().map(|layout| (0, layout.name.clone()));
@@ -10051,13 +10053,18 @@ impl ApplicationHandler<AppEvent> for App {
                 running.home_state.audio = audio::load();
                 // Start-up belongs in macros: what Settings once said to play when the app opened
                 // becomes a macro that plays it (and runs below, as it did), said once.
-                if let Some(step) = macros::from_opening_choice(&mut running.home_state.macros, &opening) {
+                // The macro is named in the notice as it is called.
+                let macro_name = |macros: &[macros::Macro], id: Uuid| {
+                    crate::i18n::quoted(macros.iter().find(|made| made.id == id).map_or("", |made| made.name.as_str()))
+                };
+                let made = macros::from_opening_choice(&mut running.home_state.macros, &opening);
+                if let Some((step, id)) = &made {
                     let saved = macros::save(&running.home_state.macros);
-                    let what = describe_opening(&self.show, &running.home_state, &step);
+                    let what = describe_opening(&self.show, &running.home_state, step);
                     let mut said = crate::i18n::tf(
                         "notices.opening.macro",
                         "What played when SoftPresenter opened is now the macro {macro} in the Macros tab, with Run When SoftPresenter Opens ticked. It plays {what} on the Announcements layer.",
-                        &[("macro", &crate::i18n::quoted(macros::OPENING_MACRO)), ("what", &what)],
+                        &[("macro", &macro_name(&running.home_state.macros, *id)), ("what", &what)],
                     );
                     said.push_str(crate::i18n::t(
                         "notices.opening.goes_off",
@@ -10075,11 +10082,14 @@ impl ApplicationHandler<AppEvent> for App {
                     applog::event("macros", &said);
                     running.home_state.notices.info(said);
                 }
-                if macros::from_audience_off(&mut running.home_state.macros, audience_off_before) {
+                let opening_macro = made.map(|(_, id)| id);
+                if let Some(id) =
+                    macros::from_audience_off(&mut running.home_state.macros, audience_off_before, opening_macro)
+                {
                     let mut said = crate::i18n::tf(
                         "notices.opening.audience_off",
                         "Starting with the audience screens off is now the step Audience Screens Off in the macro {macro} in the Macros tab, run when SoftPresenter opens.",
-                        &[("macro", &crate::i18n::quoted(macros::OPENING_MACRO))],
+                        &[("macro", &macro_name(&running.home_state.macros, id))],
                     );
                     if let Err(problem) = macros::save(&running.home_state.macros) {
                         said.push_str(&format!(" {problem}"));
@@ -10673,12 +10683,18 @@ impl ApplicationHandler<AppEvent> for App {
                     }
                     self.frames_since_start = self.frames_since_start.saturating_add(1);
                 }
-                // The services are written as soon as they change; the file is small.
-                if let Some(running) = self.running.as_mut()
-                    && std::mem::take(&mut running.home_state.services.changed)
-                    && let Err(problem) = service::save(&running.home_state.services)
-                {
-                    running.home_state.notices.trouble(problem);
+                // The services are written as soon as they change; the file is small. Until then,
+                // the first playlist of a first start is named in the language set.
+                if let Some(running) = self.running.as_mut() {
+                    let services = &mut running.home_state.services;
+                    if std::mem::take(&mut services.changed) {
+                        services.fresh = false;
+                        if let Err(problem) = service::save(services) {
+                            running.home_state.notices.trouble(problem);
+                        }
+                    } else if services.follow_language() {
+                        running.home_window.request_redraw();
+                    }
                 }
                 // Export…, from a song's or a playlist's right-click menu.
                 if let Some(request) = self.running.as_mut().and_then(|r| r.home_state.export_request.take()) {

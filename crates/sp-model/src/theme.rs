@@ -466,6 +466,12 @@ fn is_false(value: &bool) -> bool {
 /// whichever theme draws it, so each screen's theme can lay Bible slides out its own way.
 pub const BIBLE_TEMPLATE: Uuid = Uuid::from_u128(0xb1b1_7e3d);
 
+/// The ids of the three templates the built-in theme comes with, and the names it gives them
+/// (in English: the app shows them in its own language while a theme keeps these names). A theme
+/// copied from the built-in one keeps the ids.
+pub const BUILTIN_TEMPLATES: [(Uuid, &str); 3] =
+    [(Uuid::from_u128(1), "Two languages"), (Uuid::from_u128(2), "One language"), (BUILTIN_BIBLE_TEMPLATE, "Bible")];
+
 /// The id of the Bible template the built-in theme comes with.
 const BUILTIN_BIBLE_TEMPLATE: Uuid = Uuid::from_u128(3);
 
@@ -808,9 +814,10 @@ impl Theme {
         let main_alone = BoxStyle { rect: MIDDLE, ..main.clone() };
         // Bible slides: the layout of the built-in Bible theme (two translations, each with its
         // reference), which only Bible slides use.
+        let [(two_id, two), (one_id, one), (_, bible_name)] = BUILTIN_TEMPLATES;
         let bible = Theme::builtin_bible().templates.into_iter().next().map(|template| ThemeTemplate {
             id: BUILTIN_BIBLE_TEMPLATE,
-            name: "Bible".to_owned(),
+            name: bible_name.to_owned(),
             songs: false,
             bible: true,
             ..template
@@ -820,16 +827,16 @@ impl Theme {
             name: "Built-in".to_owned(),
             templates: [
                 ThemeTemplate {
-                    id: Uuid::from_u128(1),
-                    name: "Two languages".to_owned(),
+                    id: two_id,
+                    name: two.to_owned(),
                     boxes: vec![main, translation, reference.clone()],
                     objects: Vec::new(),
                     songs: true,
                     bible: false,
                 },
                 ThemeTemplate {
-                    id: Uuid::from_u128(2),
-                    name: "One language".to_owned(),
+                    id: one_id,
+                    name: one.to_owned(),
                     boxes: vec![main_alone, reference],
                     objects: Vec::new(),
                     songs: true,

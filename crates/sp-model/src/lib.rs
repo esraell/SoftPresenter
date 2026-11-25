@@ -38,9 +38,9 @@ pub use spans::{
     restyle_range, smallest_edit, style_at,
 };
 pub use theme::{
-    Align, BIBLE_TEMPLATE, BIBLE_THEME_ID, BoxStyle, Caps, DEFAULT_FONT_FAMILY, Gradient, GradientKind, LINE_HEIGHT,
-    LineFill, LineTransform, ListStyle, Scaling, Scroll, Shadow, SlideRect, TextStyle, Theme, ThemeTemplate,
-    ThemeVersion, VAlign, Version, all_versions, fonts_used, missing_fonts,
+    Align, BIBLE_TEMPLATE, BIBLE_THEME_ID, BUILTIN_TEMPLATES, BoxStyle, Caps, DEFAULT_FONT_FAMILY, Gradient,
+    GradientKind, LINE_HEIGHT, LineFill, LineTransform, ListStyle, Scaling, Scroll, Shadow, SlideRect, TextStyle,
+    Theme, ThemeTemplate, ThemeVersion, VAlign, Version, all_versions, fonts_used, missing_fonts,
 };
 pub use transition::{Direction, Transition, TransitionKind};
 pub use types::{

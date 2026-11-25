@@ -20,6 +20,7 @@ use crate::icons::{self, Icon};
 mod import_sheet;
 mod slides;
 pub use import_sheet::{AskImport, ImportAnswer, SlidesChoice};
+pub use slides::arrangement_name;
 use slides::{slide_area, slide_grid};
 
 /// The pills that hold toolbar items, and text fields.
@@ -587,7 +588,7 @@ pub struct HomeState {
     /// The places in the list of the themes that can't be deleted: the two built in.
     pub themes_kept: Vec<usize>,
     /// What each theme calls its two templates, the one for two languages first.
-    pub template_names: Vec<Vec<String>>,
+    pub template_names: Vec<Vec<(sp_model::Uuid, String)>>,
     /// Every version a theme has, for the menus that switch to one (see `versions`).
     pub versions: Vec<sp_model::Version>,
     /// The version the screens are in now, and when it ends.
@@ -623,10 +624,21 @@ pub fn layout_boxes(theme: &Theme, template: usize) -> Vec<(sp_model::Role, Slid
     boxes.iter().map(|style| (style.role.clone(), style.rect)).collect()
 }
 
-/// What each box of a template is called, in the order `layout_boxes` gives them.
-pub fn layout_labels(theme: &Theme, template: usize) -> Vec<String> {
+/// The name each box of a template was given, in the order `layout_boxes` gives them; none for
+/// a box called after its role, which the window calls in the language set (`box_name`).
+pub fn layout_labels(theme: &Theme, template: usize) -> Vec<Option<String>> {
     let boxes = theme.templates.get(template).map_or(&[][..], |template| template.boxes.as_slice());
-    boxes.iter().map(sp_model::BoxStyle::label).collect()
+    boxes.iter().map(|style| style.name.clone()).collect()
+}
+
+/// What the box with `role` is called in the window, among `boxes` with the names `labels` (see
+/// `layout_labels`): its own name, or its role's.
+fn box_name(boxes: &[(sp_model::Role, SlideRect)], labels: &[Option<String>], role: &sp_model::Role) -> String {
+    boxes
+        .iter()
+        .position(|(have, _)| have == role)
+        .and_then(|at| labels.get(at).cloned().flatten())
+        .unwrap_or_else(|| crate::editor::role_label(role))
 }
 
 /// A small picture of a slide with its boxes outlined and one of them filled, to show which
@@ -738,8 +750,8 @@ pub struct BiblePage {
     /// The boxes of the theme layout Bible slides use, and where each sits on the slide. The
     /// Verse and Reference menus offer these.
     pub boxes: Vec<(sp_model::Role, SlideRect)>,
-    /// What each of those boxes is called, in the same order.
-    pub box_labels: Vec<String>,
+    /// The name each of those boxes was given, in the same order (see `layout_labels`).
+    pub box_labels: Vec<Option<String>>,
     /// The template of the Bible theme that Bible slides are drawn with.
     pub template: Option<sp_model::Uuid>,
     /// Bibles being downloaded.
@@ -3040,8 +3052,11 @@ fn edit_view(
                                 rename_done = Some(Some((object.id, name.clone())));
                             }
                         } else {
-                            let shown =
-                                if theme_mode || stage_mode { object.name.clone() } else { listed_name(object) };
+                            let shown = if theme_mode || stage_mode {
+                                crate::editor::object_name(object)
+                            } else {
+                                listed_name(object)
+                            };
                             ui.painter().with_clip_rect(name_area).text(
                                 row.left_center() + vec2(32.0, 0.0),
                                 Align2::LEFT_CENTER,
@@ -3116,13 +3131,13 @@ fn edit_view(
                         if response.double_clicked()
                             || (response.clicked() && !extend && selected && draft.also.is_empty() && on_name)
                         {
-                            start_rename = Some((object.id, object.name.clone()));
+                            start_rename = Some((object.id, crate::editor::object_name(object)));
                         } else if response.clicked() {
                             pick = Some(object.id);
                         }
                         response.context_menu(|ui| {
                             if ui.button(t("edit.object.rename", "Rename")).clicked() {
-                                start_rename = Some((object.id, object.name.clone()));
+                                start_rename = Some((object.id, crate::editor::object_name(object)));
                                 ui.close();
                             }
                             ui.separator();
@@ -3199,7 +3214,7 @@ fn edit_view(
                             if !name.trim().is_empty()
                                 && let Some(object) = draft.slide.objects.iter_mut().find(|o| o.id == id)
                             {
-                                object.name = name.trim().to_owned();
+                                object.name = crate::editor::typed_object_name(object, name.trim());
                             }
                             draft.renaming = None;
                         }
@@ -3843,11 +3858,11 @@ fn theme_canvas_title(state: &HomeState) -> Option<(String, String)> {
     let version = edit.version.and_then(|id| edit.theme.versions.iter().find(|v| v.id == id));
     Some(match version {
         Some(version) => (
-            format!("{} \u{b7} {} \u{b7} {}", edit.theme.name, version.name, template.name),
+            format!("{} \u{b7} {} \u{b7} {}", edit.theme.name, version.name, crate::theme_store::shown_name(template)),
             tf("edit.theme_title.version", "Template \u{b7} {name} version", &[("name", &version.name)]),
         ),
         None => (
-            format!("{} \u{b7} {}", edit.theme.name, template.name),
+            format!("{} \u{b7} {}", edit.theme.name, crate::theme_store::shown_name(template)),
             t("edit.theme_title.template", "Template").to_owned(),
         ),
     })
@@ -4933,7 +4948,8 @@ fn listed_name(object: &sp_model::Object) -> String {
     let first_line = object.as_text().and_then(|text| text.lines().map(str::trim).find(|line| !line.is_empty()));
     match first_line {
         Some(line) if !named => line.to_owned(),
-        _ => object.name.clone(),
+        // A box still named after its role, with no words, is called what its role is called.
+        _ => crate::editor::object_name(object),
     }
 }
 
@@ -7069,14 +7085,17 @@ fn template_actions(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) {
 fn add_template_shown(state: &mut HomeState, copy: bool) {
     let Some(edit) = state.theme_edit.as_mut() else { return };
     let (set, after) = (edit.version, edit.template);
-    let original = edit.templates().get(after).map(|t| t.name.clone()).unwrap_or_default();
-    let names: Vec<String> = edit.templates().iter().map(|t| t.name.clone()).collect();
+    let original =
+        edit.templates().get(after).map(|t| crate::theme_store::shown_name(t).into_owned()).unwrap_or_default();
+    let names: Vec<String> = edit.templates().iter().map(|t| crate::theme_store::shown_name(t).into_owned()).collect();
     let Some(at) = edit.theme.add_template_in(set, after) else { return };
     let Some(added) = edit.theme.set_mut(set).and_then(|templates| templates.get_mut(at)) else { return };
     if copy {
         added.name =
             unused_name(&tf("themes.template.copy_name", "{original} copy", &[("original", &original)]), &names);
     } else {
+        let numbered = |n: usize| tf("themes.template.numbered", "Template {n}", &[("n", &n.to_string())]);
+        added.name = (names.len() + 1..).map(numbered).find(|name| !names.contains(name)).unwrap_or_default();
         added.boxes = added.box_for(Some(&sp_model::Role::primary())).cloned().into_iter().collect();
         added.objects.clear();
         added.songs = set.is_some();
@@ -7112,8 +7131,11 @@ fn template_pictures(
     canvas: Option<TextureId>,
 ) -> Option<usize> {
     let edit = state.theme_edit.as_ref()?;
-    let shown: Vec<(String, bool, bool, Slide)> =
-        edit.templates().iter().map(|t| (t.name.clone(), t.songs, t.bible, t.as_slide())).collect();
+    let shown: Vec<(String, bool, bool, Slide)> = edit
+        .templates()
+        .iter()
+        .map(|t| (crate::theme_store::shown_name(t).into_owned(), t.songs, t.bible, t.as_slide()))
+        .collect();
     let (current, version) = (edit.template, edit.version);
     let can_delete = shown.len() > 1 || version.is_some();
     let mut chosen = None;
@@ -7284,9 +7306,11 @@ fn template_pictures(
         state.renaming_template = None;
         if let (Some((template, name)), Some(edit)) = (outcome, state.theme_edit.as_mut()) {
             let name = name.trim();
+            // A name retyped as the window showed it changes nothing (a built-in template keeps
+            // the name the app gave it, shown in each language).
             if let Some(changed) = edit.theme.set_mut(version).and_then(|templates| templates.get_mut(template))
                 && !name.is_empty()
-                && changed.name != name
+                && crate::theme_store::shown_name(changed) != name
             {
                 changed.name = name.to_owned();
                 edit.changed = true;
@@ -7368,8 +7392,9 @@ fn version_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
     let theme = &edit.theme;
     let others: Vec<String> =
         state.versions.iter().filter(|version| !theme.has_version(version.id)).map(|v| v.name.clone()).collect();
-    let song_names: Vec<String> = theme.templates.iter().filter(|t| t.songs).map(|t| t.name.clone()).collect();
-    let bible_name = theme.templates.iter().find(|t| t.bible && !t.songs).map(|t| t.name.clone());
+    let shown = |t: &sp_model::ThemeTemplate| crate::theme_store::shown_name(t).into_owned();
+    let song_names: Vec<String> = theme.templates.iter().filter(|t| t.songs).map(shown).collect();
+    let bible_name = theme.templates.iter().find(|t| t.bible && !t.songs).map(shown);
     let title = match sheet.renaming {
         Some(_) => t("themes.sheet.rename_title", "Rename version").to_owned(),
         None => {
@@ -7557,20 +7582,14 @@ fn target_menu(
     salt: (&str, usize),
     target: &mut BibleTarget,
     boxes: &[(sp_model::Role, SlideRect)],
-    labels: &[String],
+    labels: &[Option<String>],
     taken: &[sp_model::Role],
     with_verse: Option<&sp_model::Role>,
     width: f32,
 ) {
     let is_with_verse = with_verse.is_some() && target.as_ref() == with_verse;
     // A box is called what the theme calls it.
-    let label_of = |role: &sp_model::Role| {
-        boxes
-            .iter()
-            .position(|(have, _)| have == role)
-            .and_then(|at| labels.get(at).cloned())
-            .unwrap_or_else(|| role.label())
-    };
+    let label_of = |role: &sp_model::Role| box_name(boxes, labels, role);
     // "With Verse" in its short form when the menu is too narrow for it.
     let font = egui::TextStyle::Button.resolve(ui.style());
     let room = width - ui.spacing().icon_width - ui.spacing().icon_spacing - 2.0 * ui.spacing().button_padding.x;
@@ -8229,13 +8248,9 @@ fn bible_translations(ui: &mut egui::Ui, state: &mut HomeState) {
     let boxes = state.bible.boxes.clone();
     let labels = state.bible.box_labels.clone();
     let goes = |target: &BibleTarget| {
-        target.as_ref().map_or(t("bible.translations.nowhere", "nowhere").to_owned(), |role| {
-            boxes
-                .iter()
-                .position(|(have, _)| have == role)
-                .and_then(|at| labels.get(at).cloned())
-                .unwrap_or_else(|| role.label())
-        })
+        target
+            .as_ref()
+            .map_or(t("bible.translations.nowhere", "nowhere").to_owned(), |role| box_name(&boxes, &labels, role))
     };
     if !state.bible.rows_open {
         let (line, _) = ui.allocate_exact_size(vec2(width, 30.0), Sense::hover());
@@ -14524,6 +14539,10 @@ mod tests {
         assert_eq!(listed_name(&object), "Lyrics Box");
         let shape = sp_model::Object::shape(sp_model::Shape::Star);
         assert_eq!(listed_name(&shape), "Star");
+        // An empty box still named after its role is called what its role is called.
+        let empty = sp_model::Object::text(sp_model::Role::primary(), "");
+        let spanish = crate::i18n::with_language(crate::i18n::Language::Spanish, || listed_name(&empty));
+        assert_eq!(spanish, "Principal");
     }
 
     #[test]

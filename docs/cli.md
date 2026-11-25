@@ -369,7 +369,7 @@ with Continuous on; open it with `playlist go` to run through the playlist.
 | Command | Does |
 |---|---|
 | `message show NAME`, `message hide` | Shows a message over the slides, or takes it off |
-| `message show --text WORDS` | Shows words at once, kept as the message "Quick message" |
+| `message show --text WORDS` | Shows words at once, kept as one message for words shown once ("Quick message" when it is made with the window in English; found by a mark, so it keeps a new name) |
 | `message new NAME [WORDS]`, `message set NAME text=… leaves=SECONDS\|never name=…`, `message delete NAME` | Makes and changes messages (a message deleted goes at once; `sp undo` puts it back) |
 | `prop show NAME`, `prop hide NAME` | A prop (a logo, a lower third) over the show |
 | `prop new NAME [PICTURE]`, `prop delete NAME` | A prop showing a picture, or its name in words (deleted at once; `sp undo` puts it back) |

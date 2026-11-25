@@ -203,15 +203,19 @@ pub fn step_song_title(show: &sp_engine::Show, state: &crate::home::HomeState, s
     step_song(show, state, step).and_then(|at| show.presentations().get(at)).map(|song| song.title.clone())
 }
 
-/// The name of the macro made from what Settings once said to play when SoftPresenter opened.
-pub const OPENING_MACRO: &str = "When SoftPresenter opens";
+/// The name a macro made from what Settings once said to do when SoftPresenter opened is given,
+/// in the language set.
+fn opening_macro_name() -> &'static str {
+    t("tools.macro.opening", "When SoftPresenter opens")
+}
 
 /// Start-up belongs in macros: what an earlier version's Settings › Screens › When SoftPresenter
 /// Opens said to play becomes a macro that plays it on the Announcements layer, with Run When
-/// SoftPresenter Opens ticked. Returns the macro's step when one was made; nothing when there
-/// was nothing to play, or such a macro is there already (the preferences, which no longer
-/// keep the choice, are written later, so this may be asked again at the next start).
-pub fn from_opening_choice(macros: &mut Vec<Macro>, choice: &crate::service::StartWith) -> Option<ShowAction> {
+/// SoftPresenter Opens ticked. Returns the macro's step and the macro's id when one was made;
+/// nothing when there was nothing to play, or such a macro is there already (the preferences,
+/// which no longer keep the choice, are written later, so this may be asked again at the next
+/// start).
+pub fn from_opening_choice(macros: &mut Vec<Macro>, choice: &crate::service::StartWith) -> Option<(ShowAction, Uuid)> {
     use crate::service::StartWith;
     let what = match choice {
         StartWith::Nothing => return None,
@@ -222,11 +226,12 @@ pub fn from_opening_choice(macros: &mut Vec<Macro>, choice: &crate::service::Sta
     if macros.iter().any(|made| made.on_startup && made.actions.contains(&step)) {
         return None;
     }
-    let mut made = Macro::new(OPENING_MACRO.to_owned());
+    let mut made = Macro::new(opening_macro_name().to_owned());
     made.actions = vec![step.clone()];
     made.on_startup = true;
+    let id = made.id;
     macros.push(made);
-    Some(step)
+    Some((step, id))
 }
 
 /// True when a macro run as SoftPresenter opens switches the audience screens off. The app does
@@ -237,23 +242,28 @@ pub fn starts_with_audience_off(macros: &[Macro]) -> bool {
 
 /// Start-up belongs in macros: an earlier version's Settings › Screens › Start with the
 /// Audience Screens Off becomes the step Audience Screens Off, first in the macro run as
-/// SoftPresenter opens (the one made from what it played, or a new one). True when the step was
-/// added; nothing changes when the setting was off or a start-up macro already has the step.
-pub fn from_audience_off(macros: &mut Vec<Macro>, off: bool) -> bool {
+/// SoftPresenter opens: `opening`, the macro just made from what it played
+/// ([`from_opening_choice`]), or else a new one. Returns the id of the macro the step went in;
+/// nothing changes when the setting was off or a start-up macro already has the step.
+pub fn from_audience_off(macros: &mut Vec<Macro>, off: bool, opening: Option<Uuid>) -> Option<Uuid> {
     if !off || starts_with_audience_off(macros) {
-        return false;
+        return None;
     }
     let step = ShowAction::Audience { on: false };
-    match macros.iter_mut().find(|made| made.on_startup && made.name == OPENING_MACRO) {
-        Some(made) => made.actions.insert(0, step),
+    match macros.iter_mut().find(|made| made.on_startup && Some(made.id) == opening) {
+        Some(made) => {
+            made.actions.insert(0, step);
+            Some(made.id)
+        }
         None => {
-            let mut made = Macro::new(OPENING_MACRO.to_owned());
+            let mut made = Macro::new(opening_macro_name().to_owned());
             made.actions = vec![step];
             made.on_startup = true;
+            let id = made.id;
             macros.push(made);
+            Some(id)
         }
     }
-    true
 }
 
 fn file() -> Option<std::path::PathBuf> {
@@ -390,16 +400,38 @@ mod tests {
         assert_eq!(from_opening_choice(&mut macros, &StartWith::Nothing), None);
         assert_eq!(macros.len(), 1, "nothing to play makes no macro");
         let playlist = Uuid::new_v4();
-        let step = from_opening_choice(&mut macros, &StartWith::MediaPlaylist { id: playlist });
-        assert_eq!(step, Some(ShowAction::Announce { what: Announced::MediaPlaylist { id: playlist } }));
+        let (step, id) = from_opening_choice(&mut macros, &StartWith::MediaPlaylist { id: playlist }).unwrap();
+        assert_eq!(step, ShowAction::Announce { what: Announced::MediaPlaylist { id: playlist } });
         let made = macros.last().unwrap();
-        assert_eq!((made.name.as_str(), made.on_startup, made.actions.len()), (OPENING_MACRO, true, 1));
+        assert_eq!((made.id, made.on_startup, made.actions.len()), (id, true, 1));
         // Asked again (the preferences not yet written without the choice): no second macro.
         assert_eq!(from_opening_choice(&mut macros, &StartWith::MediaPlaylist { id: playlist }), None);
         assert_eq!(macros.len(), 2);
         // A song on the Announcements layer, by its key.
         let step = from_opening_choice(&mut macros, &StartWith::Announcements { song: "41".to_owned() });
-        assert_eq!(step, Some(ShowAction::Announce { what: Announced::Song { key: "41".to_owned() } }));
+        assert_eq!(
+            step.map(|(step, _)| step),
+            Some(ShowAction::Announce { what: Announced::Song { key: "41".to_owned() } })
+        );
+    }
+
+    #[test]
+    fn the_start_up_macro_is_named_in_the_language_set_and_found_by_its_id() {
+        use crate::i18n::{Language, with_language};
+        use crate::service::StartWith;
+        let playlist = StartWith::MediaPlaylist { id: Uuid::new_v4() };
+        let mut macros = Vec::new();
+        let (_, id) = with_language(Language::Spanish, || from_opening_choice(&mut macros, &playlist)).unwrap();
+        assert_eq!(macros[0].name, "Al abrir SoftPresenter");
+        // Renamed by the church: the audience-off step still goes in it, found by its id.
+        macros[0].name = "Morning".to_owned();
+        assert_eq!(from_audience_off(&mut macros, true, Some(id)), Some(id));
+        assert_eq!((macros.len(), macros[0].actions[0].clone()), (1, ShowAction::Audience { on: false }));
+        // A macro of the same name made by hand is not it.
+        let mut by_hand = vec![Macro { on_startup: true, ..Macro::new("When SoftPresenter opens".to_owned()) }];
+        let made = with_language(Language::English, || from_audience_off(&mut by_hand, true, None)).unwrap();
+        assert_eq!((by_hand.len(), by_hand[1].id, by_hand[1].name.as_str()), (2, made, "When SoftPresenter opens"));
+        assert!(by_hand[0].actions.is_empty());
     }
 
     #[test]
@@ -408,16 +440,16 @@ mod tests {
         let off = ShowAction::Audience { on: false };
         // Off, with nothing played at start: a start-up macro of its own.
         let mut macros = Vec::new();
-        assert!(!from_audience_off(&mut macros, false), "nothing when the setting was off");
-        assert!(from_audience_off(&mut macros, true));
+        assert!(from_audience_off(&mut macros, false, None).is_none(), "nothing when the setting was off");
+        assert!(from_audience_off(&mut macros, true, None).is_some());
         assert_eq!((macros.len(), macros[0].on_startup, macros[0].actions.clone()), (1, true, vec![off.clone()]));
         assert!(starts_with_audience_off(&macros));
-        assert!(!from_audience_off(&mut macros, true), "never added twice");
+        assert!(from_audience_off(&mut macros, true, None).is_none(), "never added twice");
         // Off, with a media playlist played at start: first in that macro, before it plays.
         let mut macros = Vec::new();
         let playlist = Uuid::new_v4();
-        from_opening_choice(&mut macros, &StartWith::MediaPlaylist { id: playlist });
-        assert!(from_audience_off(&mut macros, true));
+        let opening = from_opening_choice(&mut macros, &StartWith::MediaPlaylist { id: playlist }).map(|(_, id)| id);
+        assert!(from_audience_off(&mut macros, true, opening).is_some());
         assert_eq!(macros.len(), 1);
         assert_eq!(macros[0].actions[0], off);
         // A macro that isn't run at start doesn't count.

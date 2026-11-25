@@ -3,8 +3,36 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::i18n::{t, tf};
+use std::borrow::Cow;
+
+use crate::i18n::{t, tf, tk};
 use sp_model::{Theme, Uuid};
+
+/// The words the window shows for the built-in theme's templates, in the order of
+/// [`sp_model::BUILTIN_TEMPLATES`].
+const BUILTIN_TEMPLATE_WORDS: [(&str, &str); 3] = [
+    tk("themes.builtin.two_languages", "Two languages"),
+    tk("themes.builtin.one_language", "One language"),
+    tk("themes.builtin.bible", "Bible"),
+];
+
+/// What a template is called in the window. The built-in theme's three templates (and their
+/// copies in themes made from it, which keep the ids) are called in the language set while they
+/// keep the name the app gave them; their files keep that English name, so the theme reads in
+/// whatever language the app is in. Any other template, or one a church renamed, is called by
+/// its own name.
+pub fn template_name(id: Uuid, name: &str) -> Cow<'_, str> {
+    sp_model::BUILTIN_TEMPLATES
+        .into_iter()
+        .zip(BUILTIN_TEMPLATE_WORDS)
+        .find(|((builtin, english), _)| *builtin == id && *english == name)
+        .map_or(Cow::Borrowed(name), |(_, (key, words))| Cow::Borrowed(t(key, words)))
+}
+
+/// What a template is called in the window (see [`template_name`]).
+pub fn shown_name(template: &sp_model::ThemeTemplate) -> Cow<'_, str> {
+    template_name(template.id, &template.name)
+}
 
 fn folder() -> Option<PathBuf> {
     crate::bible_store::data_dir().map(|dir| dir.join("Themes"))
@@ -171,6 +199,44 @@ fn in_use_note(main: &Theme, themes: &[Theme]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_built_in_templates_are_shown_in_the_language_set_and_kept_in_english() {
+        use crate::i18n::{Language, with_language};
+        let builtin = Theme::builtin();
+        let shown = |theme: &Theme| -> Vec<String> {
+            theme.templates.iter().map(|template| shown_name(template).into_owned()).collect()
+        };
+        // In English as the theme names them: the window's words are sp-model's.
+        assert_eq!(
+            with_language(Language::English, || shown(&builtin)),
+            builtin.templates.iter().map(|template| template.name.clone()).collect::<Vec<_>>()
+        );
+        assert_eq!(with_language(Language::Spanish, || shown(&builtin)), ["Dos idiomas", "Un idioma", "Biblia"]);
+        // A theme made from the built-in one keeps the ids, and so the words.
+        let copy = Theme { id: Uuid::new_v4(), name: "Evening".to_owned(), ..builtin.clone() };
+        assert_eq!(with_language(Language::Spanish, || shown(&copy))[0], "Dos idiomas");
+        // A template a church renamed is called as it was named, and another template with the
+        // English name is not the built-in one.
+        let mut renamed = builtin.clone();
+        renamed.templates[0].name = "Sunday".to_owned();
+        renamed.templates[1].id = Uuid::new_v4();
+        assert_eq!(with_language(Language::Spanish, || shown(&renamed))[..2], ["Sunday", "One language"]);
+        // Edited and saved in Spanish, the built-in theme's file keeps the English names, and
+        // its boxes, made into a slide and back, are still called after their roles.
+        let saved = with_language(Language::Spanish, || {
+            let mut theme = builtin.clone();
+            for template in &mut theme.templates {
+                *template = template.with_slide(&template.as_slide());
+            }
+            Theme::from_json(&theme.to_json()).unwrap()
+        });
+        assert_eq!(
+            saved.templates.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            ["Two languages", "One language", "Bible"]
+        );
+        assert!(saved.all_templates().flat_map(|t| &t.boxes).all(|style| style.name.is_none()), "{saved:?}");
+    }
 
     #[test]
     fn saved_themes_come_back_and_a_saved_built_in_takes_its_place() {

@@ -388,20 +388,13 @@ impl crate::App {
         if text.trim().is_empty() {
             return Err("message show --text WORDS".to_owned());
         }
-        const QUICK: &str = "Quick message";
         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
-        let at = match state.messages.iter().position(|m| m.name == QUICK) {
-            Some(at) => at,
-            None => {
-                state.messages.push(crate::messages::Message::new(QUICK.to_owned()));
-                state.messages.len() - 1
-            }
-        };
+        let at = crate::messages::quick_message(&mut state.messages);
         state.messages[at].text = text.replace("\\n", "\n");
         state.messages_changed = true;
-        let id = state.messages[at].id;
+        let (id, name) = (state.messages[at].id, state.messages[at].name.clone());
         self.run_action(ShowAction::Message { id, show: true });
-        Ok(Reply::done(format!("Showing \u{201c}{}\u{201d} (kept as the message {QUICK}).", text.trim())))
+        Ok(Reply::done(format!("Showing \u{201c}{}\u{201d} (kept as the message {name}).", text.trim())))
     }
 
     /// `prop new NAME [PICTURE]`, `prop delete NAME`; `None` for another word.

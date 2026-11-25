@@ -350,7 +350,7 @@ fn a_replaced_presentation_keeps_the_live_slide_by_its_id() {
 fn arranged() -> Show {
     let mut song = parse_song_text("Song", "[Verse 1]\nA\n\n[Chorus]\nC\n\n[Verse 2]\nD\n");
     let (v1, chorus, v2) = (song.groups[0].id, song.groups[1].id, song.groups[2].id);
-    let mut arrangement = song.new_arrangement();
+    let mut arrangement = song.new_arrangement(|n| format!("Arrangement {n}"));
     arrangement.groups = vec![v1, chorus, v2, chorus];
     song.arrangement = Some(arrangement.id);
     song.arrangements.push(arrangement);

@@ -316,15 +316,26 @@ pub struct Services {
     /// Set by every change. The app writes the services to their file and clears this.
     #[serde(skip)]
     pub changed: bool,
+    /// True while the playlists are the one empty playlist the app made because there was no
+    /// file to read (a first start), unchanged and never written: its name follows the language
+    /// set ([`Services::follow_language`]). Never true for playlists read from their file.
+    #[serde(skip)]
+    pub fresh: bool,
+}
+
+/// The name the app gives the first playlist, in the language set.
+pub fn first_playlist_name() -> &'static str {
+    t("left.playlist.first", "Service")
 }
 
 impl Default for Services {
     fn default() -> Services {
         Services {
-            list: vec![Service { name: "Service".to_owned(), items: Vec::new(), uids: Default::default() }],
+            list: vec![Service { name: first_playlist_name().to_owned(), items: Vec::new(), uids: Default::default() }],
             current: 0,
             chosen: None,
             changed: false,
+            fresh: true,
         }
     }
 }
@@ -361,6 +372,25 @@ struct File {
 }
 
 impl Services {
+    /// While the playlists are as the app made them at a first start ([`Services::fresh`]), the
+    /// first playlist is named in the language set: the computer's language is read on a thread
+    /// and may answer after the playlist was made, and the setup's first step (or Settings) may
+    /// choose another. Once anything changes the playlists, the name is the church's. Called
+    /// every frame; true when it renamed the playlist.
+    pub fn follow_language(&mut self) -> bool {
+        if !self.fresh || self.changed {
+            return false;
+        }
+        let name = first_playlist_name();
+        match self.list.as_mut_slice() {
+            [only] if only.items.is_empty() && only.name != name => {
+                only.name = name.to_owned();
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// The place of the service in front among the list.
     pub fn front_at(&self) -> usize {
         self.current.min(self.list.len() - 1)
@@ -1082,6 +1112,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_first_playlist_of_a_first_start_follows_the_language_until_it_is_changed() {
+        use crate::i18n::{Language, with_language};
+        let mut services = with_language(Language::English, Services::default);
+        assert_eq!((services.front().name.as_str(), services.fresh), ("Service", true));
+        // The computer's language answers, or the setup chooses Spanish: it follows.
+        assert!(with_language(Language::Spanish, || services.follow_language()));
+        assert_eq!(services.front().name, "Culto");
+        assert!(!with_language(Language::Spanish, || services.follow_language()), "once");
+        // Renamed by the church: changed, written, and from then on theirs in any language.
+        services.rename_at(0, "Sunday");
+        assert!(!with_language(Language::English, || services.follow_language()), "a change waits to be written");
+        services.changed = false;
+        services.fresh = false;
+        assert!(!with_language(Language::English, || services.follow_language()));
+        assert_eq!(services.front().name, "Sunday");
+        // A song added is a change too.
+        let mut services = with_language(Language::English, Services::default);
+        services.add(Item::song("a", "Alpha"));
+        assert!(!with_language(Language::Spanish, || services.follow_language()));
+        assert_eq!(services.front().name, "Service");
+        // Playlists read from their file are never renamed, whatever they are called.
+        let read = Services::from_json(&with_language(Language::English, Services::default).to_json()).unwrap();
+        let mut read = read;
+        assert!(!read.fresh);
+        assert!(!with_language(Language::Spanish, || read.follow_language()));
+        assert_eq!(read.front().name, "Service");
+    }
+
+    #[test]
     fn a_playlist_with_media_or_a_placeholder_is_written_as_version_3_and_others_as_2() {
         let mut services = Services::default();
         services.add(song("one"));
@@ -1420,6 +1479,7 @@ mod tests {
             current: 2,
             chosen: Some(1),
             changed: false,
+            fresh: false,
         };
         let names = |services: &Services| services.list.iter().map(|s| s.name.clone()).collect::<Vec<_>>();
         // Renaming another playlist renames it there; the one in front and its open item stay.
@@ -1495,9 +1555,11 @@ mod tests {
         services.add(passage("Пс 22:1-3"));
         services.add_service();
         let mut again = Services::from_json(&services.to_json()).unwrap();
-        // What is chosen and whether anything changed are not kept.
+        // What is chosen, whether anything changed and whether they are a first start's are not
+        // kept.
         again.changed = services.changed;
         again.chosen = services.chosen;
+        again.fresh = services.fresh;
         assert_eq!(again, services);
         assert!(Services::from_json("{}").is_err());
         assert!(

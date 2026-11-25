@@ -680,6 +680,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   any screen draws, so the audience screens never flash on. Settings no longer has start-up
   choices of its own: the first start of this version turns what an earlier version's
   Settings › Screens › When SoftPresenter Opens played into a macro "When SoftPresenter opens"
+  (named in the language set)
   that plays it on the Announcements layer (a media playlist chosen there played on the media
   layer, behind the slides; the layer goes off when a slide goes on screen), and its Start with
   the Audience Screens Off into that macro's first step, Audience Screens Off, and says so once.
@@ -1524,9 +1525,17 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   sheets, the notices list and everything said in it, and the Mac's menu bar (it changes with the
   language at once; `sp menu` keeps the English names). Still English: Settings › Screens, the
   inspector's NDI Source section, the audio player's own messages and the output windows' messages,
-  left while other work changes them; the built-in themes' and boxes' names; a word with no
+  left while other work changes them; the built-in theme's own name ("Built-in"); a word with no
   translation yet shows in
-  English. Russian and Ukrainian have the number and quotation rules and the plural forms, and
+  English. What the app names is named in the language set: the first playlist of a first start
+  (its name follows the language until anything changes the playlists, as the computer's
+  language is read after it is made and the setup may choose another), a new arrangement, theme
+  template, message for words shown once and start-up macro; a name a church gave stays as it
+  is in every language, and nothing already saved is renamed. The built-in theme's templates
+  (Two languages, One language, Bible) and the boxes' roles (Main, Translation, Reference) are
+  shown in the language set while they keep the name the app gave them; their files keep the
+  English, and the message for words shown once and the start-up macro are found by a mark or an
+  id, never by their names. Russian and Ukrainian have the number and quotation rules and the plural forms, and
   their words come next. Controls take the width of their words in the language set, and a place
   with a fixed room (a layer key, the find box, All Songs) uses a short form when the usual word
   is too long. Songs and Bible text stay as they are. The log and the `sp` command line's replies

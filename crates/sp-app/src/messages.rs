@@ -22,11 +22,23 @@ pub struct Message {
     /// Where and how the message is drawn.
     #[serde(default)]
     pub look: Look,
+    /// The message words shown once are kept as (Words once… in the Messages tab, `sp message
+    /// show --text`), found by this and not by its name, which is given in the language set when
+    /// it is made and is the church's to change. A copy of it is an ordinary message.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub quick: bool,
 }
 
 impl Message {
     pub fn new(name: String) -> Message {
-        Message { id: Uuid::new_v4(), name, text: String::new(), dismiss_after: None, look: Look::default() }
+        Message {
+            id: Uuid::new_v4(),
+            name,
+            text: String::new(),
+            dismiss_after: None,
+            look: Look::default(),
+            quick: false,
+        }
     }
 
     /// A copy with an id of its own.
@@ -34,8 +46,43 @@ impl Message {
         Message {
             id: Uuid::new_v4(),
             name: tf("tools.copy_name", "{name} copy", &[("name", &self.name)]),
+            quick: false,
             ..self.clone()
         }
+    }
+}
+
+/// The name a new message for words shown once is given, in the language set.
+fn quick_message_name() -> &'static str {
+    t("tools.message.quick.name", "Quick message")
+}
+
+/// The name of the message words shown once are kept as: its own, or the one it will be given.
+pub fn quick_name(messages: &[Message]) -> String {
+    messages.iter().find(|message| message.quick).map_or_else(|| quick_message_name().to_owned(), |m| m.name.clone())
+}
+
+/// The place of the message words shown once are kept as, made (named in the language set) when
+/// there is none.
+pub fn quick_message(messages: &mut Vec<Message>) -> usize {
+    if let Some(at) = messages.iter().position(|message| message.quick) {
+        return at;
+    }
+    messages.push(Message { quick: true, ..Message::new(quick_message_name().to_owned()) });
+    messages.len() - 1
+}
+
+/// The name every earlier version gave the message words shown once are kept as, which found it
+/// by that name. Only a file from before the mark is read for it (see [`adopt_quick_message`]).
+const QUICK_MESSAGE_BEFORE: &str = "Quick message";
+
+/// Messages saved before the message for words shown once was marked: the one with the name it
+/// was always given becomes that message, keeping its name.
+fn adopt_quick_message(messages: &mut [Message]) {
+    if !messages.iter().any(|message| message.quick)
+        && let Some(message) = messages.iter_mut().find(|message| message.name == QUICK_MESSAGE_BEFORE)
+    {
+        message.quick = true;
     }
 }
 
@@ -154,10 +201,12 @@ fn file() -> Option<std::path::PathBuf> {
 }
 
 pub fn load() -> Vec<Message> {
-    file()
+    let mut messages: Vec<Message> = file()
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    adopt_quick_message(&mut messages);
+    messages
 }
 
 pub fn save(messages: &[Message]) -> Result<(), String> {
@@ -187,6 +236,36 @@ pub fn save(messages: &[Message]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_message_for_words_shown_once_is_found_by_its_mark_not_its_name() {
+        use crate::i18n::{Language, with_language};
+        // Made when there is none, named in the language set.
+        let mut messages = vec![Message::new("Parking".to_owned())];
+        let at = with_language(Language::Spanish, || quick_message(&mut messages));
+        assert_eq!((at, messages[at].name.as_str(), messages[at].quick), (1, "Mensaje rápido", true));
+        // Renamed, it is still the one, in any language; and its name is the one shown.
+        messages[1].name = "Announcements".to_owned();
+        assert_eq!(with_language(Language::English, || quick_message(&mut messages)), 1);
+        assert_eq!(quick_name(&messages), "Announcements");
+        // A copy of it is an ordinary message, and so is one pasted (made with the struct's
+        // own fields, as Paste does).
+        let copy = messages[1].duplicate();
+        assert!(!copy.quick);
+        // Saved and read again, it keeps the mark.
+        let read: Vec<Message> = serde_json::from_str(&serde_json::to_string(&messages).unwrap()).unwrap();
+        assert!(read[1].quick && !read[0].quick);
+        // Messages saved before the mark: the one called "Quick message" becomes it, by name,
+        // once, and keeps its name; a message of that name made since is not taken.
+        let mut before = vec![Message::new("Quick message".to_owned()), Message::new("Other".to_owned())];
+        adopt_quick_message(&mut before);
+        assert!(before[0].quick && !before[1].quick);
+        let mut marked =
+            vec![Message::new("Quick message".to_owned()), Message { quick: true, ..Message::new("Mine".to_owned()) }];
+        adopt_quick_message(&mut marked);
+        assert!(!marked[0].quick);
+        assert_eq!(with_language(Language::English, || quick_name(&[])), "Quick message");
+    }
 
     #[test]
     fn a_timers_new_name_is_written_into_the_messages_that_show_it() {

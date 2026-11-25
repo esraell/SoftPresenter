@@ -1028,10 +1028,12 @@ impl Presentation {
         if order.is_empty() { written() } else { order }
     }
 
-    /// A new arrangement with the groups as written, named after how many there are.
-    pub fn new_arrangement(&self) -> Arrangement {
+    /// A new arrangement with the groups as written, named `named(n)` with the first number from
+    /// 1 that no arrangement of the song has (the app gives the name in its language, such as
+    /// "Arrangement 2").
+    pub fn new_arrangement(&self, named: impl Fn(usize) -> String) -> Arrangement {
         let taken = |name: &str| self.arrangements.iter().any(|arrangement| arrangement.name == name);
-        let name = (1..).map(|n| format!("Arrangement {n}")).find(|name| !taken(name)).unwrap_or_default();
+        let name = (1..).map(named).find(|name| !taken(name)).unwrap_or_default();
         Arrangement { id: Uuid::new_v4(), name, groups: self.groups.iter().map(|group| group.id).collect() }
     }
 
@@ -1538,7 +1540,7 @@ mod arrangement_tests {
         let mut song = song();
         assert_eq!(song.order(), [0, 1, 2, 3], "no arrangement: as written");
         let (v1, chorus, v2) = (song.groups[0].id, song.groups[1].id, song.groups[2].id);
-        let mut arrangement = song.new_arrangement();
+        let mut arrangement = song.new_arrangement(|n| format!("Arrangement {n}"));
         assert_eq!(arrangement.groups, [v1, chorus, v2]);
         arrangement.groups = vec![v1, chorus, v2, chorus];
         song.arrangement = Some(arrangement.id);
@@ -1550,7 +1552,7 @@ mod arrangement_tests {
         // An arrangement with none of its groups left plays the song as written.
         song.arrangements[0].groups = vec![Uuid::new_v4()];
         assert_eq!(song.order(), [0, 1, 2, 3]);
-        assert_eq!(song.new_arrangement().name, "Arrangement 2");
+        assert_eq!(song.new_arrangement(|n| format!("Arrangement {n}")).name, "Arrangement 2");
     }
 
     /// The song with an arrangement in use: Verse 1, Chorus ×3, Verse 2, Chorus.
@@ -1639,7 +1641,7 @@ mod arrangement_tests {
     fn splitting_a_group_or_reflowing_keeps_arrangements_whole() {
         let mut song = song();
         let (v1, chorus) = (song.groups[0].id, song.groups[1].id);
-        let mut arrangement = song.new_arrangement();
+        let mut arrangement = song.new_arrangement(|n| format!("Arrangement {n}"));
         arrangement.groups = vec![v1, chorus, v1];
         song.arrangement = Some(arrangement.id);
         song.arrangements.push(arrangement);

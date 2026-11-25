@@ -865,8 +865,8 @@ impl Default for BibleOptions {
 /// The themes to choose from for Bible slides, and the choice now made.
 pub struct ThemeChoice<'a> {
     pub names: &'a [String],
-    /// What each theme calls its two templates.
-    pub template_names: &'a [Vec<String>],
+    /// Each theme's templates, by id and the name it gives them.
+    pub template_names: &'a [Vec<(sp_model::Uuid, String)>],
     /// Each theme's two layouts, as boxes, for the pictures.
     pub layouts: &'a [Vec<Vec<(Role, sp_model::SlideRect)>>],
     pub theme: usize,
@@ -874,9 +874,12 @@ pub struct ThemeChoice<'a> {
 }
 
 impl ThemeChoice<'_> {
-    /// What a theme calls one of its templates.
-    fn template_name(&self, theme: usize, template: usize) -> &str {
-        self.template_names.get(theme).and_then(|names| names.get(template)).map_or("", String::as_str)
+    /// What one of a theme's templates is called in the window.
+    fn template_name(&self, theme: usize, template: usize) -> std::borrow::Cow<'_, str> {
+        self.template_names
+            .get(theme)
+            .and_then(|names| names.get(template))
+            .map_or(std::borrow::Cow::Borrowed(""), |(id, name)| crate::theme_store::template_name(*id, name))
     }
 }
 
@@ -1023,7 +1026,7 @@ fn choices(
         ui.label(t("bibles.options.template", "Template"));
         // Which template of the main theme Bible slides use, each shown as a small picture of
         // where its boxes sit.
-        let chosen = themes.template_name(themes.theme, themes.layout).to_owned();
+        let chosen = themes.template_name(themes.theme, themes.layout).into_owned();
         egui::ComboBox::from_id_salt("bible theme")
             .selected_text(chosen)
             .width(200.0)

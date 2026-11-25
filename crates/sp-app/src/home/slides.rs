@@ -2213,6 +2213,12 @@ fn version_button(
     egui::Popup::menu(&response).show(|ui| crate::studio::show_with_menu(ui, state, item, true));
 }
 
+/// The name a new arrangement is given, with the first number the song's arrangements leave
+/// free: "Arrangement 2", in the language set when it is made (it is the church's from then on).
+pub fn arrangement_name(n: usize) -> String {
+    tf("slides.arrangement.numbered", "Arrangement {n}", &[("n", &n.to_string())])
+}
+
 /// The arrangement menu, from the Arrangement button beside a song's title or the arrangement's
 /// name at the start of its row: sing the song as written or in one of its arrangements, make a
 /// new one, rename, duplicate or delete the one in use.
@@ -2253,7 +2259,7 @@ fn arrangement_menu(index: usize, song: &Presentation, state: &mut HomeState, bu
                 .on_hover_text(t("slides.arrangement.new.hint", "Starts with the groups as written"))
                 .clicked()
             {
-                let made = song.new_arrangement();
+                let made = song.new_arrangement(arrangement_name);
                 chosen = Some(made.id);
                 arrangements.push(made);
                 ui.data_mut(|data| data.insert_temp(renaming_id, true));
@@ -3004,7 +3010,8 @@ fn slide_menu(
             }
             ui.separator();
             for (id, name) in &state.song_templates {
-                if ui.add(egui::Button::selectable(current == Some(*id), name.as_str())).clicked() {
+                let shown = crate::theme_store::template_name(*id, name);
+                if ui.add(egui::Button::selectable(current == Some(*id), shown.as_ref())).clicked() {
                     let template = Some(*id);
                     state.slide_request = edited(&|one| Slide { template, ..one.clone() });
                     ui.close();
@@ -3541,11 +3548,23 @@ mod tests {
     }
 
     #[test]
+    fn a_new_arrangement_is_named_in_the_language_set() {
+        use crate::i18n::{Language, with_language};
+        let (show, _) = playlist(&[("Alpha", 2)]);
+        let mut song = (*show.presentations()[0]).clone();
+        let first = with_language(Language::Spanish, || song.new_arrangement(arrangement_name));
+        assert_eq!(first.name, "Arreglo 1");
+        song.arrangements.push(first);
+        assert_eq!(with_language(Language::Spanish, || song.new_arrangement(arrangement_name)).name, "Arreglo 2");
+        assert_eq!(with_language(Language::English, || song.new_arrangement(arrangement_name)).name, "Arrangement 1");
+    }
+
+    #[test]
     fn a_group_of_an_arrangement_goes_to_its_own_song_not_the_one_chosen() {
         let (mut show, mut state) = playlist(&[("Alpha", 2), ("Beta", 2)]);
         // Beta is played in an arrangement; Alpha is the song chosen.
         let mut beta = (*show.presentations()[1]).clone();
-        let made = beta.new_arrangement();
+        let made = beta.new_arrangement(arrangement_name);
         beta.arrangement = Some(made.id);
         beta.arrangements.push(made);
         show.replace_presentation(1, Arc::new(beta));
