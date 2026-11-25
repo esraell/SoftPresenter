@@ -3,16 +3,19 @@
 //! stands, and the page chosen beside them. Every page shows the thing first, one main control
 //! and a line of words, with the rest under More.
 
-use egui::{Align, Align2, FontId, Frame, Layout, Rect, Sense, pos2, vec2};
+use egui::{Align, Align2, FontId, Frame, Layout, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use sp_engine::Show;
 
 use super::{HomeState, Page, open_page};
+
+mod parts;
 use crate::i18n::{t, tf, tk, tn};
 use crate::icons::{self, Icon};
 use crate::studio::{
     BG, CARD, Flat, GAP, PANEL, RADIUS, RADIUS_PANEL, READY, ROW_HOVER, TEXT, TEXT_DIM, TEXT_FAINT, fixed,
     fixed_semibold, flat_button, paint_light, paint_spaced, semibold, spaced, within,
 };
+use parts::{Pick, Picture, card, on_off, on_off_size, picks, row};
 
 /// A page of Settings.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -123,11 +126,26 @@ impl Pane {
     }
 }
 
-/// What a row of the list says at its end, so a problem shows before its page is opened: the
-/// words, and whether its light is lit (something is on).
-fn readout(pane: Pane, state: &HomeState, show: &Show, ui: &egui::Ui, room: f32) -> Option<(String, bool)> {
-    let fits = |words: &str| spaced(ui, &words.to_uppercase(), fixed(11.0), TEXT, 0.44).size().x <= room;
-    let off = || t("settings.state.off", "Off").to_owned();
+/// What a row of the list says at its end, so a problem shows before its page is opened.
+#[derive(Clone, Debug, PartialEq)]
+struct Readout {
+    words: String,
+    /// The same, shorter, for a row whose name leaves too little room.
+    short: String,
+    /// Something is on: the row's light is lit.
+    lit: bool,
+}
+
+impl Readout {
+    fn of(words: impl Into<String>, lit: bool) -> Readout {
+        let words = words.into();
+        Readout { short: words.clone(), words, lit }
+    }
+}
+
+/// What a page's row says at its end; Advanced's pages say nothing.
+fn readout(pane: Pane, state: &HomeState, show: &Show) -> Option<Readout> {
+    let off = || Readout::of(t("settings.off", "Off"), false);
     match pane {
         Pane::Screens => {
             let output_on = show.output_enabled();
@@ -143,45 +161,51 @@ fn readout(pane: Pane, state: &HomeState, show: &Show, ui: &egui::Ui, room: f32)
                         }
                 })
                 .count();
-            let words = tf(
-                "settings.state.screens",
-                "{on} of {all} on",
-                &[("on", &crate::i18n::count(on as u64)), ("all", &crate::i18n::count(state.screens.len() as u64))],
-            );
-            Some((words, on > 0))
+            let counts =
+                [("on", crate::i18n::count(on as u64)), ("all", crate::i18n::count(state.screens.len() as u64))];
+            let counts: Vec<(&str, &str)> = counts.iter().map(|(name, value)| (*name, value.as_str())).collect();
+            Some(Readout {
+                words: tf("settings.state.screens", "{on} of {all} on", &counts),
+                short: tf("settings.state.screens.short", "{on}/{all} on", &counts),
+                lit: on > 0,
+            })
         }
-        Pane::PhoneScreens => {
-            Some((if state.mirror.on { t("settings.state.on", "On").to_owned() } else { off() }, state.mirror.on))
-        }
-        Pane::Slides => Some((crate::studio::transition_name(state.transition.kind).to_owned(), false)),
-        Pane::Language => Some((
+        Pane::PhoneScreens if state.mirror.on => Some(Readout::of(t("settings.on", "On"), true)),
+        Pane::PhoneScreens => Some(off()),
+        Pane::Slides => Some(Readout::of(crate::studio::transition_name(state.transition.kind), false)),
+        Pane::Language => Some(Readout::of(
             match crate::i18n::choice() {
-                crate::i18n::Choice::Computer => t("settings.state.auto", "Auto").to_owned(),
-                crate::i18n::Choice::Is(language) => language.own_name().to_owned(),
+                crate::i18n::Choice::Computer => t("settings.state.auto", "Auto"),
+                crate::i18n::Choice::Is(language) => language.own_name(),
             },
             false,
         )),
         Pane::Integrations => {
-            let n = connected_services(state);
-            Some((tn("settings.state.connected", n as u64, "{n} connected", "{n} connected", &[]), n > 0))
+            let n = connected_services(state) as u64;
+            Some(Readout {
+                words: tn("settings.state.connected", n, "{n} connected", "{n} connected", &[]),
+                short: tn("settings.state.connected.short", n, "{n} on", "{n} on", &[]),
+                lit: n > 0,
+            })
         }
         Pane::AiAssistants => {
             let switches = state.mcp.switches;
             let (key, english) = match (switches.allowed, switches.screens) {
-                (false, _) => return Some((off(), false)),
+                (false, _) => return Some(off()),
                 (true, false) => tk("settings.state.ai.prepare", "Can prepare"),
                 (true, true) => tk("settings.state.ai.run", "Runs screens"),
             };
-            let words = t(key, english);
-            let short = crate::i18n::ts(key, english);
-            Some((if fits(words) { words } else { short }.to_owned(), true))
+            Some(Readout {
+                words: t(key, english).to_owned(),
+                short: crate::i18n::ts(key, english).to_owned(),
+                lit: true,
+            })
         }
-        Pane::PhoneRemote => Some(if state.remote.on {
+        Pane::PhoneRemote if state.remote.on => {
             let n = state.remote.pages.len() as u64;
-            (tn("settings.state.people", n, "{n} person", "{n} people", &[]), true)
-        } else {
-            (off(), false)
-        }),
+            Some(Readout::of(tn("settings.state.people", n, "{n} person", "{n} people", &[]), true))
+        }
+        Pane::PhoneRemote => Some(off()),
         _ => None,
     }
 }
@@ -218,7 +242,7 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
         pane_list(&mut inside, state, show);
         let mut inside = ui.new_child(egui::UiBuilder::new().max_rect(page).layout(Layout::top_down(Align::Min)));
         inside.set_clip_rect(page);
-        page_ui(&mut inside, state);
+        page_ui(&mut inside, state, show);
     });
 }
 
@@ -226,6 +250,8 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
 fn pane_list(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
     let panel = ui.max_rect();
     egui::ScrollArea::vertical().id_salt("settings list").auto_shrink([false, false]).show(ui, |ui| {
+        // Every room in the list is the design's own, with nothing added between.
+        ui.spacing_mut().item_spacing.y = 0.0;
         let top = ui.cursor().min.y;
         paint_spaced(
             ui,
@@ -303,16 +329,21 @@ fn list_row(ui: &mut egui::Ui, row: Rect, pane: Pane, state: &HomeState, show: &
     let icon = Rect::from_center_size(pos2(row.min.x + 18.0, row.center().y), vec2(13.0, 13.0));
     icons::paint(ui.painter(), pane.icon(), icon, if chosen { TEXT } else { TEXT_FAINT });
     let name_at = row.min.x + 34.0;
-    // The readout has the room the name leaves it, at most half the row.
+    let font = if chosen { semibold(13.5) } else { FontId::proportional(13.5) };
+    let name_wide = ui.painter().layout_no_wrap(pane.name().to_owned(), font.clone(), ink).size().x;
+    // The readout has the room the name leaves it, in its short form when the usual is too long.
     let mut right = row.max.x - 10.0;
-    if let Some((words, lit)) = readout(pane, state, show, ui, row.width() / 2.0) {
-        let font = if chosen { fixed_semibold(11.0) } else { fixed(11.0) };
+    if let Some(Readout { words, short, lit }) = readout(pane, state, show) {
+        let caps = if chosen { fixed_semibold(11.0) } else { fixed(11.0) };
+        let room = right - name_at - name_wide - 8.0 - if lit { 15.0 } else { 0.0 };
+        let fits = spaced(ui, &words.to_uppercase(), caps.clone(), TEXT_FAINT, 0.44).size().x <= room;
+        let words = if fits { words } else { short };
         let drawn = paint_spaced(
             ui,
             pos2(right, row.center().y),
             Align2::RIGHT_CENTER,
             &words.to_uppercase(),
-            font,
+            caps,
             TEXT_FAINT,
             0.44,
         );
@@ -322,14 +353,13 @@ fn list_row(ui: &mut egui::Ui, row: Rect, pane: Pane, state: &HomeState, show: &
             right -= 7.0 + 8.0;
         }
     }
-    let font = if chosen { semibold(13.5) } else { FontId::proportional(13.5) };
     let clip = Rect::from_min_max(pos2(name_at, row.min.y), pos2(right, row.max.y));
     ui.painter().with_clip_rect(clip).text(pos2(name_at, row.center().y), Align2::LEFT_CENTER, pane.name(), font, ink);
     response.clicked()
 }
 
 /// The page: its name at the top, and what it holds under it, scrolling.
-fn page_ui(ui: &mut egui::Ui, state: &mut HomeState) {
+fn page_ui(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
     let panel = ui.max_rect();
     let pane = state.preferences_pane;
     let title = spaced(ui, pane.name(), semibold(26.0), TEXT, -0.78);
@@ -346,7 +376,7 @@ fn page_ui(ui: &mut egui::Ui, state: &mut HomeState) {
                 ui.vertical(|ui| {
                     ui.set_width(width);
                     ui.set_max_width(width);
-                    pane_contents(ui, state, pane);
+                    pane_contents(ui, state, show, pane);
                     ui.add_space(20.0);
                 });
             });
@@ -358,11 +388,11 @@ fn page_ui(ui: &mut egui::Ui, state: &mut HomeState) {
 const PAGE_WIDTH: f32 = 860.0;
 
 /// What a page holds.
-fn pane_contents(ui: &mut egui::Ui, state: &mut HomeState, pane: Pane) {
+fn pane_contents(ui: &mut egui::Ui, state: &mut HomeState, show: &Show, pane: Pane) {
     match pane {
         Pane::Screens => screens_page(ui, state),
         Pane::PhoneScreens => crate::mirror::pane(ui, &mut state.mirror),
-        Pane::Slides => slides_page(ui, state),
+        Pane::Slides => slides_page(ui, state, show),
         Pane::Groups => groups_page(ui),
         Pane::Language => language_page(ui),
         Pane::Integrations => {
@@ -433,34 +463,237 @@ fn screens_page(ui: &mut egui::Ui, state: &mut HomeState) {
     );
 }
 
-/// Settings › Slides: where a song's copyright line shows, with the church's CCLI licence.
-fn slides_page(ui: &mut egui::Ui, state: &mut HomeState) {
-    crate::studio::caption(ui, &t("settings.copyright", "Copyright").to_uppercase());
-    ui.label(t("settings.copyright.about", "Show a song's copyright line on the audience screens:"));
-    for choice in crate::service::CopyrightShow::ALL {
-        use crate::service::CopyrightShow;
-        let name = match choice {
-            CopyrightShow::Never => t("settings.copyright.never", "Never"),
-            CopyrightShow::FirstSlide => t("settings.copyright.first", "On a song's first slide"),
-            CopyrightShow::LastSlide => t("settings.copyright.last", "On a song's last slide"),
-            CopyrightShow::EverySlide => t("settings.copyright.every", "On every slide of a song"),
-        };
-        ui.radio_value(&mut state.copyright_show, choice, name);
-    }
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.label(t("settings.copyright.licence", "CCLI Licence Number"));
-        ui.add(egui::TextEdit::singleline(&mut state.ccli_licence).desired_width(160.0));
-    });
-    ui.add_space(4.0);
-    ui.label(
-        egui::RichText::new(t(
-            "settings.copyright.details",
-            "A song's writer, publisher and CCLI song number are set with the Info icon in its header.",
-        ))
-        .size(11.5)
-        .color(TEXT_DIM),
+/// Settings › Slides: what the room sees with every song, shown. The copyright line drawn on a
+/// small slide, with where it falls as four keys and the church's CCLI licence beside them; how one
+/// slide gives way to the next, the first three kinds as keys with a picture and More… for every
+/// kind, then Carry on to the next item; and how a song's slides are laid out in the window.
+fn slides_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
+    card(
+        ui,
+        t("settings.copyright.title", "Copyright line"),
+        t("settings.copyright.about", "Where the small line under a song\u{2019}s words shows"),
+        None,
+        |ui| copyright(ui, state, show),
     );
+    card(
+        ui,
+        t("settings.transition.title", "Between slides"),
+        t("settings.transition.about", "How one slide gives way to the next"),
+        Some(t("settings.transition.own", "A song or a slide can have its own")),
+        |ui| {
+            transitions(ui, state);
+            let size = on_off_size(ui);
+            row(
+                ui,
+                t("settings.continuous", "Carry on to the next item"),
+                t("settings.continuous.about", "Next at the end of a song opens the one after it"),
+                size,
+                |ui, place| {
+                    if on_off(ui, place, ui.scope_id().with("continuous"), state.continuous).clicked() {
+                        state.continuous = !state.continuous;
+                    }
+                },
+            );
+        },
+    );
+    card(
+        ui,
+        t("settings.window.title", "In your window"),
+        t("settings.window.about", "How a song\u{2019}s slides are laid out for you. The room never sees this"),
+        None,
+        |ui| {
+            use crate::home::SlideView;
+            let look = crate::studio::SwitchLook {
+                font: FontId::proportional(12.0),
+                spacing: 0.0,
+                pad: 11.0,
+                height: 24.0,
+                inset: 3.0,
+                track: PANEL,
+                idle: TEXT_DIM,
+            };
+            let labels = [
+                t("settings.window.grid", "Grid"),
+                t("settings.window.words", "Words only"),
+                t("settings.window.table", "Table"),
+            ];
+            let views = [SlideView::Grid, SlideView::Easy, SlideView::Table];
+            let chosen = views.iter().position(|view| *view == state.slide_view);
+            // Measured once off to the side, then drawn at the row's end.
+            let width: f32 = labels
+                .iter()
+                .map(|label| crate::studio::widest(ui, &[*label], &look.font) + 2.0 * look.pad)
+                .sum::<f32>()
+                + 2.0 * (labels.len() - 1) as f32
+                + 2.0 * look.inset;
+            let size = vec2(width, look.height + 2.0 * look.inset);
+            row(ui, t("settings.window.shown_as", "Slides are shown as"), "", size, |ui, place| {
+                let (_, clicked) = crate::studio::pill_switch(ui, "slide view", place.min, &labels, &[], chosen, &look);
+                if let Some(at) = clicked {
+                    state.slide_view = views[at];
+                }
+            });
+        },
+    );
+}
+
+/// The Copyright line card's insides: a slide with the line where it shows, beside the four keys
+/// and the licence (under them when the page is narrow).
+fn copyright(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
+    use crate::service::CopyrightShow as C;
+    let width = ui.available_width();
+    let choices = [C::FirstSlide, C::LastSlide, C::EverySlide, C::Never];
+    let keys = [
+        (t("settings.copyright.first", "First slide"), [true, false, false]),
+        (t("settings.copyright.last", "Last slide"), [false, false, true]),
+        (t("settings.copyright.every", "Every slide"), [true, true, true]),
+        (t("settings.copyright.never", "Nowhere"), [false, false, false]),
+    ]
+    .map(|(name, marked)| Pick { picture: Picture::Strip(marked), name: name.to_owned(), line: String::new() });
+    // The keys beside the slide while all four fit there with no word broken, else under it.
+    let beside = width - 340.0 >= parts::row_width(ui, &keys).max(320.0);
+    let slide = vec2(320.0f32.min(width), 320.0f32.min(width) * 9.0 / 16.0);
+    let shown = |ui: &mut egui::Ui, state: &mut HomeState| {
+        let chosen = choices.iter().position(|choice| *choice == state.copyright_show);
+        if let (Some(at), _) = picks(ui, "copyright", &keys, chosen, 76.0) {
+            state.copyright_show = choices[at];
+        }
+        licence(ui, state);
+    };
+    ui.add_space(4.0);
+    if beside {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 20.0;
+            sample_slide(ui, state, show, slide);
+            ui.vertical(|ui| {
+                ui.set_width(ui.available_width());
+                shown(ui, state);
+            });
+        });
+    } else {
+        sample_slide(ui, state, show, slide);
+        // 20 under the slide, as beside it; the keys bring 4 of their own.
+        ui.add_space(16.0);
+        shown(ui, state);
+    }
+    ui.add_space(10.0);
+}
+
+/// "Your church's CCLI licence" and its field, in the fixed-width face.
+fn licence(ui: &mut egui::Ui, state: &mut HomeState) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 12.0;
+        ui.label(
+            egui::RichText::new(t("settings.copyright.licence", "Your church\u{2019}s CCLI licence")).color(TEXT_DIM),
+        );
+        let (place, _) = ui.allocate_exact_size(vec2(130.0, 32.0), Sense::hover());
+        ui.painter().rect_filled(place, RADIUS, PANEL);
+        let field = ui.put(
+            place.shrink2(vec2(10.0, 7.0)),
+            egui::TextEdit::singleline(&mut state.ccli_licence)
+                .frame(egui::Frame::NONE)
+                .font(fixed(13.0))
+                .text_color(TEXT)
+                .margin(egui::Margin::ZERO),
+        );
+        if field.has_focus() {
+            ui.painter().rect_stroke(place, RADIUS, Stroke::new(1.5, TEXT_FAINT), StrokeKind::Inside);
+        }
+    });
+}
+
+/// The small slide the copyright line is drawn on: the first song with its details filled in, its
+/// first two lines, and its line at the foot as the screens show it (unless it shows nowhere).
+fn sample_slide(ui: &mut egui::Ui, state: &HomeState, show: &Show, size: egui::Vec2) {
+    let (place, response) = ui.allocate_exact_size(size, Sense::hover());
+    let painter = ui.painter().with_clip_rect(place);
+    painter.rect_filled(place, RADIUS, egui::Color32::BLACK);
+    let song = show.presentations().iter().find(|song| !song.copyright.is_empty()).or(show.presentations().first());
+    let words: Vec<String> = song
+        .and_then(|song| song.slides().next())
+        .and_then(|(_, slide)| slide.texts().into_iter().next())
+        .map(|(_, words)| words.lines().filter(|line| !line.trim().is_empty()).take(2).map(str::to_owned).collect())
+        .unwrap_or_default();
+    let lines: Vec<_> = words
+        .iter()
+        .map(|line| parts::one_line(ui, line, crate::studio::reading(15.0), TEXT, place.width() - 28.0))
+        .collect();
+    let height: f32 = lines.iter().map(|line| line.size().y).sum::<f32>() + 2.0 * lines.len().saturating_sub(1) as f32;
+    let mut y = place.center().y - 6.0 - height / 2.0;
+    for line in lines {
+        let line_height = line.size().y;
+        painter.galley(pos2(place.center().x - line.size().x / 2.0, y), line, TEXT);
+        y += line_height + 2.0;
+    }
+    if state.copyright_show != crate::service::CopyrightShow::Never {
+        let line = song
+            .filter(|song| !song.copyright.is_empty())
+            .map(|song| song.copyright.line(&song.title, state.ccli_licence.trim()))
+            .unwrap_or_else(|| {
+                t("settings.copyright.empty", "Fill in a song\u{2019}s details to see its line").to_owned()
+            });
+        let galley = parts::one_line(ui, &line, FontId::proportional(8.0), TEXT, place.width() - 20.0);
+        let band = Rect::from_min_max(
+            pos2(place.min.x + 10.0, place.max.y - 8.0 - galley.size().y - 4.0),
+            pos2(place.max.x - 10.0, place.max.y - 8.0),
+        );
+        painter.rect_stroke(band, 4.0, Stroke::new(1.0, TEXT_FAINT), StrokeKind::Outside);
+        painter.galley(pos2(band.center().x - galley.size().x / 2.0, band.min.y + 2.0), galley, TEXT);
+    }
+    response.on_hover_text(t(
+        "settings.copyright.details",
+        "A song's writer, publisher and CCLI song number are set with the Info icon in its header.",
+    ));
+}
+
+/// The Between slides keys: Cut, Dissolve and Fade, each with a picture of how it looks, and More…
+/// for every other kind, its time and direction (the dock's sheet).
+fn transitions(ui: &mut egui::Ui, state: &mut HomeState) {
+    use sp_model::TransitionKind as K;
+    let now = state.transition;
+    let three = [K::Cut, K::Dissolve, K::Fade];
+    let other = !three.contains(&now.kind);
+    let time = |look: sp_model::Transition| crate::i18n::seconds(f64::from(look.seconds));
+    let mut keys: Vec<Pick> = three
+        .iter()
+        .map(|kind| Pick {
+            picture: Picture::Transition(Some(*kind)),
+            name: crate::studio::transition_name(*kind).to_owned(),
+            line: if *kind == K::Cut {
+                t("settings.transition.cut", "At once").to_owned()
+            } else if *kind == now.kind {
+                time(now)
+            } else {
+                String::new()
+            },
+        })
+        .collect();
+    keys.push(if other {
+        Pick {
+            picture: Picture::Transition(None),
+            name: crate::studio::transition_name(now.kind).to_owned(),
+            line: time(now),
+        }
+    } else {
+        Pick {
+            picture: Picture::Transition(None),
+            name: t("settings.transition.more", "More\u{2026}").to_owned(),
+            line: t("settings.transition.more.about", "Every kind, its time and direction").to_owned(),
+        }
+    });
+    let chosen = three.iter().position(|kind| *kind == now.kind).or(Some(3));
+    let (clicked, responses) = picks(ui, "transition", &keys, chosen, 76.0);
+    if let Some(at) = clicked.filter(|at| *at < 3)
+        && three[at] != now.kind
+    {
+        // A newly chosen kind keeps the direction and takes its usual time, as the sheet does.
+        state.transition = sp_model::Transition { direction: now.direction, ..sp_model::Transition::of(three[at]) };
+    }
+    if let Some(more) = responses.get(3) {
+        egui::Popup::from_toggle_button_response(more)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| crate::studio::transition_picker(ui, &mut state.transition, "settings"));
+    }
 }
 
 /// Settings › Groups: each group's colour, and the key that jumps to it.
@@ -680,19 +913,72 @@ mod tests {
         assert_eq!(Pane::default(), Pane::Screens, "Settings opens on Screens, as the design's does");
     }
 
+    /// Clicks the words `name` where a frame of Settings drew them. False when they weren't drawn.
+    pub(super) fn click(ctx: &egui::Context, state: &mut HomeState, show: &Show, name: &str) -> bool {
+        use egui::{Event, Modifiers};
+        let mut at = None;
+        for round in 0..2 {
+            let output = crate::studio::tests::drawn(ctx, vec![], |ui| settings_ui(ui, state, show));
+            if round == 1 {
+                at = crate::studio::tests::place_of(&output, name);
+            }
+            output.drop_without_applying_deltas();
+        }
+        let Some(at) = at else { return false };
+        let press = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        for events in [vec![Event::PointerMoved(at), press(true)], vec![press(false)]] {
+            crate::studio::tests::drawn(ctx, events, |ui| settings_ui(ui, state, show)).drop_without_applying_deltas();
+        }
+        true
+    }
+
+    #[test]
+    fn slides_sets_the_copyright_line_the_transition_and_the_view() {
+        use crate::service::CopyrightShow;
+        use sp_model::TransitionKind as K;
+        let ctx = crate::studio::tests::styled();
+        let show = Show::new(Vec::new());
+        let mut state = HomeState { preferences_pane: Pane::Slides, ..HomeState::default() };
+        for (name, want) in [
+            ("Every slide", CopyrightShow::EverySlide),
+            ("Last slide", CopyrightShow::LastSlide),
+            ("First slide", CopyrightShow::FirstSlide),
+            ("Nowhere", CopyrightShow::Never),
+        ] {
+            assert!(click(&ctx, &mut state, &show, name), "{name}");
+            assert_eq!(state.copyright_show, want, "{name}");
+        }
+        // With no song's details filled in, the slide says how to see a line.
+        state.copyright_show = CopyrightShow::FirstSlide;
+        let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, &mut state, &show));
+        assert!(crate::studio::tests::place_of(&drawn, "Fill in a song\u{2019}s details to see its line").is_some());
+        drawn.drop_without_applying_deltas();
+        assert!(click(&ctx, &mut state, &show, "Cut"));
+        assert_eq!(state.transition.kind, K::Cut);
+        assert!(click(&ctx, &mut state, &show, "Fade"));
+        assert_eq!(state.transition, sp_model::Transition::of(K::Fade), "a new kind takes its usual time");
+        let continuous = state.continuous;
+        let words = if continuous { "On" } else { "Off" };
+        assert!(click(&ctx, &mut state, &show, words));
+        assert_eq!(state.continuous, !continuous, "Carry on to the next item switches Continuous");
+        assert!(click(&ctx, &mut state, &show, "Table"));
+        assert_eq!(state.slide_view, crate::home::SlideView::Table);
+        assert!(click(&ctx, &mut state, &show, "Words only"));
+        assert_eq!(state.slide_view, crate::home::SlideView::Easy);
+    }
+
     #[test]
     fn a_row_says_how_its_page_stands() {
-        let ctx = crate::studio::tests::styled();
         let show = Show::new(Vec::new());
         let mut state = HomeState::default();
         state.mcp.switches = crate::mcp::Switches::default();
         state.remote.on = false;
-        let said = |state: &HomeState, pane: Pane| {
-            let mut out = None;
-            let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| out = readout(pane, state, &show, ui, 120.0));
-            drawn.drop_without_applying_deltas();
-            out
-        };
+        let said = |state: &HomeState, pane: Pane| readout(pane, state, &show).map(|said| (said.words, said.lit));
         assert_eq!(said(&state, Pane::AiAssistants), Some(("Off".to_owned(), false)));
         state.mcp.switches.allowed = true;
         assert_eq!(said(&state, Pane::AiAssistants), Some(("Can prepare".to_owned(), true)));
@@ -702,6 +988,12 @@ mod tests {
         state.remote.on = true;
         assert_eq!(said(&state, Pane::PhoneRemote), Some(("0 people".to_owned(), true)));
         assert_eq!(said(&state, Pane::Integrations), Some(("0 connected".to_owned(), false)));
+        let all = state.screens.len();
+        assert_eq!(said(&state, Pane::Screens), Some((format!("0 of {all} on"), false)), "none is shown yet");
         assert_eq!(said(&state, Pane::Keys), None, "Advanced's pages say nothing at the end of their rows");
+        // In Spanish, a row whose name is long has a shorter readout to hand.
+        let spanish =
+            crate::i18n::with_language(crate::i18n::Language::Spanish, || readout(Pane::Integrations, &state, &show));
+        assert_eq!(spanish.map(|said| said.short), Some("0 activas".to_owned()));
     }
 }

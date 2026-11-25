@@ -912,9 +912,6 @@ pub enum CopyrightShow {
 }
 
 impl CopyrightShow {
-    pub const ALL: [CopyrightShow; 4] =
-        [CopyrightShow::Never, CopyrightShow::FirstSlide, CopyrightShow::LastSlide, CopyrightShow::EverySlide];
-
     pub fn name(self) -> &'static str {
         match self {
             CopyrightShow::Never => "Never",

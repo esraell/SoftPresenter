@@ -1779,7 +1779,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   notices list and the remote page speak the language set.
 - Each song's Artist, Author, Publisher, Year and CCLI Song # (the Info icon at the right of its header, beside Edit Words, Arrangement and Notes), and a
   copyright line on the screens on a song's first slide, last slide or every slide, with the
-  church's CCLI licence number, chosen in Settings.
+  church's CCLI licence number, chosen in **Settings › Slides**. That page shows what the room sees
+  with every song: the line drawn on a small slide (the first song whose details are filled in,
+  its first two lines and its line as the screens show it), First slide, Last slide, Every slide
+  and Nowhere as four keys, each with three small slides marking where the line falls, and the
+  licence beside them (under the slide when the window is narrow, so no word is ever broken);
+  then Between slides, the transition for all slides as the bar under the slides has it (Cut,
+  Dissolve and Fade as keys with a picture of each, and More… for every kind with its time and
+  direction), and Carry on to the next item (Continuous) On or Off; then In your window, Grid,
+  Words only or Table, how a song's slides are laid out in the window.
 - **A Settings window** (Cmd+,), its pages in four groups down the left, each row ending in how
   its page stands in the fixed-width face, with a green light when something is on: **The room**
   (Screens, "3 of 4 on"; Phone Screens, On or Off), **On screen** (Slides, with the transition
