@@ -2240,6 +2240,9 @@ impl crate::App {
                 if matches!(screen.output, crate::screens::Output::Ndi(_)) && !screen.sound {
                     line.push_str("; no sound");
                 }
+                if matches!(screen.output, crate::screens::Output::Ndi(_)) && screen.rate != Default::default() {
+                    line.push_str(&format!("; {} pictures a second", screen.rate.name()));
+                }
                 if let Some(trouble) = trouble(at) {
                     line.push_str(&format!(" ({trouble})"));
                 }
@@ -2273,6 +2276,7 @@ impl crate::App {
                     "alpha": see_through.map(crate::screens::Alpha::name),
                     "key_of": key_of,
                     "sound": matches!(screen.output, crate::screens::Output::Ndi(_)).then_some(screen.sound),
+                    "rate": matches!(screen.output, crate::screens::Output::Ndi(_)).then(|| screen.rate.name()),
                     "key_trouble": trouble(at),
                 })
             })

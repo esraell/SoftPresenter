@@ -1374,6 +1374,23 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   after saying what it will send where and waiting for yes ([cli.md](cli.md#checking-a-decklink-card)).
 - Stage screens for the people on stage: the words on screen now, the next slide's words, the
   time, a running timer and the stage message.
+- **The frame rate of an NDI screen.** Each screen sent over NDI says how many pictures a second
+  it sends, chosen under **Frame rate** in the Screens window: 29.97 (as new and existing
+  screens are), 30, 59.94, 60, 25 or 50 (`sp screen set SCREEN rate=59.94`; `sp screens` says a
+  rate other than 29.97, and its JSON has `rate`), kept in `screens.json`. Choose the rate the
+  equipment that shows the screen plays at: a decoder, switcher or television at 59.94 or 29.97
+  (most video equipment where the mains are 60 Hz) given 30.000 a second drops a picture about
+  every 33 seconds, which is seen as a small pause. The rate goes to NDI as its exact fraction
+  (29.97 is 30000/1001), NDI paces the screen's pictures to it, and the log's line each minute
+  says it ("at 1920x1080 29.97fps"). Pictures are drawn as the video behind the words gives
+  them, so a 59.94 fps video on a 59.94 screen is 59.94 different pictures a second; a video
+  with more pictures a second than the screen sends has the extra ones passed over ("skipped"
+  in the log), and one with fewer is sent as it comes. Screens that show the same picture are
+  drawn once and handed the same pictures, so the slower of two such screens at different rates
+  passes over what it cannot send. The log judges a screen's pictures late at the pace they
+  come at, found from their steady gaps (a 29.97 fps video on a 59.94 screen is steady, not
+  late). The sound's timecodes are the clock's own time, whatever the
+  rate. Changing the rate starts the screen's NDI source again.
 - **Sound over NDI.** A screen sent over NDI sends what the app plays beside its picture: the
   sound of videos (behind the words, in a box on a slide, on the Announcements layer) and the
   audio playlists, crossfades and all, as loud as the speakers play it, so the operator's
@@ -1408,7 +1425,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   seconds until one arrives. A new slide fades in over NDI
   (and out of a DeckLink card) as it does in the room, by the same clock, and a video playing
   behind the words keeps moving through the fade: NDI is given a picture of the fade for each
-  picture of the video, or thirty a second when nothing else moves, whatever pace the room's
+  picture of the video, or at the screen's own frame rate when nothing else moves, whatever pace the room's
   screens draw it at. A window that shows the same picture at 1920 × 1080 has each step copied
   back as it painted it, so the fade is not drawn twice; otherwise the fade is drawn for NDI
   as for a window (the two slides once each into textures and then blended, or from the slides
@@ -1417,8 +1434,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   own (NDI's monitor app, for one, counts as two receivers); with an NDI too old to count
   them, the screen is drawn and sent all the time.
 - **The log says how each NDI screen's pictures went out.** Once a minute, for each NDI screen,
-  as for each DeckLink output: the pictures sent (and how many a second, against the 30 it says
-  it sends), sent again, late, skipped, the longest gap between them while a video plays, not
+  as for each DeckLink output: the pictures sent (and how many a second, against the rate it
+  says it sends), sent again, late, skipped, the longest gap between them while a video plays, not
   drawn, lost on the way back from the GPU (and how long they took to come back), the
   receivers, and the longest send; or that nobody watched. When a picture comes more than two
   pictures late while a video plays, which somebody watching could see as a stutter, one line

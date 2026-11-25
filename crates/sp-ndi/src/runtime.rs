@@ -424,11 +424,13 @@ pub struct Source {
     instance: *mut c_void,
     // Kept alive for as long as NDI may read the name.
     _name: CString,
+    /// The pictures a second its pictures say they come at, which NDI paces their sending to.
+    rate: crate::Rate,
 }
 
 impl Source {
-    /// Starts a source with this name.
-    pub fn new(runtime: &'static Runtime, name: &str) -> Result<Source, String> {
+    /// Starts a source with this name, whose pictures come at `rate`.
+    pub fn new(runtime: &'static Runtime, name: &str, rate: crate::Rate) -> Result<Source, String> {
         let name = CString::new(name).map_err(|_| "An NDI name can't contain a zero byte.".to_owned())?;
         let settings =
             SendCreate { name: name.as_ptr(), groups: std::ptr::null(), clock_video: true, clock_audio: false };
@@ -438,7 +440,7 @@ impl Source {
         if instance.is_null() {
             return Err("The NDI source could not be created.".to_owned());
         }
-        Ok(Source { runtime, instance, _name: name })
+        Ok(Source { runtime, instance, _name: name, rate })
     }
 
     /// How many receivers are connected to the source now, or `None` when this runtime can't
@@ -463,8 +465,8 @@ impl Source {
             xres: w,
             yres: h,
             four_cc: if alpha { FOUR_CC_RGBA } else { FOUR_CC_RGBX },
-            frame_rate_n: 30,
-            frame_rate_d: 1,
+            frame_rate_n: c_int::try_from(self.rate.n).unwrap_or(30),
+            frame_rate_d: c_int::try_from(self.rate.d).unwrap_or(1),
             picture_aspect_ratio: 0.0,
             frame_format_type: PROGRESSIVE,
             timecode: SYNTHESIZE_TIMECODE,

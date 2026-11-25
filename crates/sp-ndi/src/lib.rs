@@ -104,19 +104,58 @@ const RESEND_EVERY: Duration = Duration::from_millis(1000);
 /// nobody was watching gets its first picture within about this time.
 const COUNT_EVERY: Duration = Duration::from_millis(1000);
 
-/// The pictures a second a source says it sends, which NDI paces its sending to (each send
-/// waits for its picture's time) and receivers expect.
-pub const FRAME_RATE: u32 = 30;
+/// The pictures a second a source says it sends, as the fraction NDI and video equipment
+/// give them by (29.97 is 30000/1001). NDI paces the source's sending to it (each send waits
+/// for its picture's time), and a receiver that plays out at the same rate shows every picture
+/// once: one that plays at another (a 59.94 Hz decoder given 30 a second) drops or repeats one
+/// every so often, which is seen as a small pause.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rate {
+    pub n: u32,
+    pub d: u32,
+}
 
-/// One picture's time at [`FRAME_RATE`].
-pub const FRAME: Duration = Duration::from_nanos(1_000_000_000 / FRAME_RATE as u64);
+impl Rate {
+    pub const R29_97: Rate = Rate { n: 30_000, d: 1001 };
+    pub const R30: Rate = Rate { n: 30, d: 1 };
+    pub const R59_94: Rate = Rate { n: 60_000, d: 1001 };
+    pub const R60: Rate = Rate { n: 60, d: 1 };
+    pub const R25: Rate = Rate { n: 25, d: 1 };
+    pub const R50: Rate = Rate { n: 50, d: 1 };
+
+    /// One picture's time at this rate.
+    pub fn frame(self) -> Duration {
+        Duration::from_nanos(1_000_000_000 * u64::from(self.d.max(1)) / u64::from(self.n.max(1)))
+    }
+
+    /// The rate as it is said: "29.97", "30", "59.94".
+    pub fn name(self) -> String {
+        if self.d == 1 { self.n.to_string() } else { format!("{:.2}", f64::from(self.n) / f64::from(self.d)) }
+    }
+}
+
+/// 29.97: what most video equipment where the mains are 60 Hz plays at.
+impl Default for Rate {
+    fn default() -> Rate {
+        Rate::R29_97
+    }
+}
+
+/// One picture's time at thirty a second: what the screens' thread counts a long step by,
+/// whatever each source's own rate.
+pub const FRAME: Duration = Duration::from_nanos(1_000_000_000 / 30);
+
+/// How many times more, and how long apart, a source that NDI would not create is tried: two
+/// seconds in all, for the source of the same name before it to be gone.
+const START_TRIES: u32 = 20;
+const START_AGAIN_AFTER: Duration = Duration::from_millis(100);
 
 /// How often a source says in the log how its pictures went out.
 const MINUTE: Duration = Duration::from_secs(60);
 
 /// The slowest the pictures' own pace is taken to be (see `Pace::frame`): fifteen a second.
 /// Pictures slower than that never count as moving, so nothing is judged late among them.
-const SLOWEST_FRAME: Duration = Duration::from_nanos(2_000_000_000 / FRAME_RATE as u64);
+const SLOWEST_FRAME: Duration = Duration::from_nanos(1_000_000_000 / 15);
 
 /// Pictures count as moving once this many gaps in a row between new ones were on time (within
 /// one and a half pictures' times at their own pace): a playing video. Fewer (a slide changed,
@@ -456,6 +495,8 @@ pub struct Minute {
     pub watched: Duration,
     /// The size of the last picture sent.
     pub size: Option<(u32, u32)>,
+    /// The pictures a second the source says it sends.
+    pub rate: Rate,
     /// New pictures sent.
     pub sent: u32,
     /// The same picture sent again, because nothing new came for a second (as it always is
@@ -465,8 +506,8 @@ pub struct Minute {
     /// pictures' own pace, while pictures were moving (see [`Hitch`]).
     pub late: u32,
     /// Pictures handed over that a newer one took the place of before they were sent, the
-    /// source's thread being busy sending (a video of more than [`FRAME_RATE`] pictures a
-    /// second skips one in two).
+    /// source's thread being busy sending (a 60 fps video on a source that sends 30 a second
+    /// skips one in two).
     pub skipped: u32,
     /// The longest time between two new pictures while pictures were moving; `None` when
     /// nothing moved.
@@ -492,7 +533,7 @@ impl Minute {
             return format!("NDI \"{name}\": nobody watching in the last minute");
         }
         let ms = |took: Duration| format!("{:.1} ms", took.as_secs_f64() * 1000.0);
-        let size = self.size.map_or(String::new(), |(w, h)| format!(" at {w}x{h} {FRAME_RATE}fps"));
+        let size = self.size.map_or(String::new(), |(w, h)| format!(" at {w}x{h} {}fps", self.rate.name()));
         let rate = f64::from(self.sent) / self.watched.as_secs_f64().max(0.001);
         let skipped = match self.passed_over {
             0 => format!("{} skipped", self.skipped),
@@ -563,6 +604,7 @@ impl Sound {
 /// A running NDI source. Dropping it stops the source.
 pub struct NdiOutput {
     name: String,
+    rate: Rate,
     shared: Arc<Shared>,
     tx: Option<Sender<Told>>,
     /// True from `forget` until the next picture is handed over: the source's thread is told
@@ -577,15 +619,15 @@ pub struct NdiOutput {
 }
 
 impl NdiOutput {
-    /// Starts an NDI source with this name. Never waits for NDI: the source starts on its own
+    /// Starts an NDI source with this name, at the usual rate. Never waits for NDI: the source starts on its own
     /// thread, and `state` says how that went. The error is a plain sentence for the operator.
     /// Nobody is told when receivers connect (use `start_with_wake` to hand them a picture),
     /// and its per-minute line goes nowhere.
     pub fn start(name: &str) -> Result<NdiOutput, String> {
-        NdiOutput::start_with_wake(name, || {}, Arc::new(|_: &str, _: bool| {}))
+        NdiOutput::start_with_wake(name, Rate::default(), || {}, Arc::new(|_: &str, _: bool| {}))
     }
 
-    /// Starts an NDI source as `start` does, which also calls `wake` each time the count of
+    /// Starts an NDI source as `start` does, whose pictures come at `rate`, and which calls `wake` each time the count of
     /// receivers is found to have changed, so that a picture can be drawn for receivers that
     /// connect after a spell with none (the source sends them nothing until one is handed
     /// over), and so that whoever shows the count can show the new one. `wake` runs on the source's own
@@ -593,9 +635,34 @@ impl NdiOutput {
     /// should only pass the word on and return. `log` is given, on the source's own thread,
     /// a line each minute saying how its pictures went out ([`Minute::words`]), and whether
     /// that is a problem.
-    pub fn start_with_wake(name: &str, wake: impl FnMut() + Send + 'static, log: Log) -> Result<NdiOutput, String> {
-        let open = |name: &str| runtime::get().and_then(|runtime| runtime::Source::new(runtime, name));
-        spawn(name, open, wake, log, MINUTE)
+    pub fn start_with_wake(
+        name: &str,
+        rate: Rate,
+        wake: impl FnMut() + Send + 'static,
+        log: Log,
+    ) -> Result<NdiOutput, String> {
+        // A source started again under the name it had (for another rate) may find the one
+        // before it still being taken down, on that one's own thread, and NDI refuses a second
+        // of the name: it is tried again for a moment, here on the new source's thread.
+        let open = move |name: &str| {
+            let runtime = runtime::get()?;
+            let mut tries = 0;
+            loop {
+                match runtime::Source::new(runtime, name, rate) {
+                    Err(_) if tries < START_TRIES => {
+                        tries += 1;
+                        std::thread::sleep(START_AGAIN_AFTER);
+                    }
+                    started => return started,
+                }
+            }
+        };
+        spawn(name, rate, open, wake, log, MINUTE)
+    }
+
+    /// The pictures a second the source says it sends.
+    pub fn rate(&self) -> Rate {
+        self.rate
     }
 
     pub fn name(&self) -> &str {
@@ -767,6 +834,7 @@ impl Sink for runtime::Source {
 /// telling `log` how that went every `minute`.
 fn spawn<S: Sink + 'static>(
     name: &str,
+    rate: Rate,
     open: impl FnOnce(&str) -> Result<S, String> + Send + 'static,
     mut wake: impl FnMut() + Send + 'static,
     log: Log,
@@ -786,7 +854,7 @@ fn spawn<S: Sink + 'static>(
                 let sink = Arc::new(sink);
                 theirs.sound.set(Some(sink.clone()));
                 theirs.set_state(State::Sending);
-                let report = Report { name: &source, log: &*log, minute };
+                let report = Report { name: &source, log: &*log, minute, rate };
                 serve(&*sink, &rx, &theirs, &mut wake, &report);
                 // Sound handed over from now on goes nowhere; the source itself is taken down
                 // when a block being sent this moment, if there is one, has gone.
@@ -798,6 +866,7 @@ fn spawn<S: Sink + 'static>(
         .map_err(|e| format!("Could not start the NDI thread: {e}"))?;
     Ok(NdiOutput {
         name: name.to_owned(),
+        rate,
         shared,
         tx: Some(tx),
         forgotten: AtomicBool::new(false),
@@ -833,6 +902,7 @@ struct Report<'a> {
     name: &'a str,
     log: &'a (dyn Fn(&str, bool) + Send + Sync),
     minute: Duration,
+    rate: Rate,
 }
 
 /// Sends the pictures handed over to `sink` until the output is dropped: each new one at once
@@ -840,7 +910,7 @@ struct Report<'a> {
 /// count of receivers has changed, and tells the log each minute how the pictures went out.
 fn serve(sink: &impl Sink, rx: &Receiver<Told>, shared: &Shared, wake: &mut impl FnMut(), report: &Report<'_>) {
     let mut gate = Gate::new(Instant::now());
-    let mut pace = Pace::new(Instant::now(), report.minute);
+    let mut pace = Pace::at(Instant::now(), report.minute, report.rate);
     // Counts the receivers, and tells everyone the count before `wake`, so that whoever is
     // woken reads the new one.
     let mut count = |gate: &mut Gate, pace: &mut Pace| {
@@ -913,8 +983,8 @@ fn serve(sink: &impl Sink, rx: &Receiver<Told>, shared: &Shared, wake: &mut impl
 /// Told the time rather than reading the clock, so it can be tested on its own.
 ///
 /// A gap is on time when it is within one and a half pictures' times at the pictures' own pace
-/// (`frame`): a thirtieth of a second for a 30 fps video (or a faster one, which NDI's pacing
-/// brings to 30), a 24 fps video's own time for that, whose steady pace is no stutter though a
+/// (`frame`): a thirtieth of a second for a 30 fps video (never less than the source's own
+/// picture time: NDI's pacing brings a faster video to that), a 24 fps video's own time for that, whose steady pace is no stutter though a
 /// receiver shows every fourth picture twice. Later than that is late; later than two
 /// pictures' times, a hitch.
 ///
@@ -949,8 +1019,12 @@ struct Pace {
     run: u32,
     pending: Option<Late>,
     /// The pictures' own pace: the time between them, followed slowly from the gaps on time,
-    /// from [`FRAME`] (NDI sends no faster) to [`SLOWEST_FRAME`].
+    /// from the source's own rate (NDI sends no faster) to [`SLOWEST_FRAME`].
     frame: Duration,
+    /// The gap before the last new picture, for telling a steady pace from a hold-up.
+    last_gap: Option<Duration>,
+    /// The pictures a second the source says it sends.
+    rate: Rate,
 }
 
 /// Late gaps while pictures move, one after another or close together (a hold-up with a
@@ -987,7 +1061,14 @@ impl Late {
 }
 
 impl Pace {
+    /// For a source that sends thirty a second.
+    #[cfg(test)]
     fn new(now: Instant, length: Duration) -> Pace {
+        Pace::at(now, length, Rate::R30)
+    }
+
+    /// For a source that sends at `rate`.
+    fn at(now: Instant, length: Duration, rate: Rate) -> Pace {
         Pace {
             began: now,
             length,
@@ -1007,7 +1088,9 @@ impl Pace {
             last_new: None,
             run: 0,
             pending: None,
-            frame: FRAME,
+            frame: rate.frame(),
+            last_gap: None,
+            rate,
         }
     }
 
@@ -1086,10 +1169,20 @@ impl Pace {
                 self.longest_gap = Some(self.longest_gap.map_or(gap, |longest| longest.max(gap)));
             }
             self.run = self.run.saturating_add(1);
-            // The pictures' own pace follows the gaps on time, slowly (a sixteenth of the way).
+        }
+        // The pictures' own pace follows the gaps, slowly (a sixteenth of the way): those on
+        // time, and late ones that are steady (within a quarter of the gap before) and no
+        // slower than the slowest pace, so that a video with fewer pictures a second than the
+        // source sends (a 29.97 fps video on a 59.94 screen), or one that follows a faster
+        // one, is found to be steady within half a second, not counted late for ever. A
+        // hold-up is not steady, and moves nothing.
+        let steady = self.last_gap.is_some_and(|before| gap <= SLOWEST_FRAME && gap.abs_diff(before) * 4 <= gap);
+        self.last_gap = Some(gap);
+        if on_time || steady {
             let (frame, gap) = (self.frame.as_secs_f64(), gap.as_secs_f64());
             let followed = frame + (gap - frame) / 16.0;
-            self.frame = Duration::from_secs_f64(followed.clamp(FRAME.as_secs_f64(), SLOWEST_FRAME.as_secs_f64()));
+            self.frame =
+                Duration::from_secs_f64(followed.clamp(self.rate.frame().as_secs_f64(), SLOWEST_FRAME.as_secs_f64()));
         }
         let mut hitch = None;
         match self.pending.take() {
@@ -1159,6 +1252,7 @@ impl Pace {
             length,
             watched: self.watched,
             size: self.size.filter(|_| watched),
+            rate: self.rate,
             sent: self.sent,
             repeated: self.repeated,
             late: self.late,
@@ -1170,8 +1264,17 @@ impl Pace {
             ..Minute::default()
         };
         let (last_new, run, pending, last_count) = (self.last_new, self.run, self.pending, self.last_count);
-        let (watched_from, frame) = (self.watched_from, self.frame);
-        *self = Pace { watched_from, last_new, run, pending, frame, last_count, ..Pace::new(now, self.length) };
+        let (watched_from, frame, last_gap) = (self.watched_from, self.frame, self.last_gap);
+        *self = Pace {
+            watched_from,
+            last_new,
+            run,
+            pending,
+            frame,
+            last_gap,
+            last_count,
+            ..Pace::at(now, self.length, self.rate)
+        };
         // The next minute's receivers start from the count there is now, if somebody watches.
         if self.watching()
             && let Some(receivers) = last_count
@@ -1825,7 +1928,8 @@ mod tests {
         let open = move |_: &str| {
             Ok(Stand { receivers: theirs, sent: sent_tx, black: black_tx, bytes: bytes_tx, sound: sound_tx })
         };
-        let output = spawn("SoftPresenter test", open, wake, Arc::new(|_: &str, _: bool| {}), MINUTE).unwrap();
+        let quiet: Log = Arc::new(|_: &str, _: bool| {});
+        let output = spawn("SoftPresenter test", Rate::default(), open, wake, quiet, MINUTE).unwrap();
         Standing { output, receivers, sent, black, bytes, sound }
     }
 
@@ -2244,7 +2348,7 @@ mod tests {
         assert_eq!(new_at(&mut pace, t + SECOND), None);
         pace.sent_again(SECOND);
         let minute = pace.minute_over(t + MINUTE).expect("a minute");
-        assert_eq!(minute, Minute { length: MINUTE, ..Minute::default() });
+        assert_eq!(minute, Minute { length: MINUTE, rate: Rate::R30, ..Minute::default() });
         assert_eq!(minute.words("Main"), "NDI \"Main\": nobody watching in the last minute");
         assert!(!minute.trouble());
     }
@@ -2285,11 +2389,102 @@ mod tests {
     }
 
     #[test]
+    fn a_rate_is_sent_as_its_exact_fraction_and_said_as_people_say_it() {
+        assert_eq!(Rate::default(), Rate { n: 30_000, d: 1001 });
+        let said: Vec<String> =
+            [Rate::R29_97, Rate::R30, Rate::R59_94, Rate::R60, Rate::R25, Rate::R50].map(Rate::name).to_vec();
+        assert_eq!(said, ["29.97", "30", "59.94", "60", "25", "50"]);
+        // One picture's time: 33.367 ms at 29.97, not the 33.333 ms of thirty a second.
+        assert_eq!(Rate::R29_97.frame(), Duration::from_nanos(33_366_666));
+        assert_eq!(Rate::R59_94.frame(), Duration::from_nanos(16_683_333));
+        assert_eq!(Rate::R30.frame(), FRAME);
+        assert_eq!(Rate::R50.frame(), Duration::from_millis(20));
+    }
+
+    #[test]
+    fn late_is_judged_at_the_sources_own_rate() {
+        // A source that sends 59.94 a second, given a 59.94 fps video: its pace is the video's,
+        // and a picture a thirtieth of a second after the one before (one was missed) is late.
+        let t = Instant::now();
+        let mut pace = Pace::at(t, MINUTE, Rate::R59_94);
+        pace.counted(t, Some(1));
+        let frame = Rate::R59_94.frame();
+        let mut at = t;
+        for _ in 0..120 {
+            at += frame;
+            assert_eq!(pace.sent_new((1920, 1080), at, at, at), None);
+        }
+        at += 2 * frame;
+        pace.sent_new((1920, 1080), at, at, at);
+        for _ in 0..10 {
+            at += frame;
+            pace.sent_new((1920, 1080), at, at, at);
+        }
+        let minute = pace.minute_over(t + MINUTE).expect("the minute is over");
+        assert_eq!((minute.rate, minute.late), (Rate::R59_94, 1));
+        // The same gaps on a source that sends 30 a second are its steady pace.
+        let mut pace = Pace::at(t, MINUTE, Rate::R30);
+        pace.counted(t, Some(1));
+        let mut at = t;
+        for _ in 0..60 {
+            at += 2 * frame;
+            pace.sent_new((1920, 1080), at, at, at);
+        }
+        assert_eq!(pace.minute_over(t + MINUTE).expect("the minute is over").late, 0);
+    }
+
+    #[test]
+    fn a_slower_video_on_a_faster_source_is_found_steady_and_its_hold_ups_are_told() {
+        // A 29.97 fps video on a source that sends 59.94 a second: every gap is two of the
+        // source's picture times. Its pace is found, and a hold-up is a hitch.
+        let t = Instant::now();
+        let mut pace = Pace::at(t, MINUTE, Rate::R59_94);
+        pace.counted(t, Some(1));
+        let frame = Rate::R29_97.frame();
+        let mut at = t;
+        for _ in 0..60 {
+            at += frame;
+            pace.sent_new((1920, 1080), at, at, at);
+        }
+        at += Duration::from_millis(400);
+        let mut hitches = u32::from(pace.sent_new((1920, 1080), at, at, at).is_some());
+        for _ in 0..30 {
+            at += frame;
+            hitches += u32::from(pace.sent_new((1920, 1080), at, at, at).is_some());
+        }
+        assert_eq!(hitches, 1, "the hold-up is told once the video is seen moving again");
+        let minute = pace.minute_over(t + MINUTE).expect("the minute is over");
+        assert_eq!(minute.longest_gap, Some(Duration::from_millis(400)));
+        assert!(minute.late < 20, "only while its pace was being found, and the hold-up: {}", minute.late);
+        // A 59.94 fps video, then a 29.97 fps one on the same source: late for a moment while
+        // the pace follows, then steady.
+        let mut pace = Pace::at(t, MINUTE, Rate::R59_94);
+        pace.counted(t, Some(1));
+        let mut at = t;
+        for _ in 0..120 {
+            at += Rate::R59_94.frame();
+            pace.sent_new((1920, 1080), at, at, at);
+        }
+        for _ in 0..60 {
+            at += frame;
+            pace.sent_new((1920, 1080), at, at, at);
+        }
+        let before = pace.late + pace.pending.map_or(0, |late| late.gaps);
+        for _ in 0..300 {
+            at += frame;
+            pace.sent_new((1920, 1080), at, at, at);
+        }
+        assert_eq!(pace.late + pace.pending.map_or(0, |late| late.gaps), before, "steady once followed");
+        assert!(before < 20, "{before}");
+    }
+
+    #[test]
     fn the_minutes_line_says_every_figure() {
         let minute = Minute {
             length: MINUTE + Duration::from_millis(400),
             watched: MINUTE,
             size: Some((1920, 1080)),
+            rate: Rate::R29_97,
             sent: 1795,
             repeated: 1,
             late: 3,
@@ -2305,7 +2500,7 @@ mod tests {
         };
         assert_eq!(
             minute.words("Main Screen NDI"),
-            "NDI \"Main Screen NDI\" at 1920x1080 30fps: 1795 pictures sent (29.9/s), 1 repeated, 3 late, 3 skipped (1 \
+            "NDI \"Main Screen NDI\" at 1920x1080 29.97fps: 1795 pictures sent (29.9/s), 1 repeated, 3 late, 3 skipped (1 \
              of them before drawing, the GPU still reading back the one before), longest gap 412.0 ms, 4 not drawn, 5 \
              lost on the way back from the GPU (back in up to 6.2 ms), receivers 2, send took up to 34.1 ms in the \
              last minute"
@@ -2370,7 +2565,7 @@ mod tests {
         let open = move |_: &str| {
             Ok(Stand { receivers: theirs, sent: sent_tx, black: black_tx, bytes: bytes_tx, sound: sound_tx })
         };
-        let output = spawn("Main", open, || {}, log, SECOND).unwrap();
+        let output = spawn("Main", Rate::R59_94, open, || {}, log, SECOND).unwrap();
         output.show(2, 1, vec![9; 8], Sent::Opaque);
         assert_eq!(sent.recv_timeout(PATIENCE).unwrap().0, 2);
         // What whoever draws says of the pictures goes in the line too.
@@ -2383,7 +2578,7 @@ mod tests {
                 break (line, problem);
             }
         };
-        assert!(line.starts_with("NDI \"Main\" at 2x1 30fps: 1 pictures sent"), "{line}");
+        assert!(line.starts_with("NDI \"Main\" at 2x1 59.94fps: 1 pictures sent"), "{line}");
         assert!(line.contains("1 lost on the way back from the GPU (back in up to 7.0 ms), receivers 1"), "{line}");
         assert!(problem, "a picture lost is a problem");
         let kept = output.last_minute().expect("the figures are kept");

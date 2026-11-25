@@ -234,7 +234,7 @@ impl crate::App {
     fn screen_set(&mut self, words: &[String]) -> Result<Reply, String> {
         let usage = "screen set SCREEN name=… output=display:NAME|window|ndi:NAME|decklink:NAME|automatic|off mode=FORMAT keyer=off|external|internal kind=audience|stage \
                      layers=slides,media,props,messages,announcements color=#RRGGBB edges=LEFT,TOP,RIGHT,BOTTOM theme=THEME|main layout=STAGE-LAYOUT \
-                     background=solid|see-through alpha=straight|premultiplied key=SCREEN|none sound=on|off";
+                     background=solid|see-through alpha=straight|premultiplied key=SCREEN|none sound=on|off rate=29.97|30|59.94|60|25|50";
         let at = words.iter().position(|w| w.contains('=')).filter(|at| *at > 0).ok_or(usage)?;
         let theme_names: Vec<(sp_model::Uuid, String)> = self.themes.iter().map(|t| (t.id, t.name.clone())).collect();
         let connected = self.connected_displays();
@@ -295,6 +295,11 @@ impl crate::App {
                 "sound" => {
                     screen.sound = on_off(key, value)?;
                     said.push(if screen.sound { "sound on" } else { "sound off" }.to_owned());
+                }
+                "rate" => {
+                    screen.rate = crate::screens::NdiRate::parse(value)
+                        .ok_or_else(|| format!("rate is 29.97, 30, 59.94, 60, 25 or 50, not {value}."))?;
+                    said.push(format!("{} pictures a second over NDI", screen.rate.name()));
                 }
                 "output" => {
                     let words: Vec<String> = match value.split_once(':') {
@@ -444,6 +449,11 @@ impl crate::App {
             && !matches!(screen.output, Output::Ndi(_))
         {
             said.push("(sound goes out with a screen sent over NDI; this one isn't)".to_owned());
+        }
+        if words[at..].iter().any(|setting| setting.to_lowercase().starts_with("rate="))
+            && !matches!(screen.output, Output::Ndi(_))
+        {
+            said.push("(the rate is for a screen sent over NDI; this one isn't)".to_owned());
         }
         let was = std::mem::replace(&mut state.screens[index], screen);
         state.screens_changed = true;

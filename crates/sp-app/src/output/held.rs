@@ -46,7 +46,7 @@ pub(super) enum Happened {
     /// An NDI drawing was put off, the GPU still reading back the one before.
     NdiPutOff,
     /// A fade began, or ended. Its steps draw the windows at their pace, and give NDI and
-    /// DeckLink a picture for each picture of a playing video, or thirty a second.
+    /// DeckLink a picture for each picture of a playing video, or at the NDI screens' own rate.
     FadeBegan,
     FadeEnded,
     /// The video gave its new picture this long after the one before.

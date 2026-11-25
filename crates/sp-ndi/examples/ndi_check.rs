@@ -37,7 +37,7 @@ fn main() {
     let wake = move || {
         let _ = joined_tx.send(());
     };
-    let output = match NdiOutput::start_with_wake(NAME, wake, log) {
+    let output = match NdiOutput::start_with_wake(NAME, sp_ndi::Rate::default(), wake, log) {
         Ok(output) => output,
         Err(reason) => {
             eprintln!("{reason}");

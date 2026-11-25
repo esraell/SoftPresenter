@@ -106,11 +106,12 @@ pub enum OutputMsg {
     PreviewTargets(Vec<wgpu::Texture>),
     /// Draw the current frame again: a window was uncovered or asked to be redrawn.
     Redraw,
-    /// Send a screen over NDI under this name, or stop with `None`. Sent again with another
-    /// name, it is renamed.
+    /// Send a screen over NDI under this name, at this many pictures a second, or stop with
+    /// `None`. Sent again with another name or rate, the source starts again with them.
     SetNdi {
         id: Uuid,
         name: Option<String>,
+        rate: sp_ndi::Rate,
     },
     /// The screens whose NDI sources send no sound (switched off for them); every other NDI
     /// source sends what the app plays beside its pictures.
@@ -532,12 +533,13 @@ fn fade_owes_ndi(moved: bool, since_video: Option<Duration>, due: bool) -> bool 
 }
 
 /// When the next picture of a fade is due to the NDI sources after one drawn `now`, the one
-/// before having been due at `due`: one picture's time after that, so the pace holds whatever
-/// the windows' steps are; from now when that has fallen a picture or more behind.
-fn next_ndi_due(due: Option<Instant>, now: Instant) -> Instant {
+/// before having been due at `due`: one picture's time (`frame`, at the rate the fastest of the
+/// sources sends) after that, so the pace holds whatever the windows' steps are; from now when
+/// that has fallen a picture or more behind.
+fn next_ndi_due(due: Option<Instant>, now: Instant, frame: Duration) -> Instant {
     match due {
-        Some(due) if now < due + sp_ndi::FRAME => due + sp_ndi::FRAME,
-        _ => now + sp_ndi::FRAME,
+        Some(due) if now < due + frame => due + frame,
+        _ => now + frame,
     }
 }
 
@@ -1820,7 +1822,7 @@ fn run(
                     output.held.since(Part::Setup, For::Window(id), setting_up);
                 }
                 OutputMsg::Redraw => {}
-                OutputMsg::SetNdi { id, name } => output.set_ndi(id, name),
+                OutputMsg::SetNdi { id, name, rate } => output.set_ndi(id, name, rate),
                 OutputMsg::NdiSilent(silent) => {
                     output.ndi_silent = silent;
                     output.set_ndi_sound();
@@ -2166,8 +2168,9 @@ impl Output {
         target.fade = None;
     }
 
-    /// Starts, renames or stops a screen's NDI source and records how that went for the operator.
-    fn set_ndi(&mut self, id: Uuid, name: Option<String>) {
+    /// Starts, renames or stops a screen's NDI source, which sends `rate` pictures a second,
+    /// and records how that went for the operator.
+    fn set_ndi(&mut self, id: Uuid, name: Option<String>, rate: sp_ndi::Rate) {
         // Stop the old source first, so a renamed one does not appear twice.
         self.ndi.retain(|(have, _)| *have != id);
         self.ndi_sound.retain(|(have, _)| *have != id);
@@ -2186,7 +2189,7 @@ impl Output {
                     crate::applog::event("ndi", line);
                 }
             });
-            let started = NdiOutput::start_with_wake(&name, wake, log);
+            let started = NdiOutput::start_with_wake(&name, rate, wake, log);
             match started {
                 Ok(ndi) => {
                     let entry = NdiEntry::Started(ndi.name().to_owned(), ndi.watch());
@@ -3733,7 +3736,10 @@ impl Output {
         let frame = self.frame.clone();
         self.send_ndi_of(&frame, NdiChange::Any, Which::Moving, windows);
         self.ndi_fade_owed = false;
-        self.ndi_fade_due = Some(next_ndi_due(self.ndi_fade_due, now));
+        // At the pace of the source that sends the most pictures a second (a DeckLink card
+        // plays the newest it has at its own).
+        let frame = self.ndi.iter().map(|(_, ndi)| ndi.rate().frame()).min().unwrap_or(sp_ndi::FRAME);
+        self.ndi_fade_due = Some(next_ndi_due(self.ndi_fade_due, now, frame));
         if let Some(drawn) = &mut self.fade_drawn {
             drawn.sent += u32::from(!self.ndi_pending.is_empty());
         }
@@ -5080,14 +5086,18 @@ mod tests {
     fn a_fades_pictures_for_ndi_keep_ndis_pace_whatever_the_windows_steps_are() {
         let start = Instant::now();
         let ms = Duration::from_millis;
+        let frame = sp_ndi::Rate::R29_97.frame();
         // The first is due a picture's time after it is drawn.
-        assert_eq!(next_ndi_due(None, start), start + sp_ndi::FRAME);
+        assert_eq!(next_ndi_due(None, start, frame), start + frame);
         // Steps every 8 ms (a covered window) or 16.7 ms: the one drawn a little after it was
-        // due does not push the next back, so thirty a second go out, not fewer.
-        let due = start + sp_ndi::FRAME;
-        assert_eq!(next_ndi_due(Some(due), due + ms(7)), due + sp_ndi::FRAME);
+        // due does not push the next back, so 29.97 a second go out, not fewer.
+        let due = start + frame;
+        assert_eq!(next_ndi_due(Some(due), due + ms(7), frame), due + frame);
         // Fallen a picture or more behind (the thread was held): from now, not two at once.
-        assert_eq!(next_ndi_due(Some(due), due + ms(50)), due + ms(50) + sp_ndi::FRAME);
+        assert_eq!(next_ndi_due(Some(due), due + ms(50), frame), due + ms(50) + frame);
+        // A source that sends 59.94 a second is given the fade twice as often.
+        let fast = sp_ndi::Rate::R59_94.frame();
+        assert_eq!(next_ndi_due(Some(start + fast), start + fast + ms(3), fast), start + 2 * fast);
     }
 
     #[test]

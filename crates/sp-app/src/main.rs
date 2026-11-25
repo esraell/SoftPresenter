@@ -1547,7 +1547,7 @@ struct Running {
     /// little later once the output thread has let go of them.
     retired: Vec<(Arc<Window>, Instant)>,
     /// The NDI names the output thread was last told to send under, by screen.
-    ndi_sent: Vec<(Uuid, String)>,
+    ndi_sent: Vec<(Uuid, String, screens::NdiRate)>,
     /// The screens the output thread was last told send no sound over NDI.
     ndi_silent_sent: Vec<Uuid>,
     /// The DeckLink devices, found on a thread of their own (none on a quiet run's own data,
@@ -8183,28 +8183,29 @@ impl App {
         // NDI: start, rename and stop sources. A source that found no NDI starts again once
         // NDI has been downloaded in the app.
         if home_state.ndi_download.take_restart() {
-            ndi_sent.retain(|(id, _)| {
+            ndi_sent.retain(|(id, ..)| {
                 !matches!(output.ndi_status(*id), output::NdiStatus::Failed(reason) if reason == sp_ndi::NOT_INSTALLED)
             });
         }
-        let wanted: Vec<(Uuid, String)> = list
+        let wanted: Vec<(Uuid, String, screens::NdiRate)> = list
             .iter()
             .zip(&placed)
             .filter_map(|(screen, place)| match place {
-                Placed::Ndi(name) => Some((screen.id, name.clone())),
+                Placed::Ndi(name) => Some((screen.id, name.clone(), screen.rate)),
                 _ => None,
             })
             .collect();
         let mut ndi_moved = false;
-        for (id, name) in &wanted {
-            if !ndi_sent.contains(&(*id, name.clone())) {
-                output.send(OutputMsg::SetNdi { id: *id, name: Some(name.clone()) });
+        // Another name or another rate starts the source again.
+        for (id, name, rate) in &wanted {
+            if !ndi_sent.contains(&(*id, name.clone(), *rate)) {
+                output.send(OutputMsg::SetNdi { id: *id, name: Some(name.clone()), rate: rate.rate() });
                 ndi_moved = true;
             }
         }
-        for (id, _) in ndi_sent.iter() {
-            if !wanted.iter().any(|(still, _)| still == id) {
-                output.send(OutputMsg::SetNdi { id: *id, name: None });
+        for (id, ..) in ndi_sent.iter() {
+            if !wanted.iter().any(|(still, ..)| still == id) {
+                output.send(OutputMsg::SetNdi { id: *id, name: None, rate: sp_ndi::Rate::default() });
                 ndi_moved = true;
             }
         }

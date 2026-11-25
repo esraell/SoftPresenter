@@ -390,7 +390,7 @@ over NDI.
 
 Each NDI source's own thread (`sp-ndi`, `Pace` in `lib.rs`) writes an `[ndi]` line each minute,
 counted only while somebody watches it (or NDI can't count its receivers), like the
-`[decklink]` lines: new pictures sent (and how many a second, against the 30 a second the
+`[decklink]` lines: new pictures sent (and how many a second, against the rate the
 source says it sends); repeated (the same picture sent again because nothing new came for a
 second, as it is every second while a slide stays); late (a new picture more than one and a
 half pictures' times after the one before, while pictures are moving, at the pictures' own
@@ -426,10 +426,11 @@ the last four passes of a picture's time or more and the last sixteen of the oth
 that can hold a picture up (a fade in the windows, a picture the GPU was too slow with, an
 NDI picture lost or put off, the video giving no new picture): those that fell in the gap,
 and the longest pass then, written as a held pass is. From a test copy playing a video
-behind a song, with a receiver watching, a minute of the video alone and then a slide
-changed with a 0.4 s dissolve:
+behind a song, with a receiver watching: a minute of the video, and the line a slide changed
+with a 0.4 s dissolve gave before NDI was sent the fade itself (a hold-up reads the same way
+now, with what the thread was doing in place of the fade):
 
-    [ndi] NDI "SPTEST Main" at 1920x1080 30fps: 1800 pictures sent (30.0/s), 0 repeated, 0 late, 17 skipped, longest gap 47.9 ms, 0 not drawn, 0 lost on the way back from the GPU (back in up to 38.1 ms), receivers 1, send took up to 47.9 ms in the last minute
+    [ndi] NDI "SPTEST Main" at 1920x1080 29.97fps: 1796 pictures sent (29.9/s), 0 repeated, 0 late, 0 skipped, longest gap 46.1 ms, 0 not drawn, 0 lost on the way back from the GPU (back in up to 13.4 ms), receivers 1, send took up to 38.5 ms in the last minute
     [ndi] NDI "SPTEST Main" stood still: 424.2 ms between two new pictures, up to 20:58:26.792, while pictures were moving and somebody watched. The picture was handed over 417.8 ms after the one before was sent, waited 0.0 ms for NDI's thread and took 6.4 ms to send. On the screens' thread then: a fade ran in the windows for 368.0 ms of it; no pass took 33.3 ms or more.
 
 A DeckLink output's thread says when opening its device took 100 ms or more, and the window
@@ -496,7 +497,7 @@ fade as a `Fade`: the two scenes, and, when the fade is cached, a texture of eac
   `NdiFade`): each picture drawn for them (`ndi_groups`) keeps the scene it was last sent
   (`ndi_shown`) and fades from it, cached like a window's when nothing moves. The fade's steps
   give them a picture when one is owed (`fade_owes_ndi`: each new picture of a playing video,
-  or one every thirtieth of a second while only the fade moves) and none is on its way back
+  or one each picture's time of the fastest NDI screen while only the fade moves) and none is on its way back
   from the GPU (`Output::step_ndi_fade`); `send_ndi_of` draws a fading picture as far as the
   fade has got whoever asks, and copies it straight from a window's texture when that window
   has just painted the same picture at NDI's size (`window_is_ndi_picture`). After the fade

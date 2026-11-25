@@ -204,6 +204,62 @@ pub struct Screen {
     /// goes with its pictures. On unless switched off, so only "off" is written.
     #[serde(default = "sound_on", skip_serializing_if = "is_on")]
     pub sound: bool,
+    /// For a screen sent over NDI, how many pictures a second it sends. 29.97 unless another is
+    /// chosen, so only another is written.
+    #[serde(default, skip_serializing_if = "NdiRate::is_default")]
+    pub rate: NdiRate,
+}
+
+/// How many pictures a second a screen sent over NDI sends: the rate the equipment that shows it
+/// plays at. A decoder or switcher playing at another rate drops or repeats a picture every so
+/// often (a 59.94 Hz one given 30 a second, about every 33 s), which is seen as a small pause.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NdiRate {
+    #[default]
+    #[serde(rename = "29.97")]
+    R29_97,
+    #[serde(rename = "30")]
+    R30,
+    #[serde(rename = "59.94")]
+    R59_94,
+    #[serde(rename = "60")]
+    R60,
+    #[serde(rename = "25")]
+    R25,
+    #[serde(rename = "50")]
+    R50,
+}
+
+impl NdiRate {
+    /// In the order they are offered.
+    pub const ALL: [NdiRate; 6] =
+        [NdiRate::R29_97, NdiRate::R30, NdiRate::R59_94, NdiRate::R60, NdiRate::R25, NdiRate::R50];
+
+    /// The rate as NDI is told it, an exact fraction.
+    pub fn rate(self) -> sp_ndi::Rate {
+        match self {
+            NdiRate::R29_97 => sp_ndi::Rate::R29_97,
+            NdiRate::R30 => sp_ndi::Rate::R30,
+            NdiRate::R59_94 => sp_ndi::Rate::R59_94,
+            NdiRate::R60 => sp_ndi::Rate::R60,
+            NdiRate::R25 => sp_ndi::Rate::R25,
+            NdiRate::R50 => sp_ndi::Rate::R50,
+        }
+    }
+
+    /// As it is said and typed: "29.97", "60".
+    pub fn name(self) -> String {
+        self.rate().name()
+    }
+
+    /// The rate typed, if it is one of them.
+    pub fn parse(typed: &str) -> Option<NdiRate> {
+        NdiRate::ALL.into_iter().find(|rate| rate.name() == typed.trim())
+    }
+
+    fn is_default(&self) -> bool {
+        *self == NdiRate::default()
+    }
 }
 
 fn sound_on() -> bool {
@@ -409,6 +465,7 @@ impl Screen {
             look: Look::default(),
             theme: None,
             sound: true,
+            rate: NdiRate::default(),
         }
     }
 
@@ -854,6 +911,31 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn an_ndi_screen_sends_29_97_pictures_a_second_unless_another_rate_is_chosen() {
+        // A screen saved before the rate could be chosen sends 29.97, as a new one does.
+        let old: Screen = serde_json::from_str(
+            r#"{"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e01","name":"Stream","output":{"ndi":"Sanctuary"}}"#,
+        )
+        .unwrap();
+        assert_eq!(old.rate, NdiRate::R29_97);
+        assert_eq!(old.rate.rate(), sp_ndi::Rate { n: 30_000, d: 1001 });
+        let mut stream = Screen::new("Stream".to_owned(), Output::Ndi("Sanctuary".to_owned()));
+        assert!(!serde_json::to_string(&stream).unwrap().contains("rate"), "the usual rate is not written");
+        // Each rate is kept by its name, and sent as its exact fraction.
+        for rate in NdiRate::ALL {
+            stream.rate = rate;
+            let saved = serde_json::to_string(&stream).unwrap();
+            let back: Screen = serde_json::from_str(&saved).unwrap();
+            assert_eq!(back.rate, rate, "{saved}");
+            assert_eq!(NdiRate::parse(&rate.name()), Some(rate));
+        }
+        stream.rate = NdiRate::R59_94;
+        assert!(serde_json::to_string(&stream).unwrap().contains(r#""rate":"59.94""#));
+        assert_eq!(NdiRate::R59_94.rate(), sp_ndi::Rate { n: 60_000, d: 1001 });
+        assert_eq!(NdiRate::parse("24"), None);
+    }
 
     #[test]
     fn a_screen_sends_sound_unless_switched_off_and_only_off_is_written() {

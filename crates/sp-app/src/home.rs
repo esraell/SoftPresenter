@@ -6478,6 +6478,27 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                         changed = true;
                     }
                     ui.end_row();
+
+                    ui.label(egui::RichText::new(t("screens.ndi.rate", "Frame rate")).color(TEXT_DIM));
+                    let mut rate = screen.rate;
+                    let hover = t(
+                        "screens.ndi.rate.hover",
+                        "How many pictures a second this screen sends. Choose the rate the equipment that shows it plays at: 29.97 or 59.94 for most video equipment where the mains are 60 Hz, 25 or 50 where they are 50 Hz. At another rate the picture pauses for a moment every few seconds.",
+                    );
+                    egui::ComboBox::from_id_salt("screen ndi rate")
+                        .selected_text(rate.name())
+                        .show_ui(ui, |ui| {
+                            for choice in crate::screens::NdiRate::ALL {
+                                ui.selectable_value(&mut rate, choice, choice.name());
+                            }
+                        })
+                        .response
+                        .on_hover_text(hover);
+                    if rate != screen.rate {
+                        state.screens[index].rate = rate;
+                        changed = true;
+                    }
+                    ui.end_row();
                 }
             });
         });

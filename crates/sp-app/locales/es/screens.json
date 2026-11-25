@@ -179,6 +179,8 @@
   "screens.ndi.problem.network": "No se pudo descargar NDI: {why}.",
   "screens.ndi.problem.processor": "La descarga de NDI no trae NDI para el procesador de este ordenador ({processor}).",
   "screens.ndi.problem.too_large": "La descarga es más grande de lo que debería ser la de NDI, así que se detuvo y se borró.",
+  "screens.ndi.rate": "Imágenes por segundo",
+  "screens.ndi.rate.hover": "Cuántas imágenes por segundo envía esta pantalla. Elige la frecuencia a la que trabaja el equipo que la muestra: 29,97 o 59,94 para casi todo el equipo de vídeo donde la red eléctrica es de 60 Hz, 25 o 50 donde es de 50 Hz. Con otra frecuencia, la imagen se detiene un instante cada pocos segundos.",
   "screens.ndi.ready": "NDI está listo: las pantallas que se envían por NDI empiezan ahora.",
   "screens.ndi.remove": "Quitar",
   "screens.ndi.remove.hover": "Borra el NDI que descargó SoftPresenter",

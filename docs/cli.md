@@ -935,7 +935,7 @@ the usual ones.
 | Command | Does |
 |---|---|
 | `screen add audience\|stage NAME [on display NAME\|window\|ndi NAME\|decklink NAME\|automatic]` | A new screen (in a window unless told); a DeckLink output by its name or its number in `sp decklink` |
-| `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|decklink:NAME\|automatic\|off`, `mode=FORMAT` (a DeckLink screen's format: `1080i59.94`, `720p50`…), `keyer=off\|external\|internal` (a DeckLink card's keyer: fill and key on two connectors, or over the card's input; keyed, the screen is see-through and premultiplied unless `alpha=` is given too, and `keyer=off` makes it solid), `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT`; for an audience screen `background=solid\|see-through`, `alpha=straight\|premultiplied` (how a see-through screen sends its soft edges; straight unless told), `key=SCREEN\|none` (shows that screen's key); for a screen sent over NDI `sound=on\|off` (whether the sound the app plays goes out with its picture; on unless switched off) |
+| `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|decklink:NAME\|automatic\|off`, `mode=FORMAT` (a DeckLink screen's format: `1080i59.94`, `720p50`…), `keyer=off\|external\|internal` (a DeckLink card's keyer: fill and key on two connectors, or over the card's input; keyed, the screen is see-through and premultiplied unless `alpha=` is given too, and `keyer=off` makes it solid), `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT`; for an audience screen `background=solid\|see-through`, `alpha=straight\|premultiplied` (how a see-through screen sends its soft edges; straight unless told), `key=SCREEN\|none` (shows that screen's key); for a screen sent over NDI `sound=on\|off` (whether the sound the app plays goes out with its picture; on unless switched off) and `rate=29.97\|30\|59.94\|60\|25\|50` (how many pictures a second it sends; 29.97 unless another is chosen) |
 | `screen delete SCREEN --yes` | Deletes a screen (there is always one) |
 | `settings set key=value…` | `transition=KIND[:SECONDS]`, `media_transition=…`, `copyright=never\|first\|last\|every`, `ccli_licence=DIGITS`, `continuous=on\|off`, `view=grid\|words\|table` (Words Only; `easy` too), `columns=1-12`, `language=auto\|en\|es\|ru\|uk` (the app's own words, as Settings › General › Language; `auto` follows the computer's; the replies stay in English) |
 
@@ -1113,6 +1113,16 @@ unless it is switched off for that screen:
     The screen Stream: sound on.
     $ sp screen set "Screen 1" sound=off
     The screen Screen 1: sound off, (sound goes out with a screen sent over NDI; this one isn't).
+
+A screen sent over NDI sends 29.97 pictures a second unless another rate is chosen for it: the
+rate the equipment that shows it plays at (29.97, 30, 59.94, 60, 25 or 50). `sp screens` says a
+rate other than 29.97, and `sp screens --json` gives each NDI screen's `rate`:
+
+    $ sp screen set Stream rate=59.94
+    The screen Stream: 59.94 pictures a second over NDI.
+    $ sp screens
+      …
+      2. Stream: Sending as "Sanctuary" to 1 receiver; 59.94 pictures a second
 
 In the JSON of `screens`, `sound` is `true` or `false` for a screen sent over NDI and null for
 any other.
