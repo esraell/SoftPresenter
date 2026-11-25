@@ -76,11 +76,33 @@ pub enum Icon {
     Stack,
     /// Three lines, the last shorter: the notices' status button.
     Notices,
+    /// A display on a short stand: Settings › Screens.
+    Display,
+    /// A phone seen from the front: Settings › Phone Screens.
+    Phone,
+    /// Three dots in a row: Settings › Groups.
+    Dots,
+    /// A globe: Settings › Language.
+    Globe,
+    /// Two links of a chain: Settings › Integrations.
+    Link,
+    /// A four-pointed star: Settings › AI assistants.
+    Sparkle,
+    /// A phone with a wave beside it: Settings › Phone remote.
+    PhoneWave,
+    /// A keyboard: Settings › Keys.
+    Keyboard,
+    /// A prompt and a cursor: Settings › Command line.
+    Prompt,
+    /// A page with its corner folded: Settings › Song files.
+    File,
+    /// An i in a circle: Settings › About.
+    Info,
 }
 
 /// Every icon, so a test can draw them all.
 #[cfg(test)]
-pub const ALL: [Icon; 59] = [
+pub const ALL: [Icon; 70] = [
     Icon::Search,
     Icon::Theme,
     Icon::Play,
@@ -140,6 +162,17 @@ pub const ALL: [Icon; 59] = [
     Icon::Film,
     Icon::Stack,
     Icon::Notices,
+    Icon::Display,
+    Icon::Phone,
+    Icon::Dots,
+    Icon::Globe,
+    Icon::Link,
+    Icon::Sparkle,
+    Icon::PhoneWave,
+    Icon::Keyboard,
+    Icon::Prompt,
+    Icon::File,
+    Icon::Info,
 ];
 
 /// Draws inside a square using coordinates from 0 to 1.
@@ -485,6 +518,79 @@ pub fn paint(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             p.line(&[(0.2, 0.3), (0.8, 0.3)]);
             p.line(&[(0.2, 0.5), (0.8, 0.5)]);
             p.line(&[(0.2, 0.7), (0.6, 0.7)]);
+        }
+        // The Settings list's icons, drawn as the design draws them on a grid of 13.
+        Icon::Display => {
+            p.rect(0.115, 0.192, 0.885, 0.692, 0.01);
+            p.line(&[(0.346, 0.885), (0.654, 0.885)]);
+        }
+        Icon::Phone => {
+            p.rect(0.308, 0.115, 0.692, 0.885, 0.01);
+            p.line(&[(0.462, 0.754), (0.538, 0.754)]);
+        }
+        Icon::Dots => {
+            for x in [0.231, 0.5, 0.769] {
+                p.dot(x, 0.5, 0.092);
+            }
+        }
+        Icon::Globe => {
+            p.circle(0.5, 0.5, 0.385);
+            p.line(&[(0.115, 0.5), (0.885, 0.5)]);
+            // The meridian: a lens from pole to pole, two curves of the design's.
+            let curve = |t: f32, side: f32| {
+                let u = 1.0 - t;
+                let x = 0.5 + side * 0.154 * 3.0 * u * t;
+                let y = 0.115 * u * u * u + 3.0 * 0.269 * u * u * t + 3.0 * 0.731 * u * t * t + 0.885 * t * t * t;
+                (x, y)
+            };
+            let lens: Vec<(f32, f32)> = (0..=16)
+                .map(|i| curve(i as f32 / 16.0, -1.0))
+                .chain((0..=16).map(|i| curve(1.0 - i as f32 / 16.0, 1.0)))
+                .collect();
+            p.closed(&lens);
+        }
+        Icon::Link => {
+            p.line(&[(0.385, 0.615), (0.615, 0.385)]);
+            p.line(&[(0.323, 0.485), (0.231, 0.577)]);
+            p.arc(0.338, 0.685, 0.152, 0.625, 0.125);
+            p.line(&[(0.446, 0.792), (0.538, 0.7)]);
+            p.line(&[(0.477, 0.308), (0.569, 0.215)]);
+            p.arc(0.677, 0.323, 0.152, 0.625, 1.125);
+            p.line(&[(0.785, 0.431), (0.692, 0.523)]);
+        }
+        Icon::Sparkle => p.closed(&[
+            (0.5, 0.115),
+            (0.592, 0.408),
+            (0.885, 0.5),
+            (0.592, 0.592),
+            (0.5, 0.885),
+            (0.408, 0.592),
+            (0.115, 0.5),
+            (0.408, 0.408),
+        ]),
+        Icon::PhoneWave => {
+            p.rect(0.269, 0.115, 0.577, 0.885, 0.01);
+            p.arc(0.559, 0.5, 0.231, -0.116, 0.116);
+        }
+        Icon::Keyboard => {
+            p.rect(0.115, 0.269, 0.885, 0.731, 0.01);
+            for x in [0.269, 0.5, 0.731] {
+                p.dot(x, 0.423, 0.05);
+            }
+            p.line(&[(0.346, 0.577), (0.654, 0.577)]);
+        }
+        Icon::Prompt => {
+            p.line(&[(0.154, 0.269), (0.385, 0.5), (0.154, 0.731)]);
+            p.line(&[(0.5, 0.731), (0.846, 0.731)]);
+        }
+        Icon::File => {
+            p.closed(&[(0.231, 0.115), (0.577, 0.115), (0.769, 0.308), (0.769, 0.885), (0.231, 0.885)]);
+            p.line(&[(0.577, 0.115), (0.577, 0.308), (0.769, 0.308)]);
+        }
+        Icon::Info => {
+            p.circle(0.5, 0.5, 0.385);
+            p.line(&[(0.5, 0.462), (0.5, 0.692)]);
+            p.dot(0.5, 0.308, 0.05);
         }
     }
 }

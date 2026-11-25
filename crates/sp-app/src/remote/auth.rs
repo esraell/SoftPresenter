@@ -164,7 +164,7 @@ impl Store {
         self.forget_unused(now_seconds());
         if self.saved.devices.len() >= MOST_DEVICES {
             return Err(format!(
-                "{MOST_DEVICES} devices are remembered already. Forget one in Settings › Remote Control first."
+                "{MOST_DEVICES} devices are remembered already. Forget one in Settings › Phone remote first."
             ));
         }
         let token = random_word(32)?;

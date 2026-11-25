@@ -1250,8 +1250,7 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
                     .clicked()
                 {
                     state.preferences_open = true;
-                    state.preferences_pane =
-                        crate::home::PANES.iter().position(|pane| *pane == "Integrations").unwrap_or(0);
+                    state.preferences_pane = crate::home::Pane::Integrations;
                     state.canva.open = true;
                 }
             }
@@ -1290,19 +1289,18 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
                 let shown = ui.interact(room, ui.scope_id().with("remote control line"), Sense::click());
                 ui.painter().with_clip_rect(room).galley(at, galley, ink);
                 let hint = state.remote.address.as_ref().map_or_else(
-                    || t("topbar.remote.settings", "Settings › Remote Control").to_owned(),
+                    || t("topbar.remote.settings", "Settings › Phone remote").to_owned(),
                     |address| {
                         tf(
                             "topbar.remote.open",
-                            "Open {address} on another device (Settings › Remote Control)",
+                            "Open {address} on another device (Settings › Phone remote)",
                             &[("address", address)],
                         )
                     },
                 );
                 if shown.on_hover_text(hint).clicked() {
                     state.preferences_open = true;
-                    state.preferences_pane =
-                        crate::home::PANES.iter().position(|pane| *pane == "Remote Control").unwrap_or(0);
+                    state.preferences_pane = crate::home::Pane::PhoneRemote;
                 }
             }
         }

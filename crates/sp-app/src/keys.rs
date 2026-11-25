@@ -676,7 +676,7 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
         let knob = if on { track.right_center() - vec2(8.5, 0.0) } else { track.left_center() + vec2(8.5, 0.0) };
         painter.circle_filled(knob, 6.0, if on { TEXT } else { TEXT_DIM });
         painter.galley(pos2(track.max.x + 10.0, track.center().y - label.size().y / 2.0), label, TEXT);
-        let where_else = t("keys.also_in", "Also in Settings \u{203a} Key Mappings.");
+        let where_else = t("keys.also_in", "Also in Settings \u{203a} Keys.");
         let left = switch.max.x + 14.0;
         let note = painter.layout(
             where_else.to_uppercase(),

@@ -1004,7 +1004,7 @@ async fn login(State(shared): State<Arc<Shared>>, request: Request) -> Response<
         return json(
             StatusCode::SERVICE_UNAVAILABLE,
             host,
-            serde_json::json!({"ok": false, "text": shared.said(|| t("remote.signin.no_password", "No password is set: set one in Settings › Remote Control."))}),
+            serde_json::json!({"ok": false, "text": shared.said(|| t("remote.signin.no_password", "No password is set: set one in Settings › Phone remote."))}),
         );
     };
     let refuse_wait = |wait: Duration| {

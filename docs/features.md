@@ -880,7 +880,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   menu is used, the keyboard goes back to running the show.
 - **Clearing from the keyboard**: Escape clears everything. On a Mac no F key is used (they
   are the system's: brightness, volume, Mission Control), so clearing one layer is its key
-  under the preview, and the list of keys and Settings › Key Mappings say "Button only" for
+  under the preview, and the list of keys and Settings › Keys say "Button only" for
   it. On Windows and Linux F1 clears everything too, and F2, F3, F4, F5 and F6 clear the slide,
   the media, the props, the audio and the message; the layer keys' tooltips name them there.
   In the Edit view (its slides, themes, props and stage layouts alike) the keyboard is the
@@ -1737,7 +1737,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 
 ## Copyright and settings
 - **The app in other languages** (`i18n.rs`, tables in `crates/sp-app/locales/`; how to add words:
-  [docs/translating.md](translating.md)). Settings › General opens with a Language card: the
+  [docs/translating.md](translating.md)). Settings › Language has the choice: the
   computer's language (named in that language, "El idioma del ordenador (Español)"), then English,
   Español, Русский and Українська, each written in itself; the setup's first step has the same
   choice. A choice shows at once, with no restart, and is kept with the preferences (`language`).
@@ -1747,8 +1747,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   layer keys, Clear All, the tool tabs and what is in them), the Bible view, the Bibles window,
   the Edit view (its lists, tools, inspector with its NDI Source section, an NDI box's tag on
   the slide, stage layouts and Edit Words), the Themes view, the
-  find box's results, Settings (General, Screens, Groups, Key Mappings, Integrations with VoxLive
-  and Canva Sync, Remote Control, About), the Screens window (the list, each screen's output,
+  find box's results, Settings (every page and what each row of its list says), the Screens window (the list, each screen's output,
   look, background, key and DeckLink rows, and what each screen is doing, which `sp screens`
   gives in English), the first-start setup, the Import Slides sheets, the confirmation
   sheets, the notices list and everything said in it, and the Mac's menu bar (it changes with the
@@ -1781,8 +1780,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - Each song's Artist, Author, Publisher, Year and CCLI Song # (the Info icon at the right of its header, beside Edit Words, Arrangement and Notes), and a
   copyright line on the screens on a song's first slide, last slide or every slide, with the
   church's CCLI licence number, chosen in Settings.
-- A Settings window (Cmd+,) with General, Screens, Groups, Key Mappings, Integrations and
-  Remote Control panes.
+- **A Settings window** (Cmd+,), its pages in four groups down the left, each row ending in how
+  its page stands in the fixed-width face, with a green light when something is on: **The room**
+  (Screens, "3 of 4 on"; Phone Screens, On or Off), **On screen** (Slides, with the transition
+  for all slides; Groups; Language, Auto or the language chosen), **Connect** (Integrations, "1
+  connected"; AI assistants, Off, Can prepare or Runs screens; Phone remote, Off or how many
+  people are connected) and **Advanced** (Keys, Command line, Song files, About), with Set Up
+  SoftPresenter… under them. There is no General page: its copyright line is in Slides, its
+  Language in Language, its Reload songs in Song files. The window opens at 1040 × 720 and keeps
+  at least 820 × 680, room for the list beside a page in every language.
 - **Integrations** (Settings): the services SoftPresenter works with, each with how it stands,
   opening a page to connect it. **VoxLive** (live translation captions) is connected with an
   API key made in VoxLive (Settings › API keys, with the screens permissions), pasted on its
@@ -1898,7 +1904,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 
 ## Remote Control
 - **Run the show from another device** on the church's network: a computer, tablet or phone
-  opens the address Settings › Remote Control shows (`https://` the computer's address and the
+  opens the address Settings › Phone remote shows (`https://` the computer's address and the
   port, 4316 unless changed; 1024 up) and signs in with a password of at least ten characters.
   Only devices on a local network are answered. Off by default; switched
   on, it stays on the next time the app opens. Off, nothing listens; switching it off closes
@@ -1921,7 +1927,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   name.
 - **In the window's language.** The page is sent the language the app speaks, with how it writes
   numbers and quotation marks, and is told at once when the operator changes it (Settings ›
-  General › Language, the setup's first step, `sp settings set language=…`), in the same change
+  Language, the setup's first step, `sp settings set language=…`), in the same change
   as every name it shows in other words, so it never shows two languages at once; the sign-in
   page and the page's script have it before anything else comes. A built-in name comes with the
   words the window shows for it (the built-in theme, "Incluido"; the untouched first playlist of
@@ -2055,7 +2061,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   for fish), never twice; on Windows, batch files in `%LOCALAPPDATA%\SoftPresenter\bin` and that
   folder on the user's PATH. It happens once for each place the app is installed in, never takes
   over an `sp` that opens another copy still there, and not again after Remove. Settings ›
-  Integrations › Command line says how it stands ("sp is installed (~/.local/bin/sp)", not found by
+  Command line says how it stands ("sp is installed (~/.local/bin/sp)", not found by
   a terminal yet, or opening another copy) with Install, Use This Copy and Remove, and says what a
   click did under the buttons at once; `softpresenter install-cli` and `remove-cli` do the same from
   a terminal.
@@ -2096,11 +2102,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   names every file moved; the window says how many went, only when some did.
 - **What the menu bar did is in the window too, on every system** (Windows and Linux have no menu
   bar; the design has none either): Settings › Screens has Identify and the test patterns (Off,
-  Colour bars, Grid, White: everyone watching sees them); Settings › General has Song files ›
-  Reload songs; Settings › Key Mappings has Show keys on buttons; Settings has Set Up
-  SoftPresenter… under its sections (Settings steps aside so the setup opens over the home
-  window); Settings › Integrations has Command line (where the sp command stands, Install, Use
-  This Copy and Remove); Settings › About has the version, What's new, Open the guide,
+  Colour bars, Grid, White: everyone watching sees them); Settings › Song files has Reload
+  songs; Settings › Keys has Show keys on buttons; Settings has Set Up SoftPresenter… under its
+  list (Settings steps aside so the setup opens over the home window); Settings › Command line
+  has where the sp command stands, Install, Use This Copy and Remove; Settings › About has the version, What's new, Open the guide,
   Report an issue… (a new issue with the version filled in) and Licences…; a click on the
   readout under the preview goes to the slide on screen (opens its item and brings the slide
   into view). The media strip has its fold button (a chevron at the right of its heading).

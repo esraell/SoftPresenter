@@ -18,8 +18,10 @@ use crate::screens::{Kind, Output, Screen};
 use crate::icons::{self, Icon};
 
 mod import_sheet;
+mod settings;
 mod slides;
 pub use import_sheet::{AskImport, ImportAnswer, SlidesChoice};
+pub use settings::{Pane, settings_ui};
 pub use slides::arrangement_name;
 use slides::{slide_area, slide_grid};
 
@@ -419,7 +421,7 @@ pub struct HomeState {
     pub view_request: Option<usize>,
     /// True while the Settings window is open, and which of its panes is showing.
     pub preferences_open: bool,
-    pub preferences_pane: usize,
+    pub preferences_pane: Pane,
     /// Settings › Integrations: VoxLive's state, and what is asked of it.
     pub voxlive: crate::voxlive::View,
     /// Canva Sync's page in Settings › Integrations, and what the top bar says of a sync.
@@ -1807,7 +1809,7 @@ impl Default for HomeState {
             operator_displays: Vec::new(),
             view_request: None,
             preferences_open: false,
-            preferences_pane: 0,
+            preferences_pane: Pane::default(),
             voxlive: Default::default(),
             canva: Default::default(),
             timelychurch: Default::default(),
@@ -5817,26 +5819,6 @@ pub fn end_search(ctx: &egui::Context, state: &mut HomeState) {
 /// The key that adds each shape in the editor, in the order of `Shape::ALL`.
 pub const SHAPE_KEYS: [char; 10] = ['O', 'R', 'E', 'G', 'L', 'H', 'P', 'S', 'D', 'A'];
 
-/// The Settings window's panes, in order (`preferences_pane` is a place in it).
-pub const PANES: [&str; 8] =
-    ["General", "Screens", "Groups", "Key Mappings", "Integrations", "Remote Control", "Phone Screens", "About"];
-
-/// A pane's name as the window shows it, in the language set. [`PANES`] keeps the English names,
-/// which the code matches on.
-fn pane_name(pane: &'static str) -> &'static str {
-    match pane {
-        "General" => t("settings.pane.general", "General"),
-        "Screens" => t("settings.pane.screens", "Screens"),
-        "Groups" => t("settings.pane.groups", "Groups"),
-        "Key Mappings" => t("settings.pane.keys", "Key Mappings"),
-        "Integrations" => t("settings.pane.integrations", "Integrations"),
-        "Remote Control" => t("settings.pane.remote", "Remote Control"),
-        "Phone Screens" => t("settings.pane.mirror", "Phone Screens"),
-        "About" => t("settings.pane.about", "About"),
-        other => other,
-    }
-}
-
 /// The web pages the app points to: from Settings › About and the Help menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -5868,117 +5850,6 @@ pub fn open_page(state: &mut HomeState, page: Page) {
             &[("error", &e.to_string())],
         ));
     }
-}
-
-/// Settings › Integrations › Command line: the `sp` command, which controls the running app from
-/// a terminal or a script. It says where sp stands (read again each time the card comes into
-/// view, and after each click) and offers what fits: Install, Use This Copy when sp opens
-/// another copy, Remove once it is there; under the buttons, what the last click did, in place
-/// of where it stood.
-fn command_line_card(ui: &mut egui::Ui, state: &mut HomeState) {
-    use crate::cli_install::{Status, Tone};
-    use crate::studio::{CARE, READY, TALLY, TEXT_DIM, TEXT_FAINT};
-    ui.add_space(18.0);
-    crate::studio::caption(ui, &t("settings.cli", "Command Line").to_uppercase());
-    ui.label(t("settings.cli.about", "The sp command controls SoftPresenter from a terminal or a script."));
-    ui.add_space(4.0);
-    let card = &mut state.command_line;
-    // Not drawn in the pass before: the card has just come into view (the pane chosen, or the
-    // window opened again), so it reads afresh and forgets what it said.
-    let pass = ui.ctx().cumulative_pass_nr();
-    if card.drawn.is_none_or(|last| pass != last && pass != last + 1) {
-        card.status = None;
-        card.said = None;
-    }
-    card.drawn = Some(pass);
-    let status = card.status.get_or_insert_with(crate::cli_install::status).clone();
-    let (install, removable) = match &status {
-        Status::Missing => (Some(t("settings.cli.install", "Install")), false),
-        Status::Here { findable: true, .. } => (None, true),
-        Status::Here { findable: false, .. } => (Some(t("settings.cli.install", "Install")), true),
-        Status::Elsewhere { .. } | Status::Gone { .. } => (Some(t("settings.cli.use_this", "Use This Copy")), true),
-    };
-    let mut clicked_install = false;
-    let mut clicked_remove = false;
-    ui.horizontal(|ui| {
-        if let Some(words) = install {
-            let hint = t("settings.cli.install.hint", "Puts sp (and softpresenter) where a terminal finds it");
-            clicked_install = ui.button(words).on_hover_text(hint).clicked();
-        }
-        if removable {
-            let hint = t(
-                "settings.cli.remove.hint",
-                "Takes sp and softpresenter away again, with anything SoftPresenter added for them",
-            );
-            clicked_remove = ui
-                .add(
-                    egui::Button::new(egui::RichText::new(t("settings.cli.remove", "Remove")).color(TEXT_DIM))
-                        .frame(false),
-                )
-                .on_hover_text(hint)
-                .clicked();
-        }
-    });
-    if clicked_install {
-        card.said = Some(match crate::cli_install::install() {
-            Ok(done) => (
-                if done.add_folder { Tone::Care } else { Tone::Good },
-                crate::cli_install::installed_words(&done, cfg!(windows)),
-            ),
-            Err(problem) => (Tone::Trouble, problem),
-        });
-        card.status = Some(crate::cli_install::status());
-    }
-    if clicked_remove {
-        card.said = Some(match crate::cli_install::remove() {
-            Ok(done) => (Tone::Plain, crate::cli_install::removed_words(&done)),
-            Err(problem) => (Tone::Trouble, problem),
-        });
-        card.status = Some(crate::cli_install::status());
-    }
-    let (tone, words) = card.said.clone().unwrap_or_else(|| crate::cli_install::status_words(&status, cfg!(windows)));
-    let colour = match tone {
-        Tone::Good => READY,
-        Tone::Plain => TEXT_FAINT,
-        Tone::Care => CARE,
-        Tone::Trouble => TALLY,
-    };
-    ui.add_space(2.0);
-    // A line short enough to read at a glance, wrapped beside its dot.
-    let room = (ui.available_width() - 14.0).min(640.0);
-    ui.horizontal_top(|ui| {
-        let (place, _) = ui.allocate_exact_size(vec2(8.0, 16.0), Sense::hover());
-        ui.painter().circle_filled(place.center(), 3.5, colour);
-        ui.vertical(|ui| {
-            ui.set_max_width(room);
-            ui.label(egui::RichText::new(words).size(12.0).color(TEXT_DIM));
-        });
-    });
-}
-
-/// Settings › General › Language, the first card: the words of SoftPresenter itself. The
-/// computer's language first (named in that language), then each language written in itself.
-/// A choice shows at once, in this window and every other.
-fn language_card(ui: &mut egui::Ui) {
-    use crate::studio::{TEXT_DIM, caption};
-    caption(ui, &t("settings.language", "Language").to_uppercase());
-    ui.label(t("settings.language.about", "The words of SoftPresenter itself"));
-    language_menu(ui);
-    ui.add_space(2.0);
-    ui.label(
-        egui::RichText::new(t("settings.language.detail", "Buttons, menus and messages. Changes at once."))
-            .size(11.5)
-            .color(TEXT_DIM),
-    );
-    ui.add_space(6.0);
-    ui.label(
-        egui::RichText::new(t(
-            "settings.language.not_this",
-            "The languages your songs and Bibles show in are set in Setup \u{203a} Languages; the Bible page has its own reading language.",
-        ))
-        .size(11.5)
-        .color(TEXT_DIM),
-    );
 }
 
 /// The menu that chooses the app's language, on the Language card and in the setup's first step.
@@ -6019,247 +5890,6 @@ pub fn language_choice_name(choice: crate::i18n::Choice) -> String {
         }
         crate::i18n::Choice::Is(language) => language.own_name().to_owned(),
     }
-}
-
-/// The Settings window's contents: its panes down the left, the chosen one on the right.
-pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
-    use crate::studio::{ACCENT, HOVER, PANEL, TEXT, TEXT_DIM};
-    egui::Panel::left("settings panes")
-        .resizable(false)
-        .exact_size(180.0)
-        .frame(Frame::new().fill(PANEL).inner_margin(egui::Margin { left: 10, right: 10, top: 14, bottom: 10 }))
-        .show(ui, |ui| {
-            for (index, name) in PANES.into_iter().enumerate() {
-                let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
-                if state.preferences_pane == index {
-                    ui.painter().rect_filled(row, 6.0, ACCENT.gamma_multiply(0.35));
-                } else if response.hovered() {
-                    ui.painter().rect_filled(row, 6.0, HOVER);
-                }
-                ui.painter().text(
-                    row.left_center() + vec2(10.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    pane_name(name),
-                    FontId::proportional(13.5),
-                    TEXT,
-                );
-                if response.clicked() {
-                    state.preferences_pane = index;
-                }
-            }
-            // The setup a fresh install starts with, run again (the design's foot of Settings'
-            // list). It opens over the home window, so Settings steps aside.
-            ui.add_space(14.0);
-            // Its words fit the column, or their short form does.
-            let room = ui.available_width() - 2.0 * ui.spacing().button_padding.x;
-            let (key, english) = tk("settings.set_up", "Set Up SoftPresenter\u{2026}");
-            let set_up = crate::studio::within(ui, key, english, FontId::proportional(12.0), 0.0, room, false);
-            if ui
-                .add_sized(vec2(ui.available_width(), 28.0), egui::Button::new(egui::RichText::new(set_up).size(12.0)))
-                .on_hover_text(if crate::setup::System::THIS == crate::setup::System::Linux {
-                    t("settings.set_up.hint", "Run the first-start setup again: screens, songs, Bibles")
-                } else {
-                    t(
-                        "settings.set_up.hint_permissions",
-                        "Run the first-start setup again: screens, songs, Bibles, permissions",
-                    )
-                })
-                .clicked()
-            {
-                state.preferences_open = false;
-                state.menu_asked = Some(crate::menubar::Action::SetUp);
-            }
-        });
-    egui::CentralPanel::default().frame(Frame::new().fill(crate::studio::BG).inner_margin(20)).show(ui, |ui| {
-        let pane = PANES.get(state.preferences_pane).copied().unwrap_or("General");
-        ui.label(egui::RichText::new(pane_name(pane)).font(crate::studio::semibold(18.0)).color(TEXT));
-        ui.add_space(12.0);
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match pane {
-            "Integrations" => {
-                let songbooks = crate::catalog::offered().then_some(&mut state.songbooks);
-                let timelychurch = state.timelychurch.offered.then_some(&mut state.timelychurch);
-                crate::integrations::pane(ui, &mut state.voxlive, &mut state.canva, songbooks, timelychurch);
-                command_line_card(ui, state);
-                crate::mcp::pane::card(ui, &mut state.mcp);
-            }
-            "About" => {
-                ui.label(
-                    egui::RichText::new(tf(
-                        "settings.about.version",
-                        "Version {version} \u{b7} free and open source, GPL-3.0-or-later",
-                        &[("version", env!("CARGO_PKG_VERSION"))],
-                    ))
-                    .color(TEXT_DIM),
-                );
-                ui.add_space(12.0);
-                for (label, page) in [
-                    (t("settings.about.whats_new", "What\u{2019}s new"), Page::WhatsNew),
-                    (t("settings.about.guide", "Open the guide"), Page::Guide),
-                    (t("settings.about.report", "Report an issue\u{2026}"), Page::ReportIssue),
-                    (t("settings.about.licences", "Licences\u{2026}"), Page::Licences),
-                ] {
-                    if ui.button(label).clicked() {
-                        open_page(state, page);
-                    }
-                    ui.add_space(4.0);
-                }
-            }
-            "Remote Control" => crate::remote::pane::pane(ui, &mut state.remote),
-            "Phone Screens" => crate::mirror::pane(ui, &mut state.mirror),
-            "General" => {
-                language_card(ui);
-                ui.add_space(18.0);
-                crate::studio::caption(ui, &t("settings.copyright", "Copyright").to_uppercase());
-                ui.label(t("settings.copyright.about", "Show a song's copyright line on the audience screens:"));
-                for choice in crate::service::CopyrightShow::ALL {
-                    use crate::service::CopyrightShow;
-                    let name = match choice {
-                        CopyrightShow::Never => t("settings.copyright.never", "Never"),
-                        CopyrightShow::FirstSlide => t("settings.copyright.first", "On a song's first slide"),
-                        CopyrightShow::LastSlide => t("settings.copyright.last", "On a song's last slide"),
-                        CopyrightShow::EverySlide => t("settings.copyright.every", "On every slide of a song"),
-                    };
-                    ui.radio_value(&mut state.copyright_show, choice, name);
-                }
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.label(t("settings.copyright.licence", "CCLI Licence Number"));
-                    ui.add(egui::TextEdit::singleline(&mut state.ccli_licence).desired_width(160.0));
-                });
-                ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new(t(
-                        "settings.copyright.details",
-                        "A song's writer, publisher and CCLI song number are set with the Info icon in its header.",
-                    ))
-                    .size(11.5)
-                    .color(TEXT_DIM),
-                );
-                // Songs are plain files that can be changed outside the app (the design's Song
-                // files card): read them again, as File > Reload Songs from Their Files does.
-                ui.add_space(18.0);
-                crate::studio::caption(ui, &t("settings.song_files", "Song Files").to_uppercase());
-                ui.label(t("settings.song_files.about", "Songs are plain files that can be changed outside the app."));
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    if ui
-                        .button(t("settings.song_files.reload", "Reload songs"))
-                        .on_hover_text(t(
-                            "settings.song_files.reload.hint",
-                            "Brings in songs and themes changed outside the app",
-                        ))
-                        .clicked()
-                    {
-                        state.menu_asked = Some(crate::menubar::Action::ReloadSongs);
-                    }
-                    ui.label(
-                        egui::RichText::new(t("settings.song_files.again", "Read them again"))
-                            .size(11.5)
-                            .color(TEXT_DIM),
-                    );
-                });
-            }
-            "Screens" => {
-                // Its key is the Mac menu bar's.
-                let hint = match crate::keys::screens_key() {
-                    Some(key) => tf("settings.screens.configure.key", "Configure Screens ({key})", &[("key", &key)]),
-                    None => t("settings.screens.configure.hint", "Configure Screens").to_owned(),
-                };
-                if ui.button(t("settings.screens.configure", "Configure Screens…")).on_hover_text(hint).clicked() {
-                    state.settings_open = true;
-                }
-                ui.add_space(14.0);
-                ui.checkbox(&mut state.stage_on, t("settings.screens.stage_on", "Stage screens on"));
-                // The check strip (the design's): mark each screen with its name and colour, and
-                // put a test pattern on every screen, to line up projectors and cables.
-                ui.add_space(14.0);
-                crate::studio::caption(ui, &t("settings.screens.check", "Check the Screens").to_uppercase());
-                ui.horizontal_wrapped(|ui| {
-                    let identify = ui.add(egui::Button::selectable(
-                        state.identify,
-                        if state.identify {
-                            t("settings.screens.identify.stop", "Stop identifying")
-                        } else {
-                            t("settings.screens.identify", "Identify")
-                        },
-                    ));
-                    if identify
-                        .on_hover_text(t(
-                            "settings.screens.identify.hint",
-                            "Each screen shows its name and colour. The room and the stream see it.",
-                        ))
-                        .clicked()
-                    {
-                        state.identify = !state.identify;
-                    }
-                });
-                ui.add_space(6.0);
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(t("settings.screens.pattern", "Test pattern"));
-                    for (pattern, label) in [
-                        (None, t("settings.screens.pattern.off", "Off")),
-                        (Some(crate::props::TestPattern::ColorBars), t("right.playing.bars", "Colour bars")),
-                        (Some(crate::props::TestPattern::Grid), t("right.playing.grid", "Grid")),
-                        (Some(crate::props::TestPattern::White), t("right.playing.white", "White")),
-                    ] {
-                        if ui.add(egui::Button::selectable(state.test_pattern == pattern, label)).clicked() {
-                            state.test_pattern = pattern;
-                        }
-                    }
-                });
-                ui.label(
-                    egui::RichText::new(t("settings.screens.seen", "Everyone watching sees these."))
-                        .size(11.5)
-                        .color(TEXT_DIM),
-                );
-            }
-            "Groups" => {
-                let about = t("settings.groups.about", "Each group's colour, and the key that jumps to it.");
-                ui.label(egui::RichText::new(about).color(TEXT_DIM));
-                ui.add_space(8.0);
-                egui::Grid::new("groups").num_columns(3).spacing([16.0, 8.0]).show(ui, |ui| {
-                    for (key, names) in sp_model::GROUP_KEYS {
-                        let name =
-                            names.iter().find(|name| name.contains(' ')).or(names.first()).copied().unwrap_or("");
-                        let mut shown = name.to_owned();
-                        if let Some(first) = shown.get_mut(0..1) {
-                            first.make_ascii_uppercase();
-                        }
-                        let (swatch, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
-                        ui.painter().rect_filled(swatch, 4.0, color32(sp_model::group_color(name)));
-                        ui.label(shown);
-                        ui.label(egui::RichText::new(key.to_ascii_uppercase().to_string()).monospace().color(TEXT_DIM));
-                        ui.end_row();
-                    }
-                });
-            }
-            _ => {
-                let about = t("settings.keys.about", "The keys that run the show, and the menu shortcuts.");
-                ui.label(egui::RichText::new(about).color(TEXT_DIM));
-                ui.add_space(8.0);
-                ui.checkbox(&mut state.keys_on_buttons, t("keys.show_on_buttons", "Show keys on buttons"));
-                ui.add_space(8.0);
-                egui::Grid::new("keys").num_columns(3).spacing([16.0, 6.0]).striped(true).show(ui, |ui| {
-                    // Every key the list of keys (`?`) has, from the same list so the two always
-                    // agree; then the menus' shortcuts.
-                    for (group, rows) in crate::keys::every_key() {
-                        for (keys, what) in rows {
-                            ui.label(egui::RichText::new(crate::keys::group_title(group)).color(TEXT_DIM));
-                            ui.label(what);
-                            ui.label(egui::RichText::new(keys.join("  ")).monospace());
-                            ui.end_row();
-                        }
-                    }
-                    for (menu, command, key) in crate::menubar::shortcuts() {
-                        ui.label(egui::RichText::new(menu).color(TEXT_DIM));
-                        ui.label(command.trim_end_matches('…'));
-                        ui.label(egui::RichText::new(key).monospace());
-                        ui.end_row();
-                    }
-                });
-            }
-        });
-    });
 }
 
 pub(crate) fn switch(ui: &mut egui::Ui, on: bool, hint: &str) -> bool {
@@ -15676,30 +15306,30 @@ mod tests {
     fn what_only_a_mac_menu_did_has_a_place_in_the_window_on_every_system() {
         use crate::menubar::Action;
         let ctx = crate::studio::tests::styled();
-        // Settings: Set Up SoftPresenter (and Settings steps aside), and, in General, Reload songs.
-        let mut state = HomeState { preferences_open: true, ..HomeState::default() };
-        let settings = |ui: &mut egui::Ui, state: &mut HomeState| settings_ui(ui, state);
-        assert!(click_word(&ctx, &mut state, "Reload songs", &settings), "General has Reload songs");
+        // Settings: Set Up SoftPresenter (and Settings steps aside), and, in Song files, Reload songs.
+        let show = Show::new(Vec::new());
+        let mut state = HomeState { preferences_open: true, preferences_pane: Pane::SongFiles, ..HomeState::default() };
+        let settings = |ui: &mut egui::Ui, state: &mut HomeState| settings_ui(ui, state, &show);
+        assert!(click_word(&ctx, &mut state, "Reload songs", &settings), "Song files has Reload songs");
         assert_eq!(state.menu_asked.take(), Some(Action::ReloadSongs));
         assert!(click_word(&ctx, &mut state, "Set Up SoftPresenter\u{2026}", &settings));
         assert_eq!(state.menu_asked.take(), Some(Action::SetUp));
         assert!(!state.preferences_open, "the setup opens over the home window");
-        // Settings > Key Mappings has the switch for the keys beside the buttons.
-        let mut keys = HomeState { preferences_open: true, preferences_pane: 3, ..HomeState::default() };
+        // Settings > Keys has the switch for the keys beside the buttons.
+        let mut keys = HomeState { preferences_open: true, preferences_pane: Pane::Keys, ..HomeState::default() };
         assert!(click_word(&ctx, &mut keys, "Show keys on buttons", &settings));
         assert!(keys.keys_on_buttons);
         // Settings > About: the version, and a new issue that carries it.
         let version = env!("CARGO_PKG_VERSION");
         assert!(page_url(Page::ReportIssue).contains(version));
         assert!(page_url(Page::ReportIssue).starts_with("https://github.com/"));
-        let about_pane = PANES.iter().position(|pane| *pane == "About").unwrap();
-        let mut about = HomeState { preferences_open: true, preferences_pane: about_pane, ..HomeState::default() };
+        let mut about = HomeState { preferences_open: true, preferences_pane: Pane::About, ..HomeState::default() };
         let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings(ui, &mut about));
         let line = format!("Version {version} \u{b7} free and open source, GPL-3.0-or-later");
         assert!(crate::studio::tests::place_of(&drawn, &line).is_some(), "About says the version");
         drawn.drop_without_applying_deltas();
         // Settings > Screens: Identify, and the test patterns one at a time, and Off.
-        let mut state = HomeState { preferences_open: true, preferences_pane: 1, ..HomeState::default() };
+        let mut state = HomeState { preferences_open: true, preferences_pane: Pane::Screens, ..HomeState::default() };
         let screens = settings;
         assert!(click_word(&ctx, &mut state, "Identify", &screens));
         assert!(state.identify);
@@ -15837,14 +15467,15 @@ mod tests {
             }
         }
         let ctx = egui::Context::default();
-        let mut state = HomeState { preferences_pane: 3, ..HomeState::default() };
+        let mut state = HomeState { preferences_pane: Pane::Keys, ..HomeState::default() };
+        let show = Show::new(Vec::new());
         let mut drawn = Vec::new();
         for _ in 0..2 {
             let raw = RawInput {
                 screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 6000.0))),
                 ..RawInput::default()
             };
-            let output = ctx.run_ui(raw, |ui| settings_ui(ui, &mut state));
+            let output = ctx.run_ui(raw, |ui| settings_ui(ui, &mut state, &show));
             drawn.clear();
             output.shapes.iter().for_each(|clipped| words(&clipped.shape, &mut drawn));
             output.drop_without_applying_deltas();

@@ -260,7 +260,7 @@ SoftPresenter is open to scripts and AI: most of what the operator does during a
 script or an AI agent can do too. `sp` (full name `softpresenter`) controls the running app from
 the command line (`sp status`, `sp next`, `sp clear all`, and slides, media, messages, timers,
 macros, the Bible and every command); the app puts it where a terminal finds it as it starts,
-and Settings › Integrations › Command line installs or removes it.
+and Settings › Command line installs or removes it.
 Remote Control sends the same commands from a page, and `sp mcp` is an MCP server through which
 Claude and other AI assistants prepare services and, when the operator allows it and says yes
 each time, run the screens.

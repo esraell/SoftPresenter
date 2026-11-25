@@ -23,6 +23,6 @@
   "topbar.remote.on": "Control remoto activo",
   "topbar.remote.connected": ["Control remoto activo · {n} conectado", "Control remoto activo · {n} conectados"],
   "topbar.remote.wrong": ["{n} contraseña incorrecta", "{n} contraseñas incorrectas"],
-  "topbar.remote.settings": "Ajustes › Control remoto",
-  "topbar.remote.open": "Abre {address} en otro dispositivo (Ajustes › Control remoto)"
+  "topbar.remote.settings": "Ajustes › Mando del móvil",
+  "topbar.remote.open": "Abre {address} en otro dispositivo (Ajustes › Mando del móvil)"
 }

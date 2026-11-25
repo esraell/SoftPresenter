@@ -115,13 +115,13 @@ start with `_` (`"_note"`) are comments.
 | `bibles` | the Bibles window, installing and reading Bibles, and what they say |
 | `setup` | the first-start setup's steps, in each system's wording |
 | `integrations` | Settings › Integrations: VoxLive, Canva Sync and their pages, states and messages |
-| `remote` | Settings › Remote Control and what Remote Control says in the window; what its server says to the phone's page (sign-in answers, refusals, errors, a playlist item's words) |
+| `remote` | Settings › Phone remote and what Remote Control says in the window; what its server says to the phone's page (sign-in answers, refusals, errors, a playlist item's words) |
 | `screens` | the Screens window: the list, each screen's output, look, background, key and DeckLink rows, what each screen is doing (which `sp screens` gives in English); the NDI download on Linux |
 | `inspector` | the inspector at the right of the Edit view: its tabs, sections, fields and menus |
 | `editor` | the Edit view's slide editing (`editor.rs`) and its stage layouts' parts (`stage_editor.rs`) |
 | `import` | the Import Slides sheets |
 | `tools` | the right column's tool tabs: Timers, Messages, Props, Macros, Stage, Audio and VoxLive; macros' steps and the stage layouts' items |
-| `settings` | the Settings window's sidebar, General, the Screens pane, Groups, Key Mappings, About |
+| `settings` | the Settings window: its list of pages in four groups and what each row says, Screens, Slides, Groups, Language, Keys, Command line, Song files, About |
 | `edit` | the Edit view: its kinds, the slides and props lists, the object tools, Edit Words, why a key is greyed |
 | `themes` | the Themes view and the version sheet |
 | `bible` | the Bible view's bar, its Options and translations, and its history's dates |

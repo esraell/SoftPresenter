@@ -676,7 +676,7 @@ impl crate::App {
                     said.push(format!("{columns} slides across"));
                     changes.push(Box::new(move |state| state.columns = columns));
                 }
-                // As Settings › General › Language: the app's own words, now (remote pages are
+                // As Settings › Language: the app's own words, now (remote pages are
                 // sent the change, in their words too).
                 "language" => {
                     let typed = value.to_lowercase();

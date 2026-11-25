@@ -315,7 +315,7 @@ impl Remote {
             // Only a different key is news: each device must be checked again.
             if had.is_some_and(|had| had != fingerprint) {
                 self.cert_news = Some(
-                    t("remote.cert.new_key", "Remote Control has a new certificate key. Each device warns once more: check the key fingerprint it shows against Settings › Remote Control.")
+                    t("remote.cert.new_key", "Remote Control has a new certificate key. Each device warns once more: check the key fingerprint it shows against Settings › Phone remote.")
                         .to_owned(),
                 );
             }
@@ -893,7 +893,7 @@ impl crate::App {
                     crate::notices::Kind::Trouble,
                     t(
                         "remote.wrong.notice",
-                        "Wrong Remote Control passwords were tried several times in the last hour. See Settings › Remote Control.",
+                        "Wrong Remote Control passwords were tried several times in the last hour. See Settings › Phone remote.",
                     ),
                 );
                 running.home_window.request_redraw();
@@ -902,8 +902,7 @@ impl crate::App {
             self.remote.wrong_said = false;
         }
         let showing = self.running.as_ref().is_some_and(|r| {
-            r.home_state.preferences_open
-                && crate::home::PANES.get(r.home_state.preferences_pane) == Some(&"Remote Control")
+            r.home_state.preferences_open && r.home_state.preferences_pane == crate::home::Pane::PhoneRemote
         });
         let view_at = showing.then(|| Instant::now() + std::time::Duration::from_secs(1));
         if showing

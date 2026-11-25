@@ -382,25 +382,25 @@ pub fn ready_words(done: &Installed, windows: bool) -> String {
     if windows {
         tf(
             "notices.command.ready_windows",
-            "The sp command is ready for the terminal ({path}), and its folder is on your PATH. In PowerShell, type softpresenter instead. Settings \u{203a} Integrations \u{203a} Command Line can remove it.",
+            "The sp command is ready for the terminal ({path}), and its folder is on your PATH. In PowerShell, type softpresenter instead. Settings \u{203a} Command line can remove it.",
             &[("path", &path)],
         )
     } else if let Some(file) = &done.shell_file {
         tf(
             "notices.command.ready_file",
-            "The sp command is ready for the terminal ({path}). SoftPresenter added a line for it to {file}. Settings \u{203a} Integrations \u{203a} Command Line can remove it.",
+            "The sp command is ready for the terminal ({path}). SoftPresenter added a line for it to {file}. Settings \u{203a} Command line can remove it.",
             &[("path", &path), ("file", &shown(file))],
         )
     } else if done.add_folder {
         tf(
             "notices.command.ready_add_folder",
-            "The sp command is in {folder}; add that folder to your PATH to use it in a terminal. Settings \u{203a} Integrations \u{203a} Command Line can remove it.",
+            "The sp command is in {folder}; add that folder to your PATH to use it in a terminal. Settings \u{203a} Command line can remove it.",
             &[("folder", &shown_folder(&done.link))],
         )
     } else {
         tf(
             "notices.command.ready",
-            "The sp command is ready for the terminal ({path}). Settings \u{203a} Integrations \u{203a} Command Line can remove it.",
+            "The sp command is ready for the terminal ({path}). Settings \u{203a} Command line can remove it.",
             &[("path", &path)],
         )
     }
@@ -1130,7 +1130,7 @@ mod tests {
         );
         assert_eq!(
             ready_words(&done, false),
-            "The sp command is ready for the terminal (/opt/x/.local/bin/sp). SoftPresenter added a line for it to /opt/x/.zshrc. Settings \u{203a} Integrations \u{203a} Command Line can remove it."
+            "The sp command is ready for the terminal (/opt/x/.local/bin/sp). SoftPresenter added a line for it to /opt/x/.zshrc. Settings \u{203a} Command line can remove it."
         );
         let already = Installed { shell_file: None, ..done.clone() };
         assert_eq!(
@@ -1155,7 +1155,7 @@ mod tests {
         );
         assert_eq!(
             ready_words(&windows, true),
-            "The sp command is ready for the terminal (C:/Users/a/AppData/Local/SoftPresenter/bin/sp.cmd), and its folder is on your PATH. In PowerShell, type softpresenter instead. Settings \u{203a} Integrations \u{203a} Command Line can remove it."
+            "The sp command is ready for the terminal (C:/Users/a/AppData/Local/SoftPresenter/bin/sp.cmd), and its folder is on your PATH. In PowerShell, type softpresenter instead. Settings \u{203a} Command line can remove it."
         );
         let here = Status::Here { link: windows.link.clone(), findable: true };
         assert_eq!(

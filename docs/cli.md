@@ -33,7 +33,7 @@ There is nothing to do: the first time an installed copy of SoftPresenter starts
 in Applications), it puts `sp` where a terminal finds it and says so in the notices. Open a new
 terminal window and type `sp status`.
 
-**Settings › Integrations › Command line** says how it stands ("sp is installed
+**Settings › Command line** says how it stands ("sp is installed
 (~/.local/bin/sp)", or that sp opens another copy of SoftPresenter, which **Use This Copy**
 points here) and has **Install** and **Remove**; what a click did shows under the buttons at
 once. `softpresenter install-cli` and `softpresenter remove-cli` do the same from a terminal.
@@ -1054,7 +1054,7 @@ the usual ones.
 | `screen add audience\|stage NAME [on display NAME\|window\|ndi NAME\|decklink NAME\|automatic]` | A new screen (in a window unless told); a DeckLink output by its name or its number in `sp decklink` |
 | `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|decklink:NAME\|automatic\|off`, `mode=FORMAT` (a DeckLink screen's format: `1080i59.94`, `720p50`…), `keyer=off\|external\|internal` (a DeckLink card's keyer: fill and key on two connectors, or over the card's input; keyed, the screen is see-through and premultiplied unless `alpha=` is given too, and `keyer=off` makes it solid), `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT`; for an audience screen `background=solid\|see-through`, `alpha=straight\|premultiplied` (how a see-through screen sends its soft edges; straight unless told), `key=SCREEN\|none` (shows that screen's key); for a screen sent over NDI `sound=on\|off` (whether the sound the app plays goes out with its picture; on unless switched off) and `rate=29.97\|30\|59.94\|60\|25\|50` (how many pictures a second it sends; 29.97 unless another is chosen) |
 | `screen delete SCREEN --yes` | Deletes a screen (there is always one) |
-| `settings set key=value…` | `transition=KIND[:SECONDS]`, `media_transition=…`, `copyright=never\|first\|last\|every`, `ccli_licence=DIGITS`, `continuous=on\|off`, `view=grid\|words\|table` (Words Only; `easy` too), `columns=1-12`, `language=auto\|en\|es\|ru\|uk` (the app's own words, as Settings › General › Language; `auto` follows the computer's; the replies stay in English) |
+| `settings set key=value…` | `transition=KIND[:SECONDS]`, `media_transition=…`, `copyright=never\|first\|last\|every`, `ccli_licence=DIGITS`, `continuous=on\|off`, `view=grid\|words\|table` (Words Only; `easy` too), `columns=1-12`, `language=auto\|en\|es\|ru\|uk` (the app's own words, as Settings › Language; `auto` follows the computer's; the replies stay in English) |
 
     $ sp screen add stage Band
     Added the stage screen Band, on a window.
@@ -1373,7 +1373,7 @@ its code. Menu items that open a window or a file chooser open it on the Mac, as
 ## Remote Control
 
 Remote Control is a web page other devices on the church's network run the show from, served
-by the app over HTTPS while switched on (Settings › Remote Control). These commands do from the
+by the app over HTTPS while switched on (Settings › Phone remote). These commands do from the
 command line what its pane does. None of them can be sent from a remote page. The page's API is
 in [remote-api.md](remote-api.md).
 

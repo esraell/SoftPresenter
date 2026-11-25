@@ -26,7 +26,7 @@ slide pictures come from plain URLs; the live preview comes over the WebSocket a
 
 ## Connecting
 
-Switched on in **Settings › Remote Control** (or `sp remote on`), the app listens on one port
+Switched on in **Settings › Phone remote** (or `sp remote on`), the app listens on one port
 (4316 unless changed; 1024 up) on every network the computer is on, **HTTPS only**, and
 answers only devices on a local network (private and link-local addresses, and the shared
 100.64/10 range some networks and VPNs use): a connection from the internet is closed at once. The pane
@@ -47,7 +47,7 @@ and every ten minutes while no page is connected), and **with the same private k
 time**. Nobody else vouches for it, so **the browser warns the first time**.
 
 What the operator verifies is the **key's fingerprint**: the SHA-256 of the key's public half
-(its DER `SubjectPublicKeyInfo`), shown in Settings › Remote Control and by `sp remote`, 32
+(its DER `SubjectPublicKeyInfo`), shown in Settings › Phone remote and by `sp remote`, 32
 pairs. It does not change when the certificate is made again, so a renewal asks nothing of
 anyone. Only Make a New Certificate makes a new key (every device then sees a new fingerprint
 and a warning again, and the operator is told).
@@ -62,7 +62,7 @@ and a warning again, and the operator is told).
        openssl s_client -connect church-mac.local:4316 -servername church-mac.local </dev/null 2>/dev/null \
          | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -hex
 
-   and compare with the one in Settings › Remote Control. On the computer itself, the same
+   and compare with the one in Settings › Phone remote. On the computer itself, the same
    command with `localhost` reads the same key. A browser alone doesn't show the key's
    fingerprint; without a terminal the first visit rests on being on the computer's own network.
 3. Go on (Chrome: Proceed; Safari: visit this website). Sign in. A certificate made again later
@@ -111,7 +111,7 @@ Show it as it comes; `wait` is the seconds as a number, for a page that counts d
 `POST /api/logout` (same Origin rule) forgets this device: its pages close, and the cookie is
 cleared.
 
-A device stays signed in until it is **forgotten** (Settings › Remote Control › Forget, Forget
+A device stays signed in until it is **forgotten** (Settings › Phone remote › Forget, Forget
 All, or `sp remote forget`), the **password changes** (which forgets every device), or it signs
 out. Its open WebSockets close at once with code **4401**: go to `/login`. At most 50 devices
 are remembered at once.
@@ -217,7 +217,7 @@ that changed, and the version they changed at. Versions go up by one per change,
 coalesced: at most about twenty a second, and none while nothing changes. The state is taken
 from what the app already keeps, never by looking at its window.
 
-**When the app's language changes** (Settings › General › Language, the setup's first step,
+**When the app's language changes** (Settings › Language, the setup's first step,
 `sp settings set language=es` at the computer, or the computer's language answering while the
 setting follows it; a page can't change it: `settings set language=…` from a page is refused),
 one change carries `app` with the new language **and every part whose words changed with
@@ -324,7 +324,7 @@ browser answers pings by itself) for 45 seconds.
 | Code | Why | The page should |
 |---|---|---|
 | 4401 | Signed out: the device was forgotten, or the password changed | go to `/login` |
-| 4000 | Disconnected at the computer (Settings › Remote Control › Disconnect) | stay disconnected until the person asks to connect again |
+| 4000 | Disconnected at the computer (Settings › Phone remote › Disconnect) | stay disconnected until the person asks to connect again |
 | 1001 | Remote Control was switched off | reconnect with the usual pauses |
 | 4008 | Too slow to take what it was sent, silent too long, or no hello in time | reconnect and resume |
 | 1013 | Too many pages connected | try again later |
@@ -340,7 +340,7 @@ and quotation marks (its `locales/<language>/format.json`):
     {"app": {"language": "es",
              "format": {"decimal": ",", "group": ".", "group_from": 5, "quote_open": "“", "quote_close": "”"}}}
 
-`language` is `en`, `es`, `ru` or `uk`: the one chosen in Settings › General › Language, or, with
+`language` is `en`, `es`, `ru` or `uk`: the one chosen in Settings › Language, or, with
 the setting on Automatic, the computer's (English when the computer's isn't one of these); never
 `auto`. `group_from` is how many figures a whole number needs before it is grouped (Spanish writes
 1234 but 13.613; English 1,234). It is sent again, in the same change as every part whose words
@@ -598,7 +598,7 @@ objects, its theme, the version, the media behind it): when any of it changes, t
 The snapshot's `you` says this page's client number, its device's name and its **role**. The
 only role so far is `control`: everything above. The server refuses what a role doesn't allow
 before the app sees it (`crates/sp-app/src/remote/policy.rs`), so a view-only role (step 2) is
-one more arm there. Settings › Remote Control lists the pages connected (device, address,
+one more arm there. Settings › Phone remote lists the pages connected (device, address,
 since), with Disconnect.
 
 ## Limits

@@ -253,13 +253,28 @@ fn open_panel_window(
     quiet: bool,
     kind: Panel,
 ) -> Result<PanelWindow, String> {
+    // Settings has its list of pages beside each page, as the home window has its columns, so it
+    // opens wider and keeps room for both.
+    let (size, least): ((f64, f64), (f64, f64)) = match kind {
+        Panel::Screens => ((780.0, 640.0), (640.0, 440.0)),
+        Panel::Settings => ((1040.0, 720.0), (820.0, 680.0)),
+    };
+    // Testing aid: SOFTPRESENTER_SETTINGS_SIZE=1100x700 opens the Settings window at that size
+    // (points), to see its pages at the sizes the design was drawn at.
+    let size = match kind {
+        Panel::Settings => std::env::var("SOFTPRESENTER_SETTINGS_SIZE")
+            .ok()
+            .and_then(|asked| {
+                let (w, h) = asked.split_once('x')?;
+                Some((w.trim().parse::<f64>().ok()?, h.trim().parse::<f64>().ok()?))
+            })
+            .unwrap_or(size),
+        Panel::Screens => size,
+    };
     let attrs = app_window(Window::default_attributes())
         .with_title(kind.title())
-        .with_inner_size(match kind {
-            Panel::Screens => winit::dpi::LogicalSize::new(780.0, 640.0),
-            Panel::Settings => winit::dpi::LogicalSize::new(760.0, 520.0),
-        })
-        .with_min_inner_size(winit::dpi::LogicalSize::new(640.0, 440.0));
+        .with_inner_size(winit::dpi::LogicalSize::new(size.0, size.1))
+        .with_min_inner_size(winit::dpi::LogicalSize::new(least.0.min(size.0), least.1.min(size.1)));
     let attrs = if quiet {
         attrs.with_active(false).with_window_level(winit::window::WindowLevel::AlwaysOnBottom)
     } else {
@@ -3158,7 +3173,7 @@ impl App {
         // A look closes with Settings, or when Settings shows another pane: its page goes with it.
         if let Some(running) = self.running.as_mut() {
             let state = &mut running.home_state;
-            let showing = state.preferences_open && home::PANES.get(state.preferences_pane) == Some(&"Integrations");
+            let showing = state.preferences_open && state.preferences_pane == home::Pane::Integrations;
             if !showing && state.voxlive.look.is_some() {
                 state.voxlive.look = None;
             }
@@ -8880,50 +8895,36 @@ impl App {
                 && let Ok(pane) = std::env::var("SOFTPRESENTER_CAPTURE_PREFERENCES")
             {
                 running.home_state.preferences_open = true;
-                // Testing aid: a pane by name (integrations, or voxlive for VoxLive's own page).
+                // Testing aid: a page by name (integrations, or voxlive for VoxLive's own page).
+                let state = &mut running.home_state;
                 match pane.as_str() {
-                    "integrations" => running.home_state.preferences_pane = 4,
                     "voxlive" | "voxlive-look" => {
-                        running.home_state.preferences_pane = 4;
-                        running.home_state.voxlive.open = true;
+                        state.preferences_pane = home::Pane::Integrations;
+                        state.voxlive.open = true;
                     }
                     "canva" => {
-                        running.home_state.preferences_pane = 4;
-                        running.home_state.canva.open = true;
-                    }
-                    // Integrations scrolled to the AI assistants (MCP) card.
-                    "mcp" => {
-                        running.home_state.preferences_pane = 4;
-                        running.home_state.mcp.reveal = true;
+                        state.preferences_pane = home::Pane::Integrations;
+                        state.canva.open = true;
                     }
                     // The same card scrolled on to its list of assistant apps.
                     "mcp-apps" => {
-                        running.home_state.preferences_pane = 4;
-                        running.home_state.mcp.reveal_apps = true;
+                        state.preferences_pane = home::Pane::AiAssistants;
+                        state.mcp.reveal_apps = true;
                     }
                     // The songbooks' page, where the song catalog is offered.
                     "songbooks" => {
-                        running.home_state.preferences_pane = 4;
-                        running.home_state.songbooks.open = true;
+                        state.preferences_pane = home::Pane::Integrations;
+                        state.songbooks.open = true;
                     }
                     // TimelyChurch's page, where it is offered.
                     "timelychurch" => {
-                        running.home_state.preferences_pane = 4;
-                        running.home_state.timelychurch.open = true;
+                        state.preferences_pane = home::Pane::Integrations;
+                        state.timelychurch.open = true;
                     }
-                    "remote" => {
-                        running.home_state.preferences_pane =
-                            home::PANES.iter().position(|pane| *pane == "Remote Control").unwrap_or(0);
-                    }
-                    "mirror" | "phone" => {
-                        running.home_state.preferences_pane =
-                            home::PANES.iter().position(|pane| *pane == "Phone Screens").unwrap_or(0);
-                    }
-                    // Any pane by its name ("Key Mappings", "key-mappings", "groups").
+                    // Any page by its name ("phone-remote", "key mappings", "mcp").
                     other => {
-                        let named = other.replace(['-', '_'], " ");
-                        if let Some(at) = home::PANES.iter().position(|pane| pane.eq_ignore_ascii_case(&named)) {
-                            running.home_state.preferences_pane = at;
+                        if let Some(found) = home::Pane::named(other) {
+                            state.preferences_pane = found;
                         }
                     }
                 }
@@ -9416,6 +9417,7 @@ impl App {
     /// Draws one frame of a panel window and returns what was asked for in it.
     fn draw_panel(&mut self, id: WindowId) -> Vec<Command> {
         let output_on = self.show.output_enabled();
+        let show = &self.show;
         let Some(running) = self.running.as_mut() else {
             return Vec::new();
         };
@@ -9428,7 +9430,7 @@ impl App {
         let kind = panel.kind;
         let mut full = panel.ctx.run_ui(raw_input, |ui| match kind {
             Panel::Screens => commands.extend(home::screens_ui(ui, home_state, output_on)),
-            Panel::Settings => home::settings_ui(ui, home_state),
+            Panel::Settings => home::settings_ui(ui, home_state, show),
         });
         panel.state.handle_platform_output(&panel.window, std::mem::take(&mut full.platform_output));
         let delay = full.viewport_output.get(&egui::ViewportId::ROOT).map_or(Duration::MAX, |v| v.repaint_delay);
