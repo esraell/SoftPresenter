@@ -5,6 +5,10 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+- Unofficial: an iPhone, iPad or Mac can show its screen in a box on a slide, through its own Screen Mirroring. Switch it on in Settings › Phone Screens; it is off until then, a device shows only where you put a Phone or iPad Screen box, and you're asked before it does. It isn't made or supported by Apple, and an Apple update may stop it working. On a Mac only for now, and without sound yet.
+
+## 0.9.0-dev.14 — 24 November 2026 (development build)
+
 - The screens no longer wait for the computer's disk to write the log, which once held them still for half a second.
 - A video behind the words no longer freezes on NDI and DeckLink for each slide change: those outputs now show the dissolve the TVs show, and the video keeps moving through it.
 - Each NDI screen has a frame rate in the Screens window: 29.97 unless you choose 30, 59.94, 60, 25 or 50. Sending exactly 30 to 29.97 equipment, as before, made a small pause every half-minute or so.
