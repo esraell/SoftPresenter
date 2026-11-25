@@ -128,7 +128,7 @@ impl Sampler {
 }
 
 /// Processor time as `ps` writes it: `0:01.23`, `1:02:03.45` or `2-03:04:05`.
-#[cfg(any(not(windows), test))]
+#[cfg(any(target_os = "macos", test))]
 pub fn parse_cpu_time(text: &str) -> Option<f64> {
     let (days, rest) = match text.split_once('-') {
         Some((days, rest)) => (days.parse::<f64>().ok()?, rest),
@@ -143,7 +143,7 @@ pub fn parse_cpu_time(text: &str) -> Option<f64> {
 
 /// What `ps -A -o pid=,ppid=,cputime=,rss=,comm=` printed, with this process's own children (and
 /// theirs) marked as kids, less the programs this sampler runs to look.
-#[cfg(any(not(windows), test))]
+#[cfg(any(target_os = "macos", test))]
 pub fn parse_ps(text: &str, me: u32) -> Reading {
     let mut rows: Vec<(u32, u32, f64, f64, &str)> = Vec::new();
     for line in text.lines() {
@@ -193,7 +193,7 @@ pub fn parse_ps(text: &str, me: u32) -> Reading {
 }
 
 /// The memory a Mac has free to give: pages free, inactive and speculative, from `vm_stat`.
-#[cfg(any(not(windows), test))]
+#[cfg(any(target_os = "macos", test))]
 pub fn parse_vm_stat(text: &str) -> Option<f64> {
     let page: f64 = text.lines().next()?.split("page size of ").nth(1)?.split_whitespace().next()?.parse().ok()?;
     let pages = |name: &str| -> f64 {
@@ -208,7 +208,7 @@ pub fn parse_vm_stat(text: &str) -> Option<f64> {
 }
 
 /// `Footprint: 1234 MB` (or KB, GB) from the line `footprint` prints.
-#[cfg(any(not(windows), test))]
+#[cfg(any(target_os = "macos", test))]
 pub fn parse_footprint(text: &str) -> Option<f32> {
     let line = text.lines().find(|line| line.contains("Footprint:"))?;
     let mut words = line.split("Footprint:").nth(1)?.split_whitespace();
