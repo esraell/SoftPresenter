@@ -1646,9 +1646,9 @@ fn tiles(program: &Path) -> Vec<StatusTile> {
 fn status_text(program: &Path) -> String {
     let switches = super::Switches::load();
     let mut lines = vec![if switches.allowed {
-        "AI assistants: on (Settings \u{203a} Integrations \u{203a} AI assistants (MCP))".to_owned()
+        "AI assistants: on (Settings \u{203a} AI assistants)".to_owned()
     } else {
-        "AI assistants: off. An assistant can do nothing until Settings \u{203a} Integrations \u{203a} AI assistants (MCP) lets them in.".to_owned()
+        "AI assistants: off. An assistant can do nothing until Settings \u{203a} AI assistants is set to Prepare.".to_owned()
     }];
     lines.push(format!("Changing the screens: {}", if switches.screens { "on" } else { "off" }));
     for (name, company, apps, found) in tiles(program) {
