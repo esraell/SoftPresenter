@@ -1,0 +1,12 @@
+{
+  "_note": "Ukrainian; see topbar.json and docs/translating.md. The find box's list of results: the SONG tag (set in capitals, as in English), the song catalog's group (its heading names Worship Leader App, which is a name and stays as it is), nothing found, looking in the Bibles and the songbooks, and the keys line at its foot (key names as printed on the keyboard).",
+  "find.catalog.from": "З Worship Leader App",
+  "find.keys": "Enter: Відкрити    Ctrl+Enter: Додати до списку    Esc: Закрити",
+  "find.keys.mac": "↵ Відкрити    ⌘↵ Додати до списку    esc Закрити",
+  "find.looking": "Пошук у Бібліях…",
+  "find.looking.songbooks": "Пошук у збірниках…",
+  "find.nothing": "Нічого не знайдено",
+  "find.tag.catalog": "ПІСНЯ · {language}",
+  "find.tag.song": "ПІСНЯ",
+  "find.tag.song_group": "ПІСНЯ · {group}"
+}
