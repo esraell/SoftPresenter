@@ -8,6 +8,7 @@ use sp_model::{Object, ObjectKind, Role, SlideRect, TextStyle};
 
 use crate::editor::EditDraft;
 use crate::home::HomeState;
+use crate::i18n::{t, tf};
 use crate::live_tabs::StagePictures;
 use crate::stage::{ITEMS, STAGE_SLOT};
 use crate::studio::{ListKey, ListPicture, TEXT, TEXT_DIM, TEXT_FAINT, Thumb};
@@ -75,14 +76,18 @@ pub fn apply(state: &mut HomeState, request: ListRequest) {
         ListRequest::Open(index) => index,
         ListRequest::New => {
             let taken = |name: &str| state.stage_layouts.iter().any(|layout| layout.name == name);
-            let name = (1..).map(|n| format!("Layout {n}")).find(|name| !taken(name)).unwrap_or_default();
+            let name = (1..)
+                .map(|n: u32| tf("editor.layout.new", "Layout {n}", &[("n", &n.to_string())]))
+                .find(|name| !taken(name))
+                .unwrap_or_default();
             state.stage_layouts.push(crate::stage::new_layout(name));
             state.stage_layouts_changed = true;
             state.stage_layouts.len() - 1
         }
         ListRequest::Duplicate(index) => {
             let Some(original) = state.stage_layouts.get(index) else { return };
-            let copy = crate::stage::copy_of(original, format!("{} copy", original.name));
+            let copy =
+                crate::stage::copy_of(original, tf("editor.layout.copy", "{name} copy", &[("name", &original.name)]));
             state.stage_layouts.insert(index + 1, copy);
             state.stage_layouts_changed = true;
             index + 1
@@ -168,7 +173,7 @@ pub fn list_head(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) -> Opti
     let count = state.stage_layouts.len();
     let mut asked = None;
     egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 0)).show(ui, |ui| {
-        crate::studio::list_heading(ui, "Stage layouts");
+        crate::studio::list_heading(ui, t("editor.layouts", "Stage layouts"));
         let can = [
             true,
             open.is_some(),
@@ -177,16 +182,16 @@ pub fn list_head(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) -> Opti
             open.is_some_and(|at| at + 1 < count),
         ];
         let hints = [
-            "A new stage layout",
-            "A copy of this layout",
-            "Delete this layout; stage screens that use it show the first one",
-            "Move this layout up the list",
-            "Move this layout down the list",
+            t("editor.layouts.new.hint", "A new stage layout"),
+            t("editor.layouts.copy.hint", "A copy of this layout"),
+            t("editor.layouts.delete.hint", "Delete this layout; stage screens that use it show the first one"),
+            t("editor.layouts.up.hint", "Move this layout up the list"),
+            t("editor.layouts.down.hint", "Move this layout down the list"),
         ];
-        const NONE_OPEN: &str = "No stage layout is open";
+        let none_open = t("editor.layouts.none_open", "No stage layout is open");
         let why = match open {
-            Some(_) => ["", NONE_OPEN, crate::home::ONE_LAYOUT, crate::studio::AT_TOP, crate::studio::AT_BOTTOM],
-            None => ["", NONE_OPEN, NONE_OPEN, NONE_OPEN, NONE_OPEN],
+            Some(_) => ["", none_open, crate::home::ONE_LAYOUT, crate::studio::AT_TOP, crate::studio::AT_BOTTOM],
+            None => ["", none_open, none_open, none_open, none_open],
         };
         let pressed = crate::studio::list_keys(ui, "stage layout keys", can, hints, why)
             .or_else(|| crate::home::list_delete_key(delete, can, why, &mut state.notices));
@@ -318,15 +323,18 @@ enum Choice {
 /// layout).
 fn layout_menu(ui: &mut egui::Ui, only_one: bool) -> Option<Choice> {
     let mut chose = None;
-    if ui.button("Rename").clicked() {
+    if ui.button(t("editor.layout.rename", "Rename")).clicked() {
         chose = Some(Choice::Rename);
     }
-    if ui.button("Duplicate").clicked() {
+    if ui.button(t("editor.layout.duplicate", "Duplicate")).clicked() {
         chose = Some(Choice::Duplicate);
     }
     let delete = ui
-        .add_enabled(!only_one, egui::Button::new("Delete"))
-        .on_hover_text("Delete this layout; stage screens that use it show the first one")
+        .add_enabled(!only_one, egui::Button::new(t("editor.layout.delete", "Delete")))
+        .on_hover_text(t(
+            "editor.layouts.delete.hint",
+            "Delete this layout; stage screens that use it show the first one",
+        ))
         .on_disabled_hover_text(crate::home::ONE_LAYOUT);
     if delete.clicked() {
         chose = Some(Choice::Delete);
@@ -349,7 +357,9 @@ pub fn audience_screens(state: &HomeState) -> Vec<(sp_model::Uuid, String)> {
 }
 
 /// What the main audience screen is called in a screen picture's choice.
-pub const MAIN_SCREEN: &str = "Audience screens (main)";
+pub fn main_screen() -> &'static str {
+    t("editor.screen.main", "Audience screens (main)")
+}
 
 /// The name a screen picture is given in the Objects list for what it shows.
 pub fn screen_object_name(screen: Option<sp_model::Uuid>, screens: &[(sp_model::Uuid, String)]) -> String {
@@ -378,43 +388,49 @@ pub fn item_object(role: &str) -> Object {
 /// Returns true when the menu asked for a picture or video from a file.
 pub fn add_menu(ui: &mut egui::Ui, draft: &mut EditDraft, screens: &[(sp_model::Uuid, String)]) -> bool {
     let mut wants_picture = false;
-    if ui.add(egui::Button::new("Text").shortcut_text("T")).clicked() {
+    if ui.add(egui::Button::new(t("editor.add.text", "Text")).shortcut_text("T")).clicked() {
         draft.add_text();
         ui.close();
     }
-    ui.menu_button("Shape", |ui| {
+    ui.menu_button(t("editor.add.shape", "Shape"), |ui| {
         for (shape, key) in sp_model::Shape::ALL.into_iter().zip(crate::home::SHAPE_KEYS) {
-            if ui.add(egui::Button::new(shape.name()).shortcut_text(key.to_string())).clicked() {
+            let name = crate::editor::shape_name(shape);
+            if ui.add(egui::Button::new(name).shortcut_text(key.to_string())).clicked() {
                 draft.add_shape(shape);
                 ui.close();
             }
         }
     });
-    if ui.button("Picture or Video…").clicked() {
+    if ui.button(t("editor.add.picture", "Picture or Video…")).clicked() {
         wants_picture = true;
         ui.close();
     }
-    if ui.button("Web Page").clicked() {
+    if ui.button(t("editor.add.web", "Web Page")).clicked() {
         draft.add_web();
         ui.close();
     }
-    if ui.button("NDI Source").clicked() {
+    if ui.button(t("editor.add.ndi", "NDI Source")).clicked() {
         draft.add_ndi();
         ui.close();
     }
     ui.separator();
-    ui.label(egui::RichText::new("SHOWS LIVE").font(crate::studio::fixed_semibold(11.0)).color(TEXT_FAINT));
+    ui.label(
+        egui::RichText::new(t("editor.add.shows_live", "SHOWS LIVE"))
+            .font(crate::studio::fixed_semibold(11.0))
+            .color(TEXT_FAINT),
+    );
     for (role, name, _) in ITEMS {
         if ui.button(name).clicked() {
             draft.add(item_object(role));
             ui.close();
         }
     }
-    ui.menu_button("Screen Picture", |ui| {
-        let mut choices = vec![(None, MAIN_SCREEN.to_owned())];
+    ui.menu_button(t("editor.add.screen", "Screen Picture"), |ui| {
+        let mut choices = vec![(None, main_screen().to_owned())];
         choices.extend(screens.iter().map(|(id, name)| (Some(*id), name.clone())));
         for (screen, name) in choices {
-            if ui.button(name).on_hover_text("What this screen shows, live, in a box on the stage").clicked() {
+            let hint = t("editor.add.screen.hint", "What this screen shows, live, in a box on the stage");
+            if ui.button(name).on_hover_text(hint).clicked() {
                 let mut object = Object::screen(screen);
                 object.name = screen_object_name(screen, screens);
                 draft.add(object);
@@ -443,7 +459,7 @@ pub fn layout_panel(ui: &mut egui::Ui, state: &mut HomeState) {
     let Some(layout) = state.stage_layouts.get_mut(index) else { return };
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Name").size(12.5).strong().color(TEXT));
+        ui.label(egui::RichText::new(t("editor.layout.name", "Name")).size(12.5).strong().color(TEXT));
         // A layout always has a name: emptied, it keeps the one it had, as a theme's does.
         let before = layout.name.clone();
         let field = ui.add(egui::TextEdit::singleline(&mut layout.name).desired_width(f32::INFINITY));
@@ -456,15 +472,20 @@ pub fn layout_panel(ui: &mut egui::Ui, state: &mut HomeState) {
         }
     });
     ui.add_space(8.0);
-    let about = "Each object shows something live: the words on screen, the next slide, the clock, a timer, \
-                 the notes, the stage message, or what an audience screen shows. Add more from Add above the \
-                 stage. Click one to change it.";
+    let about = t(
+        "editor.layout.about",
+        "Each object shows something live: the words on screen, the next slide, the clock, a timer, the notes, the stage message, or what an audience screen shows. Add more from Add above the stage. Click one to change it.",
+    );
     ui.label(egui::RichText::new(about).size(12.0).color(TEXT_FAINT));
     ui.add_space(8.0);
     let screens = if using.is_empty() {
-        "No stage screen uses this layout. Each stage screen picks its layout in the Stage tab.".to_owned()
+        t(
+            "editor.layout.unused",
+            "No stage screen uses this layout. Each stage screen picks its layout in the Stage tab.",
+        )
+        .to_owned()
     } else {
-        format!("Stage screens using this layout: {}.", using.join(", "))
+        tf("editor.layout.used_by", "Stage screens using this layout: {screens}.", &[("screens", &using.join(", "))])
     };
     ui.label(egui::RichText::new(screens).size(12.0).color(TEXT_FAINT));
 }
@@ -475,7 +496,11 @@ pub fn item_settings(ui: &mut egui::Ui, object: &mut Object, timers: &[(sp_model
     let Some(item) = crate::stage::item_of(object) else { return };
     let role = Role(item.to_owned());
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("SHOWS").font(crate::studio::fixed_semibold(11.0)).color(TEXT_FAINT));
+        ui.label(
+            egui::RichText::new(t("editor.item.shows", "SHOWS"))
+                .font(crate::studio::fixed_semibold(11.0))
+                .color(TEXT_FAINT),
+        );
         ui.label(egui::RichText::new(crate::stage::item_name(&role)).size(13.0).strong().color(TEXT));
     });
     let shows = &mut object.shows;
@@ -483,16 +508,17 @@ pub fn item_settings(ui: &mut egui::Ui, object: &mut Object, timers: &[(sp_model
         "timer" => {
             let chosen = shows.timer.and_then(|id| timers.iter().find(|(have, _)| *have == id));
             let shown = match (shows.timer, chosen) {
-                (None, _) => "The first one running".to_owned(),
+                (None, _) => t("editor.item.timer.first", "The first one running").to_owned(),
                 (Some(_), Some((_, name))) => name.clone(),
-                (Some(_), None) => "(a timer that has gone)".to_owned(),
+                (Some(_), None) => t("editor.item.timer.gone", "(a timer that has gone)").to_owned(),
             };
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Timer").size(12.5).color(TEXT_DIM));
+                ui.label(egui::RichText::new(t("editor.item.timer", "Timer")).size(12.5).color(TEXT_DIM));
                 egui::ComboBox::from_id_salt("stage timer").selected_text(shown).width(ui.available_width()).show_ui(
                     ui,
                     |ui| {
-                        if ui.add(egui::Button::selectable(shows.timer.is_none(), "The first one running")).clicked() {
+                        let first = t("editor.item.timer.first", "The first one running");
+                        if ui.add(egui::Button::selectable(shows.timer.is_none(), first)).clicked() {
                             shows.timer = None;
                         }
                         for (id, name) in timers {
@@ -504,40 +530,47 @@ pub fn item_settings(ui: &mut egui::Ui, object: &mut Object, timers: &[(sp_model
                 );
             });
             let note = if shows.timer.is_some() {
-                "Shows this timer's name and time, running or not."
+                t("editor.item.timer.this", "Shows this timer's name and time, running or not.")
             } else {
-                "Shows the name and time of the first timer that is running, and nothing while none is."
+                t(
+                    "editor.item.timer.first.about",
+                    "Shows the name and time of the first timer that is running, and nothing while none is.",
+                )
             };
             ui.label(egui::RichText::new(note).size(11.5).color(TEXT_FAINT));
         }
         "clock" => {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Clock").size(12.5).color(TEXT_DIM));
-                if ui.add(egui::Button::selectable(!shows.hours_24, "12-hour")).clicked() {
+                ui.label(egui::RichText::new(t("editor.item.clock", "Clock")).size(12.5).color(TEXT_DIM));
+                if ui.add(egui::Button::selectable(!shows.hours_24, t("editor.item.clock.12", "12-hour"))).clicked() {
                     shows.hours_24 = false;
                 }
-                if ui.add(egui::Button::selectable(shows.hours_24, "24-hour")).clicked() {
+                if ui.add(egui::Button::selectable(shows.hours_24, t("editor.item.clock.24", "24-hour"))).clicked() {
                     shows.hours_24 = true;
                 }
-                ui.checkbox(&mut shows.seconds, "Seconds");
+                ui.checkbox(&mut shows.seconds, t("editor.item.clock.seconds", "Seconds"));
             });
         }
         "notes" => {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Lines").size(12.5).color(TEXT_DIM));
+                ui.label(egui::RichText::new(t("editor.item.notes.lines", "Lines")).size(12.5).color(TEXT_DIM));
                 ui.add(egui::DragValue::new(&mut shows.lines).range(0..=40));
-                let said = if shows.lines == 0 { "all of them" } else { "from the top" };
+                let said = if shows.lines == 0 {
+                    t("editor.item.notes.all", "all of them")
+                } else {
+                    t("editor.item.notes.top", "from the top")
+                };
                 ui.label(egui::RichText::new(said).size(11.5).color(TEXT_FAINT));
             });
         }
         other => {
             let said = match other {
-                "now" => "The words of the slide on screen, every box's.",
-                "next" => "The words of the slide that Next would show.",
-                "next-label" => "NEXT, while there is a next slide.",
-                "song-title" => "The title of the song on screen.",
-                "group" => "The group of the slide on screen.",
-                _ => "The stage message, while it is showing; red unless its box has a fill.",
+                "now" => t("editor.item.now", "The words of the slide on screen, every box's."),
+                "next" => t("editor.item.next", "The words of the slide that Next would show."),
+                "next-label" => t("editor.item.next_label", "NEXT, while there is a next slide."),
+                "song-title" => t("editor.item.song_title", "The title of the song on screen."),
+                "group" => t("editor.item.group", "The group of the slide on screen."),
+                _ => t("editor.item.message", "The stage message, while it is showing; red unless its box has a fill."),
             };
             ui.label(egui::RichText::new(said).size(11.5).color(TEXT_FAINT));
         }
@@ -560,13 +593,15 @@ pub fn screen_settings(ui: &mut egui::Ui, object: &mut Object, screens: &[crate:
     let (_, fell_back) = crate::stage::source_screen(*screen, screens);
     let shown = match screen.and_then(|id| listed.iter().find(|(have, _)| *have == id)) {
         Some((_, name)) => name.clone(),
-        None => MAIN_SCREEN.to_owned(),
+        None => main_screen().to_owned(),
     };
-    ui.label(egui::RichText::new("SCREEN").font(crate::studio::fixed_semibold(11.0)).color(TEXT_FAINT));
+    ui.label(
+        egui::RichText::new(t("editor.screen", "SCREEN")).font(crate::studio::fixed_semibold(11.0)).color(TEXT_FAINT),
+    );
     egui::ComboBox::from_id_salt("screen picture source").selected_text(shown).width(ui.available_width()).show_ui(
         ui,
         |ui| {
-            if ui.add(egui::Button::selectable(screen.is_none(), MAIN_SCREEN)).clicked() {
+            if ui.add(egui::Button::selectable(screen.is_none(), main_screen())).clicked() {
                 *screen = None;
             }
             for (id, name) in &listed {
@@ -580,34 +615,46 @@ pub fn screen_settings(ui: &mut egui::Ui, object: &mut Object, screens: &[crate:
     let said = match (fell_back, main_name) {
         (true, Some(main)) => {
             let gone = screens.iter().all(|have| Some(have.id) != was);
-            let why = if gone {
-                "The screen it showed has been removed"
+            let said = if gone {
+                tf(
+                    "editor.screen.removed",
+                    "The screen it showed has been removed, so it shows the main audience screen ({main}). Choose another above.",
+                    &[("main", main)],
+                )
             } else {
-                "The screen it showed is now a stage screen"
+                tf(
+                    "editor.screen.now_stage",
+                    "The screen it showed is now a stage screen, so it shows the main audience screen ({main}). Choose another above.",
+                    &[("main", main)],
+                )
             };
-            egui::RichText::new(format!("{why}, so it shows the main audience screen ({main}). Choose another above."))
-                .color(crate::studio::CARE)
+            egui::RichText::new(said).color(crate::studio::CARE)
         }
-        (true, None) | (false, None) => {
-            egui::RichText::new("There is no audience screen to show. Add one in Settings › Screens.")
-                .color(crate::studio::CARE)
-        }
-        (false, Some(main)) if was.is_none() => {
-            egui::RichText::new(format!("Shows the first audience screen, now {main}, whichever that is."))
-                .color(TEXT_FAINT)
-        }
+        (true, None) | (false, None) => egui::RichText::new(t(
+            "editor.screen.none",
+            "There is no audience screen to show. Add one in Settings › Screens.",
+        ))
+        .color(crate::studio::CARE),
+        (false, Some(main)) if was.is_none() => egui::RichText::new(tf(
+            "editor.screen.first",
+            "Shows the first audience screen, now {main}, whichever that is.",
+            &[("main", main)],
+        ))
+        .color(TEXT_FAINT),
         (false, Some(_)) => {
-            egui::RichText::new("Shows live what that screen shows, in its own theme.").color(TEXT_FAINT)
+            egui::RichText::new(t("editor.screen.live", "Shows live what that screen shows, in its own theme."))
+                .color(TEXT_FAINT)
         }
     };
     ui.label(said.size(11.5));
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Corners").size(12.5).color(TEXT_DIM));
+        ui.label(egui::RichText::new(t("editor.screen.corners", "Corners")).size(12.5).color(TEXT_DIM));
         ui.add(egui::DragValue::new(corner).range(0.0..=200.0).speed(0.5).max_decimals(0));
         ui.add_space(12.0);
-        ui.label(egui::RichText::new("Label").size(12.5).color(TEXT_DIM));
-        ui.add(egui::TextEdit::singleline(label).hint_text("None").desired_width(f32::INFINITY));
+        ui.label(egui::RichText::new(t("editor.screen.label", "Label")).size(12.5).color(TEXT_DIM));
+        let none = t("editor.screen.label.none", "None");
+        ui.add(egui::TextEdit::singleline(label).hint_text(none).desired_width(f32::INFINITY));
     });
     // A name that said which screen it showed follows the new choice.
     if *screen != was && name_before == auto_name(was) {
@@ -626,14 +673,18 @@ fn object_screen(object: &Object) -> Option<sp_model::Uuid> {
 pub fn hint(ui: &mut egui::Ui) {
     ui.vertical_centered(|ui| {
         ui.label(
-            egui::RichText::new("Here the keyboard edits the layout. Space and the arrows don’t run the show.")
+            egui::RichText::new(t(
+                "editor.hint.keyboard",
+                "Here the keyboard edits the layout. Space and the arrows don’t run the show.",
+            ))
                 .font(crate::studio::semibold(12.0))
                 .color(crate::studio::CARE),
         );
         ui.label(
-            egui::RichText::new(
+            egui::RichText::new(t(
+                "editor.hint.mouse",
                 "Click to pick · Shift-click picks more · drag to move · handles resize · arrows nudge, Shift for one pixel",
-            )
+            ))
             .font(FontId::proportional(12.0))
             .color(TEXT_FAINT),
         );

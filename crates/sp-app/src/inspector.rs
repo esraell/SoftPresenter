@@ -11,6 +11,7 @@ use sp_render::object_frame;
 
 use crate::editor::MIN_SIDE;
 use crate::home::HomeState;
+use crate::i18n::{t, tf, tk};
 
 const PANEL: Color32 = crate::studio::PANEL;
 /// What is chosen: grey, as the rest of the app.
@@ -65,20 +66,78 @@ pub struct InspectorState {
 /// How far A− and A+ move a size, in slide units.
 const SIZE_STEP: f32 = 4.0;
 
-const WEIGHTS: [(u16, &str); 9] = [
-    (100, "Thin"),
-    (200, "Extra Light"),
-    (300, "Light"),
-    (400, "Regular"),
-    (500, "Medium"),
-    (600, "Semibold"),
-    (700, "Bold"),
-    (800, "Heavy"),
-    (900, "Black"),
+const WEIGHTS: [(u16, (&str, &str)); 9] = [
+    (100, tk("inspector.weight.thin", "Thin")),
+    (200, tk("inspector.weight.extra_light", "Extra Light")),
+    (300, tk("inspector.weight.light", "Light")),
+    (400, tk("inspector.weight.regular", "Regular")),
+    (500, tk("inspector.weight.medium", "Medium")),
+    (600, tk("inspector.weight.semibold", "Semibold")),
+    (700, tk("inspector.weight.bold", "Bold")),
+    (800, tk("inspector.weight.heavy", "Heavy")),
+    (900, tk("inspector.weight.black", "Black")),
 ];
 
 fn weight_name(weight: u16) -> &'static str {
-    WEIGHTS.iter().min_by_key(|(w, _)| w.abs_diff(weight)).map_or("Regular", |(_, name)| name)
+    WEIGHTS
+        .iter()
+        .min_by_key(|(w, _)| w.abs_diff(weight))
+        .map_or(t("inspector.weight.regular", "Regular"), |&(_, (key, english))| t(key, english))
+}
+
+/// A fill's kind in the language set (sp-model keeps the English).
+fn gradient_name(kind: sp_model::GradientKind) -> &'static str {
+    match kind {
+        sp_model::GradientKind::None => t("inspector.gradient.none", "Color"),
+        sp_model::GradientKind::Linear => t("inspector.gradient.linear", "Linear Gradient"),
+        sp_model::GradientKind::Radial => t("inspector.gradient.radial", "Radial Gradient"),
+    }
+}
+
+/// How a picture sits in its place, in the language set.
+fn fit_name(fit: sp_model::ImageFit) -> &'static str {
+    match fit {
+        sp_model::ImageFit::Fit => t("inspector.fit.fit", "Fit"),
+        sp_model::ImageFit::Fill => t("inspector.fit.fill", "Fill"),
+        sp_model::ImageFit::Stretch => t("inspector.fit.stretch", "Stretch"),
+    }
+}
+
+/// What a text box can be linked to, in the language set.
+fn link_name(link: sp_model::TextLink) -> &'static str {
+    use sp_model::TextLink;
+    match link {
+        TextLink::Clock => t("inspector.link.clock", "Clock"),
+        TextLink::Date => t("inspector.link.date", "Date"),
+        TextLink::Timer { .. } => t("inspector.link.timer_kind", "Timer"),
+        TextLink::SongTitle => t("inspector.link.song_title", "Song Title"),
+        TextLink::Group => t("inspector.link.group", "Group"),
+        TextLink::SlideLabel => t("inspector.link.slide_label", "Slide Label"),
+        TextLink::NextSlide => t("inspector.link.next_slide", "Next Slide"),
+        TextLink::Notes => t("inspector.link.notes", "Slide Notes"),
+        TextLink::StageMessage => t("inspector.link.stage_message", "Stage Message"),
+        TextLink::Copyright => t("inspector.link.copyright", "Copyright"),
+    }
+}
+
+/// The marks before each line of a box, in the language set.
+fn list_name(list: sp_model::ListStyle) -> &'static str {
+    match list {
+        sp_model::ListStyle::None => t("inspector.list.none", "None"),
+        sp_model::ListStyle::Bullets => t("inspector.list.bullets", "Bullets"),
+        sp_model::ListStyle::Numbers => t("inspector.list.numbers", "Numbers"),
+    }
+}
+
+/// How an object comes on or goes off, in the language set.
+fn effect_name(effect: sp_model::BuildEffect, coming_in: bool) -> &'static str {
+    use sp_model::BuildEffect;
+    match (effect, coming_in) {
+        (BuildEffect::Dissolve, _) => t("inspector.build.dissolve", "Dissolve"),
+        (BuildEffect::Fly, true) => t("inspector.build.fly_in", "Fly In"),
+        (BuildEffect::Fly, false) => t("inspector.build.fly_out", "Fly Out"),
+        (BuildEffect::Zoom, _) => t("inspector.build.zoom", "Zoom"),
+    }
 }
 
 fn to_color32(c: Rgba) -> Color32 {
@@ -222,27 +281,45 @@ fn tick(ui: &mut egui::Ui, on: &mut bool, title: &str) -> egui::Response {
 fn spacing_popup(ui: &mut egui::Ui, wanted: &mut sp_model::BoxStyle) {
     ui.set_width(250.0);
     egui::Grid::new("text spacing").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-        ui.label(egui::RichText::new("Character Spacing").size(12.5).color(DIM));
+        ui.label(egui::RichText::new(t("inspector.spacing.letters", "Character Spacing")).size(12.5).color(DIM));
         ui.add(egui::DragValue::new(&mut wanted.letter_spacing).speed(0.2).range(-20.0..=100.0).max_decimals(1))
-            .on_hover_text("Extra room between letters, in points at the box's font size");
+            .on_hover_text(t(
+                "inspector.spacing.letters.hint",
+                "Extra room between letters, in points at the box's font size",
+            ));
         ui.end_row();
-        ui.label(egui::RichText::new("Line Height").size(12.5).color(DIM));
+        ui.label(egui::RichText::new(t("inspector.spacing.line_height", "Line Height")).size(12.5).color(DIM));
         ui.add(egui::DragValue::new(&mut wanted.line_height).speed(0.01).range(0.5..=3.0).fixed_decimals(2))
-            .on_hover_text("The distance from one line to the next, as a multiple of the font size");
+            .on_hover_text(t(
+                "inspector.spacing.line_height.hint",
+                "The distance from one line to the next, as a multiple of the font size",
+            ));
         ui.end_row();
-        ui.label(egui::RichText::new("Paragraph Spacing").size(12.5).color(DIM));
+        ui.label(egui::RichText::new(t("inspector.spacing.paragraph", "Paragraph Spacing")).size(12.5).color(DIM));
         ui.add(egui::DragValue::new(&mut wanted.paragraph_spacing).speed(0.5).range(0.0..=400.0).max_decimals(0))
-            .on_hover_text("Extra room after each paragraph (each line break typed), in points");
+            .on_hover_text(t(
+                "inspector.spacing.paragraph.hint",
+                "Extra room after each paragraph (each line break typed), in points",
+            ));
         ui.end_row();
-        ui.label(egui::RichText::new("Baseline").size(12.5).color(DIM));
+        ui.label(egui::RichText::new(t("inspector.spacing.baseline", "Baseline")).size(12.5).color(DIM));
         ui.add(egui::DragValue::new(&mut wanted.baseline).speed(0.5).range(-400.0..=400.0).max_decimals(0))
-            .on_hover_text("Raise the text by this many points (lower it with a minus)");
+            .on_hover_text(t(
+                "inspector.spacing.baseline.hint",
+                "Raise the text by this many points (lower it with a minus)",
+            ));
         ui.end_row();
     });
     ui.add_space(8.0);
-    ui.label(egui::RichText::new("Margins").size(12.5).color(DIM));
+    ui.label(egui::RichText::new(t("inspector.spacing.margins", "Margins")).size(12.5).color(DIM));
     ui.horizontal(|ui| {
-        for (margin, name) in wanted.margins.iter_mut().zip(["Left", "Top", "Right", "Bottom"]) {
+        let sides = [
+            t("inspector.margin.left", "Left"),
+            t("inspector.margin.top", "Top"),
+            t("inspector.margin.right", "Right"),
+            t("inspector.margin.bottom", "Bottom"),
+        ];
+        for (margin, name) in wanted.margins.iter_mut().zip(sides) {
             ui.vertical(|ui| {
                 ui.add(egui::DragValue::new(margin).speed(1.0).range(0.0..=400.0).max_decimals(0));
                 ui.label(egui::RichText::new(name).size(10.5).color(DIM));
@@ -250,7 +327,7 @@ fn spacing_popup(ui: &mut egui::Ui, wanted: &mut sp_model::BoxStyle) {
         }
     });
     ui.add_space(8.0);
-    if ui.button("Reset Spacing").clicked() {
+    if ui.button(t("inspector.spacing.reset", "Reset Spacing")).clicked() {
         wanted.letter_spacing = 0.0;
         wanted.line_height = sp_model::LINE_HEIGHT;
         wanted.paragraph_spacing = 0.0;
@@ -259,9 +336,11 @@ fn spacing_popup(ui: &mut egui::Ui, wanted: &mut sp_model::BoxStyle) {
     }
 }
 
-fn labelled(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui, f32)) {
+fn labelled(ui: &mut egui::Ui, (key, english): (&'static str, &'static str), add: impl FnOnce(&mut egui::Ui, f32)) {
     ui.horizontal(|ui| {
         ui.allocate_ui_with_layout(vec2(104.0, ROW), Layout::right_to_left(Align::Center), |ui| {
+            // The usual words when they fit the column, else their short form.
+            let label = crate::studio::within(ui, key, english, FontId::proportional(12.5), 0.0, 104.0, false);
             ui.label(egui::RichText::new(label).size(12.5).color(DIM));
         });
         // What is left after the label (egui has already stepped past the gap after it), so the
@@ -385,15 +464,18 @@ fn colour_split(ui: &mut egui::Ui, value: &mut Rgba, hint: &str, split: Option<R
 /// colour and angle when there is one.
 fn fill_kind(ui: &mut egui::Ui, salt: &str, gradient: &mut sp_model::Gradient) {
     let options: Vec<(sp_model::GradientKind, &str)> =
-        sp_model::GradientKind::ALL.iter().map(|kind| (*kind, kind.name())).collect();
-    choice(ui, salt, 140.0, &mut gradient.kind, &options);
+        sp_model::GradientKind::ALL.iter().map(|kind| (*kind, gradient_name(*kind))).collect();
+    // As wide as its longest choice needs (with its padding and arrow), so none is cut short.
+    let names: Vec<&str> = options.iter().map(|(_, name)| *name).collect();
+    let wide = (crate::studio::widest(ui, &names, &FontId::proportional(13.0)) + 40.0).max(140.0);
+    choice(ui, salt, wide, &mut gradient.kind, &options);
     if gradient.on() {
         ui.add_space(6.0);
-        colour(ui, &mut gradient.to, "The colour it runs to");
+        colour(ui, &mut gradient.to, t("inspector.gradient.to", "The colour it runs to"));
         if gradient.kind == sp_model::GradientKind::Linear {
             ui.add_space(6.0);
             ui.add(egui::DragValue::new(&mut gradient.angle).speed(1.0).range(0.0..=359.0).suffix("°").max_decimals(0))
-                .on_hover_text("The way it runs: 0° left to right, 90° top to bottom");
+                .on_hover_text(t("inspector.gradient.angle", "The way it runs: 0° left to right, 90° top to bottom"));
         }
     }
 }
@@ -416,7 +498,11 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
                 ui,
                 heading.left_center(),
                 Align2::LEFT_CENTER,
-                if layout { "LAYOUT" } else { "THEME SLIDE" },
+                if layout {
+                    t("inspector.heading.layout", "LAYOUT")
+                } else {
+                    t("inspector.heading.theme_slide", "THEME SLIDE")
+                },
                 crate::studio::fixed_semibold(11.5),
                 crate::studio::TEXT_DIM,
                 0.6,
@@ -432,7 +518,9 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
             if stage && picture && state.inspector.tab == InspectorTab::Text {
                 state.inspector.tab = InspectorTab::Shape;
             }
-            let tabs = crate::studio::Tabs::plain(&["Shape", "Text", "Build"]);
+            let names =
+                [t("inspector.tab.shape", "Shape"), t("inspector.tab.text", "Text"), t("inspector.tab.build", "Build")];
+            let tabs = crate::studio::Tabs::plain(&names);
             let width = ui.available_width();
             let (place, _) =
                 ui.allocate_exact_size(vec2(width, crate::studio::tab_switch_height(&tabs)), Sense::hover());
@@ -453,21 +541,28 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
                     if !for_theme {
                         let open = state.inspector.notes_open;
                         if ui
-                            .add(egui::Button::selectable(open, "Slide Notes"))
-                            .on_hover_text("Notes for whoever runs the slides; the audience never sees them")
+                            .add(egui::Button::selectable(open, t("inspector.notes", "Slide Notes")))
+                            .on_hover_text(t(
+                                "inspector.notes.hint",
+                                "Notes for whoever runs the slides; the audience never sees them",
+                            ))
                             .clicked()
                         {
                             state.inspector.notes_open = !open;
                         }
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("Done").on_hover_text("Go back to the Service view").clicked() {
+                        let done = ui
+                            .button(t("inspector.done", "Done"))
+                            .on_hover_text(t("inspector.done.hint", "Go back to the Service view"));
+                        if done.clicked() {
                             leave = true;
                         }
                         if !for_theme {
-                            ui.checkbox(&mut state.live_edit, "Live Edit").on_hover_text(
+                            ui.checkbox(&mut state.live_edit, t("inspector.live_edit", "Live Edit")).on_hover_text(t(
+                                "inspector.live_edit.hint",
                                 "When on, changes to a slide that is on screen appear on the output as they are made",
-                            );
+                            ));
                         }
                     });
                 });
@@ -482,12 +577,14 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
             egui::Panel::bottom("slide notes").resizable(false).frame(Frame::new().fill(PANEL).inner_margin(8)).show(
                 ui,
                 |ui| {
-                    ui.label(egui::RichText::new("SLIDE NOTES").size(10.5).strong().color(DIM));
+                    ui.label(
+                        egui::RichText::new(t("inspector.notes.heading", "SLIDE NOTES")).size(10.5).strong().color(DIM),
+                    );
                     let mut notes = draft.slide.notes.clone().unwrap_or_default();
                     let field = egui::TextEdit::multiline(&mut notes)
                         .desired_rows(4)
                         .desired_width(f32::INFINITY)
-                        .hint_text("Notes for whoever runs the slides");
+                        .hint_text(t("inspector.notes.placeholder", "Notes for whoever runs the slides"));
                     if ui.add(field).changed() {
                         draft.slide.notes = (!notes.trim().is_empty()).then_some(notes);
                     }
@@ -551,43 +648,61 @@ fn theme_slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
     let Some(edit) = state.theme_edit.as_mut() else { return };
     let before = (edit.theme.name.clone(), edit.theme.background, edit.theme.background_picture.clone());
     ui.add_space(4.0);
-    labelled_left(ui, "Name", |ui| {
+    // The two names share a column as wide as the wider of them.
+    let (name, size) = (t("inspector.theme.name", "Name"), t("inspector.theme.size", "Size"));
+    let column = crate::studio::widest(ui, &[name, size], &FontId::proportional(12.5)).max(44.0);
+    labelled_left(ui, column, name, |ui| {
         ui.add(egui::TextEdit::singleline(&mut edit.theme.name).desired_width(f32::INFINITY));
     });
-    labelled_left(ui, "Size", |ui| {
-        ui.label(egui::RichText::new("1920 × 1080").size(12.5).color(INK))
-            .on_hover_text("Every slide is 1920 by 1080; other sizes are not made yet.");
+    labelled_left(ui, column, size, |ui| {
+        ui.label(egui::RichText::new("1920 × 1080").size(12.5).color(INK)).on_hover_text(t(
+            "inspector.theme.size.hint",
+            "Every slide is 1920 by 1080; other sizes are not made yet.",
+        ));
     });
     rule(ui);
     ui.horizontal(|ui| {
         let mut filled = edit.theme.background.is_some();
-        if tick(ui, &mut filled, "Background").on_hover_text("A colour behind everything on the slide").changed() {
+        let words = t("inspector.theme.background", "Background");
+        let hint = t("inspector.theme.background.hint", "A colour behind everything on the slide");
+        if tick(ui, &mut filled, words).on_hover_text(hint).changed() {
             edit.theme.background = filled.then_some(Rgba { r: 20, g: 30, b: 60, a: 255 });
         }
         if let Some(background) = edit.theme.background.as_mut() {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| colour(ui, background, "Background colour"));
+            let hint = t("inspector.theme.background.colour", "Background colour");
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| colour(ui, background, hint));
         }
     });
     rule(ui);
     // A picture behind every slide drawn with the theme, while no media is showing.
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Picture").size(13.0).strong().color(INK))
-            .on_hover_text("A picture behind every slide drawn with this theme, while no media is showing");
+        ui.label(egui::RichText::new(t("inspector.theme.picture", "Picture")).size(13.0).strong().color(INK))
+            .on_hover_text(t(
+                "inspector.theme.picture.hint",
+                "A picture behind every slide drawn with this theme, while no media is showing",
+            ));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if edit.theme.background_picture.is_some() {
-                if ui.button("Remove").clicked() {
+                if ui.button(t("inspector.theme.picture.remove", "Remove")).clicked() {
                     edit.theme.background_picture = None;
                 }
-                if ui.button("Change…").clicked() {
+                if ui.button(t("inspector.theme.picture.change", "Change…")).clicked() {
                     *picture_request = true;
                 }
-            } else if ui.button("Choose…").on_hover_text("Choose a picture from a file").clicked() {
+            } else if ui
+                .button(t("inspector.theme.picture.choose", "Choose…"))
+                .on_hover_text(t("inspector.theme.picture.choose.hint", "Choose a picture from a file"))
+                .clicked()
+            {
                 *picture_request = true;
             }
         });
     });
     rule(ui);
-    let about = "A song's slide uses, of the templates marked Songs, the one that suits what is on it: with the main language and a translation, the first with a box for both; with one language, the first with no translation box. Bible slides use the template marked Bible. Right-click a template to change what it is for. Songs and Bible slides are drawn with the main theme; right-click a theme to make it the main one.";
+    let about = t(
+        "inspector.theme.about",
+        "A song's slide uses, of the templates marked Songs, the one that suits what is on it: with the main language and a translation, the first with a box for both; with one language, the first with no translation box. Bible slides use the template marked Bible. Right-click a template to change what it is for. Songs and Bible slides are drawn with the main theme; right-click a theme to make it the main one.",
+    );
     ui.label(egui::RichText::new(about).size(11.5).color(DIM));
     if before != (edit.theme.name.clone(), edit.theme.background, edit.theme.background_picture.clone()) {
         // A theme always has a name.
@@ -598,11 +713,11 @@ fn theme_slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
     }
 }
 
-/// A bold label on the left and a control filling the rest of the row.
-fn labelled_left(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
+/// A bold label on the left, in a column `column` wide, and a control filling the rest of the row.
+fn labelled_left(ui: &mut egui::Ui, column: f32, label: &str, add: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
-        ui.allocate_ui_with_layout(vec2(44.0, ROW), Layout::left_to_right(Align::Center), |ui| {
-            ui.set_min_width(44.0);
+        ui.allocate_ui_with_layout(vec2(column, ROW), Layout::left_to_right(Align::Center), |ui| {
+            ui.set_min_width(column);
             ui.label(egui::RichText::new(label).size(12.5).strong().color(INK));
         });
         add(ui);
@@ -612,12 +727,15 @@ fn labelled_left(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)
 fn nothing_selected(ui: &mut egui::Ui) {
     ui.add_space(6.0);
     ui.label(
-        egui::RichText::new("Click something on the slide to select it.").size(12.5).color(Color32::from_gray(190)),
+        egui::RichText::new(t("inspector.nothing", "Click something on the slide to select it."))
+            .size(12.5)
+            .color(Color32::from_gray(190)),
     );
     ui.label(
-        egui::RichText::new(
+        egui::RichText::new(t(
+            "inspector.nothing.how",
             "Drag to move it, drag a handle to resize it, press Delete to remove it. Arrow keys nudge.",
-        )
+        ))
         .size(11.5)
         .color(DIM),
     );
@@ -627,7 +745,7 @@ fn nothing_selected(ui: &mut egui::Ui) {
 /// when it is left (with https:// put in front of a bare name). An address that isn't https is
 /// refused, and says so.
 fn web_address(ui: &mut egui::Ui, object: sp_model::Uuid, url: &mut String) {
-    ui.label(egui::RichText::new("Web Page").size(12.5).strong().color(INK));
+    ui.label(egui::RichText::new(t("inspector.web", "Web Page")).size(12.5).strong().color(INK));
     ui.add_space(2.0);
     let id = ui.make_persistent_id(("web address", object));
     let bad_id = id.with("refused");
@@ -650,10 +768,14 @@ fn web_address(ui: &mut egui::Ui, object: sp_model::Uuid, url: &mut String) {
         ui.data_mut(|data| data.insert_temp(bad_id, refused));
     }
     let words = if ui.data_mut(|data| data.get_temp::<bool>(bad_id)).unwrap_or(false) {
-        egui::RichText::new("Only web pages whose address starts with https:// can be shown.")
-            .color(crate::studio::TALLY)
+        egui::RichText::new(t(
+            "inspector.web.refused",
+            "Only web pages whose address starts with https:// can be shown.",
+        ))
+        .color(crate::studio::TALLY)
     } else {
-        egui::RichText::new("The page shows, live, while the slide is on screen.").color(crate::studio::TEXT_DIM)
+        egui::RichText::new(t("inspector.web.live", "The page shows, live, while the slide is on screen."))
+            .color(crate::studio::TEXT_DIM)
     };
     ui.label(words.size(11.5));
 }
@@ -803,32 +925,42 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     });
     rule(ui);
 
+    // The rows' names share a column as wide as the widest of them needs.
+    let titles = [
+        t("inspector.shape.position", "Position"),
+        t("inspector.shape.size", "Size"),
+        t("inspector.shape.transform", "Transform"),
+        t("inspector.shape.picture", "Picture"),
+        t("inspector.shape.opacity", "Opacity"),
+    ];
+    let column = crate::studio::widest(ui, &titles, &FontId::proportional(12.5)).max(72.0);
+    let [position, size, transform, picture, opacity] = titles;
     let title = |ui: &mut egui::Ui, text: &str| {
-        ui.allocate_ui_with_layout(vec2(72.0, ROW), Layout::left_to_right(Align::Center), |ui| {
-            ui.set_min_width(72.0);
+        ui.allocate_ui_with_layout(vec2(column, ROW), Layout::left_to_right(Align::Center), |ui| {
+            ui.set_min_width(column);
             ui.label(egui::RichText::new(text).size(12.5).strong().color(INK));
         });
     };
     ui.horizontal_top(|ui| {
-        title(ui, "Position");
+        title(ui, position);
         number(ui, &mut edited.x, 84.0, "X", |d| d);
         ui.add_space(16.0);
         number(ui, &mut edited.y, 84.0, "Y", |d| d);
     });
     ui.horizontal_top(|ui| {
-        title(ui, "Size");
+        title(ui, size);
         let shape = frame.w / frame.h.max(1.0);
-        number(ui, &mut edited.w, 84.0, "Width", |d| d.range(MIN_SIDE..=10_000.0));
+        number(ui, &mut edited.w, 84.0, t("inspector.shape.width", "Width"), |d| d.range(MIN_SIDE..=10_000.0));
         let lock = ui
             .add_sized(
                 [10.0, ROW - 2.0],
                 egui::Button::selectable(*lock_shape, egui::RichText::new("=").size(11.0)).frame(false),
             )
-            .on_hover_text("Keep the box's shape when its width or height changes");
+            .on_hover_text(t("inspector.shape.lock.hint", "Keep the box's shape when its width or height changes"));
         if lock.clicked() {
             *lock_shape = !*lock_shape;
         }
-        number(ui, &mut edited.h, 84.0, "Height", |d| d.range(MIN_SIDE..=10_000.0));
+        number(ui, &mut edited.h, 84.0, t("inspector.shape.height", "Height"), |d| d.range(MIN_SIDE..=10_000.0));
         if *lock_shape {
             if edited.w != frame.w {
                 edited.h = (edited.w / shape).max(MIN_SIDE);
@@ -838,7 +970,7 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         }
     });
     ui.horizontal_top(|ui| {
-        title(ui, "Transform");
+        title(ui, transform);
         // Mirror the object left to right, or top to bottom.
         let flips = [object.flip_h, object.flip_v];
         let flipped = segments(
@@ -861,7 +993,7 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
             None => {}
         }
         ui.add_space(16.0);
-        number(ui, &mut object.rotation, 84.0, "Rotation", |d| {
+        number(ui, &mut object.rotation, 84.0, t("inspector.shape.rotation", "Rotation"), |d| {
             d.speed(0.5).range(-360.0..=360.0).suffix("°").max_decimals(1)
         });
     });
@@ -886,28 +1018,30 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     // A picture: how it sits in its place.
     if let sp_model::ObjectKind::Image { fit, .. } = &mut object.kind {
         ui.horizontal(|ui| {
-            title(ui, "Picture");
+            title(ui, picture);
             let options: Vec<(sp_model::ImageFit, &str)> =
-                sp_model::ImageFit::ALL.iter().map(|fit| (*fit, fit.name())).collect();
+                sp_model::ImageFit::ALL.iter().map(|fit| (*fit, fit_name(*fit))).collect();
             choice(ui, "picture fit", 120.0, fit, &options);
         });
         rule(ui);
     }
 
     ui.horizontal(|ui| {
-        title(ui, "Opacity");
-        ui.spacing_mut().slider_width = INNER - 72.0 - 14.0;
+        title(ui, opacity);
+        ui.spacing_mut().slider_width = INNER - column - 14.0;
         ui.add(egui::Slider::new(&mut object.opacity, 0.0..=1.0).show_value(false));
     });
     rule(ui);
 
     ui.horizontal(|ui| {
         let mut filled = object.fill.is_some();
-        if tick(ui, &mut filled, "Fill").on_hover_text("Fill the box with a colour behind its text").changed() {
+        let hint = t("inspector.shape.fill.hint", "Fill the box with a colour behind its text");
+        if tick(ui, &mut filled, t("inspector.shape.fill", "Fill")).on_hover_text(hint).changed() {
             object.fill = filled.then_some(Rgba { r: 0, g: 0, b: 0, a: 160 });
         }
         if let Some(fill) = object.fill.as_mut() {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| colour(ui, fill, "Fill colour"));
+            let hint = t("inspector.shape.fill.colour", "Fill colour");
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| colour(ui, fill, hint));
         }
     });
     if object.fill.is_some() {
@@ -920,19 +1054,23 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     // A line round the box or shape: 3 points of white to start with.
     ui.horizontal(|ui| {
         let mut stroked = object.stroke.is_some();
-        if tick(ui, &mut stroked, "Stroke").on_hover_text("Draw a line round the box or shape").changed() {
+        let hint = t("inspector.shape.stroke.hint", "Draw a line round the box or shape");
+        if tick(ui, &mut stroked, t("inspector.stroke", "Stroke")).on_hover_text(hint).changed() {
             object.stroke = stroked.then_some(sp_model::StrokeLook { width: 3.0, color: Rgba::WHITE });
         }
         if let Some(line) = object.stroke.as_mut() {
-            number(ui, &mut line.width, 84.0, "Width", |d| d.speed(0.2).range(0.0..=100.0).max_decimals(1));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| colour(ui, &mut line.color, "Stroke colour"));
+            let width = t("inspector.stroke.width", "Width");
+            number(ui, &mut line.width, 84.0, width, |d| d.speed(0.2).range(0.0..=100.0).max_decimals(1));
+            let hint = t("inspector.stroke.colour", "Stroke colour");
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| colour(ui, &mut line.color, hint));
         }
     });
     rule(ui);
     // A soft shadow under the box or shape: 75 % black, falling down and to the right.
     ui.horizontal_top(|ui| {
         let mut shadowed = object.shadow.is_some();
-        if tick(ui, &mut shadowed, "Shadow").on_hover_text("Put a soft shadow under the box or shape").changed() {
+        let hint = t("inspector.shape.shadow.hint", "Put a soft shadow under the box or shape");
+        if tick(ui, &mut shadowed, t("inspector.shadow", "Shadow")).on_hover_text(hint).changed() {
             object.shadow = shadowed.then_some(sp_model::Shadow {
                 color: Rgba::BLACK,
                 opacity: 0.75,
@@ -943,26 +1081,34 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         }
         if let Some(look) = object.shadow.as_mut() {
             let mut percent = (look.opacity * 100.0).round();
-            number(ui, &mut percent, 78.0, "Opacity", |d| d.range(0.0..=100.0).suffix("%"));
+            number(ui, &mut percent, 78.0, t("inspector.shadow.opacity", "Opacity"), |d| {
+                d.range(0.0..=100.0).suffix("%")
+            });
             look.opacity = percent / 100.0;
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| colour(ui, &mut look.color, "Shadow colour"));
+            let hint = t("inspector.shadow.colour", "Shadow colour");
+            ui.with_layout(Layout::right_to_left(Align::Min), |ui| colour(ui, &mut look.color, hint));
         }
     });
     if let Some(look) = object.shadow.as_mut() {
         ui.horizontal_top(|ui| {
             let each = (INNER - 2.0 * 12.0) / 3.0;
-            number(ui, &mut look.angle, each, "Angle", |d| d.range(0.0..=360.0).suffix("°"));
+            number(ui, &mut look.angle, each, t("inspector.shadow.angle", "Angle"), |d| {
+                d.range(0.0..=360.0).suffix("°")
+            });
             ui.add_space(6.0);
-            number(ui, &mut look.offset, each, "Offset", |d| d.speed(0.5).range(0.0..=200.0));
+            number(ui, &mut look.offset, each, t("inspector.shadow.offset", "Offset"), |d| {
+                d.speed(0.5).range(0.0..=200.0)
+            });
             ui.add_space(6.0);
-            number(ui, &mut look.blur, each, "Blur", |d| d.speed(0.5).range(0.0..=200.0));
+            number(ui, &mut look.blur, each, t("inspector.shadow.blur", "Blur"), |d| d.speed(0.5).range(0.0..=200.0));
         });
     }
     rule(ui);
 
     // Not in the reference layout, but needed until objects can be managed from the slide itself.
-    ui.label(egui::RichText::new("OBJECT").size(10.5).strong().color(DIM));
-    ui.add(egui::TextEdit::singleline(&mut object.name).desired_width(f32::INFINITY).hint_text("Name"));
+    ui.label(egui::RichText::new(t("inspector.object", "OBJECT")).size(10.5).strong().color(DIM));
+    let hint = t("inspector.object.name", "Name");
+    ui.add(egui::TextEdit::singleline(&mut object.name).desired_width(f32::INFINITY).hint_text(hint));
     let follows_theme =
         object.frame.is_none() && object.rotation == 0.0 && object.opacity == 1.0 && object.fill.is_none();
     if let Some(across) = spread {
@@ -971,8 +1117,12 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     ui.horizontal_wrapped(|ui| {
         let small = |label: &str| egui::Button::new(egui::RichText::new(label).size(12.0));
         for (words, redo, hint) in [
-            ("Undo", false, crate::keys::hint("Undo the last change", "Z", false)),
-            ("Redo", true, crate::keys::hint("Redo it", "Z", true)),
+            (
+                t("inspector.undo", "Undo"),
+                false,
+                crate::keys::hint(t("inspector.undo.hint", "Undo the last change"), "Z", false),
+            ),
+            (t("inspector.redo", "Redo"), true, crate::keys::hint(t("inspector.redo.hint", "Redo it"), "Z", true)),
         ] {
             let can = if redo { history.1 } else { history.0 };
             let button = ui
@@ -984,19 +1134,31 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
                 *menu_asked = Some(if redo { Action::Redo } else { Action::Undo });
             }
         }
-        if ui.add(small("Bring Forward")).on_hover_text("Move in front of the next object").clicked() {
+        let forward = t("inspector.forward", "Bring Forward");
+        if ui
+            .add(small(forward))
+            .on_hover_text(t("inspector.forward.hint", "Move in front of the next object"))
+            .clicked()
+        {
             draft.restack(true);
         }
-        if ui.add(small("Send Backward")).on_hover_text("Move behind the previous object").clicked() {
+        let backward = t("inspector.backward", "Send Backward");
+        if ui
+            .add(small(backward))
+            .on_hover_text(t("inspector.backward.hint", "Move behind the previous object"))
+            .clicked()
+        {
             draft.restack(false);
         }
-        if ui.add(small("Delete")).on_hover_text("Remove this object from the slide (Delete)").clicked() {
+        let delete = t("inspector.delete", "Delete");
+        let hint = t("inspector.delete.hint", "Remove this object from the slide (Delete)");
+        if ui.add(small(delete)).on_hover_text(hint).clicked() {
             draft.delete_selected();
         }
         if !for_theme
             && ui
-                .add_enabled(!follows_theme, small("Reset to theme"))
-                .on_hover_text("Put this object back where the theme has it")
+                .add_enabled(!follows_theme, small(t("inspector.reset_to_theme", "Reset to theme")))
+                .on_hover_text(t("inspector.reset_to_theme.hint", "Put this object back where the theme has it"))
                 .clicked()
         {
             draft.reset_to_theme();
@@ -1026,9 +1188,12 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let object_id = object.id;
     let ObjectKind::Text { text, style, spans } = &mut object.kind else {
         ui.label(
-            egui::RichText::new("A shape has no text. Its colour and outline are on the Shape tab.")
-                .size(12.0)
-                .color(DIM),
+            egui::RichText::new(t(
+                "inspector.text.shape",
+                "A shape has no text. Its colour and outline are on the Shape tab.",
+            ))
+            .size(12.0)
+            .color(DIM),
         );
         return;
     };
@@ -1047,30 +1212,34 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         Some((_, from, to)) => {
             let words: String = text.chars().skip(from).take(to - from).collect::<String>().replace('\n', " ");
             let words = if words.chars().count() > 26 {
-                format!("\u{201c}{}\u{2026}\u{201d}", words.chars().take(25).collect::<String>().trim_end())
+                crate::i18n::quoted(&format!("{}\u{2026}", words.chars().take(25).collect::<String>().trim_end()))
             } else {
-                format!("\u{201c}{words}\u{201d}")
+                crate::i18n::quoted(&words)
             };
-            heading(ui, "SELECTED WORDS", &words);
+            heading(ui, t("inspector.text.selected", "SELECTED WORDS"), &words);
         }
-        None => heading(ui, "THE WHOLE BOX", "Select words in it to change only them"),
+        None => heading(
+            ui,
+            t("inspector.text.whole_box", "THE WHOLE BOX"),
+            t("inspector.text.whole_box.note", "Select words in it to change only them"),
+        ),
     }
 
     ui.horizontal(|ui| {
         let half = (ui.available_width() - 6.0) / 2.0;
         if ui
-            .add_sized([half, ROW], egui::Button::new("Copy Style"))
-            .on_hover_text("Remember how this text looks")
+            .add_sized([half, ROW], egui::Button::new(t("inspector.text.copy_style", "Copy Style")))
+            .on_hover_text(t("inspector.text.copy_style.hint", "Remember how this text looks"))
             .clicked()
         {
             inspector.copied_style = Some(style.clone());
         }
         let paste = ui
             .add_enabled_ui(inspector.copied_style.is_some(), |ui| {
-                ui.add_sized([half, ROW], egui::Button::new("Paste Style"))
+                ui.add_sized([half, ROW], egui::Button::new(t("inspector.text.paste_style", "Paste Style")))
             })
             .inner
-            .on_hover_text("Give this text the look that was copied")
+            .on_hover_text(t("inspector.text.paste_style.hint", "Give this text the look that was copied"))
             .on_disabled_hover_text(crate::home::COPY_A_STYLE);
         if paste.clicked()
             && let Some(copied) = &inspector.copied_style
@@ -1080,8 +1249,11 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     });
     if !spans.is_empty()
         && ui
-            .add_sized([ui.available_width(), ROW], egui::Button::new("Clear word styles"))
-            .on_hover_text("Every word takes the box's look again")
+            .add_sized(
+                [ui.available_width(), ROW],
+                egui::Button::new(t("inspector.text.clear_words", "Clear word styles")),
+            )
+            .on_hover_text(t("inspector.text.clear_words.hint", "Every word takes the box's look again"))
             .clicked()
     {
         spans.clear();
@@ -1167,8 +1339,11 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         ui.allocate_ui_with_layout(vec2(TICK, ROW), Layout::left_to_right(Align::Center), |ui| {
             ui.set_min_width(TICK);
             let mut linked = link.is_some();
-            if tick(ui, &mut linked, "Linked Text")
-                .on_hover_text("Show something that changes, such as the time or a timer, instead of these words")
+            if tick(ui, &mut linked, t("inspector.text.linked", "Linked Text"))
+                .on_hover_text(t(
+                    "inspector.text.linked.hint",
+                    "Show something that changes, such as the time or a timer, instead of these words",
+                ))
                 .changed()
             {
                 link = linked.then_some(sp_model::TextLink::Clock);
@@ -1176,20 +1351,32 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         });
         if let Some(chosen) = link {
             let shown = match chosen {
-                sp_model::TextLink::Timer { id } => format!("Timer: {}", timer_name(id).unwrap_or("(gone)")),
-                other => other.name().to_owned(),
+                sp_model::TextLink::Timer { id } => {
+                    let name = timer_name(id).unwrap_or(t("inspector.link.gone", "(gone)"));
+                    let full = tf("inspector.link.timer", "Timer: {name}", &[("name", name)]);
+                    // Where those words would run past the menu (less its padding and arrow),
+                    // the short form: the timer's name alone.
+                    let room = ui.available_width() - 40.0;
+                    if crate::studio::widest(ui, &[full.as_str()], &FontId::proportional(13.0)) <= room {
+                        full
+                    } else {
+                        crate::i18n::fill(crate::i18n::ts("inspector.link.timer", "Timer: {name}"), &[("name", name)])
+                    }
+                }
+                other => link_name(other).to_owned(),
             };
             egui::ComboBox::from_id_salt("linked text").selected_text(shown).width(ui.available_width()).show_ui(
                 ui,
                 |ui| {
                     for option in sp_model::TextLink::SIMPLE {
-                        if ui.add(egui::Button::selectable(chosen == option, option.name())).clicked() {
+                        if ui.add(egui::Button::selectable(chosen == option, link_name(option))).clicked() {
                             link = Some(option);
                         }
                     }
                     for (id, name) in &timers {
                         let option = sp_model::TextLink::Timer { id: *id };
-                        if ui.add(egui::Button::selectable(chosen == option, format!("Timer: {name}"))).clicked() {
+                        let words = tf("inspector.link.timer", "Timer: {name}", &[("name", name)]);
+                        if ui.add(egui::Button::selectable(chosen == option, words)).clicked() {
                             link = Some(option);
                         }
                     }
@@ -1224,13 +1411,20 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     rule(ui);
     ui.horizontal(|ui| {
         let plain = style.is_default();
-        let note = if plain { "Looks as the theme has it" } else { "Styled by hand on this slide" };
+        let note = if plain {
+            t("inspector.text.plain", "Looks as the theme has it")
+        } else {
+            t("inspector.text.styled", "Styled by hand on this slide")
+        };
         ui.label(egui::RichText::new(note).size(11.5).color(DIM));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let reset = egui::Button::new(egui::RichText::new("Reset style").size(12.0));
+            let reset = egui::Button::new(egui::RichText::new(t("inspector.text.reset", "Reset style")).size(12.0));
             if ui
                 .add_enabled(!plain, reset)
-                .on_hover_text("Give this text the theme's look again; words you styled one by one keep theirs")
+                .on_hover_text(t(
+                    "inspector.text.reset.hint",
+                    "Give this text the theme's look again; words you styled one by one keep theirs",
+                ))
                 .clicked()
             {
                 *style = TextStyle::default();
@@ -1264,7 +1458,7 @@ fn text_look(
     let full = ui.available_width();
     let font_menu = egui::ComboBox::from_id_salt("font family")
         .selected_text(if mix.font_family {
-            egui::RichText::new("Mixed").italics().color(DIM)
+            egui::RichText::new(t("inspector.font.mixed", "Mixed")).italics().color(DIM)
         } else {
             egui::RichText::new(wanted.font_family.as_str())
         })
@@ -1275,7 +1469,7 @@ fn text_look(
             // and Return takes the first font left.
             let search = ui.add(
                 egui::TextEdit::singleline(&mut inspector.font_search)
-                    .hint_text("Search fonts")
+                    .hint_text(t("inspector.font.search", "Search fonts"))
                     .desired_width(f32::INFINITY),
             );
             search.request_focus();
@@ -1297,7 +1491,7 @@ fn text_look(
             }
             ui.separator();
             if found.is_empty() {
-                ui.label(egui::RichText::new("No font has that in its name.").color(DIM));
+                ui.label(egui::RichText::new(t("inspector.font.none", "No font has that in its name.")).color(DIM));
             }
             for family in found {
                 if ui.selectable_label(wanted.font_family == *family, family.as_str()).clicked() {
@@ -1317,8 +1511,8 @@ fn text_look(
     egui::ComboBox::from_id_salt("font weight").selected_text(weight_name(wanted.weight)).width(full).show_ui(
         ui,
         |ui| {
-            for (weight, name) in WEIGHTS {
-                ui.selectable_value(&mut wanted.weight, weight, name);
+            for (weight, (key, english)) in WEIGHTS {
+                ui.selectable_value(&mut wanted.weight, weight, t(key, english));
             }
         },
     );
@@ -1333,16 +1527,17 @@ fn text_look(
         let field = (full - 2.0 * (button + gap)).max(40.0);
         ui.add_sized(
             [field, ROW - 2.0],
-            egui::DragValue::new(&mut wanted.size)
-                .speed(1.0)
-                .range(8.0..=600.0)
-                .max_decimals(0)
-                .custom_formatter(move |value, _| if mix.size { "Mixed".to_owned() } else { format!("{value:.0}") }),
+            egui::DragValue::new(&mut wanted.size).speed(1.0).range(8.0..=600.0).max_decimals(0).custom_formatter(
+                move |value, _| {
+                    if mix.size { t("inspector.size.mixed", "Mixed").to_owned() } else { format!("{value:.0}") }
+                },
+            ),
         )
-        .on_hover_text("Size, in slide units");
-        for (label, by, hint) in
-            [("A\u{2212}", -SIZE_STEP, "Every size one step smaller"), ("A+", SIZE_STEP, "Every size one step bigger")]
-        {
+        .on_hover_text(t("inspector.size.hint", "Size, in slide units"));
+        for (label, by, hint) in [
+            ("A\u{2212}", -SIZE_STEP, t("inspector.size.smaller", "Every size one step smaller")),
+            ("A+", SIZE_STEP, t("inspector.size.bigger", "Every size one step bigger")),
+        ] {
             if ui
                 .add_sized([button, ROW - 2.0], egui::Button::new(egui::RichText::new(label).size(11.0)))
                 .on_hover_text(hint)
@@ -1399,7 +1594,9 @@ fn text_look(
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             // Spacing: between letters, between lines, and inside the box's edges.
-            let gear = ui.add(egui::Button::new("").min_size(vec2(80.0, ROW))).on_hover_text("Spacing");
+            let gear = ui
+                .add(egui::Button::new("").min_size(vec2(80.0, ROW)))
+                .on_hover_text(t("inspector.text.spacing", "Spacing"));
             let mark = Rect::from_center_size(gear.rect.center(), vec2(14.0, 14.0));
             crate::icons::paint(ui.painter(), crate::icons::Icon::Gear, mark, INK);
             egui::Popup::from_toggle_button_response(&gear)
@@ -1407,22 +1604,23 @@ fn text_look(
                 .show(|ui| spacing_popup(ui, wanted));
         });
     });
-    labelled(ui, "Capitalisation", |ui, width| {
+    labelled(ui, tk("inspector.text.caps", "Capitalisation"), |ui, width| {
         let options = [
-            (Caps::None, "None"),
-            (Caps::AllCaps, "All Caps"),
-            (Caps::Lowercase, "Lowercase"),
-            (Caps::TitleCase, "Title Case"),
-            (Caps::StartCase, "Start Case"),
+            (Caps::None, t("inspector.caps.none", "None")),
+            (Caps::AllCaps, t("inspector.caps.all", "All Caps")),
+            (Caps::Lowercase, t("inspector.caps.lower", "Lowercase")),
+            (Caps::TitleCase, t("inspector.caps.title", "Title Case")),
+            (Caps::StartCase, t("inspector.caps.start", "Start Case")),
         ];
         choice(ui, "caps", width, &mut wanted.caps, &options);
     });
     rule(ui);
 
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Text Colour").size(13.0).color(INK));
+        ui.label(egui::RichText::new(t("inspector.text.colour", "Text Colour")).size(13.0).color(INK));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            colour_split(ui, &mut wanted.fill, "Text colour", mix.fill.then_some(mix.other_fill).flatten())
+            let hint = t("inspector.text.colour.hint", "Text colour");
+            colour_split(ui, &mut wanted.fill, hint, mix.fill.then_some(mix.other_fill).flatten())
         });
     });
     ui.add_space(4.0);
@@ -1430,25 +1628,25 @@ fn text_look(
     rule(ui);
 
     if words_picked {
-        heading_line(ui, "THE WHOLE BOX");
+        heading_line(ui, t("inspector.text.whole_box", "THE WHOLE BOX"));
     }
-    labelled(ui, "Scaling", |ui, width| {
+    labelled(ui, tk("inspector.text.scaling", "Scaling"), |ui, width| {
         let options = [
-            (Scaling::None, "None"),
-            (Scaling::TextUp, "Text up"),
-            (Scaling::TextDown, "Text down"),
-            (Scaling::TextUpOrDown, "Text up or down"),
-            (Scaling::ContainerUpOrDown, "Container up or down"),
+            (Scaling::None, t("inspector.scaling.none", "None")),
+            (Scaling::TextUp, t("inspector.scaling.up", "Text up")),
+            (Scaling::TextDown, t("inspector.scaling.down", "Text down")),
+            (Scaling::TextUpOrDown, t("inspector.scaling.up_or_down", "Text up or down")),
+            (Scaling::ContainerUpOrDown, t("inspector.scaling.container", "Container up or down")),
         ];
         choice(ui, "scaling", width, &mut wanted.scaling, &options);
     });
-    labelled(ui, "Line Transform", |ui, width| {
+    labelled(ui, tk("inspector.text.line_transform", "Line Transform"), |ui, width| {
         let options = [
-            (LineTransform::None, "None"),
-            (LineTransform::RemoveLineReturns, "Remove line returns"),
-            (LineTransform::ReplaceLineReturns, "Replace line returns"),
-            (LineTransform::OneWordPerLine, "One word per line"),
-            (LineTransform::OneCharacterPerLine, "One character per line"),
+            (LineTransform::None, t("inspector.lines.none", "None")),
+            (LineTransform::RemoveLineReturns, t("inspector.lines.remove", "Remove line returns")),
+            (LineTransform::ReplaceLineReturns, t("inspector.lines.replace", "Replace line returns")),
+            (LineTransform::OneWordPerLine, t("inspector.lines.word", "One word per line")),
+            (LineTransform::OneCharacterPerLine, t("inspector.lines.character", "One character per line")),
         ];
         choice(ui, "line transform", width, &mut wanted.line_transform, &options);
     });
@@ -1482,14 +1680,15 @@ fn text_look(
         let mut stroked = wanted.outline_width > 0.0;
         ui.allocate_ui_with_layout(vec2(TICK, ROW), Layout::left_to_right(Align::Center), |ui| {
             ui.set_min_width(TICK);
-            if tick(ui, &mut stroked, "Stroke").changed() {
+            if tick(ui, &mut stroked, t("inspector.stroke", "Stroke")).changed() {
                 wanted.outline_width = if stroked { base.outline_width.max(1.0) } else { 0.0 };
             }
         });
         if stroked {
-            number(ui, &mut wanted.outline_width, 78.0, "Width", |d| d.speed(0.25).range(0.25..=60.0).max_decimals(1));
+            let width = t("inspector.stroke.width", "Width");
+            number(ui, &mut wanted.outline_width, 78.0, width, |d| d.speed(0.25).range(0.25..=60.0).max_decimals(1));
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                colour(ui, &mut wanted.outline_color, "Stroke colour")
+                colour(ui, &mut wanted.outline_color, t("inspector.stroke.colour", "Stroke colour"))
             });
         }
     });
@@ -1498,14 +1697,16 @@ fn text_look(
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(vec2(TICK, ROW), Layout::left_to_right(Align::Center), |ui| {
             ui.set_min_width(TICK);
-            tick(ui, &mut wanted.shadow, "Shadow");
+            tick(ui, &mut wanted.shadow, t("inspector.shadow", "Shadow"));
         });
         if wanted.shadow {
             let mut percent = (wanted.shadow_look.opacity * 100.0).round();
-            number(ui, &mut percent, 78.0, "Opacity", |d| d.range(0.0..=100.0).suffix("%"));
+            number(ui, &mut percent, 78.0, t("inspector.shadow.opacity", "Opacity"), |d| {
+                d.range(0.0..=100.0).suffix("%")
+            });
             wanted.shadow_look.opacity = percent / 100.0;
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                colour(ui, &mut wanted.shadow_look.color, "Shadow colour")
+                colour(ui, &mut wanted.shadow_look.color, t("inspector.shadow.colour", "Shadow colour"))
             });
         }
     });
@@ -1513,11 +1714,15 @@ fn text_look(
         ui.horizontal_top(|ui| {
             let each = (full - 2.0 * 12.0) / 3.0;
             let look = &mut wanted.shadow_look;
-            number(ui, &mut look.angle, each, "Angle", |d| d.range(0.0..=360.0).suffix("°"));
+            number(ui, &mut look.angle, each, t("inspector.shadow.angle", "Angle"), |d| {
+                d.range(0.0..=360.0).suffix("°")
+            });
             ui.add_space(6.0);
-            number(ui, &mut look.offset, each, "Offset", |d| d.speed(0.5).range(0.0..=200.0));
+            number(ui, &mut look.offset, each, t("inspector.shadow.offset", "Offset"), |d| {
+                d.speed(0.5).range(0.0..=200.0)
+            });
             ui.add_space(6.0);
-            number(ui, &mut look.blur, each, "Blur", |d| d.speed(0.5).range(0.0..=200.0));
+            number(ui, &mut look.blur, each, t("inspector.shadow.blur", "Blur"), |d| d.speed(0.5).range(0.0..=200.0));
         });
     }
     rule(ui);
@@ -1526,7 +1731,8 @@ fn text_look(
     ui.horizontal(|ui| {
         ui.allocate_ui_with_layout(vec2(TICK, ROW), Layout::left_to_right(Align::Center), |ui| {
             ui.set_min_width(TICK);
-            tick(ui, &mut wanted.line_fill.on, "Background").on_hover_text("A colour behind the lines of text");
+            tick(ui, &mut wanted.line_fill.on, t("inspector.text.background", "Background"))
+                .on_hover_text(t("inspector.text.background.hint", "A colour behind the lines of text"));
         });
         if wanted.line_fill.on {
             let width = (ui.available_width() - 44.0).max(60.0);
@@ -1535,10 +1741,17 @@ fn text_look(
                 "line fill",
                 width,
                 &mut wanted.line_fill.full_width,
-                &[(false, "Lines Only"), (true, "Full Width")],
+                &[
+                    (false, t("inspector.text.background.lines", "Lines Only")),
+                    (true, t("inspector.text.background.full", "Full Width")),
+                ],
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                colour(ui, &mut wanted.line_fill.color, "The colour behind the text");
+                colour(
+                    ui,
+                    &mut wanted.line_fill.color,
+                    t("inspector.text.background.colour", "The colour behind the text"),
+                );
             });
         }
     });
@@ -1548,8 +1761,11 @@ fn text_look(
         ui.allocate_ui_with_layout(vec2(TICK, ROW), Layout::left_to_right(Align::Center), |ui| {
             ui.set_min_width(TICK);
             let mut scrolling = wanted.scroll != sp_model::Scroll::None;
-            if tick(ui, &mut scrolling, "Scrolling")
-                .on_hover_text("The text keeps moving through its box, as a ticker does")
+            if tick(ui, &mut scrolling, t("inspector.text.scrolling", "Scrolling"))
+                .on_hover_text(t(
+                    "inspector.text.scrolling.hint",
+                    "The text keeps moving through its box, as a ticker does",
+                ))
                 .changed()
             {
                 wanted.scroll = if scrolling { sp_model::Scroll::Left } else { sp_model::Scroll::None };
@@ -1583,10 +1799,10 @@ fn text_look(
     ui.horizontal(|ui| {
         ui.allocate_ui_with_layout(vec2(TICK, ROW), Layout::left_to_right(Align::Center), |ui| {
             ui.set_min_width(TICK);
-            ui.label(egui::RichText::new("List").size(13.0).strong().color(INK));
+            ui.label(egui::RichText::new(t("inspector.text.list", "List")).size(13.0).strong().color(INK));
         });
         let options: Vec<(sp_model::ListStyle, &str)> =
-            sp_model::ListStyle::ALL.iter().map(|list| (*list, list.name())).collect();
+            sp_model::ListStyle::ALL.iter().map(|list| (*list, list_name(*list))).collect();
         choice(ui, "list", ui.available_width(), &mut wanted.list, &options);
     });
 }
@@ -1596,7 +1812,10 @@ fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
     let Some(draft) = state.editing.as_mut() else { return };
     // A stage screen shows its layout's objects at once, whatever comes on the slides.
     if crate::stage_editor::is_stage(draft) && state.theme_edit.is_none() {
-        let said = "A stage layout's objects are on the stage screens all the time; builds are for slides and props.";
+        let said = t(
+            "inspector.build.stage",
+            "A stage layout's objects are on the stage screens all the time; builds are for slides and props.",
+        );
         ui.label(egui::RichText::new(said).size(12.0).color(DIM));
         return;
     }
@@ -1610,7 +1829,11 @@ fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             let name = object
                 .as_text()
                 .map_or_else(|| object.name.clone(), |text| text.lines().next().unwrap_or("").to_owned());
-            Some(format!("{name}: {}", build.effect.name(coming_in)))
+            Some(tf(
+                "inspector.build.step",
+                "{name}: {effect}",
+                &[("name", &name), ("effect", effect_name(build.effect, coming_in))],
+            ))
         })
         .collect();
     let Some(object) = draft.selected_object_mut() else {
@@ -1627,10 +1850,13 @@ fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
     for coming_in in [true, false] {
         let build = if coming_in { &mut object.build_in } else { &mut object.build_out };
         ui.horizontal(|ui| {
-            label(ui, if coming_in { "Build In" } else { "Build Out" });
+            label(
+                ui,
+                if coming_in { t("inspector.build.in", "Build In") } else { t("inspector.build.out", "Build Out") },
+            );
             let mut effect = build.map(|build| build.effect);
-            let mut options: Vec<(Option<BuildEffect>, &str)> = vec![(None, "None")];
-            options.extend(BuildEffect::ALL.iter().map(|effect| (Some(*effect), effect.name(coming_in))));
+            let mut options: Vec<(Option<BuildEffect>, &str)> = vec![(None, t("inspector.build.none", "None"))];
+            options.extend(BuildEffect::ALL.iter().map(|effect| (Some(*effect), effect_name(*effect, coming_in))));
             let room = ui.available_width();
             choice(ui, if coming_in { "build in" } else { "build out" }, room, &mut effect, &options);
             if effect != build.map(|build| build.effect) {
@@ -1641,12 +1867,15 @@ fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         if let Some(build) = build.as_mut() {
             if build.effect == BuildEffect::Fly {
                 ui.horizontal(|ui| {
-                    label(ui, if coming_in { "From" } else { "To" });
+                    label(
+                        ui,
+                        if coming_in { t("inspector.build.from", "From") } else { t("inspector.build.to", "To") },
+                    );
                     let sides = [
-                        (Direction::FromLeft, "Left"),
-                        (Direction::FromRight, "Right"),
-                        (Direction::FromTop, "Top"),
-                        (Direction::FromBottom, "Bottom"),
+                        (Direction::FromLeft, t("inspector.build.side.left", "Left")),
+                        (Direction::FromRight, t("inspector.build.side.right", "Right")),
+                        (Direction::FromTop, t("inspector.build.side.top", "Top")),
+                        (Direction::FromBottom, t("inspector.build.side.bottom", "Bottom")),
                     ];
                     let room = ui.available_width();
                     choice(
@@ -1659,48 +1888,63 @@ fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 });
             }
             ui.horizontal_top(|ui| {
-                label(ui, "Timing");
-                number(ui, &mut build.seconds, 72.0, "Seconds", |d| d.speed(0.05).range(0.0..=10.0).max_decimals(2));
+                label(ui, t("inspector.build.timing", "Timing"));
+                let seconds = t("inspector.build.seconds", "Seconds");
+                number(ui, &mut build.seconds, 72.0, seconds, |d| d.speed(0.05).range(0.0..=10.0).max_decimals(2));
                 ui.add_space(8.0);
-                number(ui, &mut build.delay, 72.0, "Delay", |d| d.speed(0.05).range(0.0..=30.0).max_decimals(2));
+                let delay = t("inspector.build.delay", "Delay");
+                number(ui, &mut build.delay, 72.0, delay, |d| d.speed(0.05).range(0.0..=30.0).max_decimals(2));
             });
             if coming_in {
                 ui.horizontal(|ui| {
-                    label(ui, "Starts");
-                    let starts = [(false, "With the Slide"), (true, "On a Click")];
+                    label(ui, t("inspector.build.starts", "Starts"));
+                    let starts = [
+                        (false, t("inspector.build.with_slide", "With the Slide")),
+                        (true, t("inspector.build.on_click", "On a Click")),
+                    ];
                     let room = ui.available_width();
                     choice(ui, "build in start", room, &mut build.on_click, &starts);
                 });
                 if is_text {
                     ui.horizontal(|ui| {
-                        label(ui, "Delivery");
-                        let ways = [(false, "All at Once"), (true, "By Paragraph")];
+                        label(ui, t("inspector.build.delivery", "Delivery"));
+                        let ways = [
+                            (false, t("inspector.build.all_at_once", "All at Once")),
+                            (true, t("inspector.build.by_paragraph", "By Paragraph")),
+                        ];
                         let room = ui.available_width();
                         choice(ui, "build in delivery", room, &mut build.by_paragraph, &ways);
                     });
                     if build.by_paragraph {
                         let hint = if build.on_click {
-                            "Each click shows the next paragraph."
+                            t("inspector.build.by_click", "Each click shows the next paragraph.")
                         } else {
-                            "Each paragraph follows the last after its time in seconds."
+                            t("inspector.build.by_time", "Each paragraph follows the last after its time in seconds.")
                         };
                         ui.label(egui::RichText::new(hint).size(11.5).color(DIM));
                     }
                 }
             } else {
-                ui.label(egui::RichText::new("Leaves when Next is clicked.").size(11.5).color(DIM));
+                ui.label(
+                    egui::RichText::new(t("inspector.build.leaves", "Leaves when Next is clicked."))
+                        .size(11.5)
+                        .color(DIM),
+                );
             }
         }
         rule(ui);
     }
     // The order clicks set the slide's builds going in: builds in first, then builds out.
-    ui.label(egui::RichText::new("Click Order").size(12.5).strong().color(INK));
+    ui.label(egui::RichText::new(t("inspector.build.order", "Click Order")).size(12.5).strong().color(INK));
     ui.add_space(4.0);
     if order.is_empty() {
         ui.label(
-            egui::RichText::new("No builds wait for a click. Next goes straight to the next slide.")
-                .size(11.5)
-                .color(DIM),
+            egui::RichText::new(t(
+                "inspector.build.order.none",
+                "No builds wait for a click. Next goes straight to the next slide.",
+            ))
+            .size(11.5)
+            .color(DIM),
         );
     }
     for (index, step) in order.iter().enumerate() {

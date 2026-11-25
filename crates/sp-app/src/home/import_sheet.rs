@@ -10,14 +10,24 @@ use egui::{Align2, Color32, Frame, Id, Layout, Pos2, Rect, Sense, Stroke, Stroke
 
 use super::HomeState;
 use crate::deck::ImportAs;
+use crate::i18n::{t, tf};
 use crate::icons::Icon;
 use crate::studio::{CARD, Flat, HOVER, LINE, PANEL, TEXT, TEXT_DIM, TEXT_FAINT};
 
 /// What the card for slides says of itself.
-pub const SLIDES_LINE: &str =
-    "Words stay words, ready to edit. Read straight from the file in a moment. Charts and tables come in as pictures";
+pub fn slides_line() -> &'static str {
+    t(
+        "import.slides.line",
+        "Words stay words, ready to edit. Read straight from the file in a moment. Charts and tables come in as pictures",
+    )
+}
 /// What the card for pictures says of itself.
-pub const PICTURES_LINE: &str = "The exact look, each slide a picture. An app on this computer that can open the file draws it unseen, and is closed again";
+pub fn pictures_line() -> &'static str {
+    t(
+        "import.pictures.line",
+        "The exact look, each slide a picture. An app on this computer that can open the file draws it unseen, and is closed again",
+    )
+}
 
 /// A presentation file waiting to be told how to come in, and what can be done with it. What can
 /// be done is worked out where the files are looked at (so the sheet itself is only drawn), and
@@ -82,10 +92,10 @@ impl AskImport {
     /// The kind of file the choice is kept for, as a plural: ".pptx files".
     pub fn kind_words(&self) -> String {
         match crate::deck::kind_of(&self.path) {
-            "pptx" if self.ending() == ".ppsx" => ".pptx and .ppsx files".to_owned(),
-            "pptx" => ".pptx files".to_owned(),
-            "ppt" => ".ppt and .pps files".to_owned(),
-            other => format!(".{other} files"),
+            "pptx" if self.ending() == ".ppsx" => t("import.kind.pptx_ppsx", ".pptx and .ppsx files").to_owned(),
+            "pptx" => t("import.kind.pptx", ".pptx files").to_owned(),
+            "ppt" => t("import.kind.ppt", ".ppt and .pps files").to_owned(),
+            other => tf("import.kind.other", ".{kind} files", &[("kind", other)]),
         }
     }
 
@@ -95,26 +105,33 @@ impl AskImport {
             return None;
         }
         Some(match how {
-            ImportAs::Slides => "Only .pptx and .ppsx files can come in as slides".to_owned(),
-            ImportAs::Pictures => {
-                format!("No app on this computer can open {} files to draw them", self.ending())
+            ImportAs::Slides => {
+                t("import.reason.slides", "Only .pptx and .ppsx files can come in as slides").to_owned()
             }
+            ImportAs::Pictures => tf(
+                "import.reason.pictures",
+                "No app on this computer can open {ending} files to draw them",
+                &[("ending", &self.ending())],
+            ),
         })
     }
 
     /// With neither possible, the whole sheet: why the file can't come in, and what would do.
     pub fn nothing_words(&self) -> String {
-        format!(
-            "No app on this computer can open {} files to draw them, so \u{201c}{}\u{201d} can\u{2019}t come in. \
-             Saved as .pptx, it could come in as slides.",
-            self.ending(),
-            self.name()
+        tf(
+            "import.nothing",
+            "No app on this computer can open {ending} files to draw them, so {name} can\u{2019}t come in. Saved as .pptx, it could come in as slides.",
+            &[("ending", &self.ending()), ("name", &crate::i18n::quoted(&self.name()))],
         )
     }
 
     /// The foot of the sheet.
     pub fn foot(&self) -> String {
-        format!("Enter takes the one ringed. The choice is kept for {}", self.kind_words())
+        tf(
+            "import.foot",
+            "Enter takes the one ringed. The choice is kept for {kinds}",
+            &[("kinds", &self.kind_words())],
+        )
     }
 }
 
@@ -137,7 +154,7 @@ fn card(ui: &mut egui::Ui, at: Pos2, title: &str, line: &str, ringed: bool, last
             ui,
             pos2(rect.max.x - 14.0, rect.min.y + 14.0),
             Align2::RIGHT_TOP,
-            "LAST TIME",
+            t("import.last_time", "LAST TIME"),
             crate::studio::fixed(10.0),
             TEXT_FAINT,
             0.6,
@@ -171,7 +188,7 @@ fn title_row(ui: &mut egui::Ui, title: &str) -> bool {
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
             let (close, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
             if crate::studio::quiet_icon(ui, close, ui.scope_id().with("close"), Icon::Close, 11.0, 0.7, None)
-                .on_hover_text("Close")
+                .on_hover_text(t("import.close", "Close"))
                 .clicked()
             {
                 closed = true;
@@ -216,18 +233,19 @@ pub fn ask_import_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
         |ui| {
             ui.set_width(666.0);
             ui.spacing_mut().item_spacing = vec2(8.0, 12.0);
-            cancelled |= title_row(ui, &format!("Import \u{201c}{}\u{201d}", ask.name()));
+            cancelled |=
+                title_row(ui, &tf("import.title", "Import {name}", &[("name", &crate::i18n::quoted(&ask.name()))]));
             if ringed.is_none() {
                 // Neither way is possible: one paragraph, and OK.
                 ui.label(egui::RichText::new(ask.nothing_words()).size(12.5).color(TEXT_DIM));
-                if foot_row(ui, "", "OK") || take(ui, egui::Key::Enter) {
+                if foot_row(ui, "", t("import.ok", "OK")) || take(ui, egui::Key::Enter) {
                     answer = Some(None);
                 }
             } else {
                 let (rect, _) = ui.allocate_exact_size(vec2(454.0, 112.0), Sense::hover());
                 for (place, how, title, line) in [
-                    (0.0, ImportAs::Slides, "As Slides", SLIDES_LINE),
-                    (232.0, ImportAs::Pictures, "As Pictures", PICTURES_LINE),
+                    (0.0, ImportAs::Slides, t("import.as_slides", "As Slides"), slides_line()),
+                    (232.0, ImportAs::Pictures, t("import.as_pictures", "As Pictures"), pictures_line()),
                 ] {
                     let reason = ask.reason(how);
                     let usable = reason.is_none();
@@ -237,7 +255,7 @@ pub fn ask_import_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
                         answer = Some(Some(how));
                     }
                 }
-                if foot_row(ui, &ask.foot(), "Cancel") {
+                if foot_row(ui, &ask.foot(), t("import.cancel", "Cancel")) {
                     cancelled = true;
                 }
                 if take(ui, egui::Key::Enter) {
@@ -275,27 +293,33 @@ pub fn slides_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
         |ui| {
             ui.set_width(666.0);
             ui.spacing_mut().item_spacing = vec2(8.0, 12.0);
-            cancelled |= title_row(ui, "Import Slides");
+            cancelled |= title_row(ui, t("import.slides.title", "Import Slides"));
             let (rect, _) = ui.allocate_exact_size(vec2(454.0, 112.0), Sense::hover());
             for (place, which, title, line) in [
                 (
                     0.0,
                     SlidesChoice::Pictures,
-                    "Pictures as slides",
-                    "Pictures chosen together become one presentation, a slide each, in the order their names number them",
+                    t("import.pictures_as_slides", "Pictures as slides"),
+                    t(
+                        "import.pictures_as_slides.line",
+                        "Pictures chosen together become one presentation, a slide each, in the order their names number them",
+                    ),
                 ),
                 (
                     232.0,
                     SlidesChoice::Presentation,
-                    "A presentation",
-                    "A .pptx, .ppsx, .key, .odp, .ppt or .pps file, or a PDF. You choose how it comes in",
+                    t("import.presentation", "A presentation"),
+                    t(
+                        "import.presentation.line",
+                        "A .pptx, .ppsx, .key, .odp, .ppt or .pps file, or a PDF. You choose how it comes in",
+                    ),
                 ),
             ] {
                 if card(ui, rect.min + vec2(place, 0.0), title, line, false, false, true) {
                     chosen = Some(which);
                 }
             }
-            if foot_row(ui, "", "Cancel") {
+            if foot_row(ui, "", t("import.cancel", "Cancel")) {
                 cancelled = true;
             }
             if take(ui, egui::Key::Escape) {

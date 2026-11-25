@@ -5,6 +5,8 @@ use sp_engine::{Show, SlideRef};
 use sp_model::{Object, ObjectKind, SLIDE_HEIGHT, SLIDE_WIDTH, Slide, SlideRect, TextStyle, Theme, Uuid};
 use sp_render::object_frame;
 
+use crate::i18n::{t, tf};
+
 /// An object cannot be made smaller than this on either side, in slide units.
 pub const MIN_SIDE: f32 = 20.0;
 /// How many changes can be undone.
@@ -285,6 +287,24 @@ pub enum Drag {
     },
 }
 
+/// A shape's name in the language set, for the Add menus and a new shape's name (sp-model keeps
+/// the English one).
+pub fn shape_name(shape: sp_model::Shape) -> &'static str {
+    use sp_model::Shape;
+    match shape {
+        Shape::RoundedRect => t("editor.shape.rounded_rect", "Rounded Rect"),
+        Shape::Rectangle => t("editor.shape.rectangle", "Rectangle"),
+        Shape::Ellipse => t("editor.shape.ellipse", "Ellipse"),
+        Shape::Triangle => t("editor.shape.triangle", "Triangle"),
+        Shape::RightTriangle => t("editor.shape.right_triangle", "Right Triangle"),
+        Shape::Rhombus => t("editor.shape.rhombus", "Rhombus"),
+        Shape::Polygon => t("editor.shape.polygon", "Polygon"),
+        Shape::Star => t("editor.shape.star", "Star"),
+        Shape::DoubleArrow => t("editor.shape.double_arrow", "Double Arrow"),
+        Shape::Arrow => t("editor.shape.arrow", "Arrow"),
+    }
+}
+
 /// A number for each draft made, so a change of draft can be told from the same one.
 fn next_draft_serial() -> u64 {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -560,7 +580,7 @@ impl EditDraft {
         let number = self.slide.objects.len() + 1;
         let object = Object {
             id: Uuid::new_v4(),
-            name: format!("Text {number}"),
+            name: tf("editor.new_text.name", "Text {number}", &[("number", &number.to_string())]),
             role: None,
             frame: Some(SlideRect { x: (SLIDE_WIDTH - w) / 2.0, y: (SLIDE_HEIGHT - h) / 2.0, w, h }),
             rotation: 0.0,
@@ -594,9 +614,12 @@ impl EditDraft {
             .iter()
             .filter(|o| matches!(o.kind, ObjectKind::Shape { shape: s } if s == shape))
             .count();
-        if same > 0 {
-            object.name = format!("{} {}", shape.name(), same + 1);
-        }
+        // Named in the language set: sp-model names it in English.
+        object.name = if same > 0 {
+            tf("editor.shape.numbered", "{shape} {n}", &[("shape", shape_name(shape)), ("n", &(same + 1).to_string())])
+        } else {
+            shape_name(shape).to_owned()
+        };
         self.selected = Some(object.id);
         self.also.clear();
         self.slide.objects.push(object);
@@ -624,9 +647,11 @@ impl EditDraft {
         self.record();
         let same = self.slide.objects.iter().filter(|o| matches!(o.kind, ObjectKind::Web { .. })).count();
         let mut object = Object::web(String::new());
-        if same > 0 {
-            object.name = format!("Web page {}", same + 1);
-        }
+        object.name = if same > 0 {
+            tf("editor.web.numbered", "Web page {n}", &[("n", &(same + 1).to_string())])
+        } else {
+            t("editor.web.name", "Web page").to_owned()
+        };
         self.selected = Some(object.id);
         self.also.clear();
         self.slide.objects.push(object);
@@ -637,9 +662,11 @@ impl EditDraft {
         self.record();
         let same = self.slide.objects.iter().filter(|o| matches!(o.kind, ObjectKind::Ndi { .. })).count();
         let mut object = Object::ndi(String::new());
-        if same > 0 {
-            object.name = format!("NDI source {}", same + 1);
-        }
+        object.name = if same > 0 {
+            tf("editor.ndi.numbered", "NDI source {n}", &[("n", &(same + 1).to_string())])
+        } else {
+            t("editor.ndi.name", "NDI source").to_owned()
+        };
         self.selected = Some(object.id);
         self.also.clear();
         self.slide.objects.push(object);

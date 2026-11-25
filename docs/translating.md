@@ -98,6 +98,9 @@ start with `_` (`"_note"`) are comments.
 | `setup` | the first-start setup's steps, in each system's wording |
 | `integrations` | Settings › Integrations: VoxLive, Canva Sync and their pages, states and messages |
 | `remote` | Settings › Remote Control and what Remote Control says in the window |
+| `inspector` | the inspector at the right of the Edit view: its tabs, sections, fields and menus |
+| `editor` | the Edit view's slide editing (`editor.rs`) and its stage layouts' parts (`stage_editor.rs`) |
+| `import` | the Import Slides sheets |
 | `common` | words several areas share |
 | `format` | numbers and quotation marks (not words) |
 

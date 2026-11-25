@@ -313,7 +313,7 @@ pub fn t(key: &'static str, english: &'static str) -> &'static str {
 /// A key and its English together, for a place that keeps them in a table before it draws
 /// them (the layer keys' names): the same as [`t`]'s two arguments, but the scan for wrapped
 /// keys finds them. Hand the pair on to [`ts`] or [`t`].
-pub fn tk(key: &'static str, english: &'static str) -> (&'static str, &'static str) {
+pub const fn tk(key: &'static str, english: &'static str) -> (&'static str, &'static str) {
     (key, english)
 }
 
@@ -756,6 +756,9 @@ mod tests {
         "setup",
         "integrations",
         "remote",
+        "inspector",
+        "editor",
+        "import",
     ];
 
     #[test]
