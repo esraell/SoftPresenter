@@ -148,21 +148,8 @@ fn readout(pane: Pane, state: &HomeState, show: &Show) -> Option<Readout> {
     let off = || Readout::of(t("settings.off", "Off"), false);
     match pane {
         Pane::Screens => {
-            let output_on = show.output_enabled();
-            let on = state
-                .screens
-                .iter()
-                .zip(&state.screen_status)
-                .filter(|(screen, (_, shown))| {
-                    *shown
-                        && match screen.kind {
-                            crate::screens::Kind::Audience => output_on,
-                            crate::screens::Kind::Stage => state.stage_on,
-                        }
-                })
-                .count();
-            let counts =
-                [("on", crate::i18n::count(on as u64)), ("all", crate::i18n::count(state.screens.len() as u64))];
+            let (on, all) = screens_on(state, show);
+            let counts = [("on", crate::i18n::count(on as u64)), ("all", crate::i18n::count(all as u64))];
             let counts: Vec<(&str, &str)> = counts.iter().map(|(name, value)| (*name, value.as_str())).collect();
             Some(Readout {
                 words: tf("settings.state.screens", "{on} of {all} on", &counts),
@@ -208,6 +195,25 @@ fn readout(pane: Pane, state: &HomeState, show: &Show) -> Option<Readout> {
         Pane::PhoneRemote => Some(off()),
         _ => None,
     }
+}
+
+/// How many screens are going out (shown somewhere, with their kind switched on), and how many
+/// there are.
+fn screens_on(state: &HomeState, show: &Show) -> (usize, usize) {
+    let output_on = show.output_enabled();
+    let on = state
+        .screens
+        .iter()
+        .zip(&state.screen_status)
+        .filter(|(screen, (_, shown))| {
+            *shown
+                && match screen.kind {
+                    crate::screens::Kind::Audience => output_on,
+                    crate::screens::Kind::Stage => state.stage_on,
+                }
+        })
+        .count();
+    (on, state.screens.len())
 }
 
 /// How many of the services in Integrations are connected (or, for the songbooks, have any).
@@ -390,7 +396,7 @@ const PAGE_WIDTH: f32 = 860.0;
 /// What a page holds.
 fn pane_contents(ui: &mut egui::Ui, state: &mut HomeState, show: &Show, pane: Pane) {
     match pane {
-        Pane::Screens => screens_page(ui, state),
+        Pane::Screens => screens_page(ui, state, show),
         Pane::PhoneScreens => crate::mirror::pane(ui, &mut state.mirror),
         Pane::Slides => slides_page(ui, state, show),
         Pane::Groups => groups_page(ui),
@@ -408,57 +414,138 @@ fn pane_contents(ui: &mut egui::Ui, state: &mut HomeState, show: &Show, pane: Pa
     }
 }
 
-/// Settings › Screens: Configure Screens, the stage screens' switch, and the check strip (mark
-/// each screen with its name and colour, and a test pattern on every screen, to line up
-/// projectors and cables).
-fn screens_page(ui: &mut egui::Ui, state: &mut HomeState) {
-    // Its key is the Mac menu bar's.
-    let hint = match crate::keys::screens_key() {
-        Some(key) => tf("settings.screens.configure.key", "Configure Screens ({key})", &[("key", &key)]),
-        None => t("settings.screens.configure.hint", "Configure Screens").to_owned(),
+/// Settings › Screens, until its cards by purpose are agreed: how many screens are going out; the
+/// check strip (mark each screen with its name and colour, and a test pattern on every screen, to
+/// line up projectors and cables); then the screens' own window and the stage screens' switch.
+fn screens_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
+    use crate::props::TestPattern;
+    // How many are going out.
+    {
+        let (on, all) = screens_on(state, show);
+        let counts = [("on", crate::i18n::count(on as u64)), ("all", crate::i18n::count(all as u64))];
+        let counts: Vec<(&str, &str)> = counts.iter().map(|(name, value)| (*name, value.as_str())).collect();
+        let summary = tf("settings.screens.summary", "{on} of {all} going out", &counts);
+        let width = ui.available_width();
+        let line = parts::words(ui, &summary, FontId::proportional(13.0), TEXT_FAINT, 0.0, width);
+        let (place, _) = ui.allocate_exact_size(vec2(width, line.size().y), Sense::hover());
+        ui.painter().galley(place.min, line, TEXT_FAINT);
+        ui.add_space(12.0);
+    }
+    // The check strip: Identify, a rule, then the test patterns.
+    let font = FontId::proportional(12.5);
+    let (identify, stop) =
+        (t("settings.screens.identify", "Identify"), t("settings.screens.identify.stop", "Stop identifying"));
+    let identify_width = crate::studio::widest(ui, &[identify, stop], &font) + 26.0;
+    let look = crate::studio::SwitchLook {
+        font: FontId::proportional(12.0),
+        spacing: 0.0,
+        pad: 11.0,
+        height: 24.0,
+        inset: 3.0,
+        track: CARD,
+        idle: TEXT_DIM,
     };
-    if ui.button(t("settings.screens.configure", "Configure Screens…")).on_hover_text(hint).clicked() {
-        state.settings_open = true;
+    let patterns = [
+        (None, t("settings.screens.pattern.off", "Off")),
+        (Some(TestPattern::ColorBars), t("right.playing.bars", "Colour bars")),
+        (Some(TestPattern::Grid), t("right.playing.grid", "Grid")),
+        (Some(TestPattern::White), t("right.playing.white", "White")),
+    ];
+    let labels: Vec<&str> = patterns.iter().map(|(_, label)| *label).collect();
+    let chosen = patterns.iter().position(|(pattern, _)| *pattern == state.test_pattern);
+    let caption = parts::words(
+        ui,
+        &t("settings.screens.pattern", "Test pattern").to_uppercase(),
+        fixed_semibold(11.5),
+        TEXT_DIM,
+        0.575,
+        f32::INFINITY,
+    );
+    let seen = parts::words(
+        ui,
+        &t("settings.screens.seen", "Everyone watching sees these").to_uppercase(),
+        fixed(11.5),
+        TEXT_FAINT,
+        0.575,
+        f32::INFINITY,
+    );
+    let (strip, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
+    let key = Rect::from_min_size(strip.min, vec2(identify_width, 30.0));
+    let words = if state.identify { stop } else { identify };
+    let look_now = if state.identify { Flat::On } else { Flat::Plain };
+    let identify_response = flat_button(ui, key, ui.scope_id().with("identify"), words, font, look_now, true);
+    if identify_response
+        .on_hover_text(t(
+            "settings.screens.identify.hint",
+            "Each screen shows its name and colour. The room and the stream see it.",
+        ))
+        .clicked()
+    {
+        state.identify = !state.identify;
+    }
+    let mut x = key.max.x + 12.0;
+    ui.painter().vline(
+        x,
+        egui::Rangef::new(strip.min.y + 7.0, strip.max.y - 7.0),
+        Stroke::new(1.0, crate::studio::LINE),
+    );
+    x += 12.0;
+    let caption_width = caption.size().x;
+    ui.painter().galley(pos2(x, strip.center().y - caption.size().y / 2.0), caption, TEXT_DIM);
+    x += caption_width + 10.0;
+    let (track, clicked) =
+        crate::studio::pill_switch(ui, "test pattern", pos2(x, strip.min.y), &labels, &[], chosen, &look);
+    if let Some(at) = clicked {
+        state.test_pattern = patterns[at].0;
+    }
+    // The note goes beside the switch where there is room, else under the strip.
+    if track.max.x + 12.0 + seen.size().x <= strip.max.x {
+        ui.painter().galley(pos2(track.max.x + 12.0, strip.center().y - seen.size().y / 2.0), seen, TEXT_FAINT);
+    } else {
+        ui.add_space(6.0);
+        let (place, _) = ui.allocate_exact_size(vec2(ui.available_width(), seen.size().y), Sense::hover());
+        ui.painter().galley(place.min, seen, TEXT_FAINT);
     }
     ui.add_space(14.0);
-    ui.checkbox(&mut state.stage_on, t("settings.screens.stage_on", "Stage screens on"));
-    ui.add_space(14.0);
-    crate::studio::caption(ui, &t("settings.screens.check", "Check the Screens").to_uppercase());
-    ui.horizontal_wrapped(|ui| {
-        let identify = ui.add(egui::Button::selectable(
-            state.identify,
-            if state.identify {
-                t("settings.screens.identify.stop", "Stop identifying")
-            } else {
-                t("settings.screens.identify", "Identify")
-            },
-        ));
-        if identify
-            .on_hover_text(t(
-                "settings.screens.identify.hint",
-                "Each screen shows its name and colour. The room and the stream see it.",
-            ))
-            .clicked()
-        {
-            state.identify = !state.identify;
-        }
-    });
-    ui.add_space(6.0);
-    ui.horizontal_wrapped(|ui| {
-        ui.label(t("settings.screens.pattern", "Test pattern"));
-        for (pattern, label) in [
-            (None, t("settings.screens.pattern.off", "Off")),
-            (Some(crate::props::TestPattern::ColorBars), t("right.playing.bars", "Colour bars")),
-            (Some(crate::props::TestPattern::Grid), t("right.playing.grid", "Grid")),
-            (Some(crate::props::TestPattern::White), t("right.playing.white", "White")),
-        ] {
-            if ui.add(egui::Button::selectable(state.test_pattern == pattern, label)).clicked() {
-                state.test_pattern = pattern;
-            }
-        }
-    });
-    ui.label(
-        egui::RichText::new(t("settings.screens.seen", "Everyone watching sees these.")).size(11.5).color(TEXT_DIM),
+    card(
+        ui,
+        t("settings.screens.title", "Screens"),
+        t("settings.screens.about", "Where each screen's picture goes, and how it looks"),
+        None,
+        |ui| {
+            let configure = t("settings.screens.configure", "Configure Screens\u{2026}");
+            let hint = match crate::keys::screens_key() {
+                Some(key) => tf("settings.screens.configure.key", "Configure Screens ({key})", &[("key", &key)]),
+                None => t("settings.screens.configure.hint", "Configure Screens").to_owned(),
+            };
+            let size = parts::key_size(ui, configure);
+            row(
+                ui,
+                t("settings.screens.window", "Each screen"),
+                t("settings.screens.window.about", "Its output, look, background and key, in the screens' own window"),
+                size,
+                |ui, place| {
+                    if parts::key(ui, place, ui.scope_id().with("configure screens"), configure, false)
+                        .on_hover_text(hint)
+                        .clicked()
+                    {
+                        state.settings_open = true;
+                    }
+                },
+            );
+            let size = on_off_size(ui);
+            row(
+                ui,
+                t("settings.screens.stage_on", "Stage screens"),
+                t("settings.screens.stage_on.about", "Every stage screen, as the Stage key in the top bar"),
+                size,
+                |ui, place| {
+                    if on_off(ui, place, ui.scope_id().with("stage on"), state.stage_on).clicked() {
+                        state.stage_on = !state.stage_on;
+                    }
+                },
+            );
+        },
     );
 }
 
