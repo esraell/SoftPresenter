@@ -6,25 +6,32 @@
 use egui::{Color32, Rect, vec2};
 
 use super::{Alpha, Kind, Look, Screen, key_trouble};
+use crate::i18n::{t, tf};
 use crate::studio::TEXT_DIM;
 
 /// Shown on a key that cannot follow its fill: orange, as a warning.
 const WARNING: Color32 = Color32::from_rgb(255, 170, 120);
 
-const BACKGROUND_HINT: &str = "Solid: as usual. See-through: clear wherever nothing is drawn, so that a video switcher or \
-     streaming software can lay the words over a camera picture.";
-const COLOURS_HINT: &str = "How a see-through screen sends the colour of a pixel that is only partly solid, such as \
-     the soft edge of a letter. Straight, the usual (and NDI's own way): the colour as it is. Premultiplied: the colour \
-     already darkened by how see-through it is. Choose the one your switcher or streaming software expects; if the \
-     edges of the words look dark or have a fringe, try the other.";
-const KEY_HINT: &str = "For a video switcher that takes the words and their shape as two inputs, a fill and a key: \
-     this screen shows the chosen screen's key, white where that screen is solid, black where it is clear, and greys \
-     at the soft edges. Send the two on two displays, or on two NDI names.";
+fn background_hint() -> &'static str {
+    t(
+        "screens.background.hint",
+        "Solid: as usual. See-through: clear wherever nothing is drawn, so that a video switcher or streaming software can lay the words over a camera picture.",
+    )
+}
 
-/// Why the Key choice is greyed: there is no other audience screen whose key this one could
-/// show, or every other one is a key itself.
-pub const NO_FILL: &str = "There is no other audience screen for this one to show the key of";
-pub const ALL_KEYS: &str = "The other audience screens are keys themselves";
+fn colours_hint() -> &'static str {
+    t(
+        "screens.background.edges.hint",
+        "How a see-through screen sends the colour of a pixel that is only partly solid, such as the soft edge of a letter. Straight, the usual (and NDI's own way): the colour as it is. Premultiplied: the colour already darkened by how see-through it is. Choose the one your switcher or streaming software expects; if the edges of the words look dark or have a fringe, try the other.",
+    )
+}
+
+fn key_hint() -> &'static str {
+    t(
+        "screens.key.hint",
+        "For a video switcher that takes the words and their shape as two inputs, a fill and a key: this screen shows the chosen screen's key, white where that screen is solid, black where it is clear, and greys at the soft edges. Send the two on two displays, or on two NDI names.",
+    )
+}
 
 /// The background rows for the screen at `index` (an audience screen), under its look. True
 /// when anything was changed. `status` is what each screen is doing, and whether it is going
@@ -42,23 +49,30 @@ pub fn background_rows(ui: &mut egui::Ui, screens: &mut [Screen], index: usize, 
     ui.add_space(4.0);
     if look.key_of.is_none() {
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Background").color(TEXT_DIM)).on_hover_text(BACKGROUND_HINT);
+            ui.label(egui::RichText::new(t("screens.background", "Background")).color(TEXT_DIM))
+                .on_hover_text(background_hint());
             ui.add_space(8.0);
-            if ui.add(egui::Button::selectable(look.see_through.is_none(), "Solid")).clicked() {
+            let solid = t("screens.background.solid", "Solid");
+            if ui.add(egui::Button::selectable(look.see_through.is_none(), solid)).clicked() {
                 look.see_through = None;
             }
-            let see_through = ui.add(egui::Button::selectable(look.see_through.is_some(), "See-through"));
-            if see_through.on_hover_text(BACKGROUND_HINT).clicked() && look.see_through.is_none() {
+            let see_through_words = t("screens.background.see_through", "See-through");
+            let see_through = ui.add(egui::Button::selectable(look.see_through.is_some(), see_through_words));
+            if see_through.on_hover_text(background_hint()).clicked() && look.see_through.is_none() {
                 look.see_through = Some(Alpha::default());
             }
         });
         if let Some(alpha) = look.see_through {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Soft edges").color(TEXT_DIM)).on_hover_text(COLOURS_HINT);
+                ui.label(egui::RichText::new(t("screens.background.edges", "Soft edges")).color(TEXT_DIM))
+                    .on_hover_text(colours_hint());
                 ui.add_space(8.0);
-                for (kind, label) in [(Alpha::Straight, "Straight"), (Alpha::Premultiplied, "Premultiplied")] {
-                    if ui.add(egui::Button::selectable(alpha == kind, label)).on_hover_text(COLOURS_HINT).clicked() {
+                for (kind, label) in [
+                    (Alpha::Straight, t("screens.background.straight", "Straight")),
+                    (Alpha::Premultiplied, t("screens.background.premultiplied", "Premultiplied")),
+                ] {
+                    if ui.add(egui::Button::selectable(alpha == kind, label)).on_hover_text(colours_hint()).clicked() {
                         look.see_through = Some(kind);
                     }
                 }
@@ -67,34 +81,43 @@ pub fn background_rows(ui: &mut egui::Ui, screens: &mut [Screen], index: usize, 
     }
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Key").color(TEXT_DIM)).on_hover_text(KEY_HINT);
+        ui.label(egui::RichText::new(t("screens.key", "Key")).color(TEXT_DIM)).on_hover_text(key_hint());
         ui.add_space(8.0);
         let fill_name = |fill: sp_model::Uuid| {
-            fills.iter().find(|(have, _)| *have == fill).map_or("a screen that has gone".to_owned(), |(_, n)| n.clone())
+            fills
+                .iter()
+                .find(|(have, _)| *have == fill)
+                .map_or_else(|| t("screens.key.gone", "a screen that has gone").to_owned(), |(_, n)| n.clone())
         };
-        let shown = look.key_of.map_or("Not a key".to_owned(), |fill| format!("Key of \"{}\"", fill_name(fill)));
+        let key_of = |name: &str| tf("screens.key.of", "Key of \"{name}\"", &[("name", name)]);
+        let not_a_key = t("screens.key.none", "Not a key");
+        let shown = look.key_of.map_or_else(|| not_a_key.to_owned(), |fill| key_of(&fill_name(fill)));
         // With no other screen it could be the key of, the choice is greyed and says why (a
         // screen that is a key already keeps it, so Not a key can still be chosen).
         let choosable = !fills.is_empty() || look.key_of.is_some();
         let others = screens.iter().any(|other| other.id != id && other.kind == Kind::Audience);
-        let why = if others { ALL_KEYS } else { NO_FILL };
+        let why = if others {
+            t("screens.key.all_keys", "The other audience screens are keys themselves")
+        } else {
+            t("screens.key.no_fill", "There is no other audience screen for this one to show the key of")
+        };
         ui.add_enabled_ui(choosable, |ui| {
             egui::ComboBox::from_id_salt(("screen key", index))
                 .selected_text(shown)
                 .width(220.0)
                 .show_ui(ui, |ui| {
-                    if ui.selectable_label(look.key_of.is_none(), "Not a key").clicked() {
+                    if ui.selectable_label(look.key_of.is_none(), not_a_key).clicked() {
                         look.key_of = None;
                     }
                     for (fill, fill_name) in &fills {
                         let on = look.key_of == Some(*fill);
-                        if ui.selectable_label(on, format!("Key of \"{fill_name}\"")).clicked() {
+                        if ui.selectable_label(on, key_of(fill_name)).clicked() {
                             look.key_of = Some(*fill);
                         }
                     }
                 })
                 .response
-                .on_hover_text(KEY_HINT)
+                .on_hover_text(key_hint())
                 .on_disabled_hover_text(why);
         });
     });
@@ -108,19 +131,20 @@ pub fn background_rows(ui: &mut egui::Ui, screens: &mut [Screen], index: usize, 
             None => {
                 let fill_name = screens.iter().find(|other| other.id == fill).map_or("", |other| other.name.as_str());
                 (
-                    format!(
-                        "Shows the key of \"{fill_name}\": white where it is solid, black where it is clear, made from the very picture \"{fill_name}\" shows, so the two always show the same moment, fades included. This screen's own look is not used."
+                    tf(
+                        "screens.key.about",
+                        "Shows the key of \"{name}\": white where it is solid, black where it is clear, made from the very picture \"{name}\" shows, so the two always show the same moment, fades included. This screen's own look is not used.",
+                        &[("name", fill_name)],
                     ),
                     false,
                 )
             }
         },
         (None, Some(_)) => (
-            format!(
-                "\"{name}\" is clear wherever nothing is drawn. It leaves out the media behind the words, the themes' \
-                 background colours and pictures, and its colour; the words, props, messages and announcements stay. \
-                 Over NDI the clear parts go with the picture. On a display, a second screen can be its key. The \
-                 Program preview shows the room's picture, not this one."
+            tf(
+                "screens.background.see_through.about",
+                "\"{name}\" is clear wherever nothing is drawn. It leaves out the media behind the words, the themes' background colours and pictures, and its colour; the words, props, messages and announcements stay. Over NDI the clear parts go with the picture. On a display, a second screen can be its key. The Program preview shows the room's picture, not this one.",
+                &[("name", &name)],
             ),
             false,
         ),

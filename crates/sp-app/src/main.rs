@@ -7826,12 +7826,17 @@ impl App {
                         }) => {}
                     Placed::Fullscreen(_) => *place = Placed::Window,
                     Placed::Ndi(_) if !ndi_aid => {
-                        *place = Placed::Nothing("Not sent in a quiet run (a test or a capture).".to_owned());
+                        let why = i18n::t("screens.status.quiet_ndi", "Not sent in a quiet run (a test or a capture).");
+                        *place = Placed::Nothing(why.to_owned());
                     }
                     // Never a real card: it may be on a video chain in front of people.
                     // Pretend devices (a testing switch) play into nothing, so they go on.
                     Placed::DeckLink(_) if !sp_decklink::pretending() => {
-                        *place = Placed::Nothing("Not played out in a quiet run (a test or a capture).".to_owned());
+                        let why = i18n::t(
+                            "screens.status.quiet_decklink",
+                            "Not played out in a quiet run (a test or a capture).",
+                        );
+                        *place = Placed::Nothing(why.to_owned());
                     }
                     _ => {}
                 }
@@ -7848,7 +7853,7 @@ impl App {
             .collect();
         for ((_, place), on) in list.iter().zip(placed.iter_mut()).zip(&on_flags) {
             if !*on && matches!(place, Placed::Fullscreen(_) | Placed::Window) {
-                *place = Placed::Nothing("Switched off".to_owned());
+                *place = Placed::Nothing(i18n::t("screens.status.switched_off", "Switched off").to_owned());
             }
         }
         // Without the driver, or while it is still looked for, a DeckLink screen plays nowhere.
@@ -7856,7 +7861,7 @@ impl App {
         if !matches!(driver, sp_decklink::Driver::Ready(_)) {
             for place in &mut placed {
                 if matches!(place, Placed::DeckLink(_)) {
-                    *place = Placed::Nothing(driver.in_words());
+                    *place = Placed::Nothing(screens::decklink_driver_words(driver));
                 }
             }
         }
@@ -8266,17 +8271,20 @@ impl App {
                     output::NdiStatus::On(name, receivers) => {
                         (output::NdiStatus::sending_in_words(&name, receivers), true)
                     }
-                    output::NdiStatus::Failed(reason) if reason == sp_ndi::NOT_INSTALLED => {
-                        ("NDI isn't installed on this computer".to_owned(), false)
-                    }
+                    output::NdiStatus::Failed(reason) if reason == sp_ndi::NOT_INSTALLED => (
+                        i18n::t("screens.status.ndi_not_installed", "NDI isn't installed on this computer").to_owned(),
+                        false,
+                    ),
+                    // NDI's own words for what went wrong, as it says them.
                     output::NdiStatus::Failed(reason) => (reason, false),
                     output::NdiStatus::Off => {
                         starting = true;
-                        ("Starting NDI…".to_owned(), false)
+                        (i18n::t("screens.status.ndi_starting_now", "Starting NDI\u{2026}").to_owned(), false)
                     }
                 },
                 Placed::DeckLink(_) => match output.decklink_status(screen.id) {
-                    output::DeckLinkStatus::Playing(what) => (format!("Playing at {what}"), true),
+                    output::DeckLinkStatus::Playing(what) => (screens::decklink_playing_words(&what), true),
+                    // The driver's own words for why it waits, as it says them.
                     output::DeckLinkStatus::Waiting(why) => (why, false),
                     output::DeckLinkStatus::Off | output::DeckLinkStatus::Starting => {
                         starting = true;

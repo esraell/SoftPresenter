@@ -960,6 +960,7 @@ mod tests {
         "find",
         "notices",
         "menubar",
+        "screens",
     ];
 
     #[test]

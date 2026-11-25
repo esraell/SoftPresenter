@@ -4595,17 +4595,19 @@ fn apply_prop_ask(state: &mut HomeState, ask: PropListAsk) {
 /// What an output is called in the Screens window's menus.
 fn output_label(output: &Output, displays: &[DisplayInfo]) -> String {
     match output {
-        Output::Automatic => "Not chosen yet".to_owned(),
+        Output::Automatic => t("screens.output.automatic", "Not chosen yet").to_owned(),
         Output::Display(name) => match displays.iter().find(|display| display.is_named(name)) {
-            Some(display) if display.main => format!("{}   (main display)", display.name),
+            Some(display) if display.main => {
+                tf("screens.output.main_display", "{name}   (main display)", &[("name", &display.name)])
+            }
             Some(display) => format!("{}   {} x {}", display.name, display.w, display.h),
-            None => format!("{name}   (disconnected)"),
+            None => tf("screens.output.disconnected", "{name}   (disconnected)", &[("name", name)]),
         },
-        Output::Window => "A window".to_owned(),
+        Output::Window => t("screens.output.window", "A window").to_owned(),
         Output::Ndi(_) => "NDI".to_owned(),
         // As the driver names it ("DeckLink Duo (1)"), and nothing more.
         Output::DeckLink(out) => out.device.clone(),
-        Output::Off => "Off".to_owned(),
+        Output::Off => t("screens.output.off", "Off").to_owned(),
     }
 }
 
@@ -6180,9 +6182,15 @@ fn confirm_remove_screen(ui: &mut egui::Ui, state: &mut HomeState) -> bool {
         ui.data_mut(|data| data.remove::<sp_model::Uuid>(removing_screen_id()));
         return false;
     };
-    let question = format!("Remove the screen \u{201c}{}\u{201d}?", state.screens[at].name);
-    let note = cant_undo("Nothing more is sent to it, and its settings go.");
-    let Some(remove) = crate::studio::alert(ui.ctx(), "remove screen", Icon::Trash, &question, &note, "Remove") else {
+    let question = tf(
+        "screens.remove.question",
+        "Remove the screen {name}?",
+        &[("name", &crate::i18n::quoted(&state.screens[at].name))],
+    );
+    let note = cant_undo(t("screens.remove.note", "Nothing more is sent to it, and its settings go."));
+    let remove_words = t("screens.remove", "Remove");
+    let Some(remove) = crate::studio::alert(ui.ctx(), "remove screen", Icon::Trash, &question, &note, remove_words)
+    else {
         return false;
     };
     ui.data_mut(|data| data.remove::<sp_model::Uuid>(removing_screen_id()));
@@ -6220,8 +6228,8 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                     let remove = ui
                         .add_enabled_ui(!only, |ui| ui.add_sized(small, egui::Button::new("−")))
                         .inner
-                        .on_hover_text("Remove the selected screen")
-                        .on_disabled_hover_text("There is always one audience screen");
+                        .on_hover_text(t("screens.list.remove.hover", "Remove the selected screen"))
+                        .on_disabled_hover_text(t("screens.list.remove.always_one", "There is always one audience screen"));
                     // Undo can't bring a screen back, so it asks first (see `confirm_remove_screen`).
                     if remove.clicked()
                         && !only
@@ -6230,10 +6238,12 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                         ui.data_mut(|data| data.insert_temp(removing_screen_id(), screen.id));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let identify = ui.add(egui::Button::selectable(state.identify, "Identify")).on_hover_text(
-                            "Mark each screen with its name and its own colour, to tell them apart; the colours \
-                                 are shown here beside the screens",
-                        );
+                        let identify = ui
+                            .add(egui::Button::selectable(state.identify, t("screens.list.identify", "Identify")))
+                            .on_hover_text(t(
+                                "screens.list.identify.hover",
+                                "Mark each screen with its name and its own colour, to tell them apart; the colours are shown here beside the screens",
+                            ));
                         if identify.clicked() {
                             state.identify = !state.identify;
                         }
@@ -6244,14 +6254,35 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                 for kind in [Kind::Audience, Kind::Stage] {
                     // The section's heading, with + to add a screen of its kind and a switch for all of them.
                     ui.horizontal(|ui| {
-                        crate::studio::caption(ui, if kind == Kind::Audience { "AUDIENCE" } else { "STAGE" });
+                        let caption = match kind {
+                            Kind::Audience => t("screens.list.audience", "Audience"),
+                            Kind::Stage => t("screens.list.stage", "Stage"),
+                        };
+                        crate::studio::caption(ui, &caption.to_uppercase());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let (on, what) = match kind {
-                                Kind::Audience => (output_on, "audience"),
-                                Kind::Stage => (state.stage_on, "stage"),
+                            let on = match kind {
+                                Kind::Audience => output_on,
+                                Kind::Stage => state.stage_on,
                             };
-                            let hint = format!("The {what} screens are {}", if on { "on" } else { "off" });
-                            if switch(ui, on, &hint) {
+                            let (hint, add_hint) = match (kind, on) {
+                                (Kind::Audience, true) => (
+                                    t("screens.list.audience.on", "The audience screens are on"),
+                                    t("screens.list.audience.add", "Add an audience screen"),
+                                ),
+                                (Kind::Audience, false) => (
+                                    t("screens.list.audience.off", "The audience screens are off"),
+                                    t("screens.list.audience.add", "Add an audience screen"),
+                                ),
+                                (Kind::Stage, true) => (
+                                    t("screens.list.stage.on", "The stage screens are on"),
+                                    t("screens.list.stage.add", "Add a stage screen"),
+                                ),
+                                (Kind::Stage, false) => (
+                                    t("screens.list.stage.off", "The stage screens are off"),
+                                    t("screens.list.stage.add", "Add a stage screen"),
+                                ),
+                            };
+                            if switch(ui, on, hint) {
                                 match kind {
                                     Kind::Audience => commands.push(Command::SetOutputEnabled(!output_on)),
                                     Kind::Stage => state.stage_on = !state.stage_on,
@@ -6259,7 +6290,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                             }
                             let add = ui
                                 .add_sized(vec2(22.0, 20.0), egui::Button::new("+").frame(false))
-                                .on_hover_text(format!("Add a {what} screen"));
+                                .on_hover_text(add_hint);
                             if add.clicked() {
                                 let name = crate::screens::next_name(&state.screens, kind);
                                 // A new screen goes nowhere until it is told where, so nothing
@@ -6311,7 +6342,8 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                         }
                     }
                     if !any {
-                        ui.label(egui::RichText::new("None. Press + to add one.").size(12.0).color(TEXT_FAINT));
+                        let none = t("screens.list.none", "None. Press + to add one.");
+                        ui.label(egui::RichText::new(none).size(12.0).color(TEXT_FAINT));
                     }
                     ui.add_space(14.0);
                 }
@@ -6326,7 +6358,11 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
         let (status, shown) = state.screen_status.get(index).cloned().unwrap_or_default();
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(screen.name.as_str()).font(crate::studio::semibold(18.0)).color(TEXT));
-            let what = if screen.kind == Kind::Stage { "Stage  ·  1920 × 1080" } else { "1920 × 1080" };
+            let what = if screen.kind == Kind::Stage {
+                t("screens.detail.stage_size", "Stage  ·  1920 × 1080")
+            } else {
+                "1920 × 1080"
+            };
             ui.label(egui::RichText::new(what).size(13.0).color(TEXT_DIM));
         });
         ui.add_space(12.0);
@@ -6339,12 +6375,13 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
         crate::screens::paint_background(ui.painter(), frame_rect, &screen.look);
         ui.painter().rect_stroke(frame_rect, 8.0, Stroke::new(1.0, LINE), StrokeKind::Inside);
         let target = match &screen.output {
-            Output::Automatic => "Automatic".to_owned(),
+            Output::Automatic => t("screens.target.automatic", "Automatic").to_owned(),
             Output::Display(name) => name.clone(),
-            Output::Window => "Window".to_owned(),
+            Output::Window => t("screens.target.window", "Window").to_owned(),
             Output::Ndi(name) => format!("NDI  ·  {name}"),
             Output::DeckLink(out) => out.device.clone(),
-            Output::Off => "Off".to_owned(),
+            // The same words as the status of a screen that is off, so they aren't said twice.
+            Output::Off => t("screens.status.off", "Off").to_owned(),
         };
         let repeats = status.trim() == target.trim();
         ui.painter().text(
@@ -6370,7 +6407,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
         Frame::new().fill(CARD).corner_radius(10).inner_margin(egui::Margin::symmetric(14, 10)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             egui::Grid::new("screen settings").num_columns(2).spacing([16.0, 12.0]).min_col_width(84.0).show(ui, |ui| {
-                ui.label(egui::RichText::new("Name").color(TEXT_DIM));
+                ui.label(egui::RichText::new(t("screens.row.name", "Name")).color(TEXT_DIM));
                 let mut name = screen.name.clone();
                 if ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY)).changed() {
                     state.screens[index].name = name;
@@ -6378,7 +6415,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                 }
                 ui.end_row();
 
-                ui.label(egui::RichText::new("Output").color(TEXT_DIM));
+                ui.label(egui::RichText::new(t("screens.row.output", "Output")).color(TEXT_DIM));
                 egui::ComboBox::from_id_salt("screen output")
                     .selected_text(output_label(&screen.output, &state.displays))
                     .width(ui.available_width())
@@ -6401,7 +6438,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                             };
                             let mut entry = ui.add(egui::Button::selectable(on, label));
                             if is_ndi && !state.ndi_available {
-                                entry = entry.on_hover_text(sp_ndi::NOT_INSTALLED);
+                                entry = entry.on_hover_text(crate::screens::ndi_not_installed());
                             }
                             if entry.clicked() && !on {
                                 state.screens[index].output = choice;
@@ -6413,7 +6450,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                 ui.end_row();
 
                 if let Output::Ndi(current) = &screen.output {
-                    ui.label(egui::RichText::new("NDI name").color(TEXT_DIM));
+                    ui.label(egui::RichText::new(t("screens.row.ndi_name", "NDI name")).color(TEXT_DIM));
                     let mut typed = match &state.ndi_draft {
                         Some((id, typed)) if *id == screen.id => typed.clone(),
                         _ => current.clone(),
@@ -6447,26 +6484,35 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
         ui.add_space(10.0);
         let about = match &screen.output {
             // The main display is the one with the menu bar on a Mac, the taskbar on Windows.
-            Output::Automatic if cfg!(target_os = "macos") => {
-                "Choose the display this screen fills. The main display, with the menu bar, is kept for SoftPresenter's own window."
-            }
-            Output::Automatic if cfg!(windows) => {
-                "Choose the display this screen fills. The main display, with the taskbar, is kept for SoftPresenter's own window."
-            }
-            Output::Automatic => {
-                "Choose the display this screen fills. The main display is kept for SoftPresenter's own window."
-            }
-            Output::Display(_) => {
-                "If this display is unplugged the screen shows nowhere until it is back; it never moves to another display."
-            }
-            Output::Window => "An ordinary window, for trying things out or for capturing in other software.",
-            Output::Ndi(_) => {
-                "Other computers on the network can show this screen, at 1920 × 1080. NDI® is a registered trademark of Vizrt NDI AB."
-            }
-            Output::DeckLink(_) => {
-                "Played out of a Blackmagic Design DeckLink card, on its connector, in the format chosen here. A new slide goes at once, without a dissolve."
-            }
-            Output::Off => "This screen is kept in the list and shows nowhere.",
+            Output::Automatic if cfg!(target_os = "macos") => t(
+                "screens.about.automatic.mac",
+                "Choose the display this screen fills. The main display, with the menu bar, is kept for SoftPresenter's own window.",
+            ),
+            Output::Automatic if cfg!(windows) => t(
+                "screens.about.automatic.windows",
+                "Choose the display this screen fills. The main display, with the taskbar, is kept for SoftPresenter's own window.",
+            ),
+            Output::Automatic => t(
+                "screens.about.automatic",
+                "Choose the display this screen fills. The main display is kept for SoftPresenter's own window.",
+            ),
+            Output::Display(_) => t(
+                "screens.about.display",
+                "If this display is unplugged the screen shows nowhere until it is back; it never moves to another display.",
+            ),
+            Output::Window => t(
+                "screens.about.window",
+                "An ordinary window, for trying things out or for capturing in other software.",
+            ),
+            Output::Ndi(_) => t(
+                "screens.about.ndi",
+                "Other computers on the network can show this screen, at 1920 × 1080. NDI® is a registered trademark of Vizrt NDI AB.",
+            ),
+            Output::DeckLink(_) => t(
+                "screens.about.decklink",
+                "Played out of a Blackmagic Design DeckLink card, on its connector, in the format chosen here. A new slide goes at once, without a dissolve.",
+            ),
+            Output::Off => t("screens.about.off", "This screen is kept in the list and shows nowhere."),
         };
         // A DeckLink output's format, under its output.
         if matches!(screen.output, Output::DeckLink(_)) {
@@ -6483,7 +6529,10 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                     let words = if download {
                         t("screens.ndi.not_installed", "NDI isn't installed on this computer.")
                     } else {
-                        "NDI isn't installed on this computer. Install NDI Tools (free), then turn this screen on again:"
+                        t(
+                            "screens.ndi.not_installed.install",
+                            "NDI isn't installed on this computer. Install NDI Tools (free), then turn this screen on again:",
+                        )
                     };
                     ui.label(egui::RichText::new(words).size(11.5).color(Color32::from_rgb(255, 170, 120)));
                 }
@@ -6494,12 +6543,12 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
         // An audience screen's look: which layers it shows, its colour, its covered edges.
         if screen.kind == Kind::Audience {
             ui.add_space(14.0);
-            crate::studio::caption(ui, "LOOK");
+            crate::studio::caption(ui, &t("screens.look", "Look").to_uppercase());
             ui.add_space(4.0);
             // The theme its slides are drawn with: the main theme, or one of its own.
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Theme").color(TEXT_DIM))
-                    .on_hover_text("The same words, laid out by this theme on this screen");
+                ui.label(egui::RichText::new(t("screens.look.theme", "Theme")).color(TEXT_DIM))
+                    .on_hover_text(t("screens.look.theme.hover", "The same words, laid out by this theme on this screen"));
                 ui.add_space(8.0);
                 let names = state.themes_shown();
                 let main_name = names.get(state.theme_for_songs).cloned().unwrap_or_default();
@@ -6507,10 +6556,11 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                 let own_name = own
                     .and_then(|id| state.theme_ids.iter().position(|have| *have == id))
                     .and_then(|at| names.get(at).cloned());
-                let shown = own_name.unwrap_or_else(|| format!("Main theme ({main_name})"));
+                let main_words = tf("screens.look.main_theme", "Main theme ({name})", &[("name", &main_name)]);
+                let shown = own_name.unwrap_or_else(|| main_words.clone());
                 let mut picked = None;
                 egui::ComboBox::from_id_salt(("screen theme", index)).selected_text(shown).width(220.0).show_ui(ui, |ui| {
-                    if ui.selectable_label(own.is_none(), format!("Main theme ({main_name})")).clicked() {
+                    if ui.selectable_label(own.is_none(), main_words.as_str()).clicked() {
                         picked = Some(None);
                     }
                     ui.separator();
@@ -6531,18 +6581,20 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
             let look = &mut state.screens[index].look;
             let before = *look;
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Shows").color(TEXT_DIM));
+                ui.label(egui::RichText::new(t("screens.look.shows", "Shows")).color(TEXT_DIM));
                 ui.add_space(8.0);
-                ui.checkbox(&mut look.slides, "Slides");
-                ui.checkbox(&mut look.media, "Media");
-                ui.checkbox(&mut look.props, "Props");
-                ui.checkbox(&mut look.messages, "Messages");
-                ui.checkbox(&mut look.announcements, "Announcements");
+                ui.checkbox(&mut look.slides, t("screens.look.slides", "Slides"));
+                ui.checkbox(&mut look.media, t("screens.look.media", "Media"));
+                ui.checkbox(&mut look.props, t("screens.look.props", "Props"));
+                ui.checkbox(&mut look.messages, t("screens.look.messages", "Messages"));
+                ui.checkbox(&mut look.announcements, t("screens.look.announcements", "Announcements"));
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Colour").color(TEXT_DIM))
-                    .on_hover_text("Shown where nothing is drawn: around the slide, and when the screen is clear");
+                ui.label(egui::RichText::new(t("screens.look.colour", "Colour")).color(TEXT_DIM)).on_hover_text(t(
+                    "screens.look.colour.hover",
+                    "Shown where nothing is drawn: around the slide, and when the screen is clear",
+                ));
                 ui.add_space(8.0);
                 let mut color = Color32::from_rgba_unmultiplied(look.color.r, look.color.g, look.color.b, 255);
                 if ui.color_edit_button_srgba(&mut color).changed() {
@@ -6552,17 +6604,27 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Cover edges").color(TEXT_DIM))
-                    .on_hover_text("How much of each edge to cover, in the slide's pixels, for a screen that cuts them off");
+                ui.label(egui::RichText::new(t("screens.look.edges", "Cover edges")).color(TEXT_DIM)).on_hover_text(t(
+                    "screens.look.edges.hover",
+                    "How much of each edge to cover, in the slide's pixels, for a screen that cuts them off",
+                ));
                 ui.add_space(8.0);
-                for (at, name) in ["Left", "Top", "Right", "Bottom"].into_iter().enumerate() {
+                let sides = [
+                    t("screens.look.edge.left", "Left"),
+                    t("screens.look.edge.top", "Top"),
+                    t("screens.look.edge.right", "Right"),
+                    t("screens.look.edge.bottom", "Bottom"),
+                ];
+                for (at, name) in sides.into_iter().enumerate() {
                     ui.add(egui::DragValue::new(&mut look.mask[at]).range(0.0..=540.0).speed(1.0).prefix(format!("{name} ")));
                 }
             });
             if *look != before {
                 changed = true;
             }
-            if !look.shows_everything() && ui.small_button("Show Everything").on_hover_text("Back to every layer, black, nothing covered").clicked() {
+            let everything = t("screens.look.everything", "Show Everything");
+            let everything_hover = t("screens.look.everything.hover", "Back to every layer, black, nothing covered");
+            if !look.shows_everything() && ui.small_button(everything).on_hover_text(everything_hover).clicked() {
                 *look = look.everything();
                 changed = true;
             }
@@ -6572,8 +6634,11 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
         if screen.kind == Kind::Stage {
             ui.add_space(6.0);
             ui.label(
-                egui::RichText::new("A stage screen shows the words on screen now, the next slide's words under them, and the time.")
-                    .size(11.5)
+                egui::RichText::new(t(
+                    "screens.stage.about",
+                    "A stage screen shows the words on screen now, the next slide's words under them, and the time.",
+                ))
+                .size(11.5)
                     .color(TEXT_DIM),
             );
         }

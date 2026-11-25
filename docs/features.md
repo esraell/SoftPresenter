@@ -1544,21 +1544,24 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   computer's language (named in that language, "El idioma del ordenador (Español)"), then English,
   Español, Русский and Українська, each written in itself; the setup's first step has the same
   choice. A choice shows at once, with no restart, and is kept with the preferences (`language`).
-  Spanish is written for the whole window but Settings › Screens: the top bar, the keys sheet, the
+  Spanish is written for the whole window: the top bar, the keys sheet, the
   left column (libraries, playlists and their menus), the slides area (with the slide,
   arrangement and times menus), the bar and the media strip under it, the right column (preview,
   layer keys, Clear All, the tool tabs and what is in them), the Bible view, the Bibles window,
   the Edit view (its lists, tools, inspector, stage layouts and Edit Words), the Themes view, the
-  find box's results, Settings (General, Groups, Key Mappings, Integrations with VoxLive and Canva
-  Sync, Remote Control, About), the first-start setup, the Import Slides sheets, the confirmation
+  find box's results, Settings (General, Screens, Groups, Key Mappings, Integrations with VoxLive
+  and Canva Sync, Remote Control, About), the Screens window (the list, each screen's output,
+  look, background, key and DeckLink rows, and what each screen is doing, which `sp screens`
+  gives in English), the first-start setup, the Import Slides sheets, the confirmation
   sheets, the notices list and everything said in it, and the Mac's menu bar (it changes with the
-  language at once; `sp menu` keeps the English names). Still English: Settings › Screens, the
+  language at once; `sp menu` keeps the English names). Still English: the
   inspector's NDI Source section, the audio player's own messages and the output windows' messages,
   left while other work changes them; a word with no translation yet shows in
   English. What the app names is named in the language set: the first playlist of a first start
   (its name follows the language until anything changes the playlists, as the computer's
   language is read after it is made and the setup may choose another), a new arrangement, theme,
-  copy of a theme, theme template, message for words shown once and start-up macro, and a new
+  copy of a theme, theme template, screen ("Pantalla 2", "Pantalla del escenario 1"), message for
+  words shown once and start-up macro, and a new
   box on a slide, with the sample words it says ("Texto 2" saying "Texto"; a shape by its shape,
   "Estrella 2"; "Página web", "Fuente NDI"); a name a church gave stays as it
   is in every language, and nothing already saved is renamed. A new box is listed by its name

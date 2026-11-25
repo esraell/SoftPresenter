@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use sp_model::{Rgba, Uuid};
 
 use crate::displays::{DisplayInfo, Kept, Placement, choose_output, for_automatic, kept_for_operator};
+use crate::i18n::{t, tf, tgf};
 
 mod background_ui;
 mod decklink_ui;
@@ -306,35 +307,55 @@ pub fn key_trouble(screens: &[Screen], index: usize, shown: &[bool]) -> Option<S
     let screen = screens.get(index)?;
     let fill_id = screen.look.key_of.filter(|_| screen.kind == Kind::Audience)?;
     let Some(at) = screens.iter().position(|other| other.id == fill_id) else {
-        return Some("The screen it is the key of has been removed, so it shows black.".to_owned());
+        return Some(
+            t("screens.key.fill_removed", "The screen it is the key of has been removed, so it shows black.")
+                .to_owned(),
+        );
     };
     let fill = &screens[at];
     let name = &fill.name;
     if at == index {
-        return Some("A screen can't be its own key, so it shows black.".to_owned());
+        return Some(t("screens.key.own", "A screen can't be its own key, so it shows black.").to_owned());
     }
     if fill.kind == Kind::Stage {
-        return Some(format!("\"{name}\" is a stage screen, which has no key, so this shows black."));
+        return Some(tf(
+            "screens.key.stage",
+            "\"{name}\" is a stage screen, which has no key, so this shows black.",
+            &[("name", name)],
+        ));
     }
     if fill.look.key_of.is_some() {
-        return Some(format!("\"{name}\" is a key itself, so this shows black."));
+        return Some(tf("screens.key.is_key", "\"{name}\" is a key itself, so this shows black.", &[("name", name)]));
     }
     let read_back = |screen: &Screen| matches!(screen.output, Output::Ndi(_) | Output::DeckLink(_));
     if read_back(screen) != read_back(fill) {
-        let on = match fill.output {
-            Output::Ndi(_) => "NDI",
-            Output::DeckLink(_) => "a DeckLink output",
-            _ => "a display or window",
-        };
-        return Some(format!(
-            "\"{name}\" is on {on}. A key goes out beside its fill on two displays or windows, or on two NDI or DeckLink outputs, so this shows black."
-        ));
+        return Some(match fill.output {
+            Output::Ndi(_) => tf(
+                "screens.key.mixed.ndi",
+                "\"{name}\" is on NDI. A key goes out beside its fill on two displays or windows, or on two NDI or DeckLink outputs, so this shows black.",
+                &[("name", name)],
+            ),
+            Output::DeckLink(_) => tf(
+                "screens.key.mixed.decklink",
+                "\"{name}\" is on a DeckLink output. A key goes out beside its fill on two displays or windows, or on two NDI or DeckLink outputs, so this shows black.",
+                &[("name", name)],
+            ),
+            _ => tf(
+                "screens.key.mixed.display",
+                "\"{name}\" is on a display or window. A key goes out beside its fill on two displays or windows, or on two NDI or DeckLink outputs, so this shows black.",
+                &[("name", name)],
+            ),
+        });
     }
     if !shown.get(at).copied().unwrap_or(false) {
-        return Some(format!("\"{name}\" isn't going out, so this shows black."));
+        return Some(tf("screens.key.not_out", "\"{name}\" isn't going out, so this shows black.", &[("name", name)]));
     }
     if fill.look.see_through.is_none() {
-        return Some(format!("\"{name}\" is solid, so its key is all white. Make it see-through."));
+        return Some(tf(
+            "screens.key.solid",
+            "\"{name}\" is solid, so its key is all white. Make it see-through.",
+            &[("name", name)],
+        ));
     }
     None
 }
@@ -384,9 +405,10 @@ impl Screen {
 /// The screens a fresh start has: one, placed automatically. `ndi` adds a second sent over
 /// NDI under that name, for someone who had NDI switched on before screens could be listed.
 pub fn starting(ndi: Option<&str>) -> Vec<Screen> {
-    let mut screens = vec![Screen::new("Screen 1".to_owned(), Output::Automatic)];
+    let numbered = |n: &str| tgf("screens.name.numbered", "Screen {n}", &[("n", n)]);
+    let mut screens = vec![Screen::new(numbered("1"), Output::Automatic)];
     if let Some(name) = ndi {
-        screens.push(Screen::new("Screen 2".to_owned(), Output::Ndi(name.to_owned())));
+        screens.push(Screen::new(numbered("2"), Output::Ndi(name.to_owned())));
     }
     screens
 }
@@ -412,15 +434,13 @@ pub fn identify_color(place: usize) -> sp_model::Rgba {
 /// A name no screen in the list has for a new screen of a kind: "Screen 3" when there are two
 /// audience screens, "Stage Screen 1" for the first stage screen, and so on.
 pub fn next_name(screens: &[Screen], kind: Kind) -> String {
-    let base = match kind {
-        Kind::Audience => "Screen",
-        Kind::Stage => "Stage Screen",
+    // A name the app gives and saves, in the language set (see `i18n::tg`).
+    let named = |n: usize| match kind {
+        Kind::Audience => tgf("screens.name.numbered", "Screen {n}", &[("n", &n.to_string())]),
+        Kind::Stage => tgf("screens.name.stage_numbered", "Stage Screen {n}", &[("n", &n.to_string())]),
     };
     let of_kind = screens.iter().filter(|screen| screen.kind == kind).count();
-    (of_kind + 1..)
-        .map(|n| format!("{base} {n}"))
-        .find(|name| screens.iter().all(|screen| screen.name != *name))
-        .unwrap_or_default()
+    (of_kind + 1..).map(named).find(|name| screens.iter().all(|screen| screen.name != *name)).unwrap_or_default()
 }
 
 /// Settles the screens' displays against the ones connected now, and says whether any changed
@@ -462,15 +482,20 @@ pub fn settle(screens: &mut [Screen], displays: &[DisplayInfo], operator: &[usiz
 /// Why a screen chosen for a display the operator works on shows nowhere, in words.
 fn kept_in_words(kept: Kept, display: &str) -> String {
     match kept {
-        Kept::Only => format!(
-            "\"{display}\" is the only display, where you work with SoftPresenter's own window. Plug in a TV or \
-             projector and choose it."
+        Kept::Only => tf(
+            "screens.kept.only",
+            "\"{display}\" is the only display, where you work with SoftPresenter's own window. Plug in a TV or projector and choose it.",
+            &[("display", display)],
         ),
-        Kept::Main => {
-            format!("\"{display}\" is the main display, where SoftPresenter's own window is. Choose another display.")
-        }
-        Kept::HomeWindow => format!(
-            "\"{display}\" is the display SoftPresenter's own window is on. Choose another display, or move the window."
+        Kept::Main => tf(
+            "screens.kept.main",
+            "\"{display}\" is the main display, where SoftPresenter's own window is. Choose another display.",
+            &[("display", display)],
+        ),
+        Kept::HomeWindow => tf(
+            "screens.kept.home_window",
+            "\"{display}\" is the display SoftPresenter's own window is on. Choose another display, or move the window.",
+            &[("display", display)],
         ),
     }
 }
@@ -495,10 +520,16 @@ pub fn place_all(screens: &[Screen], displays: &[DisplayInfo], operator: &[usize
                     Some(kept) => Placed::Nothing(kept_in_words(kept, &display.name)),
                     None => Placed::Fullscreen(display.index),
                 },
-                None => Placed::Nothing(format!("Disconnected: \"{name}\" is not plugged in.")),
+                None => Placed::Nothing(tf(
+                    "screens.place.disconnected",
+                    "Disconnected: \"{name}\" is not plugged in.",
+                    &[("name", name)],
+                )),
             },
             Output::Window => Placed::Window,
-            Output::Ndi(name) if name.trim().is_empty() => Placed::Nothing("Give the NDI output a name.".to_owned()),
+            Output::Ndi(name) if name.trim().is_empty() => {
+                Placed::Nothing(t("screens.place.ndi_unnamed", "Give the NDI output a name.").to_owned())
+            }
             Output::Ndi(name) => Placed::Ndi(name.trim().to_owned()),
             Output::DeckLink(out) => Placed::DeckLink(out.clone()),
             Output::Off => Placed::Nothing(String::new()),
@@ -509,13 +540,21 @@ pub fn place_all(screens: &[Screen], displays: &[DisplayInfo], operator: &[usize
             _ => false,
         });
         placed.push(match (taken, &wanted) {
-            (Some(by), Placed::Fullscreen(_)) => {
-                Placed::Nothing(format!("\"{}\" is already on that display.", screens[by].name))
-            }
-            (Some(by), Placed::DeckLink(_)) => {
-                Placed::Nothing(format!("\"{}\" already plays out of that DeckLink output.", screens[by].name))
-            }
-            (Some(by), _) => Placed::Nothing(format!("\"{}\" already uses that NDI name.", screens[by].name)),
+            (Some(by), Placed::Fullscreen(_)) => Placed::Nothing(tf(
+                "screens.place.display_taken",
+                "\"{name}\" is already on that display.",
+                &[("name", &screens[by].name)],
+            )),
+            (Some(by), Placed::DeckLink(_)) => Placed::Nothing(tf(
+                "screens.place.decklink_taken",
+                "\"{name}\" already plays out of that DeckLink output.",
+                &[("name", &screens[by].name)],
+            )),
+            (Some(by), _) => Placed::Nothing(tf(
+                "screens.place.ndi_taken",
+                "\"{name}\" already uses that NDI name.",
+                &[("name", &screens[by].name)],
+            )),
             (None, _) => wanted,
         });
     }
@@ -526,14 +565,161 @@ pub fn place_all(screens: &[Screen], displays: &[DisplayInfo], operator: &[usize
 pub fn describe(placed: &Placed, displays: &[DisplayInfo]) -> String {
     match placed {
         Placed::Fullscreen(index) => match displays.iter().find(|display| display.index == *index) {
-            Some(display) => format!("Filling \"{}\", {} x {}", display.name, display.w, display.h),
-            None => "Filling a display".to_owned(),
+            Some(display) => tf(
+                "screens.status.filling",
+                "Filling \"{name}\", {w} x {h}",
+                &[("name", &display.name), ("w", &display.w.to_string()), ("h", &display.h.to_string())],
+            ),
+            None => t("screens.status.filling_display", "Filling a display").to_owned(),
         },
-        Placed::Window => "In a window".to_owned(),
-        Placed::Ndi(name) => format!("Starting NDI as \"{name}\""),
-        Placed::DeckLink(out) => format!("Starting {} at {}", out.device, out.mode),
-        Placed::Nothing(why) if why.is_empty() => "Off".to_owned(),
+        Placed::Window => t("screens.status.window", "In a window").to_owned(),
+        Placed::Ndi(name) => tf("screens.status.ndi_starting", "Starting NDI as \"{name}\"", &[("name", name)]),
+        Placed::DeckLink(out) => tf(
+            "screens.status.decklink_starting",
+            "Starting {device} at {mode}",
+            &[("device", &out.device), ("mode", &out.mode)],
+        ),
+        Placed::Nothing(why) if why.is_empty() => t("screens.status.off", "Off").to_owned(),
         Placed::Nothing(why) => why.clone(),
+    }
+}
+
+/// A screen's status as `sp` gives it: in English whatever the window speaks. A sentence the
+/// window said is put back by `i18n::english_of`; the few words it leaves alone (a status of
+/// one word in the language set), here.
+pub fn status_in_english(doing: &str) -> String {
+    for (key, english) in [
+        crate::i18n::tk("screens.status.off", "Off"),
+        crate::i18n::tk("screens.status.switched_off", "Switched off"),
+        crate::i18n::tk("screens.status.window", "In a window"),
+    ] {
+        if doing == t(key, english) {
+            return english.to_owned();
+        }
+    }
+    crate::i18n::english_of(doing)
+}
+
+/// What a DeckLink screen that plays says of itself, in the window's language: the driver's
+/// "1080i50" or "1080i50, fill and key" (`sp_decklink::State::Playing`) after "Playing at".
+pub fn decklink_playing_words(what: &str) -> String {
+    match what.split_once(", ") {
+        Some((mode, "fill and key")) => {
+            tf("screens.status.decklink_playing.fill_and_key", "Playing at {mode}, fill and key", &[("mode", mode)])
+        }
+        Some((mode, "keyed over its input")) => tf(
+            "screens.status.decklink_playing.over_input",
+            "Playing at {mode}, keyed over its input",
+            &[("mode", mode)],
+        ),
+        _ => tf("screens.status.decklink_playing", "Playing at {what}", &[("what", what)]),
+    }
+}
+
+/// What the operator is told when NDI isn't installed, in the window's language: the words of
+/// `sp_ndi::NOT_INSTALLED`, which the log and `sp` keep as they are.
+pub fn ndi_not_installed() -> &'static str {
+    if cfg!(target_os = "linux") {
+        t(
+            "screens.ndi.not_installed.linux",
+            "NDI isn't installed on this computer. Download NDI\u{2026} in the Screens window gets it (free, from NDI).",
+        )
+    } else {
+        t(
+            "screens.ndi.not_installed.tools",
+            "NDI isn't installed on this computer. Install NDI Tools (free, from https://ndi.video/), then turn this screen on again.",
+        )
+    }
+}
+
+/// How the DeckLink driver stands, in the window's language: the words of
+/// `sp_decklink::Driver::in_words`, which `sp decklink` keeps in English. A failure the driver
+/// describes itself stays in its own words.
+pub fn decklink_driver_words(driver: &sp_decklink::Driver) -> String {
+    use sp_decklink::Driver;
+    match driver {
+        Driver::Looking => t("screens.decklink.looking", "Looking for DeckLink devices\u{2026}").to_owned(),
+        Driver::NotInstalled => t(
+            "screens.decklink.not_installed",
+            "Desktop Video (Blackmagic's DeckLink driver) isn't installed on this computer.",
+        )
+        .to_owned(),
+        Driver::TooOld(version) => tf(
+            "screens.decklink.too_old",
+            "Desktop Video {version} is installed; SoftPresenter needs 16.0 or later. Install the latest from Blackmagic Design.",
+            &[("version", version)],
+        ),
+        Driver::Unsupported => {
+            t("screens.decklink.unsupported", "DeckLink output isn't available on this kind of computer yet.")
+                .to_owned()
+        }
+        Driver::Failed(_) | Driver::Ready(_) => driver.in_words(),
+    }
+}
+
+/// A DeckLink screen's format and where it comes from, in the window's language (the words of
+/// `sp_decklink::Device::format_in_words`, which `sp` keeps in English): "1080p30, as Desktop
+/// Video Setup has it"; "720p50, set in SoftPresenter: Desktop Video Setup has 1080p30".
+pub fn decklink_format_words(device: &sp_decklink::Device, mode: &str) -> String {
+    match device.start(false) {
+        Some(start) if start.mode.name.eq_ignore_ascii_case(mode.trim()) => {
+            let name = start.mode.name.as_str();
+            if start.from_card() {
+                return tf("screens.decklink.format.card", "{mode}, as Desktop Video Setup has it", &[("mode", name)]);
+            }
+            let card = card_format_words(&start.card);
+            let args = [("mode", name), ("card", card.as_str())];
+            match name {
+                "1080i59.94" => tf("screens.decklink.format.usual", "{mode}, the usual HD format: {card}", &args),
+                "1080i50" => tf(
+                    "screens.decklink.format.usual_50",
+                    "{mode}, the usual HD format where power is 50 Hz: {card}",
+                    &args,
+                ),
+                _ if start.mode.height == 1080 => tf(
+                    "screens.decklink.format.first_1080",
+                    "{mode}, this output's first 1080-line format: {card}",
+                    &args,
+                ),
+                _ => tf("screens.decklink.format.first", "{mode}, this output's first format: {card}", &args),
+            }
+        }
+        _ => tf(
+            "screens.decklink.format.set",
+            "{mode}, set in SoftPresenter: {card}",
+            &[("mode", mode.trim()), ("card", &card_format_words(&device.card_format(false)))],
+        ),
+    }
+}
+
+/// What Desktop Video Setup has for a device, in the window's language (the words of
+/// `sp_decklink::CardFormat::in_words`).
+fn card_format_words(card: &sp_decklink::CardFormat) -> String {
+    use sp_decklink::CardFormat;
+    let name = [("name", card.name().unwrap_or_default())];
+    match card {
+        CardFormat::NotSet => t("screens.decklink.card.none", "Desktop Video Setup sets none").to_owned(),
+        CardFormat::Usable(_) => tf("screens.decklink.card.has", "Desktop Video Setup has {name}", &name),
+        CardFormat::NotListed(code) => tf(
+            "screens.decklink.card.not_listed",
+            "Desktop Video Setup has a format this output doesn't list ({code})",
+            &[("code", &sp_decklink::code_in_words(*code))],
+        ),
+        CardFormat::NotOffered(_) => tf(
+            "screens.decklink.card.not_offered",
+            "Desktop Video Setup has {name}, which SoftPresenter doesn't offer",
+            &name,
+        ),
+        CardFormat::ThreeD(_) => tf(
+            "screens.decklink.card.three_d",
+            "Desktop Video Setup has {name} in 3D, which SoftPresenter doesn't play",
+            &name,
+        ),
+        CardFormat::CantKey(_) => tf(
+            "screens.decklink.card.cant_key",
+            "Desktop Video Setup has {name}, which this output can't key in",
+            &name,
+        ),
     }
 }
 
@@ -572,14 +758,21 @@ pub fn load() -> Option<Vec<Screen>> {
 }
 
 pub fn save(screens: &[Screen]) -> Result<(), String> {
-    let path = file().ok_or_else(|| "Could not find where to keep settings on this computer.".to_owned())?;
+    let path = file()
+        .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Could not make the app's folder: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            tf(
+                "media.no_folder",
+                "Could not make the app's folder: {error}",
+                &[("error", &crate::notices::write_problem(&e))],
+            )
+        })?;
     }
     let partial = path.with_extension("json.part");
-    std::fs::write(&partial, to_json(screens))
-        .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| format!("Could not save the screens: {e}"))
+    std::fs::write(&partial, to_json(screens)).and_then(|()| std::fs::rename(&partial, &path)).map_err(|e| {
+        tf("screens.not_saved", "Could not save the screens: {error}", &[("error", &crate::notices::write_problem(&e))])
+    })
 }
 
 #[cfg(test)]
@@ -680,55 +873,58 @@ mod tests {
 
     #[test]
     fn a_key_says_why_it_shows_black_whenever_it_cannot_follow_its_fill() {
-        let see_through = Look { see_through: Some(Alpha::Straight), ..Look::default() };
-        let fill = Screen { look: see_through, ..Screen::new("Stream".to_owned(), Output::Window) };
-        let key_of = |id| Look { key_of: Some(id), ..Look::default() };
-        let key = Screen { look: key_of(fill.id), ..Screen::new("Key".to_owned(), Output::Window) };
-        let trouble = |screens: &[Screen], shown: &[bool]| key_trouble(screens, screens.len() - 1, shown);
-        // Two windows (or displays), both going out: all is well.
-        assert_eq!(trouble(&[fill.clone(), key.clone()], &[true, true]), None);
-        assert_eq!(key_trouble(&[fill.clone(), key.clone()], 0, &[true, true]), None, "the fill is no key");
-        // Both on NDI: all is well too.
-        let ndi = |screen: &Screen, name: &str| Screen { output: Output::Ndi(name.to_owned()), ..screen.clone() };
-        assert_eq!(trouble(&[ndi(&fill, "Fill"), ndi(&key, "Key")], &[true, true]), None);
-        // One on NDI and one in a window: they could not show the same moment.
-        let mixed = trouble(&[ndi(&fill, "Fill"), key.clone()], &[true, true]).unwrap();
-        assert!(mixed.contains("is on NDI") && mixed.contains("shows black"), "{mixed}");
-        let mixed = trouble(&[fill.clone(), ndi(&key, "Key")], &[true, true]).unwrap();
-        assert!(mixed.contains("display or window"), "{mixed}");
-        // A DeckLink output goes with NDI: both are given the same pictures read back.
-        let card = |screen: &Screen, device: &str| Screen {
-            output: Output::DeckLink(DeckLinkOut {
-                device: device.to_owned(),
-                id: None,
-                mode: "1080i50".to_owned(),
-                keyer: Keyer::Off,
-            }),
-            ..screen.clone()
-        };
-        assert_eq!(trouble(&[card(&fill, "Duo (1)"), card(&key, "Duo (2)")], &[true, true]), None);
-        assert_eq!(trouble(&[ndi(&fill, "Fill"), card(&key, "Duo (2)")], &[true, true]), None);
-        let mixed = trouble(&[card(&fill, "Duo (1)"), key.clone()], &[true, true]).unwrap();
-        assert!(mixed.contains("is on a DeckLink output"), "{mixed}");
-        // The fill not going out (off, or its display unplugged).
-        let off = trouble(&[fill.clone(), key.clone()], &[false, true]).unwrap();
-        assert!(off.contains("isn't going out"), "{off}");
-        // A solid fill: its key is all white.
-        let solid = Screen { look: Look::default(), ..fill.clone() };
-        assert!(trouble(&[solid, key.clone()], &[true, true]).unwrap().contains("all white"));
-        // Its own key, a stage screen's, another key's, or one that has gone.
-        let own = Screen { look: key_of(key.id), ..key.clone() };
-        assert!(trouble(&[fill.clone(), own], &[true, true]).unwrap().contains("own key"));
-        let stage = Screen { look: see_through, ..Screen::stage("Band".to_owned(), Output::Window) };
-        let of_stage = Screen { look: key_of(stage.id), ..key.clone() };
-        assert!(trouble(&[stage, of_stage], &[true, true]).unwrap().contains("stage screen"));
-        let other_key = Screen { look: key_of(fill.id), ..Screen::new("Key 1".to_owned(), Output::Window) };
-        let of_key = Screen { look: key_of(other_key.id), ..key.clone() };
-        assert!(trouble(&[fill.clone(), other_key, of_key], &[true, true, true]).unwrap().contains("a key itself"));
-        assert!(trouble(std::slice::from_ref(&key), &[true]).unwrap().contains("removed"));
-        // A stage screen is never a key, whatever its file says.
-        let stage_key = Screen { look: key_of(fill.id), ..Screen::stage("Band".to_owned(), Output::Window) };
-        assert_eq!(trouble(&[fill, stage_key], &[true, true]), None);
+        // The words are checked in English, whatever another test sets.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let see_through = Look { see_through: Some(Alpha::Straight), ..Look::default() };
+            let fill = Screen { look: see_through, ..Screen::new("Stream".to_owned(), Output::Window) };
+            let key_of = |id| Look { key_of: Some(id), ..Look::default() };
+            let key = Screen { look: key_of(fill.id), ..Screen::new("Key".to_owned(), Output::Window) };
+            let trouble = |screens: &[Screen], shown: &[bool]| key_trouble(screens, screens.len() - 1, shown);
+            // Two windows (or displays), both going out: all is well.
+            assert_eq!(trouble(&[fill.clone(), key.clone()], &[true, true]), None);
+            assert_eq!(key_trouble(&[fill.clone(), key.clone()], 0, &[true, true]), None, "the fill is no key");
+            // Both on NDI: all is well too.
+            let ndi = |screen: &Screen, name: &str| Screen { output: Output::Ndi(name.to_owned()), ..screen.clone() };
+            assert_eq!(trouble(&[ndi(&fill, "Fill"), ndi(&key, "Key")], &[true, true]), None);
+            // One on NDI and one in a window: they could not show the same moment.
+            let mixed = trouble(&[ndi(&fill, "Fill"), key.clone()], &[true, true]).unwrap();
+            assert!(mixed.contains("is on NDI") && mixed.contains("shows black"), "{mixed}");
+            let mixed = trouble(&[fill.clone(), ndi(&key, "Key")], &[true, true]).unwrap();
+            assert!(mixed.contains("display or window"), "{mixed}");
+            // A DeckLink output goes with NDI: both are given the same pictures read back.
+            let card = |screen: &Screen, device: &str| Screen {
+                output: Output::DeckLink(DeckLinkOut {
+                    device: device.to_owned(),
+                    id: None,
+                    mode: "1080i50".to_owned(),
+                    keyer: Keyer::Off,
+                }),
+                ..screen.clone()
+            };
+            assert_eq!(trouble(&[card(&fill, "Duo (1)"), card(&key, "Duo (2)")], &[true, true]), None);
+            assert_eq!(trouble(&[ndi(&fill, "Fill"), card(&key, "Duo (2)")], &[true, true]), None);
+            let mixed = trouble(&[card(&fill, "Duo (1)"), key.clone()], &[true, true]).unwrap();
+            assert!(mixed.contains("is on a DeckLink output"), "{mixed}");
+            // The fill not going out (off, or its display unplugged).
+            let off = trouble(&[fill.clone(), key.clone()], &[false, true]).unwrap();
+            assert!(off.contains("isn't going out"), "{off}");
+            // A solid fill: its key is all white.
+            let solid = Screen { look: Look::default(), ..fill.clone() };
+            assert!(trouble(&[solid, key.clone()], &[true, true]).unwrap().contains("all white"));
+            // Its own key, a stage screen's, another key's, or one that has gone.
+            let own = Screen { look: key_of(key.id), ..key.clone() };
+            assert!(trouble(&[fill.clone(), own], &[true, true]).unwrap().contains("own key"));
+            let stage = Screen { look: see_through, ..Screen::stage("Band".to_owned(), Output::Window) };
+            let of_stage = Screen { look: key_of(stage.id), ..key.clone() };
+            assert!(trouble(&[stage, of_stage], &[true, true]).unwrap().contains("stage screen"));
+            let other_key = Screen { look: key_of(fill.id), ..Screen::new("Key 1".to_owned(), Output::Window) };
+            let of_key = Screen { look: key_of(other_key.id), ..key.clone() };
+            assert!(trouble(&[fill.clone(), other_key, of_key], &[true, true, true]).unwrap().contains("a key itself"));
+            assert!(trouble(std::slice::from_ref(&key), &[true]).unwrap().contains("removed"));
+            // A stage screen is never a key, whatever its file says.
+            let stage_key = Screen { look: key_of(fill.id), ..Screen::stage("Band".to_owned(), Output::Window) };
+            assert_eq!(trouble(&[fill, stage_key], &[true, true]), None);
+        });
     }
 
     fn displays(names: &[&str]) -> Vec<DisplayInfo> {
@@ -759,24 +955,27 @@ mod tests {
 
     #[test]
     fn no_screen_fills_the_main_display_and_old_display_names_still_match() {
-        let displays = vec![
-            DisplayInfo {
-                index: 0,
-                name: "HP 27f".into(),
-                old_name: "Monitor #13643".into(),
-                main: true,
-                ..Default::default()
-            },
-            DisplayInfo { index: 1, name: "3DTV".into(), old_name: "Monitor #0".into(), ..Default::default() },
-        ];
-        let on_main = [screen("A", Output::Display("Monitor #13643".to_owned()))];
-        let placed = place_all(&on_main, &displays, &[0]);
-        assert!(matches!(&placed[0], Placed::Nothing(why) if why.contains("main display")), "{placed:?}");
-        let on_tv = [screen("A", Output::Display("Monitor #0".to_owned()))];
-        assert_eq!(place_all(&on_tv, &displays, &[0]), [Placed::Fullscreen(1)], "saved under its old name");
-        let automatic = [screen("A", Output::Automatic)];
-        assert_eq!(place_all(&automatic, &displays, &[]), [Placed::Window], "not knowing the operator's display");
-        assert_eq!(place_all(&automatic, &displays, &[0]), [Placed::Fullscreen(1)]);
+        // The words are checked in English, whatever another test sets.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let displays = vec![
+                DisplayInfo {
+                    index: 0,
+                    name: "HP 27f".into(),
+                    old_name: "Monitor #13643".into(),
+                    main: true,
+                    ..Default::default()
+                },
+                DisplayInfo { index: 1, name: "3DTV".into(), old_name: "Monitor #0".into(), ..Default::default() },
+            ];
+            let on_main = [screen("A", Output::Display("Monitor #13643".to_owned()))];
+            let placed = place_all(&on_main, &displays, &[0]);
+            assert!(matches!(&placed[0], Placed::Nothing(why) if why.contains("main display")), "{placed:?}");
+            let on_tv = [screen("A", Output::Display("Monitor #0".to_owned()))];
+            assert_eq!(place_all(&on_tv, &displays, &[0]), [Placed::Fullscreen(1)], "saved under its old name");
+            let automatic = [screen("A", Output::Automatic)];
+            assert_eq!(place_all(&automatic, &displays, &[]), [Placed::Window], "not knowing the operator's display");
+            assert_eq!(place_all(&automatic, &displays, &[0]), [Placed::Fullscreen(1)]);
+        });
     }
 
     /// Two monitors on Windows as `display_list` lists them: the main one, and a TV that gives
@@ -800,41 +999,47 @@ mod tests {
 
     #[test]
     fn a_screen_saved_under_a_windows_device_name_finds_its_display_and_takes_its_name() {
-        let displays = windows_displays();
-        let mut screens = vec![
-            screen("Audience", Output::Display(r"\\.\DISPLAY2".to_owned())),
-            screen("Stage", Output::Display(r"\\.\DISPLAY3".to_owned())),
-            screen("Lobby", Output::Display(r"\\.\DISPLAY1".to_owned())),
-        ];
-        let placed = place_all(&screens, &displays, &[0]);
-        assert_eq!(placed[..2], [Placed::Fullscreen(1), Placed::Fullscreen(2)]);
-        assert!(matches!(&placed[2], Placed::Nothing(why) if why.contains("main display")), "{placed:?}");
-        // Saved from now on under the names Windows shows; a display with no name of its own
-        // keeps its device name.
-        assert!(settle(&mut screens, &displays, &[0]));
-        let outputs: Vec<&Output> = screens.iter().map(|s| &s.output).collect();
-        assert_eq!(
-            outputs,
-            [
-                &Output::Display("Mi TV".to_owned()),
-                &Output::Display(r"\\.\DISPLAY3".to_owned()),
-                &Output::Display("Philips FTV".to_owned()),
-            ]
-        );
-        assert!(!settle(&mut screens, &displays, &[0]), "nothing more to change");
-        assert_eq!(place_all(&screens, &displays, &[0])[..2], [Placed::Fullscreen(1), Placed::Fullscreen(2)]);
+        // The words are checked in English, whatever another test sets.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let displays = windows_displays();
+            let mut screens = vec![
+                screen("Audience", Output::Display(r"\\.\DISPLAY2".to_owned())),
+                screen("Stage", Output::Display(r"\\.\DISPLAY3".to_owned())),
+                screen("Lobby", Output::Display(r"\\.\DISPLAY1".to_owned())),
+            ];
+            let placed = place_all(&screens, &displays, &[0]);
+            assert_eq!(placed[..2], [Placed::Fullscreen(1), Placed::Fullscreen(2)]);
+            assert!(matches!(&placed[2], Placed::Nothing(why) if why.contains("main display")), "{placed:?}");
+            // Saved from now on under the names Windows shows; a display with no name of its own
+            // keeps its device name.
+            assert!(settle(&mut screens, &displays, &[0]));
+            let outputs: Vec<&Output> = screens.iter().map(|s| &s.output).collect();
+            assert_eq!(
+                outputs,
+                [
+                    &Output::Display("Mi TV".to_owned()),
+                    &Output::Display(r"\\.\DISPLAY3".to_owned()),
+                    &Output::Display("Philips FTV".to_owned()),
+                ]
+            );
+            assert!(!settle(&mut screens, &displays, &[0]), "nothing more to change");
+            assert_eq!(place_all(&screens, &displays, &[0])[..2], [Placed::Fullscreen(1), Placed::Fullscreen(2)]);
+        });
     }
 
     #[test]
     fn a_screen_on_a_monitors_own_name_waits_for_it_and_is_kept() {
-        // Mi TV unplugged: the screen waits, under the same name, and nothing takes its place.
-        let mut displays = windows_displays();
-        displays.remove(1);
-        let mut screens = vec![screen("Audience", Output::Display("Mi TV".to_owned()))];
-        assert!(!settle(&mut screens, &displays, &[0]));
-        assert_eq!(screens[0].output, Output::Display("Mi TV".to_owned()));
-        let placed = place_all(&screens, &displays, &[0]);
-        assert!(matches!(&placed[0], Placed::Nothing(why) if why.contains("Disconnected")), "{placed:?}");
+        // The words are checked in English, whatever another test sets.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            // Mi TV unplugged: the screen waits, under the same name, and nothing takes its place.
+            let mut displays = windows_displays();
+            displays.remove(1);
+            let mut screens = vec![screen("Audience", Output::Display("Mi TV".to_owned()))];
+            assert!(!settle(&mut screens, &displays, &[0]));
+            assert_eq!(screens[0].output, Output::Display("Mi TV".to_owned()));
+            let placed = place_all(&screens, &displays, &[0]);
+            assert!(matches!(&placed[0], Placed::Nothing(why) if why.contains("Disconnected")), "{placed:?}");
+        });
     }
 
     #[test]
@@ -848,76 +1053,88 @@ mod tests {
 
     #[test]
     fn a_lone_display_is_the_operators_and_no_screen_fills_it() {
-        // Wayland with one display: no display is the main one, and the home window's display may
-        // or may not be known yet.
-        let one = displays(&["DP-1"]);
-        for operator in [&[][..], &[0]] {
-            assert_eq!(place_all(&[screen("A", Output::Automatic)], &one, operator), [Placed::Window]);
-            let chosen = place_all(&[screen("A", Output::Display("DP-1".to_owned()))], &one, operator);
-            assert!(
-                matches!(&chosen[0], Placed::Nothing(why) if why.contains("\"DP-1\" is the only display")),
-                "{chosen:?}"
-            );
-            // Automatic is never given the one display to keep.
-            let mut list = [screen("A", Output::Automatic)];
-            assert!(!settle(&mut list, &one, operator));
-            assert_eq!(list[0].output, Output::Automatic);
-        }
+        // The words are checked in English, whatever another test sets.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            // Wayland with one display: no display is the main one, and the home window's display may
+            // or may not be known yet.
+            let one = displays(&["DP-1"]);
+            for operator in [&[][..], &[0]] {
+                assert_eq!(place_all(&[screen("A", Output::Automatic)], &one, operator), [Placed::Window]);
+                let chosen = place_all(&[screen("A", Output::Display("DP-1".to_owned()))], &one, operator);
+                assert!(
+                    matches!(&chosen[0], Placed::Nothing(why) if why.contains("\"DP-1\" is the only display")),
+                    "{chosen:?}"
+                );
+                // Automatic is never given the one display to keep.
+                let mut list = [screen("A", Output::Automatic)];
+                assert!(!settle(&mut list, &one, operator));
+                assert_eq!(list[0].output, Output::Automatic);
+            }
+        });
     }
 
     #[test]
     fn with_a_known_main_display_a_chosen_display_is_kept_wherever_the_home_window_goes() {
-        let mut known = displays(&["Built-in", "Projector", "TV"]);
-        known[0].main = true;
-        let on_tv = [screen("A", Output::Display("TV".to_owned()))];
-        // The operator dragged the home window onto the TV: the audience screen stays.
-        assert_eq!(place_all(&on_tv, &known, &[2, 0]), [Placed::Fullscreen(2)]);
-        let on_main = place_all(&[screen("A", Output::Display("Built-in".to_owned()))], &known, &[0]);
-        assert!(matches!(&on_main[0], Placed::Nothing(why) if why.contains("main display")), "{on_main:?}");
-        // Automatic takes neither the main display nor the one holding the home window.
-        let mut list = [screen("A", Output::Automatic)];
-        assert!(settle(&mut list, &known, &[1, 0]));
-        assert_eq!(list[0].output, Output::Display("TV".to_owned()));
+        // The words are checked in English, whatever another test sets.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let mut known = displays(&["Built-in", "Projector", "TV"]);
+            known[0].main = true;
+            let on_tv = [screen("A", Output::Display("TV".to_owned()))];
+            // The operator dragged the home window onto the TV: the audience screen stays.
+            assert_eq!(place_all(&on_tv, &known, &[2, 0]), [Placed::Fullscreen(2)]);
+            let on_main = place_all(&[screen("A", Output::Display("Built-in".to_owned()))], &known, &[0]);
+            assert!(matches!(&on_main[0], Placed::Nothing(why) if why.contains("main display")), "{on_main:?}");
+            // Automatic takes neither the main display nor the one holding the home window.
+            let mut list = [screen("A", Output::Automatic)];
+            assert!(settle(&mut list, &known, &[1, 0]));
+            assert_eq!(list[0].output, Output::Display("TV".to_owned()));
+        });
     }
 
     #[test]
     fn with_no_known_main_display_the_home_windows_is_never_covered() {
-        // Wayland with a projector plugged in.
-        let two = displays(&["DP-1", "HDMI-1"]);
-        let on_home = place_all(&[screen("A", Output::Display("DP-1".to_owned()))], &two, &[0]);
-        assert!(matches!(&on_home[0], Placed::Nothing(why) if why.contains("own window is on")), "{on_home:?}");
-        assert_eq!(
-            place_all(&[screen("A", Output::Display("HDMI-1".to_owned()))], &two, &[0]),
-            [Placed::Fullscreen(1)]
-        );
-        // The audience appears on the projector as soon as it is plugged in...
-        let mut list = [screen("A", Output::Automatic)];
-        assert!(settle(&mut list, &two, &[0]));
-        assert_eq!(list[0].output, Output::Display("HDMI-1".to_owned()));
-        // ...but not while it isn't known which display the home window is on: a window then.
-        let mut list = [screen("A", Output::Automatic)];
-        assert!(!settle(&mut list, &two, &[]));
-        assert_eq!(place_all(&list, &two, &[]), [Placed::Window]);
-        // A display another screen has is not given again; old names become the new ones.
-        let mut list = [screen("A", Output::Display("HDMI-1".to_owned())), screen("B", Output::Automatic)];
-        assert!(!settle(&mut list, &two, &[0]));
-        assert_eq!(list[1].output, Output::Automatic);
-        let renamed = vec![
-            DisplayInfo { index: 0, name: "HP 27f".into(), main: true, ..Default::default() },
-            DisplayInfo { index: 1, name: "3DTV".into(), old_name: "Monitor #0".into(), ..Default::default() },
-        ];
-        let mut list = [screen("A", Output::Display("Monitor #0".to_owned()))];
-        assert!(settle(&mut list, &renamed, &[0]));
-        assert_eq!(list[0].output, Output::Display("3DTV".to_owned()));
+        // The words are checked in English, whatever another test sets.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            // Wayland with a projector plugged in.
+            let two = displays(&["DP-1", "HDMI-1"]);
+            let on_home = place_all(&[screen("A", Output::Display("DP-1".to_owned()))], &two, &[0]);
+            assert!(matches!(&on_home[0], Placed::Nothing(why) if why.contains("own window is on")), "{on_home:?}");
+            assert_eq!(
+                place_all(&[screen("A", Output::Display("HDMI-1".to_owned()))], &two, &[0]),
+                [Placed::Fullscreen(1)]
+            );
+            // The audience appears on the projector as soon as it is plugged in...
+            let mut list = [screen("A", Output::Automatic)];
+            assert!(settle(&mut list, &two, &[0]));
+            assert_eq!(list[0].output, Output::Display("HDMI-1".to_owned()));
+            // ...but not while it isn't known which display the home window is on: a window then.
+            let mut list = [screen("A", Output::Automatic)];
+            assert!(!settle(&mut list, &two, &[]));
+            assert_eq!(place_all(&list, &two, &[]), [Placed::Window]);
+            // A display another screen has is not given again; old names become the new ones.
+            let mut list = [screen("A", Output::Display("HDMI-1".to_owned())), screen("B", Output::Automatic)];
+            assert!(!settle(&mut list, &two, &[0]));
+            assert_eq!(list[1].output, Output::Automatic);
+            let renamed = vec![
+                DisplayInfo { index: 0, name: "HP 27f".into(), main: true, ..Default::default() },
+                DisplayInfo { index: 1, name: "3DTV".into(), old_name: "Monitor #0".into(), ..Default::default() },
+            ];
+            let mut list = [screen("A", Output::Display("Monitor #0".to_owned()))];
+            assert!(settle(&mut list, &renamed, &[0]));
+            assert_eq!(list[0].output, Output::Display("3DTV".to_owned()));
+        });
     }
 
     #[test]
     fn a_display_that_is_not_plugged_in_is_never_swapped_for_another() {
-        let screens = [screen("A", Output::Display("Projector".to_owned()))];
-        let placed = place_all(&screens, &displays(&["Built-in"]), &[0]);
-        assert!(matches!(&placed[0], Placed::Nothing(why) if why.contains("Disconnected")), "{placed:?}");
-        // Plugged in again, it is found by name wherever it now sits in the list.
-        assert_eq!(place_all(&screens, &displays(&["Projector", "Built-in"]), &[1]), [Placed::Fullscreen(0)]);
+        // The words are checked in English, whatever another test sets.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let screens = [screen("A", Output::Display("Projector".to_owned()))];
+            let placed = place_all(&screens, &displays(&["Built-in"]), &[0]);
+            assert!(matches!(&placed[0], Placed::Nothing(why) if why.contains("Disconnected")), "{placed:?}");
+            // Plugged in again, it is found by name wherever it now sits in the list.
+            assert_eq!(place_all(&screens, &displays(&["Projector", "Built-in"]), &[1]), [Placed::Fullscreen(0)]);
+        });
     }
 
     fn decklink(device: &str, id: Option<i64>) -> Output {
@@ -957,23 +1174,26 @@ mod tests {
 
     #[test]
     fn one_decklink_output_plays_one_screen_and_another_card_of_the_same_name_is_another_output() {
-        let screens = [
-            screen("A", decklink("DeckLink Duo (1)", Some(1))),
-            screen("B", decklink("DeckLink Duo (1)", Some(1))),
-            screen("C", decklink("DeckLink Duo (1)", Some(2))),
-            screen("D", decklink("DeckLink Duo (2)", None)),
-            screen("E", decklink("DeckLink Duo (2)", None)),
-        ];
-        let placed = place_all(&screens, &displays(&["Built-in"]), &[0]);
-        assert!(matches!(&placed[0], Placed::DeckLink(out) if out.id == Some(1)));
-        assert!(
-            matches!(&placed[1], Placed::Nothing(why) if why.contains("\"A\" already plays out of that DeckLink")),
-            "{placed:?}"
-        );
-        assert!(matches!(&placed[2], Placed::DeckLink(_)), "the same name with another id is another card");
-        assert!(matches!(&placed[3], Placed::DeckLink(_)));
-        assert!(matches!(&placed[4], Placed::Nothing(_)));
-        assert_eq!(describe(&placed[0], &[]), "Starting DeckLink Duo (1) at 1080i59.94");
+        // The words are checked in English, whatever another test sets.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let screens = [
+                screen("A", decklink("DeckLink Duo (1)", Some(1))),
+                screen("B", decklink("DeckLink Duo (1)", Some(1))),
+                screen("C", decklink("DeckLink Duo (1)", Some(2))),
+                screen("D", decklink("DeckLink Duo (2)", None)),
+                screen("E", decklink("DeckLink Duo (2)", None)),
+            ];
+            let placed = place_all(&screens, &displays(&["Built-in"]), &[0]);
+            assert!(matches!(&placed[0], Placed::DeckLink(out) if out.id == Some(1)));
+            assert!(
+                matches!(&placed[1], Placed::Nothing(why) if why.contains("\"A\" already plays out of that DeckLink")),
+                "{placed:?}"
+            );
+            assert!(matches!(&placed[2], Placed::DeckLink(_)), "the same name with another id is another card");
+            assert!(matches!(&placed[3], Placed::DeckLink(_)));
+            assert!(matches!(&placed[4], Placed::Nothing(_)));
+            assert_eq!(describe(&placed[0], &[]), "Starting DeckLink Duo (1) at 1080i59.94");
+        });
     }
 
     #[test]
@@ -1108,42 +1328,48 @@ mod tests {
 
     #[test]
     fn one_display_and_one_ndi_name_serve_one_screen_each() {
-        let screens = [
-            screen("A", Output::Automatic),
-            screen("B", Output::Display("Projector".to_owned())),
-            screen("C", Output::Ndi("Main".to_owned())),
-            screen("D", Output::Ndi(" Main ".to_owned())),
-            screen("E", Output::Window),
-            screen("F", Output::Window),
-            screen("G", Output::Off),
-            screen("H", Output::Ndi("  ".to_owned())),
-        ];
-        let placed = place_all(&screens, &displays(&["Built-in", "Projector"]), &[0]);
-        assert_eq!(placed[0], Placed::Fullscreen(1));
-        assert!(matches!(&placed[1], Placed::Nothing(why) if why.contains("\"A\"")), "{placed:?}");
-        assert_eq!(placed[2], Placed::Ndi("Main".to_owned()));
-        assert!(matches!(&placed[3], Placed::Nothing(why) if why.contains("\"C\"")));
-        // Any number of windows is fine.
-        assert_eq!((&placed[4], &placed[5]), (&Placed::Window, &Placed::Window));
-        assert_eq!(placed[6], Placed::Nothing(String::new()));
-        assert!(matches!(&placed[7], Placed::Nothing(why) if why.contains("name")));
-        assert_eq!(describe(&placed[6], &[]), "Off");
+        // The words are checked in English, whatever another test sets.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let screens = [
+                screen("A", Output::Automatic),
+                screen("B", Output::Display("Projector".to_owned())),
+                screen("C", Output::Ndi("Main".to_owned())),
+                screen("D", Output::Ndi(" Main ".to_owned())),
+                screen("E", Output::Window),
+                screen("F", Output::Window),
+                screen("G", Output::Off),
+                screen("H", Output::Ndi("  ".to_owned())),
+            ];
+            let placed = place_all(&screens, &displays(&["Built-in", "Projector"]), &[0]);
+            assert_eq!(placed[0], Placed::Fullscreen(1));
+            assert!(matches!(&placed[1], Placed::Nothing(why) if why.contains("\"A\"")), "{placed:?}");
+            assert_eq!(placed[2], Placed::Ndi("Main".to_owned()));
+            assert!(matches!(&placed[3], Placed::Nothing(why) if why.contains("\"C\"")));
+            // Any number of windows is fine.
+            assert_eq!((&placed[4], &placed[5]), (&Placed::Window, &Placed::Window));
+            assert_eq!(placed[6], Placed::Nothing(String::new()));
+            assert!(matches!(&placed[7], Placed::Nothing(why) if why.contains("name")));
+            assert_eq!(describe(&placed[6], &[]), "Off");
+        });
     }
 
     #[test]
     fn the_list_survives_its_file_and_other_files_are_refused() {
-        let screens = starting(Some("SoftPresenter Audience"));
-        assert_eq!(screens.len(), 2);
-        assert_eq!(from_json(&to_json(&screens)), Some(screens.clone()));
-        assert_eq!(from_json("{}"), None);
-        assert_eq!(from_json(&to_json(&[])), None);
-        assert_eq!(next_name(&screens, Kind::Audience), "Screen 3");
-        assert_eq!(next_name(&screens, Kind::Stage), "Stage Screen 1");
-        // A file from before stage screens reads, its screens being audience screens.
-        let old = r#"{"format":"softpresenter-screens","version":1,"screens":[{"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e01","name":"A","output":"window"}]}"#;
-        assert_eq!(from_json(old).map(|list| list[0].kind), Some(Kind::Audience));
-        let mixed = vec![Screen::new("A".to_owned(), Output::Window), Screen::stage("B".to_owned(), Output::Off)];
-        assert_eq!(from_json(&to_json(&mixed)), Some(mixed));
-        assert_eq!(starting(None).len(), 1);
+        // The words are checked in English, whatever another test sets.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let screens = starting(Some("SoftPresenter Audience"));
+            assert_eq!(screens.len(), 2);
+            assert_eq!(from_json(&to_json(&screens)), Some(screens.clone()));
+            assert_eq!(from_json("{}"), None);
+            assert_eq!(from_json(&to_json(&[])), None);
+            assert_eq!(next_name(&screens, Kind::Audience), "Screen 3");
+            assert_eq!(next_name(&screens, Kind::Stage), "Stage Screen 1");
+            // A file from before stage screens reads, its screens being audience screens.
+            let old = r#"{"format":"softpresenter-screens","version":1,"screens":[{"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e01","name":"A","output":"window"}]}"#;
+            assert_eq!(from_json(old).map(|list| list[0].kind), Some(Kind::Audience));
+            let mixed = vec![Screen::new("A".to_owned(), Output::Window), Screen::stage("B".to_owned(), Output::Off)];
+            assert_eq!(from_json(&to_json(&mixed)), Some(mixed));
+            assert_eq!(starting(None).len(), 1);
+        });
     }
 }

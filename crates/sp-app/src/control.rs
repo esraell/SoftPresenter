@@ -2193,12 +2193,24 @@ impl crate::App {
             return Reply::with("", serde_json::json!([]));
         };
         let shown: Vec<bool> = state.screen_status.iter().map(|(_, shown)| *shown).collect();
+        // Scripts read this: in English whatever the window speaks. What each screen is doing
+        // was said in the window's language; the key's trouble is said again in English.
+        let statuses: Vec<(String, bool)> = state
+            .screen_status
+            .iter()
+            .map(|(doing, shown)| (crate::screens::status_in_english(doing), *shown))
+            .collect();
+        let trouble = |at: usize| {
+            crate::i18n::with_language(crate::i18n::Language::English, || {
+                crate::screens::key_trouble(&state.screens, at, &shown)
+            })
+        };
         let lines: Vec<String> = state
             .screens
             .iter()
             .enumerate()
             .map(|(at, screen)| {
-                let mut line = match state.screen_status.get(at) {
+                let mut line = match statuses.get(at) {
                     Some((doing, _)) => format!("{}: {doing}", screen.name),
                     None => screen.name.clone(),
                 };
@@ -2211,7 +2223,7 @@ impl crate::App {
                 if matches!(screen.output, crate::screens::Output::Ndi(_)) && !screen.sound {
                     line.push_str("; no sound");
                 }
-                if let Some(trouble) = crate::screens::key_trouble(&state.screens, at, &shown) {
+                if let Some(trouble) = trouble(at) {
                     line.push_str(&format!(" ({trouble})"));
                 }
                 line
@@ -2222,7 +2234,7 @@ impl crate::App {
             .iter()
             .enumerate()
             .map(|(at, screen)| {
-                let (doing, shown_now) = state.screen_status.get(at).cloned().unwrap_or_default();
+                let (doing, shown_now) = statuses.get(at).cloned().unwrap_or_default();
                 let audience = screen.kind == crate::screens::Kind::Audience;
                 let key_of = screen.look.key_of.filter(|_| audience).and_then(|fill| {
                     state.screens.iter().find(|other| other.id == fill).map(|other| other.name.clone())
@@ -2244,7 +2256,7 @@ impl crate::App {
                     "alpha": see_through.map(crate::screens::Alpha::name),
                     "key_of": key_of,
                     "sound": matches!(screen.output, crate::screens::Output::Ndi(_)).then_some(screen.sound),
-                    "key_trouble": crate::screens::key_trouble(&state.screens, at, &shown),
+                    "key_trouble": trouble(at),
                 })
             })
             .collect();

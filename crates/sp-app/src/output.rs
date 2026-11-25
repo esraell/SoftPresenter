@@ -173,14 +173,27 @@ pub enum NdiStatus {
 impl NdiStatus {
     /// What a source that is on says of itself in the Screens window and to `sp screens`. The
     /// number is NDI's own: its monitor app, for one, counts as two receivers. Kept short: the
-    /// Screens window shows it on one line inside a small picture of the screen.
+    /// Screens window shows it on one line inside a small picture of the screen. In the window's
+    /// language (`sp` puts it back into English); for the operator's thread only.
     pub fn sending_in_words(name: &str, receivers: Option<u32>) -> String {
+        use crate::i18n::{tf, tn};
         let (w, h) = NDI_SIZE;
         match receivers {
-            None => format!("Sending as \"{name}\" at {w} x {h}"),
-            Some(0) => format!("On NDI as \"{name}\"; nobody is watching"),
-            Some(1) => format!("Sending as \"{name}\" to 1 receiver"),
-            Some(count) => format!("Sending as \"{name}\" to {count} receivers"),
+            None => tf(
+                "screens.status.ndi_sending",
+                "Sending as \"{name}\" at {w} x {h}",
+                &[("name", name), ("w", &w.to_string()), ("h", &h.to_string())],
+            ),
+            Some(0) => {
+                tf("screens.status.ndi_unwatched", "On NDI as \"{name}\"; nobody is watching", &[("name", name)])
+            }
+            Some(count) => tn(
+                "screens.status.ndi_receivers",
+                u64::from(count),
+                "Sending as \"{name}\" to {n} receiver",
+                "Sending as \"{name}\" to {n} receivers",
+                &[("name", name)],
+            ),
         }
     }
 }
@@ -4498,7 +4511,9 @@ mod tests {
 
     #[test]
     fn an_ndi_source_says_how_many_are_watching_it() {
-        let words = |receivers| NdiStatus::sending_in_words("Sanctuary", receivers);
+        let english = crate::i18n::Language::English;
+        let words =
+            |receivers| crate::i18n::with_language(english, || NdiStatus::sending_in_words("Sanctuary", receivers));
         assert_eq!(words(None), "Sending as \"Sanctuary\" at 1920 x 1080");
         assert_eq!(words(Some(0)), "On NDI as \"Sanctuary\"; nobody is watching");
         assert_eq!(words(Some(1)), "Sending as \"Sanctuary\" to 1 receiver");

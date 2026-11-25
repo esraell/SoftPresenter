@@ -110,11 +110,12 @@ start with `_` (`"_note"`) are comments.
 | `setup` | the first-start setup's steps, in each system's wording |
 | `integrations` | Settings › Integrations: VoxLive, Canva Sync and their pages, states and messages |
 | `remote` | Settings › Remote Control and what Remote Control says in the window |
+| `screens` | the Screens window: the list, each screen's output, look, background, key and DeckLink rows, what each screen is doing (which `sp screens` gives in English); the NDI download on Linux |
 | `inspector` | the inspector at the right of the Edit view: its tabs, sections, fields and menus |
 | `editor` | the Edit view's slide editing (`editor.rs`) and its stage layouts' parts (`stage_editor.rs`) |
 | `import` | the Import Slides sheets |
 | `tools` | the right column's tool tabs: Timers, Messages, Props, Macros, Stage, Audio and VoxLive; macros' steps and the stage layouts' items |
-| `settings` | the Settings window's sidebar, General, Groups, Key Mappings, About (not Screens yet) |
+| `settings` | the Settings window's sidebar, General, the Screens pane, Groups, Key Mappings, About |
 | `edit` | the Edit view: its kinds, the slides and props lists, the object tools, Edit Words, why a key is greyed |
 | `themes` | the Themes view and the version sheet |
 | `bible` | the Bible view's bar, its Options and translations, and its history's dates |
@@ -125,9 +126,8 @@ start with `_` (`"_note"`) are comments.
 | `common` | words several areas share |
 | `format` | numbers and quotation marks (not words) |
 
-Spanish has every area above. What is left is `screens` (Settings › Screens and the NDI download
-on Linux), the inspector's NDI Source section (`ndi_in.rs`), `audio.rs` and the output windows'
-messages in `main.rs`, left while other work changes them.
+Spanish has every area above. What is left is the inspector's NDI Source section (`ndi_in.rs`),
+`audio.rs` and the output windows' messages in `main.rs`, left while other work changes them.
 
 When you finish an area, add its file name to `SPANISH_DONE` in `i18n.rs`, so a string wrapped
 later without its Spanish fails the tests.
