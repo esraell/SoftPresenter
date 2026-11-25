@@ -1793,7 +1793,8 @@ function renderRight() {
       : state.test !== 'off' ? html`<div class="lv-line"><span>Test pattern: <b>${({ bars: 'Colour bars', grid: 'Grid', white: 'White' })[state.test]}</b></span><button class="vk wide" data-a="test:off">Off</button></div>`
       : state.identify ? html`<div class="lv-line"><span>Identifying the screens: <b>the room sees it</b></span><button class="vk wide" data-a="identify" title="Take each screen’s name and colour off it">Stop</button></div>` : ''}</div>`);      // Identify can be stopped from anywhere
 
-  const keys = [['slide', 'Slide'], ['media', 'Media'], ['props', 'Props'], ['messages', 'Messages'], ['audio', 'Audio'], ['announcements', 'Announce']];
+  // in the order the screens stack them, from the back (the app, 58a7d95); audio is heard, not seen, so it comes last
+  const keys = [['media', 'Media'], ['slide', 'Slide'], ['announcements', 'Announce'], ['props', 'Props'], ['messages', 'Messages'], ['audio', 'Audio']];
   put('layers', keys.map(([k, nm]) => html`<button class="layer ${layerOn(k) ? 'on' : ''}" data-a="clear:${k}" title="${layerOn(k) ? 'Clear it' : 'Nothing showing'}"><i class="led"></i><span class="nm">${nm}</span></button>`),
     html`<button class="clearall ${on ? '' : 'idle'}" data-a="clear:all">Clear All</button>`);
   put('transport', html`<button class="tbtn" data-a="step:-1">${I.prev} Previous</button><button class="tbtn nextbtn" data-a="step:1">Next ${I.next}</button>`);
@@ -2873,7 +2874,17 @@ function renderSettings() {
     const spBtns = html`${sp === 'missing' || sp === 'notfound' ? html`<button class="btn" data-a="cliDo:install" title="Puts sp (and softpresenter) where a terminal finds it">Install</button>` : ''}${sp === 'elsewhere' || sp === 'gone' ? html`<button class="btn" data-a="cliDo:use">Use This Copy</button>` : ''}${sp !== 'missing' ? html`<button class="btn ${sp === 'here' ? 'quiet' : ''}" data-a="cliDo:remove" title="Takes sp and softpresenter away again, with anything SoftPresenter added for them">Remove</button>` : ''}`;
     const cli = card('Command line', 'The sp command controls SoftPresenter from a terminal or a script.', html`
       ${stLine('The sp command', spBtns, spLine)}${state.cliSaid ? html`<p class="sc-note">${state.cliSaid}</p>` : ''}`);
-    body = [catCard(card), cli, card('VoxLive', 'Live translation captions on a screen', v.connected
+    // AI assistants (as built, 25 November, 8934701..94d7e2f; the owner: "implement mcp that way the app can talk to the agent"):
+    // off until switched on; changing the screens is a second switch, and the assistant asks the person first, each time
+    const mc = mcpSet(), prog = mcpProgram(), snip = (label, words, which) => html`<div class="st-code"><span class="st-codeh">${label}</span><div class="st-coderow"><pre class="mono">${words}</pre><button class="btn sm" data-a="mcpCopy:${which}">Copy</button></div></div>`;
+    const mcp = card('AI Assistants (MCP)', 'For Claude and other assistants', html`
+      <p class="sc-note">Let Claude and other AI assistants work with SoftPresenter: find songs and Bible passages, prepare playlists and, if you allow it, run the screens.</p>
+      ${stLine('Let AI assistants use SoftPresenter', onoff(mc.allow, 'mcpAllow'), 'They can read your songs, Bibles and playlists, and make songs and playlists. Nothing on the screens changes.')}
+      ${stLine('Let them change what’s on the screens', html`<button class="btn ${mc.screens ? 'onkey' : ''}" data-a="mcpScreens" ${{ disabled: !mc.allow, title: mc.allow ? null : 'Let AI assistants use SoftPresenter first' }}>${sw(mc.screens, 'On', 'Off')}</button>`, 'The assistant asks you first, each time. Leave this off unless someone is watching it.')}
+      ${snip('Claude Code: type this in a terminal', mcpCode(prog), 'code')}
+      ${snip('Claude Desktop: add this to its claude_desktop_config.json, then open Claude Desktop again', mcpDesktop(prog), 'desktop')}
+      ${state.mcpSaid ? html`<p class="st-said ${state.mcpSaid.bad ? 'bad' : ''}"><i class="led"></i>${state.mcpSaid.text}</p>` : ''}`);
+    body = [catCard(card), cli, mcp, card('VoxLive', 'Live translation captions on a screen', v.connected
         ? stLine('API key', html`<span class="st-key mono" style="text-transform:none">${v.key}…</span><button class="btn" data-a="voxDisconnect">Disconnect</button>`, 'Kept in the computer’s keychain; only its first characters are shown')
         : stLine('API key', html`<input class="field" id="voxKey" type="password" placeholder="Paste the key made in VoxLive"><button class="btn primary" data-a="voxConnect">Connect</button>`, 'Made in VoxLive › Settings › API keys, with the screens permissions'),
         html`<span class="pill" style="color:${v.connected ? 'var(--ok)' : 'var(--faint)'}">${v.connected ? 'Connected' : 'Not connected'}</span>`),
@@ -2947,6 +2958,19 @@ A.mirror = ([what]) => { const name = state.mirrorAsk || state.mirrorDevice;
 A.mirrorName = () => { const v = ($('mirrorName') || {}).value || ''; if (!v.trim()) return refuse('Devices need a name to find this computer by'); mutate(() => { mirrorSet().name = v.trim(); }); };
 // The menu that chooses the app's own words, on the Language card and in the setup's first step (as built, 24 November):
 // the computer's language first, named in that language, then English, Español, Русский, Українська, each written in itself.
+// AI assistants (MCP), as crates/sp-app/src/mcp/pane.rs: two switches, both off until turned on (switching the first off
+// turns the second off too); the program an assistant starts (the installed sp on a Mac and Linux, the program itself on
+// Windows, where sp is a batch file) written as a shell takes it, and as a JSON string for Claude Desktop
+const mcpSet = () => DOC.settings.mcp || (DOC.settings.mcp = { allow: false, screens: false });
+const mcpProgram = () => WINDOWS ? 'C:\\Program Files\\SoftPresenter\\SoftPresenter.exe' : '/Users/you/.local/bin/sp';
+const shellWord = p => /^[A-Za-z0-9\/._\\:-]+$/.test(p) ? p : WINDOWS ? `"${p}"` : `'${p.replace(/'/g, `'\\''`)}'`;
+const mcpCode = p => `claude mcp add softpresenter -- ${shellWord(p)} mcp`;
+const mcpDesktop = p => `{\n  "mcpServers": {\n    "softpresenter": {\n      "command": ${JSON.stringify(p)},\n      "args": ["mcp"]\n    }\n  }\n}`;
+A.mcpAllow = () => { state.mcpSaid = null; mutate(() => { const m = mcpSet(); m.allow = !m.allow; if (!m.allow) m.screens = false; }); };
+A.mcpScreens = () => { const m = mcpSet(); if (!m.allow) return; state.mcpSaid = null; mutate(() => { m.screens = !m.screens; }); };
+A.mcpCopy = ([which]) => { const p = mcpProgram(), text = which === 'code' ? mcpCode(p) : mcpDesktop(p);
+  if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+  state.mcpSaid = { text: 'Copied.' }; render(); };
 // The sp command's state for the Command line card (?sp= shows one), and what a press there says, inline
 const cliState = () => state.cli || new URLSearchParams(location.search).get('sp') || 'here';
 A.cliDo = ([what]) => { const shell = WINDOWS ? null : '~/.zshrc', folder = WINDOWS ? '%LOCALAPPDATA%\\SoftPresenter\\bin' : '~/.local/bin';

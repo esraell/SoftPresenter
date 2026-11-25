@@ -1770,6 +1770,16 @@ body.login { display: grid; grid-template: 1fr / 1fr; place-items: center; heigh
 .ndi-dl { display: grid; gap: 8px; } .ndi-dl progress { width: 100%; height: 6px; } .ndi-dl .btn { justify-self: start; }
 .ndi-lic { max-height: 120px; overflow: auto; padding: 8px 10px; border-radius: 8px; background: var(--well, rgba(255,255,255,.05)); font-size: 12px; color: var(--dim); }
 .ndi-btns { display: flex; gap: 8px; justify-content: flex-end; }
+/* words to copy into another program (the MCP card): the words in a well, Copy under them */
+.st-code { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--line); }
+.st-code pre { margin: 0; padding: 8px 10px; background: var(--well); border-radius: 8px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+.st-coderow { display: flex; gap: 10px; align-items: flex-start; }
+.st-coderow pre { flex: 1; min-width: 0; }
+.st-said { display: flex; gap: 8px; align-items: center; margin: 4px 0 0; font-size: 12px; color: var(--faint); }
+.st-said .led { background: var(--ok); }
+.st-said.bad { color: var(--dim); }
+.st-said.bad .led { background: var(--hot); }
+.st-code .st-codeh { font-size: 13px; color: var(--dim); }      /* ordinary case: a file name in it must read as typed */
 /* a quiet button: frameless and dim, for the way back out of something that is fine as it is (Remove under an installed sp) */
 .btn.quiet { background: transparent; border-color: transparent; box-shadow: none; color: var(--faint); }
 .btn.quiet:hover { color: var(--dim); }
