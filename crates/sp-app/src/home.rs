@@ -15306,13 +15306,13 @@ mod tests {
     fn what_only_a_mac_menu_did_has_a_place_in_the_window_on_every_system() {
         use crate::menubar::Action;
         let ctx = crate::studio::tests::styled();
-        // Settings: Set Up SoftPresenter (and Settings steps aside), and, in Song files, Reload songs.
+        // Settings: Set up SoftPresenter (and Settings steps aside), and, in Song files, Reload songs.
         let show = Show::new(Vec::new());
         let mut state = HomeState { preferences_open: true, preferences_pane: Pane::SongFiles, ..HomeState::default() };
         let settings = |ui: &mut egui::Ui, state: &mut HomeState| settings_ui(ui, state, &show);
         assert!(click_word(&ctx, &mut state, "Reload songs", &settings), "Song files has Reload songs");
         assert_eq!(state.menu_asked.take(), Some(Action::ReloadSongs));
-        assert!(click_word(&ctx, &mut state, "Set Up SoftPresenter\u{2026}", &settings));
+        assert!(click_word(&ctx, &mut state, "Set up SoftPresenter\u{2026}", &settings));
         assert_eq!(state.menu_asked.take(), Some(Action::SetUp));
         assert!(!state.preferences_open, "the setup opens over the home window");
         // Settings > Keys has the switch for the keys beside the buttons.

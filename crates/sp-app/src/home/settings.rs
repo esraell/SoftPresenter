@@ -252,7 +252,7 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
     });
 }
 
-/// The list: "Settings", the groups and their rows, and Set Up SoftPresenter under them.
+/// The list: "Settings", the groups and their rows, and Set up SoftPresenter under them.
 fn pane_list(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
     let panel = ui.max_rect();
     egui::ScrollArea::vertical().id_salt("settings list").auto_shrink([false, false]).show(ui, |ui| {
@@ -297,7 +297,7 @@ fn pane_list(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
         ui.add_space(13.0);
         let font = FontId::proportional(12.5);
         let room = width - 20.0 - 26.0;
-        let (key, english) = tk("settings.set_up", "Set Up SoftPresenter\u{2026}");
+        let (key, english) = tk("settings.set_up", "Set up SoftPresenter\u{2026}");
         let words = within(ui, key, english, font.clone(), 0.0, room, false);
         let wide = ui.painter().layout_no_wrap(words.clone(), font.clone(), TEXT).size().x + 26.0;
         let (place, _) = ui.allocate_exact_size(vec2(panel.width(), 30.0), Sense::hover());
@@ -399,7 +399,7 @@ fn pane_contents(ui: &mut egui::Ui, state: &mut HomeState, show: &Show, pane: Pa
         Pane::Screens => screens_page(ui, state, show),
         Pane::PhoneScreens => crate::mirror::pane(ui, &mut state.mirror),
         Pane::Slides => slides_page(ui, state, show),
-        Pane::Groups => groups_page(ui),
+        Pane::Groups => groups_page(ui, state, show),
         Pane::Language => language_page(ui),
         Pane::Integrations => {
             let songbooks = crate::catalog::offered().then_some(&mut state.songbooks);
@@ -469,7 +469,14 @@ fn screens_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
         0.575,
         f32::INFINITY,
     );
-    let (strip, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
+    // Identify, then a rule, the caption and the switch on the same line where they fit; where
+    // they don't, the caption and the switch on a line of their own under Identify (and the
+    // switch on a line of its own too, narrower still).
+    let width = ui.available_width();
+    let switch_width = crate::studio::pill_switch_width(ui, &labels, &look);
+    let caption_width = caption.size().x;
+    let one_line = identify_width + 24.0 + caption_width + 10.0 + switch_width <= width;
+    let (strip, _) = ui.allocate_exact_size(vec2(width, 30.0), Sense::hover());
     let key = Rect::from_min_size(strip.min, vec2(identify_width, 30.0));
     let words = if state.identify { stop } else { identify };
     let look_now = if state.identify { Flat::On } else { Flat::Plain };
@@ -483,24 +490,32 @@ fn screens_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
     {
         state.identify = !state.identify;
     }
-    let mut x = key.max.x + 12.0;
-    ui.painter().vline(
-        x,
-        egui::Rangef::new(strip.min.y + 7.0, strip.max.y - 7.0),
-        Stroke::new(1.0, crate::studio::LINE),
-    );
-    x += 12.0;
-    let caption_width = caption.size().x;
-    ui.painter().galley(pos2(x, strip.center().y - caption.size().y / 2.0), caption, TEXT_DIM);
-    x += caption_width + 10.0;
-    let (track, clicked) =
-        crate::studio::pill_switch(ui, "test pattern", pos2(x, strip.min.y), &labels, &[], chosen, &look);
+    let line = if one_line {
+        let x = key.max.x + 12.0;
+        ui.painter().vline(
+            x,
+            egui::Rangef::new(strip.min.y + 7.0, strip.max.y - 7.0),
+            Stroke::new(1.0, crate::studio::LINE),
+        );
+        Rect::from_min_max(pos2(x + 12.0, strip.min.y), strip.max)
+    } else {
+        ui.add_space(8.0 - ui.spacing().item_spacing.y);
+        ui.allocate_exact_size(vec2(width, 30.0), Sense::hover()).0
+    };
+    ui.painter().galley(pos2(line.min.x, line.center().y - caption.size().y / 2.0), caption, TEXT_DIM);
+    let switch_at = if caption_width + 10.0 + switch_width <= line.width() {
+        pos2(line.min.x + caption_width + 10.0, line.min.y)
+    } else {
+        ui.add_space(8.0 - ui.spacing().item_spacing.y);
+        ui.allocate_exact_size(vec2(width, 30.0), Sense::hover()).0.min
+    };
+    let (track, clicked) = crate::studio::pill_switch(ui, "test pattern", switch_at, &labels, &[], chosen, &look);
     if let Some(at) = clicked {
         state.test_pattern = patterns[at].0;
     }
-    // The note goes beside the switch where there is room, else under the strip.
+    // The note goes beside the switch where there is room, else under it.
     if track.max.x + 12.0 + seen.size().x <= strip.max.x {
-        ui.painter().galley(pos2(track.max.x + 12.0, strip.center().y - seen.size().y / 2.0), seen, TEXT_FAINT);
+        ui.painter().galley(pos2(track.max.x + 12.0, track.center().y - seen.size().y / 2.0), seen, TEXT_FAINT);
     } else {
         ui.add_space(6.0);
         let (place, _) = ui.allocate_exact_size(vec2(ui.available_width(), seen.size().y), Sense::hover());
@@ -605,14 +620,8 @@ fn slides_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
             ];
             let views = [SlideView::Grid, SlideView::Easy, SlideView::Table];
             let chosen = views.iter().position(|view| *view == state.slide_view);
-            // Measured once off to the side, then drawn at the row's end.
-            let width: f32 = labels
-                .iter()
-                .map(|label| crate::studio::widest(ui, &[*label], &look.font) + 2.0 * look.pad)
-                .sum::<f32>()
-                + 2.0 * (labels.len() - 1) as f32
-                + 2.0 * look.inset;
-            let size = vec2(width, look.height + 2.0 * look.inset);
+            // Measured first, then drawn at the row's end.
+            let size = vec2(crate::studio::pill_switch_width(ui, &labels, &look), look.height + 2.0 * look.inset);
             row(ui, t("settings.window.shown_as", "Slides are shown as"), "", size, |ui, place| {
                 let (_, clicked) = crate::studio::pill_switch(ui, "slide view", place.min, &labels, &[], chosen, &look);
                 if let Some(at) = clicked {
@@ -1055,53 +1064,103 @@ fn about_page(ui: &mut egui::Ui, state: &mut HomeState) {
     }
 }
 
-/// Settings › Groups: each group's colour, name and the key that jumps to it, in a card with a
-/// heading over each column.
-fn groups_page(ui: &mut egui::Ui) {
+/// Settings › Groups: each group's colour, name, the key that jumps to it and how many slides of
+/// the library use it, in a card with a heading over each column, laid out as the design's grid.
+fn groups_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
+    let uses = group_uses(state, show);
     card(
         ui,
         t("settings.pane.groups", "Groups"),
         t("settings.groups.about", "A song\u{2019}s parts: their names, colours and jump keys"),
         None,
         |ui| {
+            // The design's columns: the colour (26), the name (1.4 shares), the key (54), Used on
+            // (1 share) and its last (30, for deleting a group, which the app's fixed groups
+            // don't have), 12 apart.
+            const BETWEEN: f32 = 12.0;
             let width = ui.available_width();
-            let caps = |ui: &egui::Ui, words: &str| {
-                parts::words(ui, &words.to_uppercase(), fixed_semibold(11.5), TEXT_DIM, 0.575, f32::INFINITY)
+            let shares = (width - 26.0 - 54.0 - 30.0 - 4.0 * BETWEEN).max(0.0) / 2.4;
+            let name_left = 26.0 + BETWEEN;
+            let key_left = name_left + 1.4 * shares + BETWEEN;
+            let used_left = key_left + 54.0 + BETWEEN;
+            let caps = |ui: &egui::Ui, words: &str, font: FontId, ink| {
+                parts::words(ui, &words.to_uppercase(), font, ink, 0.575, f32::INFINITY)
             };
-            let (key_left, row_height) = (width.min(420.0) - 54.0, 38.0);
             let top = ui.cursor().min;
             ui.painter().hline(top.x..=top.x + width, top.y + 0.5, egui::Stroke::new(1.0, crate::studio::LINE));
-            let name_heading = caps(ui, t("settings.groups.name", "Name"));
-            let key_heading = caps(ui, t("settings.groups.key", "Key"));
             let (head, _) = ui.allocate_exact_size(vec2(width, 32.0), Sense::hover());
-            ui.painter().galley(pos2(head.min.x + 38.0, head.min.y + 12.0), name_heading, TEXT_DIM);
-            ui.painter().galley(pos2(head.min.x + key_left, head.min.y + 12.0), key_heading, TEXT_DIM);
-            for (key, names) in sp_model::GROUP_KEYS {
+            for (left, words) in [
+                (name_left, t("settings.groups.name", "Name")),
+                (key_left, t("settings.groups.key", "Key")),
+                (used_left, t("settings.groups.used", "Used on")),
+            ] {
+                let heading = caps(ui, words, fixed_semibold(11.5), TEXT_DIM);
+                ui.painter().galley(pos2(head.min.x + left, head.min.y + 12.0), heading, TEXT_DIM);
+            }
+            for ((key, names), used) in sp_model::GROUP_KEYS.iter().zip(uses.iter()) {
                 let name = names.iter().find(|name| name.contains(' ')).or(names.first()).copied().unwrap_or("");
                 let mut shown = name.to_owned();
                 if let Some(first) = shown.get_mut(0..1) {
                     first.make_ascii_uppercase();
                 }
-                let (place, _) = ui.allocate_exact_size(vec2(width, row_height), Sense::hover());
-                let swatch = Rect::from_center_size(pos2(place.min.x + 13.0, place.center().y), vec2(26.0, 18.0));
-                ui.painter().rect_filled(swatch, 5.0, super::color32(sp_model::group_color(name)));
-                ui.painter().text(
-                    pos2(place.min.x + 38.0, place.center().y),
+                let (place, _) = ui.allocate_exact_size(vec2(width, 38.0), Sense::hover());
+                let painter = ui.painter();
+                let middle = place.center().y;
+                let swatch = Rect::from_min_size(pos2(place.min.x, middle - 13.0), vec2(26.0, 26.0));
+                painter.rect_filled(swatch, 6.0, super::color32(sp_model::group_color(name)));
+                painter.rect_stroke(swatch, 6.0, Stroke::new(1.0, crate::studio::LINE), StrokeKind::Outside);
+                painter.text(
+                    pos2(place.min.x + name_left, middle),
                     Align2::LEFT_CENTER,
                     shown,
                     FontId::proportional(13.0),
                     TEXT,
                 );
-                // The key, as a key cap.
+                // The key, as a key cap in the lighter grey of what is on.
+                let cap = Rect::from_min_size(pos2(place.min.x + key_left, middle - 12.0), vec2(54.0, 24.0));
+                painter.rect_filled(cap, 6.0, crate::studio::SELECTED);
                 let letter = key.to_ascii_uppercase().to_string();
-                let chip = Rect::from_min_size(pos2(place.min.x + key_left, place.center().y - 12.0), vec2(26.0, 24.0));
-                ui.painter().rect_filled(chip, 6.0, crate::studio::BUTTON);
-                ui.painter().text(chip.center(), Align2::CENTER_CENTER, letter, fixed_semibold(11.0), TEXT);
+                painter.text(cap.center(), Align2::CENTER_CENTER, letter, fixed_semibold(11.0), TEXT);
+                let words = match *used {
+                    0 => t("settings.groups.not_used", "Not used").to_owned(),
+                    n => tn("settings.groups.slides", n as u64, "{n} slide", "{n} slides", &[]),
+                };
+                let readout = caps(ui, &words, fixed(11.5), TEXT_FAINT);
+                ui.painter().galley(
+                    pos2(place.min.x + used_left, middle - readout.size().y / 2.0),
+                    readout,
+                    TEXT_FAINT,
+                );
             }
             ui.add_space(12.0);
         },
     );
 }
+
+/// How many slides use each group a key jumps to (`GROUP_KEYS`, in order, under any of its
+/// names), across the songs the library lists (not the ones it hides or has taken out). Worked out
+/// again only when the songs change, never on every frame.
+fn group_uses(state: &mut HomeState, show: &Show) -> std::sync::Arc<Vec<usize>> {
+    let epoch = state.lists.songs.epoch();
+    if let Some(kept) = state.lists.group_uses.get(|made_in| *made_in == epoch) {
+        return kept;
+    }
+    let hidden = state.hidden_slots();
+    let mut uses = vec![0; sp_model::GROUP_KEYS.len()];
+    for (at, song) in show.presentations().iter().enumerate() {
+        if hidden.contains(&at) || state.removed_songs.contains(&at) {
+            continue;
+        }
+        for group in &song.groups {
+            let name = group.name.trim().to_lowercase();
+            if let Some(key) = sp_model::GROUP_KEYS.iter().position(|(_, names)| names.contains(&name.as_str())) {
+                uses[key] += group.slides.len();
+            }
+        }
+    }
+    state.lists.group_uses.keep(epoch, uses)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1249,8 +1308,12 @@ mod tests {
     /// Draws Settings at a page in a window `width` wide and tall enough for the whole page, two
     /// frames (the second with every size known), and gives what the second drew.
     fn settings_at(width: f32, pane: Pane) -> Vec<(String, Rect)> {
+        settings_with(width, pane, &Show::new(Vec::new()))
+    }
+
+    /// As [`settings_at`], with these songs.
+    fn settings_with(width: f32, pane: Pane, show: &Show) -> Vec<(String, Rect)> {
         let ctx = crate::studio::tests::styled();
-        let show = Show::new(Vec::new());
         let mut state = HomeState { preferences_pane: pane, ..HomeState::default() };
         let mut drawn = Vec::new();
         for _ in 0..2 {
@@ -1258,7 +1321,7 @@ mod tests {
                 screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 4000.0))),
                 ..egui::RawInput::default()
             };
-            let output = ctx.run_ui(raw, |ui| settings_ui(ui, &mut state, &show));
+            let output = ctx.run_ui(raw, |ui| settings_ui(ui, &mut state, show));
             drawn = words_drawn(&output);
             output.drop_without_applying_deltas();
         }
@@ -1292,6 +1355,51 @@ mod tests {
                 }
             });
         }
+    }
+
+    #[test]
+    fn no_page_passes_the_window_edge_at_its_least_width() {
+        use crate::i18n::Language;
+        let right = 820.0 - GAP - 28.0;
+        for language in [Language::English, Language::Spanish] {
+            crate::i18n::with_language(language, || {
+                for pane in [
+                    Pane::Screens,
+                    Pane::Slides,
+                    Pane::Groups,
+                    Pane::Language,
+                    Pane::Integrations,
+                    Pane::CommandLine,
+                    Pane::SongFiles,
+                    Pane::About,
+                ] {
+                    // Words with nothing to draw (an empty line) take no room.
+                    for (words, rect) in settings_at(820.0, pane).into_iter().filter(|(words, _)| !words.is_empty()) {
+                        assert!(
+                            rect.max.x <= right + 0.5,
+                            "{language:?}, {pane:?}: \u{201c}{words}\u{201d} ends at {}",
+                            rect.max.x
+                        );
+                    }
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn groups_say_how_many_slides_use_each() {
+        let song = sp_model::parse_song_text("Test", "[Verse 1]\nOne\n\nTwo\n\n[Chorus]\nThree\n");
+        let show = Show::new(vec![std::sync::Arc::new(song)]);
+        let drawn = settings_with(1100.0, Pane::Groups, &show);
+        let count = |wanted: &str| drawn.iter().filter(|(words, _)| words == wanted).count();
+        assert_eq!(count("USED ON"), 1);
+        assert_eq!(count("2 SLIDES"), 1, "Verse 1");
+        assert_eq!(count("1 SLIDE"), 1, "Chorus");
+        assert_eq!(count("NOT USED"), sp_model::GROUP_KEYS.len() - 2);
+        let spanish =
+            crate::i18n::with_language(crate::i18n::Language::Spanish, || settings_with(1100.0, Pane::Groups, &show));
+        assert!(spanish.iter().any(|(words, _)| words == "2 DIAPOSITIVAS"));
+        assert!(spanish.iter().any(|(words, _)| words == "SIN USAR"));
     }
 
     #[test]

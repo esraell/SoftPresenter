@@ -260,13 +260,13 @@ fn service_card(ui: &mut egui::Ui, rect: Rect, service: &Service, index: usize) 
     response.on_hover_text(hint).clicked()
 }
 
-/// The card after the services: a dashed outline saying a new service is a new card here.
+/// The card after the services: a dashed outline, with the cards' corners, saying a new service
+/// is a new card here.
 fn more_to_come(ui: &egui::Ui, rect: Rect) {
     let painter = ui.painter();
-    let outline = rect.shrink(0.5);
-    let corners =
-        [outline.left_top(), outline.right_top(), outline.right_bottom(), outline.left_bottom(), outline.left_top()];
-    painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(1.0, crate::studio::BUTTON_HOVER), 4.0, 3.0));
+    let mut outline = parts::rounded_outline(rect.shrink(0.5), crate::studio::RADIUS_CARD);
+    outline.extend(outline.first().copied());
+    painter.extend(egui::Shape::dashed_line(&outline, Stroke::new(1.0, crate::studio::BUTTON_HOVER), 4.0, 3.0));
     let title =
         parts::words(ui, t("integrations.more", "More to come"), semibold(13.0), TEXT_DIM, 0.0, rect.width() - 32.0);
     let line = parts::words(
@@ -303,7 +303,8 @@ fn page_head(ui: &mut egui::Ui, mark: Mark, name: &str, (colour, words): (Color3
     );
     ui.painter().text(pos2(back.min.x + 26.0, back.center().y), Align2::LEFT_CENTER, back_words, font, ink);
     let clicked = response.clicked();
-    ui.add_space(14.0);
+    // 14 under the way back and 16 under the head, as the design has them, with nothing added.
+    ui.add_space(14.0 - ui.spacing().item_spacing.y);
     let width = ui.available_width();
     let text = width - 64.0 - 12.0;
     let title = parts::words(ui, name, semibold(22.0), TEXT, -0.44, text);
@@ -331,7 +332,7 @@ fn page_head(ui: &mut egui::Ui, mark: Mark, name: &str, (colour, words): (Color3
     let readout_width = readout.size().x;
     ui.painter().galley(pos2(left + 16.0, line), readout, TEXT);
     ui.painter().galley(pos2(left + 16.0 + readout_width + 9.0, line), about, TEXT_DIM);
-    ui.add_space(16.0);
+    ui.add_space(16.0 - ui.spacing().item_spacing.y);
     clicked
 }
 

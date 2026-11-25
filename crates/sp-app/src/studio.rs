@@ -278,21 +278,17 @@ pub fn pill_switch(
     chosen: Option<usize>,
     look: &SwitchLook,
 ) -> (Rect, Option<usize>) {
-    const BETWEEN: f32 = 2.0;
     let height = look.height + 2.0 * look.inset;
     // Laid out twice (once to measure, once to draw); the toolkit keeps each line it has set.
-    let wide = |label: &str| spaced(ui, label, look.font.clone(), look.idle, look.spacing).size().x + 2.0 * look.pad;
-    let total: f32 = labels.iter().map(|label| wide(label)).sum::<f32>()
-        + BETWEEN * labels.len().saturating_sub(1) as f32
-        + 2.0 * look.inset;
-    let track = Rect::from_min_size(min, vec2(total, height));
+    let track = Rect::from_min_size(min, vec2(pill_switch_width(ui, labels, look), height));
     ui.painter().rect_filled(track, height / 2.0, look.track);
     let reach = ((LEAST_CLICK - look.height) / 2.0).max(0.0);
     let mut clicked = None;
     let mut x = track.min.x + look.inset;
     for (index, label) in labels.iter().enumerate() {
-        let cell = Rect::from_min_size(pos2(x, track.min.y + look.inset), vec2(wide(label), look.height));
-        x += cell.width() + BETWEEN;
+        let cell =
+            Rect::from_min_size(pos2(x, track.min.y + look.inset), vec2(pill_width(ui, label, look), look.height));
+        x += cell.width() + PILL_BETWEEN;
         let mut response =
             ui.interact(cell.expand2(vec2(0.0, reach)), ui.scope_id().with((salt, index)), Sense::click());
         let on = chosen == Some(index);
@@ -307,6 +303,22 @@ pub fn pill_switch(
         }
     }
     (track, clicked)
+}
+
+/// The room between two pills of a segmented switch.
+const PILL_BETWEEN: f32 = 2.0;
+
+/// How wide one choice of a segmented switch is: its words and the padding either side.
+fn pill_width(ui: &egui::Ui, label: &str, look: &SwitchLook) -> f32 {
+    spaced(ui, label, look.font.clone(), look.idle, look.spacing).size().x + 2.0 * look.pad
+}
+
+/// How wide a segmented switch with these choices is, as [`pill_switch`] draws it, to place it
+/// before it is drawn.
+pub fn pill_switch_width(ui: &egui::Ui, labels: &[&str], look: &SwitchLook) -> f32 {
+    labels.iter().map(|label| pill_width(ui, label, look)).sum::<f32>()
+        + PILL_BETWEEN * labels.len().saturating_sub(1) as f32
+        + 2.0 * look.inset
 }
 
 /// A small segmented switch of icons, as the Bible page's Keypad | Lists: a dark, fully round

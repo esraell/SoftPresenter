@@ -157,6 +157,9 @@ pub struct Lists {
     pub playlist_songs: Kept<(u64, Vec<crate::service::Item>), Vec<Option<usize>>>,
     /// The fonts the song in front uses that this computer doesn't have.
     pub missing_fonts: Kept<MissingFontsFrom, Vec<String>>,
+    /// For each group a key jumps to (`sp_model::GROUP_KEYS`, in order), how many slides of the
+    /// songs listed use it (Settings › Groups), by the songs' epoch.
+    pub group_uses: Kept<u64, Vec<usize>>,
 }
 
 /// The songs a library search finds, best first, each by its place with the line of its words

@@ -138,6 +138,12 @@
   "settings.about.licences.about": "La de SoftPresenter y las de las partes que lleva",
   "settings.groups.name": "Nombre",
   "settings.groups.key": "Tecla",
+  "settings.groups.used": "Usado en",
+  "settings.groups.not_used": "Sin usar",
+  "settings.groups.slides": [
+    "{n} diapositiva",
+    "{n} diapositivas"
+  ],
   "settings.screens.summary": "{on} de {all} se están mostrando",
   "settings.screens.title": "Pantallas",
   "settings.screens.about": "Adónde va la imagen de cada pantalla, y cómo se ve",

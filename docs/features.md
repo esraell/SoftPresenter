@@ -1443,8 +1443,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   presentation as pictures; on Windows the firewall, the first time a screen is sent over NDI
   or Remote Control is switched on (choose Allow for private networks). Linux asks nothing, so
   the setup has no such step there. Its words fit the system: no Mac names, menus or Word files
-  off a Mac. Settings › Set Up SoftPresenter… (and SoftPresenter › Set Up SoftPresenter… on a
-  Mac) opens it again.
+  off a Mac. Settings › Set up SoftPresenter… opens it again.
 
 ## Screens
 - Any number of audience screens, each sent to a display, a window, the network over NDI, or
@@ -1792,9 +1791,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **A Settings window** (Cmd+,), its pages in four groups down the left, each row ending in how
   its page stands in the fixed-width face, with a green light when something is on: **The room**
   (Screens, "3 of 4 on"; Phone Screens, On or Off), **On screen** (Slides, with the transition
-  for all slides; Groups; Language, Auto or the language chosen), **Connect** (Integrations, "1
+  for all slides; Groups, each group's colour, name, key and how many slides use it; Language,
+  Auto or the language chosen), **Connect** (Integrations, "1
   connected"; AI assistants, Off, Can prepare or Runs screens; Phone remote, Off or how many
-  people are connected) and **Advanced** (Keys, Command line, Song files, About), with Set Up
+  people are connected) and **Advanced** (Keys, Command line, Song files, About), with Set up
   SoftPresenter… under them. There is no General page: its copyright line is in Slides, its
   Language in Language, its Reload songs in Song files. The window opens at 1040 × 720 and keeps
   at least 820 × 560, room for the list beside a page in every language (the list scrolls when the
@@ -2130,7 +2130,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   bar; the design has none either): Settings › Screens has Identify and the test patterns (Off,
   Colour bars, Grid, White: everyone watching sees them); Settings › Song files has Read them
   again (Reload songs) and says what happens when a song was changed elsewhere; Settings › Keys
-  has Show keys on buttons; Settings has Set Up SoftPresenter… under its list (Settings steps
+  has Show keys on buttons; Settings has Set up SoftPresenter… under its list (Settings steps
   aside so the setup opens over the home window); Settings › Command line has the sp command's
   row, saying where it stands, with Install, Use This Copy and Remove (quiet while sp is where it
   should be), and what a click did under it; Settings › About has a card with the version and a

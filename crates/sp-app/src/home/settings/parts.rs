@@ -7,7 +7,6 @@ use std::sync::Arc;
 use egui::{Align2, Color32, CornerRadius, FontId, Frame, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 
 use crate::i18n::t;
-use crate::icons::Icon;
 use crate::studio::{
     BUTTON, BUTTON_HOVER, CARD, Flat, LINE, ON_EDGE, RADIUS_CARD, RADIUS_PANEL, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT,
     fixed, flat_button, paint_light, semibold, widest,
@@ -16,12 +15,29 @@ use crate::studio::{
 /// The small capitals of a card's line: their size and the room between their letters.
 const CAPS: f32 = 11.5;
 const CAPS_SPACING: f32 = 0.575;
+/// How tall each line of a row's name, of the words under it and of a note is, as the design
+/// sets them: 18, whatever the size of the letters.
+const LINE_HEIGHT: f32 = 18.0;
+/// How tall a card's title line is (15 in the design's 1.4).
+const TITLE_LINE: f32 = 21.0;
+/// The room between the parts of a card's heading.
+const HEAD_BETWEEN: f32 = 10.0;
 
 /// Lays out words in one look, wrapped at `wrap` (never, when it is infinite), with `spacing`
 /// between the letters.
 pub fn words(ui: &egui::Ui, text: &str, font: FontId, ink: Color32, spacing: f32, wrap: f32) -> Arc<egui::Galley> {
     let mut job = egui::text::LayoutJob::default();
     let format = egui::TextFormat { font_id: font, color: ink, extra_letter_spacing: spacing, ..Default::default() };
+    job.append(text, 0.0, format);
+    job.wrap.max_width = wrap;
+    ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
+}
+
+/// Words in one look wrapped at `wrap`, every line `line` tall, the room the letters don't take
+/// shared above and below them, as the design's lines are.
+pub fn lines(ui: &egui::Ui, text: &str, font: FontId, ink: Color32, wrap: f32, line: f32) -> Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::default();
+    let format = egui::TextFormat { font_id: font, color: ink, line_height: Some(line), ..Default::default() };
     job.append(text, 0.0, format);
     job.wrap.max_width = wrap;
     ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
@@ -54,29 +70,48 @@ pub fn card(ui: &mut egui::Ui, title: &str, about: &str, aside: Option<&str>, ad
     ui.add_space((14.0 - ui.spacing().item_spacing.y).max(0.0));
 }
 
-/// A card's head: its title in 15, then its line, wrapped where it is long, and its aside.
+/// A card's head: its title in 15, then its line in small capitals, and its aside at the right
+/// end, as the design's heading has them. The line and the aside share what the title leaves, in
+/// proportion to their lengths, each wrapping in its share, while neither takes more than two
+/// lines; otherwise the aside goes under the line.
 fn card_head(ui: &mut egui::Ui, title: &str, about: &str, aside: Option<&str>) {
     let width = ui.available_width();
-    let title = words(ui, title, semibold(15.0), TEXT, 0.0, f32::INFINITY);
+    let title = lines(ui, title, semibold(15.0), TEXT, f32::INFINITY, TITLE_LINE);
     let caps = |text: &str, wrap: f32| words(ui, &text.to_uppercase(), fixed(CAPS), TEXT_FAINT, CAPS_SPACING, wrap);
-    let after_title = (width - title.size().x - 10.0).max(60.0);
-    // The aside at the right end while both lines fit there whole; otherwise under the line.
-    let aside_whole = aside.map(|aside| caps(aside, f32::INFINITY));
-    let about_whole = caps(about, f32::INFINITY);
-    let side_by_side =
-        aside_whole.as_ref().is_none_or(|aside| about_whole.size().x + 10.0 + aside.size().x <= after_title);
-    let beside_aside = aside_whole.as_ref().filter(|_| side_by_side).map_or(0.0, |aside| aside.size().x + 10.0);
-    let about = caps(about, (after_title - beside_aside).max(60.0));
-    let aside = aside.map(|aside| if side_by_side { caps(aside, f32::INFINITY) } else { caps(aside, after_title) });
-    let under = if side_by_side { 0.0 } else { aside.as_ref().map_or(0.0, |aside| aside.size().y + 4.0) };
-    let height = title.size().y.max(about.size().y + 2.0 + under);
+    let after_title = (width - title.size().x - HEAD_BETWEEN).max(60.0);
+    let (about, aside, beside) = match aside {
+        None => (caps(about, after_title), None, true),
+        Some(aside) => {
+            let (about_whole, aside_whole) = (caps(about, f32::INFINITY), caps(aside, f32::INFINITY));
+            // The design's spring between them takes nothing when they are short of room, and
+            // leaves two gaps.
+            let share = after_title - 2.0 * HEAD_BETWEEN;
+            let whole = about_whole.size().x + aside_whole.size().x;
+            if whole <= share {
+                (about_whole, Some(aside_whole), true)
+            } else {
+                let about_room = share * about_whole.size().x / whole;
+                let aside_room = share - about_room;
+                let (about_shared, aside_shared) = (caps(about, about_room), caps(aside, aside_room));
+                let fits = |galley: &egui::Galley, room: f32| galley.rows.len() <= 2 && galley.size().x <= room + 0.5;
+                if fits(&about_shared, about_room) && fits(&aside_shared, aside_room) {
+                    (about_shared, Some(aside_shared), true)
+                } else {
+                    (caps(about, after_title), Some(caps(aside, after_title)), false)
+                }
+            }
+        }
+    };
+    let aside_height = aside.as_ref().map_or(0.0, |aside| aside.size().y);
+    let text = if beside { about.size().y.max(aside_height) } else { about.size().y + 4.0 + aside_height };
+    let height = title.size().y.max(text + 2.0);
     let (place, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-    let about_at = pos2(place.min.x + title.size().x + 10.0, place.min.y + 2.0);
+    let about_at = pos2(place.min.x + title.size().x + HEAD_BETWEEN, place.min.y + 2.0);
     let about_height = about.size().y;
     ui.painter().galley(place.min, title, TEXT);
     ui.painter().galley(about_at, about, TEXT_FAINT);
     if let Some(aside) = aside {
-        let at = if side_by_side {
+        let at = if beside {
             pos2(place.max.x - aside.size().x, place.min.y + 2.0)
         } else {
             about_at + vec2(0.0, about_height + 4.0)
@@ -92,8 +127,8 @@ fn card_head(ui: &mut egui::Ui, title: &str, about: &str, aside: Option<&str>) {
 pub fn row(ui: &mut egui::Ui, label: &str, note: &str, control: egui::Vec2, draw: impl FnOnce(&mut egui::Ui, Rect)) {
     let width = ui.available_width();
     let room = (width - control.x - 16.0).max(80.0);
-    let label = words(ui, label, semibold(13.0), TEXT, 0.0, room);
-    let note = (!note.is_empty()).then(|| words(ui, note, FontId::proportional(12.5), TEXT_FAINT, 0.0, room));
+    let label = lines(ui, label, semibold(13.0), TEXT, room, LINE_HEIGHT);
+    let note = (!note.is_empty()).then(|| lines(ui, note, FontId::proportional(12.5), TEXT_FAINT, room, LINE_HEIGHT));
     let text = label.size().y + note.as_ref().map_or(0.0, |note| note.size().y);
     let inner = text.max(control.y);
     let (place, _) = ui.allocate_exact_size(vec2(width, inner + 24.0), Sense::hover());
@@ -108,10 +143,10 @@ pub fn row(ui: &mut egui::Ui, label: &str, note: &str, control: egui::Vec2, draw
     draw(ui, Rect::from_min_size(at, control));
 }
 
-/// A line of small words in a card, wrapped (the design's note).
+/// A line of small words in a card, wrapped (the design's note), 18 to a line.
 pub fn note(ui: &mut egui::Ui, text: &str) {
     let width = ui.available_width().min(600.0);
-    let galley = words(ui, text, FontId::proportional(12.0), TEXT_FAINT, 0.0, width);
+    let galley = lines(ui, text, FontId::proportional(12.0), TEXT_FAINT, width, LINE_HEIGHT);
     let (place, _) = ui.allocate_exact_size(vec2(ui.available_width(), galley.size().y), Sense::hover());
     ui.painter().galley(place.min, galley, TEXT_FAINT);
     ui.add_space(12.0);
@@ -242,13 +277,14 @@ pub fn fold(ui: &mut egui::Ui, salt: &str, title: &str, open: bool, add: impl Fn
         state.toggle(ui);
     }
     let ink = if response.hovered() { TEXT } else { TEXT_DIM };
-    let arrow = if state.is_open() { Icon::ChevronDown } else { Icon::ChevronRight };
-    crate::icons::paint(
-        ui.painter(),
-        arrow,
-        Rect::from_center_size(pos2(place.min.x + 5.0, place.center().y), vec2(10.0, 10.0)),
-        ink,
-    );
+    // The design's marker: a filled triangle pointing at the title while closed, down while open.
+    let middle = pos2(place.min.x + 4.0, place.center().y);
+    let corners = if state.is_open() {
+        [middle + vec2(-4.0, -2.5), middle + vec2(4.0, -2.5), middle + vec2(0.0, 3.5)]
+    } else {
+        [middle + vec2(-2.5, -4.0), middle + vec2(3.5, 0.0), middle + vec2(-2.5, 4.0)]
+    };
+    ui.painter().add(egui::Shape::convex_polygon(corners.to_vec(), ink, Stroke::NONE));
     ui.painter().text(
         pos2(place.min.x + 14.0, place.center().y),
         Align2::LEFT_CENTER,
@@ -563,7 +599,7 @@ fn gradient(painter: &egui::Painter, rect: Rect, corner: f32, stops: &[(f32, Col
 }
 
 /// The outline of a rectangle with rounded corners, clockwise from the top left.
-fn rounded_outline(rect: Rect, corner: f32) -> Vec<Pos2> {
+pub fn rounded_outline(rect: Rect, corner: f32) -> Vec<Pos2> {
     let corner = corner.min(rect.width() / 2.0).min(rect.height() / 2.0);
     let mut points = Vec::new();
     let centres = [
