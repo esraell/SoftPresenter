@@ -1,3 +1,4 @@
+pub mod credentials;
 pub mod security;
 
 use std::ptr::{null, null_mut};

@@ -4,9 +4,11 @@
 //!
 //! - **Sign-in** is OAuth with PKCE in the system's browser, its answer coming back to a listener
 //!   on `127.0.0.1` only, which takes one answer carrying the `state` it sent and closes.
-//! - **What is kept where.** The client ID and secret and the tokens are one item in the Mac's
-//!   Keychain (a test copy, started with `SOFTPRESENTER_DATA`, keeps its own in its own folder and
-//!   never reads the Keychain); the design and its divider page are in `canva-sync.json`. No
+//! - **What is kept where.** The client ID and secret and the tokens are one item in the
+//!   system's store for secrets (`secrets`: the Keychain on a Mac, Credential Manager on Windows,
+//!   the keyring on Linux; a test copy, started with `SOFTPRESENTER_DATA`, keeps its own in its
+//!   own folder and never reads the system's); the design and its divider page are in
+//!   `canva-sync.json`. No
 //!   secret, token, sign-in answer or download address goes into a settings file, the log, a
 //!   notice, a command's reply or an error: errors are written here in plain words.
 //! - **Tokens rotate.** Canva's refresh tokens work once: each refresh gives a new one, which is
@@ -107,8 +109,8 @@ impl Places {
     /// everything in its own folder. Testing aid: in a test copy only, `SOFTPRESENTER_CANVA_API`
     /// points at a stand-in for Canva on this computer (plain http to 127.0.0.1 only, so nothing
     /// secret can go elsewhere); the stand-in serves the API under `/rest/v1` and the sign-in page
-    /// at `/api/oauth/authorize`. The owner's app never takes it, so it can't reach the Keychain
-    /// item or the old script's real folder.
+    /// at `/api/oauth/authorize`. The owner's app never takes it, so it can't reach the sign-in
+    /// the system keeps or the old script's real folder.
     pub fn for_app() -> Places {
         let data = crate::bible_store::data_dir().unwrap_or_else(std::env::temp_dir);
         let test = std::env::var_os("SOFTPRESENTER_DATA").is_some_and(|folder| !folder.is_empty());
@@ -123,10 +125,9 @@ impl Places {
         // The account's home folder from the system's records, not from `HOME`; without it the
         // old script isn't looked for.
         let home = sp_video::home_folder();
-        let (store, old_script, old_jobs, local) = if test {
+        let (old_script, old_jobs, local) = if test {
             let jobs = data.join("old-canva-sync-jobs");
             (
-                Store::File(data.join("canva-test-sign-in.json")),
                 data.join("old-canva-sync"),
                 vec![
                     (OldKind::Daemon, jobs.join("LaunchDaemons")),
@@ -139,7 +140,6 @@ impl Places {
             let local = local_cache(home.as_deref(), &data);
             match &home {
                 Some(home) => (
-                    Store::Keychain,
                     home.join("Library/Application Support/canva-sync"),
                     vec![
                         (OldKind::Daemon, PathBuf::from("/Library/LaunchDaemons")),
@@ -148,14 +148,15 @@ impl Places {
                     ],
                     local,
                 ),
-                None => (Store::Keychain, PathBuf::new(), Vec::new(), local),
+                None => (PathBuf::new(), Vec::new(), local),
             }
         };
         Places {
             api,
             authorize,
             redirect_port: REDIRECT_PORT,
-            store,
+            // A test copy's own file in its own folder; otherwise the system's store.
+            store: Store(crate::secrets::Store::for_app()),
             old_script,
             old_jobs,
             // In the data folder, which every copy of the app using this library shares.
@@ -243,51 +244,21 @@ fn now_seconds() -> i64 {
     SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |since| since.as_secs() as i64)
 }
 
-/// Where the sign-in is kept: the Mac's Keychain, or (a test copy) a file of its own.
+/// Where the sign-in is kept: the system's store for secrets (`secrets`): the Keychain on a
+/// Mac, Credential Manager on Windows, the keyring on Linux, or, for a test copy, a file in its
+/// own folder. The client ID and secret and the tokens are one item there, as JSON.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Store {
-    Keychain,
-    File(PathBuf),
-}
+pub struct Store(pub crate::secrets::Store);
 
-#[cfg(target_os = "macos")]
-const KEYCHAIN_SERVICE: &str = "SoftPresenter Canva Sync";
-#[cfg(target_os = "macos")]
-const KEYCHAIN_ACCOUNT: &str = "church sign-in";
+/// The item's names, which are the ones the Keychain item has always had.
+const KEPT_SERVICE: &str = "SoftPresenter Canva Sync";
+const KEPT_ACCOUNT: &str = "church sign-in";
 
 impl Store {
     /// The sign-in kept, if there is one. The error is a sentence.
     pub fn load(&self) -> Result<Option<Secrets>, String> {
-        let bytes = match self {
-            Store::File(path) => match std::fs::read(path) {
-                Ok(bytes) => bytes,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                Err(_) => {
-                    return Err(t(
-                        "integrations.canva.test_unreadable",
-                        "The Canva sign-in kept for this test copy could not be read.",
-                    )
-                    .to_owned());
-                }
-            },
-            #[cfg(target_os = "macos")]
-            Store::Keychain => {
-                match security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
-                    Ok(bytes) => bytes,
-                    Err(e) if e.code() == -25300 => return Ok(None),
-                    Err(_) => {
-                        return Err(t(
-                            "integrations.canva.keychain_unreadable",
-                            "The Canva sign-in could not be read from the Keychain.",
-                        )
-                        .to_owned());
-                    }
-                }
-            }
-            #[cfg(not(target_os = "macos"))]
-            Store::Keychain => return Ok(None),
-        };
-        serde_json::from_slice(&bytes).map(Some).map_err(|_| {
+        let Some(kept) = self.0.get(KEPT_SERVICE, KEPT_ACCOUNT)? else { return Ok(None) };
+        serde_json::from_str(&kept).map(Some).map_err(|_| {
             t("integrations.canva.damaged", "The Canva sign-in kept is damaged; sign in again.").to_owned()
         })
     }
@@ -295,39 +266,9 @@ impl Store {
     /// Keeps the sign-in, as one write, and reads it back to be sure it is there. The error is a
     /// sentence.
     pub fn save(&self, secrets: &Secrets) -> Result<(), String> {
-        let bytes = serde_json::to_vec(secrets)
+        let written = serde_json::to_string(secrets)
             .map_err(|_| t("integrations.canva.not_written", "The Canva sign-in could not be written.").to_owned())?;
-        match self {
-            Store::File(path) => {
-                if let Some(dir) = path.parent() {
-                    let _ = std::fs::create_dir_all(dir);
-                }
-                let partial = path.with_extension("json.part");
-                write_private(&partial, &bytes).and_then(|()| std::fs::rename(&partial, path)).map_err(|e| {
-                    tf(
-                        "integrations.canva.not_kept",
-                        "The Canva sign-in could not be kept ({error}).",
-                        &[("error", &e.to_string())],
-                    )
-                })?;
-            }
-            #[cfg(target_os = "macos")]
-            Store::Keychain => {
-                security_framework::passwords::set_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &bytes)
-                    .map_err(|_| {
-                        t(
-                            "integrations.canva.not_kept.keychain",
-                            "The Canva sign-in could not be kept in the Keychain.",
-                        )
-                        .to_owned()
-                    })?;
-            }
-            #[cfg(not(target_os = "macos"))]
-            Store::Keychain => {
-                return Err(t("integrations.canva.mac_only", "Keeping the Canva sign-in needs macOS for now (on Windows it would go in the Credential Manager, which SoftPresenter doesn't use yet).")
-                    .to_owned());
-            }
-        }
+        self.0.set(KEPT_SERVICE, KEPT_ACCOUNT, &written)?;
         match self.load() {
             Ok(Some(kept)) if kept == *secrets => Ok(()),
             _ => Err(t("integrations.canva.not_read_back", "The Canva sign-in was written but couldn't be read back.")
@@ -335,39 +276,12 @@ impl Store {
         }
     }
 
-    /// Forgets the sign-in on this computer.
+    /// Forgets the sign-in on this computer. Why it couldn't be goes in the log.
     pub fn forget(&self) {
-        match self {
-            Store::File(path) => {
-                let _ = std::fs::remove_file(path);
-            }
-            #[cfg(target_os = "macos")]
-            Store::Keychain => {
-                let _ = security_framework::passwords::delete_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
-            }
-            #[cfg(not(target_os = "macos"))]
-            Store::Keychain => {}
+        if let Err(why) = self.0.delete(KEPT_SERVICE, KEPT_ACCOUNT) {
+            crate::applog::event("canva", &format!("the sign-in kept could not be removed: {why}"));
         }
     }
-}
-
-/// Writes a new file only its owner may read. Anything left at that name (a half-written file,
-/// a link) is removed first, and the file is made new, so it is never written through.
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    match std::fs::remove_file(path) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
-        _ => {}
-    }
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path)?;
-    file.write_all(bytes)?;
-    file.sync_all()
 }
 
 /// The choices kept in `canva-sync.json`: nothing secret.
@@ -624,7 +538,7 @@ fn access_token(
         *unsaved = true;
         return Err(other(tf(
             "integrations.canva.unsaved",
-            "{why} Canva gave a new sign-in, which works only here until SoftPresenter quits: fix the Keychain, then Sync Now keeps it.",
+            "{why} Canva gave a new sign-in, which works only here until SoftPresenter quits: put that right, then Sync Now keeps it.",
             &[("why", &why)],
         )));
     }
@@ -2143,9 +2057,17 @@ impl Client {
                             self.status = Status::Connected;
                         }
                         Ok(None) => self.status = Status::NotConnected,
-                        Err(why) => {
+                        // A church that set Canva Sync up is told its sign-in couldn't be read.
+                        // One that never did isn't told at every start that the computer's
+                        // store can't be read (a Linux computer with no keyring): that goes
+                        // in the log, and is said when it tries to connect.
+                        Err(why) if self.settings.design.is_some() => {
                             self.status = Status::NotConnected;
                             self.say(why, false);
+                        }
+                        Err(why) => {
+                            self.status = Status::NotConnected;
+                            crate::applog::event("canva", &format!("the sign-in kept could not be read: {why}"));
                         }
                     }
                     if std::mem::take(&mut self.sync_waiting)

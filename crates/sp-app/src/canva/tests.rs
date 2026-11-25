@@ -118,7 +118,11 @@ fn answer(mut stream: TcpStream, port: u16, shared: &Mutex<Canva>) {
     if path.starts_with("/rest/v1/") && path != "/rest/v1/oauth/token" {
         // Each API call after a refresh: the rotated refresh token is kept by now.
         if let Some(store) = canva.store.clone() {
-            let kept = Store::File(store).load().ok().flatten().is_some_and(|s| s.refresh_token == canva.refresh);
+            let kept = Store(crate::secrets::Store::TestCopy(store))
+                .load()
+                .ok()
+                .flatten()
+                .is_some_and(|s| s.refresh_token == canva.refresh);
             canva.kept_before_next_call.push(kept);
         }
         if bearer != canva.access || bearer.is_empty() {
@@ -228,7 +232,7 @@ fn places(dir: &Path, port: u16) -> Places {
         api: format!("http://127.0.0.1:{port}/rest/v1"),
         authorize: format!("http://127.0.0.1:{port}/api/oauth/authorize"),
         redirect_port: 0,
-        store: Store::File(dir.join("sign-in.json")),
+        store: Store(crate::secrets::Store::TestCopy(dir.to_path_buf())),
         old_script: dir.join("old-script"),
         old_jobs: vec![
             (OldKind::Daemon, jobs.join("LaunchDaemons")),
@@ -467,7 +471,7 @@ fn usual() -> Canva {
 #[test]
 fn a_sync_keeps_the_rotated_token_before_anything_else_and_puts_the_video_in_place() {
     let dir = folder("sync");
-    let canva = fake(Canva { store: Some(dir.join("sign-in.json")), ..usual() });
+    let canva = fake(Canva { store: Some(dir.clone()), ..usual() });
     let places = places(&dir, canva.port);
     std::fs::create_dir_all(&places.folder).unwrap();
     let old = places.folder.join(OLD_VIDEO);
@@ -583,9 +587,9 @@ fn a_new_sign_in_that_cant_be_kept_is_held_and_kept_first_next_time() {
     let canva = fake(usual());
     let mut places = places(&dir, canva.port);
     places.store.save(&signed_in("REFRESH-SENTINEL-0")).unwrap();
-    // The store can't be written (a folder where the file would go).
+    // The store can't be written (a file where its folder would be).
     let good_store = places.store.clone();
-    places.store = Store::File(dir.join("no-such-dir").join("x").join("sign-in.json"));
+    places.store = Store(crate::secrets::Store::TestCopy(dir.join("no-such-dir").join("x")));
     std::fs::create_dir_all(dir.join("no-such-dir")).unwrap();
     std::fs::write(dir.join("no-such-dir").join("x"), b"a file, not a folder").unwrap();
     let mut secrets = Some(signed_in("REFRESH-SENTINEL-0"));
@@ -860,20 +864,32 @@ fn small_safeguards_hold() {
     let settings = Settings::load(&file);
     assert_eq!(settings.design, None);
     assert_eq!(settings.made, ["ok.mp4"]);
-    // The sign-in file is new and private, whatever was left at its name.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let target = dir.join("elsewhere");
-        std::fs::write(&target, b"someone else's").unwrap();
-        let part = dir.join("sign-in.json.part");
-        std::os::unix::fs::symlink(&target, &part).unwrap();
-        write_private(&part, b"{}").unwrap();
-        let meta = std::fs::symlink_metadata(&part).unwrap();
-        assert!(meta.is_file() && meta.permissions().mode() & 0o777 == 0o600);
-        assert_eq!(std::fs::read(&target).unwrap(), b"someone else's", "not written through the link");
-    }
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_store_that_cant_be_read_is_said_only_to_a_church_that_set_canva_sync_up() {
+    for set_up in [false, true] {
+        let dir = folder(if set_up { "unreadable-set-up" } else { "unreadable-never-used" });
+        let places = places(&dir, 1);
+        // The store can't be read (a folder where its file would be).
+        std::fs::create_dir_all(dir.join("canva-test-sign-in.json")).unwrap();
+        if set_up {
+            std::fs::write(&places.settings, r#"{"design": "DAF0000000a"}"#).unwrap();
+        }
+        let mut client = Client::new(places, None);
+        while client.status == Status::Reading {
+            client.tick();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(client.status, Status::NotConnected);
+        assert_eq!(client.settings.design.is_some(), set_up);
+        assert_eq!(client.said.is_some(), set_up, "said on the page only when Canva Sync was set up");
+        if let Some((words, good, _)) = &client.said {
+            assert!(!good && words.contains("could not be read"), "{words}");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 #[test]

@@ -2,10 +2,11 @@
 //! VoxLive account through its church API (`https://voxlive.app/api/v1`), with an API key the
 //! church makes in VoxLive and pastes into Settings › Integrations.
 //!
-//! - The key is kept in the Mac's Keychain, and is never written to a settings file, the log,
-//!   a reply on the command line, a song pack, or anywhere else. A test copy of the app (one
-//!   started with `SOFTPRESENTER_DATA`) keeps its own key in its own folder instead, so it never
-//!   reads, changes or asks for the owner's.
+//! - The key is kept in the system's store for secrets (`secrets`: the Keychain on a Mac,
+//!   Credential Manager on Windows, the keyring on Linux), and is never written to a settings
+//!   file, the log, a reply on the command line, a song pack, or anywhere else. A test copy of
+//!   the app (one started with `SOFTPRESENTER_DATA`) keeps its own key in its own folder
+//!   instead, so it never reads, changes or asks for the owner's.
 //! - The key is sent only to VoxLive's address (or, for tests, to a stand-in on this computer),
 //!   with redirects off, so it never follows one elsewhere.
 //! - Every request runs on a thread of its own, never on the thread that draws.
@@ -317,7 +318,7 @@ enum Answer {
     Schema(u64, Result<Vec<(String, serde_json::Value)>, Problem>),
     /// A look saved (the screen as VoxLive stored it), or why not.
     Saved(String, Result<Screen, Saving>),
-    /// The key kept in the Keychain, read at start-up (for the connection numbered so).
+    /// The key kept in the system's store, read at start-up (for the connection numbered so).
     KeyRead(u64, Option<String>),
 }
 
@@ -374,7 +375,7 @@ pub struct Client {
     /// Counts connections (each key given or forgotten), so an answer that comes back after
     /// its key was replaced or forgotten is let go.
     generation: u64,
-    /// The kept key is still being read from the Keychain.
+    /// The kept key is still being read from the system's store.
     key_reading: bool,
     /// A look being saved, by its screen.
     pub saving: Option<String>,
@@ -388,9 +389,10 @@ impl Client {
     /// The connection as it was left: with the key kept, if there is one, being checked.
     pub fn new() -> Client {
         let (tx, rx) = channel();
-        // The key is read from the Keychain on a thread of its own: macOS may first ask the
-        // operator whether the app may have it (it asks again for each new build until the app
-        // is signed), and the window must not wait for that answer.
+        // The key is read from the system's store on a thread of its own: macOS may first ask
+        // the operator whether the app may have it (it asks again for each new build until the
+        // app is signed) and a keyring on Linux may ask to be unlocked, and the window must not
+        // wait for that answer.
         let reader = tx.clone();
         let started = std::thread::Builder::new().name("voxlive key".to_owned()).spawn(move || {
             let _ = reader.send(Answer::KeyRead(0, store::load()));
@@ -821,65 +823,33 @@ fn refused_words(error: &str) -> String {
     .to_owned()
 }
 
-/// Where the key is kept.
+/// Where the key is kept: the system's store for secrets (`secrets`), under these names, which
+/// are the ones the Keychain item has always had.
 mod store {
-    /// The Keychain item's service.
-    #[cfg(target_os = "macos")]
+    use crate::secrets;
+
     const SERVICE: &str = "SoftPresenter VoxLive";
+    const ACCOUNT: &str = "church API key";
 
-    /// A test copy's own key file, in its own folder; `None` for the owner's app.
-    fn test_file() -> Option<std::path::PathBuf> {
-        std::env::var_os("SOFTPRESENTER_DATA").map(|dir| std::path::PathBuf::from(dir).join("voxlive-test-key"))
-    }
-
+    /// The key kept, if one is and it can be read. Why it couldn't be read goes in the log
+    /// (never the key).
     pub fn load() -> Option<String> {
-        if let Some(file) = test_file() {
-            return std::fs::read_to_string(file).ok().map(|key| key.trim().to_owned()).filter(|key| !key.is_empty());
+        match secrets::get(SERVICE, ACCOUNT) {
+            Ok(key) => key.map(|key| key.trim().to_owned()).filter(|key| !key.is_empty()),
+            Err(why) => {
+                crate::applog::event("voxlive", &format!("the key kept could not be read: {why}"));
+                None
+            }
         }
-        #[cfg(target_os = "macos")]
-        return security_framework::passwords::get_generic_password(SERVICE, "church API key")
-            .ok()
-            .and_then(|bytes| String::from_utf8(bytes).ok());
-        #[cfg(not(target_os = "macos"))]
-        None
     }
 
     pub fn save(key: &str) -> Result<(), String> {
-        if let Some(file) = test_file() {
-            std::fs::write(&file, key).map_err(|e| {
-                crate::i18n::tf(
-                    "integrations.voxlive.not_kept",
-                    "The key could not be kept: {error}",
-                    &[("error", &e.to_string())],
-                )
-            })?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600));
-            }
-            return Ok(());
-        }
-        #[cfg(target_os = "macos")]
-        return security_framework::passwords::set_generic_password(SERVICE, "church API key", key.as_bytes()).map_err(
-            |e| {
-                crate::i18n::tf(
-                    "integrations.voxlive.not_kept.keychain",
-                    "The key could not be kept in the Keychain: {error}",
-                    &[("error", &e.to_string())],
-                )
-            },
-        );
-        #[cfg(not(target_os = "macos"))]
-        Err(crate::i18n::t("integrations.voxlive.mac_only", "Keeping a VoxLive key needs macOS for now.").to_owned())
+        secrets::set(SERVICE, ACCOUNT, key)
     }
 
     pub fn forget() {
-        if let Some(file) = test_file() {
-            let _ = std::fs::remove_file(file);
-        } else {
-            #[cfg(target_os = "macos")]
-            let _ = security_framework::passwords::delete_generic_password(SERVICE, "church API key");
+        if let Err(why) = secrets::delete(SERVICE, ACCOUNT) {
+            crate::applog::event("voxlive", &format!("the key kept could not be removed: {why}"));
         }
     }
 }

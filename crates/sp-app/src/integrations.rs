@@ -497,7 +497,13 @@ fn canva_connect(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut
     crate::studio::caption(ui, t("integrations.connect.caption", "CONNECT"));
     ui.label(
         egui::RichText::new(
-            t("integrations.canva.connect.about", "Make an integration of your church's own in Canva's developer portal (canva.com/developers, Your integrations). Under Scopes tick design:content:read; under Authentication add the redirect URL below; then copy its client ID and make a secret. The secret and the sign-in are kept in this Mac's Keychain and sent only to Canva."),
+            if cfg!(target_os = "macos") {
+                t("integrations.canva.connect.about", "Make an integration of your church's own in Canva's developer portal (canva.com/developers, Your integrations). Under Scopes tick design:content:read; under Authentication add the redirect URL below; then copy its client ID and make a secret. The secret and the sign-in are kept in this Mac's Keychain and sent only to Canva.")
+            } else if cfg!(windows) {
+                t("integrations.canva.connect.about.windows", "Make an integration of your church's own in Canva's developer portal (canva.com/developers, Your integrations). Under Scopes tick design:content:read; under Authentication add the redirect URL below; then copy its client ID and make a secret. The secret and the sign-in are kept in Windows' Credential Manager on this computer and sent only to Canva.")
+            } else {
+                t("integrations.canva.connect.about.linux", "Make an integration of your church's own in Canva's developer portal (canva.com/developers, Your integrations). Under Scopes tick design:content:read; under Authentication add the redirect URL below; then copy its client ID and make a secret. The secret and the sign-in are kept in this computer's keyring and sent only to Canva.")
+            },
         )
         .size(12.0)
         .color(TEXT_DIM),
@@ -745,7 +751,13 @@ fn connect_form(ui: &mut egui::Ui, view: &mut View) {
     crate::studio::caption(ui, t("integrations.connect.caption", "CONNECT"));
     ui.label(
         egui::RichText::new(
-            t("integrations.voxlive.connect.about", "In VoxLive, open Settings › API keys and make a key with the screens permissions (read and write). Paste it here. It is kept in this Mac's Keychain and sent only to VoxLive."),
+            if cfg!(target_os = "macos") {
+                t("integrations.voxlive.connect.about", "In VoxLive, open Settings › API keys and make a key with the screens permissions (read and write). Paste it here. It is kept in this Mac's Keychain and sent only to VoxLive.")
+            } else if cfg!(windows) {
+                t("integrations.voxlive.connect.about.windows", "In VoxLive, open Settings › API keys and make a key with the screens permissions (read and write). Paste it here. It is kept in Windows' Credential Manager on this computer and sent only to VoxLive.")
+            } else {
+                t("integrations.voxlive.connect.about.linux", "In VoxLive, open Settings › API keys and make a key with the screens permissions (read and write). Paste it here. It is kept in this computer's keyring and sent only to VoxLive.")
+            },
         )
         .size(12.0)
         .color(TEXT_DIM),

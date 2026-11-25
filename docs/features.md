@@ -1566,14 +1566,30 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **Integrations** (Settings): the services SoftPresenter works with, each with how it stands,
   opening a page to connect it. **VoxLive** (live translation captions) is connected with an
   API key made in VoxLive (Settings › API keys, with the screens permissions), pasted on its
-  page or piped to `sp voxlive connect`. The key is kept in the Mac's Keychain (a test copy
-  keeps its own in its own folder) and sent only to VoxLive, with redirects off; it never goes
+  page or piped to `sp voxlive connect`. The key is kept in the computer's store for secrets
+  (below) and sent only to VoxLive, with redirects off; it never goes
   into a settings file, the log, a command's reply or a song pack, and only its first
   characters (VoxLive's own handle for it) are shown. Connected, the page lists the church's
   VoxLive screens (name, language, captions or Scripture), found again every 30 seconds; a
   key VoxLive refuses stops the asking until another is given, so the church's other devices
   aren't locked out, and a "wait" answer is waited out. Disconnect forgets the key on this
   computer, after asking ("Disconnect VoxLive? … This can't be undone.").
+- **Where keys and sign-ins are kept:** one store for every key and token the app holds
+  (VoxLive's key, Canva Sync's secret and sign-in), on every system, never a plain file or the
+  log. On a Mac it is the Keychain. On Windows it is the signed-in user's Credential Manager,
+  which Windows encrypts with the user's sign-in (a sign-in too long for one entry is laid over
+  several, and replaced in a way that leaves the one before whole if the app stops part way).
+  On Linux it is the Secret Service (GNOME Keyring, KWallet), reached through libsecret's
+  `secret-tool` command, with the secret handed over on its standard input, never as an
+  argument other programs can list. On Linux without `secret-tool` or without a keyring that
+  answers, connecting is refused with a sentence that says what to install: nothing is ever
+  written to a plain file instead. A keyring that waits more than two minutes (for its
+  password, say) is given up on. A store that can't be read as the app starts is said in the
+  log, and on Canva Sync's page only where Canva Sync was set up, so a church that uses
+  neither service is not told about its keyring at every start. No error names the secret. A test copy (one started with
+  `SOFTPRESENTER_DATA`) is the one exception, for trying the app only: it keeps its own in
+  files in its own data folder that only its user may read (mode 600 on a Mac and on Linux),
+  and never reads, changes or asks for anything in the owner's store.
 - **Canva Sync** (Settings › Integrations): keeps the announcements video fresh from the
   church's Canva presentation. It connects with an integration of the church's own, made in
   Canva's developer portal (an open-source app can't carry a secret of its own): the client ID
@@ -1582,12 +1598,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   to the integration). Or, on a computer where the old Canva sync script ran, **Use the Sign-in
   from the Old Sync Script** takes over its sign-in: read from its folder by the app itself
   while holding the lock the old script takes when it runs (so it can't refresh meanwhile;
-  while it runs, the import waits to be tried again), kept in the Keychain, and its token file
+  while it runs, the import waits to be tried again), kept in the Mac's Keychain, and its token file
   taken away so it can't refresh it; the page then says to switch the old script off, with the
   Terminal lines (every path quoted, each job's label read from its file) for the background
   jobs and menu bar plugin it finds that run it (it never removes them itself), until It's
   Switched Off is clicked. If the token file can't be taken away, the page says so and nothing
-  is synced until It's Switched Off. The secret and tokens are one item in the Mac's Keychain, sent only to Canva, never
+  is synced until It's Switched Off. The secret and tokens are one item in the computer's store for secrets (above), sent only to Canva, never
   in a file, the log, a notice or a command's reply. Canva's refresh tokens work once: each new
   one is stored and read back before anything else is asked of Canva, under a lock in the
   library folder so two copies of the app never refresh the same one (nothing is refreshed

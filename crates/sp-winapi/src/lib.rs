@@ -123,6 +123,14 @@ pub fn monitor_names() -> Vec<(String, String)> {
 #[cfg(windows)]
 pub use windows::security::{HeldFolder, Security, current_user, make_folder, security_of};
 
+/// The signed-in user's entries in Windows' Credential Manager, where the app keeps keys and
+/// tokens: bytes under a name, encrypted by Windows with the user's sign-in, for this user on
+/// this computer. One entry holds at most `ROOM` bytes.
+#[cfg(windows)]
+pub mod credentials {
+    pub use crate::windows::credentials::{ROOM, read, remove, write};
+}
+
 #[cfg(test)]
 mod tests {
     use super::{path_with, path_without};

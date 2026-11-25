@@ -214,8 +214,9 @@ VoxLive's:
 
 - **Not connected:** the church's TimelyChurch address and the Song Sync PIN, and **Connect**.
   SoftPresenter pairs as a device named after the computer, and sends its version (P2). The
-  token goes into the Mac's Keychain or Windows' Credential Manager. A test copy keeps its own
-  in its own folder. The token is never written to a settings file, the log, a command's reply
+  token goes into the computer's store for secrets (`secrets.rs`: the Mac's Keychain, Windows'
+  Credential Manager, or the keyring on Linux, where connecting is refused if there is none
+  rather than keeping the token in a plain file). A test copy keeps its own in its own folder. The token is never written to a settings file, the log, a command's reply
   or a song pack. It is sent only to the church's TimelyChurch address, over HTTPS, with
   redirects off.
 - **Connected:** the church, when it was last checked, and the upcoming services (date, name,

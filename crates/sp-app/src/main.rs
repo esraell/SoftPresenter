@@ -63,6 +63,7 @@ mod running;
 mod samples;
 mod screen_cli;
 mod screens;
+mod secrets;
 mod service;
 mod service_cli;
 mod setup;

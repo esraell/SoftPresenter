@@ -335,7 +335,7 @@ of this one copies it to Documents, checks the copy, and keeps the old folder as
 | `libraries.json` | Libraries, each a list of song ids |
 | `media.json` | The media bin and media playlists |
 | `timers.json`, `messages.json`, `macros.json` | Timers, messages and macros |
-| `canva-sync.json` | Canva Sync's presentation, divider page, last video and the videos it made (nothing secret: the integration's secret and the sign-in are in the Keychain, under SoftPresenter Canva Sync) |
+| `canva-sync.json` | Canva Sync's presentation, divider page, last video and the videos it made (nothing secret: the integration's secret and the sign-in are in the computer's store for secrets (the Keychain, Credential Manager on Windows, the keyring on Linux), under SoftPresenter Canva Sync) |
 | `.canva-sync.lock` | The lock two copies of the app take to refresh or keep the Canva sign-in |
 | `Media/Canva Sync/` | The announcements video Canva Sync made, one at a time, which the media playlist Announcements follows |
 | `stage-layouts.json` | The stage layouts, each kept as a theme's template: `objects` are its objects in order from the back (an item such as the clock is a text object whose role says what it shows; a screen picture names its screen by id, or none for the main one), and `boxes` hold each item's look and place as earlier versions read them |
