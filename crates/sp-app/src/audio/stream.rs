@@ -71,6 +71,10 @@ pub struct Shared {
     child: Mutex<Option<std::process::Child>>,
     /// How long the first frames took to be ready, in microseconds (`u64::MAX` before).
     ready_after_us: AtomicU64,
+    /// When it was started, and how long after that its first frame was played, in
+    /// microseconds (`u64::MAX` before).
+    made: Instant,
+    heard_after_us: AtomicU64,
     /// Frames the sound card's thread has played of it.
     pub played: AtomicU64,
     /// Set by the sound card's thread: its first frame has been played; its last has (or it
@@ -94,6 +98,8 @@ impl Shared {
             problem: Mutex::new(None),
             child: Mutex::new(None),
             ready_after_us: AtomicU64::new(u64::MAX),
+            made: Instant::now(),
+            heard_after_us: AtomicU64::new(u64::MAX),
             played: AtomicU64::new(0),
             began: AtomicBool::new(false),
             ended: AtomicBool::new(false),
@@ -138,6 +144,20 @@ impl Shared {
     /// How long the first frames took to be ready, from the start.
     pub fn ready_after(&self) -> Option<Duration> {
         let us = self.ready_after_us.load(Ordering::Relaxed);
+        (us != u64::MAX).then(|| Duration::from_micros(us))
+    }
+
+    /// Said by the sound card's thread as it plays the first frame: from now it is heard.
+    pub fn begin(&self) {
+        if !self.began.swap(true, Ordering::AcqRel) {
+            let us = u64::try_from(self.made.elapsed().as_micros()).unwrap_or(u64::MAX - 1);
+            self.heard_after_us.store(us, Ordering::Relaxed);
+        }
+    }
+
+    /// How long after it was started its first frame was played.
+    pub fn heard_after(&self) -> Option<Duration> {
+        let us = self.heard_after_us.load(Ordering::Relaxed);
         (us != u64::MAX).then(|| Duration::from_micros(us))
     }
 

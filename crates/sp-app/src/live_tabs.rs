@@ -2335,7 +2335,8 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             ui.painter().text(level_row.right_center(), Align2::RIGHT_CENTER, words, fixed(12.0), TEXT_DIM);
 
             // How tracks follow one another, under a line.
-            let (options, _) = ui.allocate_exact_size(vec2(width, 35.0), Sense::hover());
+            // Play through, Shuffle and Loop in a row, and the crossfade in the row under them.
+            let (options, _) = ui.allocate_exact_size(vec2(width, 35.0 + 30.0), Sense::hover());
             ui.painter().hline(options.x_range(), options.min.y, egui::Stroke::new(1.0, crate::studio::LINE));
             let y = options.min.y + 10.0 + 12.0;
             let small = FontId::proportional(11.5);
@@ -2383,22 +2384,17 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                     crate::i18n::seconds(f64::from(seconds))
                 }
             };
+            let y = y + 30.0;
             let select = Rect::from_min_size(pos2(options.max.x - 70.0, y - 12.0), vec2(70.0, 24.0));
-            // The word goes where there is room for it beside the switches (the list's hover
-            // hint says what it is either way).
-            let caption = t("tools.audio.crossfade", "CROSSFADE");
-            let caption_wide = crate::studio::spaced(ui, caption, fixed_semibold(11.5), TEXT_FAINT, 0.6).size().x;
-            if looping.max.x + 8.0 + caption_wide <= select.min.x - 8.0 {
-                paint_spaced(
-                    ui,
-                    pos2(select.min.x - 8.0, y),
-                    Align2::RIGHT_CENTER,
-                    caption,
-                    fixed_semibold(11.5),
-                    TEXT_FAINT,
-                    0.6,
-                );
-            }
+            paint_spaced(
+                ui,
+                pos2(options.min.x, y),
+                Align2::LEFT_CENTER,
+                t("tools.audio.crossfade", "CROSSFADE"),
+                fixed_semibold(11.5),
+                TEXT_FAINT,
+                0.6,
+            );
             let picker = small_select(ui, select, egui::Id::unique("audio crossfade"), &fade_words(fade))
                 .on_hover_text(t("tools.audio.crossfade.hint", "How long one track fades into the next"));
             egui::Popup::menu(&picker).show(|ui| {
@@ -3150,6 +3146,38 @@ mod tests {
         let Some(AudioRequest::Volume(volume)) = state.audio_request else { panic!("{:?}", state.audio_request) };
         assert!((volume - 1.35).abs() < 0.02, "{volume}");
         assert_eq!(state.audio_volume, volume);
+    }
+
+    #[test]
+    fn loop_stands_beside_shuffle_clear_of_the_crossfade_and_switches_on_and_off() {
+        use crate::i18n::{Language, with_language};
+        for language in [Language::English, Language::Spanish] {
+            with_language(language, || {
+                let show = show();
+                let mut state = HomeState { live_tab: 5, ..HomeState::default() };
+                let ctx = egui::Context::default();
+                let texts = frame(&ctx, &show, &mut state, vec![], 0.0);
+                let rect = |name: &str| ctx.read_response(egui::Id::unique(name)).expect("drawn").rect;
+                let (through, shuffle, looping, fade) =
+                    (rect("audio through"), rect("audio shuffle"), rect("audio loop"), rect("audio crossfade"));
+                // In a row, none over another, within the column.
+                assert!(through.max.x <= shuffle.min.x && shuffle.max.x <= looping.min.x, "{language:?}");
+                assert!(looping.max.x <= 340.0 && fade.max.x <= 340.0, "{language:?}: {looping:?} {fade:?}");
+                assert!((looping.center().y - shuffle.center().y).abs() < 0.5);
+                // The crossfade in the row under them, with its word.
+                assert!(fade.min.y >= looping.max.y, "{language:?}: {fade:?} under {looping:?}");
+                let word = crate::i18n::t("tools.audio.crossfade", "CROSSFADE");
+                let (_, at) = texts.iter().find(|(text, _)| text.contains(word)).expect("the crossfade's word");
+                assert!(at.max.x < fade.min.x && at.min.y >= looping.max.y, "{language:?}: {at:?}");
+                // A click switches it on, to be saved, and another off.
+                assert!(!state.audio.looping);
+                click(&ctx, &show, &mut state, egui::Id::unique("audio loop"), vec2(0.0, 0.0));
+                assert!(state.audio.looping && state.audio_changed, "{language:?}");
+                state.audio_changed = false;
+                click(&ctx, &show, &mut state, egui::Id::unique("audio loop"), vec2(0.0, 0.0));
+                assert!(!state.audio.looping && state.audio_changed);
+            });
+        }
     }
 
     #[test]

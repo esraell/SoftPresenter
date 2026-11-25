@@ -618,7 +618,7 @@ impl Player {
                             "heard from {} in {} after {} ms ({}, ready in {ready} ms)",
                             clock(asked.stream.from),
                             name(asked.track),
-                            asked.at.elapsed().as_millis(),
+                            asked.stream.heard_after().unwrap_or_else(|| asked.at.elapsed()).as_millis(),
                             asked.stream.way().map_or("?", stream::Way::word),
                         ),
                     );
@@ -1151,7 +1151,8 @@ mod tests {
         player.seek(&track, Duration::from_millis(2000));
         let asked = Instant::now();
         let _ = tick_until(&mut player, |player, _| player.asked.is_none());
-        let took = asked.elapsed();
+        // From the seek to its first frame played on the sound card's thread.
+        let took = player.now.as_ref().and_then(|now| now.stream.heard_after()).unwrap_or_else(|| asked.elapsed());
         assert!(player.playing().position.abs_diff(Duration::from_millis(2000)) < Duration::from_millis(60));
         assert!(took < Duration::from_millis(150), "the seek took {took:?}");
         // Loop: the same track lined up, and joined without a stop.

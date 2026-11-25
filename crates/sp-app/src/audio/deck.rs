@@ -312,7 +312,7 @@ impl Deck {
                     got += stream.ring.take(&mut self.scratch[got..wanted]);
                 }
                 if got > 0 {
-                    stream.began.store(true, Ordering::Release);
+                    stream.begin();
                 }
                 for (frame, sound) in self.block[filled..filled + got].iter_mut().zip(&self.scratch[..got]) {
                     let gain = current.ramp.step();
