@@ -686,6 +686,14 @@ pub const OFFERED: &[Offered] = &[
     },
 ];
 
+/// The Bible offered under that short name (ASV, НПУ) or short name for files (asv, ukronpu),
+/// in any case, in any alphabet: what `bible install NAME` and the policies of a remote page and
+/// an assistant all take as naming one.
+pub fn offered_named(typed: &str) -> Option<&'static Offered> {
+    let typed = typed.to_lowercase();
+    OFFERED.iter().find(|bible| bible.short.to_lowercase() == typed || bible.id.to_lowercase() == typed)
+}
+
 #[derive(Debug)]
 pub struct BibleOptions {
     pub open: bool,
@@ -1709,6 +1717,20 @@ mod tests {
                 assert!(!languages.contains(&bible.language), "{} is split into two groups", bible.language);
                 languages.push(bible.language);
             }
+        }
+    }
+
+    #[test]
+    fn an_offered_bible_is_named_by_its_short_name_in_any_case_and_alphabet() {
+        assert_eq!(offered_named("ASV").map(|b| b.id), Some("asv"));
+        assert_eq!(offered_named("asv").map(|b| b.id), Some("asv"));
+        assert_eq!(offered_named("Lut1912").map(|b| b.id), Some("lut1912"));
+        assert_eq!(offered_named("НПУ").map(|b| b.id), Some("ukronpu"));
+        assert_eq!(offered_named("нпу").map(|b| b.id), Some("ukronpu"));
+        assert_eq!(offered_named("UKRONPU").map(|b| b.id), Some("ukronpu"));
+        // Only a whole short name: never in part, and never a Bible that comes with the app.
+        for typed in ["NIV", "AS", "", "KJV", "American Standard Version"] {
+            assert!(offered_named(typed).is_none(), "{typed}");
         }
     }
 }

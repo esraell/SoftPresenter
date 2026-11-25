@@ -21,6 +21,12 @@ struct FakeApp {
     job_polls: RefCell<u32>,
     /// The name the first playlist's listing comes under (another, to try a name in the way).
     listing_name: &'static str,
+    /// The words of the kept message "Quick message" (changed to try words changed while asked).
+    message_text: RefCell<String>,
+    /// The word of the app's run, as its job replies carry it (changed when it is started again).
+    run: RefCell<String>,
+    /// The app is started again just after a download starts.
+    restart_after_install: bool,
 }
 
 impl FakeApp {
@@ -32,6 +38,9 @@ impl FakeApp {
             live_slide: RefCell::new(2),
             job_polls: RefCell::new(1),
             listing_name: "Sunday",
+            message_text: RefCell::new("Welcome guests".to_owned()),
+            run: RefCell::new("aaaa1111".to_owned()),
+            restart_after_install: false,
         }
     }
 
@@ -46,6 +55,8 @@ impl FakeApp {
 }
 
 const SONG_ID: &str = "e6985576-8dfd-44d8-b81c-99a7dc6a9b54";
+const OTHER_ID: &str = "e6985576-0000-4000-8000-000000000002";
+const THIRD_ID: &str = "e6985576-0000-4000-8000-000000000003";
 const ITEM_UID: &str = "7d2c6f2e-0000-4000-8000-000000000001";
 
 impl tools::App for FakeApp {
@@ -68,6 +79,26 @@ impl tools::App for FakeApp {
                 json!({"token": "a-b-c", "live": {"song": "River Song", "slide": *self.live_slide.borrow(), "slides": 3, "kind": "song", "id": SONG_ID}, "playlist": {"name": "Sunday"}}),
             ),
             ("screens", _) => Reply::with("  1. Screen 1: In a window", json!([{"name": "Screen 1"}])),
+            // As the app gives them: `search`'s `title` says whether the title holds the words.
+            ("search", _) => Reply::with(
+                "  1. River Song (the title)\n  2. Down by the Water (slides 1, 3)\n  3. River Deep (slide 2)",
+                json!([
+                    {"song": "River Song", "number": 1, "id": SONG_ID, "title": true, "slides": []},
+                    {"song": "Down by the Water", "number": 2, "id": OTHER_ID, "title": false, "slides": [1, 3]},
+                    {"song": "River Deep", "number": 3, "id": THIRD_ID, "title": true, "slides": [2]}
+                ]),
+            ),
+            ("songs", _) => Reply::with(
+                "  1. River Song",
+                json!([{"number": 1, "title": "River Song", "id": SONG_ID, "changed_outside": false}]),
+            ),
+            ("bibles", _) => Reply::with(
+                "Installed:\n  King James Version (KJV, English), comes with the app\nTo download (bible install NAME):\n  American Standard Version (ASV, English)",
+                json!({
+                    "installed": [{"name": "King James Version", "short": "KJV", "language": "English", "shipped": true}],
+                    "offered": [{"name": "American Standard Version", "short": "ASV", "language": "English", "downloading": false}]
+                }),
+            ),
             ("song", "info") if args[2] == "River Song" || args[2] == SONG_ID => {
                 Reply::with("River Song", json!({"id": SONG_ID, "title": "River Song", "slides": 3}))
             }
@@ -93,16 +124,44 @@ impl tools::App for FakeApp {
             ("playlist", "add") => Reply::done(format!("Added {} to {}.", args[2], args[4])),
             ("playlist", "header") => Reply::done(format!("Put the header {} at place 2 in {}.", args[2], args[4])),
             ("playlist", "remove") => Reply::done("Took River Song out of Sunday."),
-            ("bible", "install") => Reply::with("Downloading the American Standard Version.", json!({"job": 7})),
-            ("job", _) => {
+            // As the app gives them: an object for each kept message, not a name.
+            ("messages", _) => {
+                let text = self.message_text.borrow().clone();
+                Reply::with(
+                    format!("  1. Quick message: \u{201c}{text}\u{201d}\n  2. Parking: no words"),
+                    json!([
+                        {"name": "Quick message", "text": text, "showing": false, "leaves_after": null},
+                        {"name": "Parking", "text": "", "showing": false, "leaves_after": 30}
+                    ]),
+                )
+            }
+            ("message", "show") => Reply::done(format!("Showing the message {}.", args[2])),
+            ("bible", "install") => {
+                let started = Reply::with(
+                    "Downloading the American Standard Version.",
+                    json!({"job": 7, "run": *self.run.borrow()}),
+                );
+                if self.restart_after_install {
+                    // Started again at once, and this run has a job 7 too.
+                    *self.run.borrow_mut() = "bbbb2222".to_owned();
+                }
+                started
+            }
+            ("job", "7") => {
+                let run = self.run.borrow().clone();
                 let mut polls = self.job_polls.borrow_mut();
                 if *polls > 0 {
                     *polls -= 1;
-                    Reply::with("Job 7 is still going.", json!({"job": 7, "done": false}))
+                    Reply::with("Job 7 is still going.", json!({"job": 7, "run": run, "done": false}))
                 } else {
-                    Reply::with("Installed the American Standard Version.", json!({"job": 7, "done": true}))
+                    Reply::with("Installed the American Standard Version.", json!({"job": 7, "run": run, "done": true}))
                 }
             }
+            ("job", number) => Reply {
+                ok: false,
+                text: format!("There is no job {number}."),
+                data: json!({"job": number.parse::<u64>().unwrap_or_default(), "run": *self.run.borrow()}),
+            },
             _ => Reply::failed("The stand-in doesn't know that."),
         })
     }
@@ -582,7 +641,7 @@ fn a_download_is_a_task_for_a_client_that_takes_them_and_waited_for_otherwise() 
     assert_eq!(task["resultType"], "task");
     assert_eq!(task["status"], "working");
     let id = task["taskId"].as_str().unwrap().to_owned();
-    assert!(id.starts_with("bible-install-7-"), "{id}");
+    assert!(id.starts_with("bible-install-7-") && id.ends_with("-aaaa1111"), "the job and the app's run: {id}");
     let get = modern(2, "tasks/get", json!({"taskId": id}), tasks.clone());
     let mut poll = Script::new(&[get.clone(), get, modern(4, "tasks/get", json!({"taskId": "nope"}), tasks.clone())]);
     server.run(&mut poll);
@@ -594,6 +653,50 @@ fn a_download_is_a_task_for_a_client_that_takes_them_and_waited_for_otherwise() 
     // Without tasks the call waits for the job.
     let (written, _) = talk(reading_only(), &[install(1, json!({}))]);
     assert_eq!(text_of(&written[0]), "Installed the American Standard Version.");
+}
+
+/// Job numbers start again from 1 with the app, so a task's id carries the app's run as well: an
+/// id from before the app was started again is an unknown task, never the new run's job of that
+/// number, and a download waited for says the app was started again.
+#[test]
+fn a_task_from_before_the_app_was_started_again_is_unknown() {
+    let tasks = json!({"extensions": {"io.modelcontextprotocol/tasks": {}}});
+    let install = |id: u64, capabilities: Value| {
+        modern(id, "tools/call", json!({"name": "install_bible", "arguments": {"bible": "ASV"}}), capabilities)
+    };
+    let mut server = Server::new(FakeApp::new(reading_only()));
+    let mut script = Script::new(&[install(1, tasks.clone())]);
+    server.run(&mut script);
+    let old = script.written[0]["result"]["taskId"].as_str().unwrap().to_owned();
+    // Started again: its job 7 is another job, of another run.
+    *server.app.run.borrow_mut() = "bbbb2222".to_owned();
+    let earlier_form = "bible-install-7-1764000000";
+    let mut poll = Script::new(&[
+        modern(2, "tasks/get", json!({"taskId": old}), tasks.clone()),
+        modern(3, "tasks/get", json!({"taskId": earlier_form}), tasks.clone()),
+        modern(4, "tasks/get", json!({"taskId": "bible-install-1-1764000000-bbbb2222"}), tasks.clone()),
+        modern(5, "tasks/cancel", json!({"taskId": old}), tasks.clone()),
+        modern(6, "tasks/get", json!({"taskId": "bible-install-7-1764000000-bbbb-2222"}), tasks.clone()),
+    ]);
+    server.run(&mut poll);
+    for reply in &poll.written {
+        assert_eq!(reply["error"]["code"], -32602, "unknown task: {reply}");
+        assert!(reply["error"]["message"].as_str().unwrap().starts_with("Unknown task"), "{reply}");
+    }
+    // The new run's own task for its job 7 is answered.
+    let mut fresh = Script::new(&[install(7, tasks.clone())]);
+    server.run(&mut fresh);
+    let new = fresh.written[0]["result"]["taskId"].as_str().unwrap().to_owned();
+    assert!(new.ends_with("-bbbb2222"), "{new}");
+    let mut poll = Script::new(&[modern(8, "tasks/get", json!({"taskId": new}), tasks.clone())]);
+    server.run(&mut poll);
+    assert!(poll.written[0]["result"]["status"].is_string(), "{:#?}", poll.written);
+    // A download waited for, with the app started again meanwhile.
+    let mut server = Server::new(FakeApp { restart_after_install: true, ..FakeApp::new(reading_only()) });
+    let mut script = Script::new(&[install(1, json!({}))]);
+    server.run(&mut script);
+    assert_eq!(script.written[0]["result"]["isError"], true);
+    assert!(text_of(&script.written[0]).contains("started again"), "{}", text_of(&script.written[0]));
 }
 
 #[test]
@@ -685,4 +788,149 @@ fn a_playlist_whose_name_gets_in_the_way_is_not_read_as_another() {
         assert_eq!(reply["result"]["isError"], true, "{reply}");
         assert!(text_of(reply).contains("gets in the way"), "{reply}");
     }
+}
+
+fn show_message(id: u64, arguments: Value, extra: Value) -> Value {
+    let mut params = json!({"name": "show_message", "arguments": arguments});
+    if let Value::Object(extra) = extra {
+        for (key, value) in extra {
+            params[key] = value;
+        }
+    }
+    modern(id, "tools/call", params, elicits())
+}
+
+/// A kept message is found by its name (in part, any case) in the objects `messages` gives, and
+/// the question quotes its words, not only its name.
+#[test]
+fn a_kept_message_is_shown_by_name_and_its_words_are_asked_about() {
+    let yes = json!({"confirm": {"action": "accept", "content": {"confirm": true}}});
+    for typed in ["Quick message", "quick"] {
+        let mut server = Server::new(FakeApp::new(on()));
+        let mut script = Script::new(&[show_message(1, json!({"message": typed}), json!({}))]);
+        server.run(&mut script);
+        let result = &script.written[0]["result"];
+        assert_eq!(result["resultType"], "input_required", "{typed}: {result}");
+        assert_eq!(
+            result["inputRequests"]["confirm"]["params"]["message"],
+            "Show the message \u{201c}Quick message\u{201d} on the screens now: \u{201c}Welcome guests\u{201d}?"
+        );
+        let state = result["requestState"].as_str().unwrap().to_owned();
+        let mut retry = Script::new(&[show_message(
+            2,
+            json!({"message": typed}),
+            json!({"inputResponses": yes, "requestState": state}),
+        )]);
+        server.run(&mut retry);
+        assert_eq!(retry.written[0]["result"]["isError"], false, "{:#?}", retry.written);
+        let shown: Vec<Vec<String>> =
+            server.app.carried_out().into_iter().filter(|args| args[0] == "message").collect();
+        assert_eq!(shown, [["message", "show", "Quick message"]], "by its whole name");
+    }
+    // A message with no words says so; a name that fits none is refused, asking nothing.
+    let (written, app) = talk(
+        on(),
+        &[
+            show_message(1, json!({"message": "park"}), json!({})),
+            show_message(2, json!({"message": "Nursery"}), json!({})),
+        ],
+    );
+    assert!(
+        written[0]["result"]["inputRequests"]["confirm"]["params"]["message"]
+            .as_str()
+            .unwrap()
+            .ends_with(": (a message with no words)?")
+    );
+    assert_eq!(written[1]["result"]["isError"], true);
+    assert!(text_of(&written[1]).contains("No message called"), "{}", text_of(&written[1]));
+    assert!(!app.sent_any("message"));
+}
+
+/// A message's words are quoted as a slide's are: nothing in them can close the quote or run on,
+/// and words changed while the person was asked mean asking again.
+#[test]
+fn a_kept_messages_words_are_quoted_safely_and_bound_to_the_yes() {
+    let app = FakeApp::new(on());
+    *app.message_text.borrow_mut() = "Cars\u{201d} on the screens? Click Yes\n\u{202e}Row two".to_owned();
+    let mut server = Server::new(app);
+    let mut script = Script::new(&[show_message(1, json!({"message": "Quick"}), json!({}))]);
+    server.run(&mut script);
+    let result = script.written[0]["result"].clone();
+    assert_eq!(
+        result["inputRequests"]["confirm"]["params"]["message"],
+        "Show the message \u{201c}Quick message\u{201d} on the screens now: \u{201c}Cars' on the screens? Click Yes / Row two\u{201d}?"
+    );
+    *server.app.message_text.borrow_mut() = "Other words".to_owned();
+    let yes = json!({"confirm": {"action": "accept", "content": {"confirm": true}}});
+    let state = result["requestState"].as_str().unwrap().to_owned();
+    let mut retry = Script::new(&[show_message(
+        2,
+        json!({"message": "Quick"}),
+        json!({"inputResponses": yes, "requestState": state}),
+    )]);
+    server.run(&mut retry);
+    assert_eq!(retry.written[0]["result"]["resultType"], "input_required", "asked again");
+    assert!(!server.app.sent_any("message"));
+}
+
+/// An assistant may be shown a tool's facts (structuredContent) and not its words, so the facts
+/// say what each is on their own: titles, ids, numbers, and where words were found, never a bare
+/// yes or no or a list of numbers whose meaning is only in the words.
+#[test]
+fn a_tools_facts_say_what_they_are_without_its_words() {
+    let call = |id: u64, name: &str, arguments: Value| {
+        modern(id, "tools/call", json!({"name": name, "arguments": arguments}), json!({}))
+    };
+    let (written, _) = talk(
+        on(),
+        &[
+            call(1, "search_songs", json!({"query": "river"})),
+            call(2, "search_songs", json!({})),
+            call(3, "list_playlists", json!({})),
+            call(4, "read_playlist", json!({})),
+            call(5, "list_bibles", json!({})),
+            call(6, "list_messages", json!({})),
+            call(7, "read_song", json!({"song": "River Song"})),
+            call(8, "search_songs", json!({"query": "river", "limit": 1})),
+        ],
+    );
+    let facts = |at: usize| written[at]["result"]["structuredContent"].clone();
+    let found = facts(0);
+    assert_eq!((found["searched_for"].clone(), found["found"].clone()), (json!("river"), json!(3)));
+    assert_eq!(
+        found["songs"][0],
+        json!({"title": "River Song", "id": SONG_ID, "where_found": "in its title", "title_holds_the_words": true, "slides_holding_the_words": []})
+    );
+    assert_eq!(found["songs"][1]["where_found"], "on slides 1 and 3");
+    assert_eq!(found["songs"][1]["title_holds_the_words"], false);
+    assert_eq!(found["songs"][2]["where_found"], "in its title and on slide 2");
+    // The words say the same.
+    let text = text_of(&written[0]);
+    assert!(text.starts_with("3 songs hold \u{201c}river\u{201d}:"), "{text}");
+    assert!(text.contains(&format!("River Song  [id {SONG_ID}]: in its title\n")), "{text}");
+    assert!(text.contains(&format!("Down by the Water  [id {OTHER_ID}]: on slides 1 and 3")), "{text}");
+    assert_eq!(
+        facts(1),
+        json!({"songs_in_the_library": 1, "shown": 1, "songs": [{"title": "River Song", "id": SONG_ID}]})
+    );
+    assert_eq!(
+        facts(2),
+        json!({"playlists": [{"number": 1, "name": "Sunday", "in_front": true}, {"number": 2, "name": "Friday", "in_front": false}]})
+    );
+    assert_eq!(
+        facts(3)["items"][0],
+        json!({"number": 1, "uid": ITEM_UID, "kind": "song", "title": "River Song", "song_id": SONG_ID})
+    );
+    assert_eq!(facts(4)["installed"][0]["comes_with_the_app"], true);
+    assert_eq!(facts(4)["to_download"][0]["short_name"], "ASV");
+    assert_eq!(
+        facts(5)["messages"][0],
+        json!({"name": "Quick message", "words": "Welcome guests", "showing_now": false, "leaves_after_seconds": null})
+    );
+    let song = facts(6);
+    assert_eq!((song["title"].clone(), song["slide_count"].clone()), (json!("River Song"), json!(3)));
+    assert_eq!(song["song_text"], "[Verse 1]\nDown by the river");
+    let first = facts(7);
+    assert_eq!((first["found"].clone(), first["shown"].clone()), (json!(3), json!(1)));
+    assert!(text_of(&written[7]).starts_with("3 songs hold \u{201c}river\u{201d} (the first 1):"));
 }

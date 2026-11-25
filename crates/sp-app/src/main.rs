@@ -1664,6 +1664,10 @@ struct App {
     /// done (`sp job N`, and `--wait`); the number of the last one started.
     jobs: Vec<(u64, Option<Result<String, String>>)>,
     last_job: Option<u64>,
+    /// A word made at each start, which a job's replies carry as `run`: job numbers start again
+    /// from 1 with the app, so job 1 of an earlier run (an assistant's task) can be told from
+    /// this run's.
+    run_word: String,
     /// While `sp song import … --library NAME|none` runs: the library its songs (a folder's
     /// included) go into, or none.
     import_library_override: Option<Option<Uuid>>,
@@ -1691,6 +1695,8 @@ struct App {
     remote_call: bool,
     /// The same while an AI assistant's command (`sp mcp`) is carried out (`mcp::policy`).
     mcp_call: bool,
+    /// The jobs an AI assistant started (a Bible download), so the log says how each ended.
+    mcp_jobs: mcp::Jobs,
     show: Show,
     /// The file each song came from, in the show's order; `None` for the bundled sample.
     sources: Vec<Option<PathBuf>>,
@@ -4298,11 +4304,14 @@ impl App {
         }
     }
 
-    /// Keeps how a command line job went, for `job N` and `--wait`.
+    /// Keeps how a command line job went, for `job N` and `--wait`; the log says how one an AI
+    /// assistant started ended.
     fn finish_job(&mut self, job: Option<u64>, result: Result<String, String>) {
-        if let Some(job) = job
-            && let Some((_, kept)) = self.jobs.iter_mut().find(|(have, _)| *have == job)
-        {
+        let Some(job) = job else { return };
+        if let Some(line) = self.mcp_jobs.ended(job, result.is_ok()) {
+            applog::event("mcp", &line);
+        }
+        if let Some((_, kept)) = self.jobs.iter_mut().find(|(have, _)| *have == job) {
             *kept = Some(result);
         }
     }
@@ -5874,9 +5883,7 @@ impl App {
             }
         });
         for (job, result) in done {
-            if let Some((_, kept)) = self.jobs.iter_mut().find(|(have, _)| *have == job) {
-                *kept = Some(result);
-            }
+            self.finish_job(Some(job), result);
         }
     }
 
@@ -11450,6 +11457,7 @@ fn main() -> ExitCode {
         bible_rx,
         jobs: Vec::new(),
         last_job: None,
+        run_word: Uuid::new_v4().simple().to_string(),
         import_library_override: None,
         dropped: Vec::new(),
         drop_pointer: None,
@@ -11461,6 +11469,7 @@ fn main() -> ExitCode {
         remote_pages_seen: 0,
         remote_call: false,
         mcp_call: false,
+        mcp_jobs: mcp::Jobs::default(),
         _control: control,
         show,
         sources,

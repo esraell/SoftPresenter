@@ -52,6 +52,9 @@ pub const SCREENS_OFF: &str = "SoftPresenter doesn't let AI assistants change wh
 pub const NO_YES: &str =
     "This needs a yes from the person at the computer first, and it wasn't asked; nothing was done.";
 
+/// What the refusal of a Bible that isn't offered says, after the name the assistant gave.
+const NOT_OFFERED: &str = "isn't one of the Bibles SoftPresenter offers to download";
+
 /// Why the app refuses a command from an assistant, or what it is: `decide` with the switches
 /// and what the server said about the request.
 pub fn decide(switches: Switches, args: &[String], call: &McpCall) -> Result<Kind, String> {
@@ -72,6 +75,7 @@ pub fn refusal_word(why: &str) -> &'static str {
         SWITCHED_OFF => "assistants switched off",
         SCREENS_OFF => "screens switch off",
         NO_YES => "no yes",
+        _ if why.contains(NOT_OFFERED) => "Bible not offered",
         _ => "not open to assistants",
     }
 }
@@ -149,7 +153,7 @@ fn changes_a_playlist(typed: &str) -> bool {
 
 /// Whether a Bible's name is one SoftPresenter offers to download (`bibles` lists them).
 fn offered_bible(typed: &str) -> bool {
-    crate::bible::OFFERED.iter().any(|b| b.short.eq_ignore_ascii_case(typed) || b.id.eq_ignore_ascii_case(typed))
+    crate::bible::offered_named(typed).is_some()
 }
 
 /// Why a command an assistant may not send is refused, in words for it.
@@ -176,6 +180,14 @@ fn refusal(args: &[String]) -> String {
             at_computer("Files on the computer are opened")
         }
         ("slide", "web") => at_computer("Web pages are put on slides"),
+        // A Bible named alone that isn't offered (a file's path among them): which are.
+        ("bible", "install") if args.len() == 3 => {
+            let typed: String = args[2].chars().filter(|c| !c.is_control()).take(60).collect();
+            format!(
+                "\u{201c}{}\u{201d} {NOT_OFFERED}. list_bibles names those it does, and install_bible takes the short name it gives (such as ASV).",
+                typed.trim()
+            )
+        }
         _ => format!(
             "AI assistants can't use \u{201c}{}\u{201d} in SoftPresenter: only the shapes its tools send are open to them.",
             args.iter().take(2).cloned().collect::<Vec<_>>().join(" ")
@@ -255,6 +267,11 @@ mod tests {
             (&["playlist", "placeholder", "Sermon slides", "in", "Sunday"], Kind::Prepares),
             (&["playlist", "passage", "John 3:16", "in", "Sunday"], Kind::Prepares),
             (&["bible", "install", "ASV"], Kind::Prepares),
+            (&["bible", "install", "asv"], Kind::Prepares),
+            (&["bible", "install", "ukronpu"], Kind::Prepares),
+            // A short name in another alphabet, in any case.
+            (&["bible", "install", "НПУ"], Kind::Prepares),
+            (&["bible", "install", "нпу"], Kind::Prepares),
             (&["playlist", "remove", "7d2c6f2e-0000-4000-8000-000000000001", "from", "Sunday"], Kind::Removes),
             (&["next"], Kind::Live),
             (&["previous"], Kind::Live),
@@ -360,6 +377,25 @@ mod tests {
         assert!(said(&["song", "export", "Amazing", "--to", "/tmp/x"]).contains("Files"));
         assert!(said(&["slide", "web", "Amazing", "1", "https://example.org"]).contains("Web pages"));
         assert!(said(&["undo"]).contains("only the shapes"));
+    }
+
+    /// A Bible that isn't offered is refused as that, pointing to the list, not as a command
+    /// closed to assistants; a file's path is refused the same way, and never looked for.
+    #[test]
+    fn a_bible_not_offered_is_refused_as_not_offered() {
+        for typed in ["NIV", "niv", "/tmp/bible.xml", "Новый перевод"] {
+            let why = kind_of(&words(&["bible", "install", typed])).unwrap_err();
+            assert!(why.contains(&format!("\u{201c}{typed}\u{201d} isn't one of the Bibles")), "{why}");
+            assert!(why.contains("list_bibles"), "{why}");
+            assert_eq!(refusal_word(&why), "Bible not offered");
+        }
+        let long = "N".repeat(500);
+        let why = kind_of(&words(&["bible", "install", &long])).unwrap_err();
+        assert!(why.chars().count() < 250, "the name is cut short: {why}");
+        // With anything more than the name, it is a shape not open, as before.
+        let why = kind_of(&words(&["bible", "install", "ASV", "--name", "x"])).unwrap_err();
+        assert!(why.contains("only the shapes"), "{why}");
+        assert_eq!(refusal_word(&why), "not open to assistants");
     }
 
     /// Every command `control.rs` knows is closed to assistants unless one of its shapes is

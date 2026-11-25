@@ -763,9 +763,7 @@ fn with_full_paths(args: Vec<String>) -> Vec<String> {
     if first("bible") && second(&["install"]) {
         let mut args = args;
         if let Some(word) = args.get(2)
-            && !crate::bible::OFFERED
-                .iter()
-                .any(|b| b.short.eq_ignore_ascii_case(word) || b.id.eq_ignore_ascii_case(word))
+            && crate::bible::offered_named(word).is_none()
             && Path::new(word).exists()
             && let Ok(full) = Path::new(word).canonicalize()
         {
@@ -1205,6 +1203,23 @@ things lists them instead of guessing. Numbers are as the lists show them, from 
 also be named by its id, as song info and the JSON replies give it.
 ";
 
+/// `job N`'s reply: how the job went, that it is still going, or that this run has no such job.
+/// Each carries the job's number and the run's word (`run`), so a job of an earlier run, whose
+/// number this run has given again, can be told from this run's; `done` is there only when the
+/// job is this run's.
+fn job_reply(job: u64, kept: Option<&Option<Result<String, String>>>, run: &str) -> Reply {
+    let facts = |done: Option<bool>| match done {
+        Some(done) => serde_json::json!({"job": job, "run": run, "done": done}),
+        None => serde_json::json!({"job": job, "run": run}),
+    };
+    match kept {
+        None => Reply { ok: false, text: format!("There is no job {job}."), data: facts(None) },
+        Some(None) => Reply::with(format!("Job {job} is still going."), facts(Some(false))),
+        Some(Some(Ok(said))) => Reply::with(said.clone(), facts(Some(true))),
+        Some(Some(Err(problem))) => Reply { ok: false, text: problem.clone(), data: facts(Some(true)) },
+    }
+}
+
 /// A thing found by what was typed: its place in the list.
 pub(crate) fn find(kind: &str, names: &[String], typed: &str) -> Result<usize, String> {
     let wanted = typed.trim().to_lowercase();
@@ -1444,13 +1459,15 @@ impl crate::App {
         // A change that couldn't be saved, because the song's file changed outside the app, is
         // said.
         let mut reply = result.unwrap_or_else(Reply::failed);
-        // A song pack job started in the background: its number, for `job N` and `--wait`.
+        // A song pack job started in the background: its number, for `job N` and `--wait`, and
+        // this run's word (job numbers start again with the app).
         if let Some(job) = self.last_job.take() {
             match &mut reply.data {
                 serde_json::Value::Object(map) => {
                     map.insert("job".to_owned(), serde_json::json!(job));
+                    map.insert("run".to_owned(), serde_json::json!(self.run_word));
                 }
-                data => *data = serde_json::json!({"job": job}),
+                data => *data = serde_json::json!({"job": job, "run": self.run_word}),
             }
             reply.text.push_str(&format!(" (job {job}; sp job {job} says how it went)"));
         }
@@ -1560,16 +1577,8 @@ impl crate::App {
             .get(1)
             .and_then(|w| w.parse().ok())
             .ok_or("job N (the number a background song pack job was given)")?;
-        match self.jobs.iter().find(|(have, _)| *have == job) {
-            None => Err(format!("There is no job {job}.")),
-            Some((_, None)) => {
-                Ok(Reply::with(format!("Job {job} is still going."), serde_json::json!({"job": job, "done": false})))
-            }
-            Some((_, Some(Ok(said)))) => Ok(Reply::with(said.clone(), serde_json::json!({"job": job, "done": true}))),
-            Some((_, Some(Err(problem)))) => {
-                Ok(Reply { ok: false, text: problem.clone(), data: serde_json::json!({"job": job, "done": true}) })
-            }
-        }
+        let kept = self.jobs.iter().find(|(have, _)| *have == job).map(|(_, how)| how);
+        Ok(job_reply(job, kept, &self.run_word))
     }
 
     /// `song reload [SONG [--now]]`.
@@ -3629,6 +3638,23 @@ mod tests {
         assert_eq!(spanish, "River Song tiene 6 diapositivas; no hay diapositiva 9.");
         // What `sp` writes (write_reply) is in English again.
         assert_eq!(english_of(&spanish), english);
+    }
+
+    /// `job N` always says the run it comes from, and `done` only for a job this run has: so a
+    /// job of an earlier run, whose number came round again, is never taken for this run's.
+    #[test]
+    fn a_jobs_reply_says_its_run_and_done_only_for_a_job_of_this_run() {
+        let going = super::job_reply(3, Some(&None), "run-a");
+        assert!(going.ok);
+        assert_eq!(going.data, serde_json::json!({"job": 3, "run": "run-a", "done": false}));
+        let done = super::job_reply(3, Some(&Some(Ok("Installed the Bible.".to_owned()))), "run-a");
+        assert_eq!((done.ok, done.text.as_str()), (true, "Installed the Bible."));
+        assert_eq!(done.data["done"], true);
+        let failed = super::job_reply(3, Some(&Some(Err("It stopped.".to_owned()))), "run-a");
+        assert_eq!((failed.ok, failed.data["done"].clone()), (false, serde_json::json!(true)));
+        let none = super::job_reply(9, None, "run-a");
+        assert_eq!((none.ok, none.text.as_str()), (false, "There is no job 9."));
+        assert_eq!(none.data, serde_json::json!({"job": 9, "run": "run-a"}));
     }
 
     /// Every first word the app carries out a command for starts a command when typed after

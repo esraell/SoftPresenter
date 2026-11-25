@@ -1480,7 +1480,11 @@ the command's facts where it has any:
 | Command | `data` |
 |---|---|
 | `status` | `token`, for [`--wait --since`](#waiting-for-a-change) (with `--wait`, also `changed`: the parts that changed since the token); `live` (null when nothing is on screen): `song`, `slide`, `slides`, `words`, `kind` (`song`, `passage`, `voxlive`, or `catalog` for a song of the song catalog shown from the find box and not in the library), the song's `id` and its `number` in `sp songs` (null for a passage or a catalog song), and the `playlist` and `item` number it was opened from (null when it wasn't); `next_slide`, `media`, `message`, `props`, `announcements`, `media_playlist`, `timers` (each `name`, `kind`, `shows`, `running`), `audio` (`track`, `paused`, `seconds`, `length`, `volume`), `playlist` (`name`, `item_last_opened` and its number `item`, `listed`), `audience_on`, `stage_on`, `continuous`, `identify`, `main_theme`, `selected_song` |
-| `playlists`, `media`, `themes`, `timers`, `messages`, `props`, `macros`, `audio` | An array of names, in their numbered order |
+| `playlists`, `media`, `themes`, `audio` | An array of names, in their numbered order |
+| `messages` | An object for each, in their numbered order: `[{"name": "Parking", "text": "Car park full", "showing": false, "leaves_after": 30}]` (`text` with tokens such as `{timer:Sermon}` as written; `leaves_after` in seconds, null when it stays until cleared) |
+| `timers` | An object for each, in their numbered order: `name`, `kind`, `shows` (what it shows now), `running` |
+| `props` | An object for each, in their numbered order: `name`, `on` (on the screens now), `clears_after` (seconds, null when it stays until cleared) |
+| `macros` | An object for each, in their numbered order: `name`, `steps` (what it does, in words), `runs_when_opening` |
 | `songs` | `[{"number": 2, "title": "River Song", "id": "829a…", "changed_outside": false}]`: the number is the place in the list, the id is the song's own and stays when the library moves or songs are added |
 | `playlist [NAME]` | An object for each item: `item`, `uid` (the item's own id: kept when items are moved, when the playlist is saved and when the app opens again; `--aim` takes it in place of the number), `kind`, `title`, `missing`, `text`, and `id`, `number`, `media_type` or `bibles` by its kind ([above](#playlists-and-libraries)) |
 | `libraries` | `[{"name": "Hymns", "songs": 3, "missing": 1}]` |
@@ -1500,7 +1504,8 @@ the command's facts where it has any:
 | `bible search WORDS` | `[{"verse": "John 3:16", "chapter": …, "words": "…", "bible": "KJV"}]` |
 | `song import` | `imported`, `making` (presentations still being turned into slides), `opening` (song bundles still being read), `notes` (pictures or videos a bundle's song came without, and what a bundle left out), `pictures` and `videos` (how many a bundle brought into the media bin), `problems` (songs not imported, those already in the library among them) |
 | `settings` | Every setting, as the app keeps it |
-| A command that starts a job | `job`: its number |
+| A command that starts a job | `job`: its number; `run`: a word the app makes each time it starts (job numbers start again from 1 with the app, so the two together name one job) |
+| `job N` | `job`, `run` (as above: a different word means the job is another run's), and `done` (false while it goes on), which is left out when the app has no job N |
 
 The other commands answer in `text` only.
 

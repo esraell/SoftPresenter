@@ -390,7 +390,7 @@ pub const TOOLS: &[Tool] = &[
     Tool {
         name: "show_message",
         title: "Show a message on the screens",
-        description: "Shows a message over the slides on the audience screens: one kept in SoftPresenter, by name (list_messages), or a few words given (shown once). Hide it with clear_screens and layer messages. Only when the person asks for it now; SoftPresenter asks them first, and refuses unless it allows assistants to change the screens.",
+        description: "Shows a message over the slides on the audience screens: one kept in SoftPresenter, by name (list_messages), or a few words given, which SoftPresenter keeps as its quick message (in place of the words that message had; list_messages then shows it), so they can be shown again. Hide it with clear_screens and layer messages. Only when the person asks for it now; SoftPresenter asks them first, and refuses unless it allows assistants to change the screens.",
         need: Need::Asks,
         screens: true,
         idempotent: true,
@@ -398,7 +398,7 @@ pub const TOOLS: &[Tool] = &[
             object(
                 json!({
                     "message": {"type": "string", "description": "A message kept in SoftPresenter, by name. Give this or text."},
-                    "text": {"type": "string", "description": "Words to show once, at most 200 characters. Give this or message."}
+                    "text": {"type": "string", "description": "Words to show, at most 200 characters: kept as SoftPresenter's quick message, in place of its words. Give this or message."}
                 }),
                 &[],
             )
@@ -608,19 +608,18 @@ pub fn run(tool: &Tool, args: &Args, app: &dyn App) -> Answer {
         "read_song" => only(args, tool, &["song"]).and_then(|()| read_song(args, app, tool.name)),
         "look_up_bible" => only(args, tool, &["reference"])
             .and_then(|()| word(args, "reference", 200))
-            .and_then(|reference| reply_answer(ask(app, tool.name, vec!["bible".into(), "text".into(), reference]))),
+            .and_then(|reference| look_up_bible(app, tool.name, reference)),
         "search_bible" => only(args, tool, &["words"])
             .and_then(|()| word(args, "words", 200))
-            .and_then(|found| reply_answer(ask(app, tool.name, vec!["bible".into(), "search".into(), found]))),
-        "list_bibles" => only(args, tool, &[]).and_then(|()| reply_answer(ask(app, tool.name, words(&["bibles"])))),
+            .and_then(|found| search_bible(app, tool.name, found)),
+        "list_bibles" => only(args, tool, &[]).and_then(|()| list_bibles(app, tool.name)),
         "list_playlists" => only(args, tool, &[]).and_then(|()| list_playlists(app, tool.name)),
         "read_playlist" => only(args, tool, &["playlist"]).and_then(|()| read_playlist(args, app, tool.name)),
-        "list_media" => {
-            only(args, tool, &[]).and_then(|()| names_answer(ask(app, tool.name, words(&["media"])), "media"))
-        }
-        "list_messages" => {
-            only(args, tool, &[]).and_then(|()| names_answer(ask(app, tool.name, words(&["messages"])), "messages"))
-        }
+        "list_media" => only(args, tool, &[]).and_then(|()| {
+            let reply = ask(app, tool.name, words(&["media"]))?;
+            Ok(Answer::with(reply.text, json!({"pictures_and_videos": reply.data})))
+        }),
+        "list_messages" => only(args, tool, &[]).and_then(|()| list_messages(app, tool.name)),
         "create_song" => only(args, tool, &["title", "sections"]).and_then(|()| create_song(args, app, tool.name)),
         "create_playlist" => only(args, tool, &["name"])
             .and_then(|()| word(args, "name", 120))
@@ -633,20 +632,84 @@ pub fn run(tool: &Tool, args: &Args, app: &dyn App) -> Answer {
     answered.unwrap_or_else(Answer::failed)
 }
 
-/// The app's reply as an answer: its words, and its facts as an object.
+/// The app's reply as an answer: its words, and its facts when it gives an object of them.
 fn reply_answer(reply: Result<Reply, String>) -> Result<Answer, String> {
     let reply = reply?;
     Ok(match reply.data {
-        Value::Null => Answer::done(reply.text),
         Value::Object(_) => Answer::with(reply.text, reply.data),
-        data => Answer::with(reply.text, json!({"items": data})),
+        _ => Answer::done(reply.text),
     })
 }
 
-/// A list of names (`media`, `messages`): numbered words, and the names.
-fn names_answer(reply: Result<Reply, String>, key: &str) -> Result<Answer, String> {
-    let reply = reply?;
-    Ok(Answer::with(reply.text, json!({ key: reply.data })))
+/// An object the app gave, with only the fields named, under names that say what they are on
+/// their own: an assistant may see these facts and not the words beside them.
+fn picked(item: &Value, fields: &[(&str, &str)]) -> Value {
+    let mut out = Map::new();
+    for (from, to) in fields {
+        if let Some(value) = item.get(*from) {
+            out.insert((*to).to_owned(), value.clone());
+        }
+    }
+    Value::Object(out)
+}
+
+/// Each object of a list the app gave, `picked`.
+fn renamed(list: &Value, fields: &[(&str, &str)]) -> Vec<Value> {
+    list.as_array().map(|items| items.iter().map(|item| picked(item, fields)).collect()).unwrap_or_default()
+}
+
+/// Numbers as words: "1", "1 and 3", "1, 3 and 5".
+fn and_list(numbers: &[u64]) -> String {
+    let words: Vec<String> = numbers.iter().map(u64::to_string).collect();
+    match words.split_last() {
+        None => String::new(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+fn look_up_bible(app: &dyn App, tool: &str, reference: String) -> Result<Answer, String> {
+    let reply = ask(app, tool, vec!["bible".into(), "text".into(), reference.clone()])?;
+    let facts = json!({
+        "reference": reference,
+        "passage": reply.data.get("passage"),
+        "translations": reply.data.get("bibles"),
+        "slides": renamed(&reply.data["slides"], &[("slide", "slide"), ("group", "verses"), ("words", "words")]),
+    });
+    Ok(Answer::with(reply.text, facts))
+}
+
+fn search_bible(app: &dyn App, tool: &str, found: String) -> Result<Answer, String> {
+    let reply = ask(app, tool, vec!["bible".into(), "search".into(), found.clone()])?;
+    let verses = renamed(
+        &reply.data,
+        &[("verse", "reference"), ("bible", "translation"), ("words", "words"), ("chapter", "chapter")],
+    );
+    Ok(Answer::with(reply.text, json!({"searched_for": found, "found": verses.len(), "verses": verses})))
+}
+
+fn list_bibles(app: &dyn App, tool: &str) -> Result<Answer, String> {
+    let reply = ask(app, tool, words(&["bibles"]))?;
+    let facts = json!({
+        "installed": renamed(
+            &reply.data["installed"],
+            &[("name", "name"), ("short", "short_name"), ("language", "language"), ("shipped", "comes_with_the_app")],
+        ),
+        "to_download": renamed(
+            &reply.data["offered"],
+            &[("name", "name"), ("short", "short_name"), ("language", "language"), ("downloading", "downloading_now")],
+        ),
+    });
+    Ok(Answer::with(reply.text, facts))
+}
+
+fn list_messages(app: &dyn App, tool: &str) -> Result<Answer, String> {
+    let reply = ask(app, tool, words(&["messages"]))?;
+    let messages = renamed(
+        &reply.data,
+        &[("name", "name"), ("text", "words"), ("showing", "showing_now"), ("leaves_after", "leaves_after_seconds")],
+    );
+    Ok(Answer::with(reply.text, json!({"messages": messages})))
 }
 
 /// `status` with the screens: what the screens show, and each screen.
@@ -677,34 +740,62 @@ fn search_songs(args: &Args, app: &dyn App, tool: &str) -> Result<Answer, String
     let reply = match reply {
         Ok(reply) => reply,
         // Nothing found is an answer, not a failure.
-        Err(said) if found && said.starts_with("No song has") => return Ok(Answer::with(said, json!({"songs": []}))),
+        Err(said) if found && said.starts_with("No song has") => {
+            return Ok(Answer::with(said, json!({"searched_for": query, "found": 0, "songs": []})));
+        }
         Err(said) => return Err(said),
     };
     let all = reply.data.as_array().cloned().unwrap_or_default();
-    let shown: Vec<Value> = all.iter().take(limit).cloned().collect();
     let mut lines = Vec::new();
-    for song in &shown {
+    let mut songs = Vec::new();
+    for song in all.iter().take(limit) {
+        // `search` gives the title as `song` (its `title` says whether the title holds the
+        // words); `songs` gives it as `title`.
         let title = song.get("song").or_else(|| song.get("title")).and_then(Value::as_str).unwrap_or_default();
         let id = song.get("id").and_then(Value::as_str).unwrap_or_default();
-        let slides = song
+        if !found {
+            lines.push(format!("{title}  [id {id}]"));
+            songs.push(json!({"title": title, "id": id}));
+            continue;
+        }
+        let in_title = song.get("title").and_then(Value::as_bool) == Some(true);
+        let slides: Vec<u64> = song
             .get("slides")
             .and_then(Value::as_array)
-            .filter(|slides| !slides.is_empty())
-            .map(|slides| {
-                let list: Vec<String> = slides.iter().map(|slide| slide.to_string()).collect();
-                format!(" (slides {})", list.join(", "))
-            })
+            .map(|s| s.iter().filter_map(Value::as_u64).collect())
             .unwrap_or_default();
-        lines.push(format!("{title}  [id {id}]{slides}"));
+        let on_slides = match slides.as_slice() {
+            [] => String::new(),
+            [one] => format!("on slide {one}"),
+            many => format!("on slides {}", and_list(many)),
+        };
+        let where_found = match (in_title, on_slides.is_empty()) {
+            (true, true) => "in its title".to_owned(),
+            (true, false) => format!("in its title and {on_slides}"),
+            (false, _) => on_slides,
+        };
+        lines.push(format!("{title}  [id {id}]: {where_found}"));
+        songs.push(json!({
+            "title": title,
+            "id": id,
+            "where_found": where_found,
+            "title_holds_the_words": in_title,
+            "slides_holding_the_words": slides,
+        }));
     }
-    let head = match (found, all.len() > shown.len()) {
-        (true, false) => format!("{} found:", all.len()),
-        (true, true) => format!("{} found (the first {}):", all.len(), shown.len()),
-        (false, false) => format!("{} songs in the library:", all.len()),
-        (false, true) => format!("{} songs in the library (the first {}):", all.len(), shown.len()),
+    let first = if all.len() > songs.len() { format!(" (the first {})", songs.len()) } else { String::new() };
+    let head = match (&query, all.len()) {
+        (Some(query), 1) => format!("1 song holds {}:", quoted_name(query, 200)),
+        (Some(query), count) => format!("{count} songs hold {}{first}:", quoted_name(query, 200)),
+        (None, 1) => "1 song in the library:".to_owned(),
+        (None, count) => format!("{count} songs in the library{first}:"),
     };
     let text = format!("{head}\n{}", lines.join("\n"));
-    Ok(Answer::with(text, json!({"songs": shown, "total": all.len()})))
+    let facts = match &query {
+        Some(query) => json!({"searched_for": query, "found": all.len(), "shown": songs.len(), "songs": songs}),
+        None => json!({"songs_in_the_library": all.len(), "shown": songs.len(), "songs": songs}),
+    };
+    Ok(Answer::with(text, facts))
 }
 
 fn read_song(args: &Args, app: &dyn App, tool: &str) -> Result<Answer, String> {
@@ -714,7 +805,24 @@ fn read_song(args: &Args, app: &dyn App, tool: &str) -> Result<Answer, String> {
     let id = info.data.get("id").and_then(Value::as_str).ok_or("That song has no id.")?.to_owned();
     let text = ask(app, tool, vec!["song".into(), "text".into(), id])?;
     let words = text.data.get("text").and_then(Value::as_str).unwrap_or(&text.text).to_owned();
-    Ok(Answer::with(format!("{}\n\n{words}", info.text), json!({"info": info.data, "text": words})))
+    let mut facts = picked(
+        &info.data,
+        &[
+            ("id", "id"),
+            ("title", "title"),
+            ("artist", "artist"),
+            ("author", "author"),
+            ("publisher", "publisher"),
+            ("year", "year"),
+            ("ccli", "ccli_number"),
+            ("slides", "slide_count"),
+            ("theme", "theme"),
+            ("transition", "transition"),
+            ("loops", "loops_to_the_first_slide"),
+        ],
+    );
+    facts["song_text"] = json!(words);
+    Ok(Answer::with(format!("{}\n\n{words}", info.text), facts))
 }
 
 /// The playlists' names, and the one in front.
@@ -741,7 +849,12 @@ fn list_playlists(app: &dyn App, tool: &str) -> Result<Answer, String> {
         })
         .collect();
     let text = if lines.is_empty() { "(no playlists)".to_owned() } else { lines.join("\n") };
-    Ok(Answer::with(text, json!({"playlists": names, "in_front": front})))
+    let listed: Vec<Value> = names
+        .iter()
+        .enumerate()
+        .map(|(at, name)| json!({"number": at + 1, "name": name, "in_front": front.as_deref() == Some(name.as_str())}))
+        .collect();
+    Ok(Answer::with(text, json!({"playlists": listed})))
 }
 
 /// A playlist named as `sp` finds one: its place among the playlists, and its name.
@@ -801,6 +914,13 @@ fn shown_words(words: &str) -> String {
     if words.trim().is_empty() { "(a slide with no words)".to_owned() } else { quoted_name(words, WORDS_SHOWN) }
 }
 
+/// A kept message's words, quoted for a question as a slide's are (its lines read as one, parted
+/// by a slash), or a note that it has none.
+fn message_words(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+    if lines.is_empty() { "(a message with no words)".to_owned() } else { quoted_name(&lines.join(" / "), WORDS_SHOWN) }
+}
+
 fn read_playlist(args: &Args, app: &dyn App, tool: &str) -> Result<Answer, String> {
     let (at, names, reply) = playlist_items(args, app, tool)?;
     let items = reply.data.as_array().cloned().unwrap_or_default();
@@ -815,6 +935,21 @@ fn read_playlist(args: &Args, app: &dyn App, tool: &str) -> Result<Answer, Strin
     if items.is_empty() {
         lines.push("  (empty)".to_owned());
     }
+    // The item's place is its `number`; the app's own `number` (a song's place in the library,
+    // a picture's in the media bin) is left out, as the words leave it out.
+    let items = renamed(
+        &reply.data,
+        &[
+            ("item", "number"),
+            ("uid", "uid"),
+            ("kind", "kind"),
+            ("title", "title"),
+            ("missing", "missing"),
+            ("id", "song_id"),
+            ("media_type", "media_type"),
+            ("bibles", "translations"),
+        ],
+    );
     Ok(Answer::with(lines.join("\n"), json!({"playlist": names[at], "items": items})))
 }
 
@@ -913,8 +1048,9 @@ fn create_song(args: &Args, app: &dyn App, tool: &str) -> Result<Answer, String>
         Ok(info) => {
             let id = info.data.get("id").cloned().unwrap_or(Value::Null);
             let slides = info.data.get("slides").cloned().unwrap_or(Value::Null);
-            let text = format!("{} Its id: {}.", made.text, id.as_str().unwrap_or("?"));
-            Ok(Answer::with(text, json!({"id": id, "slides": slides})))
+            let count = slides.as_u64().map(|count| format!(", {count} slides")).unwrap_or_default();
+            let text = format!("{} Its id: {}{count}.", made.text, id.as_str().unwrap_or("?"));
+            Ok(Answer::with(text, json!({"title": info.data.get("title"), "id": id, "slide_count": slides})))
         }
         Err(_) => Ok(Answer::done(made.text)),
     }
@@ -966,7 +1102,7 @@ fn add_to_playlist(args: &Args, app: &dyn App, tool: &str) -> Result<Answer, Str
             }
         }
     }
-    Ok(Answer::with(said.join("\n"), json!({"playlist": name, "added": said.len()})))
+    Ok(Answer::with(said.join("\n"), json!({"playlist": name, "items_added": said.len(), "each_added": said})))
 }
 
 /// The plan of a tool that asks first: what it names, found exactly, and the question.
@@ -1159,17 +1295,34 @@ pub fn plan(tool: &Tool, args: &Args, app: &dyn App) -> Result<Plan, String> {
             only(args, tool, &["message", "text"])?;
             match (optional_word(args, "message", 120)?, args.get("text")) {
                 (Some(typed), None) => {
+                    // Each kept message, as `messages` gives it: its name and its words.
                     let reply = ask(app, tool.name, words(&["messages"]))?;
-                    let names: Vec<String> = reply
+                    let kept: Vec<(String, String)> = reply
                         .data
                         .as_array()
-                        .map(|names| names.iter().filter_map(|n| n.as_str().map(str::to_owned)).collect())
+                        .map(|messages| {
+                            messages
+                                .iter()
+                                .filter_map(|message| {
+                                    let name = message.get("name").and_then(Value::as_str)?.to_owned();
+                                    let text =
+                                        message.get("text").and_then(Value::as_str).unwrap_or_default().to_owned();
+                                    Some((name, text))
+                                })
+                                .collect()
+                        })
                         .unwrap_or_default();
+                    let names: Vec<String> = kept.iter().map(|(name, _)| name.clone()).collect();
                     let at = crate::control::find("message", &names, &typed)?;
-                    let name = names[at].clone();
+                    let (name, text) = kept[at].clone();
                     Ok(Plan {
-                        question: format!("Show the message {} on the screens now?", quoted_name(&name, 80)),
-                        binding: format!("message|{name}"),
+                        question: format!(
+                            "Show the message {} on the screens now: {}?",
+                            quoted_name(&name, 80),
+                            message_words(&text)
+                        ),
+                        // Its words too: words changed while the person was asked mean asking again.
+                        binding: format!("message|{name}|{text}"),
                         commands: vec![vec!["message".into(), "show".into(), name]],
                     })
                 }
@@ -1253,26 +1406,53 @@ pub fn allowed(tool: &Tool, plan: &Plan, app: &dyn App) -> Result<(), String> {
     Ok(())
 }
 
-/// `install_bible`: starts the download; the job's number when it runs in the background.
-pub fn start_download(args: &Args, app: &dyn App, tool: &Tool) -> Result<(Answer, Option<u64>), String> {
+/// A download started: what the app said, and, when it goes on in the background, its job's
+/// number and the word of the app's run that numbered it (numbers start again with the app).
+pub struct Started {
+    pub answer: Answer,
+    pub job: Option<u64>,
+    pub run: Option<String>,
+}
+
+/// `install_bible`: starts the download.
+pub fn start_download(args: &Args, app: &dyn App, tool: &Tool) -> Result<Started, String> {
     only(args, tool, &["bible"])?;
     let bible = word(args, "bible", 60)?;
     let reply = ask(app, tool.name, vec!["bible".into(), "install".into(), bible])?;
     let job = reply.data.get("job").and_then(Value::as_u64);
-    Ok((Answer::done(reply.text), job))
+    let run = reply.data.get("run").and_then(Value::as_str).map(str::to_owned);
+    Ok(Started { answer: Answer::done(reply.text), job, run })
 }
 
-/// How a background job stands: still going (`None`), or done, with its answer.
-pub fn job_state(app: &dyn App, job: u64) -> Result<Option<Answer>, String> {
+/// How a background job stands.
+#[derive(Debug, PartialEq)]
+pub enum JobState {
+    Going,
+    Done(Answer),
+    /// The app has no such job: none of that number, or one of another run (the app was started
+    /// again since, and gave the number again).
+    Unknown,
+}
+
+/// How a background job stands, checked against the run that numbered it when that is known;
+/// `Err` with the app's words when it doesn't answer about jobs (a refusal, or not open).
+pub fn job_state(app: &dyn App, job: u64, run: Option<&str>) -> Result<JobState, String> {
     let call = McpCall { tool: "tasks/get".to_owned(), asked: false, check: false };
     let reply = app.send(&["job".to_owned(), job.to_string()], &call)?;
-    match reply.data.get("done").and_then(Value::as_bool) {
-        Some(false) => Ok(None),
-        Some(true) if reply.ok => Ok(Some(Answer::done(reply.text))),
-        Some(true) => Ok(Some(Answer::failed(reply.text))),
-        // No such job (the app was started again), or a refusal.
-        None => Err(reply.text),
+    if reply.data.get("job").is_none() {
+        return Err(reply.text);
     }
+    if let Some(run) = run
+        && reply.data.get("run").and_then(Value::as_str) != Some(run)
+    {
+        return Ok(JobState::Unknown);
+    }
+    Ok(match reply.data.get("done").and_then(Value::as_bool) {
+        Some(false) => JobState::Going,
+        Some(true) if reply.ok => JobState::Done(Answer::done(reply.text)),
+        Some(true) => JobState::Done(Answer::failed(reply.text)),
+        None => JobState::Unknown,
+    })
 }
 
 #[cfg(test)]

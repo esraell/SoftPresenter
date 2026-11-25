@@ -64,6 +64,33 @@ fn shown_tool(tool: &str) -> String {
     if kept.trim().is_empty() { "(unnamed)".to_owned() } else { kept }
 }
 
+/// The jobs an assistant's tools started (a Bible download), by number, with the tool: the log
+/// says "started" when one starts and "done" or "failed" when it ends, however the assistant
+/// waits for it (a task it may never ask about again, or the call waiting).
+#[derive(Debug, Default)]
+pub struct Jobs {
+    started: Vec<(u64, String)>,
+}
+
+impl Jobs {
+    /// Keeps a job a tool started; the log's line for it.
+    fn started(&mut self, job: u64, tool: &str) -> String {
+        self.started.push((job, tool.to_owned()));
+        // As many as the app keeps jobs for.
+        if self.started.len() > 50 {
+            self.started.remove(0);
+        }
+        format!("{tool}: started (job {job})")
+    }
+
+    /// The log's line for a job that ended, when a tool started it.
+    pub fn ended(&mut self, job: u64, ok: bool) -> Option<String> {
+        let at = self.started.iter().position(|(have, _)| *have == job)?;
+        let (_, tool) = self.started.remove(at);
+        Some(format!("{tool}: {} (job {job})", if ok { "done" } else { "failed" }))
+    }
+}
+
 impl crate::App {
     /// Carries out a request from an AI assistant (`sp mcp`), once the switches and the policy
     /// allow it: with `check`, only says whether they would. Files are closed while it runs, as
@@ -95,8 +122,14 @@ impl crate::App {
                 // what it names (before the person is even asked), and an assistant may look
                 // often. What reads is the policy's word, by the command's shape.
                 if kind != policy::Kind::Reads {
-                    let outcome = if answer.ok { "done" } else { "not done" };
-                    crate::applog::event("mcp", &format!("{tool}: {outcome}"));
+                    let job = answer.data.get("job").and_then(serde_json::Value::as_u64).filter(|_| answer.ok);
+                    let line = match job {
+                        // A download goes on after the reply: started now, and how it ended
+                        // when it does (`finish_job`).
+                        Some(job) => self.mcp_jobs.started(job, &tool),
+                        None => format!("{tool}: {}", if answer.ok { "done" } else { "not done" }),
+                    };
+                    crate::applog::event("mcp", &line);
                 }
                 let _ = reply.send(answer);
                 // A change reaches the screens now, not at the window's next redraw.
@@ -125,6 +158,23 @@ mod tests {
         assert_eq!(shown_tool("a\nb\u{202e}c"), "abc");
         assert_eq!(shown_tool(""), "(unnamed)");
         assert_eq!(shown_tool(&"x".repeat(100)).len(), 48);
+    }
+
+    /// A download an assistant started is logged as started, and as done or failed when it ends,
+    /// once; a job no tool started (one from `sp` or the window) has no `[mcp]` line.
+    #[test]
+    fn an_assistants_download_is_logged_started_then_done_or_failed() {
+        let mut jobs = Jobs::default();
+        assert_eq!(jobs.started(3, "install_bible"), "install_bible: started (job 3)");
+        assert_eq!(jobs.started(4, "install_bible"), "install_bible: started (job 4)");
+        assert_eq!(jobs.ended(2, true), None, "not an assistant's");
+        assert_eq!(jobs.ended(4, false), Some("install_bible: failed (job 4)".to_owned()));
+        assert_eq!(jobs.ended(3, true), Some("install_bible: done (job 3)".to_owned()));
+        assert_eq!(jobs.ended(3, true), None, "once");
+        for job in 0..60 {
+            jobs.started(job, "install_bible");
+        }
+        assert!(jobs.started.len() <= 50);
     }
 
     #[test]

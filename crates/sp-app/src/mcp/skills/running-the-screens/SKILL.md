@@ -54,7 +54,8 @@ The screens are made of layers, from the back: **media** (a picture or video beh
 - `show_bible_passage` puts a passage's first verse on the screens; `next_slide` then goes verse
   by verse.
 - `show_message` shows a message kept in SoftPresenter (`list_messages`) or a few words of the
-  person's; clear `messages` to take it off.
+  person's, which SoftPresenter keeps as its quick message, in place of the words it had; clear
+  `messages` to take it off.
 - Slides are numbered from 1; `read_song` shows a song's sections and slides, and
   `read_playlist` the playlist's items.
 

@@ -103,7 +103,14 @@ screens now?") and goes ahead only on Yes.
 | `show_bible_passage` | A passage's first verse on the screens | both switches; asks |
 | `next_slide`, `previous_slide` | The next or previous slide on the screens, as the arrow keys do | both switches; asks |
 | `clear_screens` | Clears the slide, media, props, messages, audio, the announcements, or all of them | both switches; asks |
-| `show_message` | A message, or a few words given, over the slides | both switches; asks |
+| `show_message` | A message kept in SoftPresenter, or a few words given, over the slides (words given are kept as SoftPresenter's quick message, in place of the words it had, as the Messages tab's Words once… keeps them) | both switches; asks |
+
+Each tool answers in words and, where it has them, with the same facts as JSON
+(`structuredContent`), which some assistants are shown in place of the words. The facts say what
+each is on its own: `search_songs` gives each song's `title` and `id` and where the words were
+found (`where_found`: "in its title and on slide 2", with `title_holds_the_words` and
+`slides_holding_the_words`), `read_playlist` each item's `number`, `uid`, `kind`, `title` and a
+song's `song_id`, and so on.
 
 Songs, items and messages are found by name as `sp` finds them (in part, any case; a name that
 fits several is never guessed), and better by the ids the lists give. Before asking, the server
@@ -138,9 +145,14 @@ later stays closed to assistants until it is looked at.
   importing or exporting files, or anything that names a file or folder on the computer (an
   assistant's words are only ever words: the disk is never looked at for them); web pages on
   slides and NDI.
+- **A Bible SoftPresenter doesn't offer**: `install_bible` takes the short name of one that
+  `list_bibles` lists to download (ASV, or НПУ in any case); any other name, or a file's path, is
+  refused as not offered, pointing to `list_bibles`.
 
-The app's log has a line for each change an assistant makes, `[mcp] TOOL: done` (or `not done`),
-and for each request refused, `[mcp] TOOL: refused (why)`; as for `sp`, reading isn't logged. An
+The app's log has a line for each change an assistant makes, `[mcp] TOOL: done` (or `not done`;
+a Bible download says `started (job N)` when it starts, and `done (job N)` or `failed (job N)`
+when it ends, whether or not the assistant waits for it), and for each request refused,
+`[mcp] TOOL: refused (why)`; as for `sp`, reading isn't logged. An
 `[mcp]` line never has the words of a song or anything else the assistant sent (the app's other
 lines are as for any change: a song that couldn't be saved is named, whoever made it). Switching
 the two switches is logged too.
@@ -182,8 +194,11 @@ zero-width spaces), are taken out of what it quotes.
 `install_bible` downloads a Bible, which can take a while. To an assistant that offers MCP Tasks
 (revision 2026-07-28), it answers at once with a task, which the assistant checks on until the
 Bible is in; the task is the app's own job (`sp job N`), so it survives the server being started
-again. Without Tasks, the call waits for the download (up to two minutes, then says it is still
-going). Nothing else the server does takes long enough to need one: every other command is
+again. Job numbers start again from 1 when SoftPresenter does, so a task's id also carries a word
+the app makes each time it starts: after the app has been started again, an earlier task is an
+unknown task (JSON-RPC's invalid params), never the new run's job of the same number. Without
+Tasks, the call waits for the download (up to two minutes, then says it is still going, or that
+SoftPresenter was started again meanwhile). Nothing else the server does takes long enough to need one: every other command is
 answered by the app within a second or two.
 
 ## How it works

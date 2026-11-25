@@ -310,9 +310,7 @@ impl crate::App {
         let path = std::path::Path::new(typed);
         // A Bible offered, named exactly, is meant even if a file of that name happens to be
         // there; any other path that is there is read by what it holds, whatever its ending.
-        let offered_name = crate::bible::OFFERED
-            .iter()
-            .any(|b| b.short.eq_ignore_ascii_case(typed) || b.id.eq_ignore_ascii_case(typed));
+        let offered_name = crate::bible::offered_named(typed).is_some();
         // From a remote page only a Bible offered is installed: the disk is never looked at.
         if !self.outside_call() && path.exists() && !offered_name {
             self.running.as_ref().ok_or("The app isn't ready.")?;
@@ -327,9 +325,8 @@ impl crate::App {
         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
         let offered: Vec<&crate::bible::Offered> = crate::bible::OFFERED.iter().collect();
         let names: Vec<String> = offered.iter().map(|b| format!("{} ({})", b.name, b.short)).collect();
-        let at = offered
-            .iter()
-            .position(|b| b.short.eq_ignore_ascii_case(typed) || b.id.eq_ignore_ascii_case(typed))
+        let at = crate::bible::offered_named(typed)
+            .and_then(|named| offered.iter().position(|b| b.id == named.id))
             .map_or_else(|| find("Bible offered", &names, typed), Ok)
             .map_err(|problem| format!("{problem} Those offered: {}.", names.join(", ")))?;
         let bible = offered[at];

@@ -376,7 +376,7 @@ fn control_refusal(args: &[String]) -> Option<String> {
 
 /// Whether a Bible's name is one SoftPresenter offers to download (`bibles` lists them).
 fn offered_bible(typed: &str) -> bool {
-    crate::bible::OFFERED.iter().any(|b| b.short.eq_ignore_ascii_case(typed) || b.id.eq_ignore_ascii_case(typed))
+    crate::bible::offered_named(typed).is_some()
 }
 
 #[cfg(test)]
