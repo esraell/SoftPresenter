@@ -15,7 +15,7 @@ library and the playlists, which the operator sees in SoftPresenter's window.
 1. Call `get_status`. If something is on the screens, a service or a rehearsal may be running:
    say so, keep to preparing, and never touch the screens unless the person asks you to.
 2. If a tool says AI assistants are switched off, tell the person where to switch them on
-   (SoftPresenter's Settings › Integrations › AI assistants) and stop.
+   (SoftPresenter's Settings › AI assistants, Prepare) and stop.
 
 ## The order of work
 

@@ -53,7 +53,7 @@ pub struct Request {
     pub v: u32,
     pub args: Vec<String>,
     /// Set by `sp mcp` on each request it sends for an AI assistant: the app then checks the
-    /// request against Settings › Integrations › AI assistants and `mcp::policy`, not as the
+    /// request against Settings › AI assistants and `mcp::policy`, not as the
     /// computer's own user's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp: Option<McpCall>,

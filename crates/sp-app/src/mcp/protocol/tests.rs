@@ -481,7 +481,7 @@ fn a_client_that_cant_ask_is_refused_with_why() {
 fn with_the_screens_switch_off_nothing_is_asked_and_the_app_says_how_to_allow_it() {
     let (written, app) = talk(reading_only(), &[show_song(1, json!({}), elicits())]);
     assert_eq!(written[0]["result"]["isError"], true);
-    assert!(text_of(&written[0]).contains("Let them change what's on the screens"));
+    assert!(text_of(&written[0]).contains("Prepare and run the screens"));
     assert!(!app.sent_any("go"));
     // The app refuses even an answered yes when the switch is off.
     let call = McpCall { tool: "show_song".to_owned(), asked: true, check: false };

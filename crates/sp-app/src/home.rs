@@ -583,9 +583,9 @@ pub struct HomeState {
     pub free_songbooks: crate::free_songbooks::View,
     /// The song catalog's songs in the find box and the slides area (`catalog_songs`).
     pub catalog: crate::catalog_songs::CatalogSongs,
-    /// Settings › Integrations › Command line: where the sp command stands, and what it said.
+    /// Settings › Command line: where the sp command stands, and what it said.
     pub command_line: crate::cli_install::Card,
-    /// Settings › Integrations › AI assistants (MCP): its switches, and what the card said.
+    /// Settings › AI assistants (MCP): its switches and tiles, and what the page said.
     pub mcp: crate::mcp::pane::View,
     /// An NDI name being typed in the Screens window, and the screen it is for. It is used
     /// when the field is left, so NDI is not restarted at every letter.

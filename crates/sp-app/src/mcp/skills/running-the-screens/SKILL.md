@@ -24,7 +24,7 @@ slowly and only when asked.
 4. **One step at a time.** One slide, one item, one clear. Never step through slides in a loop
    or on a timer; the person, or the operator, decides when the next slide goes up.
 5. **If changing the screens isn't allowed**, SoftPresenter says how the person can allow it
-   (Settings › Integrations › AI assistants). Tell them, and stop. Never look for another way
+   (Settings › AI assistants, Prepare and run the screens). Tell them, and stop. Never look for another way
    round, such as typing `sp` commands in a terminal.
 
 ## What is on the screens, and what Clear means

@@ -1,4 +1,4 @@
-//! Connecting an assistant with one click (Settings › Integrations › AI assistants (MCP)) or one
+//! Connecting an assistant with one click (Settings › AI assistants) or one
 //! command (`sp mcp connect APP`, `sp mcp disconnect APP`, `sp mcp status`): SoftPresenter put
 //! in, or taken out of, the settings of the apps that start an MCP server on this computer.
 //! Only ever when the person clicks or types it, never at install or at start: these are other
@@ -292,20 +292,16 @@ impl Company {
     pub fn apps(self) -> Vec<App> {
         App::here().into_iter().filter(|app| app.company() == Some(self)).collect()
     }
-
-    /// What Copy setup copies: each of its apps' settings, with this program's path filled in.
-    pub fn setup(self, program: &Path) -> String {
-        self.apps().into_iter().map(|app| app.setup(program)).collect::<Vec<_>>().join("\n\n")
-    }
 }
 
-/// What Copy setup copies for one app.
+/// The settings to add by hand for one app (Other apps' Copy setup), with this program's path
+/// filled in.
 pub fn app_setup(app: App, program: &Path) -> String {
     app.setup(program)
 }
 
 /// Names as one list: "Claude Desktop and Claude Code".
-fn and_list(names: &[&str]) -> String {
+pub(crate) fn and_list(names: &[&str]) -> String {
     match names {
         [] => String::new(),
         [one] => (*one).to_owned(),
@@ -1511,7 +1507,7 @@ pub fn not_found_words() -> &'static str {
 pub fn internet_only_words() -> &'static str {
     t(
         "mcp.internet_only",
-        "ChatGPT in a browser and the Grok and Gemini apps only reach servers on the internet, and SoftPresenter stays on this computer, so they can\u{2019}t use it.",
+        "ChatGPT in a browser and the Grok and Gemini apps only reach servers on the internet, so they can\u{2019}t connect here.",
     )
 }
 
@@ -2378,11 +2374,11 @@ mod tests {
             ),
             (Tone::Trouble, "Claude Code: No.".to_owned())
         );
-        // Copy setup: each app's settings, with the path filled in.
-        let setup = Company::Claude.setup(Path::new(SP));
+        // Each app's settings to add by hand, with the path filled in.
+        let setup = app_setup(App::ClaudeCode, Path::new(SP));
         assert!(setup.contains(&format!("claude mcp add --scope user softpresenter -- {SP} mcp")), "{setup}");
-        assert!(setup.contains("\"mcpServers\"") || cfg!(target_os = "linux"), "{setup}");
-        assert!(Company::Grok.setup(Path::new(SP)).contains("[mcp_servers.softpresenter]"));
+        assert!(app_setup(App::ClaudeDesktop, Path::new(SP)).contains("\"mcpServers\""));
+        assert!(app_setup(App::Grok, Path::new(SP)).contains("[mcp_servers.softpresenter]"));
         assert!(app_setup(App::Copilot, Path::new(SP)).contains("\"tools\": [\"*\"]"));
     }
 }

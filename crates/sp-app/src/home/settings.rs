@@ -399,7 +399,7 @@ fn pane_contents(ui: &mut egui::Ui, state: &mut HomeState, show: &Show, pane: Pa
             let songbooks = crate::catalog::offered().then_some(&mut state.songbooks);
             crate::integrations::pane(ui, &mut state.voxlive, &mut state.canva, songbooks, &mut state.timelychurch);
         }
-        Pane::AiAssistants => crate::mcp::pane::card(ui, &mut state.mcp),
+        Pane::AiAssistants => crate::mcp::pane::page(ui, &mut state.mcp),
         Pane::PhoneRemote => crate::remote::pane::pane(ui, &mut state.remote),
         Pane::Keys => keys_page(ui, state),
         Pane::CommandLine => command_line_page(ui, state),

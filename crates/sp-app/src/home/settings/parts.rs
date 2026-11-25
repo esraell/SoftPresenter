@@ -7,6 +7,7 @@ use std::sync::Arc;
 use egui::{Align2, Color32, CornerRadius, FontId, Frame, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 
 use crate::i18n::t;
+use crate::icons::Icon;
 use crate::studio::{
     BUTTON, BUTTON_HOVER, CARD, Flat, LINE, ON_EDGE, RADIUS_CARD, RADIUS_PANEL, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT,
     fixed, flat_button, paint_light, semibold, widest,
@@ -129,6 +130,149 @@ pub fn on_off(ui: &egui::Ui, rect: Rect, id: egui::Id, on: bool) -> egui::Respon
     flat_button(ui, rect, id, words, FontId::proportional(12.5), if on { Flat::On } else { Flat::Plain }, true)
 }
 
+/// How large a flat key with words is: as wide as they are, and 30 high.
+pub fn key_size(ui: &egui::Ui, words: &str) -> egui::Vec2 {
+    vec2(widest(ui, &[words], &FontId::proportional(12.5)) + 26.0, 30.0)
+}
+
+/// A flat key with words in `rect`: the button grey, or, `quiet`, no block at all and faint
+/// words that grow lighter under the pointer (for taking something away again).
+pub fn key(ui: &egui::Ui, rect: Rect, id: egui::Id, words: &str, quiet: bool) -> egui::Response {
+    if !quiet {
+        return flat_button(ui, rect, id, words, FontId::proportional(12.5), Flat::Plain, true);
+    }
+    let response = ui.interact(rect, id, Sense::click());
+    let ink = if response.hovered() { TEXT_DIM } else { TEXT_FAINT };
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, words, FontId::proportional(12.5), ink);
+    response
+}
+
+/// A flat key whose words follow a green light: one that has just done what it says ("Copied").
+pub fn lit_key(ui: &egui::Ui, rect: Rect, id: egui::Id, words: &str) -> egui::Response {
+    let response = ui.interact(rect, id, Sense::click());
+    crate::studio::paint_flat(ui.painter(), rect, 9.0, Flat::Plain, response.hovered());
+    let galley = ui.painter().layout_no_wrap(words.to_owned(), FontId::proportional(12.5), TEXT);
+    let left = rect.center().x - (galley.size().x + 14.0) / 2.0;
+    paint_light(ui.painter(), pos2(left + 3.5, rect.center().y), Some(crate::studio::READY));
+    ui.painter().galley(pos2(left + 14.0, rect.center().y - galley.size().y / 2.0), galley, TEXT);
+    response
+}
+
+/// Two lists side by side under a line (one above the other where there isn't room for 240
+/// each), each with its heading in small capitals: what is allowed, each line ticked in green,
+/// and what never is, each crossed in faint.
+pub fn two_lists(ui: &mut egui::Ui, (yes_title, yes): (&str, &[&str]), (no_title, no): (&str, &[&str])) {
+    let width = ui.available_width();
+    let beside = width >= 240.0 * 2.0 + 24.0;
+    let column = if beside { (width - 24.0) / 2.0 } else { width };
+    let list = |ui: &egui::Ui, title: &str, lines: &[&str], allowed: bool, at: Pos2| -> f32 {
+        let heading =
+            words(ui, &title.to_uppercase(), crate::studio::fixed_semibold(CAPS), TEXT_DIM, CAPS_SPACING, column);
+        let mut y = at.y + heading.size().y + 8.0;
+        ui.painter().galley(at, heading, TEXT_DIM);
+        for line in lines {
+            let ink = if allowed { TEXT } else { TEXT_DIM };
+            let galley = words(ui, line, FontId::proportional(13.0), ink, 0.0, column - 20.0);
+            let (mark, colour) = if allowed { ("\u{2713}", crate::studio::READY) } else { ("\u{00d7}", TEXT_FAINT) };
+            ui.painter().text(pos2(at.x, y), Align2::LEFT_TOP, mark, crate::studio::semibold(13.0), colour);
+            let height = galley.size().y;
+            ui.painter().galley(pos2(at.x + 20.0, y), galley, ink);
+            y += height + 6.0;
+        }
+        y - 6.0 - at.y
+    };
+    let top = ui.cursor().min;
+    ui.painter().hline(top.x..=top.x + width, top.y + 0.5, Stroke::new(1.0, LINE));
+    let first = list(ui, yes_title, yes, true, top + vec2(0.0, 12.0));
+    let second_at = if beside { top + vec2(column + 24.0, 12.0) } else { top + vec2(0.0, 12.0 + first + 12.0) };
+    let second = list(ui, no_title, no, false, second_at);
+    let height = if beside { first.max(second) } else { first + 12.0 + second };
+    ui.allocate_exact_size(vec2(width, 12.0 + height + 12.0), Sense::hover());
+}
+
+/// The line under a card's tiles: what the last click did, with a light of its tone, at the left,
+/// and a standing note at the right (under it when both don't fit on one line).
+pub fn said_line(ui: &mut egui::Ui, said: Option<(crate::cli_install::Tone, &str)>, note: &str) {
+    use crate::cli_install::Tone;
+    let width = ui.available_width();
+    let font = FontId::proportional(12.0);
+    let note_whole = words(ui, note, font.clone(), TEXT_FAINT, 0.0, f32::INFINITY);
+    let said_whole = said.map(|(_, text)| words(ui, text, font.clone(), TEXT_FAINT, 0.0, f32::INFINITY));
+    let said_width = said_whole.as_ref().map_or(0.0, |said| said.size().x + 15.0);
+    let one_line = said_width + 16.0 + note_whole.size().x <= width;
+    let said_galley = said.map(|(_, text)| words(ui, text, font.clone(), TEXT_FAINT, 0.0, width - 15.0));
+    let note_galley = if one_line { note_whole } else { words(ui, note, font, TEXT_FAINT, 0.0, width) };
+    let said_height = said_galley.as_ref().map_or(0.0, |said| said.size().y);
+    let height =
+        if one_line { said_height.max(note_galley.size().y) } else { said_height + 4.0 + note_galley.size().y };
+    let (place, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    if let (Some((tone, _)), Some(galley)) = (said, said_galley) {
+        let colour = match tone {
+            Tone::Trouble => crate::studio::TALLY,
+            Tone::Care => crate::studio::CARE,
+            Tone::Good => crate::studio::READY,
+            Tone::Plain => TEXT_FAINT,
+        };
+        ui.painter().circle_filled(pos2(place.min.x + 3.5, place.min.y + 8.0), 3.5, colour);
+        ui.painter().galley(pos2(place.min.x + 15.0, place.min.y), galley, TEXT_FAINT);
+    }
+    let note_at = if one_line {
+        pos2(place.max.x - note_galley.size().x, place.min.y)
+    } else {
+        pos2(place.min.x, place.min.y + if said.is_some() { said_height + 4.0 } else { 0.0 })
+    };
+    ui.painter().galley(note_at, note_galley, TEXT_FAINT);
+    ui.add_space(12.0);
+}
+
+/// A part of a card folded away under a line until its title is clicked, as the design's More:
+/// `open` opens it (a capture run's, or after a copy).
+pub fn fold(ui: &mut egui::Ui, salt: &str, title: &str, open: bool, add: impl FnOnce(&mut egui::Ui)) {
+    let width = ui.available_width();
+    let top = ui.cursor().min;
+    ui.painter().hline(top.x..=top.x + width, top.y + 0.5, Stroke::new(1.0, LINE));
+    ui.add_space(12.0);
+    let id = ui.make_persistent_id(salt);
+    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false);
+    if open {
+        state.set_open(true);
+    }
+    let (place, response) = ui.allocate_exact_size(vec2(width, 18.0), Sense::click());
+    if response.clicked() {
+        state.toggle(ui);
+    }
+    let ink = if response.hovered() { TEXT } else { TEXT_DIM };
+    let arrow = if state.is_open() { Icon::ChevronDown } else { Icon::ChevronRight };
+    crate::icons::paint(
+        ui.painter(),
+        arrow,
+        Rect::from_center_size(pos2(place.min.x + 5.0, place.center().y), vec2(10.0, 10.0)),
+        ink,
+    );
+    ui.painter().text(
+        pos2(place.min.x + 14.0, place.center().y),
+        Align2::LEFT_CENTER,
+        title,
+        FontId::proportional(13.0),
+        ink,
+    );
+    state.show_body_unindented(ui, |ui| {
+        ui.add_space(10.0);
+        add(ui);
+    });
+    state.store(ui.ctx());
+    ui.add_space(12.0);
+}
+
+/// Words to copy, as they will be copied: in the fixed-width face on the panel's dark, wrapped.
+pub fn code(ui: &mut egui::Ui, text: &str) {
+    let width = ui.available_width();
+    let galley = words(ui, text, crate::studio::fixed(12.0), TEXT_DIM, 0.0, width - 28.0);
+    let (place, _) = ui.allocate_exact_size(vec2(width, galley.size().y + 24.0), Sense::hover());
+    ui.painter().rect_filled(place, 9.0, crate::studio::PANEL);
+    ui.painter().galley(place.min + vec2(14.0, 12.0), galley, TEXT_DIM);
+}
+
 /// What a key among a few shows above its name.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Picture {
@@ -140,6 +284,9 @@ pub enum Picture {
     Flag(crate::i18n::Language),
     /// A small screen: this computer's.
     Computer,
+    /// How much an assistant may do: a screen alone (0), lines beside it (1), or lines going to
+    /// a lit one (2).
+    Level(u8),
 }
 
 impl Picture {
@@ -149,6 +296,7 @@ impl Picture {
             Picture::Strip(_) => (13.0, 6.0),
             Picture::Transition(_) => (30.0, 6.0),
             Picture::Flag(_) | Picture::Computer => (20.0, 6.0),
+            Picture::Level(_) => (21.0, 0.0),
         }
     }
 
@@ -158,12 +306,15 @@ impl Picture {
             Picture::Strip(_) => 66.0,
             Picture::Transition(_) => 56.0,
             Picture::Flag(_) | Picture::Computer => 30.0,
+            Picture::Level(0) => 34.0,
+            Picture::Level(1) => 68.0,
+            Picture::Level(_) => 86.0,
         }
     }
 
     /// Whether it stays at the top of its key while the words sit at the foot.
     fn on_top(self) -> bool {
-        false
+        matches!(self, Picture::Level(_))
     }
 }
 
@@ -342,6 +493,34 @@ fn paint_picture(painter: &egui::Painter, picture: Picture, at: Pos2, ink: Color
             let stroke = Stroke::new(1.4 * unit, TEXT_DIM);
             painter.rect_stroke(screen, 1.5 * unit, stroke, StrokeKind::Middle);
             painter.line_segment([at + vec2(9.0 * unit, 14.5 * unit), at + vec2(15.0 * unit, 14.5 * unit)], stroke);
+        }
+        Picture::Level(level) => {
+            // A screen, dark or lit, with a faint edge; three lines of words before it; and for
+            // the last, an arrow from the words to a lit screen, 6 apart, as the design draws them.
+            let screen = |x: f32, lit: bool| {
+                let rect = Rect::from_min_size(pos2(x, at.y), vec2(34.0, 21.0));
+                painter.rect_filled(rect, 3.0, if lit { TEXT_DIM } else { DARK });
+                painter.rect_stroke(rect, 3.0, Stroke::new(1.0, TEXT_FAINT), StrokeKind::Outside);
+            };
+            let lines = |x: f32| {
+                for row in 0..3 {
+                    let line = Rect::from_min_size(pos2(x, at.y + 3.0 + row as f32 * 6.0), vec2(28.0, 3.0));
+                    painter.rect_filled(line, 1.0, ink);
+                }
+            };
+            match level {
+                0 => screen(at.x, false),
+                1 => {
+                    lines(at.x);
+                    screen(at.x + 34.0, false);
+                }
+                _ => {
+                    lines(at.x);
+                    let arrow = pos2(at.x + 40.0, at.y + 10.5);
+                    painter.text(arrow, Align2::LEFT_CENTER, "\u{2192}", FontId::proportional(13.0), TEXT_DIM);
+                    screen(at.x + 52.0, true);
+                }
+            }
         }
     }
 }

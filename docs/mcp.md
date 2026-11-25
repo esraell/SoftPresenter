@@ -12,15 +12,17 @@ the computer has allowed it and says yes each time, run the screens.
 - [Skills, questions and long jobs](#skills-questions-and-long-jobs)
 - [How it works](#how-it-works) and [its security](#security)
 
-Nothing here works until it is switched on in **Settings › Integrations › AI assistants (MCP)**:
+Nothing here works until it is allowed in **Settings › AI assistants**, under How much it may
+do, one choice of three (kept as two switches in `ai-assistants.json`):
 
-- **Let AI assistants use SoftPresenter** (off unless switched on): the assistant may read the
-  library, the Bibles and the playlists, and make songs and playlists. Nothing on the screens
-  changes.
-- **Let them change what's on the screens** (off unless switched on): the assistant may put a
-  slide, a passage or a message on the screens, go to the next or previous slide, and clear the
-  screens; each time it asks the person first. With this off, it can't, even when the person
-  says yes to its question.
+- **Off** (unless another is chosen): nothing can connect.
+- **Prepare**: the assistant may read the library, the Bibles and the playlists, and make songs
+  and playlists. Nothing on the screens changes.
+- **Prepare and run the screens**: as well, it may put a slide, a passage or a message on the
+  screens, go to the next or previous slide, and clear the screens; each time it asks the person
+  first. Without it, it can't, even when the person says yes to its question.
+
+Under the choice, two short lists say what Prepare allows and what is never allowed.
 
 ## Connecting
 
@@ -34,17 +36,26 @@ other programs' settings, and they change only when you click or type it.
 
 ### In one click
 
-**Settings › Integrations › AI assistants (MCP)** has one tile for each company, **Claude**,
-**ChatGPT**, **Gemini** and **Grok**, and the other apps (Cursor, VS Code) under **More**, one
-tile each. A tile's line says which of its apps are on this computer and where SoftPresenter
-stands in them ("Found: Claude Desktop and Claude Code. Not added yet.", "Added to Claude Desktop
-and Claude Code.", "Added to Claude Desktop; not yet to Claude Code.", or not found). **Add** adds
-SoftPresenter to every app of the tile found here; once it is in, **Remove** takes it out of each
-app it is in (an entry by that name that starts another program is left to that app); when such
-an entry is there (another copy of SoftPresenter, say), **Replace** points it at this one. Then
-quit and reopen the app. **Copy setup**, on every tile, copies the settings to add by hand, with
-this computer's path to `sp` filled in. Adding SoftPresenter lets nothing in by itself, and the
-card says so while **Let AI assistants use SoftPresenter** is off.
+**Settings › AI assistants**, under Connect one, has a tile for each company, **Claude**,
+**ChatGPT**, **Gemini** and **Grok**, each with its logo (its initials where there is none), and
+the other apps (Cursor, VS Code) under **Other apps**, a row each. A tile's line says which of
+its apps are on this computer and where SoftPresenter stands in them ("Claude Desktop and Claude
+Code found", "Added to Claude Desktop and Claude Code" with a green light, "Added to Claude
+Desktop; not yet to Claude Code.", or "For Grok Build" where none is found). **Add** adds
+SoftPresenter to every app of the tile found here and becomes **Remove** once it is in, which
+takes it out of each app it is in (an entry by that name that starts another program is left to
+that app); when such an entry is there (another copy of SoftPresenter, say), **Replace** points it
+at this one. Then quit and reopen the app. A line under the tiles says what the last click did,
+and that the versions in a browser can't connect. Adding SoftPresenter lets nothing in by itself:
+the choice above does.
+
+**Copy setup**, on every tile, copies a message to paste into that assistant, written to it: how
+to connect (its own way, with this computer's path to `sp` filled in and quoted as a shell takes
+it, and the plain stdio command for any other version), then how to use SoftPresenter: what its
+tools do, that changing the screens needs the person's yes each time, what it can never do, and
+to start by asking what is on screen. **What gets copied** shows it. The message stays English,
+as everything the server tells an assistant does. Other apps' **Copy setup** copies the settings
+to add by hand, as those apps keep them.
 
 | Tile: app | Found when | What Add does |
 |---|---|---|

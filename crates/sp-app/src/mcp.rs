@@ -8,7 +8,7 @@
 //! - `tools`: the tools, each one or a few `sp` commands, and the questions they ask.
 //! - `skills`: the two skills it serves (MCP's Skills extension).
 //! - `policy`: the app's side: which commands an assistant may send, and what each needs.
-//! - `pane`: Settings › Integrations › AI assistants (MCP).
+//! - `pane`: Settings › AI assistants (MCP).
 //! - `connect`: adding SoftPresenter to Claude Desktop and Claude Code with one click (the card's
 //!   buttons) or one command (`sp mcp connect|disconnect|status`).
 //!

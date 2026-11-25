@@ -1420,8 +1420,8 @@ a remote page (a remote page can answer the question in the notices).
 `sp mcp` (or `softpresenter mcp`) is a Model Context Protocol server, for Claude Code, Claude
 Desktop and other AI assistants: the assistant starts it, and it passes the assistant's tool
 calls to the running app as `sp` commands. It never starts SoftPresenter. Nothing works until
-**Settings › Integrations › AI assistants (MCP)** lets assistants in; changing the screens needs
-a second switch there and the person's yes each time. [mcp.md](mcp.md) says how to connect each
+**Settings › AI assistants** lets assistants in (Prepare); changing the screens needs Prepare and
+run the screens there and the person's yes each time. [mcp.md](mcp.md) says how to connect each
 assistant, what each tool does and what is refused.
 
 These are answered by `sp` itself, in English, with the app open or not, as the card's buttons
@@ -1695,7 +1695,7 @@ These need the window for now; some can be reached with `sp menu`.
   (`sp` refuses a longer one before sending it); the reply is one line of JSON. `v` is the
   protocol's version: a command line from a different build is told so. A request from
   [`sp mcp`](#ai-assistants-mcp) also carries `"mcp": {"tool": …, "asked": …, "check": …}`, and the
-  app checks it against Settings › Integrations › AI assistants and its list of what an assistant
+  app checks it against Settings › AI assistants and its list of what an assistant
   may do before anything is done (version 2 brought that field, so an app from before refuses
   such a request rather than carrying it out unchecked).
 - The app answers one command at a time, each within 15 seconds. A

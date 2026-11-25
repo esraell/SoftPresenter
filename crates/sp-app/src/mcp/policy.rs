@@ -4,7 +4,7 @@
 //! anything else it is given, any of which may be written to steer it. So the app decides, here,
 //! not the server or the assistant:
 //!
-//! - nothing at all unless Settings › Integrations › AI assistants lets assistants in;
+//! - nothing at all unless Settings › AI assistants lets assistants in (Prepare);
 //! - reading, and making songs and playlists, once it does;
 //! - taking something out only after the person said yes to the server's question;
 //! - changing the screens only with the second switch on too, and after a yes.
@@ -31,7 +31,7 @@ pub enum Kind {
     Live,
 }
 
-/// The switches of Settings › Integrations › AI assistants.
+/// The switches of Settings › AI assistants (Off, Prepare, Prepare and run the screens).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Switches {
     /// Let AI assistants use SoftPresenter: read, and make songs and playlists.
@@ -43,10 +43,10 @@ pub struct Switches {
 }
 
 /// The refusal for everything while assistants are switched off.
-pub const SWITCHED_OFF: &str = "AI assistants are switched off in SoftPresenter. To let them in, open SoftPresenter's Settings › Integrations › AI assistants and switch on \u{201c}Let AI assistants use SoftPresenter\u{201d}.";
+pub const SWITCHED_OFF: &str = "AI assistants are switched off in SoftPresenter. To let them in, open SoftPresenter's Settings › AI assistants and choose \u{201c}Prepare\u{201d}.";
 
 /// The refusal for a change to the screens while the second switch is off.
-pub const SCREENS_OFF: &str = "SoftPresenter doesn't let AI assistants change what's on the screens. To allow it, switch on \u{201c}Let them change what's on the screens\u{201d} in SoftPresenter's Settings › Integrations › AI assistants (the assistant still asks you each time).";
+pub const SCREENS_OFF: &str = "SoftPresenter doesn't let AI assistants change what's on the screens. To allow it, choose \u{201c}Prepare and run the screens\u{201d} in SoftPresenter's Settings › AI assistants (the assistant still asks you each time).";
 
 /// The refusal for a change to the screens or a removal the person hasn't said yes to.
 pub const NO_YES: &str =

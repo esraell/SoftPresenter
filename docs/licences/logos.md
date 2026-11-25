@@ -30,6 +30,7 @@ words).
 
 | Logo | File | Source, read on 25 November 2026 | The rule followed |
 |---|---|---|---|
+| Grok (Settings › AI assistants) | `grok.svg`, `grok.png` | Grok_Logomark_Light.svg from <https://data.x.ai/logos/SpaceXAI_Grok_Assets.zip>, under xAI's brand guidelines at <https://x.ai/legal/brand-guidelines> | Used only to refer to Grok accurately, exactly as provided, without any alteration, and never so it suggests xAI endorses SoftPresenter; xAI can end the permission at any time |
 | Canva (for Canva Sync) | `canva.svg`, `canva.png` | "Canva Icon logo.svg" from <https://www.canva.dev/assets/connect/Canva-logos.zip>, under the REST API brand guidelines at <https://www.canva.dev/docs/connect/guidelines/brand/> | Canva Sync is a Connect API integration: under 50 px the Icon logo is used, with 8 px clear on every side (a 32-pixel icon in a 48-pixel tile), never recoloured, never beside another logo as one mark; the words say "works with Canva", never "by Canva" |
 
 [NOTICE.md](../../NOTICE.md) names them.

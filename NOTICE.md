@@ -250,7 +250,8 @@ The logos on Settings' cards for the services and assistants SoftPresenter conne
 trademarks of their owners, used only to identify the apps SoftPresenter connects with. They are
 not covered by the GNU GPL, their permission can't be passed on, and they are removed on request.
 They are kept as their companies provide them in `assets/logos/third-party`, apart from the rest:
-the Canva icon (for Canva Sync, under canva.dev's brand guidelines). VoxLive's and TimelyChurch's
+the Canva icon (for Canva Sync, under canva.dev's brand guidelines) and Grok's logomark (under
+xAI's brand guidelines, implying no endorsement). VoxLive's and TimelyChurch's
 are the owner's own. [`docs/licences/logos.md`](docs/licences/logos.md) gives each one's source,
 date and rules.
 

@@ -1,5 +1,5 @@
 //! The `sp` command (and its full name, `softpresenter`) put where a terminal finds it: from
-//! Settings › Integrations › Command line, the menu bar, `softpresenter install-cli`, and once
+//! Settings › Command line, the menu bar, `softpresenter install-cli`, and once
 //! by itself when an installed copy of the app starts ([`at_start`]).
 //!
 //! On a Mac and on Linux it is two links to this program in a folder a terminal looks in, and,

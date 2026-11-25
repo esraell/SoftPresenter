@@ -1989,16 +1989,24 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **Claude, and other AI assistants, can work with SoftPresenter** through `sp mcp`, a Model
   Context Protocol server in the app's own program, which Claude Code or Claude Desktop starts
   and which passes each request to the running app as `sp` commands (it never starts the app:
-  with it closed, every tool says "SoftPresenter isn't open"). Off until **Settings ›
-  Integrations › AI assistants (MCP)** lets assistants in. The card has a tile for Claude (Claude
-  Desktop and Claude Code), ChatGPT (Codex, which the ChatGPT app shares), Gemini (Antigravity)
-  and Grok (Grok Build), and under More one each for Cursor and VS Code / GitHub Copilot, saying
-  which apps are found and where SoftPresenter stands, with **Add** (every app of the tile found
-  here), **Remove**, **Replace** for an entry that starts another program, and **Copy setup**;
+  with it closed, every tool says "SoftPresenter isn't open"). Off until **Settings › AI
+  assistants** lets assistants in: How much it may do is one choice of three over two switches,
+  **Off**, **Prepare** or **Prepare and run the screens** (Off turns both off), drawn as keys with a
+  small picture, with what Prepare allows and what is never allowed under them. Connect one has a
+  tile for Claude (Claude Desktop and Claude Code), ChatGPT (Codex, which the ChatGPT app shares),
+  Gemini (Antigravity) and Grok (Grok Build), each with its logo place (initials until a logo is
+  in), saying which apps are found and where SoftPresenter stands ("Claude Desktop and Claude Code
+  found", "Added to …" with a green light), with **Add** (every app of the tile found here; it
+  becomes **Remove** once added, and **Replace** where an entry starts another program) and **Copy
+  setup**, which copies a message to paste into that assistant: how to connect (its own way, this
+  computer's path to `sp` filled in and quoted as a shell takes it) and how to use SoftPresenter
+  (What gets copied shows it). A line under the tiles says what the last click did; Cursor and VS
+  Code / GitHub Copilot are under Other apps, with Add and Copy setup (their settings to add by
+  hand). Add and Remove work
   only on a click, changing only SoftPresenter's entry, through the app's own command where it
   has one, with a copy of the settings file as it was kept beside it, and never a file that isn't
   valid JSON (`sp mcp connect|disconnect|status [--json]` do the same). Apps that only reach the
-  internet (ChatGPT in a browser, the Grok and Gemini apps) are named as such. With the first switch on, an assistant can see what is on
+  internet (ChatGPT in a browser, the Grok and Gemini apps) are named as such. With Prepare, an assistant can see what is on
   the screens and each screen, search songs and read their words, look up and search the Bible
   (leaving the Bible page as the operator has it), list the playlists, media, messages and
   Bibles, make a song from lyrics (sections, slides, and a translation under each slide's
