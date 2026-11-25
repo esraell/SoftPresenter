@@ -7094,7 +7094,8 @@ fn add_template_shown(state: &mut HomeState, copy: bool) {
         added.name =
             unused_name(&tf("themes.template.copy_name", "{original} copy", &[("original", &original)]), &names);
     } else {
-        let numbered = |n: usize| tf("themes.template.numbered", "Template {n}", &[("n", &n.to_string())]);
+        let numbered =
+            |n: usize| crate::i18n::tgf("themes.template.numbered", "Template {n}", &[("n", &n.to_string())]);
         added.name = (names.len() + 1..).map(numbered).find(|name| !names.contains(name)).unwrap_or_default();
         added.boxes = added.box_for(Some(&sp_model::Role::primary())).cloned().into_iter().collect();
         added.objects.clear();

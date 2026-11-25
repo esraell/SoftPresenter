@@ -312,6 +312,23 @@ pub fn t(key: &'static str, english: &'static str) -> &'static str {
     said
 }
 
+/// The words for a name the app gives something that is then saved (the first playlist, the
+/// quick message, "Arrangement 2"), in the language set: as [`t`], but not remembered for
+/// [`english_of`]. Once saved it is the church's own name, which the log and the command line
+/// show as it is (turned back into English, `sp` would print a name it then can't find).
+pub fn tg(key: &'static str, english: &'static str) -> &'static str {
+    match words(current(), key) {
+        Some(Words::One(text)) => text,
+        Some(Words::Forms(forms)) => forms.first().copied().unwrap_or(english),
+        None => english,
+    }
+}
+
+/// [`tf`] for a name the app gives and saves (see [`tg`]): not remembered for [`english_of`].
+pub fn tgf(key: &'static str, english: &'static str, args: &[(&str, &str)]) -> String {
+    fill(tg(key, english), args)
+}
+
 /// A key and its English together, for a place that keeps them in a table before it draws
 /// them (the layer keys' names): the same as [`t`]'s two arguments, but the scan for wrapped
 /// keys finds them. Hand the pair on to [`ts`] or [`t`].
@@ -451,9 +468,12 @@ fn remember_made(said: &str, english: impl FnOnce() -> String) {
 }
 
 /// `text` with the app's own words in it put back into English: a whole sentence said in
-/// another language, or each piece of one joined from several (a whole word or phrase, never
-/// part of a word, and never fewer than three letters). Names, song words and anything the app
-/// didn't say stay as they are. For the log and the command line's replies, which stay English.
+/// another language, or each piece of one joined from several (a whole phrase, never part of
+/// a word). Only sentences the app made with its words (`tf`, `tn`, filled with their own
+/// names and numbers) and phrases of two words or more are put back; a single word never is,
+/// on its own or inside a line, because a name the church chose ("Culto", "Más de ti") can be
+/// the same word, and a reply must never change the church's names. Names the app gives and
+/// saves (`tg`) aren't remembered at all. For the log and the command line's replies.
 pub fn english_of(text: &str) -> String {
     // Waited for, not tried: the lock is only held while a translation is noted, and a
     // try that failed left a line in the language set now and then (and a test flaky).
@@ -463,11 +483,16 @@ pub fn english_of(text: &str) -> String {
     }
     // The whole sentence when it was said as one; then any piece still in the language (a
     // placeholder filled with the app's own words, or sentences joined).
-    let whole = shadow.made.get(text).cloned().or_else(|| shadow.fixed.get(text).map(|english| (*english).to_owned()));
+    let whole = shadow
+        .made
+        .get(text)
+        .cloned()
+        .or_else(|| shadow.fixed.get(text).filter(|_| several_words(text)).map(|english| (*english).to_owned()));
     if shadow.sorted.is_none() {
         let mut all: Vec<(String, String)> = shadow
             .fixed
             .iter()
+            .filter(|(said, _)| several_words(said))
             .map(|(said, english)| ((*said).to_owned(), (*english).to_owned()))
             .chain(shadow.made.iter().map(|(said, english)| (said.clone(), english.clone())))
             .filter(|(said, _)| said.chars().count() >= 3)
@@ -482,6 +507,12 @@ pub fn english_of(text: &str) -> String {
         }
     }
     out
+}
+
+/// Whether the app's words are a phrase of two words or more, which a church's name is unlikely
+/// to be the same as by chance (see [`english_of`]).
+fn several_words(said: &str) -> bool {
+    said.split_whitespace().nth(1).is_some()
 }
 
 /// Every place `said` stands in `text` as a whole word or phrase (not inside a longer word),
@@ -567,7 +598,7 @@ pub fn quoted(text: &str) -> String {
 pub fn wrapped_in(source: &str) -> Vec<(String, String)> {
     let bytes = source.as_bytes();
     let mut found = Vec::new();
-    for name in ["t", "ts", "tf", "tn", "tk"] {
+    for name in ["t", "ts", "tf", "tn", "tk", "tg", "tgf"] {
         let pattern = format!("{name}(");
         let mut from = 0;
         while let Some(hit) = source[from..].find(&pattern) {
@@ -735,6 +766,18 @@ mod tests {
             assert_eq!(english_of(&inside), "Added Untitled to Domingo.", "a placeholder filled with the app's words");
         });
         assert_eq!(english_of("Borrar todos los días"), "Borrar todos los días", "never part of a word");
+        with_language(Language::Spanish, || {
+            // A single word the app says ("Culto", the Service tab) is never put back inside a
+            // line or alone: a playlist the church calls Culto, or a song "Más de ti", stays.
+            let _ = t("topbar.view.service", "Service");
+            let _ = t("dock.advanced", "Advanced");
+            assert_eq!(english_of("1. Culto (3 items)"), "1. Culto (3 items)");
+            assert_eq!(english_of("Culto"), "Culto");
+            assert_eq!(english_of("Más de ti"), "Más de ti");
+            // A name the app gives and saves isn't remembered, so it prints as saved.
+            let quick = tg("tools.message.quick.name", "Quick message");
+            assert_eq!(english_of(&format!("Showing {quick}.")), format!("Showing {quick}."));
+        });
         assert_eq!(replace_whole("todo, todos y todo", "todo", "all"), "all, todos y all");
     }
 

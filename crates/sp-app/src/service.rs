@@ -325,7 +325,7 @@ pub struct Services {
 
 /// The name the app gives the first playlist, in the language set.
 pub fn first_playlist_name() -> &'static str {
-    t("left.playlist.first", "Service")
+    crate::i18n::tg("left.playlist.first", "Service")
 }
 
 impl Default for Services {

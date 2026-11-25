@@ -256,7 +256,7 @@ impl crate::App {
                 let copied: Vec<String> = from
                     .iter()
                     .filter_map(|at| target.templates.get(*at))
-                    .map(|t| crate::theme_store::shown_name(t).into_owned())
+                    .map(crate::theme_store::given_name)
                     .collect();
                 if !target.add_version(&version, &from) {
                     return Err(
@@ -275,11 +275,7 @@ impl crate::App {
             }
             Ask::AddCopy { theme, version, from } => {
                 let target = self.themes.get_mut(theme).ok_or(t("notices.theme_gone", "That theme is gone."))?;
-                let copied = target
-                    .templates
-                    .get(from)
-                    .map(|t| crate::theme_store::shown_name(t).into_owned())
-                    .unwrap_or_default();
+                let copied = target.templates.get(from).map(crate::theme_store::given_name).unwrap_or_default();
                 let at = target
                     .add_copy_to_version(version, from)
                     .ok_or(t("notices.versions.template_missing", "That template is not in the theme."))?;

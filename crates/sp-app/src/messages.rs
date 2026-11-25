@@ -54,7 +54,7 @@ impl Message {
 
 /// The name a new message for words shown once is given, in the language set.
 fn quick_message_name() -> &'static str {
-    t("tools.message.quick.name", "Quick message")
+    crate::i18n::tg("tools.message.quick.name", "Quick message")
 }
 
 /// The name of the message words shown once are kept as: its own, or the one it will be given.

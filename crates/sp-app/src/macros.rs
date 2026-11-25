@@ -206,7 +206,7 @@ pub fn step_song_title(show: &sp_engine::Show, state: &crate::home::HomeState, s
 /// The name a macro made from what Settings once said to do when SoftPresenter opened is given,
 /// in the language set.
 fn opening_macro_name() -> &'static str {
-    t("tools.macro.opening", "When SoftPresenter opens")
+    crate::i18n::tg("tools.macro.opening", "When SoftPresenter opens")
 }
 
 /// Start-up belongs in macros: what an earlier version's Settings › Screens › When SoftPresenter

@@ -2216,7 +2216,7 @@ fn version_button(
 /// The name a new arrangement is given, with the first number the song's arrangements leave
 /// free: "Arrangement 2", in the language set when it is made (it is the church's from then on).
 pub fn arrangement_name(n: usize) -> String {
-    tf("slides.arrangement.numbered", "Arrangement {n}", &[("n", &n.to_string())])
+    crate::i18n::tgf("slides.arrangement.numbered", "Arrangement {n}", &[("n", &n.to_string())])
 }
 
 /// The arrangement menu, from the Arrangement button beside a song's title or the arrangement's

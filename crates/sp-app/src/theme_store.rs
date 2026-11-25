@@ -29,6 +29,17 @@ pub fn template_name(id: Uuid, name: &str) -> Cow<'_, str> {
         .map_or(Cow::Borrowed(name), |(_, (key, words))| Cow::Borrowed(t(key, words)))
 }
 
+/// The name a copy of a template is saved under (a new version's templates): as the window
+/// shows it, but not remembered for turning back into English (`i18n::tg`), as the copy's name
+/// is saved and the command line must show it as it is.
+pub fn given_name(template: &sp_model::ThemeTemplate) -> String {
+    sp_model::BUILTIN_TEMPLATES
+        .into_iter()
+        .zip(BUILTIN_TEMPLATE_WORDS)
+        .find(|((builtin, english), _)| *builtin == template.id && *english == template.name)
+        .map_or_else(|| template.name.clone(), |(_, (key, words))| crate::i18n::tg(key, words).to_owned())
+}
+
 /// What a template is called in the window (see [`template_name`]).
 pub fn shown_name(template: &sp_model::ThemeTemplate) -> Cow<'_, str> {
     template_name(template.id, &template.name)
