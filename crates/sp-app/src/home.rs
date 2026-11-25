@@ -12,7 +12,7 @@ use sp_render::object_frame;
 
 use crate::displays::DisplayInfo;
 use crate::editor::EditDraft;
-use crate::i18n::{t, tf, tk, tn};
+use crate::i18n::{t, tf, tk, tn, ts};
 use crate::screens::{Kind, Output, Screen};
 
 use crate::icons::{self, Icon};
@@ -7807,16 +7807,29 @@ fn bible_bar(
     let font = FontId::proportional(12.5);
     let width = ui.available_width();
     let look = bible_switch_look();
-    let views = [t("bible.bar.page", "Page"), t("bible.bar.slides", "Slides")];
-    let views_width =
-        crate::studio::pill_cells(ui, pos2(0.0, 0.0), &views, &look).last().map_or(0.0, |cell| cell.max.x) + look.inset;
-    let (options_words, books_words) = (t("bible.bar.options", "Options"), t("bible.bar.books", "Books"));
-    let options_width = flat_button_width(ui, &[options_words], &font, 13.0);
     let add_width = flat_button_width(ui, &[t("bible.add", "Add")], &font, 13.0) + 18.0;
+    // The row from Add to Options, with the usual words or, where they don't fit the bar (a
+    // narrow window in a longer language), their short forms.
+    let row = |views: &[&str; 2], options: &str| {
+        let views_width =
+            crate::studio::pill_cells(ui, pos2(0.0, 0.0), views, &look).last().map_or(0.0, |cell| cell.max.x)
+                + look.inset;
+        let options_width = flat_button_width(ui, &[options], &font, 13.0);
+        let right = add_width + 1.0 + ARROW + GAP + 1.0 + GAP + views_width + 8.0 + LANGUAGE + 8.0 + options_width;
+        (views_width, options_width, right)
+    };
+    let mut views = [t("bible.bar.page", "Page"), t("bible.bar.slides", "Slides")];
+    let mut options_words = t("bible.bar.options", "Options");
+    let (mut views_width, mut options_width, mut right) = row(&views, options_words);
+    if right > width {
+        views = [ts("bible.bar.page", "Page"), ts("bible.bar.slides", "Slides")];
+        options_words = ts("bible.bar.options", "Options");
+        (views_width, options_width, right) = row(&views, options_words);
+    }
+    let books_words = t("bible.bar.books", "Books");
     let books_width =
         if state.bible.lists_open { 0.0 } else { flat_button_width(ui, &[books_words], &font, 13.0) + GAP };
     let left = books_width + GAP + STEP + 6.0 + STEP;
-    let right = add_width + 1.0 + ARROW + GAP + 1.0 + GAP + views_width + 8.0 + LANGUAGE + 8.0 + options_width;
     let one_row = width - left - GAP - right;
     let two_rows = one_row < 170.0;
     let field_width = if two_rows { width - left } else { one_row }.clamp(120.0, 236.0);
