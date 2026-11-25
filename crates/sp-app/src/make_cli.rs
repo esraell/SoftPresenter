@@ -749,7 +749,7 @@ impl crate::App {
     }
 
     fn audio_add(&mut self, words: &[String]) -> Result<Reply, String> {
-        self.only_at_the_computer("Adding audio tracks")?;
+        self.only_at_the_computer(crate::remote::policy::AtComputer::AudioTracks)?;
         let (files, playlist) = split_at_word(words, "to");
         if files.is_empty() {
             return Err("audio add FILE… [to PLAYLIST]".to_owned());
@@ -935,7 +935,7 @@ impl crate::App {
         let following = if folder.eq_ignore_ascii_case("off") {
             None
         } else {
-            self.only_at_the_computer("Following a folder")?;
+            self.only_at_the_computer(crate::remote::policy::AtComputer::FollowFolder)?;
             let path = PathBuf::from(folder);
             if !path.is_dir() {
                 return Err(format!("There is no folder {folder}."));

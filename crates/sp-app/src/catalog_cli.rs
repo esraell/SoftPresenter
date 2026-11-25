@@ -924,7 +924,7 @@ impl crate::App {
     }
 
     fn catalog_download(&mut self, args: &[String]) -> Result<Reply, String> {
-        self.only_at_the_computer("Downloading songs")?;
+        self.only_at_the_computer(crate::remote::policy::AtComputer::DownloadSongs)?;
         let [lang] = args else { return Err("catalog download LANGUAGE   (such as ru, uk, en)".to_owned()) };
         let lang = lang.to_lowercase();
         if !catalog::valid_language(&lang) {
@@ -951,7 +951,7 @@ impl crate::App {
     }
 
     fn catalog_check_now(&mut self) -> Result<Reply, String> {
-        self.only_at_the_computer("Checking for newer songs")?;
+        self.only_at_the_computer(crate::remote::policy::AtComputer::CheckNewer)?;
         let engine = self.catalog_engine()?;
         let langs = engine.installed();
         if langs.is_empty() {
@@ -970,7 +970,7 @@ impl crate::App {
     }
 
     fn catalog_remove(&mut self, args: &[String]) -> Result<Reply, String> {
-        self.only_at_the_computer("Removing songs")?;
+        self.only_at_the_computer(crate::remote::policy::AtComputer::RemoveSongs)?;
         let yes = args.iter().any(|w| w == "--yes");
         let langs: Vec<&String> = args.iter().filter(|w| *w != "--yes").collect();
         let [lang] = langs.as_slice() else { return Err("catalog remove LANGUAGE --yes".to_owned()) };

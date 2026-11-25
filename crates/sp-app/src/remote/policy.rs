@@ -9,6 +9,10 @@
 //! every command it knows and fails while one isn't). Within the commands listed, the shapes
 //! that name a file or folder, take a key, or wait on the main thread are refused by their
 //! words alone: never by looking at the disk, which would tell the page what is there.
+//!
+//! A refusal is said in the window's language, as everything the app says to the page is.
+
+use crate::i18n::{quoted, t, tf};
 
 /// What a signed-in page may do. Only Control so far; a view-only page, and others, come later
 /// as more arms of `refusal`.
@@ -161,68 +165,162 @@ fn as_carried_out(args: &[String]) -> Vec<String> {
     args
 }
 
+/// What is done at the computer only, never from a remote page: refused by the policy's words,
+/// and again where each would open a file (`App::only_at_the_computer`), saying so in the
+/// window's language.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AtComputer {
+    MenuBar,
+    AudioTracks,
+    FollowFolder,
+    BibleFile,
+    WebPage,
+    Ndi,
+    VoxLive,
+    Canva,
+    Catalog,
+    DownloadSongs,
+    CheckNewer,
+    RemoveSongs,
+    ImportSongs,
+    ExportPack,
+    AddMedia,
+    Samples,
+    SongWordsFile,
+}
+
+impl AtComputer {
+    /// Why a page can't do it: a whole sentence, in the language set.
+    pub fn words(self) -> &'static str {
+        match self {
+            AtComputer::MenuBar => t(
+                "remote.at_computer.menu",
+                "Choosing from the menu bar is done at the computer, not from the remote page.",
+            ),
+            AtComputer::AudioTracks => {
+                t("remote.at_computer.audio", "Adding audio tracks is done at the computer, not from the remote page.")
+            }
+            AtComputer::FollowFolder => {
+                t("remote.at_computer.folder", "Following a folder is done at the computer, not from the remote page.")
+            }
+            AtComputer::BibleFile => t(
+                "remote.at_computer.bible",
+                "Installing a Bible from a file is done at the computer, not from the remote page.",
+            ),
+            AtComputer::WebPage => t(
+                "remote.at_computer.web",
+                "Putting a web page on a slide is done at the computer, not from the remote page.",
+            ),
+            AtComputer::Ndi => t(
+                "remote.at_computer.ndi",
+                "Sending a screen over NDI is done at the computer, not from the remote page.",
+            ),
+            AtComputer::VoxLive => {
+                t("remote.at_computer.voxlive", "Connecting VoxLive is done at the computer, not from the remote page.")
+            }
+            AtComputer::Canva => t(
+                "remote.at_computer.canva",
+                "Canva Sync's sign-in and presentation are set at the computer, not from the remote page.",
+            ),
+            AtComputer::Catalog => t(
+                "remote.at_computer.catalog",
+                "Downloading, checking for and removing catalog songs is done at the computer, not from the remote page.",
+            ),
+            AtComputer::DownloadSongs => {
+                t("remote.at_computer.download", "Downloading songs is done at the computer, not from the remote page.")
+            }
+            AtComputer::CheckNewer => t(
+                "remote.at_computer.newer",
+                "Checking for newer songs is done at the computer, not from the remote page.",
+            ),
+            AtComputer::RemoveSongs => {
+                t("remote.at_computer.remove", "Removing songs is done at the computer, not from the remote page.")
+            }
+            AtComputer::ImportSongs => {
+                t("remote.at_computer.import", "Importing songs is done at the computer, not from the remote page.")
+            }
+            AtComputer::ExportPack => t(
+                "remote.at_computer.export",
+                "Exporting a song pack is done at the computer, not from the remote page.",
+            ),
+            AtComputer::AddMedia => t(
+                "remote.at_computer.media",
+                "Adding pictures and videos is done at the computer, not from the remote page.",
+            ),
+            AtComputer::Samples => t(
+                "remote.at_computer.samples",
+                "The sample backgrounds are added at the computer, not from the remote page.",
+            ),
+            AtComputer::SongWordsFile => t(
+                "remote.at_computer.words_file",
+                "Reading a song's words from a file is done at the computer, not from the remote page.",
+            ),
+        }
+    }
+}
+
 fn control_refusal(args: &[String]) -> Option<String> {
     let word = |at: usize| args.get(at).map(|w| w.to_lowercase()).unwrap_or_default();
     let first = word(0);
     let second = word(1);
     let after = |at: usize| args.len().saturating_sub(at);
-    let at_computer = |what: &str| Some(format!("{what} is done at the computer, not from the remote page."));
+    let at_computer = |what: AtComputer| Some(what.words().to_owned());
     if first.is_empty() {
-        return Some("Which command?".to_owned());
+        return Some(t("remote.refused.which", "Which command?").to_owned());
     }
     if CLOSED.contains(&first.as_str()) || !OPEN.contains(&first.as_str()) {
-        return Some(format!("The remote page can't use the command \u{201c}{}\u{201d}.", args[0]));
+        return Some(tf(
+            "remote.refused.command",
+            "The remote page can't use the command {command}.",
+            &[("command", &quoted(&args[0]))],
+        ));
     }
     // Sub-commands: only those listed as open.
     if let Some((_, open)) = OPEN_SUBCOMMANDS.iter().find(|(word, _)| *word == first)
         && !open.contains(&second.as_str())
     {
-        return Some(match (first.as_str(), second.as_str()) {
-            ("voxlive", _) => "Connecting VoxLive is done at the computer, not from the remote page.".to_owned(),
-            ("canva", _) => {
-                "Canva Sync's sign-in and presentation are set at the computer, not from the remote page.".to_owned()
-            }
-            ("catalog", _) => {
-                "Downloading, checking for and removing catalog songs is done at the computer, not from the remote page."
-                    .to_owned()
-            }
-            ("song", "import") => "Importing songs is done at the computer, not from the remote page.".to_owned(),
-            ("song", "export") => "Exporting a song pack is done at the computer, not from the remote page.".to_owned(),
-            ("media", "add") => {
-                "Adding pictures and videos is done at the computer, not from the remote page.".to_owned()
-            }
-            ("media", "samples") => {
-                "The sample backgrounds are added at the computer, not from the remote page.".to_owned()
-            }
-            _ => format!(
-                "The remote page can't use \u{201c}{} {}\u{201d}.",
-                args[0],
-                args.get(1).map_or("", String::as_str)
-            ),
-        });
+        return match (first.as_str(), second.as_str()) {
+            ("voxlive", _) => at_computer(AtComputer::VoxLive),
+            ("canva", _) => at_computer(AtComputer::Canva),
+            ("catalog", _) => at_computer(AtComputer::Catalog),
+            ("song", "import") => at_computer(AtComputer::ImportSongs),
+            ("song", "export") => at_computer(AtComputer::ExportPack),
+            ("media", "add") => at_computer(AtComputer::AddMedia),
+            ("media", "samples") => at_computer(AtComputer::Samples),
+            _ => Some(tf(
+                "remote.refused.command",
+                "The remote page can't use the command {command}.",
+                &[("command", &quoted(&format!("{} {}", args[0], args.get(1).map_or("", String::as_str))))],
+            )),
+        };
     }
     match (first.as_str(), second.as_str()) {
         // The page is sent every change as it happens; a wait would hold a place on the app's
         // main thread for nothing.
-        ("status", _) if args.iter().any(|w| w == "--wait") => {
-            Some("The remote page is sent each change as it happens; it doesn't wait for one.".to_owned())
-        }
+        ("status", _) if args.iter().any(|w| w == "--wait") => Some(
+            t("remote.refused.wait", "The remote page is sent each change as it happens; it doesn't wait for one.")
+                .to_owned(),
+        ),
         // The menu bar's items include Quit and the ones that open the computer's own windows.
-        ("menu", _) if args.len() > 1 => at_computer("Choosing from the menu bar"),
+        ("menu", _) if args.len() > 1 => at_computer(AtComputer::MenuBar),
         // Files and folders on the computer: reading them in, following them.
-        ("audio", "add") => at_computer("Adding audio tracks"),
-        ("media-playlist", "follow") if !(args.len() == 4 && word(3) == "off") => at_computer("Following a folder"),
-        ("bible", "install") if !(args.len() == 3 && offered_bible(&args[2])) => {
-            at_computer("Installing a Bible from a file")
-        }
+        ("audio", "add") => at_computer(AtComputer::AudioTracks),
+        ("media-playlist", "follow") if !(args.len() == 4 && word(3) == "off") => at_computer(AtComputer::FollowFolder),
+        ("bible", "install") if !(args.len() == 3 && offered_bible(&args[2])) => at_computer(AtComputer::BibleFile),
         // A title, name or song given as one word (spaces and all) is never read as a file; more
         // words than that could end in one (`song new TITLE FILE.txt`, `prop new NAME PICTURE`,
         // `song text SONG FILE`).
-        ("song", "new" | "text") | ("prop", "new") if after(2) > 1 => Some(format!(
-            "From the remote page, give the {} as one word (quoted, spaces and all): {} {} \u{201c}…\u{201d}",
-            if second == "text" { "song" } else { "name" },
-            first,
-            second
+        ("song", "text") if after(2) > 1 => Some(
+            t(
+                "remote.refused.one_word_song",
+                "From the remote page, give the song as one word (quoted, spaces and all): song text “…”",
+            )
+            .to_owned(),
+        ),
+        ("song", "new") | ("prop", "new") if after(2) > 1 => Some(tf(
+            "remote.refused.one_word_name",
+            "From the remote page, give the name as one word (quoted, spaces and all): {command} “…”",
+            &[("command", &format!("{first} {second}"))],
         )),
         // A web page on a slide runs its own scripts in the computer's web view, on the
         // screens: put up at the computer only. Taking one off is open.
@@ -231,7 +329,7 @@ fn control_refusal(args: &[String]) -> Option<String> {
                 .last()
                 .is_some_and(|word| word.eq_ignore_ascii_case("off") || word.eq_ignore_ascii_case("none")) =>
         {
-            at_computer("Putting a web page on a slide")
+            at_computer(AtComputer::WebPage)
         }
         // NDI sends a screen to anyone on the network who asks, with no password: turned on at
         // the computer only.
@@ -241,7 +339,7 @@ fn control_refusal(args: &[String]) -> Option<String> {
                 word == "ndi" || word.starts_with("output=ndi")
             }) =>
         {
-            at_computer("Sending a screen over NDI")
+            at_computer(AtComputer::Ndi)
         }
         // Reading every song again from its file: one song at a time from a page. The command
         // reads what is left of the words, less `--now`, as the song's name: nothing, or "all",
@@ -252,7 +350,10 @@ fn control_refusal(args: &[String]) -> Option<String> {
                 typed.trim().is_empty() || typed.trim().eq_ignore_ascii_case("all")
             } =>
         {
-            Some("From the remote page, name the song to read again: song reload SONG".to_owned())
+            Some(
+                t("remote.refused.reload_all", "From the remote page, name the song to read again: song reload SONG")
+                    .to_owned(),
+            )
         }
         _ => None,
     }
@@ -534,5 +635,53 @@ mod tests {
             }
         }
         assert!(checked >= 6, "only {checked} help lines name a file");
+    }
+
+    #[test]
+    fn a_refusal_is_said_in_the_windows_language_and_given_back_in_english_for_the_log() {
+        use crate::i18n::{Language, english_of, with_language};
+        let menu = words("menu Quit");
+        let english = with_language(Language::English, || refusal(Role::Control, &menu)).unwrap();
+        assert_eq!(english, "Choosing from the menu bar is done at the computer, not from the remote page.");
+        let spanish = with_language(Language::Spanish, || refusal(Role::Control, &menu)).unwrap();
+        assert_eq!(spanish, "Elegir en la barra de menús se hace en el ordenador, no desde la página remota.");
+        assert_eq!(english_of(&spanish), english);
+        let unknown = with_language(Language::Spanish, || refusal(Role::Control, &words("frobnicate now"))).unwrap();
+        assert_eq!(unknown, "La página remota no puede usar el comando “frobnicate”.");
+        let sub = with_language(Language::English, || refusal(Role::Control, &words("song frob x"))).unwrap();
+        assert_eq!(sub, "The remote page can't use the command “song frob”.");
+        let one_word = with_language(Language::Spanish, || refusal(Role::Control, &words("prop new Big Banner")));
+        assert_eq!(
+            one_word.as_deref(),
+            Some(
+                "Desde la página remota, da el nombre como una sola palabra (entre comillas, con espacios y todo): prop new “…”"
+            )
+        );
+        // Every reason a page is sent to the computer has its own Spanish sentence.
+        let all = [
+            AtComputer::MenuBar,
+            AtComputer::AudioTracks,
+            AtComputer::FollowFolder,
+            AtComputer::BibleFile,
+            AtComputer::WebPage,
+            AtComputer::Ndi,
+            AtComputer::VoxLive,
+            AtComputer::Canva,
+            AtComputer::Catalog,
+            AtComputer::DownloadSongs,
+            AtComputer::CheckNewer,
+            AtComputer::RemoveSongs,
+            AtComputer::ImportSongs,
+            AtComputer::ExportPack,
+            AtComputer::AddMedia,
+            AtComputer::Samples,
+            AtComputer::SongWordsFile,
+        ];
+        for what in all {
+            let (english, spanish) =
+                (with_language(Language::English, || what.words()), with_language(Language::Spanish, || what.words()));
+            assert_ne!(english, spanish, "{what:?}");
+            assert!(spanish.ends_with("no desde la página remota."), "{what:?}: {spanish}");
+        }
     }
 }

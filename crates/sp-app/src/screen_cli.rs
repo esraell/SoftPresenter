@@ -501,7 +501,8 @@ impl crate::App {
     /// `settings`, and `settings set key=value…`: the choices kept between runs.
     pub(crate) fn ctl_settings(&mut self, args: &[String]) -> Result<Reply, String> {
         let usage = "settings | settings set transition=KIND[:SECONDS] media_transition=… copyright=never|first|last|every \
-                     ccli_licence=NUMBER continuous=on|off view=grid|words|table columns=1-12";
+                     ccli_licence=NUMBER continuous=on|off view=grid|words|table columns=1-12 \
+                     language=auto|en|es|ru|uk";
         let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
         if args.get(1).is_none() {
             let prefs = state.prefs();
@@ -523,6 +524,7 @@ impl crate::App {
                 ),
                 format!("continuous: {}", if prefs.continuous { "on" } else { "off" }),
                 format!("slides: {}, {} across", view_words(&prefs.slide_view), prefs.columns),
+                format!("language: {}", prefs.language),
             ];
             let data = serde_json::to_value(&prefs).unwrap_or_default();
             return Ok(Reply::with(lines.join("\n"), data));
@@ -605,6 +607,17 @@ impl crate::App {
                         value.parse::<usize>().ok().filter(|c| (1..=12).contains(c)).ok_or("columns is 1 to 12.")?;
                     said.push(format!("{columns} slides across"));
                     changes.push(Box::new(move |state| state.columns = columns));
+                }
+                // As Settings › General › Language: the app's own words, now (remote pages are
+                // sent the change, in their words too).
+                "language" => {
+                    let typed = value.to_lowercase();
+                    let choice = crate::i18n::Choice::ALL
+                        .into_iter()
+                        .find(|choice| choice.code() == typed)
+                        .ok_or_else(|| format!("language is auto, en, es, ru or uk, not {value}."))?;
+                    said.push(format!("language {}", choice.code()));
+                    changes.push(Box::new(move |_| crate::i18n::set_choice(choice)));
                 }
                 other => return Err(format!("{other} isn't a setting. {usage}")),
             }

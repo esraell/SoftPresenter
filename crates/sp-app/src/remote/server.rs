@@ -24,8 +24,8 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicU16, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU8, AtomicU16, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 use axum::Router;
@@ -43,6 +43,7 @@ use super::auth;
 use super::hub::{self, Hub};
 use super::policy::{self, Role};
 use crate::control::Reply;
+use crate::i18n::{Language, t, tf};
 
 /// Connections at once, from everywhere.
 pub const MOST_CONNECTIONS: usize = 64;
@@ -156,6 +157,48 @@ fn page_file(path: &str) -> Option<(&'static str, &'static [u8], Who)> {
         "/fonts/OFL.txt" => signed_in("OFL.txt", include_bytes!("page/fonts/OFL.txt")),
         _ => None,
     }
+}
+
+/// The line of the page's script after which the app writes the language its words are in
+/// (`window.SP_LANGUAGE`), so the page's own words match before the first snapshot comes.
+const REMOTE_MARK: &str = "window.SP_REMOTE = true;";
+
+/// A built-in file as it is sent: its bytes, and its tag.
+type Sent = (Bytes, String);
+
+/// A built-in file as it is sent, in the app's language: the page and the sign-in page say it
+/// in `<html lang>`, and their scripts set `window.SP_LANGUAGE` (after `window.SP_REMOTE` in the
+/// page's, after `"use strict";` in the sign-in page's). Any other file is sent as it is. Made
+/// once per file and language, with its tag.
+fn in_language(path: &str, body: &'static [u8], language: Language) -> Sent {
+    let text = match path {
+        "/" | "/login" | "/app.js" | "/login.js" => String::from_utf8_lossy(body),
+        _ => return (Bytes::from_static(body), file_tag(body)),
+    };
+    static MADE: OnceLock<Mutex<HashMap<(String, Language), Sent>>> = OnceLock::new();
+    let key = (path.to_owned(), language);
+    if let Some(kept) = MADE.get_or_init(Default::default).lock().ok().and_then(|made| made.get(&key).cloned()) {
+        return kept;
+    }
+    let code = language.code();
+    let sent = if path.ends_with(".js") {
+        let line = format!("window.SP_LANGUAGE = \"{code}\";");
+        let after = [REMOTE_MARK, "\"use strict\";", "'use strict';"]
+            .into_iter()
+            .find_map(|mark| text.find(mark).map(|at| at + mark.len()));
+        match after {
+            Some(at) => format!("{}\n{line}{}", &text[..at], &text[at..]),
+            None => format!("{line}\n{text}"),
+        }
+    } else {
+        text.replacen("<html lang=\"en\"", &format!("<html lang=\"{code}\""), 1)
+    };
+    let bytes = Bytes::from(sent);
+    let sent = (bytes.clone(), file_tag(&bytes));
+    if let Ok(mut made) = MADE.get_or_init(Default::default).lock() {
+        made.insert(key, sent.clone());
+    }
+    sent
 }
 
 /// A tag for a file built into the app: the same bytes give the same tag, so a browser that has
@@ -320,6 +363,10 @@ pub struct Shared {
     /// The computer's own name on the network (`church-mac.local`), answered as a Host as its
     /// address is.
     local_name: Mutex<Option<String>>,
+    /// The language the app's words are in now (its place in [`Language::ALL`]), set by the
+    /// app: what the server says to pages (sign-in answers, refusals, errors) is said in it,
+    /// and the page files say it.
+    language: AtomicU8,
 }
 
 impl Shared {
@@ -349,7 +396,26 @@ impl Shared {
             connects: Mutex::new(HashMap::new()),
             versions: Mutex::new(std::collections::HashSet::new()),
             local_name: Mutex::new(None),
+            language: AtomicU8::new(0),
         }))
+    }
+
+    /// The language the app's words are in now (from the app's main thread, which sets it as
+    /// it changes).
+    pub fn set_language(&self, language: Language) {
+        let at = Language::ALL.iter().position(|each| *each == language).unwrap_or(0);
+        self.language.store(at as u8, Ordering::Release);
+    }
+
+    /// The language the app's words are in, as last set (English until the app sets one).
+    pub fn language(&self) -> Language {
+        Language::ALL.get(usize::from(self.language.load(Ordering::Acquire))).copied().unwrap_or(Language::English)
+    }
+
+    /// Words the server says to a page (a sign-in answer, a refusal, an error), made in the
+    /// app's language.
+    fn said<R>(&self, words: impl FnOnce() -> R) -> R {
+        crate::i18n::with_language(self.language(), words)
     }
 
     /// Takes the state as it is now (from the app's main thread); pages are sent what changed.
@@ -841,7 +907,9 @@ async fn page_at(State(shared): State<Arc<Shared>>, request: Request) -> Respons
     if let Some(answer) = only_get(&parts, &gate.host) {
         return answer;
     }
-    let tag = file_tag(body);
+    // In the app's language; the tag is the bytes sent, so a page cached in another language
+    // is sent again.
+    let (body, tag) = in_language(path, body, shared.language());
     let fresh = parts.headers.get(header::IF_NONE_MATCH).and_then(|value| value.to_str().ok()) == Some(tag.as_str());
     let builder = Response::builder()
         .header(header::CONTENT_TYPE, kind)
@@ -936,16 +1004,20 @@ async fn login(State(shared): State<Arc<Shared>>, request: Request) -> Response<
         return json(
             StatusCode::SERVICE_UNAVAILABLE,
             host,
-            serde_json::json!({"ok": false, "text": "No password is set: set one in Settings › Remote Control."}),
+            serde_json::json!({"ok": false, "text": shared.said(|| t("remote.signin.no_password", "No password is set: set one in Settings › Remote Control."))}),
         );
     };
     let refuse_wait = |wait: Duration| {
         let seconds = wait.as_secs().max(1);
-        let mut answer = json(
-            StatusCode::TOO_MANY_REQUESTS,
-            host,
-            serde_json::json!({"ok": false, "text": format!("Too many wrong passwords. Try again in {seconds} s."), "wait": seconds}),
-        );
+        let text = shared.said(|| {
+            tf(
+                "remote.signin.wait",
+                "Too many wrong passwords. Try again in {n} s.",
+                &[("n", &crate::i18n::count(seconds))],
+            )
+        });
+        let mut answer =
+            json(StatusCode::TOO_MANY_REQUESTS, host, serde_json::json!({"ok": false, "text": text, "wait": seconds}));
         if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
             answer.headers_mut().insert(header::RETRY_AFTER, value);
         }
@@ -992,7 +1064,7 @@ async fn login(State(shared): State<Arc<Shared>>, request: Request) -> Response<
             None => json(
                 StatusCode::UNAUTHORIZED,
                 host,
-                serde_json::json!({"ok": false, "text": "That password isn't right."}),
+                serde_json::json!({"ok": false, "text": shared.said(|| t("remote.signin.wrong", "That password isn't right."))}),
             ),
         };
     }
@@ -1450,7 +1522,7 @@ async fn page(shared: Arc<Shared>, mut socket: WebSocket, caller: Caller) {
                     Message::Binary(_) => {
                         // Counted as any message is; past the limit, not even answered.
                         if state.bucket.take()
-                            && !say(&mut socket, Message::text(error_message("Send messages as text (JSON)."))).await
+                            && !say(&mut socket, Message::text(error_message(shared.said(|| t("remote.error.binary", "Send messages as text (JSON)."))))).await
                         {
                             break;
                         }
@@ -1538,13 +1610,14 @@ async fn take_message(
     // and nothing is locked.
     let allowed = state.bucket.take();
     let Ok(message) = serde_json::from_str::<serde_json::Value>(text) else {
-        return allowed.then(|| error_message("That isn't JSON."));
+        return allowed.then(|| error_message(shared.said(|| t("remote.error.not_json", "That isn't JSON."))));
     };
     let kind = message.get("type").and_then(serde_json::Value::as_str);
     if !allowed {
         return match (kind, message.get("id")) {
             (Some("command"), Some(id)) if id.is_number() || id.as_str().is_some_and(|id| id.len() <= 64) => {
-                Some(reply_message(id, &Reply::failed("Too many commands at once; slow down.")))
+                let refused = shared.said(|| t("remote.refused.too_many", "Too many commands at once; slow down."));
+                Some(reply_message(id, &Reply::failed(refused)))
             }
             _ => None,
         };
@@ -1554,7 +1627,9 @@ async fn take_message(
             // A device forgotten since it connected is told so, and closed.
             if !shared.remembered(&caller.device) {
                 shared.sign_out(&caller.device);
-                return Some(error_message("This device has been signed out."));
+                return Some(error_message(
+                    shared.said(|| t("remote.error.signed_out", "This device has been signed out.")),
+                ));
             }
             if let Some(on) = message.get("preview").and_then(serde_json::Value::as_bool) {
                 registered.watch(on);
@@ -1588,47 +1663,59 @@ async fn take_message(
                 _ => false,
             };
             if !id_ok {
-                return Some(error_message("A command needs an id: a number, or a short word."));
+                return Some(error_message(
+                    shared.said(|| t("remote.error.no_id", "A command needs an id: a number, or a short word.")),
+                ));
             }
             let args: Option<Vec<String>> =
                 message.get("args").and_then(serde_json::Value::as_array).and_then(|args| {
                     (args.len() <= 64).then(|| args.iter().map(|arg| arg.as_str().map(str::to_owned)).collect())?
                 });
+            let refused = |words: &'static str| reply_message(&id, &Reply::failed(words));
             let Some(args) = args else {
-                return Some(reply_message(&id, &Reply::failed("A command's args are a list of words.")));
+                return Some(refused(
+                    shared.said(|| t("remote.refused.args", "A command's args are a list of words.")),
+                ));
             };
             // The device is still remembered (it is closed as soon as it is forgotten; this is
             // the check at the moment it counts).
             if !shared.remembered(&caller.device) {
                 shared.sign_out(&caller.device);
-                return Some(reply_message(&id, &Reply::failed("This device has been signed out.")));
+                return Some(refused(shared.said(|| t("remote.error.signed_out", "This device has been signed out."))));
             }
-            if let Some(refused) = policy::refusal(caller.role, &args) {
-                return Some(reply_message(&id, &Reply::failed(refused)));
+            if let Some(refusal) = shared.said(|| policy::refusal(caller.role, &args)) {
+                return Some(reply_message(&id, &Reply::failed(refusal)));
             }
             // Every page's commands together are counted too: the app carries each out.
             if !shared.commands.lock().is_ok_and(|mut all| all.take()) {
-                return Some(reply_message(
-                    &id,
-                    &Reply::failed("Remote Control is busy with other pages' commands; try again in a moment."),
-                ));
+                return Some(refused(shared.said(|| {
+                    t(
+                        "remote.refused.busy",
+                        "Remote Control is busy with other pages' commands; try again in a moment.",
+                    )
+                })));
             }
             let Ok(permit) = state.waiting.clone().try_acquire_owned() else {
-                return Some(reply_message(&id, &Reply::failed("Still busy with the commands before; try again.")));
+                return Some(refused(
+                    shared.said(|| t("remote.refused.waiting", "Still busy with the commands before; try again.")),
+                ));
             };
             let answer = shared.backend.command(caller.clone(), args);
             let replies = replies.clone();
+            let late = shared.said(|| t("remote.refused.late", "SoftPresenter did not answer in time."));
             tokio::spawn(async move {
                 let reply = match tokio::time::timeout(ANSWER_WITHIN, answer).await {
                     Ok(Ok(reply)) => reply,
-                    _ => Reply::failed("SoftPresenter did not answer in time."),
+                    _ => Reply::failed(late),
                 };
                 let _ = replies.send(reply_message(&id, &reply)).await;
                 drop(permit);
             });
             None
         }
-        _ => Some(error_message("Unknown message: send hello, command or preview.")),
+        _ => Some(error_message(
+            shared.said(|| t("remote.error.unknown", "Unknown message: send hello, command or preview.")),
+        )),
     }
 }
 

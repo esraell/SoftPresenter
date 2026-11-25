@@ -5,6 +5,7 @@
 use sp_model::{ObjectKind, Presentation, ShowAction, Transition, TransitionKind};
 
 use crate::control::{Reply, find, numbered};
+use crate::i18n::tf;
 use crate::service::Item;
 
 /// Splits `words … KEYWORD more words` at the last KEYWORD: the words before it and after.
@@ -60,26 +61,53 @@ pub(crate) enum Found {
     Nothing,
 }
 
-/// One playlist item as `playlist [NAME]` lists it: its line, and the same as data, with its
-/// number in the playlist, its kind, its title as the playlist shows it, and what it was found
-/// to be. `text` is the line, as the JSON gave it before it had the rest.
-pub(crate) fn item_entry(number: usize, item: &Item, found: &Found) -> (String, serde_json::Value) {
+/// A playlist item in words, in the language set: its line ("Bars.mp4 (video)"), its kind, and
+/// whether what it names has gone. `sp` lists it in English ([`item_entry`]); a remote page is
+/// sent it in the window's language ([`item_text`]).
+fn item_line(item: &Item, found: &Found) -> (String, &'static str, bool) {
     let title = item.title();
-    let (line, kind, missing) = match (item, found) {
+    let with = [("title", title)];
+    match (item, found) {
         (Item::Header { name }, _) => (format!("— {name} —"), "header", false),
         (Item::Song { .. }, Found::VoxLive) => (title.to_owned(), "voxlive", false),
         (Item::Song { .. }, Found::Song { .. }) => (title.to_owned(), "song", false),
-        (Item::Song { .. }, _) => (format!("{title} (missing)"), "song", true),
+        (Item::Song { .. }, _) => (tf("remote.item.missing", "{title} (missing)", &with), "song", true),
         (Item::Passage(_), _) => (title.to_owned(), "passage", false),
-        (Item::Media { .. }, Found::Media { video: true, .. }) => (format!("{title} (video)"), "media", false),
-        (Item::Media { .. }, Found::Media { .. }) => (format!("{title} (picture)"), "media", false),
-        (Item::Media { .. }, _) => (format!("{title} (missing picture or video)"), "media", true),
-        (Item::MediaPlaylist { .. }, Found::MediaPlaylist { .. }) => {
-            (format!("{title} (media playlist)"), "media_playlist", false)
+        (Item::Media { .. }, Found::Media { video: true, .. }) => {
+            (tf("remote.item.video", "{title} (video)", &with), "media", false)
         }
-        (Item::MediaPlaylist { .. }, _) => (format!("{title} (missing media playlist)"), "media_playlist", true),
-        (Item::Placeholder { .. }, _) => (format!("{title} (placeholder)"), "placeholder", false),
-    };
+        (Item::Media { .. }, Found::Media { .. }) => {
+            (tf("remote.item.picture", "{title} (picture)", &with), "media", false)
+        }
+        (Item::Media { .. }, _) => {
+            (tf("remote.item.media_missing", "{title} (missing picture or video)", &with), "media", true)
+        }
+        (Item::MediaPlaylist { .. }, Found::MediaPlaylist { .. }) => {
+            (tf("remote.item.media_playlist", "{title} (media playlist)", &with), "media_playlist", false)
+        }
+        (Item::MediaPlaylist { .. }, _) => (
+            tf("remote.item.media_playlist_missing", "{title} (missing media playlist)", &with),
+            "media_playlist",
+            true,
+        ),
+        (Item::Placeholder { .. }, _) => {
+            (tf("remote.item.placeholder", "{title} (placeholder)", &with), "placeholder", false)
+        }
+    }
+}
+
+/// A playlist item's line as a remote page is sent it: in the language set.
+pub(crate) fn item_text(item: &Item, found: &Found) -> String {
+    item_line(item, found).0
+}
+
+/// One playlist item as `playlist [NAME]` lists it: its line, and the same as data, with its
+/// number in the playlist, its kind, its title as the playlist shows it, and what it was found
+/// to be. `text` is the line, as the JSON gave it before it had the rest. Always in English, as
+/// the command line is ([`item_text`] is the window's language, for a page).
+pub(crate) fn item_entry(number: usize, item: &Item, found: &Found) -> (String, serde_json::Value) {
+    let title = item.title();
+    let (line, kind, missing) = crate::i18n::with_language(crate::i18n::Language::English, || item_line(item, found));
     let mut data = serde_json::json!({
         "item": number, "kind": kind, "title": title, "missing": missing, "text": line,
     });
@@ -146,8 +174,9 @@ impl crate::App {
         }
     }
 
-    /// `playlist [NAME]`: a playlist's items, as lines and as data.
-    pub(crate) fn playlist_listing(&self, list: usize) -> (Vec<String>, Vec<serde_json::Value>) {
+    /// `playlist [NAME]`: a playlist's items, as lines and as data. `for_page`: each item's
+    /// `text` in the window's language, as a remote page is sent it (`sp` has it in English).
+    pub(crate) fn playlist_listing(&self, list: usize, for_page: bool) -> (Vec<String>, Vec<serde_json::Value>) {
         let Some(playlist) = self.running.as_ref().and_then(|r| r.home_state.services.list.get(list)) else {
             return (Vec::new(), Vec::new());
         };
@@ -157,8 +186,12 @@ impl crate::App {
             .iter()
             .enumerate()
             .map(|(at, item)| {
-                let (line, mut data) = item_entry(at + 1, item, &self.found(item));
+                let found = self.found(item);
+                let (line, mut data) = item_entry(at + 1, item, &found);
                 data["uid"] = serde_json::json!(uids[at]);
+                if for_page {
+                    data["text"] = serde_json::json!(item_text(item, &found));
+                }
                 (line, data)
             })
             .unzip()
@@ -814,7 +847,7 @@ impl crate::App {
             .parse::<usize>()
             .ok()
             .filter(|n| (1..=count).contains(n))
-            .ok_or_else(|| format!("{} has {count} slides; there is no slide {number}.", presentation.title))?
+            .ok_or_else(|| crate::control::no_such_slide(&presentation.title, count, number))?
             - 1;
         let (song, said) = change(&presentation, index, &rest.join(" ")).ok_or("That can't be done to that slide.")?;
         self.change_song(at, song);
@@ -892,7 +925,7 @@ impl crate::App {
         if let Some(after) = after
             && !(1..=count).contains(&after)
         {
-            return Err(format!("{} has {count} slides; there is no slide {after}.", presentation.title));
+            return Err(crate::control::no_such_slide(&presentation.title, count, &after.to_string()));
         }
         // A new slide at the end, laid out like the one before it, with the words in it; then
         // moved after the slide named, and starting a group if one was named.
@@ -1138,6 +1171,27 @@ mod tests {
         let (line, data) = item_entry(8, &passage, &Found::Nothing);
         assert_eq!((line.as_str(), data["kind"].as_str()), ("John 3:16-18", Some("passage")));
         assert_eq!(data["bibles"], serde_json::json!(["kjv"]));
+    }
+
+    #[test]
+    fn a_page_has_an_items_words_in_the_windows_language_and_sp_in_english() {
+        use crate::i18n::{Language, english_of, with_language};
+        let id = sp_model::Uuid::new_v4();
+        let picture = Item::Media { id, name: "pic001.png".to_owned() };
+        let found = Found::Media { number: 1, video: false };
+        let (line, data) = with_language(Language::Spanish, || item_entry(4, &picture, &found));
+        assert_eq!((line.as_str(), data["text"].as_str()), ("pic001.png (picture)", Some("pic001.png (picture)")));
+        let for_page = with_language(Language::Spanish, || item_text(&picture, &found));
+        assert_eq!(for_page, "pic001.png (imagen)");
+        assert_eq!(english_of(&for_page), "pic001.png (picture)");
+        let place = Item::Placeholder { name: "Sermón".to_owned() };
+        assert_eq!(with_language(Language::Spanish, || item_text(&place, &Found::Nothing)), "Sermón (hueco)");
+        let song = Item::song("title:Gone".to_owned(), "Gone".to_owned());
+        assert_eq!(with_language(Language::Spanish, || item_text(&song, &Found::Nothing)), "Gone (falta)");
+        // Names, headers, passages and songs found are the same in every language.
+        let header = Item::Header { name: "Adoración".to_owned() };
+        assert_eq!(with_language(Language::Spanish, || item_text(&header, &Found::Nothing)), "— Adoración —");
+        assert_eq!(with_language(Language::English, || item_text(&picture, &found)), "pic001.png (picture)");
     }
 
     #[test]

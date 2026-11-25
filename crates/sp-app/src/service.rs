@@ -350,9 +350,12 @@ pub struct Services {
     pub fresh: bool,
 }
 
+/// The first playlist's name as the app gives it: its key, and its English.
+pub const FIRST_PLAYLIST: (&str, &str) = crate::i18n::tk("left.playlist.first", "Service");
+
 /// The name the app gives the first playlist, in the language set.
 pub fn first_playlist_name() -> &'static str {
-    crate::i18n::tg("left.playlist.first", "Service")
+    crate::i18n::tg(FIRST_PLAYLIST.0, FIRST_PLAYLIST.1)
 }
 
 impl Default for Services {
@@ -410,17 +413,24 @@ impl Services {
     /// choose another. Once anything changes the playlists, the name is the church's. Called
     /// every frame; true when it renamed the playlist.
     pub fn follow_language(&mut self) -> bool {
-        if !self.fresh || self.changed {
+        if !self.first_is_the_apps() {
             return false;
         }
         let name = first_playlist_name();
         match self.list.as_mut_slice() {
-            [only] if only.items.is_empty() && only.name != name => {
+            [only] if only.name != name => {
                 only.name = name.to_owned();
                 true
             }
             _ => false,
         }
+    }
+
+    /// Whether the playlists are still the one empty playlist the app made at a first start,
+    /// with nothing changed ([`Services::fresh`]): its name is then the app's, [`FIRST_PLAYLIST`],
+    /// shown in the language set, not yet the church's.
+    pub fn first_is_the_apps(&self) -> bool {
+        self.fresh && !self.changed && matches!(self.list.as_slice(), [only] if only.items.is_empty())
     }
 
     /// The place of the service in front among the list.

@@ -232,6 +232,86 @@ impl Answer {
     }
 }
 
+/// A built-in file as the server sends it in a language.
+fn sent(path: &str, body: &'static str, language: Language) -> String {
+    String::from_utf8(in_language(path, body.as_bytes(), language).0.to_vec()).expect("text")
+}
+
+#[test]
+fn the_page_and_the_sign_in_page_say_the_apps_language_before_anything_else_comes() {
+    // The marks the language is written beside are in the files bundled (a new bundle that
+    // dropped one would leave the page without its language).
+    assert!(APP_JS.contains(REMOTE_MARK), "app.js sets window.SP_REMOTE");
+    assert!(LOGIN_JS.contains("\"use strict\";"), "login.js says \"use strict\";");
+    for page in [INDEX_HTML, LOGIN_HTML] {
+        assert!(page.contains("<html lang=\"en\""), "the page says its language in <html lang>");
+    }
+    let test = start_test("language");
+    let english_tag = test.get("/login", None).header("etag").expect("a tag").to_owned();
+    test.shared.set_language(Language::Spanish);
+    // Before signing in: the sign-in page and its script.
+    let login = test.get("/login", None);
+    assert!(login.text().starts_with("<!doctype html>\n<html lang=\"es\">"), "{}", login.text());
+    assert_ne!(login.header("etag"), Some(english_tag.as_str()), "a page cached in English is sent again");
+    let again = test.runtime.block_on(test.http("GET", "/login", &[("If-None-Match", english_tag.as_str())], b""));
+    assert_eq!(again.status, 200);
+    let script = test.get("/login.js", None).text();
+    assert!(script.contains("\"use strict\";\nwindow.SP_LANGUAGE = \"es\";\n"), "{script}");
+    assert_eq!(script.matches("SP_LANGUAGE").count(), 1);
+    // Signed in: the page and its script, the language right after window.SP_REMOTE.
+    let token = test.token();
+    let page = test.get("/", Some(&token)).text();
+    assert!(page.contains("<html lang=\"es\" data-look=\"dark\">"), "{page}");
+    let script = test.get("/app.js", Some(&token)).text();
+    assert!(script.contains("window.SP_REMOTE = true;\nwindow.SP_LANGUAGE = \"es\";\n"));
+    assert_eq!(script.len(), APP_JS.len() + "\nwindow.SP_LANGUAGE = \"es\";".len(), "nothing else changes");
+    // And back in English, at once.
+    test.shared.set_language(Language::English);
+    assert!(test.get("/app.js", Some(&token)).text().contains("window.SP_LANGUAGE = \"en\";"));
+    assert_eq!(test.get("/login", None).text(), LOGIN_HTML);
+}
+
+#[test]
+fn sign_in_answers_refusals_and_errors_come_in_the_apps_language() {
+    let test = start_test("spanish");
+    test.shared.set_language(Language::Spanish);
+    for _ in 0..3 {
+        let answer = test.sign_in("wrong password");
+        assert_eq!(answer.status, 401);
+        let said: serde_json::Value = serde_json::from_slice(&answer.body).expect("JSON");
+        assert_eq!(said["text"], "Esa contraseña no es correcta.");
+    }
+    let slowed = test.sign_in("wrong password");
+    assert_eq!(slowed.status, 429);
+    let said: serde_json::Value = serde_json::from_slice(&slowed.body).expect("JSON");
+    assert_eq!(said["text"], "Demasiadas contraseñas incorrectas. Inténtalo de nuevo dentro de 1 s.");
+    assert_eq!(said["wait"], 1);
+    std::thread::sleep(Duration::from_millis(1100));
+    let token = test.token();
+    test.runtime.block_on(async {
+        let mut page = test.socket(&token, Some(&test.origin())).await.expect("connected");
+        page.send(tungstenite::Message::text(r#"{"type":"hello"}"#)).await.expect("sent");
+        next_json(&mut page).await;
+        // A refusal by the policy, and the server's own errors.
+        let closed = serde_json::json!({"type": "command", "id": 1, "args": ["menu", "Quit"]});
+        page.send(tungstenite::Message::text(closed.to_string())).await.expect("sent");
+        let refused = next_json(&mut page).await;
+        assert_eq!(refused["reply"]["ok"], false);
+        assert_eq!(
+            refused["reply"]["text"],
+            "Elegir en la barra de menús se hace en el ordenador, no desde la página remota."
+        );
+        page.send(tungstenite::Message::text("not JSON")).await.expect("sent");
+        assert_eq!(next_json(&mut page).await, serde_json::json!({"type": "error", "text": "Eso no es JSON."}));
+        page.send(tungstenite::Message::text(r#"{"type":"command","id":2,"args":[1]}"#)).await.expect("sent");
+        assert_eq!(next_json(&mut page).await["reply"]["text"], "Los args de un comando son una lista de palabras.");
+        // In English again as soon as the app is.
+        test.shared.set_language(Language::English);
+        page.send(tungstenite::Message::text(r#"{"type":"nonsense"}"#)).await.expect("sent");
+        assert_eq!(next_json(&mut page).await["text"], "Unknown message: send hello, command or preview.");
+    });
+}
+
 /// The next text message from a page's socket, as JSON (heartbeats and pictures passed over).
 async fn next_json(socket: &mut WebSocketStream<TlsStream<TcpStream>>) -> serde_json::Value {
     serde_json::from_str(&next_text(socket).await).expect("JSON")
@@ -313,7 +393,7 @@ fn the_page_and_its_files_are_served_with_their_types_to_the_right_people() {
     ] {
         let open = test.get(path, None);
         assert_eq!((open.status, open.header("content-type")), (200, Some(kind)), "{path}");
-        assert_eq!(open.text(), body, "{path}");
+        assert_eq!(open.text(), sent(path, body, Language::English), "{path}");
         assert!(open.header("etag").is_some() && open.header("cache-control") == Some("no-cache"), "{path}");
     }
     let token = test.token();
@@ -332,7 +412,7 @@ fn the_page_and_its_files_are_served_with_their_types_to_the_right_people() {
     assert_eq!(page.header("x-frame-options"), Some("DENY"));
     let script = test.get("/app.js", Some(&token));
     assert_eq!((script.status, script.header("content-type")), (200, Some("text/javascript; charset=utf-8")));
-    assert_eq!(script.text(), APP_JS);
+    assert_eq!(script.text(), sent("/app.js", APP_JS, Language::English));
     // The slide face and its licence: signed-in only, and fetched once (asked again with its
     // tag, a file is not sent again).
     for name in ["Regular", "Bold", "Italic", "BoldItalic"] {

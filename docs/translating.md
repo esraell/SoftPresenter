@@ -68,6 +68,12 @@ never part of a word, and nothing under three letters; names and song words stay
 For a reply built from words of its own, `i18n::with_language(Language::English, …)` makes it
 in English to begin with (the macros' `describe` does).
 
+A remote page gets the same replies without `english_of`, so a refusal wrapped with `t`/`tf`
+reaches it in the window's language. JSON data is never turned back: where `sp`'s data holds
+words (a playlist item's `text`), make them in English for `sp` and in the language for a page
+(`service_cli::item_entry` and `item_text`). The server's own sentences are made on its thread
+with `Shared::said`, in the language the app last gave it.
+
 ## Numbers, times and quotation marks
 
 `i18n::count(n)`, `i18n::number(x, places)`, `i18n::seconds(x)` ("0.4 s", "0,4 s") and
@@ -109,7 +115,7 @@ start with `_` (`"_note"`) are comments.
 | `bibles` | the Bibles window, installing and reading Bibles, and what they say |
 | `setup` | the first-start setup's steps, in each system's wording |
 | `integrations` | Settings › Integrations: VoxLive, Canva Sync and their pages, states and messages |
-| `remote` | Settings › Remote Control and what Remote Control says in the window |
+| `remote` | Settings › Remote Control and what Remote Control says in the window; what its server says to the phone's page (sign-in answers, refusals, errors, a playlist item's words) |
 | `screens` | the Screens window: the list, each screen's output, look, background, key and DeckLink rows, what each screen is doing (which `sp screens` gives in English); the NDI download on Linux |
 | `inspector` | the inspector at the right of the Edit view: its tabs, sections, fields and menus |
 | `editor` | the Edit view's slide editing (`editor.rs`) and its stage layouts' parts (`stage_editor.rs`) |

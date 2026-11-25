@@ -551,6 +551,19 @@ fn format_of(language: Language) -> &'static Format {
     &tables().languages[language.index()].format
 }
 
+/// How `language` writes numbers and quotation marks, as its `format.json` says (English's own
+/// rules for English), for a page that writes them itself: the remote page's `app` part.
+pub fn number_format(language: Language) -> serde_json::Value {
+    let format = format_of(language);
+    serde_json::json!({
+        "decimal": format.decimal,
+        "group": format.group,
+        "group_from": format.group_from,
+        "quote_open": format.open,
+        "quote_close": format.close,
+    })
+}
+
 /// A whole number as the current language writes it: 13,613 in English, 13.613 in Spanish,
 /// 13 613 (a no-break space) in Russian and Ukrainian.
 pub fn count(n: u64) -> String {

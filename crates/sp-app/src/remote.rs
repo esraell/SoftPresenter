@@ -168,6 +168,9 @@ pub struct Remote {
     /// When the state was last published, and its seldom-changing parts.
     pub(crate) published: Option<Instant>,
     pub(crate) published_slow: Option<Instant>,
+    /// The language the state was last published in: when the app's language changes, every
+    /// part is published at once, so a page never shows two languages.
+    pub(crate) published_language: Option<crate::i18n::Language>,
     pub clock: Clock,
     pub(crate) looks: state::Looks,
     /// A new certificate the operator should hear of, once.
@@ -210,6 +213,7 @@ impl Remote {
             thumbs_waiting: VecDeque::new(),
             published: None,
             published_slow: None,
+            published_language: None,
             clock: Clock::new(),
             looks: state::Looks::default(),
             cert_news: None,
@@ -319,6 +323,7 @@ impl Remote {
         let shared = server::Shared::new(store, Box::new(bridge()))?;
         self.local_name = names.local_name();
         shared.set_local_name(self.local_name.clone());
+        shared.set_language(crate::i18n::current());
         let running = server::start(server::Config { bind: bind_address(), port, cert }, shared)?;
         crate::applog::event("remote", &format!("Switched on, on port {}.", running.local.port()));
         self.cert_checked = Some(Instant::now());
@@ -326,6 +331,7 @@ impl Remote {
         self.fingerprint = Some(fingerprint);
         self.published = None;
         self.published_slow = None;
+        self.published_language = None;
         self.set_on(true);
         Ok(())
     }
@@ -603,9 +609,9 @@ fn unreachable_bridge() -> Bridge {
 impl crate::App {
     /// Refuses, while a remote page's command runs, what would open a file or folder on the
     /// computer: called where each such command opens it, behind the policy's own refusal.
-    pub(crate) fn only_at_the_computer(&self, what: &str) -> Result<(), String> {
+    pub(crate) fn only_at_the_computer(&self, what: policy::AtComputer) -> Result<(), String> {
         if self.remote_call {
-            return Err(format!("{what} is done at the computer, not from the remote page."));
+            return Err(what.words().to_owned());
         }
         Ok(())
     }

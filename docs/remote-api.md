@@ -18,7 +18,8 @@ slide pictures come from plain URLs; the live preview comes over the WebSocket a
   [changes and versions](#changes-and-versions), [reconnecting](#reconnecting),
   [commands and replies](#commands-and-replies), [the live preview](#the-live-preview),
   [heartbeats](#heartbeats), [close codes](#close-codes)
-- [The state, part by part](#the-state-part-by-part) · [times](#times)
+- [The state, part by part](#the-state-part-by-part) · [built-in names](#built-in-names) ·
+  [the app's language](#the-apps-language) · [times](#times)
 - [The page's own state: open item, picks, cue](#the-pages-own-state-open-item-picks-cue)
 - [Slide pictures](#slide-pictures) · [roles](#roles-and-who-you-are) · [limits](#limits) ·
   [the security model](#the-security-model) · [step 2](#step-2-designed-not-built-yet)
@@ -103,6 +104,10 @@ A test copy started with `SOFTPRESENTER_QUIET=1` listens on 127.0.0.1 only.
   `Retry-After: 4`. A right password clears its address.
 - **No password set yet:** `503` with text saying to set one in Settings.
 
+Each `text` is in the app's language ([below](#the-apps-language)): in Spanish, `"Esa contraseña
+no es correcta."` and `"Demasiadas contraseñas incorrectas. Inténtalo de nuevo dentro de 4 s."`.
+Show it as it comes; `wait` is the seconds as a number, for a page that counts down itself.
+
 `POST /api/logout` (same Origin rule) forgets this device: its pages close, and the cookie is
 cleared.
 
@@ -166,6 +171,16 @@ runs), and its form is `method="post"`, so a Return pressed early can't send the
 address. The sign-in page and the style sheet are open to anyone; the page, its script and the
 fonts are for a signed-in device only.
 
+**The language, before anything else comes.** The app writes the language its words are in
+(`en`, `es`, `ru` or `uk`, as [`app.language`](#the-apps-language)) into four files as it sends
+them: `<html lang="en"` becomes `<html lang="es"` in `index.html` and `login.html`, and a line
+`window.SP_LANGUAGE = "es";` goes into `app.js` right after `window.SP_REMOTE = true;` and into
+`login.js` right after its `"use strict";` (so the sign-in page can speak the language before
+anyone signs in, and the page before its first snapshot). A bundle must keep those marks: a test
+fails if one goes. Nothing else in the files changes, and each language has its own `ETag`, so a
+browser that has the English page fetches the Spanish one afresh. After the first snapshot,
+follow `app.language`, which changes while the page is open.
+
 ## The WebSocket
 
 One socket per page: `wss://HOST/api/ws`, opened with the cookie and the page's Origin (a
@@ -185,7 +200,7 @@ page last had. The answer is a snapshot, or (resuming) a change with exactly wha
 
     {"type": "snapshot", "epoch": "Hk3…", "version": 41, "now": 1795370000123,
      "you": {"client": 3, "device": "Safari on an iPad", "role": "control"},
-     "parts": {"live": {…}, "playlist": {…}, "playlists": […], "library": {…}, "bin": {…},
+     "parts": {"app": {…}, "live": {…}, "playlist": {…}, "playlists": […], "library": {…}, "bin": {…},
                "media": {…}, "audio": {…}, "timers": […], "messages": […], "props": […],
                "macros": […], "screens": {…}, "notices": […], "versions": {…}}}
 
@@ -201,6 +216,15 @@ that changed, and the version they changed at. Versions go up by one per change,
 1 each time Remote Control is switched on, under a new **epoch** (a random word). Changes are
 coalesced: at most about twenty a second, and none while nothing changes. The state is taken
 from what the app already keeps, never by looking at its window.
+
+**When the app's language changes** (Settings › General › Language, the setup's first step,
+`sp settings set language=es`, or the computer's language answering while the setting follows
+it), one change carries `app` with the new language **and every part whose words changed with
+it**: each part with a [built-in name](#built-in-names) (`live`, `playlist`, `playlists` today)
+and the `playlist` part's item `text`s, all under one version. Apply the whole change before
+drawing, and switch the page's own words by `app.language` at the same time, so the page never
+shows two languages at once. A part whose words are the same in both languages (no label in
+either) isn't sent: what the page has is already right. Notices keep the words they were said in.
 
 ### Reconnecting
 
@@ -224,9 +248,11 @@ reply:
 
     {"type": "reply", "id": 7, "reply": {"ok": true, "text": "On screen: River Song, slide 1 of 6 (Verse 1).", "data": …}}
 
-`reply` is the reply `sp --json` gets, byte for byte, but for one thing: any absolute path in it
+`reply` is the reply `sp --json` gets, byte for byte, but for two things: any absolute path in it
 (a picture's file, a folder) is cut to its file name, so the computer's folders and the user's
-name in them stay on the computer (the state is sent the same way). It is carried out on the
+name in them stay on the computer (the state is sent the same way); and its words are in the
+app's language where the app has them in it, where `sp` always gets English
+([below](#the-apps-language)). It is carried out on the
 app's main thread by the same handler as `sp` and the window's own buttons. `ok: false` is a **refusal**; `text` is the
 app's own words for why (show it as the cue chip), such as "River Song has 6 slides; there is no
 slide 9.". Next or Previous at an end is not a refusal: `ok: true`, with `data` `{"at_end": true}`,
@@ -266,7 +292,8 @@ anything else is not answered; at most four commands from a page waiting for the
 forty commands a second (eighty in a burst) from every page together; a device connects at most
 twelve pages a minute (ten at once).
 
-A message the server can't read gets `{"type": "error", "text": "…"}`.
+A message the server can't read gets `{"type": "error", "text": "…"}` (in the app's language:
+`"Eso no es JSON."`).
 
 ### The live preview
 
@@ -303,6 +330,18 @@ browser answers pings by itself) for 45 seconds.
 Each part is what the app already keeps, mostly the same JSON `sp` gives for the matching
 command. Numbers are counted from 1, as `sp` counts them.
 
+**`app`** — the app itself: the language its words are in, and how that language writes numbers
+and quotation marks (its `locales/<language>/format.json`):
+
+    {"app": {"language": "es",
+             "format": {"decimal": ",", "group": ".", "group_from": 5, "quote_open": "“", "quote_close": "”"}}}
+
+`language` is `en`, `es`, `ru` or `uk`: the one chosen in Settings › General › Language, or, with
+the setting on Automatic, the computer's (English when the computer's isn't one of these); never
+`auto`. `group_from` is how many figures a whole number needs before it is grouped (Spanish writes
+1234 but 13.613; English 1,234). It is sent again, in the same change as every part whose words
+change with it, whenever the language changes ([above](#changes-and-versions)).
+
 **`live`** — what is on screen, and the switches beside it: `sp status --json`'s `data` less what
 ticks (`timers`, `audio`, `token`), plus:
 
@@ -312,6 +351,7 @@ ticks (`timers`, `audio`, `token`), plus:
      "audience_on": true, "stage_on": true, "selected_song": "…", "announcements": "…",
      "media_playlist": "…", "playlist": {"name": "Sunday", "item": 3, "item_last_opened": "…", "listed": true},
      "continuous": false, "identify": false, "main_theme": "Built-in",
+     "main_theme_built_in": true, "main_theme_label": "Incluido",
      "version": {"name": "Offering", "kept": false, "waiting": false},
      "build": 0, "slide_id": "<uuid>", "thumb": "/thumb/<uuid>/usual/<look>.jpg",
      "live_item": 3, "advance_at": 1795370004000,
@@ -325,9 +365,14 @@ window would), `live_item` which item went on screen (also when a page started i
 if it doesn't); `captions` whether VoxLive's captions are on screen; `version_id` the theme
 version the screens draw in. A Bible passage on screen is `kind: "passage"`, and a song of the
 song catalog shown from the find box and not in the library `kind: "catalog"` (with no `id` or
-`number`), each with its title in `song`.
+`number`), each with its title in `song`. `main_theme` is the main theme's name as kept; the
+built-in theme under the name the app gave it has `main_theme_built_in: true` and, when the
+window calls it otherwise, `main_theme_label` ([built-in names](#built-in-names)).
+`live.playlist` (the playlist in front) carries the same `name`, `built_in` and `label` as the
+`playlist` part.
 
-**`playlist`** — the playlist in front: `{"name", "number", "rev", "live_item", "items": […]}`,
+**`playlist`** — the playlist in front: `{"name", "number", "rev", "live_item", "items": […]}`
+(and `built_in`, `label` for the untouched first playlist: [built-in names](#built-in-names)),
 the items as `sp playlist --json` lists them. Each has `item` (its place in the playlist: the
 number `--aim` takes), `uid` (the item's own id, [below](#the-pages-own-state-open-item-picks-cue)), `title`, `text` (as `sp` shows it), `kind`
 (`song|passage|header|media|media_playlist|placeholder`) and `missing`; a song adds its `id` and
@@ -338,6 +383,11 @@ number `--aim` takes), `uid` (the item's own id, [below](#the-pages-own-state-op
     {"item": 2, "uid": "032fb9a3-4bc7-4f35-9cc6-23ca08c68153", "kind": "song", "id": "58a9…", "number": 2, "title": "Test One", "text": "Test One", "missing": false}
     {"item": 4, "uid": "9f75b90a-22d8-4c2a-907d-cab4589f9399", "kind": "media", "media_type": "picture", "number": 2, "title": "pic001.png", "text": "pic001.png (picture)", "missing": false}
 
+`text` is in the app's language (`"pic001.png (imagen)"`, `"Sermón (hueco)"`, `"Bars.mp4
+(falta la imagen o el vídeo)"`), here and in the reply to `["playlist", "NAME"]`, and sent again
+when the language changes; `sp` has it in English. `title` is the item's own name, and `kind`
+and `media_type` are words for the page to read, never translated.
+
 `uid` belongs to the item in the playlist, not to the song or picture it shows (the same song in
 two playlists is two items, and a song's `id` is its own). It stays with the item when the items
 are moved about, when the playlist is saved and read again and when the app is opened again; an
@@ -347,8 +397,9 @@ name) are told apart by their order only.
 
 `rev` changes whenever the items do; send it with `--aim` ([below](#the-pages-own-state-open-item-picks-cue)).
 
-**`playlists`** — `[{"number", "name", "items", "rev", "front"}]`. A playlist's items come on
-demand: `["playlist", "NAME"]`.
+**`playlists`** — `[{"number", "name", "items", "rev", "front"}]` (and `built_in`, `label` for the
+untouched first playlist). A playlist's items come on demand: `["playlist", "NAME"]`, or
+`["playlist", "2"]` by its number.
 
 **`library`** — `{"songs": 214, "rev": "…", "libraries": […]}`. The songs come on demand:
 `["songs"]` (all; fetch again when `rev` changes; each `{"number": 2, "title": "Harbour Lights", "id": "829a…", "changed_outside": false}`, where `id` is the song's stable id), `["library", "NAME"]`,
@@ -381,7 +432,9 @@ demand: `["playlist", "NAME"]`.
 
 **`notices`** — the list under the app's status button, as the app keeps it (`notices.rs`):
 `[{"id", "kind": "info|trouble|ask", "text", "time" (seconds since 1970), "seen", "actions":
-[{"id", "label"}]}]`, questions first, then newest first. A page's own button mirrors it with
+[{"id", "label"}]}]`, questions first, then newest first. `text` and each action's `label` are
+the window's own words, in the language the app spoke when it said them (a notice said in
+Spanish stays in Spanish, in the window too, after a switch to English). A page's own button mirrors it with
 the same commands as `sp`: `["notices", "answer", "ID", "ACTION_ID"]` answers a question with one
 of its own actions (`outside:reload`, `outside:keep`; any other is refused), `["notices",
 "seen"]` marks every entry seen (as closing the list does), `["notices", "clear"]` is Clear All
@@ -391,6 +444,59 @@ page, `seen` leaves them unseen and `clear` keeps them until the operator has se
 app (closing the list there marks them seen).
 
 **`versions`** — `{"versions": [{"id", "name"}], "on": {"id", "keep", "waiting"}}`.
+
+## Built-in names
+
+Some names are the app's, not the church's: the built-in theme ("Built-in"), and the first
+playlist of a first start while nothing has changed it ("Service"). Their files keep the English,
+and the window shows them in its language ("Incluido", "Culto"). Wherever such a name reaches the
+page it comes with two more fields:
+
+- `built_in: true` while it is the app's name (a playlist renamed, given an item or written to
+  its file, or a theme renamed, is the church's, and has neither field);
+- `label`: the name as the window shows it now, **only when that differs** from the name (so
+  never in English).
+
+The name itself stays in `name` (the English the app gave it). **Show `label` when there is one,
+else `name`.** Today's places:
+
+    "live":      {"main_theme": "Built-in", "main_theme_built_in": true, "main_theme_label": "Incluido",
+                  "playlist": {"name": "Service", "built_in": true, "label": "Culto", "item": null, …}, …}
+    "playlist":  {"name": "Service", "built_in": true, "label": "Culto", "number": 1, "items": [], …}
+    "playlists": [{"number": 1, "name": "Service", "built_in": true, "label": "Culto", "items": 0, "front": true, …}]
+
+`main_theme` is a string, so its pair are siblings (`main_theme_built_in`, `main_theme_label`).
+The untouched first playlist has no items, so nothing on screen comes from it (`live.live.playlist`
+never names it). No template's or box role's name is in the state yet; when one comes (step 2),
+it gets the same pair beside its `id`. Names made in a language and saved ("Arreglo 2",
+"Mensaje rápido", "Texto 3") are the church's from then on and come as they are.
+
+**In commands, name a built-in playlist by its `number`** (`["playlist", "open", "1"]`): the
+app's name for it while the window speaks Spanish is "Culto", so `["playlist", "open",
+"Service"]` is refused. A number always works for a playlist.
+
+## The app's language
+
+The page has its own words in its own tables; the app tells it which language to use (`app`, and
+`window.SP_LANGUAGE` in the page's script before the first snapshot) and sends what it says
+itself in that language, as the window says it:
+
+- the sign-in answers (`401`, `429`, `503`);
+- refusals (`ok: false`) the app has words for: those the policy gives (what is done at the
+  computer: "Elegir en la barra de menús se hace en el ordenador, no desde la página remota.",
+  a command closed to pages), the server's own (too many commands, busy, no answer in time, a
+  device signed out), a playlist changed since it was looked at, an item no longer there, a slide
+  that isn't there ("River Song tiene 6 diapositivas; no hay diapositiva 9."). Other refusals that
+  only the command line words (most usage lines, "No item called …") are still in English;
+  show `text` whatever language it is in;
+- `{"type": "error"}` texts;
+- the notices and their answers' labels (as the window said them);
+- a playlist item's `text`, in the `playlist` part and in `["playlist", NAME]` replies.
+
+What stays as it is: names and words the church typed (songs, slides, playlists, headers),
+words for the page to read (`kind`, `media_type`, `test_pattern`, `tone`, ids), and an
+`ok: true` reply's `text`, which is as the command made it. `sp` and the log are always in
+English. `["settings", "set", "language=es"]` changes the app's language from a page too.
 
 ## Times
 
@@ -601,7 +707,9 @@ NDI receivers, DeckLink devices with the formats each can key).
 1. Its files are served from `crates/sp-app/src/remote/page/` (scripts and styles as files).
 2. On load: open the socket; send `hello` with `preview` and the `resume` from the last
    snapshot or change (keep epoch and version in memory, or in `sessionStorage`).
-3. Replace parts whole on `snapshot` and `change`; draw from them.
+3. Replace parts whole on `snapshot` and `change`; draw from them. Speak `app.language`
+   (`window.SP_LANGUAGE` until the first snapshot), switching with the change that brings a new
+   one, and show `label || name` for a name with `built_in`.
 4. Keep the open item, picks and cue in the page; send `--aim ITEM --rev REV` with Next and
    Previous, and `go --aim ITEM SLIDE` for Enter and clicks.
 5. Send every action as a command with an id; show `reply.text` (always the app's words) when

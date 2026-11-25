@@ -1722,6 +1722,18 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   itself: those are refused in words, and are done at the computer; a sub-command added later
   stays closed to pages until it is listed. Any path in what a page is sent is cut to its file
   name.
+- **In the window's language.** The page is sent the language the app speaks, with how it writes
+  numbers and quotation marks, and is told at once when the operator changes it (Settings ›
+  General › Language, the setup's first step, `sp settings set language=…`), in the same change
+  as every name it shows in other words, so it never shows two languages at once; the sign-in
+  page and the page's script have it before anything else comes. A built-in name comes with the
+  words the window shows for it (the built-in theme, "Incluido"; the untouched first playlist of
+  a first start, "Culto") while its files keep the English. What the app says to the page is in
+  that language as the window says it: the sign-in answers, the refusals of what is done at the
+  computer, a playlist changed or an item gone, a slide that isn't there, the server's errors,
+  the notices and their answers, and each playlist item's words ("pic001.png (imagen)"). Other
+  refusals that only the command line words are still in English; `sp` and the log stay in
+  English.
 - **The page keeps its own open item and picks**, so two computers never fight over the
   window's: it names the item each time (`next --aim ITEM`, `go --aim ITEM SLIDE`), and the
   window's open item, picks and chosen song stay as they are.
@@ -1799,7 +1811,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   colour, edges, theme, stage layout, background solid or see-through, alpha, key of another
   screen), `screen delete SCREEN --yes`; `settings` and `settings set
   key=value…` (transitions, the copyright line and CCLI licence, Continuous, the
-  slide view and size; what happens at start is a macro's, `macro startup NAME on`); `view words
+  slide view and size, the app's language; what happens at start is a macro's, `macro startup NAME on`); `view words
   [SONG]` (Edit Words; `view reflow` too); and `help COMMAND` for one command's help, without the app running. Bible downloads
   started from the command line have a job number, for `--wait` and `sp job N`.
 - **The sp command installs itself.** The first time an installed copy starts (on a Mac, one in

@@ -29,6 +29,18 @@ use crate::private_folder;
 /// Changes when requests or replies change shape, so an older command line is told so.
 pub const PROTOCOL: u32 = 1;
 
+/// Why a slide named by its number isn't there: "River Song has 6 slides; there is no slide 9.",
+/// in the window's language for a remote page (`sp`'s replies are given back in English).
+pub(crate) fn no_such_slide(title: &str, count: usize, number: &str) -> String {
+    crate::i18n::tn(
+        "remote.refused.no_slide",
+        count as u64,
+        "{title} has {n} slide; there is no slide {number}.",
+        "{title} has {n} slides; there is no slide {number}.",
+        &[("title", title), ("number", number)],
+    )
+}
+
 /// The most a request may be; a longer one is refused.
 const MAX_REQUEST: u64 = 64 * 1024;
 
@@ -1101,6 +1113,7 @@ Screens and settings
                                last|every ccli_licence=N start_audience=on|off continuous=on|off
                                start_with=nothing|media-playlist:NAME|announcements:SONG
                                view=grid|words|table columns=1-12
+                               language=auto|en|es|ru|uk (the app's own words)
   view words [SONG]            Edit Words: a song's words as text to change (view reflow too)
   help COMMAND                 the help for one command
 
@@ -1438,7 +1451,7 @@ impl crate::App {
     /// `song export SONG… [--playlist NAME] --to FILE.sppack [--no-videos]`.
     fn ctl_song_export(&mut self, args: &[String]) -> Result<Reply, String> {
         const USAGE: &str = "song export SONG… [--playlist NAME] --to FILE.sppack [--no-videos]";
-        self.only_at_the_computer("Exporting a song pack")?;
+        self.only_at_the_computer(crate::remote::policy::AtComputer::ExportPack)?;
         let mut songs = Vec::new();
         let (mut to, mut playlist, mut videos) = (None, None, true);
         let mut words = args.iter();
@@ -2001,9 +2014,7 @@ impl crate::App {
         }
         let slide = match slide {
             Some(number) if (1..=song.slide_count()).contains(&number) => number - 1,
-            Some(number) => {
-                return Err(format!("{} has {} slides; there is no slide {number}.", song.title, song.slide_count()));
-            }
+            Some(number) => return Err(no_such_slide(&song.title, song.slide_count(), &number.to_string())),
             None => song.order().into_iter().find(|s| song.slide(*s).is_some_and(|(_, sl)| sl.enabled)).unwrap_or(0),
         };
         self.apply(vec![Command::Select(at), Command::GoTo(SlideRef { presentation: at, slide })]);
@@ -2017,14 +2028,19 @@ impl crate::App {
         let list = state.services.front();
         // An item's `uid` names it exactly, wherever it has been moved to since: no `--rev` needed.
         if let Ok(uid) = sp_model::Uuid::parse_str(aim.item.trim()) {
-            return list
-                .place_of_uid(uid)
-                .ok_or_else(|| format!("That item is no longer in {}; look again and try once more.", list.name));
+            return list.place_of_uid(uid).ok_or_else(|| {
+                crate::i18n::tf(
+                    "remote.refused.item_gone",
+                    "That item is no longer in {playlist}; look again and try once more.",
+                    &[("playlist", &list.name)],
+                )
+            });
         }
         if aim.rev.as_ref().is_some_and(|rev| *rev != list.rev()) {
-            return Err(format!(
-                "{} has changed since it was last looked at; look again and try once more.",
-                list.name
+            return Err(crate::i18n::tf(
+                "remote.refused.playlist_changed",
+                "{playlist} has changed since it was last looked at; look again and try once more.",
+                &[("playlist", &list.name)],
             ));
         }
         let titles: Vec<String> = list.items.iter().map(|item| item.title().to_owned()).collect();
@@ -2064,7 +2080,7 @@ impl crate::App {
             (Some(at), Some(number)) => {
                 let count = self.show.presentations().get(at).map_or(0, |song| song.slide_count());
                 if !(1..=count).contains(&number) {
-                    return Err(format!("{title} has {count} slides; there is no slide {number}."));
+                    return Err(no_such_slide(&title, count, &number.to_string()));
                 }
                 self.apply(vec![Command::GoTo(SlideRef { presentation: at, slide: number - 1 })]);
                 self.with_state(|state| state.live_item = Some(item));
@@ -2427,8 +2443,9 @@ impl crate::App {
                 };
                 let name = state.services.list.get(at).ok_or("No such playlist.")?.name.clone();
                 // Each item says what it is; a song, picture, video or media playlist that can't
-                // be found is kept, and shown as missing.
-                let (lines, data) = self.playlist_listing(at);
+                // be found is kept, and shown as missing. A remote page has each item's text in
+                // the window's language, as the playlist part gives it.
+                let (lines, data) = self.playlist_listing(at, self.remote_call);
                 Ok(Reply::with(format!("{name}\n{}", numbered(&lines)), serde_json::json!(data)))
             }
         }
@@ -2756,7 +2773,7 @@ impl crate::App {
                 Ok(Reply::done(format!("Showing {}.", self.show.media()[at].name)))
             }
             Some("add") => {
-                self.only_at_the_computer("Adding pictures and videos")?;
+                self.only_at_the_computer(crate::remote::policy::AtComputer::AddMedia)?;
                 let files: Vec<PathBuf> = args[2..].iter().map(PathBuf::from).collect();
                 if files.is_empty() {
                     return Err("Add which files?".to_owned());
@@ -2803,7 +2820,7 @@ impl crate::App {
                 Ok(Reply::with(text, data))
             }
             Some("samples") => {
-                self.only_at_the_computer("Adding the sample backgrounds")?;
+                self.only_at_the_computer(crate::remote::policy::AtComputer::Samples)?;
                 let added = self.add_sample_backgrounds()?;
                 let names: Vec<&str> = added.items.iter().map(|item| item.name.as_str()).collect();
                 let playlist = self
@@ -3270,7 +3287,7 @@ impl crate::App {
             }
             Some("export") => self.ctl_song_export(&args[2..]),
             Some("import") => {
-                self.only_at_the_computer("Importing songs")?;
+                self.only_at_the_computer(crate::remote::policy::AtComputer::ImportSongs)?;
                 // Song packs: what to do with songs the library has already (skip, unless told).
                 let same = if args.iter().any(|w| w == "--replace") {
                     crate::pack::Same::Replace
@@ -3518,6 +3535,21 @@ fn setting_value(field: &serde_json::Value, key: &str, typed: &str) -> Result<se
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_slide_that_isnt_there_is_said_in_the_windows_language_and_in_english_to_sp() {
+        use crate::i18n::{Language, english_of, with_language};
+        let english = with_language(Language::English, || super::no_such_slide("River Song", 6, "9"));
+        assert_eq!(english, "River Song has 6 slides; there is no slide 9.");
+        assert_eq!(
+            with_language(Language::English, || super::no_such_slide("Amen", 1, "2")),
+            "Amen has 1 slide; there is no slide 2."
+        );
+        let spanish = with_language(Language::Spanish, || super::no_such_slide("River Song", 6, "9"));
+        assert_eq!(spanish, "River Song tiene 6 diapositivas; no hay diapositiva 9.");
+        // What `sp` writes (write_reply) is in English again.
+        assert_eq!(english_of(&spanish), english);
+    }
 
     /// Every first word the app carries out a command for starts a command when typed after
     /// `sp` (without `ctl`), so a new command can't be left out of COMMANDS again.
