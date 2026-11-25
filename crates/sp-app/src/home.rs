@@ -18,7 +18,7 @@ use crate::screens::{Kind, Output, Screen};
 use crate::icons::{self, Icon};
 
 mod import_sheet;
-mod settings;
+pub(crate) mod settings;
 mod slides;
 pub use import_sheet::{AskImport, ImportAnswer, SlidesChoice};
 pub use settings::{Pane, settings_ui};

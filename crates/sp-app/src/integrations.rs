@@ -1,20 +1,27 @@
-//! Settings › Integrations: the services SoftPresenter works with, each a row with its state,
-//! opening a page of its own to connect it: VoxLive, Canva Sync, TimelyChurch where it is
-//! offered (`timelychurch`), and the free songbooks of Worship Leader App where the song
-//! catalog is offered (`songbooks`).
+//! Settings › Integrations: the services SoftPresenter works with, each the same card (the
+//! owner, 2026-11-25: "the integration cards should be the same and that goes for voxlive"): its
+//! logo, name and one line, a light with how it stands, one key. A card opens that service's
+//! page in place, every page the same way: the way back, its logo and how it stands, what it
+//! brings, then the account. Worship Leader App's free songbooks (where the song catalog is
+//! offered, `songbooks`), VoxLive, Canva Sync, and TimelyChurch (where it is offered,
+//! `timelychurch`); a service not offered yet is greyed as coming soon.
 
 use egui::{Align, Align2, Color32, FontId, Layout, Rect, Sense, Stroke, pos2, vec2};
 
+use crate::home::settings::parts;
 use crate::i18n::{t, tf, tn};
-use crate::studio::{CARD, HOVER, LINE, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::logos::{self, Logo, Mark};
+use crate::studio::{CARD, CARE, HOVER, LINE, PANEL, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
 use crate::voxlive::{Status, View};
 
-/// VoxLive's own colour, for its mark; and its lighter shade, for words on a dark ground.
-pub const VOXLIVE: Color32 = Color32::from_rgb(44, 93, 124);
+/// VoxLive's own colour's lighter shade, for words on a dark ground.
 pub const VOXLIVE_LIGHT: Color32 = Color32::from_rgb(127, 169, 198);
 
 /// The green of something connected.
-const GOOD: Color32 = Color32::from_rgb(52, 199, 89);
+const GOOD: Color32 = crate::studio::READY;
+
+/// A card under the pointer: a step lighter than the well.
+const CARD_HOVER: Color32 = Color32::from_rgb(0x28, 0x28, 0x28);
 
 /// What the Integrations pane asks of the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,47 +40,30 @@ pub enum Request {
     CloseLook,
 }
 
-/// The colour of the songbooks' mark.
-const SONGBOOKS: Color32 = Color32::from_rgb(58, 128, 98);
-
 /// The pane: the list of services, or the page of the one open, or a screen's look.
-/// `songbooks` is given only where the song catalog is offered, and `timelychurch` only where
-/// TimelyChurch is.
+/// `songbooks` is given only where the song catalog is offered; TimelyChurch's card is greyed
+/// as coming soon unless it is offered (`timelychurch.offered`).
 pub fn pane(
     ui: &mut egui::Ui,
     view: &mut View,
     canva: &mut crate::canva::View,
     mut songbooks: Option<&mut crate::songbooks::View>,
-    mut timelychurch: Option<&mut crate::timelychurch::View>,
+    timelychurch: &mut crate::timelychurch::View,
 ) {
     let songbooks_open = songbooks.as_ref().is_some_and(|songbooks| songbooks.open);
-    let timelychurch_open = timelychurch.as_ref().is_some_and(|timelychurch| timelychurch.open);
     if view.look.is_some() {
         look_page(ui, view);
     } else if view.open {
         voxlive_page(ui, view);
     } else if canva.open {
         canva_page(ui, canva);
-    } else if let (true, Some(timelychurch)) = (timelychurch_open, timelychurch.as_deref_mut()) {
+    } else if timelychurch.offered && timelychurch.open {
         timelychurch_page(ui, timelychurch);
     } else if let (true, Some(songbooks)) = (songbooks_open, songbooks.as_deref_mut()) {
         songbooks_page(ui, songbooks);
     } else {
         list(ui, view, canva, songbooks, timelychurch);
     }
-}
-
-/// A service's mark: a rounded square of its colour with its initial.
-fn mark(ui: &mut egui::Ui, size: f32, colour: Color32, letter: &str) {
-    let (place, _) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
-    ui.painter().rect_filled(place, size * 0.24, colour);
-    ui.painter().text(
-        place.center(),
-        Align2::CENTER_CENTER,
-        letter,
-        crate::studio::semibold(size * 0.52),
-        Color32::WHITE,
-    );
 }
 
 /// A dot and a word or two for how a service stands.
@@ -89,177 +79,280 @@ fn state_words(status: &Status) -> (Color32, String) {
     }
 }
 
+/// A service's card in the list, the same for every service: its logo, its name and one line,
+/// then a light with how it stands and one key.
+struct Service<'a> {
+    mark: Mark<'a>,
+    name: &'a str,
+    about: &'a str,
+    /// How it stands: the light's colour (faint for off) and the words.
+    state: (Color32, String),
+    /// Its key's words: Connect, Open, or Soon for a service that isn't working yet.
+    key: &'a str,
+    /// Greyed, as "Coming soon", until it works.
+    soon: bool,
+}
+
+/// The list: a line saying what it is, then a card for each service, the same for all of them,
+/// and a card saying more will come. A card opens that service's page.
 fn list(
     ui: &mut egui::Ui,
     view: &mut View,
     canva: &mut crate::canva::View,
     songbooks: Option<&mut crate::songbooks::View>,
-    timelychurch: Option<&mut crate::timelychurch::View>,
+    timelychurch: &mut crate::timelychurch::View,
 ) {
-    ui.label(
-        egui::RichText::new(t(
-            "integrations.list.about",
-            "Services SoftPresenter works with. Click one to connect it.",
-        ))
-        .color(TEXT_DIM),
-    );
-    ui.add_space(12.0);
-    let voxlive = (
-        VOXLIVE,
-        "V",
-        "VoxLive",
-        t("integrations.voxlive.about.short", "Live translation of the sermon, as captions on your screens"),
-    );
-    if service_row(
-        ui,
-        voxlive,
-        state_words(&view.status),
-        t("integrations.voxlive.row.hint", "Connect VoxLive, or see its screens"),
-    ) {
-        view.open = true;
-    }
-    ui.add_space(8.0);
-    let about = (
-        CANVA,
-        "C",
-        "Canva Sync",
-        t("integrations.canva.about.short", "The announcements video, fresh from your Canva presentation"),
-    );
-    if service_row(
-        ui,
-        about,
-        canva_state(canva),
-        t("integrations.canva.row.hint", "Connect Canva Sync, choose the presentation, or sync now"),
-    ) {
-        canva.open = true;
-    }
-    if let Some(timelychurch) = timelychurch {
-        ui.add_space(8.0);
-        let about = (
-            TIMELYCHURCH,
-            "T",
-            crate::timelychurch::SOURCE_NAME,
-            t("integrations.timelychurch.about.short", "Your upcoming services as playlists, with their songs"),
-        );
-        let hint = t("integrations.timelychurch.row.hint", "Connect TimelyChurch, or see its services");
-        if service_row(ui, about, timelychurch_state(timelychurch), hint) {
-            timelychurch.open = true;
+    let about = t("integrations.list.about", "Other services SoftPresenter works with. Every one opens the same way.");
+    let width = ui.available_width();
+    let line = parts::words(ui, about, FontId::proportional(13.0), TEXT_FAINT, 0.0, width);
+    let (place, _) = ui.allocate_exact_size(vec2(width, line.size().y), Sense::hover());
+    ui.painter().galley(place.min, line, TEXT_FAINT);
+    ui.add_space(14.0 - ui.spacing().item_spacing.y);
+    let connect = t("integrations.connect", "Connect");
+    let open = t("integrations.open", "Open");
+    let soon_key = t("integrations.soon", "Soon");
+    let soon_words = || (CARE, t("integrations.state.soon", "Coming soon").to_owned());
+    let songbooks_offered = songbooks.is_some();
+    let songbooks_state = songbooks.as_deref().map(crate::songbooks::state_words);
+    let songbooks_initials = Mark::initials_of(crate::catalog::SOURCE_NAME);
+    let services = [
+        Service {
+            mark: Mark::Initials(&songbooks_initials),
+            name: crate::catalog::SOURCE_NAME,
+            about: t("integrations.songbooks.service", "Free songbooks, one for each language"),
+            state: match &songbooks_state {
+                Some((have, words)) => (if *have { GOOD } else { TEXT_FAINT }, words.clone()),
+                None => soon_words(),
+            },
+            key: if songbooks_offered { open } else { soon_key },
+            soon: !songbooks_offered,
+        },
+        Service {
+            mark: Mark::Logo(Logo::VoxLive),
+            name: "VoxLive",
+            about: t("integrations.voxlive.about.short", "Live translation captions on a screen"),
+            state: state_words(&view.status),
+            key: if view.status == Status::NoKey { connect } else { open },
+            soon: false,
+        },
+        Service {
+            mark: Mark::Logo(Logo::Canva),
+            name: "Canva Sync",
+            about: t("integrations.canva.about.short", "The announcements video, fresh from your Canva presentation"),
+            state: canva_state(canva),
+            key: if canva.status == crate::canva::Status::NotConnected { connect } else { open },
+            soon: false,
+        },
+        Service {
+            mark: Mark::Logo(Logo::TimelyChurch),
+            name: crate::timelychurch::SOURCE_NAME,
+            about: t("integrations.timelychurch.about.short", "Service plans and set lists from your church planner"),
+            state: if timelychurch.offered { timelychurch_state(timelychurch) } else { soon_words() },
+            key: if !timelychurch.offered {
+                soon_key
+            } else if matches!(
+                timelychurch.status,
+                crate::timelychurch::Status::NotConnected | crate::timelychurch::Status::Off
+            ) {
+                connect
+            } else {
+                open
+            },
+            soon: !timelychurch.offered,
+        },
+    ];
+    // Two across where there is room for 240 each, one above another where there isn't.
+    const BETWEEN: f32 = 12.0;
+    let across = (((width + BETWEEN) / (240.0 + BETWEEN)).floor() as usize).clamp(1, 2);
+    let each = (width - BETWEEN * (across - 1) as f32) / across as f32;
+    let tallest = services.iter().map(|service| card_height(ui, service, each)).fold(176.0, f32::max);
+    let count = services.len() + 1;
+    let rows = count.div_ceil(across);
+    let (grid, _) = ui.allocate_exact_size(vec2(width, rows as f32 * (tallest + BETWEEN) - BETWEEN), Sense::hover());
+    let mut opened = None;
+    for (index, service) in services.iter().enumerate() {
+        let corner =
+            grid.min + vec2((index % across) as f32 * (each + BETWEEN), (index / across) as f32 * (tallest + BETWEEN));
+        if service_card(ui, Rect::from_min_size(corner, vec2(each, tallest)), service, index) {
+            opened = Some(index);
         }
     }
-    if let Some(songbooks) = songbooks {
-        ui.add_space(8.0);
-        let about = (
-            SONGBOOKS,
-            "W",
-            crate::catalog::SOURCE_NAME,
-            t("integrations.songbooks.service", "Free songbooks, one for each language"),
-        );
-        let (have, words) = crate::songbooks::state_words(songbooks);
-        let hint = t("integrations.songbooks.hint", "Download songbooks, or remove them");
-        if service_row(ui, about, (if have { GOOD } else { TEXT_FAINT }, words), hint) {
-            songbooks.open = true;
+    let index = services.len();
+    let corner =
+        grid.min + vec2((index % across) as f32 * (each + BETWEEN), (index / across) as f32 * (tallest + BETWEEN));
+    more_to_come(ui, Rect::from_min_size(corner, vec2(each, tallest)));
+    match opened {
+        Some(0) => {
+            if let Some(songbooks) = songbooks {
+                songbooks.open = true;
+            }
         }
+        Some(1) => view.open = true,
+        Some(2) => canva.open = true,
+        Some(3) => timelychurch.open = true,
+        _ => {}
     }
+}
+
+/// How tall a service's card must be for its line to fit, at `width`.
+fn card_height(ui: &egui::Ui, service: &Service, width: f32) -> f32 {
+    let text = width - 32.0 - 48.0 - 12.0;
+    let name = parts::words(ui, service.name, semibold(16.0), TEXT, 0.0, text);
+    let about = parts::words(ui, service.about, FontId::proportional(13.0), TEXT_DIM, 0.0, text);
+    16.0 + (name.size().y + 3.0 + about.size().y).max(48.0) + 14.0 + 43.0 + 16.0
+}
+
+/// A service's card, drawn in `rect`: the well, lighter under the pointer; its logo, name and
+/// line at the top; along its foot, under a line, its light, how it stands in the fixed-width
+/// face, and its key. A service coming soon is greyed and takes no clicks. True when clicked.
+fn service_card(ui: &mut egui::Ui, rect: Rect, service: &Service, index: usize) -> bool {
+    let sense = if service.soon { Sense::hover() } else { Sense::click() };
+    let response = ui.interact(rect, ui.scope_id().with(("service", index)), sense);
+    let hovered = response.hovered() && !service.soon;
+    let mut painter = ui.painter().clone();
+    if service.soon {
+        painter.set_opacity(0.7);
+    }
+    painter.rect_filled(rect, crate::studio::RADIUS_CARD, if hovered { CARD_HOVER } else { CARD });
+    let inner = rect.shrink(16.0);
+    let logo = Rect::from_min_size(inner.min, vec2(48.0, 48.0));
+    let mut tile_ui = ui.new_child(egui::UiBuilder::new().max_rect(logo));
+    tile_ui.set_opacity(if service.soon { 0.7 } else { 1.0 });
+    logos::tile(&tile_ui, logo, service.mark, PANEL);
+    let text = inner.width() - 48.0 - 12.0;
+    let name = parts::words(ui, service.name, semibold(16.0), TEXT, 0.0, text);
+    let about = parts::words(ui, service.about, FontId::proportional(13.0), TEXT_DIM, 0.0, text);
+    let left = logo.max.x + 12.0;
+    let name_height = name.size().y;
+    painter.galley(pos2(left, inner.min.y), name, TEXT);
+    painter.galley(pos2(left, inner.min.y + name_height + 3.0), about, TEXT_DIM);
+    // The foot: a line, then the light, the words and the key, 30 high.
+    let foot = Rect::from_min_max(pos2(inner.min.x, inner.max.y - 43.0), inner.max);
+    painter.hline(foot.x_range(), foot.min.y + 0.5, Stroke::new(1.0, LINE));
+    let middle = foot.max.y - 15.0;
+    let (colour, words) = &service.state;
+    let light = pos2(foot.min.x + 3.5, middle);
+    if *colour == GOOD {
+        crate::studio::paint_light(&painter, light, Some(GOOD));
+    } else if *colour == TEXT_FAINT {
+        crate::studio::paint_light(&painter, light, None);
+    } else {
+        painter.circle_filled(light, 3.5, *colour);
+    }
+    let key_width = crate::studio::widest(ui, &[service.key], &FontId::proportional(12.5)) + 26.0;
+    let key = Rect::from_min_size(pos2(foot.max.x - key_width, middle - 15.0), vec2(key_width, 30.0));
+    let room = key.min.x - 9.0 - (light.x + 3.5 + 9.0);
+    let readout = parts::one_line(ui, &words.to_uppercase(), crate::studio::fixed(11.0), TEXT_DIM, room);
+    painter.galley(pos2(light.x + 3.5 + 9.0, middle - readout.size().y / 2.0), readout, TEXT_DIM);
+    // The key is part of the card, which takes the click.
+    crate::studio::paint_flat(&painter, key, 9.0, crate::studio::Flat::Plain, hovered);
+    painter.text(key.center(), Align2::CENTER_CENTER, service.key, FontId::proportional(12.5), TEXT);
+    let hint = match index {
+        0 => t("integrations.songbooks.hint", "Download songbooks, or remove them"),
+        1 => t("integrations.voxlive.row.hint", "Connect VoxLive, or see its screens"),
+        2 => t("integrations.canva.row.hint", "Connect Canva Sync, choose the presentation, or sync now"),
+        _ => t("integrations.timelychurch.row.hint", "Connect TimelyChurch, or see its services"),
+    };
+    let hint = if service.soon { t("integrations.state.soon", "Coming soon") } else { hint };
+    response.on_hover_text(hint).clicked()
+}
+
+/// The card after the services: a dashed outline saying a new service is a new card here.
+fn more_to_come(ui: &egui::Ui, rect: Rect) {
+    let painter = ui.painter();
+    let outline = rect.shrink(0.5);
+    let corners =
+        [outline.left_top(), outline.right_top(), outline.right_bottom(), outline.left_bottom(), outline.left_top()];
+    painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(1.0, crate::studio::BUTTON_HOVER), 4.0, 3.0));
+    let title =
+        parts::words(ui, t("integrations.more", "More to come"), semibold(13.0), TEXT_DIM, 0.0, rect.width() - 32.0);
+    let line = parts::words(
+        ui,
+        t("integrations.more.about", "A new service is a new card here"),
+        FontId::proportional(13.0),
+        TEXT_FAINT,
+        0.0,
+        rect.width() - 32.0,
+    );
+    let height = title.size().y + 4.0 + line.size().y;
+    let top = rect.center().y - height / 2.0;
+    let title_height = title.size().y;
+    painter.galley(pos2(rect.center().x - title.size().x / 2.0, top), title, TEXT_DIM);
+    painter.galley(pos2(rect.center().x - line.size().x / 2.0, top + title_height + 4.0), line, TEXT_FAINT);
+}
+
+/// The head of a service's page, the same for every service: the way back to the list, then its
+/// logo, its name, and a light with how it stands and what it brings. True when the way back was
+/// clicked.
+fn page_head(ui: &mut egui::Ui, mark: Mark, name: &str, (colour, words): (Color32, String), what: &str) -> bool {
+    use crate::icons::{Icon, paint};
+    let back_words = t("integrations.back_to", "Integrations");
+    let font = FontId::proportional(13.0);
+    let wide = crate::studio::widest(ui, &[back_words], &font) + 8.0 + 12.0 + 6.0 + 12.0;
+    let (back, response) = ui.allocate_exact_size(vec2(wide, 32.0), Sense::click());
+    let ink = if response.hovered() { TEXT } else { TEXT_DIM };
+    ui.painter().rect_filled(back, 16.0, CARD);
+    paint(
+        ui.painter(),
+        Icon::ChevronLeft,
+        Rect::from_center_size(pos2(back.min.x + 14.0, back.center().y), vec2(12.0, 12.0)),
+        ink,
+    );
+    ui.painter().text(pos2(back.min.x + 26.0, back.center().y), Align2::LEFT_CENTER, back_words, font, ink);
+    let clicked = response.clicked();
+    ui.add_space(14.0);
+    let width = ui.available_width();
+    let text = width - 64.0 - 12.0;
+    let title = parts::words(ui, name, semibold(22.0), TEXT, -0.44, text);
+    let readout = parts::words(ui, &words.to_uppercase(), crate::studio::fixed(11.0), TEXT, 0.44, f32::INFINITY);
+    let about_room = (text - 16.0 - readout.size().x - 9.0).max(80.0);
+    let about = parts::words(ui, what, FontId::proportional(13.0), TEXT_DIM, 0.0, about_room);
+    let height = (title.size().y + 4.0 + about.size().y.max(readout.size().y)).max(64.0);
+    let (place, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let logo = Rect::from_min_size(pos2(place.min.x, place.center().y - 32.0), vec2(64.0, 64.0));
+    logos::tile(ui, logo, mark, CARD);
+    let left = logo.max.x + 12.0;
+    let block = title.size().y + 4.0 + about.size().y.max(readout.size().y);
+    let top = place.center().y - block / 2.0;
+    let title_height = title.size().y;
+    ui.painter().galley(pos2(left, top), title, TEXT);
+    let line = top + title_height + 4.0;
+    let middle = line + readout.size().y / 2.0;
+    if colour == GOOD {
+        crate::studio::paint_light(ui.painter(), pos2(left + 3.5, middle), Some(GOOD));
+    } else if colour == TEXT_FAINT {
+        crate::studio::paint_light(ui.painter(), pos2(left + 3.5, middle), None);
+    } else {
+        ui.painter().circle_filled(pos2(left + 3.5, middle), 3.5, colour);
+    }
+    let readout_width = readout.size().x;
+    ui.painter().galley(pos2(left + 16.0, line), readout, TEXT);
+    ui.painter().galley(pos2(left + 16.0 + readout_width + 9.0, line), about, TEXT_DIM);
+    ui.add_space(16.0);
+    clicked
 }
 
 /// Settings › Integrations › Worship Leader App: its songbooks, to download or remove.
 fn songbooks_page(ui: &mut egui::Ui, view: &mut crate::songbooks::View) {
-    if ui
-        .add(
-            egui::Button::new(egui::RichText::new(t("integrations.back", "‹ Integrations")).color(TEXT_DIM))
-                .frame(false),
-        )
-        .clicked()
-    {
+    let (have, words) = crate::songbooks::state_words(view);
+    let what = t("integrations.songbooks.service", "Free songbooks, one for each language");
+    let initials = Mark::initials_of(crate::catalog::SOURCE_NAME);
+    let state = (if have { GOOD } else { TEXT_FAINT }, words);
+    if page_head(ui, Mark::Initials(&initials), crate::catalog::SOURCE_NAME, state, what) {
         view.open = false;
     }
-    ui.add_space(6.0);
-    let (have, words) = crate::songbooks::state_words(view);
-    ui.horizontal(|ui| {
-        mark(ui, 44.0, SONGBOOKS, "W");
-        ui.add_space(6.0);
-        ui.vertical(|ui| {
-            ui.label(egui::RichText::new(crate::catalog::SOURCE_NAME).font(crate::studio::semibold(18.0)).color(TEXT));
-            ui.horizontal(|ui| {
-                let (place, _) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
-                ui.painter().circle_filled(place.center(), 3.5, if have { GOOD } else { TEXT_FAINT });
-                ui.label(egui::RichText::new(words).size(12.0).color(TEXT_DIM));
-            });
-        });
-    });
-    ui.add_space(10.0);
     let width = ui.available_width().min(560.0);
     ui.set_max_width(width);
     crate::songbooks::settings_page(ui, view);
 }
 
-/// A service's row in the list: its mark, name and what it does, and how it stands. True when
-/// clicked.
-fn service_row(
-    ui: &mut egui::Ui,
-    (colour, letter, name, about): (Color32, &str, &str, &str),
-    (dot, words): (Color32, String),
-    hint: &str,
-) -> bool {
-    let width = ui.available_width().min(560.0);
-    let (row, response) = ui.allocate_exact_size(vec2(width, 60.0), Sense::click());
-    ui.painter().rect_filled(row, 10.0, if response.hovered() { HOVER } else { CARD });
-    let mut inside = ui.new_child(
-        egui::UiBuilder::new().max_rect(row.shrink2(vec2(14.0, 10.0))).layout(Layout::left_to_right(Align::Center)),
-    );
-    mark(&mut inside, 36.0, colour, letter);
-    inside.add_space(10.0);
-    inside.vertical(|ui| {
-        ui.add_space(2.0);
-        ui.label(egui::RichText::new(name).font(crate::studio::semibold(14.0)).color(TEXT));
-        ui.label(egui::RichText::new(about).size(11.5).color(TEXT_DIM));
-    });
-    let right = Rect::from_min_max(row.right_top() - vec2(170.0, 0.0), row.max - vec2(14.0, 0.0));
-    ui.painter().text(
-        right.right_center() - vec2(0.0, 0.0),
-        Align2::RIGHT_CENTER,
-        "›",
-        FontId::proportional(18.0),
-        TEXT_FAINT,
-    );
-    let text = ui.painter().text(
-        right.right_center() - vec2(18.0, 0.0),
-        Align2::RIGHT_CENTER,
-        &words,
-        FontId::proportional(12.0),
-        TEXT_DIM,
-    );
-    ui.painter().circle_filled(text.left_center() - vec2(9.0, 0.0), 3.5, dot);
-    response.on_hover_text(hint).clicked()
-}
-
 fn voxlive_page(ui: &mut egui::Ui, view: &mut View) {
-    if ui
-        .add(
-            egui::Button::new(egui::RichText::new(t("integrations.back", "‹ Integrations")).color(TEXT_DIM))
-                .frame(false),
-        )
-        .clicked()
-    {
+    let what = t("integrations.voxlive.about.short", "Live translation captions on a screen");
+    if page_head(ui, Mark::Logo(Logo::VoxLive), "VoxLive", state_words(&view.status), what) {
         view.open = false;
         view.typed.clear();
         view.problem = None;
     }
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        mark(ui, 44.0, VOXLIVE, "V");
-        ui.add_space(6.0);
-        ui.vertical(|ui| {
-            ui.label(egui::RichText::new("VoxLive").font(crate::studio::semibold(18.0)).color(TEXT));
-            let (dot, words) = state_words(&view.status);
-            ui.horizontal(|ui| {
-                let (place, _) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
-                ui.painter().circle_filled(place.center(), 3.5, dot);
-                ui.label(egui::RichText::new(words).size(12.0).color(TEXT_DIM));
-            });
-        });
-    });
-    ui.add_space(10.0);
     let width = ui.available_width().min(560.0);
     ui.set_max_width(width);
     ui.label(
@@ -312,8 +405,7 @@ fn voxlive_page(ui: &mut egui::Ui, view: &mut View) {
     }
 }
 
-/// Canva's colour, for Canva Sync's mark, and a lighter shade for words on a dark ground.
-pub const CANVA: Color32 = Color32::from_rgb(0, 160, 170);
+/// A lighter shade of Canva's colour, for Canva Sync's words on a dark ground.
 pub const CANVA_LIGHT: Color32 = Color32::from_rgb(110, 214, 220);
 
 /// A dot and a word or two for how Canva Sync stands.
@@ -340,31 +432,11 @@ fn canva_state(view: &crate::canva::View) -> (Color32, String) {
 /// and Sync Now.
 fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
     use crate::canva::{Request as R, Status as S};
-    if ui
-        .add(
-            egui::Button::new(egui::RichText::new(t("integrations.back", "‹ Integrations")).color(TEXT_DIM))
-                .frame(false),
-        )
-        .clicked()
-    {
+    let what = t("integrations.canva.about.short", "The announcements video, fresh from your Canva presentation");
+    if page_head(ui, Mark::Logo(Logo::Canva), "Canva Sync", canva_state(view), what) {
         view.open = false;
         view.typed_secret.clear();
     }
-    ui.add_space(6.0);
-    let (dot, words) = canva_state(view);
-    ui.horizontal(|ui| {
-        mark(ui, 44.0, CANVA, "C");
-        ui.add_space(6.0);
-        ui.vertical(|ui| {
-            ui.label(egui::RichText::new("Canva Sync").font(crate::studio::semibold(18.0)).color(TEXT));
-            ui.horizontal(|ui| {
-                let (place, _) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
-                ui.painter().circle_filled(place.center(), 3.5, dot);
-                ui.label(egui::RichText::new(words).size(12.0).color(TEXT_DIM));
-            });
-        });
-    });
-    ui.add_space(10.0);
     let width = ui.available_width().min(560.0);
     ui.set_max_width(width);
     ui.label(
@@ -477,9 +549,7 @@ fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
     }
 }
 
-/// TimelyChurch's colour, for its mark until its logo comes, and a lighter shade for words on
-/// a dark ground.
-pub const TIMELYCHURCH: Color32 = Color32::from_rgb(88, 86, 200);
+/// A lighter shade of TimelyChurch's colour, for its words on a dark ground.
 pub const TIMELYCHURCH_LIGHT: Color32 = Color32::from_rgb(164, 162, 240);
 
 /// A dot and a word or two for how TimelyChurch stands.
@@ -525,34 +595,13 @@ fn service_date(date: &str) -> String {
 /// and the playlists made from its services.
 fn timelychurch_page(ui: &mut egui::Ui, view: &mut crate::timelychurch::View) {
     use crate::timelychurch::{Request as R, Status as S};
-    if ui
-        .add(
-            egui::Button::new(egui::RichText::new(t("integrations.back", "‹ Integrations")).color(TEXT_DIM))
-                .frame(false),
-        )
-        .clicked()
-    {
+    let what = t("integrations.timelychurch.about.short", "Service plans and set lists from your church planner");
+    let name = crate::timelychurch::SOURCE_NAME;
+    if page_head(ui, Mark::Logo(Logo::TimelyChurch), name, timelychurch_state(view), what) {
         view.open = false;
         view.typed_code.clear();
         view.problem = None;
     }
-    ui.add_space(6.0);
-    let (dot, words) = timelychurch_state(view);
-    ui.horizontal(|ui| {
-        mark(ui, 44.0, TIMELYCHURCH, "T");
-        ui.add_space(6.0);
-        ui.vertical(|ui| {
-            ui.label(
-                egui::RichText::new(crate::timelychurch::SOURCE_NAME).font(crate::studio::semibold(18.0)).color(TEXT),
-            );
-            ui.horizontal(|ui| {
-                let (place, _) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
-                ui.painter().circle_filled(place.center(), 3.5, dot);
-                ui.label(egui::RichText::new(words).size(12.0).color(TEXT_DIM));
-            });
-        });
-    });
-    ui.add_space(10.0);
     let width = ui.available_width().min(560.0);
     ui.set_max_width(width);
     ui.label(
@@ -1482,8 +1531,10 @@ mod tests {
         }
         let ctx = egui::Context::default();
         let (mut voxlive, mut canva) = (View::default(), crate::canva::View::default());
+        let mut not_offered = crate::timelychurch::View::default();
         let mut drawn = ctx.run_ui(egui::RawInput::default(), |ui| {
-            pane(ui, &mut voxlive, &mut canva, songbooks.as_deref_mut(), timelychurch.as_deref_mut());
+            let timelychurch = timelychurch.as_deref_mut().unwrap_or(&mut not_offered);
+            pane(ui, &mut voxlive, &mut canva, songbooks.as_deref_mut(), timelychurch);
         });
         drawn.textures_delta.clear();
         let mut words = Vec::new();
@@ -1492,26 +1543,32 @@ mod tests {
     }
 
     #[test]
-    fn the_songbooks_are_listed_only_where_the_catalog_is_offered() {
+    fn the_songbooks_are_coming_soon_unless_the_catalog_is_offered() {
         crate::i18n::with_language(crate::i18n::Language::English, || {
             let without = words_drawn(None);
             assert!(without.iter().any(|w| w == "VoxLive") && without.iter().any(|w| w == "Canva Sync"), "{without:?}");
-            assert!(!without.iter().any(|w| w.contains("Worship Leader App")), "{without:?}");
+            assert!(without.iter().any(|w| w == "Worship Leader App"), "{without:?}");
+            assert_eq!(
+                without.iter().filter(|w| *w == "COMING SOON").count(),
+                2,
+                "songbooks and TimelyChurch: {without:?}"
+            );
             let mut songbooks = crate::songbooks::View::default();
             let with = words_drawn(Some(&mut songbooks));
             assert!(with.iter().any(|w| w == "Worship Leader App"), "{with:?}");
-            assert!(with.iter().any(|w| w == "Not downloaded"), "{with:?}");
+            assert!(with.iter().any(|w| w == "NOT DOWNLOADED"), "{with:?}");
         });
     }
 
     #[test]
-    fn timelychurch_is_listed_only_where_it_is_offered_and_its_card_follows_the_connection() {
+    fn timelychurch_is_coming_soon_unless_offered_and_its_page_follows_the_connection() {
         use crate::timelychurch::{RowState, ServiceRow, Status, View as Card};
         crate::i18n::with_language(crate::i18n::Language::English, || {
-            assert!(!words_drawn(None).iter().any(|w| w.contains("TimelyChurch")), "hidden unless offered");
+            let soon = words_drawn(None);
+            assert!(soon.iter().any(|w| w == "TimelyChurch") && soon.iter().any(|w| w == "Soon"), "{soon:?}");
             let mut card = Card { offered: true, status: Status::NotConnected, asks_address: true, ..Card::default() };
             let listed = words_drawn_with(None, Some(&mut card));
-            assert!(listed.iter().any(|w| w == "TimelyChurch"), "{listed:?}");
+            assert!(listed.iter().any(|w| w == "TimelyChurch") && listed.iter().any(|w| w == "Connect"), "{listed:?}");
             card.open = true;
             let page = words_drawn_with(None, Some(&mut card));
             for words in ["CONNECT TO TIMELYCHURCH", "Address", "Pairing code", "Connect"] {

@@ -244,6 +244,16 @@ The project drew them with its own script, `assets/backgrounds/make_backgrounds.
 them and the script under CC0 1.0 Universal (public domain).
 [`docs/licences/backgrounds.md`](docs/licences/backgrounds.md) explains.
 
+### Logos in Settings
+
+The logos on Settings' cards for the services and assistants SoftPresenter connects with are
+trademarks of their owners, used only to identify the apps SoftPresenter connects with. They are
+not covered by the GNU GPL, their permission can't be passed on, and they are removed on request.
+They are kept as their companies provide them in `assets/logos/third-party`, apart from the rest:
+the Canva icon (for Canva Sync, under canva.dev's brand guidelines). VoxLive's and TimelyChurch's
+are the owner's own. [`docs/licences/logos.md`](docs/licences/logos.md) gives each one's source,
+date and rules.
+
 ### Song catalog
 
 Song catalog: Worship Leader App, [worshipleaderapp.com](https://worshipleaderapp.com). The

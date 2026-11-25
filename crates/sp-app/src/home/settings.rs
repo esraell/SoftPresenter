@@ -8,7 +8,7 @@ use sp_engine::Show;
 
 use super::{HomeState, Page, open_page};
 
-mod parts;
+pub(crate) mod parts;
 use crate::i18n::{t, tf, tk, tn};
 use crate::icons::{self, Icon};
 use crate::studio::{
@@ -397,8 +397,7 @@ fn pane_contents(ui: &mut egui::Ui, state: &mut HomeState, show: &Show, pane: Pa
         Pane::Language => language_page(ui),
         Pane::Integrations => {
             let songbooks = crate::catalog::offered().then_some(&mut state.songbooks);
-            let timelychurch = state.timelychurch.offered.then_some(&mut state.timelychurch);
-            crate::integrations::pane(ui, &mut state.voxlive, &mut state.canva, songbooks, timelychurch);
+            crate::integrations::pane(ui, &mut state.voxlive, &mut state.canva, songbooks, &mut state.timelychurch);
         }
         Pane::AiAssistants => crate::mcp::pane::card(ui, &mut state.mcp),
         Pane::PhoneRemote => crate::remote::pane::pane(ui, &mut state.remote),
@@ -933,12 +932,25 @@ mod tests {
 
     /// Clicks the words `name` where a frame of Settings drew them. False when they weren't drawn.
     pub(super) fn click(ctx: &egui::Context, state: &mut HomeState, show: &Show, name: &str) -> bool {
+        click_where(ctx, state, show, name, false)
+    }
+
+    /// As [`click`], on the last place the words were drawn (the page's, not the list's).
+    pub(super) fn click_last(ctx: &egui::Context, state: &mut HomeState, show: &Show, name: &str) -> bool {
+        click_where(ctx, state, show, name, true)
+    }
+
+    fn click_where(ctx: &egui::Context, state: &mut HomeState, show: &Show, name: &str, last: bool) -> bool {
         use egui::{Event, Modifiers};
         let mut at = None;
         for round in 0..2 {
             let output = crate::studio::tests::drawn(ctx, vec![], |ui| settings_ui(ui, state, show));
             if round == 1 {
-                at = crate::studio::tests::place_of(&output, name);
+                at = if last {
+                    crate::studio::tests::place_on_top(&output, name)
+                } else {
+                    crate::studio::tests::place_of(&output, name)
+                };
             }
             output.drop_without_applying_deltas();
         }
@@ -1003,6 +1015,27 @@ mod tests {
             assert!(place(name).x > computer.x, "{name} comes after the computer's");
         }
         drawn.drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn every_service_has_the_same_card_and_one_opens_its_page() {
+        let ctx = crate::studio::tests::styled();
+        let show = Show::new(Vec::new());
+        let mut state = HomeState { preferences_pane: Pane::Integrations, ..HomeState::default() };
+        state.timelychurch.offered = false;
+        let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, &mut state, &show));
+        for name in ["VoxLive", "Canva Sync", "TimelyChurch", "More to come", "COMING SOON"] {
+            assert!(crate::studio::tests::place_of(&drawn, name).is_some(), "{name}");
+        }
+        drawn.drop_without_applying_deltas();
+        // TimelyChurch, not offered yet, is greyed and takes no clicks.
+        assert!(click(&ctx, &mut state, &show, "TimelyChurch"));
+        assert!(!state.timelychurch.open);
+        assert!(click(&ctx, &mut state, &show, "Canva Sync"));
+        assert!(state.canva.open, "a card opens its service's page");
+        // The page has the way back.
+        assert!(click_last(&ctx, &mut state, &show, "Integrations"));
+        assert!(!state.canva.open);
     }
 
     #[test]

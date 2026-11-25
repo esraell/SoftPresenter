@@ -5,12 +5,11 @@
   "integrations.state.not_connected": "No conectado",
   "integrations.voxlive.state.refused": "Clave rechazada",
   "integrations.voxlive.state.trouble": "No responde",
-  "integrations.list.about": "Servicios con los que trabaja SoftPresenter. Haz clic en uno para conectarlo.",
-  "integrations.voxlive.about.short": "El sermón traducido en directo, en subtítulos en pantalla",
+  "integrations.list.about": "Otros servicios con los que trabaja SoftPresenter. Todos se abren igual.",
+  "integrations.voxlive.about.short": "Subtítulos de traducción en directo en una pantalla",
   "integrations.voxlive.row.hint": "Conecta VoxLive o mira sus pantallas",
   "integrations.canva.about.short": "El vídeo de anuncios, al día con tu presentación de Canva",
   "integrations.canva.row.hint": "Conecta Canva Sync, elige la presentación o sincroniza ahora",
-  "integrations.back": "‹ Integraciones",
   "integrations.voxlive.about": "VoxLive traduce el sermón mientras se predica y lo muestra como subtítulos en sus pantallas. Una vez conectado, SoftPresenter muestra las pantallas de VoxLive de tu iglesia como las diapositivas de un elemento VoxLive (en BIBLIOTECA y en las listas) y en la pestaña VoxLive junto a las pantallas: un clic pone los subtítulos en pantalla en lugar de un versículo, y un clic en el versículo lo vuelve a poner.",
   "integrations.voxlive.key": "Clave",
   "integrations.disconnect": "Desconectar",
@@ -83,7 +82,10 @@
   "integrations.look.save.hint": "La pantalla cambia al momento, allí donde se esté mostrando",
   "integrations.look.revert": "Revertir",
   "integrations.look.no_changes": "Sin cambios",
-  "integrations.look.changed": ["{n} ajuste cambiado", "{n} ajustes cambiados"],
+  "integrations.look.changed": [
+    "{n} ajuste cambiado",
+    "{n} ajustes cambiados"
+  ],
   "integrations.look.changed_there": "El aspecto de esta pantalla se cambió en VoxLive después de que lo abrieras.",
   "integrations.look.use_theirs": "Usar el de VoxLive",
   "integrations.look.use_theirs.hint": "Descarta tus cambios y parte del aspecto que tiene ahora VoxLive",
@@ -244,7 +246,10 @@
   "integrations.canva.choose_first": "Primero elige el diseño y su página divisoria: Ajustes › Integraciones › Canva Sync.",
   "integrations.canva.signed_in.said": "Sesión iniciada en Canva.",
   "integrations.canva.imported": "Se trajo la sesión del antiguo script de sincronización. Apaga ya el script antiguo.",
-  "integrations.canva.updated_video": ["Actualizado: {name} ({n} página, {size} MB).", "Actualizado: {name} ({n} páginas, {size} MB)."],
+  "integrations.canva.updated_video": [
+    "Actualizado: {name} ({n} página, {size} MB).",
+    "Actualizado: {name} ({n} páginas, {size} MB)."
+  ],
   "integrations.canva.broke": "Canva Sync se detuvo a medias; el vídeo se queda como estaba. Inténtalo de nuevo.",
   "integrations.canva.broke.short": "Canva Sync se detuvo a medias.",
   "integrations.canva.quiet": "Canva: {doing}",
@@ -253,7 +258,10 @@
   "integrations.songbooks.service": "Cancioneros gratis, uno para cada idioma",
   "integrations.songbooks.hint": "Descargar cancioneros, o quitarlos",
   "integrations.songbooks.none": "Sin descargar",
-  "integrations.songbooks.count": ["{n} cancionero", "{n} cancioneros"],
+  "integrations.songbooks.count": [
+    "{n} cancionero",
+    "{n} cancioneros"
+  ],
   "integrations.songbooks.about": "Canciones gratis de Worship Leader App, un cancionero para cada idioma. Se guardan en este ordenador, aparte de tus canciones, y solo pasan a tu biblioteca cuando usas una. Al quitar un cancionero, las canciones que ya están en tu biblioteca se quedan.",
   "integrations.songbooks.here": "En este ordenador",
   "integrations.songbooks.recommended": "Recomendados",
@@ -265,12 +273,15 @@
   "integrations.songbooks.downloading": "Descargando…",
   "integrations.songbooks.downloading_per": "Descargando · {per} %",
   "integrations.songbooks.on_computer": "En este ordenador · {songs}",
-  "integrations.songbooks.songs": ["{n} canción", "{n} canciones"],
+  "integrations.songbooks.songs": [
+    "{n} canción",
+    "{n} canciones"
+  ],
   "integrations.songbooks.to_download": "{size} MB para descargar",
   "integrations.songbooks.looking": "Buscando los cancioneros en Worship Leader App…",
   "integrations.songbooks.offline": "No se puede llegar a Worship Leader App: puede que este ordenador no esté conectado a internet.",
   "integrations.songbooks.try_again": "Reintentar",
-  "integrations.timelychurch.about.short": "Tus próximos cultos como listas, con sus canciones",
+  "integrations.timelychurch.about.short": "Planes de culto y listas de canciones desde el planificador de tu iglesia",
   "integrations.timelychurch.row.hint": "Conecta TimelyChurch o mira sus cultos",
   "integrations.timelychurch.about": "Los próximos repertorios y planes de culto de tu iglesia en TimelyChurch se convierten aquí en listas, y sus canciones entran en la biblioteca con sus traducciones, al día durante la semana. Una canción o lista que cambies aquí nunca se sobrescribe: la versión más reciente de TimelyChurch solo se ofrece. SoftPresenter le dice a TimelyChurch qué canciones se mostraron en cada culto, para el informe de uso de canciones de tu iglesia.",
   "integrations.timelychurch.reading": "Leyendo la conexión guardada en este ordenador…",
@@ -291,11 +302,17 @@
   "integrations.timelychurch.disconnect.hint": "Olvida la conexión en este ordenador; las canciones y listas que creó se quedan",
   "integrations.timelychurch.check_now": "Comprobar ahora",
   "integrations.timelychurch.check_now.hint": "Pide los cambios a TimelyChurch ahora (se le pregunta cada pocos minutos de todos modos)",
-  "integrations.timelychurch.uses_waiting": ["{n} canción mostrada está pendiente de comunicar a TimelyChurch.", "{n} canciones mostradas están pendientes de comunicar a TimelyChurch."],
+  "integrations.timelychurch.uses_waiting": [
+    "{n} canción mostrada está pendiente de comunicar a TimelyChurch.",
+    "{n} canciones mostradas están pendientes de comunicar a TimelyChurch."
+  ],
   "integrations.timelychurch.services.caption": "PRÓXIMOS CULTOS",
   "integrations.timelychurch.services.coming": "Los cultos llegan en la primera comprobación.",
   "integrations.timelychurch.services.none": "No hay próximos cultos en TimelyChurch.",
-  "integrations.timelychurch.songs": ["{n} canción", "{n} canciones"],
+  "integrations.timelychurch.songs": [
+    "{n} canción",
+    "{n} canciones"
+  ],
   "integrations.timelychurch.row.in_step": "Al día",
   "integrations.timelychurch.row.changed": "Cambiada aquí",
   "integrations.timelychurch.row.newer": "Cambiada aquí; más reciente en TimelyChurch",
@@ -316,5 +333,12 @@
   "integrations.timelychurch.not_connected": "TimelyChurch no está conectado.",
   "integrations.timelychurch.off": "TimelyChurch aún no está disponible en esta versión.",
   "integrations.timelychurch.wait": "TimelyChurch ha pedido esperar un momento; inténtalo de nuevo enseguida.",
-  "integrations.timelychurch.not_saved": "No se pudo guardar lo que SoftPresenter conserva de TimelyChurch: {error}"
+  "integrations.timelychurch.not_saved": "No se pudo guardar lo que SoftPresenter conserva de TimelyChurch: {error}",
+  "integrations.connect": "Conectar",
+  "integrations.open": "Abrir",
+  "integrations.soon": "Pronto",
+  "integrations.state.soon": "Muy pronto",
+  "integrations.more": "Habrá más",
+  "integrations.more.about": "Cada servicio nuevo es una tarjeta nueva aquí",
+  "integrations.back_to": "Integraciones"
 }

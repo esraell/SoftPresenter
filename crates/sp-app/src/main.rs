@@ -44,6 +44,7 @@ mod library_folder;
 mod links;
 mod live_tabs;
 mod load;
+mod logos;
 mod macros;
 mod make_cli;
 mod mcp;

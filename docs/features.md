@@ -1797,8 +1797,16 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   SoftPresenter… under them. There is no General page: its copyright line is in Slides, its
   Language in Language, its Reload songs in Song files. The window opens at 1040 × 720 and keeps
   at least 820 × 680, room for the list beside a page in every language.
-- **Integrations** (Settings): the services SoftPresenter works with, each with how it stands,
-  opening a page to connect it. **VoxLive** (live translation captions) is connected with an
+- **Integrations** (Settings): the services SoftPresenter works with, each the same card, two
+  across where there is room: its logo (VoxLive's and TimelyChurch's, the owner's own; Canva's
+  icon for Canva Sync; Worship Leader App's initials), its name and one line, then a light with
+  how it stands in the fixed-width face and one key (Connect, Open, or Soon), and a dashed card
+  saying more will come. Worship Leader App (where the song catalog is offered) and TimelyChurch
+  (where it is offered) are greyed as Coming soon otherwise, and take no clicks. A card opens
+  that service's page in place, every one the same way: the way back to Integrations, its logo,
+  name and how it stands with what it brings, then the account. Logos of other companies are
+  their owners' trademarks, kept apart and not covered by the GPL
+  ([docs/licences/logos.md](licences/logos.md)). **VoxLive** (live translation captions) is connected with an
   API key made in VoxLive (Settings › API keys, with the screens permissions), pasted on its
   page or piped to `sp voxlive connect`. The key is kept in the computer's store for secrets
   (below) and sent only to VoxLive, with redirects off; it never goes
