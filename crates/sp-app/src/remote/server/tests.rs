@@ -257,7 +257,8 @@ fn the_page_and_the_sign_in_page_say_the_apps_language_before_anything_else_come
     assert_eq!(again.status, 200);
     let script = test.get("/login.js", None).text();
     assert!(script.contains("\"use strict\";\nwindow.SP_LANGUAGE = \"es\";\n"), "{script}");
-    assert_eq!(script.matches("SP_LANGUAGE").count(), 1);
+    // Set once, by the server (the script itself only reads it).
+    assert_eq!(script.matches("window.SP_LANGUAGE = ").count(), 1);
     // Signed in: the page and its script, the language right after window.SP_REMOTE.
     let token = test.token();
     let page = test.get("/", Some(&token)).text();

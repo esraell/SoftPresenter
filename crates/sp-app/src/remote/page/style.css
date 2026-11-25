@@ -191,7 +191,8 @@ input[type=range] { accent-color: var(--ink); width: 110px; }
 .clip.on .pic { box-shadow: 0 0 0 3px var(--hot); }
 .clip .nm { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .clip.on .nm { color: var(--hot); font-weight: 700; }
-.clip .vid { position: absolute; left: 6px; bottom: 6px; background: rgba(0,0,0,.7); border-radius: 3px; padding: 2px 5px; font: 9px var(--mono); color: #fff; }
+/* a video's length, bottom-right on its tile (media strip and the slides area); a picture has nothing (as built, 24 November) */
+.vlen { position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,.7); border-radius: 3px; padding: 2px 5px; font: 9px var(--mono); font-variant-numeric: tabular-nums; color: #fff; pointer-events: none; }
 
 /* ───────── right: the display ───────── */
 .program { margin: 10px 10px 0; padding: 10px; background: var(--screen); border-radius: 13px; color: var(--screen-ink); }
@@ -363,7 +364,7 @@ input[type=range] { accent-color: var(--ink); width: 110px; }
 .ed-hint { padding: 12px 20px 18px; text-align: center; }
 .edkeys { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 6px; padding: 0 8px 12px; }
 .edkeys .btn { justify-content: center; padding: 0; }
-.edslides { display: grid; gap: 6px; padding: 0 10px 12px; }
+.edslides { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 0 10px 12px; }      /* a tile keeps to the column; a long caption shrinks */
 .edslide { text-align: left; border-radius: 9px; padding: 5px 5px 0; }
 .edslide.on { background: var(--well); box-shadow: 0 0 0 2px var(--ink); }
 .edslide.live .strip, .edslide.live .strip .n { color: var(--hot); }
@@ -844,6 +845,7 @@ button.pill:hover { color: var(--ink); }
 .is-dragging-song .sh-panel.closed { display: block; }
 .rowbtn.pickd { background: color-mix(in srgb, #6aa5ff 22%, transparent); color: var(--ink); }
 .clip.pickd .pic { box-shadow: 0 0 0 3px #6aa5ff; }
+.clip.on.pickd .pic { box-shadow: 0 0 0 3px var(--hot); }      /* on screen and picked: only the orange ring */
 .ed-font { flex: 1; justify-content: flex-start; font-size: 14px; }
 .guide.v { left: 50%; } .guide.h { top: 50%; }
 
@@ -1589,6 +1591,10 @@ body.login { display: grid; grid-template: 1fr / 1fr; place-items: center; heigh
   .foot input[data-i="size"] { display: none; }          /* tiles fit the column by themselves; the bar stays one row */
   .card .t { min-width: 0; } .card .t b, .card .t span:not(.time) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
+/* A narrower window gives up Undo and Redo next (their keys still work), and Continuous last, as the app does (24 November) */
+@media (max-width: 1000px) {
+  .foot .ui-ur, .foot .sh-urdiv { display: none; }
+}
 @media (max-width: 900px) {
   .slides .grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)) !important; }
   .layer { padding-left: 8px; padding-right: 6px; letter-spacing: .02em; }
@@ -1649,7 +1655,8 @@ body.login { display: grid; grid-template: 1fr / 1fr; place-items: center; heigh
 .su-lang.on { box-shadow: inset 0 0 0 2px var(--ink); }
 .su-tick { position: absolute; top: 12px; right: 12px; width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--faint); display: grid; place-items: center; }
 .su-lang.on .su-tick { background: var(--ink); color: var(--panel); box-shadow: none; } .su-tick svg { width: 11px; height: 11px; }
-.su-order { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .su-order .sel { width: auto; min-width: 130px; } .su-order .cap { margin-right: 4px; } .su-w { color: var(--dim); font-size: 13px; }
+.su-order { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.su-ui { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; } .su-ui .sel { width: auto; min-width: 130px; }      /* the app's own words, above the church's languages */ .su-order .sel { width: auto; min-width: 130px; } .su-order .cap { margin-right: 4px; } .su-w { color: var(--dim); font-size: 13px; }
 .su-card { background: var(--well); border-radius: var(--r-key); padding: 14px 16px; display: grid; gap: 10px; }
 .su-src { display: flex; align-items: center; gap: 9px; font-size: 15px; } .su-src svg { width: 18px; height: 18px; color: var(--c-song); } .su-site { margin-left: auto; }
 .su-rows { display: grid; gap: 2px; }
@@ -1689,6 +1696,7 @@ body.login { display: grid; grid-template: 1fr / 1fr; place-items: center; heigh
 .cat-newer { display: flex; align-items: center; gap: 10px; font-size: 12.5px; } .cat-newer span { flex: 1; }
 .fd-sect { display: flex; align-items: center; gap: 6px; padding: 8px 12px 4px; color: var(--faint); border-top: 1px solid var(--line); margin-top: 4px; } .fd-sect svg { width: 12px; height: 12px; }
 .fd-row.cat .fd-ico, .fd-row.cat span { color: var(--c-song); }
+.fd-row.cat .fd-ico { opacity: .55; }      /* a songbook's song: the song's note in a dimmer ink than the library's (as built, 24 November) */
 .cat-p { margin: 0; color: var(--dim); font-size: 12.5px; line-height: 1.4; }
 .cat-info .btn, .cat-line .btn, .cat-bar .btn, .su-site, .st-card .btn.sm { white-space: nowrap; flex: none; }
 .su-row.off > .sub:last-child { grid-column: 3 / -1; }
@@ -1744,3 +1752,29 @@ body.login { display: grid; grid-template: 1fr / 1fr; place-items: center; heigh
 .sh-order { flex-wrap: wrap; } .sh-order .seg { flex: 1 1 170px; }
 .card .t span { white-space: normal; }
 .irow, .insp .irow { grid-template-columns: var(--lab, 58px) minmax(0, 1fr); }
+
+/* An item shown with a theme version (the owner, 24 November: a two-line title plus the version's pill made three rows): the
+   version is a small badge on the corner of the item's number, the theme icon, lit orange while the item is on screen in that
+   version; its name is in the badge's tooltip and on the title bar's version button. It takes none of the title's room, so
+   rows stay one or two lines. */
+.item .num { position: relative; }
+.sh-vbadge { position: absolute; right: -6px; bottom: -4px; width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center; background: var(--panel); box-shadow: 0 0 0 1.5px var(--panel); color: var(--dim); font-style: normal; }
+.sh-vbadge svg { width: 11px; height: 11px; } .sh-vbadge.on { color: var(--hot); }
+.item .rowbtn.on .sh-vbadge, .item .rowbtn:hover .sh-vbadge { background: var(--well); box-shadow: 0 0 0 1.5px var(--well); }
+
+/* What the Mac menu gave up has a home in the window (24 November): the media strip folds to its heading (the chevron turns
+   up while it is folded); the readout under the preview takes the slides to the one on screen. */
+.sh-mhide svg { transition: none; } .sh-mhide.up svg { transform: rotate(180deg); }
+.readout[data-a] { cursor: pointer; border-radius: 9px; } .readout[data-a]:hover { background: var(--well); }
+/* Download NDI… on Linux (as built, 24 November): the progress, then NDI's licence in a box that scrolls, then Accept */
+.ndi-dl { display: grid; gap: 8px; } .ndi-dl progress { width: 100%; height: 6px; } .ndi-dl .btn { justify-self: start; }
+.ndi-lic { max-height: 120px; overflow: auto; padding: 8px 10px; border-radius: 8px; background: var(--well, rgba(255,255,255,.05)); font-size: 12px; color: var(--dim); }
+.ndi-btns { display: flex; gap: 8px; justify-content: flex-end; }
+/* a quiet button: frameless and dim, for the way back out of something that is fine as it is (Remove under an installed sp) */
+.btn.quiet { background: transparent; border-color: transparent; box-shadow: none; color: var(--faint); }
+.btn.quiet:hover { color: var(--dim); }
+/* a template tile's caption: its name shrinks to "…", its kind stays whole (06 rule 6) */
+.strip .lbl.split { display: flex; min-width: 0; gap: .45em; }
+.strip .lbl.split .tn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strip .lbl.split .tk { flex: none; }
+.lv-annmedia { background-size: cover; background-position: center; } .lv-annmedia .sl-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
