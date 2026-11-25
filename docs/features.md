@@ -1304,7 +1304,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   quiet test run never announces itself and listens on this computer only. From the command
   line: `sp mirror` ([cli.md](cli.md#phone-screens)). A song with such a box is written as
   version 5 of the song format, which earlier builds decline to open rather than lose the box.
-  Interface words are in English and Spanish. On a Mac for now.
+  Interface words are in English, Spanish and Ukrainian. On a Mac for now.
 - **Builds** (the inspector's Build tab): an object can come on with a Dissolve, Fly In from
   any side, or Zoom, with the slide (after its transition and a delay) or on a click of Next,
   and leave with a Dissolve, Fly Out or Zoom on a click. Next sets a slide's click builds going
@@ -1742,6 +1742,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   English, Español, Русский and Українська, each written in itself with the flag it is best known
   by; the setup's first step has the same choice as a menu ("El idioma del ordenador (Español)"). A choice shows at once, with no restart, and is kept with the preferences (`language`).
   Spanish and Russian are written for the whole window: the top bar, the keys sheet, the
+  Spanish and Ukrainian are written for the whole window: the top bar, the keys sheet, the
   left column (libraries, playlists and their menus), the slides area (with the slide,
   arrangement and times menus), the bar and the media strip under it, the right column (preview,
   layer keys, Clear All, the tool tabs and what is in them), the Bible view, the Bibles window,

@@ -1018,6 +1018,50 @@ mod tests {
         assert!(lacking.is_empty(), "no Spanish yet for: {lacking:#?}");
     }
 
+    // The areas Ukrainian has in full: from then on a string wrapped without its Ukrainian
+    // fails here, as one without Spanish does above.
+    const UKRAINIAN_DONE: &[&str] = &[
+        "topbar",
+        "left",
+        "right",
+        "slides",
+        "dock",
+        "keys",
+        "common",
+        "media",
+        "biblepage",
+        "bibles",
+        "setup",
+        "integrations",
+        "remote",
+        "inspector",
+        "editor",
+        "import",
+        "tools",
+        "settings",
+        "edit",
+        "themes",
+        "bible",
+        "dialogs",
+        "find",
+        "notices",
+        "menubar",
+        "screens",
+        "mirror",
+        "mcp",
+        "freesongbooks",
+    ];
+
+    #[test]
+    fn the_finished_areas_have_all_their_ukrainian() {
+        let lacking: Vec<String> = missing(Language::Ukrainian)
+            .into_iter()
+            .filter(|(key, _)| UKRAINIAN_DONE.contains(&key.split('.').next().unwrap_or("")))
+            .map(|(key, english)| format!("{key} ({english})"))
+            .collect();
+        assert!(lacking.is_empty(), "no Ukrainian yet for: {lacking:#?}");
+    }
+
     #[test]
     fn the_finished_areas_have_all_their_russian() {
         let lacking = lacking_in(Language::Russian, RUSSIAN_DONE);

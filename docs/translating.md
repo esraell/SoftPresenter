@@ -134,6 +134,7 @@ start with `_` (`"_note"`) are comments.
 | `format` | numbers and quotation marks (not words) |
 
 Spanish and Russian have every area above. What stays in English is what other crates say in their own words
+Spanish and Ukrainian have every area above. What stays in English is what other crates say in their own words
 when something fails (NDI's, the DeckLink driver's and a video file's reasons, shown as they
 come), and the few errors said at startup before the language is known (the home window can't
 open, no graphics device).
@@ -145,6 +146,10 @@ English.
 When you finish an area, add its file name to `SPANISH_DONE` in `i18n.rs`, so a string wrapped
 later without its Spanish fails the tests. Russian is held to the same list (`RUSSIAN_DONE` is
 `SPANISH_DONE`), so a string wrapped later needs its Russian as well as its Spanish.
+When you finish an area, add its file name to `SPANISH_DONE` in `i18n.rs` (and to the list of
+each other language that has it in full, such as `UKRAINIAN_DONE`), so a string wrapped later
+without its words in that language fails the tests. Every area is in both lists now: a new string
+needs its Spanish and its Ukrainian in the same commit.
 
 ## Spanish: which Spanish
 
@@ -238,6 +243,106 @@ means. The Ukrainian tables follow the same glossary, so the two read alike.
 | Trash | Корзина |
 | Command line / terminal | Командная строка / терминал |
 | Identify / Stop identifying | Опознать / Остановить (the setup: Остановить опознание) |
+## Ukrainian
+
+Written for the Ukrainian-speaking evangelical (Baptist) churches the app was first made for:
+plain modern Ukrainian (the 2019 spelling), the way a church volunteer talks, not word-for-word
+from Russian. Translated from the English in the code; Spanish only helped with what a string
+means. A native speaker should still read it.
+
+- **Register.** Buttons and menu items are infinitives («Очистити», «Додати», «Зберегти»).
+  Sentences that tell the person what to do use the polite plural («Клацніть», «Натисніть»,
+  «Перезапустіть SoftPresenter»). Sentence case everywhere; capitals only where the app sets a
+  caption in capitals itself (the layer keys, the find box's ПІСНЯ tag).
+- **Marks.** Quotation marks «…» (`format.json`); the apostrophe is ʼ (U+02BC, as Apple's own
+  Ukrainian writes it: компʼютер, обʼєкт), never ' or ’; the ellipsis is one character, …;
+  numbers 13 613 and 0,4 с.
+- **Plurals** have three forms, `[one, few, many]`: 1 пісня, 2 пісні, 5 пісень (21 пісня, 22 пісні,
+  11 пісень). Sentences are written so the number agrees without knowing a gender: «Додано {n}
+  пісню», «Додано {n} пісні», «Додано {n} пісень».
+- **Keys.** What is printed on the key stays as printed (Shift, Enter, Esc, Tab, Delete, Home, End,
+  ⌘, ⌥); what describes keys is translated (Пробіл, Стрілки, Літера, «потім 1 … 9»). A song part's
+  jump key stays its letter (C for the chorus).
+- **The Mac's menu bar** uses Apple's own Ukrainian names: Файл, Редагування, Перегляд, Вікно,
+  Довідка; Відмінити, Повторити, Вирізати, Скопіювати, Вставити, Вибрати все; Про SoftPresenter,
+  Сховати SoftPresenter, Сховати решту, Показати всі, Завершити SoftPresenter, Служби, Згорнути,
+  Масштаб, Усі наперед. One exception: Apple says Параметри… where the app's own window is
+  Налаштування, so the menu says Налаштування… too.
+- **Product and app names** stay as they are (SoftPresenter, NDI, DeckLink, VoxLive, Canva,
+  TimelyChurch, Worship Leader App, Claude, ChatGPT, Codex, Grok, Gemini, AirPlay, FFmpeg…).
+
+Glossary, shared with the Russian tables so the two read alike:
+
+| English | Ukrainian |
+|---|---|
+| Service (the church service; the first playlist's name; the view's tab) | Служіння |
+| the service's playlist | список служіння |
+| playlist | список |
+| media playlist | медіасписок |
+| library | бібліотека |
+| song | пісня |
+| words (of a song) | слова |
+| line (of words) | рядок |
+| slide | слайд |
+| verse (of a song) | куплет |
+| chorus | приспів |
+| pre-chorus | передприспів |
+| bridge | брідж |
+| ending | закінчення |
+| group (a song's verse, chorus…) | частина |
+| arrangement | порядок виконання (short: порядок) |
+| songbook | збірник |
+| song pack | пакет пісень |
+| Bible verse | вірш |
+| chapter · book · passage | розділ · книга · уривок |
+| reference (a Bible reference) | посилання |
+| translation (of the Bible) | переклад |
+| reading | читання |
+| screen | екран |
+| audience screens (the Audience key: Зал) | екрани для залу |
+| stage screens (the Stage key: Сцена) | екрани для сцени |
+| display, monitor (the device itself) | монітор |
+| the operator's window | вікно оператора |
+| on screen | на екрані |
+| output | вивід |
+| preview | попередній перегляд |
+| Clear · Clear All | Очистити · Очистити все |
+| take off the screens (a layer key) | прибрати з екранів |
+| media · picture · video · audio · sound | медіа · зображення · відео · аудіо · звук |
+| props (prop) | накладки (накладка) |
+| messages (shown on the screens) | повідомлення |
+| notices (the app's own list) | сповіщення |
+| announcements | оголошення |
+| timer · countdown · clock | таймер · зворотний відлік · годинник |
+| macro | макрос |
+| stage layout | макет сцени |
+| theme · theme version · template | тема · версія теми · шаблон |
+| the usual look | звичайний вигляд |
+| transition | перехід |
+| Settings | Налаштування |
+| Integrations | Інтеграції |
+| AI assistants | ШІ-помічники |
+| Phone remote | Пульт на телефоні |
+| Remote Control | Дистанційне керування |
+| Phone Screens | Екрани телефонів |
+| Edit view · Service view · Bible view | Редактор · Служіння · Біблія |
+| Edit (the verb) | Редагувати |
+| key (on the keyboard) | клавіша |
+| item (in a playlist) | елемент |
+| divider · header | розділювач · заголовок |
+| text box · shape · object | текстове поле · фігура · обʼєкт |
+| background | фон |
+| captions | субтитри |
+| computer | компʼютер |
+| folder · file | папка · файл |
+| Undo · Redo | Відмінити · Повторити |
+| Cancel · Done · Close | Скасувати · Готово · Закрити |
+| Delete · Remove | Видалити · Вилучити |
+| Copy · Paste · Duplicate · Rename | Скопіювати · Вставити · Дублювати · Перейменувати |
+| Show · Hide | Показати · Сховати |
+| Install · Download | Встановити · Завантажити |
+| Connect · Sign in | Підключити · Увійти |
+| click · press · drag | клацніть · натисніть · перетягніть |
 
 ## Checking
 
