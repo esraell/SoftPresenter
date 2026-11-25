@@ -5882,6 +5882,8 @@ pub enum Page {
     WhatsNew,
     ReportIssue,
     Licences,
+    /// What the anonymous reports send, and what they never do.
+    Privacy,
 }
 
 /// The address of a page. A new issue starts with the version filled in.
@@ -5894,6 +5896,7 @@ pub fn page_url(page: Page) -> String {
             format!("{REPO}/issues/new?body=SoftPresenter%20{}%0A%0A", crate::updates::VERSION)
         }
         Page::Licences => format!("{REPO}/blob/master/NOTICE.md"),
+        Page::Privacy => format!("{REPO}/blob/master/PRIVACY.md"),
     }
 }
 

@@ -19,7 +19,7 @@ change, as everything else may (see the README).
   [changing a slide](#changing-a-slide) ·
   [playlists and libraries](#playlists-and-libraries) · [themes](#themes) ·
   [screens and settings](#screens-and-settings) ·
-  [undo, jobs and the menu bar](#undo-jobs-and-the-menu-bar) · [notices](#notices) · [Remote Control](#remote-control) ·
+  [undo, jobs and the menu bar](#undo-jobs-and-the-menu-bar) · [notices](#notices) · [anonymous reports](#anonymous-reports) · [Remote Control](#remote-control) ·
   [AI assistants (MCP)](#ai-assistants-mcp)
 - [Song text](#song-text) · [song files edited outside the app](#song-files-edited-outside-the-app) ·
   [song packs](#song-packs)
@@ -1343,9 +1343,21 @@ The list under the status button (≡) after the find box: information, trouble 
 | Command | Does |
 |---|---|
 | `notices` | The entries, questions first, then newest first: each with its number, kind (`info`, `trouble`, `ask`), words, whether it is new, and a question's answers (`--json`: id, kind, text, time in seconds since 1970, seen, actions with id and label) |
-| `notices answer N ANSWER` | Answers question N with one of its own answers (`outside:reload` reads the file again, `outside:keep` keeps SoftPresenter's version), as its button does; the reply is what the list then says |
+| `notices answer N ANSWER` | Answers question N with one of its own answers (`outside:reload` reads the file again, `outside:keep` keeps SoftPresenter's version; `reports:off` turns anonymous reports off and `reports:keep` leaves them on, at the computer only), as its button does; the reply is what the list then says |
 | `notices seen` | Marks every entry seen, as closing the list does (a question stays new until answered). From a remote page, entries about security (a new certificate key, wrong passwords coming again and again) stay unseen until the operator sees them in the app |
 | `notices clear` | Clear All: the list empties but for questions. From a remote page, entries about security stay until the operator has seen them in the app |
+
+## Anonymous reports
+
+What Settings › About › Anonymous reports does ([PRIVACY.md](../PRIVACY.md)). A remote page and
+an AI assistant can't use these: whether a computer sends reports is decided at the computer.
+
+| Command | Does |
+|---|---|
+| `reports` | Whether anonymous reports are on, whether this copy may send them (a test copy never does), and how many have gone since the app started (`--json`: `on`, `starts_on` (how reports start where the computer is: false in the EU, the EEA and the UK), `told`, `may_send`, `anonymous_id`, `sent`) |
+| `reports show` | The next report exactly as it would be sent, as JSON: all of it (See what's sent) |
+| `reports on`, `reports off` | Switches them. Off stops at once and deletes any report that was waiting |
+| `reports reset-id` | A new random anonymous id; what waited under the old one is deleted |
 
 ## Undo, jobs and the menu bar
 

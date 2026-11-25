@@ -78,6 +78,12 @@ pub fn ffmpeg_program() -> Option<std::path::PathBuf> {
     ffmpeg::tool("ffmpeg")
 }
 
+/// What FFmpeg's probe says a video is: its width, its height and its pictures a second. Runs a
+/// program and waits for it: never on a thread that draws.
+pub fn video_summary(path: &Path) -> Option<(u32, u32, f64)> {
+    ffmpeg::probe(path).ok().map(|info| (info.width, info.height, info.fps))
+}
+
 /// A still from a video, no larger than `max_side` on its longer side: from the system's player
 /// if it can read the video, otherwise from FFmpeg. Many videos open on black or fade in, so a
 /// dark picture half a second in is passed over for one a little later.

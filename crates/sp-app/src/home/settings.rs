@@ -103,6 +103,8 @@ impl Pane {
             "mirror" | "phone" => Some(Pane::PhoneScreens),
             "mcp" | "ai" => Some(Pane::AiAssistants),
             "cli" => Some(Pane::CommandLine),
+            // About, with the anonymous reports' See what's sent opened.
+            "reports sent" | "reports" => Some(Pane::About),
             _ => None,
         };
         before.or_else(|| Pane::all().find(|pane| pane.words().1.to_lowercase() == name))
@@ -1013,7 +1015,7 @@ fn song_files_page(ui: &mut egui::Ui, state: &mut HomeState) {
 }
 
 /// Settings › About: the version, updates, what's new, the guide, reporting a problem and the
-/// licences, each a row with its key.
+/// licences, each a row with its key; then the anonymous reports' card.
 fn about_page(ui: &mut egui::Ui, state: &mut HomeState) {
     let version = tf(
         "settings.about.version",
@@ -1060,6 +1062,7 @@ fn about_page(ui: &mut egui::Ui, state: &mut HomeState) {
     if let Some(page) = opened {
         open_page(state, page);
     }
+    crate::reports::ui::settings_card(ui, state);
 }
 
 /// Settings › About's Updates row: what the last Check for Updates found and when, and the key

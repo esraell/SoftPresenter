@@ -1452,6 +1452,39 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   or Remote Control is switched on (choose Allow for private networks). Linux asks nothing, so
   the setup has no such step there. Its words fit the system: no Mac names, menus or Word files
   off a Mac. Settings › Set up SoftPresenter… opens it again.
+- **Anonymous reports** ([PRIVACY.md](../PRIVACY.md), every field in
+  [anonymous-reports.md](anonymous-reports.md)). SoftPresenter sends the project small reports
+  of how it runs and what goes wrong: the app's version, the system, the processor, memory,
+  graphics and displays' sizes, how many screens are set up and on, a row for each minute
+  (processor and memory, how long the window and the screens took to draw, what kinds of thing
+  were on screen as codes such as `song` or `video_1080p30`), events as codes, how many times
+  each view and menu command was used, problem lines that can't hold a name, and any crash
+  (where in the program, never anything of the builder's or the person's computer). Never the
+  words or titles of songs, Bible text, the names of files, folders, displays, screens or
+  people, the computer's name, addresses, passwords or the log. On a computer whose region
+  (never its language: a Mac's region, Windows' Country or region, the territory of a Linux
+  locale) is in the European Union, Iceland, Liechtenstein, Norway or the United Kingdom they
+  are **off unless turned on**: the Reports step shows the switch Off with a line inviting to
+  turn it on, there is no notice, and nothing is counted or sent until they are switched on.
+  Everywhere else, and where the computer doesn't say where it is, they are **on unless turned
+  off**: the setup's last step before Done, Reports, shows them on with the On/Off key, one line
+  on what is and isn't sent, See what's sent and the way to the privacy page; an install that
+  never passed that step (one updated from an earlier version, or whose setup was skipped) gets
+  a notice once, "Anonymous reports are on…", opened so that it is read, with Turn off and Keep
+  on. Nothing is counted, kept or sent until the step has been passed or the notice shown, and
+  nothing in the first minute after. Then one report every fifteen minutes, one as the app
+  quits (waited for for two seconds at the most) and one for a crash (at the next start if it
+  could not go); with no network they wait on disk, 256 KB at the most. A choice made (the
+  key, `sp reports on|off`, or Continue on the setup's step) is kept and wins over how reports
+  start, wherever the computer is taken. At quit the last report goes from its own thread
+  while the library's files are saved, and the window still answers. Settings › About ›
+  Anonymous reports has the On/Off key (off stops at once and deletes what waited), Reset my
+  anonymous id (a new random number, made from nothing about the computer) and See what's
+  sent: the next report exactly as it would go, with Copy. `sp reports`, `reports show`,
+  `reports on|off` and `reports reset-id` do the same; a remote page and an AI assistant can't.
+  It all runs on a thread of its own, so the screens and the window never wait for it. A test
+  copy (`SOFTPRESENTER_QUIET`, a data folder of its own, or a run that only saves a picture)
+  never sends, and says so beside the key.
 
 ## Screens
 - Any number of audience screens, each sent to a display, a window, the network over NDI, or

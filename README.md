@@ -235,7 +235,9 @@ box sits and how it looks.
 Everything lives in `~/Documents/SoftPresenter/`: songs made in the app (`Songs/`), themes
 (`Themes/`), pictures (`Images/`), downloaded Bibles (`Bibles/`), playlists, libraries,
 screens and a few preferences, where you can see it and back it up. The log is in
-`~/Library/Logs/SoftPresenter/`. A library kept in `~/Library/Application Support/SoftPresenter/`
+`~/Library/Logs/SoftPresenter/`. Nothing of yours leaves the computer: SoftPresenter sends only
+small anonymous reports of how it runs and what goes wrong, which you can read and turn off in
+Settings › About ([PRIVACY.md](PRIVACY.md)). A library kept in `~/Library/Application Support/SoftPresenter/`
 by an earlier version is moved to Documents the first time the new one starts; the old folder is
 kept beside it as "SoftPresenter (moved to Documents)".
 
@@ -309,7 +311,8 @@ packages a Linux build needs), with the lints on all three.
 
 Bug reports, ideas and Bible requests go in [Issues](https://github.com/esraell/SoftPresenter/issues/new/choose);
 changes are welcome as pull requests, as [CONTRIBUTING.md](CONTRIBUTING.md) describes. Report
-security problems privately, as [SECURITY.md](SECURITY.md) says. Everyone taking part follows
+security problems privately, as [SECURITY.md](SECURITY.md) says. What the app sends, and what it
+never does, is in [PRIVACY.md](PRIVACY.md). Everyone taking part follows
 the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Licence

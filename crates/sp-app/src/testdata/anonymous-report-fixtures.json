@@ -1,0 +1,809 @@
+{
+  "about": "Reports the anonymous-report route must take (valid) and must refuse (invalid). Each invalid one is the valid report named in `from`, with the value at `path` replaced by `value` (or removed when `remove` is true); `error` is a pattern the server's message matches. The app's tests (crates/sp-app/src/reports/tests.rs) and the server's test both read this file, so the two can't drift apart. docs/anonymous-reports.md describes the format in words.",
+  "valid": {
+    "full": {
+      "v": 1,
+      "kind": "report",
+      "install_id": "5f0c1e7a9b3d4c2e8a6f0b1d2c3e4f5a",
+      "session": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "sent_at": 1795608000,
+      "app": {
+        "version": "0.1.0",
+        "commit": "69dd8c2",
+        "channel": "release"
+      },
+      "os": {
+        "name": "windows",
+        "version": "Windows 11 Pro (build 26100)",
+        "arch": "x86_64"
+      },
+      "cpu": {
+        "model": "Intel(R) Core(TM) i7-12700 CPU @ 2.10GHz",
+        "cores": 20
+      },
+      "ram_gb": 16,
+      "gpu": {
+        "name": "Intel(R) UHD Graphics 770",
+        "driver": "Intel Corporation 31.0.101.2125",
+        "backend": "dx12",
+        "type": "integrated"
+      },
+      "displays": [
+        {
+          "w": 1920,
+          "h": 1080,
+          "scale": 1,
+          "hz": 60,
+          "main": true
+        },
+        {
+          "w": 3840,
+          "h": 2160,
+          "scale": 1.5,
+          "hz": 59.94,
+          "main": false
+        }
+      ],
+      "outputs": {
+        "audience": 1,
+        "stage": 1,
+        "on": 2,
+        "display": 1,
+        "window": 0,
+        "ndi": 1,
+        "decklink": 0
+      },
+      "integrations": {
+        "ndi": true,
+        "decklink": false,
+        "ffmpeg": true
+      },
+      "language": "ru",
+      "uptime_s": 905,
+      "minutes": [
+        {
+          "at": 1795607940,
+          "up_s": 845,
+          "ticks": 12,
+          "cpu": {
+            "app": [
+              12.5,
+              31
+            ],
+            "video": [
+              40.1,
+              55.2
+            ],
+            "system": [
+              35,
+              62.3
+            ]
+          },
+          "mem_mb": {
+            "app": [
+              612.4,
+              640
+            ],
+            "video": [
+              180,
+              181.5
+            ],
+            "free_least": 5230.5
+          },
+          "ui": {
+            "view": "service",
+            "frames": 1410,
+            "p50": 3.1,
+            "p95": 7.9,
+            "max": 41.2,
+            "over50": 0,
+            "over100": 0
+          },
+          "screens": {
+            "passes": 3600,
+            "p50": 2.2,
+            "p95": 4.8,
+            "max": 61.5,
+            "over50": 1,
+            "over100": 0,
+            "shown": 3600,
+            "not_shown": 0
+          },
+          "scene": [
+            "video_1080p30",
+            "player_ffmpeg",
+            "song"
+          ],
+          "actions": {
+            "keys": 14,
+            "clicks": 3,
+            "remote": 0
+          },
+          "outputs_on": 2
+        }
+      ],
+      "events": [
+        {
+          "t": 12.4,
+          "kind": "display_added",
+          "n": 2
+        },
+        {
+          "t": 300.2,
+          "kind": "slow_pass",
+          "ms": 61.5
+        },
+        {
+          "t": 410,
+          "kind": "notice",
+          "id": "media.missing"
+        }
+      ],
+      "features": {
+        "view_service": 4,
+        "view_songs": 2,
+        "tool_bible": 7,
+        "search": 12
+      },
+      "problems": [
+        "[video] the decoder stopped: error -1094995529",
+        "[screens] surface lost; made again"
+      ],
+      "dropped": {
+        "minutes": 0,
+        "events": 0,
+        "problems": 3
+      }
+    },
+    "crash": {
+      "v": 1,
+      "kind": "crash",
+      "install_id": "5f0c1e7a9b3d4c2e8a6f0b1d2c3e4f5a",
+      "sent_at": 1795608100,
+      "app": {
+        "version": "0.1.0",
+        "commit": "unknown",
+        "channel": "dev"
+      },
+      "os": {
+        "name": "macos",
+        "version": "15.1",
+        "arch": "aarch64"
+      },
+      "crash": {
+        "message": "index out of bounds: the len is 3 but the index is 7",
+        "location": "crates/sp-app/src/deck.rs:412:17",
+        "thread": "main",
+        "backtrace": "   0: std::backtrace::Backtrace::force_capture\n   1: sp_app::reports::on_panic\n             at crates/sp-app/src/reports.rs:210:24\n   2: core::panicking::panic_bounds_check\n             at /rustc/17067e9ac6d7e6f9c0d6ab1e0e5d5e8f3a2b1c0d/library/core/src/panicking.rs:274:5\n   3: sp_app::deck::Deck::show\n             at crates/sp-app/src/deck.rs:412:17\n   4: wgpu::api::device::Device::poll\n             at wgpu-27.0.1/src/api/device.rs:88:9",
+        "uptime_s": 1320
+      }
+    },
+    "smallest": {
+      "v": 1,
+      "kind": "report",
+      "install_id": "00000000000000000000000000000000",
+      "sent_at": 1795608000,
+      "app": {
+        "version": "0.1.0",
+        "channel": "release"
+      },
+      "os": {
+        "name": "linux"
+      }
+    },
+    "crash_in_rust_library": {
+      "v": 1,
+      "kind": "crash",
+      "install_id": "5f0c1e7a9b3d4c2e8a6f0b1d2c3e4f5a",
+      "sent_at": 1795608100,
+      "app": {
+        "version": "0.1.0",
+        "commit": "unknown",
+        "channel": "dev"
+      },
+      "os": {
+        "name": "macos",
+        "version": "15.1",
+        "arch": "aarch64"
+      },
+      "crash": {
+        "message": "called Option::unwrap() on a None value at 12:30:45",
+        "location": "/rustc/17067e9ac6d7e6f9c0d6ab1e0e5d5e8f3a2b1c0d/library/core/src/panicking.rs:274:5",
+        "thread": "main",
+        "backtrace": "   0: std::backtrace::Backtrace::force_capture\n   1: sp_app::reports::on_panic\n             at crates/sp-app/src/reports.rs:210:24\n   2: core::panicking::panic_bounds_check\n             at /rustc/17067e9ac6d7e6f9c0d6ab1e0e5d5e8f3a2b1c0d/library/core/src/panicking.rs:274:5\n   3: sp_app::deck::Deck::show\n             at crates/sp-app/src/deck.rs:412:17\n   4: wgpu::api::device::Device::poll\n             at wgpu-27.0.1/src/api/device.rs:88:9",
+        "uptime_s": 1320
+      }
+    }
+  },
+  "invalid": [
+    {
+      "name": "an unknown field at the top",
+      "from": "full",
+      "path": [
+        "tester"
+      ],
+      "value": "Test Person",
+      "error": "does not take"
+    },
+    {
+      "name": "the computer's name",
+      "from": "full",
+      "path": [
+        "machine"
+      ],
+      "value": "MacBookPro18,3",
+      "error": "does not take"
+    },
+    {
+      "name": "the log",
+      "from": "full",
+      "path": [
+        "log"
+      ],
+      "value": "line one\n",
+      "error": "does not take"
+    },
+    {
+      "name": "a note",
+      "from": "full",
+      "path": [
+        "note"
+      ],
+      "value": "hello",
+      "error": "does not take"
+    },
+    {
+      "name": "an unknown field in a display (its name)",
+      "from": "full",
+      "path": [
+        "displays",
+        0,
+        "name"
+      ],
+      "value": "Sanctuary Projector",
+      "error": "does not take"
+    },
+    {
+      "name": "an unknown field in a minute",
+      "from": "full",
+      "path": [
+        "minutes",
+        0,
+        "outputs"
+      ],
+      "value": [
+        {
+          "name": "Main"
+        }
+      ],
+      "error": "does not take"
+    },
+    {
+      "name": "an event with words",
+      "from": "full",
+      "path": [
+        "events",
+        0,
+        "what"
+      ],
+      "value": "Added Amazing Grace.mp4",
+      "error": "does not take"
+    },
+    {
+      "name": "an unknown field in the crash (the log's end)",
+      "from": "crash",
+      "path": [
+        "crash",
+        "log_tail"
+      ],
+      "value": "x",
+      "error": "does not take"
+    },
+    {
+      "name": "another version",
+      "from": "full",
+      "path": [
+        "v"
+      ],
+      "value": 2,
+      "error": "unsupported v"
+    },
+    {
+      "name": "a note kind",
+      "from": "full",
+      "path": [
+        "kind"
+      ],
+      "value": "note",
+      "error": "kind"
+    },
+    {
+      "name": "no install id",
+      "from": "full",
+      "path": [
+        "install_id"
+      ],
+      "remove": true,
+      "error": "install_id"
+    },
+    {
+      "name": "an install id in capitals",
+      "from": "full",
+      "path": [
+        "install_id"
+      ],
+      "value": "5F0C1E7A9B3D4C2E8A6F0B1D2C3E4F5A",
+      "error": "install_id"
+    },
+    {
+      "name": "a session that is a name",
+      "from": "full",
+      "path": [
+        "session"
+      ],
+      "value": "sunday-morning",
+      "error": "session"
+    },
+    {
+      "name": "no app",
+      "from": "full",
+      "path": [
+        "app"
+      ],
+      "remove": true,
+      "error": "app"
+    },
+    {
+      "name": "a version with a space",
+      "from": "full",
+      "path": [
+        "app",
+        "version"
+      ],
+      "value": "0.1.0 beta",
+      "error": "app.version"
+    },
+    {
+      "name": "another channel",
+      "from": "full",
+      "path": [
+        "app",
+        "channel"
+      ],
+      "value": "nightly",
+      "error": "app.channel"
+    },
+    {
+      "name": "another system",
+      "from": "full",
+      "path": [
+        "os",
+        "name"
+      ],
+      "value": "Windows",
+      "error": "os.name"
+    },
+    {
+      "name": "a system version in another script",
+      "from": "full",
+      "path": [
+        "os",
+        "version"
+      ],
+      "value": "Церковь 11",
+      "error": "os.version"
+    },
+    {
+      "name": "a processor name too long",
+      "from": "full",
+      "path": [
+        "cpu",
+        "model"
+      ],
+      "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "error": "cpu.model"
+    },
+    {
+      "name": "half a core",
+      "from": "full",
+      "path": [
+        "cpu",
+        "cores"
+      ],
+      "value": 1.5,
+      "error": "cpu.cores"
+    },
+    {
+      "name": "memory as text",
+      "from": "full",
+      "path": [
+        "ram_gb"
+      ],
+      "value": "16",
+      "error": "ram_gb"
+    },
+    {
+      "name": "another graphics backend",
+      "from": "full",
+      "path": [
+        "gpu",
+        "backend"
+      ],
+      "value": "Dx12",
+      "error": "gpu.backend"
+    },
+    {
+      "name": "a display with no height",
+      "from": "full",
+      "path": [
+        "displays",
+        0,
+        "h"
+      ],
+      "remove": true,
+      "error": "displays\\[0\\].h"
+    },
+    {
+      "name": "a negative count",
+      "from": "full",
+      "path": [
+        "outputs",
+        "ndi"
+      ],
+      "value": -1,
+      "error": "outputs.ndi"
+    },
+    {
+      "name": "a language that is a sentence",
+      "from": "full",
+      "path": [
+        "language"
+      ],
+      "value": "Russian (our church)",
+      "error": "language"
+    },
+    {
+      "name": "a view with capitals and a space",
+      "from": "full",
+      "path": [
+        "minutes",
+        0,
+        "ui",
+        "view"
+      ],
+      "value": "Amazing Grace",
+      "error": "ui.view"
+    },
+    {
+      "name": "a scene in words",
+      "from": "full",
+      "path": [
+        "minutes",
+        0,
+        "scene",
+        0
+      ],
+      "value": "video 1080p30 (FFmpeg) behind song slide",
+      "error": "scene"
+    },
+    {
+      "name": "a minute with no ticks",
+      "from": "full",
+      "path": [
+        "minutes",
+        0,
+        "ticks"
+      ],
+      "value": 0,
+      "error": "ticks"
+    },
+    {
+      "name": "a pair of three",
+      "from": "full",
+      "path": [
+        "minutes",
+        0,
+        "cpu",
+        "app"
+      ],
+      "value": [
+        1,
+        2,
+        3
+      ],
+      "error": "cpu.app"
+    },
+    {
+      "name": "an event kind in words",
+      "from": "full",
+      "path": [
+        "events",
+        0,
+        "kind"
+      ],
+      "value": "Display added",
+      "error": "kind"
+    },
+    {
+      "name": "a notice id that is a file name",
+      "from": "full",
+      "path": [
+        "events",
+        2,
+        "id"
+      ],
+      "value": "Amazing Grace.mp4",
+      "error": "id"
+    },
+    {
+      "name": "a feature named with a title",
+      "from": "full",
+      "path": [
+        "features",
+        "Amazing Grace"
+      ],
+      "value": 1,
+      "error": "features"
+    },
+    {
+      "name": "a feature count as text",
+      "from": "full",
+      "path": [
+        "features",
+        "search"
+      ],
+      "value": "many",
+      "error": "features"
+    },
+    {
+      "name": "a problem line in another script",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "не найдено: Благодать",
+      "error": "ASCII"
+    },
+    {
+      "name": "a problem line with a Mac home folder",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "[media] could not open /Users/maria/Movies/intro.mp4",
+      "error": "folder"
+    },
+    {
+      "name": "a problem line with a Windows folder",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "[media] could not open C:\\Users\\Maria\\Videos\\intro.mp4",
+      "error": "folder"
+    },
+    {
+      "name": "a problem line with a Linux home folder",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "[media] could not open /home/maria/intro.mp4",
+      "error": "folder"
+    },
+    {
+      "name": "a problem line with a network share",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "[media] could not open \\\\nas\\media\\intro.mp4",
+      "error": "folder"
+    },
+    {
+      "name": "a problem line with an e-mail address",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "[sync] signed in as maria@example.org",
+      "error": "e-mail"
+    },
+    {
+      "name": "a problem line with an IP address",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "[remote] refused 192.168.1.20",
+      "error": "network address"
+    },
+    {
+      "name": "a problem line with a MAC address",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "[net] interface 3c:22:fb:10:9a:7e down",
+      "error": "network address"
+    },
+    {
+      "name": "a problem line with a link",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "[web] could not load https://example.org/live",
+      "error": "link"
+    },
+    {
+      "name": "a problem line with a key",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "[captions] key Zq5WKdsBVv1pJ32zO8ZdFi7kNqHONkYqEQaMBE2FDmupQpQ refused",
+      "error": "key"
+    },
+    {
+      "name": "a problem line with a control character",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "bell\u0007",
+      "error": "ASCII"
+    },
+    {
+      "name": "a problem line too long",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "error": "longer"
+    },
+    {
+      "name": "a crash kind with no crash",
+      "from": "crash",
+      "path": [
+        "crash"
+      ],
+      "remove": true,
+      "error": "crash is required"
+    },
+    {
+      "name": "a crash in a plain report",
+      "from": "full",
+      "path": [
+        "crash"
+      ],
+      "value": {
+        "message": "x"
+      },
+      "error": "only with kind"
+    },
+    {
+      "name": "a crash place on the builder's disk",
+      "from": "crash",
+      "path": [
+        "crash",
+        "location"
+      ],
+      "value": "/Users/builder/dev/app/crates/sp-app/src/deck.rs:412:17",
+      "error": "crash.location"
+    },
+    {
+      "name": "a crash place inside a home folder",
+      "from": "crash",
+      "path": [
+        "crash",
+        "location"
+      ],
+      "value": "Users/builder/dev/app/src/deck.rs:412:17",
+      "error": "folder"
+    },
+    {
+      "name": "a backtrace with the builder's home folder",
+      "from": "crash",
+      "path": [
+        "crash",
+        "backtrace"
+      ],
+      "value": "0: main\n   at /Users/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wgpu-27.0.1/src/lib.rs:1:1",
+      "error": "folder"
+    },
+    {
+      "name": "a crash message quoting a title in another script",
+      "from": "crash",
+      "path": [
+        "crash",
+        "message"
+      ],
+      "value": "no song called «Благодать»",
+      "error": "ASCII"
+    },
+    {
+      "name": "a crash thread named with odd characters",
+      "from": "crash",
+      "path": [
+        "crash",
+        "thread"
+      ],
+      "value": "worker/1",
+      "error": "crash.thread"
+    },
+    {
+      "name": "a crash place with Windows separators",
+      "from": "crash",
+      "path": [
+        "crash",
+        "location"
+      ],
+      "value": "crates\\sp-app\\src\\deck.rs:412:17",
+      "error": "crash.location"
+    },
+    {
+      "name": "a crash place under another root",
+      "from": "crash",
+      "path": [
+        "crash",
+        "location"
+      ],
+      "value": "/opt/build/crates/sp-app/src/deck.rs:412:17",
+      "error": "crash.location"
+    },
+    {
+      "name": "a problem line with a short IPv6 address",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "[remote] refused fe80::1c2a:7bff:fe00:1",
+      "error": "network address"
+    },
+    {
+      "name": "a problem line with a bracketed IPv6 address",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "[remote] listening on [::1]:4310",
+      "error": "network address"
+    },
+    {
+      "name": "a problem line with a full IPv6 address",
+      "from": "full",
+      "path": [
+        "problems",
+        0
+      ],
+      "value": "[remote] refused 2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+      "error": "network address"
+    },
+    {
+      "name": "a crash message with an IPv6 address",
+      "from": "crash",
+      "path": [
+        "crash",
+        "message"
+      ],
+      "value": "could not bind 2001:db8::7",
+      "error": "network address"
+    }
+  ]
+}

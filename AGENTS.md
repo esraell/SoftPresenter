@@ -59,7 +59,7 @@ person:
 
 | Switch | What it does |
 |---|---|
-| `SOFTPRESENTER_QUIET=1` | Windows open behind everything, no full screen, no NDI, no DeckLink card; Remote Control, if switched on, listens on 127.0.0.1 only; so does receiving phone screens, which then announces nothing; sound plays, timed and mixed as usual (NDI included), but the speakers get silence |
+| `SOFTPRESENTER_QUIET=1` | Windows open behind everything, no full screen, no NDI, no DeckLink card; no anonymous reports are sent, and the one-time notice about them is not shown (the same in any copy with `SOFTPRESENTER_DATA`, or one that only saves a picture); Remote Control, if switched on, listens on 127.0.0.1 only; so does receiving phone screens, which then announces nothing; sound plays, timed and mixed as usual (NDI included), but the speakers get silence |
 | `SOFTPRESENTER_DATA=<folder>` | Keep the library, Bibles, settings and log in that folder instead of the owner's |
 | `SOFTPRESENTER_CONTROL_SOCKET=<path>` | Where `sp` and the app meet; a short path for a test copy (a socket file on Windows too) |
 | `SOFTPRESENTER_TEST_ROOT=<folder>` | For test programs built on one computer and run on another (Windows tests built on the Mac): the golden pictures and shipped Bibles are read from that copy of the repository instead of the build's own source folder |
@@ -97,6 +97,8 @@ person:
 | `SOFTPRESENTER_SETTINGS_SIZE=1100x700` | Open the Settings window at that size (points), smaller than its least size too, to see its pages at the sizes the design was drawn at |
 | `SOFTPRESENTER_ASSISTANTS_HOME=<folder>` | The home folder a test copy looks for assistant apps in (Settings › AI assistants, `sp mcp connect`): their settings files (`Library/Application Support/Claude/`, `.cursor/`, `.copilot/`, `.gemini/`, and `AppData/Roaming` for Windows' own) and their programs (`.local/bin/claude`, `.local/bin/codex`, `.grok/bin/grok`), and nowhere else, not the PATH. A test copy without it finds none, so it never reads or changes the owner's |
 | `SOFTPRESENTER_LANGUAGE=<es\|ru\|uk\|en>` | Stands in for the computer's language, so a test copy starts in that language (the app's own words, and the Bible view's reading language), unless the Language setting chose one; for captures and tests. Several separated by commas (`ru,uk,en`) stand in for the computer's preferred languages, its own first (the Bibles window lists Bibles in them first) |
+| `SOFTPRESENTER_REPORTS_TEST_URL=http://127.0.0.1:<port>` | A test copy sends its anonymous reports to a server on this computer (the reports Worker run locally), as a person's own copy sends them to the project's: the one-time notice is shown, the first report goes a minute later, then one every fifteen minutes and one at quit. Honoured only together with `SOFTPRESENTER_DATA`, and only for `http://127.0.0.1` or `http://localhost`; with any other address the copy sends nowhere. `sp reports`, `reports show`, `reports on|off` drive it without a pointer; `SOFTPRESENTER_SETUP=reports` opens the setup at its Reports step (`reports-open` with See what's sent opened) and `SOFTPRESENTER_CAPTURE_PREFERENCES=reports-sent` Settings › About with it opened |
+| `SOFTPRESENTER_REGION=<DE>` | Stands in for the computer's region (a country's two-letter code), which decides whether anonymous reports start on or off (off in the EU, the EEA and the UK): a test copy then starts as a computer there does |
 | `SOFTPRESENTER_HIDE_NDI=1` | Behave as on a computer without NDI installed |
 | `SOFTPRESENTER_SLOW_PAGES=<ms>` | Each page of a PDF being made into slides takes that many milliseconds longer, to try a quit part way through (the pictures are drawn at the next start) or to see "Page N…" |
 | `SOFTPRESENTER_SLOW_WRITES=<ms>` | Each file the library's writer writes (a song, the playlists, the libraries, the media bin) takes that many milliseconds longer, as on a computer whose disk or virus scanner is slow (Windows Defender looks at every new file): to see that a big import never holds up the window or `sp`, and that quitting waits until every file is written. Only with `SOFTPRESENTER_DATA` set |
@@ -128,7 +130,9 @@ message.
   Metal interface and its `cover` part that puts a screen's window on its display and listens for
   the displays changing, `web_mac` for web pages), `sp-ndi`'s `runtime` module, `sp-winapi`'s `windows` module (the few Windows calls the
   app needs: joining the console a command was typed in, asking a monitor for its work area,
-  asking Windows the names the monitors give themselves, putting a folder on the user's PATH and
+  asking Windows the names the monitors give themselves and the country the user's location is set to, reading how much processor time and
+  memory the app, the programs it started and the computer use (its `stats` part, for the
+  anonymous reports), putting a folder on the user's PATH and
   taking it off again, in its `security` part, reading and setting who owns and may open the
   control socket's folder and finding the user the app runs as, and, in its `credentials` part,
   reading, writing and removing the user's entries in Credential Manager, where keys are kept) and
@@ -181,6 +185,13 @@ message.
   Tests use text written for them.
 - **Privacy.** No secrets, tokens, local paths (`/Users/…`), links to private sessions or
   documents, or personal details of real people.
+- **Anonymous reports** ([PRIVACY.md](PRIVACY.md), [docs/anonymous-reports.md](docs/anonymous-reports.md)).
+  A report is built only from the closed types in `crates/sp-app/src/reports/format.rs`: views,
+  tools, events and what is on screen are codes the program made up, never words, and nothing
+  that could hold a name (a title, a file, a display, a person) is ever put in one. A new field
+  changes the server, the format's page, the fixtures and PRIVACY.md together. Text for a
+  report is dropped when in doubt, never cleaned (`reports/scrub.rs`). Nothing is counted,
+  written or sent before the person has been told, and a test copy never sends.
 - **Third-party code.** Before linking anything new, read its licence and record it in
   `docs/licences/`, and in `NOTICE.md` if it ships with the app.
 - **Tests that need a GPU** go in `crates/sp-render/tests/golden.rs`, which the automatic checks

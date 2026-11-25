@@ -1,6 +1,9 @@
 pub mod credentials;
 pub mod security;
 
+mod stats;
+pub use stats::process_stats;
+
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Devices::Display::{
@@ -233,6 +236,17 @@ fn active_paths() -> Option<Vec<DISPLAYCONFIG_PATH_INFO>> {
 }
 
 /// The text of a fixed-size wide string, up to its first NUL.
+/// The user's location as Windows names it: `DE`, or `XX` when none is set.
+pub fn user_geo_name() -> Option<String> {
+    use windows_sys::Win32::Globalization::GetUserDefaultGeoName;
+    // A geo name is two letters or three digits; Windows asks for room for a few more.
+    let mut name = [0u16; 16];
+    // SAFETY: `name` is valid for the call to fill in, and its length is given with it; the call
+    // writes no more than that, ending the text with a zero.
+    let written = unsafe { GetUserDefaultGeoName(name.as_mut_ptr(), name.len() as i32) };
+    (written > 0).then(|| from_wide(&name))
+}
+
 fn from_wide(text: &[u16]) -> String {
     let end = text.iter().position(|&c| c == 0).unwrap_or(text.len());
     String::from_utf16_lossy(&text[..end])

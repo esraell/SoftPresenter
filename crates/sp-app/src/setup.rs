@@ -49,6 +49,8 @@ pub enum Step {
     FreeSongs,
     Bibles,
     Permissions,
+    /// Anonymous reports: on, with the key that turns them off (`reports::ui::setup_step`).
+    Reports,
     Done,
 }
 
@@ -62,6 +64,7 @@ impl Step {
             Step::FreeSongs => t("setup.step.free_songs", "Free Songs"),
             Step::Bibles => t("setup.step.bibles", "Bibles"),
             Step::Permissions => t("setup.step.permissions", "Permissions"),
+            Step::Reports => t("setup.step.reports", "Reports"),
             Step::Done => t("setup.step.done", "Done"),
         }
     }
@@ -69,13 +72,15 @@ impl Step {
 
 /// The steps on `system`, in order. Linux has no Permissions step: nothing there asks. Free
 /// Songs follows Songs: the songbooks shared by churches, and the song catalog's too where it is
-/// offered (`catalog::offered`).
+/// offered (`catalog::offered`). Reports is the last before Done on every system: anonymous
+/// reports are on unless they are turned off there.
 fn steps(system: System) -> Vec<Step> {
     let mut steps = vec![Step::Welcome, Step::Screens, Step::Songs, Step::FreeSongs];
     steps.push(Step::Bibles);
     if system != System::Linux {
         steps.push(Step::Permissions);
     }
+    steps.push(Step::Reports);
     steps.push(Step::Done);
     steps
 }
@@ -115,9 +120,19 @@ impl Setup {
     /// start for any other value.
     pub fn opened_at(name: &str) -> Setup {
         let wanted = name.trim().to_ascii_lowercase().replace(['-', '_', ' '], "");
+        // `reports-open`: the Reports step with See what's sent opened (`reports::ui`).
+        let wanted = wanted.strip_suffix("open").filter(|step| *step == "reports").unwrap_or(&wanted).to_owned();
         let mut setup = Setup::new();
-        let all =
-            [Step::Welcome, Step::Screens, Step::Songs, Step::FreeSongs, Step::Bibles, Step::Permissions, Step::Done];
+        let all = [
+            Step::Welcome,
+            Step::Screens,
+            Step::Songs,
+            Step::FreeSongs,
+            Step::Bibles,
+            Step::Permissions,
+            Step::Reports,
+            Step::Done,
+        ];
         if let Some(step) = all.into_iter().find(|step| format!("{step:?}").to_ascii_lowercase() == wanted) {
             setup.step = step;
         }
@@ -177,7 +192,9 @@ pub fn setup_ui(ctx: &egui::Context, show: &Show, state: &mut HomeState, command
         .frame(frame)
         .show(ctx, |ui| {
             let system = System::THIS;
-            let steps = steps(system);
+            let mut steps = steps(system);
+            // The Reports step belongs to a build that has the anonymous reports.
+            steps.retain(|step| *step != Step::Reports || crate::reports::offered());
             // A step this system doesn't have (Permissions on Linux) is never shown.
             if !steps.contains(&setup.step) {
                 setup.step = steps[0];
@@ -193,6 +210,7 @@ pub fn setup_ui(ctx: &egui::Context, show: &Show, state: &mut HomeState, command
                 Step::FreeSongs => not_now = free_songs(ui, &mut setup, state),
                 Step::Bibles => bibles(ui, state),
                 Step::Permissions => permissions(ui, system),
+                Step::Reports => crate::reports::ui::setup_step(ui, state),
                 Step::Done => done(ui, show, state, commands),
             }
             ui.add_space(20.0);
@@ -220,6 +238,11 @@ pub fn setup_ui(ctx: &egui::Context, show: &Show, state: &mut HomeState, command
                         if setup.step == Step::FreeSongs {
                             setup.free_songs.confirmed = true;
                             setup.shared.confirmed = true;
+                        }
+                        // Continue on Reports: the person has seen that reports are on, and
+                        // how to turn them off.
+                        if setup.step == Step::Reports {
+                            crate::reports::ui::passed_setup_step();
                         }
                         if last {
                             open = false;
@@ -938,7 +961,7 @@ mod tests {
         for said in ["macOS may ask", "on this Mac", "the File menu", "Word", "What macOS will ask", "Local Network"] {
             assert!(words.contains(said), "a Mac doesn't hear {said:?}:\n{words}");
         }
-        assert_eq!(steps(System::Mac).len(), 7);
+        assert_eq!(steps(System::Mac).len(), 8);
     }
 
     #[test]
@@ -969,7 +992,7 @@ mod tests {
         assert!(asks(System::Linux).is_none());
         assert_eq!(
             steps(System::Linux),
-            [Step::Welcome, Step::Screens, Step::Songs, Step::FreeSongs, Step::Bibles, Step::Done]
+            [Step::Welcome, Step::Screens, Step::Songs, Step::FreeSongs, Step::Bibles, Step::Reports, Step::Done]
         );
         assert!(!all_words(System::Linux).contains("Permissions"));
     }

@@ -713,6 +713,7 @@ pub fn only_reads(args: &[String]) -> bool {
         }
         "remote" | "mirror" | "update" => alone || (args.len() == 2 && word(1) == "status"),
         "notices" => alone,
+        "reports" => alone || (args.len() == 2 && word(1) == "show"),
         // `bible text REFERENCE` and `bible search WORDS` leave the Bible page as it is.
         "bible" => matches!(word(1).as_str(), "text" | "search"),
         // `playlist [NAME]`, not `playlist add …`.
@@ -897,6 +898,7 @@ const COMMANDS: &[&str] = &[
     "remote",
     "mirror",
     "notices",
+    "reports",
     "catalog",
     "songbooks",
     "songbook",
@@ -1201,6 +1203,12 @@ Notices (the list under the status button)
   notices seen | notices clear mark every entry seen, as closing the list does | Clear All
                                (a question stays until it is answered)
 
+Anonymous reports (Settings › About)
+  reports                      whether they are on, and how many have gone this run
+  reports show                 the next report, exactly as it would be sent
+  reports on | reports off     switch them (off stops at once and deletes what was waiting)
+  reports reset-id             a new random anonymous id
+
 Remote Control (a web page on the church's network that runs the show)
   remote [status]              on or off, the address to open, the certificate's fingerprint,
                                the pages connected and the devices remembered
@@ -1486,6 +1494,7 @@ impl crate::App {
             "mirror" => self.ctl_mirror(args),
             "notices" => self.ctl_notices(args),
             "update" => self.ctl_update(args),
+            "reports" => crate::reports::ctl(args),
             other => Err(format!("SoftPresenter doesn't know the command \u{201c}{other}\u{201d}. See: sp help")),
         };
         if let Some(running) = self.running.as_ref() {

@@ -326,12 +326,15 @@ impl Held {
 
     /// A pass begins, with the running totals as they stand.
     pub(super) fn begin(&mut self, now: Instant, totals: Totals) {
+        crate::reports::stats::busy(crate::reports::stats::Who::Screens);
         self.pass = Pass::new(now, totals);
         self.building = 0;
     }
 
     /// One step of a part took this long.
     pub(super) fn add(&mut self, part: Part, what: For, took: Duration) {
+        // For the anonymous reports: the number of the step the thread last finished.
+        crate::reports::stats::phase(crate::reports::stats::Who::Screens, part.at() as u32 + 1);
         let pass = &mut self.pass;
         pass.took[part.at()] += took;
         pass.times[part.at()] += 1;
@@ -452,6 +455,8 @@ impl Held {
 
     /// A picture reached a window, or did not (covered, hidden, or its surface being set up).
     pub(super) fn window_shown(&mut self, shown: bool) {
+        use crate::reports::stats::{Count, bump};
+        bump(if shown { Count::WindowShown } else { Count::WindowNotShown });
         if shown {
             self.minute.shown += 1;
         } else {
@@ -468,6 +473,8 @@ impl Held {
     /// written, with [`Held::words`]); counted for the minute either way.
     pub(super) fn end(&mut self, now: Instant) -> Option<Duration> {
         let took = now.saturating_duration_since(self.pass.began);
+        crate::reports::stats::screens_pass(took);
+        crate::reports::stats::idle(crate::reports::stats::Who::Screens);
         if took >= SLOW {
             self.minute.slow += 1;
         }

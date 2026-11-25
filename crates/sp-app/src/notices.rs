@@ -43,6 +43,10 @@ pub const KEEP_MINE: &str = "outside:keep";
 pub const ALLOW: &str = "mirror:allow";
 pub const DONT_ALLOW: &str = "mirror:deny";
 
+/// The answers the one-time notice that anonymous reports are on offers.
+pub const KEEP_REPORTS: &str = "reports:keep";
+pub const REPORTS_OFF: &str = "reports:off";
+
 /// What kind of entry a notice is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -206,6 +210,20 @@ impl Notices {
         self.push(Kind::Question, text.into(), Some(about), actions);
     }
 
+    /// Says, once, that anonymous reports are on, with Turn off beside it (and Keep on). It
+    /// waits at the head of the list until answered.
+    pub fn ask_reports(&mut self, text: impl Into<String>) {
+        let about = Waiting::Reports;
+        if self.asks_about(about) {
+            return;
+        }
+        let actions = vec![
+            Action { id: REPORTS_OFF.to_owned(), label: t("reports.turn_off", "Turn off").to_owned() },
+            Action { id: KEEP_REPORTS.to_owned(), label: t("reports.keep_on", "Keep on").to_owned() },
+        ];
+        self.push(Kind::Question, text.into(), Some(about), actions);
+    }
+
     /// Whether a question about this waits for an answer.
     pub fn asks_about(&self, about: Waiting) -> bool {
         self.list.iter().any(|notice| notice.about == Some(about))
@@ -234,7 +252,7 @@ impl Notices {
             .actions
             .iter()
             .any(|offered| offered.id == action)
-            .then_some((about, action == RELOAD || action == ALLOW))
+            .then_some((about, action == RELOAD || action == ALLOW || action == KEEP_REPORTS))
     }
 
     /// Why nothing happened ("Look a passage up first."), said at the place of action for a
@@ -361,6 +379,7 @@ impl Notices {
             self.list.remove(at);
         }
         crate::applog::event(if kind == Kind::Question { "question" } else { "notice" }, &text);
+        crate::reports::stats::notice(kind == Kind::Trouble);
         self.next += 1;
         self.list.insert(0, Notice { id: self.next, kind, text, time, seen: false, actions, about, secure: false });
         let mut kept = 0;

@@ -101,9 +101,10 @@ pub const OPEN: &[&str] = &[
 /// TimelyChurch's (its connection is made and kept at the computer), the switch that lets
 /// devices on the network show their screens, `mcp` (adding SoftPresenter to assistant apps
 /// changes their settings on this computer; `sp` answers it itself, so the app never sees it,
-/// and it is closed here too), and `update` (checking for a newer version asks the internet from
-/// the computer, and is the operator's to ask for).
-pub const CLOSED: &[&str] = &["remote", "timelychurch", "mirror", "mcp", "update"];
+/// and it is closed here too), `update` (checking for a newer version asks the internet from
+/// the computer, and is the operator's to ask for), and `reports` (whether this computer sends
+/// anonymous reports is its owner's choice, made at the computer).
+pub const CLOSED: &[&str] = &["remote", "timelychurch", "mirror", "mcp", "update", "reports"];
 
 /// For the open commands made of sub-commands, the sub-commands open to Control (`""` for the
 /// command alone); any other is closed, so a sub-command added later, or one taking a key, a
@@ -369,6 +370,14 @@ fn control_refusal(args: &[String]) -> Option<String> {
             )
             .to_owned(),
         ),
+        // Whether this computer sends anonymous reports is decided at the computer too.
+        ("notices", "answer") if args.iter().skip(3).any(|word| word.to_lowercase().starts_with("reports:")) => Some(
+            t(
+                "remote.at_computer.reports",
+                "Anonymous reports are turned on or off at the computer, not from the remote page.",
+            )
+            .to_owned(),
+        ),
         // The window's language is the operator's: a phone never changes it.
         ("settings", "set") if args.iter().skip(2).any(|word| word.to_lowercase().starts_with("language=")) => Some(
             t("remote.at_computer.language", "The app's language is chosen at the computer, not from the remote page.")
@@ -545,6 +554,11 @@ mod tests {
             "settings set language=es",
             "notices answer 3 mirror:allow",
             "notices answer 3 MIRROR:deny",
+            "notices answer 3 reports:keep",
+            "notices answer 3 Reports:off",
+            "reports",
+            "reports off",
+            "reports show",
             "settings set continuous=on LANGUAGE=en",
             "notices forget 3",
             "remote off",

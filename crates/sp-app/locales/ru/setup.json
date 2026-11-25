@@ -14,6 +14,7 @@
   "setup.step.songs": "Песни",
   "setup.step.bibles": "Библии",
   "setup.step.permissions": "Разрешения",
+  "setup.step.reports": "Отчёты",
   "setup.step.done": "Готово",
   "setup.screens.title": "Какой экран видит церковь?",
   "setup.screens.one.named": "Подключён только один монитор ({name}). На нём вы работаете, поэтому экран для зала никогда его не закрывает: церковь видит его на телевизоре или проекторе.",

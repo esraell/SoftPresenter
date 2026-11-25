@@ -14,6 +14,7 @@
   "setup.step.songs": "Canciones",
   "setup.step.bibles": "Biblias",
   "setup.step.permissions": "Permisos",
+  "setup.step.reports": "Informes",
   "setup.step.done": "Listo",
   "setup.screens.title": "¿Qué pantalla ve la congregación?",
   "setup.screens.one.named": "Solo hay una pantalla conectada ({name}). Es donde trabajas, así que la pantalla del público nunca la tapa: la congregación la ve en un televisor o un proyector.",

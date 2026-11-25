@@ -43,7 +43,7 @@ sources) drawn by their own thread.
 | Audience ON/OFF | The audience screens on or off (Shift-Command-1; Ctrl+Shift+1 on other computers) | `audience on\|off` |
 | Stage ON/OFF | The stage screens on or off (Shift-Command-2) | `stage on\|off` |
 | ? | The list of every key (the `?` key opens it too; Escape, Enter or Done close it) (`keys.rs`) | |
-| ⚙ | Settings, its pages in four groups (`home/settings.rs`): The room (Screens: Configure Screens…, Identify and the test patterns; Phone Screens), On screen (Slides, Groups, Language), Connect (Integrations, AI assistants, Phone remote) and Advanced (Keys with Show keys on buttons, Command line, Song files with Reload songs, About with the version, Updates (Check for updates, and a newer version's Open the download page; `updates.rs`), What's new, the guide, Report an issue…, Licences…); each row ends in how its page stands; Set up SoftPresenter… under the list (Command-comma) | `menu Settings` |
+| ⚙ | Settings, its pages in four groups (`home/settings.rs`): The room (Screens: Configure Screens…, Identify and the test patterns; Phone Screens), On screen (Slides, Groups, Language), Connect (Integrations, AI assistants, Phone remote) and Advanced (Keys with Show keys on buttons, Command line, Song files with Reload songs, About with the version, Updates (Check for updates, and a newer version's Open the download page; `updates.rs`), What's new, the guide, Report an issue…, Licences…, and the Anonymous reports card: On/Off, Reset my anonymous id, Privacy…, See what's sent; `reports/ui.rs`, `sp reports`); each row ends in how its page stands; Set up SoftPresenter… under the list (Command-comma) | `menu Settings` |
 
 ### Left column: a playlist or a library
 

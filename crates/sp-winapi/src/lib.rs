@@ -116,6 +116,20 @@ pub fn monitor_names() -> Vec<(String, String)> {
     }
 }
 
+/// The user's location as Windows names it (Settings › Time & language › Region › Country or
+/// region): a country's two-letter code such as `DE`, `XX` when none is set, or a number for a
+/// region that is no country. `None` where it can't be asked, and on other systems.
+pub fn user_geo_name() -> Option<String> {
+    #[cfg(windows)]
+    {
+        windows::user_geo_name()
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
 /// Who owns a file or folder and who may open it, read and set with Windows' own security
 /// calls, and the user this program runs as: what keeps the control socket's folder to one
 /// user. Access lists go in and out written down as Windows writes them (SDDL); what they mean
@@ -129,6 +143,34 @@ pub use windows::security::{HeldFolder, Security, current_user, make_folder, sec
 #[cfg(windows)]
 pub mod credentials {
     pub use crate::windows::credentials::{ROOM, read, remove, write};
+}
+
+/// What this program, the programs it started and the whole computer have used, as Windows
+/// counts it: processor time in seconds since each began (take two and divide by the time
+/// between), private memory in bytes, and the memory free now.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ProcessStats {
+    pub app_cpu_s: f64,
+    pub app_private_bytes: u64,
+    /// The programs this one started (FFmpeg), and theirs in turn, added up.
+    pub kids_cpu_s: f64,
+    pub kids_private_bytes: u64,
+    /// Time every processor has spent on anything but idling, added up, in seconds.
+    pub system_busy_s: Option<f64>,
+    pub free_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+}
+
+/// The figures above, or `None` where they can't be asked (every system but Windows).
+pub fn process_stats() -> Option<ProcessStats> {
+    #[cfg(windows)]
+    {
+        windows::process_stats()
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
 }
 
 #[cfg(test)]

@@ -104,13 +104,15 @@ impl Stamps {
     }
 }
 
-/// Something the app is waiting on a choice for: a song or theme changed outside it, or a
-/// device that wants to show its screen (by the number the receiving program gave it).
+/// Something the app is waiting on a choice for: a song or theme changed outside it, a
+/// device that wants to show its screen (by the number the receiving program gave it), or the
+/// one-time notice that anonymous reports are on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Waiting {
     Song(usize),
     Theme(usize),
     Mirror(u64),
+    Reports,
 }
 
 #[cfg(test)]

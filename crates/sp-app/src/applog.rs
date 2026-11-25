@@ -18,8 +18,8 @@ static STARTED: OnceLock<Instant> = OnceLock::new();
 /// The log's own thread, which writes the lines of threads that must never wait for the disk.
 static WRITER: OnceLock<std::sync::mpsc::Sender<String>> = OnceLock::new();
 
-/// Where the log is kept.
-fn folder() -> Option<PathBuf> {
+/// Where the log is kept: a place of this computer's own, never the library's folder on a Mac.
+pub(crate) fn folder() -> Option<PathBuf> {
     if let Some(data) = std::env::var_os("SOFTPRESENTER_DATA") {
         return Some(PathBuf::from(data));
     }
@@ -65,6 +65,7 @@ pub fn start() {
     std::panic::set_hook(Box::new(move |info| {
         // Written at once, whatever thread it is: the app may be about to stop.
         write_line(&line("crash", &info.to_string()));
+        crate::reports::on_panic(info);
         before(info);
     }));
 }
@@ -170,6 +171,7 @@ fn write_line(line: &str) {
 pub fn problem(area: &str, message: &str) {
     eprintln!("{}", crate::i18n::english_of(message));
     event(area, message);
+    crate::reports::stats::problem_in(area, message);
 }
 
 /// A problem that may come back with every picture drawn (thirty times a second, under a

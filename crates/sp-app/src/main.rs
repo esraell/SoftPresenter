@@ -44,6 +44,7 @@ mod library_folder;
 mod links;
 mod live_tabs;
 mod load;
+mod log_scrub;
 mod logos;
 mod macros;
 mod make_cli;
@@ -64,6 +65,7 @@ mod props;
 mod remote;
 mod removed;
 mod renamed;
+mod reports;
 mod running;
 mod samples;
 mod screen_cli;
@@ -2073,6 +2075,7 @@ impl App {
                 context.memory_hints
             ),
         );
+        reports::gpu_chosen(&chosen);
         let gpu = Gpu { device: handle.device.clone(), queue: handle.queue.clone() };
         // By default a graphics error ends the program; in a service it is better to say so and carry on.
         gpu.device.on_uncaptured_error(Arc::new(|error| graphics_error(&error.to_string())));
@@ -3891,7 +3894,11 @@ impl App {
         if !control::only_reads(args) {
             let outcome = if reply.ok { "done" } else { "refused" };
             match from {
-                Some(from) => applog::event("remote", &format!("{from}: {:?} -> {outcome}", control::shown_args(args))),
+                Some(from) => {
+                    // Counted for the anonymous reports: that a remote page did something.
+                    reports::stats::bump(reports::stats::Count::RemoteActions);
+                    applog::event("remote", &format!("{from}: {:?} -> {outcome}", control::shown_args(args)))
+                }
                 None => applog::event("control", &format!("{:?} -> {outcome}", control::shown_args(args))),
             }
         }
@@ -5443,8 +5450,8 @@ impl App {
     /// it is answered; it never opens the list by itself.
     fn wait_on(&mut self, what: outside::Waiting) {
         let name = match what {
-            // Asked by `mirror`, with the device's name.
-            outside::Waiting::Mirror(_) => return,
+            // Asked by `mirror`, with the device's name; and by `reports`, once.
+            outside::Waiting::Mirror(_) | outside::Waiting::Reports => return,
             outside::Waiting::Song(index) => self.show.presentations().get(index).map_or_else(
                 || crate::i18n::t("notices.ask.a_song", "A song").to_owned(),
                 |song| crate::i18n::quoted(&song.title),
@@ -5727,6 +5734,21 @@ impl App {
 
     /// Carries out the choice made in the bar that offers Reload and Keep mine.
     fn choose_outside(&mut self, what: outside::Waiting, reload: bool) {
+        // The one-time notice that anonymous reports are on: Keep on or Turn off.
+        if what == outside::Waiting::Reports {
+            reports::set_enabled(reload);
+            if let Some(running) = self.running.as_mut() {
+                running.home_state.notices.settle(what);
+                if !reload {
+                    running
+                        .home_state
+                        .notices
+                        .info(crate::i18n::t("reports.turned_off", "Anonymous reports are off. Nothing was sent."));
+                }
+                running.home_window.request_redraw();
+            }
+            return;
+        }
         // A device that wants to show its screen: Allow or Don't Allow.
         if let outside::Waiting::Mirror(device) = what {
             let said = self.mirror_answer(device, reload);
@@ -5741,7 +5763,7 @@ impl App {
             (outside::Waiting::Song(index), false) => self.keep_song(index),
             (outside::Waiting::Theme(index), true) => self.reload_theme(index),
             (outside::Waiting::Theme(index), false) => self.keep_theme(index),
-            (outside::Waiting::Mirror(_), _) => return,
+            (outside::Waiting::Mirror(_) | outside::Waiting::Reports, _) => return,
         };
         // The answer is noted in the list (a problem with it too, and the question stays).
         let said = match result {
@@ -10041,6 +10063,7 @@ impl App {
     /// Carries out a choice from the menu bar.
     fn menu_action(&mut self, el: &ActiveEventLoop, action: menubar::Action) {
         use menubar::Action as A;
+        reports::stats::feature_of(&action);
         if action == A::Quit {
             return self.quit(el);
         }
@@ -10439,6 +10462,9 @@ impl App {
             self.video = None;
             self.announcing = None;
             self.quitting = Some(Instant::now());
+            // The last anonymous report, if reports are on, goes from its own thread while the
+            // rest of the leaving is done.
+            reports::quit_begin();
         }
         // Every file handed to the library's writer is written before the app goes (a big import
         // on a slow disk can take minutes), here in the event loop, so the window still answers.
@@ -10487,6 +10513,11 @@ impl App {
         self.remove_replaced_canva_videos();
         // The program that receives phone screens leaves with the app.
         self.mirror.quit();
+        // The last anonymous report is given two seconds from when the quit began, here in the
+        // event loop too (most often they have passed, or it has gone, while the saves were made).
+        if !reports::quit_done() {
+            return;
+        }
         el.exit();
     }
 }
@@ -10691,6 +10722,7 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn user_event(&mut self, el: &ActiveEventLoop, event: AppEvent) {
+        let _busy = reports::stats::BusyGuard::new(reports::stats::Who::Ui);
         let id = match event {
             AppEvent::Menu(id) => id,
             // A command from `softpresenter ctl`: done now, and its outcome sent back.
@@ -10825,6 +10857,8 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        let _busy = reports::stats::BusyGuard::new(reports::stats::Who::Ui);
+        reports::ui::window_event(&event);
         match &event {
             WindowEvent::ModifiersChanged(now) => self.held = now.state(),
             WindowEvent::Focused(true) => self.focused = Some(id),
@@ -11077,6 +11111,8 @@ impl ApplicationHandler<AppEvent> for App {
                 let drawing = Instant::now();
                 let commands = self.draw_home();
                 self.home_timing.add(drawing.elapsed());
+                reports::stats::ui_frame(drawing.elapsed());
+                reports::stats::phase(reports::stats::Who::Ui, reports::stats::UI_DRAWN);
                 self.resize_testing_aid();
                 // A command chosen from a right-click menu in the window, done as the menu bar's.
                 if let Some(action) = self.running.as_mut().and_then(|r| r.home_state.menu_asked.take()) {
@@ -11277,6 +11313,8 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        let _busy = reports::stats::BusyGuard::new(reports::stats::Who::Ui);
+        self.reports_tick();
         // Quitting, waiting for the library's writer to write what it holds, or for Canva Sync
         // to keep a sign-in it is refreshing: looked at again shortly (their threads also wake
         // the loop when they are done), and nothing else is run.
@@ -11607,6 +11645,7 @@ fn main() -> ExitCode {
     let settled = bible_store::data_dir().map(|dir| song_ids::settle(&dir, true)).unwrap_or_default();
     applog::start();
     start_steps::mark("log opened");
+    reports::start(options.capture_home.is_some());
     for done in &moved {
         applog::event("renamed", done);
     }

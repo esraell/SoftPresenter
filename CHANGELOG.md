@@ -5,6 +5,8 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+- SoftPresenter now sends small anonymous reports of how it runs and what goes wrong (the kind of computer, speeds, crashes), so problems get found and fixed. Never your songs, Bible text, file names or anything about you. They are on unless you turn them off: the setup has a Reports step with the key, and if you already use SoftPresenter a notice says so once, with Turn off beside it; nothing is sent before you have seen one of the two. On a computer whose region is in the European Union, Iceland, Liechtenstein, Norway or the United Kingdom they are off unless you turn them on, and the setup invites you to. Settings › About › Anonymous reports has the On/Off key, See what's sent (the next report, exactly as it would go) and Reset my anonymous id. PRIVACY.md says what is sent, where it goes and that it is kept for 90 days.
+
 ## 0.9.0-dev.15 — 25 November 2026 (development build)
 
 - A big import no longer freezes the app while its songs are saved. Installing a free songbook or importing hundreds of songs on a slow computer (on Windows, where each new file is checked for viruses) left the window and `sp` unanswered for minutes until every song was written; now the songs are written in the background while you carry on, and quitting waits, saying so, until the last one is saved.

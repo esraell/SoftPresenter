@@ -14,6 +14,7 @@
   "setup.step.songs": "Пісні",
   "setup.step.bibles": "Біблії",
   "setup.step.permissions": "Дозволи",
+  "setup.step.reports": "Звіти",
   "setup.step.done": "Готово",
   "setup.screens.title": "Який екран бачить церква?",
   "setup.screens.one.named": "Підключено лише один монітор ({name}). На ньому ви працюєте, тому екран для залу ніколи його не закриває: церква бачить слайди на телевізорі чи проєкторі.",
