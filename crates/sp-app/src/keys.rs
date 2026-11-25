@@ -717,18 +717,19 @@ mod tests {
         assert_eq!(chord_on(false, false, false, false, true, "1"), "Ctrl+1");
         assert_eq!(chord_on(false, true, true, true, true, "K"), "Ctrl+Alt+Shift+K");
         // What the window says in a hover hint or a notice goes through it.
-        let (show, shifted, tab) = (hint("Service", "1", false), hint("Screens", "1", true), tab_hint("Timers", 0));
+        let (service, shifted, tab) = (hint("Service", "1", false), hint("Screens", "1", true), tab_hint("Timers", 0));
         if cfg!(target_os = "macos") {
             assert_eq!(
-                (show.as_str(), shifted.as_str(), tab.as_str()),
+                (service.as_str(), shifted.as_str(), tab.as_str()),
                 ("Service (\u{2318}1)", "Screens (\u{21e7}\u{2318}1)", "Timers (\u{2325}1)")
             );
             assert_eq!(hint_key("N"), "\u{2318}N");
         } else {
             assert_eq!(
-                (show.as_str(), shifted.as_str(), tab.as_str()),
-                ("Show (Ctrl+1)", "Screens (Ctrl+Shift+1)", "Timers (Alt+1)")
+                (service.as_str(), shifted.as_str(), tab.as_str()),
+                ("Service (Ctrl+1)", "Screens (Ctrl+Shift+1)", "Timers (Alt+1)")
             );
+            assert_eq!(hint_key("N"), "Ctrl+N");
         }
     }
 

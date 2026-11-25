@@ -733,9 +733,32 @@ mod tests {
         assert!(line(Company::ChatGpt).contains("codex mcp add softpresenter -- /Users/someone/.local/bin/sp mcp"));
         assert!(line(Company::Grok).contains("grok mcp add -s user softpresenter -- /Users/someone/.local/bin/sp mcp"));
         assert!(line(Company::Gemini).contains("~/.gemini/config/mcp_config.json"));
-        // A path with a space is quoted as a shell takes it.
-        let spaced = setup_message(Company::Grok, Path::new("/Applications/Soft Presenter.app/Contents/MacOS/sp"));
-        assert!(spaced.contains("-- '/Applications/Soft Presenter.app/Contents/MacOS/sp' mcp"), "{spaced}");
+        // A path with a space is quoted as this computer's shell takes it: in single quotes on a
+        // Mac and Linux, in double quotes on Windows (cmd and PowerShell).
+        let (spaced, quoted) = if cfg!(windows) {
+            (
+                r"C:\Program Files\SoftPresenter\softpresenter.exe",
+                r#""C:\Program Files\SoftPresenter\softpresenter.exe""#,
+            )
+        } else {
+            (
+                "/Applications/Soft Presenter.app/Contents/MacOS/sp",
+                "'/Applications/Soft Presenter.app/Contents/MacOS/sp'",
+            )
+        };
+        let said = setup_message(Company::Grok, Path::new(spaced));
+        assert!(said.contains(&format!("grok mcp add -s user softpresenter -- {quoted} mcp")), "{said}");
+        assert!(said.contains(&format!("The command is {quoted} and its one argument is mcp.")), "{said}");
+    }
+
+    #[test]
+    fn a_path_is_quoted_only_when_it_must_be_and_as_each_systems_shell_takes_it() {
+        let word = |path: &str, windows| shell_word(Path::new(path), windows);
+        assert_eq!(word("/Users/someone/.local/bin/sp", false), "/Users/someone/.local/bin/sp");
+        assert_eq!(word(r"C:\Users\someone\sp.exe", true), r"C:\Users\someone\sp.exe");
+        assert_eq!(word("/Soft Presenter/sp", false), "'/Soft Presenter/sp'");
+        assert_eq!(word("/it's/sp", false), r"'/it'\''s/sp'");
+        assert_eq!(word(r"C:\Program Files\sp.exe", true), r#""C:\Program Files\sp.exe""#);
     }
 
     #[test]

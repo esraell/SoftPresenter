@@ -2056,18 +2056,22 @@ mod tests {
         ] {
             std::fs::create_dir_all(home.join(folder)).unwrap();
         }
+        // Compared as paths, which Windows writes with `\` between folders.
         let file = |app: App, system: System| match place_in(app, &around(system, &home)) {
-            Some(Place::File(file)) => file.strip_prefix(&home).unwrap().to_string_lossy().into_owned(),
+            Some(Place::File(file)) => file.strip_prefix(&home).unwrap().to_owned(),
             other => panic!("{app:?}: {other:?}"),
         };
         assert_eq!(
             file(App::ClaudeDesktop, System::Mac),
-            "Library/Application Support/Claude/claude_desktop_config.json"
+            Path::new("Library/Application Support/Claude/claude_desktop_config.json")
         );
-        assert_eq!(file(App::ClaudeDesktop, System::Windows), "AppData/Roaming/Claude/claude_desktop_config.json");
-        assert_eq!(file(App::Cursor, System::Mac), ".cursor/mcp.json");
-        assert_eq!(file(App::Copilot, System::Other), ".copilot/mcp-config.json");
-        assert_eq!(file(App::Antigravity, System::Windows), ".gemini/config/mcp_config.json");
+        assert_eq!(
+            file(App::ClaudeDesktop, System::Windows),
+            Path::new("AppData/Roaming/Claude/claude_desktop_config.json")
+        );
+        assert_eq!(file(App::Cursor, System::Mac), Path::new(".cursor/mcp.json"));
+        assert_eq!(file(App::Copilot, System::Other), Path::new(".copilot/mcp-config.json"));
+        assert_eq!(file(App::Antigravity, System::Windows), Path::new(".gemini/config/mcp_config.json"));
         // No Claude Desktop for Linux.
         assert_eq!(place_in(App::ClaudeDesktop, &around(System::Other, &home)), None);
         assert!(!App::ClaudeDesktop.made_for(System::Other) && App::Grok.made_for(System::Other));
@@ -2083,16 +2087,15 @@ mod tests {
             program_places(App::Codex, &windows),
             [home.join(".local").join("bin").join("codex.exe"), home.join("AppData/Roaming/npm/codex.cmd")]
         );
-        // The real thing also looks in Homebrew's folder and the PATH (written in full only).
-        let real =
-            Around { everywhere: true, path: Some("/usr/bin:relative/bin".into()), ..around(System::Mac, &home) };
+        // The real thing also looks in Homebrew's folder and the PATH (written in full only). The
+        // PATH is written as this computer writes one: on Windows `;` parts its folders, and a
+        // folder written in full starts with a drive.
+        let full = home.join("bin");
+        let path = std::env::join_paths([full.as_path(), Path::new("relative/bin")]).unwrap();
+        let real = Around { everywhere: true, path: Some(path), ..around(System::Mac, &home) };
         assert_eq!(
             program_places(App::Codex, &real)[1..],
-            [
-                PathBuf::from("/opt/homebrew/bin/codex"),
-                PathBuf::from("/usr/local/bin/codex"),
-                PathBuf::from("/usr/bin/codex")
-            ]
+            [PathBuf::from("/opt/homebrew/bin/codex"), PathBuf::from("/usr/local/bin/codex"), full.join("codex")]
         );
         // A program found is a program with the settings file it changes.
         #[cfg(unix)]
