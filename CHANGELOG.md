@@ -5,6 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+- The phone Remote Control page speaks Russian and Ukrainian too, following the app's language.
 - Song parts named in Russian, Ukrainian or Spanish (Куплет 2, Припев, Приспів, Estribillo…) get the same colours and jump keys as English ones: C goes to «Припев», S to «Куплет 2».
 - The app can be used in Russian: choose Русский in Settings › Language or in the setup, and every button, menu, notice and window changes at once, in plain church words (Служение, список, куплет, припев, экраны для зала).
 - The app can be used in Ukrainian: choose Українська in Settings › Language or in the setup, or leave it on This computer's on a computer set to Ukrainian, and every window, menu and notice changes at once. Songs and Bibles keep their own languages.

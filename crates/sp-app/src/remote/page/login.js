@@ -32,7 +32,15 @@ const REMOTE_WORDS = {
    "Add to playlist": "Añadir a la lista",
    "Adding music is done at the computer for now.": "Por ahora, la música se añade en el ordenador.",
    "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Añadir imágenes y vídeos desde aquí llegará en el próximo paso. Por ahora, añádelos en el ordenador.",
-   "Advanced": "Más",
+   "Advanced": {
+    "in": [
+     [
+      ".st-navg",
+      "Avanzado"
+     ]
+    ],
+    "else": "Más"
+   },
    "All Media": "Todo",
    "Announce": "Anuncios",
    "Arrangement": "Arreglo: reproducir los grupos de la canción en otro orden",
@@ -386,6 +394,788 @@ const REMOTE_WORDS = {
    "group_from": 5,
    "quote_open": "“",
    "quote_close": "”"
+  }
+ },
+ "ru": {
+  "exact": {
+   "A Bible passage…": "Отрывок из Библии…",
+   "A header…": "Заголовок…",
+   "A Library Folder…": "Папка библиотеки…",
+   "A media playlist": "Медиасписок",
+   "A picture or video": "Картинка или видео",
+   "A placeholder…": "Пустое место…",
+   "A playlist is the running order of a service: songs, Bible passages, pictures and videos, in the order they come.": "Список — это порядок служения: песни, отрывки из Библии, картинки и видео, в том порядке, в каком они идут.",
+   "A question is waiting: click to answer it": "Есть вопрос: нажмите, чтобы ответить",
+   "a service, in order": "служение, по порядку",
+   "A small tag beside each button with its key. Also in Settings › Keys.": "Маленькая метка с клавишей возле каждой кнопки. Также в «Настройки › Клавиши».",
+   "A Song Bundle…": "Пакет песен…",
+   "A song…": "Песня…",
+   "A–Z": "А–Я",
+   "Actions": "Действия",
+   "Add a Bible passage": "Добавить отрывок из Библии",
+   "Add a header": "Добавить заголовок",
+   "Add a song": "Добавить песню",
+   "Add a track to this playlist": "Добавьте трек в этот список",
+   "Add pictures or videos": "Добавить картинки или видео",
+   "Add pictures or videos to show behind the words": "Добавьте картинки или видео, чтобы показывать их за словами",
+   "Add Slide": "Добавить слайд",
+   "Add the Sample Backgrounds": "Добавить образцы фонов",
+   "Add to playlist": "Добавить в список",
+   "Adding music is done at the computer for now.": "Музыка пока добавляется на компьютере.",
+   "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Добавлять картинки и видео отсюда можно будет со следующим шагом. Пока добавляйте их на компьютере.",
+   "Advanced": {
+    "in": [
+     [
+      ".st-navg",
+      "Дополнительно"
+     ]
+    ],
+    "else": "Другие"
+   },
+   "All Media": "Все медиа",
+   "Announce": "Объявления",
+   "Arrangement": "Порядок исполнения: петь части песни в другом порядке",
+   "As listed": "Как в библиотеке",
+   "Audience": "Зал",
+   "Audience screens on or off (⇧⌘1)": "Экраны для зала: включить или выключить (⇧⌘1)",
+   "Audience screens, stage screens, on or off": "Экраны для зала, экраны для сцены: вкл. или выкл.",
+   "Audio": "Аудио",
+   "Audio playlist": "Аудиосписок",
+   "Back 15 seconds": "Назад на 15 секунд",
+   "Bible": "Библия",
+   "Bible, too (Bold while editing a slide)": "Тоже Библия (при правке слайда — жирный)",
+   "Cancel": "Отмена",
+   "Changing songs, playlists and settings is done at the computer for now. Running the show works from here.": "Песни, списки и настройки пока меняются на компьютере. Вести служение можно отсюда.",
+   "Changing things": "Изменения",
+   "Choose": "Выбрать",
+   "Choose a library or playlist (⌘P)": "Выберите список или библиотеку (⌘P)",
+   "Choose a song…": "Выбрать песню…",
+   "Choosing from the menu bar is done at the computer, not from the remote page.": "Выбирать в строке меню можно на компьютере, а не со страницы пульта.",
+   "Choosing the stage layouts": "Выбор макетов сцены",
+   "CLEAR": "ПУСТО",
+   "Clear All": "Очистить всё",
+   "Clear everything": "Очистить всё",
+   "Clear it": "Убрать",
+   "Clear the slide, media, props, audio, message": "Убрать слайд, медиа, накладки, аудио, сообщение",
+   "Clearing": "Очистка",
+   "Click to show it": "Нажмите, чтобы показать",
+   "Close": "Закрыть",
+   "comes to the remote page with the next step. Use the computer for now.": "появится на странице пульта со следующим шагом. Пока пользуйтесь компьютером.",
+   "Connect": "Подключить",
+   "Connected": "Подключено",
+   "Connecting…": "Подключение…",
+   "Continuous": "Подряд",
+   "Copy": "Копировать",
+   "Copy Style": "Копировать стиль",
+   "Copy, cut, paste the picked slides (objects in Edit)": "Копировать, вырезать, вставить выбранные слайды (в Редакторе — объекты)",
+   "Could not sign in.": "Не удалось войти.",
+   "Crossfade": "ПЕРЕХОД",
+   "Cut": {
+    "in": [
+     [
+      "#foot",
+      "Сразу"
+     ]
+    ],
+    "else": "Вырезать"
+   },
+   "Delete": {
+    "in": [
+     [
+      ".ui-keys",
+      "Delete"
+     ]
+    ],
+    "else": "Удалить"
+   },
+   "Delete Song from Library…": "Удалить песню из библиотеки…",
+   "Delete what is picked: what Undo brings back goes at once (playlist items, slides, a media playlist’s items); songs in a library, pictures in the bin and screens ask first": "Удалить выбранное: то, что возвращает «Отменить», удаляется сразу (пункты списка, слайды, пункты медиасписка); песни в библиотеке, картинки в корзине и экраны сначала спрашивают",
+   "Delete…": "Удалить…",
+   "Details": "Сведения: автор песни, издатель и номер CCLI",
+   "Disable": "Отключить слайд",
+   "Disconnected at the computer: click to connect again": "Отключено на компьютере: нажмите, чтобы подключиться снова",
+   "Dissolve": "Плавно",
+   "Done": "Готово",
+   "Drag it into a playlist": "Перетащите в список",
+   "Drag it into a playlist or a library": "Перетащите в список или в библиотеку",
+   "Duplicate": "Дублировать",
+   "Edit": {
+    "in": [
+     [
+      "#modes",
+      "Редактор"
+     ]
+    ],
+    "else": "Изменить"
+   },
+   "Edit this slide": "Изменить этот слайд",
+   "Edit Words": "Изменить слова",
+   "Every key (press ?)": "Все клавиши (нажмите ?)",
+   "Every other transition": "Все остальные переходы и их длительность",
+   "every song you keep": "все ваши песни",
+   "Fill with Song…": "Заполнить песней…",
+   "Filter": "Фильтр",
+   "Find a song, a line or a verse": "Найти песню, строку или стих",
+   "Find a song, a line, or a verse": "Найти песню, строку или стих",
+   "First or last slide of the song": "Первый или последний слайд песни",
+   "Forward 15 seconds": "Вперёд на 15 секунд",
+   "Go to Next": "Переход дальше",
+   "Go to the slide on screen": "Перейти к слайду, который на экране",
+   "Going places": "Переходы",
+   "Grid": "Сетка",
+   "Group": "Часть",
+   "Hide": "Скрыть",
+   "Hide the media strip": "Скрыть полосу медиа",
+   "Hot Key…": "Горячая клавиша…",
+   "How long one track fades into the next": "Сколько длится плавный переход одного трека в следующий",
+   "Import Songs": "Импорт песен",
+   "Import songs or slides": "Импорт песен или слайдов",
+   "Import…": "Импорт…",
+   "In Edit: a new text box, duplicate, pick everything": "В Редакторе: новый текстовый блок, дублировать, выбрать всё",
+   "In Edit: nudge the picked object (Shift for one pixel)": "В Редакторе: сдвинуть выбранный объект (с Shift — на один пиксель)",
+   "is empty": "пуст",
+   "Jump to a group (C for the chorus), or a slide’s own hot key": "Перейти к части (C — припев) или по собственной горячей клавише слайда",
+   "Keep playing until stopped: after the last track, start again from the first (with Play through off, play this track again)": "Играть, пока не остановят: после последнего трека начать снова с первого (если «Подряд» выключено — повторять этот трек)",
+   "Keys": "Клавиши",
+   "Label": "Метка",
+   "Library": "Библиотека",
+   "Longest": "Самые длинные",
+   "Looking up the Bible comes to the remote page with the next step. Use the Bible page at the computer for now.": "Поиск по Библии появится на странице пульта со следующим шагом. Пока пользуйтесь страницей Библии на компьютере.",
+   "Loop": {
+    "in": [
+     [
+      ".lv-audio",
+      "Повтор"
+     ]
+    ],
+    "else": "По кругу"
+   },
+   "Macros": "Макросы",
+   "Media": "Медиа",
+   "Media Playlists": "Медиасписки",
+   "Menus and windows": "Меню и окна",
+   "Messages": "Сообщения",
+   "More": "Ещё",
+   "Move": "Перемещаться",
+   "Move Down": "Переместить вниз",
+   "Move Up": "Переместить вверх",
+   "Mute": "Выключить звук",
+   "New": "Новый таймер",
+   "New library": "Новая библиотека",
+   "New Media Playlist…": "Новый медиасписок…",
+   "New playlist": "Новый список",
+   "New song": "Новая песня",
+   "Next": "Дальше",
+   "Next at the end of a song goes on to the next song": "«Далее» в конце песни переходит к следующей песне",
+   "Next slide": "Следующий слайд",
+   "Next track": "Следующий трек",
+   "No song is open": "Песня не открыта",
+   "No songs here yet. Make one, import some, or drag songs onto this library’s name.": "Здесь пока нет песен. Создайте песню, импортируйте или перетащите песни на название этой библиотеки.",
+   "No tracks yet. Add music files from this computer.": "Треков пока нет. Добавьте музыкальные файлы с этого компьютера.",
+   "Notes": "Заметки",
+   "Nothing found": "Ничего не найдено",
+   "Nothing showing": "Ничего не показано",
+   "Nothing to play": "НЕЧЕГО ИГРАТЬ",
+   "Nothing to redo": "Нечего повторять",
+   "Nothing to tell you. Trouble, questions, and what happens out of sight (added to another playlist, a file read or written) come here.": "Пока сообщать нечего. Сюда приходят неполадки, вопросы и то, что происходит вне поля зрения (добавлено в другой список, файл прочитан или записан).",
+   "Nothing to undo": "Нечего отменять",
+   "Notices": "Уведомления",
+   "Off": {
+    "in": [
+     [
+      ".ui-sw",
+      "Выкл"
+     ],
+     [
+      "#outAudience, #outStage",
+      "Выкл"
+     ]
+    ],
+    "else": "Выкл"
+   },
+   "ON": "ВКЛ",
+   "ON SCREEN": "НА ЭКРАНЕ",
+   "Open a group of choices; go back": "Открыть группу пунктов; назад",
+   "Open Timers, Messages, Props, Macros, Stage, Audio, VoxLive": "Открыть Таймеры, Сообщения, Накладки, Макросы, Сцену, Аудио, VoxLive",
+   "Or use the sample backgrounds": "Или возьмите образцы фонов",
+   "Order": "Порядок",
+   "Password": "Пароль",
+   "Paste": "Вставить",
+   "Paste Style": "Вставить стиль",
+   "Pause": "Пауза",
+   "Pick several in the left column: grow the pick, or pick them all": "Выбрать несколько в левой колонке: расширить выбор или выбрать всё",
+   "Picture": "Картинка",
+   "Placeholder": "Пустое место",
+   "Play": "Воспроизвести",
+   "Play on Announcements Layer": "Показать на слое объявлений",
+   "Play the tracks in a random order": "Воспроизводить треки в случайном порядке",
+   "Play through": "Подряд",
+   "Playing": "ИГРАЕТ",
+   "Playlist": "Список",
+   "Playlists": "Списки",
+   "Playlists and libraries": "Списки и библиотеки",
+   "Press / to search from anywhere": "Нажмите /, чтобы искать откуда угодно",
+   "Prev": "Назад",
+   "Previous": "Назад",
+   "Previous slide": "Предыдущий слайд",
+   "Props": "Накладки",
+   "Ready": "ГОТОВО",
+   "Reconnecting…": "Переподключение…",
+   "Redo": "Повторить",
+   "Remote Control": "УДАЛЁННОЕ УПРАВЛЕНИЕ",
+   "Remove from Playlist": "Убрать из списка",
+   "Rename": "Переименовать",
+   "Reset": "Сбросить",
+   "Running the slides": "Показ слайдов",
+   "s": "с",
+   "Scaling": "Масштаб",
+   "Service": "Служение",
+   "Service (⌥S)": "Служение (⌥S)",
+   "Service, Bible (ready for a reference), Edit (in the app ⌘1 ⌘2 ⌘3; a browser keeps those)": "Служение, Библия (готова к вводу ссылки), Правка (в приложении ⌘1 ⌘2 ⌘3; браузер оставляет их себе)",
+   "Settings": "Настройки",
+   "Settings are changed at the computer.": "Настройки меняются на компьютере.",
+   "Show": "Показать",
+   "Show a message": "Показать сообщение",
+   "Show keys on buttons": "Клавиши на кнопках",
+   "Show that picture or video": "Показать эту картинку или видео",
+   "Shuffle": "Вперемешку",
+   "Sign In": "Войти",
+   "Sign Out of This Device…": "Выйти на этом устройстве…",
+   "Signing in…": "Вход…",
+   "Slide": "Слайд",
+   "Slide size": "Размер слайдов",
+   "Slides…": "Слайды…",
+   "SoftPresenter Remote Control": "Пульт SoftPresenter",
+   "Something went wrong: click to see": "Что-то пошло не так: нажмите, чтобы посмотреть",
+   "Song": "Песня",
+   "Song Files…": "Файлы песен…",
+   "Song libraries": "Библиотеки песен",
+   "Stage": "Сцена",
+   "Stage screens on or off (⇧⌘2)": "Экраны для сцены: включить или выключить (⇧⌘2)",
+   "Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track": "Запустить этот таймер, показать это сообщение или накладку, выполнить этот макрос, переключить сцену на этот макет, включить этот трек",
+   "Table": "Таблица",
+   "Template": "Шаблон",
+   "The car with the lights on, please": "Машина с включёнными фарами, пожалуйста",
+   "The computer didn't answer.": "Компьютер не ответил.",
+   "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "Отмеченный слайд или стих выходит на экран (после поиска или ↑ ↓)",
+   "The first nine can be changed in Settings › Keys.": "Первые девять можно изменить: Настройки › Клавиши.",
+   "The item above or below, cued at its first slide; in Bible, the verse before or after": "Пункт выше или ниже; в Библии — стих до или после",
+   "The live tools": "Инструменты показа",
+   "The menu for the slide on screen": "Меню слайда, который на экране",
+   "then 1–9": "затем 1 … 9",
+   "This device is remembered once it signs in, until it is forgotten in Settings › Phone remote on the computer.": "Это устройство запоминается после входа, пока его не забудут на компьютере: Настройки › Пульт на телефоне.",
+   "This library has no songs yet.": "В этой библиотеке пока нет песен.",
+   "This list": "Этот список (внизу — «Клавиши на кнопках»)",
+   "This sample only has": "В этом образце есть только",
+   "Timers": "Таймеры",
+   "track": "Трек",
+   "Transition": "Переход",
+   "Typing in a box: bold, italic, underlined, for the words selected (or the whole box)": "При вводе в блоке: жирный, курсив, подчёркнутый — для выделенных слов (или всего блока)",
+   "Undo": "Отменить",
+   "Undo, redo": "Отменить, повторить",
+   "Volume": "Громкость",
+   "VoxLive": "VoxLive",
+   "Waiting for SoftPresenter": "Ждём SoftPresenter",
+   "Waiting for SoftPresenter to answer. Try again in a moment.": "Ждём ответа SoftPresenter. Попробуйте ещё раз через минуту.",
+   "When a track ends, go on to the next": "Когда трек кончится, перейти к следующему",
+   "With nothing on screen, move the cue; Space or Enter puts it on": "Когда на экране пусто, передвинуть метку; пробел или Enter выводит на экран",
+   "Words": {
+    "in": [
+     [
+      ".ui-sheet",
+      "Слова"
+     ]
+    ],
+    "else": "Слова"
+   },
+   "Words from Text…": "Слова из текста…",
+   "Words once…": "Слова один раз…",
+   "Words only": "Только слова",
+   "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Разрешить телефону, iPad или Mac показывать свой экран можно только за компьютером, а не с удалённой страницы.",
+   "There is no track to play. Add music at the computer.": "Нет трека для воспроизведения. Добавьте музыку на компьютере."
+  },
+  "patterns": [
+   {
+    "re": "^(.+) \\(⌥(\\d), then 1 to 9 for what is in it\\)$",
+    "to": "{1t} (⌥{2}, затем от 1 до 9 для того, что внутри)",
+    "key": "page.tool_tab.hint"
+   },
+   {
+    "re": "^Running SoftPresenter as (.+)$",
+    "to": "SoftPresenter работает как {1}",
+    "key": "page.conn.as"
+   },
+   {
+    "re": "^Notices: (\\d+) need you$",
+    "to": "Уведомления: {1} ждут вас",
+    "key": "page.notices.many"
+   },
+   {
+    "re": "^Counts down from (.+?)$",
+    "to": "Обратный отсчёт от {1}",
+    "key": "tools.timer.down_from"
+   },
+   {
+    "re": "^(.+) (\\d+(?:\\.\\d+)?)s$",
+    "to": "{1t} {2} с",
+    "key": "page.transition.time"
+   },
+   {
+    "re": "^Notices: 1 needs you$",
+    "to": "Уведомления: 1 ждёт вас",
+    "key": "page.notices.one"
+   },
+   {
+    "re": "^(\\d+(?:\\.\\d+)?) s$",
+    "to": "{1} с",
+    "key": "common.seconds_unit"
+   },
+   {
+    "re": "^(\\d+(?:\\.\\d+)?)s$",
+    "to": "{1} с",
+    "key": "common.seconds_unit"
+   },
+   {
+    "re": "^Bible · (.+)$",
+    "to": "Библия · {1}",
+    "key": "page.find.bible_tag"
+   },
+   {
+    "re": "^Add to (.+?)$",
+    "to": "Добавить в «{1}»",
+    "key": "left.song.add_to"
+   },
+   {
+    "re": "^(.+?) tracks$",
+    "to": "{1} трека",
+    "key": "tools.audio.tracks"
+   },
+   {
+    "re": "^Song · (.+)$",
+    "to": "Песня · {1}",
+    "key": "find.tag.song_group"
+   },
+   {
+    "re": "^(.+?) items$",
+    "to": "{1} пункта",
+    "key": "media.items"
+   },
+   {
+    "re": "^(.+?) songs$",
+    "to": "{1} песни",
+    "key": "integrations.songbooks.songs"
+   },
+   {
+    "re": "^(.+?) track$",
+    "to": "{1} трек",
+    "key": "tools.audio.tracks"
+   },
+   {
+    "re": "^Start (.+?)$",
+    "to": "Запустить: {1}",
+    "key": "tools.steps.timer_start"
+   }
+  ],
+  "keys": {
+   "Shift": "Shift"
+  },
+  "format": {
+   "decimal": ",",
+   "group": " ",
+   "group_from": 4,
+   "quote_open": "«",
+   "quote_close": "»"
+  }
+ },
+ "uk": {
+  "exact": {
+   "A Bible passage…": "Уривок з Біблії…",
+   "A header…": "Заголовок…",
+   "A Library Folder…": "Папка бібліотеки…",
+   "A media playlist": "Медіасписок",
+   "A picture or video": "Зображення або відео",
+   "A placeholder…": "Порожнє місце…",
+   "A playlist is the running order of a service: songs, Bible passages, pictures and videos, in the order they come.": "Список — це порядок служіння: пісні, уривки з Біблії, зображення й відео в тому порядку, в якому вони йдуть.",
+   "A question is waiting: click to answer it": "Чекає запитання: клацніть, щоб відповісти",
+   "a service, in order": "служіння, за порядком",
+   "A small tag beside each button with its key. Also in Settings › Keys.": "Маленька мітка з клавішею біля кожної кнопки. Також у «Налаштування › Клавіші».",
+   "A Song Bundle…": "Пакет пісень…",
+   "A song…": "Пісня…",
+   "A–Z": "А–Я",
+   "Actions": "Дії",
+   "Add a Bible passage": "Додати уривок з Біблії",
+   "Add a header": "Додати заголовок",
+   "Add a song": "Додати пісню",
+   "Add a track to this playlist": "Додайте трек до цього списку",
+   "Add pictures or videos": "Додати зображення або відео",
+   "Add pictures or videos to show behind the words": "Додайте зображення або відео, щоб показувати їх за словами",
+   "Add Slide": "Додати слайд",
+   "Add the Sample Backgrounds": "Додати зразки фонів",
+   "Add to playlist": "Додати до списку",
+   "Adding music is done at the computer for now.": "Музика поки що додається на компʼютері.",
+   "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Додавати зображення й відео звідси можна буде з наступним кроком. Поки що додавайте їх на компʼютері.",
+   "Advanced": {
+    "in": [
+     [
+      ".st-navg",
+      "Додатково"
+     ]
+    ],
+    "else": "Більше"
+   },
+   "All Media": "Усі медіа",
+   "Announce": "Оголошення",
+   "Arrangement": "Порядок виконання: співати частини пісні в іншому порядку",
+   "As listed": "Як є",
+   "Audience": "Зал",
+   "Audience screens on or off (⇧⌘1)": "Екрани для залу: увімкнути або вимкнути (⇧⌘1)",
+   "Audience screens, stage screens, on or off": "Екрани для залу, екрани для сцени: увімкнути чи вимкнути",
+   "Audio": "Аудіо",
+   "Audio playlist": "аудіосписок",
+   "Back 15 seconds": "Назад на 15 секунд",
+   "Bible": "Біблія",
+   "Bible, too (Bold while editing a slide)": "Також Біблія (жирний шрифт під час редагування слайда)",
+   "Cancel": "Скасувати",
+   "Changing songs, playlists and settings is done at the computer for now. Running the show works from here.": "Пісні, списки й налаштування поки що змінюються на компʼютері. Вести служіння можна звідси.",
+   "Changing things": "Зміни",
+   "Choose": "Вибрати",
+   "Choose a library or playlist (⌘P)": "Вибрати список або бібліотеку (⌘P)",
+   "Choose a song…": "Вибрати пісню…",
+   "Choosing from the menu bar is done at the computer, not from the remote page.": "Вибирати в рядку меню можна на компʼютері, а не зі сторінки пульта.",
+   "Choosing the stage layouts": "Вибір макетів сцени",
+   "CLEAR": "ЧИСТО",
+   "Clear All": "Очистити все",
+   "Clear everything": "Очистити все",
+   "Clear it": "Прибрати",
+   "Clear the slide, media, props, audio, message": "Прибрати слайд, медіа, накладки, аудіо, повідомлення",
+   "Clearing": "Очищення",
+   "Click to show it": "Клацніть, щоб показати",
+   "Close": "Закрити",
+   "comes to the remote page with the next step. Use the computer for now.": "зʼявиться на сторінці пульта з наступним кроком. Поки що користуйтеся компʼютером.",
+   "Connect": "Підключити",
+   "Connected": "Підключено",
+   "Connecting…": "Підключення…",
+   "Continuous": "Підряд",
+   "Copy": "Скопіювати",
+   "Copy Style": "Скопіювати стиль",
+   "Copy, cut, paste the picked slides (objects in Edit)": "Скопіювати, вирізати, вставити вибрані слайди (обʼєкти в Редакторі)",
+   "Could not sign in.": "Не вдалося увійти.",
+   "Crossfade": "ПЕРЕХІД",
+   "Cut": {
+    "in": [
+     [
+      "#foot",
+      "Одразу"
+     ]
+    ],
+    "else": "Вирізати"
+   },
+   "Delete": {
+    "in": [
+     [
+      ".ui-keys",
+      "Delete"
+     ]
+    ],
+    "else": "Видалити"
+   },
+   "Delete Song from Library…": "Видалити пісню з бібліотеки…",
+   "Delete what is picked: what Undo brings back goes at once (playlist items, slides, a media playlist’s items); songs in a library, pictures in the bin and screens ask first": "Видалити вибране: те, що повертає «Відмінити», видаляється одразу (пункти списку, слайди, пункти медіасписку); пісні в бібліотеці, зображення в медіатеці та екрани спершу питають",
+   "Delete…": "Видалити…",
+   "Details": "Відомості: автор, видавець і номер CCLI пісні",
+   "Disable": "Вимкнути слайд",
+   "Disconnected at the computer: click to connect again": "Відключено на компʼютері: натисніть, щоб підключитися знову",
+   "Dissolve": "Плавно",
+   "Done": "Готово",
+   "Drag it into a playlist": "Перетягніть у список",
+   "Drag it into a playlist or a library": "Перетягніть у список або в бібліотеку",
+   "Duplicate": "Дублювати",
+   "Edit": {
+    "in": [
+     [
+      "#modes",
+      "Редактор"
+     ]
+    ],
+    "else": "Редагувати"
+   },
+   "Edit this slide": "Редагувати цей слайд",
+   "Edit Words": "Редагувати слова",
+   "Every key (press ?)": "Усі клавіші (натисніть ?)",
+   "Every other transition": "Усі інші переходи і їхня тривалість",
+   "every song you keep": "усі ваші пісні",
+   "Fill with Song…": "Заповнити піснею…",
+   "Filter": "Фільтр",
+   "Find a song, a line or a verse": "Знайти пісню, рядок або вірш",
+   "Find a song, a line, or a verse": "Знайти пісню, рядок або вірш",
+   "First or last slide of the song": "Перший чи останній слайд пісні",
+   "Forward 15 seconds": "Уперед на 15 секунд",
+   "Go to Next": "Перейти далі",
+   "Go to the slide on screen": "Перейти до слайда, що на екрані",
+   "Going places": "Переходи",
+   "Grid": "Сітка",
+   "Group": "Частина",
+   "Hide": "Сховати",
+   "Hide the media strip": "Сховати смугу медіа",
+   "Hot Key…": "Гаряча клавіша…",
+   "How long one track fades into the next": "Скільки триває плавний перехід одного треку в наступний",
+   "Import Songs": "Імпортувати пісні",
+   "Import songs or slides": "Імпортувати пісні або слайди",
+   "Import…": "Імпортувати…",
+   "In Edit: a new text box, duplicate, pick everything": "У Редакторі: нове текстове поле, дублювати, вибрати все",
+   "In Edit: nudge the picked object (Shift for one pixel)": "У Редакторі: зсунути вибраний обʼєкт (із Shift — на один піксель)",
+   "is empty": "порожній",
+   "Jump to a group (C for the chorus), or a slide’s own hot key": "Перейти до частини (C — приспів) або за власною гарячою клавішею слайда",
+   "Keep playing until stopped: after the last track, start again from the first (with Play through off, play this track again)": "Грати, доки не зупините: після останнього треку почати знову з першого (коли «Підряд» вимкнено, повторювати цей трек)",
+   "Keys": "Клавіші",
+   "Label": "Мітка",
+   "Library": "Бібліотека",
+   "Longest": "Найдовші",
+   "Looking up the Bible comes to the remote page with the next step. Use the Bible page at the computer for now.": "Пошук у Біблії зʼявиться на сторінці пульта з наступним кроком. Поки що користуйтеся сторінкою Біблії на компʼютері.",
+   "Loop": {
+    "in": [
+     [
+      ".lv-audio",
+      "По колу"
+     ]
+    ],
+    "else": "По колу"
+   },
+   "Macros": "Макроси",
+   "Media": "Медіа",
+   "Media Playlists": "Медіасписки",
+   "Menus and windows": "Меню і вікна",
+   "Messages": "Повідомлення",
+   "More": "Більше",
+   "Move": "Переміщення",
+   "Move Down": "Перемістити нижче",
+   "Move Up": "Перемістити вище",
+   "Mute": "Вимкнути звук",
+   "New": "Новий таймер",
+   "New library": "Нова бібліотека",
+   "New Media Playlist…": "Новий медіасписок…",
+   "New playlist": "Новий список",
+   "New song": "Нова пісня",
+   "Next": "Далі",
+   "Next at the end of a song goes on to the next song": "«Далі» в кінці пісні переходить до наступної пісні",
+   "Next slide": "Наступний слайд",
+   "Next track": "Наступний трек",
+   "No song is open": "Жодну пісню не відкрито",
+   "No songs here yet. Make one, import some, or drag songs onto this library’s name.": "Тут ще немає пісень. Створіть пісню, імпортуйте кілька або перетягніть пісні на назву цієї бібліотеки.",
+   "No tracks yet. Add music files from this computer.": "Треків ще немає. Додайте музичні файли з цього компʼютера.",
+   "Notes": "Нотатки",
+   "Nothing found": "Нічого не знайдено",
+   "Nothing showing": "Нічого не показується",
+   "Nothing to play": "НЕМАЄ ЩО ГРАТИ",
+   "Nothing to redo": "Нічого повторювати",
+   "Nothing to tell you. Trouble, questions, and what happens out of sight (added to another playlist, a file read or written) come here.": "Поки нічого. Сюди приходять проблеми, запитання і те, що стається поза увагою (додано до іншого списку, файл прочитано чи записано).",
+   "Nothing to undo": "Нічого відміняти",
+   "Notices": "Сповіщення",
+   "Off": {
+    "in": [
+     [
+      ".ui-sw",
+      "Вимк"
+     ],
+     [
+      "#outAudience, #outStage",
+      "Вимк"
+     ]
+    ],
+    "else": "Вимк"
+   },
+   "ON": "УВІМК",
+   "ON SCREEN": "НА ЕКРАНІ",
+   "Open a group of choices; go back": "Відкрити набір варіантів; повернутися",
+   "Open Timers, Messages, Props, Macros, Stage, Audio, VoxLive": "Відкрити Таймери, Повідомлення, Накладки, Макроси, Сцену, Аудіо, VoxLive",
+   "Or use the sample backgrounds": "Або візьміть зразки фонів",
+   "Order": "Порядок",
+   "Password": "Пароль",
+   "Paste": "Вставити",
+   "Paste Style": "Вставити стиль",
+   "Pause": "Пауза",
+   "Pick several in the left column: grow the pick, or pick them all": "Вибрати кілька в лівій колонці: розширити вибір або вибрати все",
+   "Picture": "Зображення",
+   "Placeholder": "Порожнє місце",
+   "Play": "Відтворити",
+   "Play on Announcements Layer": "Відтворити в шарі оголошень",
+   "Play the tracks in a random order": "Відтворювати треки у випадковому порядку",
+   "Play through": "Підряд",
+   "Playing": "ГРАЄ",
+   "Playlist": "Список",
+   "Playlists": "Списки",
+   "Playlists and libraries": "Списки й бібліотеки",
+   "Press / to search from anywhere": "Натисніть /, щоб шукати будь-звідки",
+   "Prev": "Назад",
+   "Previous": "Назад",
+   "Previous slide": "Попередній слайд",
+   "Props": "Накладки",
+   "Ready": "ГОТОВО",
+   "Reconnecting…": "Перепідключення…",
+   "Redo": "Повторити",
+   "Remote Control": "ДИСТАНЦІЙНЕ КЕРУВАННЯ",
+   "Remove from Playlist": "Вилучити зі списку",
+   "Rename": "Перейменувати",
+   "Reset": "Скинути",
+   "Running the slides": "Ведення слайдів",
+   "s": "с",
+   "Scaling": "Масштаб",
+   "Service": "Служіння",
+   "Service (⌥S)": "Служіння (⌥S)",
+   "Service, Bible (ready for a reference), Edit (in the app ⌘1 ⌘2 ⌘3; a browser keeps those)": "Служіння, Біблія (готова до введення посилання), Редагування (у застосунку ⌘1 ⌘2 ⌘3; браузер залишає їх собі)",
+   "Settings": "Налаштування",
+   "Settings are changed at the computer.": "Налаштування змінюються на компʼютері.",
+   "Show": "Показати",
+   "Show a message": "Показати повідомлення",
+   "Show keys on buttons": "Клавіші на кнопках",
+   "Show that picture or video": "Показати це зображення чи відео",
+   "Shuffle": "Вперемішку",
+   "Sign In": "Увійти",
+   "Sign Out of This Device…": "Вийти на цьому пристрої…",
+   "Signing in…": "Вхід…",
+   "Slide": "Слайд",
+   "Slide size": "Розмір слайдів",
+   "Slides…": "Слайди…",
+   "SoftPresenter Remote Control": "Пульт SoftPresenter",
+   "Something went wrong: click to see": "Щось пішло не так: клацніть, щоб побачити",
+   "Song": "Пісня",
+   "Song Files…": "Файли пісень…",
+   "Song libraries": "Бібліотеки пісень",
+   "Stage": "Сцена",
+   "Stage screens on or off (⇧⌘2)": "Екрани для сцени: увімкнути або вимкнути (⇧⌘2)",
+   "Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track": "Запустити цей таймер, показати це повідомлення чи накладку, виконати цей макрос, перемкнути сцену на цей макет, відтворити цей трек",
+   "Table": "Таблиця",
+   "Template": "Шаблон",
+   "The car with the lights on, please": "Автомобіль з увімкненими фарами, будь ласка",
+   "The computer didn't answer.": "Компʼютер не відповів.",
+   "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "Позначений слайд або вірш виходить на екран (після пошуку або ↑ ↓)",
+   "The first nine can be changed in Settings › Keys.": "Перші девʼять можна змінити: Налаштування › Клавіші.",
+   "The item above or below, cued at its first slide; in Bible, the verse before or after": "Пункт вище чи нижче; у Біблії — вибрати попередній чи наступний вірш",
+   "The live tools": "Під час служіння",
+   "The menu for the slide on screen": "Меню слайда, що на екрані",
+   "then 1–9": "потім 1 … 9",
+   "This device is remembered once it signs in, until it is forgotten in Settings › Phone remote on the computer.": "Цей пристрій запамʼятовується після входу, доки його не забудуть на компʼютері: Налаштування › Пульт на телефоні.",
+   "This library has no songs yet.": "У цій бібліотеці поки що немає пісень.",
+   "This list": "Цей перелік (унизу є «Клавіші на кнопках»)",
+   "This sample only has": "У цьому зразку є лише",
+   "Timers": "Таймери",
+   "track": "Трек",
+   "Transition": "Перехід",
+   "Typing in a box: bold, italic, underlined, for the words selected (or the whole box)": "Під час введення в блоці: жирний, курсив, підкреслений — для виділених слів (або всього блока)",
+   "Undo": "Відмінити",
+   "Undo, redo": "Відмінити, повторити",
+   "Volume": "Гучність",
+   "VoxLive": "VoxLive",
+   "Waiting for SoftPresenter": "Чекаємо на SoftPresenter",
+   "Waiting for SoftPresenter to answer. Try again in a moment.": "Чекаємо на відповідь SoftPresenter. Спробуйте ще раз за хвилину.",
+   "When a track ends, go on to the next": "Коли трек закінчується, переходити до наступного",
+   "With nothing on screen, move the cue; Space or Enter puts it on": "Коли на екрані порожньо, пересунути мітку; пробіл або Enter виводить на екран",
+   "Words": {
+    "in": [
+     [
+      ".ui-sheet",
+      "Слова"
+     ]
+    ],
+    "else": "Слова"
+   },
+   "Words from Text…": "Слова з тексту…",
+   "Words once…": "Швидкий текст…",
+   "Words only": "Лише слова",
+   "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Дозволити телефону, iPad чи Mac показувати свій екран можна лише за компʼютером, не зі сторінки пульта.",
+   "There is no track to play. Add music at the computer.": "Немає треку для відтворення. Додайте музику на компʼютері."
+  },
+  "patterns": [
+   {
+    "re": "^(.+) \\(⌥(\\d), then 1 to 9 for what is in it\\)$",
+    "to": "{1t} (⌥{2}, потім від 1 до 9 для того, що всередині)",
+    "key": "page.tool_tab.hint"
+   },
+   {
+    "re": "^Running SoftPresenter as (.+)$",
+    "to": "SoftPresenter працює як {1}",
+    "key": "page.conn.as"
+   },
+   {
+    "re": "^Notices: (\\d+) need you$",
+    "to": "Сповіщення: {1} чекають на вас",
+    "key": "page.notices.many"
+   },
+   {
+    "re": "^Counts down from (.+?)$",
+    "to": "Зворотний відлік від {1}",
+    "key": "tools.timer.down_from"
+   },
+   {
+    "re": "^(.+) (\\d+(?:\\.\\d+)?)s$",
+    "to": "{1t} {2} с",
+    "key": "page.transition.time"
+   },
+   {
+    "re": "^Notices: 1 needs you$",
+    "to": "Сповіщення: 1 чекає на вас",
+    "key": "page.notices.one"
+   },
+   {
+    "re": "^(\\d+(?:\\.\\d+)?) s$",
+    "to": "{1} с",
+    "key": "common.seconds_unit"
+   },
+   {
+    "re": "^(\\d+(?:\\.\\d+)?)s$",
+    "to": "{1} с",
+    "key": "common.seconds_unit"
+   },
+   {
+    "re": "^Bible · (.+)$",
+    "to": "Біблія · {1}",
+    "key": "page.find.bible_tag"
+   },
+   {
+    "re": "^Add to (.+?)$",
+    "to": "Додати до «{1}»",
+    "key": "left.song.add_to"
+   },
+   {
+    "re": "^(.+?) tracks$",
+    "to": "{1} треки",
+    "key": "tools.audio.tracks"
+   },
+   {
+    "re": "^Song · (.+)$",
+    "to": "Пісня · {1}",
+    "key": "find.tag.song_group"
+   },
+   {
+    "re": "^(.+?) items$",
+    "to": "{1} пункти",
+    "key": "media.items"
+   },
+   {
+    "re": "^(.+?) songs$",
+    "to": "{1} пісні",
+    "key": "integrations.songbooks.songs"
+   },
+   {
+    "re": "^(.+?) track$",
+    "to": "{1} трек",
+    "key": "tools.audio.tracks"
+   },
+   {
+    "re": "^Start (.+?)$",
+    "to": "Запустити {1}",
+    "key": "tools.steps.timer_start"
+   }
+  ],
+  "keys": {
+   "Shift": "Shift"
+  },
+  "format": {
+   "decimal": ",",
+   "group": " ",
+   "group_from": 4,
+   "quote_open": "«",
+   "quote_close": "»"
   }
  }
 };
