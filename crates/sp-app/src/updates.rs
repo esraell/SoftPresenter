@@ -47,6 +47,28 @@ pub const VERSION: &str = match (DEV_VERSION, RELEASE_VERSION) {
     (None, None) => env!("CARGO_PKG_VERSION"),
 };
 
+/// Whether `version` is a pre-release (`0.9.0-dev.16`, `1.0.0-beta.1`): a version with a
+/// pre-release part after its three numbers. A release (`0.9.0`, `1.0.0`) isn't, nor is anything
+/// that isn't a version.
+pub fn is_pre_release(version: &str) -> bool {
+    Version::parse(version).is_some_and(|version| !version.pre.is_empty())
+}
+
+/// What a pre-release says of itself where people see its version (the setup's first step,
+/// Settings › About): that it is one, with its version, and what that means. `None` for a
+/// release, so from 1.0 on nothing is said, with nothing to change here.
+pub fn pre_release_words(version: &str) -> Option<(String, &'static str)> {
+    is_pre_release(version).then(|| {
+        (
+            tf("settings.about.prerelease.title", "This is a pre-release ({version})", &[("version", version)]),
+            t(
+                "settings.about.prerelease.about",
+                "Things may still change: the core of how SoftPresenter works and looks will stay, and bugs will be fixed in the versions that come next.",
+            ),
+        )
+    })
+}
+
 /// Where the releases are listed (100 to a page: the Bibles' releases come between the app's).
 const RELEASES: &str = "https://api.github.com/repos/esraell/SoftPresenter/releases?per_page=100";
 /// Where a release's page must be, to be opened.
@@ -564,6 +586,20 @@ mod tests {
         assert!(v("0.9.0-dev") > v("0.9.0-1"));
         // Build metadata is no part of the order.
         assert_eq!(v("0.9.0+mac").cmp(&v("0.9.0")), Ordering::Equal);
+    }
+
+    #[test]
+    fn only_a_pre_release_says_it_is_one() {
+        for version in ["0.9.0-dev.16", "0.9.0-dev.15", "v0.9.1-dev.2", "1.0.0-beta.1", "1.0.0-rc.1", "0.9.0-dev+mac"] {
+            assert!(is_pre_release(version), "{version}");
+            let words = crate::i18n::with_language(crate::i18n::Language::English, || pre_release_words(version));
+            let (title, _) = words.unwrap_or_else(|| panic!("{version} says nothing"));
+            assert_eq!(title, format!("This is a pre-release ({version})"));
+        }
+        for version in ["0.9.0", "1.0.0", "1.0.0+mac", "2.3.4", "", "bibles-4", "0.9"] {
+            assert!(!is_pre_release(version), "{version}");
+            assert_eq!(pre_release_words(version), None, "{version}");
+        }
     }
 
     #[test]

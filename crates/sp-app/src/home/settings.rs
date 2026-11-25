@@ -1014,8 +1014,9 @@ fn song_files_page(ui: &mut egui::Ui, state: &mut HomeState) {
     );
 }
 
-/// Settings › About: the version, updates, what's new, the guide, reporting a problem and the
-/// licences, each a row with its key; then the anonymous reports' card.
+/// Settings › About: the version, updates (and under them, in a pre-release, a row saying so),
+/// what's new, the guide, reporting a problem and the licences, each a row with its key; then
+/// the anonymous reports' card.
 fn about_page(ui: &mut egui::Ui, state: &mut HomeState) {
     let version = tf(
         "settings.about.version",
@@ -1025,6 +1026,12 @@ fn about_page(ui: &mut egui::Ui, state: &mut HomeState) {
     let mut opened = None;
     card(ui, "SoftPresenter", &version, None, |ui| {
         updates_row(ui, state);
+        // A pre-release says so under Updates, as the setup's first step does.
+        if let Some((heading, about)) = crate::updates::pre_release_words(crate::updates::VERSION) {
+            let updates =
+                t("settings.about.prerelease.updates", "Check for updates, above, tells you when one is out.");
+            row(ui, &heading, &format!("{about} {updates}"), vec2(0.0, 30.0), |_, _| {});
+        }
         for (label, key, note, page) in [
             (
                 t("settings.about.whats_new.label", "What\u{2019}s new"),

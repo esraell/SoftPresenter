@@ -387,6 +387,16 @@ fn welcome_about(system: System) -> &'static str {
     }
 }
 
+/// What the welcome says in a pre-release (`version`, as the build shows it), under the
+/// language: that it is one, what may change and what won't, and where to hear of the next.
+/// `None` for a release.
+fn pre_release_note(version: &str) -> Option<(String, String)> {
+    let (heading, about) = crate::updates::pre_release_words(version)?;
+    let updates =
+        t("setup.prerelease.updates", "Check for updates (Settings \u{203a} About) tells you when one is out.");
+    Some((heading, format!("{about} {updates}")))
+}
+
 fn welcome(ui: &mut egui::Ui, system: System) {
     title(ui, t("setup.welcome.title", "Welcome to SoftPresenter"));
     say(ui, welcome_about(system));
@@ -395,6 +405,16 @@ fn welcome(ui: &mut egui::Ui, system: System) {
     ui.label(t("setup.welcome.language", "Language of SoftPresenter"));
     ui.add_space(4.0);
     crate::home::language_menu(ui);
+    // A pre-release says so, calmly, in a small card at the foot (the owner, 2026-11-25).
+    if let Some((heading, words)) = pre_release_note(crate::updates::VERSION) {
+        ui.add_space(18.0);
+        Frame::new().fill(CARD).corner_radius(9.0).inner_margin(egui::Margin::symmetric(14, 11)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(heading).font(semibold(13.0)).color(TEXT));
+            ui.add_space(3.0);
+            ui.add(egui::Label::new(RichText::new(words).size(12.5).color(TEXT_DIM)).wrap());
+        });
+    }
 }
 
 /// The displays the audience may be given, with their sizes: each one the operator doesn't work
@@ -939,8 +959,32 @@ mod tests {
             }
             words.extend(steps(system).iter().map(|step| step.name().to_owned()));
             words.push(crate::free_songbooks::later_words().to_owned());
+            if let Some((heading, about)) = pre_release_note("0.9.0-dev.16") {
+                words.extend([heading, about]);
+            }
             words.join("\n")
         })
+    }
+
+    #[test]
+    fn the_welcome_says_a_pre_release_is_one_and_a_release_says_nothing() {
+        with_language(Language::English, || {
+            let (heading, words) = pre_release_note("0.9.0-dev.16").expect("a pre-release says so");
+            assert_eq!(heading, "This is a pre-release (0.9.0-dev.16)");
+            assert_eq!(
+                words,
+                "Things may still change: the core of how SoftPresenter works and looks will stay, and bugs will be fixed in the versions that come next. Check for updates (Settings \u{203a} About) tells you when one is out."
+            );
+            assert!(!heading.contains('!') && !words.contains('!'), "calm, not alarming");
+        });
+        for language in [Language::Spanish, Language::Russian, Language::Ukrainian] {
+            let said = with_language(language, || pre_release_note("1.0.0-beta.1"));
+            let (heading, words) = said.expect("a pre-release says so in every language");
+            assert!(heading.contains("1.0.0-beta.1"), "{language:?}: {heading}");
+            assert!(!words.contains("Things may"), "{language:?} has its own words: {words}");
+        }
+        assert_eq!(pre_release_note("0.9.0"), None);
+        assert_eq!(pre_release_note("1.0.0"), None);
     }
 
     #[test]

@@ -1454,7 +1454,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   presentation as pictures; on Windows the firewall, the first time a screen is sent over NDI
   or Remote Control is switched on (choose Allow for private networks). Linux asks nothing, so
   the setup has no such step there. Its words fit the system: no Mac names, menus or Word files
-  off a Mac. Settings › Set up SoftPresenter… opens it again.
+  off a Mac. Settings › Set up SoftPresenter… opens it again. In a pre-release (a version with
+  a part after its three numbers, such as 0.9.0-dev.16) the first step says so in a small card
+  under the language: "This is a pre-release (0.9.0-dev.16)", then "Things may still change: the
+  core of how SoftPresenter works and looks will stay, and bugs will be fixed in the versions
+  that come next. Check for updates (Settings › About) tells you when one is out." Settings ›
+  About has the same under its Updates row. A release (0.9.0, 1.0.0) says nothing of it.
 - **Anonymous reports** ([PRIVACY.md](../PRIVACY.md), every field in
   [anonymous-reports.md](anonymous-reports.md)). SoftPresenter sends the project small reports
   of how it runs and what goes wrong: the app's version, the system, the processor, memory,
@@ -2178,7 +2183,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   aside so the setup opens over the home window); Settings › Command line has the sp command's
   row, saying where it stands, with Install, Use This Copy and Remove (quiet while sp is where it
   should be), and what a click did under it; Settings › About has a card with the version and a
-  row each for Updates (Check for updates, below), What's new, Help (Open the guide), Something
+  row each for Updates (Check for updates, below; in a pre-release a row under it says so, as
+  the setup does), What's new, Help (Open the guide), Something
   wrong? (Report an issue…, a new issue with the version filled in) and Licences…; a click on the
   readout under the preview goes to the slide on screen (opens its item and brings the slide
   into view). The media strip has its fold button (a chevron at the right of its heading).
