@@ -140,6 +140,11 @@ impl Export {
             }
         };
         for mut song in songs {
+            // A song made from TimelyChurch leaves its mark at home: the mark names the church's
+            // TimelyChurch, whose songs are for that church only. In the pack it is a plain song.
+            if song.catalog.as_ref().is_some_and(|mark| mark.source == crate::timelychurch::SOURCE) {
+                song.catalog = None;
+            }
             for group in &mut song.groups {
                 for slide in &mut group.slides {
                     for object in &mut slide.objects {
@@ -908,6 +913,43 @@ mod tests {
         ] {
             assert_eq!(classify(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn a_song_from_timelychurch_goes_into_a_pack_without_its_mark_and_a_catalog_song_keeps_its() {
+        let mark = |source: &str| sp_model::CatalogOrigin {
+            source: source.to_owned(),
+            key: "church.example.org/song/57".to_owned(),
+            language: String::new(),
+            second: None,
+            text_hash: String::new(),
+            made_hash: String::new(),
+            added: "2026-11-24".to_owned(),
+            newer: None,
+            gone: false,
+        };
+        let song = |source: &str| Presentation {
+            id: Uuid::new_v4(),
+            title: "Song".to_owned(),
+            groups: Vec::new(),
+            copyright: sp_model::Copyright::default(),
+            theme: None,
+            arrangement: None,
+            arrangements: Vec::new(),
+            loops: false,
+            transition: None,
+            catalog: Some(Box::new(mark(source))),
+        };
+        let export = Export::plan(
+            vec![song(crate::timelychurch::SOURCE), song("worshipleaderapp")],
+            &[],
+            None,
+            |_| None,
+            &|_| None,
+            |_| None,
+        );
+        assert_eq!(export.songs[0].catalog, None, "the church's TimelyChurch stays at home");
+        assert_eq!(export.songs[1].catalog.as_ref().map(|m| m.source.as_str()), Some("worshipleaderapp"));
     }
 
     #[test]
