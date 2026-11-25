@@ -5,6 +5,9 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+- A video behind the words no longer freezes on NDI and DeckLink for each slide change: those outputs now show the dissolve the TVs show, and the video keeps moving through it.
+- Each NDI screen has a frame rate in the Screens window: 29.97 unless you choose 30, 59.94, 60, 25 or 50. Sending exactly 30 to 29.97 equipment, as before, made a small pause every half-minute or so.
+- The stage screen's clock no longer makes the other NDI screens redraw once a second.
 - Keying a DeckLink screen is one choice in the Screens window now: Keyer Off, Fill and key, or Over the card's input. Keying makes the screen see-through with premultiplied soft edges, the usual for a switcher's keyer, so only the words are keyed; a keyed screen left solid before is put right when the app opens. When the screen's format isn't the one Desktop Video Setup has, the window says so in amber, with a button to use it.
 
 ## 0.9.0-dev.13 — 24 November 2026 (development build)
