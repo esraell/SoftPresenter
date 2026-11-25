@@ -1,0 +1,12 @@
+{
+  "_note": "Russian; see topbar.json. The find box's list of results: the tags beside each result (in capitals, as the English), what it says while it looks, the keys at its foot.",
+  "find.tag.song": "ПЕСНЯ",
+  "find.tag.song_group": "ПЕСНЯ · {group}",
+  "find.nothing": "Ничего не найдено",
+  "find.looking": "Поиск в Библиях…",
+  "find.looking.songbooks": "Поиск в сборниках…",
+  "find.catalog.from": "Из Worship Leader App",
+  "find.tag.catalog": "ПЕСНЯ · {language}",
+  "find.keys.mac": "↵ Открыть    ⌘↵ В список    esc Закрыть",
+  "find.keys": "Enter: открыть    Ctrl+Enter: в список    Esc: закрыть"
+}

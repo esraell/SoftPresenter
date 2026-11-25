@@ -843,8 +843,12 @@ mod tests {
                 ("1 canción".into(), "0 canciones".into(), "13.613 canciones".into())
             );
         });
-        // The tables of the Cyrillic languages come later; their rules already work.
-        with_language(Language::Russian, || assert_eq!(songs(5), "5 songs", "no table yet: the English"));
+        with_language(Language::Russian, || {
+            assert_eq!(
+                (songs(1), songs(2), songs(5), songs(21), songs(13613)),
+                ("1 песня".into(), "2 песни".into(), "5 песен".into(), "21 песня".into(), "13\u{a0}613 песен".into())
+            );
+        });
         let template = |n| {
             let forms = ["{n} песня", "{n} песни", "{n} песен"];
             fill(forms[Language::Russian.plural_form(n)], &[("n", &n.to_string())])
@@ -871,7 +875,12 @@ mod tests {
             assert_eq!(seconds(3.0), "3 s");
             assert_eq!(quoted("Amén"), "“Amén”");
         });
-        // The Cyrillic languages' rules, from their format tables once those are written.
+        with_language(Language::Russian, || {
+            assert_eq!(count(13613), "13\u{a0}613");
+            assert_eq!(count(1234), "1\u{a0}234");
+            assert_eq!(seconds(0.4), "0,4 с");
+            assert_eq!(quoted("Аминь"), "«Аминь»");
+        });
         let russian = Format { decimal: ",", group: "\u{a0}", group_from: 4, open: "«", close: "»" };
         assert_eq!(group_digits("13613", &russian), "13\u{a0}613");
     }
