@@ -99,9 +99,21 @@ fn chosen<'a>(
     });
     let canva = playlists
         .iter()
-        .filter(move |playlist| playlist.folder.as_deref() == Some(canva))
+        .filter(move |playlist| playlist.folder.as_deref().is_some_and(|folder| same_folder(folder, canva)))
         .map(|playlist| Announce::MediaPlaylist(playlist.id));
     last.into_iter().chain(steps).chain(canva)
+}
+
+/// The folder Canva Sync puts the video in, by its full path when it is there.
+fn canva_folder() -> std::path::PathBuf {
+    let folder = crate::canva::folder();
+    folder.canonicalize().unwrap_or(folder)
+}
+
+/// Whether a folder a media playlist follows is `canva` (by its full path when it is there: one
+/// chosen from the command line is kept by its full path).
+fn same_folder(folder: &Path, canva: &Path) -> bool {
+    folder == canva || folder.canonicalize().is_ok_and(|full| full == canva)
 }
 
 /// What a click on a picture or video of the media bin plays on the Announcements layer, when it
@@ -127,13 +139,13 @@ fn of_media(
 /// What a click on a picture or video of the media bin (in the media strip or a playlist) plays
 /// on the Announcements layer, when it belongs to the announcements; `None` for the media layer.
 pub fn for_media(state: &crate::home::HomeState, item: &sp_model::MediaItem) -> Option<(Announce, Option<Uuid>)> {
-    of_media(item, state.announced_last, &state.macros, &state.media_playlists, &crate::canva::folder())
+    of_media(item, state.announced_last, &state.macros, &state.media_playlists, &canva_folder())
 }
 
 /// The same for a media playlist clicked in a playlist, or started by the keys: it plays round on
 /// the Announcements layer when it belongs to the announcements; `None` for the media layer.
 pub fn for_media_playlist(state: &crate::home::HomeState, id: Uuid) -> Option<(Announce, Option<Uuid>)> {
-    of_playlist(id, state.announced_last, &state.macros, &state.media_playlists, &crate::canva::folder())
+    of_playlist(id, state.announced_last, &state.macros, &state.media_playlists, &canva_folder())
 }
 
 /// What a click on a media playlist plays on the Announcements layer, when it belongs to the

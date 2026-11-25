@@ -70,6 +70,14 @@ impl crate::App {
         });
         let Some(song) = song else {
             let title = chosen.title().to_owned();
+            // A picture, video or media playlist of the announcements plays there, as a click on
+            // its tile does.
+            if slide == Some(1)
+                && let Some((what, from)) = self.announced_item(at, &self.playlist_stops().0)
+            {
+                self.announce_clicked(what, from);
+                return Ok(Reply::done(format!("Playing {title} on the Announcements layer.")));
+            }
             // A picture, video or media playlist has one thing to show: 1 shows it (or plays it).
             return match (&chosen, slide) {
                 (crate::service::Item::Passage(_), None) => {
