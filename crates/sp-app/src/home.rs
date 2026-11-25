@@ -851,6 +851,9 @@ pub struct BiblePage {
     /// the verse on screen in sight as it changes).
     pub page: crate::bible_page::PageCache,
     pub page_live_seen: Option<SlideRef>,
+    /// The Bibles in use as a thread of their own reads them when the app starts (see
+    /// `read_ahead`), each with its id, for the shelf to keep as it comes.
+    pub read_ahead: Option<std::sync::mpsc::Receiver<(String, std::sync::Arc<sp_bible::Bible>)>>,
 }
 
 impl Default for BiblePage {
@@ -912,6 +915,7 @@ impl Default for BiblePage {
             open_read_in: false,
             page: crate::bible_page::PageCache::default(),
             page_live_seen: None,
+            read_ahead: None,
         }
     }
 }
@@ -1363,6 +1367,58 @@ impl BiblePage {
             })
             .collect();
         (places, languages)
+    }
+
+    /// Has the Bibles in use read on a thread of their own, for the app's start: otherwise the
+    /// first drawing of the Bible view reads them on the window's thread, unpacking each file
+    /// (two Bibles took 20 ms of a 40 ms frame on a fast Mac, and several times that on a slower
+    /// one). The others are still read the first time they are asked for. One asked for before
+    /// its copy has come is read where it is asked for, as before.
+    pub fn read_ahead(&mut self) {
+        let (places, _) = self.in_use();
+        let readers: Vec<crate::bible::BibleReader> = places
+            .into_iter()
+            .filter_map(|at| self.shelf.reader(at))
+            .filter(|reader| reader.loaded.is_none())
+            .collect();
+        if readers.is_empty() {
+            return;
+        }
+        let (send, coming) = std::sync::mpsc::channel();
+        let reading = std::thread::Builder::new().name("bibles read ahead".to_owned()).spawn(move || {
+            for reader in readers {
+                let id = reader.id.clone();
+                // One that can't be read says why when it is asked for on the window's thread.
+                if let Ok(bible) = reader.read()
+                    && send.send((id, bible)).is_err()
+                {
+                    return;
+                }
+            }
+        });
+        if reading.is_ok() {
+            self.read_ahead = Some(coming);
+        }
+    }
+
+    /// Keeps the Bibles read ahead that have come since (see `read_ahead`). Called each frame;
+    /// once all have come it does nothing.
+    pub fn keep_read_ahead(&mut self) {
+        let Some(coming) = &self.read_ahead else { return };
+        let mut done = false;
+        loop {
+            match coming.try_recv() {
+                Ok((id, bible)) => self.shelf.keep(&id, bible),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    done = true;
+                    break;
+                }
+            }
+        }
+        if done {
+            self.read_ahead = None;
+        }
     }
 
     /// How the operator's language is decided now: the session's, and the language chosen with
@@ -9673,6 +9729,29 @@ mod tests {
     /// second), ready to make passages.
     fn bible_page() -> BiblePage {
         BiblePage { slots: Some([0, 1]), ..BiblePage::default() }
+    }
+
+    #[test]
+    fn the_bibles_in_use_are_read_ahead_off_the_window_and_kept_and_no_others() {
+        let mut page = bible_page();
+        let read = |page: &BiblePage, id: &str| {
+            let at = page.shelf.position(id).unwrap();
+            page.shelf.reader(at).is_some_and(|reader| reader.loaded.is_some())
+        };
+        // As the app starts: the Synodal and the King James Version are in use, the others not.
+        assert!(!read(&page, "syn") && !read(&page, "kjv"));
+        page.read_ahead();
+        let began = std::time::Instant::now();
+        while page.read_ahead.is_some() && began.elapsed() < std::time::Duration::from_secs(30) {
+            page.keep_read_ahead();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(page.read_ahead.is_none(), "the thread has finished and been let go");
+        assert!(read(&page, "syn") && read(&page, "kjv"), "both in use are kept");
+        assert!(!read(&page, "web") && !read(&page, "bsb"), "a Bible not in use is read only when asked for");
+        // Nothing left to read: no thread is started again.
+        page.read_ahead();
+        assert!(page.read_ahead.is_none());
     }
 
     /// Looks a reference up as if typed and Return pressed: what the field then says, the

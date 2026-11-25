@@ -8857,6 +8857,7 @@ impl App {
             }
         }
         thumbs.begin_frame();
+        running.home_state.bible.keep_read_ahead();
         // The output gone (not taken away for quitting) is trouble, said once.
         if running.output.as_ref().is_some_and(OutputHandle::is_finished) {
             running.home_state.output_has_stopped();
@@ -10464,6 +10465,8 @@ impl ApplicationHandler<AppEvent> for App {
                 running.home_state.bible.history = service::load_bible_history();
                 // The language a session of the Bible view starts in, read once on a thread.
                 running.home_state.bible.system_language.start();
+                // The Bibles in use, read on a thread of their own, not as the Bible view opens.
+                running.home_state.bible.read_ahead();
                 self.bible_page_saved = running.home_state.bible.choices();
                 let prefs = service::load_prefs();
                 running.home_state.apply_prefs(&prefs);
