@@ -93,6 +93,8 @@ person:
 | `SOFTPRESENTER_VIDEO_RGBA=1` | The video FFmpeg plays behind the words comes as RGBA pixels FFmpeg converts on the processor, as before, instead of as planes the GPU turns into colours (to compare the two ways, or go back with no new build) |
 | `SOFTPRESENTER_NDI_LOSE=<n>` or `<n>@<place>` | The next n NDI pictures somebody is watching for count as lost on their way back from the GPU (with a place, only that picture of each drawing: 1 is the first) |
 | `SOFTPRESENTER_NDI=<name>` | Also send over NDI under this name, this run only |
+| `SOFTPRESENTER_MIRROR_MODEL=<model>` | `softpresenter-mirror` says it is this model instead of its own (`SoftPresenter1,1`), to find out with a real phone whether a name of our own is accepted. Only the owner decides whether a build may ever say another model |
+| `SOFTPRESENTER_MIRROR_H264_ONLY=1` | `softpresenter-mirror` leaves out the feature bit that lets a sender choose HEVC, to tell a codec problem from a protocol one |
 | `SOFTPRESENTER_HIDE_DECKLINK=1` | Behave as on a computer without Desktop Video (the DeckLink driver) |
 | `SOFTPRESENTER_PRETEND_DECKLINK=1` | List made-up DeckLink devices ("Pretend DeckLink (1)"…) in place of real ones; what they are sent goes nowhere |
 | `SOFTPRESENTER_PRETEND_DECKLINK_STALL=<s>` | Each pretend DeckLink card stops taking frames that many seconds after it starts, as a card taken away does |
@@ -149,7 +151,16 @@ message.
   the song importer reads SoftProjector's song databases and songbooks, whose layout was
   learnt from SoftProjector's GPL-3.0 source (table and column names, how a song's text is
   split); none of its code is used, and SoftProjector may be named where the importer says
-  what it reads.
+  what it reads. A third, agreed by the owner on 2026-11-24: `softpresenter-mirror`
+  (`crates/sp-mirror`), the separate program that receives an iPhone, iPad or Mac screen,
+  follows UxPlay's `lib/` (LGPL-2.1-or-later) and carries a Rust port of playfair (GPL-3.0),
+  whose tables came from someone else's study of Apple's own program; it may name Apple,
+  AirPlay and those projects as plain facts where it says what it does, and it keeps their
+  notices ([docs/licences/screen-mirroring.md](docs/licences/screen-mirroring.md)). It stays a
+  separate program: `sp-app` never depends on that crate, the crate depends on no `sp-*` crate,
+  and SoftPresenter's additional permission for NDI and DeckLink does not extend to it. The
+  interface calls the feature by what it does ("Show an iPhone, iPad or Mac screen") and says,
+  wherever it is switched on, that it is unofficial.
 - **Content.** No song lyrics or Bible text that isn't public domain, in tests or anywhere else.
   Tests use text written for them.
 - **Privacy.** No secrets, tokens, local paths (`/Users/…`), links to private sessions or

@@ -280,6 +280,8 @@ The code is a Rust workspace:
     crates/sp-video    videos (macOS's AVFoundation, then FFmpeg), system picture formats, and
                        web pages drawn off-screen (macOS's web view)
     crates/sp-app      the app and its windows
+    crates/sp-mirror   softpresenter-mirror, a separate program that receives an iPhone, iPad or
+                       Mac screen (unofficial; docs/licences/screen-mirroring.md)
     third_party/vello  the vello renderer's main crate, changed to size its GPU memory from
                        what is drawn (outside the workspace; its PROVENANCE.md explains)
     third_party/fontique  the font finder Parley uses, changed to map only font files nothing
@@ -316,3 +318,8 @@ The Bibles keep their own terms ([docs/licences/bibles.md](docs/licences/bibles.
 LGPL build inside the app) runs as a separate program and NDI's runtime is opened at run time, never linked
 ([docs/licences/ffmpeg.md](docs/licences/ffmpeg.md), [docs/licences/ndi.md](docs/licences/ndi.md)).
 NDI® is a registered trademark of Vizrt NDI AB.
+
+Showing an iPhone, iPad or Mac screen is unofficial: a separate program does it
+([docs/licences/screen-mirroring.md](docs/licences/screen-mirroring.md)). AirPlay, iPhone, iPad,
+Mac and Apple TV are trademarks of Apple Inc. SoftPresenter is not made, licensed or endorsed by
+Apple.

@@ -159,6 +159,32 @@ version 2.1 or later; its licence and the exact source it was built from are in 
 FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.
 [`docs/licences/ffmpeg.md`](docs/licences/ffmpeg.md) explains.
 
+### Showing an iPhone, iPad or Mac screen
+
+SoftPresenter can show the screen of a device that picks it in Screen Mirroring (AirPlay). This
+is unofficial: it is not made, licensed, certified or supported by Apple, and an Apple update
+may stop it working. AirPlay, iPhone, iPad, Mac and Apple TV are trademarks of Apple Inc.
+SoftPresenter is not made, licensed or endorsed by Apple.
+
+It is done by a separate program, `softpresenter-mirror`, which SoftPresenter starts and talks
+to through pipes; none of its code is in or linked with SoftPresenter itself, and it uses
+neither NDI nor DeckLink. `softpresenter-mirror` is under the GNU General Public License,
+version 3 or later, **without** the additional permission in
+[ADDITIONAL-PERMISSION.md](ADDITIONAL-PERMISSION.md): that permission does not extend to it. It
+is written in Rust following these works, whose notices it keeps:
+
+- UxPlay's `lib/` ([github.com/FDH2/UxPlay](https://github.com/FDH2/UxPlay), which descends
+  from shairplay, AirplayServer and RPiPlay): copyright (C) 2011-2012, 2018 Juho Vähä-Herttua;
+  (c) 2019 dsafa22; (C) 2020 Jaslo Ziska; 2014 Joakim Plate; Florian Draschbacher; (C) 2026 Omar
+  Roth; modified 2021-2026 by F. Duncanh. GNU Lesser General Public License, version 2.1 or
+  later ([`docs/licences/LGPL-2.1.txt`](docs/licences/LGPL-2.1.txt)).
+- playfair ([github.com/EstebanKubata/playfair](https://github.com/EstebanKubata/playfair),
+  2015, as carried in UxPlay's `lib/playfair/`): GNU General Public License, version 3
+  ([LICENSE](LICENSE)). The helper's FairPlay module is a port of it.
+
+[`docs/licences/screen-mirroring.md`](docs/licences/screen-mirroring.md) says which part follows
+which file, and lists the libraries the helper is built with.
+
 ### Reading ProPresenter 7 song documents
 
 SoftPresenter's importer for `.pro` song documents uses the field numbers from greyshirtguy's

@@ -1,0 +1,39 @@
+[package]
+name = "sp-mirror"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+# Not the workspace's licence: this program carries a GPL-3.0 part (the FairPlay step, a port of
+# playfair) whose author gave no permission to combine it with the NDI and DeckLink components.
+# It is a separate program, never linked into SoftPresenter itself, and it uses neither.
+# docs/licences/screen-mirroring.md says what it follows and under which licences.
+license = "GPL-3.0-or-later"
+description = "softpresenter-mirror: receives an iPhone, iPad or Mac screen (Screen Mirroring) for SoftPresenter"
+
+[[bin]]
+name = "softpresenter-mirror"
+path = "src/main.rs"
+
+[dependencies]
+# The property lists every request and answer of the control channel uses. Its stream of
+# events is behind a feature the crate may change between versions (hence the exact version):
+# a sender's list is read as events first, so that one that unfolds without end is given up
+# (src/plists.rs).
+plist = { version = "=1.10.4", default-features = false, features = ["enable_unstable_features_that_may_break_with_minor_version_bumps"] }
+# Being found by phones (DNS-SD over multicast DNS), the same way on a Mac, Windows and Linux.
+mdns-sd = { version = "=0.22.0", default-features = false }
+# The video's cipher (AES-128 in CTR mode); ring has no CTR mode.
+aes = "=0.8.4"
+ctr = "=0.9.2"
+# Ed25519, X25519, SHA-512 and random bytes: the ones SoftPresenter already has.
+ring = "0.17"
+sha2.workspace = true
+# The header lines of a request (the request line is read here: it may say RTSP/1.0).
+httparse = "1"
+# Listening on IPv4 and IPv6 at the same port (the IPv6 socket must be told to take IPv6 only).
+socket2 = "0.6"
+# The lines this program and SoftPresenter say to each other.
+serde_json.workspace = true
+
+[lints]
+workspace = true
