@@ -124,7 +124,23 @@ fn user_path() -> Result<String, String> {
 
 pub fn add_to_user_path(folder: &str) -> Result<bool, String> {
     let Some(longer) = crate::path_with(&user_path()?, folder) else { return Ok(false) };
-    let (key, name, data) = (wide("Environment"), wide("Path"), wide(&longer));
+    save_user_path(&longer)?;
+    Ok(true)
+}
+
+pub fn remove_from_user_path(folder: &str) -> Result<bool, String> {
+    let Some(shorter) = crate::path_without(&user_path()?, folder) else { return Ok(false) };
+    save_user_path(&shorter)?;
+    Ok(true)
+}
+
+pub fn on_user_path(folder: &str) -> bool {
+    user_path().is_ok_and(|path| crate::path_with(&path, folder).is_none())
+}
+
+/// Saves the user's own PATH and tells running programs it changed.
+fn save_user_path(value: &str) -> Result<(), String> {
+    let (key, name, data) = (wide("Environment"), wide("Path"), wide(value));
     // SAFETY: the key and value names are NUL-terminated; `data` is the NUL-terminated value and
     // its length in bytes, NUL included, is what the call is told.
     let status = unsafe {
@@ -159,7 +175,7 @@ pub fn add_to_user_path(folder: &str) -> Result<bool, String> {
             );
         }
     });
-    Ok(true)
+    Ok(())
 }
 
 pub fn monitor_names() -> Vec<(String, String)> {

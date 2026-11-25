@@ -1743,8 +1743,20 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   slide view and size; what happens at start is a macro's, `macro startup NAME on`); `view words
   [SONG]` (Edit Words; `view reflow` too); and `help COMMAND` for one command's help, without the app running. Bible downloads
   started from the command line have a job number, for `--wait` and `sp job N`.
-- `sp …` (full name `softpresenter`), installed from Settings › Integrations › Command line › Install…,
-  controls the running app from a terminal, a script or an AI agent (`sp status`, `sp next`):
+- **The sp command installs itself.** The first time an installed copy starts (on a Mac, one in
+  Applications; on Windows and Linux, anywhere but the temporary folder, a mounted disk or a build
+  folder; never a test copy), it puts `sp` where a terminal finds it and says so once in the
+  notices: on a Mac and Linux, links in `~/.local/bin` and, when a new terminal wouldn't look there,
+  one marked line in the person's own shell startup file (`~/.zshrc` for zsh; for bash
+  `~/.bash_profile` or the login file a Mac's Terminal reads, `~/.bashrc` on Linux; `config.fish`
+  for fish), never twice; on Windows, batch files in `%LOCALAPPDATA%\SoftPresenter\bin` and that
+  folder on the user's PATH. It happens once for each place the app is installed in, never takes
+  over an `sp` that opens another copy still there, and not again after Remove. Settings ›
+  Integrations › Command line says how it stands ("sp is installed (~/.local/bin/sp)", not found by
+  a terminal yet, or opening another copy) with Install, Use This Copy and Remove, and says what a
+  click did under the buttons at once; `softpresenter install-cli` and `remove-cli` do the same from
+  a terminal.
+- `sp …` (full name `softpresenter`) controls the running app from a terminal, a script or an AI agent (`sp status`, `sp next`):
   what is on screen, the lists, going to slides, clearing, media, messages, props, timers,
   macros, announcements, audio, the Bible and songs, and every menu bar item. A quick fix
   needs no editor: `sp slide SONG N` shows a slide's objects and how they look, and
@@ -1784,8 +1796,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Colour bars, Grid, White: everyone watching sees them); Settings › General has Song files ›
   Reload songs; Settings › Key Mappings has Show keys on buttons; Settings has Set Up
   SoftPresenter… under its sections (Settings steps aside so the setup opens over the home
-  window); Settings › Integrations has Command line (Install… on a Mac or Linux; on Windows it
-  says to type softpresenter.exe); Settings › About has the version, What's new, Open the guide,
+  window); Settings › Integrations has Command line (where the sp command stands, Install, Use
+  This Copy and Remove); Settings › About has the version, What's new, Open the guide,
   Report an issue… (a new issue with the version filled in) and Licences…; a click on the
   readout under the preview goes to the slide on screen (opens its item and brings the slide
   into view). The media strip has its fold button (a chevron at the right of its heading).

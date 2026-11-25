@@ -45,6 +45,35 @@ pub fn add_to_user_path(folder: &str) -> Result<bool, String> {
     }
 }
 
+/// Takes `folder` off the signed-in user's own PATH, if it is there, and tells running programs
+/// the settings changed. `Ok(true)` when it was taken off, `Ok(false)` when it wasn't there. On
+/// other systems it does nothing.
+pub fn remove_from_user_path(folder: &str) -> Result<bool, String> {
+    #[cfg(windows)]
+    {
+        windows::remove_from_user_path(folder)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = folder;
+        Ok(false)
+    }
+}
+
+/// Whether `folder` is on the signed-in user's own PATH (false where it can't be read, and on
+/// other systems).
+pub fn on_user_path(folder: &str) -> bool {
+    #[cfg(windows)]
+    {
+        windows::on_user_path(folder)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = folder;
+        false
+    }
+}
+
 /// `path` (a PATH as Windows saves it: folders between `;`) with `folder` added at its end, or
 /// `None` when it holds that folder already (with or without a last `\`, in any case).
 pub fn path_with(path: &str, folder: &str) -> Option<String> {
@@ -59,6 +88,16 @@ pub fn path_with(path: &str, folder: &str) -> Option<String> {
     }
     longer.push_str(folder);
     Some(longer)
+}
+
+/// `path` without `folder` (written with or without a last `\`, in any case), or `None` when
+/// it doesn't hold that folder.
+pub fn path_without(path: &str, folder: &str) -> Option<String> {
+    let bare = |entry: &str| entry.trim().trim_end_matches('\\').to_lowercase();
+    let wanted = bare(folder);
+    let entries: Vec<&str> = path.split(';').collect();
+    let kept: Vec<&str> = entries.iter().copied().filter(|entry| bare(entry) != wanted).collect();
+    (kept.len() < entries.len()).then(|| kept.join(";"))
 }
 
 /// The names the connected monitors give themselves ("Mi TV", "Philips FTV"), as Windows'
@@ -86,7 +125,7 @@ pub use windows::security::{HeldFolder, Security, current_user, make_folder, sec
 
 #[cfg(test)]
 mod tests {
-    use super::path_with;
+    use super::{path_with, path_without};
 
     #[test]
     fn a_folder_goes_on_the_end_of_the_path_once() {
@@ -99,5 +138,19 @@ mod tests {
         // Already there, however it was written.
         assert_eq!(path_with(r"C:\Tools;c:\users\A\AppData\Local\SoftPresenter\BIN\", bin), None);
         assert_eq!(path_with(&format!("{bin};C:\\Tools"), bin), None);
+    }
+
+    #[test]
+    fn a_folder_comes_off_the_path_however_it_was_written() {
+        let bin = r"C:\Users\a\AppData\Local\SoftPresenter\bin";
+        assert_eq!(path_without(bin, bin).as_deref(), Some(""));
+        assert_eq!(
+            path_without(r"C:\Tools;c:\users\A\AppData\Local\SoftPresenter\BIN\;%USERPROFILE%\x", bin).as_deref(),
+            Some(r"C:\Tools;%USERPROFILE%\x")
+        );
+        // What went on comes off, and the rest is as it was.
+        let before = r"%USERPROFILE%\AppData\Local\Microsoft\WindowsApps";
+        assert_eq!(path_without(&path_with(before, bin).expect("added"), bin).as_deref(), Some(before));
+        assert_eq!(path_without(r"C:\Tools", bin), None);
     }
 }

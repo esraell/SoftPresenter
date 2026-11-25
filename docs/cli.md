@@ -28,12 +28,45 @@ change, as everything else may (see the README).
 
 ## Install
 
-Choose **Settings › Integrations › Command line › Install…** (or run the app's program with
-`install-cli`). On a Mac and on Linux it puts `sp`, and its full name `softpresenter`, in
-`~/.local/bin` (or Homebrew's `bin` folder) as links to the app; on Windows it writes `sp.cmd` and
-`softpresenter.cmd` in `%LOCALAPPDATA%\SoftPresenter\bin` and puts that folder on your own PATH
-(open a new terminal afterwards). No administrator password is needed. Press Install again after
-moving the app.
+There is nothing to do: the first time an installed copy of SoftPresenter starts (on a Mac, one
+in Applications), it puts `sp` where a terminal finds it and says so in the notices. Open a new
+terminal window and type `sp status`.
+
+**Settings › Integrations › Command line** says how it stands ("sp is installed
+(~/.local/bin/sp)", or that sp opens another copy of SoftPresenter, which **Use This Copy**
+points here) and has **Install** and **Remove**; what a click did shows under the buttons at
+once. `softpresenter install-cli` and `softpresenter remove-cli` do the same from a terminal.
+
+- **On a Mac and on Linux**, `sp` and its full name `softpresenter` are links to the app in
+  `~/.local/bin` (links an earlier version put in Homebrew's `bin` folder or `/usr/local/bin` are
+  updated where they are). When a new terminal wouldn't look in `~/.local/bin`, one line goes at
+  the end of your own shell startup file, under a comment that says who added it:
+
+      # Added by SoftPresenter: the sp command
+      export PATH="$HOME/.local/bin:$PATH"
+
+  For zsh (a Mac's usual shell) that is `~/.zshrc`; for bash on a Mac, the first of
+  `~/.bash_profile`, `~/.bash_login` and `~/.profile` that is there (a Mac's Terminal starts
+  login shells, which read those and not `~/.bashrc`; `~/.bash_profile` is made only when none
+  is there); for bash on Linux, `~/.bashrc` (a line in `~/.profile` would only count from your
+  next sign-in); for fish, `fish_add_path ~/.local/bin` in `~/.config/fish/config.fish`. Nothing
+  is added when a startup file the shell reads already puts the folder on the PATH, however it is
+  written, so installing twice adds one line. For another shell nothing is written, and the card
+  says to add the folder to your PATH yourself.
+- **On Windows**, `sp.cmd` and `softpresenter.cmd` in `%LOCALAPPDATA%\SoftPresenter\bin`, and
+  that folder on your own PATH.
+
+No administrator password is needed, and no system file is changed. **Remove** takes away the
+links (or batch files), SoftPresenter's line, and on Windows the folder on the PATH; a program of
+someone else's called `sp` is never replaced or removed.
+
+The app installs it by itself once for each place it is installed in (it notes the place in
+`sp-command.txt` in its data folder, and does it again after the app has moved), and not again
+after Remove until Install is pressed. It never takes over an `sp` that opens another copy of
+SoftPresenter that is still there, and never runs from a place the app is only passing through
+(on a Mac, anywhere outside Applications, such as a disk image or Downloads; on Windows and
+Linux, the temporary folder, a mounted disk or a build folder) or in a test copy (one with
+`SOFTPRESENTER_QUIET`, `SOFTPRESENTER_DATA` or a capture switch set).
 
     sp                  # what is on screen; starts SoftPresenter first if it isn't running
     sp go "Blessed Assurance" 3

@@ -111,7 +111,7 @@ message.
   Metal interface and its `cover` part that puts a screen's window on its display and listens for
   the displays changing, `web_mac` for web pages), `sp-ndi`'s `runtime` module, `sp-winapi`'s `windows` module (the few Windows calls the
   app needs: joining the console a command was typed in, asking a monitor for its work area,
-  asking Windows the names the monitors give themselves, putting a folder on the user's PATH,
+  asking Windows the names the monitors give themselves, putting a folder on the user's PATH and taking it off again,
   and, in its `security` part, reading and setting who owns and may open the control socket's
   folder and finding the user the app runs as) and `sp-decklink`'s `ffi`
   module, and every block says why it is sound. `web_mac` also calls two web view settings outside Apple's published interface

@@ -570,6 +570,8 @@ pub struct HomeState {
     pub songbooks: crate::songbooks::View,
     /// The song catalog's songs in the find box and the slides area (`catalog_songs`).
     pub catalog: crate::catalog_songs::CatalogSongs,
+    /// Settings › Integrations › Command line: where the sp command stands, and what it said.
+    pub command_line: crate::cli_install::Card,
     /// An NDI name being typed in the Screens window, and the screen it is for. It is used
     /// when the field is left, so NDI is not restarted at every letter.
     pub ndi_draft: Option<(sp_model::Uuid, String)>,
@@ -1910,6 +1912,7 @@ impl Default for HomeState {
             setup_done: false,
             songbooks: crate::songbooks::View::default(),
             catalog: crate::catalog_songs::CatalogSongs::default(),
+            command_line: crate::cli_install::Card::default(),
             ndi_draft: None,
             // Assumed until it has been looked for.
             ndi_available: true,
@@ -5727,16 +5730,89 @@ pub fn open_page(state: &mut HomeState, page: Page) {
 }
 
 /// Settings › Integrations › Command line: the `sp` command, which controls the running app from
-/// a terminal or a script, and the button that installs it (where it can be).
+/// a terminal or a script. It says where sp stands (read again each time the card comes into
+/// view, and after each click) and offers what fits: Install, Use This Copy when sp opens
+/// another copy, Remove once it is there; under the buttons, what the last click did, in place
+/// of where it stood.
 fn command_line_card(ui: &mut egui::Ui, state: &mut HomeState) {
+    use crate::cli_install::{Status, Tone};
+    use crate::studio::{CARE, READY, TALLY, TEXT_DIM, TEXT_FAINT};
     ui.add_space(18.0);
     crate::studio::caption(ui, &t("settings.cli", "Command Line").to_uppercase());
     ui.label(t("settings.cli.about", "The sp command controls SoftPresenter from a terminal or a script."));
     ui.add_space(4.0);
-    let hint = t("settings.cli.install.hint", "Puts sp (and softpresenter) where a terminal finds it");
-    if ui.button(t("settings.cli.install", "Install\u{2026}")).on_hover_text(hint).clicked() {
-        state.menu_asked = Some(crate::menubar::Action::InstallCommandLine);
+    let card = &mut state.command_line;
+    // Not drawn in the pass before: the card has just come into view (the pane chosen, or the
+    // window opened again), so it reads afresh and forgets what it said.
+    let pass = ui.ctx().cumulative_pass_nr();
+    if card.drawn.is_none_or(|last| pass != last && pass != last + 1) {
+        card.status = None;
+        card.said = None;
     }
+    card.drawn = Some(pass);
+    let status = card.status.get_or_insert_with(crate::cli_install::status).clone();
+    let (install, removable) = match &status {
+        Status::Missing => (Some(t("settings.cli.install", "Install")), false),
+        Status::Here { findable: true, .. } => (None, true),
+        Status::Here { findable: false, .. } => (Some(t("settings.cli.install", "Install")), true),
+        Status::Elsewhere { .. } | Status::Gone { .. } => (Some(t("settings.cli.use_this", "Use This Copy")), true),
+    };
+    let mut clicked_install = false;
+    let mut clicked_remove = false;
+    ui.horizontal(|ui| {
+        if let Some(words) = install {
+            let hint = t("settings.cli.install.hint", "Puts sp (and softpresenter) where a terminal finds it");
+            clicked_install = ui.button(words).on_hover_text(hint).clicked();
+        }
+        if removable {
+            let hint = t(
+                "settings.cli.remove.hint",
+                "Takes sp and softpresenter away again, with anything SoftPresenter added for them",
+            );
+            clicked_remove = ui
+                .add(
+                    egui::Button::new(egui::RichText::new(t("settings.cli.remove", "Remove")).color(TEXT_DIM))
+                        .frame(false),
+                )
+                .on_hover_text(hint)
+                .clicked();
+        }
+    });
+    if clicked_install {
+        card.said = Some(match crate::cli_install::install() {
+            Ok(done) => (
+                if done.add_folder { Tone::Care } else { Tone::Good },
+                crate::cli_install::installed_words(&done, cfg!(windows)),
+            ),
+            Err(problem) => (Tone::Trouble, problem),
+        });
+        card.status = Some(crate::cli_install::status());
+    }
+    if clicked_remove {
+        card.said = Some(match crate::cli_install::remove() {
+            Ok(done) => (Tone::Plain, crate::cli_install::removed_words(&done)),
+            Err(problem) => (Tone::Trouble, problem),
+        });
+        card.status = Some(crate::cli_install::status());
+    }
+    let (tone, words) = card.said.clone().unwrap_or_else(|| crate::cli_install::status_words(&status, cfg!(windows)));
+    let colour = match tone {
+        Tone::Good => READY,
+        Tone::Plain => TEXT_FAINT,
+        Tone::Care => CARE,
+        Tone::Trouble => TALLY,
+    };
+    ui.add_space(2.0);
+    // A line short enough to read at a glance, wrapped beside its dot.
+    let room = (ui.available_width() - 14.0).min(640.0);
+    ui.horizontal_top(|ui| {
+        let (place, _) = ui.allocate_exact_size(vec2(8.0, 16.0), Sense::hover());
+        ui.painter().circle_filled(place.center(), 3.5, colour);
+        ui.vertical(|ui| {
+            ui.set_max_width(room);
+            ui.label(egui::RichText::new(words).size(12.0).color(TEXT_DIM));
+        });
+    });
 }
 
 /// Settings › General › Language, the first card: the words of SoftPresenter itself. The

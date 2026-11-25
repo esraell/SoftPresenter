@@ -839,102 +839,6 @@ pub fn is_command(word: &str) -> bool {
     COMMANDS.contains(&word.to_lowercase().as_str())
 }
 
-/// The names the command is installed as: the short one to type, and the full one (as links,
-/// on Unix systems).
-#[cfg(unix)]
-pub const COMMAND_NAMES: [&str; 2] = ["sp", "softpresenter"];
-
-/// Puts the `sp` (and `softpresenter`) command on the PATH: links to this program in the
-/// first of these folders that is there and can be written to without an administrator:
-/// `~/.local/bin`, then `/opt/homebrew/bin`, then `/usr/local/bin`; failing those,
-/// `~/.local/bin` is made. A link already there is replaced; a file of that name that is not a
-/// link is left alone. Returns where the short one is.
-#[cfg(unix)]
-pub fn install_command() -> Result<PathBuf, String> {
-    let program = std::env::current_exe()
-        .and_then(std::fs::canonicalize)
-        .map_err(|e| format!("Could not find this program: {e}"))?;
-    let home = std::env::var_os("HOME").map(PathBuf::from).ok_or("Could not find the home folder.")?;
-    let local = home.join(".local/bin");
-    let writable = |dir: &Path| {
-        std::fs::metadata(dir).is_ok_and(|meta| meta.is_dir())
-            && std::fs::File::create(dir.join(".softpresenter-check")).is_ok_and(|_| {
-                let _ = std::fs::remove_file(dir.join(".softpresenter-check"));
-                true
-            })
-    };
-    let folder = [local.clone(), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")]
-        .into_iter()
-        .find(|dir| writable(dir))
-        .map_or_else(
-            || {
-                std::fs::create_dir_all(&local)
-                    .map(|()| local.clone())
-                    .map_err(|e| format!("Could not make {}: {e}", local.display()))
-            },
-            Ok,
-        )?;
-    for name in COMMAND_NAMES {
-        let link = folder.join(name);
-        if let Ok(meta) = std::fs::symlink_metadata(&link) {
-            if !meta.file_type().is_symlink() {
-                return Err(format!("There is already a file at {}; it was left alone.", link.display()));
-            }
-            std::fs::remove_file(&link).map_err(|e| format!("Could not replace {}: {e}", link.display()))?;
-        }
-        std::os::unix::fs::symlink(&program, &link).map_err(|e| format!("Could not make {}: {e}", link.display()))?;
-    }
-    let link = folder.join(COMMAND_NAMES[0]);
-    let on_path = std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|dir| dir == folder));
-    if !on_path && folder == local {
-        let shell = std::env::var("SHELL").unwrap_or_default();
-        let file = if shell.ends_with("zsh") { "~/.zshrc" } else { "~/.bashrc" };
-        let later = if cfg!(target_os = "linux") { " Most Linux systems add it at your next sign-in; or" } else { "" };
-        return Err(format!(
-            "Installed {}, but ~/.local/bin is not on this terminal's PATH yet.{later} add this line to {file}: export PATH=\"$HOME/.local/bin:$PATH\"",
-            link.display()
-        ));
-    }
-    Ok(link)
-}
-
-/// On Windows: `sp.cmd` and `softpresenter.cmd` in a folder of the user's own
-/// (`%LOCALAPPDATA%\\SoftPresenter\\bin`), each starting this program with what was typed after
-/// it (and, typed alone, opening the app without holding the terminal), and that folder put on
-/// the user's PATH. Pressing Install again points them at this program, wherever it now is.
-/// Returns where `sp.cmd` is.
-#[cfg(windows)]
-pub fn install_command() -> Result<PathBuf, String> {
-    let program = std::env::current_exe().map_err(|e| format!("Could not find this program: {e}"))?;
-    let local = std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .ok_or("Could not find the folder for this user's programs (LOCALAPPDATA).")?;
-    let folder = local.join("SoftPresenter").join("bin");
-    std::fs::create_dir_all(&folder).map_err(|e| format!("Could not make {}: {e}", folder.display()))?;
-    std::fs::write(folder.join("sp.cmd"), command_file(&program))
-        .and_then(|()| std::fs::write(folder.join("softpresenter.cmd"), command_file(&program)))
-        .map_err(|e| format!("Could not write the sp command in {}: {e}", folder.display()))?;
-    sp_winapi::add_to_user_path(&folder.to_string_lossy())
-        .map_err(|e| format!("Made the sp command in {}, but {e}.", folder.display()))?;
-    Ok(folder.join("sp.cmd"))
-}
-
-/// The batch file behind `sp` on Windows: a command goes to the program and its answer and exit
-/// code come back; `sp` alone opens the app (through `start`, so the terminal isn't held until
-/// it quits). A batch file reads `%` as the start of a variable, so the path's are doubled.
-#[cfg(any(windows, test))]
-fn command_file(program: &Path) -> String {
-    let program = program.display().to_string().replace('%', "%%");
-    format!(
-        "@echo off\r\nif \"%~1\"==\"\" goto open\r\n\"{program}\" %*\r\nexit /b %errorlevel%\r\n:open\r\nstart \"\" \"{program}\"\r\n"
-    )
-}
-
-#[cfg(not(any(unix, windows)))]
-pub fn install_command() -> Result<PathBuf, String> {
-    Err("Installing the command line tool works on macOS, Windows and Linux.".to_owned())
-}
-
 /// The app bundle this program is in, when it was started through a link from outside it (the
 /// installed `softpresenter` command): opening the bundle names and places the app properly.
 #[cfg(target_os = "macos")]
@@ -3988,20 +3892,6 @@ mod tests {
         let _ = std::fs::remove_dir(&link);
         let _ = std::fs::remove_file(&link);
         let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn the_windows_sp_command_passes_commands_on_and_opens_the_app_alone() {
-        let file = command_file(Path::new(r"C:\Users\a\100% Church\SoftPresenter.exe"));
-        assert!(file.starts_with("@echo off\r\n"), "{file}");
-        // A command, with its answer's exit code; the % in the path is doubled for the batch file.
-        assert!(
-            file.contains("\"C:\\Users\\a\\100%% Church\\SoftPresenter.exe\" %*\r\nexit /b %errorlevel%"),
-            "{file}"
-        );
-        // Alone: opens the app without holding the terminal.
-        assert!(file.contains("if \"%~1\"==\"\" goto open"), "{file}");
-        assert!(file.ends_with(":open\r\nstart \"\" \"C:\\Users\\a\\100%% Church\\SoftPresenter.exe\"\r\n"), "{file}");
     }
 
     #[cfg(unix)]

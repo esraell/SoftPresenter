@@ -18,6 +18,7 @@ mod canva;
 mod catalog;
 mod catalog_cli;
 mod catalog_songs;
+mod cli_install;
 mod clock;
 mod close_button;
 mod control;
@@ -9760,8 +9761,12 @@ impl App {
             A::Quit => {}
             A::Settings => state.preferences_open = true,
             A::InstallCommandLine => {
-                // Written files, out of sight: said in the list.
-                state.notices.outcome(control::install_command().map(|link| installed_words(&link)));
+                // Written files, out of sight: said in the list (Settings' card says it in the
+                // card instead), and the card reads afresh.
+                state
+                    .notices
+                    .outcome(cli_install::install().map(|done| cli_install::installed_words(&done, cfg!(windows))));
+                state.command_line = Default::default();
             }
             A::ConfigureScreens => state.settings_open = true,
             A::SetUp => state.setup = Some(setup::Setup::new()),
@@ -10137,6 +10142,12 @@ impl ApplicationHandler<AppEvent> for App {
                 // What became of the library's folder at this start (moved to Documents, or why not).
                 if let Some(said) = library_folder::take_notice() {
                     running.home_state.notices.outcome(said);
+                }
+                // The sp command, put where a terminal finds it once for each place the app is
+                // installed in (never by a test copy), said once.
+                if let Some(said) = cli_install::at_start(self.quiet()) {
+                    applog::event("command line", &said);
+                    running.home_state.notices.info(said);
                 }
                 // Pictures, videos and leftovers nothing in the library uses go to the Trash, at
                 // most once a day, on a thread of their own; the window says so if any went.
@@ -10870,23 +10881,6 @@ impl ApplicationHandler<AppEvent> for App {
     }
 }
 
-/// What is said once the sp command is installed: where it is, and what to type to try it.
-fn installed_words(link: &std::path::Path) -> String {
-    if cfg!(windows) {
-        crate::i18n::tf(
-            "notices.command.installed_windows",
-            "Installed the sp command ({path}) and put its folder on your PATH. In a new Command Prompt, try: sp status. In PowerShell, where sp already means something else, type softpresenter status.",
-            &[("path", &link.display().to_string())],
-        )
-    } else {
-        crate::i18n::tf(
-            "notices.command.installed",
-            "Installed the sp command at {path} (and softpresenter beside it). In Terminal, try: sp status",
-            &[("path", &link.display().to_string())],
-        )
-    }
-}
-
 /// The app's icon, for its windows' title bars and the taskbar where the system takes it from
 /// the window (a Mac takes it from the app bundle instead): on Windows the icon built into the
 /// program, every size of it; on Linux a 256-pixel picture.
@@ -10994,10 +10988,19 @@ fn main() -> ExitCode {
         // `softpresenter decklink-check …`: lists the DeckLink devices, and with `play` sends a
         // test picture to one, from a terminal, without the app.
         Some("decklink-check") => return sp_decklink::check::run(&args[1..], "softpresenter decklink-check"),
-        Some("install-cli") => {
-            return match control::install_command() {
-                Ok(link) => {
-                    println!("{}", installed_words(&link));
+        // `softpresenter install-cli` and `remove-cli`: what Settings' Install and Remove do,
+        // from a terminal, answered in English as the command line is.
+        Some(verb @ ("install-cli" | "remove-cli")) => {
+            let said = i18n::with_language(i18n::Language::English, || {
+                if verb == "install-cli" {
+                    cli_install::install().map(|done| cli_install::installed_words(&done, cfg!(windows)))
+                } else {
+                    cli_install::remove().map(|done| cli_install::removed_words(&done))
+                }
+            });
+            return match said {
+                Ok(said) => {
+                    println!("{said}");
                     ExitCode::SUCCESS
                 }
                 Err(problem) => {
