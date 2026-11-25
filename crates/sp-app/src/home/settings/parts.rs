@@ -634,50 +634,62 @@ fn clip_x(points: &[Pos2], x: f32, keep_right: bool) -> Vec<Pos2> {
     }
     out
 }
+/// The part of a convex outline between the heights `top` and `bottom`.
+fn clip_y(points: &[Pos2], top: f32, bottom: f32) -> Vec<Pos2> {
+    // Across is down with x and y swapped; swapping back keeps the outline's order.
+    let swapped: Vec<Pos2> = points.iter().map(|point| pos2(point.y, point.x)).collect();
+    let kept = clip_x(&clip_x(&swapped, top, true), bottom, false);
+    kept.into_iter().map(|point| pos2(point.y, point.x)).collect()
+}
+
 /// A language's flag, 30 × 20 with small rounded corners and a faint ring: the flag most people
 /// know that language by (the United States for English, Spain, Russia, Ukraine).
 pub fn flag(painter: &egui::Painter, rect: Rect, language: crate::i18n::Language) {
     use crate::i18n::Language;
-    const R: u8 = 3;
+    const R: f32 = 3.0;
+    let rect = egui::emath::GuiRounding::round_to_pixels(rect, painter.pixels_per_point());
     let unit = rect.height() / 16.0;
-    let band = |from: f32, to: f32| {
-        Rect::from_min_max(pos2(rect.min.x, rect.min.y + from * unit), pos2(rect.max.x, rect.min.y + to * unit))
+    // The whole flag is one rounded outline, and each colour is a piece cut from it, so every
+    // corner is the same curve however thin the stripe that reaches it. The first colour fills
+    // the whole flag and each later one is laid over it, so where two colours meet, the edge
+    // blends one into the other and never shows the window behind.
+    let outline = rounded_outline(rect, R);
+    let paint = |piece: Vec<Pos2>, colour: Color32| {
+        if piece.len() >= 3 {
+            painter.add(egui::Shape::convex_polygon(piece, colour, Stroke::NONE));
+        }
     };
-    let top = CornerRadius { nw: R, ne: R, sw: 0, se: 0 };
-    let foot = CornerRadius { nw: 0, ne: 0, sw: R, se: R };
+    // Where two colours meet, the edge sits on a whole pixel, so it is one crisp line and not a
+    // row of the two blended.
+    let pixels = painter.pixels_per_point();
+    let snap = |at: f32| (at * pixels).round() / pixels;
+    let rows = |from: f32, to: f32| clip_y(&outline, snap(rect.min.y + from * unit), snap(rect.min.y + to * unit));
     match language {
         Language::English => {
             let (red, white) = (Color32::from_rgb(0xb2, 0x22, 0x34), Color32::WHITE);
             let stripe = 16.0 / 7.0;
-            for at in 0..7 {
-                let corners = match at {
-                    0 => top,
-                    6 => foot,
-                    _ => CornerRadius::ZERO,
-                };
-                let colour = if at % 2 == 0 { red } else { white };
-                painter.rect_filled(band(at as f32 * stripe, (at + 1) as f32 * stripe), corners, colour);
+            paint(outline.clone(), red);
+            for at in [1.0, 3.0, 5.0] {
+                paint(rows(at * stripe, (at + 1.0) * stripe), white);
             }
-            let canton = Rect::from_min_size(rect.min, vec2(10.5 * unit, 4.0 * stripe * unit));
-            painter.rect_filled(
-                canton,
-                CornerRadius { nw: R, ne: 0, sw: 0, se: 0 },
-                Color32::from_rgb(0x3c, 0x3b, 0x6e),
-            );
+            let canton = clip_x(&rows(0.0, 4.0 * stripe), snap(rect.min.x + 10.5 * unit), false);
+            paint(canton, Color32::from_rgb(0x3c, 0x3b, 0x6e));
         }
         Language::Spanish => {
-            painter.rect_filled(rect, R, Color32::from_rgb(0xaa, 0x15, 0x1b));
-            painter.rect_filled(band(4.0, 12.0), 0.0, Color32::from_rgb(0xf1, 0xbf, 0x00));
+            paint(outline.clone(), Color32::from_rgb(0xaa, 0x15, 0x1b));
+            paint(rows(4.0, 12.0), Color32::from_rgb(0xf1, 0xbf, 0x00));
         }
         Language::Russian => {
-            painter.rect_filled(band(0.0, 5.33), top, Color32::WHITE);
-            painter.rect_filled(band(5.33, 10.67), 0.0, Color32::from_rgb(0x00, 0x39, 0xa6));
-            painter.rect_filled(band(10.67, 16.0), foot, Color32::from_rgb(0xd5, 0x2b, 0x1e));
+            paint(outline.clone(), Color32::WHITE);
+            paint(rows(5.33, 16.0), Color32::from_rgb(0x00, 0x39, 0xa6));
+            paint(rows(10.67, 16.0), Color32::from_rgb(0xd5, 0x2b, 0x1e));
         }
         Language::Ukrainian => {
-            painter.rect_filled(band(0.0, 8.0), top, Color32::from_rgb(0x00, 0x57, 0xb7));
-            painter.rect_filled(band(8.0, 16.0), foot, Color32::from_rgb(0xff, 0xd7, 0x00));
+            paint(outline.clone(), Color32::from_rgb(0x00, 0x57, 0xb7));
+            paint(rows(8.0, 16.0), Color32::from_rgb(0xff, 0xd7, 0x00));
         }
     }
-    painter.rect_stroke(rect, R, Stroke::new(1.0, Color32::from_white_alpha(31)), StrokeKind::Outside);
+    // The design's ring: 1 point outside the flag, on the same curve.
+    let ring = rounded_outline(rect.expand(0.5), R + 0.5);
+    painter.add(egui::Shape::closed_line(ring, Stroke::new(1.0, Color32::from_white_alpha(31))));
 }
