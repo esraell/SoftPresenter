@@ -10014,6 +10014,39 @@ mod tests {
         (page.lookup.clone(), page.session_language(), slides_as_shown(&passage))
     }
 
+    /// `passage_typed` (what `bible text`, `playlist passage` and an AI assistant's question
+    /// before a passage goes on screen use) makes the passage looking it up makes, kept as Add to
+    /// keeps it, with the same first verse, and leaves the page as it was, whatever the language
+    /// and numbering typed.
+    #[test]
+    fn a_passage_made_without_the_page_is_the_one_looking_it_up_makes() {
+        let texts = |passage: &sp_model::Presentation, at: usize| {
+            passage
+                .slide(at)
+                .map(|(_, slide)| slide.texts().into_iter().map(|(_, text)| text.to_string()).collect::<Vec<_>>())
+        };
+        for reference in ["Psalm 23:4", "Пс 22:4", "gen 1 1", "Быт 1 1", "John 3:16-18", "Ів 3:16"] {
+            let mut quiet = bible_page();
+            let (passage, saved) = quiet.passage_typed(reference).expect(reference);
+            assert!(
+                quiet.lookup.is_empty() && quiet.shown.is_empty() && quiet.pending.is_none(),
+                "{reference}: the page is left as it was"
+            );
+            let mut page = bible_page();
+            page.lookup = reference.to_owned();
+            page.look_up(None);
+            let (_, deck) = page.pending.take().expect("made");
+            assert_eq!(passage.title, page.shown, "{reference}");
+            let kept = page.saved().expect("kept");
+            assert_eq!(
+                (saved.lookup.as_str(), saved.numbering.as_deref()),
+                (kept.lookup.as_str(), kept.numbering.as_deref()),
+                "{reference}"
+            );
+            assert_eq!(texts(&passage, 0), texts(&deck, page.passage_slides().start), "{reference}: the first verse");
+        }
+    }
+
     /// Return pressed again on what the field says.
     fn retyped(page: &mut BiblePage) -> (String, String, serde_json::Value) {
         let again = page.lookup.clone();

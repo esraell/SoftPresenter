@@ -85,15 +85,16 @@ impl crate::App {
             Ok(_) if call.check => {
                 let _ = reply.send(Reply::done("Allowed."));
             }
-            Ok(_) => {
+            Ok(kind) => {
                 self.mcp_call = true;
                 let answer = self.control(el, &request.args);
                 self.mcp_call = false;
                 // What it took out goes in the history now, before any later change.
                 self.keep_removed();
-                // As for `sp`, a command that only reads isn't logged: a tool reads several
-                // times to find exactly what it names, and an assistant may look often.
-                if !crate::control::only_reads(&request.args) {
+                // As for `sp`, reading isn't logged: a tool reads several times to find exactly
+                // what it names (before the person is even asked), and an assistant may look
+                // often. What reads is the policy's word, by the command's shape.
+                if kind != policy::Kind::Reads {
                     let outcome = if answer.ok { "done" } else { "not done" };
                     crate::applog::event("mcp", &format!("{tool}: {outcome}"));
                 }

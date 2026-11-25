@@ -93,7 +93,7 @@ screens now?") and goes ahead only on Yes.
 | `read_playlist` | A playlist's items in order (each with its kind, title and id), the one in front if none is named | the first switch |
 | `list_media` | The pictures and videos in the media bin | the first switch |
 | `list_messages` | The messages kept for showing over the slides | the first switch |
-| `create_song` | A new song from lyrics: its groups (Verse 1, Chorus…), slides, and a translation under each slide's lines | the first switch |
+| `create_song` | A new song from lyrics: its groups (Verse 1, Chorus…), slides, and a translation under each slide's lines (at most four lines a slide in each language, each at most 100 characters, so a whole slide always fits in a question) | the first switch |
 | `create_playlist` | A new, empty playlist | the first switch |
 | `add_to_playlist` | Songs, Bible passages, pictures or videos, headers and placeholders, in order, at the end of a playlist | the first switch |
 | `install_bible` | Downloads one of the Bibles SoftPresenter offers (a long job: see [Tasks](#long-jobs-tasks)) | the first switch |
@@ -172,8 +172,10 @@ and once); on the earlier revisions the server asks while the call waits.
 The question is written by the server from what the app found, never in the assistant's own
 words, and it shows the words that will go on the screens (the slide's, or the message's), not
 only a name: an assistant can make a song and give it any title, so a title alone proves
-nothing. Quotation marks of every kind, and the characters that change how text is shown
-(right-to-left overrides, zero-width spaces), are taken out of what it quotes.
+nothing. A slide an assistant made is always shown whole (its slides are kept small enough); a
+long slide from elsewhere in the library is shown to about 800 characters. Quotation marks of
+every kind, and the characters that change how text is shown (right-to-left overrides,
+zero-width spaces), are taken out of what it quotes.
 
 ### Long jobs (Tasks)
 

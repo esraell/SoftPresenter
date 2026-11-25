@@ -12,6 +12,14 @@ use serde_json::{Map, Value, json};
 
 use crate::control::{McpCall, Reply};
 
+/// The longest line of a song `create_song` makes, and the most lines a slide has in each
+/// language: so a slide's whole words, as `slides` joins them, fit in the question.
+const LINE_MOST: usize = 100;
+const SLIDE_LINES_MOST: usize = 4;
+
+/// How much of a slide's words a question shows: all of one `create_song` made.
+const WORDS_SHOWN: usize = 2 * SLIDE_LINES_MOST * (LINE_MOST + 3);
+
 /// What every tool answers while the app isn't running.
 pub const NOT_OPEN: &str = "SoftPresenter isn't open, so nothing can be read or changed. Open it on this computer, then try again (an assistant never opens it).";
 
@@ -208,8 +216,8 @@ pub const TOOLS: &[Tool] = &[
                                     "items": {
                                         "type": "object",
                                         "properties": {
-                                            "lines": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "The slide's lines in the main language: two is usual, four at most."},
-                                            "translation": {"type": "array", "items": {"type": "string"}, "description": "The same lines in the second language, for a song shown in two. Leave out otherwise."}
+                                            "lines": {"type": "array", "items": {"type": "string", "maxLength": 100}, "minItems": 1, "maxItems": 4, "description": "The slide's lines in the main language: two is usual, four at most, each at most 100 characters."},
+                                            "translation": {"type": "array", "items": {"type": "string", "maxLength": 100}, "maxItems": 4, "description": "The same lines in the second language, for a song shown in two (four at most, each at most 100 characters). Leave out otherwise."}
                                         },
                                         "required": ["lines"],
                                         "additionalProperties": false
@@ -790,7 +798,7 @@ fn slide_words(app: &dyn App, tool: &str, read: Vec<String>, slide: u64) -> Resu
 
 /// The words of a slide, quoted for a question, or a note that it has none.
 fn shown_words(words: &str) -> String {
-    if words.trim().is_empty() { "(a slide with no words)".to_owned() } else { quoted_name(words, 160) }
+    if words.trim().is_empty() { "(a slide with no words)".to_owned() } else { quoted_name(words, WORDS_SHOWN) }
 }
 
 fn read_playlist(args: &Args, app: &dyn App, tool: &str) -> Result<Answer, String> {
@@ -814,6 +822,10 @@ fn read_playlist(args: &Args, app: &dyn App, tool: &str) -> Result<Answer, Strin
 /// else (a section's name in brackets, or the line that parts a translation).
 fn song_line(line: &str) -> Result<String, String> {
     let line = line.replace(['\r', '\n', '\t'], " ").trim().to_owned();
+    // A slide's whole words fit in the question asked before it goes on the screens.
+    if line.chars().count() > LINE_MOST {
+        return Err(format!("A line is at most {LINE_MOST} characters; part a long one over two lines."));
+    }
     if line.starts_with('[') && line.ends_with(']') {
         return Err(format!("The line \u{201c}{line}\u{201d} would start a section; give it without the brackets."));
     }
@@ -855,6 +867,9 @@ pub fn song_text(sections: &Value) -> Result<String, String> {
             if lines.is_empty() {
                 return Err(format!("A slide of {name} has no lines."));
             }
+            if lines.len() > SLIDE_LINES_MOST {
+                return Err(format!("A slide has at most {SLIDE_LINES_MOST} lines; make two slides of {name}'s."));
+            }
             let translation: Vec<String> = slide
                 .get("translation")
                 .and_then(Value::as_array)
@@ -864,6 +879,9 @@ pub fn song_text(sections: &Value) -> Result<String, String> {
                 .into_iter()
                 .filter(|line| !line.is_empty())
                 .collect();
+            if translation.len() > SLIDE_LINES_MOST {
+                return Err(format!("A slide's translation has at most {SLIDE_LINES_MOST} lines."));
+            }
             if at > 0 {
                 out.push('\n');
             }
@@ -1340,5 +1358,25 @@ mod tests {
         assert!(word(&args(json!("x".repeat(201))), "song", 200).is_err());
         assert_eq!(word(&args(json!(3)), "song", 200), Ok("3".to_owned()));
         assert!(word(&Map::new(), "song", 200).is_err());
+    }
+
+    /// The largest slide `create_song` makes is shown whole in a question: an assistant can't
+    /// put harmless words first and others past what the person sees.
+    #[test]
+    fn the_largest_slide_an_assistant_can_make_fits_the_question_whole() {
+        let line = "x".repeat(LINE_MOST);
+        let lines = vec![line.clone(); SLIDE_LINES_MOST];
+        let sections = json!([{"name": "Verse 1", "slides": [{"lines": lines, "translation": lines}]}]);
+        assert!(song_text(&sections).is_ok());
+        // As `slides` joins a slide's lines and its translation's.
+        let joined = vec![line; 2 * SLIDE_LINES_MOST].join(" / ");
+        assert!(!shown_words(&joined).contains('\u{2026}'), "nothing cut");
+        let long = json!([{"name": "Verse 1", "slides": [{"lines": ["y".repeat(LINE_MOST + 1)]}]}]);
+        assert!(song_text(&long).is_err());
+        let many = json!([{"name": "Verse 1", "slides": [{"lines": ["a", "b", "c", "d", "e"]}]}]);
+        assert!(song_text(&many).is_err());
+        let under =
+            json!([{"name": "Verse 1", "slides": [{"lines": ["a"], "translation": ["a", "b", "c", "d", "e"]}]}]);
+        assert!(song_text(&under).is_err());
     }
 }
