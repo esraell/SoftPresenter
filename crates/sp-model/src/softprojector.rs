@@ -1,7 +1,8 @@
 //! Songs from SoftProjector, the open-source presentation program many Russian- and
 //! Ukrainian-speaking churches use. Its songs are kept in an SQLite database (its own
-//! `spData.sqlite`, or a songbook exported as `.sps`); the app reads the rows, and this turns
-//! one song's text into SoftPresenter's groups and slides.
+//! `spData.sqlite`, or a songbook exported as `.sps`); [`read_songbook`] reads the songs out of
+//! either, and [`from_softprojector`] turns one song's text into SoftPresenter's groups and
+//! slides.
 //!
 //! A song's text is blocks, each starting with a line naming it: a verse ("Куплет 1",
 //! "Verse 2"), the chorus ("Припев", "Приспів", "Chorus"), or a slide of another kind ("Слайд",
@@ -10,7 +11,217 @@
 //! of the verse or chorus before it. SoftProjector sings the chorus after every verse; the song
 //! comes with an arrangement in that order.
 
+use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::io::{Read, Seek};
+
+use crate::sqlite_read::{Database, Limits, Value, is_database};
 use crate::{Arrangement, Copyright, Group, Object, Presentation, Role, Slide, Uuid, group_color};
+
+/// One song as a songbook keeps it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SongbookSong {
+    /// Its number in its songbook.
+    pub number: Option<i64>,
+    pub title: String,
+    /// Who wrote the words, and who the music.
+    pub words: String,
+    pub music: String,
+    /// The song itself, as [`from_softprojector`] takes it.
+    pub text: String,
+    /// The name of its songbook.
+    pub book: Option<String>,
+}
+
+/// Why a file gave no songs.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SongbookProblem {
+    /// Not a songbook of a kind read here.
+    NotSongbook,
+    /// A songbook with no songs in it.
+    NoSongs,
+    /// A songbook that could not be read; why, as the end of a sentence.
+    Unreadable(String),
+}
+
+/// A song's values on the way in, as the database has them: number, title, words, music, text
+/// and the songbook's name.
+type Fields = [Value; 6];
+
+/// Every song in a SoftProjector database or an exported songbook, told by how the file
+/// starts. They come in the songbooks' order by name and, within a songbook, by number; songs
+/// with the same number stay in the order they were kept in.
+pub fn read_songbook<R: Read + Seek>(mut source: R) -> Result<Vec<SongbookSong>, SongbookProblem> {
+    let unreadable = |e: std::io::Error| SongbookProblem::Unreadable(format!("it could not be read ({e})"));
+    let mut head = Vec::new();
+    source.by_ref().take(16).read_to_end(&mut head).map_err(unreadable)?;
+    let fields = if is_database(&head) {
+        database_songs(source).map_err(|problem| problem.unwrap_or(SongbookProblem::NotSongbook))?
+    } else {
+        return Err(SongbookProblem::NotSongbook);
+    };
+    if fields.is_empty() {
+        return Err(SongbookProblem::NoSongs);
+    }
+    let words = |value: &Value| match value {
+        Value::Text(text) => text.clone(),
+        _ => String::new(),
+    };
+    Ok(fields
+        .iter()
+        .map(|[number, title, by_words, by_music, text, book]| SongbookSong {
+            number: match number {
+                Value::Integer(number) => Some(*number),
+                Value::Text(written) => written.trim().parse().ok(),
+                _ => None,
+            },
+            title: words(title),
+            words: words(by_words),
+            music: words(by_music),
+            text: words(text),
+            book: Some(words(book)).filter(|book| !book.trim().is_empty()),
+        })
+        .collect())
+}
+
+/// The most songs one file may give: many times the largest songbook, and few enough that a
+/// file made to exhaust the computer can't.
+const MOST_SONGS: usize = 200_000;
+
+/// A whole number against one with a fraction, exactly (not by rounding the whole number to
+/// the nearest the other kind can hold), so that sorting by it is always one order.
+fn whole_and_fraction(whole: i64, fraction: f64) -> Ordering {
+    // Beyond every whole number, either way (2 to the 63rd).
+    const EDGE: f64 = 9_223_372_036_854_775_808.0;
+    if fraction >= EDGE {
+        return Ordering::Less;
+    }
+    if fraction < -EDGE || fraction.is_nan() {
+        return Ordering::Greater;
+    }
+    // Inside that, the whole part is a whole number exactly.
+    let part = fraction.trunc();
+    whole.cmp(&(part as i64)).then_with(|| 0.0_f64.total_cmp(&(fraction - part)))
+}
+
+/// A songbook's id, or a song's `songbook_id`, as something to look up by: a number with no
+/// fraction is the whole number it equals.
+#[derive(PartialEq, Eq, Hash)]
+enum Id {
+    Whole(i64),
+    Fraction(u64),
+    Text(String),
+    Bytes(Vec<u8>),
+}
+
+impl Id {
+    /// `None` for nothing, which equals nothing.
+    fn of(value: &Value) -> Option<Id> {
+        Some(match value {
+            Value::Null => return None,
+            Value::Integer(whole) => Id::Whole(*whole),
+            Value::Real(x) if whole_and_fraction(*x as i64, *x) == Ordering::Equal => Id::Whole(*x as i64),
+            Value::Real(x) => Id::Fraction(x.to_bits()),
+            Value::Text(text) => Id::Text(text.clone()),
+            Value::Blob(bytes) => Id::Bytes(bytes.clone()),
+        })
+    }
+}
+
+/// Which of two values SQLite puts first when it sorts: nothing, then numbers, then text by
+/// its bytes, then bytes.
+fn sort_order(a: &Value, b: &Value, text: &impl Fn(&str, &str) -> Ordering) -> Ordering {
+    let rank = |value: &Value| match value {
+        Value::Null => 0,
+        Value::Integer(_) | Value::Real(_) => 1,
+        Value::Text(_) => 2,
+        Value::Blob(_) => 3,
+    };
+    match (a, b) {
+        (Value::Integer(a), Value::Integer(b)) => a.cmp(b),
+        (Value::Integer(a), Value::Real(b)) => whole_and_fraction(*a, *b),
+        (Value::Real(a), Value::Integer(b)) => whole_and_fraction(*b, *a).reverse(),
+        (Value::Real(a), Value::Real(b)) => a.total_cmp(b),
+        (Value::Text(a), Value::Text(b)) => text(a, b),
+        (Value::Blob(a), Value::Blob(b)) => a.cmp(b),
+        _ => rank(a).cmp(&rank(b)),
+    }
+}
+
+/// The songs of an SQLite file, as SQLite itself gives them for these two questions. Of a
+/// whole database (it has a `Songbooks` table):
+///
+/// ```sql
+/// SELECT s.number, s.title, s.words, s.music, s.song_text, b.name
+/// FROM Songs s LEFT JOIN Songbooks b ON b.id = s.songbook_id ORDER BY b.name, s.number
+/// ```
+///
+/// and of an exported songbook (it has a `SongBook` table, of one row):
+///
+/// ```sql
+/// SELECT s.number, s.title, s.words, s.music, s.song_text, (SELECT title FROM SongBook LIMIT 1)
+/// FROM Songs s ORDER BY s.number
+/// ```
+///
+/// `Err(None)` is a database that is neither.
+fn database_songs<R: Read + Seek>(source: R) -> Result<Vec<Fields>, Option<SongbookProblem>> {
+    let unreadable = |why: String| Some(SongbookProblem::Unreadable(why));
+    let limits = Limits { rows: MOST_SONGS, ..Limits::NORMAL };
+    let mut db = Database::open(source, limits).map_err(unreadable)?;
+    let (whole, one) = (db.has_table("Songbooks"), db.has_table("SongBook"));
+    if !whole && !one {
+        return Err(None);
+    }
+    let mut columns = vec!["number", "title", "words", "music", "song_text"];
+    if whole {
+        columns.push("songbook_id");
+    }
+    let songs = db.rows("Songs", &columns).map_err(unreadable)?;
+    let books = if whole { db.rows("Songbooks", &["id", "name"]) } else { db.rows("SongBook", &["title"]) };
+    let books = books.map_err(unreadable)?;
+    // The songbooks' names by id, to find a song's by its songbook_id as `=` has it for two
+    // columns of whole numbers: nothing equals nothing, and a number never equals text.
+    let mut names_by_id: HashMap<Id, Vec<&Value>> = HashMap::new();
+    for book in &books {
+        if let ([id, name], true) = (book.values.as_slice(), whole)
+            && let Some(id) = Id::of(id)
+        {
+            names_by_id.entry(id).or_default().push(name);
+        }
+    }
+    let first_title = books.first().and_then(|book| book.values.first()).cloned().unwrap_or(Value::Null);
+    let mut fields: Vec<Fields> = Vec::new();
+    for song in songs {
+        let mut values = song.values.into_iter();
+        let mut next = || values.next().unwrap_or(Value::Null);
+        let (number, title, words, music, text) = (next(), next(), next(), next(), next());
+        if !whole {
+            fields.push([number, title, words, music, text, first_title.clone()]);
+            continue;
+        }
+        // Once with each songbook of that id (there is one, where ids are the rows' numbers),
+        // or once with no songbook.
+        let names = Id::of(&next()).and_then(|id| names_by_id.get(&id)).map_or(&[][..], Vec::as_slice);
+        // Songbooks sharing an id (never, where ids are the rows' numbers) can't multiply the
+        // songs past the limit.
+        if fields.len() + names.len() > MOST_SONGS {
+            return Err(unreadable("it has more songs than any songbook".to_owned()));
+        }
+        if names.is_empty() {
+            fields.push([number, title, words, music, text, Value::Null]);
+            continue;
+        }
+        for name in names {
+            fields.push([number.clone(), title.clone(), words.clone(), music.clone(), text.clone(), (*name).clone()]);
+        }
+    }
+    let text = |a: &str, b: &str| db.text_order(a, b);
+    fields.sort_by(|[a_number, .., a_book], [b_number, .., b_book]| {
+        let by_book = if whole { sort_order(a_book, b_book, &text) } else { Ordering::Equal };
+        by_book.then_with(|| sort_order(a_number, b_number, &text))
+    });
+    Ok(fields)
+}
 
 /// What kind of block a title line starts.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -226,5 +437,147 @@ mod tests {
         assert_eq!(words(&song).len(), 1);
         assert!(song.arrangements.is_empty());
         assert_eq!(song.title, "Words");
+    }
+
+    /// What the importer made of SQLite's own answer, as JSON, when it asked the system's
+    /// SQLite tool: a number as a number or as text that is one, the rest as text or nothing.
+    fn from_sqlite_json(json: &str) -> Vec<SongbookSong> {
+        let rows: Vec<serde_json::Value> = serde_json::from_str(json).unwrap();
+        let field = |row: &serde_json::Value, key: &str| row.get(key).and_then(|v| v.as_str()).unwrap_or("").to_owned();
+        rows.iter()
+            .map(|row| SongbookSong {
+                number: row.get("number").and_then(|v| v.as_i64().or_else(|| v.as_str()?.trim().parse().ok())),
+                title: field(row, "title"),
+                words: field(row, "words"),
+                music: field(row, "music"),
+                text: field(row, "text"),
+                book: Some(field(row, "book")).filter(|b| !b.trim().is_empty()),
+            })
+            .collect()
+    }
+
+    fn read(bytes: &[u8]) -> Result<Vec<SongbookSong>, SongbookProblem> {
+        read_songbook(std::io::Cursor::new(bytes))
+    }
+
+    #[test]
+    fn a_database_and_a_songbook_give_what_sqlite_gives_for_them() {
+        // Each file with SQLite's own answer for it (`tests/songbooks/make.sh` made both).
+        let made: [(&str, &[u8], &str); 5] = [
+            (
+                "database",
+                include_bytes!("../tests/songbooks/database.sqlite"),
+                include_str!("../tests/songbooks/database.json"),
+            ),
+            (
+                "songbook",
+                include_bytes!("../tests/songbooks/songbook.sps"),
+                include_str!("../tests/songbooks/songbook.json"),
+            ),
+            (
+                "utf16le",
+                include_bytes!("../tests/songbooks/utf16le.sps"),
+                include_str!("../tests/songbooks/utf16le.json"),
+            ),
+            (
+                "utf16be",
+                include_bytes!("../tests/songbooks/utf16be.sps"),
+                include_str!("../tests/songbooks/utf16be.json"),
+            ),
+            // Songbooks sharing an id (a song comes once with each), ids that aren't whole
+            // numbers, and numbers too large to be told apart as fractions.
+            (
+                "shared",
+                include_bytes!("../tests/songbooks/shared.sqlite"),
+                include_str!("../tests/songbooks/shared.json"),
+            ),
+        ];
+        for (name, bytes, json) in made {
+            let (ours, theirs) = (read(bytes).unwrap(), from_sqlite_json(json));
+            assert_eq!(ours.len(), theirs.len(), "{name}");
+            for (at, (our, their)) in ours.iter().zip(&theirs).enumerate() {
+                assert_eq!(our, their, "{name}, song {at}");
+            }
+        }
+        // A database: songs under their songbooks' names, a songbook without a name and a song
+        // without a songbook under none, songbooks in the order of their names.
+        let songs = read(include_bytes!("../tests/songbooks/database.sqlite")).unwrap();
+        assert_eq!(songs.len(), 226);
+        let mut books: Vec<Option<&str>> = songs.iter().map(|song| song.book.as_deref()).collect();
+        books.dedup();
+        assert_eq!(books, [None, Some("Evening Hymns"), Some("Вечерние песни"), Some("Ранкові пісні")]);
+        // Songs with the same number stay in the order they were kept in.
+        let sevens: Vec<&str> =
+            songs.iter().filter(|song| song.number == Some(7)).map(|song| song.title.as_str()).collect();
+        assert_eq!(sevens, ["Песня 7", "Ранок", "Ранок удруге"]);
+        // An exported songbook: every song under the songbook's one title, by number.
+        let songs = read(include_bytes!("../tests/songbooks/songbook.sps")).unwrap();
+        assert!(songs.iter().all(|song| song.book.as_deref() == Some("Zpěvník pro zkoušku")));
+        let numbers: Vec<Option<i64>> = songs.iter().map(|song| song.number).collect();
+        assert_eq!(numbers, [None, Some(1), Some(2), Some(3), Some(3), Some(10), Some(20)]);
+        let song =
+            from_softprojector(songs[2].number, &songs[2].title, &songs[2].words, &songs[2].music, &songs[2].text);
+        assert_eq!(song.title, "2. Druhá píseň");
+        assert_eq!(song.copyright.author, "Jana / Petr");
+        assert_eq!(words(&song)[1], ("Refrén".to_owned(), "Zpívej, zpívej".to_owned()));
+    }
+
+    #[test]
+    fn a_file_that_is_no_songbook_says_so() {
+        assert_eq!(read(b""), Err(SongbookProblem::NotSongbook));
+        assert_eq!(read(b"Verse 1\nJust a song\n"), Err(SongbookProblem::NotSongbook));
+        // An SQLite file of something else, one with no songs, and one that is damaged.
+        let other = include_bytes!("../tests/songbooks/other.sqlite");
+        assert_eq!(read(other), Err(SongbookProblem::NotSongbook));
+        let empty = include_bytes!("../tests/songbooks/empty.sps");
+        assert_eq!(read(empty), Err(SongbookProblem::NoSongs));
+        let whole = include_bytes!("../tests/songbooks/songbook.sps");
+        let cut = &whole[..5 * 1024];
+        let why = "the file is cut short or damaged (a row is longer than the file)".to_owned();
+        assert_eq!(read(cut), Err(SongbookProblem::Unreadable(why)));
+        // A songbook whose songs have lost a column the import needs.
+        let narrow = include_bytes!("../tests/songbooks/narrow.sps");
+        assert!(matches!(read(narrow), Err(SongbookProblem::Unreadable(why)) if why.contains("no column song_text")));
+    }
+
+    /// Compares what real files give with what the system's SQLite gives for the importer's
+    /// two questions. Testing aid: `SOFTPRESENTER_SQLITE_FILES` names the files (separated as
+    /// in PATH); run on a Mac with
+    /// `cargo test -p sp-model the_systems_sqlite -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "needs files to compare, and /usr/bin/sqlite3"]
+    fn every_song_is_what_the_systems_sqlite_gives() {
+        let files = std::env::var_os("SOFTPRESENTER_SQLITE_FILES").expect("SOFTPRESENTER_SQLITE_FILES names the files");
+        for path in std::env::split_paths(&files) {
+            let ask = |query: &str| {
+                let output = std::process::Command::new("/usr/bin/sqlite3")
+                    .args(["-readonly", "-json"])
+                    .arg(&path)
+                    .arg(query)
+                    .output()
+                    .unwrap();
+                assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+                String::from_utf8_lossy(&output.stdout).into_owned()
+            };
+            let tables = ask("SELECT name FROM sqlite_master WHERE type = 'table'");
+            let query = if tables.contains("\"Songbooks\"") {
+                "SELECT s.number AS number, s.title AS title, s.words AS words, s.music AS music, s.song_text AS text, \
+                 b.name AS book FROM Songs s LEFT JOIN Songbooks b ON b.id = s.songbook_id ORDER BY b.name, s.number"
+            } else {
+                "SELECT s.number AS number, s.title AS title, s.words AS words, s.music AS music, s.song_text AS text, \
+                 (SELECT title FROM SongBook LIMIT 1) AS book FROM Songs s ORDER BY s.number"
+            };
+            let theirs = from_sqlite_json(&ask(query));
+            let ours = read_songbook(std::fs::File::open(&path).unwrap()).unwrap();
+            assert_eq!(ours.len(), theirs.len(), "{}", path.display());
+            for (at, (our, their)) in ours.iter().zip(&theirs).enumerate() {
+                assert_eq!(our, their, "{}, song {at}", path.display());
+            }
+            println!(
+                "{}: {} songs the same, in the same order",
+                path.file_name().unwrap().to_string_lossy(),
+                ours.len()
+            );
+        }
     }
 }

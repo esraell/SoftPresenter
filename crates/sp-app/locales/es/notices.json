@@ -71,7 +71,7 @@
   "notices.undo.kind.media": "multimedia",
   "notices.import.not_found": "No se encontró {name} ({error}).",
   "notices.import.not_songbook": "{name} no es un cancionero de SoftProjector que SoftPresenter pueda leer.",
-  "notices.import.unreadable_plain": "No se pudo leer {name}.",
+  "notices.import.songbook_unsaved": "{name} seguía abierto en SoftProjector cuando se copió, así que pueden faltar sus últimos cambios. Cierra SoftProjector e impórtalo de nuevo para estar seguro.",
   "notices.import.no_songs": "{name} no contiene canciones.",
   "notices.import.unreadable": "No se pudo leer {name} ({error}).",
   "notices.import.the_file": "El archivo",

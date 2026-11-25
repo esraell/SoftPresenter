@@ -12,6 +12,7 @@ mod rtf;
 mod softprojector;
 mod song_text;
 mod spans;
+pub mod sqlite_read;
 mod text_map;
 mod theme;
 mod transition;
@@ -29,7 +30,16 @@ pub use link::TextLink;
 pub use pro_file::example as pro_example;
 pub use pro_file::{LARGEST_PRO_FILE, ProDocument, ProMedia, read_pro_document, read_pro_file};
 pub use rtf::rtf_to_text;
-pub use softprojector::from_softprojector;
+pub use softprojector::{SongbookProblem, SongbookSong, from_softprojector, read_songbook};
+/// Small songbooks made for tests (`tests/songbooks`), for other crates' tests.
+#[cfg(any(test, feature = "test-documents"))]
+#[doc(hidden)]
+pub mod songbook_examples {
+    /// A whole database of several songbooks, 226 songs.
+    pub const DATABASE: &[u8] = include_bytes!("../tests/songbooks/database.sqlite");
+    /// One exported songbook, "Zpěvník pro zkoušku", 7 songs.
+    pub const SONGBOOK: &[u8] = include_bytes!("../tests/songbooks/songbook.sps");
+}
 pub use song_text::{
     GROUP_KEYS, clean_box_text, group_color, groups_for_key, key_for_group, parse_song_text, to_song_text,
 };

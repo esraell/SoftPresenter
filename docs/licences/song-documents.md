@@ -65,6 +65,9 @@ SoftPresenter also imports songs from SoftProjector (its `spData.sqlite` databas
 by reading SoftProjector's source code, which is published under the GPL version 3
 (github.com/SoftProjector/softprojector): the names of its tables and columns, and how it splits
 a song's text into verses and choruses. Those are facts about the format; no code was copied.
-The files are read with macOS's own `sqlite3`, read-only. The songs in a church's own
+The files are SQLite databases. SoftPresenter reads them with a small reader of its own
+(`crates/sp-model/src/sqlite_read.rs`), written from the description of the file format that
+SQLite's authors publish (sqlite.org/fileformat2.html); it uses no code from SQLite or from
+anyone else, links no library and runs no other program, and it only reads. The songs in a church's own
 SoftProjector files are the church's to bring across; the songbooks SoftProjector offers for
 download carry their publishers' copyrights, and SoftPresenter does not ship any of them.

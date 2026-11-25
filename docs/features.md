@@ -202,7 +202,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   becomes a library of its name, each song keeps its number before its title (so "123" still
   finds it), its lyricist and composer, its verses, choruses and other parts as groups (a
   "&Куплет" part as more slides of its verse), and an arrangement, "As sung", that repeats the
-  chorus after every verse as SoftProjector does. Read with macOS's own SQLite tool, read-only.
+  chorus after every verse as SoftProjector does. It works the same on a Mac, on Windows and on
+  Linux: both are SQLite files, and SoftPresenter reads them itself (`sqlite_read.rs`, written
+  from SQLite's published description of the file; nothing on the computer is asked to), never
+  writes them, and gives the songs in the order SQLite gives them: songbooks by name, songs by
+  number. A file that is cut short or damaged is refused in a sentence saying which, and a file
+  that isn't a songbook says so. A database copied while SoftProjector had it open, with
+  changes still waiting in a `-wal` or `-journal` file beside it, comes in from the database
+  alone, with a line saying its latest changes may be missing.
 - **Bringing a library across from ProPresenter 7.** File › Import Songs › A Library Folder… opens
   its Libraries folder; choose song documents, one library, or the folder of all of them. Each folder becomes a
   library of the same name. Each song keeps its groups, slides, arrangements (and the one

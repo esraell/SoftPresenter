@@ -6576,11 +6576,19 @@ impl App {
             let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
             if load::is_songbook(path) {
                 match load::import_songbook(path) {
-                    Ok(book) => read.extend(book.into_iter().map(|(song, book)| SongRead::Song {
-                        song: Ok(song),
-                        path: path.clone(),
-                        library: book.or_else(|| library.clone()),
-                    })),
+                    Ok(book) => {
+                        read.extend(book.songs.into_iter().map(|(song, book)| SongRead::Song {
+                            song: Ok(song),
+                            path: path.clone(),
+                            library: book.or_else(|| library.clone()),
+                        }));
+                        // What the operator should know of it is said with the problems.
+                        read.extend(book.cautions.into_iter().map(|caution| SongRead::Song {
+                            song: Err(caution),
+                            path: path.clone(),
+                            library: None,
+                        }));
+                    }
                     Err(problem) => {
                         read.push(SongRead::Song { song: Err(problem), path: path.clone(), library: None });
                     }

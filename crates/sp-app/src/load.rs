@@ -56,79 +56,74 @@ pub fn is_songbook(path: &Path) -> bool {
     SONGBOOK_ENDINGS.iter().any(|ending| has_extension(path, ending))
 }
 
-/// Runs one fixed query on an SQLite file with macOS's own SQLite tool, opened read-only, and
-/// returns its rows as JSON text.
-fn sqlite_rows(full: &Path, query: &str) -> Option<String> {
-    let output = std::process::Command::new("/usr/bin/sqlite3")
-        .arg("-readonly")
-        .arg("-json")
-        .arg(full)
-        .arg(query)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+/// What a file of many songs gave: each song with the name of its songbook, and anything the
+/// operator should know about what came in.
+pub struct Songbook {
+    pub songs: Vec<(Presentation, Option<String>)>,
+    pub cautions: Vec<String>,
 }
 
 /// Every song in a SoftProjector database or exported songbook, each with the name of its
 /// songbook. The two keep songs differently: the database has a `Songbooks` table and each
 /// song names its songbook; an exported songbook has one `SongBook` row (its title) and its
-/// songs. Read with macOS's own SQLite tool, opened read-only, with fixed queries.
-pub fn import_songbook(path: &Path) -> Result<Vec<(Presentation, Option<String>)>, String> {
+/// songs. Both are SQLite files, which SoftPresenter reads itself (`sp_model::sqlite_read`), the
+/// same way on every system, and never writes.
+pub fn import_songbook(path: &Path) -> Result<Songbook, String> {
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    let full = path.canonicalize().map_err(|e| {
+    let file = std::fs::File::open(path).map_err(|e| {
         tf(
             "notices.import.not_found",
             "{name} could not be found ({error}).",
             &[("name", &name), ("error", &e.to_string())],
         )
     })?;
-    let not_songbook = || {
-        tf(
+    let songs = songbook_songs(file, &name)?;
+    Ok(Songbook { songs, cautions: unsaved_changes(path, &name).into_iter().collect() })
+}
+
+/// The songs of one songbook, as presentations; `name` is the file's, for what is said of it.
+fn songbook_songs<R: std::io::Read + std::io::Seek>(
+    source: R,
+    name: &str,
+) -> Result<Vec<(Presentation, Option<String>)>, String> {
+    use sp_model::SongbookProblem;
+    let songs = sp_model::read_songbook(source).map_err(|problem| match problem {
+        SongbookProblem::NotSongbook => tf(
             "notices.import.not_songbook",
             "{name} isn't a SoftProjector songbook SoftPresenter can read.",
-            &[("name", &name)],
-        )
-    };
-    let tables = sqlite_rows(&full, "SELECT name FROM sqlite_master WHERE type = 'table'").ok_or_else(not_songbook)?;
-    let query = if tables.contains("\"Songbooks\"") {
-        "SELECT s.number AS number, s.title AS title, s.words AS words, s.music AS music, s.song_text AS text, \
-         b.name AS book FROM Songs s LEFT JOIN Songbooks b ON b.id = s.songbook_id ORDER BY b.name, s.number"
-    } else if tables.contains("\"SongBook\"") {
-        "SELECT s.number AS number, s.title AS title, s.words AS words, s.music AS music, s.song_text AS text, \
-         (SELECT title FROM SongBook LIMIT 1) AS book FROM Songs s ORDER BY s.number"
-    } else {
-        return Err(not_songbook());
-    };
-    let text = sqlite_rows(&full, query)
-        .ok_or_else(|| tf("notices.import.unreadable_plain", "{name} could not be read.", &[("name", &name)]))?;
-    if text.trim().is_empty() {
-        return Err(tf("notices.import.no_songs", "{name} has no songs in it.", &[("name", &name)]));
-    }
-    let rows: Vec<serde_json::Value> = serde_json::from_str(&text).map_err(|e| {
-        tf(
-            "notices.import.unreadable",
-            "{name} could not be read ({error}).",
-            &[("name", &name), ("error", &e.to_string())],
-        )
+            &[("name", name)],
+        ),
+        SongbookProblem::NoSongs => tf("notices.import.no_songs", "{name} has no songs in it.", &[("name", name)]),
+        SongbookProblem::Unreadable(why) => {
+            tf("notices.import.unreadable", "{name} could not be read ({error}).", &[("name", name), ("error", &why)])
+        }
     })?;
-    let field = |row: &serde_json::Value, key: &str| row.get(key).and_then(|v| v.as_str()).unwrap_or("").to_owned();
-    Ok(rows
-        .iter()
-        .map(|row| {
-            let number = row.get("number").and_then(|v| v.as_i64().or_else(|| v.as_str()?.trim().parse().ok()));
-            let song = sp_model::from_softprojector(
-                number,
-                &field(row, "title"),
-                &field(row, "words"),
-                &field(row, "music"),
-                &field(row, "text"),
-            );
-            let book = Some(field(row, "book")).filter(|b| !b.trim().is_empty());
-            (song, book)
+    Ok(songs
+        .into_iter()
+        .map(|song| {
+            let made = sp_model::from_softprojector(song.number, &song.title, &song.words, &song.music, &song.text);
+            (made, song.book)
         })
         .filter(|(song, _)| song.slide_count() > 0)
         .collect())
+}
+
+/// A database copied while the program that keeps it had it open may have changes waiting in
+/// a file beside it (`-wal`, or `-journal` part way through a change). Only the database itself
+/// is read, so the operator is told its latest changes may be missing.
+fn unsaved_changes(path: &Path, name: &str) -> Option<String> {
+    let beside = |ending: &str| {
+        let mut other = path.as_os_str().to_owned();
+        other.push(ending);
+        std::fs::metadata(other).is_ok_and(|meta| meta.is_file() && meta.len() > 0)
+    };
+    (beside("-wal") || beside("-journal")).then(|| {
+        tf(
+            "notices.import.songbook_unsaved",
+            "{name} was still open in SoftProjector when it was copied, so its latest changes may be missing. Close SoftProjector and import it again to be sure.",
+            &[("name", name)],
+        )
+    })
 }
 
 /// The files to import for the paths given, each with the library it goes into. A file goes
@@ -507,6 +502,45 @@ mod tests {
         let files = files_to_import(std::slice::from_ref(&dir.0));
         assert_eq!(files.len(), 1);
         assert!(files[0].0.ends_with("Harbour Lights.proBundle"));
+    }
+
+    #[test]
+    fn a_songbook_and_a_database_come_in_on_every_system() {
+        use sp_model::songbook_examples::{DATABASE, SONGBOOK};
+        let dir = TempDir::new("songbooks");
+        // An exported songbook: its songs under its title, numbers before their titles.
+        let book = import_songbook(&dir.write("Zkouška.sps", SONGBOOK)).unwrap();
+        assert!(book.cautions.is_empty());
+        assert_eq!(book.songs.len(), 7);
+        assert!(book.songs.iter().all(|(_, book)| book.as_deref() == Some("Zpěvník pro zkoušku")));
+        let titles: Vec<&str> = book.songs.iter().map(|(song, _)| song.title.as_str()).collect();
+        assert_eq!(titles[..4], ["Без номера", "1. První píseň", "2. Druhá píseň", "3. Третья"]);
+        let second = &book.songs[2].0;
+        assert_eq!(second.copyright.author, "Jana / Petr");
+        assert_eq!(second.groups[0].slides[0].text_for(&Role::primary()), Some("Žluťoučký kůň běží polem"));
+        assert_eq!(second.groups[1].name, "Refrén");
+        // A whole database: each song under its own songbook; the two without words stay out.
+        let all = import_songbook(&dir.write("spData.sqlite", DATABASE)).unwrap();
+        assert_eq!(all.songs.len(), 224);
+        let mut books: Vec<Option<&str>> = all.songs.iter().map(|(_, book)| book.as_deref()).collect();
+        books.dedup();
+        assert_eq!(books, [None, Some("Evening Hymns"), Some("Вечерние песни"), Some("Ранкові пісні")]);
+        assert!(
+            all.songs.iter().any(|(song, book)| song.title == "7. Ранок" && book.as_deref() == Some("Ранкові пісні"))
+        );
+        // Changes still waiting in a file beside it are not read, and that is said.
+        dir.write("spData.sqlite-wal", b"changes not yet in the database");
+        let all = import_songbook(&dir.0.join("spData.sqlite")).unwrap();
+        assert_eq!(all.songs.len(), 224);
+        assert!(all.cautions[0].contains("latest changes may be missing"), "{:?}", all.cautions);
+        // What isn't a songbook says so, in a sentence.
+        let problem = |path: &Path| import_songbook(path).err().unwrap();
+        assert!(problem(&dir.write("Notes.sps", b"just some words")).contains("isn't a SoftProjector songbook"));
+        assert!(
+            problem(&dir.write("Cut.sps", &SONGBOOK[..5 * 1024]))
+                .contains("Cut.sps could not be read (the file is cut short")
+        );
+        assert!(problem(&dir.0.join("Gone.sps")).contains("Gone.sps could not be found"));
     }
 
     #[test]
