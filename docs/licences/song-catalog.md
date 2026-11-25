@@ -30,10 +30,29 @@ song packs with words written for them.
 - A church that copies a song into its library is responsible for the licence it needs to show
   that song, as for any song.
 
+## Offered in development builds only
+
+Until the source has answered the owner's email (24 November 2026), the windows that offer the
+catalog (the setup's Free Songs step, Settings › Integrations › Worship Leader App) are shown
+only in development builds: those compiled with `SOFTPRESENTER_DEV_VERSION` set
+(`catalog::offered`). A release shows none of them. The `sp catalog` commands are in every build.
+
+## Which languages
+
+The source publishes no list of its packs to fetch (its folder of packs refuses to be listed).
+Its download page has a table of them, with English names and rounded song counts, and says
+the files are brought up to date daily; it states no terms of use. The app's list
+(`catalog/books.rs`) was written from that table as it stood on 24 November 2026, leaving out
+the full database, the same songs in another script, and the packs listed with about ten songs;
+the page is never read by the app. The table's counts don't agree with the packs, so they are
+not kept: a window shows the size the source gives for a pack, and its songs once downloaded.
+
 ## What the app does with the source
 
 - It asks for `<language>.qsp` with `If-None-Match` and `If-Modified-Since` from the last
-  fetch, so a check that finds nothing new downloads nothing.
+  fetch, so a check that finds nothing new downloads nothing. It asks for the file as it is
+  (`Accept-Encoding: identity`): asked for compressed, the source compresses the zip again as it
+  sends and gives no length, so a window could say neither its size nor how far it has got.
 - The file is untrusted: it is read through the same bounded zip reader as the other zip files
   the app opens, each song file is bounded in size and depth, a song that isn't well-formed is
   left out, and a pack that would empty most of the catalog is not believed.

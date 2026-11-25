@@ -123,7 +123,9 @@ fn get_once(base: &str, url: &str, have: &Have, progress: Option<&Progress>) -> 
         ureq::Error::StatusCode(code) => Failed::Server(format!("The song source answered {code}, not the songs.")),
         other => Failed::Network(format!("Could not reach the song source: {other}")),
     };
-    let mut request = agent(base).get(url);
+    // The pack as it is: asked for compressed, the source compresses it as it sends (a zip
+    // gains nothing) and then gives no length, so no per cent and no check for a cut-short body.
+    let mut request = agent(base).get(url).header("Accept-Encoding", "identity");
     if let Some(etag) = &have.etag {
         request = request.header("If-None-Match", etag);
     }
@@ -175,10 +177,10 @@ fn get_once(base: &str, url: &str, have: &Have, progress: Option<&Progress>) -> 
 }
 
 /// How big a language's pack is, as the server says, without downloading it. `None` when the
-/// server doesn't say.
+/// server doesn't say. Asked for as it is: asked for compressed, the source gives no length.
 pub fn size_of(base: &str, lang: &str) -> Result<Option<u64>, String> {
     let url = pack_url(base, lang)?;
-    let response = agent(base).head(&url).call().map_err(|e| match e {
+    let response = agent(base).head(&url).header("Accept-Encoding", "identity").call().map_err(|e| match e {
         ureq::Error::StatusCode(404) => format!("There are no {lang} songs at the source."),
         other => format!("Could not reach the song source: {other}"),
     })?;

@@ -67,6 +67,7 @@ mod setup;
 mod show_cli;
 mod slide_cli;
 mod song_ids;
+mod songbooks;
 mod stage;
 mod stage_editor;
 mod studio;
@@ -8627,6 +8628,11 @@ impl App {
                         running.home_state.preferences_pane = 4;
                         running.home_state.canva.open = true;
                     }
+                    // The songbooks' page, where the song catalog is offered.
+                    "songbooks" => {
+                        running.home_state.preferences_pane = 4;
+                        running.home_state.songbooks.open = true;
+                    }
                     "remote" => {
                         running.home_state.preferences_pane =
                             home::PANES.iter().position(|pane| *pane == "Remote Control").unwrap_or(0);
@@ -9999,8 +10005,11 @@ impl ApplicationHandler<AppEvent> for App {
                 running.home_state.apply_prefs(&prefs);
                 // The setup opens once on every Mac that hasn't seen it yet, a fresh install or
                 // one set up before there was a setup. Testing aid: SOFTPRESENTER_SETUP=1 shows
-                // it in a quiet run too.
-                if (!prefs.setup_done && !self.quiet()) || std::env::var_os("SOFTPRESENTER_SETUP").is_some() {
+                // it in a quiet run too, and SOFTPRESENTER_SETUP=<step> (free-songs, bibles…)
+                // opens it at that step.
+                if let Ok(step) = std::env::var("SOFTPRESENTER_SETUP") {
+                    running.home_state.setup = Some(setup::Setup::opened_at(&step));
+                } else if !prefs.setup_done && !self.quiet() {
                     running.home_state.setup = Some(setup::Setup::new());
                 }
                 // From before start-up was a macro: whether Settings said to start with the
@@ -10305,6 +10314,8 @@ impl ApplicationHandler<AppEvent> for App {
                 WindowEvent::RedrawRequested => {
                     let commands = self.draw_panel(id);
                     self.apply(commands);
+                    // Settings may have asked for a songbook.
+                    self.handle_songbooks();
                     self.sync_screens(el);
                 }
                 _ => {
@@ -10618,6 +10629,7 @@ impl ApplicationHandler<AppEvent> for App {
                 self.handle_import_answer();
                 self.handle_slides_choice();
                 self.handle_setup();
+                self.handle_songbooks();
                 // The Bible page's set-up (translations, boxes, options) is remembered the
                 // moment it changes, so it is as it was left at the next start.
                 if let Some(running) = self.running.as_mut() {

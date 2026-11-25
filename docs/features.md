@@ -233,10 +233,22 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   read in the background; the notice says when its songs are in. Its pictures keep their own
   file names in the Media folder (numbered when the name is taken), so the media bin shows those
   names.
-- **The song catalog** (the engine and `sp catalog`; its windows are being built): free songs
-  from Worship Leader App, a songbook for each language, downloaded from the source by each
-  church and kept in `Catalog/worshipleaderapp/<language>/` of the data folder, apart from the
-  library. The pack is kept as downloaded (about 1.3 MB for Ukrainian, 16 MB for Russian), with an
+- **The song catalog** (the engine and `sp catalog`; its find box and chooser are being built):
+  free songs from Worship Leader App, a songbook for each language, downloaded from the source
+  by each church and kept in `Catalog/worshipleaderapp/<language>/` of the data folder, apart
+  from the library. **In development builds only**, until Worship Leader App has answered: the
+  setup's Free Songs step (after Songs) lists the songbooks, each named in its own language
+  (Latin and Cyrillic names; the others in English, which every system can draw), with the
+  download's size as the source gives it and the songs once downloaded; the operator's own
+  language (SoftPresenter's, from the first step) is ticked to start with, and every other
+  language the source publishes is a click away (Other languages…). Continue downloads what is
+  ticked in the background once the setup closes (by its last button or Escape), with a notice
+  when each starts and ends; Not Now downloads nothing, nor does leaving the setup before that
+  step's Continue; with the source out of reach it says so, with Try Again, and nothing is
+  ticked. Settings › Integrations › Worship Leader App downloads more
+  later or removes one (asking first; songs already in the library stay), the recommended ones
+  listed first. The languages are built in, from the source's table of 24 November 2026: it
+  publishes no list to fetch. The pack is kept as downloaded (about 1.3 MB for Ukrainian, 16 MB for Russian), with an
   index made once from it: a search of 14,000 songs takes a third of a millisecond, and reading
   the index at a start under twenty. Search finds words in a title or in the first line of a
   section, in Cyrillic or Latin, whatever the case, with ё as е, stress marks and punctuation
@@ -1251,7 +1263,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   offered, the audience screen shows in a window until a TV or projector is plugged in (it
   then fills it at once), or goes over NDI; bringing songs in (one click for a library of
   `.pro` song documents found in the Documents folder, "Look for a Song Library", or song
-  files); which Bible goes on top and which below; and what the system will ask permission
+  files); in a development build, free songbooks to start with (see the song catalog); which
+  Bible goes on top and which below; and what the system will ask permission
   for and why: on a Mac the local network, the Documents folder and the app that draws a
   presentation as pictures; on Windows the firewall, the first time a screen is sent over NDI
   or Remote Control is switched on (choose Allow for private networks). Linux asks nothing, so

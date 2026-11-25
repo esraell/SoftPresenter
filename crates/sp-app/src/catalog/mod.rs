@@ -10,14 +10,18 @@
 //! are brought up to date, and a song the church changed is never overwritten, a newer version
 //! is offered instead.
 //!
-//! This module is the engine, with no window of its own: `read` (the song pack), `fold`
-//! (searching alike), `store` (the files), `search`, `fetch` (the network), `present` (making a
-//! song and judging an update).
+//! This module is the engine, with no window of its own: `books` (the songbooks the source
+//! publishes, and which to recommend), `read` (the song pack), `fold` (searching alike), `store`
+//! (the files), `search`, `fetch` (the network), `present` (making a song and judging an
+//! update). The windows that show it (the setup's Free Songs step, Settings › Integrations) are
+//! in `songbooks`, and are offered only in development builds for now ([`offered`]).
 
-// The window's find box, chooser and setup step are built on this engine next; until they are, the
-// commands use part of it and the rest (the whole of `Catalog`'s API for a window) is tested only.
+// The window's find box and chooser are built on this engine next; until they are, the commands
+// and the songbook windows use part of it and the rest (the whole of `Catalog`'s API for a
+// window) is tested only.
 #![allow(dead_code, unused_imports)]
 
+mod books;
 mod fetch;
 mod fold;
 mod present;
@@ -25,6 +29,7 @@ mod read;
 mod search;
 mod store;
 
+pub use books::{SONGBOOKS, Songbook, in_name_order, recommended, songbook};
 pub use fetch::{Have, Progress, Reply, base_url};
 pub use fold::fold;
 pub use present::{
@@ -35,7 +40,21 @@ pub use read::{KEY_VERSION, Section, Song, Version, read_pack, song_key, text_ha
 pub use search::{Found, Hit, search_indexes};
 pub use store::{Catalog, Entry, Gone, Installed, LangIndex, date_of, lang_of_key, valid_language};
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+/// True in a development build: one made with `SOFTPRESENTER_DEV_VERSION` set when it was
+/// compiled. The catalog's windows are offered only there until Worship Leader App has answered
+/// about the app offering its songs (the owner, 24 November 2026); a release shows none of them.
+pub const DEV_BUILD: bool = option_env!("SOFTPRESENTER_DEV_VERSION").is_some();
+
+/// Whether the windows offer the catalog: the setup's Free Songs step and Settings ›
+/// Integrations › Worship Leader App. The `sp catalog` commands are there in every build.
+pub fn offered() -> bool {
+    static OFFERED: OnceLock<bool> = OnceLock::new();
+    // Testing aid: SOFTPRESENTER_CATALOG_OFFERED=1 offers the catalog's windows in a build that
+    // isn't a development build, to try them.
+    *OFFERED.get_or_init(|| DEV_BUILD || std::env::var("SOFTPRESENTER_CATALOG_OFFERED").is_ok_and(|v| v == "1"))
+}
 
 /// The catalog's name inside the data folder and in a song's mark.
 pub const SOURCE: &str = "worshipleaderapp";

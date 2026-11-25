@@ -44,6 +44,8 @@ pub enum Step {
     Welcome,
     Screens,
     Songs,
+    /// Free songbooks from the song catalog, where it is offered (`songbooks`).
+    FreeSongs,
     Bibles,
     Permissions,
     Done,
@@ -56,6 +58,7 @@ impl Step {
             Step::Welcome => t("setup.step.welcome", "Welcome"),
             Step::Screens => t("setup.step.screens", "Screens"),
             Step::Songs => t("setup.step.songs", "Songs"),
+            Step::FreeSongs => t("setup.step.free_songs", "Free Songs"),
             Step::Bibles => t("setup.step.bibles", "Bibles"),
             Step::Permissions => t("setup.step.permissions", "Permissions"),
             Step::Done => t("setup.step.done", "Done"),
@@ -63,14 +66,19 @@ impl Step {
     }
 }
 
-/// The steps on `system`, in order. Linux has no Permissions step: nothing there asks.
-fn steps(system: System) -> &'static [Step] {
-    const ALL: [Step; 6] = [Step::Welcome, Step::Screens, Step::Songs, Step::Bibles, Step::Permissions, Step::Done];
-    const NOTHING_ASKS: [Step; 5] = [Step::Welcome, Step::Screens, Step::Songs, Step::Bibles, Step::Done];
-    match system {
-        System::Mac | System::Windows => &ALL,
-        System::Linux => &NOTHING_ASKS,
+/// The steps on `system`, in order. Linux has no Permissions step: nothing there asks. Free
+/// Songs follows Songs where the song catalog is offered (`catalog::offered`).
+fn steps(system: System, catalog: bool) -> Vec<Step> {
+    let mut steps = vec![Step::Welcome, Step::Screens, Step::Songs];
+    if catalog {
+        steps.push(Step::FreeSongs);
     }
+    steps.push(Step::Bibles);
+    if system != System::Linux {
+        steps.push(Step::Permissions);
+    }
+    steps.push(Step::Done);
+    steps
 }
 
 /// The setup while it is open.
@@ -86,11 +94,32 @@ pub struct Setup {
     pub looked: bool,
     /// What bringing songs in came to, in plain words.
     pub songs_said: Option<String>,
+    /// The songbooks ticked on the Free Songs step.
+    pub free_songs: crate::songbooks::Picked,
 }
 
 impl Setup {
     pub fn new() -> Setup {
-        Setup { step: Step::Welcome, library_found: None, looked: false, songs_said: None }
+        Setup {
+            step: Step::Welcome,
+            library_found: None,
+            looked: false,
+            songs_said: None,
+            free_songs: crate::songbooks::Picked::default(),
+        }
+    }
+
+    /// The setup opened at the step a testing aid names (`free-songs`, `bibles`…), or at its
+    /// start for any other value.
+    pub fn opened_at(name: &str) -> Setup {
+        let wanted = name.trim().to_ascii_lowercase().replace(['-', '_', ' '], "");
+        let mut setup = Setup::new();
+        let all =
+            [Step::Welcome, Step::Screens, Step::Songs, Step::FreeSongs, Step::Bibles, Step::Permissions, Step::Done];
+        if let Some(step) = all.into_iter().find(|step| format!("{step:?}").to_ascii_lowercase() == wanted) {
+            setup.step = step;
+        }
+        setup
     }
 }
 
@@ -146,20 +175,31 @@ pub fn setup_ui(ctx: &egui::Context, show: &Show, state: &mut HomeState, command
         .frame(frame)
         .show(ctx, |ui| {
             let system = System::THIS;
-            let steps = steps(system);
+            let steps = steps(system, crate::catalog::offered());
+            // A step this build doesn't offer (Free Songs named by a testing aid) is never shown.
+            if !steps.contains(&setup.step) {
+                setup.step = steps[0];
+            }
             ui.set_width(540.0);
-            steps_bar(ui, setup.step, steps);
+            steps_bar(ui, setup.step, &steps);
             ui.add_space(18.0);
+            let mut not_now = false;
             match setup.step {
                 Step::Welcome => welcome(ui, system),
                 Step::Screens => screens(ui, state),
                 Step::Songs => songs(ui, &mut setup, state, system),
+                Step::FreeSongs => {
+                    not_now = crate::songbooks::setup_step(ui, &mut setup.free_songs, &mut state.songbooks);
+                }
                 Step::Bibles => bibles(ui, state),
                 Step::Permissions => permissions(ui, system),
                 Step::Done => done(ui, show, state, commands),
             }
             ui.add_space(20.0);
             let at = steps.iter().position(|step| *step == setup.step).unwrap_or(0);
+            if not_now && at + 1 < steps.len() {
+                setup.step = steps[at + 1];
+            }
             ui.horizontal(|ui| {
                 if at == 0 {
                     if link(ui, t("setup.skip", "Skip setup")).clicked() {
@@ -176,6 +216,10 @@ pub fn setup_ui(ctx: &egui::Context, show: &Show, state: &mut HomeState, command
                         _ => t("setup.continue", "Continue"),
                     };
                     if button(ui, label, true).clicked() {
+                        // Continue on Free Songs: what is ticked downloads once the setup closes.
+                        if setup.step == Step::FreeSongs {
+                            setup.free_songs.confirmed = true;
+                        }
                         if last {
                             open = false;
                         } else {
@@ -193,6 +237,7 @@ pub fn setup_ui(ctx: &egui::Context, show: &Show, state: &mut HomeState, command
     } else {
         state.setup_done = true;
         state.identify = false;
+        crate::songbooks::setup_closed(&setup.free_songs, &mut state.songbooks);
     }
 }
 
@@ -221,17 +266,17 @@ fn steps_bar(ui: &mut egui::Ui, now: Step, steps: &[Step]) {
     });
 }
 
-fn title(ui: &mut egui::Ui, text: &str) {
+pub(crate) fn title(ui: &mut egui::Ui, text: &str) {
     ui.label(RichText::new(text).font(semibold(20.0)).color(Color32::WHITE));
     ui.add_space(6.0);
 }
 
-fn say(ui: &mut egui::Ui, text: &str) {
+pub(crate) fn say(ui: &mut egui::Ui, text: &str) {
     ui.add(egui::Label::new(RichText::new(text).size(13.0).color(TEXT_DIM)).wrap());
 }
 
 /// A rounded button; `main` for the one that goes on.
-fn button(ui: &mut egui::Ui, label: &str, main: bool) -> egui::Response {
+pub(crate) fn button(ui: &mut egui::Ui, label: &str, main: bool) -> egui::Response {
     let font = if main { semibold(13.0) } else { egui::FontId::proportional(13.0) };
     let width = ui.painter().layout_no_wrap(label.to_owned(), font.clone(), TEXT).size().x + 32.0;
     let (place, response) = ui.allocate_exact_size(vec2(width.max(90.0), 30.0), Sense::click());
@@ -246,7 +291,7 @@ fn button(ui: &mut egui::Ui, label: &str, main: bool) -> egui::Response {
     response
 }
 
-fn link(ui: &mut egui::Ui, label: &str) -> egui::Response {
+pub(crate) fn link(ui: &mut egui::Ui, label: &str) -> egui::Response {
     ui.add(egui::Label::new(RichText::new(label).size(12.5).color(TEXT_FAINT)).sense(Sense::click()))
         .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -848,7 +893,7 @@ mod tests {
                 words.extend([asks.title, asks.intro, asks.after].map(str::to_owned));
                 words.extend(asks.questions.iter().flat_map(|(what, why)| [what.to_string(), why.to_string()]));
             }
-            words.extend(steps(system).iter().map(|step| step.name().to_owned()));
+            words.extend(steps(system, true).iter().map(|step| step.name().to_owned()));
             words.join("\n")
         })
     }
@@ -871,7 +916,23 @@ mod tests {
         for said in ["macOS may ask", "on this Mac", "the File menu", "Word", "What macOS will ask", "Local Network"] {
             assert!(words.contains(said), "a Mac doesn't hear {said:?}:\n{words}");
         }
-        assert_eq!(steps(System::Mac).len(), 6);
+        assert_eq!(steps(System::Mac, false).len(), 6);
+    }
+
+    #[test]
+    fn free_songs_follows_songs_only_where_the_catalog_is_offered() {
+        for system in [System::Mac, System::Windows, System::Linux] {
+            // Not offered (a release): the steps as they always were.
+            assert!(!steps(system, false).contains(&Step::FreeSongs), "{system:?}");
+            let offered = steps(system, true);
+            let songs = offered.iter().position(|step| *step == Step::Songs);
+            assert_eq!(offered.get(songs.map_or(0, |at| at + 1)), Some(&Step::FreeSongs), "{system:?}");
+            assert_eq!(offered.len(), steps(system, false).len() + 1);
+        }
+        // A testing aid opens it at a step by name.
+        assert_eq!(Setup::opened_at("free-songs").step, Step::FreeSongs);
+        assert_eq!(Setup::opened_at("Bibles").step, Step::Bibles);
+        assert_eq!(Setup::opened_at("1").step, Step::Welcome);
     }
 
     #[test]
@@ -882,10 +943,10 @@ mod tests {
             assert!(windows.contains(said), "Windows doesn't hear {said:?}:\n{windows}");
         }
         assert!(windows.contains("this computer") && windows.contains("\u{2193} button in the left column"));
-        assert!(steps(System::Windows).contains(&Step::Permissions));
+        assert!(steps(System::Windows, false).contains(&Step::Permissions));
         // Nothing asks on Linux, so it has no Permissions step.
         assert!(asks(System::Linux).is_none());
-        assert_eq!(steps(System::Linux), [Step::Welcome, Step::Screens, Step::Songs, Step::Bibles, Step::Done]);
+        assert_eq!(steps(System::Linux, false), [Step::Welcome, Step::Screens, Step::Songs, Step::Bibles, Step::Done]);
         assert!(!all_words(System::Linux).contains("Permissions"));
     }
 

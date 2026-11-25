@@ -25,6 +25,10 @@ const LOOK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// How long to wait, with something on screen or open for editing, before trying again.
 const BUSY_RETRY: Duration = Duration::from_secs(5 * 60);
 
+/// What came of a download, in words: from its language, its outcome or problem, and the
+/// seconds it took.
+type DownloadWords = fn(&str, Result<&Outcome, &str>, f32) -> Result<String, String>;
+
 /// What a background job finished.
 struct Done {
     job: Option<u64>,
@@ -51,11 +55,18 @@ pub struct CatalogState {
     apply_pending: bool,
     /// The first look over the copies has been made.
     looked_once: bool,
+    /// The source's answers about how big songbooks are, for the windows (`songbooks`).
+    sizes_tx: Sender<Vec<catalog::Size>>,
+    sizes_rx: Receiver<Vec<catalog::Size>>,
+    /// The songbooks on this computer are to be read again for the windows: at the start, after
+    /// a download and after a removal.
+    stale: bool,
 }
 
 impl Default for CatalogState {
     fn default() -> CatalogState {
         let (tx, rx) = channel();
+        let (sizes_tx, sizes_rx) = channel();
         let now = Instant::now();
         CatalogState {
             catalog: Catalog::in_data_dir().map(Arc::new),
@@ -66,6 +77,9 @@ impl Default for CatalogState {
             next_look: now + FIRST_LOOK_AFTER,
             apply_pending: false,
             looked_once: false,
+            sizes_tx,
+            sizes_rx,
+            stale: true,
         }
     }
 }
@@ -101,34 +115,7 @@ pub struct Applied {
 
 /// A language's name in English, for the sentences `sp` says; the code itself for one not known.
 pub fn language_name(code: &str) -> String {
-    let base = code.split('-').next().unwrap_or(code);
-    match base {
-        "en" => "English",
-        "ru" => "Russian",
-        "uk" => "Ukrainian",
-        "es" => "Spanish",
-        "de" => "German",
-        "fr" => "French",
-        "pt" => "Portuguese",
-        "ro" => "Romanian",
-        "pl" => "Polish",
-        "cs" => "Czech",
-        "sk" => "Slovak",
-        "bg" => "Bulgarian",
-        "hu" => "Hungarian",
-        "tr" => "Turkish",
-        "kk" => "Kazakh",
-        "ky" => "Kyrgyz",
-        "uz" => "Uzbek",
-        "az" => "Azerbaijani",
-        "mn" => "Mongolian",
-        "ar" => "Arabic",
-        "ko" => "Korean",
-        "sv" => "Swedish",
-        "be" => "Belarusian",
-        _ => return code.to_owned(),
-    }
-    .to_owned()
+    catalog::songbook(code).map_or_else(|| code.to_owned(), |book| book.english.to_owned())
 }
 
 /// A language's name as the window's notices say it, in the language set (in English as
@@ -433,12 +420,156 @@ impl crate::App {
         Ok(())
     }
 
+    /// Starts downloading a language on a thread of its own (see [`Catalog::download`]): for
+    /// `sp catalog download` and the songbook windows alike. `words` says what came of it (the
+    /// outcome or the problem, and the seconds it took), for the job and the notices.
+    fn start_catalog_download(&mut self, lang: String, job: Option<u64>, words: DownloadWords) -> Result<(), String> {
+        let named = lang.clone();
+        self.catalog_spawn(vec![lang], job, false, move |engine, progress| {
+            let started = Instant::now();
+            let outcome = engine.download(&named, now(), progress.first().map(|(_, p)| p.as_ref()));
+            let installed = matches!(outcome, Ok(Outcome::Installed(_)));
+            let seconds = started.elapsed().as_secs_f32();
+            (words(&named, outcome.as_ref().map_err(String::as_str), seconds), installed)
+        })
+    }
+
+    /// Carries out what the songbook windows (the setup's Free Songs step, Settings ›
+    /// Integrations) asked, and tells them what is known: the songbooks on this computer, the
+    /// downloads under way and the sizes the source gave. Called after each drawing of a window;
+    /// does nothing where the catalog isn't offered.
+    pub(crate) fn handle_songbooks(&mut self) {
+        if !catalog::offered() {
+            return;
+        }
+        let Some(running) = self.running.as_mut() else { return };
+        let asks = std::mem::take(&mut running.home_state.songbooks.asks);
+        for ask in asks {
+            match ask {
+                crate::songbooks::Ask::Download(langs) => self.download_songbooks(langs),
+                crate::songbooks::Ask::Remove(lang) => self.remove_songbook(&lang),
+                crate::songbooks::Ask::Look(langs) => self.look_at_songbooks(langs),
+            }
+        }
+        let answers: Vec<Vec<catalog::Size>> = self.catalog.sizes_rx.try_iter().collect();
+        let installed = std::mem::take(&mut self.catalog.stale).then(|| {
+            let Some(engine) = self.catalog.catalog.as_ref() else { return Default::default() };
+            engine
+                .installed()
+                .into_iter()
+                .filter_map(|lang| {
+                    let index = engine.index(&lang).ok().flatten()?;
+                    Some((lang, index.entries.len()))
+                })
+                .collect()
+        });
+        let busy = self.catalog.busy.iter().map(|(lang, progress)| (lang.clone(), progress.per_cent())).collect();
+        let Some(running) = self.running.as_mut() else { return };
+        let known = &mut running.home_state.songbooks.known;
+        known.busy = busy;
+        if let Some(installed) = installed {
+            known.installed = installed;
+        }
+        for sizes in answers {
+            known.take_sizes(sizes);
+        }
+    }
+
+    /// Downloads songbooks the windows chose, each on a thread of its own, saying so in one
+    /// notice; those here already or under way are left alone.
+    fn download_songbooks(&mut self, langs: Vec<String>) {
+        let here = self.catalog.catalog.as_ref().map(|engine| engine.installed()).unwrap_or_default();
+        let mut started: Vec<String> = Vec::new();
+        for lang in langs {
+            let wanted = catalog::valid_language(&lang)
+                && !here.contains(&lang)
+                && !started.contains(&lang)
+                && !self.catalog.busy.iter().any(|(busy, _)| *busy == lang);
+            if !wanted {
+                continue;
+            }
+            match self.start_catalog_download(lang.clone(), None, window_download_words) {
+                Ok(()) => started.push(lang),
+                Err(problem) => {
+                    if let Some(running) = self.running.as_mut() {
+                        running.home_state.notices.trouble(problem);
+                    }
+                }
+            }
+        }
+        let name = |lang: &String| catalog::songbook(lang).map_or_else(|| lang.clone(), |book| book.name().to_owned());
+        let said = match started.as_slice() {
+            [] => return,
+            [one] => tf(
+                "notices.songbooks.downloading",
+                "Downloading the {name} songbook from Worship Leader App in the background.",
+                &[("name", &name(one))],
+            ),
+            many => tn(
+                "notices.songbooks.downloading_several",
+                many.len() as u64,
+                "Downloading {n} songbook from Worship Leader App in the background: {names}.",
+                "Downloading {n} songbooks from Worship Leader App in the background: {names}.",
+                &[("names", &many.iter().map(name).collect::<Vec<_>>().join(", "))],
+            ),
+        };
+        crate::applog::event("catalog", &format!("downloading {} for the window", started.join(", ")));
+        if let Some(running) = self.running.as_mut() {
+            running.home_state.notices.info(said);
+        }
+    }
+
+    /// Takes a songbook off this computer, as Settings asked (it asked first). Songs already in
+    /// the library stay. Done is seen in the list, so only a failure is said.
+    fn remove_songbook(&mut self, lang: &str) {
+        if self.catalog.busy.iter().any(|(busy, _)| busy == lang) {
+            return;
+        }
+        let Ok(engine) = self.catalog_engine() else { return };
+        self.catalog.stale = true;
+        match engine.remove(lang) {
+            Ok(_) => crate::applog::event("catalog", &format!("removed the {lang} songs from Settings")),
+            Err(problem) => {
+                let name = catalog::songbook(lang).map_or(lang, |book| book.name());
+                let said = tf(
+                    "notices.songbooks.remove_failed",
+                    "The {name} songbook couldn\u{2019}t be removed: {problem}",
+                    &[("name", name), ("problem", &problem)],
+                );
+                if let Some(running) = self.running.as_mut() {
+                    running.home_state.notices.trouble(said);
+                }
+            }
+        }
+    }
+
+    /// Asks the source how big these songbooks are, on a thread of its own (a request that
+    /// downloads nothing); the answer comes back to `handle_songbooks`.
+    fn look_at_songbooks(&mut self, langs: Vec<String>) {
+        let Ok(engine) = self.catalog_engine() else { return };
+        let langs: Vec<String> = langs.into_iter().filter(|lang| catalog::valid_language(lang)).collect();
+        if langs.is_empty() {
+            return;
+        }
+        if let Some(running) = self.running.as_mut() {
+            running.home_state.songbooks.known.looking.extend(langs.iter().cloned());
+        }
+        let tx = self.catalog.sizes_tx.clone();
+        let spawned = std::thread::Builder::new().name("song catalog sizes".to_owned()).spawn(move || {
+            let _ = tx.send(engine.sizes(&langs, true));
+        });
+        if let Err(problem) = spawned {
+            crate::applog::problem("catalog", &format!("could not ask the source about sizes: {problem}"));
+        }
+    }
+
     /// Takes in what the catalog's threads have finished, starts the monthly check when it is due
     /// and nothing is on screen, and looks over the library's copies once a pack has been filed.
     /// Called from the idle loop; returns when it next wants to be called.
     pub(crate) fn tick_catalog(&mut self) -> Option<Instant> {
         while let Ok(done) = self.catalog.rx.try_recv() {
             self.catalog.busy.retain(|(lang, _)| !done.langs.contains(lang));
+            self.catalog.stale = true;
             if done.installed {
                 self.catalog.apply_pending = true;
             }
@@ -746,16 +877,13 @@ impl crate::App {
             return Err(format!("The {lang} songs are being downloaded already."));
         }
         let job = self.start_job();
-        let named = lang.clone();
-        self.catalog_spawn(vec![lang.clone()], Some(job), false, move |engine, progress| {
-            let started = Instant::now();
-            let outcome = engine.download(&named, now(), progress.first().map(|(_, p)| p.as_ref()));
-            let installed = matches!(outcome, Ok(Outcome::Installed(_)));
-            let result = outcome.map(|outcome| {
-                let took = crate::i18n::number(f64::from(started.elapsed().as_secs_f32()), 1);
-                format!("{} ({took} {})", outcome_words(&named, &outcome), t("common.seconds_unit", "s"))
-            });
-            (result, installed)
+        self.start_catalog_download(lang.clone(), Some(job), |lang, outcome, seconds| {
+            outcome
+                .map(|outcome| {
+                    let took = crate::i18n::number(f64::from(seconds), 1);
+                    format!("{} ({took} {})", outcome_words(lang, outcome), t("common.seconds_unit", "s"))
+                })
+                .map_err(str::to_owned)
         })?;
         Ok(Reply::done(format!(
             "Downloading the {} songs in the background (job {job}); sp catalog shows how far it has got.",
@@ -908,6 +1036,26 @@ impl crate::App {
             (Ok(describe(engine, &langs, true).0), false)
         })?;
         Ok(Reply::done(format!("Asking the source how big each is, in the background (job {job}).")))
+    }
+}
+
+/// What a download the songbook windows started came to, for the notices, in the app's language.
+fn window_download_words(lang: &str, outcome: Result<&Outcome, &str>, _seconds: f32) -> Result<String, String> {
+    let name = catalog::songbook(lang).map_or(lang, |book| book.name());
+    match outcome {
+        Ok(Outcome::Installed(done)) => Ok(tf(
+            "notices.songbooks.done",
+            "The {name} songbook is on this computer: {songs} from Worship Leader App.",
+            &[("name", name), ("songs", &crate::songbooks::songs_words(done.songs))],
+        )),
+        Ok(Outcome::Unchanged { .. }) => {
+            Ok(tf("notices.songbooks.unchanged", "The {name} songbook is up to date.", &[("name", name)]))
+        }
+        Err(problem) => Err(tf(
+            "notices.songbooks.failed",
+            "The {name} songbook didn\u{2019}t download: {problem}",
+            &[("name", name), ("problem", problem)],
+        )),
     }
 }
 

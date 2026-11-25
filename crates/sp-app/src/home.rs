@@ -565,6 +565,8 @@ pub struct HomeState {
     pub setup_request: Option<crate::setup::SetupRequest>,
     /// True once the setup has been seen, so it isn't shown again at the next start.
     pub setup_done: bool,
+    /// The song catalog's songbooks as the setup and Settings show them (`songbooks`).
+    pub songbooks: crate::songbooks::View,
     /// An NDI name being typed in the Screens window, and the screen it is for. It is used
     /// when the field is left, so NDI is not restarted at every letter.
     pub ndi_draft: Option<(sp_model::Uuid, String)>,
@@ -1892,6 +1894,7 @@ impl Default for HomeState {
             setup: None,
             setup_request: None,
             setup_done: false,
+            songbooks: crate::songbooks::View::default(),
             ndi_draft: None,
             // Assumed until it has been looked for.
             ndi_available: true,
@@ -5746,7 +5749,8 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
         ui.add_space(12.0);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match pane {
             "Integrations" => {
-                crate::integrations::pane(ui, &mut state.voxlive, &mut state.canva);
+                let songbooks = crate::catalog::offered().then_some(&mut state.songbooks);
+                crate::integrations::pane(ui, &mut state.voxlive, &mut state.canva, songbooks);
                 command_line_card(ui, state);
             }
             "About" => {

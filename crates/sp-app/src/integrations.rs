@@ -1,5 +1,6 @@
 //! Settings › Integrations: the services SoftPresenter works with, each a row with its state,
-//! opening a page of its own to connect it: VoxLive, and Canva Sync.
+//! opening a page of its own to connect it: VoxLive, Canva Sync, and the free songbooks of
+//! Worship Leader App where the song catalog is offered (`songbooks`).
 
 use egui::{Align, Align2, Color32, FontId, Layout, Rect, Sense, Stroke, pos2, vec2};
 
@@ -31,16 +32,31 @@ pub enum Request {
     CloseLook,
 }
 
+/// The colour of the songbooks' mark.
+const SONGBOOKS: Color32 = Color32::from_rgb(58, 128, 98);
+
 /// The pane: the list of services, or the page of the one open, or a screen's look.
-pub fn pane(ui: &mut egui::Ui, view: &mut View, canva: &mut crate::canva::View) {
+/// `songbooks` is given only where the song catalog is offered.
+pub fn pane(
+    ui: &mut egui::Ui,
+    view: &mut View,
+    canva: &mut crate::canva::View,
+    songbooks: Option<&mut crate::songbooks::View>,
+) {
     if view.look.is_some() {
         look_page(ui, view);
     } else if view.open {
         voxlive_page(ui, view);
     } else if canva.open {
         canva_page(ui, canva);
+    } else if let Some(songbooks) = songbooks {
+        if songbooks.open {
+            songbooks_page(ui, songbooks);
+        } else {
+            list(ui, view, canva, Some(songbooks));
+        }
     } else {
-        list(ui, view, canva);
+        list(ui, view, canva, None);
     }
 }
 
@@ -70,7 +86,12 @@ fn state_words(status: &Status) -> (Color32, String) {
     }
 }
 
-fn list(ui: &mut egui::Ui, view: &mut View, canva: &mut crate::canva::View) {
+fn list(
+    ui: &mut egui::Ui,
+    view: &mut View,
+    canva: &mut crate::canva::View,
+    songbooks: Option<&mut crate::songbooks::View>,
+) {
     ui.label(
         egui::RichText::new(t(
             "integrations.list.about",
@@ -108,6 +129,51 @@ fn list(ui: &mut egui::Ui, view: &mut View, canva: &mut crate::canva::View) {
     ) {
         canva.open = true;
     }
+    if let Some(songbooks) = songbooks {
+        ui.add_space(8.0);
+        let about = (
+            SONGBOOKS,
+            "W",
+            crate::catalog::SOURCE_NAME,
+            t("integrations.songbooks.service", "Free songbooks, one for each language"),
+        );
+        let (have, words) = crate::songbooks::state_words(songbooks);
+        let hint = t("integrations.songbooks.hint", "Download songbooks, or remove them");
+        if service_row(ui, about, (if have { GOOD } else { TEXT_FAINT }, words), hint) {
+            songbooks.open = true;
+        }
+    }
+}
+
+/// Settings › Integrations › Worship Leader App: its songbooks, to download or remove.
+fn songbooks_page(ui: &mut egui::Ui, view: &mut crate::songbooks::View) {
+    if ui
+        .add(
+            egui::Button::new(egui::RichText::new(t("integrations.back", "‹ Integrations")).color(TEXT_DIM))
+                .frame(false),
+        )
+        .clicked()
+    {
+        view.open = false;
+    }
+    ui.add_space(6.0);
+    let (have, words) = crate::songbooks::state_words(view);
+    ui.horizontal(|ui| {
+        mark(ui, 44.0, SONGBOOKS, "W");
+        ui.add_space(6.0);
+        ui.vertical(|ui| {
+            ui.label(egui::RichText::new(crate::catalog::SOURCE_NAME).font(crate::studio::semibold(18.0)).color(TEXT));
+            ui.horizontal(|ui| {
+                let (place, _) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
+                ui.painter().circle_filled(place.center(), 3.5, if have { GOOD } else { TEXT_FAINT });
+                ui.label(egui::RichText::new(words).size(12.0).color(TEXT_DIM));
+            });
+        });
+    });
+    ui.add_space(10.0);
+    let width = ui.available_width().min(560.0);
+    ui.set_max_width(width);
+    crate::songbooks::settings_page(ui, view);
 }
 
 /// A service's row in the list: its mark, name and what it does, and how it stands. True when
@@ -1089,5 +1155,38 @@ mod tests {
         assert!(!frame(Some(egui::Key::Enter)), "and the question has gone");
         ctx.data_mut(|data| data.insert_temp(disconnecting_id("voxlive"), true));
         assert!(frame(Some(egui::Key::Enter)), "Return disconnects");
+    }
+
+    /// Every word the pane draws in one frame.
+    fn words_drawn(mut songbooks: Option<&mut crate::songbooks::View>) -> Vec<String> {
+        fn walk(shape: &egui::Shape, words: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => words.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, words)),
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        let (mut voxlive, mut canva) = (View::default(), crate::canva::View::default());
+        let mut drawn = ctx.run_ui(egui::RawInput::default(), |ui| {
+            pane(ui, &mut voxlive, &mut canva, songbooks.as_deref_mut());
+        });
+        drawn.textures_delta.clear();
+        let mut words = Vec::new();
+        drawn.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut words));
+        words
+    }
+
+    #[test]
+    fn the_songbooks_are_listed_only_where_the_catalog_is_offered() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let without = words_drawn(None);
+            assert!(without.iter().any(|w| w == "VoxLive") && without.iter().any(|w| w == "Canva Sync"), "{without:?}");
+            assert!(!without.iter().any(|w| w.contains("Worship Leader App")), "{without:?}");
+            let mut songbooks = crate::songbooks::View::default();
+            let with = words_drawn(Some(&mut songbooks));
+            assert!(with.iter().any(|w| w == "Worship Leader App"), "{with:?}");
+            assert!(with.iter().any(|w| w == "Not downloaded"), "{with:?}");
+        });
     }
 }

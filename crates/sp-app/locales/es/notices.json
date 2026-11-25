@@ -347,5 +347,11 @@
   "notices.opening.macro": "Lo que se reproducía al abrir SoftPresenter es ahora la macro {macro} de la pestaña Macros, con Ejecutar al abrir SoftPresenter marcado. Reproduce {what} en la capa de anuncios.",
   "notices.opening.goes_off": " Se quita cuando una diapositiva sale en pantalla, hasta que se vuelva a iniciar.",
   "notices.opening.was_behind": " (Antes, la lista multimedia se reproducía detrás de las diapositivas.)",
-  "notices.opening.audience_off": "Empezar con las pantallas del público apagadas es ahora el paso Apagar las pantallas del público de la macro {macro} de la pestaña Macros, que se ejecuta al abrir SoftPresenter."
+  "notices.opening.audience_off": "Empezar con las pantallas del público apagadas es ahora el paso Apagar las pantallas del público de la macro {macro} de la pestaña Macros, que se ejecuta al abrir SoftPresenter.",
+  "notices.songbooks.downloading": "Descargando el cancionero {name} de Worship Leader App en segundo plano.",
+  "notices.songbooks.downloading_several": ["Descargando {n} cancionero de Worship Leader App en segundo plano: {names}.", "Descargando {n} cancioneros de Worship Leader App en segundo plano: {names}."],
+  "notices.songbooks.done": "El cancionero {name} ya está en este ordenador: {songs} de Worship Leader App.",
+  "notices.songbooks.unchanged": "El cancionero {name} está al día.",
+  "notices.songbooks.failed": "El cancionero {name} no se descargó: {problem}",
+  "notices.songbooks.remove_failed": "No se pudo quitar el cancionero {name}: {problem}"
 }

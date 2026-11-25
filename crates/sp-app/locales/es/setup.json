@@ -70,5 +70,11 @@
   "setup.asks.windows.after": "Si elegiste Cancelar por error, permite SoftPresenter en la configuración del Firewall de Windows.",
   "setup.done.title": "Ya está todo listo",
   "setup.done.about": "Haz clic en una diapositiva para ponerla en pantalla, pulsa las flechas o la barra espaciadora para avanzar y Esc para borrarlo todo. La página de la Biblia busca los pasajes mientras escribes, como “John 3 16” o “Ин 3:16”.",
-  "setup.done.test_slide": "Mostrar una diapositiva de prueba"
+  "setup.done.test_slide": "Mostrar una diapositiva de prueba",
+  "setup.step.free_songs": "Canciones gratis",
+  "setup.free_songs.title": "Canciones para empezar",
+  "setup.free_songs.about": "Canciones gratis de Worship Leader App, un cancionero para cada idioma. Se guardan en este ordenador, aparte de tus canciones, y solo pasan a tu biblioteca cuando usas una.",
+  "setup.free_songs.others": "Otros idiomas…",
+  "setup.free_songs.later": "Los cancioneros marcados se descargan en segundo plano cuando termina la configuración. Puedes descargar más, o quitarlos, en Ajustes › Integraciones.",
+  "setup.free_songs.not_now": "Ahora no"
 }

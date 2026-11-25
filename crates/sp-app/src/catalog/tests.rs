@@ -536,7 +536,8 @@ fn serve(etag: &'static str, modified: &'static str, body: Vec<u8>) -> Server {
                 |name: &str, value: &str| text.lines().any(|l| l.to_lowercase().starts_with(name) && l.contains(value));
             let unchanged = has("if-none-match:", etag);
             log.lock().expect("log").push(format!(
-                "{line} | none-match: {} | modified-since: {}",
+                "{line} | identity: {} | none-match: {} | modified-since: {}",
+                has("accept-encoding:", "identity"),
                 has("if-none-match:", etag),
                 has("if-modified-since:", modified)
             ));
@@ -599,6 +600,8 @@ fn a_second_download_asks_with_the_servers_validators_and_a_304_costs_no_downloa
     assert!(sizes[2].problem.as_deref().is_some_and(|p| p.contains("no zz songs")), "{:?}", sizes[2]);
     let asked = server.asked.lock().expect("log").clone();
     assert!(asked.iter().skip(2).all(|line| line.starts_with("HEAD")), "{asked:?}");
+    // Every request asks for the pack as it is, so the source says how long it is.
+    assert!(asked.iter().all(|line| line.contains("identity: true")), "{asked:?}");
 }
 
 #[test]
