@@ -13,7 +13,7 @@ mod decklink;
 mod held;
 mod next_picture;
 pub use decklink::DeckLinkStatus;
-use held::{For, Held, Part, Totals};
+use held::{For, Happened, Held, Part, Totals};
 use next_picture::{Next, NextPicture};
 use sp_render::{
     Fonts, Layers, MovingPicture, Painter, Picture, Solid, SolidPass, build_layers, read_pixels,
@@ -198,6 +198,9 @@ struct NdiReadback {
     buffer: wgpu::Buffer,
     padded_row: usize,
     done: Arc<Mutex<Option<bool>>>,
+    /// When the copy was asked for (after the drawing it copies), for the NDI sources'
+    /// per-minute line: how long it took to come back.
+    asked: Instant,
 }
 
 /// How soon the idle output thread looks at the GPU again while it still holds memory the
@@ -1218,6 +1221,9 @@ struct Output {
     ndi_pending: Vec<NdiReadback>,
     ndi_buffers: Vec<wgpu::Buffer>,
     ndi_dirty: Option<NdiChange>,
+    /// True while `ndi_dirty` is a drawing put off (not one asked for again after a picture was
+    /// lost): another put off before it is drawn passes it over, which the sources count.
+    ndi_put_off: bool,
     /// The sources the NDI pictures were last drawn for, each with how many times receivers
     /// had come to it by then.
     ndi_drawn_for: Vec<(Uuid, u32)>,
@@ -1296,6 +1302,8 @@ struct Output {
     /// When a video last gave a new picture, or a message last came (so a video just shown is
     /// looked at often from the start).
     video_moved_at: Instant,
+    /// When a video (or a box's video or NDI picture) last gave a new picture.
+    video_came_at: Option<Instant>,
     /// `sp_render::ndi_changes` as last drawn, and how visible each NDI source then was.
     ndi_seen: u64,
     ndi_visible_seen: Vec<f32>,
@@ -1374,6 +1382,7 @@ fn run(
         ndi_pending: Vec::new(),
         ndi_buffers: Vec::new(),
         ndi_dirty: None,
+        ndi_put_off: false,
         ndi_drawn_for: Vec::new(),
         ndi_lost: Lost::default(),
         ndi_lost_trouble: crate::applog::Lasting::default(),
@@ -1418,6 +1427,7 @@ fn run(
         preview_targets: Vec::new(),
         previewed_at: Instant::now(),
         video_moved_at: Instant::now(),
+        video_came_at: None,
         ndi_seen: 0,
         ndi_visible_seen: Vec::new(),
         preview_shown: None,
@@ -1735,7 +1745,7 @@ fn run(
                         .collect();
                     output.identify_since = Instant::now();
                     // Names appear and go at once, whatever was fading.
-                    output.fading = None;
+                    output.set_fading(None);
                     for target in &mut output.targets {
                         target.fade = None;
                         target.shown = None;
@@ -1838,9 +1848,15 @@ impl Output {
     }
 
     /// Ends the pass under way; one held up is written to the log, with where its time went and
-    /// what the DeckLink and NDI threads were doing.
+    /// what the DeckLink and NDI threads were doing. One long enough to hold up an NDI picture
+    /// is kept a while, and an NDI source's hitch is told with what this thread was doing then.
     fn end_pass(&mut self) {
         let now = Instant::now();
+        if self.held.is_long(now) {
+            let totals = self.totals();
+            self.held.keep(now, totals);
+        }
+        self.tell_ndi_hitches(now);
         let Some(took) = self.held.end(now) else { return };
         let began_at = chrono::Local::now() - chrono::Duration::from_std(took).unwrap_or_default();
         let began_at = began_at.format("%H:%M:%S%.3f").to_string();
@@ -1873,6 +1889,40 @@ impl Output {
             ));
         }
         crate::applog::event("output", &line);
+    }
+
+    /// Says in the log, for each NDI source that has had a hitch since this last looked (a new
+    /// picture sent more than two pictures' times after the one before while pictures were
+    /// moving, which somebody watching could see), what held it up: on the source's thread,
+    /// and on this one then. At most one line every few seconds for each source (see
+    /// `NdiOutput::hitch_to_tell`); otherwise one atomic load per source.
+    fn tell_ndi_hitches(&self, now: Instant) {
+        for (_, ndi) in &self.ndi {
+            let Some((hitch, more)) = ndi.hitch_to_tell(now) else { continue };
+            let ms = |took: Duration| format!("{:.1} ms", took.as_secs_f64() * 1000.0);
+            let more = match more {
+                0 => String::new(),
+                1 => " (1 more since the last such line)".to_owned(),
+                more => format!(" ({more} more since the last such line)"),
+            };
+            let then = self
+                .held
+                .then(hitch.at.checked_sub(hitch.gap).unwrap_or(hitch.at), hitch.at, |what| self.step_for(what));
+            crate::applog::problem(
+                "ndi",
+                &format!(
+                    "NDI \"{}\" stood still: {} between two new pictures, up to {}, while pictures were moving and \
+                     somebody watched{more}. The picture was handed over {} after the one before was sent, waited {} \
+                     for NDI's thread and took {} to send. On the screens' thread then: {then}",
+                    ndi.name(),
+                    ms(hitch.gap),
+                    held::clock(hitch.at),
+                    ms(hitch.handed_after),
+                    ms(hitch.waited),
+                    ms(hitch.took),
+                ),
+            );
+        }
     }
 
     /// Waits as `wait` does (for at most `most`, when it says), as the end of one pass and the
@@ -1993,11 +2043,20 @@ impl Output {
         self.ndi_sound.retain(|(have, _)| *have != id);
         // Starting never waits on NDI: the source starts on its own thread.
         let status = name.map(|name| {
-            // Its thread says when its receivers come and go; it only passes the word on.
+            // Its thread says when its receivers come and go; it only passes the word on. It
+            // says in the log each minute how its pictures went out.
             let tell = self.from_ndi.clone();
-            let started = NdiOutput::start_with_wake(&name, move || {
+            let wake = move || {
                 let _ = tell.send(OutputMsg::NdiReceivers);
+            };
+            let log: sp_ndi::Log = Arc::new(|line: &str, problem: bool| {
+                if problem {
+                    crate::applog::problem("ndi", line);
+                } else {
+                    crate::applog::event("ndi", line);
+                }
             });
+            let started = NdiOutput::start_with_wake(&name, wake, log);
             match started {
                 Ok(ndi) => {
                     let entry = NdiEntry::Started(ndi.name().to_owned(), ndi.watch());
@@ -2047,6 +2106,7 @@ impl Output {
         self.ndi_pending.clear();
         self.ndi_buffers.clear();
         self.ndi_dirty = None;
+        self.ndi_put_off = false;
         self.ndi_lost = Lost::default();
         self.ndi_lost_trouble = crate::applog::Lasting::default();
     }
@@ -2413,6 +2473,7 @@ impl Output {
             // Nobody is watching (or no source could start): no picture is owed, so none is
             // undrawn, whatever went wrong while someone watched.
             self.ndi_dirty = None;
+            self.ndi_put_off = false;
             self.ndi_drawn_for.clear();
             self.ndi_state.not_asked();
             self.ndi_trouble = crate::applog::Lasting::default();
@@ -2421,21 +2482,34 @@ impl Output {
             return;
         }
         if !self.ndi_pending.is_empty() {
+            // Drawn when the picture before it is back. One already put off is passed over: its
+            // sources never get it, and count it.
+            if std::mem::replace(&mut self.ndi_put_off, true) {
+                let wanted: Vec<Uuid> = seen.iter().filter(|source| source.wanted).map(|source| source.id).collect();
+                self.ndi_note(&wanted, sp_ndi::Before::PassedOver);
+            }
+            self.held.happened(Instant::now(), Happened::NdiPutOff);
             self.ndi_dirty = Some(changed);
             return;
         }
         self.ndi_dirty = None;
+        self.ndi_put_off = false;
         self.ndi_lost.painting();
         self.ndi_drawn_for =
             seen.iter().filter(|source| source.wanted).map(|source| (source.id, source.arrivals)).collect();
         let (w, h) = NDI_SIZE;
         let mut all_painted = true;
-        for (place, group) in groups.into_iter().enumerate() {
+        let mut groups = groups.into_iter().enumerate();
+        while let Some((place, group)) = groups.next() {
             // Not asked for after a picture the GPU was too slow with: it waits for the next
-            // try, and so do the pictures after it.
+            // try, and so do the pictures after it, which their sources count as not drawn.
             if self.round.slow {
                 self.ndi_state.skipped();
                 all_painted = false;
+                for (_, group) in std::iter::once((place, group)).chain(groups.by_ref()) {
+                    self.ndi_note(&group.fills, sp_ndi::Before::NotDrawn);
+                    self.ndi_note(&group.keys, sp_ndi::Before::NotDrawn);
+                }
                 break;
             }
             // Its picture is the one its sources are sending.
@@ -2456,6 +2530,8 @@ impl Output {
                 }
                 // The other sources' pictures are still drawn, unless the GPU was too slow.
                 self.ndi_state.failed(&e);
+                self.ndi_note(&group.fills, sp_ndi::Before::NotDrawn);
+                self.ndi_note(&group.keys, sp_ndi::Before::NotDrawn);
                 all_painted = false;
                 continue;
             }
@@ -2493,10 +2569,11 @@ impl Output {
                     *flag = Some(result.is_ok());
                 }
             });
-            self.held.since(Part::Readback, For::Ndi(group.of), reading_back);
+            let asked = self.held.since(Part::Readback, For::Ndi(group.of), reading_back);
             let ids = group.fills.into_iter().chain(group.keys.iter().copied()).collect();
             let sent = ndi_sent(see_through);
-            self.ndi_pending.push(NdiReadback { ids, keys: group.keys, sent, place, buffer, padded_row, done });
+            let readback = NdiReadback { ids, keys: group.keys, sent, place, buffer, padded_row, done, asked };
+            self.ndi_pending.push(readback);
         }
         if !all_painted {
             return;
@@ -2556,13 +2633,26 @@ impl Output {
     /// picture nobody is watching for any more is owed to nobody. Said in the log once while
     /// it lasts.
     fn ndi_lost(&mut self, ids: &[Uuid]) {
+        // Each source still watched counts it, every time.
+        self.ndi_note(ids, sp_ndi::Before::Lost);
         for (id, ndi) in self.ndi.iter().filter(|(id, _)| ids.contains(id)) {
             ndi.forget_as(self.see_through(*id).is_some());
         }
         if ndi_lost_is_owed(ids, &self.ndi_seen()) {
+            self.held.happened(Instant::now(), Happened::NdiLost);
             self.ndi_lost.one_lost();
             if self.ndi_lost_trouble.is_news("An NDI picture could not be read back.") {
                 crate::applog::problem("output", "An NDI picture could not be read back.");
+            }
+        }
+    }
+
+    /// Tells the NDI sources among `ids` that somebody is watching (or whose count isn't known)
+    /// what became of a picture meant for them, for their per-minute line. Never waits.
+    fn ndi_note(&self, ids: &[Uuid], what: sp_ndi::Before) {
+        for (_, ndi) in self.ndi.iter().filter(|(id, _)| ids.contains(id)) {
+            if ndi_wanted(&ndi.state(), ndi.receivers()) {
+                ndi.note(what);
             }
         }
     }
@@ -2619,10 +2709,12 @@ impl Output {
                     // any more would only throw it away: it is told that the picture it had
                     // is out of date, which is all this one would have told it.
                     let mut sources: Vec<(&NdiOutput, sp_ndi::Sent)> = Vec::new();
+                    let came_back = sp_ndi::Before::CameBack(readback.asked.elapsed());
                     for (id, ndi) in self.ndi.iter().filter(|(id, _)| readback.ids.contains(id)) {
                         if ndi_wanted(&ndi.state(), ndi.receivers()) {
                             // A key and its fill are handed these same pixels together.
                             let sent = if readback.keys.contains(id) { sp_ndi::Sent::Key } else { readback.sent };
+                            ndi.note(came_back);
                             sources.push((ndi, sent));
                         } else {
                             ndi.forget_as(self.see_through(*id).is_some());
@@ -2728,27 +2820,15 @@ impl Output {
         let started = Instant::now();
         self.draw_now(new_picture, moving_only);
         self.timing.add(started.elapsed());
+        // How each NDI source's pictures went out is its own line, from its own thread.
         let (videos, screens, ndi) = (self.video_pictures, self.targets.len(), self.ndi.len());
         let spare = self.painter.spare_bytes() >> 20;
-        let (held, sources) = (&mut self.held, &self.ndi);
+        let held = &mut self.held;
         let extra = || {
-            let mut words = format!(
+            format!(
                 "{videos} video pictures, {screens} windows, {ndi} NDI, painter holds {spare} MB; {}",
                 held.minute_words()
-            );
-            // A picture NDI took long to send held up nothing here (sending is on the source's
-            // own thread), but is worth knowing of.
-            for (_, source) in sources {
-                let longest = source.longest_send();
-                if longest >= held::HELD {
-                    words.push_str(&format!(
-                        "; NDI \"{}\" took {:.1} ms to send a picture",
-                        source.name(),
-                        longest.as_secs_f64() * 1000.0
-                    ));
-                }
-            }
-            words
+            )
         };
         if self.timing.report_each_minute("output", extra) {
             self.video_pictures = 0;
@@ -2889,7 +2969,7 @@ impl Output {
                 (target.id, target.config.width, target.config.height)
             };
             if !clock_started && self.is_stage(id) {
-                self.fading = fading.then(|| (Instant::now(), self.look));
+                self.set_fading(fading.then(|| (Instant::now(), self.look)));
                 self.windows_behind = false;
                 clock_started = true;
             }
@@ -2930,7 +3010,7 @@ impl Output {
             }
         }
         if !clock_started {
-            self.fading = fading.then(|| (Instant::now(), self.look));
+            self.set_fading(fading.then(|| (Instant::now(), self.look)));
         }
         self.windows_behind = false;
         // The preview follows, fading if the screens do.
@@ -2974,16 +3054,34 @@ impl Output {
     }
 
     /// Notes how one painting went: a picture that was given up counts against a pretended slow
-    /// GPU, and the drawing under way hears of any trouble.
+    /// GPU, is kept for saying what held up an NDI picture, and the drawing under way hears of
+    /// any trouble.
     fn paint_noted<T>(&mut self, pretending: bool, painted: &Result<T, sp_render::PaintError>) {
+        let too_slow = painted.as_ref().is_err_and(sp_render::PaintError::worth_trying_again);
+        if too_slow {
+            self.held.happened(Instant::now(), Happened::GpuTooSlow);
+        }
         // Only a picture that was given up counts: one drawn before is not waited for.
         if pretending
-            && painted.as_ref().is_err_and(sp_render::PaintError::worth_trying_again)
+            && too_slow
             && let Some(slow) = &mut self.pretend_slow
         {
             slow.left -= 1;
         }
         self.round.note(&painted.as_ref().map(|_| ()).map_err(Clone::clone));
+    }
+
+    /// Starts, starts again or ends the fade under way in the windows, each kept for saying what
+    /// held up an NDI picture (a fade's steps draw the windows only).
+    fn set_fading(&mut self, fading: Option<(Instant, sp_model::Transition)>) {
+        let now = Instant::now();
+        if self.fading.is_some() {
+            self.held.happened(now, Happened::FadeEnded);
+        }
+        if fading.is_some() {
+            self.held.happened(now, Happened::FadeBegan);
+        }
+        self.fading = fading;
     }
 
     /// Draws the two sides of a fade once each into textures of their own, so that the fade's
@@ -3230,7 +3328,14 @@ impl Output {
             new = true;
         }
         if new {
-            self.video_moved_at = Instant::now();
+            let now = Instant::now();
+            self.video_moved_at = now;
+            // A video that stood still for more than two pictures (and less than a stop) is kept
+            // for saying what held up an NDI picture.
+            let still = self.video_came_at.replace(now).map(|came| now.saturating_duration_since(came));
+            if let Some(still) = still.filter(|still| *still > 2 * sp_ndi::FRAME && *still <= Duration::from_secs(2)) {
+                self.held.happened(now, Happened::VideoStill(still));
+            }
         }
         new
     }
@@ -3448,7 +3553,7 @@ impl Output {
                     ),
                 );
             }
-            self.fading = None;
+            self.set_fading(None);
             // An NDI picture that could not be drawn as the fade began, or during it, had no
             // drawing to be tried again in: the steps of a fade draw the windows only, and the
             // time set for another try is dropped while one runs (whether it was still being

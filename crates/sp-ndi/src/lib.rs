@@ -81,6 +81,7 @@ mod runtime;
 mod receive;
 pub use receive::{Finder, FinderState, Incoming, IncomingState, Video};
 
+use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -102,6 +103,45 @@ const RESEND_EVERY: Duration = Duration::from_millis(1000);
 /// How often a source asks NDI how many receivers it has. A receiver that connects to a source
 /// nobody was watching gets its first picture within about this time.
 const COUNT_EVERY: Duration = Duration::from_millis(1000);
+
+/// The pictures a second a source says it sends, which NDI paces its sending to (each send
+/// waits for its picture's time) and receivers expect.
+pub const FRAME_RATE: u32 = 30;
+
+/// One picture's time at [`FRAME_RATE`].
+pub const FRAME: Duration = Duration::from_nanos(1_000_000_000 / FRAME_RATE as u64);
+
+/// How often a source says in the log how its pictures went out.
+const MINUTE: Duration = Duration::from_secs(60);
+
+/// The slowest the pictures' own pace is taken to be (see `Pace::frame`): fifteen a second.
+/// Pictures slower than that never count as moving, so nothing is judged late among them.
+const SLOWEST_FRAME: Duration = Duration::from_nanos(2_000_000_000 / FRAME_RATE as u64);
+
+/// Pictures count as moving once this many gaps in a row between new ones were on time (within
+/// one and a half pictures' times at their own pace): a playing video. Fewer (a slide changed,
+/// then the stage screens' time a moment later) say nothing of when the next should come.
+const MOVING_AFTER: u32 = 3;
+
+/// Late gaps while pictures move wait for the gaps after them to say whether the pictures went
+/// on moving (see [`Late`]). A gap up to this long says they did: one more gap after a late gap
+/// of up to this long, or [`MOVING_AFTER`] more after a longer one, and the late gaps count. Two
+/// gaps longer than this say they had stopped (the video ended and a slide was changed a moment
+/// later; a burst of pictures for a screen that shows nothing moving, then its time once a
+/// second), and the late gaps count nothing. So a stretch of pictures coming late counts every
+/// one, and a hitch is said a picture or three after it ends.
+const STILL_MOVING_UP_TO: Duration = Duration::from_millis(250);
+
+/// A gap longer than this is pictures having stopped, not one coming late: a video ended, a
+/// slide stayed. Nothing is counted for it.
+const STOPPED_AFTER: Duration = Duration::from_secs(2);
+
+/// A source's hitches are told to the log at most this often; the next line says how many
+/// more there were.
+const TELL_EVERY: Duration = Duration::from_secs(5);
+
+/// Said to the app's log, from a source's own thread: a line, and whether it is a problem.
+pub type Log = Arc<dyn Fn(&str, bool) + Send + Sync>;
 
 /// How a source sends the pictures it is handed. A picture is handed over as the screens'
 /// renderer leaves it: tightly packed RGBA rows whose fourth byte says how solid each pixel is,
@@ -161,11 +201,14 @@ struct Picture {
     sent: Sent,
     /// True once `rgba` is as it is sent: any change `sent` asks for has been made.
     ready: bool,
+    /// When it was handed over, for saying what held up one that came late.
+    handed: Instant,
 }
 
 impl Picture {
     fn new(width: u32, height: u32, rgba: Arc<Vec<u8>>, sent: Sent) -> Picture {
-        Picture { width, height, rgba, sent, ready: matches!(sent, Sent::Opaque | Sent::Straight) }
+        let ready = matches!(sent, Sent::Opaque | Sent::Straight);
+        Picture { width, height, rgba, sent, ready, handed: Instant::now() }
     }
 
     /// Makes the change `sent` asks for, once: into a copy of its own, so other sources
@@ -225,6 +268,19 @@ struct Shared {
     /// Where the source's sound goes while it runs: what its pictures go to, shared with
     /// whichever thread hands over the sound.
     sound: SoundTo,
+    /// What whoever draws the pictures said became of them before they were handed over, this
+    /// minute (see [`Before`]): not drawn, passed over, lost, and the longest one took to come
+    /// back from the GPU, in microseconds. The source's thread takes them for its minute's line.
+    not_drawn: AtomicU32,
+    passed_over: AtomicU32,
+    lost: AtomicU32,
+    came_back: AtomicU64,
+    /// How many hitches the source has had (see [`Hitch`]), and the latest, set before the
+    /// count moves on.
+    hitches: AtomicU32,
+    hitch: Mutex<Option<Hitch>>,
+    /// The last whole minute's counts, once there has been one.
+    minute: Mutex<Option<Minute>>,
 }
 
 /// Where a running source's sound goes; nowhere before it has started and once it has stopped.
@@ -257,7 +313,48 @@ impl Shared {
             arrivals: AtomicU32::new(0),
             longest_send: AtomicU64::new(0),
             sound: SoundTo::default(),
+            not_drawn: AtomicU32::new(0),
+            passed_over: AtomicU32::new(0),
+            lost: AtomicU32::new(0),
+            came_back: AtomicU64::new(0),
+            hitches: AtomicU32::new(0),
+            hitch: Mutex::new(None),
+            minute: Mutex::new(None),
         }
+    }
+
+    /// Notes what became of a picture before it was handed over.
+    fn note(&self, what: Before) {
+        let count = match what {
+            Before::NotDrawn => &self.not_drawn,
+            Before::PassedOver => &self.passed_over,
+            Before::Lost => &self.lost,
+            Before::CameBack(took) => {
+                self.came_back.fetch_max(micros(took), Ordering::Relaxed);
+                return;
+            }
+        };
+        count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Adds to a minute what whoever draws said of its pictures, and begins those counts again.
+    fn take_before(&self, minute: &mut Minute) {
+        minute.not_drawn = self.not_drawn.swap(0, Ordering::Relaxed);
+        minute.passed_over = self.passed_over.swap(0, Ordering::Relaxed);
+        minute.lost = self.lost.swap(0, Ordering::Relaxed);
+        minute.came_back = Duration::from_micros(self.came_back.swap(0, Ordering::Relaxed));
+    }
+
+    /// A hitch: kept as the latest, then counted, so whoever sees the count move finds it.
+    fn hitched(&self, hitch: Hitch) {
+        if let Ok(mut latest) = self.hitch.lock() {
+            *latest = Some(hitch);
+        }
+        self.hitches.fetch_add(1, Ordering::Release);
+    }
+
+    fn last_minute(&self) -> Option<Minute> {
+        self.minute.lock().ok().and_then(|minute| *minute)
     }
 
     fn state(&self) -> State {
@@ -279,7 +376,7 @@ impl Shared {
 
     /// A picture took this long to send.
     fn sent_in(&self, took: Duration) {
-        self.longest_send.fetch_max(u64::try_from(took.as_micros()).unwrap_or(u64::MAX), Ordering::Relaxed);
+        self.longest_send.fetch_max(micros(took), Ordering::Relaxed);
     }
 
     fn set_receivers(&self, count: Option<u32>) {
@@ -301,6 +398,137 @@ impl Watch {
     /// Never waits.
     pub fn receivers(&self) -> Option<u32> {
         self.0.receivers()
+    }
+
+    /// How the source's pictures went out in its last whole minute, the figures of its
+    /// per-minute line in the log; `None` before its first minute is over. Waits only for the
+    /// source's thread to put a minute's figures in, which it does once a minute.
+    pub fn last_minute(&self) -> Option<Minute> {
+        self.0.last_minute()
+    }
+}
+
+/// What became of a picture meant for a source before it was handed over, said by whoever
+/// draws the pictures ([`NdiOutput::note`]) for the source's per-minute line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Before {
+    /// It was not drawn: the GPU was too slow with it (it is drawn again later), or could not
+    /// draw it.
+    NotDrawn,
+    /// A newer picture took its place before it was drawn, while the one before it was still
+    /// on its way back from the GPU.
+    PassedOver,
+    /// It was drawn, and lost on its way back from the GPU.
+    Lost,
+    /// It came back from the GPU this long after it was asked for (drawing it included).
+    CameBack(Duration),
+}
+
+/// A hitch someone watching a source could have seen: while pictures were moving, a new one
+/// was sent more than two pictures' times after the one before, at the pictures' own pace (a
+/// thirtieth of a second at 30 fps, a 24 fps video's own time for that), so the one before
+/// stood still for a picture or more longer than the rest. Measured on the source's own
+/// thread, from when each picture's send returned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hitch {
+    /// When the late picture's send returned.
+    pub at: Instant,
+    /// How long after the new picture before it.
+    pub gap: Duration,
+    /// How long after the picture before it was sent this one was handed over: time the
+    /// source had nothing new to send.
+    pub handed_after: Duration,
+    /// How long it then waited for the source's thread, busy sending the one before.
+    pub waited: Duration,
+    /// How long it took to send, any change it needed (premultiplied, a key) included. NDI
+    /// paces its sending, so up to about one picture's time is the wait for its turn.
+    pub took: Duration,
+}
+
+/// How a source's pictures went out over one minute: the figures of its per-minute line
+/// ([`Minute::words`]), counted only while somebody watched (or the count of receivers wasn't
+/// known, when the source sends all the time).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Minute {
+    /// How long the minute was (it ends at the first look after sixty seconds).
+    pub length: Duration,
+    /// How long of it somebody watched. Nothing else is counted when this is nought.
+    pub watched: Duration,
+    /// The size of the last picture sent.
+    pub size: Option<(u32, u32)>,
+    /// New pictures sent.
+    pub sent: u32,
+    /// The same picture sent again, because nothing new came for a second (as it always is
+    /// while the slide stays as it is).
+    pub repeated: u32,
+    /// New pictures sent more than one and a half pictures' times after the one before, at the
+    /// pictures' own pace, while pictures were moving (see [`Hitch`]).
+    pub late: u32,
+    /// Pictures handed over that a newer one took the place of before they were sent, the
+    /// source's thread being busy sending (a video of more than [`FRAME_RATE`] pictures a
+    /// second skips one in two).
+    pub skipped: u32,
+    /// The longest time between two new pictures while pictures were moving; `None` when
+    /// nothing moved.
+    pub longest_gap: Option<Duration>,
+    /// The longest one send took.
+    pub longest_send: Duration,
+    /// The fewest and the most receivers counted while somebody watched; `None` when NDI
+    /// couldn't count them, or nobody watched.
+    pub receivers: Option<(u32, u32)>,
+    /// How many hitches there were (every one is late too).
+    pub hitches: u32,
+    /// Said by whoever draws the pictures ([`Before`]).
+    pub not_drawn: u32,
+    pub passed_over: u32,
+    pub lost: u32,
+    pub came_back: Duration,
+}
+
+impl Minute {
+    /// The minute's line for the log, for the source of this name.
+    pub fn words(&self, name: &str) -> String {
+        if self.watched.is_zero() {
+            return format!("NDI \"{name}\": nobody watching in the last minute");
+        }
+        let ms = |took: Duration| format!("{:.1} ms", took.as_secs_f64() * 1000.0);
+        let size = self.size.map_or(String::new(), |(w, h)| format!(" at {w}x{h} {FRAME_RATE}fps"));
+        let rate = f64::from(self.sent) / self.watched.as_secs_f64().max(0.001);
+        let skipped = match self.passed_over {
+            0 => format!("{} skipped", self.skipped),
+            passed => format!(
+                "{} skipped ({passed} of them before drawing, the GPU still reading back the one before)",
+                self.skipped + passed
+            ),
+        };
+        let gap = self.longest_gap.map_or("nothing moving".to_owned(), |gap| format!("longest gap {}", ms(gap)));
+        let receivers = match self.receivers {
+            None => "receivers not known".to_owned(),
+            Some((fewest, most)) if fewest == most => format!("receivers {most}"),
+            Some((fewest, most)) => format!("receivers {fewest} to {most}"),
+        };
+        // A minute watched from start to end says so; part of one says how much.
+        let when = if self.watched + Duration::from_secs(1) >= self.length {
+            "in the last minute".to_owned()
+        } else {
+            format!("in the {:.0} s watched of the last minute", self.watched.as_secs_f64())
+        };
+        format!(
+            "NDI \"{name}\"{size}: {} pictures sent ({rate:.1}/s), {} repeated, {} late, {skipped}, {gap}, {} not \
+             drawn, {} lost on the way back from the GPU (back in up to {}), {receivers}, send took up to {} {when}",
+            self.sent,
+            self.repeated,
+            self.late,
+            self.not_drawn,
+            self.lost,
+            ms(self.came_back),
+            ms(self.longest_send),
+        )
+    }
+
+    /// True when something went wrong that a receiver may have seen: worth a problem's line.
+    pub fn trouble(&self) -> bool {
+        self.late + self.skipped + self.passed_over + self.not_drawn + self.lost > 0
     }
 }
 
@@ -340,15 +568,21 @@ pub struct NdiOutput {
     /// True from `forget` until the next picture is handed over: the source's thread is told
     /// once, however often it is said.
     forgotten: AtomicBool,
+    /// For telling hitches at most every [`TELL_EVERY`]: the count of hitches last looked at,
+    /// the count when one was last told, and when. Only its owner's thread looks.
+    hitches_seen: Cell<u32>,
+    hitches_told: Cell<u32>,
+    told_at: Cell<Option<Instant>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl NdiOutput {
     /// Starts an NDI source with this name. Never waits for NDI: the source starts on its own
     /// thread, and `state` says how that went. The error is a plain sentence for the operator.
-    /// Nobody is told when receivers connect: use `start_with_wake` to hand them a picture.
+    /// Nobody is told when receivers connect (use `start_with_wake` to hand them a picture),
+    /// and its per-minute line goes nowhere.
     pub fn start(name: &str) -> Result<NdiOutput, String> {
-        NdiOutput::start_with_wake(name, || {})
+        NdiOutput::start_with_wake(name, || {}, Arc::new(|_: &str, _: bool| {}))
     }
 
     /// Starts an NDI source as `start` does, which also calls `wake` each time the count of
@@ -356,9 +590,12 @@ impl NdiOutput {
     /// connect after a spell with none (the source sends them nothing until one is handed
     /// over), and so that whoever shows the count can show the new one. `wake` runs on the source's own
     /// thread once the new count can be read from `receivers`, never on the caller's; it
-    /// should only pass the word on and return.
-    pub fn start_with_wake(name: &str, wake: impl FnMut() + Send + 'static) -> Result<NdiOutput, String> {
-        spawn(name, |name| runtime::get().and_then(|runtime| runtime::Source::new(runtime, name)), wake)
+    /// should only pass the word on and return. `log` is given, on the source's own thread,
+    /// a line each minute saying how its pictures went out ([`Minute::words`]), and whether
+    /// that is a problem.
+    pub fn start_with_wake(name: &str, wake: impl FnMut() + Send + 'static, log: Log) -> Result<NdiOutput, String> {
+        let open = |name: &str| runtime::get().and_then(|runtime| runtime::Source::new(runtime, name));
+        spawn(name, open, wake, log, MINUTE)
     }
 
     pub fn name(&self) -> &str {
@@ -394,6 +631,38 @@ impl NdiOutput {
     /// A way to see what the source is doing from another thread.
     pub fn watch(&self) -> Watch {
         Watch(self.shared.clone())
+    }
+
+    /// How the source's pictures went out in its last whole minute (see [`Watch::last_minute`]).
+    pub fn last_minute(&self) -> Option<Minute> {
+        self.shared.last_minute()
+    }
+
+    /// Says what became of a picture meant for this source before it was handed over, for its
+    /// per-minute line. Said only for a source somebody is watching (or whose count isn't
+    /// known). Never waits.
+    pub fn note(&self, what: Before) {
+        self.shared.note(what);
+    }
+
+    /// The source's latest hitch, if it has had one since this was last asked, and it is
+    /// [`TELL_EVERY`] since the last one told: with how many more there were since that one,
+    /// not told one by one. A hitch not told when it is new is never told (whatever made it is
+    /// long gone by the time telling is allowed again); it is counted in the next told. For
+    /// the thread drawing the pictures to say in the log what it was doing then: one atomic
+    /// load, unless there is a hitch to tell. Never waits for long.
+    pub fn hitch_to_tell(&self, now: Instant) -> Option<(Hitch, u32)> {
+        let count = self.shared.hitches.load(Ordering::Acquire);
+        if count == self.hitches_seen.replace(count) {
+            return None;
+        }
+        if self.told_at.get().is_some_and(|told| now.saturating_duration_since(told) < TELL_EVERY) {
+            return None;
+        }
+        let hitch = self.shared.hitch.lock().ok().and_then(|latest| *latest)?;
+        let more = count.saturating_sub(self.hitches_told.replace(count)).saturating_sub(1);
+        self.told_at.set(Some(now));
+        Some((hitch, more))
     }
 
     /// Where to hand the sound that goes with the source's pictures, from any thread.
@@ -494,11 +763,14 @@ impl Sink for runtime::Source {
     }
 }
 
-/// Starts a source's thread, which opens where its pictures go with `open` and then sends.
+/// Starts a source's thread, which opens where its pictures go with `open` and then sends,
+/// telling `log` how that went every `minute`.
 fn spawn<S: Sink + 'static>(
     name: &str,
     open: impl FnOnce(&str) -> Result<S, String> + Send + 'static,
     mut wake: impl FnMut() + Send + 'static,
+    log: Log,
+    minute: Duration,
 ) -> Result<NdiOutput, String> {
     let name = name.trim();
     if name.is_empty() {
@@ -514,7 +786,8 @@ fn spawn<S: Sink + 'static>(
                 let sink = Arc::new(sink);
                 theirs.sound.set(Some(sink.clone()));
                 theirs.set_state(State::Sending);
-                serve(&*sink, &rx, &theirs, &mut wake);
+                let report = Report { name: &source, log: &*log, minute };
+                serve(&*sink, &rx, &theirs, &mut wake, &report);
                 // Sound handed over from now on goes nowhere; the source itself is taken down
                 // when a block being sent this moment, if there is one, has gone.
                 theirs.sound.set(None);
@@ -528,37 +801,54 @@ fn spawn<S: Sink + 'static>(
         shared,
         tx: Some(tx),
         forgotten: AtomicBool::new(false),
+        hitches_seen: Cell::new(0),
+        hitches_told: Cell::new(0),
+        told_at: Cell::new(None),
         thread: Some(thread),
     })
 }
 
 /// What has queued up comes to, `first` included: the newest picture, if there is one, and
 /// whether the word to forget came after it (or with no picture at all), with whether the
-/// screen was see-through then. Word to forget from before the newest picture is overtaken by it.
-fn newest(rx: &Receiver<Told>, first: Told) -> (Option<Picture>, Option<bool>) {
-    let (mut picture, mut forget) = (None, None);
+/// screen was see-through then; and how many pictures the newest overtook, which are never
+/// sent. Word to forget from before the newest picture is overtaken by it.
+fn newest(rx: &Receiver<Told>, first: Told) -> (Option<Picture>, Option<bool>, u32) {
+    let (mut picture, mut forget, mut overtaken) = (None, None, 0);
     let mut next = Some(first);
     while let Some(told) = next {
         match told {
-            Told::Picture(newer) => (picture, forget) = (Some(newer), None),
+            Told::Picture(newer) => {
+                overtaken += u32::from(picture.is_some());
+                (picture, forget) = (Some(newer), None);
+            }
             Told::Forget(see_through) => forget = Some(see_through),
         }
         next = rx.try_recv().ok();
     }
-    (picture, forget)
+    (picture, forget, overtaken)
+}
+
+/// Who a source's thread tells how its pictures went out, and how often.
+struct Report<'a> {
+    name: &'a str,
+    log: &'a (dyn Fn(&str, bool) + Send + Sync),
+    minute: Duration,
 }
 
 /// Sends the pictures handed over to `sink` until the output is dropped: each new one at once
 /// and the current one again every second, while anyone is watching. Calls `wake` whenever the
-/// count of receivers has changed.
-fn serve(sink: &impl Sink, rx: &Receiver<Told>, shared: &Shared, wake: &mut impl FnMut()) {
+/// count of receivers has changed, and tells the log each minute how the pictures went out.
+fn serve(sink: &impl Sink, rx: &Receiver<Told>, shared: &Shared, wake: &mut impl FnMut(), report: &Report<'_>) {
     let mut gate = Gate::new(Instant::now());
+    let mut pace = Pace::new(Instant::now(), report.minute);
     // Counts the receivers, and tells everyone the count before `wake`, so that whoever is
     // woken reads the new one.
-    let mut count = |gate: &mut Gate| {
+    let mut count = |gate: &mut Gate, pace: &mut Pace| {
         let receivers = sink.receivers();
         let nobody_was = !gate.watched();
-        let changed = gate.counted(Instant::now(), receivers);
+        let now = Instant::now();
+        let changed = gate.counted(now, receivers);
+        pace.counted(now, receivers);
         if nobody_was && gate.watched() {
             shared.arrivals.fetch_add(1, Ordering::Relaxed);
         }
@@ -570,21 +860,22 @@ fn serve(sink: &impl Sink, rx: &Receiver<Told>, shared: &Shared, wake: &mut impl
     loop {
         match rx.recv_timeout(gate.wait(Instant::now())) {
             Ok(first) => {
-                let (picture, forget) = newest(rx, first);
+                let (picture, forget, overtaken) = newest(rx, first);
                 // Word for a source nobody was watching when last counted. Someone may have
                 // come since: counted again now, a picture is sent to them rather than
                 // dropped, and a black one is not sent over what they are looking at.
                 let watched_before = gate.watched();
                 if !watched_before {
-                    count(&mut gate);
+                    count(&mut gate, &mut pace);
                 }
+                pace.skipped(overtaken);
                 gate.told(picture, forget, watched_before);
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
         if gate.count_due(Instant::now()) {
-            count(&mut gate);
+            count(&mut gate, &mut pace);
         }
         // Black for a solid source; for a see-through one, all clear (zeros sent as RGBA), so
         // that a video switcher shows its camera rather than black where the words were.
@@ -593,13 +884,301 @@ fn serve(sink: &impl Sink, rx: &Receiver<Told>, shared: &Shared, wake: &mut impl
             sink.send(width, height, &vec![0; width as usize * height as usize * 4], alpha);
             shared.sent_in(began.elapsed());
         }
-        if let Some(picture) = gate.picture_due(Instant::now()) {
+        if let Some((picture, fresh)) = gate.picture_due(Instant::now()) {
             // Changed once, the first time it is sent, then sent again as it is each second.
             let began = Instant::now();
             picture.prepare();
             sink.send(picture.width, picture.height, &picture.rgba, picture.sent.alpha());
-            shared.sent_in(began.elapsed());
+            let ended = Instant::now();
+            shared.sent_in(ended - began);
+            if !fresh {
+                pace.sent_again(ended - began);
+            } else if let Some(hitch) = pace.sent_new((picture.width, picture.height), picture.handed, began, ended) {
+                shared.hitched(hitch);
+            }
         }
+        if let Some(mut minute) = pace.minute_over(Instant::now()) {
+            shared.take_before(&mut minute);
+            if let Ok(mut last) = shared.minute.lock() {
+                *last = Some(minute);
+            }
+            (report.log)(&minute.words(report.name), minute.trouble());
+        }
+    }
+}
+
+/// How a source's pictures go out over the minute under way, counted on the source's own
+/// thread (nothing in it is shared, so nothing is waited for), and whether pictures are moving
+/// now: a playing video, as against a slide that stays, which is sent again once a second.
+/// Told the time rather than reading the clock, so it can be tested on its own.
+///
+/// A gap is on time when it is within one and a half pictures' times at the pictures' own pace
+/// (`frame`): a thirtieth of a second for a 30 fps video (or a faster one, which NDI's pacing
+/// brings to 30), a 24 fps video's own time for that, whose steady pace is no stutter though a
+/// receiver shows every fourth picture twice. Later than that is late; later than two
+/// pictures' times, a hitch.
+///
+/// Late pictures and hitches are judged only while pictures move: once [`MOVING_AFTER`] gaps
+/// in a row between new pictures were on time. Late gaps (each up to [`STOPPED_AFTER`]) then
+/// count once the gaps after them show the pictures went on moving ([`STILL_MOVING_UP_TO`]);
+/// otherwise they had stopped, and count nothing. So a slide that stays, a video that ends,
+/// the stage screens' time once a second and a slide changed now and then count nothing.
+struct Pace {
+    began: Instant,
+    length: Duration,
+    /// Since when somebody has been watching, while they are, and how long they watched
+    /// before that in this minute.
+    watched_from: Option<Instant>,
+    watched: Duration,
+    /// The count of receivers last made, which the next minute's fewest and most start from.
+    last_count: Option<Option<u32>>,
+    receivers: Option<(u32, u32)>,
+    count_unknown: bool,
+    sent: u32,
+    repeated: u32,
+    late: u32,
+    skipped: u32,
+    hitches: u32,
+    longest_gap: Option<Duration>,
+    longest_send: Duration,
+    size: Option<(u32, u32)>,
+    /// When the last new picture's send returned, while somebody watches, how many gaps in a
+    /// row between new pictures were on time, and the late gaps waiting for the gaps after
+    /// them to say whether they count.
+    last_new: Option<Instant>,
+    run: u32,
+    pending: Option<Late>,
+    /// The pictures' own pace: the time between them, followed slowly from the gaps on time,
+    /// from [`FRAME`] (NDI sends no faster) to [`SLOWEST_FRAME`].
+    frame: Duration,
+}
+
+/// Late gaps while pictures move, one after another or close together (a hold-up with a
+/// picture late beside it is one stutter), waiting for the gaps after them to say whether the
+/// pictures went on moving: the longest, how many there are, and how many more gaps up to
+/// [`STILL_MOVING_UP_TO`] they wait for.
+#[derive(Clone, Copy, Debug)]
+struct Late {
+    worst: Hitch,
+    gaps: u32,
+    waiting: u32,
+}
+
+impl Late {
+    /// A late gap, the first: one more gap is waited for after a short one, more after a
+    /// hold-up.
+    fn new(gap: Hitch) -> Late {
+        let waiting = if gap.gap <= STILL_MOVING_UP_TO { 1 } else { MOVING_AFTER };
+        Late { worst: gap, gaps: 1, waiting }
+    }
+
+    /// Another late gap, before the pictures were seen moving again.
+    fn add(&mut self, gap: Hitch) {
+        self.gaps += 1;
+        if gap.gap > self.worst.gap {
+            self.worst = gap;
+        }
+    }
+
+    /// Whether a gap longer than [`STILL_MOVING_UP_TO`] is among them.
+    fn held(&self) -> bool {
+        self.worst.gap > STILL_MOVING_UP_TO
+    }
+}
+
+impl Pace {
+    fn new(now: Instant, length: Duration) -> Pace {
+        Pace {
+            began: now,
+            length,
+            watched_from: None,
+            watched: Duration::ZERO,
+            last_count: None,
+            receivers: None,
+            count_unknown: false,
+            sent: 0,
+            repeated: 0,
+            late: 0,
+            skipped: 0,
+            hitches: 0,
+            longest_gap: None,
+            longest_send: Duration::ZERO,
+            size: None,
+            last_new: None,
+            run: 0,
+            pending: None,
+            frame: FRAME,
+        }
+    }
+
+    /// A gap longer than this is late: one and a half pictures' times at their own pace.
+    fn late_after(&self) -> Duration {
+        self.frame * 3 / 2
+    }
+
+    fn watching(&self) -> bool {
+        self.watched_from.is_some()
+    }
+
+    /// The receivers were counted (`None`: NDI can't count them, so someone may be watching).
+    fn counted(&mut self, now: Instant, receivers: Option<u32>) {
+        self.last_count = Some(receivers);
+        if receivers == Some(0) {
+            if let Some(from) = self.watched_from.take() {
+                self.watched += now.saturating_duration_since(from);
+            }
+            // Whatever moved is over: the next receivers start afresh.
+            (self.last_new, self.run, self.pending) = (None, 0, None);
+            return;
+        }
+        self.watched_from.get_or_insert(now);
+        self.add_count(receivers);
+    }
+
+    fn add_count(&mut self, receivers: Option<u32>) {
+        match receivers {
+            Some(count) => {
+                let (fewest, most) = self.receivers.unwrap_or((count, count));
+                self.receivers = Some((fewest.min(count), most.max(count)));
+            }
+            None => self.count_unknown = true,
+        }
+    }
+
+    /// Pictures handed over were overtaken by a newer one before they could be sent.
+    fn skipped(&mut self, overtaken: u32) {
+        if self.watching() {
+            self.skipped += overtaken;
+        }
+    }
+
+    /// The current picture was sent again, its send taking `took`.
+    fn sent_again(&mut self, took: Duration) {
+        if self.watching() {
+            self.repeated += 1;
+            self.longest_send = self.longest_send.max(took);
+        }
+    }
+
+    /// A new picture of this size was sent: handed over at `handed`, its send begun at `began`
+    /// and returned at `ended`. The hitch this picture says there was: the longest of the late
+    /// gaps before it, now that the pictures are seen to have gone on moving after them (see
+    /// [`STILL_MOVING_UP_TO`]), when it was long enough to be one.
+    fn sent_new(&mut self, size: (u32, u32), handed: Instant, began: Instant, ended: Instant) -> Option<Hitch> {
+        if !self.watching() {
+            return None;
+        }
+        self.sent += 1;
+        self.size = Some(size);
+        self.longest_send = self.longest_send.max(ended.saturating_duration_since(began));
+        let last = self.last_new.replace(ended)?;
+        let gap = ended.saturating_duration_since(last);
+        let this = Hitch {
+            at: ended,
+            gap,
+            handed_after: handed.saturating_duration_since(last),
+            waited: began.saturating_duration_since(handed),
+            took: ended.saturating_duration_since(began),
+        };
+        let on_time = gap <= self.late_after();
+        if on_time {
+            if self.run >= MOVING_AFTER {
+                self.longest_gap = Some(self.longest_gap.map_or(gap, |longest| longest.max(gap)));
+            }
+            self.run = self.run.saturating_add(1);
+            // The pictures' own pace follows the gaps on time, slowly (a sixteenth of the way).
+            let (frame, gap) = (self.frame.as_secs_f64(), gap.as_secs_f64());
+            let followed = frame + (gap - frame) / 16.0;
+            self.frame = Duration::from_secs_f64(followed.clamp(FRAME.as_secs_f64(), SLOWEST_FRAME.as_secs_f64()));
+        }
+        let mut hitch = None;
+        match self.pending.take() {
+            // Not moving (yet): only a run of pictures on time counts.
+            None if self.run < MOVING_AFTER || gap > STOPPED_AFTER => {
+                if !on_time {
+                    self.run = 0;
+                }
+            }
+            None => {
+                if !on_time {
+                    self.pending = Some(Late::new(this));
+                }
+            }
+            // Moving on after late gaps: on time, or late but soon.
+            Some(mut late) if gap <= STILL_MOVING_UP_TO => {
+                late.waiting -= 1;
+                if late.waiting > 0 {
+                    if !on_time {
+                        late.add(this);
+                    }
+                    self.pending = Some(late);
+                } else {
+                    hitch = self.count(late);
+                    if !on_time {
+                        self.pending = Some(Late::new(this));
+                    }
+                }
+            }
+            // A hold-up after a picture or two late: one stutter, waiting to see the video move.
+            Some(mut late) if gap <= STOPPED_AFTER && !late.held() => {
+                late.add(this);
+                late.waiting = MOVING_AFTER;
+                self.pending = Some(late);
+            }
+            // A second long gap: the pictures had stopped.
+            Some(_) => self.run = 0,
+        }
+        hitch
+    }
+
+    /// Late gaps the pictures went on moving after count: the longest of them is a hitch, when
+    /// it is longer than two pictures' times at their own pace.
+    fn count(&mut self, late: Late) -> Option<Hitch> {
+        self.late += late.gaps;
+        let worst = late.worst;
+        self.longest_gap = Some(self.longest_gap.map_or(worst.gap, |longest| longest.max(worst.gap)));
+        (worst.gap > self.frame * 2).then(|| {
+            self.hitches += 1;
+            worst
+        })
+    }
+
+    /// The minute's figures, once it is over at `now`, and the counts begun again; `None`
+    /// until then. What whoever draws said is added by the caller.
+    fn minute_over(&mut self, now: Instant) -> Option<Minute> {
+        let length = now.saturating_duration_since(self.began);
+        if length < self.length {
+            return None;
+        }
+        if let Some(from) = self.watched_from.as_mut() {
+            self.watched += now.saturating_duration_since(*from);
+            *from = now;
+        }
+        let watched = self.watched > Duration::ZERO;
+        let minute = Minute {
+            length,
+            watched: self.watched,
+            size: self.size.filter(|_| watched),
+            sent: self.sent,
+            repeated: self.repeated,
+            late: self.late,
+            skipped: self.skipped,
+            longest_gap: self.longest_gap,
+            longest_send: self.longest_send,
+            receivers: self.receivers.filter(|_| !self.count_unknown),
+            hitches: self.hitches,
+            ..Minute::default()
+        };
+        let (last_new, run, pending, last_count) = (self.last_new, self.run, self.pending, self.last_count);
+        let (watched_from, frame) = (self.watched_from, self.frame);
+        *self = Pace { watched_from, last_new, run, pending, frame, last_count, ..Pace::new(now, self.length) };
+        // The next minute's receivers start from the count there is now, if somebody watches.
+        if self.watching()
+            && let Some(receivers) = last_count
+        {
+            self.add_count(receivers);
+        }
+        Some(minute)
     }
 }
 
@@ -743,17 +1322,23 @@ impl Gate {
     }
 
     /// The picture to send now, if any: a fresh one at once, the current one again when it is
-    /// time, and nothing while nobody is watching.
-    fn picture_due(&mut self, now: Instant) -> Option<&mut Picture> {
+    /// time, and nothing while nobody is watching. True with it when it is fresh, not sent
+    /// before.
+    fn picture_due(&mut self, now: Instant) -> Option<(&mut Picture, bool)> {
         if !self.watched() || !(self.fresh || now >= self.next_resend) {
             return None;
         }
         let picture = self.current.as_mut()?;
-        self.fresh = false;
+        let fresh = std::mem::take(&mut self.fresh);
         self.next_resend = now + RESEND_EVERY;
         self.given = Some((picture.width, picture.height, picture.sent.alpha()));
-        Some(picture)
+        Some((picture, fresh))
     }
+}
+
+/// A length of time in whole microseconds, for keeping in an atomic.
+fn micros(took: Duration) -> u64 {
+    u64::try_from(took.as_micros()).unwrap_or(u64::MAX)
 }
 
 #[cfg(test)]
@@ -770,7 +1355,7 @@ mod tests {
 
     /// The width of the picture the gate sends now, which tells the tests' pictures apart.
     fn sent(gate: &mut Gate, now: Instant) -> Option<u32> {
-        gate.picture_due(now).map(|picture| picture.width)
+        gate.picture_due(now).map(|(picture, _)| picture.width)
     }
 
     #[test]
@@ -864,7 +1449,8 @@ mod tests {
     #[test]
     fn the_newest_queued_picture_wins() {
         let (tx, rx) = channel();
-        let width = |(picture, forget): (Option<Picture>, Option<bool>)| (picture.map(|picture| picture.width), forget);
+        let width =
+            |(picture, forget, _): (Option<Picture>, Option<bool>, u32)| (picture.map(|picture| picture.width), forget);
         for width in [2, 3] {
             tx.send(Told::Picture(picture(width))).unwrap();
         }
@@ -1239,7 +1825,7 @@ mod tests {
         let open = move |_: &str| {
             Ok(Stand { receivers: theirs, sent: sent_tx, black: black_tx, bytes: bytes_tx, sound: sound_tx })
         };
-        let output = spawn("SoftPresenter test", open, wake).unwrap();
+        let output = spawn("SoftPresenter test", open, wake, Arc::new(|_: &str, _: bool| {}), MINUTE).unwrap();
         Standing { output, receivers, sent, black, bytes, sound }
     }
 
@@ -1439,6 +2025,380 @@ mod tests {
         woken.recv_timeout(PATIENCE).unwrap();
         source.output.forget();
         assert_eq!(source.black.recv_timeout(PATIENCE).unwrap(), 3);
+    }
+
+    /// A new picture sent through a pace, its send returning at `at`: handed over 2 ms before
+    /// and begun 1 ms before.
+    fn new_at(pace: &mut Pace, at: Instant) -> Option<Hitch> {
+        pace.sent_new((1920, 1080), at - Duration::from_millis(2), at - Duration::from_millis(1), at)
+    }
+
+    /// A video's pictures through a pace, one every picture's time from `from` for `count`
+    /// pictures; when the last was sent.
+    fn video(pace: &mut Pace, from: Instant, count: u32) -> Instant {
+        let mut at = from;
+        for _ in 0..count {
+            assert_eq!(new_at(pace, at), None, "a picture on time is no hitch");
+            at += FRAME;
+        }
+        at - FRAME
+    }
+
+    #[test]
+    fn a_video_sent_on_time_for_a_minute_counts_nothing_late() {
+        let t = Instant::now();
+        let mut pace = Pace::new(t, MINUTE);
+        pace.counted(t, Some(2));
+        let last = video(&mut pace, t + FRAME, 1799);
+        assert_eq!(pace.minute_over(last), None, "not a minute yet");
+        let minute = pace.minute_over(t + MINUTE).expect("a minute");
+        assert_eq!((minute.sent, minute.repeated, minute.late, minute.skipped, minute.hitches), (1799, 0, 0, 0, 0));
+        assert_eq!(minute.longest_gap, Some(FRAME));
+        assert_eq!((minute.watched, minute.receivers, minute.size), (MINUTE, Some((2, 2)), Some((1920, 1080))));
+        assert_eq!(minute.longest_send, Duration::from_millis(1));
+        assert!(!minute.trouble());
+        // The next minute starts afresh, with the receivers still there.
+        let next = pace.minute_over(t + 2 * MINUTE).expect("another minute");
+        assert_eq!((next.sent, next.receivers, next.watched), (0, Some((2, 2)), MINUTE));
+    }
+
+    #[test]
+    fn a_slide_that_stays_is_sent_again_each_second_and_nothing_counts_as_moving() {
+        let t = Instant::now();
+        let mut pace = Pace::new(t, MINUTE);
+        pace.counted(t, Some(1));
+        new_at(&mut pace, t);
+        for _ in 1..60 {
+            pace.sent_again(Duration::from_millis(3));
+        }
+        let minute = pace.minute_over(t + MINUTE).expect("a minute");
+        assert_eq!((minute.sent, minute.repeated, minute.late, minute.hitches), (1, 59, 0, 0));
+        assert_eq!(minute.longest_gap, None, "nothing moved");
+        assert!(minute.words("Main").contains("nothing moving"));
+    }
+
+    #[test]
+    fn a_video_that_ends_and_slides_changed_now_and_then_count_nothing_late() {
+        let t = Instant::now();
+        let mut pace = Pace::new(t, MINUTE);
+        pace.counted(t, Some(1));
+        // The video plays for ten seconds and ends; a second later the slide is changed (and
+        // the stage screen's time drawn a moment after it), then the slides are changed every
+        // few seconds, with the time once a second.
+        let ended = video(&mut pace, t, 300);
+        let mut at = ended + Duration::from_secs(1);
+        for _ in 0..5 {
+            assert_eq!(new_at(&mut pace, at), None);
+            assert_eq!(new_at(&mut pace, at + Duration::from_millis(20)), None);
+            at += Duration::from_secs(1);
+        }
+        for _ in 0..5 {
+            assert_eq!(new_at(&mut pace, at), None);
+            at += Duration::from_secs(4);
+        }
+        let minute = pace.minute_over(t + MINUTE).expect("a minute");
+        assert_eq!((minute.late, minute.hitches), (0, 0));
+        assert_eq!(minute.longest_gap, Some(FRAME), "only the video's gaps were judged");
+    }
+
+    #[test]
+    fn pictures_late_while_moving_are_counted_and_a_long_wait_is_a_hitch_with_what_held_it() {
+        let t = Instant::now();
+        let mut pace = Pace::new(t, MINUTE);
+        pace.counted(t, Some(1));
+        let mut at = video(&mut pace, t, 10);
+        // 60 ms: late (more than a picture and a half), but not a hitch; counted once the
+        // next picture comes on time.
+        at += Duration::from_millis(60);
+        assert_eq!(new_at(&mut pace, at), None);
+        at = video(&mut pace, at + FRAME, 5);
+        // 200 ms: the picture was handed over 190 ms after the one before was sent, waited
+        // 1 ms for the source's thread and took 9 ms to send. A hitch, said when the next
+        // picture shows the video went on moving.
+        let before = at;
+        at += Duration::from_millis(200);
+        let handed = before + Duration::from_millis(190);
+        assert_eq!(pace.sent_new((1920, 1080), handed, handed + Duration::from_millis(1), at), None);
+        assert_eq!(
+            new_at(&mut pace, at + FRAME),
+            Some(Hitch {
+                at,
+                gap: Duration::from_millis(200),
+                handed_after: Duration::from_millis(190),
+                waited: Duration::from_millis(1),
+                took: Duration::from_millis(9),
+            })
+        );
+        video(&mut pace, at + 2 * FRAME, 5);
+        let minute = pace.minute_over(t + MINUTE).expect("a minute");
+        assert_eq!((minute.late, minute.hitches), (2, 1));
+        assert_eq!(minute.longest_gap, Some(Duration::from_millis(200)));
+        assert_eq!(minute.longest_send, Duration::from_millis(9));
+        assert!(minute.trouble());
+    }
+
+    #[test]
+    fn a_stretch_of_late_pictures_counts_every_one_and_a_long_stop_ends_the_moving() {
+        let t = Instant::now();
+        let mut pace = Pace::new(t, MINUTE);
+        pace.counted(t, Some(1));
+        let mut at = video(&mut pace, t, 10);
+        // Five pictures 80 ms apart (the screens drawing at 12 a second): each late, and each
+        // a hitch, said as the next comes.
+        for picture in 0..5 {
+            at += Duration::from_millis(80);
+            assert_eq!(new_at(&mut pace, at).is_some(), picture > 0);
+        }
+        at += FRAME;
+        assert!(new_at(&mut pace, at).is_some(), "the last of them, said as the video goes on");
+        // Held up 400 ms (a fade, say): late and a hitch once the video is seen moving again,
+        // three pictures on.
+        at = video(&mut pace, at + FRAME, 10) + Duration::from_millis(400);
+        assert_eq!(new_at(&mut pace, at), None);
+        for picture in 1..=3 {
+            assert_eq!(new_at(&mut pace, at + picture * FRAME).is_some(), picture == 3);
+        }
+        // A burst of pictures, then nothing for 450 ms, then a picture once a second (a stage
+        // screen's time, after pictures drawn for it with a video's): it had stopped moving.
+        at = video(&mut pace, at + 4 * FRAME, 10) + Duration::from_millis(450);
+        assert_eq!(new_at(&mut pace, at), None);
+        for _ in 0..3 {
+            at += Duration::from_secs(1);
+            assert_eq!(new_at(&mut pace, at), None);
+        }
+        // Nor does a video that ends, and a slide changed a second later with the time drawn
+        // just after it.
+        at = video(&mut pace, at + FRAME, 10) + Duration::from_secs(1);
+        assert_eq!(new_at(&mut pace, at), None);
+        assert_eq!(new_at(&mut pace, at + Duration::from_millis(20)), None);
+        assert_eq!(new_at(&mut pace, at + Duration::from_secs(1)), None);
+        // A gap of more than two seconds counts nothing at all: the video stopped.
+        at = video(&mut pace, at + Duration::from_secs(2), 10);
+        assert_eq!(new_at(&mut pace, at + Duration::from_millis(2500)), None);
+        let minute = pace.minute_over(t + MINUTE).expect("a minute");
+        assert_eq!((minute.late, minute.hitches), (6, 6));
+        assert_eq!(minute.longest_gap, Some(Duration::from_millis(400)));
+    }
+
+    #[test]
+    fn a_slower_video_is_judged_at_its_own_pace() {
+        let t = Instant::now();
+        let mut pace = Pace::new(t, MINUTE);
+        pace.counted(t, Some(1));
+        // A 24 fps video for ten seconds, each picture up to 8 ms either side of its time (the
+        // screens look for a new one every 8 ms): its gaps run from 34 to 50 ms, past one and
+        // a half thirtieths of a second, and none is late.
+        let picture = Duration::from_nanos(1_000_000_000 / 24);
+        let wobble = |at: u32| Duration::from_millis(u64::from(at * 7 % 9));
+        let start = t + SECOND;
+        for at in 0..240 {
+            assert_eq!(new_at(&mut pace, start + picture * at + wobble(at)), None);
+        }
+        // Held up 120 ms: late at that pace, and a hitch once the video goes on.
+        let held = start + picture * 239 + wobble(239) + Duration::from_millis(120);
+        assert_eq!(new_at(&mut pace, held), None);
+        let hitch = (1..=3).find_map(|after| new_at(&mut pace, held + picture * after));
+        assert_eq!(hitch.map(|hitch| hitch.gap), Some(held - (start + picture * 239 + wobble(239))));
+        let minute = pace.minute_over(t + MINUTE).expect("a minute");
+        assert_eq!((minute.late, minute.hitches), (1, 1));
+        assert!(pace.frame > Duration::from_millis(40), "its pace is followed: {:?}", pace.frame);
+    }
+
+    #[test]
+    fn a_hold_up_with_a_late_picture_beside_it_is_still_one_hitch() {
+        let t = Instant::now();
+        let mut pace = Pace::new(t, MINUTE);
+        pace.counted(t, Some(1));
+        // A picture 60 ms late, then the video held up 400 ms, then on time again.
+        let mut at = video(&mut pace, t, 10) + Duration::from_millis(60);
+        assert_eq!(new_at(&mut pace, at), None);
+        at += Duration::from_millis(400);
+        let held = at;
+        assert_eq!(new_at(&mut pace, at), None);
+        assert_eq!(new_at(&mut pace, at + FRAME), None);
+        assert_eq!(new_at(&mut pace, at + 2 * FRAME), None);
+        let hitch = new_at(&mut pace, at + 3 * FRAME).expect("the hold-up, once the video is seen moving");
+        assert_eq!((hitch.at, hitch.gap), (held, Duration::from_millis(400)));
+        // Held up 400 ms, then a picture 60 ms late among the three on time after it.
+        at = video(&mut pace, at + 4 * FRAME, 10) + Duration::from_millis(400);
+        let held = at;
+        assert_eq!(new_at(&mut pace, at), None);
+        at += FRAME;
+        assert_eq!(new_at(&mut pace, at), None);
+        at += Duration::from_millis(60);
+        assert_eq!(new_at(&mut pace, at), None);
+        at += FRAME;
+        assert_eq!(new_at(&mut pace, at).map(|hitch| (hitch.at, hitch.gap)), Some((held, Duration::from_millis(400))));
+        video(&mut pace, at + FRAME, 5);
+        let minute = pace.minute_over(t + MINUTE).expect("a minute");
+        assert_eq!((minute.late, minute.hitches), (4, 2), "every late gap, and one hitch for each hold-up");
+        assert_eq!(minute.longest_gap, Some(Duration::from_millis(400)));
+    }
+
+    #[test]
+    fn nothing_is_counted_while_nobody_watches_and_the_line_says_so() {
+        let t = Instant::now();
+        let mut pace = Pace::new(t, MINUTE);
+        pace.counted(t, Some(0));
+        pace.skipped(3);
+        assert_eq!(new_at(&mut pace, t + SECOND), None);
+        pace.sent_again(SECOND);
+        let minute = pace.minute_over(t + MINUTE).expect("a minute");
+        assert_eq!(minute, Minute { length: MINUTE, ..Minute::default() });
+        assert_eq!(minute.words("Main"), "NDI \"Main\": nobody watching in the last minute");
+        assert!(!minute.trouble());
+    }
+
+    #[test]
+    fn part_of_a_minute_watched_is_counted_and_said() {
+        let t = Instant::now();
+        let mut pace = Pace::new(t, MINUTE);
+        pace.counted(t, Some(0));
+        // A receiver comes after 18 s, and another for a while; then they leave, and one
+        // comes back. What moved before they left counts nothing after.
+        pace.counted(t + Duration::from_secs(18), Some(1));
+        let last = video(&mut pace, t + Duration::from_secs(18), 300);
+        pace.counted(t + Duration::from_secs(30), Some(2));
+        pace.counted(t + Duration::from_secs(40), Some(0));
+        pace.skipped(4);
+        pace.counted(t + Duration::from_secs(50), Some(1));
+        assert!(last < t + Duration::from_secs(40));
+        assert_eq!(new_at(&mut pace, t + Duration::from_millis(50_100)), None, "afresh after nobody watched");
+        let minute = pace.minute_over(t + MINUTE).expect("a minute");
+        assert_eq!(minute.watched, Duration::from_secs(32));
+        assert_eq!((minute.sent, minute.skipped, minute.receivers), (301, 0, Some((1, 2))));
+        let words = minute.words("Main");
+        assert!(words.ends_with("in the 32 s watched of the last minute"), "{words}");
+        assert!(words.contains("301 pictures sent (9.4/s)") && words.contains("receivers 1 to 2"), "{words}");
+    }
+
+    #[test]
+    fn a_count_ndi_cannot_make_is_watched_and_said_not_known() {
+        let t = Instant::now();
+        let mut pace = Pace::new(t, MINUTE);
+        pace.counted(t, None);
+        pace.skipped(2);
+        new_at(&mut pace, t);
+        let minute = pace.minute_over(t + MINUTE).expect("a minute");
+        assert_eq!((minute.watched, minute.skipped, minute.receivers), (MINUTE, 2, None));
+        assert!(minute.words("Main").contains("receivers not known"));
+    }
+
+    #[test]
+    fn the_minutes_line_says_every_figure() {
+        let minute = Minute {
+            length: MINUTE + Duration::from_millis(400),
+            watched: MINUTE,
+            size: Some((1920, 1080)),
+            sent: 1795,
+            repeated: 1,
+            late: 3,
+            skipped: 2,
+            longest_gap: Some(Duration::from_millis(412)),
+            longest_send: Duration::from_micros(34_120),
+            receivers: Some((2, 2)),
+            hitches: 1,
+            not_drawn: 4,
+            passed_over: 1,
+            lost: 5,
+            came_back: Duration::from_micros(6_240),
+        };
+        assert_eq!(
+            minute.words("Main Screen NDI"),
+            "NDI \"Main Screen NDI\" at 1920x1080 30fps: 1795 pictures sent (29.9/s), 1 repeated, 3 late, 3 skipped (1 \
+             of them before drawing, the GPU still reading back the one before), longest gap 412.0 ms, 4 not drawn, 5 \
+             lost on the way back from the GPU (back in up to 6.2 ms), receivers 2, send took up to 34.1 ms in the \
+             last minute"
+        );
+        let clean = Minute { late: 0, skipped: 0, hitches: 0, not_drawn: 0, passed_over: 0, lost: 0, ..minute };
+        assert!(minute.trouble() && !clean.trouble());
+        assert!(clean.words("Main").contains(", 0 skipped, longest gap"));
+    }
+
+    #[test]
+    fn pictures_overtaken_in_the_queue_are_counted() {
+        let (tx, rx) = channel();
+        for width in [2, 3, 4] {
+            tx.send(Told::Picture(picture(width))).unwrap();
+        }
+        tx.send(Told::Forget(false)).unwrap();
+        let (kept, forget, overtaken) = newest(&rx, Told::Picture(picture(1)));
+        assert_eq!((kept.map(|picture| picture.width), forget, overtaken), (Some(4), Some(false), 3));
+        let (_, _, overtaken) = newest(&rx, Told::Forget(true));
+        assert_eq!(overtaken, 0, "word to forget overtakes no picture");
+    }
+
+    #[test]
+    fn hitches_are_told_at_most_every_five_seconds_with_how_many_more_there_were() {
+        let source = standing(1, || {});
+        let output = &source.output;
+        let t = Instant::now();
+        let hitch = |ms: u64| Hitch {
+            at: t,
+            gap: Duration::from_millis(ms),
+            handed_after: Duration::ZERO,
+            waited: Duration::ZERO,
+            took: Duration::ZERO,
+        };
+        assert_eq!(output.hitch_to_tell(t), None);
+        output.shared.hitched(hitch(100));
+        assert_eq!(output.hitch_to_tell(t), Some((hitch(100), 0)));
+        assert_eq!(output.hitch_to_tell(t), None, "told once");
+        // Two more within five seconds: not told, and not told later either.
+        output.shared.hitched(hitch(200));
+        assert_eq!(output.hitch_to_tell(t + SECOND), None);
+        output.shared.hitched(hitch(300));
+        assert_eq!(output.hitch_to_tell(t + 2 * SECOND), None);
+        assert_eq!(output.hitch_to_tell(t + 6 * SECOND), None, "they are long gone");
+        // The next one after that is told, with the two before it.
+        output.shared.hitched(hitch(400));
+        assert_eq!(output.hitch_to_tell(t + 7 * SECOND), Some((hitch(400), 2)));
+    }
+
+    #[test]
+    fn a_source_says_each_minute_how_its_pictures_went_out_and_keeps_the_figures() {
+        let (lines_tx, lines) = channel();
+        let log: Log = Arc::new(move |line: &str, problem: bool| {
+            let _ = lines_tx.send((line.to_owned(), problem));
+        });
+        let receivers = Arc::new(AtomicU32::new(1));
+        let (sent_tx, sent) = channel();
+        let (black_tx, _black) = channel();
+        let (bytes_tx, _bytes) = channel();
+        let (sound_tx, _sound) = channel();
+        let theirs = receivers.clone();
+        let open = move |_: &str| {
+            Ok(Stand { receivers: theirs, sent: sent_tx, black: black_tx, bytes: bytes_tx, sound: sound_tx })
+        };
+        let output = spawn("Main", open, || {}, log, SECOND).unwrap();
+        output.show(2, 1, vec![9; 8], Sent::Opaque);
+        assert_eq!(sent.recv_timeout(PATIENCE).unwrap().0, 2);
+        // What whoever draws says of the pictures goes in the line too.
+        output.note(Before::Lost);
+        output.note(Before::CameBack(Duration::from_millis(7)));
+        let began = Instant::now();
+        let (line, problem) = loop {
+            let (line, problem) = lines.recv_timeout(PATIENCE).expect("a line each minute");
+            if line.contains("1 lost") || began.elapsed() > PATIENCE {
+                break (line, problem);
+            }
+        };
+        assert!(line.starts_with("NDI \"Main\" at 2x1 30fps: 1 pictures sent"), "{line}");
+        assert!(line.contains("1 lost on the way back from the GPU (back in up to 7.0 ms), receivers 1"), "{line}");
+        assert!(problem, "a picture lost is a problem");
+        let kept = output.last_minute().expect("the figures are kept");
+        assert_eq!((kept.sent, kept.lost, kept.receivers), (1, 1, Some((1, 1))));
+        // Nobody watching: the next minutes say only that.
+        receivers.store(0, Ordering::Relaxed);
+        let began = Instant::now();
+        while !lines
+            .recv_timeout(PATIENCE)
+            .expect("a line each minute")
+            .0
+            .ends_with("nobody watching in the last minute")
+        {
+            assert!(began.elapsed() < PATIENCE);
+        }
     }
 
     #[test]

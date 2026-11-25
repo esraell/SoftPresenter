@@ -32,9 +32,12 @@ fn main() {
     // The source tells this thread when its count of receivers changes, as it tells the app's
     // screens.
     let (joined_tx, joined) = channel();
-    let output = match NdiOutput::start_with_wake(NAME, move || {
+    // Its line each minute, saying how the pictures went out, is printed as the app logs it.
+    let log: sp_ndi::Log = Arc::new(|line: &str, _problem: bool| println!("[ndi] {line}"));
+    let wake = move || {
         let _ = joined_tx.send(());
-    }) {
+    };
+    let output = match NdiOutput::start_with_wake(NAME, wake, log) {
         Ok(output) => output,
         Err(reason) => {
             eprintln!("{reason}");

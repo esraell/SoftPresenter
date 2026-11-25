@@ -1395,6 +1395,16 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   say how many receivers each NDI screen has, or that nobody is watching. The number is NDI's
   own (NDI's monitor app, for one, counts as two receivers); with an NDI too old to count
   them, the screen is drawn and sent all the time.
+- **The log says how each NDI screen's pictures went out.** Once a minute, for each NDI screen,
+  as for each DeckLink output: the pictures sent (and how many a second, against the 30 it says
+  it sends), sent again, late, skipped, the longest gap between them while a video plays, not
+  drawn, lost on the way back from the GPU (and how long they took to come back), the
+  receivers, and the longest send; or that nobody watched. When a picture comes more than two
+  pictures late while a video plays, which somebody watching could see as a stutter, one line
+  (at most every five seconds for each screen) says how long, whether NDI or the screens held
+  it up, and what the screens were doing then: a fade, the GPU too slow, a picture lost, the
+  video standing still, or a long step, with where its time went. It costs a few readings of
+  the clock and counts kept in place, nothing for each picture.
 - While a video plays, only the screens that show it are drawn again for each of its pictures:
   an audience screen with the media layer on (or with a video in a box on its slide or in its
   announcements), a stage screen that shows a picture of such a screen, and the same screens'
@@ -1517,7 +1527,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   and the locks shared with the operator's window. The line each minute counts the passes over
   50 and 100 ms and the pictures the windows showed and didn't; screens' windows being covered
   and uncovered, the displays changing and a slow try at opening a DeckLink device are logged
-  too. All of it costs a few readings of the clock.
+  too, and the last few hold-ups of a picture's time or more are kept for the line that says
+  what held up an NDI picture. All of it costs a few readings of the clock.
 - **A screen's window the computer is slow with doesn't hold up the others.** The system lends
   each window the pictures it draws into, and on a Mac can take about a second to give one back
   when it isn't showing the window for a moment. The screens wait for one a twentieth of a

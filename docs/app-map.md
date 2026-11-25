@@ -383,7 +383,55 @@ From a test copy laid out as the church's, its window held back for a second wit
 
 The per-minute `[output]` line adds the longest pass, how many passes were over 50 ms and over
 100 ms, how many pictures reached the windows and how many didn't (a covered window shows
-none), how late the thread woke when that was 50 ms or more, and an NDI send of 100 ms or more.
+none), and how late the thread woke when that was 50 ms or more. Its "N NDI" is how many NDI
+sources are switched on (one that could not start included); its "video pictures" are the new
+pictures that came in to be shown (videos, and NDI Source boxes), never the pictures sent out
+over NDI.
+
+Each NDI source's own thread (`sp-ndi`, `Pace` in `lib.rs`) writes an `[ndi]` line each minute,
+counted only while somebody watches it (or NDI can't count its receivers), like the
+`[decklink]` lines: new pictures sent (and how many a second, against the 30 a second the
+source says it sends); repeated (the same picture sent again because nothing new came for a
+second, as it is every second while a slide stays); late (a new picture more than one and a
+half pictures' times after the one before, while pictures are moving, at the pictures' own
+pace: a thirtieth of a second for a 30 fps video, a 24 fps video's own time for that, which
+the source follows slowly from the gaps on time, so a slower video's steady pace is no
+lateness); skipped (a picture
+handed over that a newer one replaced before it could be sent, the source's thread busy; and
+one put off on the screens' thread while the GPU still read back the one before, then passed
+over); the longest gap between new pictures while moving; not drawn (the GPU too slow with
+it, or unable to draw it); lost on the way back from the GPU, and the longest one took to
+come back; the receivers; and the longest send (NDI paces its sending, so a send waits up to
+a picture's time for its turn). Pictures count as moving once three gaps in a row were on
+time (a playing video). Late gaps (each up to two seconds) then count
+once the gaps after them show the pictures went on moving: one more gap of up to a quarter
+of a second after a short late gap, three after a longer hold-up (a picture late beside a
+hold-up is part of the same stutter, whose longest gap is the hitch); two gaps over a
+quarter of a second say the pictures had stopped, and they count nothing. So a slide that
+stays, a video that ends, the stage screens' time once a second and slides changed now and
+then count nothing, and a hitch is known a picture or three after it ends. With
+nobody watching all minute the line says only that. The screens' thread tells a source what
+became of its pictures before they reached it (`NdiOutput::note`); the minute's figures are
+kept for other code too (`sp_ndi::Watch::last_minute`, reached through the `NdiEntry` each
+screen's source has in the window's statuses).
+
+When a new picture comes more than two pictures' times after the one before while pictures
+move (a hitch someone watching could see), the source's thread notes it, and the screens'
+thread, which looks at each source's count of hitches at the end of every pass (one atomic
+load), writes one `[ndi]` line at most every five seconds for each source (the next says how
+many more there were): the gap and when it ended; how long after the picture before was sent
+this one was handed over, how long it waited for the source's thread and how long it took to
+send; and what the screens' thread was doing in that time, from `output/held.rs`, which keeps
+the last four passes of a picture's time or more and the last sixteen of the other things
+that can hold a picture up (a fade in the windows, a picture the GPU was too slow with, an
+NDI picture lost or put off, the video giving no new picture): those that fell in the gap,
+and the longest pass then, written as a held pass is. From a test copy playing a video
+behind a song, with a receiver watching, a minute of the video alone and then a slide
+changed with a 0.4 s dissolve:
+
+    [ndi] NDI "SPTEST Main" at 1920x1080 30fps: 1800 pictures sent (30.0/s), 0 repeated, 0 late, 17 skipped, longest gap 47.9 ms, 0 not drawn, 0 lost on the way back from the GPU (back in up to 38.1 ms), receivers 1, send took up to 47.9 ms in the last minute
+    [ndi] NDI "SPTEST Main" stood still: 424.2 ms between two new pictures, up to 20:58:26.792, while pictures were moving and somebody watched. The picture was handed over 417.8 ms after the one before was sent, waited 0.0 ms for NDI's thread and took 6.4 ms to send. On the screens' thread then: a fade ran in the windows for 368.0 ms of it; no pass took 33.3 ms or more.
+
 A DeckLink output's thread says when opening its device took 100 ms or more, and the window
 says when a screen's window is covered or uncovered and when the displays change (`[screens]`). Where a screen's window goes when displays change is decided by `window_plan.rs` (a pure function: displays, screens' targets and where each window is, in; open, keep, put back, hide out, with the notice for a display that went; tested with made-up displays) and carried out by `App::sync_screens` in `main.rs`. On a Mac the window is placed by `sp_video::cover_display` (`crates/sp-video/src/mac/cover.rs`: level, Spaces behaviour, exact frame), and `sp_video::DisplayWatch` wakes the loop when macOS says the displays changed; elsewhere `App::look_at_displays` looks once a second. Testing aids: `SOFTPRESENTER_SCREENS_FILL=<display name>` (a quiet run's screens fill that one display), with `SOFTPRESENTER_SCREENS_ON_TOP=1` for the real window level; `spikes/virtual-display` makes a virtual display to try it on. A screen's window that fills a display shows a large X in its top-right corner when the pointer keeps moving over it, which switches that screen off: the clock, the place and what a press does are `close_button.rs` (a pure state machine held on each `ScreenWindow`, fed by `App::window_event`'s pointer events and run by `App::tick_close_buttons` from `about_to_wait`, which also shows the pointer while it is up); the screens' thread is told how strongly to draw it (`OutputMsg::CloseButton`) and lays it over the window's picture as that goes into the window (`show_in_window_timed`, with `sp_render::CloseMark`, a small shader pass), never into the window's texture, so NDI, keys, stage screens, the preview and captures never have it; a change of the X alone shows the window's picture again without painting it (`Output::show_close_buttons`). Testing aids: `SOFTPRESENTER_CLOSE_BUTTON_IN_WINDOWS=1` (screens in an ordinary window get it too) and `SOFTPRESENTER_CLOSE_BUTTON_PLAY=1` (a played pointer moves over the first such window and presses its X; `=move` only moves).
 

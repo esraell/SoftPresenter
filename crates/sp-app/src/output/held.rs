@@ -8,6 +8,12 @@
 //! when it began, the longest single step and what it was for, every part's share, and what the
 //! DeckLink and NDI threads were doing. The per-minute line counts the passes over [`SLOW`] and
 //! over [`HELD`], the pictures the windows showed and didn't, and how late the thread woke.
+//!
+//! The last few passes of [`LONG`] or more are kept too, with the other things the thread does
+//! that can keep an NDI picture from coming in time (a fade, a picture the GPU was too slow
+//! with, one lost on its way back, a video that gave no new picture): when an NDI source finds
+//! a picture came late, the line saying so tells what the thread was doing then
+//! ([`Held::then`]). Kept in fixed lists, so nothing is allocated for them either.
 
 use std::time::{Duration, Instant};
 
@@ -20,6 +26,32 @@ pub(super) const HELD: Duration = Duration::from_millis(100);
 /// A pass this long already costs a 30 fps video a picture or so. Counted each minute, not
 /// written one by one.
 pub(super) const SLOW: Duration = Duration::from_millis(50);
+
+/// A pass this long or longer is kept a while, with where its time went, for the line that
+/// says what held up an NDI picture: one picture's time at the rate NDI sends.
+pub(super) const LONG: Duration = sp_ndi::FRAME;
+
+/// How many long passes are kept, and how many of the other things that can hold up a picture.
+const KEPT: usize = 4;
+const HAPPENINGS: usize = 16;
+
+/// Something the thread does, other than taking long over a pass, that can keep an NDI source
+/// from getting its next picture in time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Happened {
+    /// The GPU was too slow with a picture: it is drawn again shortly.
+    GpuTooSlow,
+    /// An NDI picture was lost on its way back from the GPU.
+    NdiLost,
+    /// An NDI drawing was put off, the GPU still reading back the one before.
+    NdiPutOff,
+    /// A fade began, or ended, in the windows. Their steps draw the windows only: NDI is given
+    /// the new slide at once, and nothing more until the fade is over.
+    FadeBegan,
+    FadeEnded,
+    /// The video gave its new picture this long after the one before.
+    VideoStill(Duration),
+}
 
 /// A kind of step the thread takes. The parts never overlap one another, so with what no part
 /// covers ("other") they add up to the whole pass.
@@ -139,19 +171,40 @@ pub(super) struct Totals {
     pub log: Duration,
 }
 
-/// The pass under way, and the counts for the per-minute line.
-#[derive(Debug)]
-pub(super) struct Held {
+/// One pass's steps: when it began, each part's time and count, its longest step and what that
+/// was for, and the running totals at its start.
+#[derive(Clone, Copy, Debug)]
+struct Pass {
     began: Instant,
     took: [Duration; PARTS],
     times: [u32; PARTS],
-    /// The longest single step of the pass, and what it was for.
     longest: (Part, For, Duration),
+    at_begin: Totals,
+}
+
+/// A long pass kept: its steps, how long it took, and the running totals at its end.
+#[derive(Clone, Copy, Debug)]
+struct Kept {
+    pass: Pass,
+    took: Duration,
+    at_end: Totals,
+}
+
+/// The pass under way, the counts for the per-minute line, and what is kept for saying what
+/// held up an NDI picture.
+#[derive(Debug)]
+pub(super) struct Held {
+    pass: Pass,
     /// How deep the thread is in building a scene: a stage screen's picture of another screen
     /// is built inside its own, and the time counts once.
     building: u8,
-    at_begin: Totals,
     minute: Minute,
+    /// The last few passes of [`LONG`] or more, and the next place to keep one (the oldest).
+    kept: [Option<Kept>; KEPT],
+    next_kept: usize,
+    /// The last few other things that can hold a picture up, with when, and the next place.
+    happened: [Option<(Instant, Happened)>; HAPPENINGS],
+    next_happened: usize,
 }
 
 /// What the per-minute line says of the passes and the windows.
@@ -165,36 +218,173 @@ struct Minute {
     late: Duration,
 }
 
-impl Held {
-    pub(super) fn new(now: Instant) -> Held {
-        Held {
+impl Pass {
+    fn new(now: Instant, totals: Totals) -> Pass {
+        Pass {
             began: now,
             took: [Duration::ZERO; PARTS],
             times: [0; PARTS],
             longest: (Part::Acquire, For::Nothing, Duration::ZERO),
+            at_begin: totals,
+        }
+    }
+
+    /// The line for a pass that was held `took`, the running totals being `now` at its end:
+    /// when it began (by the clock), its longest step, every part it had, and what was left
+    /// over. `name` says what a step was for, in words.
+    fn words(&self, took: Duration, began_at: &str, now: Totals, name: impl Fn(For) -> String) -> String {
+        let (part, what, longest) = self.longest;
+        let mut line = format!("The screens' thread was held {} from {began_at}.", ms(took));
+        if longest > Duration::ZERO {
+            let what = name(what);
+            let what = if what.is_empty() { String::new() } else { format!(" for {what}") };
+            line.push_str(&format!(" Longest step: {}{what}, {}.", part.words(), ms(longest)));
+        }
+        let mut parts = Vec::new();
+        let mut counted = Duration::ZERO;
+        for part in Part::ALL {
+            let times = self.times[part.at()];
+            if times == 0 {
+                continue;
+            }
+            let spent = self.took[part.at()];
+            counted += spent;
+            let mut said = format!("{} {} ×{times}", part.words(), ms(spent));
+            if part == Part::Paint {
+                let waited = now.gpu_wait.saturating_sub(self.at_begin.gpu_wait);
+                let runs = now.runs.saturating_sub(self.at_begin.runs);
+                let reruns = now.reruns.saturating_sub(self.at_begin.reruns);
+                said.push_str(&format!(" (GPU wait {}, {runs} runs, {reruns} again for room)", ms(waited)));
+            }
+            parts.push(said);
+        }
+        parts.push(format!("other {}", ms(took.saturating_sub(counted))));
+        line.push_str(&format!(" All steps: {}.", parts.join("; ")));
+        let locks = now.shared_locks.saturating_sub(self.at_begin.shared_locks);
+        let log = now.log.saturating_sub(self.at_begin.log);
+        line.push_str(&format!(
+            " Within them: waiting for the pictures' and fonts' locks {}, writing the log {}.",
+            ms(locks),
+            ms(log)
+        ));
+        line
+    }
+}
+
+impl Held {
+    pub(super) fn new(now: Instant) -> Held {
+        Held {
+            pass: Pass::new(now, Totals::default()),
             building: 0,
-            at_begin: Totals::default(),
             minute: Minute::default(),
+            kept: [None; KEPT],
+            next_kept: 0,
+            happened: [None; HAPPENINGS],
+            next_happened: 0,
         }
     }
 
     /// A pass begins, with the running totals as they stand.
     pub(super) fn begin(&mut self, now: Instant, totals: Totals) {
-        self.began = now;
-        self.took = [Duration::ZERO; PARTS];
-        self.times = [0; PARTS];
-        self.longest = (Part::Acquire, For::Nothing, Duration::ZERO);
+        self.pass = Pass::new(now, totals);
         self.building = 0;
-        self.at_begin = totals;
     }
 
     /// One step of a part took this long.
     pub(super) fn add(&mut self, part: Part, what: For, took: Duration) {
-        self.took[part.at()] += took;
-        self.times[part.at()] += 1;
-        if took > self.longest.2 {
-            self.longest = (part, what, took);
+        let pass = &mut self.pass;
+        pass.took[part.at()] += took;
+        pass.times[part.at()] += 1;
+        if took > pass.longest.2 {
+            pass.longest = (part, what, took);
         }
+    }
+
+    /// Whether the pass under way, ending now, is long enough to keep ([`Held::keep`]).
+    pub(super) fn is_long(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.pass.began) >= LONG
+    }
+
+    /// Keeps the pass under way, ending now with the running totals at `at_end`, in place of
+    /// the oldest kept.
+    pub(super) fn keep(&mut self, now: Instant, at_end: Totals) {
+        let took = now.saturating_duration_since(self.pass.began);
+        self.kept[self.next_kept] = Some(Kept { pass: self.pass, took, at_end });
+        self.next_kept = (self.next_kept + 1) % KEPT;
+    }
+
+    /// Something that can hold a picture up happened now, in place of the oldest such.
+    pub(super) fn happened(&mut self, now: Instant, what: Happened) {
+        self.happened[self.next_happened] = Some((now, what));
+        self.next_happened = (self.next_happened + 1) % HAPPENINGS;
+    }
+
+    /// What the thread was doing from `from` to `to`, for the line that says an NDI picture came
+    /// late then: a fade, pictures the GPU was too slow with, NDI pictures lost or put off, the
+    /// video's pause between pictures, and the longest pass of [`LONG`] or more that ran then,
+    /// written as a held pass is. `name` says what a step was for, in words.
+    pub(super) fn then(&self, from: Instant, to: Instant, name: impl Fn(For) -> String) -> String {
+        let overlap = |began: Instant, ended: Instant| ended.min(to).saturating_duration_since(began.max(from));
+        let (mut fading_since, mut faded) = (None, Duration::ZERO);
+        let (mut slow, mut lost, mut put_off, mut still) = (0, 0, 0, Duration::ZERO);
+        // Oldest first: from the place after the newest.
+        let order = (0..HAPPENINGS).map(|at| self.happened[(self.next_happened + at) % HAPPENINGS]);
+        for (at, what) in order.flatten() {
+            match what {
+                Happened::FadeBegan => fading_since = Some(at),
+                Happened::FadeEnded => {
+                    faded += fading_since.take().map_or(Duration::ZERO, |began| overlap(began, at));
+                }
+                Happened::VideoStill(gap) => {
+                    if !overlap(at.checked_sub(gap).unwrap_or(at), at).is_zero() {
+                        still = still.max(gap);
+                    }
+                }
+                _ if at < from || at > to => {}
+                Happened::GpuTooSlow => slow += 1,
+                Happened::NdiLost => lost += 1,
+                Happened::NdiPutOff => put_off += 1,
+            }
+        }
+        // A fade still under way.
+        faded += fading_since.map_or(Duration::ZERO, |began| overlap(began, to));
+        let mut facts = Vec::new();
+        if !faded.is_zero() {
+            facts.push(format!("a fade ran in the windows for {} of it", ms(faded)));
+        }
+        if slow > 0 {
+            facts.push(format!("the GPU was too slow with {}", count(slow, "picture", "pictures")));
+        }
+        if lost > 0 {
+            facts.push(format!("{} lost on the way back from the GPU", count(lost, "NDI picture", "NDI pictures")));
+        }
+        if put_off > 0 {
+            let drawings = count(put_off, "NDI drawing", "NDI drawings");
+            facts.push(format!("{drawings} put off, the GPU still reading back the one before"));
+        }
+        if !still.is_zero() {
+            facts.push(format!("the video gave no new picture for {}", ms(still)));
+        }
+        let longest = self
+            .kept
+            .iter()
+            .flatten()
+            .filter(|kept| !overlap(kept.pass.began, kept.pass.began + kept.took).is_zero())
+            .max_by_key(|kept| kept.took);
+        let mut words = facts.join("; ");
+        match longest {
+            Some(kept) => {
+                if !words.is_empty() {
+                    words.push_str(". ");
+                }
+                words.push_str(&kept.pass.words(kept.took, &clock(kept.pass.began), kept.at_end, name));
+            }
+            None if words.is_empty() => {
+                words = format!("nothing that holds a picture up (no pass took {} or more).", ms(LONG));
+            }
+            None => words.push_str(&format!("; no pass took {} or more.", ms(LONG))),
+        }
+        words
     }
 
     /// One step of a part began at `from` and ends now. Gives the time now, for a step that
@@ -237,7 +427,7 @@ impl Held {
     /// The pass ends now. Its length when it was held for [`HELD`] or more (it should then be
     /// written, with [`Held::words`]); counted for the minute either way.
     pub(super) fn end(&mut self, now: Instant) -> Option<Duration> {
-        let took = now.saturating_duration_since(self.began);
+        let took = now.saturating_duration_since(self.pass.began);
         if took >= SLOW {
             self.minute.slow += 1;
         }
@@ -249,45 +439,9 @@ impl Held {
         Some(took)
     }
 
-    /// The line for a pass that was held `took`, the running totals being `now` at its end:
-    /// when it began (by the clock), its longest step, every part it had, and what was left
-    /// over. `name` says what a step was for, in words.
+    /// The line for the pass under way, held `took` (see `Pass::words`).
     pub(super) fn words(&self, took: Duration, began_at: &str, now: Totals, name: impl Fn(For) -> String) -> String {
-        let (part, what, longest) = self.longest;
-        let mut line = format!("The screens' thread was held {} from {began_at}.", ms(took));
-        if longest > Duration::ZERO {
-            let what = name(what);
-            let what = if what.is_empty() { String::new() } else { format!(" for {what}") };
-            line.push_str(&format!(" Longest step: {}{what}, {}.", part.words(), ms(longest)));
-        }
-        let mut parts = Vec::new();
-        let mut counted = Duration::ZERO;
-        for part in Part::ALL {
-            let times = self.times[part.at()];
-            if times == 0 {
-                continue;
-            }
-            let spent = self.took[part.at()];
-            counted += spent;
-            let mut said = format!("{} {} ×{times}", part.words(), ms(spent));
-            if part == Part::Paint {
-                let waited = now.gpu_wait.saturating_sub(self.at_begin.gpu_wait);
-                let runs = now.runs.saturating_sub(self.at_begin.runs);
-                let reruns = now.reruns.saturating_sub(self.at_begin.reruns);
-                said.push_str(&format!(" (GPU wait {}, {runs} runs, {reruns} again for room)", ms(waited)));
-            }
-            parts.push(said);
-        }
-        parts.push(format!("other {}", ms(took.saturating_sub(counted))));
-        line.push_str(&format!(" All steps: {}.", parts.join("; ")));
-        let locks = now.shared_locks.saturating_sub(self.at_begin.shared_locks);
-        let log = now.log.saturating_sub(self.at_begin.log);
-        line.push_str(&format!(
-            " Within them: waiting for the pictures' and fonts' locks {}, writing the log {}.",
-            ms(locks),
-            ms(log)
-        ));
-        line
+        self.pass.words(took, began_at, now, name)
     }
 
     /// What the per-minute line adds, and the counts begun again.
@@ -313,6 +467,17 @@ impl Held {
 /// A length of time in milliseconds, to a tenth.
 fn ms(took: Duration) -> String {
     format!("{:.1} ms", took.as_secs_f64() * 1000.0)
+}
+
+/// How many of something, in words: "1 picture", "3 pictures".
+fn count(n: u32, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// The time of day an instant was, to the thousandth of a second, as the log writes times.
+pub(super) fn clock(at: Instant) -> String {
+    let ago = Instant::now().saturating_duration_since(at);
+    (chrono::Local::now() - chrono::Duration::from_std(ago).unwrap_or_default()).format("%H:%M:%S%.3f").to_string()
 }
 
 #[cfg(test)]
@@ -363,11 +528,11 @@ mod tests {
         assert!(outer.is_some() && inner.is_none());
         held.scene_built(inner, For::Nothing);
         held.scene_built(outer, For::Nothing);
-        assert_eq!(held.times[Part::Scene.at()], 1);
+        assert_eq!(held.pass.times[Part::Scene.at()], 1);
         // And the next one counts again.
         let next = held.scene_begins();
         held.scene_built(next, For::Nothing);
-        assert_eq!(held.times[Part::Scene.at()], 2);
+        assert_eq!(held.pass.times[Part::Scene.at()], 2);
     }
 
     #[test]
@@ -388,5 +553,54 @@ mod tests {
         );
         held.woke_late(Duration::from_millis(400));
         assert!(held.minute_words().ends_with("not; woke up to 400.0 ms late"), "counted afresh, late said");
+    }
+
+    #[test]
+    fn what_held_up_an_ndi_picture_is_what_happened_in_its_time_and_the_longest_pass_then() {
+        let ms = Duration::from_millis;
+        let start = Instant::now();
+        let mut held = Held::new(start);
+        // A pass of 120 ms (a window's picture slow to come), kept; a quick one, not.
+        held.begin(start + ms(1000), Totals::default());
+        assert!(!held.is_long(start + ms(1010)));
+        held.add(Part::Acquire, For::Window(Uuid::nil()), ms(110));
+        assert!(held.is_long(start + ms(1120)));
+        held.keep(start + ms(1120), Totals::default());
+        // A fade from 900 ms to 1300 ms, two pictures the GPU was too slow with, an NDI
+        // picture lost, and the video still for 150 ms up to 1250 ms. Some of it is later.
+        held.happened(start + ms(900), Happened::FadeBegan);
+        held.happened(start + ms(1100), Happened::GpuTooSlow);
+        held.happened(start + ms(1150), Happened::GpuTooSlow);
+        held.happened(start + ms(1200), Happened::NdiLost);
+        held.happened(start + ms(1250), Happened::VideoStill(ms(150)));
+        held.happened(start + ms(1300), Happened::FadeEnded);
+        held.happened(start + ms(3000), Happened::GpuTooSlow);
+        let then = held.then(start + ms(1000), start + ms(1400), named);
+        assert!(
+            then.starts_with(
+                "a fade ran in the windows for 300.0 ms of it; the GPU was too slow with 2 pictures; 1 NDI picture \
+                 lost on the way back from the GPU; the video gave no new picture for 150.0 ms. The screens' thread \
+                 was held 120.0 ms from "
+            ),
+            "{then}"
+        );
+        assert!(then.contains("Longest step: surface acquire for the window TV, 110.0 ms."), "{then}");
+        // Before all of it: nothing, and no pass.
+        assert_eq!(
+            held.then(start, start + ms(500), named),
+            "nothing that holds a picture up (no pass took 33.3 ms or more)."
+        );
+        // A fade still under way counts up to the end of the time asked about.
+        held.happened(start + ms(4000), Happened::FadeBegan);
+        assert_eq!(
+            held.then(start + ms(4100), start + ms(4500), named),
+            "a fade ran in the windows for 400.0 ms of it; no pass took 33.3 ms or more."
+        );
+        // Only the last sixteen are kept: sixteen more push the rest out.
+        for at in 0..HAPPENINGS as u64 {
+            held.happened(start + ms(5000 + at), Happened::NdiPutOff);
+        }
+        assert!(held.then(start + ms(5000), start + ms(6000), named).starts_with("16 NDI drawings put off"));
+        assert!(!held.then(start + ms(1000), start + ms(1400), named).contains("GPU was too slow"));
     }
 }
