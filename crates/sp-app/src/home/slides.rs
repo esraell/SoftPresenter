@@ -561,7 +561,12 @@ pub fn decks(show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) ->
                         ringed: None,
                     }),
                     Some(Err(problem)) => Deck::Note { item, title, kind: "Bible", words: problem },
-                    None => Deck::Note { item, title, kind: "Bible", words: "Looking it up\u{2026}".to_owned() },
+                    None => Deck::Note {
+                        item,
+                        title,
+                        kind: "Bible",
+                        words: t("slides.note.looking_up", "Looking it up\u{2026}").to_owned(),
+                    },
                 }
             }
             (Item::Song { .. }, Some(at)) => match show.presentations().get(at) {
@@ -581,7 +586,7 @@ pub fn decks(show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) ->
                 item,
                 title,
                 kind: "Missing",
-                words: "This song is not in the library any more.".to_owned(),
+                words: t("slides.note.missing", "This song is not in the library any more.").to_owned(),
             },
         })
         .collect()
@@ -1347,7 +1352,11 @@ fn draw_slides(
             && !deck.made
             && let Some(key) = sp_model::key_for_group(&group.name)
         {
-            response.clone().on_hover_text(format!("{} (key {key})", group.name));
+            response.clone().on_hover_text(tf(
+                "slides.group_key",
+                "{group} (key {key})",
+                &[("group", &group.name), ("key", &key.to_string())],
+            ));
         }
         let is_live = live_at == Some(at);
         // The slide that waits for Enter: in ink, never orange, and not the blue of slides
@@ -1412,7 +1421,7 @@ fn draw_slides(
                     ui.painter().text(
                         picture.center(),
                         Align2::CENTER_CENTER,
-                        format!("Page {page}\u{2026}"),
+                        tf("slides.page_waiting", "Page {page}\u{2026}", &[("page", &page.to_string())]),
                         FontId::proportional(14.0),
                         TEXT_FAINT,
                     );
@@ -1703,7 +1712,7 @@ pub(super) fn slide_tags(slide: &Slide) -> Vec<Tag> {
         ));
     }
     if let Some(own) = slide.transition {
-        tags.push(Tag::new(own.kind.name().to_uppercase(), TagLook::Plain));
+        tags.push(Tag::new(crate::studio::transition_name(own.kind).to_uppercase(), TagLook::Plain));
     }
     if !slide.enabled {
         tags.push(Tag::new(t("slides.tag.off", "Off").to_uppercase(), TagLook::Plain));
@@ -2199,7 +2208,11 @@ fn version_button(
 fn arrangement_menu(index: usize, song: &Presentation, state: &mut HomeState, button: &egui::Response) {
     let active = song.active_arrangement();
     let named = |arrangement: &sp_model::Arrangement| {
-        if arrangement.name.trim().is_empty() { "Untitled".to_owned() } else { arrangement.name.clone() }
+        if arrangement.name.trim().is_empty() {
+            t("left.untitled", "Untitled").to_owned()
+        } else {
+            arrangement.name.clone()
+        }
     };
     let mut arrangements = song.arrangements.clone();
     let mut chosen = song.arrangement;
@@ -2209,7 +2222,10 @@ fn arrangement_menu(index: usize, song: &Presentation, state: &mut HomeState, bu
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.set_min_width(220.0);
-            if ui.add(egui::Button::selectable(active.is_none(), "As written")).clicked() {
+            if ui
+                .add(egui::Button::selectable(active.is_none(), t("slides.arrangement.as_written", "As written")))
+                .clicked()
+            {
                 chosen = None;
                 ui.close();
             }
@@ -2221,7 +2237,11 @@ fn arrangement_menu(index: usize, song: &Presentation, state: &mut HomeState, bu
                 }
             }
             ui.separator();
-            if ui.button("New Arrangement").on_hover_text("Starts with the groups as written").clicked() {
+            if ui
+                .button(t("slides.arrangement.new", "New Arrangement"))
+                .on_hover_text(t("slides.arrangement.new.hint", "Starts with the groups as written"))
+                .clicked()
+            {
                 let made = song.new_arrangement();
                 chosen = Some(made.id);
                 arrangements.push(made);
@@ -2231,22 +2251,22 @@ fn arrangement_menu(index: usize, song: &Presentation, state: &mut HomeState, bu
                 let renaming = ui.data(|data| data.get_temp::<bool>(renaming_id).unwrap_or(false));
                 if renaming {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Name").color(DIM));
+                        ui.label(egui::RichText::new(t("slides.arrangement.name", "Name")).color(DIM));
                         ui.add(egui::TextEdit::singleline(&mut arrangements[at].name).desired_width(150.0));
                     });
-                } else if ui.button("Rename\u{2026}").clicked() {
+                } else if ui.button(t("slides.arrangement.rename", "Rename\u{2026}")).clicked() {
                     ui.data_mut(|data| data.insert_temp(renaming_id, true));
                 }
-                if ui.button("Duplicate").clicked() {
+                if ui.button(t("slides.duplicate", "Duplicate")).clicked() {
                     let copy = sp_model::Arrangement {
                         id: sp_model::Uuid::new_v4(),
-                        name: format!("{} copy", arrangements[at].name),
+                        name: tf("slides.arrangement.copy", "{name} copy", &[("name", &arrangements[at].name)]),
                         groups: arrangements[at].groups.clone(),
                     };
                     chosen = Some(copy.id);
                     arrangements.push(copy);
                 }
-                if ui.button("Delete").clicked() {
+                if ui.button(t("slides.delete", "Delete")).clicked() {
                     arrangements.remove(at);
                     chosen = None;
                     ui.close();
@@ -2306,7 +2326,8 @@ fn arrangement_layout(ui: &egui::Ui, song: &Presentation, width: f32) -> Option<
         x += w + 6.0;
         rect
     };
-    let label = if arrangement.name.trim().is_empty() { "Untitled" } else { arrangement.name.as_str() };
+    let label =
+        if arrangement.name.trim().is_empty() { t("left.untitled", "Untitled") } else { arrangement.name.as_str() };
     let name = put(wide(&format!("{label} \u{25be}"), fixed_semibold(11.0)) + 26.0);
     let mut chips = Vec::new();
     let steps = song.run_steps();
@@ -2364,9 +2385,9 @@ fn piece_menu(ui: &mut egui::Ui, arrangement: &sp_model::Arrangement, chip: usiz
     let run = runs.get(chip)?;
     let mut changed = arrangement.clone();
     ui.set_min_width(190.0);
-    ui.label(egui::RichText::new("How many times").size(11.5).color(TEXT_FAINT));
+    ui.label(egui::RichText::new(t("slides.times", "How many times")).size(11.5).color(TEXT_FAINT));
     let mut done = false;
-    for (times, words) in [(1, "Once"), (2, "\u{d7}2"), (3, "\u{d7}3"), (4, "\u{d7}4")] {
+    for (times, words) in [(1, t("slides.times.once", "Once")), (2, "\u{d7}2"), (3, "\u{d7}3"), (4, "\u{d7}4")] {
         if ui.add(egui::Button::selectable(run.count == times, words)).clicked() {
             changed.set_times(run.start, times);
             done = true;
@@ -2375,25 +2396,31 @@ fn piece_menu(ui: &mut egui::Ui, arrangement: &sp_model::Arrangement, chip: usiz
     // More: up to twenty times.
     let mut times = run.count.max(5);
     ui.horizontal(|ui| {
-        ui.label(if run.count > 4 { format!("\u{d7}{} \u{b7} More", run.count) } else { "More\u{2026}".to_owned() });
-        let field = ui.add(egui::DragValue::new(&mut times).range(1..=sp_model::MOST_TIMES).suffix(" times"));
+        ui.label(if run.count > 4 {
+            tf("slides.times.more_now", "\u{d7}{n} \u{b7} More", &[("n", &run.count.to_string())])
+        } else {
+            t("slides.times.more", "More\u{2026}").to_owned()
+        });
+        let field = ui.add(
+            egui::DragValue::new(&mut times).range(1..=sp_model::MOST_TIMES).suffix(t("slides.times.suffix", " times")),
+        );
         if field.changed() || (field.lost_focus() && run.count <= 4 && times > 4) {
             changed.set_times(run.start, times);
             done = true;
         }
     });
     ui.separator();
-    if ui.add_enabled(chip > 0, egui::Button::new("Move Left")).clicked() {
+    if ui.add_enabled(chip > 0, egui::Button::new(t("slides.piece.move_left", "Move Left"))).clicked() {
         changed.move_run(run.start, runs[chip - 1].start, false);
         done = true;
         ui.close();
     }
-    if ui.add_enabled(chip + 1 < count, egui::Button::new("Move Right")).clicked() {
+    if ui.add_enabled(chip + 1 < count, egui::Button::new(t("slides.piece.move_right", "Move Right"))).clicked() {
         changed.move_run(run.start, runs[chip + 1].start, true);
         done = true;
         ui.close();
     }
-    if ui.add_enabled(runs.len() > 1, egui::Button::new("Remove")).clicked() {
+    if ui.add_enabled(runs.len() > 1, egui::Button::new(t("slides.piece.remove", "Remove"))).clicked() {
         changed.remove_run(run.start);
         done = true;
         ui.close();
@@ -2425,7 +2452,8 @@ fn arrangement_strip(
     let pill_at = Rect::from_center_size(name.center(), vec2(name.width(), 21.0));
     let button = ui.interact(name, id.with("name"), Sense::click());
     ui.painter().rect_filled(pill_at, 10.5, if button.hovered() { crate::studio::BUTTON } else { CARD });
-    let label = if arrangement.name.trim().is_empty() { "Untitled" } else { arrangement.name.as_str() };
+    let label =
+        if arrangement.name.trim().is_empty() { t("left.untitled", "Untitled") } else { arrangement.name.as_str() };
     crate::studio::paint_spaced(
         ui,
         pill_at.center(),
@@ -2435,7 +2463,8 @@ fn arrangement_strip(
         TEXT_DIM,
         0.7,
     );
-    arrangement_menu(index, song, state, &button.on_hover_text("Choose, make or change an arrangement"));
+    let hint = t("slides.arrangement.hint", "Choose, make or change an arrangement");
+    arrangement_menu(index, song, state, &button.on_hover_text(hint));
     let mut groups: Option<Vec<Uuid>> = None;
     let count = layout.chips.len();
     let rects: Vec<Rect> = layout.chips.iter().map(|chip| chip.rect.translate(origin.to_vec2())).collect();
@@ -2667,9 +2696,10 @@ fn nothing_open(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
                     state.bible.focus_lookup = true;
                 }
                 if ui.button(t("slides.empty.add_header", "Add a header")).clicked() {
-                    state.services.add(Item::Header { name: "Header".to_owned() });
+                    let name = t("left.add.header.name", "Header");
+                    state.services.add(Item::Header { name: name.to_owned() });
                     let at = state.services.front().items.len() - 1;
-                    state.renaming_header = Some((at, "Header".to_owned()));
+                    state.renaming_header = Some((at, name.to_owned()));
                     state.rename_started = true;
                 }
             } else if ui.button(t("left.new_song", "New song")).clicked() {
@@ -2705,7 +2735,7 @@ fn slide_menu(
     slide: &Slide,
 ) {
     let (which, index) = (here.presentation, here.slide);
-    if ui.button("Edit").clicked() {
+    if ui.button(t("slides.menu.edit", "Edit")).clicked() {
         state.editing = EditDraft::of(show, here);
         ui.close();
     }
@@ -2732,24 +2762,26 @@ fn slide_menu(
     // A song always keeps one slide: with every slide of it picked (or its only one), Cut and
     // Delete are greyed, and say so.
     let all = these.len() >= presentation.slide_count();
-    let cut = ui.add_enabled(!all, egui::Button::new("Cut").shortcut_text(key("X")));
-    if cut.on_disabled_hover_text(crate::home::ONE_SLIDE).clicked() {
+    let cut = ui.add_enabled(!all, egui::Button::new(t("slides.menu.cut", "Cut")).shortcut_text(key("X")));
+    let one_slide = t("slides.menu.one_slide", "A song always keeps one slide");
+    if cut.on_disabled_hover_text(one_slide).clicked() {
         copy_slides(ui.ctx(), state, presentation, &these);
         state.slide_request = Some((here, SlideRequest::DeleteMany(these.clone())));
         ui.close();
     }
-    if ui.add(egui::Button::new("Copy").shortcut_text(key("C"))).clicked() {
+    if ui.add(egui::Button::new(t("slides.menu.copy", "Copy")).shortcut_text(key("C"))).clicked() {
         copy_slides(ui.ctx(), state, presentation, &these);
         ui.close();
     }
     let clip = state.slide_clip.clone();
-    let paste = ui.add_enabled(!clip.is_empty(), egui::Button::new("Paste").shortcut_text(key("V")));
-    if paste.on_disabled_hover_text("Copy or cut a slide first").clicked() {
+    let paste =
+        ui.add_enabled(!clip.is_empty(), egui::Button::new(t("slides.menu.paste", "Paste")).shortcut_text(key("V")));
+    if paste.on_disabled_hover_text(t("slides.menu.paste.none", "Copy or cut a slide first")).clicked() {
         state.slide_request = Some((here, SlideRequest::PasteAfter(clip)));
         ui.close();
     }
     // A copy of the slides (this one, or those picked with it) just after them.
-    if ui.button("Duplicate").clicked() {
+    if ui.button(t("slides.duplicate", "Duplicate")).clicked() {
         let copies: Vec<Slide> =
             these.iter().filter_map(|at| presentation.slide(*at).map(|(_, one)| one.clone())).collect();
         let last = SlideRef { slide: these.last().copied().unwrap_or(index), ..here };
@@ -2758,21 +2790,27 @@ fn slide_menu(
     }
     // At once, asking nothing (Undo puts them back): this slide, or the slides of this song
     // picked with it, never slides of another song.
-    let delete = if these.len() > 1 { format!("Delete {} Slides", these.len()) } else { "Delete".to_owned() };
-    if ui.add_enabled(!all, egui::Button::new(delete)).on_disabled_hover_text(crate::home::ONE_SLIDE).clicked() {
+    let delete = if these.len() > 1 {
+        let n = crate::i18n::count(these.len() as u64);
+        tf("slides.menu.delete_many", "Delete {n} Slides", &[("n", &n)])
+    } else {
+        t("slides.delete", "Delete").to_owned()
+    };
+    if ui.add_enabled(!all, egui::Button::new(delete)).on_disabled_hover_text(one_slide).clicked() {
         crate::home::delete_slides(state, which, &these);
         ui.close();
     }
     // One place up or down the song (with the slides picked with it).
     let (first, last) = (these.first().copied().unwrap_or(index), these.last().copied().unwrap_or(index));
-    let up = ui.add_enabled(first > 0, egui::Button::new("Move Up"));
-    if up.on_disabled_hover_text(crate::studio::AT_TOP).clicked() {
+    let up = ui.add_enabled(first > 0, egui::Button::new(t("left.move_up", "Move Up")));
+    if up.on_disabled_hover_text(t("left.at_top", "Already at the top")).clicked() {
         let to = first - 1;
         state.slide_request = Some((here, SlideRequest::Move { slides: these.clone(), to, after: false }));
         ui.close();
     }
-    let down = ui.add_enabled(last + 1 < presentation.slide_count(), egui::Button::new("Move Down"));
-    if down.on_disabled_hover_text(crate::studio::AT_BOTTOM).clicked() {
+    let down =
+        ui.add_enabled(last + 1 < presentation.slide_count(), egui::Button::new(t("left.move_down", "Move Down")));
+    if down.on_disabled_hover_text(t("left.at_bottom", "Already at the bottom")).clicked() {
         let to = last + 1;
         state.slide_request = Some((here, SlideRequest::Move { slides: these.clone(), to, after: true }));
         ui.close();
@@ -2781,7 +2819,7 @@ fn slide_menu(
     // Where a group starts: this slide and the rest of its group take the name (several picked:
     // just they become the group). The group it is in now is ticked.
     let group_now = presentation.slide(index).map(|(group, _)| group.name.clone()).unwrap_or_default();
-    ui.menu_button("Group", |ui| {
+    ui.menu_button(t("slides.menu.group", "Group"), |ui| {
         for name in GROUP_NAMES {
             if ui.add(egui::Button::selectable(group_now.eq_ignore_ascii_case(name), name)).clicked() {
                 state.slide_request = Some((here, SlideRequest::Group(these.clone(), name.to_owned())));
@@ -2790,15 +2828,15 @@ fn slide_menu(
         }
     });
     // The media the slide puts behind its words when it goes on screen.
-    ui.menu_button("Media", |ui| {
+    ui.menu_button(t("slides.menu.media", "Media"), |ui| {
         let own = media_of(slide);
-        if ui.add(egui::Button::selectable(own.is_none(), "None")).clicked() {
+        if ui.add(egui::Button::selectable(own.is_none(), t("slides.menu.media.none", "None"))).clicked() {
             state.slide_request = edited(&|one| slide_with_media(one, None));
             ui.close();
         }
         ui.separator();
         if show.media().is_empty() {
-            ui.label(egui::RichText::new("The media bin is empty.").color(DIM));
+            ui.label(egui::RichText::new(t("left.add.media.empty", "The media bin is empty.")).color(DIM));
         }
         for item in show.media() {
             if ui.add(egui::Button::selectable(own == Some(item.id), item.name.as_str())).clicked() {
@@ -2807,7 +2845,7 @@ fn slide_menu(
             }
         }
     });
-    ui.menu_button("Transition", |ui| {
+    ui.menu_button(t("slides.menu.transition", "Transition"), |ui| {
         // Usual: the song's own transition, or else the one under the slides, named.
         let usual = crate::studio::usual_transition(presentation.transition.unwrap_or(state.transition));
         if ui.add(egui::Button::selectable(slide.transition.is_none(), usual)).clicked() {
@@ -2817,7 +2855,7 @@ fn slide_menu(
         ui.separator();
         for kind in sp_model::TransitionKind::ALL {
             let on = slide.transition.is_some_and(|own| own.kind == kind);
-            if ui.add(egui::Button::selectable(on, kind.name())).clicked() {
+            if ui.add(egui::Button::selectable(on, crate::studio::transition_name(kind))).clicked() {
                 let own = sp_model::Transition::of(kind);
                 state.slide_request = edited(&|one| Slide { transition: Some(own), ..one.clone() });
                 ui.close();
@@ -2825,10 +2863,10 @@ fn slide_menu(
         }
     });
     // What the slide does when it goes on screen.
-    ui.menu_button("Actions", |ui| {
+    ui.menu_button(t("slides.menu.actions", "Actions"), |ui| {
         for (at, action) in slide.actions.iter().enumerate() {
             let words = crate::live_tabs::describe_action(show, state, action);
-            if ui.button(format!("Remove: {words}")).clicked() {
+            if ui.button(tf("slides.menu.actions.remove", "Remove: {action}", &[("action", &words)])).clicked() {
                 let mut kept = slide.clone();
                 kept.actions.remove(at);
                 state.pending_edit = Some((here, kept));
@@ -2838,7 +2876,7 @@ fn slide_menu(
         if !slide.actions.is_empty() {
             ui.separator();
         }
-        ui.menu_button("Add Action", |ui| {
+        ui.menu_button(t("slides.menu.actions.add", "Add Action"), |ui| {
             if let Some(action) = crate::live_tabs::add_action_menu(ui, show, state) {
                 let mut more = slide.clone();
                 more.actions.push(action);
@@ -2848,15 +2886,15 @@ fn slide_menu(
         });
     });
     // Going on to the next slide by itself, after a time.
-    ui.menu_button("Go to Next", |ui| {
-        if ui.add(egui::Button::selectable(slide.advance.is_none(), "None")).clicked() {
+    ui.menu_button(t("slides.menu.go_next", "Go to Next"), |ui| {
+        if ui.add(egui::Button::selectable(slide.advance.is_none(), t("slides.menu.go_next.none", "None"))).clicked() {
             state.slide_request = edited(&|one| Slide { advance: None, ..one.clone() });
             ui.close();
         }
         ui.separator();
         for seconds in [3.0, 5.0, 8.0, 10.0, 15.0, 20.0, 30.0, 45.0, 60.0] {
             let on = slide.advance == Some(seconds);
-            let label = format!("After {seconds:.0} Seconds");
+            let label = tf("slides.menu.go_next.after", "After {n} Seconds", &[("n", &format!("{seconds:.0}"))]);
             if ui.add(egui::Button::selectable(on, label)).clicked() {
                 state.slide_request = edited(&|one| Slide { advance: Some(seconds), ..one.clone() });
                 ui.close();
@@ -2864,8 +2902,8 @@ fn slide_menu(
         }
     });
     // A key that puts this slide on screen in the Service view.
-    ui.menu_button("Hot Key", |ui| {
-        if ui.add(egui::Button::selectable(slide.hot_key.is_none(), "None")).clicked() {
+    ui.menu_button(t("slides.menu.hot_key", "Hot Key"), |ui| {
+        if ui.add(egui::Button::selectable(slide.hot_key.is_none(), t("slides.menu.hot_key.none", "None"))).clicked() {
             state.slide_request = edited(&|one| Slide { hot_key: None, ..one.clone() });
             ui.close();
         }
@@ -2887,19 +2925,25 @@ fn slide_menu(
     // A slide that came in from a presentation with a reason to look at it: marked as looked at,
     // which takes its tag off (Undo puts it back).
     let to_check = these.iter().any(|at| presentation.slide(*at).is_some_and(|(_, one)| one.check.is_some()));
-    if to_check && ui.button("Mark as Checked").clicked() {
+    if to_check && ui.button(t("slides.menu.checked", "Mark as Checked")).clicked() {
         state.slide_request = edited(&|one| Slide { check: None, ..one.clone() });
         ui.close();
     }
     // The look of the slide's text, to give another slide.
-    if ui.button("Copy Style").clicked() {
+    if ui.button(t("slides.menu.copy_style", "Copy Style")).clicked() {
         state.inspector.copied_style = slide.objects.iter().find_map(|object| object.text_style().cloned());
         ui.close();
     }
     if ui
-        .add_enabled(state.inspector.copied_style.is_some(), egui::Button::new("Paste Style"))
-        .on_hover_text("Give every text box on the slide (and the slides picked with it) the look that was copied")
-        .on_disabled_hover_text(crate::home::COPY_A_STYLE)
+        .add_enabled(
+            state.inspector.copied_style.is_some(),
+            egui::Button::new(t("slides.menu.paste_style", "Paste Style")),
+        )
+        .on_hover_text(t(
+            "slides.menu.paste_style.hint",
+            "Give every text box on the slide (and the slides picked with it) the look that was copied",
+        ))
+        .on_disabled_hover_text(t("slides.menu.paste_style.none", "Copy a style first"))
         .clicked()
         && let Some(copied) = state.inspector.copied_style.clone()
     {
@@ -2914,8 +2958,8 @@ fn slide_menu(
         });
         ui.close();
     }
-    ui.menu_button("Label", |ui| {
-        if ui.add(egui::Button::selectable(slide.label.is_none(), "None")).clicked() {
+    ui.menu_button(t("slides.menu.label", "Label"), |ui| {
+        if ui.add(egui::Button::selectable(slide.label.is_none(), t("slides.menu.label.none", "None"))).clicked() {
             state.slide_request = edited(&|one| Slide { label: None, ..one.clone() });
             ui.close();
         }
@@ -2930,7 +2974,8 @@ fn slide_menu(
     });
     // A disabled slide stays in the song but is stepped over and never shown. The slides picked
     // with it all take what it offers: off when this one is on, on when it is off.
-    let label = if slide.enabled { "Disable Slide" } else { "Enable Slide" };
+    let label =
+        if slide.enabled { t("slides.menu.disable", "Disable Slide") } else { t("slides.menu.enable", "Enable Slide") };
     if ui.button(label).clicked() {
         let enabled = !slide.enabled;
         state.slide_request = edited(&|one| Slide { enabled, ..one.clone() });
@@ -2939,9 +2984,10 @@ fn slide_menu(
     // Which of the theme's templates the slide is drawn with. Usual lets the theme pick the
     // one that suits what is on the slide.
     if !state.song_templates.is_empty() {
-        ui.menu_button("Template", |ui| {
+        ui.menu_button(t("slides.menu.template", "Template"), |ui| {
             let current = slide.template.filter(|id| state.song_templates.iter().any(|(t, _)| t == id));
-            if ui.add(egui::Button::selectable(current.is_none(), "Usual (the theme picks)")).clicked() {
+            let usual = t("slides.menu.template.usual", "Usual (the theme picks)");
+            if ui.add(egui::Button::selectable(current.is_none(), usual)).clicked() {
                 state.slide_request = edited(&|one| Slide { template: None, ..one.clone() });
                 ui.close();
             }

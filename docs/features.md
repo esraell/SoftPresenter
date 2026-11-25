@@ -1480,8 +1480,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   computer's language (named in that language, "El idioma del ordenador (Español)"), then English,
   Español, Русский and Українська, each written in itself; the setup's first step has the same
   choice. A choice shows at once, with no restart, and is kept with the preferences (`language`).
-  Spanish is written for the top bar, the keys sheet, the left column (libraries and playlists),
-  the slides area and the bar under it, the media strip under it (its menus, and what adding
+  Spanish is written for the top bar, the keys sheet, the left column (libraries and playlists,
+  and the song and playlist item menus), the slides area (with the slide, arrangement and times
+  menus) and the bar under it, the media strip under it (its menus, and what adding
   pictures and videos says), and the right column's preview, layer keys, Clear All and tool tabs;
   the rest of the window is still English, and a word with no translation yet shows in
   English. Russian and Ukrainian have the number and quotation rules and the plural forms, and

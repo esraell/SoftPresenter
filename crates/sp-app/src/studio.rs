@@ -1827,7 +1827,7 @@ pub fn icon_button(ui: &egui::Ui, rect: Rect, id: egui::Id, icon: Icon, strength
 /// strength and full when the pointer is `near` (over its row). It opens what a right-click
 /// on the row opens.
 pub fn more_button(ui: &egui::Ui, rect: Rect, id: egui::Id, near: bool) -> egui::Response {
-    icon_button(ui, rect, id, Icon::More, if near { 1.0 } else { 0.5 }, false).on_hover_text("More")
+    icon_button(ui, rect, id, Icon::More, if near { 1.0 } else { 0.5 }, false).on_hover_text(t("left.more", "More"))
 }
 
 /// The dot that says a thing is on the screens: orange, with a faint ring round it.
@@ -2430,9 +2430,13 @@ fn found_added_to_playlist(
             ));
         }
     } else if added {
-        state.notices.info(format!("Added {name} to {playlist_name}."));
+        state.notices.info(tf("left.added", "Added {item} to {list}.", &[("item", name), ("list", &playlist_name)]));
     } else {
-        state.notices.refuse(format!("{name} is already in {playlist_name}."));
+        state.notices.refuse(tf(
+            "left.already_in",
+            "{item} is already in {list}.",
+            &[("item", name), ("list", &playlist_name)],
+        ));
     }
 }
 
@@ -2832,7 +2836,7 @@ fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, c
         .on_hover_text(t("left.add.header.hint", "A heading over the items under it"))
         .clicked()
     {
-        made = Some((Item::Header { name: "Header".to_owned() }, true));
+        made = Some((Item::Header { name: t("left.add.header.name", "Header").to_owned() }, true));
         ui.close();
     }
     if ui
@@ -2840,7 +2844,7 @@ fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, c
         .on_hover_text(t("left.add.placeholder.hint", "A place kept for something to come, such as the sermon slides"))
         .clicked()
     {
-        made = Some((Item::Placeholder { name: "Placeholder".to_owned() }, true));
+        made = Some((Item::Placeholder { name: t("left.add.placeholder.name", "Placeholder").to_owned() }, true));
         ui.close();
     }
     ui.menu_button(t("left.add.media", "A Picture or Video"), |ui| {
@@ -3616,7 +3620,7 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
         let words = match songs.as_slice() {
             [] => String::new(),
             [one] => show.presentations().get(*one).map_or_else(String::new, |song| song.title.clone()),
-            many => format!("{} songs", many.len()),
+            many => tn("left.songs", many.len() as u64, "{n} song", "{n} songs", &[]),
         };
         paint_carried(ui.ctx(), &words);
     }
@@ -3693,7 +3697,8 @@ pub fn song_to_edit(show: &Show, state: &HomeState) -> Option<SlideRef> {
 /// `confirm` (drawn in red, as macOS draws a destructive button); Escape cancels. `None` until
 /// it is answered.
 pub fn alert(ctx: &egui::Context, id: &str, icon: Icon, title: &str, message: &str, confirm: &str) -> Option<bool> {
-    choose_with(ctx, id, icon, title, message, &["Cancel", confirm], 1, true, 268.0).map(|answer| answer == 1)
+    let cancel = t("left.alert.cancel", "Cancel");
+    choose_with(ctx, id, icon, title, message, &[cancel, confirm], 1, true, 268.0).map(|answer| answer == 1)
 }
 
 /// An alert with any number of buttons side by side, the first of which is Cancel (Escape
@@ -3928,32 +3933,40 @@ pub fn song_menu(
     let front = state.services.front().name.clone();
     // The songs an add takes: this one, or those picked with it, as a drag would carry them.
     let adds = songs_menu_adds(show, state, index, item);
-    if !in_playlist && ui.button(format!("Add to {front}")).clicked() {
+    if !in_playlist && ui.button(tf("left.song.add_to", "Add to {list}", &[("list", &front)])).clicked() {
         asks.add = adds.clone();
         ui.close();
     }
     // Another playlist, or a new one; with no other playlist to offer, a new one straight away.
     let others = playlists_to_add_to(state, in_playlist);
     if others.is_empty() {
-        if ui.button("Add to New Playlist\u{2026}").on_hover_text("A new playlist with this song in it").clicked() {
+        if ui
+            .button(t("left.song.add_to_new", "Add to New Playlist\u{2026}"))
+            .on_hover_text(t("left.song.add_to_new.hint", "A new playlist with this song in it"))
+            .clicked()
+        {
             asks.add_to = Some((adds, None));
             ui.close();
         }
     } else {
         // A playlist that has the song already says so.
         let item = state.song_keys.get(index).map(|key| crate::service::Item::song(key.clone(), String::new()));
-        ui.menu_button("Add to Playlist", |ui| {
+        ui.menu_button(t("left.song.add_to_playlist", "Add to Playlist"), |ui| {
             for at in others {
                 let Some(playlist) = state.services.list.get(at) else { continue };
                 let has = item.as_ref().is_some_and(|item| state.services.place_of(at, item).is_some());
-                let label = if has { format!("{} \u{b7} in it already", playlist.name) } else { playlist.name.clone() };
+                let label = if has {
+                    tf("left.song.in_it_already", "{list} \u{b7} in it already", &[("list", &playlist.name)])
+                } else {
+                    playlist.name.clone()
+                };
                 if ui.button(label).clicked() {
                     asks.add_to = Some((adds.clone(), Some(at)));
                     ui.close();
                 }
             }
             ui.separator();
-            if ui.button("New Playlist\u{2026}").clicked() {
+            if ui.button(t("left.song.new_playlist", "New Playlist\u{2026}")).clicked() {
                 asks.add_to = Some((adds.clone(), None));
                 ui.close();
             }
@@ -3961,11 +3974,14 @@ pub fn song_menu(
     }
     // The libraries the song is in.
     if let Some(key) = state.song_keys.get(index).cloned() {
-        ui.menu_button("Libraries", |ui| {
+        ui.menu_button(t("left.song.libraries", "Libraries"), |ui| {
             if state.libraries.is_empty() {
                 ui.label(
-                    egui::RichText::new("No libraries yet. Make one where playlists and libraries are chosen.")
-                        .color(TEXT_DIM),
+                    egui::RichText::new(t(
+                        "left.song.libraries.none",
+                        "No libraries yet. Make one where playlists and libraries are chosen.",
+                    ))
+                    .color(TEXT_DIM),
                 );
             }
             for library in &mut state.libraries {
@@ -3977,7 +3993,7 @@ pub fn song_menu(
         });
     }
     ui.separator();
-    if ui.button("Rename").clicked() {
+    if ui.button(t("left.rename", "Rename")).clicked() {
         commands.push(Command::Select(index));
         state.bible_open = false;
         state.editing = None;
@@ -3986,19 +4002,26 @@ pub fn song_menu(
         ui.close();
     }
     // A copy beside it: from a playlist's item, a new item just after it too.
-    if ui.button("Duplicate").clicked() {
+    if ui.button(t("left.song.duplicate", "Duplicate")).clicked() {
         state.song_request = Some((index, crate::home::SongRequest::Duplicate { item }));
         ui.close();
     }
-    if ui.button("Export…").on_hover_text("Save as a song pack, to open on another computer").clicked() {
+    if ui
+        .button(t("left.export", "Export\u{2026}"))
+        .on_hover_text(t("left.song.export.hint", "Save as a song pack, to open on another computer"))
+        .clicked()
+    {
         state.export_request = Some(crate::home::ExportRequest::Songs(songs_menu_acts_on(state, index, in_playlist)));
         ui.close();
     }
     // Next on the last slide goes back to the first.
     let loops = show.presentations().get(index).is_some_and(|song| song.loops);
     if ui
-        .add(egui::Button::selectable(loops, "Loop to First Slide"))
-        .on_hover_text("Next on the last slide goes back to the first, for a loop of announcements")
+        .add(egui::Button::selectable(loops, t("left.song.loop", "Loop to First Slide")))
+        .on_hover_text(t(
+            "left.song.loop.hint",
+            "Next on the last slide goes back to the first, for a loop of announcements",
+        ))
         .clicked()
     {
         state.song_loop_request = Some(index);
@@ -4011,15 +4034,18 @@ pub fn song_menu(
         ui,
         state,
         crate::announcements::Announce::Song(index),
-        "Its slides go round by themselves over the slides (each for its Go to Next time, or 8 seconds)",
-        none_on.then_some(NO_SLIDE_ON),
+        t(
+            "left.song.announce.hint",
+            "Its slides go round by themselves over the slides (each for its Go to Next time, or 8 seconds)",
+        ),
+        none_on.then_some(no_slide_on()),
     );
     // How its slides give way to each other, unless a slide has its own.
     let own_transition = show.presentations().get(index).and_then(|song| song.transition);
-    ui.menu_button("Transition", |ui| {
+    ui.menu_button(t("left.song.transition", "Transition"), |ui| {
         if ui
             .add(egui::Button::selectable(own_transition.is_none(), usual_transition(state.transition)))
-            .on_hover_text("The transition chosen under the slides")
+            .on_hover_text(t("left.song.transition.usual.hint", "The transition chosen under the slides"))
             .clicked()
         {
             state.song_transition_request = Some((index, None));
@@ -4029,16 +4055,18 @@ pub fn song_menu(
         let mut look = own_transition.unwrap_or(state.transition);
         let before = look;
         transition_picker(ui, &mut look, "song");
-        if look != before || (own_transition.is_none() && ui.button("Use This for the Song").clicked()) {
+        if look != before
+            || (own_transition.is_none() && ui.button(t("left.song.transition.use", "Use This for the Song")).clicked())
+        {
             state.song_transition_request = Some((index, Some(look)));
         }
     });
     // The theme this song is drawn with.
     let own = show.presentations().get(index).and_then(|song| song.theme);
-    ui.menu_button("Theme", |ui| {
+    ui.menu_button(t("left.song.theme", "Theme"), |ui| {
         if ui
-            .add(egui::Button::selectable(own.is_none(), "Main Theme"))
-            .on_hover_text("The theme songs use unless they set their own")
+            .add(egui::Button::selectable(own.is_none(), t("left.song.theme.main", "Main Theme")))
+            .on_hover_text(t("left.song.theme.main.hint", "The theme songs use unless they set their own"))
             .clicked()
         {
             state.song_theme_request = Some((index, None));
@@ -4053,7 +4081,7 @@ pub fn song_menu(
             }
         }
     });
-    if ui.button("Edit Words").clicked()
+    if ui.button(t("left.song.edit_words", "Edit Words")).clicked()
         && let Some(song) = show.presentations().get(index)
     {
         commands.push(Command::Select(index));
@@ -4063,7 +4091,7 @@ pub fn song_menu(
         ui.close();
     }
     // In a library, Delete deletes every song picked out, when this is one of them.
-    if !in_playlist && ui.button("Delete…").clicked() {
+    if !in_playlist && ui.button(t("left.song.delete", "Delete\u{2026}")).clicked() {
         state.confirm_delete_songs = songs_menu_acts_on(state, index, in_playlist);
         ui.close();
     }
@@ -4073,8 +4101,8 @@ pub fn song_menu(
 /// (from the library, every playlist and every library), after asking. After Remove from
 /// Playlist, which only takes the item out.
 fn delete_song_from_library(ui: &mut egui::Ui, state: &mut HomeState, song: usize) {
-    let hint = "Deletes the song itself, not just this item, after asking";
-    if ui.button("Delete Song from Library\u{2026}").on_hover_text(hint).clicked() {
+    let hint = t("left.song.delete_from_library.hint", "Deletes the song itself, not just this item, after asking");
+    if ui.button(t("left.song.delete_from_library", "Delete Song from Library\u{2026}")).on_hover_text(hint).clicked() {
         state.confirm_delete_songs = songs_menu_acts_on(state, song, true);
         ui.close();
     }
@@ -4109,7 +4137,11 @@ fn rename_in_row(
 pub fn song_picker(ui: &mut egui::Ui, show: &Show, state: &HomeState) -> Option<usize> {
     let id = ui.make_persistent_id("song picker");
     let mut typed = ui.data_mut(|data| data.get_temp::<String>(id)).unwrap_or_default();
-    let field = ui.add(egui::TextEdit::singleline(&mut typed).hint_text("Search songs").desired_width(220.0));
+    let field = ui.add(
+        egui::TextEdit::singleline(&mut typed)
+            .hint_text(t("left.song_picker.search", "Search songs"))
+            .desired_width(220.0),
+    );
     if typed.is_empty() && !field.has_focus() {
         field.request_focus();
     }
@@ -4130,7 +4162,7 @@ pub fn song_picker(ui: &mut egui::Ui, show: &Show, state: &HomeState) -> Option<
             let mut button = egui::Button::new(song.title.as_str()).frame(false);
             let key = state.song_keys.get(index).cloned().unwrap_or_default();
             if state.services.place_of(state.services.front_at(), &crate::service::Item::song(key, "")).is_some() {
-                button = button.shortcut_text("In this playlist");
+                button = button.shortcut_text(t("left.song_picker.in_playlist", "In this playlist"));
             }
             if ui.add(button).clicked() {
                 picked = Some(index);
@@ -4141,7 +4173,7 @@ pub fn song_picker(ui: &mut egui::Ui, show: &Show, state: &HomeState) -> Option<
             }
         }
         if shown == 0 {
-            ui.label(egui::RichText::new("No song has that in its title.").color(TEXT_DIM));
+            ui.label(egui::RichText::new(t("left.song_picker.none", "No song has that in its title.")).color(TEXT_DIM));
         }
     });
     if picked.is_some() {
@@ -4188,11 +4220,15 @@ pub fn item_menu(
         _ => None,
     };
     if let Some(song) = song {
-        if ui.button("Add Slide").on_hover_text("Add a slide laid out like the last one").clicked() {
+        if ui
+            .button(t("slides.add_slide", "Add Slide"))
+            .on_hover_text(t("slides.add_slide.hint", "Add a slide laid out like the last one"))
+            .clicked()
+        {
             state.add_slide = Some(song);
             ui.close();
         }
-        ui.menu_button("Song", |ui| song_menu(ui, show, state, commands, song, asks, Some(index)));
+        ui.menu_button(t("left.item.song", "Song"), |ui| song_menu(ui, show, state, commands, song, asks, Some(index)));
         ui.separator();
     }
     let announced = match state.services.front().items.get(index) {
@@ -4210,7 +4246,7 @@ pub fn item_menu(
                 .is_none_or(|playlist| crate::media::playlist_places(&playlist.files, show.media()).is_empty()),
             _ => false,
         };
-        let hint = "It goes round by itself over the slides until it is cleared";
+        let hint = t("left.item.announce.hint", "It goes round by itself over the slides until it is cleared");
         announce_button(ui, state, what, hint, empty.then_some(nothing_to_play()));
         ui.separator();
     }
@@ -4225,7 +4261,7 @@ pub fn item_menu(
 /// the one it shows in marked, picked with one click, then a separator. Nothing otherwise.
 pub fn version_section(ui: &mut egui::Ui, state: &mut HomeState, index: usize) {
     if can_show_with(state, index) {
-        crate::live_tabs::menu_heading(ui, "Version");
+        crate::live_tabs::menu_heading(ui, t("left.item.version", "Version"));
         show_with_menu(ui, state, index, false);
         ui.separator();
     }
@@ -4247,30 +4283,40 @@ pub fn show_with_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, he
     let Some(item) = state.services.front().items.get(index) else { return };
     let now = item.show_with().filter(|wanted| state.versions.iter().any(|version| version.id == wanted.version));
     if heading {
-        crate::live_tabs::menu_heading(ui, "When this item goes on screen, show it in");
+        crate::live_tabs::menu_heading(ui, t("left.item.version.heading", "When this item goes on screen, show it in"));
     }
     let mut chosen = None;
-    if ui.add(egui::Button::selectable(now.is_none(), "The usual look")).clicked() {
+    if ui.add(egui::Button::selectable(now.is_none(), t("dock.version.the_usual", "The usual look"))).clicked() {
         chosen = Some(None);
     }
     for version in &state.versions {
         let on = now.is_some_and(|wanted| wanted.version == version.id);
-        if ui.add(egui::Button::selectable(on, format!("The {} version", version.name))).clicked() {
+        let words = tf("dock.version.the", "The {name} version", &[("name", &version.name)]);
+        if ui.add(egui::Button::selectable(on, words)).clicked() {
             chosen = Some(Some(ShowWith { version: version.id, keep: now.is_some_and(|wanted| wanted.keep) }));
         }
     }
     ui.separator();
     let keep = now.is_some_and(|wanted| wanted.keep);
     let kept = ui
-        .add_enabled(now.is_some(), egui::Button::selectable(keep, "Keep It After This Item"))
-        .on_hover_text("The version stays on when the next item goes on screen, until it is switched back");
+        .add_enabled(
+            now.is_some(),
+            egui::Button::selectable(keep, t("left.item.version.keep", "Keep It After This Item")),
+        )
+        .on_hover_text(t(
+            "left.item.version.keep.hint",
+            "The version stays on when the next item goes on screen, until it is switched back",
+        ));
     if kept.clicked() {
         chosen = Some(now.map(|wanted| ShowWith { keep: !keep, ..wanted }));
     }
     if heading {
         ui.add_enabled(
             false,
-            egui::Button::new("It applies in this playlist only; the song itself doesn\u{2019}t change"),
+            egui::Button::new(t(
+                "left.item.version.only_here",
+                "It applies in this playlist only; the song itself doesn\u{2019}t change",
+            )),
         );
     }
     if let Some(chosen) = chosen {
@@ -4313,7 +4359,9 @@ pub fn nothing_to_play() -> &'static str {
 }
 
 /// Why a song's Play on Announcements Layer is greyed, in the words the app refuses with.
-const NO_SLIDE_ON: &str = "That song has no slide that is on";
+fn no_slide_on() -> &'static str {
+    t("left.song.no_slide_on", "That song has no slide that is on")
+}
 
 /// The part of a playlist item's menu that is about its place in the playlist: filling a
 /// placeholder, renaming a header or a placeholder, moving it up or down, taking it out.
@@ -4322,7 +4370,7 @@ fn item_moves(ui: &mut egui::Ui, show: &Show, state: &HomeState, index: usize, a
     let items = &state.services.front().items;
     let item = items.get(index);
     if matches!(item, Some(Item::Placeholder { .. })) {
-        ui.menu_button("Fill with Song", |ui| {
+        ui.menu_button(t("left.item.fill", "Fill with Song"), |ui| {
             if let Some(song) = song_picker(ui, show, state) {
                 *ask = Some(ItemAsk::Fill(index, song));
                 ui.close();
@@ -4331,8 +4379,8 @@ fn item_moves(ui: &mut egui::Ui, show: &Show, state: &HomeState, index: usize, a
     }
     if matches!(item, Some(Item::Passage(_))) {
         if ui
-            .button("Open on the Bible Page")
-            .on_hover_text("With the translations and options it was kept with")
+            .button(t("left.item.open_bible", "Open on the Bible Page"))
+            .on_hover_text(t("left.item.open_bible.hint", "With the translations and options it was kept with"))
             .clicked()
         {
             *ask = Some(ItemAsk::Bible(index));
@@ -4341,7 +4389,7 @@ fn item_moves(ui: &mut egui::Ui, show: &Show, state: &HomeState, index: usize, a
         ui.separator();
     }
     if matches!(item, Some(Item::Placeholder { .. } | Item::Header { .. })) {
-        if ui.button("Rename").clicked() {
+        if ui.button(t("left.rename", "Rename")).clicked() {
             *ask = Some(ItemAsk::Rename(index));
             ui.close();
         }
@@ -4353,25 +4401,33 @@ fn item_moves(ui: &mut egui::Ui, show: &Show, state: &HomeState, index: usize, a
     let these = items_acted_on(state, index);
     let (first, last) = (these.first().copied().unwrap_or(index), these.last().copied().unwrap_or(index));
     let (up, down) = match these.len() {
-        1 => ("Move Up".to_owned(), "Move Down".to_owned()),
-        many => (format!("Move {many} Up"), format!("Move {many} Down")),
+        1 => (t("left.move_up", "Move Up").to_owned(), t("left.move_down", "Move Down").to_owned()),
+        many => {
+            let n = crate::i18n::count(many as u64);
+            (
+                tf("left.item.move_up_many", "Move {n} Up", &[("n", &n)]),
+                tf("left.item.move_down_many", "Move {n} Down", &[("n", &n)]),
+            )
+        }
     };
-    if ui.add_enabled(first > 0, egui::Button::new(up)).on_disabled_hover_text(AT_TOP).clicked() {
+    let up = ui.add_enabled(first > 0, egui::Button::new(up));
+    if up.on_disabled_hover_text(t("left.at_top", "Already at the top")).clicked() {
         *ask = Some(ItemAsk::Earlier(index));
         ui.close();
     }
     let down = ui.add_enabled(last + 1 < items.len(), egui::Button::new(down));
-    if down.on_disabled_hover_text(AT_BOTTOM).clicked() {
+    if down.on_disabled_hover_text(t("left.at_bottom", "Already at the bottom")).clicked() {
         *ask = Some(ItemAsk::Later(index));
         ui.close();
     }
     ui.separator();
     let label = if picks.several() && picks.places.contains(&index) {
-        format!("Remove {} Items from Playlist", picks.places.len())
+        let n = crate::i18n::count(picks.places.len() as u64);
+        tf("left.item.remove_many", "Remove {n} Items from Playlist", &[("n", &n)])
     } else {
-        "Remove from Playlist".to_owned()
+        t("left.item.remove", "Remove from Playlist").to_owned()
     };
-    if ui.button(label).on_hover_text("Takes it out of this playlist only").clicked() {
+    if ui.button(label).on_hover_text(t("left.item.remove.hint", "Takes it out of this playlist only")).clicked() {
         *ask = Some(ItemAsk::Remove(index));
         ui.close();
     }
@@ -4596,10 +4652,11 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         if items.is_empty() {
             ui.add_space(12.0);
             ui.label(
-                egui::RichText::new(
+                egui::RichText::new(t(
+                    "left.empty.playlist",
                     "Nothing yet. Use Add to playlist below, drag songs here from a library, or drag a \
-                     picture or video here from the media strip.",
-                )
+                         picture or video here from the media strip.",
+                ))
                 .size(12.5)
                 .color(TEXT_FAINT),
             );
@@ -4669,7 +4726,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             let (icon, missing, live, gone) = match item {
                 Item::Song { .. } => {
                     let live = song.is_some() && song == live_in;
-                    (None, song.is_none(), live, "This song is not open in the library")
+                    (None, song.is_none(), live, t("left.item.gone.song", "This song is not open in the library"))
                 }
                 Item::Passage(saved) => {
                     let live = shows_passage(&saved.lookup);
@@ -4681,12 +4738,18 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                     let icon = if video { Icon::Film } else { Icon::Picture };
                     let live =
                         found.is_some() && found == show.live_media() || crate::announcements::shows_item(state, *id);
-                    (Some(icon), found.is_none(), live, "This picture or video is no longer in the media bin")
+                    let gone = t("left.item.gone.media", "This picture or video is no longer in the media bin");
+                    (Some(icon), found.is_none(), live, gone)
                 }
                 Item::MediaPlaylist { id, .. } => {
                     let found = state.media_playlists.iter().any(|playlist| playlist.id == *id);
                     let live = state.media_playing == Some(*id) || crate::announcements::plays_playlist(state, *id);
-                    (Some(Icon::Loop), !found, live, "This media playlist has been deleted")
+                    (
+                        Some(Icon::Loop),
+                        !found,
+                        live,
+                        t("left.item.gone.media_playlist", "This media playlist has been deleted"),
+                    )
                 }
                 // Not missing, but faint: a place kept for something to come.
                 Item::Placeholder { .. } => (Some(Icon::Target), true, false, ""),
@@ -4745,16 +4808,21 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             }
             // The library a song is in is said when the pointer rests on its row.
             if let Some(library) = looked_up.get(index).and_then(|(_, library)| library.as_deref()) {
-                response = response.on_hover_text(format!("In the library {library}"));
+                response = response.on_hover_text(tf(
+                    "left.item.in_library",
+                    "In the library {library}",
+                    &[("library", library)],
+                ));
             }
             if missing && !gone.is_empty() {
                 response = response.on_hover_text(gone);
             }
             if matches!(item, Item::Placeholder { .. }) {
-                response = response.on_hover_text(
+                response = response.on_hover_text(t(
+                    "left.item.placeholder.hint",
                     "A place kept for something to come: fill it with a song from its menu, or drag a \
                      picture or video onto it",
-                );
+                ));
             }
             if response.double_clicked() && matches!(item, Item::Placeholder { .. }) {
                 ask = Some(ItemAsk::Rename(index));
