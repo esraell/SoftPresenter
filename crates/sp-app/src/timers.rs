@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use sp_model::Uuid;
 
+use crate::i18n::{t, tf};
+
 /// What a timer counts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -113,21 +115,34 @@ impl Timer {
             text.strip_prefix("00:").map_or(text.clone(), str::to_owned)
         };
         match self.kind {
-            Kind::Countdown { seconds } => format!("Counts down from {}", short(seconds)),
+            Kind::Countdown { seconds } => {
+                tf("tools.timer.down_from", "Counts down from {time}", &[("time", &short(seconds))])
+            }
             Kind::CountdownTo { hour, minute, .. } => {
+                let (am, pm) = (t("tools.timer.am", "AM"), t("tools.timer.pm", "PM"));
                 let (twelve, half) = match hour {
-                    0 => (12, "AM"),
-                    1..=11 => (hour, "AM"),
-                    12 => (12, "PM"),
-                    _ => (hour - 12, "PM"),
+                    0 => (12, am),
+                    1..=11 => (hour, am),
+                    12 => (12, pm),
+                    _ => (hour - 12, pm),
                 };
-                format!("Counts down to {twelve}:{minute:02} {half}")
+                let time = format!("{twelve}:{minute:02} {half}");
+                // One o'clock has a word of its own in some languages ("la 1:00", "las 11:00").
+                if twelve == 1 {
+                    tf("tools.timer.down_to.one", "Counts down to {time}", &[("time", &time)])
+                } else {
+                    tf("tools.timer.down_to", "Counts down to {time}", &[("time", &time)])
+                }
             }
-            Kind::Elapsed { start: 0, end: None } => "Counts up".to_owned(),
-            Kind::Elapsed { start, end } => {
-                let to = end.map(|end| format!(", stopping at {}", short(end))).unwrap_or_default();
-                format!("Counts up from {}{to}", short(start))
+            Kind::Elapsed { start: 0, end: None } => t("tools.timer.up", "Counts up").to_owned(),
+            Kind::Elapsed { start, end: None } => {
+                tf("tools.timer.up_from", "Counts up from {start}", &[("start", &short(start))])
             }
+            Kind::Elapsed { start, end: Some(end) } => tf(
+                "tools.timer.up_from_to",
+                "Counts up from {start}, stopping at {end}",
+                &[("start", &short(start)), ("end", &short(end))],
+            ),
         }
     }
 }
@@ -168,14 +183,17 @@ pub fn load() -> Vec<Timer> {
 }
 
 pub fn save(timers: &[Timer]) -> Result<(), String> {
-    let path = file().ok_or_else(|| "Could not find where to keep settings on this computer.".to_owned())?;
+    let path = file()
+        .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Could not make the app's folder: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+        })?;
     }
     let partial = path.with_extension("json.part");
     std::fs::write(&partial, serde_json::to_string_pretty(timers).unwrap_or_default())
         .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| format!("Could not save the timers: {e}"))
+        .map_err(|e| tf("tools.timers.not_saved", "Could not save the timers: {error}", &[("error", &e.to_string())]))
 }
 
 #[cfg(test)]

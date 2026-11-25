@@ -101,6 +101,7 @@ start with `_` (`"_note"`) are comments.
 | `inspector` | the inspector at the right of the Edit view: its tabs, sections, fields and menus |
 | `editor` | the Edit view's slide editing (`editor.rs`) and its stage layouts' parts (`stage_editor.rs`) |
 | `import` | the Import Slides sheets |
+| `tools` | the right column's tool tabs: Timers, Messages, Props, Macros, Stage, Audio and VoxLive; macros' steps and the stage layouts' items |
 | `common` | words several areas share |
 | `format` | numbers and quotation marks (not words) |
 

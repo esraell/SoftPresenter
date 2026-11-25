@@ -1486,7 +1486,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   pictures and videos says), the Bible view's page and lists and the Bibles window, the
   first-start setup, the Edit view's inspector and stage layouts, the Import Slides sheets,
   Settings › Integrations (VoxLive, Canva Sync) and Remote Control, and the right
-  column's preview, layer keys, Clear All and tool tabs;
+  column's preview, layer keys, Clear All and tool tabs with what is in them (timers, messages,
+  props, macros, the stage layouts, the audio player);
   the rest of the window is still English, and a word with no translation yet shows in
   English. Russian and Ukrainian have the number and quotation rules and the plural forms, and
   their words come next. Controls take the width of their words in the language set, and a place

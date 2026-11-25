@@ -18,6 +18,8 @@ use sp_model::{
     Align, BoxStyle, Object, ObjectKind, Rgba, Role, Slide, SlideRect, TextStyle, Theme, ThemeTemplate, Uuid, VAlign,
 };
 
+use crate::i18n::{t, tf};
+
 /// Where the Edit view's draft of a stage layout says it is from: no song, and the layout by
 /// its place in the list as the slide (as a prop's draft has `PROP_SLOT`).
 pub const STAGE_SLOT: usize = usize::MAX - 2;
@@ -33,7 +35,8 @@ const TITLE: &str = "song-title";
 const GROUP: &str = "group";
 
 /// What a stage layout can show: each item's role, its name, and words to stand in for it in
-/// the editor.
+/// the editor, in English (the command line's words); the window says them with [`item_name`]
+/// and [`item_sample`].
 pub const ITEMS: [(&str, &str, &str); 9] = [
     (NOW, "Current Slide", "The words on screen now"),
     (NEXT, "Next Slide", "The next slide's words"),
@@ -46,14 +49,36 @@ pub const ITEMS: [(&str, &str, &str); 9] = [
     (MESSAGE, "Stage Message", "A note for the stage"),
 ];
 
-/// An item's name, by its role.
+/// An item's name, by its role, in the window's language.
 pub fn item_name(role: &Role) -> &'static str {
-    ITEMS.iter().find(|(have, _, _)| *have == role.0).map_or("Item", |(_, name, _)| name)
+    match role.0.as_str() {
+        NOW => t("tools.stage.item.now", "Current Slide"),
+        NEXT => t("tools.stage.item.next", "Next Slide"),
+        NEXT_LABEL => t("tools.stage.item.next_label", "Next Label"),
+        CLOCK => t("tools.stage.item.clock", "Clock"),
+        TIMER => t("tools.stage.item.timer", "Timer"),
+        NOTES => t("tools.stage.item.notes", "Slide Notes"),
+        TITLE => t("tools.stage.item.title", "Song Title"),
+        GROUP => t("tools.stage.item.group", "Group"),
+        MESSAGE => t("tools.stage.item.message", "Stage Message"),
+        _ => t("tools.stage.item.other", "Item"),
+    }
 }
 
-/// An item's stand-in words for the editor, by its role.
+/// An item's stand-in words for the editor, by its role, in the window's language.
 pub fn item_sample(role: &Role) -> &'static str {
-    ITEMS.iter().find(|(have, _, _)| *have == role.0).map_or("", |(_, _, sample)| sample)
+    match role.0.as_str() {
+        NOW => t("tools.stage.sample.now", "The words on screen now"),
+        NEXT => t("tools.stage.sample.next", "The next slide's words"),
+        NEXT_LABEL => t("tools.stage.next_word", "NEXT"),
+        TIMER => t("tools.stage.sample.timer", "Sermon  00:24:10"),
+        NOTES => t("tools.stage.sample.notes", "Notes for the slide on screen"),
+        TITLE => t("tools.stage.sample.title", "Song Title"),
+        GROUP => t("tools.stage.sample.group", "Chorus"),
+        MESSAGE => t("tools.stage.sample.message", "A note for the stage"),
+        // The clock's stand-in is a time, the same in every language.
+        _ => ITEMS.iter().find(|(have, _, _)| *have == role.0).map_or("", |(_, _, sample)| sample),
+    }
 }
 
 /// A box for a stage item, in its place, at its size and colour.
@@ -88,7 +113,7 @@ pub fn builtin_layouts() -> Vec<ThemeTemplate> {
             songs: true,
             bible: false,
             id: id(2),
-            name: "Words and Next".to_owned(),
+            name: t("tools.stage.layout.words_next", "Words and Next").to_owned(),
             boxes: vec![
                 item_box(NOW, rect(60.0, 130.0, 1800.0, 560.0), 110.0, white, Align::Center, VAlign::Middle),
                 BoxStyle {
@@ -106,7 +131,7 @@ pub fn builtin_layouts() -> Vec<ThemeTemplate> {
             songs: true,
             bible: false,
             id: id(3),
-            name: "Words Only".to_owned(),
+            name: t("tools.stage.layout.words_only", "Words Only").to_owned(),
             boxes: vec![
                 item_box(NOW, rect(60.0, 130.0, 1800.0, 900.0), 140.0, white, Align::Center, VAlign::Middle),
                 clock(),
@@ -118,7 +143,7 @@ pub fn builtin_layouts() -> Vec<ThemeTemplate> {
             songs: true,
             bible: false,
             id: id(4),
-            name: "Words and Notes".to_owned(),
+            name: t("tools.stage.layout.words_notes", "Words and Notes").to_owned(),
             boxes: vec![
                 item_box(GROUP, rect(60.0, 24.0, 900.0, 90.0), 56.0, grey, Align::Left, VAlign::Middle),
                 item_box(NOW, rect(60.0, 130.0, 1800.0, 520.0), 100.0, white, Align::Center, VAlign::Middle),
@@ -132,7 +157,7 @@ pub fn builtin_layouts() -> Vec<ThemeTemplate> {
             songs: true,
             bible: false,
             id: id(5),
-            name: "Clock and Timer".to_owned(),
+            name: t("tools.stage.layout.clock_timer", "Clock and Timer").to_owned(),
             boxes: vec![
                 item_box(TITLE, rect(60.0, 24.0, 1800.0, 90.0), 56.0, grey, Align::Center, VAlign::Middle),
                 item_box(CLOCK, rect(60.0, 220.0, 1800.0, 380.0), 300.0, white, Align::Center, VAlign::Middle),
@@ -367,8 +392,9 @@ pub fn describe(object: &Object, screens: &[crate::screens::Screen]) -> String {
     let name_of = |id: Option<Uuid>| screens.iter().find(|screen| Some(screen.id) == id).map(|s| s.name.clone());
     match (&object.kind, item_of(object)) {
         (_, Some(item)) => {
-            let role = Role(item.to_owned());
-            format!("shows {}", item_name(&role).to_lowercase())
+            // In English, as the command line speaks: `ITEMS` keeps each item's English name.
+            let name = ITEMS.iter().find(|(have, _, _)| *have == item).map_or("item", |(_, name, _)| name);
+            format!("shows {}", name.to_lowercase())
         }
         (ObjectKind::Screen { screen, .. }, None) => {
             let (shows, fell_back) = source_screen(*screen, screens);
@@ -445,14 +471,19 @@ fn read_layouts(text: &str) -> Option<Vec<ThemeTemplate>> {
 }
 
 pub fn save_layouts(layouts: &[ThemeTemplate]) -> Result<(), String> {
-    let path = file().ok_or_else(|| "Could not find where to keep settings on this computer.".to_owned())?;
+    let path = file()
+        .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Could not make the app's folder: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+        })?;
     }
     let partial = path.with_extension("json.part");
     std::fs::write(&partial, serde_json::to_string_pretty(layouts).unwrap_or_default())
         .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| format!("Could not save the stage layouts: {e}"))
+        .map_err(|e| {
+            tf("tools.stage.not_saved", "Could not save the stage layouts: {error}", &[("error", &e.to_string())])
+        })
 }
 
 /// What the stage screens are told about the song on screen besides its slides.
@@ -530,9 +561,10 @@ fn sample_for(item: &str, shows: &sp_model::StageShows) -> String {
             (true, true) => "22:42:15",
         }
         .to_owned(),
-        NOTES if shows.lines > 0 => {
-            (1..=shows.lines).map(|line| format!("Line {line} of the notes")).collect::<Vec<_>>().join("\n")
-        }
+        NOTES if shows.lines > 0 => (1..=shows.lines)
+            .map(|line| tf("tools.stage.sample.notes_line", "Line {line} of the notes", &[("line", &line.to_string())]))
+            .collect::<Vec<_>>()
+            .join("\n"),
         other => item_sample(&Role(other.to_owned())).to_owned(),
     }
 }
@@ -572,7 +604,7 @@ fn item_value(
             .map(|notes| first_lines(notes, shows.lines)),
         TITLE => about.title.clone(),
         GROUP => about.group.clone().filter(|group| !group.trim().is_empty()),
-        NEXT_LABEL => next.map(|_| "NEXT".to_owned()),
+        NEXT_LABEL => next.map(|_| t("tools.stage.next_word", "NEXT").to_owned()),
         NEXT => next.map(words),
         MESSAGE => overlay.stage_message.clone().filter(|message| !message.trim().is_empty()),
         _ => None,

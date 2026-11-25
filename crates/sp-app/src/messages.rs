@@ -8,6 +8,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use sp_model::{Align, Object, Rgba, Role, Slide, SlideRect, TextStyle, Uuid, VAlign};
 
+use crate::i18n::{t, tf};
 use crate::timers::Timer;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,7 +31,11 @@ impl Message {
 
     /// A copy with an id of its own.
     pub fn duplicate(&self) -> Message {
-        Message { id: Uuid::new_v4(), name: format!("{} copy", self.name), ..self.clone() }
+        Message {
+            id: Uuid::new_v4(),
+            name: tf("tools.copy_name", "{name} copy", &[("name", &self.name)]),
+            ..self.clone()
+        }
     }
 }
 
@@ -56,11 +61,11 @@ impl Look {
 
     pub fn name(self) -> &'static str {
         match self {
-            Look::BottomBand => "Band at the Bottom",
-            Look::TopBand => "Band at the Top",
-            Look::Centre => "Box in the Middle",
-            Look::LowerThird => "Lower Third",
-            Look::Caption => "Caption, No Band",
+            Look::BottomBand => t("tools.message.look.bottom", "Band at the Bottom"),
+            Look::TopBand => t("tools.message.look.top", "Band at the Top"),
+            Look::Centre => t("tools.message.look.centre", "Box in the Middle"),
+            Look::LowerThird => t("tools.message.look.lower_third", "Lower Third"),
+            Look::Caption => t("tools.message.look.caption", "Caption, No Band"),
         }
     }
 }
@@ -156,14 +161,19 @@ pub fn load() -> Vec<Message> {
 }
 
 pub fn save(messages: &[Message]) -> Result<(), String> {
-    let path = file().ok_or_else(|| "Could not find where to keep settings on this computer.".to_owned())?;
+    let path = file()
+        .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Could not make the app's folder: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+        })?;
     }
     let partial = path.with_extension("json.part");
     std::fs::write(&partial, serde_json::to_string_pretty(messages).unwrap_or_default())
         .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| format!("Could not save the messages: {e}"))
+        .map_err(|e| {
+            tf("tools.messages.not_saved", "Could not save the messages: {error}", &[("error", &e.to_string())])
+        })
 }
 
 #[cfg(test)]

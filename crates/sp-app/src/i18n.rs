@@ -759,6 +759,7 @@ mod tests {
         "inspector",
         "editor",
         "import",
+        "tools",
     ];
 
     #[test]

@@ -2,7 +2,9 @@
 //! `macros.json`.
 
 use serde::{Deserialize, Serialize};
-use sp_model::{Announced, Rgba, ShowAction, Uuid};
+use sp_model::{Announced, ClearWhat, Rgba, ShowAction, TimerDo, Uuid};
+
+use crate::i18n::{t, tf, tk};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Macro {
@@ -15,16 +17,16 @@ pub struct Macro {
     pub on_startup: bool,
 }
 
-/// The colours a macro can be given.
-pub const COLORS: [(&str, Rgba); 8] = [
-    ("Blue", Rgba::rgb(66, 133, 244)),
-    ("Green", Rgba::rgb(52, 168, 110)),
-    ("Orange", Rgba::rgb(244, 160, 0)),
-    ("Purple", Rgba::rgb(155, 89, 182)),
-    ("Teal", Rgba::rgb(0, 172, 193)),
-    ("Pink", Rgba::rgb(204, 78, 180)),
-    ("Grey", Rgba::rgb(120, 144, 156)),
-    ("Brown", Rgba::rgb(141, 110, 99)),
+/// The colours a macro can be given, each with its name (a key and its English, for `t`).
+pub const COLORS: [((&str, &str), Rgba); 8] = [
+    (tk("tools.color.blue", "Blue"), Rgba::rgb(66, 133, 244)),
+    (tk("tools.color.green", "Green"), Rgba::rgb(52, 168, 110)),
+    (tk("tools.color.orange", "Orange"), Rgba::rgb(244, 160, 0)),
+    (tk("tools.color.purple", "Purple"), Rgba::rgb(155, 89, 182)),
+    (tk("tools.color.teal", "Teal"), Rgba::rgb(0, 172, 193)),
+    (tk("tools.color.pink", "Pink"), Rgba::rgb(204, 78, 180)),
+    (tk("tools.color.grey", "Grey"), Rgba::rgb(120, 144, 156)),
+    (tk("tools.color.brown", "Brown"), Rgba::rgb(141, 110, 99)),
 ];
 
 impl Macro {
@@ -33,7 +35,11 @@ impl Macro {
     }
 
     pub fn duplicate(&self) -> Macro {
-        Macro { id: Uuid::new_v4(), name: format!("{} copy", self.name), ..self.clone() }
+        Macro {
+            id: Uuid::new_v4(),
+            name: tf("tools.copy_name", "{name} copy", &[("name", &self.name)]),
+            ..self.clone()
+        }
     }
 
     /// Puts `step` where the step at `at` (counting from 0) is, so it is done at the same point.
@@ -55,9 +61,9 @@ impl Macro {
     }
 }
 
-/// What an action does, in words, given the names of what it names. Something it names that is
-/// gone is said plainly ("a song no longer in the library"), so the step can be seen to need
-/// changing.
+/// What an action does, in words, given the names of what it names, always in English: for the
+/// command line, which speaks English whatever the window's language. The window says it with
+/// [`said`].
 #[allow(clippy::too_many_arguments)]
 pub fn describe(
     action: &ShowAction,
@@ -69,44 +75,108 @@ pub fn describe(
     media_playlist_name: impl Fn(Uuid) -> Option<String>,
     version_name: impl Fn(Uuid) -> Option<String>,
 ) -> String {
-    let gone = |what: &'static str| move || format!("({what})");
-    let (song_gone, media_gone) =
-        (gone("a song no longer in the library"), gone("a picture or video no longer in the media bin"));
+    crate::i18n::with_language(crate::i18n::Language::English, || {
+        said(action, message_name, prop_name, timer_name, song_name, media_name, media_playlist_name, version_name)
+    })
+}
+
+/// What an action does, in words, in the window's language, given the names of what it names.
+/// Something it names that is gone is said plainly ("a song no longer in the library"), so the
+/// step can be seen to need changing.
+#[allow(clippy::too_many_arguments)]
+pub fn said(
+    action: &ShowAction,
+    message_name: impl Fn(Uuid) -> Option<String>,
+    prop_name: impl Fn(Uuid) -> Option<String>,
+    timer_name: impl Fn(Uuid) -> Option<String>,
+    song_name: impl Fn(&str) -> Option<String>,
+    media_name: impl Fn(Uuid) -> Option<String>,
+    media_playlist_name: impl Fn(Uuid) -> Option<String>,
+    version_name: impl Fn(Uuid) -> Option<String>,
+) -> String {
+    let gone = |what: &'static str| move || what.to_owned();
+    let (song_gone, media_gone) = (
+        gone(t("tools.step.gone.song", "(a song no longer in the library)")),
+        gone(t("tools.step.gone.media", "(a picture or video no longer in the media bin)")),
+    );
+    let named = |template: &str, name: &str| crate::i18n::fill(template, &[("name", name)]);
     match action {
-        ShowAction::Clear { what } => what.name().to_owned(),
+        ShowAction::Clear { what } => clear_words(*what).to_owned(),
         ShowAction::Message { id, show } => {
-            let name = message_name(*id).unwrap_or_else(gone("a message that has been deleted"));
-            format!("{} Message: {name}", if *show { "Show" } else { "Hide" })
+            let name = message_name(*id)
+                .unwrap_or_else(gone(t("tools.step.gone.message", "(a message that has been deleted)")));
+            if *show {
+                named(t("tools.step.show_message", "Show Message: {name}"), &name)
+            } else {
+                named(t("tools.step.hide_message", "Hide Message: {name}"), &name)
+            }
         }
         ShowAction::Prop { id, show } => {
-            let name = prop_name(*id).unwrap_or_else(gone("a prop that has been deleted"));
-            format!("{} Prop: {name}", if *show { "Show" } else { "Hide" })
+            let name = prop_name(*id).unwrap_or_else(gone(t("tools.step.gone.prop", "(a prop that has been deleted)")));
+            if *show {
+                named(t("tools.step.show_prop", "Show Prop: {name}"), &name)
+            } else {
+                named(t("tools.step.hide_prop", "Hide Prop: {name}"), &name)
+            }
         }
         ShowAction::Timer { id, act } => {
-            format!("{} Timer: {}", act.name(), timer_name(*id).unwrap_or_else(gone("a timer that has been deleted")))
+            let name =
+                timer_name(*id).unwrap_or_else(gone(t("tools.step.gone.timer", "(a timer that has been deleted)")));
+            let template = match act {
+                TimerDo::Start => t("tools.step.start_timer", "Start Timer: {name}"),
+                TimerDo::Stop => t("tools.step.stop_timer", "Stop Timer: {name}"),
+                TimerDo::Reset => t("tools.step.reset_timer", "Reset Timer: {name}"),
+            };
+            named(template, &name)
         }
-        ShowAction::Audience { on } => format!("Audience Screens {}", if *on { "On" } else { "Off" }),
-        ShowAction::Song { key } => format!("Go to Song: {}", song_name(key).unwrap_or_else(song_gone)),
-        ShowAction::Media { id } => format!("Show Media: {}", media_name(*id).unwrap_or_else(media_gone)),
+        ShowAction::Audience { on: true } => t("tools.step.audience_on", "Audience Screens On").to_owned(),
+        ShowAction::Audience { on: false } => t("tools.step.audience_off", "Audience Screens Off").to_owned(),
+        ShowAction::Song { key } => {
+            named(t("tools.step.song", "Go to Song: {name}"), &song_name(key).unwrap_or_else(song_gone))
+        }
+        ShowAction::Media { id } => {
+            named(t("tools.step.media", "Show Media: {name}"), &media_name(*id).unwrap_or_else(media_gone))
+        }
         ShowAction::Announce { what } => {
             let name = match what {
                 Announced::Song { key } => song_name(key).unwrap_or_else(song_gone),
                 Announced::Media { id } => media_name(*id).unwrap_or_else(media_gone),
-                Announced::MediaPlaylist { id } => {
-                    media_playlist_name(*id).unwrap_or_else(gone("a media playlist that has been deleted"))
-                }
+                Announced::MediaPlaylist { id } => media_playlist_name(*id).unwrap_or_else(gone(t(
+                    "tools.step.gone.media_playlist",
+                    "(a media playlist that has been deleted)",
+                ))),
             };
-            format!("Play on the Announcements Layer: {name}")
+            named(t("tools.step.announce", "Play on the Announcements Layer: {name}"), &name)
         }
-        ShowAction::CanvaSync => "Sync from Canva".to_owned(),
-        ShowAction::Version { id: None, .. } => "Back to the usual look".to_owned(),
+        ShowAction::CanvaSync => t("tools.step.canva", "Sync from Canva").to_owned(),
+        ShowAction::Version { id: None, .. } => t("tools.step.usual_look", "Back to the usual look").to_owned(),
         ShowAction::Version { id: Some(id), keep } => {
-            let until = if *keep { " until switched back" } else { "" };
-            match version_name(*id) {
-                Some(name) => format!("Use the {name} version{until}"),
-                None => format!("Use {}{until}", gone("a version that has been removed")()),
+            let gone_version = t("tools.step.gone.version", "(a version that has been removed)");
+            match (version_name(*id), keep) {
+                (Some(name), false) => named(t("tools.step.version", "Use the {name} version"), &name),
+                (Some(name), true) => {
+                    named(t("tools.step.version.kept", "Use the {name} version until switched back"), &name)
+                }
+                (None, false) => named(t("tools.step.version.gone", "Use {name}"), gone_version),
+                (None, true) => {
+                    named(t("tools.step.version.gone_kept", "Use {name} until switched back"), gone_version)
+                }
             }
         }
+    }
+}
+
+/// What a Clear step clears, in words, in the window's language (sp-model's own names are the
+/// English ones).
+pub fn clear_words(what: ClearWhat) -> &'static str {
+    match what {
+        ClearWhat::All => t("right.clear_all", "Clear All"),
+        ClearWhat::Slide => t("tools.step.clear_slide", "Clear Slide"),
+        ClearWhat::Media => t("tools.step.clear_media", "Clear Media"),
+        ClearWhat::Props => t("tools.step.clear_props", "Clear Props"),
+        ClearWhat::Messages => t("tools.step.clear_messages", "Clear Messages"),
+        ClearWhat::Audio => t("tools.step.clear_audio", "Clear Audio"),
+        ClearWhat::Announcements => t("tools.step.clear_announcements", "Clear Announcements"),
     }
 }
 
@@ -198,14 +268,17 @@ pub fn load() -> Vec<Macro> {
 }
 
 pub fn save(macros: &[Macro]) -> Result<(), String> {
-    let path = file().ok_or_else(|| "Could not find where to keep settings on this computer.".to_owned())?;
+    let path = file()
+        .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Could not make the app's folder: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+        })?;
     }
     let partial = path.with_extension("json.part");
     std::fs::write(&partial, serde_json::to_string_pretty(macros).unwrap_or_default())
         .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| format!("Could not save the macros: {e}"))
+        .map_err(|e| tf("tools.macros.not_saved", "Could not save the macros: {error}", &[("error", &e.to_string())]))
 }
 
 #[cfg(test)]

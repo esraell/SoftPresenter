@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 use sp_model::{Object, Role, Slide, SlideRect, TextStyle, Uuid};
 
+use crate::i18n::{t, tf};
+
 /// The place an editor draft says it belongs to when it is a prop being edited; `slide` then
 /// says which prop.
 pub const PROP_SLOT: usize = usize::MAX - 1;
@@ -29,7 +31,7 @@ impl Prop {
         look.align = sp_model::Align::Left;
         look.outline_width = 0.0;
         let mut words = Object::text(Role("prop".to_owned()), name.clone());
-        words.name = "Words".to_owned();
+        words.name = t("tools.prop.words_object", "Words").to_owned();
         words.frame = Some(SlideRect { x: 60.0, y: 40.0, w: 700.0, h: 110.0 });
         if let Some(style) = words.text_style_mut() {
             *style = TextStyle::all(&look);
@@ -41,7 +43,7 @@ impl Prop {
     pub fn duplicate(&self) -> Prop {
         let mut copy = self.clone();
         copy.id = Uuid::new_v4();
-        copy.name = format!("{} copy", self.name);
+        copy.name = tf("tools.copy_name", "{name} copy", &[("name", &self.name)]);
         copy.slide.id = Uuid::new_v4();
         for object in &mut copy.slide.objects {
             object.id = Uuid::new_v4();
@@ -159,14 +161,17 @@ pub fn load() -> Vec<Prop> {
 }
 
 pub fn save(props: &[Prop]) -> Result<(), String> {
-    let path = file().ok_or_else(|| "Could not find where to keep settings on this computer.".to_owned())?;
+    let path = file()
+        .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Could not make the app's folder: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+        })?;
     }
     let partial = path.with_extension("json.part");
     std::fs::write(&partial, serde_json::to_string_pretty(props).unwrap_or_default())
         .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| format!("Could not save the props: {e}"))
+        .map_err(|e| tf("tools.props.not_saved", "Could not save the props: {error}", &[("error", &e.to_string())]))
 }
 
 #[cfg(test)]

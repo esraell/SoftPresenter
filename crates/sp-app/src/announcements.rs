@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 use sp_model::{Slide, Theme, Uuid};
 use sp_video::Lend;
 
+use crate::i18n::t;
 use crate::output::{Announcement, OutputMsg};
 
 /// Something asked to play on the Announcements layer.
@@ -264,21 +265,25 @@ impl crate::App {
                     self.show_announcement_slide(song, first);
                     None
                 }
-                None => Some("That song has no slide that is on.".to_owned()),
+                None => Some(t("tools.announce.no_slide", "That song has no slide that is on.").to_owned()),
             },
             Announce::Media(id) => match self.show.media().iter().position(|item| item.id == id) {
                 Some(index) => {
                     self.show_media_announcement(what, 0, index);
                     None
                 }
-                None => Some("That picture or video isn't in the media bin any more.".to_owned()),
+                None => Some(
+                    t("tools.announce.media_gone", "That picture or video isn't in the media bin any more.").to_owned(),
+                ),
             },
             Announce::MediaPlaylist(id) => match self.playlist_media(id).first() {
                 Some(first) => {
                     self.show_media_announcement(what, 0, *first);
                     None
                 }
-                None => Some("That media playlist has nothing in it to play.".to_owned()),
+                None => Some(
+                    t("tools.announce.playlist_empty", "That media playlist has nothing in it to play.").to_owned(),
+                ),
             },
         };
         if let Some(said) = said
@@ -416,10 +421,10 @@ impl crate::App {
         if !OFF_SAID.swap(true, std::sync::atomic::Ordering::Relaxed)
             && let Some(running) = self.running.as_mut()
         {
-            running
-                .home_state
-                .notices
-                .info("Announcements are off while a slide is on screen. Announce starts them again.");
+            running.home_state.notices.info(t(
+                "tools.announce.off",
+                "Announcements are off while a slide is on screen. Announce starts them again.",
+            ));
         }
         if let Some(running) = self.running.as_ref() {
             running.home_window.request_redraw();
