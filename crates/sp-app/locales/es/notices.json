@@ -365,5 +365,6 @@
   "notices.timelychurch.updated": ["{n} canción de TimelyChurch se ha puesto al día.", "{n} canciones de TimelyChurch se han puesto al día."],
   "notices.timelychurch.offered": ["{n} canción que cambiaste tiene una versión más reciente en TimelyChurch; se conserva la tuya.", "{n} canciones que cambiaste tienen una versión más reciente en TimelyChurch; se conservan las tuyas."],
   "notices.timelychurch.playlist_offered": "{name} cambió en TimelyChurch; se conserva tu lista, que cambiaste.",
-  "notices.timelychurch.removed": "{name} se quitó en TimelyChurch; su lista se queda."
+  "notices.timelychurch.removed": "{name} se quitó en TimelyChurch; su lista se queda.",
+  "notices.ndi.stopped": "La fuente NDI {source} dejó de enviar. Sus diapositivas se muestran sin ella hasta que vuelva."
 }

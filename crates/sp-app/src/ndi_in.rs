@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 use sp_model::{ObjectKind, ndi_short_name};
 
+use crate::i18n::{t, tf, tn};
+
 /// How long a source is given, from when it is first wanted, to show it is there before it is
 /// called not sending.
 const GRACE: Duration = Duration::from_secs(3);
@@ -102,9 +104,15 @@ pub fn offered(found: &[String], own: &[String]) -> Vec<String> {
 /// or, where the app downloads NDI itself (Linux), the button under it.
 fn not_installed(app_downloads: bool) -> &'static str {
     if app_downloads {
-        "NDI isn't installed on this computer. Download NDI\u{2026}, below, gets it (free, from NDI), for receiving and for sending."
+        t(
+            "inspector.ndi.not_installed.download",
+            "NDI isn't installed on this computer. Download NDI\u{2026}, below, gets it (free, from NDI), for receiving and for sending.",
+        )
     } else {
-        "NDI isn't installed on this computer. SoftPresenter uses the NDI Tools you install yourself, as it does for sending."
+        t(
+            "inspector.ndi.not_installed.tools",
+            "NDI isn't installed on this computer. SoftPresenter uses the NDI Tools you install yourself, as it does for sending.",
+        )
     }
 }
 
@@ -115,31 +123,53 @@ pub fn line(installed: bool, found: usize, source: &str, stopped: bool) -> (Stri
     }
     if !source.is_empty() && stopped {
         return (
-            format!(
-                "\u{201c}{}\u{201d} isn't sending now. On screen the slide shows without it until it is back.",
-                ndi_short_name(source)
+            tf(
+                "inspector.ndi.not_sending",
+                "{source} isn't sending now. On screen the slide shows without it until it is back.",
+                &[("source", &crate::i18n::quoted(ndi_short_name(source)))],
             ),
             true,
         );
     }
-    let live = "The picture shows, live, while the slide is on screen.";
     if !source.is_empty() {
-        return (live.to_owned(), false);
+        return (t("inspector.ndi.live", "The picture shows, live, while the slide is on screen.").to_owned(), false);
     }
     if found == 0 {
-        return (
-            "Looking for NDI on this network. A source shows here as soon as it starts sending.".to_owned(),
-            false,
+        let looking = t(
+            "inspector.ndi.looking",
+            "Looking for NDI on this network. A source shows here as soon as it starts sending.",
         );
+        return (looking.to_owned(), false);
     }
-    (format!("{found} found on this network. {live}"), false)
+    let said = tn(
+        "inspector.ndi.found",
+        found as u64,
+        "{n} found on this network. The picture shows, live, while the slide is on screen.",
+        "{n} found on this network. The picture shows, live, while the slide is on screen.",
+        &[],
+    );
+    (said, false)
+}
+
+/// The tag at the foot of an NDI box on a slide in the operator's window, in the language set
+/// (handed to `sp_render::set_ndi_tag_words`): the source's own name, or `None` while none is
+/// chosen, and whether it has stopped sending. The screens never show it.
+pub fn tag_words(source: Option<&str>, stopped: bool) -> String {
+    match source {
+        None => t("editor.ndi.tag.choose", "NDI \u{b7} choose a source").to_owned(),
+        Some(name) if stopped => {
+            tf("editor.ndi.tag.not_sending", "NDI \u{b7} {name} \u{b7} not sending", &[("name", name)])
+        }
+        Some(name) => format!("NDI \u{b7} {name}"),
+    }
 }
 
 /// What the operator is told when a source stops.
 pub fn stopped_notice(source: &str) -> String {
-    format!(
-        "NDI \u{201c}{}\u{201d} stopped sending. Its slides show without it until it is back.",
-        ndi_short_name(source)
+    tf(
+        "notices.ndi.stopped",
+        "NDI {source} stopped sending. Its slides show without it until it is back.",
+        &[("source", &crate::i18n::quoted(ndi_short_name(source)))],
     )
 }
 
@@ -308,6 +338,20 @@ mod tests {
 
     #[test]
     fn the_line_under_the_menu_says_what_is_so_in_each_of_its_four_states() {
+        // The words are checked in English, whatever another test sets.
+        crate::i18n::with_language(crate::i18n::Language::English, the_line_in_english);
+        // And in Spanish, from its table.
+        crate::i18n::with_language(crate::i18n::Language::Spanish, || {
+            let (words, _) = line(true, 2, "STREAM-PC (Camera 1)", true);
+            assert!(words.starts_with("\u{201c}Camera 1\u{201d} "), "{words}");
+            assert_ne!(
+                line(true, 3, "", false).0,
+                "3 found on this network. The picture shows, live, while the slide is on screen."
+            );
+        });
+    }
+
+    fn the_line_in_english() {
         let (words, amber) = line(true, 3, "", false);
         assert_eq!(words, "3 found on this network. The picture shows, live, while the slide is on screen.");
         assert!(!amber);

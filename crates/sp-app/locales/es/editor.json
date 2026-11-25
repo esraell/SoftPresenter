@@ -21,6 +21,8 @@
   "editor.web.numbered": "Página web {n}",
   "editor.ndi.name": "Fuente NDI",
   "editor.ndi.numbered": "Fuente NDI {n}",
+  "editor.ndi.tag.choose": "NDI · elige una fuente",
+  "editor.ndi.tag.not_sending": "NDI · {name} · no envía",
   "editor.layout.new": "Diseño {n}",
   "editor.layout.copy": "Copia de {name}",
   "editor.layouts": "Diseños del escenario",

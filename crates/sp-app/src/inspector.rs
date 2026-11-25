@@ -796,15 +796,19 @@ fn ndi_source(
     installed: bool,
     download: &mut crate::ndi_download::NdiDownload,
 ) {
-    ui.label(egui::RichText::new("NDI Source").size(12.5).strong().color(INK));
+    ui.label(egui::RichText::new(t("inspector.ndi", "NDI Source")).size(12.5).strong().color(INK));
     ui.add_space(2.0);
     let stopped = !source.is_empty() && view.stopped.contains(source);
     let runtime = installed && !view.unavailable;
     ui.horizontal(|ui| {
         let shown = if source.is_empty() {
-            "Choose a source\u{2026}".to_owned()
+            t("inspector.ndi.choose", "Choose a source\u{2026}").to_owned()
         } else if stopped {
-            format!("{} \u{b7} not sending", sp_model::ndi_short_name(source))
+            tf(
+                "inspector.ndi.menu_not_sending",
+                "{name} \u{b7} not sending",
+                &[("name", sp_model::ndi_short_name(source))],
+            )
         } else {
             crate::ndi_in::menu_name(source)
         };
@@ -825,7 +829,8 @@ fn ndi_source(
                             ui.selectable_value(source, found.clone(), crate::ndi_in::menu_name(found));
                         }
                         if view.sources.is_empty() {
-                            ui.label(egui::RichText::new("None found yet").size(11.5).color(crate::studio::TEXT_DIM));
+                            let none = t("inspector.ndi.none_found", "None found yet");
+                            ui.label(egui::RichText::new(none).size(11.5).color(crate::studio::TEXT_DIM));
                         }
                     })
             })
@@ -833,7 +838,13 @@ fn ndi_source(
         if ui.data_mut(|data| data.remove_temp::<bool>(egui::Id::unique("ndi source focus"))).is_some() {
             chooser.response.request_focus();
         }
-        if ui.button("Look again").on_hover_text("Look for NDI sources on the network again").clicked() {
+        // Beside the menu, in the room it leaves: a shorter word where the usual is too long.
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let room = 100.0 - ui.spacing().item_spacing.x - 2.0 * ui.spacing().button_padding.x;
+        let (key, english) = tk("inspector.ndi.look_again", "Look again");
+        let again = crate::studio::within(ui, key, english, font, 0.0, room, false);
+        let hint = t("inspector.ndi.look_again.hint", "Look for NDI sources on the network again");
+        if ui.button(again).on_hover_text(hint).clicked() {
             view.look_again = true;
         }
     });
@@ -854,19 +865,26 @@ fn ndi_source(
             add(ui);
         });
     };
-    let fits: Vec<(sp_model::ImageFit, &str)> = sp_model::ImageFit::ALL.iter().map(|fit| (*fit, fit.name())).collect();
-    row(ui, "Fits", &mut |ui| choice(ui, "ndi fits", 120.0, scaling, &fits));
+    let fits: Vec<(sp_model::ImageFit, &str)> =
+        sp_model::ImageFit::ALL.iter().map(|fit| (*fit, fit_name(*fit))).collect();
+    row(ui, t("inspector.ndi.fits", "Fits"), &mut |ui| choice(ui, "ndi fits", 120.0, scaling, &fits));
+    let quality_name = |q: sp_model::NdiQuality| match q {
+        sp_model::NdiQuality::Full => t("inspector.ndi.quality.full", "Full"),
+        sp_model::NdiQuality::Light => t("inspector.ndi.quality.light", "Light"),
+    };
     let qualities: Vec<(sp_model::NdiQuality, &str)> =
-        sp_model::NdiQuality::ALL.iter().map(|q| (*q, q.name())).collect();
-    row(ui, "Quality", &mut |ui| choice(ui, "ndi quality", 120.0, quality, &qualities));
-    ui.label(
-        egui::RichText::new("Light is the sender\u{2019}s smaller picture").size(11.0).color(crate::studio::TEXT_DIM),
-    );
-    let sounds = [(false, "Off"), (true, "On")];
-    row(ui, "Sound", &mut |ui| {
+        sp_model::NdiQuality::ALL.iter().map(|q| (*q, quality_name(*q))).collect();
+    row(ui, t("inspector.ndi.quality", "Quality"), &mut |ui| choice(ui, "ndi quality", 120.0, quality, &qualities));
+    let light = t("inspector.ndi.quality.light.about", "Light is the sender\u{2019}s smaller picture");
+    ui.label(egui::RichText::new(light).size(11.0).color(crate::studio::TEXT_DIM));
+    let sounds = [(false, t("inspector.ndi.sound.off", "Off")), (true, t("inspector.ndi.sound.on", "On"))];
+    row(ui, t("inspector.ndi.sound", "Sound"), &mut |ui| {
         choice(ui, "ndi sound", 120.0, sound, &sounds);
-        ui.label(egui::RichText::new("Sound comes later").size(11.0).color(crate::studio::TEXT_DIM))
-            .on_hover_text("The setting is kept. SoftPresenter has no way yet to play a source\u{2019}s sound.");
+        let later = t("inspector.ndi.sound.later", "Sound comes later");
+        ui.label(egui::RichText::new(later).size(11.0).color(crate::studio::TEXT_DIM)).on_hover_text(t(
+            "inspector.ndi.sound.later.hint",
+            "The setting is kept. SoftPresenter has no way yet to play a source\u{2019}s sound.",
+        ));
     });
 }
 

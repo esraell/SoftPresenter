@@ -9047,6 +9047,14 @@ impl App {
                     object.build_in = Some(fly);
                     object.build_out = Some(sp_model::Build::of(sp_model::BuildEffect::Dissolve));
                 }
+                // Testing aid: SOFTPRESENTER_CAPTURE_NDI=1 puts an NDI source box on the slide,
+                // selected, as NDI Source in the tools does, for a picture of the inspector's NDI
+                // Source section (with SOFTPRESENTER_INSPECTOR_TAB=shape).
+                if std::env::var_os("SOFTPRESENTER_CAPTURE_NDI").is_some()
+                    && let Some(draft) = running.home_state.editing.as_mut()
+                {
+                    draft.add_ndi();
+                }
                 // Testing aids: show the grid, and zoom in.
                 running.home_state.edit_grid = std::env::var_os("SOFTPRESENTER_EDIT_GRID").is_some();
                 if let Some(zoom) = std::env::var("SOFTPRESENTER_EDIT_ZOOM").ok().and_then(|z| z.parse().ok()) {
@@ -11136,6 +11144,7 @@ fn main() -> ExitCode {
     // A web page box whose page costs to open (a VoxLive screen's live display) shows its free
     // test pattern in the operator's window instead.
     sp_render::set_web_stand_in(web_stand_in);
+    sp_render::set_ndi_tag_words(ndi_in::tag_words);
 
     let (media_paths, song_paths): (Vec<PathBuf>, Vec<PathBuf>) =
         options.paths.iter().cloned().partition(|path| media::is_media(path));

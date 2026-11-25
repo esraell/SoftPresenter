@@ -1548,14 +1548,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   left column (libraries, playlists and their menus), the slides area (with the slide,
   arrangement and times menus), the bar and the media strip under it, the right column (preview,
   layer keys, Clear All, the tool tabs and what is in them), the Bible view, the Bibles window,
-  the Edit view (its lists, tools, inspector, stage layouts and Edit Words), the Themes view, the
+  the Edit view (its lists, tools, inspector with its NDI Source section, an NDI box's tag on
+  the slide, stage layouts and Edit Words), the Themes view, the
   find box's results, Settings (General, Screens, Groups, Key Mappings, Integrations with VoxLive
   and Canva Sync, Remote Control, About), the Screens window (the list, each screen's output,
   look, background, key and DeckLink rows, and what each screen is doing, which `sp screens`
   gives in English), the first-start setup, the Import Slides sheets, the confirmation
   sheets, the notices list and everything said in it, and the Mac's menu bar (it changes with the
-  language at once; `sp menu` keeps the English names). Still English: the
-  inspector's NDI Source section, the audio player's own messages and the output windows' messages,
+  language at once; `sp menu` keeps the English names). Still English: the audio player's own
+  messages and the output windows' messages,
   left while other work changes them; a word with no translation yet shows in
   English. What the app names is named in the language set: the first playlist of a first start
   (its name follows the language until anything changes the playlists, as the computer's

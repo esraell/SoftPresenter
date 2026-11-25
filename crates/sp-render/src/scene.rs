@@ -485,6 +485,17 @@ pub fn set_web_stand_in(stand_in: fn(&str) -> Option<String>) {
     let _ = WEB_STAND_IN.set(stand_in);
 }
 
+/// The words of an NDI box's tag in the operator's window, in the app's language: given the
+/// source's own name (`None` while none is chosen) and whether it has stopped sending. Without
+/// them, English ("NDI · choose a source", "NDI · Camera 1 · not sending").
+static NDI_TAG_WORDS: std::sync::OnceLock<fn(Option<&str>, bool) -> String> = std::sync::OnceLock::new();
+
+/// Says how an NDI box's tag is worded in the operator's window (the screens never show it).
+/// Set once.
+pub fn set_ndi_tag_words(words: fn(Option<&str>, bool) -> String) {
+    let _ = NDI_TAG_WORDS.set(words);
+}
+
 fn object_web_url(object: &sp_model::Object) -> &str {
     match &object.kind {
         ObjectKind::Web { url } => url,
@@ -557,10 +568,15 @@ fn draw_ndi(
     }
     let name = sp_model::ndi_short_name(source);
     let amber = Color::from_rgba8(255, 196, 0, 255);
-    let (tag, stopped) = match source {
-        "" => ("NDI \u{b7} choose a source".to_owned(), false),
-        _ if shown.stopped => (format!("NDI \u{b7} {name} \u{b7} not sending"), true),
-        _ => (format!("NDI \u{b7} {name}"), false),
+    let stopped = !source.is_empty() && shown.stopped;
+    let chosen = (!source.is_empty()).then_some(name);
+    let tag = match NDI_TAG_WORDS.get() {
+        Some(words) => words(chosen, stopped),
+        None => match chosen {
+            None => "NDI \u{b7} choose a source".to_owned(),
+            Some(name) if stopped => format!("NDI \u{b7} {name} \u{b7} not sending"),
+            Some(name) => format!("NDI \u{b7} {name}"),
+        },
     };
     let picture = shown.picture.filter(|_| !stopped);
     match picture {
