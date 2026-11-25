@@ -124,6 +124,35 @@ all with:
 A new switch gets the same `// Testing aid:` comment, and a `Testing aid:` line in its commit
 message.
 
+## End-to-end tests
+
+`crates/sp-app/tests/e2e.rs` starts the app Cargo built as a quiet test copy and drives it
+through `sp`, as a script would: songs, slides and the six clears, a Bible passage, a picture
+behind the words, a playlist, audio, a 300-song import on a slow disk, Remote Control's sign-in,
+snapshot and sign-out over HTTPS, Check for Updates against a stand-in on this computer, and a
+`--capture-home` picture. It runs with `cargo test` (on all three systems in CI), in about half
+a minute on a Mac. One test alone:
+
+    cargo test -p sp-app --test e2e remote_control -- --nocapture
+
+- **Its own copy, always quit.** Each test starts a copy of its own, with
+  `SOFTPRESENTER_QUIET=1`, `SOFTPRESENTER_DATA` and `SOFTPRESENTER_CONTROL_SOCKET` in a
+  temporary folder named `spe2e-<process>-<n>` (under `/tmp` on a Mac and Linux), and every other
+  `SOFTPRESENTER_*` variable taken out of its environment and `sp`'s, so it never reaches the
+  owner's library, log or socket. Copies run one at a time. When a test ends, passed or failed,
+  its guard sends `menu Quit` through the copy's own socket and kills the copy if it hasn't gone
+  30 seconds later. A failed test keeps its folder (the copy's log, standard output and error),
+  and says where.
+- **What a quit is checked for:** exit code 0, no `[crash]`, `panicked` or `Graphics error` in
+  the log or on the standard error, and the socket gone.
+- **Skipped, out loud:** `SOFTPRESENTER_E2E=off` skips them all, as does a Linux computer with
+  no display; a part a computer can't do (sound, with no sound output) is skipped with the
+  reason printed, and as a notice on a GitHub run.
+- **Switches it uses:** `SOFTPRESENTER_SLOW_WRITES` (the import), `SOFTPRESENTER_RELEASES_URL`
+  (the updates stand-in), `SOFTPRESENTER_LANGUAGE=en`.
+- **The tests need a graphics device,** as the app does. CI gives them one: Metal on the Mac,
+  WARP (DirectX 12 in software) on Windows, and on Linux Mesa's software Vulkan under `xvfb-run`.
+
 ## Rules
 
 - **`unsafe` code** is allowed only in `sp-video`'s two macOS modules (`mac` for videos and
@@ -196,7 +225,8 @@ message.
 - **Third-party code.** Before linking anything new, read its licence and record it in
   `docs/licences/`, and in `NOTICE.md` if it ships with the app.
 - **Tests that need a GPU** go in `crates/sp-render/tests/golden.rs`, which the automatic checks
-  leave out, or are marked `#[ignore]` with the reason.
+  leave out, or are marked `#[ignore]` with the reason. The one exception is the
+  [end-to-end tests](#end-to-end-tests), which compare no pictures and run everywhere.
 - **The docs follow the code.** When what works changes, update
   [docs/features.md](docs/features.md) in the same commit (and the README's one-line overview
   if a whole area changes). When a planned feature is built, take it off

@@ -1,0 +1,1317 @@
+//! End to end: the app Cargo built, started as a quiet test copy and driven through `sp` as a
+//! person or a script drives it, then quit, and its files read back from the disk.
+//!
+//! Each test starts a copy of its own with `SOFTPRESENTER_QUIET=1`, a data folder of its own
+//! (`SOFTPRESENTER_DATA`) and a control socket of its own (`SOFTPRESENTER_CONTROL_SOCKET`), in a
+//! temporary folder named `spe2e-…`. Only one copy runs at a time, whatever `--test-threads`
+//! says. A copy is always quit when its test ends, passed or failed: `menu Quit` through its own
+//! socket, and killed if it hasn't gone 30 seconds later. A failed test keeps its folder (the
+//! path is printed), with the copy's log and what it wrote to its standard output and error.
+//!
+//! `SOFTPRESENTER_E2E=off` skips them all, with the reason printed; so does a Linux computer with
+//! no display (CI runs them under `xvfb-run`). A part a computer can't do (sound, where it has no
+//! sound output) is skipped with its reason printed, never silently.
+
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard, Once};
+use std::time::{Duration, Instant};
+
+use serde_json::Value;
+
+/// The program: the app, and `sp` too (the same program with a command after it).
+const APP: &str = env!("CARGO_BIN_EXE_softpresenter");
+
+/// One copy at a time (AGENTS.md: run one instance at a time), and honest timings.
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+/// How long a copy may take to answer its first command: generous, for a cold start on a
+/// computer that draws in software (CI's Linux and Windows machines).
+const START_WITHIN: Duration = Duration::from_secs(120);
+/// How long a copy may take to close after `menu Quit` before it is killed.
+const QUIT_WITHIN: Duration = Duration::from_secs(30);
+/// How long one `sp` command may take (the app answers within 15 seconds, or says it didn't).
+const COMMAND_WITHIN: Duration = Duration::from_secs(45);
+/// The longest a socket's path may be: the app refuses a longer one (`control::listen_at`).
+const SOCKET_PATH_MOST: usize = 100;
+
+// ---------------------------------------------------------------------------------------------
+// Skipping, said out loud
+
+/// Why every end-to-end test is skipped on this computer, if they are.
+fn skipped_here() -> Option<String> {
+    if let Ok(said) = std::env::var("SOFTPRESENTER_E2E")
+        && matches!(said.trim().to_ascii_lowercase().as_str(), "off" | "0" | "no" | "false")
+    {
+        return Some(format!("SOFTPRESENTER_E2E={said}"));
+    }
+    if cfg!(all(unix, not(target_os = "macos")))
+        && std::env::var_os("DISPLAY").is_none()
+        && std::env::var_os("WAYLAND_DISPLAY").is_none()
+    {
+        return Some("no display here (DISPLAY and WAYLAND_DISPLAY are unset); run them under xvfb-run".to_owned());
+    }
+    None
+}
+
+/// Says that something was skipped and why, where it is seen: written straight to the process's
+/// standard error, which the test harness doesn't hold back as it holds back `eprintln!` from a
+/// test that passes; and on GitHub as a notice on the run.
+fn say_skipped(what: &str, why: &str) {
+    let _ = writeln!(std::io::stderr(), "e2e: skipped {what}: {why}");
+    if std::env::var_os("GITHUB_ACTIONS").is_some() {
+        let _ = writeln!(std::io::stdout(), "::notice title=End-to-end test skipped::{what}: {why}");
+    }
+}
+
+/// Says something worth seeing in the output of a test that passes (timings).
+fn say(line: &str) {
+    let _ = writeln!(std::io::stderr(), "e2e: {line}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// A run: a test's folder, and its turn
+
+/// One test's folder (its copy's data folder, socket and files) and its turn: no other test's
+/// copy runs while it is held. The folder is removed when the test passes and kept, with its
+/// path printed, when it fails.
+struct Run {
+    name: &'static str,
+    root: PathBuf,
+    data: PathBuf,
+    socket: PathBuf,
+    /// Copies started so far in this run (a test may start a second on the same data).
+    started: AtomicUsize,
+    _turn: MutexGuard<'static, ()>,
+}
+
+impl Run {
+    /// A run for the test `name`, or `None` (said) when the tests are skipped here.
+    fn new(name: &'static str) -> Option<Run> {
+        if let Some(why) = skipped_here() {
+            static SAID: Once = Once::new();
+            SAID.call_once(|| say_skipped("every end-to-end test", &why));
+            let _ = writeln!(std::io::stderr(), "e2e: skipped {name} (see above)");
+            return None;
+        }
+        let turn = ONE_AT_A_TIME.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        static COUNT: AtomicUsize = AtomicUsize::new(0);
+        // A short path, so the socket's stays under the limit: /tmp on a Mac and Linux (a Mac's
+        // own temporary folder is long), the user's temporary folder on Windows.
+        let base = if cfg!(unix) { PathBuf::from("/tmp") } else { std::env::temp_dir() };
+        let root = base.join(format!("spe2e-{}-{}", std::process::id(), COUNT.fetch_add(1, Ordering::Relaxed)));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("files")).expect("the test's folder");
+        // The socket's own folder is left for the app to make: it makes it for this user only,
+        // and on Windows it looks hard at one that was there already.
+        let socket = root.join("s").join("ctl.sock");
+        assert!(
+            socket.as_os_str().len() <= SOCKET_PATH_MOST,
+            "the socket's path is too long for the app: {}",
+            socket.display()
+        );
+        Some(Run { name, data: root.join("data"), root, socket, started: AtomicUsize::new(0), _turn: turn })
+    }
+
+    /// A file of the test's own, outside the copy's data folder.
+    fn file(&self, name: &str) -> PathBuf {
+        self.root.join("files").join(name)
+    }
+
+    /// The program with this run's copy's variables, and nothing else of SoftPresenter's from the
+    /// environment the tests run in: never the owner's library, log or socket.
+    fn program(&self) -> Command {
+        let mut command = Command::new(APP);
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("SOFTPRESENTER_") {
+                command.env_remove(&name);
+            }
+        }
+        command
+            .env("SOFTPRESENTER_QUIET", "1")
+            .env("SOFTPRESENTER_DATA", &self.data)
+            .env("SOFTPRESENTER_CONTROL_SOCKET", &self.socket)
+            .env("SOFTPRESENTER_LANGUAGE", "en")
+            .stdin(Stdio::null());
+        command
+    }
+
+    /// Starts a copy, with any more variables given, and waits until it answers.
+    fn start(&self, more: &[(&str, &str)]) -> Copy<'_> {
+        let number = self.started.fetch_add(1, Ordering::Relaxed);
+        let out = self.root.join(format!("app-{number}.out"));
+        let err = self.root.join(format!("app-{number}.err"));
+        let mut command = self.program();
+        for (name, value) in more {
+            command.env(name, value);
+        }
+        command
+            .stdout(std::fs::File::create(&out).expect("the copy's output file"))
+            .stderr(std::fs::File::create(&err).expect("the copy's error file"));
+        let child = command.spawn().unwrap_or_else(|e| panic!("could not start {APP}: {e}"));
+        let mut copy = Copy { run: self, child, exit: None, err };
+        copy.wait_until_it_answers();
+        copy
+    }
+
+    /// The copy's log, as far as it has been written.
+    fn log(&self) -> String {
+        std::fs::read_to_string(self.data.join("SoftPresenter.log")).unwrap_or_default()
+    }
+
+    /// Runs `sp` with these words and `--json`, as a script would, and reads its reply.
+    fn sp(&self, args: &[&str]) -> Reply {
+        self.sp_with_input(args, None)
+    }
+
+    /// The same, with a line given on its standard input (a password).
+    fn sp_with_input(&self, args: &[&str], input: Option<&str>) -> Reply {
+        let mut command = self.program();
+        command.args(args).arg("--json");
+        let (status, stdout, stderr, took) = run_to_end(command, input, COMMAND_WITHIN);
+        let words = args.join(" ");
+        let Some(status) = status else {
+            panic!("sp {words} took longer than {COMMAND_WITHIN:?}{}", self.context());
+        };
+        let reply: Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
+            panic!("sp {words} didn't answer in JSON ({e}): {stdout:?} {stderr:?}{}", self.context())
+        });
+        let ok = reply["ok"].as_bool().unwrap_or_else(|| panic!("sp {words}: no ok in {reply}"));
+        let text = reply["text"].as_str().unwrap_or_default().to_owned();
+        // The exit code says the same as the reply: 0 done, 1 refused.
+        let code = status.code();
+        assert_eq!(code, Some(if ok { 0 } else { 1 }), "sp {words} exited {status} with {reply}{}", self.context());
+        Reply { words, ok, text, data: reply["data"].clone(), took }
+    }
+
+    /// The end of the log and of the copy's standard error, for a failure's message.
+    fn context(&self) -> String {
+        let tail = |text: &str, lines: usize| {
+            let all: Vec<&str> = text.lines().collect();
+            all[all.len().saturating_sub(lines)..].join("\n")
+        };
+        let mut said = format!("\n\n--- the test's folder: {}", self.root.display());
+        said.push_str(&format!("\n--- the end of the copy's log:\n{}", tail(&self.log(), 40)));
+        for number in 0..self.started.load(Ordering::Relaxed) {
+            let err = std::fs::read_to_string(self.root.join(format!("app-{number}.err"))).unwrap_or_default();
+            if !err.trim().is_empty() {
+                said.push_str(&format!("\n--- the end of copy {number}'s standard error:\n{}", tail(&err, 20)));
+            }
+        }
+        said
+    }
+}
+
+impl Drop for Run {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            let _ =
+                writeln!(std::io::stderr(), "e2e: {} failed; its folder is kept: {}", self.name, self.root.display());
+        } else {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// A copy of the app, running
+
+/// A copy that is running. However its test ends, it is quit: `menu Quit` through its own
+/// socket, then killed if it hasn't gone in time.
+struct Copy<'a> {
+    run: &'a Run,
+    child: Child,
+    exit: Option<ExitStatus>,
+    err: PathBuf,
+}
+
+/// What a copy left when it quit.
+struct Quitted {
+    status: ExitStatus,
+    log: String,
+    stderr: String,
+}
+
+impl Copy<'_> {
+    fn wait_until_it_answers(&mut self) {
+        let began = Instant::now();
+        loop {
+            if let Ok(Some(status)) = self.child.try_wait() {
+                self.exit = Some(status);
+                panic!("the copy stopped before it answered ({status}){}", self.run.context());
+            }
+            let mut command = self.run.program();
+            command.args(["status", "--json"]);
+            let (status, stdout, _, _) = run_to_end(command, None, COMMAND_WITHIN);
+            if status.is_some_and(|status| status.success()) && stdout.contains("\"ok\": true") {
+                say(&format!("{}: copy answered after {:.1} s", self.run.name, began.elapsed().as_secs_f64()));
+                return;
+            }
+            if began.elapsed() > START_WITHIN {
+                self.kill();
+                panic!("the copy didn't answer within {START_WITHIN:?}{}", self.run.context());
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    fn sp(&self, args: &[&str]) -> Reply {
+        self.run.sp(args)
+    }
+
+    /// `sp` with these words, which must be done.
+    fn ok(&self, args: &[&str]) -> Reply {
+        let reply = self.run.sp(args);
+        assert!(reply.ok, "sp {} was refused: {}{}", reply.words, reply.text, self.run.context());
+        reply
+    }
+
+    /// `sp` with these words, which must be refused, with words containing `why`.
+    fn refused(&self, args: &[&str], why: &str) -> Reply {
+        let reply = self.run.sp(args);
+        assert!(!reply.ok, "sp {} was done, and should have been refused: {}", reply.words, reply.text);
+        assert!(reply.text.contains(why), "sp {} was refused saying {:?}, not {why:?}", reply.words, reply.text);
+        reply
+    }
+
+    /// `status --json`'s facts.
+    fn status(&self) -> Value {
+        self.ok(&["status"]).data
+    }
+
+    /// What is on screen: the song (or passage) and slide, or `None`.
+    fn live(&self) -> Option<(String, u64)> {
+        let status = self.status();
+        let live = &status["live"];
+        if live.is_null() {
+            return None;
+        }
+        Some((live["song"].as_str().unwrap_or_default().to_owned(), live["slide"].as_u64().unwrap_or_default()))
+    }
+
+    /// Asserts what is on screen.
+    fn assert_live(&self, song: &str, slide: u64) {
+        let live = self.live();
+        assert_eq!(live, Some((song.to_owned(), slide)), "on screen{}", self.run.context());
+    }
+
+    /// Waits until `ready` holds for the status, or fails after `within`.
+    fn wait_for(&self, what: &str, within: Duration, ready: impl Fn(&Value) -> bool) -> Value {
+        let began = Instant::now();
+        loop {
+            let status = self.status();
+            if ready(&status) {
+                return status;
+            }
+            assert!(began.elapsed() < within, "{what} didn't happen within {within:?}: {status}{}", self.run.context());
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    /// Quits the copy as a person would (`menu Quit`), and waits for it to go.
+    fn quit(self) -> Quitted {
+        self.quit_within(QUIT_WITHIN)
+    }
+
+    fn quit_within(mut self, within: Duration) -> Quitted {
+        self.ok(&["menu", "Quit"]);
+        let status = self.wait_exit(within).unwrap_or_else(|| {
+            self.kill();
+            panic!("the copy hadn't quit {within:?} after menu Quit; it was killed{}", self.run.context())
+        });
+        Quitted { status, log: self.run.log(), stderr: std::fs::read_to_string(&self.err).unwrap_or_default() }
+    }
+
+    fn wait_exit(&mut self, within: Duration) -> Option<ExitStatus> {
+        if let Some(status) = self.exit {
+            return Some(status);
+        }
+        let began = Instant::now();
+        while began.elapsed() < within {
+            if let Ok(Some(status)) = self.child.try_wait() {
+                self.exit = Some(status);
+                return Some(status);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        None
+    }
+
+    fn kill(&mut self) {
+        let _ = self.child.kill();
+        self.exit = self.child.wait().ok();
+    }
+}
+
+impl Drop for Copy<'_> {
+    /// A copy still running when its test ends (a failed assertion) is quit, then killed.
+    fn drop(&mut self) {
+        if self.exit.is_some() {
+            return;
+        }
+        let mut command = self.run.program();
+        command.args(["menu", "Quit"]);
+        let _ = run_to_end(command, None, Duration::from_secs(20));
+        if self.wait_exit(QUIT_WITHIN).is_none() {
+            let _ = writeln!(std::io::stderr(), "e2e: {}: the copy didn't quit; killed it", self.run.name);
+            self.kill();
+        }
+    }
+}
+
+impl Quitted {
+    /// It closed by itself with nothing wrong: exit code 0, no crash or graphics error in its
+    /// log or on its standard error. (The log has no tag of its own for a problem: a crash is
+    /// `[crash]`, and every problem logged is also written to the standard error.)
+    fn assert_clean(&self, run: &Run) {
+        assert!(self.status.success(), "the copy exited with {}{}", self.status, run.context());
+        for bad in ["[crash]", "panicked", "Graphics error"] {
+            assert!(!self.log.contains(bad), "the copy's log says {bad:?}{}", run.context());
+            assert!(!self.stderr.contains(bad), "the copy's standard error says {bad:?}{}", run.context());
+        }
+        // Looked at without following it: on Windows a socket is a stand-in file `exists` can't
+        // follow.
+        let socket = std::fs::symlink_metadata(&run.socket);
+        assert!(socket.is_err(), "the copy left its socket behind: {}", run.socket.display());
+    }
+}
+
+/// A reply from `sp … --json`.
+#[derive(Debug)]
+struct Reply {
+    words: String,
+    ok: bool,
+    text: String,
+    data: Value,
+    took: Duration,
+}
+
+/// Runs a command to its end, with a line on its standard input if given; gives up (and kills
+/// it) after `within`. The exit status (`None` when it took too long), what it wrote, and how
+/// long it took.
+fn run_to_end(
+    mut command: Command,
+    input: Option<&str>,
+    within: Duration,
+) -> (Option<ExitStatus>, String, String, Duration) {
+    let began = Instant::now();
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    if input.is_some() {
+        command.stdin(Stdio::piped());
+    }
+    let mut child = command.spawn().unwrap_or_else(|e| panic!("could not run {APP}: {e}"));
+    if let (Some(line), Some(mut stdin)) = (input, child.stdin.take()) {
+        let _ = writeln!(stdin, "{line}");
+    }
+    let read = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut text = String::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_string(&mut text);
+            }
+            text
+        })
+    };
+    let out = read(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let err = read(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if began.elapsed() < within => std::thread::sleep(Duration::from_millis(5)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+        }
+    };
+    let took = began.elapsed();
+    (status, out.join().unwrap_or_default(), err.join().unwrap_or_default(), took)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Files the tests make
+
+/// Song text for a test song: its groups, a slide each, with words written for the test.
+fn song_text(groups: &[(&str, &str)]) -> String {
+    groups.iter().map(|(group, words)| format!("[{group}]\n{words}\n")).collect::<Vec<_>>().join("\n")
+}
+
+/// A small PNG of one colour.
+fn write_png(path: &Path, rgb: [u8; 3]) {
+    let picture = image::RgbImage::from_pixel(64, 36, image::Rgb(rgb));
+    picture.save_with_format(path, image::ImageFormat::Png).expect("the picture");
+}
+
+/// A WAV file of `seconds` of silence (mono, 16 bits, 8000 samples a second).
+fn write_wav(path: &Path, seconds: u32) {
+    let rate = 8000u32;
+    let bytes = rate * seconds * 2;
+    let mut wav = Vec::with_capacity(44 + bytes as usize);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + bytes).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    wav.extend_from_slice(&1u16.to_le_bytes()); // one channel
+    wav.extend_from_slice(&rate.to_le_bytes());
+    wav.extend_from_slice(&(rate * 2).to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&bytes.to_le_bytes());
+    wav.resize(44 + bytes as usize, 0);
+    std::fs::write(path, wav).expect("the sound file");
+}
+
+/// The song files in a data folder's Songs folder, and any half-written files beside them.
+fn song_files(data: &Path) -> (usize, Vec<String>) {
+    let mut songs = 0;
+    let mut half = Vec::new();
+    for folder in [data.to_path_buf(), data.join("Songs")] {
+        for entry in std::fs::read_dir(folder).into_iter().flatten().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.ends_with(".saving") || name.ends_with(".part") {
+                half.push(name);
+            } else if name.ends_with(".sppres") {
+                songs += 1;
+            }
+        }
+    }
+    (songs, half)
+}
+
+/// A song file's text, found by its title in the copy's Songs folder.
+fn song_file_with(data: &Path, words: &str) -> Option<String> {
+    std::fs::read_dir(data.join("Songs"))
+        .ok()?
+        .flatten()
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+        .find(|text| text.contains(words))
+}
+
+// ---------------------------------------------------------------------------------------------
+// The tests
+
+#[test]
+fn starts_answers_and_quits_cleanly() {
+    let Some(run) = Run::new("starts_answers_and_quits_cleanly") else { return };
+    let copy = run.start(&[]);
+    let status = copy.status();
+    assert!(status["live"].is_null(), "nothing on screen at the start: {status}");
+    assert_eq!(status["playlist"]["name"], "Service", "the first playlist");
+    assert_eq!(status["selected_song"], "Sample song", "the sample song is chosen");
+    assert!(status["token"].as_str().is_some_and(|token| token.split('-').count() == 3), "a token: {status}");
+    let songs = copy.ok(&["songs"]).data;
+    assert_eq!(songs.as_array().map(Vec::len), Some(1), "the sample song alone: {songs}");
+    // Refusals carry exit code 1 (`sp` checks every reply's exit code against `ok`).
+    copy.refused(&["go", "nosuch"], "No song called");
+    // A first word that is neither a command nor a file is a mistake, exit code 2, said by sp.
+    let mut mistake = run.program();
+    mistake.arg("nosuch");
+    let (code, _, stderr, _) = run_to_end(mistake, None, COMMAND_WITHIN);
+    assert_eq!(code.and_then(|c| c.code()), Some(2), "{stderr}");
+    let quitted = copy.quit();
+    quitted.assert_clean(&run);
+    assert!(quitted.log.contains("[control] listening for commands"), "{}", quitted.log);
+    let gpu = quitted.log.lines().find_map(|line| line.split_once("[gpu] ").map(|(_, said)| said.to_owned()));
+    let gpu = gpu.unwrap_or_else(|| panic!("the log names the graphics it drew with{}", run.context()));
+    // Said in the output, so a CI run shows what it drew with (WARP, Mesa's lavapipe…).
+    say(&format!("the copy drew with {gpu}"));
+    // With the copy gone, sp says so (exit code 1) and starts nothing.
+    run.sp(&["status"]).ok.then(|| panic!("a copy still answers after quitting{}", run.context()));
+}
+
+/// The six layers `clear` takes, in the order of [`filled`].
+const LAYERS: [&str; 6] = ["slide", "media", "props", "messages", "audio", "announcements"];
+
+/// Which of the six layers have something on them, from `status --json`.
+fn filled(status: &Value) -> [bool; 6] {
+    [
+        !status["live"].is_null(),
+        !status["media"].is_null(),
+        status["props"].as_array().is_some_and(|props| !props.is_empty()),
+        !status["message"].is_null(),
+        !status["audio"]["track"].is_null(),
+        !status["announcements"].is_null(),
+    ]
+}
+
+/// Plays a track. `false`, said, when this computer has no sound output to play it through (CI's
+/// machines have none); any other refusal fails the test.
+fn play_or_skip(copy: &Copy, track: &str, what: &str) -> bool {
+    let reply = copy.sp(&["audio", "play", track]);
+    if reply.ok {
+        return true;
+    }
+    if reply.text.contains("sound output") {
+        say_skipped(what, &format!("this computer has no sound output ({})", reply.text));
+        return false;
+    }
+    panic!("audio play {track} was refused: {}{}", reply.text, copy.run.context());
+}
+
+#[test]
+fn a_song_from_text_runs_slide_by_slide_and_each_layer_clears() {
+    let Some(run) = Run::new("a_song_from_text_runs_slide_by_slide_and_each_layer_clears") else { return };
+    let words = song_text(&[
+        ("Verse 1", "Morning light on the hill\nWe walk the quiet road"),
+        ("Chorus", "Sing out, the day is new"),
+        ("Verse 2", "Evening comes with gentle rain"),
+    ]);
+    let file = run.file("Hill Road.txt");
+    std::fs::write(&file, words).expect("the song's file");
+    let picture = run.file("Blue.png");
+    write_png(&picture, [30, 90, 200]);
+    let tone = run.file("Tone.wav");
+    write_wav(&tone, 30);
+    let copy = run.start(&[]);
+
+    let imported = copy.ok(&["song", "import", &file.to_string_lossy()]);
+    assert!(imported.text.contains("Hill Road"), "{}", imported.text);
+    let slides = copy.ok(&["slides", "Hill Road"]).data;
+    let groups: Vec<&str> = slides.as_array().into_iter().flatten().filter_map(|s| s["group"].as_str()).collect();
+    assert_eq!(groups, ["Verse 1", "Chorus", "Verse 2"], "{slides}");
+
+    // Through the song, and back, as the arrow keys, Home and End do.
+    copy.ok(&["go", "Hill Road"]);
+    copy.assert_live("Hill Road", 1);
+    let status = copy.status();
+    assert_eq!(status["live"]["words"], "Morning light on the hill / We walk the quiet road", "{status}");
+    assert_eq!(status["live"]["kind"], "song");
+    assert_eq!(status["next_slide"], 2, "{status}");
+    copy.ok(&["next"]);
+    copy.assert_live("Hill Road", 2);
+    copy.ok(&["next"]);
+    copy.assert_live("Hill Road", 3);
+    let end = copy.ok(&["next"]);
+    assert_eq!(end.data["at_end"], true, "at the end Next says so: {end:?}");
+    copy.assert_live("Hill Road", 3);
+    copy.ok(&["previous"]);
+    copy.assert_live("Hill Road", 2);
+    copy.ok(&["first"]);
+    copy.assert_live("Hill Road", 1);
+    copy.ok(&["last"]);
+    copy.assert_live("Hill Road", 3);
+    copy.ok(&["go", "Hill Road", "2"]);
+    copy.assert_live("Hill Road", 2);
+    copy.refused(&["go", "Hill Road", "9"], "there is no slide 9");
+    copy.assert_live("Hill Road", 2);
+    copy.ok(&["go", "Hill Road", "1"]);
+    copy.ok(&["group", "chorus"]);
+    copy.assert_live("Hill Road", 2);
+    // A slide's words changed while it is on screen: shown at once, and saved.
+    copy.ok(&["slide", "text", "Hill Road", "2", "Sing out, the day is here"]);
+    assert_eq!(copy.status()["live"]["words"], "Sing out, the day is here");
+
+    // Something on every layer.
+    copy.ok(&["media", "add", &picture.to_string_lossy()]);
+    copy.ok(&["media", "show", "blue"]);
+    copy.ok(&["prop", "new", "Banner"]);
+    copy.ok(&["prop", "show", "Banner"]);
+    copy.ok(&["message", "show", "--text", "Welcome, friends"]);
+    copy.ok(&["announce", "Sample song"]);
+    copy.ok(&["audio", "add", &tone.to_string_lossy()]);
+    let sound =
+        play_or_skip(&copy, "tone", "a_song_from_text_runs_slide_by_slide_and_each_layer_clears: the audio layer");
+    let mut expected = [true, true, true, true, sound, true];
+    assert_eq!(filled(&copy.status()), expected, "every layer has something: {}", copy.status());
+    // Each clear takes its own layer, and leaves the others.
+    for (at, layer) in LAYERS.iter().enumerate() {
+        let cleared = copy.ok(&["clear", layer]);
+        assert_eq!(cleared.text, format!("Cleared {layer}."));
+        expected[at] = false;
+        let status = copy.status();
+        assert_eq!(filled(&status), expected, "after clear {layer} ({LAYERS:?}): {status}");
+    }
+    copy.refused(&["clear", "bogus"], "isn't a layer");
+    // Everything again, then Clear All.
+    copy.ok(&["go", "Hill Road", "3"]);
+    copy.ok(&["media", "show", "blue"]);
+    copy.ok(&["prop", "show", "Banner"]);
+    copy.ok(&["message", "show", "--text", "Welcome, friends"]);
+    copy.ok(&["announce", "Sample song"]);
+    if sound {
+        copy.ok(&["audio", "play", "tone"]);
+    }
+    assert_eq!(filled(&copy.status()), [true, true, true, true, sound, true]);
+    copy.ok(&["clear"]);
+    assert_eq!(filled(&copy.status()), [false; 6], "Clear All: {}", copy.status());
+
+    copy.quit().assert_clean(&run);
+    let saved = song_file_with(&run.data, "Morning light on the hill").expect("the song's file in Songs");
+    assert!(saved.contains("Sing out, the day is here"), "the changed words were saved: {saved}");
+    assert!(!saved.contains("the day is new"), "{saved}");
+}
+
+#[test]
+fn a_bible_passage_goes_on_screen_and_steps_verse_by_verse() {
+    let Some(run) = Run::new("a_bible_passage_goes_on_screen_and_steps_verse_by_verse") else { return };
+    let copy = run.start(&[]);
+    // The King James Version comes with the app (public domain).
+    let bibles = copy.ok(&["bibles"]).data;
+    let shipped: Vec<&str> =
+        bibles["installed"].as_array().into_iter().flatten().filter_map(|b| b["short"].as_str()).collect();
+    assert!(shipped.contains(&"KJV"), "the Bibles that come with the app: {bibles}");
+    copy.ok(&["bible", "rows", "KJV"]);
+    let shown = copy.ok(&["bible", "John 3:16", "--show"]);
+    assert!(shown.text.contains("slide 16 of 36"), "{}", shown.text);
+    let status = copy.status();
+    assert_eq!(status["live"]["kind"], "passage", "{status}");
+    copy.assert_live("John 3:1-36", 16);
+    let words = status["live"]["words"].as_str().unwrap_or_default();
+    assert!(words.starts_with("For God so loved the world"), "{words}");
+    copy.ok(&["next"]);
+    copy.assert_live("John 3:1-36", 17);
+    let words = copy.status()["live"]["words"].as_str().unwrap_or_default().to_owned();
+    assert!(words.starts_with("For God sent not his Son into the world"), "{words}");
+    copy.ok(&["next"]);
+    copy.assert_live("John 3:1-36", 18);
+    copy.ok(&["previous"]);
+    copy.ok(&["previous"]);
+    copy.assert_live("John 3:1-36", 16);
+    // Read without touching the page or the screens.
+    let text = copy.ok(&["bible", "text", "Psalm 117"]).data;
+    assert_eq!(text["slides"].as_array().map(Vec::len), Some(2), "{text}");
+    copy.assert_live("John 3:1-36", 16);
+    let found = copy.ok(&["bible", "search", "everlasting life"]).data;
+    assert!(found.as_array().into_iter().flatten().any(|hit| hit["verse"] == "John 3:16"), "{found}");
+    copy.refused(&["bible", "John 99:1"], "John has 21 chapters");
+    copy.ok(&["clear"]);
+    assert!(copy.live().is_none());
+
+    copy.quit().assert_clean(&run);
+    let history = std::fs::read_to_string(run.data.join("bible-history.json")).unwrap_or_default();
+    assert!(history.contains("John 3:16"), "the passage looked up is in the history: {history}");
+}
+
+#[test]
+fn a_picture_from_the_media_bin_shows_behind_the_words_and_clears() {
+    let Some(run) = Run::new("a_picture_from_the_media_bin_shows_behind_the_words_and_clears") else { return };
+    let blue = run.file("Blue.png");
+    let green = run.file("Green.png");
+    write_png(&blue, [30, 90, 200]);
+    write_png(&green, [40, 160, 60]);
+    let copy = run.start(&[]);
+    let added = copy.ok(&["media", "add", &blue.to_string_lossy(), &green.to_string_lossy()]);
+    assert!(added.text.contains("Added 2 to the media bin"), "{}", added.text);
+    assert_eq!(copy.ok(&["media"]).data, serde_json::json!(["Blue.png", "Green.png"]));
+    // Words on screen, the picture behind them.
+    copy.ok(&["go", "Sample song", "1"]);
+    copy.ok(&["media", "show", "blue"]);
+    let status = copy.status();
+    assert_eq!(status["media"], "Blue.png", "{status}");
+    copy.assert_live("Sample song", 1);
+    copy.ok(&["media", "next"]);
+    assert_eq!(copy.status()["media"], "Green.png");
+    copy.ok(&["media", "set", "green", "scaling=fit"]);
+    copy.refused(&["media", "set", "green", "loop=on"], "loop is for videos");
+    // Cleared: the picture goes, the words stay.
+    copy.ok(&["clear", "media"]);
+    let status = copy.status();
+    assert!(status["media"].is_null(), "{status}");
+    copy.assert_live("Sample song", 1);
+    copy.ok(&["media", "show", "1"]);
+    assert_eq!(copy.status()["media"], "Blue.png");
+    copy.ok(&["next"]);
+    assert_eq!(copy.status()["media"], "Blue.png", "the picture stays behind the next slide");
+    copy.ok(&["clear"]);
+    assert_eq!(filled(&copy.status()), [false; 6]);
+
+    copy.quit().assert_clean(&run);
+    let bin = std::fs::read_to_string(run.data.join("media.json")).unwrap_or_default();
+    assert!(bin.contains("Blue.png") && bin.contains("Green.png"), "the media bin was saved: {bin}");
+}
+
+#[test]
+fn a_playlist_is_made_and_run_from_item_to_item() {
+    let Some(run) = Run::new("a_playlist_is_made_and_run_from_item_to_item") else { return };
+    let alpha = run.file("Alpha.txt");
+    let delta = run.file("Delta.txt");
+    std::fs::write(&alpha, song_text(&[("Verse 1", "Alpha one"), ("Chorus", "Alpha two"), ("Verse 2", "Alpha three")]))
+        .expect("Alpha");
+    std::fs::write(&delta, song_text(&[("Verse 1", "Delta one"), ("Verse 2", "Delta two")])).expect("Delta");
+    let copy = run.start(&[]);
+    copy.ok(&["song", "import", &alpha.to_string_lossy(), &delta.to_string_lossy()]);
+    copy.ok(&["bible", "rows", "KJV"]);
+    copy.ok(&["playlist", "new", "Evening Test"]);
+    copy.ok(&["playlist", "header", "Worship", "in", "Evening Test"]);
+    copy.ok(&["playlist", "add", "Alpha", "to", "Evening Test"]);
+    copy.ok(&["playlist", "add", "Delta", "to", "Evening Test"]);
+    copy.ok(&["playlist", "passage", "John 3:16-17", "in", "Evening Test"]);
+    let items = copy.ok(&["playlist", "Evening Test"]).data;
+    let kinds: Vec<&str> = items.as_array().into_iter().flatten().filter_map(|item| item["kind"].as_str()).collect();
+    assert_eq!(kinds, ["header", "song", "song", "passage"], "{items}");
+    copy.ok(&["playlist", "open", "Evening Test"]);
+    copy.ok(&["continuous", "on"]);
+
+    // From the first song's first slide to the end of the playlist, and back.
+    copy.ok(&["playlist", "go", "2", "1"]);
+    copy.assert_live("Alpha", 1);
+    let status = copy.status();
+    assert_eq!(status["live"]["playlist"], "Evening Test", "opened from the playlist: {status}");
+    assert_eq!(status["live"]["item"], 2, "{status}");
+    let mut seen = vec![copy.live().expect("on screen")];
+    loop {
+        let next = copy.ok(&["next"]);
+        if next.data["at_end"] == true {
+            assert!(next.text.contains("last slide of the playlist"), "{}", next.text);
+            break;
+        }
+        seen.push(copy.live().unwrap_or_else(|| panic!("nothing on screen after {next:?}")));
+        assert!(seen.len() < 20, "Next never came to the end: {seen:?}");
+    }
+    let names: Vec<String> = seen.iter().map(|(song, slide)| format!("{song} {slide}")).collect();
+    assert_eq!(names[..5], ["Alpha 1", "Alpha 2", "Alpha 3", "Delta 1", "Delta 2"], "{names:?}");
+    assert_eq!(names.len(), 7, "the passage's two verses after the songs: {names:?}");
+    let status = copy.status();
+    assert_eq!(status["live"]["kind"], "passage", "{status}");
+    assert_eq!(status["live"]["item"], 4, "{status}");
+    assert!(status["live"]["words"].as_str().unwrap_or_default().starts_with("For God sent not his Son"), "{status}");
+    // Back, into the last slide of the item before.
+    copy.ok(&["previous"]);
+    copy.ok(&["previous"]);
+    copy.assert_live("Delta", 2);
+    assert_eq!(copy.status()["live"]["item"], 3);
+    // With Continuous off, Next stays at the end of the song, and says why.
+    copy.ok(&["continuous", "off"]);
+    let stayed = copy.ok(&["next"]);
+    assert_eq!(stayed.data["at_end"], true, "{stayed:?}");
+    assert!(stayed.text.contains("Continuous is off"), "{}", stayed.text);
+    copy.assert_live("Delta", 2);
+    // Items moved and taken out.
+    copy.ok(&["playlist", "move", "4", "to", "2", "in", "Evening Test"]);
+    copy.ok(&["playlist", "remove", "Delta", "from", "Evening Test"]);
+    let items = copy.ok(&["playlist", "Evening Test"]).data;
+    let titles: Vec<&str> = items.as_array().into_iter().flatten().filter_map(|item| item["title"].as_str()).collect();
+    assert_eq!(titles, ["Worship", "John 3:16-17", "Alpha"], "{items}");
+
+    copy.quit().assert_clean(&run);
+    let saved = std::fs::read_to_string(run.data.join("services.json")).unwrap_or_default();
+    assert!(saved.contains("Evening Test") && saved.contains("John 3:16-17"), "the playlist was saved: {saved}");
+}
+
+/// The owner's rule for the keys (docs/cli.md, `running.rs`): once another item of the playlist
+/// is opened, the next Next starts it at its first slide.
+#[test]
+#[ignore = "bug: after a Bible verse is shown from the Bible page and cleared, a song opened in the playlist \
+            isn't started by Next: the next verse goes on screen instead (running::step, Here::Elsewhere)"]
+fn after_a_reading_is_cleared_next_starts_the_song_opened_in_the_playlist() {
+    let Some(run) = Run::new("after_a_reading_is_cleared_next_starts_the_song_opened_in_the_playlist") else { return };
+    let song = run.file("Alpha.txt");
+    std::fs::write(&song, song_text(&[("Verse 1", "Alpha one"), ("Verse 2", "Alpha two")])).expect("Alpha");
+    let copy = run.start(&[]);
+    copy.ok(&["song", "import", &song.to_string_lossy()]);
+    copy.ok(&["playlist", "add", "Alpha"]);
+    copy.ok(&["bible", "rows", "KJV"]);
+    copy.ok(&["bible", "John 3:16", "--show"]);
+    copy.ok(&["clear"]);
+    copy.ok(&["view", "service"]);
+    copy.ok(&["playlist", "go", "Alpha"]);
+    copy.ok(&["next"]);
+    copy.assert_live("Alpha", 1);
+    copy.quit().assert_clean(&run);
+}
+
+#[test]
+fn audio_is_added_played_moved_through_and_stopped() {
+    let Some(run) = Run::new("audio_is_added_played_moved_through_and_stopped") else { return };
+    let tone = run.file("Tone.wav");
+    write_wav(&tone, 6);
+    let copy = run.start(&[]);
+    let added = copy.ok(&["audio", "add", &tone.to_string_lossy()]);
+    assert!(added.text.contains("Tone"), "{}", added.text);
+    assert_eq!(copy.ok(&["audio"]).data, serde_json::json!(["Tone"]));
+    if play_or_skip(&copy, "tone", "audio_is_added_played_moved_through_and_stopped: playing, seeking and stopping") {
+        let status = copy.wait_for("the track playing", Duration::from_secs(10), |s| {
+            s["audio"]["track"] == "Tone" && s["audio"]["seconds"].as_u64().is_some_and(|at| at >= 1)
+        });
+        assert_eq!(status["audio"]["length"], 6, "{status}");
+        let sought = copy.ok(&["audio", "seek", "3"]);
+        assert_eq!(sought.text, "Tone: at 0:03 of 0:06.");
+        let at = copy.status()["audio"]["seconds"].as_u64().unwrap_or_default();
+        assert!((3..=4).contains(&at), "at {at} s after a seek to 3 s");
+        copy.refused(&["audio", "seek", "9"], "past its end");
+        copy.ok(&["audio", "pause"]);
+        let paused = copy.status()["audio"].clone();
+        assert_eq!(paused["paused"], true, "{paused}");
+        std::thread::sleep(Duration::from_millis(1200));
+        assert_eq!(copy.status()["audio"]["seconds"], paused["seconds"], "the place is held while paused");
+        copy.ok(&["audio", "pause"]);
+        assert_eq!(copy.status()["audio"]["paused"], false);
+        copy.ok(&["audio", "stop"]);
+        let stopped = copy.status()["audio"].clone();
+        assert!(stopped["track"].is_null(), "{stopped}");
+    }
+    copy.ok(&["audio", "volume", "40"]);
+    copy.refused(&["audio", "volume", "150"], "goes from 0 to 100");
+    assert_eq!(copy.status()["audio"]["volume"], 40);
+
+    copy.quit().assert_clean(&run);
+    let saved = std::fs::read_to_string(run.data.join("audio.json")).unwrap_or_default();
+    assert!(saved.contains("Tone.wav"), "the audio playlist was saved: {saved}");
+}
+
+#[test]
+fn a_big_import_on_a_slow_disk_keeps_answering_and_quitting_keeps_every_song() {
+    const SONGS: usize = 300;
+    /// Each file the library's writer writes takes this much longer (SOFTPRESENTER_SLOW_WRITES),
+    /// so writing them all takes 12 s at the least.
+    const SLOW_MS: u64 = 40;
+    let Some(run) = Run::new("a_big_import_on_a_slow_disk_keeps_answering_and_quitting_keeps_every_song") else {
+        return;
+    };
+    let folder = run.file("Import Test");
+    std::fs::create_dir_all(&folder).expect("the folder of songs");
+    for n in 1..=SONGS {
+        let words = song_text(&[
+            ("Verse 1", &format!("The first verse of test song {n}")),
+            ("Verse 2", &format!("The second verse of test song {n}")),
+        ]);
+        std::fs::write(folder.join(format!("Test Song {n:03}.txt")), words).expect("a song");
+    }
+    let copy = run.start(&[("SOFTPRESENTER_SLOW_WRITES", &SLOW_MS.to_string())]);
+    let imported = copy.ok(&["song", "import", &folder.to_string_lossy()]);
+    assert_eq!(imported.data["imported"].as_array().map(Vec::len), Some(SONGS), "{}", imported.text);
+    // The import doesn't wait for its files: they are written one by one, behind it.
+    let whole_save = Duration::from_millis(SLOW_MS * SONGS as u64);
+    assert!(imported.took < whole_save / 2, "the import took {:?}: it waited for its files", imported.took);
+    say(&format!("importing {SONGS} songs took {:.2} s to answer", imported.took.as_secs_f64()));
+    // While they are written, the copy answers at once.
+    let mut slowest = Duration::ZERO;
+    for _ in 0..10 {
+        let status = copy.ok(&["status"]);
+        slowest = slowest.max(status.took);
+        assert_eq!(status.data["selected_song"].as_str().map(|s| s.starts_with("Test Song")), Some(true));
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let (written, _) = song_files(&run.data);
+    say(&format!("slowest status while saving: {} ms; {written} of {SONGS} songs written", slowest.as_millis()));
+    assert!(slowest < Duration::from_secs(2), "status took {slowest:?} while the songs were saved");
+    // Quit part way through: it waits until every song is written.
+    assert!(
+        written < SONGS,
+        "all {SONGS} songs were written before quitting, so quitting part way wasn't tried (SLOW_MS too small?)"
+    );
+    let quitted = copy.quit_within(Duration::from_secs(300));
+    quitted.assert_clean(&run);
+    assert!(
+        quitted.log.contains("files to be written before quitting"),
+        "the log says the quit waited for the files: {}",
+        run.context()
+    );
+    let (written, half) = song_files(&run.data);
+    assert_eq!(written, SONGS, "every song was written before the copy went{}", run.context());
+    assert!(half.is_empty(), "half-written files left: {half:?}");
+    let libraries = std::fs::read_to_string(run.data.join("libraries.json")).unwrap_or_default();
+    assert!(libraries.contains("Import Test"), "the folder's library was saved: {libraries}");
+    // Started again, every song is there, in its library.
+    let copy = run.start(&[]);
+    let songs = copy.ok(&["songs"]).data;
+    assert_eq!(songs.as_array().map(Vec::len), Some(SONGS + 1), "the songs and the sample");
+    let libraries = copy.ok(&["libraries"]).data;
+    let library = libraries.as_array().into_iter().flatten().find(|l| l["name"] == "Import Test");
+    assert_eq!(library, Some(&serde_json::json!({"name": "Import Test", "songs": SONGS, "missing": 0})), "{libraries}");
+    copy.ok(&["go", "Test Song 300", "2"]);
+    assert_eq!(copy.status()["live"]["words"], "The second verse of test song 300");
+    copy.quit().assert_clean(&run);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Remote Control, over HTTPS on 127.0.0.1 (a quiet copy listens there only)
+
+mod remote {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use futures_util::{SinkExt, StreamExt};
+    use serde_json::Value;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+    use tokio_rustls::client::TlsStream;
+    use tokio_rustls::rustls;
+    use tokio_tungstenite::WebSocketStream;
+    use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+
+    pub const COOKIE: &str = "__Host-sp_device";
+
+    /// A page's connection to the copy, trusting only the certificate the copy made.
+    pub struct Page {
+        pub port: u16,
+        tls: Arc<rustls::ClientConfig>,
+        pub runtime: tokio::runtime::Runtime,
+    }
+
+    /// An HTTP answer.
+    pub struct Answer {
+        pub status: u16,
+        pub headers: Vec<(String, String)>,
+        pub body: String,
+    }
+
+    impl Answer {
+        pub fn header(&self, name: &str) -> Option<&str> {
+            self.headers.iter().find(|(have, _)| have == name).map(|(_, value)| value.as_str())
+        }
+    }
+
+    impl Page {
+        pub fn new(port: u16, certificate: Vec<u8>) -> Page {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.add(rustls::pki_types::CertificateDer::from(certificate)).expect("the copy's certificate");
+            let mut config =
+                rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+                    .with_safe_default_protocol_versions()
+                    .expect("TLS versions")
+                    .with_root_certificates(roots)
+                    .with_no_client_auth();
+            config.alpn_protocols = vec![b"http/1.1".to_vec()];
+            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("runtime");
+            Page { port, tls: Arc::new(config), runtime }
+        }
+
+        pub fn host(&self) -> String {
+            format!("127.0.0.1:{}", self.port)
+        }
+
+        pub fn origin(&self) -> String {
+            format!("https://{}", self.host())
+        }
+
+        async fn connect(&self) -> std::io::Result<TlsStream<TcpStream>> {
+            let tcp = TcpStream::connect(("127.0.0.1", self.port)).await?;
+            // The certificate names localhost (and the computer's name), never an address.
+            let name = rustls::pki_types::ServerName::try_from("localhost").map_err(std::io::Error::other)?.to_owned();
+            tokio_rustls::TlsConnector::from(self.tls.clone()).connect(name, tcp).await
+        }
+
+        /// One HTTP request, on a connection of its own, answered to its end.
+        pub fn http(&self, method: &str, path: &str, headers: &[(&str, &str)], body: &str) -> Answer {
+            self.runtime.block_on(async {
+                let mut stream = self.connect().await.expect("a TLS connection to the copy");
+                let mut request = format!(
+                    "{method} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Length: {}\r\n",
+                    self.host(),
+                    body.len()
+                );
+                for (name, value) in headers {
+                    request.push_str(&format!("{name}: {value}\r\n"));
+                }
+                request.push_str("\r\n");
+                request.push_str(body);
+                stream.write_all(request.as_bytes()).await.expect("sent");
+                stream.flush().await.expect("sent");
+                let mut bytes = Vec::new();
+                let _ = tokio::time::timeout(Duration::from_secs(20), stream.read_to_end(&mut bytes)).await;
+                let text = String::from_utf8_lossy(&bytes).into_owned();
+                let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
+                let mut lines = head.lines();
+                let status = lines.next().and_then(|l| l.split_whitespace().nth(1)).and_then(|s| s.parse().ok());
+                let headers = lines
+                    .filter_map(|line| line.split_once(':'))
+                    .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim().to_owned()))
+                    .collect();
+                Answer { status: status.unwrap_or(0), headers, body: body.to_owned() }
+            })
+        }
+
+        /// The page's WebSocket, with its device's cookie.
+        pub fn socket(&self, token: &str) -> WebSocketStream<TlsStream<TcpStream>> {
+            self.runtime.block_on(async {
+                let stream = self.connect().await.expect("a TLS connection to the copy");
+                let mut request = format!("wss://{}/api/ws", self.host()).into_client_request().expect("request");
+                request.headers_mut().insert("Origin", self.origin().parse().expect("header"));
+                request.headers_mut().insert("Cookie", format!("{COOKIE}={token}").parse().expect("header"));
+                tokio_tungstenite::client_async(request, stream).await.expect("the WebSocket").0
+            })
+        }
+
+        pub fn send(&self, socket: &mut WebSocketStream<TlsStream<TcpStream>>, message: Value) {
+            self.runtime.block_on(socket.send(Message::text(message.to_string()))).expect("sent");
+        }
+
+        /// The next JSON message the server sends (pictures passed over), or how it closed.
+        pub fn receive(&self, socket: &mut WebSocketStream<TlsStream<TcpStream>>) -> Result<Value, Option<u16>> {
+            self.runtime.block_on(async {
+                loop {
+                    let next = tokio::time::timeout(Duration::from_secs(20), socket.next()).await;
+                    match next {
+                        Ok(Some(Ok(Message::Text(text)))) => {
+                            return Ok(serde_json::from_str(&text).expect("JSON from the server"));
+                        }
+                        Ok(Some(Ok(Message::Close(frame)))) => return Err(frame.map(|f| u16::from(f.code))),
+                        Ok(Some(Ok(_))) => {}
+                        Ok(Some(Err(_)) | None) => return Err(None),
+                        Err(_) => panic!("the server sent nothing for 20 s"),
+                    }
+                }
+            })
+        }
+
+        /// The next message of this type (beats and changes in between passed over).
+        pub fn receive_type(&self, socket: &mut WebSocketStream<TlsStream<TcpStream>>, kind: &str) -> Value {
+            for _ in 0..200 {
+                let message = self.receive(socket).unwrap_or_else(|code| panic!("closed ({code:?}) before a {kind}"));
+                if message["type"] == kind {
+                    return message;
+                }
+            }
+            panic!("no {kind} came");
+        }
+    }
+}
+
+#[test]
+fn remote_control_signs_in_takes_a_snapshot_runs_a_command_and_signs_out() {
+    const PASSWORD: &str = "a password for this test";
+    let Some(run) = Run::new("remote_control_signs_in_takes_a_snapshot_runs_a_command_and_signs_out") else { return };
+    let copy = run.start(&[]);
+    copy.refused(&["remote", "on"], "password");
+    let set = run.sp_with_input(&["remote", "password"], Some(PASSWORD));
+    assert!(set.ok, "{}", set.text);
+    // A free port of this computer's, never the usual 4316 (the owner's copy may use it).
+    let port = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port").local_addr().expect("port").port();
+    copy.ok(&["remote", "port", &port.to_string()]);
+    let on = copy.ok(&["remote", "on"]);
+    assert_eq!(on.data["on"], true, "{on:?}");
+    assert_eq!(on.data["address_by_ip"], format!("https://127.0.0.1:{port}"), "a quiet copy listens on 127.0.0.1");
+    let certificate = std::fs::read(run.data.join("remote").join("cert.der")).expect("the certificate it made");
+    let page = remote::Page::new(port, certificate);
+    let origin = page.origin();
+
+    // Not signed in: the page sends the browser to sign in.
+    let answer = page.http("GET", "/", &[], "");
+    assert_eq!((answer.status, answer.header("location")), (303, Some("/login")), "{}", answer.body);
+    // A wrong password, then the right one.
+    let sign_in = |password: &str| {
+        let body = serde_json::json!({ "password": password }).to_string();
+        page.http(
+            "POST",
+            "/api/login",
+            &[
+                ("Origin", &origin),
+                ("Content-Type", "application/json"),
+                ("User-Agent", "Mozilla/5.0 (iPad) Safari/604.1"),
+            ],
+            &body,
+        )
+    };
+    let wrong = sign_in("not the password at all");
+    assert_eq!(wrong.status, 401, "{}", wrong.body);
+    let right = sign_in(PASSWORD);
+    assert_eq!(right.status, 200, "{}", right.body);
+    let cookie = right.header("set-cookie").expect("a cookie").to_owned();
+    let token = cookie
+        .strip_prefix(&format!("{}=", remote::COOKIE))
+        .and_then(|rest| rest.split(';').next())
+        .expect("the device's token")
+        .to_owned();
+    let with_cookie = format!("{}={token}", remote::COOKIE);
+    assert_eq!(page.http("GET", "/", &[("Cookie", &with_cookie)], "").status, 200, "the page, signed in");
+    let devices = copy.ok(&["remote"]).data["devices"].clone();
+    assert_eq!(devices.as_array().map(Vec::len), Some(1), "the device is remembered: {devices}");
+
+    // The page's WebSocket: hello, the whole state, then a command and the change it makes.
+    let mut socket = page.socket(&token);
+    page.send(&mut socket, serde_json::json!({"type": "hello"}));
+    let snapshot = page.receive_type(&mut socket, "snapshot");
+    for part in ["app", "live", "playlist", "playlists", "library", "bin", "audio", "timers", "messages", "props"] {
+        assert!(snapshot["parts"].get(part).is_some(), "the snapshot has {part}: {snapshot}");
+    }
+    assert_eq!(snapshot["you"]["role"], "control", "{snapshot}");
+    page.send(&mut socket, serde_json::json!({"type": "command", "id": 7, "args": ["go", "Sample song", "2"]}));
+    // Its reply, and the change it made to what is on screen, in whichever order they come.
+    let (mut reply, mut change) = (None, None);
+    for _ in 0..200 {
+        let message = page.receive(&mut socket).unwrap_or_else(|code| panic!("closed ({code:?}) before the reply"));
+        match message["type"].as_str() {
+            Some("reply") => reply = Some(message),
+            Some("change") if message["parts"].get("live").is_some() => change = Some(message),
+            _ => {}
+        }
+        if reply.is_some() && change.is_some() {
+            break;
+        }
+    }
+    let reply = reply.expect("the command's reply");
+    assert_eq!(reply["id"], 7);
+    assert_eq!(reply["reply"]["ok"], true, "{reply}");
+    assert!(change.is_some(), "a change carrying what is on screen came");
+    copy.assert_live("Sample song", 2);
+    // What a page may not do is refused before it reaches the app.
+    page.send(&mut socket, serde_json::json!({"type": "command", "id": 8, "args": ["remote", "off"]}));
+    let refused = page.receive_type(&mut socket, "reply");
+    assert_eq!(refused["reply"]["ok"], false, "{refused}");
+    assert_eq!(copy.ok(&["remote"]).data["on"], true);
+
+    // Signing out forgets the device, closes its pages, and clears the cookie.
+    let out = page.http("POST", "/api/logout", &[("Origin", &origin), ("Cookie", &with_cookie)], "");
+    assert_eq!(out.status, 200, "{}", out.body);
+    assert!(out.header("set-cookie").is_some_and(|c| c.contains("Max-Age=0")), "{:?}", out.headers);
+    let closed = loop {
+        match page.receive(&mut socket) {
+            Ok(_) => continue,
+            Err(code) => break code,
+        }
+    };
+    assert_eq!(closed, Some(4401), "the page's socket closes with 4401 (signed out)");
+    let answer = page.http("GET", "/", &[("Cookie", &with_cookie)], "");
+    assert_eq!(answer.status, 303, "the old cookie no longer signs in: {}", answer.body);
+    let devices = copy.ok(&["remote"]).data["devices"].clone();
+    assert_eq!(devices, serde_json::json!([]), "no device is remembered after signing out");
+
+    copy.ok(&["remote", "off"]);
+    let off = Instant::now();
+    while std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        assert!(off.elapsed() < Duration::from_secs(10), "something still listens on {port} after remote off");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    copy.quit().assert_clean(&run);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Check for Updates, against a stand-in for GitHub on this computer
+
+/// A stand-in for GitHub's list of releases: answers each request with the next of its answers,
+/// and keeps what it was asked.
+struct StandIn {
+    port: u16,
+    asked: std::sync::Arc<Mutex<Vec<String>>>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl StandIn {
+    fn serve(answers: Vec<(u16, String)>) -> StandIn {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port for the stand-in");
+        listener.set_nonblocking(true).expect("non-blocking");
+        let port = listener.local_addr().expect("its port").port();
+        let asked = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (kept, stopping) = (asked.clone(), stop.clone());
+        let thread = std::thread::spawn(move || {
+            let mut answers = answers.into_iter();
+            while !stopping.load(Ordering::Relaxed) {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                };
+                let _ = stream.set_nonblocking(false);
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                let mut head = Vec::new();
+                let mut byte = [0u8; 1];
+                while !head.ends_with(b"\r\n\r\n") && stream.read(&mut byte).is_ok_and(|n| n == 1) {
+                    head.push(byte[0]);
+                }
+                if let Ok(mut asked) = kept.lock() {
+                    asked.push(String::from_utf8_lossy(&head).into_owned());
+                }
+                let (status, body) = answers.next().unwrap_or((500, "no more answers".to_owned()));
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} Answer\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        StandIn { port, asked, stop, thread: Some(thread) }
+    }
+
+    fn asked(&self) -> Vec<String> {
+        self.asked.lock().map(|asked| asked.clone()).unwrap_or_default()
+    }
+}
+
+impl Drop for StandIn {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// A release as GitHub lists it.
+fn release(tag: &str, page: &str) -> Value {
+    serde_json::json!({ "tag_name": tag, "html_url": page, "draft": false, "prerelease": tag.contains('-') })
+}
+
+#[test]
+fn check_for_updates_asks_for_the_releases_and_says_what_it_found() {
+    let Some(run) = Run::new("check_for_updates_asks_for_the_releases_and_says_what_it_found") else { return };
+    const PAGES: &str = "https://github.com/esraell/SoftPresenter/releases/tag/";
+    let answers = vec![
+        // Only older versions, and the Bibles' release, which isn't a version.
+        (200, serde_json::json!([release("v0.1.0", &format!("{PAGES}v0.1.0")), release("bibles-4", "")]).to_string()),
+        // A newer one.
+        (200, serde_json::json!([release("v99.0.0", &format!("{PAGES}v99.0.0"))]).to_string()),
+        // Not a list of releases.
+        (200, "<html>not this</html>".to_owned()),
+        // A newer one whose page is somewhere else: its page is made from its tag instead.
+        (200, serde_json::json!([release("v99.1.0", "https://example.com/elsewhere")]).to_string()),
+        // GitHub taking fewer checks.
+        (429, "{}".to_owned()),
+    ];
+    let stand_in = StandIn::serve(answers);
+    let address = format!("http://127.0.0.1:{}/repos/releases", stand_in.port);
+    let copy = run.start(&[("SOFTPRESENTER_RELEASES_URL", &address)]);
+    let version = copy.ok(&["update"]).data["version"].as_str().unwrap_or_default().to_owned();
+    let newest = copy.sp(&["update", "check"]);
+    if stand_in.asked().is_empty() {
+        // A development build (SOFTPRESENTER_DEV_VERSION) may ask its own updater instead.
+        let why = format!("this build ({version}) didn't ask for the releases: {}", newest.text);
+        say_skipped("check_for_updates_asks_for_the_releases_and_says_what_it_found", &why);
+        return;
+    }
+    assert!(newest.ok, "{}", newest.text);
+    assert_eq!(newest.text, format!("You have the newest version ({version})"));
+    let newer = copy.ok(&["update", "check"]);
+    assert_eq!(newer.text, format!("SoftPresenter 99.0.0 is available: {PAGES}v99.0.0"));
+    let status = copy.ok(&["update"]).data;
+    assert_eq!(
+        (status["newer"].as_str(), status["page"].as_str()),
+        (Some("99.0.0"), Some(&*format!("{PAGES}v99.0.0")))
+    );
+    let notices = copy.ok(&["notices"]).text;
+    assert!(notices.contains("SoftPresenter 99.0.0 is available"), "the answer is in the notices too: {notices}");
+    copy.refused(&["update", "check"], "list of releases");
+    let elsewhere = copy.ok(&["update", "check"]);
+    assert_eq!(elsewhere.text, format!("SoftPresenter 99.1.0 is available: {PAGES}v99.1.0"));
+    copy.refused(&["update", "check"], "fewer checks");
+    let asked = stand_in.asked();
+    assert_eq!(asked.len(), 5, "one request for each check: {asked:?}");
+    for head in &asked {
+        let lower = head.to_ascii_lowercase();
+        assert!(head.starts_with("GET /repos/releases HTTP/1.1"), "{head}");
+        assert!(
+            lower.contains(&format!("user-agent: softpresenter/{version}\r\n")),
+            "only the app and its version: {head}"
+        );
+        assert!(!lower.contains("cookie") && !lower.contains("authorization"), "nothing that tells who asks: {head}");
+    }
+    copy.quit().assert_clean(&run);
+}
+
+#[test]
+fn capture_home_saves_a_picture_of_the_window_and_quits() {
+    let Some(run) = Run::new("capture_home_saves_a_picture_of_the_window_and_quits") else { return };
+    let picture = run.file("home.png");
+    let mut command = run.program();
+    command.arg("--capture-home").arg(&picture);
+    let (status, stdout, stderr, took) = run_to_end(command, None, START_WITHIN);
+    let Some(status) = status else { panic!("the capture run didn't finish within {START_WITHIN:?}{}", run.context()) };
+    say(&format!("the capture run took {:.1} s", took.as_secs_f64()));
+    assert!(status.success(), "the capture run exited with {status}: {stderr}{}", run.context());
+    assert!(stdout.contains("saved"), "{stdout}");
+    let image =
+        image::open(&picture).unwrap_or_else(|e| panic!("the picture it saved: {e}{}", run.context())).to_rgba8();
+    assert!(image.width() >= 800 && image.height() >= 500, "a picture of the whole window: {:?}", image.dimensions());
+    let colours: std::collections::HashSet<[u8; 4]> = image.pixels().step_by(7).map(|p| p.0).collect();
+    assert!(colours.len() > 50, "the window, drawn ({} colours), not a blank picture", colours.len());
+    let log = run.log();
+    for bad in ["[crash]", "panicked", "Graphics error"] {
+        assert!(!log.contains(bad) && !stderr.contains(bad), "the capture run said {bad:?}{}", run.context());
+    }
+}
