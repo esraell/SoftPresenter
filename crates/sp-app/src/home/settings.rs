@@ -431,7 +431,7 @@ fn screens_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
         ui.painter().galley(place.min, line, TEXT_FAINT);
         ui.add_space(12.0);
     }
-    // The check strip: Identify, a rule, then the test patterns.
+    // The check strip: Identify, then the test patterns.
     let font = FontId::proportional(12.5);
     let (identify, stop) =
         (t("settings.screens.identify", "Identify"), t("settings.screens.identify.stop", "Stop identifying"));
@@ -463,13 +463,13 @@ fn screens_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
     );
     let seen_words = t("settings.screens.seen", "Everyone watching sees these").to_uppercase();
     let seen = |ui: &egui::Ui, wrap: f32| parts::words(ui, &seen_words, fixed(11.5), TEXT_FAINT, 0.575, wrap);
-    // Identify, then a rule, the caption and the switch on the same line where they fit; where
-    // they don't, the caption and the switch on a line of their own under Identify (and the
-    // switch on a line of its own too, narrower still).
+    // Identify, then the caption and the switch on the same line where they fit, 20 after it (the
+    // design's rule there draws nothing); where they don't, the caption and the switch on a line
+    // of their own under Identify (and the switch on a line of its own too, narrower still).
     let width = ui.available_width();
     let switch_width = crate::studio::pill_switch_width(ui, &labels, &look);
     let caption_width = caption.size().x;
-    let one_line = identify_width + 24.0 + caption_width + 10.0 + switch_width <= width;
+    let one_line = identify_width + 20.0 + caption_width + 10.0 + switch_width <= width;
     let (strip, _) = ui.allocate_exact_size(vec2(width, 30.0), Sense::hover());
     let key = Rect::from_min_size(strip.min, vec2(identify_width, 30.0));
     let words = if state.identify { stop } else { identify };
@@ -485,13 +485,7 @@ fn screens_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
         state.identify = !state.identify;
     }
     let line = if one_line {
-        let x = key.max.x + 12.0;
-        ui.painter().vline(
-            x,
-            egui::Rangef::new(strip.min.y + 7.0, strip.max.y - 7.0),
-            Stroke::new(1.0, crate::studio::LINE),
-        );
-        Rect::from_min_max(pos2(x + 12.0, strip.min.y), strip.max)
+        Rect::from_min_max(pos2(key.max.x + 20.0, strip.min.y), strip.max)
     } else {
         ui.add_space(8.0 - ui.spacing().item_spacing.y);
         ui.allocate_exact_size(vec2(width, 30.0), Sense::hover()).0
@@ -861,7 +855,10 @@ fn keys_page(ui: &mut egui::Ui, state: &mut HomeState) {
 fn keys_table(ui: &mut egui::Ui, rows: &[(&str, String, String)]) {
     const BETWEEN: f32 = 16.0;
     const PAD: f32 = 6.0;
-    let width = ui.available_width();
+    // The room inside a row's stripe at either end, so the words never touch its edge.
+    const INSET: f32 = 8.0;
+    let whole = ui.available_width();
+    let width = whole - 2.0 * INSET;
     let body = egui::TextStyle::Body.resolve(ui.style());
     let mono = egui::TextStyle::Monospace.resolve(ui.style());
     let widest = |font: &FontId, texts: &mut dyn Iterator<Item = &str>| {
@@ -879,10 +876,11 @@ fn keys_table(ui: &mut egui::Ui, rows: &[(&str, String, String)]) {
         let what = parts::words(ui, what, body.clone(), TEXT, 0.0, what_width);
         let keys = parts::words(ui, keys, mono.clone(), TEXT, 0.0, keys_width);
         let inner = group.size().y.max(what.size().y).max(keys.size().y);
-        let (place, _) = ui.allocate_exact_size(vec2(width, inner + 2.0 * PAD), Sense::hover());
+        let (stripe_place, _) = ui.allocate_exact_size(vec2(whole, inner + 2.0 * PAD), Sense::hover());
         if at % 2 == 1 {
-            ui.painter().rect_filled(place, 2.0, stripe);
+            ui.painter().rect_filled(stripe_place, 2.0, stripe);
         }
+        let place = stripe_place.shrink2(vec2(INSET, 0.0));
         let top = place.min.y + PAD;
         ui.painter().galley(pos2(place.min.x, top), group, TEXT_DIM);
         ui.painter().galley(pos2(place.min.x + group_width + BETWEEN, top), what, TEXT);

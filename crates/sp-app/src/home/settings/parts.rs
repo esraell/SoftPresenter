@@ -303,7 +303,8 @@ pub fn fold(ui: &mut egui::Ui, salt: &str, title: &str, open: bool, add: impl Fn
 /// Words to copy, as they will be copied: in the fixed-width face on the panel's dark, wrapped.
 pub fn code(ui: &mut egui::Ui, text: &str) {
     let width = ui.available_width();
-    let galley = words(ui, text, crate::studio::fixed(12.0), TEXT_DIM, 0.0, width - 28.0);
+    // 12 on lines 1.6 apart, as the design's.
+    let galley = lines(ui, text, crate::studio::fixed(12.0), TEXT_DIM, width - 28.0, 19.2);
     let (place, _) = ui.allocate_exact_size(vec2(width, galley.size().y + 24.0), Sense::hover());
     ui.painter().rect_filled(place, 9.0, crate::studio::PANEL);
     ui.painter().galley(place.min + vec2(14.0, 12.0), galley, TEXT_DIM);
