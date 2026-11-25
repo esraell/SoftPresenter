@@ -975,6 +975,14 @@ struct Fade {
     cache: Option<(sp_render::CachedSide, sp_render::CachedSide)>,
 }
 
+/// The two pictures a fade goes between, for `Output::cache_sides`: the scenes, and the texture
+/// the picture it starts from is painted in already, when there is one (a window's own).
+struct Sides<'a> {
+    from: &'a vello::Scene,
+    painted: Option<&'a wgpu::Texture>,
+    to: &'a vello::Scene,
+}
+
 /// The slide above a playing video, kept in a texture (see `Output::steady_scene`).
 struct Steady {
     id: Uuid,
@@ -3054,7 +3062,8 @@ impl Output {
         match before {
             Some(from) if new_picture && self.fading.is_some() => {
                 let looking = self.preview_screen.unwrap_or(Uuid::nil());
-                let cache = self.cache_sides(For::Preview, self.see_through(looking).is_some(), &from, &scene, w, h);
+                let sides = Sides { from: &from, painted: None, to: &scene };
+                let cache = self.cache_sides(For::Preview, self.see_through(looking).is_some(), sides, w, h);
                 self.preview_fade = Some(Fade { from, to: scene, cache });
                 self.step_live_preview(Some(0.0));
             }
@@ -3191,13 +3200,19 @@ impl Output {
             // What the next fade starts from: the last whole picture, or for a fade cut short,
             // one of its two whole pictures.
             let target = &mut self.targets[index];
+            // With no fade under way, the window's texture holds that last whole picture as it
+            // was painted (a picture that could not be painted left it as it was, and so did
+            // one that reached no window), and a cached fade starts from a copy of it.
+            let painted = (target.fade.is_none() && target.shown.is_some()).then(|| target.texture.clone());
             let before = match target.fade.take() {
                 Some(fade) => Some(fade_start(fade.from, fade.to, amount.unwrap_or(1.0), new_picture)),
                 None => target.shown.take(),
             };
             match before {
                 Some(from) if new_picture && self.look.duration() > 0.0 && !at_once => {
-                    let cache = self.cache_sides(For::Window(id), self.see_through(id).is_some(), &from, &scene, w, h);
+                    let see_through = self.see_through(id).is_some();
+                    let sides = Sides { from: &from, painted: painted.as_ref(), to: &scene };
+                    let cache = self.cache_sides(For::Window(id), see_through, sides, w, h);
                     self.targets[index].fade = Some(Fade { from, to: scene, cache });
                     fading = true;
                 }
@@ -3294,16 +3309,19 @@ impl Output {
     ///   box on the slide or on the Announcements layer;
     /// - the GPU could not draw one of the pictures into a texture.
     ///
+    /// The side the fade starts from is copied from the texture it is painted in already, when
+    /// `sides` gives one of the size (a window's own picture), rather than painted again.
+    ///
     /// A GPU that was too slow is said to the drawing under way as for any picture.
     fn cache_sides(
         &mut self,
         what: For,
         see_through: bool,
-        from: &vello::Scene,
-        to: &vello::Scene,
+        sides: Sides<'_>,
         w: u32,
         h: u32,
     ) -> Option<(sp_render::CachedSide, sp_render::CachedSide)> {
+        let Sides { from, painted, to } = sides;
         if !self.fade_cache
             || self.round.slow
             || see_through
@@ -3314,7 +3332,10 @@ impl Output {
             return None;
         }
         self.cache_with(what, |painter, device, queue| {
-            let old = painter.cache_whole(device, queue, from, w, h)?;
+            let old = match painted.filter(|painted| (painted.width(), painted.height()) == (w, h)) {
+                Some(painted) => painter.cache_copy(device, queue, painted)?,
+                None => painter.cache_whole(device, queue, from, w, h)?,
+            };
             Ok((old, painter.cache_whole(device, queue, to, w, h)?))
         })
     }
@@ -3681,7 +3702,8 @@ impl Output {
             let cache = if in_a_window {
                 None
             } else {
-                self.cache_sides(For::Ndi(of), self.see_through(of).is_some(), &from, &to, w, h)
+                let sides = Sides { from: &from, painted: None, to: &to };
+                self.cache_sides(For::Ndi(of), self.see_through(of).is_some(), sides, w, h)
             };
             self.ndi_fades.push(NdiFade { of, fade: Fade { from, to, cache }, built: self.video_moves });
         }
@@ -3877,11 +3899,21 @@ impl Output {
         for index in 0..self.targets.len() {
             let Some(fade) = self.targets[index].fade.take() else { continue };
             if amount >= 1.0 {
-                // A last picture that could not be painted was never shown: the window keeps
-                // the one the fade started from, for the next fade to start from. (The
-                // textures of a cached fade go with it.)
+                // The last picture is the new one whole. A cached fade that is a plain sum of
+                // its two pictures holds it in a texture already, painted from the same scene,
+                // and its last step is nothing but that texture: it is shown from there, where
+                // painting the scene again took a 4K screen with a photo behind the verse 1.4 to
+                // 3 ms of the GPU on an M3 Max, and several times that on a slower one, for each
+                // window at every verse. A last picture that could not be shown never was: the
+                // window keeps the one the fade started from, for the next fade to start from.
+                // (The textures of a cached fade go with it.)
+                let id = self.targets[index].id;
+                let whole = if self.see_through(id).is_some() { None } else { fade.blend(look, 1.0) };
+                let painted = match whole {
+                    Some((from, to, weights)) => self.present_draw(index, Draw::Blend(from, to, weights)),
+                    None => self.present(index, &fade.to),
+                };
                 let Fade { from, to, .. } = fade;
-                let painted = self.present(index, &to);
                 stepped.extend(painted.then_some(index));
                 self.targets[index].shown = Some(if painted { to } else { from });
             } else {
@@ -5130,5 +5162,94 @@ mod tests {
         assert!(same_picture(plain, other_plain, own_way));
         // One with a look, a theme, a stage layout or its name on it shows another picture.
         assert!(!same_picture(plain, own, own_way) && !same_picture(own, other_plain, own_way));
+    }
+
+    /// How long the screens' thread takes over a verse change at 3840 × 2160 with a large
+    /// picture behind the verse, drawn as a dissolve is drawn on a solid screen: the picture the
+    /// fade starts from copied from the window's (`cache_copy`), the one it ends at painted once
+    /// into a texture of its own (`cache_whole`), and the last step shown from that texture; and,
+    /// for comparison, the starting picture and the last one painted again, as they were before. Each step is timed
+    /// until the GPU has finished it, with the painter's wait for the GPU and its runs. Prints the
+    /// figures. Run by hand:
+    /// `cargo test --release -p sp-app verse_over_a_picture_at_4k -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "needs a GPU, and is for measuring"]
+    fn verse_over_a_picture_at_4k_drawing_time() {
+        use sp_render::vello::util::RenderContext;
+        use sp_render::{Fonts, Layers, Painter, build_layers, target_texture, wgpu};
+        let (w, h) = (3840, 2160);
+        let mut cx = RenderContext::new();
+        let id = pollster::block_on(cx.device(None)).expect("a GPU");
+        let (device, queue) = (&cx.devices[id].device, &cx.devices[id].queue);
+        let mut painter = Painter::new(device).expect("painter");
+        let blend = sp_render::FadeBlend::new(device);
+        let mut fonts = Fonts::new();
+        let target = target_texture(device, w, h);
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        // A photograph as the screens load one for a 4K screen: 3840 pixels on its longer side.
+        let (pw, ph) = (3840, 2560);
+        let pixels: Vec<u8> =
+            (0..pw * ph).flat_map(|i| [(i % 251) as u8, (i % 241) as u8, (i % 239) as u8, 255]).collect();
+        let photo = sp_render::Picture::from_rgba(pw, ph, pixels).expect("a picture");
+        let mut shelf = crate::bible::Shelf::shipped();
+        let kjv = shelf.get(shelf.position("kjv").expect("the KJV")).expect("read");
+        let rows = [crate::bible::RowChoice {
+            bible: kjv,
+            verse: Some(sp_model::Role::primary()),
+            reference: Some(sp_model::Role::reference()),
+        }];
+        let options = crate::bible::BibleOptions::default();
+        let passage = crate::bible::build_passage("John 3:1-36", &rows, &options, None).expect("John 3");
+        let theme = sp_model::Theme::builtin_bible();
+        let mut scene_of = |at: usize, picture: bool| {
+            let layers = Layers {
+                media: picture.then_some(&photo),
+                media_fit: sp_model::ImageFit::Fill,
+                slide: passage.slide(at).map(|(_, slide)| slide),
+                ..Default::default()
+            };
+            build_layers(&mut fonts, &layers, &theme, w, h).scene
+        };
+        let step = |painter: &mut Painter, name: &str, run: &mut dyn FnMut(&mut Painter)| {
+            let (waited, runs) = (painter.gpu_waited(), painter.runs());
+            let started = std::time::Instant::now();
+            run(painter);
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            println!(
+                "  {name:<36} {:>6.2} ms (GPU wait {:>5.2} ms, {} runs)",
+                started.elapsed().as_secs_f64() * 1000.0,
+                (painter.gpu_waited() - waited).as_secs_f64() * 1000.0,
+                painter.runs() - runs
+            );
+        };
+        for picture in [true, false] {
+            println!("{} picture behind:", if picture { "A" } else { "No" });
+            let mut shown = scene_of(0, picture);
+            step(&mut painter, "first verse (its picture sent)", &mut |p| {
+                p.paint(device, queue, &shown, &view, w, h).expect("paint");
+            });
+            for at in 1..5 {
+                let next = scene_of(at, picture);
+                let (mut from, mut to) = (None, None);
+                step(&mut painter, "fade starts: from, copied", &mut |p| {
+                    from = Some(p.cache_copy(device, queue, &target).expect("from"));
+                });
+                step(&mut painter, "fade starts: from, painted (before)", &mut |p| {
+                    drop(p.cache_whole(device, queue, &shown, w, h).expect("from"));
+                });
+                step(&mut painter, "fade starts: to, into a texture", &mut |p| {
+                    to = Some(p.cache_whole(device, queue, &next, w, h).expect("to"));
+                });
+                let (from, to) = (from.expect("from"), to.expect("to"));
+                let weights = sp_render::blend_weights(sp_model::TransitionKind::Dissolve, 1.0).expect("a sum");
+                step(&mut painter, "fade ends: from the new texture", &mut |_| {
+                    assert!(blend.draw(device, queue, &from, &to, weights, &target));
+                });
+                step(&mut painter, "fade ends: painted again (before)", &mut |p| {
+                    p.paint(device, queue, &next, &view, w, h).expect("paint");
+                });
+                shown = next;
+            }
+        }
     }
 }

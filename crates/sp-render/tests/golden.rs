@@ -2379,8 +2379,9 @@ struct Mixing { amount: f32 }
 
 /// The plain two-texture blend (`FadeBlend`), which the app uses for the fades that are a sum of
 /// the two pictures, gives the same pictures as drawing them from the slides: at the ends exactly
-/// the old and the new picture, and between them within a level or two, at many points through
-/// the fade (the app's own fades are eased, so any point may come).
+/// the old and the new picture (for every such kind at the end, which a window then keeps as its
+/// picture), and between them within a level or two, at many points through the fade (the app's
+/// own fades are eased, so any point may come).
 #[test]
 fn the_plain_blend_matches_a_fade_drawn_from_the_slides() {
     use sp_model::{Direction, TransitionKind};
@@ -2418,13 +2419,64 @@ fn the_plain_blend_matches_a_fade_drawn_from_the_slides() {
             if step == 0 && kind == TransitionKind::Dissolve {
                 assert_eq!(compare(&old, &got, 0).1, 0, "the first step is the old picture");
             }
-            if step == 20 && kind == TransitionKind::Dissolve {
-                assert_eq!(compare(&new, &got, 0).1, 0, "the last step is the new picture");
+            // The app's windows keep the last step as the new picture, not painted again.
+            if step == 20 {
+                assert_eq!(compare(&new, &got, 0).1, 0, "{kind:?}: the last step is the new picture, exactly");
             }
         }
     }
     eprintln!("{report}");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The side a fade starts from, copied from a window's picture (`Painter::cache_copy`) as the app
+/// takes it when the window holds that picture, is the very side painting the slide again gives
+/// (`cache_whole`): every step of the fade from it is the same, through the plain blend and
+/// through the renderer.
+#[test]
+fn a_side_copied_from_a_painted_picture_is_the_side_painted_again() {
+    use sp_model::{Direction, TransitionKind};
+    let (w, h) = (960, 540);
+    let (device, queue) = gpu();
+    let mut painter = Painter::new(device).expect("painter");
+    let blend = sp_render::FadeBlend::new(device);
+    let mut fonts = Fonts::bundled_only();
+    let theme = outlined_theme();
+    let picture = busy_picture(w, h);
+    let first = slide("Glory to God in the highest", Some("Слава Богу в вышних"));
+    let second = slide("And on earth peace", Some("И на земле мир"));
+    let from = sp_render::build_layers(&mut fonts, &layers_of(&picture, &first), &theme, w, h).scene;
+    let to = sp_render::build_layers(&mut fonts, &layers_of(&picture, &second), &theme, w, h).scene;
+    // The window's picture: the first slide painted as the screens paint a window's.
+    let window = target_texture(device, w, h);
+    let view = window.create_view(&wgpu::TextureViewDescriptor::default());
+    painter.paint(device, queue, &from, &view, w, h).expect("paint");
+    let copied = painter.cache_copy(device, queue, &window).expect("copy");
+    let painted = painter.cache_whole(device, queue, &from, w, h).expect("paint again");
+    let cached_to = painter.cache_whole(device, queue, &to, w, h).expect("to");
+    for step in 0..=10 {
+        let amount = step as f32 / 10.0;
+        let weights = sp_render::blend_weights(TransitionKind::Dissolve, amount).expect("a sum of the two");
+        let (a, b) = (target_texture(device, w, h), target_texture(device, w, h));
+        assert!(blend.draw(device, queue, &copied, &cached_to, weights, &a));
+        assert!(blend.draw(device, queue, &painted, &cached_to, weights, &b));
+        let (a, b) = (read_pixels(device, queue, &a).expect("read"), read_pixels(device, queue, &b).expect("read"));
+        assert_eq!(compare(&a, &b, 0).1, 0, "blended, step {step}");
+        let push = |side: &sp_render::CachedSide| {
+            sp_render::transition(
+                TransitionKind::Push,
+                Direction::FromLeft,
+                side.scene(),
+                cached_to.scene(),
+                amount,
+                w,
+                h,
+            )
+        };
+        let (a, b) =
+            (paint_to_pixels(&mut painter, &push(&copied), w, h), paint_to_pixels(&mut painter, &push(&painted), w, h));
+        assert_eq!(compare(&a, &b, 0).1, 0, "pushed, step {step}");
+    }
 }
 
 /// Not a check: saves the middle of a dissolve drawn from the slides and drawn from textures as

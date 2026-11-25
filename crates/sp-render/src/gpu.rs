@@ -788,6 +788,34 @@ impl Painter {
         Ok(CachedSide { scene: CachedSide::compose(None, &picture), picture, under: None })
     }
 
+    /// Keeps a picture already painted whole (a screen's window's, into a texture
+    /// [`target_texture`] made) in a texture of its own, to be drawn from for as long as a fade
+    /// lasts, as [`Painter::cache_whole`] keeps one it paints: a copy on the GPU, with nothing
+    /// painted again.
+    pub fn cache_copy(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        painted: &wgpu::Texture,
+    ) -> Result<CachedSide, PaintError> {
+        if painted.format() != wgpu::TextureFormat::Rgba8Unorm
+            || !painted.usage().contains(wgpu::TextureUsages::COPY_SRC)
+        {
+            return Err(PaintError::Failed("the picture can't be copied".to_owned()));
+        }
+        let (w, h) = (painted.width(), painted.height());
+        let picture = self.cache_texture(device, w, h)?;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        encoder.copy_texture_to_texture(
+            painted.as_image_copy(),
+            picture.texture.as_image_copy(),
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        queue.submit([encoder.finish()]);
+        self.renderer.mark_override_image_dirty(&picture.picture.image);
+        Ok(CachedSide { scene: CachedSide::compose(None, &picture), picture, under: None })
+    }
+
     /// Paints the part of a picture above its media (`over`, see [`Parts`](crate::Parts)) once
     /// into a texture on clear, to be drawn over `under`, which is drawn live each time.
     pub fn cache_split(
