@@ -5,6 +5,8 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+## 0.9.0-dev.15 — 25 November 2026 (development build)
+
 - A big import no longer freezes the app while its songs are saved. Installing a free songbook or importing hundreds of songs on a slow computer (on Windows, where each new file is checked for viruses) left the window and `sp` unanswered for minutes until every song was written; now the songs are written in the background while you carry on, and quitting waits, saying so, until the last one is saved.
 - A fade to the next slide or verse asks less of the graphics card: each screen now draws only the new picture, once, where it used to draw the old picture again as the fade began and the new one again as it ended. On large screens, such as 4K with a photo behind the words, the screens are held up less at each change.
 - The first time you open the Bible view after starting the app, the window no longer stands still for a moment while the Bibles are read: the translations you use are read in the background as the app starts.
