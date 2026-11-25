@@ -649,11 +649,20 @@ mod tests {
     }
 
     #[test]
-    fn the_version_shown_is_the_packages_in_a_build_from_the_public_source() {
-        // Tests are built without SOFTPRESENTER_DEV_VERSION.
-        assert_eq!(DEV_VERSION, None);
-        assert_eq!(VERSION, env!("CARGO_PKG_VERSION"));
-        assert_eq!(Found::Newest.words(), format!("You have the newest version ({VERSION})"));
+    fn the_version_shown_is_a_development_builds_own_or_the_packages() {
+        match DEV_VERSION {
+            // A build from the public source.
+            None => {
+                assert_eq!(VERSION, env!("CARGO_PKG_VERSION"));
+                assert_eq!(Found::Newest.words(), format!("You have the newest version ({VERSION})"));
+            }
+            // Tests built as a development build (SOFTPRESENTER_DEV_VERSION set).
+            Some(dev) => {
+                assert_eq!(VERSION, dev);
+                assert_eq!(Found::Newest.words(), format!("You have the newest development version ({dev})"));
+            }
+        }
+        assert!(Version::parse(VERSION).is_some(), "{VERSION} is a version the check can compare");
     }
 
     #[test]

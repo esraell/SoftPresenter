@@ -15407,7 +15407,12 @@ mod tests {
         // In the small capitals of its card's line.
         let line = format!("Version {version} \u{b7} free and open source, GPL-3.0-or-later").to_uppercase();
         assert!(crate::studio::tests::place_of(&drawn, &line).is_some(), "About says the version");
+        assert!(crate::studio::tests::place_of(&drawn, "Not checked yet").is_some(), "and that updates weren't");
         drawn.drop_without_applying_deltas();
+        // Its Check for updates does what the Mac's Check for Updates… does: on Windows and Linux,
+        // which have no menu bar, it is the way to check.
+        assert!(click_word(&ctx, &mut about, "Check for updates", &settings));
+        assert_eq!(about.menu_asked.take(), Some(Action::CheckForUpdates));
         // Settings > Screens: Identify, and the test patterns one at a time, and Off.
         let mut state = HomeState { preferences_open: true, preferences_pane: Pane::Screens, ..HomeState::default() };
         let screens = settings;
