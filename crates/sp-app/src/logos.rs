@@ -20,6 +20,12 @@ pub enum Logo {
     Canva,
     /// Grok's logomark (xAI's, light), naming Grok accurately and implying no endorsement.
     Grok,
+    /// Claude's spark (Anthropic's press kit), used without Anthropic's approval.
+    Claude,
+    /// OpenAI's Blossom in white (OpenAI's brand kit), for ChatGPT, used without OpenAI's approval.
+    ChatGpt,
+    /// Worship Leader App's note (its own site), used without its owner's approval.
+    WorshipLeaderApp,
 }
 
 impl Logo {
@@ -30,6 +36,12 @@ impl Logo {
             Logo::TimelyChurch => Some(("logo timelychurch", include_bytes!("../../../assets/logos/timelychurch.png"))),
             Logo::Canva => Some(("logo canva", include_bytes!("../../../assets/logos/third-party/canva.png"))),
             Logo::Grok => Some(("logo grok", include_bytes!("../../../assets/logos/third-party/grok.png"))),
+            Logo::Claude => Some(("logo claude", include_bytes!("../../../assets/logos/third-party/claude.png"))),
+            Logo::ChatGpt => Some(("logo chatgpt", include_bytes!("../../../assets/logos/third-party/chatgpt.png"))),
+            Logo::WorshipLeaderApp => Some((
+                "logo worship leader app",
+                include_bytes!("../../../assets/logos/third-party/worship-leader-app.png"),
+            )),
         }
     }
 }
@@ -122,7 +134,15 @@ mod tests {
 
     #[test]
     fn every_logo_is_a_picture_the_app_can_read_or_is_drawn() {
-        for logo in [Logo::VoxLive, Logo::TimelyChurch, Logo::Canva, Logo::Grok] {
+        for logo in [
+            Logo::VoxLive,
+            Logo::TimelyChurch,
+            Logo::Canva,
+            Logo::Grok,
+            Logo::Claude,
+            Logo::ChatGpt,
+            Logo::WorshipLeaderApp,
+        ] {
             if let Some((_, bytes)) = logo.picture() {
                 let picture = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).unwrap();
                 assert!(picture.width() >= 64 && picture.width() == picture.height(), "{logo:?} is square");

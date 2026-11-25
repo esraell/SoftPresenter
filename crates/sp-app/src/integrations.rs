@@ -114,10 +114,9 @@ fn list(
     let soon_words = || (CARE, t("integrations.state.soon", "Coming soon").to_owned());
     let songbooks_offered = songbooks.is_some();
     let songbooks_state = songbooks.as_deref().map(crate::songbooks::state_words);
-    let songbooks_initials = Mark::initials_of(crate::catalog::SOURCE_NAME);
     let services = [
         Service {
-            mark: Mark::Initials(&songbooks_initials),
+            mark: Mark::Logo(Logo::WorshipLeaderApp),
             name: crate::catalog::SOURCE_NAME,
             about: t("integrations.songbooks.service", "Free songbooks, one for each language"),
             state: match &songbooks_state {
@@ -336,9 +335,8 @@ fn page_head(ui: &mut egui::Ui, mark: Mark, name: &str, (colour, words): (Color3
 fn songbooks_page(ui: &mut egui::Ui, view: &mut crate::songbooks::View) {
     let (have, words) = crate::songbooks::state_words(view);
     let what = t("integrations.songbooks.service", "Free songbooks, one for each language");
-    let initials = Mark::initials_of(crate::catalog::SOURCE_NAME);
     let state = (if have { GOOD } else { TEXT_FAINT }, words);
-    if page_head(ui, Mark::Initials(&initials), crate::catalog::SOURCE_NAME, state, what) {
+    if page_head(ui, Mark::Logo(Logo::WorshipLeaderApp), crate::catalog::SOURCE_NAME, state, what) {
         view.open = false;
     }
     let width = ui.available_width().min(560.0);

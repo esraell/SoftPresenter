@@ -251,9 +251,10 @@ trademarks of their owners, used only to identify the apps SoftPresenter connect
 not covered by the GNU GPL, their permission can't be passed on, and they are removed on request.
 They are kept as their companies provide them in `assets/logos/third-party`, apart from the rest:
 the Canva icon (for Canva Sync, under canva.dev's brand guidelines) and Grok's logomark (under
-xAI's brand guidelines, implying no endorsement). VoxLive's and TimelyChurch's
-are the owner's own. [`docs/licences/logos.md`](docs/licences/logos.md) gives each one's source,
-date and rules.
+xAI's brand guidelines, implying no endorsement); and Claude's spark (Anthropic), OpenAI's
+Blossom (for ChatGPT) and Worship Leader App's note, which are used without the owner's approval.
+VoxLive's and TimelyChurch's are the owner's own. [`docs/licences/logos.md`](docs/licences/logos.md)
+gives each one's source, date and rules.
 
 ### Song catalog
 

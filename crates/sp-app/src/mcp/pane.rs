@@ -479,8 +479,11 @@ fn draw_tile(ui: &mut egui::Ui, rect: Rect, look: &TileLook, at: usize) -> Optio
 /// The logo a company's tile shows, where it has one (docs/licences/logos.md); initials where not.
 fn logo_of(company: Company) -> Option<Logo> {
     match company {
+        Company::Claude => Some(Logo::Claude),
+        Company::ChatGpt => Some(Logo::ChatGpt),
         Company::Grok => Some(Logo::Grok),
-        _ => None,
+        // Google offers Gemini's icon only through a form behind a sign-in: initials until then.
+        Company::Gemini => None,
     }
 }
 
