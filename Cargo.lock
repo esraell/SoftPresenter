@@ -3766,7 +3766,7 @@ dependencies = [
 
 [[package]]
 name = "sp-app"
-version = "0.1.0"
+version = "0.9.0"
 dependencies = [
  "argon2",
  "axum",
@@ -3814,7 +3814,7 @@ dependencies = [
 
 [[package]]
 name = "sp-bible"
-version = "0.1.0"
+version = "0.9.0"
 dependencies = [
  "flate2",
  "quick-xml",
@@ -3824,21 +3824,21 @@ dependencies = [
 
 [[package]]
 name = "sp-decklink"
-version = "0.1.0"
+version = "0.9.0"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "sp-engine"
-version = "0.1.0"
+version = "0.9.0"
 dependencies = [
  "sp-model",
 ]
 
 [[package]]
 name = "sp-model"
-version = "0.1.0"
+version = "0.9.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3848,7 +3848,7 @@ dependencies = [
 
 [[package]]
 name = "sp-ndi"
-version = "0.1.0"
+version = "0.9.0"
 dependencies = [
  "grafton-ndi",
  "libloading",
@@ -3856,7 +3856,7 @@ dependencies = [
 
 [[package]]
 name = "sp-render"
-version = "0.1.0"
+version = "0.9.0"
 dependencies = [
  "parley",
  "png",
@@ -3867,7 +3867,7 @@ dependencies = [
 
 [[package]]
 name = "sp-video"
-version = "0.1.0"
+version = "0.9.0"
 dependencies = [
  "block2 0.6.2",
  "image",
@@ -3893,7 +3893,7 @@ dependencies = [
 
 [[package]]
 name = "sp-winapi"
-version = "0.1.0"
+version = "0.9.0"
 dependencies = [
  "windows-sys 0.61.2",
 ]
