@@ -832,22 +832,57 @@ fn keys_page(ui: &mut egui::Ui, state: &mut HomeState) {
     ui.add_space(8.0);
     ui.checkbox(&mut state.keys_on_buttons, t("keys.show_on_buttons", "Show keys on buttons"));
     ui.add_space(8.0);
-    egui::Grid::new("keys").num_columns(3).spacing([16.0, 6.0]).striped(true).show(ui, |ui| {
-        for (group, rows) in crate::keys::every_key() {
-            for (keys, what) in rows {
-                ui.label(egui::RichText::new(crate::keys::group_title(group)).color(TEXT_DIM));
-                ui.label(what);
-                ui.label(egui::RichText::new(keys.join("  ")).monospace());
-                ui.end_row();
-            }
+    // A key's own words never break (Space, then 1 … 9); a line breaks only between keys.
+    let keys_words = |keys: &[String]| keys.iter().map(|key| key.replace(' ', "\u{a0}")).collect::<Vec<_>>().join("  ");
+    let mut rows: Vec<(&str, String, String)> = Vec::new();
+    for (group, keys) in crate::keys::every_key() {
+        for (keys, what) in keys {
+            rows.push((crate::keys::group_title(group), what, keys_words(&keys)));
         }
-        for (menu, command, key) in crate::menubar::shortcuts() {
-            ui.label(egui::RichText::new(menu).color(TEXT_DIM));
-            ui.label(command.trim_end_matches('…'));
-            ui.label(egui::RichText::new(key).monospace());
-            ui.end_row();
+    }
+    for (menu, command, key) in crate::menubar::shortcuts() {
+        rows.push((menu, command.trim_end_matches('…').to_owned(), keys_words(&[key])));
+    }
+    keys_table(ui, &rows);
+}
+
+/// The Keys page's table, every other row striped: each row's group, what it does, and its keys,
+/// in three columns that share the page's width. The group and the keys take what their longest
+/// needs, up to a share of the width; what a key does takes the rest, and anything longer than its
+/// column wraps within it, so every row's keys stay on the page however narrow it is.
+fn keys_table(ui: &mut egui::Ui, rows: &[(&str, String, String)]) {
+    const BETWEEN: f32 = 16.0;
+    const PAD: f32 = 6.0;
+    let width = ui.available_width();
+    let body = egui::TextStyle::Body.resolve(ui.style());
+    let mono = egui::TextStyle::Monospace.resolve(ui.style());
+    let widest = |font: &FontId, texts: &mut dyn Iterator<Item = &str>| {
+        texts.map(|text| ui.painter().layout_no_wrap(text.to_owned(), font.clone(), TEXT).size().x).fold(0.0, f32::max)
+    };
+    let group_width = widest(&body, &mut rows.iter().map(|row| row.0)).min((width * 0.24).max(60.0)).ceil();
+    let keys_width = widest(&mono, &mut rows.iter().map(|row| row.2.as_str())).min((width * 0.3).max(60.0)).ceil();
+    let what_width = (width - group_width - keys_width - 2.0 * BETWEEN).max(40.0);
+    let stripe = ui.visuals().faint_bg_color;
+    let (body_height, mono_height) = (ui.fonts_mut(|f| f.row_height(&body)), ui.fonts_mut(|f| f.row_height(&mono)));
+    // The rows touch: each carries its own room above and below.
+    let spacing = std::mem::replace(&mut ui.spacing_mut().item_spacing.y, 0.0);
+    for (at, (group, what, keys)) in rows.iter().enumerate() {
+        let group = parts::words(ui, group, body.clone(), TEXT_DIM, 0.0, group_width);
+        let what = parts::words(ui, what, body.clone(), TEXT, 0.0, what_width);
+        let keys = parts::words(ui, keys, mono.clone(), TEXT, 0.0, keys_width);
+        let inner = group.size().y.max(what.size().y).max(keys.size().y);
+        let (place, _) = ui.allocate_exact_size(vec2(width, inner + 2.0 * PAD), Sense::hover());
+        if at % 2 == 1 {
+            ui.painter().rect_filled(place, 2.0, stripe);
         }
-    });
+        let top = place.min.y + PAD;
+        ui.painter().galley(pos2(place.min.x, top), group, TEXT_DIM);
+        ui.painter().galley(pos2(place.min.x + group_width + BETWEEN, top), what, TEXT);
+        // The keys' first line level with the words' first line.
+        let keys_top = top + ((body_height - mono_height) / 2.0).max(0.0);
+        ui.painter().galley(pos2(place.max.x - keys_width, keys_top), keys, TEXT);
+    }
+    ui.spacing_mut().item_spacing.y = spacing;
 }
 
 /// Settings › Command line: the `sp` command, which controls the running app from a terminal or a
@@ -1195,6 +1230,68 @@ mod tests {
         // The page has the way back.
         assert!(click_last(&ctx, &mut state, &show, "Integrations"));
         assert!(!state.canva.open);
+    }
+
+    /// Every piece of words a frame drew, with the rectangle it took.
+    fn words_drawn(output: &egui::FullOutput) -> Vec<(String, Rect)> {
+        fn walk(shape: &egui::Shape, into: &mut Vec<(String, Rect)>) {
+            match shape {
+                egui::Shape::Text(text) => into.push((text.galley.text().to_owned(), text.visual_bounding_rect())),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let mut into = Vec::new();
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut into));
+        into
+    }
+
+    /// Draws Settings at a page in a window `width` wide and tall enough for the whole page, two
+    /// frames (the second with every size known), and gives what the second drew.
+    fn settings_at(width: f32, pane: Pane) -> Vec<(String, Rect)> {
+        let ctx = crate::studio::tests::styled();
+        let show = Show::new(Vec::new());
+        let mut state = HomeState { preferences_pane: pane, ..HomeState::default() };
+        let mut drawn = Vec::new();
+        for _ in 0..2 {
+            let raw = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 4000.0))),
+                ..egui::RawInput::default()
+            };
+            let output = ctx.run_ui(raw, |ui| settings_ui(ui, &mut state, &show));
+            drawn = words_drawn(&output);
+            output.drop_without_applying_deltas();
+        }
+        drawn
+    }
+
+    #[test]
+    fn every_keys_row_shows_its_keys_inside_the_page_at_the_least_width() {
+        use crate::i18n::Language;
+        for language in [Language::English, Language::Spanish] {
+            crate::i18n::with_language(language, || {
+                // The least width the window takes: the page's words end 28 inside its panel,
+                // which ends a gap inside the window.
+                let width = 820.0;
+                let right = width - GAP - 28.0;
+                let drawn = settings_at(width, Pane::Keys);
+                for (words, rect) in &drawn {
+                    assert!(rect.max.x <= right + 0.5, "{language:?}: \u{201c}{words}\u{201d} ends at {}", rect.max.x);
+                }
+                // Each row's keys are drawn (as one piece of words; a long one wraps within it).
+                let keys = |keys: &[String]| keys.iter().map(|key| key.replace(' ', "\u{a0}")).collect::<Vec<_>>();
+                for (_, rows) in crate::keys::every_key() {
+                    for (row, what) in rows {
+                        let wanted = keys(&row).join("  ");
+                        assert!(drawn.iter().any(|(words, _)| *words == wanted), "{language:?}: the keys for {what}");
+                    }
+                }
+                for (_, command, key) in crate::menubar::shortcuts() {
+                    let wanted = key.replace(' ', "\u{a0}");
+                    assert!(drawn.iter().any(|(words, _)| *words == wanted), "{language:?}: the keys for {command}");
+                }
+            });
+        }
     }
 
     #[test]

@@ -15481,6 +15481,8 @@ mod tests {
             output.shapes.iter().for_each(|clipped| words(&clipped.shape, &mut drawn));
             output.drop_without_applying_deltas();
         }
+        // A key's own words are drawn with spaces that never break ("Button only").
+        let drawn: Vec<String> = drawn.iter().map(|words| words.replace('\u{a0}', " ")).collect();
         for (group, rows) in crate::keys::every_key() {
             for (keys, what) in rows {
                 assert!(drawn.contains(&what), "{group}: {what}");

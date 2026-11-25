@@ -795,8 +795,15 @@ mod tests {
             assert_eq!(said, "Se añadió Gracia a Domingo.");
             assert_eq!(english_of(&said), "Added Gracia to Domingo.", "a whole sentence");
             let songs = tn("left.songs", 1234, "{n} song", "{n} songs", &[]);
-            let joined = format!("{}: {songs}", t("right.clear_all", "Clear All"));
-            assert_eq!(english_of(&joined), "Clear All: 1,234 songs", "pieces, numbers written the English way");
+            // A phrase only one English has: "Borrar todo" is Clear All and Clear everything
+            // (Settings › Keys) both, and whichever a test said first is the English given back.
+            let licence = t("settings.copyright.licence", "Your church\u{2019}s CCLI licence");
+            let joined = format!("{licence}: {songs}");
+            assert_eq!(
+                english_of(&joined),
+                "Your church\u{2019}s CCLI licence: 1,234 songs",
+                "pieces, numbers written the English way"
+            );
             let untitled = t("left.untitled", "Untitled");
             let inside = tf("left.added", "Added {item} to {list}.", &[("item", untitled), ("list", "Domingo")]);
             assert_eq!(english_of(&inside), "Added Untitled to Domingo.", "a placeholder filled with the app's words");
