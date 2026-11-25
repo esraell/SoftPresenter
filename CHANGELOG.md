@@ -5,6 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+- A dimmed line under the preview says what Next will put on screen: "Next: Verse 2", "Next: John 3:18", "Next: Amazing Grace, slide 1" when Next would start the song opened or go on into the next one, or "Next: nothing — end of the playlist". It follows the same rules as the key, so it never says other than what Next does; `sp status` says the same. The preview block is a line taller for it.
 - With a Bible reading (or a song from a library) still on screen at its last slide, opening a song in the playlist and pressing Next now starts that song at its first slide. Before, Next stayed on the last verse until the reading was cleared. Next always moves what the audience sees; opening a song only lines it up.
 - On a Windows PC with no working graphics driver (Device Manager shows "Microsoft Basic Display Adapter"), and in some virtual machines, SoftPresenter closed by itself a moment after starting. It now starts there and shows its slides, working the pictures out on the processor: more slowly than with a graphics card (a full-screen slide can take a few seconds to appear), and a 4K slide packed with small text may be refused as too much to draw. Installing the graphics card's own driver is still the way to make it fast.
 

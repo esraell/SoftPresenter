@@ -19,6 +19,9 @@
 //! waits, Next and Previous go on with what is on screen (a song runs on to its end while the
 //! reading waits), and with nothing on screen they say so and start nothing.
 //!
+//! Before Next is pressed, the line under the preview and `sp status` say what it would put on
+//! screen ([`next_up`]), made from the same decision, so they never say other than the key does.
+//!
 //! Nothing here knows about the window: the app says what the playlist holds and where the
 //! show is, and carries out what comes back.
 
@@ -97,7 +100,32 @@ pub enum Do {
     /// Change nothing: the show is at an end of what it steps through. Said only in a command's
     /// reply (to `sp` or a remote page), never in the window: reaching an end needs no notice
     /// (the owner, 2026-11-23).
-    Stay(String),
+    Stay(End),
+}
+
+/// Which end Next or Previous stayed at.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum End {
+    /// The last (or first) slide of a slide from outside the playlist.
+    Slide { last: bool },
+    /// The last or first slide of an item of the playlist (by its title), with Continuous off.
+    ContinuousOff { title: String, last: bool },
+    /// The last or first slide of the playlist.
+    Playlist { last: bool },
+}
+
+impl End {
+    /// What a command's reply says.
+    pub fn words(&self) -> String {
+        let end = |last: bool| if last { "last" } else { "first" };
+        match self {
+            End::Slide { last } => format!("That is the {} slide.", end(*last)),
+            End::ContinuousOff { title, last } => {
+                format!("That is the {} slide of {title}, and Continuous is off.", end(*last))
+            }
+            End::Playlist { last } => format!("That is the {} slide of the playlist.", end(*last)),
+        }
+    }
 }
 
 /// What Next or Previous said instead of moving, for a command's reply: `at_end` when it stayed
@@ -145,7 +173,7 @@ pub fn step(situation: &Situation, forward: bool) -> Do {
     let Here::Item(here) = situation.here else {
         // Not in the playlist: the show steps, or stays at the end of what it shows.
         return if edge && situation.here == Here::Elsewhere {
-            Do::Stay(if forward { "That is the last slide." } else { "That is the first slide." }.to_owned())
+            Do::Stay(End::Slide { last: forward })
         } else {
             Do::Show(command)
         };
@@ -153,14 +181,71 @@ pub fn step(situation: &Situation, forward: bool) -> Do {
     if !edge {
         return Do::Show(command);
     }
-    let title = situation.titles.get(here).map_or("", String::as_str);
-    let end = if forward { "last" } else { "first" };
     if !situation.continuous {
-        return Do::Stay(format!("That is the {end} slide of {title}, and Continuous is off."));
+        let title = situation.titles.get(here).cloned().unwrap_or_default();
+        return Do::Stay(End::ContinuousOff { title, last: forward });
     }
     match next_stop(stops, here, forward) {
         Some(item) => Do::Start { item, last: !forward },
-        None => Do::Stay(format!("That is the {end} slide of the playlist.")),
+        None => Do::Stay(End::Playlist { last: forward }),
+    }
+}
+
+/// What Next would put on screen, said before it is pressed: the line under the preview and
+/// `sp status`'s Next. Made from what Next decides ([`next_up`]), so it never says other than
+/// the key does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NextUp {
+    /// A slide of what is on screen (or was last): by its group's name, or by its number (from
+    /// 1) when its group has none.
+    Slide { name: Option<String>, number: usize },
+    /// An item started, or a song with nothing shown yet: a song or passage at its first slide
+    /// (`slides`), or a picture, a video or a media playlist shown; by its title.
+    Item { title: String, slides: bool },
+    /// Nothing: the playlist's last slide is on screen.
+    PlaylistEnd,
+    /// Nothing: an item's last slide is on screen, and Continuous is off.
+    ContinuousOff,
+    /// Nothing worth saying: Next would change nothing, set a click build going, or only say
+    /// why it doesn't.
+    Nothing,
+}
+
+impl NextUp {
+    /// The line's words, in the window's language; `None` when it says nothing.
+    pub fn words(&self) -> Option<String> {
+        Some(match self {
+            NextUp::Slide { name: Some(name), .. } => tf("right.next.what", "Next: {what}", &[("what", name)]),
+            NextUp::Slide { name: None, number } => {
+                tf("right.next.slide", "Next: slide {n}", &[("n", &number.to_string())])
+            }
+            NextUp::Item { title, slides: true } => tf("right.next.start", "Next: {item}, slide 1", &[("item", title)]),
+            NextUp::Item { title, slides: false } => tf("right.next.what", "Next: {what}", &[("what", title)]),
+            NextUp::PlaylistEnd => {
+                t("right.next.playlist_end", "Next: nothing \u{2014} end of the playlist").to_owned()
+            }
+            NextUp::ContinuousOff => {
+                t("right.next.continuous_off", "Next: nothing \u{2014} Continuous is off").to_owned()
+            }
+            NextUp::Nothing => return None,
+        })
+    }
+}
+
+/// What Next would put on screen, from what it decides (`decided`: [`step`]'s answer, or the
+/// app's on the Bible page and in the editors, with Continuous going on), the playlist's items
+/// and their titles, and, when Next only steps the show, the slide the show would put on
+/// (`slide`, asked only then).
+pub fn next_up(decided: &Do, stops: &[Stop], titles: &[String], slide: impl FnOnce() -> NextUp) -> NextUp {
+    match decided {
+        Do::Show(Command::Next) => slide(),
+        Do::Start { item, .. } => NextUp::Item {
+            title: titles.get(*item).cloned().unwrap_or_default(),
+            slides: stops.get(*item).is_some_and(|stop| stop.steps_into()),
+        },
+        Do::Stay(End::Playlist { .. }) => NextUp::PlaylistEnd,
+        Do::Stay(End::ContinuousOff { .. }) => NextUp::ContinuousOff,
+        Do::Show(_) | Do::Say(_) | Do::Stay(End::Slide { .. }) => NextUp::Nothing,
     }
 }
 
@@ -381,10 +466,10 @@ mod tests {
     fn at_either_end_of_the_playlist_it_stays_and_says_so() {
         let playlist = service();
         let s = situation(&playlist, Here::Item(7), Some(7), true, false);
-        assert_eq!(step(&s, true), Do::Stay("That is the last slide of the playlist.".to_owned()));
+        assert_eq!(step(&s, true), Do::Stay(End::Playlist { last: true }));
         let playlist = service();
         let s = situation(&playlist, Here::Item(2), Some(2), false, true);
-        assert_eq!(step(&s, false), Do::Stay("That is the first slide of the playlist.".to_owned()));
+        assert_eq!(step(&s, false), Do::Stay(End::Playlist { last: false }));
     }
 
     #[test]
@@ -392,8 +477,8 @@ mod tests {
         let playlist = service();
         let mut s = situation(&playlist, Here::Item(2), Some(2), true, false);
         s.continuous = false;
-        let Do::Stay(said) = step(&s, true) else { panic!("it stays") };
-        assert_eq!(said, "That is the last slide of Alpha, and Continuous is off.");
+        let Do::Stay(end) = step(&s, true) else { panic!("it stays") };
+        assert_eq!(end.words(), "That is the last slide of Alpha, and Continuous is off.");
     }
 
     #[test]
@@ -402,9 +487,9 @@ mod tests {
         let playlist = service();
         let mut s = situation(&playlist, Here::Elsewhere, Some(6), true, false);
         assert!(s.showing, "still on screen");
-        assert_eq!(step(&s, true), Do::Stay("That is the last slide.".to_owned()));
+        assert_eq!(step(&s, true), Do::Stay(End::Slide { last: true }));
         s.open = None;
-        assert_eq!(step(&s, true), Do::Stay("That is the last slide.".to_owned()));
+        assert_eq!(step(&s, true), Do::Stay(End::Slide { last: true }));
         let playlist = service();
         let s = situation(&playlist, Here::Elsewhere, Some(3), false, false);
         assert!(s.showing, "still on screen");
@@ -425,11 +510,11 @@ mod tests {
         assert_eq!(step(&s, true), Do::Start { item: 3, last: false });
         // Previous at the reading's first slide stays, as before.
         (s.at_end, s.at_start) = (false, true);
-        assert_eq!(step(&s, false), Do::Stay("That is the first slide.".to_owned()));
+        assert_eq!(step(&s, false), Do::Stay(End::Slide { last: false }));
         // At a slide that is both its first and its last, Next starts Beta and Previous stays.
         s.at_end = true;
         assert_eq!(step(&s, true), Do::Start { item: 3, last: false });
-        assert_eq!(step(&s, false), Do::Stay("That is the first slide.".to_owned()));
+        assert_eq!(step(&s, false), Do::Stay(End::Slide { last: false }));
     }
 
     #[test]
@@ -450,7 +535,7 @@ mod tests {
         let playlist = service();
         let mut s = situation(&playlist, Here::Elsewhere, Some(3), true, false);
         s.picked = Some("verse");
-        assert_eq!(step(&s, true), Do::Stay("That is the last slide.".to_owned()));
+        assert_eq!(step(&s, true), Do::Stay(End::Slide { last: true }));
     }
 
     #[test]
@@ -489,7 +574,7 @@ mod tests {
         s.open = None;
         assert_eq!(step(&s, true), Do::Show(Command::Next), "no item open (a library listed): the same");
         s.at_end = true;
-        assert_eq!(step(&s, true), Do::Stay("That is the last slide.".to_owned()));
+        assert_eq!(step(&s, true), Do::Stay(End::Slide { last: true }));
         // A verse picked and waiting for Enter still holds the keys.
         let mut s = situation(&playlist, Here::Elsewhere, Some(3), false, false);
         (s.showing, s.picked) = (false, Some("verse"));
@@ -504,6 +589,115 @@ mod tests {
         s.showing = false;
         assert_eq!(step(&s, true), Do::Show(Command::Next));
         assert_eq!(step(&s, false), Do::Show(Command::Previous));
+    }
+
+    /// What the line under the preview says, as `App::next_up` makes it: from what `step`
+    /// decides, with `slide` standing in for the show's own next slide.
+    fn line(s: &Situation) -> NextUp {
+        let slide = || NextUp::Slide { name: Some("Verse 2".to_owned()), number: 2 };
+        next_up(&step(s, true), s.stops, s.titles, slide)
+    }
+
+    #[test]
+    fn the_next_line_says_what_next_would_put_on_screen() {
+        let playlist = service();
+        let item = |title: &str, slides: bool| NextUp::Item { title: title.to_owned(), slides };
+        // The item on screen open: its next slide, as the show has it.
+        let mut s = situation(&playlist, Here::Item(2), Some(2), false, false);
+        assert_eq!(line(&s), NextUp::Slide { name: Some("Verse 2".to_owned()), number: 2 });
+        // Another item opened: it starts; a video is shown, a media playlist plays.
+        s.open = Some(3);
+        assert_eq!(line(&s), item("Beta", true));
+        s.open = Some(0);
+        assert_eq!(line(&s), item("Walk-in", false));
+        s.open = Some(8);
+        assert_eq!(line(&s), item("Loop", false));
+        // A placeholder opened: the song on screen goes on.
+        s.open = Some(6);
+        assert_eq!(line(&s), NextUp::Slide { name: Some("Verse 2".to_owned()), number: 2 });
+        // At the end of a song, with Continuous on: the next song or passage, over a header.
+        let s = situation(&playlist, Here::Item(3), Some(3), true, false);
+        assert_eq!(line(&s), item("John 3:16-18", true));
+        // At the end of the playlist, and with Continuous off: nothing, and why.
+        let mut s = situation(&playlist, Here::Item(7), Some(7), true, false);
+        assert_eq!(line(&s), NextUp::PlaylistEnd);
+        s.here = Here::Item(2);
+        s.open = Some(2);
+        s.continuous = false;
+        assert_eq!(line(&s), NextUp::ContinuousOff);
+        // Nothing on screen yet, Beta open: Beta.
+        let s = situation(&playlist, Here::Nothing, Some(3), false, false);
+        assert_eq!(line(&s), item("Beta", true));
+    }
+
+    #[test]
+    fn the_next_line_follows_a_reading_from_elsewhere() {
+        let playlist = service();
+        // On screen, part way: its next verse, even with Beta opened.
+        let mut s = situation(&playlist, Here::Elsewhere, Some(3), false, false);
+        assert_eq!(line(&s), NextUp::Slide { name: Some("Verse 2".to_owned()), number: 2 });
+        // At its last slide with Beta lined up: Beta (the owner's rule, 2026-11-25).
+        s.at_end = true;
+        assert_eq!(line(&s), NextUp::Item { title: "Beta".to_owned(), slides: true });
+        // With nothing lined up: nothing to say.
+        s.open = Some(6);
+        assert_eq!(line(&s), NextUp::Nothing);
+        // Cleared, with Beta opened: Beta.
+        let mut s = situation(&playlist, Here::Elsewhere, Some(3), false, false);
+        s.showing = false;
+        assert_eq!(line(&s), NextUp::Item { title: "Beta".to_owned(), slides: true });
+        // A verse picked and waiting for Enter, with nothing on screen: Next only says so.
+        s.picked = Some("verse");
+        assert_eq!(line(&s), NextUp::Nothing);
+        // With the reading on screen at its last slide, a pick waiting holds the keys: nothing.
+        let mut s = situation(&playlist, Here::Elsewhere, Some(3), true, false);
+        s.picked = Some("verse");
+        assert_eq!(line(&s), NextUp::Nothing);
+    }
+
+    #[test]
+    fn the_next_line_takes_the_show_s_slide_only_when_next_only_steps_it() {
+        // A click build left, the end of what is on screen with the slide still there: the show
+        // has no slide to put on, and the line says nothing.
+        let playlist = service();
+        let s = situation(&playlist, Here::Item(2), Some(2), false, false);
+        assert_eq!(next_up(&step(&s, true), s.stops, s.titles, || NextUp::Nothing), NextUp::Nothing);
+        // On the Bible page and in the editors the app decides a plain step: the show's slide.
+        let slide = NextUp::Slide { name: None, number: 4 };
+        assert_eq!(next_up(&Do::Show(Command::Next), &[], &[], || slide.clone()), slide);
+    }
+
+    #[test]
+    fn the_next_lines_words_in_english_and_back_in_english_for_sp() {
+        use crate::i18n::{Language, english_of, with_language};
+        let item = |title: &str, slides: bool| NextUp::Item { title: title.to_owned(), slides };
+        let said = |up: NextUp| with_language(Language::English, || up.words());
+        assert_eq!(
+            said(NextUp::Slide { name: Some("Verse 2".to_owned()), number: 4 }).as_deref(),
+            Some("Next: Verse 2")
+        );
+        assert_eq!(said(NextUp::Slide { name: None, number: 4 }).as_deref(), Some("Next: slide 4"));
+        assert_eq!(said(item("Amazing Grace", true)).as_deref(), Some("Next: Amazing Grace, slide 1"));
+        assert_eq!(said(item("Walk-in.mp4", false)).as_deref(), Some("Next: Walk-in.mp4"));
+        assert_eq!(said(NextUp::PlaylistEnd).as_deref(), Some("Next: nothing \u{2014} end of the playlist"));
+        assert_eq!(said(NextUp::ContinuousOff).as_deref(), Some("Next: nothing \u{2014} Continuous is off"));
+        assert_eq!(said(NextUp::Nothing), None);
+        // The window in Russian: its words; `sp status` gives them back in English (the song's
+        // own names stay as they are).
+        let russian = with_language(Language::Russian, || item("Благодать", true).words()).unwrap_or_default();
+        assert_eq!(russian, "Далее: Благодать, слайд 1");
+        assert_eq!(english_of(&russian), "Next: Благодать, slide 1");
+        let russian = with_language(Language::Russian, || NextUp::PlaylistEnd.words()).unwrap_or_default();
+        assert_eq!(english_of(&russian), "Next: nothing \u{2014} end of the playlist");
+    }
+
+    #[test]
+    fn an_end_stayed_at_is_said_as_before() {
+        assert_eq!(End::Slide { last: true }.words(), "That is the last slide.");
+        assert_eq!(End::Slide { last: false }.words(), "That is the first slide.");
+        assert_eq!(End::Playlist { last: true }.words(), "That is the last slide of the playlist.");
+        let off = End::ContinuousOff { title: "Alpha".to_owned(), last: false };
+        assert_eq!(off.words(), "That is the first slide of Alpha, and Continuous is off.");
     }
 
     #[test]

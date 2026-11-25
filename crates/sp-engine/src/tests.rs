@@ -462,3 +462,56 @@ fn preceding_is_the_slide_previous_would_show_and_none_at_the_start() {
     s.apply(Command::ClearAll);
     assert_eq!(s.preceding(), None, "still the start after a clear");
 }
+
+#[test]
+fn next_on_screen_says_what_next_puts_on_screen() {
+    // Each time, what it says before Next is pressed is what Next then puts on screen (or
+    // nothing, when Next puts no new slide on).
+    fn check(s: &mut Show, expected: Option<SlideRef>, why: &str) {
+        let said = s.next_on_screen();
+        assert_eq!(said, expected, "{why}");
+        let changes = s.apply(Command::Next);
+        assert_eq!(changes.slides.then(|| s.live()).flatten(), said, "{why}: what Next did");
+    }
+    // Nothing shown yet: the selected song's first slide.
+    let mut s = show();
+    s.apply(Command::Select(1));
+    check(&mut s, at(1, 0), "nothing shown yet");
+    // In a song, the slide after; at its end, nothing.
+    check(&mut s, at(1, 1), "the slide after");
+    check(&mut s, None, "the last slide on screen");
+    // Cleared part way, the slide after the one last on screen; cleared at the end, that slide
+    // goes back on.
+    let mut s = show();
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+    s.apply(Command::Clear(Layer::Slides));
+    check(&mut s, at(0, 1), "cleared part way");
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 2 }));
+    s.apply(Command::Clear(Layer::Slides));
+    check(&mut s, at(0, 2), "cleared at the end");
+    // Another song selected while one is on screen: Next goes on in the one on screen.
+    let mut s = show();
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 1 }));
+    s.apply(Command::Select(1));
+    check(&mut s, at(0, 2), "another song selected");
+    // A switched-off slide is passed over.
+    let mut song = parse_song_text("Off", "A\n\nB\n\nC\n");
+    song.groups[0].slides[1].enabled = false;
+    let mut s = Show::new(vec![Arc::new(song)]);
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+    check(&mut s, at(0, 2), "past a switched-off slide");
+    // A song that loops goes round.
+    let mut song = parse_song_text("Notices", "A\n\nB\n");
+    song.loops = true;
+    let mut s = Show::new(vec![Arc::new(song)]);
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 1 }));
+    check(&mut s, at(0, 0), "a song that loops");
+    // A click build left: Next sets it going, and puts no slide on.
+    let mut song = parse_song_text("Song", "A\n\nB\n");
+    let click = sp_model::Build { on_click: true, ..sp_model::Build::of(sp_model::BuildEffect::Dissolve) };
+    song.groups[0].slides[0].objects[0].build_in = Some(click);
+    let mut s = Show::new(vec![Arc::new(song)]);
+    s.apply(Command::Next);
+    check(&mut s, None, "a build left");
+    check(&mut s, at(0, 1), "then the slide after");
+}

@@ -835,11 +835,19 @@ fn at_a_readings_last_verse_next_starts_the_song_opened_in_the_playlist() {
     let status = copy.status();
     assert_eq!(status["live"]["slides"], 2, "{status}");
     assert!(status["next_slide"].is_null(), "at the reading's last verse: {status}");
+    // What `status` says Next will do is what the line under the window's preview says, and
+    // what Next then does: nothing more of the reading, then the song lined up.
+    let said = copy.ok(&["status"]).text;
+    assert!(!said.contains("Next:"), "{said}");
     copy.ok(&["view", "service"]);
     copy.ok(&["playlist", "go", "Alpha"]);
     copy.assert_live(&reading, 2);
+    let said = copy.ok(&["status"]).text;
+    assert!(said.contains("\nNext: Alpha, slide 1\n"), "{said}");
     copy.ok(&["next"]);
     copy.assert_live("Alpha", 1);
+    let said = copy.ok(&["status"]).text;
+    assert!(said.contains("\nNext: Verse 2\n"), "{said}");
     copy.quit().assert_clean(&run);
 }
 

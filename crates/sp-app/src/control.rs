@@ -1739,8 +1739,10 @@ impl crate::App {
         if let Some(words) = &words {
             lines.push(format!("Words: {words}"));
         }
-        if let Some(next) = next {
-            lines.push(format!("Next: slide {next}"));
+        // What Next would put on screen, decided as the key decides it: the words of the line
+        // under the window's preview.
+        if let Some(next_up) = self.next_up().words() {
+            lines.push(next_up);
         }
         lines.push(format!("Media: {}", media.clone().unwrap_or_else(|| "none".to_owned())));
         if let Some(message) = &message {

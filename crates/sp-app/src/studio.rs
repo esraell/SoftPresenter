@@ -5150,6 +5150,9 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
 const LEAST_BODY: f32 = 212.0;
 /// The least height of the preview's picture in a short window (it is 180 in a tall one).
 const LEAST_PICTURE: f32 = 112.0;
+/// The height the line under the preview's readout takes (see [`next_line`]), always, so nothing
+/// moves when it says nothing.
+const NEXT_LINE: f32 = 16.0;
 /// How far in from the right column's panel what is in it stands, on every side.
 const RIGHT_INSET: f32 = 10.0;
 
@@ -5182,9 +5185,9 @@ pub fn right_column(
         let width = column.width() - 2.0 * SIDE;
         // Everything down to Clear All has its own fixed place. In a short window the picture
         // is less tall, which is the only thing that ever changes these places.
-        let fixed_height = 10.0 + 316.0 + 12.0 + 44.0 + 10.0 + 44.0 + 13.0 + 50.0 + 14.0;
+        let fixed_height = 10.0 + 316.0 + NEXT_LINE + 12.0 + 44.0 + 10.0 + 44.0 + 13.0 + 50.0 + 14.0;
         let short_by = (LEAST_BODY - (column.height() - SIDE - fixed_height)).clamp(0.0, 180.0 - LEAST_PICTURE);
-        let block = Rect::from_min_size(pos2(left, column.min.y + 10.0), vec2(width, 316.0 - short_by));
+        let block = Rect::from_min_size(pos2(left, column.min.y + 10.0), vec2(width, 316.0 + NEXT_LINE - short_by));
         // What shows, layer by layer. The screens show five of the layers; the sixth is heard.
         let slide = show.live().is_some();
         let media = show.live_media().is_some();
@@ -5302,11 +5305,38 @@ fn column_body(ui: &mut egui::Ui, room: Rect, state: &mut HomeState, body: impl 
     body(&mut child, state);
 }
 
+/// The line under the preview's readout that says what Next will put on screen ("Next: Verse 2",
+/// `HomeState::next_line`, which the app works out when what it depends on changes), dimmed and
+/// in capitals as the readout's second line is, cut short with "…" where it is wider than
+/// `rect` (the whole of it shows on hover). Its room ([`NEXT_LINE`]) is kept when it says
+/// nothing, so nothing under it moves. The owner may take it away: this function, its one call
+/// in [`preview_block`], `NEXT_LINE`, and `App::refresh_next_line` with what it keeps.
+fn next_line(ui: &egui::Ui, state: &mut HomeState, rect: Rect) {
+    // A key's refusal is said under this line, not over it (`notices::paint_cue`).
+    if let Some(readout) = state.notices.readout.as_mut() {
+        *readout = readout.union(rect);
+    }
+    let Some(words) = state.next_line.as_deref() else { return };
+    let mut job = egui::text::LayoutJob::single_section(
+        words.to_uppercase(),
+        egui::TextFormat { font_id: fixed(12.0), color: TEXT_FAINT, extra_letter_spacing: 0.7, ..Default::default() },
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width());
+    let line = ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
+    let cut = line.elided;
+    ui.painter().galley(pos2(rect.min.x, rect.center().y - line.size().y / 2.0), line, TEXT_FAINT);
+    let response = ui.interact(rect, ui.scope_id().with("next line"), Sense::hover());
+    if cut {
+        response.on_hover_text(words);
+    }
+}
+
 /// The preview block, in `block` (`anything_shows` says whether any layer the screens show has
 /// something on it): black, with a head (the on-screen light, the switch between
 /// the audience's picture and the stage's, and ON SCREEN or CLEAR), the picture, the readout
-/// (the slide's number large, then its group and song, or the announcements playing), and one
-/// row, always there, for whatever is playing.
+/// (the slide's number large, then its group and song, or the announcements playing), the line
+/// saying what Next will put on screen ([`next_line`]), and one row, always there, for whatever
+/// is playing.
 fn preview_block(
     ui: &mut egui::Ui,
     show: &Show,
@@ -5374,7 +5404,8 @@ fn preview_block(
     paint_spaced(ui, pos2(inner.max.x - 3.0, head), Align2::RIGHT_CENTER, &words, fixed_semibold(11.0), ink, 0.9);
 
     // The picture: as wide as the block allows, 16 to 9, in the middle of its room.
-    let room = Rect::from_min_max(pos2(inner.min.x, block.min.y + 46.0), pos2(inner.max.x, block.max.y - 90.0));
+    let room =
+        Rect::from_min_max(pos2(inner.min.x, block.min.y + 46.0), pos2(inner.max.x, block.max.y - 90.0 - NEXT_LINE));
     let tall = room.height().min(room.width() * 9.0 / 16.0);
     let picture = Rect::from_center_size(room.center(), vec2((tall * 16.0 / 9.0).round(), tall));
     const CORNER: f32 = 6.0;
@@ -5513,10 +5544,13 @@ fn preview_block(
         let line = spaced(ui, &second, label, SCREEN_DIM, 0.7);
         painter.galley(pos2(words.min.x, words.center().y + 9.0 - line.size().y / 2.0), line, TEXT_FAINT);
     }
+    next_line(ui, state, Rect::from_min_size(pos2(readout.min.x, readout.max.y), vec2(readout.width(), NEXT_LINE)));
 
     // The row for whatever is playing: always there, so Clear All never moves.
-    let row =
-        Rect::from_min_max(pos2(inner.min.x + 2.0, readout.max.y + 6.0), pos2(inner.max.x - 2.0, readout.max.y + 36.0));
+    let row = Rect::from_min_max(
+        pos2(inner.min.x + 2.0, readout.max.y + NEXT_LINE + 6.0),
+        pos2(inner.max.x - 2.0, readout.max.y + NEXT_LINE + 36.0),
+    );
     // Identify first: it covers every screen the room sees, so it can be stopped from here
     // whatever else plays, however it was started.
     if state.identify {
@@ -7847,18 +7881,19 @@ pub mod tests {
         assert_eq!(click(323.0), Some(VideoRequest::Muted(true)));
     }
 
-    /// Draws the preview block, 320 by 316 at (10, 10), with what `state` says plays, through
-    /// frames of input, and returns the words drawn in the last one.
+    /// Draws the preview block, 320 wide and as tall as in a tall window, at (10, 10), with what
+    /// `state` says plays, through frames of input, and returns the words drawn in the last one.
     fn preview_frames(show: &Show, state: &mut HomeState, frames: &[Vec<Event>]) -> Vec<String> {
         fn words(shape: &egui::Shape, into: &mut Vec<String>) {
             match shape {
-                egui::Shape::Text(text) => into.push(text.galley.text().to_owned()),
+                // As drawn: a line cut short ends in "…".
+                egui::Shape::Text(text) => into.push(text.galley.rows.iter().map(|row| row.text()).collect()),
                 egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| words(shape, into)),
                 _ => {}
             }
         }
         let ctx = egui::Context::default();
-        let block = Rect::from_min_size(pos2(10.0, 10.0), vec2(320.0, 316.0));
+        let block = Rect::from_min_size(pos2(10.0, 10.0), vec2(320.0, 316.0 + NEXT_LINE));
         let mut drawn = Vec::new();
         for (n, events) in frames.iter().enumerate() {
             let input = RawInput {
@@ -7899,8 +7934,8 @@ pub mod tests {
             announcement_media: Some(Shown { item, video: Some(announced_video("Notices.mp4")), over_slides: true }),
             ..HomeState::default()
         };
-        // Play or Pause, at the left of the row under the readout.
-        let play = pos2(36.0, 301.0);
+        // Play or Pause, at the left of the row under the readout and the Next line.
+        let play = pos2(36.0, 317.0);
         let frames = vec![vec![Event::PointerMoved(play)], vec![press(play, true)], vec![press(play, false)], vec![]];
         let words = preview_frames(&show, &mut state, &frames);
         assert!(words.iter().any(|w| w == "ANNOUNCEMENTS"), "named in the readout: {words:?}");
@@ -7910,6 +7945,28 @@ pub mod tests {
         assert!(!words.iter().any(|w| w == "Clear"), "the Announce key clears it, not a key of its own: {words:?}");
         assert_eq!(state.announcement_video_request, Some(VideoRequest::TogglePause), "asked of its own player");
         assert_eq!(state.video_request, None, "not of the media layer's");
+    }
+
+    #[test]
+    fn the_line_under_the_readout_says_what_next_will_put_on_screen() {
+        let mut show = Show::new(vec![Arc::new(sp_model::parse_song_text("Song", "One\n\nTwo\n"))]);
+        show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        let mut state = HomeState { next_line: Some("Next: Verse 2".to_owned()), ..HomeState::default() };
+        let words = preview_frames(&show, &mut state, &[vec![]]);
+        assert!(words.iter().any(|w| w == "NEXT: VERSE 2"), "in capitals, as the readout's lines: {words:?}");
+        // A refusal's cue goes under it, not over it.
+        let readout = state.notices.readout.expect("the readout's place");
+        // (the block's foot is at 10 + 316 + NEXT_LINE; the line ends 46 above it)
+        assert!(readout.max.y >= 10.0 + 316.0 + NEXT_LINE - 46.0 - 0.5, "{readout:?}");
+        // Too long for the column: cut short with "…".
+        state.next_line = Some(format!("Next: {}, slide 1", "A Very Long Song Title ".repeat(4)));
+        let words = preview_frames(&show, &mut state, &[vec![]]);
+        let line = words.iter().find(|w| w.starts_with("NEXT: A VERY")).expect("the line");
+        assert!(line.ends_with('\u{2026}') && !line.contains("SLIDE 1"), "{line}");
+        // Nothing to say: no line, and the row under it stays where it is.
+        state.next_line = None;
+        let words = preview_frames(&show, &mut state, &[vec![]]);
+        assert!(!words.iter().any(|w| w.starts_with("NEXT")), "{words:?}");
     }
 
     #[test]

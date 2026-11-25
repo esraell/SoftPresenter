@@ -337,6 +337,9 @@ pub struct HomeState {
     /// The playlist item whose slide went on screen last (a click on it, or a key starting
     /// it), so a song the playlist holds twice is known to be on screen from the right place.
     pub live_item: Option<usize>,
+    /// What Next will put on screen, in words, for the line under the preview (`studio::next_line`);
+    /// worked out by the app when what it depends on changes (`App::next_up`). `None` says nothing.
+    pub next_line: Option<String>,
     /// A slide found with the find box, lit for a moment with an ink ring, and when it was first
     /// drawn; and for how many more frames the view may still be brought to it (the song may
     /// first have to be shown).
@@ -1950,6 +1953,7 @@ impl Default for HomeState {
             song_order: crate::kept::SongOrder::Listed,
             live_row_seen: None,
             live_item: None,
+            next_line: None,
             spotlight: None,
             spotlight_scroll: 0,
             picked: None,
@@ -12216,7 +12220,8 @@ mod tests {
                 show.apply(command);
                 None
             }
-            crate::running::Do::Say(words) | crate::running::Do::Stay(words) => Some(words),
+            crate::running::Do::Say(words) => Some(words),
+            crate::running::Do::Stay(end) => Some(end.words()),
             crate::running::Do::Start { .. } => panic!("nothing in a playlist is started here"),
         }
     }

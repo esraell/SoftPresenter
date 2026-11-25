@@ -161,6 +161,20 @@ impl Show {
         (at != cursor || step != self.step).then_some(at)
     }
 
+    /// The slide `Next` would put on screen, as `apply` does it: the one after the cursor in the
+    /// play order (a song that loops goes round), the selected presentation's first with nothing
+    /// shown yet, or, after a clear at the end of a song, the slide last on screen again. `None`
+    /// when Next would put no slide on: it sets the live slide's next build going instead, or
+    /// the slide on screen is the last.
+    pub fn next_on_screen(&self) -> Option<SlideRef> {
+        if self.builds_left() {
+            return None;
+        }
+        let (at, _) = self.next_target()?;
+        let shown = at.slide < self.slide_count(at.presentation) && self.enabled(at);
+        (shown && self.live != Some(at)).then_some(at)
+    }
+
     /// The slide `Previous` would put on screen before the cursor, in the play order; `None`
     /// at the start of the song. A click build to take back doesn't count: see `build_step`.
     pub fn preceding(&self) -> Option<SlideRef> {

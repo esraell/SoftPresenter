@@ -1714,11 +1714,102 @@ struct Running {
     /// The Edit view's picture of the slide being edited, and the words it was drawn from.
     canvas: Option<egui::TextureId>,
     canvas_for: Option<(sp_engine::SlideRef, Slide)>,
+    /// What the line under the preview saying what Next will put on screen was last worked out
+    /// from (see `refresh_next_line`).
+    next_line_from: Option<NextLineFrom>,
     frames: u32,
     /// The GPU instance, which outlives its surfaces and makes the surfaces of new screens,
     /// and which of its devices is in use.
     context: RenderContext,
     device_id: usize,
+}
+
+/// Everything what Next would do is worked out from (`App::next_up`), kept to tell when the
+/// line under the preview must be worked out again: where the show is, the window's view, open
+/// item and pick (`at`), the songs taken out, the media playlists, the playlist in front and
+/// the passages the Bible page's places hold (which tell whether a reading on screen is a
+/// playlist's passage; a passage looked up in a chapter already made changes no song).
+/// Compared with what they are now on each frame without copying anything.
+#[derive(Clone, PartialEq)]
+struct NextLineFrom {
+    at: NextLineAt,
+    held: [home::Held; 2],
+    removed: Vec<usize>,
+    media_playlists: Vec<usize>,
+    items: Vec<service::Item>,
+}
+
+/// The plain values of [`NextLineFrom`].
+#[derive(Clone, Copy, PartialEq)]
+struct NextLineAt {
+    songs: u64,
+    live: Option<sp_engine::SlideRef>,
+    cursor: Option<sp_engine::SlideRef>,
+    place: Option<(usize, usize)>,
+    build: usize,
+    selected: usize,
+    picked: Option<sp_engine::SlideRef>,
+    picked_word: Option<&'static str>,
+    editing: bool,
+    bible_open: bool,
+    playlist_open: bool,
+    playlist: usize,
+    chosen: Option<usize>,
+    live_item: Option<usize>,
+    continuous: bool,
+    keys: usize,
+    media: usize,
+    language: i18n::Language,
+}
+
+impl NextLineFrom {
+    fn of(show: &Show, state: &HomeState) -> NextLineFrom {
+        NextLineFrom {
+            at: NextLineAt::of(show, state),
+            held: state.bible.held.clone(),
+            removed: state.removed_songs.clone(),
+            media_playlists: state.media_playlists.iter().map(|playlist| playlist.files.len()).collect(),
+            items: state.services.front().items.clone(),
+        }
+    }
+
+    /// Whether everything is still as it was.
+    fn holds(&self, show: &Show, state: &HomeState) -> bool {
+        self.at == NextLineAt::of(show, state)
+            && self.held == state.bible.held
+            && self.removed == state.removed_songs
+            && self.items == state.services.front().items
+            && self
+                .media_playlists
+                .iter()
+                .copied()
+                .eq(state.media_playlists.iter().map(|playlist| playlist.files.len()))
+    }
+}
+
+impl NextLineAt {
+    fn of(show: &Show, state: &HomeState) -> NextLineAt {
+        NextLineAt {
+            songs: show.version(),
+            live: show.live(),
+            cursor: show.cursor(),
+            place: show.position(),
+            build: show.build_step(),
+            selected: show.selected(),
+            picked: state.pick(show),
+            picked_word: state.picked_word(show),
+            editing: state.edit_kind().is_some(),
+            bible_open: state.bible_open,
+            playlist_open: state.playlist_open,
+            playlist: state.services.current,
+            chosen: state.services.chosen,
+            live_item: state.live_item,
+            continuous: state.continuous,
+            keys: state.song_keys.len(),
+            media: show.media().len(),
+            language: i18n::current(),
+        }
+    }
 }
 
 /// A window an audience screen is drawn in.
@@ -2248,6 +2339,7 @@ impl App {
             next_repaint: None,
             canvas: None,
             canvas_for: None,
+            next_line_from: None,
             frames: 0,
             context,
             device_id,
@@ -3686,22 +3778,27 @@ impl App {
     /// playlist in front goes on into the next song or passage instead of staying put (a slide
     /// that goes on by itself, the command line). Anything else is left as it is.
     fn continue_playlist(&mut self, command: Command) -> Vec<Command> {
-        let continuous = self.running.as_ref().is_some_and(|running| running.home_state.continuous);
-        // Only at the end of the song's play order, with the last slide's builds all done.
-        if command != Command::Next
-            || !continuous
-            || self.show.live().is_none()
-            || self.show.upcoming().is_some()
-            || self.show.builds_left()
-        {
+        if command != Command::Next {
             return vec![command];
         }
-        let (stops, _) = self.playlist_stops();
-        let here = self.cursor_item(&stops);
-        match running::go_on(&stops, here, true) {
-            Some(item) => self.start_commands(item, false, &stops, true).unwrap_or_else(|| vec![command]),
+        match self.goes_on_into() {
+            Some((item, stops)) => self.start_commands(item, false, &stops, true).unwrap_or_else(|| vec![command]),
             None => vec![command],
         }
+    }
+
+    /// The item of the playlist in front that the show's own Next goes on into with Continuous
+    /// on (see `continue_playlist`), and the playlist as the keys see it; `None` when it stays in
+    /// what is on screen.
+    fn goes_on_into(&self) -> Option<(usize, Vec<running::Stop>)> {
+        let continuous = self.running.as_ref().is_some_and(|running| running.home_state.continuous);
+        // Only at the end of the song's play order, with the last slide's builds all done.
+        if !continuous || self.show.live().is_none() || self.show.upcoming().is_some() || self.show.builds_left() {
+            return None;
+        }
+        let (stops, _) = self.playlist_stops();
+        let item = running::go_on(&stops, self.cursor_item(&stops), true)?;
+        Some((item, stops))
     }
 
     /// The playlist in front as the keys that run the show see it, with each item's title.
@@ -3773,6 +3870,26 @@ impl App {
     /// keeps its own open item and picks and must not move the window's. An item it starts goes
     /// on screen without becoming the window's open item.
     pub(crate) fn step_aimed(&mut self, forward: bool, aim: Option<usize>) -> Option<running::Said> {
+        match self.decide_step(forward, aim)? {
+            running::Do::Show(command) => self.apply(vec![command]),
+            running::Do::Start { item, last } => self.start_item_as(item, last, aim.is_none()),
+            running::Do::Say(words) => {
+                if let Some(running) = self.running.as_mut() {
+                    running.home_state.notices.refuse(words.clone());
+                    running.home_window.request_redraw();
+                }
+                return Some(running::Said { words, at_end: false });
+            }
+            // At an end: nothing in the window, only words for a command's reply.
+            running::Do::Stay(end) => return Some(running::Said { words: end.words(), at_end: true }),
+        }
+        None
+    }
+
+    /// What Next (`forward`) or Previous would do now, as `step_aimed` (with `aim`, for a remote
+    /// page) carries it out; nothing is changed. The one place this is decided: the line under
+    /// the preview and `sp status` say what Next would do from it too (`next_up`).
+    fn decide_step(&self, forward: bool, aim: Option<usize>) -> Option<running::Do> {
         let command = if forward { Command::Next } else { Command::Previous };
         let running = self.running.as_ref()?;
         let state = &running.home_state;
@@ -3780,7 +3897,7 @@ impl App {
         let showing = self.show.live().is_some();
         // In the editors the show steps as it always has; on the Bible page too, unless a verse
         // picked waits for Enter with nothing on screen. An aimed step is the playlist's.
-        let decided = if aim.is_none() && state.edit_kind().is_some() {
+        Some(if aim.is_none() && state.edit_kind().is_some() {
             running::Do::Show(command)
         } else if aim.is_none() && state.bible_open {
             running::held_for_enter(picked, showing).unwrap_or(running::Do::Show(command))
@@ -3802,21 +3919,53 @@ impl App {
                 showing,
             };
             running::step(&situation, forward)
+        })
+    }
+
+    /// What Next would put on screen now, for the line under the preview and `sp status`: what
+    /// `decide_step` decides, with the show's own Next going on into the next item where
+    /// Continuous takes it (`goes_on_into`, as `apply` does), and the slide the show would put
+    /// on (`Show::next_on_screen`). So they never say other than the key does.
+    pub(crate) fn next_up(&self) -> running::NextUp {
+        let Some(decided) = self.decide_step(true, None) else { return running::NextUp::Nothing };
+        let decided = match decided {
+            running::Do::Show(Command::Next) => match self.goes_on_into() {
+                Some((item, _)) => running::Do::Start { item, last: false },
+                None => decided,
+            },
+            decided => decided,
         };
-        match decided {
-            running::Do::Show(command) => self.apply(vec![command]),
-            running::Do::Start { item, last } => self.start_item_as(item, last, aim.is_none()),
-            running::Do::Say(words) => {
-                if let Some(running) = self.running.as_mut() {
-                    running.home_state.notices.refuse(words.clone());
-                    running.home_window.request_redraw();
-                }
-                return Some(running::Said { words, at_end: false });
+        let (stops, titles) = match decided {
+            running::Do::Start { .. } => self.playlist_stops(),
+            _ => (Vec::new(), Vec::new()),
+        };
+        running::next_up(&decided, &stops, &titles, || {
+            let Some(at) = self.show.next_on_screen() else { return running::NextUp::Nothing };
+            let Some(song) = self.show.presentations().get(at.presentation) else { return running::NextUp::Nothing };
+            // Nothing shown yet: the song chosen starts.
+            if self.show.cursor().is_none_or(|cursor| cursor.presentation != at.presentation) {
+                return running::NextUp::Item { title: song.title.clone(), slides: true };
             }
-            // At an end: nothing in the window, only words for a command's reply.
-            running::Do::Stay(words) => return Some(running::Said { words, at_end: true }),
+            // Named as the readout over it names the slide on screen: by its group.
+            let name = song.slide(at.slide).map(|(group, _)| group.name.trim()).filter(|name| !name.is_empty());
+            running::NextUp::Slide { name: name.map(str::to_owned), number: at.slide + 1 }
+        })
+    }
+
+    /// Works out again the line under the preview that says what Next will put on screen
+    /// (`next_up`), when anything it is worked out from has changed since: not on every frame a
+    /// video or a fade draws, as working it out goes through the playlist and the library.
+    fn refresh_next_line(&mut self) {
+        let Some(running) = self.running.as_ref() else { return };
+        if running.next_line_from.as_ref().is_some_and(|from| from.holds(&self.show, &running.home_state)) {
+            return;
         }
-        None
+        let from = NextLineFrom::of(&self.show, &running.home_state);
+        let line = self.next_up().words();
+        if let Some(running) = self.running.as_mut() {
+            running.home_state.next_line = line;
+            running.next_line_from = Some(from);
+        }
     }
 
     /// Space and the arrows while a slide is picked and nothing is on screen (the owner's rule,
@@ -8836,6 +8985,7 @@ impl App {
     fn draw_home(&mut self) -> Vec<Command> {
         // Undo and Redo are drawn greyed when the history has nothing to take back.
         self.note_show_history(false);
+        self.refresh_next_line();
         // The song in front (being edited, or chosen) may have a theme of its own.
         let in_front = self
             .running

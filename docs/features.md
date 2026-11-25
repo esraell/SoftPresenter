@@ -938,7 +938,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - The preview shows what the audience sees, drawn by the screens' own renderer, so a
   playing video, a fade or a build moves in it as on the screens; or (from the switch at its
   head) what the stage screens show, with the time kept up to date. Under the picture: the
-  slide's number in the song as it is played, its group and the song. If a screen cannot draw
+  slide's number in the song as it is played, its group and the song; under that, a dimmed line
+  saying what Next will put on screen, worked out by the same rules as the key: "Next: Verse 2"
+  (the next slide, by its group, or "slide 4"), "Next: John 3:18", "Next: Amazing Grace, slide
+  1" (an item opened, or the next one Continuous goes on into), "Next: nothing — end of the
+  playlist", "Next: nothing — Continuous is off", or nothing when Next would put nothing new on
+  (a click build, a slide picked and waiting for Enter, a reading's last verse with nothing
+  opened). Cut short with "…" where it is too long, with the whole of it on hover; `sp status`
+  says the same. If a screen cannot draw
   what is live because there is far too much on the slide, or because the GPU did not answer
   in time, it keeps what it last showed, and a warning over the preview's picture says so
   until it draws again. (The warning covers those two cases. It does not see a picture the GPU dropped

@@ -183,7 +183,7 @@ mistake impossible:
 
 | Command | Gives |
 |---|---|
-| `sp` or `status` | What is on screen (song, slide, words), the next slide, the media, any message and props, the announcements layer, a media playlist playing, running timers, the audio, the playlist in front, the theme version on (once any theme has one), whether the screens, Continuous and Identify are on, and the main theme |
+| `sp` or `status` | What is on screen (song, slide, words), what Next will put on screen (the words of the line under the window's preview: "Next: Chorus", "Next: Amazing Grace, slide 1", "Next: nothing — end of the playlist"; no line when Next would put nothing new on), the media, any message and props, the announcements layer, a media playlist playing, running timers, the audio, the playlist in front, the theme version on (once any theme has one), whether the screens, Continuous and Identify are on, and the main theme |
 | `status --wait SECONDS [--since TOKEN]` | The same, once something has changed since TOKEN (or, with no TOKEN, from now), or when SECONDS (0 to 30) are up; see [waiting for a change](#waiting-for-a-change) |
 | `songs` | Every song in the library, numbered; saved Bible passages and slides made from presentations too. A song whose file changed outside the app is marked. `--json` gives each song's `number`, `title`, stable `id` and `changed_outside`; `go`, `slides`, `slide` and the other commands that name a song take the id in place of its title or number |
 | `slides [SONG]` | A song's slides: number, group, words (lines joined with " / ", main language first), which is on screen, and marks for a slide that is off, labelled or has a hot key |
@@ -202,7 +202,7 @@ mistake impossible:
     $ sp status
     On screen: Blessed Assurance, slide 2 of 7 (Verse 1).
     Words: Heir of salvation, purchase of God / Born of His Spirit, washed in His blood
-    Next: slide 3
+    Next: Chorus
     Media: Bars.mp4
     Audience screens: on   Stage screens: on
     Song shown in the window: Blessed Assurance
@@ -1645,7 +1645,7 @@ the command's facts where it has any:
 
 | Command | `data` |
 |---|---|
-| `status` | `token`, for [`--wait --since`](#waiting-for-a-change) (with `--wait`, also `changed`: the parts that changed since the token); `live` (null when nothing is on screen): `song`, `slide`, `slides`, `words`, `kind` (`song`, `passage`, `voxlive`, or `catalog` for a song of the song catalog shown from the find box and not in the library), the song's `id` and its `number` in `sp songs` (null for a passage or a catalog song), and the `playlist` and `item` number it was opened from (null when it wasn't); `next_slide`, `media`, `message`, `props`, `announcements`, `media_playlist`, `timers` (each `name`, `kind`, `shows`, `running`), `audio` (`track`, `paused`, `seconds`, `length`, `volume`, `through`, `shuffle`, `loop`), `playlist` (`name`, `item_last_opened` and its number `item`, `listed`), `audience_on`, `stage_on`, `continuous`, `identify`, `main_theme`, `selected_song` |
+| `status` | `token`, for [`--wait --since`](#waiting-for-a-change) (with `--wait`, also `changed`: the parts that changed since the token); `live` (null when nothing is on screen): `song`, `slide`, `slides`, `words`, `kind` (`song`, `passage`, `voxlive`, or `catalog` for a song of the song catalog shown from the find box and not in the library), the song's `id` and its `number` in `sp songs` (null for a passage or a catalog song), and the `playlist` and `item` number it was opened from (null when it wasn't); `next_slide` (the number of the slide after the one on screen in its song, null at its end; what Next will do is in the reply's words), `media`, `message`, `props`, `announcements`, `media_playlist`, `timers` (each `name`, `kind`, `shows`, `running`), `audio` (`track`, `paused`, `seconds`, `length`, `volume`, `through`, `shuffle`, `loop`), `playlist` (`name`, `item_last_opened` and its number `item`, `listed`), `audience_on`, `stage_on`, `continuous`, `identify`, `main_theme`, `selected_song` |
 | `playlists`, `media`, `themes`, `audio` | An array of names, in their numbered order |
 | `messages` | An object for each, in their numbered order: `[{"name": "Parking", "text": "Car park full", "showing": false, "leaves_after": 30}]` (`text` with tokens such as `{timer:Sermon}` as written; `leaves_after` in seconds, null when it stays until cleared) |
 | `timers` | An object for each, in their numbered order: `name`, `kind`, `shows` (what it shows now), `running` |
