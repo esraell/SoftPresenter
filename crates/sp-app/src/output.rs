@@ -1991,6 +1991,7 @@ impl Output {
             reruns: self.painter.reruns(),
             shared_locks: sp_render::lock_waits(),
             log: crate::applog::time_writing(),
+            work: self.painter.work(),
         }
     }
 

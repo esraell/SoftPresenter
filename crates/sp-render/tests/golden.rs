@@ -2616,6 +2616,77 @@ fn video_picture_step_cost() {
     time("slide kept in a texture       ", cached.scene());
 }
 
+/// What one step of [`first_big_picture_cost`] took of the calling thread, and what the painter's
+/// own time in it was made of.
+fn say_step(
+    name: &str,
+    painter: &Painter,
+    began: std::time::Instant,
+    before: sp_render::vello::PaintWork,
+    waited: std::time::Duration,
+) {
+    let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+    let (took, now) = (began.elapsed(), painter.work());
+    eprintln!(
+        "  {name:<44} {:>7.2} ms: GPU wait {:.2}, working out {:.2}, {} sent from memory ({} MB) {:.2}, {} copied on \
+         the GPU, pictures' texture made x{} ({} MB) {:.2}, handing over {:.2}, commands {:.2}; pictures' texture \
+         now {} px",
+        ms(took),
+        ms(painter.gpu_waited() - waited),
+        ms(now.resolving - before.resolving),
+        now.pictures_sent - before.pictures_sent,
+        (now.bytes_sent - before.bytes_sent) >> 20,
+        ms(now.sending - before.sending),
+        now.pictures_copied - before.pictures_copied,
+        now.atlases_made - before.atlases_made,
+        (now.atlas_bytes_made - before.atlas_bytes_made) >> 20,
+        ms(now.atlas_making - before.atlas_making),
+        ms(now.handing_over - before.handing_over),
+        ms(now.recording - before.recording),
+        painter.pictures_texture_side(),
+    );
+}
+
+/// Not a check: what the first drawing of a big picture costs the thread that draws it, part by
+/// part, at 3840 by 2160 with a 3840 by 2160 picture behind words, from the state the screens'
+/// painter is in when the app has started (readied for a 1080p video). Then the same slide again
+/// (nothing to send), a second big picture never seen before (a fade between two pictures paints
+/// the new one while the old is still kept), and the first again. Each step's time is the calling
+/// thread's, until the call returns; the GPU's own work is waited for between steps and not
+/// counted. Run it by name, in a release build:
+/// `cargo test --release -p sp-render --test golden first_big_picture_cost -- --ignored --nocapture`.
+#[test]
+#[ignore = "a timing, not a check: run with --ignored --nocapture"]
+fn first_big_picture_cost() {
+    use std::time::Instant;
+    let (w, h) = (3840, 2160);
+    let (device, queue) = gpu();
+    let mut fonts = Fonts::bundled_only();
+    let theme = outlined_theme();
+    let words =
+        slide("Glory to God in the highest, and on earth peace to people of good will", Some("Слава Богу в вышних"));
+    let texture = target_texture(device, w, h);
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    for round in 0..3 {
+        eprintln!("A painter new from the app's start, round {round}:");
+        let mut painter = Painter::new(device).expect("painter");
+        painter.prepare_video(device, queue, 1920, 1080).expect("readied");
+        let (first, second) = (busy_picture(w, h), busy_picture(w, h));
+        let mut step = |name: &str, picture: &sp_render::Picture| {
+            let scene = sp_render::build_layers(&mut fonts, &layers_of(picture, &words), &theme, w, h).scene;
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            let (began, before, waited) = (Instant::now(), painter.work(), painter.gpu_waited());
+            painter.paint(device, queue, &scene, &view, w, h).expect("paint");
+            say_step(name, &painter, began, before, waited);
+        };
+        step("a big picture's first drawing", &first);
+        step("the same again", &first);
+        step("a second big picture's first drawing", &second);
+        step("the first picture again", &first);
+        step("the second again", &second);
+    }
+}
+
 /// A window's picture for the close mark to go over, as the screens' windows have them (RGBA):
 /// light grey to the left of `split`, black to its right, so one mark shows over both.
 fn split_picture(w: u32, h: u32, split: u32) -> wgpu::Texture {

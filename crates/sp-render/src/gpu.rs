@@ -562,6 +562,18 @@ impl Painter {
         self.renderer.gpu_waited()
     }
 
+    /// Where the painter's own time has gone, in all, apart from waiting for the GPU: running
+    /// totals, to be read before and after some painting (see [`vello::PaintWork`]).
+    pub fn work(&self) -> vello::PaintWork {
+        self.renderer.paint_work()
+    }
+
+    /// The side in pixels of the square texture the renderer keeps the pictures it draws in
+    /// (0 before anything is painted).
+    pub fn pictures_texture_side(&self) -> u32 {
+        self.renderer.atlas_side()
+    }
+
     /// Sets how long one [`Painter::paint`] waits for the GPU before it gives the picture up
     /// with [`PaintError::NotNow`]; `None` is the usual wait. For tests of what happens when
     /// the GPU is too slow.

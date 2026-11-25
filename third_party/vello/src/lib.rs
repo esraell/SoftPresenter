@@ -150,6 +150,35 @@ pub use wgpu;
 pub use scene::{DrawGlyphs, Scene};
 #[cfg(feature = "wgpu")]
 pub use scratch::{ScratchPlan, ScratchRoom, ScratchSizes};
+
+/// SoftPresenter: where a renderer's own time has gone, in all, since it was made: running
+/// totals, for a caller to read before and after some drawing and say what that drawing's time
+/// was made of. None of it is waiting for the GPU to finish (that is
+/// [`Renderer::gpu_waited`]); it is the processor's work on the calling thread, and whatever
+/// the GPU's driver does inside the calls made to it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PaintWork {
+    /// Working out what a frame sends to the GPU: packing the scene, placing its pictures in
+    /// the picture atlas, sizing the buffers.
+    pub resolving: std::time::Duration,
+    /// Making the picture atlas's texture: how long, how many times, and the bytes of the
+    /// textures made.
+    pub atlas_making: std::time::Duration,
+    pub atlases_made: u64,
+    pub atlas_bytes_made: u64,
+    /// Sending pictures' pixels from memory to the atlas (`Queue::write_texture`, which copies
+    /// them on the calling thread): how long, how many pictures, how many bytes.
+    pub sending: std::time::Duration,
+    pub pictures_sent: u64,
+    pub bytes_sent: u64,
+    /// Pictures copied into the atlas from a texture of their own already on the GPU (a
+    /// command for the GPU; no pixels are touched on the calling thread).
+    pub pictures_copied: u64,
+    /// Handing a recording's commands to the GPU (`Queue::submit`).
+    pub handing_over: std::time::Duration,
+    /// The rest of running the recordings: buffers made and filled, commands recorded.
+    pub recording: std::time::Duration,
+}
 pub use vello_encoding::{FontEmbolden, Glyph, NormalizedCoord};
 
 use low_level::ShaderId;
@@ -392,6 +421,9 @@ pub struct Renderer {
     // SoftPresenter: how long this renderer has waited for the GPU, in all, reading back the
     // counters of frames it had to check (see `gpu_waited`).
     gpu_waited: std::time::Duration,
+    // SoftPresenter: how long this renderer has spent, in all, working out what frames send to
+    // the GPU (see `PaintWork::resolving`); the rest of `PaintWork` is kept by the engine.
+    resolving: std::time::Duration,
     #[cfg(feature = "debug_layers")]
     debug: debug::DebugRenderer,
     #[cfg(feature = "wgpu-profiler")]
@@ -565,6 +597,7 @@ impl Renderer {
             learnt_wait: std::time::Duration::ZERO,
             left_behind: None,
             gpu_waited: std::time::Duration::ZERO,
+            resolving: std::time::Duration::ZERO,
             #[cfg(feature = "debug_layers")]
             debug,
             #[cfg(feature = "wgpu-profiler")]
@@ -659,6 +692,7 @@ impl Renderer {
                 (std::time::Instant::now() + allowed).min(hard_stop)
             };
             let mut render = Render::new();
+            let resolving = std::time::Instant::now();
             let coarse = render.render_encoding_coarse(
                 scene.encoding(),
                 &mut self.resolver,
@@ -668,6 +702,7 @@ impl Renderer {
                 true,
                 Some(room),
             );
+            self.resolving += resolving.elapsed();
             let plan = *render
                 .scratch_plan()
                 .expect("a render given scratch sizes has a plan");
@@ -1043,6 +1078,17 @@ impl Renderer {
     /// timing a frame subtracts this before and after to tell the GPU's time from its own.
     pub fn gpu_waited(&self) -> std::time::Duration {
         self.gpu_waited
+    }
+
+    /// SoftPresenter: where this renderer's own time has gone, in all (see [`PaintWork`]).
+    pub fn paint_work(&self) -> PaintWork {
+        PaintWork { resolving: self.resolving, ..self.engine.work }
+    }
+
+    /// SoftPresenter: the side of the picture atlas's texture in pixels (it is square), or 0
+    /// before any frame has been drawn.
+    pub fn atlas_side(&self) -> u32 {
+        self.image_atlas.map_or(0, |atlas| atlas.width)
     }
 
     /// Vello 0.12's own `render_to_texture`: one pass with constant scratch sizes, which does

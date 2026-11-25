@@ -95,7 +95,13 @@ Everything is marked `SoftPresenter:` in the source. Removed from the published 
     `Renderer::spare_bytes`, `Renderer::scratch_wanted`, `Renderer::scratch_reruns`,
     `Renderer::scratch_runs`, `Renderer::scratch_unwaited`, `Renderer::gpu_waited` (how long
     the renderer has waited for the GPU, in all, reading back counters: the app's log of a
-    hold-up of the screens tells the GPU's time from the renderer's own by it); for tests,
+    hold-up of the screens tells the GPU's time from the renderer's own by it),
+    `Renderer::paint_work` with the type `PaintWork` (running totals of where the renderer's
+    own time went: working out what a frame sends, making the picture atlas's texture,
+    sending pictures' pixels from memory with their count and bytes, pictures copied from
+    textures already on the GPU, handing commands over, and the rest of running the
+    recordings; the engine keeps them as it runs a recording, by the clock alone) and
+    `Renderer::atlas_side`; for tests,
     `Renderer::set_longest_wait`, `Renderer::set_most_runs` and `Renderer::drop_frames`; the
     errors above and
     `Error::GpuWait`; the types `ScratchSizes`, `ScratchPlan` and `ScratchRoom`.

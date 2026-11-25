@@ -42,6 +42,9 @@ pub(crate) struct WgpuEngine {
     /// The `Texture` should have the same size as the `Image`.
     pub(crate) image_overrides: HashMap<u64, wgpu::TexelCopyTextureInfoBase<Texture>>,
     pipeline_cache: Option<PipelineCache>,
+    /// SoftPresenter: where the time of running recordings has gone, in all (see
+    /// [`PaintWork`](crate::PaintWork)).
+    pub(crate) work: crate::PaintWork,
 }
 
 enum PipelineState {
@@ -392,6 +395,10 @@ impl WgpuEngine {
         label: &'static str,
         #[cfg(feature = "wgpu-profiler")] profiler: &mut wgpu_profiler::GpuProfiler,
     ) -> Result<()> {
+        // SoftPresenter: the recording's time is counted, and within it the parts that can be
+        // slow for a picture: making the picture atlas, sending pixels, handing over to the GPU.
+        let began = Instant::now();
+        let before = self.work;
         let mut free_bufs: HashSet<ResourceId> = HashSet::default();
         let mut free_images: HashSet<ResourceId> = HashSet::default();
         let mut transient_map = TransientBindMap::new(external_resources);
@@ -484,7 +491,16 @@ impl WgpuEngine {
                         .insert_image(image_proxy.id, texture, texture_view);
                 }
                 Command::WriteImage(proxy, [x, y], image) => {
+                    // SoftPresenter: making the atlas is timed.
+                    let making = (!self.bind_map.image_map.contains_key(&proxy.id))
+                        .then(Instant::now);
                     let (texture, _) = self.bind_map.get_or_create_image(*proxy, device);
+                    if let Some(making) = making {
+                        self.work.atlas_making += making.elapsed();
+                        self.work.atlases_made += 1;
+                        self.work.atlas_bytes_made +=
+                            u64::from(proxy.width) * u64::from(proxy.height) * 4;
+                    }
                     let format = proxy.format.to_wgpu();
                     let block_size = format
                         .block_copy_size(None)
@@ -509,6 +525,7 @@ impl WgpuEngine {
                                 depth_or_array_layers: 1,
                             },
                         );
+                        self.work.pictures_copied += 1;
                     } else {
                         if image.data.is_empty() && image.width != 0 && image.height != 0 {
                             panic!(
@@ -518,6 +535,8 @@ impl WgpuEngine {
                                 image.data.id()
                             );
                         }
+                        // SoftPresenter: sending a picture's pixels is timed.
+                        let sending = Instant::now();
                         queue.write_texture(
                             wgpu::TexelCopyTextureInfo {
                                 texture,
@@ -537,6 +556,9 @@ impl WgpuEngine {
                                 depth_or_array_layers: 1,
                             },
                         );
+                        self.work.sending += sending.elapsed();
+                        self.work.pictures_sent += 1;
+                        self.work.bytes_sent += image.data.data().len() as u64;
                     }
                 }
                 Command::Dispatch(shader_id, wg_size, bindings) => {
@@ -761,7 +783,9 @@ impl WgpuEngine {
         // TODO: This only actually needs to happen once per frame, but run_recording happens two or three times
         #[cfg(feature = "wgpu-profiler")]
         profiler.resolve_queries(&mut encoder);
+        let handing = Instant::now();
         queue.submit(Some(encoder.finish()));
+        self.work.handing_over += handing.elapsed();
         for id in free_bufs {
             if let Some(buf) = self.bind_map.buf_map.remove(&id)
                 && let MaterializedBuffer::Gpu(gpu_buf) = buf.buffer
@@ -784,6 +808,11 @@ impl WgpuEngine {
                 texture.destroy();
             }
         }
+        // SoftPresenter: what is left of the recording's time once the parts are taken out.
+        let parts = (self.work.atlas_making - before.atlas_making)
+            + (self.work.sending - before.sending)
+            + (self.work.handing_over - before.handing_over);
+        self.work.recording += began.elapsed().saturating_sub(parts);
         Ok(())
     }
 

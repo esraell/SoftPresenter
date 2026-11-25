@@ -18,6 +18,7 @@
 use std::time::{Duration, Instant};
 
 use sp_model::Uuid;
+use sp_render::vello;
 
 /// A pass held this long or longer is written to the log with where its time went: the
 /// audience would have seen the picture stand still for three pictures of a 30 fps video.
@@ -169,6 +170,8 @@ pub(super) struct Totals {
     pub reruns: u64,
     pub shared_locks: Duration,
     pub log: Duration,
+    /// Where the painter's own time has gone (see `paint_work`).
+    pub work: vello::PaintWork,
 }
 
 /// One pass's steps: when it began, each part's time and count, its longest step and what that
@@ -254,7 +257,9 @@ impl Pass {
                 let waited = now.gpu_wait.saturating_sub(self.at_begin.gpu_wait);
                 let runs = now.runs.saturating_sub(self.at_begin.runs);
                 let reruns = now.reruns.saturating_sub(self.at_begin.reruns);
-                said.push_str(&format!(" (GPU wait {}, {runs} runs, {reruns} again for room)", ms(waited)));
+                said.push_str(&format!(" (GPU wait {}, {runs} runs, {reruns} again for room", ms(waited)));
+                said.push_str(&paint_work(self.at_begin.work, now.work));
+                said.push(')');
             }
             parts.push(said);
         }
@@ -269,6 +274,41 @@ impl Pass {
         ));
         line
     }
+}
+
+/// What the painter's own time in a pass was made of, from its running totals at the pass's
+/// start and end: working out what to send, sending pictures' pixels to the GPU from memory,
+/// copying pictures already there, making the texture the renderer keeps pictures in, handing
+/// the commands over, and the rest. Parts that did not happen are left out.
+fn paint_work(began: vello::PaintWork, now: vello::PaintWork) -> String {
+    let megabytes = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
+    let mut said = format!("; working out {}", ms(now.resolving.saturating_sub(began.resolving)));
+    let sent = now.pictures_sent - began.pictures_sent;
+    if sent > 0 {
+        said.push_str(&format!(
+            ", {sent} pictures sent from memory ({:.0} MB) {}",
+            megabytes(now.bytes_sent - began.bytes_sent),
+            ms(now.sending.saturating_sub(began.sending))
+        ));
+    }
+    let copied = now.pictures_copied - began.pictures_copied;
+    if copied > 0 {
+        said.push_str(&format!(", {copied} pictures copied on the GPU"));
+    }
+    let made = now.atlases_made - began.atlases_made;
+    if made > 0 {
+        said.push_str(&format!(
+            ", pictures' texture made ×{made} ({:.0} MB) {}",
+            megabytes(now.atlas_bytes_made - began.atlas_bytes_made),
+            ms(now.atlas_making.saturating_sub(began.atlas_making))
+        ));
+    }
+    said.push_str(&format!(
+        ", handing over {}, commands {}",
+        ms(now.handing_over.saturating_sub(began.handing_over)),
+        ms(now.recording.saturating_sub(began.recording))
+    ));
+    said
 }
 
 impl Held {
@@ -507,11 +547,32 @@ mod tests {
         held.add(Part::Acquire, window, Duration::from_millis(1003));
         held.add(Part::Present, window, Duration::from_millis(1));
         let took = held.end(start + Duration::from_millis(1019)).expect("held over 100 ms");
-        let at_end = Totals { gpu_wait: Duration::from_millis(3), runs: 12, reruns: 1, ..Totals::default() };
+        let work = vello::PaintWork {
+            resolving: Duration::from_millis(1),
+            sending: Duration::from_millis(2),
+            pictures_sent: 1,
+            bytes_sent: 32 * 1024 * 1024,
+            atlas_making: Duration::from_micros(500),
+            atlases_made: 1,
+            atlas_bytes_made: 64 * 1024 * 1024,
+            handing_over: Duration::from_micros(300),
+            recording: Duration::from_micros(200),
+            ..Default::default()
+        };
+        let at_end = Totals { gpu_wait: Duration::from_millis(3), runs: 12, reruns: 1, work, ..Totals::default() };
         let line = held.words(took, "10:00:16.976", at_end, named);
         assert!(line.starts_with("The screens' thread was held 1019.0 ms from 10:00:16.976."), "{line}");
         assert!(line.contains("Longest step: surface acquire for the window TV, 1003.0 ms."), "{line}");
-        assert!(line.contains("vello paint 8.0 ms ×2 (GPU wait 2.0 ms, 2 runs, 1 again for room)"), "{line}");
+        assert!(line.contains("vello paint 8.0 ms ×2 (GPU wait 2.0 ms, 2 runs, 1 again for room; "), "{line}");
+        // What the painter's own time was made of; a part that did not happen is left out.
+        assert!(
+            line.contains(
+                "working out 1.0 ms, 1 pictures sent from memory (32 MB) 2.0 ms, pictures' texture made ×1 (64 MB) \
+                 0.5 ms, handing over 0.3 ms, commands 0.2 ms)"
+            ),
+            "{line}"
+        );
+        assert!(!line.contains("copied on the GPU"), "{line}");
         assert!(line.contains("present 1.0 ms ×1"), "{line}");
         // What no part covers is said, so the parts add up to the whole.
         assert!(line.contains("other 7.0 ms."), "{line}");
