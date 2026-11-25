@@ -385,30 +385,25 @@ pub fn load_list() -> List {
         .unwrap_or_default()
 }
 
-/// Remembers the media bin, for the next start.
-pub fn save_list(list: &List) -> Result<(), String> {
+/// The media bin's file and what goes in it, for the library's writer to write (`writer`), so
+/// the bin is as it was at the next start.
+pub fn list_to_save(list: &List) -> Result<crate::writer::Save, String> {
     let path = list_file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| {
-            tf(
-                "media.no_folder",
-                "Could not make the app's folder: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })?;
-    }
-    let partial = path.with_extension("json.part");
-    std::fs::write(&partial, serde_json::to_string_pretty(list).unwrap_or_default())
-        .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| {
-            tf(
-                "media.not_saved",
-                "Could not save the media list: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })
+    let text = serde_json::to_string_pretty(list).unwrap_or_default();
+    let mut save =
+        crate::writer::Save::new(path, crate::writer::Kind::MediaList, crate::writer::Guard::Any, move || {
+            text.into_bytes()
+        });
+    save.make_folder = true;
+    Ok(save)
 }
+
+/// What the window says when the media bin couldn't be written.
+pub fn list_not_saved(error: &std::io::Error) -> String {
+    tf("media.not_saved", "Could not save the media list: {error}", &[("error", &crate::notices::write_problem(error))])
+}
+
 /// Videos by their names. macOS's own player plays MP4 and MOV; FFmpeg plays the rest (and any
 /// MP4 or MOV the system's player can't).
 const VIDEOS: [&str; 17] = [

@@ -244,8 +244,10 @@ impl crate::App {
         state.libraries.iter().filter(|library| library.has(key)).map(|library| library.name.clone()).collect()
     }
 
-    /// Puts the tidied songs in place and saves them, each song's file copied first. Returns
-    /// the folder the copies are in, if any were made.
+    /// Puts the tidied songs in place and hands them to the library's writer, which copies each
+    /// song's file into the backup folder before writing over it (a song whose copy can't be
+    /// made isn't written, and is said in the notices, as any save that fails is). Returns the
+    /// folder the copies go in, if any are made.
     fn apply_tidy(&mut self, looked: &mut [Looked]) -> Result<Option<PathBuf>, String> {
         let folder = crate::bible_store::data_dir().ok_or("Could not find the library folder.")?;
         let backup = backup_folder(&folder, &chrono::Local::now().format("%Y-%m-%d").to_string());
@@ -258,13 +260,9 @@ impl crate::App {
                 continue;
             }
             let file = self.sources.get(at).cloned().flatten().map(|path| crate::load::song_file_for(&path));
-            if let Some(file) = file.filter(|file| file.is_file()) {
+            if let Some(file) = file.filter(|file| file.is_file() || self.stamps.is_writing(file)) {
                 if self.stamps.check(&file) != crate::outside::Now::Same {
                     one.not_done = Some("its file changed outside SoftPresenter".to_owned());
-                    continue;
-                }
-                if let Err(why) = keep_copy(&file, &backup) {
-                    one.not_done = Some(format!("a copy of its file couldn't be kept ({why})"));
                     continue;
                 }
                 made_backup = true;
@@ -272,28 +270,14 @@ impl crate::App {
             let old_ids: Vec<sp_model::Uuid> = one.before.slides().map(|(_, slide)| slide.id).collect();
             self.history.forget(at);
             self.show.replace_presentation_following(at, Arc::new(one.tidied.song.clone()));
-            if !self.unsaved.contains(&at) {
-                self.unsaved.push(at);
-            }
+            self.unsaved.retain(|have| *have != at);
+            self.save_song_file(at, Some(backup.clone()));
             if let Some(running) = self.running.as_mut() {
                 for id in old_ids {
                     running.thumbs.forget(id, &mut running.egui_renderer);
                 }
             }
             changed.push(at);
-        }
-        self.save_unsaved();
-        // What was saved is read back: a song whose file doesn't hold it now wasn't saved.
-        for one in looked.iter_mut().filter(|one| changed.contains(&one.at)) {
-            let saved = self
-                .sources
-                .get(one.at)
-                .cloned()
-                .flatten()
-                .and_then(|path| crate::load::read_song_file(&crate::load::song_file_for(&path)).ok());
-            if saved.as_ref() != Some(&one.tidied.song) {
-                one.not_done = Some("it couldn't be saved; it is changed in the window only".to_owned());
-            }
         }
         if let Some(running) = self.running.as_mut() {
             // An editor open on a song tidied shows the slide it had, wherever it now is.
@@ -332,18 +316,6 @@ fn backup_folder(data: &Path, date: &str) -> PathBuf {
         .chain((2..).map(|n| data.join(format!("{name} {n}"))))
         .find(|path| std::fs::symlink_metadata(path).is_err())
         .unwrap_or_else(|| data.join(name))
-}
-
-/// Copies a song's file into the backup folder, never over a file there.
-fn keep_copy(file: &Path, backup: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(backup).map_err(|e| e.to_string())?;
-    let name = file.file_name().ok_or("no file name")?.to_string_lossy().into_owned();
-    let (stem, ending) = name.rsplit_once('.').map_or((name.as_str(), ""), |(s, e)| (s, e));
-    let target = std::iter::once(backup.join(&name))
-        .chain((2..).map(|n| backup.join(format!("{stem} {n}.{ending}"))))
-        .find(|path| std::fs::symlink_metadata(path).is_err())
-        .ok_or("no free name")?;
-    std::fs::copy(file, &target).map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// The songs with the same words (after tidying), by their places in `looked`, two or more to
@@ -753,13 +725,24 @@ mod tests {
         assert_eq!(first, dir.join("Backup before tidying 2026-11-25"));
         std::fs::create_dir_all(&first).unwrap();
         assert_eq!(backup_folder(&dir, "2026-11-25"), dir.join("Backup before tidying 2026-11-25 2"));
+        // Each song's file is copied in by the library's writer before the tidied song is written
+        // over it, never over a copy there.
         let song = dir.join("song.sppres");
         std::fs::write(&song, "one").unwrap();
-        keep_copy(&song, &first).unwrap();
-        std::fs::write(&song, "two").unwrap();
-        keep_copy(&song, &first).unwrap();
+        let writer = crate::writer::Writer::start(|| {});
+        for tidied in ["two", "three"] {
+            let mut save =
+                crate::writer::Save::new(song.clone(), crate::writer::Kind::Song, crate::writer::Guard::Any, {
+                    let tidied = tidied.to_owned();
+                    move || tidied.into_bytes()
+                });
+            save.keep_old_in = Some(first.clone());
+            writer.write(save);
+            writer.drain();
+        }
         assert_eq!(std::fs::read_to_string(first.join("song.sppres")).unwrap(), "one");
         assert_eq!(std::fs::read_to_string(first.join("song 2.sppres")).unwrap(), "two");
+        assert_eq!(std::fs::read_to_string(&song).unwrap(), "three");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

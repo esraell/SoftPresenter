@@ -5,9 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::i18n::{t, tf};
 use sp_model::bounded_zip::{ZipLimits, ZipRefusal};
-use sp_model::{
-    LARGEST_PRO_FILE, Presentation, decode_text, from_json, import_song_text, read_pro_file, rtf_to_text, to_json,
-};
+use sp_model::{LARGEST_PRO_FILE, Presentation, decode_text, from_json, import_song_text, read_pro_file, rtf_to_text};
 
 /// The song shown when the program is started without any files.
 pub const SAMPLE_SONG: &str = include_str!("../../../samples/sample-song.txt");
@@ -479,21 +477,15 @@ pub fn song_file_for(path: &Path) -> PathBuf {
     path.with_extension(SONG_EXTENSION)
 }
 
-/// Saves a song as a SoftPresenter song file beside the file it came from, and returns where
-/// it was written. A text file it was read from is left untouched. The new file is written
-/// under a temporary name first and then moved into place, so a crash cannot leave half a song.
-pub fn save_song(path: &Path, song: &Presentation) -> Result<PathBuf, String> {
-    let target = song_file_for(path);
-    let name = target.file_name().map_or_else(|| "song".into(), |n| n.to_string_lossy().into_owned());
-    let temporary = target.with_file_name(format!(".{name}.saving"));
-    std::fs::write(&temporary, to_json(song)).and_then(|()| std::fs::rename(&temporary, &target)).map_err(|e| {
-        tf(
-            "notices.song.not_saved",
-            "{file}: could not be saved ({error}).",
-            &[("file", &target.display().to_string()), ("error", &crate::notices::write_problem(&e))],
-        )
-    })?;
-    Ok(target)
+/// Says that a song's file couldn't be written, and why. Songs are saved by the library's
+/// writer (`writer`), into the file [`song_file_for`] names, so a text file a song was read
+/// from is left untouched.
+pub fn not_saved(file: &Path, error: &std::io::Error) -> String {
+    tf(
+        "notices.song.not_saved",
+        "{file}: could not be saved ({error}).",
+        &[("file", &file.display().to_string()), ("error", &crate::notices::write_problem(error))],
+    )
 }
 
 /// Loads every path given: a file is one song, a folder is every song directly inside it in
@@ -584,7 +576,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&folder);
     }
 
-    use sp_model::{Role, parse_song_text};
+    use sp_model::{Role, parse_song_text, to_json};
 
     use super::*;
 
@@ -877,8 +869,15 @@ mod tests {
         let mut edited = songs.remove(0).song.with_slide_text(0, "New words", "Новые слова").unwrap();
         edited.groups[0].slides[0].objects[0].frame =
             Some(sp_model::SlideRect { x: 10.0, y: 20.0, w: 300.0, h: 200.0 });
-        let written = save_song(&path, &edited).unwrap();
+        let written = song_file_for(&path);
         assert_eq!(written, dir.0.join("song.sppres"));
+        let writer = crate::writer::Writer::start(|| {});
+        let song = edited.clone();
+        let guard = crate::writer::Guard::Unchanged(None);
+        writer.write(crate::writer::Save::new(written.clone(), crate::writer::Kind::Song, guard, move || {
+            to_json(&song).into_bytes()
+        }));
+        writer.drain();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "[Verse]\nOld\n", "the text file must not change");
 
         // Opening the text file again gives the edited song, moved object and all.
@@ -902,7 +901,7 @@ mod tests {
         let a = dir.write("a.txt", b"From text\n");
         dir.write("b.txt", b"Only text\n");
         let edited = parse_song_text("a", "From our file\n");
-        save_song(&a, &edited).unwrap();
+        std::fs::write(song_file_for(&a), to_json(&edited)).unwrap();
         let (songs, problems) = load_songs(std::slice::from_ref(&dir.0));
         assert!(problems.is_empty(), "{problems:?}");
         let words: Vec<_> =
@@ -924,8 +923,18 @@ mod tests {
     #[test]
     fn saving_into_a_missing_folder_is_reported() {
         let dir = TempDir::new("nosave");
-        let song = parse_song_text("x", "A\n");
-        assert!(save_song(&dir.0.join("gone").join("song.txt"), &song).unwrap_err().contains("could not be saved"));
+        let file = song_file_for(&dir.0.join("gone").join("song.txt"));
+        let writer = crate::writer::Writer::start(|| {});
+        let guard = crate::writer::Guard::Any;
+        writer.write(crate::writer::Save::new(file.clone(), crate::writer::Kind::Song, guard, || b"{}".to_vec()));
+        writer.drain();
+        let said = writer.finished().into_iter().find_map(|done| match done {
+            crate::writer::Done::Failed { path, kind, error, .. } => Some(kind.problem(&path, &error)),
+            _ => None,
+        });
+        let said = said.expect("the save failed");
+        assert!(said.contains("could not be saved") && said.contains("song.sppres"), "{said}");
+        assert!(!dir.0.join("gone").exists(), "no folder is made for a song outside the app's own");
     }
 
     #[test]

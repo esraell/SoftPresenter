@@ -368,6 +368,7 @@
   "notices.command.ready_add_folder": "Команда sp находится в {folder}; добавьте эту папку в PATH, чтобы пользоваться ею в терминале. Убрать её можно в «Настройки › Командная строка».",
   "notices.command.ready_windows": "Команда sp готова для терминала ({path}), и её папка добавлена в PATH. В PowerShell вводите softpresenter. Убрать её можно в «Настройки › Командная строка».",
   "notices.canva.keeping": "Сохраняется вход в Canva… SoftPresenter закроется, как только он будет сохранён.",
+  "notices.saving_before_quit": ["Сохраняется {n} файл… SoftPresenter закроется, когда всё будет сохранено.", "Сохраняются {n} файла… SoftPresenter закроется, когда всё будет сохранено.", "Сохраняются {n} файлов… SoftPresenter закроется, когда всё будет сохранено."],
   "notices.opening.song": "песню {title}",
   "notices.opening.song_gone": "песню, которой больше нет в библиотеке, поэтому ничего не играет, пока вы не выберете, что ему играть",
   "notices.opening.media_playlist": "медиасписок {name}",

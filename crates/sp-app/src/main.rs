@@ -90,6 +90,7 @@ mod timers;
 mod versions;
 mod voxlive;
 mod window_plan;
+mod writer;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -674,6 +675,9 @@ enum AppEvent {
     CatalogDone,
     /// A free songbook's download finished on its thread (see `free_songbooks_cli`).
     SongbookDone,
+    /// The library's writer wrote everything handed to it, or a file couldn't be written (see
+    /// `writer`).
+    Saved,
     /// The system says the displays changed (macOS: a display plugged in or out, the main one
     /// changed, a size or the arrangement changed). Only macOS sends it.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -1802,6 +1806,9 @@ struct App {
     /// How each song and theme file was when the app last read or wrote it, so a file changed
     /// outside the app is never saved over (see `outside`).
     stamps: outside::Stamps,
+    /// The thread that writes songs, playlists, libraries and the media bin, so the window never
+    /// waits for the disk (see `writer`).
+    writer: writer::Writer,
     /// Songs and themes with changes not saved because their file changed outside the app; they
     /// wait on Reload or Keep mine.
     held_songs: Vec<usize>,
@@ -4716,10 +4723,15 @@ impl App {
             })
             .collect();
         let playlists = self.running.as_ref().map(|r| r.home_state.media_playlists.clone()).unwrap_or_default();
-        if let Err(problem) = media::save_list(&media::List { entries, playlists })
-            && let Some(running) = self.running.as_mut()
-        {
-            running.home_state.notices.trouble(problem);
+        match media::list_to_save(&media::List { entries, playlists }) {
+            Ok(save) => {
+                self.writer.write(save);
+            }
+            Err(problem) => {
+                if let Some(running) = self.running.as_mut() {
+                    running.home_state.notices.trouble(problem);
+                }
+            }
         }
     }
 
@@ -5256,47 +5268,12 @@ impl App {
         // Edit view, and on quitting.
     }
 
-    /// Writes every song changed in the Edit view to its file. The bundled sample has no file.
+    /// Writes every song changed in the Edit view to its file (by way of the library's writer,
+    /// which writes it a moment later on a thread of its own). The bundled sample has no file.
     fn save_unsaved(&mut self) {
         let mut problem = None;
         for index in std::mem::take(&mut self.unsaved) {
-            // A song with no file yet (the sample) is given one in the app's Songs folder, so
-            // a change to it is kept like any other. Bible passages are never saved as songs.
-            if !self.app_made(index)
-                && let (Some(None), Some(song)) = (self.sources.get(index), self.show.presentations().get(index))
-                && let Some(folder) = bible_store::data_dir().map(|dir| dir.join("Songs"))
-            {
-                let _ = std::fs::create_dir_all(&folder);
-                self.sources[index] = Some(folder.join(format!("{}.{}", song.id, load::SONG_EXTENSION)));
-            }
-            let (Some(Some(path)), Some(song)) = (self.sources.get(index), self.show.presentations().get(index)) else {
-                continue;
-            };
-            // A file changed outside the app since it was read is never saved over: the song
-            // waits on Reload or Keep mine, holding its changes.
-            let target = load::song_file_for(path);
-            if self.stamps.check(&target) != outside::Now::Same {
-                applog::event("outside", &format!("did not save over {}: it changed outside", file_name(&target)));
-                if !self.held_songs.contains(&index) {
-                    self.held_songs.push(index);
-                }
-                self.wait_on(outside::Waiting::Song(index));
-                continue;
-            }
-            match load::save_song(path, song) {
-                // From now on the song lives in the file that was just written.
-                Ok(written) => {
-                    self.stamps.note(&written);
-                    self.sources[index] = Some(written);
-                }
-                Err(e) => {
-                    problem = Some(crate::i18n::tf(
-                        "notices.song.change_not_saved",
-                        "The change was not saved. {error}",
-                        &[("error", &e)],
-                    ))
-                }
-            }
+            self.save_song_file(index, None);
         }
         for index in std::mem::take(&mut self.themes_unsaved) {
             let Some(theme) = self.themes.get(index) else { continue };
@@ -5323,6 +5300,111 @@ impl App {
             if let Some(problem) = problem {
                 running.home_state.notices.trouble(problem);
             }
+            running.home_window.request_redraw();
+        }
+    }
+
+    /// Hands a song to the library's writer, to be written to its file; a song with no file yet
+    /// (the sample) is given one in the app's Songs folder, so a change to it is kept like any
+    /// other. Bible passages are never saved as songs. A file changed outside the app since it
+    /// was read is never saved over: the song waits on Reload or Keep mine, holding its changes.
+    /// With `keep_old_in`, the file as it was is copied into that folder first.
+    fn save_song_file(&mut self, index: usize, keep_old_in: Option<PathBuf>) {
+        let songs_folder = bible_store::data_dir().map(|dir| dir.join("Songs"));
+        if !self.app_made(index)
+            && let (Some(None), Some(song)) = (self.sources.get(index), self.show.presentations().get(index))
+            && let Some(folder) = &songs_folder
+        {
+            self.sources[index] = Some(folder.join(format!("{}.{}", song.id, load::SONG_EXTENSION)));
+        }
+        let Some(Some(path)) = self.sources.get(index) else { return };
+        let target = load::song_file_for(path);
+        if self.stamps.check(&target) != outside::Now::Same {
+            applog::event("outside", &format!("did not save over {}: it changed outside", file_name(&target)));
+            self.hold_song(index);
+            return;
+        }
+        let in_songs_folder = songs_folder.is_some_and(|folder| target.parent() == Some(folder.as_path()));
+        self.write_song(index, target, in_songs_folder, keep_old_in);
+    }
+
+    /// Hands a song to the library's writer to be written to `file` (its folder made first if
+    /// `make_folder`), from now on the file it lives in. Saved only over the file as the app last
+    /// saw it (see `outside`).
+    fn write_song(&mut self, index: usize, file: PathBuf, make_folder: bool, keep_old_in: Option<PathBuf>) {
+        let Some(song) = self.show.presentations().get(index).cloned() else { return };
+        let mut save = writer::Save::new(file.clone(), writer::Kind::Song, self.stamps.guard(&file), move || {
+            sp_model::to_json(&song).into_bytes()
+        });
+        save.make_folder = make_folder;
+        save.keep_old_in = keep_old_in;
+        let seq = self.writer.write(save);
+        self.stamps.writing(&file, seq);
+        if let Some(source) = self.sources.get_mut(index) {
+            *source = Some(file);
+        }
+    }
+
+    /// A song whose file changed outside the app: its changes are held, and it waits on Reload
+    /// or Keep mine.
+    fn hold_song(&mut self, index: usize) {
+        if !self.held_songs.contains(&index) {
+            self.held_songs.push(index);
+        }
+        self.wait_on(outside::Waiting::Song(index));
+    }
+
+    /// Takes in what the library's writer did since it was last asked: the files written (now as
+    /// the app last saw them), a song kept from a file changed outside meanwhile (held, waiting on
+    /// Reload or Keep mine), and what couldn't be written, said in the notices and the log.
+    fn finish_saves(&mut self) {
+        let mut problems = Vec::new();
+        for done in self.writer.finished() {
+            let said = match done {
+                writer::Done::Written { path, seq, stamp } => {
+                    self.stamps.written(&path, seq, Some(stamp));
+                    continue;
+                }
+                writer::Done::ChangedOutside { path, seq } => {
+                    self.stamps.written(&path, seq, None);
+                    applog::event("outside", &format!("did not save over {}: it changed outside", file_name(&path)));
+                    let removed = self.running.as_ref().map(|r| r.home_state.removed_songs.clone()).unwrap_or_default();
+                    let song = self.sources.iter().enumerate().position(|(at, source)| {
+                        !removed.contains(&at)
+                            && source.as_ref().is_some_and(|source| load::song_file_for(source) == path)
+                    });
+                    if let Some(index) = song {
+                        self.hold_song(index);
+                    }
+                    continue;
+                }
+                writer::Done::Failed { path, seq, kind, error } => {
+                    self.stamps.written(&path, seq, None);
+                    kind.problem(&path, &error)
+                }
+                writer::Done::Problem(said) => {
+                    applog::problem("saving", &said);
+                    said
+                }
+            };
+            problems.push(said);
+        }
+        // Many at once (a full disk) are one notice; the log has each.
+        let Some(first) = problems.first() else { return };
+        let said = match problems.len() {
+            1 => first.clone(),
+            n => format!(
+                "{}{}.",
+                first.trim_end_matches('.'),
+                crate::i18n::tf(
+                    "notices.bundle.more_in_log",
+                    " and {n} more (see the log)",
+                    &[("n", &crate::i18n::count(n as u64 - 1))]
+                )
+            ),
+        };
+        if let Some(running) = self.running.as_mut() {
+            running.home_state.notices.trouble(said);
             running.home_window.request_redraw();
         }
     }
@@ -5473,6 +5555,11 @@ impl App {
             crate::i18n::tf("notices.reload.no_file", "{title} has no file to read.", &[("title", &title)])
         })?;
         let target = load::song_file_for(&path);
+        // A save still on its way to the file (the app's own, or a song pack's version written
+        // over it) is written first, so what is read is the file as it will be (that file alone,
+        // ahead of anything else waiting).
+        self.writer.flush(&target);
+        self.finish_saves();
         if !target.is_file() {
             return Err(crate::i18n::tf(
                 "notices.reload.file_gone",
@@ -5489,11 +5576,18 @@ impl App {
                 &[("title", &title), ("why", &why)],
             )
         })?;
-        let key = song_ids::key_for(Some(&target), song.id, &song.title);
-        let title = song.title.clone();
-        let changes = self.show.replace_presentation_following(index, Arc::new(song));
-        self.sources[index] = Some(target.clone());
         self.stamps.note(&target);
+        Ok(self.take_version(index, Arc::new(song), target))
+    }
+
+    /// Puts a version of a song from its file (`file`) in place of the app's: what was not saved
+    /// goes, as does its undo history, and the editor on it starts again from this version.
+    /// Returns its title.
+    fn take_version(&mut self, index: usize, song: Arc<sp_model::Presentation>, file: PathBuf) -> String {
+        let key = song_ids::key_for(Some(&file), song.id, &song.title);
+        let title = song.title.clone();
+        let changes = self.show.replace_presentation_following(index, song);
+        self.sources[index] = Some(file);
         self.history.forget(index);
         self.unsaved.retain(|at| *at != index);
         self.held_songs.retain(|at| *at != index);
@@ -5518,7 +5612,7 @@ impl App {
         if changes.slides {
             self.refresh_output();
         }
-        Ok(title)
+        title
     }
 
     /// Writes the app's version of a song over its file, which changed outside the app.
@@ -5530,9 +5624,15 @@ impl App {
             return Err(crate::i18n::t("notices.keep.no_file", "That song has no file.").to_owned());
         };
         let title = song.title.clone();
-        let written = load::save_song(path, song)?;
-        self.stamps.note(&written);
-        self.sources[index] = Some(written);
+        let file = load::song_file_for(path);
+        // Over whatever is there now (a save that fails is said when the writer gets to it).
+        let song = song.clone();
+        let seq =
+            self.writer.write(writer::Save::new(file.clone(), writer::Kind::Song, writer::Guard::Any, move || {
+                sp_model::to_json(&song).into_bytes()
+            }));
+        self.stamps.writing(&file, seq);
+        self.sources[index] = Some(file);
         self.held_songs.retain(|at| *at != index);
         self.unsaved.retain(|at| *at != index);
         self.stop_waiting(outside::Waiting::Song(index));
@@ -5724,20 +5824,20 @@ impl App {
                 continue;
             };
             // A copy of a song already here gets an id of its own, written back to its file.
-            if self.show.presentations().iter().any(|have| have.id == song.id) {
+            let copy = self.show.presentations().iter().any(|have| have.id == song.id);
+            if copy {
                 song.id = Uuid::new_v4();
-                if let Err(e) = load::save_song(&path, &song) {
-                    done.problems.push(e);
-                    continue;
-                }
             }
             self.stamps.note(&path);
             let key = song_ids::key_for(Some(&path), song.id, &song.title);
             done.added.push(song.title.clone());
-            self.show.add_presentation(Arc::new(song));
-            self.sources.push(Some(path));
+            let index = self.show.add_presentation(Arc::new(song));
+            self.sources.push(Some(path.clone()));
             if let Some(running) = self.running.as_mut() {
                 running.home_state.song_keys.push(key);
+            }
+            if copy {
+                self.write_song(index, path, false, None);
             }
         }
         // Themes, with the Theme editor closed.
@@ -6274,18 +6374,35 @@ impl App {
             };
             let title = song.title.clone();
             match here {
-                // Replaced: written over its file, then read again as an outside change is (so a
-                // song on screen, being edited or holding changes waits on a choice in the bar).
+                // Replaced: written over its file, and taken as an outside change is: at once,
+                // unless the song is on screen, being edited or holding changes, when it waits on a
+                // choice in the bar (Reload takes the pack's version from the file).
                 Some(index) => match self.sources.get(index).cloned().flatten() {
                     Some(path) => {
-                        if let Err(problem) = load::save_song(&path, &song) {
-                            waiting.push(format!("{title} ({problem})"));
-                            continue;
-                        }
-                        if self.freshen(index, false) {
-                            replaced.push(title);
-                        } else {
+                        let file = load::song_file_for(&path);
+                        let song = Arc::new(song);
+                        let written = song.clone();
+                        let save = writer::Save::new(file.clone(), writer::Kind::Song, writer::Guard::Any, move || {
+                            sp_model::to_json(&written).into_bytes()
+                        });
+                        let in_use = self.song_in_use(index, true)
+                            || self.unsaved.contains(&index)
+                            || self.held_songs.contains(&index);
+                        if in_use {
+                            // Not the app's own save: once written, the file reads as changed. The
+                            // app's own saves of it are written first (so none waits to be merged
+                            // with this one, or is left counting as on its way); a save of the
+                            // song after it finds the pack's version and waits on the choice.
+                            self.writer.flush(&file);
+                            self.finish_saves();
+                            self.writer.write(save);
+                            self.wait_on(outside::Waiting::Song(index));
                             waiting.push(title);
+                        } else {
+                            self.take_version(index, song, file.clone());
+                            let seq = self.writer.write(save);
+                            self.stamps.writing(&file, seq);
+                            replaced.push(title);
                         }
                     }
                     None => {
@@ -7559,19 +7676,18 @@ impl App {
         }
     }
 
-    /// Adds a song to the show with a file of its own in the Songs folder, to be saved shortly,
-    /// and returns its place and the key the song list knows it by.
+    /// Adds a song to the show with a file of its own in the Songs folder, handed to the
+    /// library's writer at once (so it is on disk before a library or playlist naming it), and
+    /// returns its place and the key the song list knows it by.
     fn store_song(&mut self, song: sp_model::Presentation) -> (usize, String) {
         let (id, title) = (song.id, song.title.clone());
         // New songs live in the app's Songs folder, each in a file named by its id.
         let path = song_ids::library_path(id);
-        if let Some(folder) = path.as_ref().and_then(|path| path.parent()) {
-            let _ = std::fs::create_dir_all(folder);
-        }
         let index = self.show.add_presentation(Arc::new(song));
-        self.sources.push(path);
-        self.unsaved.push(index);
-        self.unsaved_since = Some(Instant::now());
+        self.sources.push(path.clone());
+        if let Some(path) = path {
+            self.write_song(index, path, true, None);
+        }
         let key = song_ids::library_key(id, &title);
         if let Some(running) = self.running.as_mut() {
             running.home_state.song_keys.push(key.clone());
@@ -8644,6 +8760,8 @@ impl App {
         }
         if aid.step == 40 {
             eprintln!("resize aid done");
+            // What the library's writer holds is written first: the exit skips its own wait.
+            self.writer.drain();
             std::process::exit(0);
         }
         aid.step += 1;
@@ -9687,51 +9805,53 @@ impl App {
             }
             SongRequest::Delete => {
                 // A song made in the app goes to the Trash; one opened from elsewhere stays put.
+                // Its file goes on the library writer's thread, after any save of it still on
+                // its way (which would otherwise make the file again); a file that won't go is
+                // said then.
                 let own = bible_store::data_dir().map(|dir| dir.join("Songs"));
-                let mut problem = None;
                 if let (Some(Some(path)), Some(own)) = (self.sources.get(index), own)
                     && path.starts_with(&own)
-                    && path.exists()
-                    && let Err(e) = sweep::to_trash(path)
                 {
-                    problem = Some(crate::i18n::tf(
-                        "notices.song.not_trashed",
-                        "Could not move the song to the Trash: {error}",
-                        &[("error", &e.to_string())],
-                    ));
+                    let path = path.clone();
+                    self.writer.then(move || {
+                        if !path.exists() {
+                            return Ok(());
+                        }
+                        sweep::to_trash(&path).map_err(|e| {
+                            crate::i18n::tf(
+                                "notices.song.not_trashed",
+                                "Could not move the song to the Trash: {error}",
+                                &[("error", &e.to_string())],
+                            )
+                        })
+                    });
                 }
-                if problem.is_none() {
-                    if self.show.live().is_some_and(|live| live.presentation == index) {
-                        self.apply(vec![Command::Clear(sp_engine::Layer::Slides)]);
-                    }
-                    self.unsaved.retain(|at| *at != index);
-                    // A deleted song can't be brought back by Undo, which would save it again.
-                    self.history.forget(index);
-                    if let Some(running) = self.running.as_mut() {
-                        let state = &mut running.home_state;
-                        state.removed_songs.push(index);
-                        state.notices.settle(outside::Waiting::Song(index));
-                        // Nor is it in any library any more.
-                        if let Some(key) = state.song_keys.get(index).cloned() {
-                            for library in &mut state.libraries {
-                                let before = library.songs.len();
-                                library.songs.retain(|have| *have != key);
-                                state.libraries_changed |= library.songs.len() != before;
-                            }
+                if self.show.live().is_some_and(|live| live.presentation == index) {
+                    self.apply(vec![Command::Clear(sp_engine::Layer::Slides)]);
+                }
+                self.unsaved.retain(|at| *at != index);
+                // A deleted song can't be brought back by Undo, which would save it again.
+                self.history.forget(index);
+                if let Some(running) = self.running.as_mut() {
+                    let state = &mut running.home_state;
+                    state.removed_songs.push(index);
+                    state.notices.settle(outside::Waiting::Song(index));
+                    // Nor is it in any library any more.
+                    if let Some(key) = state.song_keys.get(index).cloned() {
+                        for library in &mut state.libraries {
+                            let before = library.songs.len();
+                            library.songs.retain(|have| *have != key);
+                            state.libraries_changed |= library.songs.len() != before;
                         }
                     }
-                    // Another song is shown in its place.
-                    let removed = self.running.as_ref().map(|r| r.home_state.removed_songs.clone()).unwrap_or_default();
-                    let next =
-                        (0..self.show.presentations().len()).find(|at| !removed.contains(at) && !self.app_made(*at));
-                    if self.show.selected() == index
-                        && let Some(next) = next
-                    {
-                        self.apply(vec![Command::Select(next)]);
-                    }
                 }
-                if let (Some(problem), Some(running)) = (problem, self.running.as_mut()) {
-                    running.home_state.notices.trouble(problem);
+                // Another song is shown in its place.
+                let removed = self.running.as_ref().map(|r| r.home_state.removed_songs.clone()).unwrap_or_default();
+                let next = (0..self.show.presentations().len()).find(|at| !removed.contains(at) && !self.app_made(*at));
+                if self.show.selected() == index
+                    && let Some(next) = next
+                {
+                    self.apply(vec![Command::Select(next)]);
                 }
             }
         }
@@ -9785,10 +9905,14 @@ impl App {
         {
             state.notices.trouble(problem);
         }
-        if std::mem::take(&mut state.libraries_changed)
-            && let Err(problem) = libraries::save(&state.libraries)
-        {
-            state.notices.trouble(problem);
+        // Handed to the library's writer, after the songs a library has just been given.
+        if std::mem::take(&mut state.libraries_changed) {
+            match libraries::to_save(&state.libraries) {
+                Ok(save) => {
+                    self.writer.write(save);
+                }
+                Err(problem) => state.notices.trouble(problem),
+            }
         }
         // Props that clear themselves, once their time is up.
         let props = &state.props;
@@ -10275,6 +10399,30 @@ impl App {
             self.announcing = None;
             self.quitting = Some(Instant::now());
         }
+        // Every file handed to the library's writer is written before the app goes (a big import
+        // on a slow disk can take minutes), here in the event loop, so the window still answers.
+        // Said once, after a moment.
+        self.finish_saves();
+        if !self.writer.is_idle() {
+            static SAVING_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            let waited = self.quitting.map_or(Duration::ZERO, |since| since.elapsed());
+            if waited >= Duration::from_secs(1)
+                && let Some(running) = self.running.as_mut()
+                && !SAVING_SAID.swap(true, std::sync::atomic::Ordering::Relaxed)
+            {
+                let left = self.writer.left();
+                applog::event("saving", &format!("waiting for {left} files to be written before quitting"));
+                running.home_state.notices.info(crate::i18n::tn(
+                    "notices.saving_before_quit",
+                    left as u64,
+                    "Saving {n} file\u{2026} SoftPresenter closes as soon as it is saved.",
+                    "Saving {n} files\u{2026} SoftPresenter closes as soon as they are saved.",
+                    &[],
+                ));
+                running.home_window.request_redraw();
+            }
+            return;
+        }
         // A refresh of the Canva sign-in in flight is waited for (its new token must be kept),
         // here in the event loop, so the window still answers (and isn't taken for hung).
         if !self.canva.may_close(self.quitting.unwrap_or_else(Instant::now)) {
@@ -10542,6 +10690,10 @@ impl ApplicationHandler<AppEvent> for App {
             }
             AppEvent::SongbookDone => {
                 self.tick_free_songbooks();
+                return;
+            }
+            AppEvent::Saved => {
+                self.finish_saves();
                 return;
             }
             AppEvent::MediaRead => {
@@ -11009,14 +11161,18 @@ impl ApplicationHandler<AppEvent> for App {
                     }
                     self.frames_since_start = self.frames_since_start.saturating_add(1);
                 }
-                // The services are written as soon as they change; the file is small. Until then,
-                // the first playlist of a first start is named in the language set.
+                // The services are handed to the library's writer as soon as they change (after
+                // the songs a playlist has just been given). Until then, the first playlist of a
+                // first start is named in the language set.
                 if let Some(running) = self.running.as_mut() {
                     let services = &mut running.home_state.services;
                     if std::mem::take(&mut services.changed) {
                         services.fresh = false;
-                        if let Err(problem) = service::save(services) {
-                            running.home_state.notices.trouble(problem);
+                        match service::to_save(services) {
+                            Ok(save) => {
+                                self.writer.write(save);
+                            }
+                            Err(problem) => running.home_state.notices.trouble(problem),
                         }
                     } else if services.follow_language() {
                         running.home_window.request_redraw();
@@ -11067,13 +11223,16 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
-        // Quitting, waiting for Canva Sync to keep a sign-in it is refreshing: looked at again
-        // shortly (its thread also wakes the loop when it is done), and nothing else is run.
+        // Quitting, waiting for the library's writer to write what it holds, or for Canva Sync
+        // to keep a sign-in it is refreshing: looked at again shortly (their threads also wake
+        // the loop when they are done), and nothing else is run.
         if self.quitting.is_some() {
             self.quit(el);
             el.set_control_flow(ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(100)));
             return;
         }
+        // What the library's writer has written since (its stamps), and what it couldn't.
+        self.finish_saves();
         // Files dropped on the window, now that all of the drop have come.
         self.finish_drop();
         // What runs by the clock is done here too, not only when the operator window draws:
@@ -11693,6 +11852,12 @@ fn main() -> ExitCode {
         media_playlists: Vec::new(),
         announcing: None,
         stamps,
+        writer: {
+            let proxy = event_loop.create_proxy();
+            writer::Writer::start(move || {
+                let _ = proxy.send_event(AppEvent::Saved);
+            })
+        },
         held_songs: Vec::new(),
         held_themes: Vec::new(),
         media_cycle: None,
@@ -12074,7 +12239,7 @@ mod tests {
         clock.link = Some(sp_model::TextLink::Clock);
         clock.frame = Some(sp_model::SlideRect { x: 60.0, y: 40.0, w: 600.0, h: 120.0 });
         fourth.objects.push(clock);
-        load::save_song(std::path::Path::new(&path), &song).unwrap();
+        std::fs::write(load::song_file_for(std::path::Path::new(&path)), sp_model::to_json(&song)).unwrap();
     }
 
     #[test]

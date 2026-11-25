@@ -1131,24 +1131,19 @@ pub fn not_saved(error: &std::io::Error) -> String {
     )
 }
 
-/// Writes the services to their file. The error is a plain sentence.
-pub fn save(services: &Services) -> Result<(), String> {
+/// The services' file and what goes in it, for the library's writer to write (`writer`). The
+/// error is a plain sentence.
+pub fn to_save(services: &Services) -> Result<crate::writer::Save, String> {
     let path = file().ok_or_else(|| {
         t("notices.save.no_place_services", "Could not find where to keep playlists on this computer.").to_owned()
     })?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| {
-            tf(
-                "media.no_folder",
-                "Could not make the app's folder: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })?;
-    }
-    let partial = path.with_extension("json.part");
-    std::fs::write(&partial, services.to_json())
-        .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| not_saved(&e))
+    let text = services.to_json();
+    let mut save =
+        crate::writer::Save::new(path, crate::writer::Kind::Playlists, crate::writer::Guard::Any, move || {
+            text.into_bytes()
+        });
+    save.make_folder = true;
+    Ok(save)
 }
 
 #[cfg(test)]

@@ -288,32 +288,28 @@ impl crate::App {
         }
         let editing = state.editing.as_ref().map(|draft| draft.at.presentation);
         let (gone, mut kept) = free_songbooks::removal(&songs, &used, editing);
-        // The songs' files go into a folder of their own (a move on the same disk, quick), and
-        // that folder to the Trash on a thread of its own.
+        // The songs' files go into a folder of their own (a move on the same disk), and that
+        // folder to the Trash: on the library writer's thread, after any save of them still on
+        // its way (a songbook just installed may not be written yet), so the window never waits
+        // for the disk. A song with a file of its own outside the Songs folder stays, as the
+        // church's own.
         let own = crate::bible_store::data_dir().map(|dir| dir.join("Songs"));
         let staging = crate::bible_store::data_dir()
             .map(|dir| dir.join(format!(".removing-songbook-{}", sp_model::Uuid::new_v4())));
         let folder = staging.as_ref().map(|staging| {
             staging.join(tf("freesongbooks.trash_folder", "{name} (removed songbook)", &[("name", &trash_name(book))]))
         });
-        if let Some(folder) = &folder {
-            let _ = std::fs::create_dir_all(folder);
-        }
         let mut taken = Vec::new();
+        let mut moving = Vec::new();
         for at in gone {
-            let moved = match (self.sources.get(at), &own, &folder) {
-                (Some(Some(path)), Some(own), Some(folder)) if path.starts_with(own) && path.exists() => {
-                    let name = path.file_name().map(PathBuf::from).unwrap_or_default();
-                    std::fs::rename(path, folder.join(name)).is_ok()
+            match self.sources.get(at) {
+                Some(Some(path)) if folder.is_some() && own.as_ref().is_some_and(|own| path.starts_with(own)) => {
+                    moving.push(path.clone());
+                    taken.push(at);
                 }
-                // Not written yet (just installed), or no file of its own: nothing to move.
-                (Some(Some(path)), _, _) => !path.exists(),
-                _ => true,
-            };
-            if moved {
-                taken.push(at);
-            } else {
-                kept.push(at);
+                Some(Some(path)) if path.exists() => kept.push(at),
+                // No file of its own: nothing to move.
+                _ => taken.push(at),
             }
         }
         for &at in &taken {
@@ -357,19 +353,45 @@ impl crate::App {
             }
         }
         if let (Some(staging), Some(folder)) = (staging, folder) {
-            let spawned = std::thread::Builder::new().name("songbook to the Trash".to_owned()).spawn(move || {
-                if let Err(problem) = crate::sweep::to_trash(&folder) {
+            let id = book.id;
+            self.writer.then(move || {
+                if let Err(e) = std::fs::create_dir_all(&folder) {
+                    crate::applog::problem("songbooks", &format!("could not move removed songs to the Trash: {e}"));
+                    return Ok(());
+                }
+                let stayed = moving
+                    .iter()
+                    .filter(|path| {
+                        let Some(name) = path.file_name() else { return false };
+                        path.exists() && std::fs::rename(path, folder.join(name)).is_err()
+                    })
+                    .count();
+                if stayed > 0 {
                     crate::applog::problem(
                         "songbooks",
-                        &format!("could not move removed songs to the Trash: {problem}"),
+                        &format!("{stayed} removed songs of {id} could not be moved; they stay in the Songs folder"),
                     );
-                    return;
                 }
-                let _ = std::fs::remove_dir(&staging);
+                // The Trash can take a while: on a thread of its own, so what waits behind is
+                // written meanwhile.
+                let spawned = std::thread::Builder::new().name("songbook to the Trash".to_owned()).spawn(move || {
+                    if let Err(problem) = crate::sweep::to_trash(&folder) {
+                        crate::applog::problem(
+                            "songbooks",
+                            &format!("could not move removed songs to the Trash: {problem}"),
+                        );
+                        return;
+                    }
+                    let _ = std::fs::remove_dir(&staging);
+                });
+                if let Err(problem) = spawned {
+                    crate::applog::problem(
+                        "songbooks",
+                        &format!("could not start moving songs to the Trash: {problem}"),
+                    );
+                }
+                Ok(())
             });
-            if let Err(problem) = spawned {
-                crate::applog::problem("songbooks", &format!("could not start moving songs to the Trash: {problem}"));
-            }
         }
         crate::applog::event(
             "songbooks",

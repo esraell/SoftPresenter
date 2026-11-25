@@ -95,26 +95,26 @@ pub fn load() -> Vec<Library> {
     })
 }
 
-pub fn save(libraries: &[Library]) -> Result<(), String> {
+/// The libraries' file and what goes in it, for the library's writer to write (`writer`).
+pub fn to_save(libraries: &[Library]) -> Result<crate::writer::Save, String> {
     let path = file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| {
-            tf(
-                "media.no_folder",
-                "Could not make the app's folder: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })?;
-    }
-    let partial = path.with_extension("json.part");
-    std::fs::write(&partial, to_json(libraries)).and_then(|()| std::fs::rename(&partial, &path)).map_err(|e| {
-        tf(
-            "notices.save.libraries",
-            "Could not save the libraries: {error}",
-            &[("error", &crate::notices::write_problem(&e))],
-        )
-    })
+    let text = to_json(libraries);
+    let mut save =
+        crate::writer::Save::new(path, crate::writer::Kind::Libraries, crate::writer::Guard::Any, move || {
+            text.into_bytes()
+        });
+    save.make_folder = true;
+    Ok(save)
+}
+
+/// What the window says when the libraries couldn't be written.
+pub fn not_saved(error: &std::io::Error) -> String {
+    tf(
+        "notices.save.libraries",
+        "Could not save the libraries: {error}",
+        &[("error", &crate::notices::write_problem(error))],
+    )
 }
 
 #[cfg(test)]

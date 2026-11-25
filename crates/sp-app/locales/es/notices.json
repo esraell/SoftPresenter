@@ -368,6 +368,7 @@
   "notices.command.ready_add_folder": "El comando sp está en {folder}; añade esa carpeta a tu PATH para usarlo en un terminal. Puedes quitarlo en Ajustes › Línea de comandos.",
   "notices.command.ready_windows": "El comando sp está listo para el terminal ({path}) y su carpeta está en tu PATH. En PowerShell, escribe softpresenter en su lugar. Puedes quitarlo en Ajustes › Línea de comandos.",
   "notices.canva.keeping": "Guardando el inicio de sesión de Canva… SoftPresenter se cerrará en cuanto esté guardado.",
+  "notices.saving_before_quit": ["Guardando {n} archivo… SoftPresenter se cerrará en cuanto esté guardado.", "Guardando {n} archivos… SoftPresenter se cerrará en cuanto estén guardados."],
   "notices.opening.song": "la canción {title}",
   "notices.opening.song_gone": "una canción que ya no está en la biblioteca, así que no se reproduce nada hasta que elijas qué reproduce",
   "notices.opening.media_playlist": "la lista multimedia {name}",

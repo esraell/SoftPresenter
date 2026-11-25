@@ -5,6 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+- A big import no longer freezes the app while its songs are saved. Installing a free songbook or importing hundreds of songs on a slow computer (on Windows, where each new file is checked for viruses) left the window and `sp` unanswered for minutes until every song was written; now the songs are written in the background while you carry on, and quitting waits, saying so, until the last one is saved.
 - On Windows and Linux, a placeholder's name in the playlist no longer jumps a little when you start renaming it; the words stay where they were, as on a Mac.
 - The Bibles window lists Bibles in the languages you use first, under Your languages, then the rest under Other languages: SoftPresenter's language, your computer's preferred languages and the languages of Bibles you installed. With the app in Russian, the Russian Bible to download is at the top instead of near the end of the list; `sp bibles` lists them the same way.
 - The phone Remote Control page speaks Russian and Ukrainian too, following the app's language.

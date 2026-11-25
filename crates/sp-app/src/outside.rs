@@ -8,10 +8,16 @@
 //!
 //! No folder is watched: a change comes in when the song is opened or reloaded, never in the
 //! middle of a slide that is on screen.
+//!
+//! The app's own saves are written a moment later, on the library writer's thread (`writer`):
+//! while one of a file is on its way, the file counts as unchanged (what is on disk is about to
+//! be the app's), and once it is written, its stamp is the one the writer found straight after.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+
+use crate::writer::Guard;
 
 /// A file's modification time and size.
 pub type Stamp = (SystemTime, u64);
@@ -33,26 +39,67 @@ pub enum Now {
     Gone,
 }
 
-/// The stamps of the files the app read or wrote.
+/// The stamps of the files the app read or wrote, and the files it is writing.
 #[derive(Default)]
-pub struct Stamps(HashMap<PathBuf, Stamp>);
+pub struct Stamps {
+    seen: HashMap<PathBuf, Stamp>,
+    /// Files with a save of the app's on its way, by the number the writer gave the last one.
+    writing: HashMap<PathBuf, u64>,
+}
 
 impl Stamps {
-    /// Notes how the file is now, as the app has just read or written it.
+    /// Notes how the file is now, as the app has just read it.
     pub fn note(&mut self, path: &Path) {
-        match stamp(path) {
-            Some(now) => self.0.insert(path.to_path_buf(), now),
-            None => self.0.remove(path),
+        self.set(path, stamp(path));
+    }
+
+    fn set(&mut self, path: &Path, now: Option<Stamp>) {
+        match now {
+            Some(now) => self.seen.insert(path.to_path_buf(), now),
+            None => self.seen.remove(path),
         };
     }
 
-    /// How the file is now, beside how the app last saw it.
+    /// How the file is now, beside how the app last saw it. A file the app is writing is as the
+    /// app has it.
     pub fn check(&self, path: &Path) -> Now {
-        match (self.0.get(path), stamp(path)) {
+        if self.writing.contains_key(path) {
+            return Now::Same;
+        }
+        match (self.seen.get(path), stamp(path)) {
             (Some(then), Some(now)) if *then == now => Now::Same,
             (None, None) => Now::Same,
             (Some(_), None) => Now::Gone,
             _ => Now::Changed,
+        }
+    }
+
+    /// Whether a save of the app's is on its way to the file.
+    pub fn is_writing(&self, path: &Path) -> bool {
+        self.writing.contains_key(path)
+    }
+
+    /// When a save of the file may go ahead: only if it is still as the app last saw it, or, with
+    /// a save of it still on its way, as that save leaves it.
+    pub fn guard(&self, path: &Path) -> Guard {
+        if self.writing.contains_key(path) { Guard::AsLeft } else { Guard::Unchanged(self.seen.get(path).copied()) }
+    }
+
+    /// A save of the file was handed to the writer, which numbered it `seq`.
+    pub fn writing(&mut self, path: &Path, seq: u64) {
+        self.writing.insert(path.to_path_buf(), seq);
+    }
+
+    /// A save of the file ended: written, leaving the file as `now` says (`Some`), or not
+    /// (`None`: the file is as it was). Only the last save handed over counts; until it ends,
+    /// the file is still being written.
+    pub fn written(&mut self, path: &Path, seq: u64, now: Option<Option<Stamp>>) {
+        if self.writing.get(path) != Some(&seq) {
+            return;
+        }
+        self.writing.remove(path);
+        if let Some(now) = now {
+            self.set(path, now);
         }
     }
 }
@@ -87,6 +134,52 @@ mod tests {
         stamps.note(&song);
         std::fs::remove_file(&song).unwrap();
         assert_eq!(stamps.check(&song), Now::Gone);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_apps_own_saves_on_their_way_are_never_taken_for_changes_made_outside() {
+        use crate::writer::{Done, Kind, Save, Writer};
+        let dir = std::env::temp_dir().join(format!("sp-outside-own-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let song = dir.join("song.sppres");
+        std::fs::write(&song, "read at the start").unwrap();
+        let mut stamps = Stamps::default();
+        stamps.note(&song);
+        let read = stamp(&song);
+        assert_eq!(stamps.guard(&song), Guard::Unchanged(read), "saved only over the file as read");
+        // Two saves handed over, one after the other.
+        stamps.writing(&song, 1);
+        assert_eq!(stamps.guard(&song), Guard::AsLeft, "a save behind another of the app's");
+        stamps.writing(&song, 2);
+        // The writer writes the first; the app hasn't been told yet.
+        let writer = Writer::start(|| {});
+        writer.write(Save::new(song.clone(), Kind::Song, Guard::Any, || b"the app's first save".to_vec()));
+        writer.drain();
+        let first = writer.finished().into_iter().find_map(|done| match done {
+            Done::Written { stamp, .. } => Some(stamp),
+            _ => None,
+        });
+        assert!(first.is_some_and(|first| first != read), "the file on disk is new");
+        assert_eq!(stamps.check(&song), Now::Same, "the app's own save, not a change made outside");
+        // The first ending changes nothing while the second is on its way.
+        stamps.written(&song, 1, first);
+        assert!(stamps.is_writing(&song));
+        assert_eq!(stamps.check(&song), Now::Same);
+        // The second, written, is how the app last saw the file.
+        std::fs::write(&song, "the app's second save, longer").unwrap();
+        stamps.written(&song, 2, Some(stamp(&song)));
+        assert!(!stamps.is_writing(&song));
+        assert_eq!(stamps.check(&song), Now::Same);
+        assert_eq!(stamps.guard(&song), Guard::Unchanged(stamp(&song)));
+        // A change made outside afterwards is seen.
+        std::fs::write(&song, "changed by someone else").unwrap();
+        assert_eq!(stamps.check(&song), Now::Changed);
+        // A save that ended unwritten (kept from that change, or failed) leaves the last stamp.
+        stamps.writing(&song, 3);
+        stamps.written(&song, 3, None);
+        assert_eq!(stamps.check(&song), Now::Changed);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
