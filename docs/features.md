@@ -1796,13 +1796,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   people are connected) and **Advanced** (Keys, Command line, Song files, About), with Set Up
   SoftPresenter… under them. There is no General page: its copyright line is in Slides, its
   Language in Language, its Reload songs in Song files. The window opens at 1040 × 720 and keeps
-  at least 820 × 680, room for the list beside a page in every language.
+  at least 820 × 560, room for the list beside a page in every language (the list scrolls when the
+  window is shorter than it).
 - **Integrations** (Settings): the services SoftPresenter works with, each the same card, two
   across where there is room: its logo (VoxLive's and TimelyChurch's, the owner's own; Canva's
   icon for Canva Sync; Worship Leader App's initials), its name and one line, then a light with
   how it stands in the fixed-width face and one key (Connect, Open, or Soon), and a dashed card
-  saying more will come. Worship Leader App (where the song catalog is offered) and TimelyChurch
-  (where it is offered) are greyed as Coming soon otherwise, and take no clicks. A card opens
+  saying more will come. Worship Leader App's card shows only where the song catalog is offered,
+  as before; TimelyChurch's is greyed as Coming soon, taking no clicks, unless it is offered. A card opens
   that service's page in place, every one the same way: the way back to Integrations, its logo,
   name and how it stands with what it brings, then the account. Logos of other companies are
   their owners' trademarks, kept apart and not covered by the GPL

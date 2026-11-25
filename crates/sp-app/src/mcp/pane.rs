@@ -24,8 +24,13 @@ pub struct View {
     /// What the last click said (Copy setup, Add or Remove, or a switch that couldn't be
     /// saved): its tone, and the words.
     said: Option<(Tone, String)>,
-    /// The company whose message Copy setup copied last.
+    /// The company whose tile's Copy setup has just copied its message (its key says Copied
+    /// until the page comes into view again or another key is pressed).
     copied: Option<Company>,
+    /// The company whose message What gets copied shows (Claude's until one is copied).
+    shown: Option<Company>,
+    /// Open What gets copied when next drawn (once, after a copy).
+    reveal_copied: bool,
     /// The program an assistant starts, found again each time the card comes into view.
     program: Option<PathBuf>,
     /// The pass the card was last drawn in, to know when it has just come into view.
@@ -241,6 +246,8 @@ fn connect_one(ui: &mut egui::Ui, view: &mut View) {
             (Some(Click::Copy), Some(company), Some(program)) => {
                 ui.ctx().copy_text(setup_message(company, program));
                 view.copied = Some(company);
+                view.shown = Some(company);
+                view.reveal_copied = true;
                 let mut said =
                     tf("mcp.copied_into", "Copied. Paste it into {assistant}.", &[("assistant", company.name())]);
                 if !view.switches.allowed {
@@ -248,7 +255,10 @@ fn connect_one(ui: &mut egui::Ui, view: &mut View) {
                 }
                 view.said = Some((Tone::Good, said));
             }
-            (Some(click), _, Some(program)) => start_click(&ctx, &mut view.tiles[*at], program, click),
+            (Some(click), _, Some(program)) => {
+                view.copied = None;
+                start_click(&ctx, &mut view.tiles[*at], program, click);
+            }
             _ => {}
         }
     }
@@ -266,19 +276,18 @@ fn connect_one(ui: &mut egui::Ui, view: &mut View) {
             // Add (or Remove, or Replace) where it applies, and Copy setup: the settings to add
             // by hand, as these apps keep them.
             let copy = t("mcp.copy_setup", "Copy setup");
-            let key = look.key.map(|(click, words)| (click, words, parts::key_size(ui, words).x));
+            let action = action_width(ui);
             let copy_width = parts::key_size(ui, copy).x;
-            let size = vec2(key.map_or(0.0, |(_, _, wide)| wide + 6.0) + copy_width, 30.0);
+            let size = vec2(look.keys.len() as f32 * (action + 6.0) + copy_width, 30.0);
             parts::row(ui, &look.name, &look.state.1, size, |ui, place| {
                 let mut x = place.min.x;
-                if let Some((click, words, wide)) = key {
-                    let rect = Rect::from_min_size(pos2(x, place.min.y), vec2(wide, 30.0));
-                    if parts::key(ui, rect, ui.scope_id().with(("other app", *at)), words, click == Click::Remove)
-                        .clicked()
-                    {
-                        pressed = Some((*at, click));
+                for (click, words) in &look.keys {
+                    let rect = Rect::from_min_size(pos2(x, place.min.y), vec2(action, 30.0));
+                    let id = ui.scope_id().with(("other app", *at, *words));
+                    if parts::key(ui, rect, id, words, *click == Click::Remove).clicked() {
+                        pressed = Some((*at, *click));
                     }
-                    x += wide + 6.0;
+                    x += action + 6.0;
                 }
                 let rect = Rect::from_min_size(pos2(x, place.min.y), vec2(copy_width, 30.0));
                 if parts::key(ui, rect, ui.scope_id().with(("other app copy", *at)), copy, false).clicked() {
@@ -298,12 +307,15 @@ fn connect_one(ui: &mut egui::Ui, view: &mut View) {
             ui.ctx().copy_text(setup);
             view.said = Some((Tone::Good, t("mcp.copied", "Copied.").to_owned()));
         }
-        (Some((at, click)), Some(program)) => start_click(&ctx, &mut view.tiles[at], program, click),
+        (Some((at, click)), Some(program)) => {
+            view.copied = None;
+            start_click(&ctx, &mut view.tiles[at], program, click);
+        }
         _ => {}
     }
     // What Copy setup copies: the last one copied, or Claude's.
-    let shown = view.copied.unwrap_or(Company::Claude);
-    let open = view.copied.is_some();
+    let shown = view.shown.unwrap_or(Company::Claude);
+    let open = std::mem::take(&mut view.reveal_copied);
     parts::fold(ui, "mcp what gets copied", t("mcp.what_copied", "What gets copied"), open, |ui| {
         if let Some(program) = program.as_deref() {
             parts::code(ui, &setup_message(shown, program));
@@ -318,9 +330,10 @@ struct TileLook {
     state: (Tone, String),
     /// Added to every app found: the line has a green light.
     added: bool,
-    /// The key that fits where SoftPresenter stands (Add, Replace or Remove), with its words;
-    /// none while a look or a click is under way, or where nothing is found.
-    key: Option<(Click, &'static str)>,
+    /// The keys that fit where SoftPresenter stands, with their words: Replace where another
+    /// program has the entry, Add while an app hasn't got it, Remove (quiet) once one has; none
+    /// while a look or a click is under way, or where nothing is found.
+    keys: Vec<(Click, &'static str)>,
     /// Copy setup has just copied this tile's message.
     copied: bool,
     /// Claude's tile while Claude Code isn't found here: a link to get it.
@@ -352,31 +365,46 @@ fn tile_look(tile: &Tile, copied: Option<Company>) -> TileLook {
     } else {
         (Tone::Plain, tf("mcp.found", "{apps} found", &[("apps", &connect::and_list(&names))]))
     };
-    let key = if busy || tile.found.is_empty() || known.is_none() {
-        None
-    } else if any(|s| matches!(s, Stands::Other { .. })) {
-        Some((Click::Replace, t("mcp.replace", "Replace")))
-    } else if added {
-        Some((Click::Remove, t("mcp.remove", "Remove")))
-    } else {
-        Some((Click::Add, t("mcp.add", "Add")))
-    };
+    let mut keys = Vec::new();
+    if !busy && !tile.found.is_empty() && known.is_some() {
+        if any(|s| matches!(s, Stands::Other { .. })) {
+            keys.push((Click::Replace, t("mcp.replace", "Replace")));
+        }
+        if any(|s| matches!(s, Stands::Missing | Stands::Trouble(_))) {
+            keys.push((Click::Add, t("mcp.add", "Add")));
+        }
+        if any(|s| *s == Stands::Added) {
+            keys.push((Click::Remove, t("mcp.remove", "Remove")));
+        }
+    }
     let get_claude_code =
         tile.company == Some(Company::Claude) && !busy && !tile.found.iter().any(|(app, _, _)| *app == App::ClaudeCode);
     let copied = tile.company.is_some() && tile.company == copied;
-    TileLook { name, company: tile.company, state, added, key, copied, get_claude_code }
+    TileLook { name, company: tile.company, state, added, keys, copied, get_claude_code }
 }
 
-/// A tile's keys, row by row: Add (or Remove, or Replace) where it applies, then Copy setup; side
-/// by side while they fit, else one above the other.
+/// How wide an Add, Replace or Remove key is: as wide as the longest of the three, so nothing
+/// beside it moves when one becomes another.
+fn action_width(ui: &egui::Ui) -> f32 {
+    let words = [t("mcp.add", "Add"), t("mcp.replace", "Replace"), t("mcp.remove", "Remove")];
+    crate::studio::widest(ui, &words, &egui::FontId::proportional(12.5)) + 26.0
+}
+
+/// How wide Copy setup is: as wide as Copied with its light, or Copy setup, whichever is longer.
+fn copy_width(ui: &egui::Ui) -> f32 {
+    let font = egui::FontId::proportional(12.5);
+    let copied = crate::studio::widest(ui, &[t("mcp.copied_key", "Copied")], &font) + 14.0;
+    crate::studio::widest(ui, &[t("mcp.copy_setup", "Copy setup")], &font).max(copied) + 26.0
+}
+
+/// A tile's keys, row by row: those that apply, then Copy setup; side by side while they fit,
+/// else one above another. Each keeps the width of its longest wording.
 fn tile_keys(ui: &egui::Ui, look: &TileLook, room: f32) -> Vec<Vec<(Click, &'static str, f32)>> {
     let copy = if look.copied { t("mcp.copied_key", "Copied") } else { t("mcp.copy_setup", "Copy setup") };
-    let mut keys: Vec<(Click, &'static str, f32)> = Vec::new();
-    if let Some((click, words)) = look.key {
-        keys.push((click, words, parts::key_size(ui, words).x));
-    }
-    // Copied carries a light before its words.
-    keys.push((Click::Copy, copy, parts::key_size(ui, copy).x + if look.copied { 14.0 } else { 0.0 }));
+    let action = action_width(ui);
+    let mut keys: Vec<(Click, &'static str, f32)> =
+        look.keys.iter().map(|(click, words)| (*click, *words, action)).collect();
+    keys.push((Click::Copy, copy, copy_width(ui)));
     let wide: f32 = keys.iter().map(|(_, _, wide)| wide).sum::<f32>() + 6.0 * (keys.len() - 1) as f32;
     if wide <= room { vec![keys] } else { keys.into_iter().map(|key| vec![key]).collect() }
 }
@@ -388,9 +416,11 @@ fn tile_height(ui: &egui::Ui, look: &TileLook, width: f32) -> f32 {
     let name = parts::words(ui, &look.name, semibold(16.0), TEXT, 0.0, text);
     let state_room = text - if look.added { 14.0 } else { 0.0 };
     let state = parts::words(ui, &look.state.1, egui::FontId::proportional(12.0), TEXT_DIM, 0.0, state_room);
+    // Room for two lines of it whatever it says now, so a tile doesn't grow when it changes.
+    let state_height = state.size().y.max(2.0 * state.size().y / state.rows.len().max(1) as f32);
     let rows = tile_keys(ui, look, text).len() as f32;
     let link = if look.get_claude_code { 20.0 } else { 0.0 };
-    14.0 + 36.0 + 10.0 + name.size().y + 3.0 + state.size().y + link + 14.0 + rows * 30.0 + (rows - 1.0) * 6.0 + 14.0
+    14.0 + 36.0 + 10.0 + name.size().y + 3.0 + state_height + link + 14.0 + rows * 30.0 + (rows - 1.0) * 6.0 + 14.0
 }
 
 /// A company's tile in `rect`: its logo (its initials until there is one), its name, where
@@ -489,12 +519,17 @@ fn logo_of(company: Company) -> Option<Logo> {
 
 /// Starts a click's work on the tile's own thread (an app's own command can take a moment).
 fn start_click(ctx: &egui::Context, tile: &mut Tile, program: &Path, click: Click) {
+    // Copy setup copies; it never changes an app's settings.
+    if click == Click::Copy {
+        return;
+    }
     let places: Vec<(App, Place)> = tile.found.iter().map(|(app, place, _)| (*app, place.clone())).collect();
     let program = program.to_owned();
     tile.said = None;
     tile.job = Some(on_a_thread(ctx, move || {
         let done = match click {
-            Click::Add | Click::Copy => connect::add_all(&places, &program, false),
+            Click::Add => connect::add_all(&places, &program, false),
+            Click::Copy => Vec::new(),
             Click::Replace => connect::add_all(&places, &program, true),
             Click::Remove => connect::remove_ours(&places, &program),
         };
@@ -549,6 +584,7 @@ How to use it
 fn came_into_view(ctx: &egui::Context, view: &mut View) {
     view.program = connect::program();
     view.said = None;
+    view.copied = None;
     // A tile with a click under way keeps it, and the answer it will bring.
     let mut busy: Vec<Tile> = view.tiles.drain(..).filter(|tile| tile.job.is_some()).collect();
     let groups: Vec<(Option<Company>, Vec<App>)> = Company::ALL
@@ -641,7 +677,19 @@ mod tests {
     #[test]
     fn the_page_shows_the_three_choices_and_a_tile_for_each_company() {
         let ctx = crate::studio::tests::styled();
-        let mut view = View::default();
+        // Tiles made here, and the page counted as in view, so nothing looks for (or asks) any
+        // assistant app on this computer.
+        let tiles = Company::ALL
+            .into_iter()
+            .map(|company| Tile {
+                company: Some(company),
+                apps: company.apps(),
+                found: Vec::new(),
+                said: None,
+                job: None,
+            })
+            .collect();
+        let mut view = View { tiles, drawn: Some(ctx.cumulative_pass_nr()), ..View::default() };
         let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| page(ui, &mut view));
         for words in [
             "Off",

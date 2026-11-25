@@ -258,7 +258,7 @@ fn open_panel_window(
     // opens wider and keeps room for both.
     let (size, least): ((f64, f64), (f64, f64)) = match kind {
         Panel::Screens => ((780.0, 640.0), (640.0, 440.0)),
-        Panel::Settings => ((1040.0, 720.0), (820.0, 680.0)),
+        Panel::Settings => ((1040.0, 720.0), (820.0, 560.0)),
     };
     // Testing aid: SOFTPRESENTER_SETTINGS_SIZE=1100x700 opens the Settings window at that size
     // (points), to see its pages at the sizes the design was drawn at.

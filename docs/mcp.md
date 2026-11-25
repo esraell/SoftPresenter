@@ -62,8 +62,8 @@ to add by hand, as those apps keep them.
 | Claude: Claude Desktop (Mac, Windows) | its folder is there (`~/Library/Application Support/Claude`, `%APPDATA%\Claude`) | `mcpServers.softpresenter` in its `claude_desktop_config.json` |
 | Claude: Claude Code | `claude` is found | `claude mcp add --scope user softpresenter -- PROGRAM mcp` |
 | ChatGPT: Codex (the ChatGPT app, Codex's command line and editor extensions share its setting) | `codex` is found | `codex mcp add softpresenter -- PROGRAM mcp`, which writes `~/.codex/config.toml` |
-| More: Cursor | `~/.cursor` is there | `mcpServers.softpresenter` in `~/.cursor/mcp.json` |
-| More: VS Code / GitHub Copilot | `~/.copilot` (or `COPILOT_HOME`) is there | `mcpServers.softpresenter` in its `mcp-config.json`, with `"type": "stdio"` and `"tools": ["*"]` |
+| Other apps: Cursor | `~/.cursor` is there | `mcpServers.softpresenter` in `~/.cursor/mcp.json` |
+| Other apps: VS Code / GitHub Copilot | `~/.copilot` (or `COPILOT_HOME`) is there | `mcpServers.softpresenter` in its `mcp-config.json`, with `"type": "stdio"` and `"tools": ["*"]` |
 | Gemini: Antigravity (which took the Gemini command line's place) | `~/.gemini/antigravity`, `~/.gemini/antigravity-cli` or `~/.gemini/config` is there | `mcpServers.softpresenter` in `~/.gemini/config/mcp_config.json` |
 | Grok: Grok Build | `grok` is found | `grok mcp add -s user softpresenter -- PROGRAM mcp`, which writes `~/.grok/config.toml` |
 

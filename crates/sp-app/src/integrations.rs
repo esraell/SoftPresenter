@@ -121,10 +121,10 @@ fn list(
             about: t("integrations.songbooks.service", "Free songbooks, one for each language"),
             state: match &songbooks_state {
                 Some((have, words)) => (if *have { GOOD } else { TEXT_FAINT }, words.clone()),
-                None => soon_words(),
+                None => (TEXT_FAINT, String::new()),
             },
-            key: if songbooks_offered { open } else { soon_key },
-            soon: !songbooks_offered,
+            key: open,
+            soon: false,
         },
         Service {
             mark: Mark::Logo(Logo::VoxLive),
@@ -160,23 +160,27 @@ fn list(
             soon: !timelychurch.offered,
         },
     ];
+    // Worship Leader App's card only where the song catalog is offered, as before (releases
+    // don't offer it until Worship Leader App answers).
+    let shown: Vec<(usize, &Service)> =
+        services.iter().enumerate().filter(|(id, _)| *id != 0 || songbooks_offered).collect();
     // Two across where there is room for 240 each, one above another where there isn't.
     const BETWEEN: f32 = 12.0;
     let across = (((width + BETWEEN) / (240.0 + BETWEEN)).floor() as usize).clamp(1, 2);
     let each = (width - BETWEEN * (across - 1) as f32) / across as f32;
-    let tallest = services.iter().map(|service| card_height(ui, service, each)).fold(176.0, f32::max);
-    let count = services.len() + 1;
+    let tallest = shown.iter().map(|(_, service)| card_height(ui, service, each)).fold(176.0, f32::max);
+    let count = shown.len() + 1;
     let rows = count.div_ceil(across);
     let (grid, _) = ui.allocate_exact_size(vec2(width, rows as f32 * (tallest + BETWEEN) - BETWEEN), Sense::hover());
     let mut opened = None;
-    for (index, service) in services.iter().enumerate() {
+    for (index, (id, service)) in shown.iter().enumerate() {
         let corner =
             grid.min + vec2((index % across) as f32 * (each + BETWEEN), (index / across) as f32 * (tallest + BETWEEN));
-        if service_card(ui, Rect::from_min_size(corner, vec2(each, tallest)), service, index) {
-            opened = Some(index);
+        if service_card(ui, Rect::from_min_size(corner, vec2(each, tallest)), service, *id) {
+            opened = Some(*id);
         }
     }
-    let index = services.len();
+    let index = shown.len();
     let corner =
         grid.min + vec2((index % across) as f32 * (each + BETWEEN), (index / across) as f32 * (tallest + BETWEEN));
     more_to_come(ui, Rect::from_min_size(corner, vec2(each, tallest)));
@@ -1541,16 +1545,12 @@ mod tests {
     }
 
     #[test]
-    fn the_songbooks_are_coming_soon_unless_the_catalog_is_offered() {
+    fn the_songbooks_are_listed_only_where_the_catalog_is_offered() {
         crate::i18n::with_language(crate::i18n::Language::English, || {
             let without = words_drawn(None);
             assert!(without.iter().any(|w| w == "VoxLive") && without.iter().any(|w| w == "Canva Sync"), "{without:?}");
-            assert!(without.iter().any(|w| w == "Worship Leader App"), "{without:?}");
-            assert_eq!(
-                without.iter().filter(|w| *w == "COMING SOON").count(),
-                2,
-                "songbooks and TimelyChurch: {without:?}"
-            );
+            assert!(!without.iter().any(|w| w.contains("Worship Leader App")), "{without:?}");
+            assert_eq!(without.iter().filter(|w| *w == "COMING SOON").count(), 1, "TimelyChurch only: {without:?}");
             let mut songbooks = crate::songbooks::View::default();
             let with = words_drawn(Some(&mut songbooks));
             assert!(with.iter().any(|w| w == "Worship Leader App"), "{with:?}");
