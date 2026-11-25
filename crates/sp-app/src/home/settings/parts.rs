@@ -107,6 +107,15 @@ pub fn row(ui: &mut egui::Ui, label: &str, note: &str, control: egui::Vec2, draw
     draw(ui, Rect::from_min_size(at, control));
 }
 
+/// A line of small words in a card, wrapped (the design's note).
+pub fn note(ui: &mut egui::Ui, text: &str) {
+    let width = ui.available_width().min(600.0);
+    let galley = words(ui, text, FontId::proportional(12.0), TEXT_FAINT, 0.0, width);
+    let (place, _) = ui.allocate_exact_size(vec2(ui.available_width(), galley.size().y), Sense::hover());
+    ui.painter().galley(place.min, galley, TEXT_FAINT);
+    ui.add_space(12.0);
+}
+
 /// How large an On/Off key is: as wide as the longer of its two words, in the language set.
 pub fn on_off_size(ui: &egui::Ui) -> egui::Vec2 {
     let words = [t("settings.on", "On"), t("settings.off", "Off")];
@@ -127,6 +136,10 @@ pub enum Picture {
     Strip([bool; 3]),
     /// How one slide gives way to the next (`None`: the dots of More…).
     Transition(Option<sp_model::TransitionKind>),
+    /// A language's flag.
+    Flag(crate::i18n::Language),
+    /// A small screen: this computer's.
+    Computer,
 }
 
 impl Picture {
@@ -135,6 +148,7 @@ impl Picture {
         match self {
             Picture::Strip(_) => (13.0, 6.0),
             Picture::Transition(_) => (30.0, 6.0),
+            Picture::Flag(_) | Picture::Computer => (20.0, 6.0),
         }
     }
 
@@ -143,6 +157,7 @@ impl Picture {
         match self {
             Picture::Strip(_) => 66.0,
             Picture::Transition(_) => 56.0,
+            Picture::Flag(_) | Picture::Computer => 30.0,
         }
     }
 
@@ -180,6 +195,8 @@ pub fn picks(
         .rev()
         .find(|across| (width - BETWEEN * (*across - 1) as f32) / *across as f32 >= least_wide)
         .unwrap_or(1);
+    // Rows as even as they can be: five keys that don't fit across go three and two.
+    let across = keys.len().div_ceil(keys.len().div_ceil(across));
     let each = (width - BETWEEN * (across - 1) as f32) / across as f32;
     let inner = (each - 24.0).max(10.0);
     let laid: Vec<_> = keys
@@ -317,6 +334,15 @@ fn paint_picture(painter: &egui::Painter, picture: Picture, at: Pos2, ink: Color
                 }
             }
         }
+        Picture::Flag(language) => flag(painter, Rect::from_min_size(at, vec2(30.0, 20.0)), language),
+        Picture::Computer => {
+            // The design's small screen: 16 × 10 on a stand, in 24 × 16, drawn 30 × 20.
+            let unit = 1.25;
+            let screen = Rect::from_min_size(at + vec2(4.0 * unit, 1.5 * unit), vec2(16.0 * unit, 10.0 * unit));
+            let stroke = Stroke::new(1.4 * unit, TEXT_DIM);
+            painter.rect_stroke(screen, 1.5 * unit, stroke, StrokeKind::Middle);
+            painter.line_segment([at + vec2(9.0 * unit, 14.5 * unit), at + vec2(15.0 * unit, 14.5 * unit)], stroke);
+        }
     }
 }
 
@@ -391,4 +417,51 @@ fn clip_x(points: &[Pos2], x: f32, keep_right: bool) -> Vec<Pos2> {
         }
     }
     out
+}
+/// A language's flag, 30 × 20 with small rounded corners and a faint ring: the flag most people
+/// know that language by (the United States for English, Spain, Russia, Ukraine).
+pub fn flag(painter: &egui::Painter, rect: Rect, language: crate::i18n::Language) {
+    use crate::i18n::Language;
+    const R: u8 = 3;
+    let unit = rect.height() / 16.0;
+    let band = |from: f32, to: f32| {
+        Rect::from_min_max(pos2(rect.min.x, rect.min.y + from * unit), pos2(rect.max.x, rect.min.y + to * unit))
+    };
+    let top = CornerRadius { nw: R, ne: R, sw: 0, se: 0 };
+    let foot = CornerRadius { nw: 0, ne: 0, sw: R, se: R };
+    match language {
+        Language::English => {
+            let (red, white) = (Color32::from_rgb(0xb2, 0x22, 0x34), Color32::WHITE);
+            let stripe = 16.0 / 7.0;
+            for at in 0..7 {
+                let corners = match at {
+                    0 => top,
+                    6 => foot,
+                    _ => CornerRadius::ZERO,
+                };
+                let colour = if at % 2 == 0 { red } else { white };
+                painter.rect_filled(band(at as f32 * stripe, (at + 1) as f32 * stripe), corners, colour);
+            }
+            let canton = Rect::from_min_size(rect.min, vec2(10.5 * unit, 4.0 * stripe * unit));
+            painter.rect_filled(
+                canton,
+                CornerRadius { nw: R, ne: 0, sw: 0, se: 0 },
+                Color32::from_rgb(0x3c, 0x3b, 0x6e),
+            );
+        }
+        Language::Spanish => {
+            painter.rect_filled(rect, R, Color32::from_rgb(0xaa, 0x15, 0x1b));
+            painter.rect_filled(band(4.0, 12.0), 0.0, Color32::from_rgb(0xf1, 0xbf, 0x00));
+        }
+        Language::Russian => {
+            painter.rect_filled(band(0.0, 5.33), top, Color32::WHITE);
+            painter.rect_filled(band(5.33, 10.67), 0.0, Color32::from_rgb(0x00, 0x39, 0xa6));
+            painter.rect_filled(band(10.67, 16.0), foot, Color32::from_rgb(0xd5, 0x2b, 0x1e));
+        }
+        Language::Ukrainian => {
+            painter.rect_filled(band(0.0, 8.0), top, Color32::from_rgb(0x00, 0x57, 0xb7));
+            painter.rect_filled(band(8.0, 16.0), foot, Color32::from_rgb(0xff, 0xd7, 0x00));
+        }
+    }
+    painter.rect_stroke(rect, R, Stroke::new(1.0, Color32::from_white_alpha(31)), StrokeKind::Outside);
 }

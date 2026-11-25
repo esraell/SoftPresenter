@@ -1,10 +1,9 @@
 {
   "_note": "Español de España; see topbar.json. The Settings window as home/settings.rs draws it: the list's four groups, each page's name and what its row says, the Set Up button, the pages (Screens, Slides, Groups, Language, Keys, Command line, Song files, About). Rows of lang-tables.js of the design were used where they exist (Settings, Slides, Keys, On/Off as Sí/No, Screens, Groups, Integrations, Copyright, Song files, Reload songs, Set up SoftPresenter…).",
   "settings.language": "Idioma",
-  "settings.language.about": "Los textos del propio SoftPresenter",
+  "settings.language.about": "Los textos del propio SoftPresenter: botones, menús y mensajes. Cambia al momento",
   "settings.language.computer": "El idioma del ordenador ({language})",
-  "settings.language.detail": "Botones, menús y mensajes. Cambia al momento.",
-  "settings.language.not_this": "Los idiomas de tus canciones y Biblias se eligen en Configuración › Idiomas; la página de la Biblia tiene su propio idioma de lectura.",
+  "settings.language.not_this": "Las canciones y las Biblias conservan sus propios idiomas: Configurar SoftPresenter › Idiomas. La página de la Biblia tiene su propio idioma de lectura (Аа).",
   "settings.pane.screens": "Pantallas",
   "settings.pane.groups": "Grupos",
   "settings.pane.keys": "Teclas",
@@ -123,5 +122,6 @@
   "settings.state.connected.short": [
     "{n} activa",
     "{n} activas"
-  ]
+  ],
+  "settings.language.this_computer": "El de este ordenador"
 }

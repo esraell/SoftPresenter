@@ -15,7 +15,7 @@ use crate::studio::{
     BG, CARD, Flat, GAP, PANEL, RADIUS, RADIUS_PANEL, READY, ROW_HOVER, TEXT, TEXT_DIM, TEXT_FAINT, fixed,
     fixed_semibold, flat_button, paint_light, paint_spaced, semibold, spaced, within,
 };
-use parts::{Pick, Picture, card, on_off, on_off_size, picks, row};
+use parts::{Pick, Picture, card, note, on_off, on_off_size, picks, row};
 
 /// A page of Settings.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -721,23 +721,41 @@ fn groups_page(ui: &mut egui::Ui) {
 /// that language), then each language written in itself. A choice shows at once, in this window
 /// and every other.
 fn language_page(ui: &mut egui::Ui) {
-    crate::studio::caption(ui, &t("settings.language", "Language").to_uppercase());
-    ui.label(t("settings.language.about", "The words of SoftPresenter itself"));
-    super::language_menu(ui);
-    ui.add_space(2.0);
-    ui.label(
-        egui::RichText::new(t("settings.language.detail", "Buttons, menus and messages. Changes at once."))
-            .size(11.5)
-            .color(TEXT_DIM),
-    );
-    ui.add_space(6.0);
-    ui.label(
-        egui::RichText::new(t(
-            "settings.language.not_this",
-            "The languages your songs and Bibles show in are set in Setup \u{203a} Languages; the Bible page has its own reading language.",
-        ))
-        .size(11.5)
-        .color(TEXT_DIM),
+    use crate::i18n::Choice;
+    card(
+        ui,
+        t("settings.language", "Language"),
+        t("settings.language.about", "The words of SoftPresenter itself: buttons, menus and messages. Changes at once"),
+        None,
+        |ui| {
+            let keys: Vec<Pick> = Choice::ALL
+                .iter()
+                .map(|choice| match choice {
+                    Choice::Computer => Pick {
+                        picture: Picture::Computer,
+                        name: t("settings.language.this_computer", "This computer\u{2019}s").to_owned(),
+                        line: crate::i18n::computer().unwrap_or(crate::i18n::Language::English).own_name().to_owned(),
+                    },
+                    Choice::Is(language) => Pick {
+                        picture: Picture::Flag(*language),
+                        name: language.own_name().to_owned(),
+                        line: String::new(),
+                    },
+                })
+                .collect();
+            let now = crate::i18n::choice();
+            let chosen = Choice::ALL.iter().position(|choice| *choice == now);
+            if let (Some(at), _) = picks(ui, "language", &keys, chosen, 76.0) {
+                crate::i18n::set_choice(Choice::ALL[at]);
+            }
+            note(
+                ui,
+                t(
+                    "settings.language.not_this",
+                    "Songs and Bibles keep their own languages: Set up SoftPresenter \u{203a} Languages. The Bible page has its own reading language (\u{410}\u{430}).",
+                ),
+            );
+        },
     );
 }
 
@@ -970,6 +988,21 @@ mod tests {
         assert_eq!(state.slide_view, crate::home::SlideView::Table);
         assert!(click(&ctx, &mut state, &show, "Words only"));
         assert_eq!(state.slide_view, crate::home::SlideView::Easy);
+    }
+
+    #[test]
+    fn language_shows_each_language_in_its_own_name_after_the_computers() {
+        let ctx = crate::studio::tests::styled();
+        let show = Show::new(Vec::new());
+        let mut state = HomeState { preferences_pane: Pane::Language, ..HomeState::default() };
+        let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, &mut state, &show));
+        let place =
+            |words: &str| crate::studio::tests::place_on_top(&drawn, words).unwrap_or_else(|| panic!("{words}"));
+        let computer = place("This computer\u{2019}s");
+        for name in ["English", "Español", "Русский", "Українська"] {
+            assert!(place(name).x > computer.x, "{name} comes after the computer's");
+        }
+        drawn.drop_without_applying_deltas();
     }
 
     #[test]
