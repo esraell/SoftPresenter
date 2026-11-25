@@ -5,6 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+- The clearing keys work in the Edit view too: off a Mac F1 to F6, as in the Service view, and Escape once nothing is picked, being typed or open there (a first Escape still lets go of the picked box, puts back words being typed or closes a menu; the next one clears the screens). Space, the arrows and the letters still never change the screens from the Edit view.
 - The six clear buttons on the right are in the order the screens stack the layers, from the back: Media, Slide, Announce, then Props, Messages and Audio. Their keys are the same.
 - The phone and tablet Remote Control page speaks the app's language: Spanish when the app is in Spanish, from the sign-in on, with the same words as the app.
 - Claude and other AI assistants can help prepare services through `sp mcp`: find songs and Bible passages, make songs and playlists. Switch it on in Settings › Integrations; changing the screens needs a second switch, and the assistant asks you each time, showing the words that will go up.

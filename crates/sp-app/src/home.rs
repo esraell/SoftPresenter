@@ -2212,6 +2212,37 @@ impl HomeState {
             || !self.bible.options.details.is_empty()
     }
 
+    /// Whether an Escape pressed in the Edit view has something there to do, which it does
+    /// instead of clearing the screens: a box's words being typed in (Escape puts them back), a
+    /// name being retyped (it keeps the old one), objects picked on the canvas (it lets go of
+    /// them), the sheet that adds a theme version (it closes it), a drag (it stops it), or
+    /// anything over the window (a menu, a question, a sheet). Read from the state, not from
+    /// which control has the keyboard: the show's keys are read before the window draws, and an
+    /// Escape that clears the screens never reaches the editor.
+    pub fn escape_edits(&self, ctx: &egui::Context) -> bool {
+        let draft = self.editing.as_ref().is_some_and(|draft| {
+            draft.selected.is_some()
+                || !draft.also.is_empty()
+                || draft.typing.is_some()
+                || draft.renaming.is_some()
+                || draft.drag.is_some()
+                || draft.marquee.is_some()
+        });
+        let renaming = self.renaming_song.is_some()
+            || self.renaming_group.is_some()
+            || self.renaming_theme.is_some()
+            || self.renaming_template.is_some()
+            || self.prop_rename.is_some()
+            || self.stage_rename.is_some();
+        draft
+            || renaming
+            || self.version_sheet.is_some()
+            || self.escape_taken_above(ctx)
+            || ctx.text_edit_focused()
+            || ctx.dragged_id().is_some()
+            || ctx.input(|input| input.pointer.any_down())
+    }
+
     /// Whether the playlist chooser or the Reflow editor is open in the Service view, where
     /// Escape closes it instead of clearing the screens.
     pub fn show_view_overlay_open(&self) -> bool {

@@ -772,6 +772,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   under the preview, and the list of keys and Settings › Key Mappings say "Button only" for
   it. On Windows and Linux F1 clears everything too, and F2, F3, F4, F5 and F6 clear the slide,
   the media, the props, the audio and the message; the layer keys' tooltips name them there.
+  In the Edit view (its slides, themes, props and stage layouts alike) the keyboard is the
+  editor's, and only the keys that clear reach the screens: the F keys as anywhere else (not
+  while a text box has the keyboard), and Escape only when it has nothing to do in the editor:
+  no words being typed in a box (Escape puts them back), no name being retyped, nothing picked
+  on the canvas (Escape lets go of it), no menu, question or sheet open (Escape closes it) and
+  no drag going on (Escape stops it). So a first Escape lets go of the picked object and a
+  second clears the screens. Space, the arrows, Home, End, Enter and the letters never run the
+  show from the Edit view.
 - **The Edit view** edits four kinds of thing, chosen by a switch at the top of its left
   column: a song's Slides, the Themes and their templates, the Props, and the Stage screens'
   layouts. View › Themes, Control-T and `sp view themes` open

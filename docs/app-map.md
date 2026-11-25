@@ -123,6 +123,16 @@ Every command, with its words, is listed by `sp menu`; any of them can be chosen
 (SoftPresenter, File, Edit, View, Window, Help); `COMMANDS` is the longer list `sp menu` uses, and
 each of those has its place in the window. Windows and Linux have no menu bar.
 
+### Keys in the Edit view
+
+The keyboard is the editor's: Space, the arrows, Home, End, Enter and the letters never run the
+show from here. Only the keys that clear reach the screens (`home_key_command` in `main.rs`):
+
+| Key | Does |
+|---|---|
+| F1, F2, F3, F4, F5, F6 (off a Mac) | Clear all, slide, media, props, audio, messages, as in the Service view; not while a text box has the keyboard |
+| Escape | First whatever it does in the editor: puts back the words being typed in a box, keeps the old name of one being retyped, lets go of the picked objects, closes a menu, a question or the sheet adding a theme version, stops a drag. With none of those (`HomeState::escape_edits`), it clears all |
+
 ## The Edit view (slides, themes, props, stage)
 
 ```
@@ -189,7 +199,8 @@ each of those has its place in the window. Windows and Linux have no menu bar.
   the Text tab starts with what it shows and its own settings (which timer, the clock's form,
   lines of notes); for a screen picture the Shape tab starts with its screen, corners and
   label. The arrows move an object 10, Shift one pixel (on a slide 1, and Shift 10). While it
-  is open the keyboard does not run the show, as in the rest of Edit.
+  is open the keyboard does not run the show, as in the rest of Edit: only the keys that clear
+  reach it (see Keys in the Edit view).
 - **Themes** (Edit › Themes; View › Themes, Control-T and `sp view themes` open it): the same canvas, tools and inspector, editing a theme's
   layouts (templates). A layout's text boxes say where each kind of words goes; its shapes,
   pictures and videos are drawn behind the words on every slide that uses it. The left column

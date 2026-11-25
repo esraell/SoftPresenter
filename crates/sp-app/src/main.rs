@@ -980,6 +980,42 @@ fn show_key_held_back(state: &home::HomeState, ctx: &egui::Context, key: &Key) -
         && matches!(key, Key::Named(NamedKey::ArrowLeft | NamedKey::ArrowRight | NamedKey::Space | NamedKey::Enter))
 }
 
+/// What a key pressed in the home window does to the show (with the F keys clearing or not, as
+/// `show_key_command_on`), or `None` when the key is the window's: while a text box is typed
+/// in, a question or the new-song sheet is open, or the key is held back (`show_key_held_back`).
+/// Escape clears the screens only when there is nothing else for it to close. In the Edit view
+/// the keyboard is the editor's, and only the keys that clear reach the show: off a Mac F1 to
+/// F6, and Escape only when it has nothing to do in the editor (`HomeState::escape_edits`:
+/// no words being typed, no name being retyped, nothing picked on the canvas, no drag, nothing
+/// open over the window). Space, the arrows, Home, End and the letters stay the editor's.
+fn home_key_command(
+    state: &home::HomeState,
+    ctx: &egui::Context,
+    key: &Key,
+    show: &Show,
+    f_keys: bool,
+) -> Option<Command> {
+    if ctx.text_edit_focused()
+        || state.new_song_sheet.is_some()
+        || state.alert_open()
+        || show_key_held_back(state, ctx, key)
+    {
+        return None;
+    }
+    let command = show_key_command_on(key, show, f_keys)?;
+    let escape = matches!(key, Key::Named(NamedKey::Escape));
+    if escape && escape_closes_something(state, ctx) {
+        return None;
+    }
+    if state.edit_kind().is_some() {
+        let clears = matches!(command, Command::ClearAll | Command::Clear(_));
+        if !clears || (escape && state.escape_edits(ctx)) {
+            return None;
+        }
+    }
+    Some(command)
+}
+
 /// Whether `/` is free to open the find box: the keyboard is not in a text field, the Edit view
 /// is not open, and no sheet, question or menu is up.
 fn find_key_is_free(state: &home::HomeState, ctx: &egui::Context) -> bool {
@@ -10611,25 +10647,16 @@ impl ApplicationHandler<AppEvent> for App {
         // control happens to have the keyboard. Typing in a text box is left alone.
         if let WindowEvent::KeyboardInput { event: key, .. } = &event
             && key.state == ElementState::Pressed
-            && !running.egui_ctx.text_edit_focused()
-            && running.home_state.edit_kind().is_none()
-            && running.home_state.new_song_sheet.is_none()
-            && !running.home_state.alert_open()
             && !self.held.super_key()
             && !self.held.control_key()
-            && !show_key_held_back(&running.home_state, &running.egui_ctx, &key.logical_key)
-            && let Some(command) = show_key_command(&key.logical_key, &self.show)
+            && let Some(command) =
+                home_key_command(&running.home_state, &running.egui_ctx, &key.logical_key, &self.show, keys::f_keys())
         {
-            // Escape clears the screen only when there is nothing else for it to close.
-            let something_open = escape_closes_something(&running.home_state, &running.egui_ctx);
-            let escape = matches!(key.logical_key, Key::Named(NamedKey::Escape));
-            if !(escape && something_open) {
-                let logical = key.logical_key.clone();
-                if !self.pick_key(&logical) {
-                    self.show_key(command);
-                }
-                return;
+            let logical = key.logical_key.clone();
+            if !self.pick_key(&logical) {
+                self.show_key(command);
             }
+            return;
         }
         // Enter puts the slide picked on screen, or the open item of the playlist from its first
         // slide, when no control has the keyboard and nothing is open over the window. Not when
@@ -11936,6 +11963,125 @@ mod tests {
         state.numbers = None;
         state.key_sheet = true;
         assert!(show_key_held_back(&state, &ctx, &space), "nothing runs the show under the list of keys");
+    }
+
+    #[test]
+    fn in_the_edit_view_only_the_keys_that_clear_reach_the_show_and_escape_edits_first() {
+        use sp_engine::Layer;
+        let song = sp_model::parse_song_text("Song", "[Verse 1]\nOne\n\n[Chorus]\nTwo\n");
+        let show = Show::new(vec![Arc::new(song)]);
+        let ctx = egui::Context::default();
+        let named = Key::Named;
+        let key = |state: &home::HomeState, key: Key, f_keys| home_key_command(state, &ctx, &key, &show, f_keys);
+        let editing = EditDraft::of(&show, sp_engine::SlideRef { presentation: 0, slide: 0 });
+        let mut state = home::HomeState { editing, ..home::HomeState::default() };
+        assert!(state.editing.is_some());
+        // Off a Mac the F keys clear while editing, as in the Service view.
+        assert_eq!(key(&state, named(NamedKey::F1), true), Some(Command::ClearAll));
+        for (f, layer) in [
+            (NamedKey::F2, Layer::Slides),
+            (NamedKey::F3, Layer::Media),
+            (NamedKey::F4, Layer::Props),
+            (NamedKey::F5, Layer::Audio),
+            (NamedKey::F6, Layer::Messages),
+        ] {
+            assert_eq!(key(&state, named(f), true), Some(Command::Clear(layer)), "{f:?}");
+            assert_eq!(key(&state, named(f), false), None, "{f:?} on a Mac is the system's");
+        }
+        // With nothing picked, typed or open, Escape clears everything, on every computer.
+        assert_eq!(key(&state, named(NamedKey::Escape), true), Some(Command::ClearAll));
+        assert_eq!(key(&state, named(NamedKey::Escape), false), Some(Command::ClearAll));
+        // The keys that run the slides stay the editor's: they never put a slide up from here.
+        for other in [
+            named(NamedKey::Space),
+            named(NamedKey::ArrowRight),
+            named(NamedKey::ArrowLeft),
+            named(NamedKey::Home),
+            named(NamedKey::End),
+            named(NamedKey::Enter),
+            Key::Character("c".into()),
+            Key::Character("1".into()),
+        ] {
+            assert_eq!(key(&state, other.clone(), true), None, "{other:?} is the editor's");
+        }
+        // Escape has an editing meaning first, and then it clears nothing.
+        let escape = |state: &home::HomeState| key(state, named(NamedKey::Escape), false);
+        let first = state.editing.as_ref().and_then(|draft| draft.slide.objects.first().map(|object| object.id));
+        assert!(first.is_some());
+        let edit = |state: &mut home::HomeState, change: &dyn Fn(&mut EditDraft)| {
+            if let Some(draft) = state.editing.as_mut() {
+                change(draft);
+            }
+        };
+        edit(&mut state, &|draft| draft.selected = first);
+        assert_eq!(escape(&state), None, "an object picked: Escape lets go of it");
+        assert_eq!(key(&state, named(NamedKey::F2), true), Some(Command::Clear(Layer::Slides)), "F2 still clears");
+        edit(&mut state, &|draft| draft.typing = first);
+        assert_eq!(escape(&state), None, "words being typed: Escape puts them back");
+        edit(&mut state, &|draft| draft.selected = None);
+        assert_eq!(escape(&state), None, "still typing, though nothing is picked");
+        edit(&mut state, &|draft| draft.typing = None);
+        edit(&mut state, &|draft| draft.renaming = Some((sp_model::Uuid::nil(), "Main".to_owned())));
+        assert_eq!(escape(&state), None, "an object's name being retyped");
+        edit(&mut state, &|draft| draft.renaming = None);
+        state.stage_rename = Some((0, "Words".to_owned()));
+        assert_eq!(escape(&state), None, "a stage layout's name being retyped");
+        state.stage_rename = None;
+        state.version_sheet = Some(home::VersionSheet::adding(&state));
+        assert_eq!(escape(&state), None, "the sheet that adds a theme version");
+        state.version_sheet = None;
+        egui::Popup::open_id(&ctx, egui::Id::unique("a menu"));
+        assert_eq!(escape(&state), None, "a menu open over the editor");
+        assert_eq!(key(&state, named(NamedKey::F3), true), Some(Command::Clear(Layer::Media)), "F3 still clears");
+        egui::Popup::close_all(&ctx);
+        assert_eq!(escape(&state), Some(Command::ClearAll), "nothing left for it to do");
+        // A text box with the keyboard (an inspector field, a name) keeps every key, F keys too.
+        let frame = |focus: bool| {
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                let mut words = String::new();
+                let field = ui.text_edit_singleline(&mut words);
+                if focus {
+                    field.request_focus();
+                }
+            })
+            .drop_without_applying_deltas();
+        };
+        frame(true);
+        frame(true);
+        assert_eq!(escape(&state), None, "a field has the keyboard");
+        assert_eq!(key(&state, named(NamedKey::F2), true), None, "and the F keys wait, as in the Service view");
+        ctx.memory_mut(|memory| memory.stop_text_input());
+        frame(false);
+        assert_eq!(escape(&state), Some(Command::ClearAll));
+        // A drag going on (a slide being moved in the list, a box dragged round objects).
+        let press = |pressed: bool| {
+            let event = egui::Event::PointerButton {
+                pos: egui::pos2(10.0, 10.0),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let raw = egui::RawInput {
+                events: vec![egui::Event::PointerMoved(egui::pos2(10.0, 10.0)), event],
+                ..egui::RawInput::default()
+            };
+            ctx.run_ui(raw, |_| {}).drop_without_applying_deltas();
+        };
+        press(true);
+        assert_eq!(escape(&state), None, "the pointer is held down: Escape stops the drag");
+        press(false);
+        assert_eq!(escape(&state), Some(Command::ClearAll));
+        // Every kind of the Edit view is the same: the themes, the props, the stage layouts.
+        let mut props = home::HomeState { props_editor_open: true, ..home::HomeState::default() };
+        assert_eq!(key(&props, named(NamedKey::Escape), false), Some(Command::ClearAll), "the props, none yet");
+        assert_eq!(key(&props, named(NamedKey::Space), false), None);
+        props.props_editor_open = false;
+        props.stage_editor_open = true;
+        assert_eq!(key(&props, named(NamedKey::F4), true), Some(Command::Clear(Layer::Props)), "the stage layouts");
+        // And the Service view runs the show with every key, as before.
+        let service = home::HomeState::default();
+        assert_eq!(key(&service, named(NamedKey::Space), false), Some(Command::Next));
+        assert_eq!(key(&service, named(NamedKey::Escape), false), Some(Command::ClearAll));
     }
 
     #[test]
