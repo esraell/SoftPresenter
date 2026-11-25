@@ -609,7 +609,9 @@ impl Output {
         // that wasn't before), and goes on to the output through the tap.
         let (channels, rate) = (stream.config().channel_count(), stream.config().sample_rate());
         let (mixer, mixed) = rodio::mixer::mixer(channels, rate);
-        stream.mixer().add(Tap::new(mixed, channels, rate));
+        // A test copy (`SOFTPRESENTER_QUIET`) is never heard in the room.
+        let speakers_silent = std::env::var_os("SOFTPRESENTER_QUIET").is_some();
+        stream.mixer().add(Tap::new(mixed, channels, rate, speakers_silent));
         Ok(Output { _stream: stream, mixer, rate })
     }
 
@@ -643,10 +645,13 @@ struct Tap {
     copying: bool,
     /// How many chunks in a row have been silent (counted up to [`QUIET_CHUNKS`]).
     quiet: u32,
+    /// A test copy (`SOFTPRESENTER_QUIET`) sends silence to the speakers: what plays is still
+    /// mixed, timed and copied for the mix (and so for NDI), but nothing is heard in the room.
+    speakers_silent: bool,
 }
 
 impl Tap {
-    fn new(mixed: rodio::mixer::MixerSource, channels: u16, rate: u32) -> Tap {
+    fn new(mixed: rodio::mixer::MixerSource, channels: u16, rate: u32, speakers_silent: bool) -> Tap {
         Tap {
             mixed,
             channels,
@@ -660,6 +665,7 @@ impl Tap {
             began: Instant::now(),
             copying: false,
             quiet: QUIET_CHUNKS,
+            speakers_silent,
         }
     }
 }
@@ -693,7 +699,7 @@ impl Iterator for Tap {
                 }
             }
         }
-        Some(sample)
+        Some(if self.speakers_silent { 0.0 } else { sample })
     }
 }
 
@@ -997,7 +1003,7 @@ mod tests {
         // What an output plays goes through the tap on its way to the sound card: the very
         // same samples come out, in order, whether or not anybody wants a copy.
         let (mixer, mixed) = rodio::mixer::mixer(2, 44_100);
-        let mut tap = Tap::new(mixed, 2, 44_100);
+        let mut tap = Tap::new(mixed, 2, 44_100, false);
         // Nothing playing yet: silence, never the end of the sound.
         assert_eq!(tap.by_ref().take(10).collect::<Vec<f32>>(), [0.0; 10]);
         let played: Vec<f32> = (0..9000).map(|n| ((n % 200) as f32 - 100.0) / 128.0).collect();
@@ -1005,6 +1011,18 @@ mod tests {
         assert_eq!(tap.by_ref().take(9000).collect::<Vec<f32>>(), played);
         assert_eq!(tap.by_ref().take(2000).collect::<Vec<f32>>(), [0.0; 2000]);
         assert_eq!((rodio::Source::channels(&tap), rodio::Source::sample_rate(&tap)), (2, 44_100));
+    }
+
+    #[test]
+    fn a_test_copys_speakers_get_silence_while_the_sound_still_plays_through() {
+        // In a test copy the sound card hears nothing, though the sound plays on as before:
+        // the mixer is read sample by sample, at the same pace, and nothing is left behind.
+        let (mixer, mixed) = rodio::mixer::mixer(2, 44_100);
+        let mut tap = Tap::new(mixed, 2, 44_100, true);
+        let played: Vec<f32> = (0..9000).map(|n| ((n % 200) as f32 - 100.0) / 128.0).collect();
+        mixer.add(rodio::buffer::SamplesBuffer::new(2, 44_100, played));
+        assert_eq!(tap.by_ref().take(9000).collect::<Vec<f32>>(), vec![0.0; 9000]);
+        assert_eq!(tap.mixed.next(), None, "every sample was taken from the mixer");
     }
 
     struct Heard {

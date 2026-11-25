@@ -59,7 +59,7 @@ person:
 
 | Switch | What it does |
 |---|---|
-| `SOFTPRESENTER_QUIET=1` | Windows open behind everything, no full screen, no NDI, no DeckLink card; Remote Control, if switched on, listens on 127.0.0.1 only; so does receiving phone screens, which then announces nothing |
+| `SOFTPRESENTER_QUIET=1` | Windows open behind everything, no full screen, no NDI, no DeckLink card; Remote Control, if switched on, listens on 127.0.0.1 only; so does receiving phone screens, which then announces nothing; sound plays, timed and mixed as usual (NDI included), but the speakers get silence |
 | `SOFTPRESENTER_DATA=<folder>` | Keep the library, Bibles, settings and log in that folder instead of the owner's |
 | `SOFTPRESENTER_CONTROL_SOCKET=<path>` | Where `sp` and the app meet; a short path for a test copy (a socket file on Windows too) |
 | `SOFTPRESENTER_TEST_ROOT=<folder>` | For test programs built on one computer and run on another (Windows tests built on the Mac): the golden pictures and shipped Bibles are read from that copy of the repository instead of the build's own source folder |
