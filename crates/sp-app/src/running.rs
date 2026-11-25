@@ -3,6 +3,9 @@
 //! The keys act on the open item. While the open item is the one on screen, Next and Previous
 //! step through it; once Up, Down or a click has opened another item, the next Next or Previous
 //! starts that item at its first slide (a picture or video is shown, a media playlist plays).
+//! A slide from outside the playlist (a reading from the Bible page, a song from a library) is
+//! the exception while it is on screen: they go on with it, and the open item waits for Enter;
+//! once it has been cleared, they start the open item.
 //! At the end of a song Next goes on into the next song or Bible passage when Continuous is on,
 //! passing over headers, placeholders, pictures and videos; Previous goes back the same way,
 //! into the last slide of the item before. At either end of the playlist, or with Continuous
@@ -124,10 +127,14 @@ pub fn step(situation: &Situation, forward: bool) -> Do {
     let startable = |item: Option<usize>| item.filter(|at| stops.get(*at).is_some_and(|stop| stop.startable()));
     // A slide picked waits for Enter: the open item is not started over it.
     let open = situation.open.filter(|_| situation.picked.is_none());
-    // The open item is not where the show is: it is started instead.
+    // The open item is not where the show is: it is started instead. A slide from elsewhere still
+    // on screen (a reading from the Bible page, a song from a library) goes on, so it can be
+    // finished while the next item is opened; once it has been cleared, the item opened is what
+    // Next means (the owner, 2026-11-25).
     match (situation.here, startable(open)) {
         (Here::Item(here), Some(open)) if here != open => return Do::Start { item: open, last: false },
         (Here::Nothing, Some(open)) => return Do::Start { item: open, last: false },
+        (Here::Elsewhere, Some(open)) if !situation.showing => return Do::Start { item: open, last: false },
         _ => {}
     }
     let edge = if forward { situation.at_end } else { situation.at_start };
@@ -389,10 +396,66 @@ mod tests {
     fn a_song_from_a_library_stays_at_its_end_and_says_so() {
         let playlist = service();
         let s = situation(&playlist, Here::Elsewhere, Some(3), true, false);
+        assert!(s.showing, "still on screen");
         assert_eq!(step(&s, true), Do::Stay("That is the last slide.".to_owned()));
         let playlist = service();
         let s = situation(&playlist, Here::Elsewhere, Some(3), false, false);
+        assert!(s.showing, "still on screen");
         assert_eq!(step(&s, true), Do::Show(Command::Next), "the open item isn't started over a song from elsewhere");
+        assert_eq!(step(&s, false), Do::Show(Command::Previous), "nor by Previous");
+    }
+
+    #[test]
+    fn once_a_reading_from_elsewhere_is_cleared_next_starts_the_song_opened_in_the_playlist() {
+        // A verse from the Bible page went on screen and was cleared; then Beta was opened in the
+        // playlist (a click, `sp playlist go`): Next starts Beta at its first slide, not the
+        // reading's next verse (the owner, 2026-11-25). Previous too, as with nothing shown yet.
+        let playlist = service();
+        let mut s = situation(&playlist, Here::Elsewhere, Some(3), false, false);
+        s.showing = false;
+        assert_eq!(step(&s, true), Do::Start { item: 3, last: false });
+        assert_eq!(step(&s, false), Do::Start { item: 3, last: false });
+        // Cleared at the reading's last verse, or its first: the same.
+        (s.at_end, s.at_start) = (true, true);
+        assert_eq!(step(&s, true), Do::Start { item: 3, last: false });
+        assert_eq!(step(&s, false), Do::Start { item: 3, last: false });
+    }
+
+    #[test]
+    fn once_a_reading_from_elsewhere_is_cleared_next_starts_a_passage_opened_in_the_playlist() {
+        let playlist = service();
+        let mut s = situation(&playlist, Here::Elsewhere, Some(5), false, false);
+        s.showing = false;
+        assert_eq!(step(&s, true), Do::Start { item: 5, last: false });
+        // A video opened is shown, as with nothing on screen yet.
+        s.open = Some(0);
+        assert_eq!(step(&s, true), Do::Start { item: 0, last: false });
+    }
+
+    #[test]
+    fn once_a_reading_from_elsewhere_is_cleared_with_nothing_startable_open_it_goes_on_as_before() {
+        let playlist = service();
+        let mut s = situation(&playlist, Here::Elsewhere, Some(6), false, false);
+        s.showing = false;
+        assert_eq!(step(&s, true), Do::Show(Command::Next), "a placeholder open: the reading goes on");
+        s.open = None;
+        assert_eq!(step(&s, true), Do::Show(Command::Next), "no item open (a library listed): the same");
+        s.at_end = true;
+        assert_eq!(step(&s, true), Do::Stay("That is the last slide.".to_owned()));
+        // A verse picked and waiting for Enter still holds the keys.
+        let mut s = situation(&playlist, Here::Elsewhere, Some(3), false, false);
+        (s.showing, s.picked) = (false, Some("verse"));
+        assert_eq!(step(&s, true), Do::Say("Press Enter to put the picked verse on screen.".to_owned()));
+    }
+
+    #[test]
+    fn after_a_clear_the_item_on_screen_last_goes_on_where_it_was() {
+        // Alpha cleared part way and still the open item: Next goes on in Alpha, as ever.
+        let playlist = service();
+        let mut s = situation(&playlist, Here::Item(2), Some(2), false, false);
+        s.showing = false;
+        assert_eq!(step(&s, true), Do::Show(Command::Next));
+        assert_eq!(step(&s, false), Do::Show(Command::Previous));
     }
 
     #[test]

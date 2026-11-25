@@ -794,10 +794,9 @@ fn a_playlist_is_made_and_run_from_item_to_item() {
 }
 
 /// The owner's rule for the keys (docs/cli.md, `running.rs`): once another item of the playlist
-/// is opened, the next Next starts it at its first slide.
+/// is opened, the next Next starts it at its first slide. After a verse from the Bible page was
+/// shown and cleared, that is the song opened, not the next verse (the owner, 2026-11-25).
 #[test]
-#[ignore = "bug: after a Bible verse is shown from the Bible page and cleared, a song opened in the playlist \
-            isn't started by Next: the next verse goes on screen instead (running::step, Here::Elsewhere)"]
 fn after_a_reading_is_cleared_next_starts_the_song_opened_in_the_playlist() {
     let Some(run) = Run::new("after_a_reading_is_cleared_next_starts_the_song_opened_in_the_playlist") else { return };
     let song = run.file("Alpha.txt");

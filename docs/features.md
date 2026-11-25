@@ -475,6 +475,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the right arrow) and Previous (the left arrow) step through it. Once ↑, ↓ or a click on a
   row has opened another item, the next Next or Previous starts that item at its first slide:
   a song or Bible passage goes on screen, a picture or video is shown, a media playlist plays.
+  The same after a reading from the Bible page, or a song from a library, has been shown and
+  cleared; while one of those is still on screen, Next and Previous go on with it, so it can be
+  finished while the next item waits (Enter starts it).
   ↑ and ↓ open the item above or below (passing over headers), and say so at either end;
   Enter puts the open item on screen from its first slide (with a library listed, the song
   chosen). With Continuous on (in the bar
