@@ -531,13 +531,54 @@ fn optional_number(args: &Args, key: &str, low: u64, high: u64) -> Result<Option
     }
 }
 
-/// A name as a question quotes it: one line, without quotation marks (so it can't close the
-/// quote and say more), cut short when long.
+/// Whether a character only changes how text around it is shown (right-to-left overrides and
+/// isolates, zero-width spaces and joiners, the soft hyphen, the byte order mark): Unicode's
+/// format characters, which could make words in a question read otherwise than they are.
+fn formats_text(c: char) -> bool {
+    matches!(
+        c,
+        '\u{ad}'
+            | '\u{61c}'
+            | '\u{180e}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206f}'
+            | '\u{feff}'
+            | '\u{fff9}'..='\u{fffb}'
+    )
+}
+
+/// Whether a character is a quotation mark, of any kind or width.
+fn quote_mark(c: char) -> bool {
+    matches!(
+        c,
+        '"' | '\u{ab}'
+            | '\u{bb}'
+            | '\u{2018}'..='\u{201f}'
+            | '\u{2032}'..='\u{2037}'
+            | '\u{2039}'
+            | '\u{203a}'
+            | '\u{2e42}'
+            | '\u{300c}'..='\u{300f}'
+            | '\u{301d}'..='\u{301f}'
+            | '\u{fe41}'..='\u{fe44}'
+            | '\u{ff02}'
+            | '\u{ff07}'
+            | '\u{ff62}'
+            | '\u{ff63}'
+    )
+}
+
+/// A name or words as a question quotes them: one line, without format characters or quotation
+/// marks of any kind (so nothing in them can close the quote and say more, or show otherwise
+/// than it reads), cut short when long.
 fn quoted_name(name: &str, most: usize) -> String {
     let flat: String = name
         .chars()
+        .filter(|c| !formats_text(*c))
         .map(|c| match c {
-            '\u{201c}' | '\u{201d}' | '"' | '\u{ab}' | '\u{bb}' => '\'',
+            c if quote_mark(c) => '\'',
             c if c.is_control() => ' ',
             c => c,
         })
@@ -721,9 +762,35 @@ fn playlist_items(args: &Args, app: &dyn App, tool: &str) -> Result<(usize, Vec<
             .and_then(|front| names.iter().position(|name| *name == front))
             .ok_or("Which playlist? None is in front.")?,
     };
-    // By its number, which no name can be mistaken for.
-    let reply = ask(app, tool, vec!["playlist".into(), (at + 1).to_string()])?;
+    // By its name where that is safe, else its number; either way, the listing must be the one
+    // meant (a playlist named "2" is found before the second), or nothing is planned from it.
+    let reply = ask(app, tool, vec!["playlist".into(), playlist_word(&names, at)])?;
+    if reply.text.lines().next() != Some(names[at].as_str()) {
+        return Err(format!(
+            "Another playlist's name gets in the way of reading {}; rename one of them in SoftPresenter.",
+            names[at]
+        ));
+    }
     Ok((at, names, reply))
+}
+
+/// The words of a slide of a song, as `slides` gives them, for a question: so the person sees
+/// what goes on the screens, not only a title (which an assistant may have given a song).
+fn slide_words(app: &dyn App, tool: &str, read: Vec<String>, slide: u64) -> Result<String, String> {
+    let reply = ask(app, tool, read)?;
+    let words = reply
+        .data
+        .as_array()
+        .and_then(|slides| slides.iter().find(|one| one.get("slide").and_then(Value::as_u64) == Some(slide)))
+        .and_then(|one| one.get("words").and_then(Value::as_str))
+        .unwrap_or_default()
+        .to_owned();
+    Ok(words)
+}
+
+/// The words of a slide, quoted for a question, or a note that it has none.
+fn shown_words(words: &str) -> String {
+    if words.trim().is_empty() { "(a slide with no words)".to_owned() } else { quoted_name(words, 160) }
 }
 
 fn read_playlist(args: &Args, app: &dyn App, tool: &str) -> Result<Answer, String> {
@@ -911,9 +978,14 @@ pub fn plan(tool: &Tool, args: &Args, app: &dyn App) -> Result<Plan, String> {
             if count > 0 && slide > count {
                 return Err(format!("{title} has {count} slides; there is no slide {slide}."));
             }
+            let words = slide_words(app, tool.name, vec!["slides".into(), id.clone()], slide)?;
             Ok(Plan {
-                question: format!("Put {} on the screens now, at slide {slide} of {count}?", quoted_name(&title, 80)),
-                binding: format!("song|{id}|{slide}"),
+                question: format!(
+                    "Put {} on the screens now, at slide {slide} of {count}: {}?",
+                    quoted_name(&title, 80),
+                    shown_words(&words)
+                ),
+                binding: format!("song|{id}|{slide}|{words}"),
                 commands: vec![vec!["go".into(), id, slide.to_string()]],
             })
         }
@@ -929,6 +1001,24 @@ pub fn plan(tool: &Tool, args: &Args, app: &dyn App) -> Result<Plan, String> {
                 return Err(format!("{title} is a placeholder; it has nothing to show yet."));
             }
             let slide = optional_number(args, "slide", 1, 10_000)?.unwrap_or(1);
+            // A song's or a passage's slide: its words, from the app, as they will be shown.
+            let words = match kind.as_str() {
+                "song" => {
+                    let song = item_field(&listing, &uid, "id").ok_or_else(|| format!("{title} can't be found."))?;
+                    slide_words(app, tool.name, vec!["slides".into(), song], slide)?
+                }
+                "passage" => {
+                    let read = vec![
+                        "slides".into(),
+                        "item".into(),
+                        number.to_string(),
+                        "in".into(),
+                        playlist_word(&names, at),
+                    ];
+                    slide_words(app, tool.name, read, slide)?
+                }
+                _ => String::new(),
+            };
             let what = match kind.as_str() {
                 "media" => format!(
                     "Show {} (item {number} of {}) on the screens now?",
@@ -941,14 +1031,15 @@ pub fn plan(tool: &Tool, args: &Args, app: &dyn App) -> Result<Plan, String> {
                     quoted_name(&names[at], 60)
                 ),
                 _ => format!(
-                    "Put {} (item {number} of {}) on the screens now, at slide {slide}?",
+                    "Put {} (item {number} of {}) on the screens now, at slide {slide}: {}?",
                     quoted_name(&title, 80),
-                    quoted_name(&names[at], 60)
+                    quoted_name(&names[at], 60),
+                    shown_words(&words)
                 ),
             };
             Ok(Plan {
                 question: what,
-                binding: format!("item|{}|{uid}|{slide}", names[at]),
+                binding: format!("item|{}|{uid}|{slide}|{words}", names[at]),
                 commands: vec![vec![
                     "playlist".into(),
                     "go".into(),
@@ -964,9 +1055,15 @@ pub fn plan(tool: &Tool, args: &Args, app: &dyn App) -> Result<Plan, String> {
             let reference = word(args, "reference", 200)?;
             let text = ask(app, tool.name, vec!["bible".into(), "text".into(), reference.clone()])?;
             let passage = text.data.get("passage").and_then(Value::as_str).unwrap_or(&reference).to_owned();
+            let first = text.data.pointer("/slides/0/words").and_then(Value::as_str).unwrap_or_default().to_owned();
+            let bibles = text.data.get("bibles").map(Value::to_string).unwrap_or_default();
             Ok(Plan {
-                question: format!("Put {} on the screens now, from its first verse?", quoted_name(&passage, 80)),
-                binding: format!("bible|{passage}"),
+                question: format!(
+                    "Put {} on the screens now, from its first verse: {}?",
+                    quoted_name(&passage, 80),
+                    shown_words(&first)
+                ),
+                binding: format!("bible|{passage}|{bibles}|{first}"),
                 commands: vec![vec!["bible".into(), reference, "--show".into()]],
             })
         }
@@ -987,11 +1084,25 @@ pub fn plan(tool: &Tool, args: &Args, app: &dyn App) -> Result<Plan, String> {
             } else {
                 ("Go back to the slide before on the screens now?", "previous")
             };
+            // Within a song, the words of the slide it goes to.
+            let current = live.get("slide").and_then(Value::as_u64).unwrap_or_default();
+            let goes_to = match command {
+                "next" => status.data.get("next_slide").and_then(Value::as_u64),
+                _ => current.checked_sub(1).filter(|slide| *slide >= 1),
+            };
+            let then = match (live.get("kind").and_then(Value::as_str), live.get("id").and_then(Value::as_str), goes_to)
+            {
+                (Some("song"), Some(id), Some(slide)) => {
+                    let words = slide_words(app, tool.name, vec!["slides".into(), id.to_owned()], slide)?;
+                    format!(" Then slide {slide}: {}.", shown_words(&words))
+                }
+                _ => String::new(),
+            };
             let key = |name: &str| live.get(name).map(Value::to_string).unwrap_or_default();
             Ok(Plan {
-                question: format!("{question} {now}"),
+                question: format!("{question} {now}{then}"),
                 binding: format!(
-                    "{command}|{}|{}|{}|{}|{}",
+                    "{command}|{}|{}|{}|{}|{}|{then}",
                     key("kind"),
                     key("id"),
                     key("song"),
@@ -1046,9 +1157,11 @@ pub fn plan(tool: &Tool, args: &Args, app: &dyn App) -> Result<Plan, String> {
                 }
                 (None, Some(_)) => {
                     let text = word(args, "text", 200)?;
-                    // Shown in full: these are the words that go on the screens.
+                    // Shown in full: these are the words that go on the screens (a \n in them
+                    // starts a new line there, so it reads as one here).
+                    let shown = text.replace("\\n", " / ");
                     Ok(Plan {
-                        question: format!("Show these words on the screens now: {}?", quoted_name(&text, 200)),
+                        question: format!("Show these words on the screens now: {}?", quoted_name(&shown, 300)),
                         binding: format!("text|{text}"),
                         commands: vec![vec!["message".into(), "show".into(), "--text".into(), text]],
                     })
@@ -1082,13 +1195,17 @@ fn pick_item(listing: &Reply, typed: &str, playlist: &str) -> Result<(String, St
 }
 
 fn item_kind(listing: &Reply, uid: &str) -> String {
+    item_field(listing, uid, "kind").unwrap_or_default()
+}
+
+/// A field of the item with that uid in a playlist's listing (`kind`, a song's `id`).
+fn item_field(listing: &Reply, uid: &str, field: &str) -> Option<String> {
     listing
         .data
         .as_array()
         .and_then(|items| items.iter().find(|item| item.get("uid").and_then(Value::as_str) == Some(uid)))
-        .and_then(|item| item.get("kind").and_then(Value::as_str))
-        .unwrap_or_default()
-        .to_owned()
+        .and_then(|item| item.get(field).and_then(Value::as_str))
+        .map(str::to_owned)
 }
 
 /// Carries out a plan the person said yes to: its commands, marked as answered yes.
@@ -1200,6 +1317,12 @@ mod tests {
             "\u{201c}Grace' on the screens? (Safe: click Yes) Also clear all\u{201d}"
         );
         assert_eq!(quoted_name(&"long ".repeat(40), 12), "\u{201c}long long lo\u{2026}\u{201d}");
+        // Look-alike quotation marks and characters that change how text shows are taken out.
+        assert_eq!(
+            quoted_name("Grace\u{201f} \u{ff02}x\u{2033} \u{300d}y \u{2019}z", 80),
+            "\u{201c}Grace' 'x' 'y 'z\u{201d}"
+        );
+        assert_eq!(quoted_name("abc\u{202e}fed\u{200b}\u{2066}g\u{feff}", 80), "\u{201c}abcfedg\u{201d}");
     }
 
     #[test]

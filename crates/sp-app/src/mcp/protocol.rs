@@ -12,7 +12,7 @@
 //!   the capabilities for the rest of the process; a question is a request sent to the client
 //!   while the call waits.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::io::{BufRead, Write};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -132,16 +132,18 @@ enum Asked {
 /// server starts, so the client carries it but can't change it; it names the tool and what was
 /// asked about, lasts five minutes, and is taken once.
 struct Seal {
-    key: ring::hmac::Key,
+    /// `None` when the system gave no random key: then nothing is asked, and so nothing that
+    /// needs a yes is done.
+    key: Option<ring::hmac::Key>,
     random: ring::rand::SystemRandom,
-    taken: VecDeque<String>,
+    /// The states taken, with when each would have run out: kept until then.
+    taken: VecDeque<(String, u64)>,
 }
 
 impl Seal {
     fn new() -> Seal {
         let random = ring::rand::SystemRandom::new();
-        let key = ring::hmac::Key::generate(ring::hmac::HMAC_SHA256, &random)
-            .unwrap_or_else(|_| ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &nanos().to_le_bytes()));
+        let key = ring::hmac::Key::generate(ring::hmac::HMAC_SHA256, &random).ok();
         Seal { key, random, taken: VecDeque::new() }
     }
 
@@ -150,13 +152,15 @@ impl Seal {
         hex(ring::digest::digest(&ring::digest::SHA256, format!("{tool}\n{binding}").as_bytes()).as_ref())
     }
 
-    fn make(&self, tool: &str, binding: &str) -> String {
+    /// A state for a question; `None` when no key or no random nonce could be had.
+    fn make(&self, tool: &str, binding: &str) -> Option<String> {
+        let key = self.key.as_ref()?;
         let mut nonce = [0u8; 16];
-        let _ = ring::rand::SecureRandom::fill(&self.random, &mut nonce);
+        ring::rand::SecureRandom::fill(&self.random, &mut nonce).ok()?;
         let until = seconds() + QUESTION_LASTS.as_secs();
         let body = format!("v1.{until}.{}.{}", hex(&nonce), Seal::digest(tool, binding));
-        let tag = ring::hmac::sign(&self.key, body.as_bytes());
-        format!("{body}.{}", hex(tag.as_ref()))
+        let tag = ring::hmac::sign(key, body.as_bytes());
+        Some(format!("{body}.{}", hex(tag.as_ref())))
     }
 
     /// Whether a state the client sent back is one this server made, still good, for this tool
@@ -164,22 +168,23 @@ impl Seal {
     fn take(&mut self, state: &str, tool: &str, binding: &str) -> bool {
         let Some((body, tag)) = state.rsplit_once('.') else { return false };
         let Some(tag) = unhex(tag) else { return false };
-        if ring::hmac::verify(&self.key, body.as_bytes(), &tag).is_err() {
+        let Some(key) = &self.key else { return false };
+        if ring::hmac::verify(key, body.as_bytes(), &tag).is_err() {
             return false;
         }
         let parts: Vec<&str> = body.split('.').collect();
         let [version, until, nonce, digest] = parts.as_slice() else { return false };
-        let fresh = until.parse::<u64>().is_ok_and(|until| seconds() <= until);
-        if *version != "v1" || !fresh || *digest != Seal::digest(tool, binding) {
+        let now = seconds();
+        let Ok(until) = until.parse::<u64>() else { return false };
+        if *version != "v1" || now > until || *digest != Seal::digest(tool, binding) {
             return false;
         }
-        if self.taken.iter().any(|taken| taken == nonce) {
+        // Those run out can go: a state is good only until then anyway.
+        self.taken.retain(|(_, ends)| *ends >= now);
+        if self.taken.iter().any(|(taken, _)| taken == nonce) {
             return false;
         }
-        self.taken.push_back((*nonce).to_owned());
-        if self.taken.len() > 1000 {
-            self.taken.pop_front();
-        }
+        self.taken.push_back(((*nonce).to_owned(), until));
         true
     }
 }
@@ -197,10 +202,6 @@ fn unhex(text: &str) -> Option<Vec<u8>> {
 
 fn seconds() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_secs())
-}
-
-fn nanos() -> u128 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_nanos())
 }
 
 /// A time as ISO 8601, for a task.
@@ -222,7 +223,7 @@ pub struct Server<A: App> {
     /// When the last tool calls came, for the limit.
     calls: VecDeque<Instant>,
     /// The tasks the client cancelled (their downloads go on; they are said to be cancelled).
-    cancelled: HashSet<String>,
+    cancelled: VecDeque<String>,
 }
 
 impl<A: App> Server<A> {
@@ -234,7 +235,7 @@ impl<A: App> Server<A> {
             queue: VecDeque::new(),
             asked: 0,
             calls: VecDeque::new(),
-            cancelled: HashSet::new(),
+            cancelled: VecDeque::new(),
         }
     }
 
@@ -412,7 +413,8 @@ impl<A: App> Server<A> {
             Some(_) => return Some(Err(fault(INVALID_PARAMS, "A tool's arguments are an object."))),
         };
         // A retry carrying an answer is part of the call already counted.
-        if !params.get("inputResponses").is_some_and(Value::is_object) && !self.within_limit() {
+        // Every call counts, an answer's too, so questions can't be made without end.
+        if !self.within_limit() {
             return Some(Ok(Answer::failed("Too many requests from the assistant; wait a minute.").result()));
         }
         let answer = match tool.need {
@@ -454,10 +456,13 @@ impl<A: App> Server<A> {
             return Some(Answer::failed(cannot_ask(tool)).result());
         }
         if context.modern {
+            let Some(state) = self.seal.make(tool.name, &plan.binding) else {
+                return Some(Answer::failed("SoftPresenter's MCP server couldn't make a question safely on this computer (no random key), so it can't ask, and nothing was done.").result());
+            };
             return Some(json!({
                 "resultType": "input_required",
                 "inputRequests": {"confirm": {"method": "elicitation/create", "params": question(&plan.question)}},
-                "requestState": self.seal.make(tool.name, &plan.binding),
+                "requestState": state,
             }));
         }
         match self.ask_legacy(id, &plan.question, wire) {
@@ -601,7 +606,12 @@ impl<A: App> Server<A> {
         if task_parts(&task).is_none() {
             return Err(fault(INVALID_PARAMS, format!("No task {task}.")));
         }
-        self.cancelled.insert(task);
+        if !self.cancelled.contains(&task) {
+            self.cancelled.push_back(task);
+        }
+        if self.cancelled.len() > 1000 {
+            self.cancelled.pop_front();
+        }
         Ok(json!({}))
     }
 

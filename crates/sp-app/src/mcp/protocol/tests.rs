@@ -19,6 +19,8 @@ struct FakeApp {
     live_slide: RefCell<u64>,
     /// Polls of `job 7` still to answer "still going".
     job_polls: RefCell<u32>,
+    /// The name the first playlist's listing comes under (another, to try a name in the way).
+    listing_name: &'static str,
 }
 
 impl FakeApp {
@@ -29,6 +31,7 @@ impl FakeApp {
             sent: RefCell::new(Vec::new()),
             live_slide: RefCell::new(2),
             job_polls: RefCell::new(1),
+            listing_name: "Sunday",
         }
     }
 
@@ -73,10 +76,18 @@ impl tools::App for FakeApp {
                 Reply::with("[Verse 1]\nDown by the river", json!({"text": "[Verse 1]\nDown by the river"}))
             }
             ("song", "new") => Reply::done(format!("Made the song {}.", args[2])),
+            ("slides", _) => Reply::with(
+                "River Song",
+                json!([
+                    {"slide": 1, "words": "Down by the river / Light on the water"},
+                    {"slide": 2, "words": "A second verse"},
+                    {"slide": 3, "words": "Sing it again"}
+                ]),
+            ),
             ("go", _) => Reply::done("On screen: River Song, slide 1 of 3 (Verse 1)."),
             ("playlists", _) => Reply::with("  1. Sunday\n  2. Friday", json!(["Sunday", "Friday"])),
-            ("playlist", "1") | ("playlist", "") => Reply::with(
-                "Sunday\n  1. River Song",
+            ("playlist", "1") | ("playlist", "Sunday") | ("playlist", "") => Reply::with(
+                format!("{}\n  1. River Song", self.listing_name),
                 json!([{"item": 1, "uid": ITEM_UID, "kind": "song", "title": "River Song", "id": SONG_ID, "text": "River Song"}]),
             ),
             ("playlist", "add") => Reply::done(format!("Added {} to {}.", args[2], args[4])),
@@ -313,7 +324,10 @@ fn a_change_to_the_screens_asks_first_and_is_done_only_on_yes() {
     assert_eq!(result["resultType"], "input_required");
     let ask = &result["inputRequests"]["confirm"];
     assert_eq!(ask["method"], "elicitation/create");
-    assert_eq!(ask["params"]["message"], "Put \u{201c}River Song\u{201d} on the screens now, at slide 1 of 3?");
+    assert_eq!(
+        ask["params"]["message"],
+        "Put \u{201c}River Song\u{201d} on the screens now, at slide 1 of 3: \u{201c}Down by the river / Light on the water\u{201d}?"
+    );
     assert_eq!(ask["params"]["requestedSchema"]["properties"]["confirm"]["type"], "boolean");
 
     // The same server, asked and answered: a fresh server would not know its seal.
@@ -642,7 +656,7 @@ fn too_many_calls_in_a_minute_are_refused_for_a_while() {
 #[test]
 fn a_seal_is_good_once_for_what_it_was_made_for() {
     let mut seal = Seal::new();
-    let state = seal.make("show_song", "song|x|1");
+    let state = seal.make("show_song", "song|x|1").unwrap();
     assert!(!seal.take(&state, "show_song", "song|x|2"));
     assert!(!seal.take(&state, "clear_screens", "song|x|1"));
     assert!(seal.take(&state, "show_song", "song|x|1"));
@@ -650,6 +664,25 @@ fn a_seal_is_good_once_for_what_it_was_made_for() {
     assert!(!seal.take("v1.99999999999.00.11.22", "show_song", "song|x|1"));
     assert!(!seal.take("", "show_song", "song|x|1"));
     // Another server's seal (made at another start) is not this one's.
-    let other = Seal::new().make("show_song", "song|x|1");
+    let other = Seal::new().make("show_song", "song|x|1").unwrap();
     assert!(!seal.take(&other, "show_song", "song|x|1"));
+}
+
+#[test]
+fn a_playlist_whose_name_gets_in_the_way_is_not_read_as_another() {
+    let mut server = Server::new(FakeApp { listing_name: "1", ..FakeApp::new(on()) });
+    let mut script = Script::new(&[
+        modern(1, "tools/call", json!({"name": "read_playlist", "arguments": {"playlist": "Sunday"}}), json!({})),
+        modern(
+            2,
+            "tools/call",
+            json!({"name": "remove_from_playlist", "arguments": {"playlist": "Sunday", "item": "1"}}),
+            elicits(),
+        ),
+    ]);
+    server.run(&mut script);
+    for reply in &script.written {
+        assert_eq!(reply["result"]["isError"], true, "{reply}");
+        assert!(text_of(reply).contains("gets in the way"), "{reply}");
+    }
 }

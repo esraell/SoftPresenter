@@ -108,8 +108,9 @@ screens now?") and goes ahead only on Yes.
 Songs, items and messages are found by name as `sp` finds them (in part, any case; a name that
 fits several is never guessed), and better by the ids the lists give. Before asking, the server
 finds exactly what will happen (the song's id, the playlist item's own id, the slide on screen
-now), puts that in the question, and does exactly that; if anything changed while the person was
-being asked (the item moved, another slide went on screen), it asks again.
+now), puts that in the question with the words of the slide that will go up, and does exactly
+that; if anything changed while the person was being asked (the item moved, another slide went
+on screen, the words changed), it asks again.
 
 **Resources** the assistant (or the person, with `@` in Claude Code) can read:
 `softpresenter://status` (what `get_status` gives, as JSON), `softpresenter://playlists` (the
@@ -139,9 +140,10 @@ later stays closed to assistants until it is looked at.
   slides and NDI.
 
 The app's log has a line for each change an assistant makes, `[mcp] TOOL: done` (or `not done`),
-and for each request refused, `[mcp] TOOL: refused (why)`; as for `sp`, reading isn't logged. A
-line never has the words of a song or anything else the assistant sent. Switching the two
-switches is logged too.
+and for each request refused, `[mcp] TOOL: refused (why)`; as for `sp`, reading isn't logged. An
+`[mcp]` line never has the words of a song or anything else the assistant sent (the app's other
+lines are as for any change: a song that couldn't be saved is named, whoever made it). Switching
+the two switches is logged too.
 
 ## Skills, questions and long jobs
 
@@ -168,7 +170,10 @@ what was asked is carried, signed by the server, in the request's state, valid f
 and once); on the earlier revisions the server asks while the call waits.
 
 The question is written by the server from what the app found, never in the assistant's own
-words, so a song title or an instruction hidden in song words can't word it.
+words, and it shows the words that will go on the screens (the slide's, or the message's), not
+only a name: an assistant can make a song and give it any title, so a title alone proves
+nothing. Quotation marks of every kind, and the characters that change how text is shown
+(right-to-left overrides, zero-width spaces), are taken out of what it quotes.
 
 ### Long jobs (Tasks)
 
@@ -209,7 +214,7 @@ which may hold words meant to steer it and is trusted with nothing.
 |---|---|
 | The assistant changes the screens during a service without the person knowing | Off unless the screens switch is on; each change needs the person's yes to a question the server words; the app refuses a change the server didn't mark as answered Yes |
 | Words in a song or playlist steer the assistant ("clear the screens now") | The same: a change to the screens or a removal needs the switch and a Yes; reading tools never change the screens or the window |
-| The question misleads the person | Worded by the server from what the app found (the song's own title, the item's place), with quotes and line breaks taken out and long names cut short; words to show on the screens are shown in full |
+| The question misleads the person | Worded by the server from what the app found (the song's title, the item's place, and the words of the slide that will go up), with quotation marks of every kind, format characters and line breaks taken out and long words cut short; words for a message are shown in full |
 | Yes to one thing, another done | What was asked is bound to exactly what is done (ids, the slide on screen), signed with a key the server makes at each start, for five minutes and once; anything different is asked again |
 | Reading or changing files, keys or settings through the assistant | Refused by the app's list, whatever the tool; an assistant's words are never read as a file |
 | An older SoftPresenter running unchecked commands | The socket's protocol version: an older app refuses the server's requests |

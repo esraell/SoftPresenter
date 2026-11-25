@@ -98,6 +98,9 @@ pub fn kind_of(args: &[String]) -> Result<Kind, String> {
         ("search", 2) if name(1) => Some(Kind::Reads),
         ("song", 3) if matches!(word(1), "text" | "info") && name(2) => Some(Kind::Reads),
         ("bible", 3) if matches!(word(1), "text" | "search") && name(2) => Some(Kind::Reads),
+        // A song's slides, or a playlist item's (whatever the words, `slides` only reads).
+        ("slides", 2) if name(1) && !word(1).trim().eq_ignore_ascii_case("item") => Some(Kind::Reads),
+        ("slides", 5) if word(1) == "item" && number(2) && word(3) == "in" && name(4) => Some(Kind::Reads),
         ("playlist", 1) => Some(Kind::Reads),
         // `playlist NAME`, read only when the name isn't one of the words that change one.
         ("playlist", 2) if name(1) && !changes_a_playlist(word(1)) => Some(Kind::Reads),
@@ -238,6 +241,8 @@ mod tests {
             (&["playlists"], Kind::Reads),
             (&["playlist"], Kind::Reads),
             (&["playlist", "2"], Kind::Reads),
+            (&["slides", "e6985576-8dfd-44d8-b81c-99a7dc6a9b54"], Kind::Reads),
+            (&["slides", "item", "3", "in", "Sunday"], Kind::Reads),
             (&["playlist", "Sunday Evening"], Kind::Reads),
             (&["media"], Kind::Reads),
             (&["messages"], Kind::Reads),
@@ -400,6 +405,7 @@ mod tests {
             "clear",
             "go",
             "message",
+            "slides",
         ];
         for word in known {
             if listed.contains(&word.as_str()) {
