@@ -5,8 +5,13 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+## 0.9.0-dev.17 — 25 November 2026 (development build)
+
 - A pre-release says so: the setup's first step, and Settings › About under Updates, say "This is a pre-release" with its version, that things may still change while the core of how SoftPresenter works and looks stays, that bugs will be fixed in the versions that come next, and that Check for updates tells you when one is out.
 - After a Bible verse shown from the Bible page has been cleared, opening a song in the playlist and pressing Next now starts that song at its first slide. Before, the next verse of the reading went back on screen instead.
+
+## 0.9.0-dev.16 — 25 November 2026 (development build)
+
 - SoftPresenter now sends small anonymous reports of how it runs and what goes wrong (the kind of computer, speeds, crashes), so problems get found and fixed. Never your songs, Bible text, file names or anything about you. They are on unless you turn them off: the setup has a Reports step with the key, and if you already use SoftPresenter a notice says so once, with Turn off beside it; nothing is sent before you have seen one of the two. On a computer whose region is in the European Union, Iceland, Liechtenstein, Norway or the United Kingdom they are off unless you turn them on, and the setup invites you to. Settings › About › Anonymous reports has the On/Off key, See what's sent (the next report, exactly as it would go) and Reset my anonymous id. PRIVACY.md says what is sent, where it goes and that it is kept for 90 days.
 
 ## 0.9.0-dev.15 — 25 November 2026 (development build)
