@@ -3307,8 +3307,16 @@ fn edit_view(
         let area = ui.available_rect_before_wrap();
         let ruler = 16.0;
         // Fitted, the slide fills the room under the tools; zoomed, it is its own size, moved by
-        // scrolling. A pinch zooms from wherever it is.
-        let (inner, room, fit_width) = canvas_room(area, ruler);
+        // scrolling. A pinch zooms from wherever it is. The object tools are placed first: when
+        // their words need a second row, the slide goes under it.
+        let inner = canvas_inner(area, ruler);
+        let title = theme_canvas_title(state).filter(|_| theme_mode);
+        let title_room = title.as_ref().map(|(name, _)| {
+            ui.painter().layout_no_wrap(name.clone(), theme_title_font(), crate::studio::TEXT).size().x + 14.0
+        });
+        let tool_places =
+            (!stage_mode).then(|| tool_bars(&tool_widths(ui), inner, title_room.or(theme_mode.then_some(0.0))));
+        let (room, fit_width) = canvas_room(inner, tool_places.as_deref().map_or(TOOLS_ONE_ROW, |b| tools_tall(b, inner)));
         let pixels = ui.ctx().pixels_per_point();
         let canvas_area = Rect::from_min_max(area.min + vec2(ruler, ruler), area.max);
         if ui.rect_contains_pointer(canvas_area) {
@@ -3654,28 +3662,21 @@ fn edit_view(
         // the screens' pictures), Undo and Redo.
         if stage_mode {
             stage_tools(ui, state, inner, at.slide);
-        } else {
+        } else if let Some(tools) = tool_places.as_deref() {
         // The object tools, the same for a song's slide and a theme's layout: a text box, the
-        // shapes, and pictures and videos.
-        // They are centred on the slide as drawn when it fits (not on the area round it, whose
-        // rulers take room at the left, and not moved by a zoomed slide's scrolling). In the
-        // Theme Editor they stand at the right, leaving the left for what is on the canvas.
-        let tool_row = if theme_mode { inner.max.x - 256.0 } else { fitted_centre.x };
-        let tools = tool_bars(tool_row, inner.min.y + 22.0);
-        if theme_mode {
-            theme_canvas_title(ui, state, inner, tools[0].min.x - 14.0);
+        // shapes, and pictures and videos, in a row over the slide, or two when their words
+        // need it (`tool_bars`). In the Theme Editor they stand at the right, leaving the left
+        // for what is on the canvas.
+        if let Some(title) = title {
+            // Beside the first row of tools, or alone in it.
+            let first_row = tools.iter().find(|tool| tool.min.y <= inner.min.y + TOOL_GAP + 0.5);
+            paint_theme_canvas_title(ui, title, inner, first_row.map_or(inner.max.x, |tool| tool.min.x - 14.0));
         }
         // A picture from a file.
         let picture_bar = tools[2];
         let picture = ui.interact(picture_bar, ui.scope_id().with("add picture"), Sense::click());
         crate::studio::paint_button(ui.painter(), picture_bar, picture.hovered());
-        ui.painter().text(
-            picture_bar.center(),
-            Align2::CENTER_CENTER,
-            t("edit.tools.media", "Media…"),
-            crate::studio::semibold(12.5),
-            crate::studio::TEXT,
-        );
+        ui.painter().text(picture_bar.center(), Align2::CENTER_CENTER, tool_words(2), tool_font(), crate::studio::TEXT);
         if picture
             .on_hover_text(t(
                 "edit.tools.media.hint",
@@ -3689,8 +3690,7 @@ fn edit_view(
         let web_bar = tools[3];
         let web = ui.interact(web_bar, ui.scope_id().with("add web page"), Sense::click());
         crate::studio::paint_button(ui.painter(), web_bar, web.hovered());
-        let web_words = t("edit.tools.web", "Web Page");
-        ui.painter().text(web_bar.center(), Align2::CENTER_CENTER, web_words, crate::studio::semibold(12.5), crate::studio::TEXT);
+        ui.painter().text(web_bar.center(), Align2::CENTER_CENTER, tool_words(3), tool_font(), crate::studio::TEXT);
         if web
             .on_hover_text(t(
                 "edit.tools.web.hint",
@@ -3709,8 +3709,7 @@ fn edit_view(
         let ndi_bar = tools[4];
         let ndi = ui.interact(ndi_bar, ui.scope_id().with("add ndi source"), Sense::click());
         crate::studio::paint_button(ui.painter(), ndi_bar, ndi.hovered());
-        let ndi_words = t("edit.tools.ndi", "NDI Source");
-        ui.painter().text(ndi_bar.center(), Align2::CENTER_CENTER, ndi_words, crate::studio::semibold(12.5), crate::studio::TEXT);
+        ui.painter().text(ndi_bar.center(), Align2::CENTER_CENTER, tool_words(4), tool_font(), crate::studio::TEXT);
         if ndi
             .on_hover_text(t(
                 "edit.tools.ndi.hint",
@@ -3728,13 +3727,7 @@ fn edit_view(
         let shapes_bar = tools[1];
         let shapes = ui.interact(shapes_bar, ui.scope_id().with("add shape"), Sense::click());
         crate::studio::paint_button(ui.painter(), shapes_bar, shapes.hovered());
-        ui.painter().text(
-            shapes_bar.center(),
-            Align2::CENTER_CENTER,
-            t("edit.tools.shapes", "Shapes ▾"),
-            crate::studio::semibold(12.5),
-            crate::studio::TEXT,
-        );
+        ui.painter().text(shapes_bar.center(), Align2::CENTER_CENTER, tool_words(1), tool_font(), crate::studio::TEXT);
         let shapes = shapes.on_hover_text(t("edit.tools.shapes.hint", "Add a shape. Each has a key: O R E G L H P S D A"));
         egui::Popup::menu(&shapes).show(|ui| {
             for (shape, key) in sp_model::Shape::ALL.into_iter().zip(SHAPE_KEYS) {
@@ -3748,13 +3741,7 @@ fn edit_view(
         let bar = tools[0];
         let add = ui.interact(bar, ui.scope_id().with("add text"), Sense::click());
         crate::studio::paint_button(ui.painter(), bar, add.hovered());
-        ui.painter().text(
-            bar.center(),
-            Align2::CENTER_CENTER,
-            t("edit.add_text", "Add Text"),
-            crate::studio::semibold(12.5),
-            crate::studio::TEXT,
-        );
+        ui.painter().text(bar.center(), Align2::CENTER_CENTER, tool_words(0), tool_font(), crate::studio::TEXT);
         if add.on_hover_text(t("edit.tools.text.hint", "Add a text box to the slide")).clicked()
             && let Some(draft) = state.editing.as_mut()
         {
@@ -3847,15 +3834,14 @@ fn edit_view(
     }
 }
 
-/// The name of what is on the theme canvas, at its top left: the theme, the version when the
-/// template is a version's, and the template ("Built-in · Offering · Two languages"); then,
-/// where there is room before `right`, what it is in small capitals ("Template · Offering
-/// version").
-fn theme_canvas_title(ui: &egui::Ui, state: &HomeState, inner: Rect, right: f32) {
-    let Some(edit) = state.theme_edit.as_ref() else { return };
-    let Some(template) = edit.open_template() else { return };
+/// The name of what is on the theme canvas, for its top left: the theme, the version when the
+/// template is a version's, and the template ("Built-in · Offering · Two languages"); and what
+/// it is, for small capitals after it ("Template · Offering version").
+fn theme_canvas_title(state: &HomeState) -> Option<(String, String)> {
+    let edit = state.theme_edit.as_ref()?;
+    let template = edit.open_template()?;
     let version = edit.version.and_then(|id| edit.theme.versions.iter().find(|v| v.id == id));
-    let (name, what) = match version {
+    Some(match version {
         Some(version) => (
             format!("{} \u{b7} {} \u{b7} {}", edit.theme.name, version.name, template.name),
             tf("edit.theme_title.version", "Template \u{b7} {name} version", &[("name", &version.name)]),
@@ -3864,15 +3850,25 @@ fn theme_canvas_title(ui: &egui::Ui, state: &HomeState, inner: Rect, right: f32)
             format!("{} \u{b7} {}", edit.theme.name, template.name),
             t("edit.theme_title.template", "Template").to_owned(),
         ),
-    };
+    })
+}
+
+/// The face of the name on the theme canvas.
+fn theme_title_font() -> FontId {
+    crate::studio::semibold(16.0)
+}
+
+/// Paints the name of what is on the theme canvas (see [`theme_canvas_title`]) at its top left,
+/// in the room before `right` that the tools leave it; then, where there is room before
+/// `right`, what it is in small capitals.
+fn paint_theme_canvas_title(ui: &egui::Ui, (name, what): (String, String), inner: Rect, right: f32) {
     let y = inner.min.y + 22.0;
-    let room = Rect::from_min_max(inner.min, pos2(right, inner.min.y + 44.0));
-    let font = crate::studio::semibold(16.0);
+    let room = Rect::from_min_max(inner.min, pos2(right, inner.min.y + TOOLS_ONE_ROW));
     let title = ui.painter().with_clip_rect(room).text(
         pos2(inner.min.x, y),
         Align2::LEFT_CENTER,
         name,
-        font,
+        theme_title_font(),
         crate::studio::TEXT,
     );
     let look = crate::studio::Lettering::cap(crate::studio::TEXT_FAINT);
@@ -8570,23 +8566,103 @@ fn bible_row_extras(
     }
 }
 
-/// How far apart the object tools' centres are.
-const TOOL_STEP: f32 = 104.0;
+/// How far apart the object tools are, side by side and one row under another.
+const TOOL_GAP: f32 = 8.0;
+/// How tall an object tool is.
+const TOOL_TALL: f32 = 28.0;
+/// The narrowest an object tool is, so short words still make a tool of the usual size.
+const TOOL_WIDTH: f32 = 96.0;
+/// The room an object tool keeps either side of its words.
+const TOOL_PAD: f32 = 12.0;
+/// The room the tools over the canvas take at its top when they are in one row (a stage
+/// layout's always are).
+const TOOLS_ONE_ROW: f32 = 44.0;
 
-/// The object tools of the Edit view (Add Text, Shapes, Media…, Web Page, NDI Source), left to right, in a
-/// row centred on `centre_x`, their middles `y` down.
-fn tool_bars(centre_x: f32, y: f32) -> [Rect; 5] {
-    [-2.0, -1.0, 0.0, 1.0, 2.0].map(|n| Rect::from_center_size(pos2(centre_x + n * TOOL_STEP, y), vec2(96.0, 28.0)))
+/// The words on the Edit view's object tools, left to right: Add Text, Shapes, Media…, Web Page
+/// and NDI Source.
+const TOOL_WORDS: [(&str, &str); 5] = [
+    tk("edit.add_text", "Add Text"),
+    tk("edit.tools.shapes", "Shapes ▾"),
+    tk("edit.tools.media", "Media…"),
+    tk("edit.tools.web", "Web Page"),
+    tk("edit.tools.ndi", "NDI Source"),
+];
+
+/// The words on the object tool at `place` (see [`TOOL_WORDS`]), in the language set.
+fn tool_words(place: usize) -> &'static str {
+    let (key, english) = TOOL_WORDS[place];
+    t(key, english)
+}
+
+/// The face of the object tools' words.
+fn tool_font() -> FontId {
+    crate::studio::semibold(12.5)
+}
+
+/// How wide each object tool is in the language set: its words and the room either side of
+/// them, and never narrower than [`TOOL_WIDTH`].
+fn tool_widths(ui: &egui::Ui) -> [f32; 5] {
+    std::array::from_fn(|place| {
+        crate::studio::flat_button_width(ui, &[tool_words(place)], &tool_font(), TOOL_PAD).max(TOOL_WIDTH)
+    })
+}
+
+/// Where the object tools go at the top of the canvas room `inner`, left to right in order,
+/// each as wide as `widths` says: in one row when they fit across the room, and otherwise in as
+/// many rows as they need, filled in order, so no tool's words are ever cut. Without a `title`
+/// each row is centred on the room, which is centred on the slide as drawn when it fits (not on
+/// the area round it, whose rulers take room at the left, and not moved by a zoomed slide's
+/// scrolling). In the Theme Editor, `title` is the room the name of what is open takes at the
+/// left of the first row: the rows stand against the room's right edge, the first leaving that
+/// room, and when not even one tool fits beside the name, the name has the first row to itself.
+fn tool_bars(widths: &[f32], inner: Rect, title: Option<f32>) -> Vec<Rect> {
+    let mut rows: Vec<Vec<f32>> = vec![Vec::new()];
+    for &width in widths {
+        let first = rows.len() == 1;
+        let room = if first { inner.width() - title.unwrap_or(0.0) } else { inner.width() };
+        let Some(row) = rows.last_mut() else { break };
+        let used: f32 = row.iter().map(|have| have + TOOL_GAP).sum();
+        // A tool wider than the whole room still has a row of its own.
+        if used + width <= room || (row.is_empty() && (title.is_none() || !first)) {
+            row.push(width);
+        } else {
+            rows.push(vec![width]);
+        }
+    }
+    let mut bars = Vec::with_capacity(widths.len());
+    for (n, row) in rows.iter().enumerate().filter(|(_, row)| !row.is_empty()) {
+        let across = row.iter().sum::<f32>() + TOOL_GAP * (row.len() - 1) as f32;
+        let left = if title.is_some() { inner.max.x - across } else { inner.center().x - across / 2.0 };
+        let top = inner.min.y + TOOL_GAP + n as f32 * (TOOL_TALL + TOOL_GAP);
+        let mut x = left.max(inner.min.x);
+        for &width in row {
+            bars.push(Rect::from_min_size(pos2(x, top), vec2(width, TOOL_TALL)));
+            x += width + TOOL_GAP;
+        }
+    }
+    bars
+}
+
+/// How much of the top of the canvas room `inner` the object tools in `bars` take, with the
+/// gap under their last row: [`TOOLS_ONE_ROW`] for one row, and a row's height more for each
+/// further row.
+fn tools_tall(bars: &[Rect], inner: Rect) -> f32 {
+    let bottom = bars.iter().map(|bar| bar.max.y).fold(inner.min.y, f32::max);
+    (bottom + TOOL_GAP - inner.min.y).max(TOOLS_ONE_ROW)
 }
 
 /// The Edit view's canvas in an `area` (the middle column's room, with `ruler` taken at the top
-/// and left): the room inside its margins, the part of that under the tools, and the width a
-/// slide fitted to it has.
-fn canvas_room(area: Rect, ruler: f32) -> (Rect, Rect, f32) {
-    let inner = Rect::from_min_max(area.min + vec2(ruler, ruler), area.max).shrink(28.0);
-    let room = Rect::from_min_max(pos2(inner.min.x, inner.min.y + 44.0), inner.max);
+/// and left): the room inside its margins.
+fn canvas_inner(area: Rect, ruler: f32) -> Rect {
+    Rect::from_min_max(area.min + vec2(ruler, ruler), area.max).shrink(28.0)
+}
+
+/// The part of the canvas room `inner` under the tools, which take `tools` points at its top,
+/// and the width a slide fitted to it has.
+fn canvas_room(inner: Rect, tools: f32) -> (Rect, f32) {
+    let room = Rect::from_min_max(pos2(inner.min.x, inner.min.y + tools), inner.max);
     let fit_width = inner.width().min(room.height() * 16.0 / 9.0).max(1.0);
-    (inner, room, fit_width)
+    (room, fit_width)
 }
 
 /// Where the middle of a slide fitted to the canvas is.
@@ -9184,19 +9260,82 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_editors_object_tools_are_centred_on_the_slide_whatever_the_room() {
-        // Wide and narrow rooms, as a window of any size or the inspector's room taken from
-        // it leaves: the middle of the four tools is the middle of the slide as drawn.
-        for (left, width, height) in
-            [(0.0, 1000.0, 700.0), (370.0, 760.0, 640.0), (370.0, 420.0, 900.0), (12.0, 1500.0, 500.0)]
-        {
-            let area = Rect::from_min_size(pos2(left, 70.0), vec2(width, height));
-            let (inner, room, fit) = canvas_room(area, 16.0);
-            let slide = Rect::from_center_size(fitted_slide_centre(inner, room, fit), vec2(fit, fit * 9.0 / 16.0));
-            let tools = tool_bars(fitted_slide_centre(inner, room, fit).x, inner.min.y + 22.0);
-            let row = Rect::from_min_max(tools[0].min, tools[4].max);
-            assert!((row.center().x - slide.center().x).abs() < 0.01, "{area:?}: {row:?} against {slide:?}");
-            assert!(tools.windows(2).all(|pair| pair[0].max.x < pair[1].min.x), "in a row, apart");
+    fn the_editors_object_tools_fit_their_words_and_take_a_second_row_rather_than_cut_them() {
+        use crate::i18n::{Language, with_language};
+        let ctx = crate::studio::tests::styled();
+        for language in [Language::English, Language::Spanish] {
+            // Each tool is as wide as its words in the language, with room either side.
+            let mut widths = [0.0; 5];
+            let mut words = [0.0; 5];
+            let output = ctx.run_ui(RawInput::default(), |ui| {
+                with_language(language, || {
+                    widths = tool_widths(ui);
+                    words = std::array::from_fn(|n| crate::studio::widest(ui, &[tool_words(n)], &tool_font()));
+                });
+            });
+            output.drop_without_applying_deltas();
+            // Wide and narrow rooms, as a window of any size or the inspector's room taken from
+            // it leaves; over a song's slide (centred), and in the Theme Editor (at the right),
+            // with no name and with a name 200 points wide at the left.
+            for (left, width, height) in
+                [(0.0, 1000.0, 700.0), (370.0, 760.0, 640.0), (370.0, 420.0, 900.0), (12.0, 1500.0, 500.0)]
+            {
+                for title in [None, Some(0.0), Some(200.0)] {
+                    let area = Rect::from_min_size(pos2(left, 70.0), vec2(width, height));
+                    let inner = canvas_inner(area, 16.0);
+                    let tools = tool_bars(&widths, inner, title);
+                    let (room, fit) = canvas_room(inner, tools_tall(&tools, inner));
+                    let slide =
+                        Rect::from_center_size(fitted_slide_centre(inner, room, fit), vec2(fit, fit * 9.0 / 16.0));
+                    let at = format!("{language:?} in {area:?}, the name taking {title:?}");
+                    assert_eq!(tools.len(), 5, "{at}");
+                    for (n, tool) in tools.iter().enumerate() {
+                        assert!(tool.width() >= words[n] + 2.0 * TOOL_PAD - 0.01, "{at}: tool {n}'s words are cut");
+                        assert!(inner.contains_rect(*tool), "{at}: tool {n} {tool:?} out of the room {inner:?}");
+                        assert!(tool.max.y + TOOL_GAP <= slide.min.y + 0.01, "{at}: tool {n} over the slide");
+                    }
+                    // In order, left to right along a row and row under row, none over another.
+                    for pair in tools.windows(2) {
+                        let along = (pair[0].center().y - pair[1].center().y).abs() < 0.01;
+                        assert!(
+                            if along { pair[0].max.x < pair[1].min.x } else { pair[0].max.y < pair[1].min.y },
+                            "{at}: {pair:?}"
+                        );
+                    }
+                    // Each row is centred on the slide as drawn, or stands at the right.
+                    let mut rows: Vec<Rect> = Vec::new();
+                    for tool in &tools {
+                        match rows.last_mut() {
+                            Some(row) if (row.center().y - tool.center().y).abs() < 0.01 => *row = row.union(*tool),
+                            _ => rows.push(*tool),
+                        }
+                    }
+                    for row in &rows {
+                        if title.is_some() {
+                            assert!((row.max.x - inner.max.x).abs() < 0.01, "{at}: {row:?}");
+                        } else {
+                            assert!(
+                                (row.center().x - slide.center().x).abs() < 0.01,
+                                "{at}: {row:?} against {slide:?}"
+                            );
+                        }
+                    }
+                    // The name has its room at the left of the first row, or the row to itself.
+                    let name = title.unwrap_or(0.0);
+                    let first_row = inner.min.y + TOOL_GAP;
+                    match tools.iter().find(|tool| (tool.min.y - first_row).abs() < 0.01) {
+                        Some(first) => assert!(first.min.x - inner.min.x >= name - 0.01, "{at}: {first:?}"),
+                        None => assert!(name + widths[0] > inner.width(), "{at}: the name alone, with room for a tool"),
+                    }
+                    // One row where the room is wide enough for all five beside the name; the
+                    // narrow room needs more.
+                    let all = name + widths.iter().sum::<f32>() + 4.0 * TOOL_GAP;
+                    assert_eq!(rows.len() == 1 && rows[0].min.y < first_row + 0.01, all <= inner.width(), "{at}");
+                    if width == 420.0 {
+                        assert!(rows.len() >= 2, "{at}");
+                    }
+                }
+            }
         }
     }
 

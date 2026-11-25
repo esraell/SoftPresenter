@@ -164,7 +164,7 @@ each of those has its place in the window. Windows and Linux have no menu bar.
   Move Up and Move Down) retypes the group's name in the strip; dragging moves a slide (and
   those picked out with it) to the ink line. The pictures are 224 wide, the props' and
   layouts' 204: the design's slides view sits 10 in from the column's sides, not 20.
-- **Canvas**: Add Text, Shapes, Media… (the row is centred on the slide, `tool_bars` in `home.rs`) (a picture or a video, which plays in its box when the
+- **Canvas**: Add Text, Shapes, Media… (the row is centred on the slide, or in the Theme Editor stands at the right beside the name of what is open; each tool is as wide as its words, and when they don't fit across the canvas they take a second row, which the slide goes under: `tool_bars` in `home.rs`) (a picture or a video, which plays in its box when the
   slide is on screen), Web Page (a box showing a live web page; its address is typed in the
   Shape tab), NDI Source (a 16:9 box showing a live NDI source, chosen in the Shape tab's NDI Source section: Source menu, Look again, a line saying what is so, Fits, Quality, Sound; `ndi_in.rs`, `inspector::ndi_source`; the picture is received on a thread of its own and put where every drawing thread finds it, `sp_render::show_ndi`, and the screens only look for news in `Output::take_video_picture`); pictures and videos can be dropped on it from the Finder. Double-click a
   text box to type in it. The letter keys add objects (T for a text box, one key per shape).
