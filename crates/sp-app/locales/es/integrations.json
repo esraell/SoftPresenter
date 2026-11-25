@@ -311,7 +311,6 @@
   "integrations.timelychurch.no_services": "La respuesta de TimelyChurch no traía cultos.",
   "integrations.timelychurch.no_song": "La respuesta de TimelyChurch no era una canción.",
   "integrations.timelychurch.not_kept": "No se pudo guardar la conexión en este ordenador: {error}",
-  "integrations.timelychurch.mac_only": "guardar la conexión necesita un Mac hasta que esta versión pueda usar el almacén seguro del sistema",
   "integrations.timelychurch.no_code": "Escribe el código de emparejamiento de TimelyChurch (Setlists › Song Sync).",
   "integrations.timelychurch.pairing_already": "Ya se está conectando…",
   "integrations.timelychurch.not_connected": "TimelyChurch no está conectado.",

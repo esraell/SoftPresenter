@@ -1657,9 +1657,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   offered only when `SOFTPRESENTER_TIMELYCHURCH_URL` is set, and nothing is asked of the
   network without it). Connect to TimelyChurch takes the church's TimelyChurch address and a
   pairing code an administrator makes there (Setlists › Song Sync), or `sp timelychurch
-  connect` with the code on its standard input; the device token goes into the Mac's Keychain
-  (a test copy keeps its own in its own folder), only ever in the `Authorization` header, only
-  to that address, over HTTPS. Connected, the card says "Connected to <church> · last checked
+  connect` with the code on its standard input; the device token goes into the system's store for
+  secrets (the Keychain, Credential Manager or the Secret Service; a test copy keeps its own in
+  its own folder), only ever in the `Authorization` header, only to that address, over HTTPS. Connected, the card says "Connected to <church> · last checked
   …", with Check Now, Disconnect (which keeps the songs and playlists made) and the upcoming
   services listed with how each stands. The services of the next four weeks are asked for soon
   after the start and every five minutes, with the last list's ETag; each becomes a playlist

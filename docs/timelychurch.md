@@ -193,11 +193,12 @@ with their songs"), shown only while it is offered. Its page:
   connect form, after a restart too, until it is connected again.
 - The logo comes later (TimelyChurch will send its files); until then a "T" mark.
 
-The token goes into the Mac's Keychain (a test copy started with `SOFTPRESENTER_DATA` keeps its
-own in its own folder). `token.rs` holds a stand-in for `crate::secrets` (the store over the
-Keychain, Windows Credential Manager and Linux Secret Service being written now), with the same
-`get`, `set` and `delete`, to be replaced by it; until then only a Mac keeps a token. The token
-is never written to a settings file, the log, a notice, a command's reply or a song pack.
+The token goes into the app's store for secrets (`secrets.rs`: the Mac's Keychain, Windows'
+Credential Manager, or the Secret Service on Linux, where connecting is refused if there is
+none rather than keeping the token in a plain file), under the church's address; a test copy
+started with `SOFTPRESENTER_DATA` keeps its own in its own folder, and the unit tests keep
+theirs in memory. The token is never written to a settings file, the log, a notice, a
+command's reply or a song pack.
 
 `sp timelychurch` does the same from the command line: `sp timelychurch` (how it stands),
 `echo "$CODE" | sp timelychurch connect [ADDRESS]`, `check`, `services`, `newer`, `use-newer
@@ -257,7 +258,7 @@ name below is marked `assumed:` in `wire.rs`; the likeliest other spellings are 
 | Step | What | Where it stands |
 |---|---|---|
 | 1 | The mapping: songs (sections, order sung, translation lined up, details, mark) and playlists | Done, for the described API |
-| 2 | The client: pairing, the token in the system's store, the reads, errors, the stand-in | Done (the store is a stand-in until `secrets.rs`) |
+| 2 | The client: pairing, the token in the system's store, the reads, errors, the stand-in | Done |
 | 3 | Keeping in step: the background check, fetching only what changed, the update rules, the TimelyChurch library, the playlists' mark, notices | Done |
 | 4 | Settings › Integrations › TimelyChurch and `sp timelychurch` | Done, hidden behind `SOFTPRESENTER_TIMELYCHURCH_URL`; the logo when it comes |
 | 5 | Song use, queued offline | Done |
