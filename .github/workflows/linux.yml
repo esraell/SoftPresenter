@@ -28,20 +28,30 @@ jobs:
       # (fontconfig), and the window system's libraries (Wayland, X11 and its keyboard). DejaVu
       # Sans is the interface face the app looks for on Linux, so the tests that measure words
       # measure them in it. FFmpeg lets the screen-receiving tests decode their pictures, as
-      # they do on a computer that has it; without it they say so and pass.
-      - name: Install the system's libraries, a font and FFmpeg
+      # they do on a computer that has it; without it they say so and pass. The end-to-end
+      # tests start the app itself, which needs a display and a graphics device: a virtual X
+      # display (Xvfb, started by xvfb-run, which needs xauth), the X keyboard library winit
+      # loads as it starts, and Mesa's Vulkan and OpenGL drivers, which draw on the processor.
+      - name: Install the system's libraries, a font, FFmpeg and a virtual display
         run: >-
           sudo apt-get update &&
           sudo apt-get install -y --no-install-recommends
           pkg-config libasound2-dev libfontconfig-dev libwayland-dev libxkbcommon-dev
           libx11-dev libxcursor-dev libxrandr-dev libxi-dev fonts-dejavu-core ffmpeg
+          xvfb xauth libxkbcommon-x11-0 libx11-xcb1 mesa-vulkan-drivers libvulkan1 libegl1
+          libgl1-mesa-dri
       - name: Install the Rust version in rust-toolchain.toml
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build
         run: cargo build --workspace
-      - name: Tests
-        run: cargo test --workspace --exclude sp-render --no-fail-fast
+      # On a virtual display, for the end-to-end tests (crates/sp-app/tests/e2e.rs), which start
+      # the app; the other tests don't notice it. Without a display those tests skip themselves,
+      # saying so.
+      - name: Tests (on a virtual display, for the end-to-end tests)
+        run: >-
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24"
+          cargo test --workspace --exclude sp-render --no-fail-fast
       - name: Tests (sp-render, without the picture tests)
         if: success() || failure()
         run: cargo test -p sp-render --lib --no-fail-fast

@@ -40,6 +40,9 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build
         run: cargo build --workspace
+      # The end-to-end tests (crates/sp-app/tests/e2e.rs) are among them: they start the app
+      # itself, as a quiet copy, drawing with WARP (DirectX 12 on the processor), as these
+      # machines have no graphics card.
       - name: Tests
         run: cargo test --workspace --exclude sp-render --no-fail-fast
       - name: Tests (sp-render, without the picture tests)
