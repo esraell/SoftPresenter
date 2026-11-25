@@ -1232,6 +1232,16 @@ fn retry_after(failures: u32) -> Duration {
 mod tests {
     use super::*;
 
+    /// The Mac bundle lists the Bonjour services the app uses, and macOS blocks any it leaves
+    /// out: without NDI's, no NDI screen could be found (it happened on the church's Mac).
+    #[test]
+    fn the_mac_bundle_lets_every_bonjour_service_through() {
+        let script = include_str!("../../../scripts/macos-app.sh");
+        for service in ["_ndi._tcp", "_airplay._tcp", "_raop._tcp"] {
+            assert!(script.contains(&format!("<string>{service}</string>")), "{service} is not in NSBonjourServices");
+        }
+    }
+
     #[test]
     fn the_helpers_lines_are_read_and_anything_else_is_only_logged() {
         assert_eq!(

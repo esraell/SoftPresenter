@@ -75,8 +75,10 @@ done
 # NSAppleEventsUsageDescription: why macOS asks to let SoftPresenter use Keynote or PowerPoint,
 # which turn a presentation file into slides on import.
 # NSLocalNetworkUsageDescription and NSBonjourServices: why macOS asks to let SoftPresenter find
-# and be found by devices on the local network, and the two services a phone looks for when it
-# shows its screen.
+# and be found by devices on the local network, and every Bonjour service it announces or looks
+# for. Once the list is there macOS blocks any service not in it, so it must name them all: NDI's
+# (screens sent over NDI, and NDI Source boxes finding sources) and the two a phone looks for when
+# it shows its screen. Leaving NDI's out stopped every NDI screen being found.
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -112,6 +114,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
     <string>SoftPresenter uses the local network so an iPhone, iPad or Mac can show its screen, and for NDI and Remote Control.</string>
     <key>NSBonjourServices</key>
     <array>
+        <string>_ndi._tcp</string>
         <string>_airplay._tcp</string>
         <string>_raop._tcp</string>
     </array>
