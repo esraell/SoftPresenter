@@ -360,6 +360,7 @@ of this one copies it to Documents, checks the copy, and keeps the old folder as
 | `.softpresenter-library` | Says the folder is SoftPresenter's library |
 | `Not saved/` | SoftPresenter's version of a song or theme whose file changed outside the app, kept on quitting before Reload or Keep mine was chosen |
 | `Backup before song ids/` | Files as they were before songs were named by id (only where that was done in place) |
+| `Backup before tidying DATE/` | Each song's file as it was before `sp library tidy --apply` changed it (`tidy_cli.rs`); a second tidy the same day makes `… DATE 2/` |
 | `.opening-pack-<id>/` | A song pack being opened; one a quit left behind goes to the Trash after a day |
 | `.last-tidy` | When the library was last tidied (at most once a day: pictures and videos nothing uses, and files left half-saved, go to the Trash) |
 | `remote/` | Remote Control, in a folder only the user may enter: `settings.json` (on or off, the port, the password's argon2id hash, and the devices remembered, each with only its token's SHA-256), `cert.der` and `key.der` (its certificate and key, readable by the user only) |

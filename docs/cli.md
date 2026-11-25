@@ -833,7 +833,7 @@ Romans`.
 | `library open NAME\|all` | Shows a library's songs, or every song, in the song list |
 | `library new NAME`, `library rename OLD to NEW`, `library delete NAME` | Makes, renames or deletes a library (its songs stay; deleted at once, `sp undo` puts it back) |
 | `library add SONG… to LIBRARY`, `library remove SONG… from LIBRARY` | Puts songs in a library or takes them out (quote each name with spaces) |
-| `library tidy [--apply] [--keep-numbers]` | Puts the library's songs right as an import does ([below](#tidying-the-library)): lists every change, and makes them with `--apply`. At the computer only |
+| `library tidy [--apply] [--keep-numbers] [--titles-from FOLDER]` | Puts the library's songs right as an import does ([below](#tidying-the-library)): lists every change, and makes them with `--apply`. At the computer only |
 
     $ sp playlist new Sunday Evening
     Made the playlist Sunday Evening.
@@ -914,9 +914,18 @@ the date, in the data folder. `--keep-numbers` leaves the number-only titles as 
 Songs kept in step with the song catalog or TimelyChurch are left alone, and so is a song
 whose file changed outside the app (the reply names it). Run again, it says there is nothing
 to tidy. `--json` gives each song with a change (`id`, `title_before`, `title`,
-`title_fixes`, `splits`, `left_whole`, `chars`, `libraries`, and with `--apply` `not_done`),
-`duplicates`, the `backup` folder and the `counts`. It isn't open to a remote page or an AI
-assistant.
+`title_fixes`, `splits`, `left_whole`, `chars`, `libraries`, `from_file`, and with `--apply`
+`not_done`), `duplicates`, the `backup` folder and the `counts`. It isn't open to a remote page
+or an AI assistant.
+
+`--titles-from FOLDER` names songs brought across from a folder of song documents (`.pro`) as
+an import names them now: after their files ("12 - Amazing Grace"), not by the name each
+document keeps inside, which earlier imports used. FOLDER is the folder they were imported
+from (or the folder holding it), and it is only read. A song is found there by what it was
+imported as, its old title and its words; one already named after its file is recognised,
+and run again it finds nothing left. Songs found in several files that would name them
+differently, and songs not found there (imported from somewhere else, or changed since), are
+listed, and the other rules alone name them.
 
     $ sp library tidy
     Tidying would change 6 of the library's 7 songs. Nothing has changed yet: sp library tidy --apply does it.

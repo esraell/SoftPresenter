@@ -360,12 +360,12 @@ pub fn import_file(path: &Path) -> Result<Presentation, String> {
     if size > largest {
         return Err(tf("notices.import.too_large", "{name} is too large to be a song.", &[("name", &name)]));
     }
-    let title = path
-        .file_stem()
-        .map_or_else(|| t("left.untitled", "Untitled").to_owned(), |s| s.to_string_lossy().into_owned());
+    // The file's name, which a song document is named by before the name it keeps inside.
+    let stem = path.file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+    let title = if stem.trim().is_empty() { t("left.untitled", "Untitled").to_owned() } else { stem.clone() };
     let read = || std::fs::read(path).map_err(|e| unreadable(&e.to_string()));
     let song = if pro {
-        read_pro_file(&read()?, &title).map_err(|reason| unreadable(&reason))?
+        read_pro_file(&read()?, &stem).map_err(|reason| unreadable(&reason))?
     } else {
         let text = if has_extension(path, RICH_TEXT_ENDING) {
             rtf_to_text(&read()?)

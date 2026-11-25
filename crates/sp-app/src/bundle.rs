@@ -809,8 +809,20 @@ mod tests {
         let bundle = dir.0.join("Service.proBundle");
         several_songs(&bundle);
         let opened = open(&bundle, &dir.0.join("staging")).unwrap();
+        // Named by their entries' file names, in the bundle's order; an import's tidying then
+        // takes the endings off.
         let titles: Vec<&str> = opened.songs.iter().map(|song| song.song.title.as_str()).collect();
-        assert_eq!(titles, ["Evening Lantern", "Anchor Song", "Песня рассвета"], "in the bundle's order");
+        assert_eq!(
+            titles,
+            ["Evening Lantern (modified).docx", "Anchor Song", "Песня рассвета Modified.docx"],
+            "in the bundle's order"
+        );
+        let tidied: Vec<String> = opened
+            .songs
+            .iter()
+            .map(|song| sp_model::tidy_song(&song.song, sp_model::TidyOptions::default()).song.title)
+            .collect();
+        assert_eq!(tidied, ["Evening Lantern (modified)", "Anchor Song", "Песня рассвета Modified"]);
         // The picture both songs show is taken out once.
         let names: Vec<&str> = opened.files.iter().map(|staged| staged.name.as_str()).collect();
         assert_eq!(names, ["Sky.png", "Waves.mov"]);

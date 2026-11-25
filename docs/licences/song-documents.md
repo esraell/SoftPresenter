@@ -74,3 +74,12 @@ SQLite's authors publish (sqlite.org/fileformat2.html); it uses no code from SQL
 anyone else, links no library and runs no other program, and it only reads. The songs in a church's own
 SoftProjector files are the church's to bring across; the songbooks SoftProjector offers for
 download carry their publishers' copyrights, and SoftPresenter does not ship any of them.
+
+## Tidying imported songs: Unicode normalisation
+
+Every import, and `sp library tidy`, joins letters written as a letter and a combining mark
+into one (Unicode's NFC: и and a breve become й) with the
+[`icu_normalizer`](https://crates.io/crates/icu_normalizer) crate, version 2.3, under the
+Unicode-3.0 licence, a permissive licence that can be combined with the GNU GPL version 3. It
+was already built into SoftPresenter for web addresses (through `idna`); `sp-model` now uses it
+directly, with only its compiled-in data (`compiled_data`), so it brings no other crate.

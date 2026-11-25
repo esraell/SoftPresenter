@@ -255,7 +255,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   is not read yet, and says so.
 - **Bringing a library across from ProPresenter 7.** File › Import Songs › A Library Folder… opens
   its Libraries folder; choose song documents, one library, or the folder of all of them. Each folder becomes a
-  library of the same name. Each song keeps its groups, slides, arrangements (and the one
+  library of the same name. Each song is named as its file is ("12 - Amazing Grace", hymn
+  number and all), the name kept right in the libraries seen; the name a document keeps inside
+  (often its first line as first typed, a name garbled long ago, or another song's) is used
+  only when the file's name has no letter or digit. Songs brought across
+  before that was so are named after their files by `sp library tidy --titles-from FOLDER`,
+  FOLDER being the folder they were imported from, which it only reads (see
+  [cli.md](cli.md#tidying-the-library)). Each song keeps its groups, slides, arrangements (and the one
   chosen), slide labels and notes, slides switched off, and its copyright details. A slide's
   text box in the largest type becomes the words, the next the translation, and a line such as
   "Psalm 133:3" the reference. `.pro` files can also be dropped on the window or given to

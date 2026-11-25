@@ -591,7 +591,10 @@ fn tidy_slide(mut slide: Slide, chars: &mut CharFixes) -> (Vec<Slide>, Outcome) 
         .flat_map(|stanza| share_out(stanza, MOST_TIDY_LINES).into_iter().map(<[String]>::to_vec))
         .collect();
     if pieces.len() <= 1 {
-        return (vec![slide], Outcome::Same);
+        // A translation parted where its main words aren't: left, and said.
+        let parted = found[1..].iter().any(|(_, theirs)| theirs.list.len() > 1);
+        let outcome = if parted { Outcome::Whole(WholeWhy::Translation) } else { Outcome::Same };
+        return (vec![slide], outcome);
     }
     if translations.len() > 1 {
         return (vec![slide], Outcome::Whole(WholeWhy::Boxes));
@@ -910,6 +913,11 @@ mod tests {
         assert_eq!(words(tidied.song.slide(0).unwrap().1, Role::primary()), "A\nB\n\nC\nD", "only its end is trimmed");
         assert_eq!(tidied.left_whole, [LeftWhole { slide: 1, why: WholeWhy::Translation }]);
         assert!(tidied.splits.is_empty());
+        // A translation parted where its main words aren't: left as it is, and said too.
+        let theirs = song_of(vec![slide("A\nB", Some("А\n\nБ"))]);
+        let tidied = tidy_song(&theirs, TidyOptions::default());
+        assert_eq!(tidied.song, theirs);
+        assert_eq!(tidied.left_whole, [LeftWhole { slide: 1, why: WholeWhy::Translation }]);
     }
 
     #[test]

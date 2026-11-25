@@ -156,13 +156,20 @@ pub struct ProMedia {
 pub struct ProDocument {
     pub song: Presentation,
     pub media: Vec<(Uuid, ProMedia)>,
+    /// The name the document carries inside it (or its CCLI title), empty when it has none.
+    /// Songs used to be named by it; see [`read_pro_file`] for why the file's name comes first.
+    pub own_name: String,
 }
 
-/// Reads a song from a `.pro` document. `fallback` is the title used when the document has
-/// none (its file name, say). A document with pictures or videos but no words is refused, as
-/// its slides would come across empty.
-pub fn read_pro_file(bytes: &[u8], fallback: &str) -> Result<Presentation, String> {
-    let document = read_pro_document(bytes, fallback)?;
+/// Reads a song from a `.pro` document. `file_title` is the title its file's name gives (its
+/// name without the ending; empty when there is none). The song is named by its file when that
+/// name has a letter or digit in it. In the libraries seen, the files' names were the ones kept
+/// right (hymn numbers and all), while the name kept inside a document was often its first line
+/// as first typed (comma and all), a name garbled long ago, or another song's. The document's
+/// own name is used when the file gives none. A document with pictures or videos but no words is refused, as its
+/// slides would come across empty.
+pub fn read_pro_file(bytes: &[u8], file_title: &str) -> Result<Presentation, String> {
+    let document = read_pro_document(bytes, file_title)?;
     let has_words = |slide: &Slide| slide.objects.iter().any(|o| o.as_text().is_some_and(|t| !t.trim().is_empty()));
     if !document.song.groups.iter().flat_map(|g| &g.slides).any(has_words) {
         return Err("it has pictures or videos but no words, and those don't come across yet".to_owned());
@@ -171,15 +178,16 @@ pub fn read_pro_file(bytes: &[u8], fallback: &str) -> Result<Presentation, Strin
 }
 
 /// Reads a song from a `.pro` document with the pictures and videos its slides show, for a
-/// bundle that carries their files. A document with neither words nor pictures is refused.
-pub fn read_pro_document(bytes: &[u8], fallback: &str) -> Result<ProDocument, String> {
+/// bundle that carries their files, named as [`read_pro_file`] names it. A document with
+/// neither words nor pictures is refused.
+pub fn read_pro_document(bytes: &[u8], file_title: &str) -> Result<ProDocument, String> {
     if bytes.len() > LARGEST_PRO_FILE {
         return Err("the file is too large to be a song".to_owned());
     }
-    read(bytes, fallback).map_err(str::to_owned)
+    read(bytes, file_title).map_err(str::to_owned)
 }
 
-fn read(bytes: &[u8], fallback: &str) -> Result<ProDocument, &'static str> {
+fn read(bytes: &[u8], file_title: &str) -> Result<ProDocument, &'static str> {
     let mut name = String::new();
     let mut selected = String::new();
     let mut arrangements: Vec<(String, String, Vec<String>)> = Vec::new();
@@ -304,7 +312,11 @@ fn read(bytes: &[u8], fallback: &str) -> Result<ProDocument, &'static str> {
     if media.is_empty() && !song_groups.iter().flat_map(|g| &g.slides).any(has_words) {
         return Err("it has no words or pictures in it, or isn't a song document");
     }
-    let title = [name.trim(), ccli_title.trim(), fallback].into_iter().find(|t| !t.is_empty()).unwrap_or("Untitled");
+    let own_name = [name.trim(), ccli_title.trim()].into_iter().find(|t| !t.is_empty()).unwrap_or_default().to_owned();
+    let file_title = file_title.trim();
+    let title =
+        if file_title.chars().any(char::is_alphanumeric) || own_name.is_empty() { file_title } else { &own_name };
+    let title = if title.is_empty() { "Untitled" } else { title };
     let song = Presentation {
         id: Uuid::new_v4(),
         title: title.to_owned(),
@@ -317,7 +329,7 @@ fn read(bytes: &[u8], fallback: &str) -> Result<ProDocument, &'static str> {
         transition: None,
         catalog: None,
     };
-    Ok(ProDocument { song, media })
+    Ok(ProDocument { song, media, own_name })
 }
 
 /// The positions of a song's text boxes, main words first. Each position is ranked by the size
@@ -730,8 +742,8 @@ mod tests {
 
     #[test]
     fn a_song_comes_with_its_groups_words_translation_labels_and_details() {
-        let song = read_pro_file(&document(), "file").unwrap();
-        assert_eq!(song.title, "Lantern Song");
+        let song = read_pro_file(&document(), "").unwrap();
+        assert_eq!(song.title, "Lantern Song", "a file with no name: the document's own");
         let names: Vec<&str> = song.groups.iter().map(|g| g.name.as_str()).collect();
         assert_eq!(names, ["Verse 1", "Chorus"]);
         let first = &song.groups[0].slides[0];
@@ -766,6 +778,20 @@ mod tests {
         let song = read_pro_file(&doc, "Fallback name").unwrap();
         assert!(song.groups[0].slides[0].enabled);
         assert_eq!(song.title, "Fallback name");
+    }
+
+    #[test]
+    fn a_song_is_named_by_its_file_and_by_the_name_inside_when_the_file_gives_none() {
+        let inside = document();
+        let read = |file: &str| read_pro_document(&inside, file).unwrap();
+        assert_eq!(read("12 - Lantern Song").song.title, "12 - Lantern Song");
+        assert_eq!(read("12 - Lantern Song").own_name, "Lantern Song");
+        assert_eq!(read("").song.title, "Lantern Song");
+        assert_eq!(read(" - ").song.title, "Lantern Song", "no letter or digit in the file's name");
+        assert_eq!(read("100").song.title, "100", "a number is a name");
+        let nameless =
+            [field(12, &group("g", "Verse", &["a"])), field(13, &cue("a", &[r"{\rtf1 Words}"], "", false))].concat();
+        assert_eq!(read_pro_file(&nameless, "").unwrap().title, "Untitled");
     }
 
     #[test]

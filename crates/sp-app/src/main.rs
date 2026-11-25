@@ -6801,8 +6801,9 @@ impl App {
     ) {
         // A song from another program's file comes in tidied (its title and words put right, as
         // `sp library tidy` puts the library's), before it is looked for in the library, so
-        // the same file imported again is found there. SoftPresenter's own songs come as saved.
-        if !load::is_song_file(path) {
+        // the same file imported again is found there. SoftPresenter's own songs come as saved,
+        // and so does a song kept in step with an outside source (its fingerprint would change).
+        if !load::is_song_file(path) && song.catalog.is_none() {
             song = sp_model::tidy_song(&song, sp_model::TidyOptions::default()).song;
         }
         let look = import_key(&song);
@@ -12229,11 +12230,12 @@ mod tests {
         let song = |title: &str| sp_model::pro_example::titled_song_showing(title, &[]);
         let bundle = dir.join("Service.proBundle");
         let mut zip = zip::ZipWriter::new(std::fs::File::create(&bundle).unwrap());
+        // Each song is named by its entry's file name, whatever name it keeps inside.
         for (name, title) in [
             ("Anchor Song.pro", "Anchor Song"),
-            ("Evening Lantern.docx.pro", "Evening Lantern"),
-            ("Anchor Song (copy).pro", "anchor song"),
-            ("Dawn Road.pro", "Dawn Road"),
+            ("Evening Lantern.pro", "Evening Lantern,"),
+            ("anchor song.pro", "Anchor Song (copy)"),
+            ("Dawn Road.pro", "Untitled"),
         ] {
             zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
             zip.write_all(&song(title)).unwrap();
