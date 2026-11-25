@@ -814,6 +814,35 @@ fn after_a_reading_is_cleared_next_starts_the_song_opened_in_the_playlist() {
     copy.quit().assert_clean(&run);
 }
 
+/// The owner's rule (2026-11-25): Next always moves what the audience sees, and opening an item
+/// only lines it up. A reading from the Bible page still on screen at its last verse: Next starts
+/// the song opened in the playlist at its first slide.
+#[test]
+fn at_a_readings_last_verse_next_starts_the_song_opened_in_the_playlist() {
+    let Some(run) = Run::new("at_a_readings_last_verse_next_starts_the_song_opened_in_the_playlist") else { return };
+    let song = run.file("Alpha.txt");
+    std::fs::write(&song, song_text(&[("Verse 1", "Alpha one"), ("Verse 2", "Alpha two")])).expect("Alpha");
+    let copy = run.start(&[]);
+    copy.ok(&["song", "import", &song.to_string_lossy()]);
+    copy.ok(&["playlist", "add", "Alpha"]);
+    copy.ok(&["bible", "rows", "KJV"]);
+    // The Bible page makes the slides of the passage's whole chapter; Psalm 117 has two verses.
+    copy.ok(&["bible", "Psalm 117:1", "--show"]);
+    let (reading, first) = copy.live().expect("the reading on screen");
+    assert_eq!(first, 1, "{reading}");
+    copy.ok(&["next"]);
+    copy.assert_live(&reading, 2);
+    let status = copy.status();
+    assert_eq!(status["live"]["slides"], 2, "{status}");
+    assert!(status["next_slide"].is_null(), "at the reading's last verse: {status}");
+    copy.ok(&["view", "service"]);
+    copy.ok(&["playlist", "go", "Alpha"]);
+    copy.assert_live(&reading, 2);
+    copy.ok(&["next"]);
+    copy.assert_live("Alpha", 1);
+    copy.quit().assert_clean(&run);
+}
+
 #[test]
 fn audio_is_added_played_moved_through_and_stopped() {
     let Some(run) = Run::new("audio_is_added_played_moved_through_and_stopped") else { return };

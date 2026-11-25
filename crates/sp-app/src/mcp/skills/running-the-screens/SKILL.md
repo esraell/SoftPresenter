@@ -50,7 +50,8 @@ The screens are made of layers, from the back: **media** (a picture or video beh
   Continuous on in SoftPresenter, on into the playlist's next item. At an end, `next_slide`
   says so and nothing changes: that is not a mistake to work round.
 - `show_song` puts a song from the library on the screens (not as part of the playlist, so Next
-  stops at its last slide).
+  stops at its last slide, unless an item of the playlist has been opened in SoftPresenter:
+  Next then starts that item).
 - `show_bible_passage` puts a passage's first verse on the screens; `next_slide` then goes verse
   by verse.
 - `show_message` shows a message kept in SoftPresenter (`list_messages`) or a few words of the
