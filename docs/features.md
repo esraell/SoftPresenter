@@ -1480,22 +1480,23 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   computer's language (named in that language, "El idioma del ordenador (Español)"), then English,
   Español, Русский and Українська, each written in itself; the setup's first step has the same
   choice. A choice shows at once, with no restart, and is kept with the preferences (`language`).
-  Spanish is written for the top bar, the keys sheet, the left column (libraries and playlists,
-  and the song and playlist item menus), the slides area (with the slide, arrangement and times
-  menus) and the bar under it, the media strip under it (its menus, and what adding
-  pictures and videos says), the Bible view's page and lists and the Bibles window, the
-  first-start setup, the Edit view (its lists, tools, inspector and stage layouts, Edit Words),
-  the Themes view, the Bible view's bar and Options, the find box's results, Settings (all but
-  Screens), the confirmation sheets, the notices list and everything said in it, the Mac's menu
-  bar (it changes with the language at once; `sp menu` keeps the English names), the Import Slides sheets,
-  Settings › Integrations (VoxLive, Canva Sync) and Remote Control, and the right
-  column's preview, layer keys, Clear All and tool tabs with what is in them (timers, messages,
-  props, macros, the stage layouts, the audio player);
-  the rest of the window is still English, and a word with no translation yet shows in
+  Spanish is written for the whole window but Settings › Screens: the top bar, the keys sheet, the
+  left column (libraries, playlists and their menus), the slides area (with the slide,
+  arrangement and times menus), the bar and the media strip under it, the right column (preview,
+  layer keys, Clear All, the tool tabs and what is in them), the Bible view, the Bibles window,
+  the Edit view (its lists, tools, inspector, stage layouts and Edit Words), the Themes view, the
+  find box's results, Settings (General, Groups, Key Mappings, Integrations with VoxLive and Canva
+  Sync, Remote Control, About), the first-start setup, the Import Slides sheets, the confirmation
+  sheets, the notices list and everything said in it, and the Mac's menu bar (it changes with the
+  language at once; `sp menu` keeps the English names). Still English: Settings › Screens, the
+  inspector's NDI Source section, the audio player's own messages and the output windows' messages,
+  left while other work changes them; the built-in themes' and boxes' names; a word with no
+  translation yet shows in
   English. Russian and Ukrainian have the number and quotation rules and the plural forms, and
   their words come next. Controls take the width of their words in the language set, and a place
   with a fixed room (a layer key, the find box, All Songs) uses a short form when the usual word
-  is too long. Songs, Bible text and the `sp` command line stay as they are.
+  is too long. Songs and Bible text stay as they are; the `sp` command line keeps English where
+  only it speaks, and repeats a notice or message the window says in the window's language.
 - Each song's Artist, Author, Publisher, Year and CCLI Song # (the Info icon at the right of its header, beside Edit Words, Arrangement and Notes), and a
   copyright line on the screens on a song's first slide, last slide or every slide, with the
   church's CCLI licence number, chosen in Settings.

@@ -113,9 +113,9 @@ start with `_` (`"_note"`) are comments.
 | `common` | words several areas share |
 | `format` | numbers and quotation marks (not words) |
 
-The next areas, each a file of its own for one agent: `editor` and `inspector`; `settings`,
-`setup` and `screens`; `bible`; `notices`, `messages` and `dialogs`; `stage` and the remaining
-views (props, timers, macros, announcements).
+Spanish has every area above. What is left is `screens` (Settings › Screens and the NDI download
+on Linux), the inspector's NDI Source section (`ndi_in.rs`), `audio.rs` and the output windows'
+messages in `main.rs`, left while other work changes them.
 
 When you finish an area, add its file name to `SPANISH_DONE` in `i18n.rs`, so a string wrapped
 later without its Spanish fails the tests.
