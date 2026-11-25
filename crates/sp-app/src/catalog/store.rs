@@ -28,6 +28,7 @@ use sha2::{Digest, Sha256};
 
 use super::fold::fold;
 use super::read::{self, KEY_VERSION, Song};
+use crate::i18n::tf;
 
 /// What an index file says it is.
 const INDEX_FORMAT: &str = "softpresenter-song-catalog-index";
@@ -374,7 +375,13 @@ impl Catalog {
             let extra = file.gone.len() - MOST_GONE;
             file.gone.drain(..extra);
         }
-        std::fs::create_dir_all(&dir).map_err(|e| format!("Could not make the catalog's folder: {e}"))?;
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            tf(
+                "notices.catalog.no_folder",
+                "Could not make the catalog's folder: {error}",
+                &[("error", &crate::notices::write_problem(&e))],
+            )
+        })?;
         write_atomically(&dir.join(&pack), bytes)?;
         let text = serde_json::to_string(&file).map_err(|e| e.to_string())?;
         write_atomically(&dir.join("index.json"), text.as_bytes())?;
@@ -473,9 +480,27 @@ pub fn lang_of_key(key: &str) -> Option<&str> {
     key.split_once(':').map(|(lang, _)| lang).filter(|lang| valid_language(lang))
 }
 
+/// Why a pack was refused, in a sentence in the language set (a language's status keeps the
+/// problem in English: see `Catalog::download_from`).
+fn refused_words(lang: &str, why: &read::Refused) -> String {
+    let lang = [("lang", lang)];
+    match why {
+        read::Refused::NotAZip => {
+            tf("notices.catalog.refused.not_a_pack", "The {lang} songs isn't a song pack that could be read.", &lang)
+        }
+        read::Refused::TooMany => {
+            tf("notices.catalog.refused.too_many", "The {lang} songs holds more files than a song pack should.", &lang)
+        }
+        read::Refused::TooBig => {
+            tf("notices.catalog.refused.too_big", "The {lang} songs unpacks to more than a song pack should.", &lang)
+        }
+        read::Refused::NoSongs => tf("notices.catalog.refused.no_songs", "The {lang} songs has no songs in it.", &lang),
+    }
+}
+
 /// Reads a pack whole and makes its index: songs sorted by title, each with its key.
 fn build_index(lang: &str, bytes: &[u8], pack: &str, meta: &Meta, carried: &[Gone]) -> Result<IndexFile, String> {
-    let found = read::read_pack(bytes).map_err(|why| format!("The {lang} songs {}.", why.words()))?;
+    let found = read::read_pack(bytes).map_err(|why| refused_words(lang, &why))?;
     let mut entries: Vec<Entry> = read::keyed(lang, found.songs)
         .into_iter()
         .map(|(key, at, song)| Entry {
@@ -525,7 +550,11 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
         Some(ext) => format!("{}.part", ext.to_string_lossy()),
         None => "part".to_owned(),
     });
-    std::fs::write(&partial, bytes)
-        .and_then(|()| std::fs::rename(&partial, path))
-        .map_err(|e| format!("Could not save the catalog's files: {e}"))
+    std::fs::write(&partial, bytes).and_then(|()| std::fs::rename(&partial, path)).map_err(|e| {
+        tf(
+            "notices.catalog.not_saved",
+            "Could not save the catalog's files: {error}",
+            &[("error", &crate::notices::write_problem(&e))],
+        )
+    })
 }

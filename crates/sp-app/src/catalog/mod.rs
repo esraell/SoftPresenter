@@ -218,7 +218,8 @@ impl Catalog {
         if let Err(problem) = &result
             && index.is_some()
         {
-            let _ = self.note_checked(lang, now, Some(problem.clone()));
+            // Kept in English whatever the window speaks: `sp catalog` reads it back later.
+            let _ = self.note_checked(lang, now, Some(crate::i18n::english_of(problem)));
         }
         result
     }

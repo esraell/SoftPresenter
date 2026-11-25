@@ -78,24 +78,13 @@ pub struct Read {
     pub duplicates: usize,
 }
 
-/// Why a whole pack was refused.
+/// Why a whole pack was refused (said in words by `store::refused_words`).
 #[derive(Debug, PartialEq, Eq)]
 pub enum Refused {
     NotAZip,
     TooMany,
     TooBig,
     NoSongs,
-}
-
-impl Refused {
-    pub fn words(&self) -> &'static str {
-        match self {
-            Refused::NotAZip => "isn't a song pack that could be read",
-            Refused::TooMany => "holds more files than a song pack should",
-            Refused::TooBig => "unpacks to more than a song pack should",
-            Refused::NoSongs => "has no songs in it",
-        }
-    }
 }
 
 /// Reads every song in a song pack (a zip). Songs are told apart by [`song_key`]; a song the

@@ -126,8 +126,14 @@ start with `_` (`"_note"`) are comments.
 | `common` | words several areas share |
 | `format` | numbers and quotation marks (not words) |
 
-Spanish has every area above. What is left is the output windows' messages in `main.rs`, left
-while other work changes them.
+Spanish has every area above. What stays in English is what other crates say in their own words
+when something fails (NDI's, the DeckLink driver's and a video file's reasons, shown as they
+come), and the few errors said at startup before the language is known (the home window can't
+open, no graphics device).
+Where another crate's words are drawn in the window, sp-app says them from the crate's own values
+(`screens::decklink_driver_words`, `screens::decklink_format_words`, `screens::ndi_not_installed`)
+or hands the crate its words (`sp_render::set_ndi_tag_words`), so the crate and `sp` keep their
+English.
 
 When you finish an area, add its file name to `SPANISH_DONE` in `i18n.rs`, so a string wrapped
 later without its Spanish fails the tests.

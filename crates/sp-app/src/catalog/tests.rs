@@ -580,10 +580,14 @@ fn a_check_is_due_about_monthly_and_sooner_after_a_failure() {
     assert!(catalog.due(1_000_000 + CHECK_EVERY - 1).is_empty());
     assert_eq!(catalog.due(1_000_000 + CHECK_EVERY), ["ru"]);
     // A source that can't be reached: the check fails, the songs stay, and it is tried again in a day.
-    let failed = catalog.download_from("http://127.0.0.1:1", "ru", 5_000_000, None);
-    assert!(failed.is_err());
+    // The window says why in its language; what is kept for `sp catalog` stays in English.
+    let failed = crate::i18n::with_language(crate::i18n::Language::Spanish, || {
+        catalog.download_from("http://127.0.0.1:1", "ru", 5_000_000, None)
+    });
+    assert!(failed.as_ref().is_err_and(|said| said.starts_with("No se pudo llegar")), "{failed:?}");
     assert_eq!(catalog.languages()[0].songs, 1);
-    assert!(catalog.languages()[0].problem.is_some());
+    let kept = catalog.languages()[0].problem.clone().unwrap_or_default();
+    assert!(kept.starts_with("Could not reach the song source"), "{kept}");
     assert!(catalog.due(5_000_000 + RETRY_AFTER - 1).is_empty());
     assert_eq!(catalog.due(5_000_000 + RETRY_AFTER), ["ru"]);
     // A server that answers 404 is a failure said in words, not a crash.
@@ -605,7 +609,10 @@ fn a_pack_bigger_than_allowed_or_cut_short_is_not_kept() {
         }
     });
     let catalog = catalog("cut-short");
-    let cut = catalog.download_from(&address, "ru", 0, None).unwrap_err();
+    // The words are checked in English, whatever another test sets.
+    let cut = crate::i18n::with_language(crate::i18n::Language::English, || {
+        catalog.download_from(&address, "ru", 0, None).unwrap_err()
+    });
     assert!(cut.to_lowercase().contains("cut short") || cut.to_lowercase().contains("stopped"), "{cut}");
     assert!(catalog.installed().is_empty(), "nothing was kept");
     // A server that says the pack is enormous is not asked for the rest.

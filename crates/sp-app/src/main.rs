@@ -1011,7 +1011,13 @@ fn surface_format(surface: &wgpu::Surface<'_>, adapter: &wgpu::Adapter) -> Resul
         .formats
         .into_iter()
         .find(|f| matches!(f, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Rgba8Unorm))
-        .ok_or_else(|| "This display does not offer a colour format SoftPresenter can draw to.".to_owned())
+        .ok_or_else(|| {
+            i18n::t(
+                "notices.screens.no_format",
+                "This display does not offer a colour format SoftPresenter can draw to.",
+            )
+            .to_owned()
+        })
 }
 
 /// A screen's name, by its id, for the log.
@@ -1207,7 +1213,11 @@ fn add_surface(
     let surface = match context.instance.create_surface(window.clone()) {
         Ok(surface) => surface,
         Err(e) => {
-            notices.lasting_trouble(format!("Could not draw to \"{}\": {e}", screen.name));
+            notices.lasting_trouble(i18n::tf(
+                "notices.screens.not_drawn",
+                "Could not draw to \"{name}\": {error}",
+                &[("name", &screen.name), ("error", &e.to_string())],
+            ));
             return false;
         }
     };
@@ -8072,7 +8082,11 @@ impl App {
             let window = match el.create_window(attrs) {
                 Ok(window) => Arc::new(window),
                 Err(e) => {
-                    home_state.notices.lasting_trouble(format!("Could not open a window for \"{}\": {e}", screen.name));
+                    home_state.notices.lasting_trouble(i18n::tf(
+                        "notices.screens.no_window",
+                        "Could not open a window for \"{name}\": {error}",
+                        &[("name", &screen.name), ("error", &e.to_string())],
+                    ));
                     continue;
                 }
             };
@@ -8083,9 +8097,11 @@ impl App {
             {
                 if let Err(problem) = put_on_display(&window, monitor, above, true) {
                     window.set_visible(false);
-                    home_state
-                        .notices
-                        .lasting_trouble(format!("Could not put \"{}\" on its display: {problem}", screen.name));
+                    home_state.notices.lasting_trouble(i18n::tf(
+                        "notices.screens.not_placed",
+                        "Could not put \"{name}\" on its display: {problem}",
+                        &[("name", &screen.name), ("problem", &problem)],
+                    ));
                     continue;
                 }
                 put_on = Some(*rect);
@@ -8309,7 +8325,11 @@ impl App {
                 && decklink_playing.contains(&screen.id)
                 && !playing.contains(&screen.id)
             {
-                home_state.notices.trouble(format!("{}: {doing} Trying again.", screen.name));
+                home_state.notices.trouble(i18n::tf(
+                    "notices.decklink.trying_again",
+                    "{screen}: {doing} Trying again.",
+                    &[("screen", &screen.name), ("doing", doing)],
+                ));
             }
         }
         *decklink_playing = playing;

@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use super::store::valid_language;
+use crate::i18n::{t, tf};
 
 /// Where the source publishes its free song packs: the language's code and `.qsp` are added.
 const DOWNLOADS: &str = "https://repo.worshipleaderapp.com/website/quelea";
@@ -120,8 +121,16 @@ impl Failed {
 
 fn get_once(base: &str, url: &str, have: &Have, progress: Option<&Progress>) -> Result<Reply, Failed> {
     let offline = |e: ureq::Error| match e {
-        ureq::Error::StatusCode(code) => Failed::Server(format!("The song source answered {code}, not the songs.")),
-        other => Failed::Network(format!("Could not reach the song source: {other}")),
+        ureq::Error::StatusCode(code) => Failed::Server(tf(
+            "notices.catalog.answered",
+            "The song source answered {code}, not the songs.",
+            &[("code", &code.to_string())],
+        )),
+        other => Failed::Network(tf(
+            "notices.catalog.unreachable",
+            "Could not reach the song source: {error}",
+            &[("error", &other.to_string())],
+        )),
     };
     // The pack as it is: asked for compressed, the source compresses it as it sends (a zip
     // gains nothing) and then gives no length, so no per cent and no check for a cut-short body.
@@ -146,7 +155,11 @@ fn get_once(base: &str, url: &str, have: &Have, progress: Option<&Progress>) -> 
     let expected = header(&response, "content-length").and_then(|value| value.parse::<u64>().ok());
     if expected.is_some_and(|expected| expected > LARGEST) {
         return Err(Failed::Server(
-            "The song pack is bigger than a song pack should be, so it was not downloaded.".to_owned(),
+            t(
+                "notices.catalog.too_big",
+                "The song pack is bigger than a song pack should be, so it was not downloaded.",
+            )
+            .to_owned(),
         ));
     }
     if let (Some(progress), Some(expected)) = (progress, expected) {
@@ -156,14 +169,24 @@ fn get_once(base: &str, url: &str, have: &Have, progress: Option<&Progress>) -> 
     let mut bytes = Vec::with_capacity(expected.unwrap_or(1 << 20).min(LARGEST) as usize);
     let mut chunk = [0_u8; 64 * 1024];
     loop {
-        let read = reader.read(&mut chunk).map_err(|e| Failed::Network(format!("The download stopped: {e}")))?;
+        let read = reader.read(&mut chunk).map_err(|e| {
+            Failed::Network(tf(
+                "notices.catalog.stopped",
+                "The download stopped: {error}",
+                &[("error", &e.to_string())],
+            ))
+        })?;
         if read == 0 {
             break;
         }
         bytes.extend_from_slice(&chunk[..read]);
         if bytes.len() as u64 > LARGEST {
             return Err(Failed::Server(
-                "The song pack is bigger than a song pack should be, so it was not kept.".to_owned(),
+                t(
+                    "notices.catalog.too_big_kept",
+                    "The song pack is bigger than a song pack should be, so it was not kept.",
+                )
+                .to_owned(),
             ));
         }
         if let Some(progress) = progress {
@@ -171,7 +194,9 @@ fn get_once(base: &str, url: &str, have: &Have, progress: Option<&Progress>) -> 
         }
     }
     if expected.is_some_and(|expected| expected != bytes.len() as u64) {
-        return Err(Failed::Network("The download was cut short. Try again.".to_owned()));
+        return Err(Failed::Network(
+            t("notices.catalog.cut_short", "The download was cut short. Try again.").to_owned(),
+        ));
     }
     Ok(Reply::Pack { bytes, etag, last_modified })
 }

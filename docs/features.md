@@ -1555,9 +1555,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   look, background, key and DeckLink rows, and what each screen is doing, which `sp screens`
   gives in English), the first-start setup, the Import Slides sheets, the confirmation
   sheets, the notices list and everything said in it, and the Mac's menu bar (it changes with the
-  language at once; `sp menu` keeps the English names). Still English: the output windows'
-  messages,
-  left while other work changes them; a word with no translation yet shows in
+  language at once; `sp menu` keeps the English names). Still English: what NDI, the DeckLink
+  driver or a video file says in its own words when something fails, shown as it comes; a word
+  with no translation yet shows in
   English. What the app names is named in the language set: the first playlist of a first start
   (its name follows the language until anything changes the playlists, as the computer's
   language is read after it is made and the setup may choose another), a new arrangement, theme,
