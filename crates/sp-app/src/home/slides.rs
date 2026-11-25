@@ -14,7 +14,7 @@ use egui::style::ScrollAnimation;
 use sp_model::{Presentation, Uuid};
 
 use super::*;
-use crate::i18n::{t, tf, tn};
+use crate::i18n::{t, tf, tk, tn};
 use crate::outside::Waiting;
 use crate::service::{Item, SavedPassage};
 use crate::studio::{
@@ -1022,14 +1022,18 @@ pub fn slide_scroll(
                         .and_then(|at| show.media().get(at))
                         .is_some_and(|m| crate::announcements::shows_item(state, m.id));
                     let live = at.is_some() && *at == show.live_media() || announced;
+                    // The strip under the picture has one line: a short form where the words don't fit.
+                    let fit = |(key, english): (&'static str, &'static str)| {
+                        crate::studio::within(ui, key, english, fixed_semibold(12.0), 0.5, tile.width() - 6.0, true)
+                    };
                     let words = match at {
-                        None => t("slides.media.gone", "Gone from the media strip"),
-                        Some(_) if live => t("slides.media.live", "On screen"),
-                        Some(_) => t("slides.media.show", "Click to show it"),
+                        None => fit(tk("slides.media.gone", "Gone from the media strip")),
+                        Some(_) if live => fit(tk("slides.media.live", "On screen")),
+                        Some(_) => fit(tk("slides.media.show", "Click to show it")),
                     };
                     let pictures: Vec<Option<TextureId>> =
                         at.iter().map(|at| thumb(ThumbOf::Media(*at)).map(|(texture, _)| texture)).collect();
-                    let response = item_tile(ui, &sheet, tile, ("media tile", *item), &pictures, words, live, length);
+                    let response = item_tile(ui, &sheet, tile, ("media tile", *item), &pictures, &words, live, length);
                     if let Some(at) = at
                         && response.on_hover_text(t("slides.media.show_hint", "Show it on the screens")).clicked()
                     {
@@ -1045,7 +1049,8 @@ pub fn slide_scroll(
                     } else if *count == 0 {
                         t("slides.playlist.empty", "Nothing in it yet").to_owned()
                     } else if live {
-                        t("slides.playlist.playing", "Playing round and round").to_owned()
+                        let (key, english) = tk("slides.playlist.playing", "Playing round and round");
+                        crate::studio::within(ui, key, english, fixed_semibold(12.0), 0.5, tile.width() - 6.0, true)
                     } else {
                         tn(
                             "slides.playlist.click",
@@ -1792,7 +1797,13 @@ fn item_tile(
     }
     let ink = if live { TALLY } else { TEXT };
     let strip = Rect::from_min_max(pos2(rect.min.x + 3.0, picture.max.y), pos2(rect.max.x - 3.0, rect.max.y));
-    let galley = crate::studio::spaced(ui, &words.to_uppercase(), fixed_semibold(12.0), ink, 0.5);
+    let mut galley = crate::studio::spaced(ui, &words.to_uppercase(), fixed_semibold(12.0), ink, 0.5);
+    // Too long for the line: what comes before " · " (the count, without what a click does).
+    if galley.size().x > strip.width()
+        && let Some((first, _)) = words.split_once(" \u{b7} ")
+    {
+        galley = crate::studio::spaced(ui, &first.to_uppercase(), fixed_semibold(12.0), ink, 0.5);
+    }
     ui.painter().with_clip_rect(strip).galley(pos2(strip.min.x, strip.center().y - galley.size().y / 2.0), galley, ink);
     response
 }

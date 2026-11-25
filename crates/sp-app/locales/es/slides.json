@@ -114,5 +114,8 @@
   "slides.menu.template": "Plantilla",
   "slides.menu.template.usual": "Habitual (la elige el tema)",
   "slides.menu.one_slide": "Una canción siempre conserva una diapositiva",
-  "slides.menu.paste_style.none": "Primero copia un estilo"
+  "slides.menu.paste_style.none": "Primero copia un estilo",
+  "slides.media.show.short": "Clic para mostrar",
+  "slides.media.gone.short": "Ya no está",
+  "slides.playlist.playing.short": "En bucle"
 }
