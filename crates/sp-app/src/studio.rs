@@ -5828,6 +5828,17 @@ fn menu_pill(ui: &egui::Ui, id: &str, left: f32, middle: f32, words: &str, right
     response
 }
 
+/// A video's length on its picture (`picture`, a tile in the media strip or a playlist), in the
+/// lower right corner: small fixed-width figures, white on a dark plate, so the picture keeps its
+/// room and the width doesn't jump as the figures change. A picture has none.
+pub fn length_chip(painter: &egui::Painter, picture: Rect, seconds: f64) {
+    let galley = painter.layout_no_wrap(crate::media::length_words(seconds), fixed(9.0), Color32::WHITE);
+    let size = galley.size() + vec2(10.0, 4.0);
+    let chip = Rect::from_min_size(picture.max - vec2(6.0, 6.0) - size, size);
+    painter.rect_filled(chip, 3.0, Color32::from_black_alpha(178));
+    painter.galley(chip.min + vec2(5.0, 2.0), galley, Color32::WHITE);
+}
+
 /// Puts a picture or video of the media bin on screen, as a click on it does (in the media strip
 /// or a playlist): on the Announcements layer when it belongs to the announcements (see
 /// `announcements::for_media`), otherwise behind the words.
@@ -6046,27 +6057,18 @@ pub fn media_strip(
                                 }
                                 None => ui.ctx().request_repaint(),
                             }
-                            // A video says so in its corner.
-                            if crate::media::is_video(&item.path) {
-                                let galley = spaced(ui, "\u{25b6} VIDEO", fixed(11.0), Color32::WHITE, 0.3);
-                                let tag = Rect::from_min_size(
-                                    pos2(image.min.x + 6.0, image.max.y - 6.0 - galley.size().y - 4.0),
-                                    galley.size() + vec2(10.0, 4.0),
-                                );
-                                ui.painter().rect_filled(tag, 3.0, Color32::from_black_alpha(178));
-                                ui.painter().galley(tag.min + vec2(5.0, 2.0), galley, Color32::WHITE);
+                            // A video says how long it is in its corner; a picture says nothing.
+                            if let Some(seconds) = state.media_lengths.get(&item.id) {
+                                length_chip(ui.painter(), image, *seconds);
                             }
                             let live =
                                 show.live_media() == Some(index) || crate::announcements::shows_item(state, item.id);
                             let picked = state.picked_media.contains(&index);
+                            // On screen, the orange ring alone says so, picked out or not.
                             if live {
                                 ui.painter().rect_stroke(image, RADIUS, Stroke::new(3.0, TALLY), StrokeKind::Outside);
                             } else if picked {
                                 ui.painter().rect_stroke(image, RADIUS, Stroke::new(3.0, PICKED), StrokeKind::Outside);
-                            }
-                            // Picked out and on screen: a blue ring inside the orange one.
-                            if live && picked {
-                                ui.painter().rect_stroke(image, RADIUS, Stroke::new(2.0, PICKED), StrokeKind::Inside);
                             }
                             let label = Rect::from_min_max(pos2(rect.min.x, image.max.y + 6.0), rect.max);
                             let (font, ink) =

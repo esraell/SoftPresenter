@@ -417,6 +417,20 @@ pub fn is_video(path: &Path) -> bool {
     VIDEOS.contains(&extension(path).as_str())
 }
 
+/// How long a video is, in seconds, for its tile; `None` for a picture, or a video whose length
+/// can't be read. It reads the file, so it is for the media bin's readers, not the window.
+pub fn video_length(path: &Path) -> Option<f64> {
+    is_video(path).then(|| sp_video::length(path)).flatten()
+}
+
+/// A video's length as its tile shows it: "0:36", "12:05", or "1:02:09" from an hour on. A
+/// video of under a second counts as one.
+pub fn length_words(seconds: f64) -> String {
+    let all = (seconds.round() as u64).max(1);
+    let (hours, minutes, seconds) = (all / 3600, all / 60 % 60, all % 60);
+    if hours > 0 { format!("{hours}:{minutes:02}:{seconds:02}") } else { format!("{minutes}:{seconds:02}") }
+}
+
 /// True for a video this computer can't play because FFmpeg isn't here: any video, except on a
 /// Mac, where the system's own player plays MP4 and MOV.
 pub fn needs_missing_ffmpeg(path: &Path) -> bool {
@@ -548,6 +562,27 @@ mod tests {
 
     fn write_png(path: &Path, width: u32, height: u32) {
         image::RgbaImage::from_pixel(width, height, image::Rgba([10, 200, 30, 255])).save(path).unwrap();
+    }
+
+    #[test]
+    fn a_videos_tile_shows_its_length_in_minutes_and_seconds_and_hours_from_an_hour_on() {
+        assert_eq!(length_words(36.4), "0:36");
+        assert_eq!(length_words(35.6), "0:36");
+        assert_eq!(length_words(0.3), "0:01", "never 0:00");
+        assert_eq!(length_words(725.0), "12:05");
+        assert_eq!(length_words(3599.4), "59:59");
+        assert_eq!(length_words(3599.6), "1:00:00");
+        assert_eq!(length_words(3729.0), "1:02:09");
+        assert_eq!(video_length(Path::new("Welcome.png")), None, "a picture has none");
+    }
+
+    /// The system's player reads a video's length on a Mac (elsewhere ffprobe, if it is there).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_sample_videos_length_is_read_for_its_tile() {
+        let video = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/backgrounds/Drifting Light.mp4");
+        let length = video_length(&video).expect("its length");
+        assert_eq!(length_words(length), "0:16", "{length}");
     }
 
     #[test]

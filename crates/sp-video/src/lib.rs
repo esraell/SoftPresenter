@@ -95,6 +95,17 @@ fn still_at(path: &Path, max_side: u32, at: f64) -> Result<Frame, String> {
     }
 }
 
+/// How long a video is, in seconds: as the system's player reads it if it can, otherwise as
+/// FFmpeg says. `None` when neither can say. It reads the file, so it is for a thread that may
+/// wait (the media bin's readers), not the screens'.
+pub fn length(path: &Path) -> Option<f64> {
+    #[cfg(target_os = "macos")]
+    if let Some(seconds) = mac::length(path) {
+        return Some(seconds);
+    }
+    ffmpeg::probe(path).ok()?.duration.filter(|seconds| seconds.is_finite() && *seconds > 0.0)
+}
+
 /// True for a picture that is nearly all black: a video's opening before its first scene.
 fn dark(frame: &Frame) -> bool {
     let pixels = frame.rgba.as_chunks::<4>().0;

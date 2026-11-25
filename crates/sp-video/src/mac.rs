@@ -514,6 +514,16 @@ pub fn still(path: &Path, max_side: u32, at: f64) -> Result<Frame, String> {
     draw(&image).ok_or_else(|| format!("{}: the video's picture is empty.", shown_name(path)))
 }
 
+/// How long a video is, in seconds, as the system reads it; `None` for one it can't read.
+pub fn length(path: &Path) -> Option<f64> {
+    let url = file_url(path).ok()?;
+    // SAFETY: a valid file URL and no options.
+    let asset = unsafe { AVURLAsset::URLAssetWithURL_options(&url, None) };
+    // SAFETY: a live asset. Asked at once, it waits for the file's header to be read, which a
+    // reader of the media bin's pictures may do.
+    seconds(unsafe { asset.duration() }).filter(|seconds| *seconds > 0.0)
+}
+
 /// A picture file in any format the system reads, no larger than `max_side` on its longer
 /// side, turned the way the camera held it.
 pub fn picture(path: &Path, max_side: u32) -> Result<Frame, String> {

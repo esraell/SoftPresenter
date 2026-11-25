@@ -336,7 +336,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the three views and the slide size, and under it the media strip ("Media",
   the menu of media playlists, how one picture or video gives way to the next, a chevron that
   folds the strip away, + to add some, then the pictures and videos with their names, each
-  with ⋯ for its menu; the one showing is ringed in orange). The slides fade into the panel
+  with ⋯ for its menu, a video with its length in a small dark chip at the lower right of its
+  picture ("0:36", or "1:02:09" from an hour on; a picture has nothing there, and the same chip
+  is on a video's tile in a playlist); the one showing is ringed in orange, and only orange
+  while it is also picked out). The slides fade into the panel
   just above it. In a narrow window the bar leaves out Undo and Redo, then Continuous, then
   the size, rather than squeeze them (each is in the menu bar too). Add Slide is in a song's ⋯
   menu on its bar, and in the File menu.

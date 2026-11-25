@@ -4259,6 +4259,7 @@ impl App {
                         path.file_name().map_or_else(|| "Picture".to_owned(), |n| n.to_string_lossy().into_owned());
                     let item = MediaItem::new(name, path.to_owned());
                     self.bin_pictures.set_small(item.id, picture, whole);
+                    self.bin_pictures.read_length(item.id, path);
                     self.show.add_media(item);
                     applog::event("media", &format!("added {} in {:?}", path.display(), started.elapsed()));
                 } else {
@@ -4306,7 +4307,7 @@ impl App {
             // that can't be read is noted, and tried again only once it changes.
             let from_folder = match &arrived {
                 Arrived::Small(id) | Arrived::Refused(id, _) => self.folder_notes.coming.remove(id).map(|f| (*id, f)),
-                Arrived::Full(_) => None,
+                Arrived::Full(_) | Arrived::Length(..) => None,
             };
             if let Some((id, (path, changed))) = from_folder {
                 if let Arrived::Refused(_, problem) = &arrived {
@@ -4333,6 +4334,8 @@ impl App {
                     }
                     self.forget_thumbs_showing(id);
                 }
+                // A video's tile shows its length.
+                Arrived::Length(id, length) => self.note_media_length(id, length),
                 Arrived::Refused(id, problem) => {
                     applog::event("media", &problem);
                     // An item whose picture was never read (its file is gone, or isn't a picture)
@@ -4372,6 +4375,20 @@ impl App {
         }
     }
 
+    /// Tells the window how long a media bin item is (`None` for a picture, or a video whose
+    /// length couldn't be read), for its tile.
+    fn note_media_length(&mut self, id: Uuid, length: Option<f64>) {
+        let Some(running) = self.running.as_mut() else { return };
+        let lengths = &mut running.home_state.media_lengths;
+        let changed = match length {
+            Some(seconds) => lengths.insert(id, seconds) != Some(seconds),
+            None => lengths.remove(&id).is_some(),
+        };
+        if changed {
+            running.home_window.request_redraw();
+        }
+    }
+
     /// Lets go of the thumbnails that show a media item (its own, and those of slides with it
     /// behind their words), so they are drawn again with its picture as it is now.
     fn forget_thumbs_showing(&mut self, id: Uuid) {
@@ -4404,6 +4421,7 @@ impl App {
             state.picked_media =
                 state.picked_media.iter().filter_map(|at| media::place_after_removal(*at, index)).collect();
             state.media_anchor = state.media_anchor.and_then(|at| media::place_after_removal(at, index));
+            state.media_lengths.remove(&id);
             running.thumbs.forget(id, &mut running.egui_renderer);
         }
         changed
@@ -5717,6 +5735,7 @@ impl App {
             item.looping = entry.looping;
             let new = item.id;
             self.bin_pictures.set_small(new, picture, whole);
+            self.bin_pictures.read_length(new, &item.path);
             self.show.add_media(item);
             seen.added += 1;
             Some(new)
@@ -6514,6 +6533,7 @@ impl App {
                 item.looping = staged.looping;
                 let id = item.id;
                 pictures.set_small(id, picture, whole);
+                pictures.read_length(id, path);
                 show.add_media(item);
                 if staged.video {
                     added.1 += 1;

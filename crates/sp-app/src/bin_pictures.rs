@@ -37,6 +37,8 @@ enum Want {
     FullNow,
     /// The full-size picture of an item about to go on screen.
     FullAhead,
+    /// A video's length alone, for an item whose small copy was read already (one just added).
+    Length,
 }
 
 struct Job {
@@ -53,6 +55,8 @@ struct Read {
     stamp: u64,
     /// The picture, and whether a small copy is the whole picture (it was no larger).
     result: Result<(Picture, bool), String>,
+    /// A video's length in seconds, read with its small copy, when it could be.
+    length: Option<f64>,
 }
 
 type Wake = Arc<dyn Fn() + Send + Sync>;
@@ -127,9 +131,14 @@ fn read_all(queue: &Mutex<(VecDeque<Job>, usize)>, done: &Sender<Read>, wake: &W
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match job.want {
             Want::Small => crate::media::load_small(&job.path),
             Want::FullNow | Want::FullAhead => crate::media::load_picture(&job.path).map(|picture| (picture, false)),
+            Want::Length => Err(String::new()),
         }))
         .unwrap_or_else(|_| Err(format!("{}: the picture could not be read.", job.path.display())));
-        if done.send(Read { id: job.id, want: job.want, stamp: job.stamp, result }).is_err() {
+        // A video's length goes with its small copy, for its tile.
+        let length = (job.want == Want::Length || job.want == Want::Small && result.is_ok())
+            .then(|| std::panic::catch_unwind(|| crate::media::video_length(&job.path)).ok().flatten())
+            .flatten();
+        if done.send(Read { id: job.id, want: job.want, stamp: job.stamp, result, length }).is_err() {
             if let Ok(mut queue) = queue.lock() {
                 queue.1 -= 1;
             }
@@ -140,7 +149,7 @@ fn read_all(queue: &Mutex<(VecDeque<Job>, usize)>, done: &Sender<Read>, wake: &W
 }
 
 /// What came in from the readers, for the app to act on.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Arrived {
     /// An item's small copy is there: its first, or a new one after its file changed.
     Small(Uuid),
@@ -148,6 +157,9 @@ pub enum Arrived {
     Refused(Uuid, String),
     /// An item's full-size picture is there.
     Full(Uuid),
+    /// An item's length in seconds, read with its new small copy (`None` for a picture, or a
+    /// video whose length couldn't be read).
+    Length(Uuid, Option<f64>),
 }
 
 /// A full-size picture kept, and when it was last shown.
@@ -278,6 +290,14 @@ impl BinPictures {
         self.small_readers.push(job, false, &self.done_tx, &self.wake);
     }
 
+    /// Has a video's length read, for an item whose small copy was read already (one just
+    /// added); it comes as [`Arrived::Length`]. Nothing for a picture.
+    pub fn read_length(&mut self, id: Uuid, path: &Path) {
+        let Some(stamp) = self.stamps.get(&id).copied().filter(|_| crate::media::is_video(path)) else { return };
+        let job = Job { id, path: path.to_owned(), want: Want::Length, stamp };
+        self.small_readers.push(job, false, &self.done_tx, &self.wake);
+    }
+
     /// Forgets an item that has left the bin.
     pub fn forget(&mut self, id: Uuid) {
         self.drop_full(id);
@@ -386,7 +406,13 @@ impl BinPictures {
     pub fn take_arrived(&mut self) -> Vec<Arrived> {
         let mut arrived = Vec::new();
         while let Ok(read) = self.done_rx.try_recv() {
-            arrived.extend(self.arrived(read));
+            let (id, length) = (read.id, read.length);
+            let came = self.arrived(read);
+            let small = matches!(came, Some(Arrived::Small(_)));
+            arrived.extend(came);
+            if small {
+                arrived.push(Arrived::Length(id, length));
+            }
         }
         arrived
     }
@@ -419,6 +445,7 @@ impl BinPictures {
                     Err(problem) => Some(Arrived::Refused(id, problem)),
                 }
             }
+            Want::Length => Some(Arrived::Length(id, read.length)),
             Want::FullNow | Want::FullAhead => {
                 self.full_coming.remove(&id);
                 match read.result {
@@ -458,7 +485,7 @@ mod tests {
 
     /// A full-size picture read for an item, as a reader hands it back.
     fn full_read(pictures: &BinPictures, id: Uuid, side: u32) -> Read {
-        Read { id, want: Want::FullNow, stamp: pictures.stamps[&id], result: Ok((picture(side), false)) }
+        Read { id, want: Want::FullNow, stamp: pictures.stamps[&id], result: Ok((picture(side), false)), length: None }
     }
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -540,13 +567,20 @@ mod tests {
         assert_eq!(pictures.for_screens(Some((id, path))).map(|p| p.width()), Some(16));
         assert!(pictures.screens_have_full());
         // Half written, it can't be read yet: still the old picture.
-        let refused = Read { id, want: Want::Small, stamp: pictures.stamps[&id], result: Err("half written".into()) };
+        let refused = Read {
+            id,
+            want: Want::Small,
+            stamp: pictures.stamps[&id],
+            result: Err("half written".into()),
+            length: None,
+        };
         assert!(matches!(pictures.arrived(refused), Some(Arrived::Refused(..))));
         assert_eq!(pictures.for_screens(Some((id, path))).map(|p| p.width()), Some(16));
         // Read at last: the old full-size picture goes, so the screens take the new small copy
         // (the app is told the screens don't have the full one), and the new full one is read.
         pictures.read(id, path);
-        let new = Read { id, want: Want::Small, stamp: pictures.stamps[&id], result: Ok((picture(9), false)) };
+        let new =
+            Read { id, want: Want::Small, stamp: pictures.stamps[&id], result: Ok((picture(9), false)), length: None };
         assert_eq!(pictures.arrived(new), Some(Arrived::Small(id)));
         assert!(!pictures.screens_have_full() && pictures.full_kept().is_empty());
         assert_eq!(pictures.for_screens(Some((id, path))).map(|p| p.width()), Some(9));
@@ -555,8 +589,14 @@ mod tests {
         let other = Uuid::new_v4();
         pictures.read(other, Path::new("/x/none.png"));
         let stamp = pictures.stamps[&other];
-        pictures.arrived(Read { id: other, want: Want::FullNow, stamp, result: Ok((picture(16), false)) });
-        pictures.arrived(Read { id: other, want: Want::Small, stamp, result: Ok((picture(8), false)) });
+        pictures.arrived(Read {
+            id: other,
+            want: Want::FullNow,
+            stamp,
+            result: Ok((picture(16), false)),
+            length: None,
+        });
+        pictures.arrived(Read { id: other, want: Want::Small, stamp, result: Ok((picture(8), false)), length: None });
         assert!(pictures.full_kept().contains(&other));
     }
 

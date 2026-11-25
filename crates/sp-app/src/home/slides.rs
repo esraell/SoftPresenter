@@ -1011,8 +1011,8 @@ pub fn slide_scroll(
                 }
                 Deck::Media { item, at, .. } => {
                     let tile = sheet.tile(place, 0);
-                    let video =
-                        at.is_some_and(|at| show.media().get(at).is_some_and(|m| crate::media::is_video(&m.path)));
+                    let length =
+                        at.and_then(|at| show.media().get(at)).and_then(|m| state.media_lengths.get(&m.id).copied());
                     let announced = at
                         .and_then(|at| show.media().get(at))
                         .is_some_and(|m| crate::announcements::shows_item(state, m.id));
@@ -1024,7 +1024,7 @@ pub fn slide_scroll(
                     };
                     let pictures: Vec<Option<TextureId>> =
                         at.iter().map(|at| thumb(ThumbOf::Media(*at)).map(|(texture, _)| texture)).collect();
-                    let response = item_tile(ui, &sheet, tile, ("media tile", *item), &pictures, words, live, video);
+                    let response = item_tile(ui, &sheet, tile, ("media tile", *item), &pictures, words, live, length);
                     if let Some(at) = at
                         && response.on_hover_text(t("slides.media.show_hint", "Show it on the screens")).clicked()
                     {
@@ -1052,8 +1052,7 @@ pub fn slide_scroll(
                     };
                     let pictures: Vec<Option<TextureId>> =
                         shown.iter().map(|at| thumb(ThumbOf::Media(*at)).map(|(texture, _)| texture)).collect();
-                    let response =
-                        item_tile(ui, &sheet, tile, ("playlist tile", *item), &pictures, &words, live, false);
+                    let response = item_tile(ui, &sheet, tile, ("playlist tile", *item), &pictures, &words, live, None);
                     if !*gone
                         && *count > 0
                         && response
@@ -1725,7 +1724,7 @@ fn item_tile(
     pictures: &[Option<TextureId>],
     words: &str,
     live: bool,
-    video: bool,
+    length: Option<f64>,
 ) -> egui::Response {
     let response = ui.interact(rect, ui.scope_id().with(id), Sense::click());
     let picture = Rect::from_min_size(rect.min, sheet.grid.picture);
@@ -1765,14 +1764,9 @@ fn item_tile(
             }
         }
     }
-    if video {
-        let galley = crate::studio::spaced(ui, "\u{25b6} VIDEO", fixed(11.0), Color32::WHITE, 0.3);
-        let tag = Rect::from_min_size(
-            pos2(picture.min.x + 8.0, picture.max.y - 8.0 - galley.size().y - 4.0),
-            galley.size() + vec2(10.0, 4.0),
-        );
-        ui.painter().rect_filled(tag, 3.0, Color32::from_black_alpha(178));
-        ui.painter().galley(tag.min + vec2(5.0, 2.0), galley, Color32::WHITE);
+    // A video says how long it is in its corner, as in the media strip.
+    if let Some(seconds) = length {
+        crate::studio::length_chip(ui.painter(), picture, seconds);
     }
     if live {
         ui.painter().rect_stroke(picture, ROUND, Stroke::new(3.0, TALLY), StrokeKind::Outside);

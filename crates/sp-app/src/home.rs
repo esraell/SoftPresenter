@@ -310,6 +310,8 @@ pub struct HomeState {
     pub picked_songs: Vec<usize>,
     pub song_anchor: Option<usize>,
     pub picked_media: Vec<usize>,
+    /// How long each video of the media bin is, in seconds, once read (for its tile).
+    pub media_lengths: std::collections::HashMap<sp_model::Uuid, f64>,
     pub media_anchor: Option<usize>,
     /// The items of the playlist in front picked out (several with Command or Shift).
     pub item_picks: ItemPicks,
@@ -1782,6 +1784,7 @@ impl Default for HomeState {
             picked_songs: Vec::new(),
             song_anchor: None,
             picked_media: Vec::new(),
+            media_lengths: std::collections::HashMap::new(),
             media_anchor: None,
             item_picks: ItemPicks::default(),
             removed: Vec::new(),
