@@ -1043,7 +1043,8 @@ struct Target {
     /// own (see `output/next_picture.rs`).
     next: NextPicture,
     config: wgpu::SurfaceConfiguration,
-    blitter: wgpu::util::TextureBlitter,
+    /// What copies the painted picture into the window's, shared by the windows of its format.
+    blitter: Arc<wgpu::util::TextureBlitter>,
     /// What a see-through screen's picture, or a key, is shown through in place of the
     /// blitter: made the first time one is shown, and again if it must show another way.
     pass: Option<SolidPass>,
@@ -1437,6 +1438,9 @@ struct Output {
     /// an X that couldn't be shown is tried again.
     close_marks: Vec<Arc<sp_render::CloseMark>>,
     close_again_at: Option<Instant>,
+    /// What copies a painted picture into a window's, one for each format of window, made with
+    /// the first window of that format (see `add_surface`).
+    blitters: Vec<(wgpu::TextureFormat, Arc<wgpu::util::TextureBlitter>)>,
 }
 
 fn run(
@@ -1559,6 +1563,7 @@ fn run(
         windows_behind: false,
         close_marks: Vec::new(),
         close_again_at: None,
+        blitters: Vec::new(),
         device,
         queue,
     };
@@ -2130,12 +2135,25 @@ impl Output {
                 mark
             }
         };
+        // Likewise what copies the painted picture into the window's: making it compiles a
+        // shader and a pipeline, which takes longer on a PC's DirectX 12 or Vulkan than on a Mac
+        // (a window's whole set-up held a PC's screens' thread 33 ms as it opened). A window of a
+        // format seen before (the next display's, or a screen switched on again while others
+        // show) uses the one made then.
+        let blitter = match self.blitters.iter().find(|(made_for, _)| *made_for == format) {
+            Some((_, blitter)) => blitter.clone(),
+            None => {
+                let blitter = Arc::new(wgpu::util::TextureBlitter::new(&self.device, format));
+                self.blitters.push((format, blitter.clone()));
+                blitter
+            }
+        };
         // A screen has one window: a new one takes the old one's place.
         self.targets.retain(|target| target.id != id);
         self.targets.push(Target {
             id,
             name,
-            blitter: wgpu::util::TextureBlitter::new(&self.device, format),
+            blitter,
             pass: None,
             texture: target_texture(&self.device, config.width, config.height),
             next,
