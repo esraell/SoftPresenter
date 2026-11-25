@@ -1147,6 +1147,35 @@ mod tests {
         assert!(samples.iter().any(|sample| sample.abs() > 0.05));
     }
 
+    /// A video with sound played through FFmpeg: its sound (decoded as the audio player's tracks
+    /// are) starts its clock, and it moves on. Needs a sound output (it plays at no volume), and
+    /// an FFmpeg that can make the video: `cargo test -p sp-video a_video_with -- --ignored`.
+    #[test]
+    #[ignore = "needs the computer's sound output"]
+    fn a_video_with_sound_moves_on_by_its_sound() {
+        let Some(ffmpeg) = tool("ffmpeg") else { return };
+        let dir = std::env::temp_dir().join(format!("softpresenter-video-sound-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("tone.mkv");
+        let made = Command::new(ffmpeg)
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=gray:s=64x36:r=30:d=4"])
+            .args(["-f", "lavfi", "-i", "sine=frequency=500:sample_rate=48000:duration=4"])
+            .args(["-c:v", "ffv1", "-c:a", "flac", "-shortest"])
+            .arg(&path)
+            .status()
+            .expect("FFmpeg runs");
+        assert!(made.success(), "the video is made");
+        let mut player = Player::open(&path, false).expect("FFmpeg opens the video");
+        assert!(player.info.sound && player.stream.is_some(), "it has sound, and an output to play it");
+        player.set_volume(0.0);
+        player.play();
+        std::thread::sleep(Duration::from_millis(1500));
+        let position = player.position();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(position > 1.0 && position < 2.0, "{position} s");
+        assert_eq!(player.problem(), None);
+    }
+
     #[test]
     fn the_clock_waits_to_start_and_stops_while_paused() {
         let clock = Clock::default();

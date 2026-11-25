@@ -445,8 +445,11 @@ impl Player {
         let rate = self.out()?.rate;
         let decoding = stream::start(track.path.clone(), track.name.clone(), from, rate);
         let shared = decoding.shared.clone();
-        if let Some(out) = &self.out {
-            let _ = out.orders.send(order(shared.clone()));
+        // Never waits: a sound card that has stopped taking sound (taken away, say) leaves the
+        // orders unread, and the window must not stop with it.
+        let sent = self.out.as_ref().is_some_and(|out| out.orders.try_send(order(shared.clone())).is_ok());
+        if !sent {
+            return Err(t("tools.audio.output_stuck", "The computer's sound output isn't taking sound.").to_owned());
         }
         self.held.push(decoding);
         Ok(shared)
@@ -458,7 +461,13 @@ impl Player {
     /// output that can't be opened is an error here.
     pub fn play_fading(&mut self, track: &Track, fade: Duration) -> Result<(), String> {
         self.cancel_then();
-        let shared = self.start(track, Duration::ZERO, |stream| deck::Order::Play { stream, fade })?;
+        let shared = match self.start(track, Duration::ZERO, |stream| deck::Order::Play { stream, fade }) {
+            Ok(shared) => shared,
+            Err(problem) => {
+                self.refused = Some((track.id, problem.clone()));
+                return Err(problem);
+            }
+        };
         if let Some(out) = &self.out {
             out.controls.set_paused(false);
         }
@@ -482,7 +491,7 @@ impl Player {
         if let Some(then) = self.then.take()
             && let Some(out) = &self.out
         {
-            let _ = out.orders.send(deck::Order::NoThen);
+            let _ = out.orders.try_send(deck::Order::NoThen);
             self.dropped = Some(then);
         }
     }
@@ -545,7 +554,7 @@ impl Player {
     /// Stops, fading out over a moment; whatever was lined up goes too.
     pub fn stop(&mut self) {
         if let Some(out) = &self.out {
-            let _ = out.orders.send(deck::Order::Stop);
+            let _ = out.orders.try_send(deck::Order::Stop);
             out.controls.set_paused(false);
         }
         self.now = None;
@@ -1212,6 +1221,18 @@ mod tests {
         wav.extend_from_slice(&(samples * 2).to_le_bytes());
         wav.resize(wav.len() + samples as usize * 2, 0);
         wav
+    }
+
+    #[test]
+    fn a_track_refused_before_it_was_decoded_says_why_when_asked() {
+        // No sound output, so no track was started: what was refused is still the answer, not
+        // "Playing".
+        let track = Uuid::new_v4();
+        let mut player = Player::default();
+        assert_eq!(player.outcome(track), None);
+        player.refused = Some((track, "No sound output.".to_owned()));
+        assert_eq!(player.outcome(track), Some(Err("No sound output.".to_owned())));
+        assert_eq!(player.outcome(Uuid::new_v4()), None);
     }
 
     #[test]

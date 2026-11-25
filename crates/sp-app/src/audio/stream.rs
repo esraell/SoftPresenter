@@ -238,7 +238,11 @@ pub fn start(path: PathBuf, name: String, from: Duration, rate: u32) -> Stream {
         decode(&path, &named, &decoding, Instant::now());
     });
     if let Err(problem) = started {
-        shared.fail(format!("{name}: the audio could not be started ({problem})."));
+        shared.fail(crate::i18n::tf(
+            "tools.audio.not_started",
+            "{name} could not be started ({error}).",
+            &[("name", &name), ("error", &problem.to_string())],
+        ));
     }
     Stream { shared }
 }
@@ -384,8 +388,13 @@ fn open_ffmpeg(path: &Path, name: &str, native_problem: &str, shared: &Shared) -
     if let Some(length) = info.duration {
         shared.length_ms.store((length * 1000.0) as u64, Ordering::Relaxed);
     }
-    let (child, reader) = sp_video::decode_sound(path, shared.from.as_secs_f64(), shared.rate)
-        .map_err(|problem| format!("{name}: {problem}"))?;
+    let (child, reader) = sp_video::decode_sound(path, shared.from.as_secs_f64(), shared.rate).map_err(|problem| {
+        crate::i18n::tf(
+            "tools.audio.ffmpeg_problem",
+            "{name} can't be played: {error}",
+            &[("name", name), ("error", &problem)],
+        )
+    })?;
     if let Ok(mut kept) = shared.child.lock() {
         *kept = Some(child);
     }
