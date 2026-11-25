@@ -652,7 +652,12 @@ fn theme_slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
     let (name, size) = (t("inspector.theme.name", "Name"), t("inspector.theme.size", "Size"));
     let column = crate::studio::widest(ui, &[name, size], &FontId::proportional(12.5)).max(44.0);
     labelled_left(ui, column, name, |ui| {
-        ui.add(egui::TextEdit::singleline(&mut edit.theme.name).desired_width(f32::INFINITY));
+        // As the window calls it (the built-in theme in the language set); typed back as shown,
+        // the built-in theme keeps the app's name for it, so no translation is saved.
+        let mut shown = crate::theme_store::shown_theme_name(&edit.theme).into_owned();
+        if ui.add(egui::TextEdit::singleline(&mut shown).desired_width(f32::INFINITY)).changed() {
+            edit.theme.name = crate::theme_store::typed_theme_name(edit.theme.id, &shown);
+        }
     });
     labelled_left(ui, column, size, |ui| {
         ui.label(egui::RichText::new("1920 × 1080").size(12.5).color(INK)).on_hover_text(t(
@@ -1389,7 +1394,8 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     });
     if link != object.link {
         // The box's own words say what it is linked to, so its picture in the editor does too.
-        let placeholder = text.is_empty() || text == "Text" || (text.starts_with('[') && text.ends_with(']'));
+        let placeholder =
+            text.is_empty() || crate::editor::is_sample_words(text) || (text.starts_with('[') && text.ends_with(']'));
         match link {
             Some(chosen) if placeholder => {
                 let name = match chosen {
@@ -1398,9 +1404,10 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
                 };
                 sp_model::edit_text(text, spans, 0, usize::MAX, &crate::links::placeholder(chosen, name));
             }
-            // Unlinked: the words the link put there go too, and the box says "Text" again, as a
-            // new one does. Words of its own were never replaced, so they stay.
-            None if placeholder => sp_model::edit_text(text, spans, 0, usize::MAX, "Text"),
+            // Unlinked: the words the link put there go too, and the box says the sample words
+            // again ("Text", in the language set), as a new one does. Words of its own were never
+            // replaced, so they stay.
+            None if placeholder => sp_model::edit_text(text, spans, 0, usize::MAX, crate::editor::sample_words()),
             _ => {}
         }
         if link.is_some() {

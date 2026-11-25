@@ -779,7 +779,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   heading (SLIDES, PROPS, STAGE LAYOUTS), a row of keys that act on the one open (Add,
   Duplicate, Delete, at once, as Undo puts it back,
   and ↑ and ↓ to move it up or down the list), then each as its picture with its number and
-  name under it, the one open on a lighter grey with a ring round it. A click opens one, a double click retypes its name in place (the name keeps its
+  name under it (a template's also says what it is for, "· SONGS", never shortened; a name too
+  long for the strip ends in "…" and the picture's hover text has it whole), the one open on a
+  lighter grey with a ring round it. A click opens one, a double click retypes its name in place (the name keeps its
   look while it is retyped), a drag moves it to where the ink line is (the one open stays
   open), and a right-click opens its other choices; the objects of the one open stay at the
   foot of the column. Delete with nothing picked on the canvas is the list's Delete key: it
@@ -1541,16 +1543,21 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   sheets, the notices list and everything said in it, and the Mac's menu bar (it changes with the
   language at once; `sp menu` keeps the English names). Still English: Settings › Screens, the
   inspector's NDI Source section, the audio player's own messages and the output windows' messages,
-  left while other work changes them; the built-in theme's own name ("Built-in"); a word with no
-  translation yet shows in
+  left while other work changes them; a word with no translation yet shows in
   English. What the app names is named in the language set: the first playlist of a first start
   (its name follows the language until anything changes the playlists, as the computer's
-  language is read after it is made and the setup may choose another), a new arrangement, theme
-  template, message for words shown once and start-up macro; a name a church gave stays as it
-  is in every language, and nothing already saved is renamed. The built-in theme's templates
+  language is read after it is made and the setup may choose another), a new arrangement, theme,
+  copy of a theme, theme template, message for words shown once and start-up macro, and a new
+  box on a slide, with the sample words it says ("Texto 2" saying "Texto"; a shape by its shape,
+  "Estrella 2"; "Página web", "Fuente NDI"); a name a church gave stays as it
+  is in every language, and nothing already saved is renamed. A new box is listed by its name
+  until it has words of its own, in whichever language it was made. The built-in theme's name
+  (Built-in, "Incluido"), its templates
   (Two languages, One language, Bible) and the boxes' roles (Main, Translation, Reference) are
-  shown in the language set while they keep the name the app gave them; their files keep the
-  English, and the message for words shown once and the start-up macro are found by a mark or an
+  shown in the language set while they keep the name the app gave them, and the Theme Editor's
+  boxes say the sample words in it ("Text", "Texto"); their files keep the
+  English (a name retyped as the window shows it changes nothing), and the message for words
+  shown once and the start-up macro are found by a mark or an
   id, never by their names. Russian and Ukrainian have the number and quotation rules and the plural forms, and
   their words come next. Controls take the width of their words in the language set, and a place
   with a fixed room (a layer key, the find box, All Songs) uses a short form when the usual word

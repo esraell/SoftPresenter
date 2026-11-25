@@ -1658,7 +1658,8 @@ impl ThemeEdit {
     pub fn show(&mut self, version: Option<sp_model::Uuid>, template: usize) -> Option<EditDraft> {
         self.version = version.filter(|id| self.theme.has_version(*id));
         self.template = template.min(self.templates().len().saturating_sub(1));
-        self.open_template().map(|opened| EditDraft::of_slide(opened.as_slide(), self.template))
+        self.open_template()
+            .map(|opened| EditDraft::of_slide(opened.as_slide(crate::editor::sample_words()), self.template))
     }
 }
 
@@ -1941,6 +1942,24 @@ impl Default for HomeState {
 }
 
 impl HomeState {
+    /// What the theme at `at` (in the order of `theme_names`) is called in the window: the
+    /// built-in theme in the language set while it keeps the app's name for it
+    /// ([`crate::theme_store::theme_name`]). `theme_names` keeps the names as saved, for the
+    /// command line.
+    pub fn theme_shown(&self, at: usize) -> Option<String> {
+        let name = self.theme_names.get(at)?;
+        Some(
+            self.theme_ids
+                .get(at)
+                .map_or_else(|| name.clone(), |id| crate::theme_store::theme_name(*id, name).into_owned()),
+        )
+    }
+
+    /// Every theme as the window calls it ([`HomeState::theme_shown`]), in their order.
+    pub fn themes_shown(&self) -> Vec<String> {
+        (0..self.theme_names.len()).filter_map(|at| self.theme_shown(at)).collect()
+    }
+
     /// Which kind of the Edit view is open, if it is: the one answer to "is the editor open".
     pub fn edit_kind(&self) -> Option<EditKind> {
         if self.theme_edit.is_some() {
@@ -3868,11 +3887,20 @@ fn theme_canvas_title(state: &HomeState) -> Option<(String, String)> {
     let version = edit.version.and_then(|id| edit.theme.versions.iter().find(|v| v.id == id));
     Some(match version {
         Some(version) => (
-            format!("{} \u{b7} {} \u{b7} {}", edit.theme.name, version.name, crate::theme_store::shown_name(template)),
+            format!(
+                "{} \u{b7} {} \u{b7} {}",
+                crate::theme_store::shown_theme_name(&edit.theme),
+                version.name,
+                crate::theme_store::shown_name(template)
+            ),
             tf("edit.theme_title.version", "Template \u{b7} {name} version", &[("name", &version.name)]),
         ),
         None => (
-            format!("{} \u{b7} {}", edit.theme.name, crate::theme_store::shown_name(template)),
+            format!(
+                "{} \u{b7} {}",
+                crate::theme_store::shown_theme_name(&edit.theme),
+                crate::theme_store::shown_name(template)
+            ),
             t("edit.theme_title.template", "Template").to_owned(),
         ),
     })
@@ -4216,6 +4244,7 @@ fn slide_list(
                 let look = ListPicture {
                     number: index + 1,
                     name: &name,
+                    kind: None,
                     dot: Some(slides::dot_colour(group.color)),
                     open: index == at.slide,
                     live: live == Some(index),
@@ -4438,6 +4467,7 @@ fn prop_list(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut crate::studio
                 let look = ListPicture {
                     number: index + 1,
                     name: &prop.name,
+                    kind: None,
                     dot: None,
                     open: open == Some(index),
                     live: state.props_live.iter().any(|(live, _)| *live == prop.id),
@@ -4962,12 +4992,17 @@ const GROUP_NAMES: [&str; 19] = [
 const SLIDE_LABELS: [&str; 4] = ["Blank Slide", "Instrumental", "Repeat", "Spoken Word"];
 
 /// What an object is called in the Objects list: the name it was given, or, until it is given
-/// one, the first line of its words.
+/// one (a box still has the name the app gave it, "Text 2" or "Texto 2" in whichever language it
+/// was made in), the first line of its words. A new box still saying the app's sample words has
+/// no words of its own yet, so it is called by its name.
 fn listed_name(object: &sp_model::Object) -> String {
     let named = !(object.name.is_empty()
         || object.role.as_ref().is_some_and(|role| object.name == role.label())
-        || object.name.strip_prefix("Text ").is_some_and(|number| number.parse::<u32>().is_ok()));
-    let first_line = object.as_text().and_then(|text| text.lines().map(str::trim).find(|line| !line.is_empty()));
+        || crate::editor::is_new_text_name(&object.name));
+    let first_line = object
+        .as_text()
+        .filter(|text| !crate::editor::is_sample_words(text.trim()))
+        .and_then(|text| text.lines().map(str::trim).find(|line| !line.is_empty()));
     match first_line {
         Some(line) if !named => line.to_owned(),
         // A box still named after its role, with no words, is called what its role is called.
@@ -6462,11 +6497,12 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                 ui.label(egui::RichText::new("Theme").color(TEXT_DIM))
                     .on_hover_text("The same words, laid out by this theme on this screen");
                 ui.add_space(8.0);
-                let main_name = state.theme_names.get(state.theme_for_songs).cloned().unwrap_or_default();
+                let names = state.themes_shown();
+                let main_name = names.get(state.theme_for_songs).cloned().unwrap_or_default();
                 let own = state.screens[index].theme;
                 let own_name = own
                     .and_then(|id| state.theme_ids.iter().position(|have| *have == id))
-                    .and_then(|at| state.theme_names.get(at).cloned());
+                    .and_then(|at| names.get(at).cloned());
                 let shown = own_name.unwrap_or_else(|| format!("Main theme ({main_name})"));
                 let mut picked = None;
                 egui::ComboBox::from_id_salt(("screen theme", index)).selected_text(shown).width(220.0).show_ui(ui, |ui| {
@@ -6474,7 +6510,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                         picked = Some(None);
                     }
                     ui.separator();
-                    for (id, name) in state.theme_ids.iter().zip(&state.theme_names) {
+                    for (id, name) in state.theme_ids.iter().zip(&names) {
                         if ui.selectable_label(own == Some(*id), name.as_str()).clicked() {
                             picked = Some(Some(*id));
                         }
@@ -6587,6 +6623,7 @@ fn missing_font_notice(ui: &mut egui::Ui, missing: &[String]) {
 /// format: [Verse 1] and so on, a blank line between slides). Create makes it; Escape or Cancel
 /// closes the sheet.
 fn new_song_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
+    let theme_names = state.themes_shown();
     let Some(sheet) = state.new_song_sheet.as_mut() else { return };
     let mut decided = None;
     egui::Window::new("New Song")
@@ -6612,12 +6649,12 @@ fn new_song_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
                 ui.end_row();
                 ui.label(egui::RichText::new(t("dialogs.new_song.theme", "Theme")).color(DIM));
                 let main_theme = t("dialogs.new_song.main_theme", "Main Theme");
-                let shown = sheet.theme.and_then(|at| state.theme_names.get(at)).map_or(main_theme, String::as_str);
+                let shown = sheet.theme.and_then(|at| theme_names.get(at)).map_or(main_theme, String::as_str);
                 egui::ComboBox::from_id_salt("new song theme").selected_text(shown).width(340.0).show_ui(ui, |ui| {
                     if ui.add(egui::Button::selectable(sheet.theme.is_none(), main_theme)).clicked() {
                         sheet.theme = None;
                     }
-                    for (at, name) in state.theme_names.iter().enumerate() {
+                    for (at, name) in theme_names.iter().enumerate() {
                         if ui.add(egui::Button::selectable(sheet.theme == Some(at), name.as_str())).clicked() {
                             sheet.theme = Some(at);
                         }
@@ -6813,7 +6850,7 @@ fn confirm_delete_media(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
 
 fn confirm_delete_theme(ui: &mut egui::Ui, state: &mut HomeState) {
     let Some(index) = state.confirm_delete_theme else { return };
-    let Some(name) = state.theme_names.get(index).cloned() else {
+    let Some(name) = state.theme_shown(index) else {
         state.confirm_delete_theme = None;
         return;
     };
@@ -6933,7 +6970,8 @@ fn theme_column(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) {
 /// dragged to another place as slides are; the built-in theme stays first.
 fn theme_rows(ui: &mut egui::Ui, state: &mut HomeState) {
     let editing = state.theme_edit.as_ref().map_or(0, |edit| edit.index);
-    let names = state.theme_names.clone();
+    // As the window calls them: the built-in theme in the language set, and retyped from there.
+    let names = state.themes_shown();
     let mut start_rename = None;
     let mut renamed: Option<Option<String>> = None;
     egui::ScrollArea::vertical().id_salt("theme list").max_height(150.0).auto_shrink([false, true]).show(ui, |ui| {
@@ -7007,12 +7045,16 @@ fn theme_rows(ui: &mut egui::Ui, state: &mut HomeState) {
     }
     if let Some(outcome) = renamed {
         state.renaming_theme = None;
+        // A name retyped as the window showed it changes nothing (the built-in theme keeps the
+        // name the app gave it, shown in each language).
         if let (Some(name), Some(edit)) = (outcome, state.theme_edit.as_mut())
             && !name.trim().is_empty()
-            && name.trim() != edit.theme.name
         {
-            edit.theme.name = name.trim().to_owned();
-            edit.changed = true;
+            let name = crate::theme_store::typed_theme_name(edit.theme.id, name.trim());
+            if name != edit.theme.name {
+                edit.theme.name = name;
+                edit.changed = true;
+            }
         }
     }
 }
@@ -7155,7 +7197,8 @@ fn version_line(ui: &mut egui::Ui, state: &mut HomeState) {
     use crate::studio::{MORE_BUTTON, TEXT_FAINT};
     let Some(edit) = state.theme_edit.as_ref() else { return };
     let Some(version) = edit.version.and_then(|id| edit.theme.versions.iter().find(|v| v.id == id)) else { return };
-    let (id, name, theme_name, theme) = (version.id, version.name.clone(), edit.theme.name.clone(), edit.index);
+    let (id, name, theme_name, theme) =
+        (version.id, version.name.clone(), crate::theme_store::shown_theme_name(&edit.theme).into_owned(), edit.index);
     // The usual templates the version has no copy of yet, by name and what they are for.
     let copyable: Vec<(usize, String)> = edit
         .theme
@@ -7309,7 +7352,14 @@ fn template_pictures(
     let shown: Vec<(String, bool, bool, Slide)> = edit
         .templates()
         .iter()
-        .map(|t| (crate::theme_store::shown_name(t).into_owned(), t.songs, t.bible, t.as_slide()))
+        .map(|t| {
+            (
+                crate::theme_store::shown_name(t).into_owned(),
+                t.songs,
+                t.bible,
+                t.as_slide(crate::editor::sample_words()),
+            )
+        })
         .collect();
     let (current, version) = (edit.template, edit.version);
     let can_delete = shown.len() > 1 || version.is_some();
@@ -7330,10 +7380,10 @@ fn template_pictures(
             for (index, (name, songs, bible, slide)) in shown.iter().enumerate() {
                 let open = index == current;
                 let renaming = state.renaming_template.as_ref().is_some_and(|(which, _)| *which == index);
-                let label = format!("{name} \u{b7} {}", used_for(*songs, *bible));
                 let look = crate::studio::ListPicture {
                     number: index + 1,
-                    name: &label,
+                    name,
+                    kind: Some(used_for(*songs, *bible)),
                     dot: None,
                     open,
                     live: false,
@@ -7518,7 +7568,7 @@ fn version_sheet_blocked(
         return Some(tf(
             "themes.sheet.has_it",
             "{theme} has the {name} version already",
-            &[("theme", &theme.name), ("name", &had.name)],
+            &[("theme", &crate::theme_store::shown_theme_name(theme)), ("name", &had.name)],
         ));
     }
     (!sheet.songs && !sheet.bible)
@@ -7572,9 +7622,11 @@ fn version_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
     let bible_name = theme.templates.iter().find(|t| t.bible && !t.songs).map(shown);
     let title = match sheet.renaming {
         Some(_) => t("themes.sheet.rename_title", "Rename version").to_owned(),
-        None => {
-            tf("themes.sheet.add_title", "Add a version to {theme}", &[("theme", &crate::i18n::quoted(&theme.name))])
-        }
+        None => tf(
+            "themes.sheet.add_title",
+            "Add a version to {theme}",
+            &[("theme", &crate::i18n::quoted(&crate::theme_store::shown_theme_name(theme)))],
+        ),
     };
     let frame = Frame::new()
         .fill(crate::studio::PANEL)
@@ -8118,13 +8170,14 @@ fn bible_bar(
             state.bible.options.open = false;
         }
         let preview = bible_preview(show, &mut state.bible, thumb);
+        let theme_names = state.themes_shown();
         let bible = &mut state.bible;
         let picked = crate::bible::options_popup(
             ui.ctx(),
             &mut bible.options,
             button.rect,
             &crate::bible::ThemeChoice {
-                names: &state.theme_names,
+                names: &theme_names,
                 template_names: &state.template_names,
                 layouts: &state.theme_layouts,
                 theme: state.theme_for_bible,
@@ -10571,7 +10624,7 @@ mod tests {
     fn delete_with_a_box_selected_in_the_theme_editor_deletes_the_box_not_the_template() {
         let (ctx, show) = (egui::Context::default(), three_songs());
         let theme = Theme::builtin();
-        let slide = theme.templates[0].as_slide();
+        let slide = theme.templates[0].as_slide(crate::editor::sample_words());
         let boxes = slide.objects.len();
         let mut draft = EditDraft::of_slide(slide, 0);
         draft.select_only(draft.slide.objects.first().map(|o| o.id));
@@ -10631,6 +10684,20 @@ mod tests {
         texts.iter().rfind(|(text, _)| text == words).map(|(_, rect)| rect.center())
     }
 
+    /// Where a template's strip says its `name` and its `kind` ("DOS IDIOMAS · CANCIONES"), the
+    /// name whole or shortened with "…", the kind always whole, or none.
+    fn template_caption(texts: &[(String, Rect)], name: &str, kind: &str) -> Option<egui::Pos2> {
+        let tail = format!(" \u{b7} {kind}");
+        texts
+            .iter()
+            .find(|(text, _)| {
+                text.strip_suffix(&tail).is_some_and(|shown| {
+                    shown == name || shown.strip_suffix('\u{2026}').is_some_and(|start| name.starts_with(start))
+                })
+            })
+            .map(|(_, rect)| rect.center())
+    }
+
     /// The built-in theme with an Offering version made of copies of its two song templates.
     fn offering_theme() -> (Theme, sp_model::Version) {
         let mut theme = Theme::builtin();
@@ -10657,7 +10724,7 @@ mod tests {
         // and Undo brings both back.
         let mut one = Theme::builtin();
         assert!(one.add_version(&offering, &[0]));
-        let first = EditDraft::of_slide(one.templates[0].as_slide(), 0);
+        let first = EditDraft::of_slide(one.templates[0].as_slide(crate::editor::sample_words()), 0);
         let mut state = HomeState { theme_edit: Some(ThemeEdit::of(0, one.clone())), ..HomeState::default() };
         state.theme_edit.as_mut().expect("open").version = Some(offering.id);
         state.editing = Some(first);
@@ -10678,7 +10745,7 @@ mod tests {
     fn the_themes_column_shows_a_versions_templates_and_the_canvas_names_the_version() {
         let (ctx, show) = (egui::Context::default(), three_songs());
         let (theme, offering) = offering_theme();
-        let first = EditDraft::of_slide(theme.templates[0].as_slide(), 0);
+        let first = EditDraft::of_slide(theme.templates[0].as_slide(crate::editor::sample_words()), 0);
         let mut state = HomeState {
             theme_names: vec![theme.name.clone()],
             versions: vec![offering.clone()],
@@ -10691,7 +10758,8 @@ mod tests {
         for words in ["THEME", "Built-in", "MAIN", "TEMPLATES", "Usual", "Offering", "Built-in \u{b7} Two languages"] {
             assert!(drawn_at(&texts, words).is_some(), "{words} is drawn");
         }
-        assert!(drawn_at(&texts, "TWO LANGUAGES \u{b7} SONGS").is_some(), "each template's strip says what it is for");
+        let strip = template_caption(&texts, "TWO LANGUAGES", "SONGS");
+        assert!(strip.is_some(), "each template's strip says what it is for: {texts:?}");
         // A click on Offering shows the version's templates, its first on the canvas.
         let at = drawn_at(&texts, "Offering").unwrap();
         let press = |pressed| Event::PointerButton {
@@ -10716,6 +10784,51 @@ mod tests {
         let edit = state.theme_edit.as_ref().unwrap();
         assert_eq!(edit.theme.versions[0].templates.len(), 1, "one of its two went");
         assert!(matches!(state.removed.as_slice(), [crate::removed::Removed::Template { at: 0, .. }]));
+    }
+
+    #[test]
+    fn the_themes_view_says_the_built_in_theme_and_its_sample_words_in_the_language_set() {
+        use crate::i18n::{Language, with_language};
+        let (ctx, show) = (egui::Context::default(), three_songs());
+        let theme = Theme::builtin();
+        let mut state = HomeState {
+            theme_names: vec![theme.name.clone(), "Evening".to_owned()],
+            theme_ids: vec![theme.id, sp_model::Uuid::new_v4()],
+            theme_edit: Some(ThemeEdit::of(0, theme)),
+            ..HomeState::default()
+        };
+        // A template opened in Spanish: its boxes say the sample words in Spanish.
+        state.editing = with_language(Language::Spanish, || state.theme_edit.as_mut().and_then(|e| e.show(None, 0)));
+        let words: Vec<Option<&str>> =
+            state.editing.as_ref().map_or(Vec::new(), |d| d.slide.objects.iter().map(|o| o.as_text()).collect());
+        assert!(!words.is_empty() && words.iter().all(|said| *said == Some("Texto")), "{words:?}");
+        let mut time = 0.0;
+        let mut frame = |state: &mut HomeState, events: Vec<Event>| {
+            time += 0.1;
+            with_language(Language::Spanish, || frame_texts(&ctx, &show, state, events, time))
+        };
+        let texts = frame(&mut state, Vec::new());
+        for words in ["Incluido", "Incluido \u{b7} Dos idiomas"] {
+            assert!(drawn_at(&texts, words).is_some(), "{words} is drawn");
+        }
+        // Each template's strip: its name in Spanish, ending in "…" where it is too long for the
+        // strip, and what it is for, whole.
+        for (name, kind) in [("DOS IDIOMAS", "CANCIONES"), ("UN IDIOMA", "CANCIONES"), ("BIBLIA", "BIBLIA")] {
+            assert!(template_caption(&texts, name, kind).is_some(), "{name} \u{b7} {kind}: {texts:?}");
+        }
+        assert!(drawn_at(&texts, "Built-in").is_none(), "no English name in the window");
+        assert_eq!(state.theme_names[0], "Built-in", "the command line's names are as saved");
+        // Retyped as the window says it, nothing changes: the file keeps the English.
+        state.renaming_theme = Some("Incluido".to_owned());
+        frame(&mut state, pressed(Key::Enter, Modifiers::NONE));
+        let edit = state.theme_edit.as_ref().expect("still open");
+        assert!(state.renaming_theme.is_none(), "the retyping is over");
+        assert_eq!((edit.theme.name.as_str(), edit.changed), ("Built-in", false));
+        // Retyped as another name, that is its name, in every language.
+        state.renaming_theme = Some("Domingo".to_owned());
+        frame(&mut state, pressed(Key::Enter, Modifiers::NONE));
+        let edit = state.theme_edit.as_ref().expect("still open");
+        assert_eq!((edit.theme.name.as_str(), edit.changed), ("Domingo", true));
     }
 
     #[test]
@@ -10774,7 +10887,7 @@ mod tests {
         let (ctx, show) = (egui::Context::default(), three_songs());
         let mut theme = Theme::builtin();
         theme.id = sp_model::Uuid::new_v4();
-        let slide = theme.templates[0].as_slide();
+        let slide = theme.templates[0].as_slide(crate::editor::sample_words());
         let boxes = slide.objects.len();
         let mut state = HomeState {
             theme_edit: Some(ThemeEdit::of(2, theme.clone())),
@@ -10956,7 +11069,7 @@ mod tests {
         assert!(matches!(state.theme_request, Some(ThemeRequest::Edit(_))));
         // From the Theme Editor, another kind waits for the app to save the theme and close it.
         let theme = Theme::builtin();
-        state.editing = Some(EditDraft::of_slide(theme.templates[0].as_slide(), 0));
+        state.editing = Some(EditDraft::of_slide(theme.templates[0].as_slide(crate::editor::sample_words()), 0));
         state.theme_edit = Some(ThemeEdit::of(0, theme));
         assert_eq!(state.edit_kind(), Some(EditKind::Themes));
         state.edit_kind_request = Some(EditKind::Props);
@@ -11162,7 +11275,7 @@ mod tests {
         let (ctx, show) = (egui::Context::default(), three_songs());
         let theme = Theme::builtin();
         let first = theme.templates[0].name.clone();
-        let draft = EditDraft::of_slide(theme.templates[0].as_slide(), 0);
+        let draft = EditDraft::of_slide(theme.templates[0].as_slide(crate::editor::sample_words()), 0);
         let mut state = HomeState {
             theme_edit: Some(ThemeEdit::of(0, theme)),
             editing: Some(draft),
@@ -11788,7 +11901,7 @@ mod tests {
         assert_eq!(state.editing.as_ref().map(|draft| draft.at.slide), Some(0));
         // A theme asked about, with a box of a template picked: Delete doesn't take the box.
         let theme = Theme::builtin();
-        let mut draft = EditDraft::of_slide(theme.templates[0].as_slide(), 0);
+        let mut draft = EditDraft::of_slide(theme.templates[0].as_slide(crate::editor::sample_words()), 0);
         draft.select_only(draft.slide.objects.first().map(|object| object.id));
         let boxes = draft.slide.objects.len();
         let mut state = HomeState {
@@ -14950,6 +15063,31 @@ mod tests {
         let empty = sp_model::Object::text(sp_model::Role::primary(), "");
         let spanish = crate::i18n::with_language(crate::i18n::Language::Spanish, || listed_name(&empty));
         assert_eq!(spanish, "Principal");
+    }
+
+    #[test]
+    fn a_new_box_is_listed_by_the_name_it_was_given_in_any_language_until_it_has_words() {
+        use crate::i18n::{Language, with_language};
+        let (show, mut state) = song_open(&[("Verse 1", 1)], 0);
+        let draft = state.editing.as_mut().expect("a slide open");
+        with_language(Language::Spanish, || draft.add_text());
+        let number = draft.slide.objects.len();
+        let added = draft.slide.objects.last().expect("added").clone();
+        // Saying the sample words still, it is called by the name it was given, in Spanish, with
+        // the window in either language.
+        for language in [Language::Spanish, Language::English] {
+            assert_eq!(with_language(language, || listed_name(&added)), format!("Texto {number}"));
+        }
+        // Given words, it is listed by them, as a box made in English is.
+        let mut worded = added.clone();
+        worded.set_text("Hola a todos\nbuenas noches");
+        assert_eq!(with_language(Language::English, || listed_name(&worded)), "Hola a todos");
+        worded.name = "Text 4".to_owned();
+        assert_eq!(with_language(Language::Spanish, || listed_name(&worded)), "Hola a todos");
+        // A name a church gave it is its name, whatever its words.
+        worded.name = "Texto final".to_owned();
+        assert_eq!(listed_name(&worded), "Texto final");
+        drop(show);
     }
 
     #[test]

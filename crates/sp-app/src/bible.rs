@@ -864,6 +864,7 @@ impl Default for BibleOptions {
 
 /// The themes to choose from for Bible slides, and the choice now made.
 pub struct ThemeChoice<'a> {
+    /// Each theme as the window calls it ([`crate::home::HomeState::themes_shown`]).
     pub names: &'a [String],
     /// Each theme's templates, by id and the name it gives them.
     pub template_names: &'a [Vec<(sp_model::Uuid, String)>],

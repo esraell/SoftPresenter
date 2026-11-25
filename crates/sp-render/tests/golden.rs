@@ -793,7 +793,7 @@ fn a_layouts_shapes_are_drawn_behind_the_words_of_its_slides() {
     let (r, g, b) = at(&drawn, 10, 8);
     assert!(r < 30 && g < 30 && b < 30, "and nowhere else");
     // The theme editor's slide is the layout itself, its bar among its objects.
-    let editing = theme.templates[0].as_slide();
+    let editing = theme.templates[0].as_slide("Text");
     assert_eq!(editing.objects.iter().filter(|o| o.id == bar.id).count(), 1);
     assert!(sp_render::layout_objects(&editing, &theme).is_none(), "drawn once, as the slide's own");
     // Saving what the editor made keeps the bar.

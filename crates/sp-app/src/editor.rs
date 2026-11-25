@@ -5,7 +5,7 @@ use sp_engine::{Show, SlideRef};
 use sp_model::{Object, ObjectKind, SLIDE_HEIGHT, SLIDE_WIDTH, Slide, SlideRect, TextStyle, Theme, Uuid};
 use sp_render::object_frame;
 
-use crate::i18n::{t, tf};
+use crate::i18n::{t, tg, tgf, tk};
 
 /// An object cannot be made smaller than this on either side, in slide units.
 pub const MIN_SIDE: f32 = 20.0;
@@ -287,22 +287,58 @@ pub enum Drag {
     },
 }
 
-/// A shape's name in the language set, for the Add menus and a new shape's name (sp-model keeps
-/// the English one).
-pub fn shape_name(shape: sp_model::Shape) -> &'static str {
+/// What a shape is called (its key and its English), for the Add menus and a new shape's name.
+fn shape_words(shape: sp_model::Shape) -> (&'static str, &'static str) {
     use sp_model::Shape;
     match shape {
-        Shape::RoundedRect => t("editor.shape.rounded_rect", "Rounded Rect"),
-        Shape::Rectangle => t("editor.shape.rectangle", "Rectangle"),
-        Shape::Ellipse => t("editor.shape.ellipse", "Ellipse"),
-        Shape::Triangle => t("editor.shape.triangle", "Triangle"),
-        Shape::RightTriangle => t("editor.shape.right_triangle", "Right Triangle"),
-        Shape::Rhombus => t("editor.shape.rhombus", "Rhombus"),
-        Shape::Polygon => t("editor.shape.polygon", "Polygon"),
-        Shape::Star => t("editor.shape.star", "Star"),
-        Shape::DoubleArrow => t("editor.shape.double_arrow", "Double Arrow"),
-        Shape::Arrow => t("editor.shape.arrow", "Arrow"),
+        Shape::RoundedRect => tk("editor.shape.rounded_rect", "Rounded Rect"),
+        Shape::Rectangle => tk("editor.shape.rectangle", "Rectangle"),
+        Shape::Ellipse => tk("editor.shape.ellipse", "Ellipse"),
+        Shape::Triangle => tk("editor.shape.triangle", "Triangle"),
+        Shape::RightTriangle => tk("editor.shape.right_triangle", "Right Triangle"),
+        Shape::Rhombus => tk("editor.shape.rhombus", "Rhombus"),
+        Shape::Polygon => tk("editor.shape.polygon", "Polygon"),
+        Shape::Star => tk("editor.shape.star", "Star"),
+        Shape::DoubleArrow => tk("editor.shape.double_arrow", "Double Arrow"),
+        Shape::Arrow => tk("editor.shape.arrow", "Arrow"),
     }
+}
+
+/// A shape's name in the language set, for the Add menus (sp-model keeps the English one).
+pub fn shape_name(shape: sp_model::Shape) -> &'static str {
+    let (key, english) = shape_words(shape);
+    t(key, english)
+}
+
+/// The words a new text box says, and a template's boxes in the Theme Editor: sample text, never
+/// a song's words. Given in the language set when the box is made, and kept as given.
+const SAMPLE_WORDS: (&str, &str) = tk("editor.sample_text", "Text");
+
+/// What a new text box is named: "Text 2", numbered by its place on the slide.
+const NEW_TEXT_NAME: (&str, &str) = tk("editor.new_text.name", "Text {number}");
+
+/// The sample words in the language set (see [`SAMPLE_WORDS`]): what a new text box says, and
+/// what a template's boxes say while it is edited (they keep no words of their own).
+pub fn sample_words() -> &'static str {
+    crate::i18n::tg(SAMPLE_WORDS.0, SAMPLE_WORDS.1)
+}
+
+/// Whether a box's words are still the app's sample words, in whichever language the app was in
+/// when it gave them ("Text", "Texto"), rather than words of its own.
+pub fn is_sample_words(text: &str) -> bool {
+    crate::i18n::every_wording(SAMPLE_WORDS).any(|sample| sample == text)
+}
+
+/// Whether `name` is the name the app gave a new text box ("Text 2", "Texto 2"), in any of its
+/// languages, rather than one a church gave it.
+pub fn is_new_text_name(name: &str) -> bool {
+    crate::i18n::every_wording(NEW_TEXT_NAME).any(|numbered| {
+        numbered.split_once("{number}").is_some_and(|(before, after)| {
+            name.strip_prefix(before)
+                .and_then(|rest| rest.strip_suffix(after))
+                .is_some_and(|number| !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()))
+        })
+    })
 }
 
 /// What a box's role is called in the window: the built-in roles (the main language, the
@@ -613,7 +649,8 @@ impl EditDraft {
         }
     }
 
-    /// Adds a text object in the middle of the slide, on top, and selects it.
+    /// Adds a text object in the middle of the slide, on top, and selects it. Its name and its
+    /// sample words are given in the language set, and kept.
     pub fn add_text(&mut self) {
         self.record();
         // Three quarters of the slide, in the middle.
@@ -621,7 +658,7 @@ impl EditDraft {
         let number = self.slide.objects.len() + 1;
         let object = Object {
             id: Uuid::new_v4(),
-            name: tf("editor.new_text.name", "Text {number}", &[("number", &number.to_string())]),
+            name: tgf(NEW_TEXT_NAME.0, NEW_TEXT_NAME.1, &[("number", &number.to_string())]),
             role: None,
             frame: Some(SlideRect { x: (SLIDE_WIDTH - w) / 2.0, y: (SLIDE_HEIGHT - h) / 2.0, w, h }),
             rotation: 0.0,
@@ -639,7 +676,7 @@ impl EditDraft {
             shows: sp_model::StageShows::default(),
             gradient: None,
             shown_paragraphs: None,
-            kind: ObjectKind::Text { text: "Text".to_owned(), style: TextStyle::default(), spans: Vec::new() },
+            kind: ObjectKind::Text { text: sample_words().to_owned(), style: TextStyle::default(), spans: Vec::new() },
         };
         self.selected = Some(object.id);
         self.slide.objects.push(object);
@@ -655,11 +692,13 @@ impl EditDraft {
             .iter()
             .filter(|o| matches!(o.kind, ObjectKind::Shape { shape: s } if s == shape))
             .count();
-        // Named in the language set: sp-model names it in English.
+        // Named in the language set, and kept: sp-model names it in English.
+        let (key, english) = shape_words(shape);
+        let named = tg(key, english);
         object.name = if same > 0 {
-            tf("editor.shape.numbered", "{shape} {n}", &[("shape", shape_name(shape)), ("n", &(same + 1).to_string())])
+            tgf("editor.shape.numbered", "{shape} {n}", &[("shape", named), ("n", &(same + 1).to_string())])
         } else {
-            shape_name(shape).to_owned()
+            named.to_owned()
         };
         self.selected = Some(object.id);
         self.also.clear();
@@ -689,9 +728,9 @@ impl EditDraft {
         let same = self.slide.objects.iter().filter(|o| matches!(o.kind, ObjectKind::Web { .. })).count();
         let mut object = Object::web(String::new());
         object.name = if same > 0 {
-            tf("editor.web.numbered", "Web page {n}", &[("n", &(same + 1).to_string())])
+            tgf("editor.web.numbered", "Web page {n}", &[("n", &(same + 1).to_string())])
         } else {
-            t("editor.web.name", "Web page").to_owned()
+            tg("editor.web.name", "Web page").to_owned()
         };
         self.selected = Some(object.id);
         self.also.clear();
@@ -704,9 +743,9 @@ impl EditDraft {
         let same = self.slide.objects.iter().filter(|o| matches!(o.kind, ObjectKind::Ndi { .. })).count();
         let mut object = Object::ndi(String::new());
         object.name = if same > 0 {
-            tf("editor.ndi.numbered", "NDI source {n}", &[("n", &(same + 1).to_string())])
+            tgf("editor.ndi.numbered", "NDI source {n}", &[("n", &(same + 1).to_string())])
         } else {
-            t("editor.ndi.name", "NDI source").to_owned()
+            tg("editor.ndi.name", "NDI source").to_owned()
         };
         self.selected = Some(object.id);
         self.also.clear();
@@ -1306,6 +1345,44 @@ mod tests {
             assert_eq!(super::typed_object_name(&object, "Principal"), "Main");
             assert_eq!(super::typed_object_name(&object, "Coro"), "Coro");
         });
+    }
+
+    #[test]
+    fn new_boxes_are_named_and_say_their_sample_words_in_the_language_set_and_keep_them() {
+        use crate::i18n::{Language, with_language};
+        let mut d = draft();
+        let before = d.slide.objects.len();
+        with_language(Language::Spanish, || {
+            d.add_text();
+            d.add_shape(sp_model::Shape::Star);
+            d.add_shape(sp_model::Shape::Star);
+            d.add_web();
+            d.add_ndi();
+        });
+        let added: Vec<(String, Option<String>)> = d.slide.objects[before..]
+            .iter()
+            .map(|object| (object.name.clone(), object.as_text().map(str::to_owned)))
+            .collect();
+        let number = (before + 1).to_string();
+        let expected = [
+            (format!("Texto {number}"), Some("Texto".to_owned())),
+            ("Estrella".to_owned(), None),
+            ("Estrella 2".to_owned(), None),
+            ("Página web".to_owned(), None),
+            ("Fuente NDI".to_owned(), None),
+        ];
+        assert_eq!(added, expected);
+        // Kept as given: in English the Spanish box is still the app's, by its name and its words.
+        with_language(Language::English, || {
+            assert!(super::is_new_text_name(&format!("Texto {number}")) && super::is_new_text_name("Text 12"));
+            assert!(super::is_sample_words("Texto") && super::is_sample_words("Text"));
+            assert_eq!(super::sample_words(), "Text");
+        });
+        // A church's names and words are its own, in any language.
+        for (name, words) in [("Texto final", "Textos"), ("Text", "Text 2"), ("Texto 2a", "texto"), ("Texto ", "")] {
+            assert!(!super::is_new_text_name(name), "{name}");
+            assert!(!super::is_sample_words(words), "{words}");
+        }
     }
 
     use super::*;

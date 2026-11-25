@@ -466,6 +466,10 @@ fn is_false(value: &bool) -> bool {
 /// whichever theme draws it, so each screen's theme can lay Bible slides out its own way.
 pub const BIBLE_TEMPLATE: Uuid = Uuid::from_u128(0xb1b1_7e3d);
 
+/// The id of the theme the app starts with ([`Theme::builtin`]), and the name it gives it (in
+/// English: the app shows it in its own language while the theme keeps this name).
+pub const BUILTIN_THEME: (Uuid, &str) = (Uuid::nil(), "Built-in");
+
 /// The ids of the three templates the built-in theme comes with, and the names it gives them
 /// (in English: the app shows them in its own language while a theme keeps these names). A theme
 /// copied from the built-in one keeps the ids.
@@ -685,16 +689,17 @@ impl ThemeTemplate {
     }
 
     /// The template as a slide the editor can work on: its shapes, pictures and videos, then a
-    /// text box for each of its boxes, saying "Text", carrying the box's whole look, place and
-    /// name.
-    pub fn as_slide(&self) -> Slide {
+    /// text box for each of its boxes, saying `sample` (the app's sample words, "Text" in
+    /// English: a template's boxes keep no words of their own, so they are never saved),
+    /// carrying the box's whole look, place and name.
+    pub fn as_slide(&self, sample: &str) -> Slide {
         // Its other objects first, at the back, as they are drawn; then its boxes.
         let objects = self
             .objects
             .iter()
             .cloned()
             .chain(self.boxes.iter().map(|style| {
-                let mut object = Object::text(style.role.clone(), "Text");
+                let mut object = Object::text(style.role.clone(), sample);
                 object.name = style.label();
                 object.frame = Some(style.rect);
                 if let ObjectKind::Text { style: own, .. } = &mut object.kind {
@@ -822,9 +827,10 @@ impl Theme {
             bible: true,
             ..template
         });
+        let (id, name) = BUILTIN_THEME;
         Theme {
-            id: Uuid::nil(),
-            name: "Built-in".to_owned(),
+            id,
+            name: name.to_owned(),
             templates: [
                 ThemeTemplate {
                     id: two_id,
@@ -1572,9 +1578,9 @@ mod tests {
     fn a_template_goes_to_the_editor_and_back_unchanged_and_edits_change_only_it() {
         let theme = Theme::builtin();
         for template in &theme.templates {
-            assert_eq!(&template.with_slide(&template.as_slide()), template);
+            assert_eq!(&template.with_slide(&template.as_slide("Text")), template);
         }
-        let mut slide = theme.templates[0].as_slide();
+        let mut slide = theme.templates[0].as_slide("Text");
         slide.objects[1].frame = Some(SlideRect { x: 10.0, y: 20.0, w: 300.0, h: 100.0 });
         let ObjectKind::Text { style, .. } = &mut slide.objects[1].kind else { panic!("a text box") };
         style.size = Some(48.0);
@@ -1600,7 +1606,7 @@ mod tests {
         slide.objects.remove(0);
         assert!(theme.templates[0].with_slide(&slide).style_for(&Role::primary()).is_none());
         // Names come back when the template is opened again.
-        let names: Vec<String> = edited.as_slide().objects.iter().map(|o| o.name.clone()).collect();
+        let names: Vec<String> = edited.as_slide("Text").objects.iter().map(|o| o.name.clone()).collect();
         assert_eq!(names, ["English", "Translation", "Reference", "Notes", "Notes"]);
     }
 

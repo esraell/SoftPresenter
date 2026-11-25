@@ -1601,6 +1601,9 @@ pub struct ListPicture<'a> {
     /// Its place in the list, from 1, shown as two figures.
     pub number: usize,
     pub name: &'a str,
+    /// What it is, after its name and a dot ("Two languages · Songs", a template's kind): never
+    /// shortened; a name too long for the strip ends in "…" before it.
+    pub kind: Option<&'a str>,
     /// A dot between the number and the name, in this colour (a slide's group).
     pub dot: Option<Color32>,
     /// The one open: on the well, with a ring round it.
@@ -1636,11 +1639,23 @@ pub fn list_name_look(ink: Color32) -> Lettering {
     Lettering { font: fixed_semibold(12.0), ink, spacing: 0.5, capitals: true }
 }
 
+/// A list picture's caption: its name, then a dot and its kind if it has one, on one line that
+/// `fits` (as it says). When the whole is too long the name ends in "…", never cut off without
+/// it, and the kind is never shortened. Also whether the name was shortened, so the whole caption
+/// can go in the picture's hover text.
+fn list_caption(name: &str, kind: Option<&str>, fits: impl Fn(&str) -> bool) -> (String, bool) {
+    let tail = kind.map_or_else(String::new, |kind| format!(" \u{b7} {kind}"));
+    let shortened = crate::media::ellipsize(name, |part| fits(&format!("{part}{tail}")));
+    let cut = shortened != name;
+    (format!("{shortened}{tail}"), cut)
+}
+
 /// One picture of a list in the Edit view's left column, as wide as the room there is, 16 to 9
-/// with a strip under it: its number, its dot if it has one, its name. `list` names the list,
-/// and the picture is the `index`th of it. When another picture becomes the open one, the list
-/// scrolls it into sight. Returns what the pointer did on it, and where its parts are; the
-/// response's rect is the whole tile.
+/// with a strip under it: its number, its dot if it has one, its name and its kind
+/// ([`list_caption`]: a name too long ends in "…", and the picture's hover text has it whole).
+/// `list` names the list, and the picture is the `index`th of it. When another picture becomes
+/// the open one, the list scrolls it into sight. Returns what the pointer did on it, and where
+/// its parts are; the response's rect is the whole tile.
 ///
 /// It takes clicks and drags. A list whose pictures can be dragged to another place moves them
 /// as the playlist's items are moved, with [`drag_let_go`], [`drop_slot`], [`paint_rows_moving`]
@@ -1656,7 +1671,7 @@ pub fn list_picture(
     let inner = width - 2.0 * LIST_PICTURE_INSET;
     let size = vec2(inner, inner * 9.0 / 16.0);
     let (tile, _) = ui.allocate_exact_size(vec2(width, LIST_PICTURE_INSET + size.y + LIST_STRIP), Sense::hover());
-    let response = ui.interact(tile, list.with(("picture", index)), Sense::click_and_drag());
+    let mut response = ui.interact(tile, list.with(("picture", index)), Sense::click_and_drag());
     if look.open {
         ui.painter().rect_filled(tile, 9.0, CARD);
         ui.painter().rect_stroke(tile, 9.0, Stroke::new(2.0, SELECTED), StrokeKind::Outside);
@@ -1682,10 +1697,19 @@ pub fn list_picture(
         start += 8.0 + 7.0;
     }
     let right = picture.max.x - 3.0;
-    if !look.renaming {
-        let words = list_name_look(ink).lay_out(ui, look.name);
+    // Only a strip in sight is measured (a name too long is measured once for each letter cut).
+    // A line fits when its letters do, up to where their ink ends.
+    if !look.renaming && ui.is_rect_visible(tile) {
+        let lettering = list_name_look(ink);
+        let (caption, cut) =
+            list_caption(look.name, look.kind, |line| lettering.lay_out(ui, line).mesh_bounds.max.x <= right - start);
+        let words = lettering.lay_out(ui, &caption);
         let room = Rect::from_min_max(pos2(start, picture.max.y), pos2(right, tile.max.y));
         ui.painter().with_clip_rect(room).galley(pos2(start, middle - words.size().y / 2.0), words, ink);
+        if cut {
+            let whole = look.kind.map_or_else(|| look.name.to_owned(), |kind| format!("{} \u{b7} {kind}", look.name));
+            response = response.on_hover_text(whole);
+        }
     }
     // The open one is brought into sight when it changes (added, copied, moved, opened).
     let shown = list.with("open");
@@ -4132,7 +4156,7 @@ pub fn song_menu(
             ui.close();
         }
         ui.separator();
-        for (at, name) in state.theme_names.iter().enumerate() {
+        for (at, name) in state.themes_shown().iter().enumerate() {
             let on = own.is_some() && state.theme_ids.get(at).copied() == own;
             if ui.add(egui::Button::selectable(on, name.as_str())).clicked() {
                 state.song_theme_request = Some((index, Some(at)));
@@ -7084,6 +7108,32 @@ pub mod tests {
         .drop_without_applying_deltas();
         // Menus keep the whole file name, as the tile's hover text does.
         assert_eq!(crate::backgrounds::FILES[5], "Room Out of Focus.jpg");
+    }
+
+    #[test]
+    fn a_list_pictures_caption_shortens_the_name_with_an_ellipsis_and_never_the_kind() {
+        let within = |room: usize| move |line: &str| line.chars().count() <= room;
+        let caption = |name: &str, kind: Option<&str>, room: usize| list_caption(name, kind, within(room));
+        // Room for it all: as it is.
+        assert_eq!(caption("Dos idiomas", Some("Canciones"), 30), ("Dos idiomas \u{b7} Canciones".to_owned(), false));
+        // Too long: the name ends in "…", never cut without it, and the kind stays whole, the
+        // longest kind too.
+        assert_eq!(
+            caption("Dos idiomas", Some("Canciones"), 21),
+            ("Dos idio\u{2026} \u{b7} Canciones".to_owned(), true)
+        );
+        assert_eq!(
+            caption("Dos idiomas", Some("Canciones y Biblia"), 25),
+            ("Dos\u{2026} \u{b7} Canciones y Biblia".to_owned(), true)
+        );
+        assert_eq!(
+            caption("Two languages", Some("Songs and Bible"), 10),
+            ("\u{2026} \u{b7} Songs and Bible".to_owned(), true),
+            "with no room even for the kind, only the name goes"
+        );
+        // With no kind, the name alone.
+        assert_eq!(caption("Verse 1", None, 7), ("Verse 1".to_owned(), false));
+        assert_eq!(caption("Pre-chorus", None, 5), ("Pre-\u{2026}".to_owned(), true));
     }
 
     #[test]

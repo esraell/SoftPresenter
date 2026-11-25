@@ -5145,7 +5145,7 @@ impl App {
                     crate::i18n::tf(
                         "notices.ask.the_theme",
                         "The theme {name}",
-                        &[("name", &crate::i18n::quoted(&theme.name))],
+                        &[("name", &crate::i18n::quoted(&theme_store::shown_theme_name(theme)))],
                     )
                 },
             ),
@@ -5356,24 +5356,24 @@ impl App {
             crate::i18n::tf(
                 "notices.theme.unreadable",
                 "The theme {name} could not be read: {error}",
-                &[("name", &theme.name), ("error", &e.to_string())],
+                &[("name", &theme_store::shown_theme_name(theme)), ("error", &e.to_string())],
             )
         })?;
         let read = sp_model::Theme::from_json(&text).map_err(|e| {
             crate::i18n::tf(
                 "notices.theme.unreadable",
                 "The theme {name} could not be read: {error}",
-                &[("name", &theme.name), ("error", &e.to_string())],
+                &[("name", &theme_store::shown_theme_name(theme)), ("error", &e.to_string())],
             )
         })?;
         if read.id != theme.id {
             return Err(crate::i18n::tf(
                 "notices.theme.other_inside",
                 "The file of the theme {name} now holds another theme.",
-                &[("name", &theme.name)],
+                &[("name", &theme_store::shown_theme_name(theme))],
             ));
         }
-        let name = read.name.clone();
+        let name = theme_store::shown_theme_name(&read).into_owned();
         self.themes[index] = read;
         self.stamps.note(&file);
         self.held_themes.retain(|at| *at != index);
@@ -5388,7 +5388,7 @@ impl App {
     fn keep_theme(&mut self, index: usize) -> Result<String, String> {
         let theme = self.themes.get(index).ok_or(crate::i18n::t("notices.theme_gone", "That theme is gone."))?;
         theme_store::save(theme)?;
-        let name = theme.name.clone();
+        let name = theme_store::shown_theme_name(theme).into_owned();
         if let Some(file) = theme_store::file_of(theme) {
             self.stamps.note(&file);
         }
@@ -5553,7 +5553,7 @@ impl App {
                         done.waiting.push(crate::i18n::tf(
                             "notices.reload.the_theme",
                             "the theme {name}",
-                            &[("name", &self.themes[index].name)],
+                            &[("name", &theme_store::shown_theme_name(&self.themes[index]))],
                         ));
                         self.wait_on(outside::Waiting::Theme(index));
                     }
@@ -7490,8 +7490,11 @@ impl App {
             }
             Some(ThemeRequest::Duplicate(index)) if index < count => {
                 let mut theme = self.themes[index].clone();
+                // Named in the language set, after the name the window shows (a copy of the
+                // built-in theme is "Incluido copia" in Spanish), and kept.
+                let original = theme_store::shown_theme_name(&theme).into_owned();
                 theme.id = Uuid::new_v4();
-                theme.name = crate::i18n::tf("notices.copy_name", "{name} copy", &[("name", &theme.name)]);
+                theme.name = crate::i18n::tgf("notices.copy_name", "{name} copy", &[("name", &original)]);
                 self.themes.push(theme);
                 self.themes_unsaved.push(self.themes.len() - 1);
                 self.unsaved_since = Some(Instant::now());
@@ -7501,7 +7504,7 @@ impl App {
             Some(ThemeRequest::New) => {
                 let mut theme = (*self.theme).clone();
                 theme.id = Uuid::new_v4();
-                theme.name = crate::i18n::t("notices.theme.new_name", "New Theme").to_owned();
+                theme.name = crate::i18n::tg("notices.theme.new_name", "New Theme").to_owned();
                 self.themes.push(theme);
                 self.themes_unsaved.push(self.themes.len() - 1);
                 self.unsaved_since = Some(Instant::now());
@@ -7610,7 +7613,11 @@ impl App {
             return;
         };
         let edit = home::ThemeEdit::of(index, theme.clone());
-        running.home_state.editing = edit.theme.templates.first().map(|first| EditDraft::of_slide(first.as_slide(), 0));
+        running.home_state.editing = edit
+            .theme
+            .templates
+            .first()
+            .map(|first| EditDraft::of_slide(first.as_slide(crate::editor::sample_words()), 0));
         running.home_state.theme_edit = Some(edit);
         running.home_state.bible_open = false;
         running.canvas_for = None;
@@ -8956,7 +8963,7 @@ impl App {
             {
                 let template =
                     edit.theme.templates.first().map(|t| theme_store::shown_name(t).into_owned()).unwrap_or_default();
-                running.home_state.renaming_theme = Some(edit.theme.name.clone());
+                running.home_state.renaming_theme = Some(theme_store::shown_theme_name(&edit.theme).into_owned());
                 running.home_state.renaming_template = Some((0, template));
             }
             // Testing aid: also open the slide editor, to check how it looks.
@@ -9065,7 +9072,12 @@ impl App {
                         let at = items.iter().position(|item| matches!(item, service::Item::Header { .. }));
                         state.renaming_header = at.map(|at| (at, items[at].title().to_owned()));
                     }
-                    "theme" => state.renaming_theme = state.theme_edit.as_ref().map(|edit| edit.theme.name.clone()),
+                    "theme" => {
+                        state.renaming_theme = state
+                            .theme_edit
+                            .as_ref()
+                            .map(|edit| theme_store::shown_theme_name(&edit.theme).into_owned())
+                    }
                     "template" => {
                         let name = state.theme_edit.as_ref().and_then(|edit| edit.theme.templates.first());
                         state.renaming_template =

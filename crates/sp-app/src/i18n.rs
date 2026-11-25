@@ -329,6 +329,18 @@ pub fn tgf(key: &'static str, english: &'static str, args: &[(&str, &str)]) -> S
     fill(tg(key, english), args)
 }
 
+/// What a key says in each language the app has words in, English first, for telling words the
+/// app gave and saved (a new box's sample words, its numbered name) in whichever language it was
+/// in when it gave them: a box made in Spanish still says "Texto" with the window in English.
+/// The pair is as [`tk`] makes it.
+pub fn every_wording((key, english): (&'static str, &'static str)) -> impl Iterator<Item = &'static str> {
+    Language::ALL.into_iter().map(move |language| match words(language, key) {
+        Some(Words::One(text)) => *text,
+        Some(Words::Forms(forms)) => forms.first().copied().unwrap_or(english),
+        None => english,
+    })
+}
+
 /// A key and its English together, for a place that keeps them in a table before it draws
 /// them (the layer keys' names): the same as [`t`]'s two arguments, but the scan for wrapped
 /// keys finds them. Hand the pair on to [`ts`] or [`t`].

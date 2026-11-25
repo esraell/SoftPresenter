@@ -236,6 +236,7 @@ pub fn list(
                 let look = ListPicture {
                     number: index + 1,
                     name: &layout.name,
+                    kind: None,
                     dot: None,
                     open: open == Some(index),
                     live: false,

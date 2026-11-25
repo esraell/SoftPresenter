@@ -45,6 +45,37 @@ pub fn shown_name(template: &sp_model::ThemeTemplate) -> Cow<'_, str> {
     template_name(template.id, &template.name)
 }
 
+/// The words the window shows for the built-in theme's name ([`sp_model::BUILTIN_THEME`]).
+const BUILTIN_THEME_WORDS: (&str, &str) = tk("themes.builtin.theme", "Built-in");
+
+/// What a theme is called in the window. The built-in theme is called in the language set while
+/// it keeps the name the app gave it; its file keeps that English name, as its templates' do
+/// ([`template_name`]). Any other theme, or the built-in one renamed, is called by its own name.
+pub fn theme_name(id: Uuid, name: &str) -> Cow<'_, str> {
+    if (id, name) == sp_model::BUILTIN_THEME {
+        Cow::Borrowed(t(BUILTIN_THEME_WORDS.0, BUILTIN_THEME_WORDS.1))
+    } else {
+        Cow::Borrowed(name)
+    }
+}
+
+/// What a theme is called in the window (see [`theme_name`]).
+pub fn shown_theme_name(theme: &Theme) -> Cow<'_, str> {
+    theme_name(theme.id, &theme.name)
+}
+
+/// The name the theme with this id is given when `typed` is typed for it: the built-in theme
+/// typed as the window calls it keeps the name the app gave it, so a translation is never saved
+/// as its name; anything else is the name typed.
+pub fn typed_theme_name(id: Uuid, typed: &str) -> String {
+    let (builtin, english) = sp_model::BUILTIN_THEME;
+    if id == builtin && typed == t(BUILTIN_THEME_WORDS.0, BUILTIN_THEME_WORDS.1) {
+        english.to_owned()
+    } else {
+        typed.to_owned()
+    }
+}
+
 fn folder() -> Option<PathBuf> {
     crate::bible_store::data_dir().map(|dir| dir.join("Themes"))
 }
@@ -238,7 +269,7 @@ mod tests {
         let saved = with_language(Language::Spanish, || {
             let mut theme = builtin.clone();
             for template in &mut theme.templates {
-                *template = template.with_slide(&template.as_slide());
+                *template = template.with_slide(&template.as_slide(crate::editor::sample_words()));
             }
             Theme::from_json(&theme.to_json()).unwrap()
         });
@@ -247,6 +278,35 @@ mod tests {
             ["Two languages", "One language", "Bible"]
         );
         assert!(saved.all_templates().flat_map(|t| &t.boxes).all(|style| style.name.is_none()), "{saved:?}");
+    }
+
+    #[test]
+    fn the_built_in_theme_is_called_in_the_language_set_and_keeps_its_english_name() {
+        use crate::i18n::{Language, with_language};
+        let builtin = Theme::builtin();
+        // In English as the theme names it; in Spanish as the window says it.
+        assert_eq!(with_language(Language::English, || shown_theme_name(&builtin).into_owned()), "Built-in");
+        assert_eq!(with_language(Language::Spanish, || shown_theme_name(&builtin).into_owned()), "Incluido");
+        // Renamed, it is called by its name; another theme of the same name is not the built-in.
+        let renamed = Theme { name: "Domingo".to_owned(), ..builtin.clone() };
+        assert_eq!(with_language(Language::Spanish, || shown_theme_name(&renamed).into_owned()), "Domingo");
+        let other = Theme { id: Uuid::new_v4(), ..builtin.clone() };
+        assert_eq!(with_language(Language::Spanish, || shown_theme_name(&other).into_owned()), "Built-in");
+        // Typed back as the window says it, the built-in theme keeps the app's name for it (so
+        // its file keeps "Built-in"), and a renamed one gets it back; any other theme, or other
+        // words, take what was typed.
+        with_language(Language::Spanish, || {
+            assert_eq!(typed_theme_name(builtin.id, "Incluido"), "Built-in");
+            assert_eq!(typed_theme_name(builtin.id, "Domingo"), "Domingo");
+            assert_eq!(typed_theme_name(other.id, "Incluido"), "Incluido");
+        });
+        assert_eq!(with_language(Language::English, || typed_theme_name(builtin.id, "Built-in")), "Built-in");
+        let saved = with_language(Language::Spanish, || {
+            let mut theme = builtin.clone();
+            theme.name = typed_theme_name(theme.id, &shown_theme_name(&theme));
+            Theme::from_json(&theme.to_json()).unwrap()
+        });
+        assert_eq!(saved.name, "Built-in");
     }
 
     #[test]

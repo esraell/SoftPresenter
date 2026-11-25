@@ -16,6 +16,7 @@
   "editor.role.translation_reference": "Referencia de la traducción",
   "editor.shape.numbered": "{shape} {n}",
   "editor.new_text.name": "Texto {number}",
+  "editor.sample_text": "Texto",
   "editor.web.name": "Página web",
   "editor.web.numbered": "Página web {n}",
   "editor.ndi.name": "Fuente NDI",
