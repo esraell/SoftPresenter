@@ -76,7 +76,7 @@ fn is_song_text(text: &str) -> bool {
 
 /// The section a line names, tidied ("CHORUS:" gives "Chorus"), or `None` for a line of words.
 pub fn section_name(line: &str) -> Option<String> {
-    const NAMES: [&str; 33] = [
+    const NAMES: [&str; 37] = [
         "verse",
         "chorus",
         "pre-chorus",
@@ -100,12 +100,16 @@ pub fn section_name(line: &str) -> Option<String> {
         "предприпев",
         "пре-припев",
         "бридж",
+        "брідж",
+        "передприспів",
         "мост",
         "міст",
         "вступ",
         "вступление",
         "кода",
         "окончание",
+        "концовка",
+        "закінчення",
         "кінцівка",
         "проигрыш",
         "програш",
