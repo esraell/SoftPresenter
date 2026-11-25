@@ -200,7 +200,9 @@ fn sort_order(a: &Value, b: &Value, text: &impl Fn(&str, &str) -> Ordering) -> O
         (Value::Integer(a), Value::Integer(b)) => a.cmp(b),
         (Value::Integer(a), Value::Real(b)) => whole_and_fraction(*a, *b),
         (Value::Real(a), Value::Integer(b)) => whole_and_fraction(*b, *a).reverse(),
-        (Value::Real(a), Value::Real(b)) => a.total_cmp(b),
+        // Nothing and less-than-nothing are the same number, as they are to a whole 0. (A
+        // number that isn't one never gets here: the reader gives nothing for it.)
+        (Value::Real(a), Value::Real(b)) => a.partial_cmp(b).unwrap_or_else(|| a.total_cmp(b)),
         (Value::Text(a), Value::Text(b)) => text(a, b),
         (Value::Blob(a), Value::Blob(b)) => a.cmp(b),
         _ => rank(a).cmp(&rank(b)),
@@ -644,6 +646,49 @@ mod tests {
         let songs = read(odd).unwrap();
         assert_eq!(songs.len(), 2);
         assert!(songs.iter().all(|song| song.text.is_empty() && song.book.is_none()));
+    }
+
+    #[test]
+    fn numbers_of_every_kind_sort_in_one_order() {
+        // Whole numbers, fractions, nothing written two ways, and numbers too large to tell
+        // apart as fractions, many times over and mixed up: sorting needs one order of them.
+        let numbers = [
+            "0",
+            "-0.0",
+            "0.0",
+            "9007199254740993",
+            "9007199254740992.0",
+            "9007199254740992",
+            "-1",
+            "1e30",
+            "-1e30",
+            "x",
+            "",
+            "2.5",
+            "9223372036854775807",
+            "9223372036854775808.0",
+        ];
+        let mut text = String::from("##1\n##Numbers\n##\n");
+        let mut dice = 0x2545_f491_4f6c_dd1d_u64;
+        for at in 0..600 {
+            dice ^= dice << 13;
+            dice ^= dice >> 7;
+            dice ^= dice << 17;
+            let number = numbers[(dice % numbers.len() as u64) as usize];
+            text.push_str(&format!("{number}#$#Song {at}#$##$##$##$##$#Verse 1@%Line\n"));
+        }
+        let songs = read(text.as_bytes()).unwrap();
+        assert_eq!(songs.len(), 600);
+        let whole: Vec<i64> = songs.iter().filter_map(|song| song.number).collect();
+        assert!(whole.windows(2).all(|pair| pair[0] <= pair[1]));
+        let order = |a: f64, b: f64| sort_order(&Value::Real(a), &Value::Real(b), &|a: &str, b: &str| a.cmp(b));
+        assert_eq!(order(-0.0, 0.0), Ordering::Equal);
+        assert_eq!(whole_and_fraction(0, -0.0), Ordering::Equal);
+        assert_eq!(whole_and_fraction(9_007_199_254_740_993, 9_007_199_254_740_992.0), Ordering::Greater);
+        assert_eq!(whole_and_fraction(i64::MAX, 9_223_372_036_854_775_808.0), Ordering::Less);
+        assert_eq!(whole_and_fraction(i64::MIN, -9_223_372_036_854_775_808.0), Ordering::Equal);
+        assert_eq!(whole_and_fraction(2, 2.5), Ordering::Less);
+        assert_eq!(whole_and_fraction(-2, -2.5), Ordering::Greater);
     }
 
     /// Writes the songs real songbooks give as JSON, to compare with what another program
