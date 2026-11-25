@@ -28,13 +28,23 @@ pub const DEV_VERSION: Option<&str> = match option_env!("SOFTPRESENTER_DEV_VERSI
     _ => None,
 };
 
+/// A pre-release's own version ("0.9.0-dev.16"), set when a build from the public source is made
+/// for GitHub's releases (`SOFTPRESENTER_RELEASE_VERSION`; an empty one counts as none). Unlike a
+/// development build's, it changes nothing but the version: without it a pre-release would call
+/// itself 0.9.0, which comes after every 0.9.0-dev.N, and never be told of a newer one.
+const RELEASE_VERSION: Option<&str> = match option_env!("SOFTPRESENTER_RELEASE_VERSION") {
+    Some(version) if !version.is_empty() => Some(version),
+    _ => None,
+};
+
 /// The version this build is, as it shows it everywhere (the About panel, Settings › About, the
-/// log, a new issue's text, the MCP server's name): a development build's own, else the
-/// package's ("0.9.0"). Values other programs or files read as a plain version (a song pack's
-/// manifest, what TimelyChurch is told) keep the package's.
-pub const VERSION: &str = match DEV_VERSION {
-    Some(version) => version,
-    None => env!("CARGO_PKG_VERSION"),
+/// log, a new issue's text, the MCP server's name) and compares with GitHub's releases: a
+/// development build's own, else a pre-release's, else the package's ("0.9.0"). Values other
+/// programs or files read as a plain version (a song pack's manifest, what TimelyChurch is told)
+/// keep the package's.
+pub const VERSION: &str = match (DEV_VERSION, RELEASE_VERSION) {
+    (Some(version), _) | (None, Some(version)) => version,
+    (None, None) => env!("CARGO_PKG_VERSION"),
 };
 
 /// Where the releases are listed (100 to a page: the Bibles' releases come between the app's).
@@ -651,9 +661,9 @@ mod tests {
     #[test]
     fn the_version_shown_is_a_development_builds_own_or_the_packages() {
         match DEV_VERSION {
-            // A build from the public source.
+            // A build from the public source (a pre-release's version, or the package's).
             None => {
-                assert_eq!(VERSION, env!("CARGO_PKG_VERSION"));
+                assert_eq!(VERSION, RELEASE_VERSION.unwrap_or(env!("CARGO_PKG_VERSION")));
                 assert_eq!(Found::Newest.words(), format!("You have the newest version ({VERSION})"));
             }
             // Tests built as a development build (SOFTPRESENTER_DEV_VERSION set).

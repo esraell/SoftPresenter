@@ -59,6 +59,7 @@ person:
 
 | Switch | What it does |
 |---|---|
+| `SOFTPRESENTER_RELEASE_VERSION=<version>` (when building) | A pre-release made from the public source for GitHub's releases calls itself this (`0.9.0-dev.16`) in About, the log and Check for Updates, so it is told of newer pre-releases; nothing else changes (unlike a development build, it offers no song catalog) |
 | `SOFTPRESENTER_QUIET=1` | Windows open behind everything, no full screen, no NDI, no DeckLink card; no anonymous reports are sent, and the one-time notice about them is not shown (the same in any copy with `SOFTPRESENTER_DATA`, or one that only saves a picture); Remote Control, if switched on, listens on 127.0.0.1 only; so does receiving phone screens, which then announces nothing; sound plays, timed and mixed as usual (NDI included), but the speakers get silence |
 | `SOFTPRESENTER_DATA=<folder>` | Keep the library, Bibles, settings and log in that folder instead of the owner's |
 | `SOFTPRESENTER_CONTROL_SOCKET=<path>` | Where `sp` and the app meet; a short path for a test copy (a socket file on Windows too) |
