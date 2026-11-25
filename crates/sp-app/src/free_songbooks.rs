@@ -461,10 +461,15 @@ pub fn read(book: &Offered, bytes: &[u8], folder: &Path, now: i64) -> Result<Vec
     }
     let read = crate::load::import_songbook(&path);
     let _ = std::fs::remove_dir_all(&staging);
-    let songs = read.map_err(|problem| {
+    let read = read.map_err(|problem| {
         crate::applog::problem("songbooks", &format!("{} could not be read: {problem}", book.id));
         unreadable()
     })?;
+    // What reading it noticed (such as changes the file may be missing) goes in the log.
+    for caution in &read.cautions {
+        crate::applog::event("songbooks", &format!("{}: {caution}", book.id));
+    }
+    let songs = read.songs;
     if songs.is_empty() {
         return Err(unreadable());
     }
