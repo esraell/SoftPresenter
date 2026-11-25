@@ -2878,7 +2878,7 @@ function renderSettings() {
   }
   if (sec === 'Slides') { const eg = DOC.songs.find(s => copyrightLine(s) && s.info && (s.info.author || s.info.ccli)) || DOC.songs[0], at = st.copyrightAt, tr = st.transition;
     // What the room sees with every song, shown: the copyright line drawn on a slide, the transition as keys with a picture
-    const strip = k => html`<span class="st-strip" aria-hidden="true">${[0, 1, 2].map(i => html`<i class="${k === 'every' || (k === 'first' && i === 0) || (k === 'last' && i === 2) ? 'has' : ''}"></i>`)}</span>`;
+    const strip = k => html`<span class="st-where" aria-hidden="true">${[0, 1, 2].map(i => html`<i class="${k === 'every' || (k === 'first' && i === 0) || (k === 'last' && i === 2) ? 'has' : ''}"></i>`)}</span>`;
     const three = TRANSITIONS.slice(0, 3), other = !three.includes(tr.kind);
     body = [card('Copyright line', 'Where the small line under a song’s words shows', html`<div class="st-show">
         <div class="st-slide" role="img" aria-label="A slide, with the copyright line where it shows"><div class="w">${String(slideWords(eg.slides[0]) || eg.title).split('\n').slice(0, 2).map(l => html`<span>${l}</span>`)}</div>${at === 'none' ? '' : html`<div class="c">${copyrightLine(eg) || 'Fill in a song’s details to see its line'}</div>`}</div>
@@ -4094,7 +4094,6 @@ const REMOTE_WORDS = {
    "No song is open": "No hay ninguna canción abierta",
    "No songs here yet. Make one, import some, or drag songs onto this library’s name.": "Aún no hay canciones aquí. Crea una, importa algunas o arrastra canciones sobre el nombre de esta biblioteca.",
    "No tracks yet. Add music files from this computer.": "Aún no hay pistas. Añade archivos de música de este ordenador.",
-   "Not connected to SoftPresenter.": "No hay conexión con SoftPresenter.",
    "Notes": "Notas",
    "Nothing found": "No se encontró nada",
    "Nothing showing": "No se muestra nada",
@@ -4186,7 +4185,7 @@ const REMOTE_WORDS = {
    "The live tools": "Las herramientas en vivo",
    "The menu for the slide on screen": "El menú de la diapositiva que está en pantalla",
    "then 1–9": "luego 1 … 9",
-   "This device is remembered once it signs in, until it is forgotten in Settings › Remote Control on the computer.": "Este dispositivo se recuerda en cuanto inicia sesión, hasta que lo olvides en Ajustes › Control remoto en el ordenador.",
+   "This device is remembered once it signs in, until it is forgotten in Settings › Phone remote on the computer.": "Este dispositivo se recuerda en cuanto inicia sesión, hasta que lo olvides en Ajustes › Mando del móvil en el ordenador.",
    "This library has no songs yet.": "Esta biblioteca aún no tiene canciones.",
    "This list": "Esta lista (al pie tiene Teclas en los botones)",
    "This sample only has": "Esta muestra solo tiene",
