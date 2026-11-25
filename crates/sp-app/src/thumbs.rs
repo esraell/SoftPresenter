@@ -13,8 +13,14 @@ pub const THUMB_W: u32 = 480;
 pub const THUMB_H: u32 = 270;
 const PREVIEW_W: u32 = 640;
 const PREVIEW_H: u32 = 360;
-/// New thumbnails drawn per frame, so a long song fills in without stalling the window.
+/// New thumbnails drawn per frame at most, so a long song fills in without stalling the window.
 const PER_FRAME: usize = 12;
+/// No new thumbnail is begun in a frame once the ones drawn in it have taken this long, though
+/// one always is. A new picture waits for the GPU before it is finished (its room is read back),
+/// and with a GPU that is slower, or busy drawing large screens, each took 10 ms or more: twelve
+/// at once, for a chapter of verses just looked up, held the window for well over a tenth of a
+/// second. The rest come in the next frames.
+const FRAME_BUDGET: Duration = Duration::from_millis(8);
 /// Thumbnails kept at once. Each is about half a megabyte of GPU memory, so this is about
 /// 80 MB; scrolling a long song drops the ones not looked at for longest.
 const MAX_CACHED: usize = 160;
@@ -64,7 +70,9 @@ pub struct Thumbs {
     rest_at: Option<Instant>,
     fonts: Fonts,
     cache: HashMap<Uuid, Thumb>,
+    /// The new thumbnails drawn in this frame, and the time they took.
     drawn_this_frame: usize,
+    spent_this_frame: Duration,
     frame: u64,
     /// The two pictures the preview alternates between, and which one is in front.
     previews: [Option<(wgpu::Texture, egui::TextureId)>; 2],
@@ -87,6 +95,7 @@ impl Thumbs {
             fonts: Fonts::new(),
             cache: HashMap::new(),
             drawn_this_frame: 0,
+            spent_this_frame: Duration::ZERO,
             frame: 0,
             previews: [None, None],
             preview_front: 0,
@@ -103,6 +112,7 @@ impl Thumbs {
     /// Call once at the start of each frame.
     pub fn begin_frame(&mut self) {
         self.drawn_this_frame = 0;
+        self.spent_this_frame = Duration::ZERO;
         self.frame += 1;
     }
 
@@ -291,16 +301,18 @@ impl Thumbs {
                 egui_renderer.free_texture(&thumb.id);
             }
         }
-        if self.drawn_this_frame >= PER_FRAME {
+        if !may_begin_another(self.drawn_this_frame, self.spent_this_frame) {
             return None;
         }
         self.drawn_this_frame += 1;
+        let drawing = Instant::now();
         let built = build_layers(&mut self.fonts, layers, theme, THUMB_W, THUMB_H);
         let texture = target_texture(&gpu.device, THUMB_W, THUMB_H);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         // One that can't be drawn is kept blank (a new texture is clear), so the window doesn't
         // try again, and ask to be drawn again, on every frame.
         let drawn = self.painter.paint(&gpu.device, &gpu.queue, &built.scene, &view, THUMB_W, THUMB_H);
+        self.spent_this_frame += drawing.elapsed();
         match &drawn {
             Ok(()) => drop(self.thumbnails_said.remove(&key)),
             Err(error) => {
@@ -477,6 +489,13 @@ pub fn web_pages(slide: Option<&Slide>, theme: &Theme) -> Vec<String> {
         .collect()
 }
 
+/// Whether another new thumbnail may be drawn in this frame, `drawn` having been drawn in it
+/// already, in `spent`: the first always, then up to [`PER_FRAME`] while they have taken less
+/// than [`FRAME_BUDGET`].
+fn may_begin_another(drawn: usize, spent: Duration) -> bool {
+    drawn == 0 || (drawn < PER_FRAME && spent < FRAME_BUDGET)
+}
+
 /// Which thumbnails to drop so that at most `max` remain: the ones shown longest ago, and
 /// never one shown in the current frame (it is on screen right now).
 fn to_evict(ages: &[(Uuid, u64)], max: usize, current_frame: u64) -> Vec<Uuid> {
@@ -494,6 +513,20 @@ mod tests {
 
     fn ages(used: &[u64]) -> Vec<(Uuid, u64)> {
         used.iter().map(|u| (Uuid::new_v4(), *u)).collect()
+    }
+
+    #[test]
+    fn a_frame_draws_new_thumbnails_until_its_time_for_them_is_spent_and_always_one() {
+        let ms = Duration::from_millis;
+        // The first, however slow the ones before it in other frames were.
+        assert!(may_begin_another(0, Duration::ZERO));
+        assert!(may_begin_another(0, ms(500)));
+        // More while they have been quick, up to the most a frame draws.
+        assert!(may_begin_another(3, ms(5)));
+        assert!(!may_begin_another(PER_FRAME, ms(1)));
+        // None once they have taken the frame's time: one slow thumbnail is the frame's only one.
+        assert!(!may_begin_another(1, FRAME_BUDGET));
+        assert!(!may_begin_another(1, ms(40)));
     }
 
     #[test]
