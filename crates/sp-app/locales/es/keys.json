@@ -50,5 +50,7 @@
   "keys.changing.3": "Eliminar lo elegido: lo que Deshacer recupera se elimina al momento (elementos de la lista, diapositivas, elementos de una lista multimedia); las canciones de una biblioteca, las imágenes de la mediateca y las pantallas preguntan antes",
   "keys.changing.4": "Una canción nueva",
   "keys.changing.5": "En Editar: un cuadro de texto nuevo, duplicar, elegirlo todo",
-  "keys.changing.6": "En Editar: mover el objeto elegido (con Mayús, un píxel)"
+  "keys.changing.6": "En Editar: mover el objeto elegido (con Mayús, un píxel)",
+  "keys.cap.home": "Inicio",
+  "keys.cap.end": "Fin"
 }

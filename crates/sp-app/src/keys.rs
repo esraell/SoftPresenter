@@ -421,7 +421,10 @@ fn every_key_on(f_keys: bool) -> Vec<(&'static str, Vec<Row>)> {
                         "The slide picked goes on screen (found with / or looked up, or picked in Bible); else the open item, from its first slide",
                     ),
                 ),
-                row(keys(&["Home", "End"]), t("keys.running.5", "First or last slide of the song")),
+                row(
+                    keys(&[t("keys.cap.home", "Home"), t("keys.cap.end", "End")]),
+                    t("keys.running.5", "First or last slide of the song"),
+                ),
                 row(
                     one(t("keys.cap.letter", "A letter")),
                     t(

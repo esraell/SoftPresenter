@@ -13,7 +13,7 @@ use sp_engine::{Command, Show, SlideRef};
 
 use crate::displays::{DisplayInfo, kept_for_operator};
 use crate::home::HomeState;
-use crate::i18n::t;
+use crate::i18n::{t, tf, tn};
 use crate::screens::{Kind, Output, Screen};
 use crate::studio::{CARD, HOVER, READY, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
 
@@ -36,14 +36,6 @@ impl System {
     } else {
         System::Linux
     };
-
-    /// The computer, in the setup's words.
-    fn computer(self) -> &'static str {
-        match self {
-            System::Mac => "this Mac",
-            System::Windows | System::Linux => "this computer",
-        }
-    }
 }
 
 /// The steps.
@@ -61,12 +53,12 @@ impl Step {
     /// Its name along the top.
     fn name(self) -> &'static str {
         match self {
-            Step::Welcome => "Welcome",
-            Step::Screens => "Screens",
-            Step::Songs => "Songs",
-            Step::Bibles => "Bibles",
-            Step::Permissions => "Permissions",
-            Step::Done => "Done",
+            Step::Welcome => t("setup.step.welcome", "Welcome"),
+            Step::Screens => t("setup.step.screens", "Screens"),
+            Step::Songs => t("setup.step.songs", "Songs"),
+            Step::Bibles => t("setup.step.bibles", "Bibles"),
+            Step::Permissions => t("setup.step.permissions", "Permissions"),
+            Step::Done => t("setup.step.done", "Done"),
         }
     }
 }
@@ -331,13 +323,21 @@ fn audience_displays(displays: &[DisplayInfo], operator: &[usize]) -> Vec<(Strin
 /// projector, or over NDI (`ndi`, when it is installed). What happens until one is plugged in
 /// depends on the choice, so each choice says it.
 fn one_display_words(name: Option<&str>, ndi: bool) -> String {
-    let named = name.map_or_else(String::new, |name| format!(" ({name})"));
-    let mut words = format!(
-        "Only one display is connected{named}. This is where you work, so the audience screen never covers it: \
-         the congregation sees it on a TV or projector."
-    );
+    let mut words = match name {
+        Some(name) => tf(
+            "setup.screens.one.named",
+            "Only one display is connected ({name}). This is where you work, so the audience screen never covers it: the congregation sees it on a TV or projector.",
+            &[("name", name)],
+        ),
+        None => t(
+            "setup.screens.one",
+            "Only one display is connected. This is where you work, so the audience screen never covers it: the congregation sees it on a TV or projector.",
+        )
+        .to_owned(),
+    };
     if ndi {
-        words.push_str(" It can also be sent over NDI, to a stream or a video switcher.");
+        words.push(' ');
+        words.push_str(t("setup.screens.one.ndi", "It can also be sent over NDI, to a stream or a video switcher."));
     }
     words
 }
@@ -370,11 +370,18 @@ fn one_display_choice(output: &Output, ndi: bool) -> OneDisplayChoice {
 /// window. Where the window system doesn't say which display is the main one (Wayland), it is
 /// the one the window is on, and those displays aren't offered.
 fn several_displays_words(main: Option<&str>) -> String {
-    let kept = match main {
-        Some(name) => format!("The main display ({name}) is kept for SoftPresenter's own window."),
-        None => "The display SoftPresenter's own window is on is kept for it.".to_owned(),
-    };
-    format!("{kept} Choose the projector or TV; the screen goes there straight away so you can check.")
+    match main {
+        Some(name) => tf(
+            "setup.screens.several.main",
+            "The main display ({name}) is kept for SoftPresenter's own window. Choose the projector or TV; the screen goes there straight away so you can check.",
+            &[("name", name)],
+        ),
+        None => t(
+            "setup.screens.several.window",
+            "The display SoftPresenter's own window is on is kept for it. Choose the projector or TV; the screen goes there straight away so you can check.",
+        )
+        .to_owned(),
+    }
 }
 
 /// Which display the congregation sees, and a stage display for the band if there is another.
@@ -382,7 +389,7 @@ fn several_displays_words(main: Option<&str>) -> String {
 /// the audience screen is left to choose for itself (Automatic) unless told otherwise: in a
 /// window until a TV or projector is plugged in, which it then fills at once (`screens::settle`).
 fn screens(ui: &mut egui::Ui, state: &mut HomeState) {
-    title(ui, "Which screen does the congregation see?");
+    title(ui, t("setup.screens.title", "Which screen does the congregation see?"));
     let others = audience_displays(&state.displays, &state.operator_displays);
     let audience = match state.screens.iter().position(|screen| screen.kind == Kind::Audience) {
         Some(at) => at,
@@ -412,8 +419,8 @@ fn screens(ui: &mut egui::Ui, state: &mut HomeState) {
         if choice(
             ui,
             lit == OneDisplayChoice::Automatic,
-            "In a window for now",
-            "On a TV or projector as soon as one is plugged in",
+            t("setup.screens.automatic", "In a window for now"),
+            t("setup.screens.automatic.detail", "On a TV or projector as soon as one is plugged in"),
         )
         .clicked()
         {
@@ -421,18 +428,36 @@ fn screens(ui: &mut egui::Ui, state: &mut HomeState) {
         }
         ui.add_space(6.0);
         if lit == OneDisplayChoice::Window {
-            choice(ui, true, "Only in a window", "Stays in a window, even with a TV or projector plugged in");
+            choice(
+                ui,
+                true,
+                t("setup.screens.window", "Only in a window"),
+                t("setup.screens.window.detail", "Stays in a window, even with a TV or projector plugged in"),
+            );
             ui.add_space(6.0);
         }
         if state.ndi_available
-            && choice(ui, lit == OneDisplayChoice::Ndi, "Send over NDI", "For a stream or a video switcher").clicked()
+            && choice(
+                ui,
+                lit == OneDisplayChoice::Ndi,
+                t("setup.screens.ndi", "Send over NDI"),
+                t("setup.screens.ndi.detail", "For a stream or a video switcher"),
+            )
+            .clicked()
         {
             set(Output::Ndi("SoftPresenter Audience".to_owned()), state);
         }
         if state.ndi_available {
             ui.add_space(6.0);
         }
-        if choice(ui, lit == OneDisplayChoice::NotNow, "Not now", "Choose in the Screens window later").clicked() {
+        if choice(
+            ui,
+            lit == OneDisplayChoice::NotNow,
+            t("setup.screens.not_now", "Not now"),
+            t("setup.screens.not_now.detail", "Choose in the Screens window later"),
+        )
+        .clicked()
+        {
             set(Output::Off, state);
         }
         return;
@@ -459,7 +484,14 @@ fn screens(ui: &mut egui::Ui, state: &mut HomeState) {
         }
         ui.add_space(6.0);
     }
-    if choice(ui, current.is_none(), "Not now", "Choose a display later in the Screens window").clicked() {
+    if choice(
+        ui,
+        current.is_none(),
+        t("setup.screens.not_now", "Not now"),
+        t("setup.screens.not_now.display", "Choose a display later in the Screens window"),
+    )
+    .clicked()
+    {
         state.screens[audience].output = Output::Off;
         state.screens_changed = true;
     }
@@ -467,7 +499,11 @@ fn screens(ui: &mut egui::Ui, state: &mut HomeState) {
     let free: Vec<&(String, String)> = others.iter().filter(|(name, _)| current.as_deref() != Some(name)).collect();
     if !free.is_empty() {
         ui.add_space(14.0);
-        ui.label(RichText::new("A screen for the band (stage display)?").font(semibold(13.5)).color(TEXT));
+        ui.label(
+            RichText::new(t("setup.screens.stage", "A screen for the band (stage display)?"))
+                .font(semibold(13.5))
+                .color(TEXT),
+        );
         ui.add_space(6.0);
         let stage = state.screens.iter().position(|screen| screen.kind == Kind::Stage);
         let stage_on = stage.and_then(|at| match &state.screens[at].output {
@@ -478,13 +514,16 @@ fn screens(ui: &mut egui::Ui, state: &mut HomeState) {
             if choice(ui, stage_on.as_deref() == Some(name), name, size).clicked() {
                 match stage {
                     Some(at) => state.screens[at].output = Output::Display(name.clone()),
-                    None => state.screens.push(Screen::stage("Stage".to_owned(), Output::Display(name.clone()))),
+                    None => state.screens.push(Screen::stage(
+                        t("setup.screens.stage.name", "Stage").to_owned(),
+                        Output::Display(name.clone()),
+                    )),
                 }
                 state.screens_changed = true;
             }
             ui.add_space(6.0);
         }
-        if choice(ui, stage_on.is_none(), "No stage display", "").clicked()
+        if choice(ui, stage_on.is_none(), t("setup.screens.stage.none", "No stage display"), "").clicked()
             && let Some(at) = stage
         {
             state.screens[at].output = Output::Off;
@@ -493,67 +532,96 @@ fn screens(ui: &mut egui::Ui, state: &mut HomeState) {
     }
     ui.add_space(8.0);
     ui.horizontal(|ui| {
-        if button(ui, if state.identify { "Stop Identifying" } else { "Identify Screens" }, false).clicked() {
+        let identify = if state.identify {
+            t("setup.screens.identify.stop", "Stop Identifying")
+        } else {
+            t("setup.screens.identify", "Identify Screens")
+        };
+        if button(ui, identify, false).clicked() {
             state.identify = !state.identify;
         }
-        ui.label(RichText::new("Shows each screen's name on it").size(11.5).color(TEXT_FAINT));
+        ui.label(
+            RichText::new(t("setup.screens.identify.about", "Shows each screen's name on it"))
+                .size(11.5)
+                .color(TEXT_FAINT),
+        );
     });
 }
 
 /// What the Songs step says before looking: a Mac asks before the Documents folder is read.
 fn songs_look_words(system: System) -> &'static str {
     match system {
-        System::Mac => {
-            "SoftPresenter can look in your Documents folder for a library of song documents (.pro files) to bring \
-             across. macOS may ask whether SoftPresenter can use the Documents folder: choose OK."
-        }
-        System::Windows | System::Linux => {
-            "SoftPresenter can look in your Documents folder for a library of song documents (.pro files) to bring \
-             across."
-        }
+        System::Mac => t(
+            "setup.songs.look.mac",
+            "SoftPresenter can look in your Documents folder for a library of song documents (.pro files) to bring across. macOS may ask whether SoftPresenter can use the Documents folder: choose OK.",
+        ),
+        System::Windows | System::Linux => t(
+            "setup.songs.look",
+            "SoftPresenter can look in your Documents folder for a library of song documents (.pro files) to bring across.",
+        ),
     }
 }
 
 /// What the Songs step says after looking: what was found, or which song files come in (Word
 /// files only on a Mac, whose own converter reads them).
 fn songs_found_words(system: System, found: Option<(usize, usize)>) -> String {
+    let mac = system == System::Mac;
     match found {
-        Some((songs, libraries)) => format!(
-            "A library of song documents was found on {}: {songs} songs in {libraries} {}. Each library comes across \
-             as a library of the same name, with its groups, arrangements and both languages.",
-            system.computer(),
-            if libraries == 1 { "library" } else { "libraries" }
-        ),
-        None => format!(
-            "No library of song documents was found in the Documents folder. Song files from anywhere come in: {}.",
-            match system {
-                System::Mac => "text, lyric files from song services, ChordPro, Word, and .pro song documents",
-                System::Windows | System::Linux => {
-                    "text, lyric files from song services, ChordPro, and .pro song documents"
-                }
+        Some((songs, libraries)) => {
+            let songs = crate::i18n::count(songs as u64);
+            let libraries = libraries as u64;
+            if mac {
+                tn(
+                    "setup.songs.found.mac",
+                    libraries,
+                    "A library of song documents was found on this Mac: {songs} songs in {n} library. Each library comes across as a library of the same name, with its groups, arrangements and both languages.",
+                    "A library of song documents was found on this Mac: {songs} songs in {n} libraries. Each library comes across as a library of the same name, with its groups, arrangements and both languages.",
+                    &[("songs", &songs)],
+                )
+            } else {
+                tn(
+                    "setup.songs.found",
+                    libraries,
+                    "A library of song documents was found on this computer: {songs} songs in {n} library. Each library comes across as a library of the same name, with its groups, arrangements and both languages.",
+                    "A library of song documents was found on this computer: {songs} songs in {n} libraries. Each library comes across as a library of the same name, with its groups, arrangements and both languages.",
+                    &[("songs", &songs)],
+                )
             }
-        ),
+        }
+        None if mac => t(
+            "setup.songs.none.mac",
+            "No library of song documents was found in the Documents folder. Song files from anywhere come in: text, lyric files from song services, ChordPro, Word, and .pro song documents.",
+        )
+        .to_owned(),
+        None => t(
+            "setup.songs.none",
+            "No library of song documents was found in the Documents folder. Song files from anywhere come in: text, lyric files from song services, ChordPro, and .pro song documents.",
+        )
+        .to_owned(),
     }
 }
 
 fn songs(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, system: System) {
-    title(ui, "Bring your songs in");
+    title(ui, t("setup.songs.title", "Bring your songs in"));
     if !setup.looked {
         say(ui, songs_look_words(system));
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            if button(ui, "Look for a Song Library", true).clicked() {
+            if button(ui, t("setup.songs.look_for", "Look for a Song Library"), true).clicked() {
                 setup.library_found = library_found();
                 setup.looked = true;
             }
-            if button(ui, "Choose Song Files…", false).clicked() {
+            if button(ui, t("setup.songs.choose", "Choose Song Files…"), false).clicked() {
                 state.setup_request = Some(SetupRequest::ChooseSongFiles);
             }
         });
         ui.add_space(8.0);
         say(
             ui,
-            "Or skip this and start with the sample song. Songs can be imported at any time with the \u{2193} button in the left column, or dropped on the window.",
+            t(
+                "setup.songs.skip",
+                "Or skip this and start with the sample song. Songs can be imported at any time with the \u{2193} button in the left column, or dropped on the window.",
+            ),
         );
         if let Some(said) = &setup.songs_said {
             ui.add_space(10.0);
@@ -565,18 +633,21 @@ fn songs(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, system: Sy
     say(ui, &songs_found_words(system, found));
     ui.add_space(10.0);
     if let Some((folder, _, _)) = &setup.library_found {
-        if button(ui, "Import This Library", true).clicked() {
+        if button(ui, t("setup.songs.import", "Import This Library"), true).clicked() {
             state.setup_request = Some(SetupRequest::ImportLibrary(folder.clone()));
         }
         ui.add_space(10.0);
     }
-    if button(ui, "Choose Song Files…", false).clicked() {
+    if button(ui, t("setup.songs.choose", "Choose Song Files…"), false).clicked() {
         state.setup_request = Some(SetupRequest::ChooseSongFiles);
     }
     ui.add_space(8.0);
     say(
         ui,
-        "Or skip this and start with the sample song. Songs can be imported at any time with the \u{2193} button in the left column, or dropped on the window.",
+        t(
+            "setup.songs.skip",
+            "Or skip this and start with the sample song. Songs can be imported at any time with the \u{2193} button in the left column, or dropped on the window.",
+        ),
     );
     if let Some(said) = &setup.songs_said {
         ui.add_space(10.0);
@@ -586,17 +657,29 @@ fn songs(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, system: Sy
 
 /// Which translation goes on top (the main words) and which below (the translation).
 fn bibles(ui: &mut egui::Ui, state: &mut HomeState) {
-    title(ui, "Your Bibles");
-    say(ui, "Bible passages show two translations, one above the other. Choose which goes on top and which below.");
+    title(ui, t("setup.bibles.title", "Your Bibles"));
+    say(
+        ui,
+        t(
+            "setup.bibles.about",
+            "Bible passages show two translations, one above the other. Choose which goes on top and which below.",
+        ),
+    );
     ui.add_space(12.0);
     let names: Vec<String> = state.bible.shelf.bibles.iter().map(|b| format!("{} ({})", b.name, b.short)).collect();
     if names.is_empty() || state.bible.rows.is_empty() {
-        say(ui, "No Bibles are installed yet. Open the Bible page's Options to download one.");
+        say(
+            ui,
+            t(
+                "setup.bibles.none_installed",
+                "No Bibles are installed yet. Open the Bible page's Options to download one.",
+            ),
+        );
         return;
     }
     let mut changed = false;
     egui::Grid::new("setup bibles").num_columns(2).spacing([14.0, 10.0]).show(ui, |ui| {
-        ui.label(RichText::new("On top").color(TEXT));
+        ui.label(RichText::new(t("setup.bibles.top", "On top")).color(TEXT));
         let top = state.bible.rows[0].bible.unwrap_or(0).min(names.len() - 1);
         egui::ComboBox::from_id_salt("setup top bible").width(340.0).selected_text(names[top].clone()).show_ui(
             ui,
@@ -610,11 +693,12 @@ fn bibles(ui: &mut egui::Ui, state: &mut HomeState) {
             },
         );
         ui.end_row();
-        ui.label(RichText::new("Below").color(TEXT));
+        ui.label(RichText::new(t("setup.bibles.below", "Below")).color(TEXT));
         let below = state.bible.rows.get(1).and_then(|row| row.bible);
-        let shown = below.and_then(|at| names.get(at).cloned()).unwrap_or_else(|| "None (one translation)".to_owned());
+        let none = t("setup.bibles.none", "None (one translation)");
+        let shown = below.and_then(|at| names.get(at).cloned()).unwrap_or_else(|| none.to_owned());
         egui::ComboBox::from_id_salt("setup second bible").width(340.0).selected_text(shown).show_ui(ui, |ui| {
-            if ui.selectable_label(below.is_none(), "None (one translation)").clicked() {
+            if ui.selectable_label(below.is_none(), none).clicked() {
                 if let Some(row) = state.bible.rows.get_mut(1) {
                     row.bible = None;
                 }
@@ -638,7 +722,7 @@ fn bibles(ui: &mut egui::Ui, state: &mut HomeState) {
         state.bible.made_with.clear();
     }
     ui.add_space(10.0);
-    say(ui, "More translations can be downloaded from the Bible page's Options.");
+    say(ui, t("setup.bibles.more", "More translations can be downloaded from the Bible page's Options."));
 }
 
 /// What the system will ask permission for: the Permissions step's title, what it says first,
@@ -646,7 +730,7 @@ fn bibles(ui: &mut egui::Ui, state: &mut HomeState) {
 struct Asks {
     title: &'static str,
     intro: &'static str,
-    questions: &'static [(&'static str, &'static str)],
+    questions: Vec<(&'static str, &'static str)>,
     after: &'static str,
 }
 
@@ -658,32 +742,56 @@ struct Asks {
 fn asks(system: System) -> Option<Asks> {
     match system {
         System::Mac => Some(Asks {
-            title: "What macOS will ask",
-            intro: "macOS asks before an app does some things. When these come up, choose Allow or OK:",
-            questions: &[
+            title: t("setup.asks.mac.title", "What macOS will ask"),
+            intro: t(
+                "setup.asks.mac.intro",
+                "macOS asks before an app does some things. When these come up, choose Allow or OK:",
+            ),
+            questions: vec![
                 (
-                    "Local Network",
-                    "When a screen is sent over NDI (to a stream or a video switcher). Without it, NDI can't be seen on the network.",
+                    t("setup.asks.mac.network", "Local Network"),
+                    t(
+                        "setup.asks.mac.network.why",
+                        "When a screen is sent over NDI (to a stream or a video switcher). Without it, NDI can't be seen on the network.",
+                    ),
                 ),
                 (
-                    "Files in your Documents folder",
-                    "When SoftPresenter looks for a library of song documents or opens songs, pictures and videos kept there.",
+                    t("setup.asks.mac.documents", "Files in your Documents folder"),
+                    t(
+                        "setup.asks.mac.documents.why",
+                        "When SoftPresenter looks for a library of song documents or opens songs, pictures and videos kept there.",
+                    ),
                 ),
                 (
-                    "Controlling the app that opens a presentation",
-                    "The first time you bring a presentation in as pictures, SoftPresenter asks an app on this Mac that can open it to draw its slides. macOS asks once, to allow that.",
+                    t("setup.asks.mac.automation", "Controlling the app that opens a presentation"),
+                    t(
+                        "setup.asks.mac.automation.why",
+                        "The first time you bring a presentation in as pictures, SoftPresenter asks an app on this Mac that can open it to draw its slides. macOS asks once, to allow that.",
+                    ),
                 ),
             ],
-            after: "SoftPresenter never asks for your password. If you chose Don't Allow by mistake, change it in System Settings › Privacy & Security.",
+            after: t(
+                "setup.asks.mac.after",
+                "SoftPresenter never asks for your password. If you chose Don't Allow by mistake, change it in System Settings › Privacy & Security.",
+            ),
         }),
         System::Windows => Some(Asks {
-            title: "What Windows will ask",
-            intro: "Windows asks once, before other computers and phones can reach SoftPresenter. When it comes up, choose Allow:",
-            questions: &[(
-                "Windows Defender Firewall",
-                "The first time a screen is sent over NDI, or Remote Control is switched on, Windows asks whether to allow SoftPresenter. Choose Allow for private networks. Without it, NDI can't be seen on the network, and phones on the church network can't reach Remote Control.",
+            title: t("setup.asks.windows.title", "What Windows will ask"),
+            intro: t(
+                "setup.asks.windows.intro",
+                "Windows asks once, before other computers and phones can reach SoftPresenter. When it comes up, choose Allow:",
+            ),
+            questions: vec![(
+                t("setup.asks.windows.firewall", "Windows Defender Firewall"),
+                t(
+                    "setup.asks.windows.firewall.why",
+                    "The first time a screen is sent over NDI, or Remote Control is switched on, Windows asks whether to allow SoftPresenter. Choose Allow for private networks. Without it, NDI can't be seen on the network, and phones on the church network can't reach Remote Control.",
+                ),
             )],
-            after: "If you chose Cancel by mistake, allow SoftPresenter in the Windows firewall's settings.",
+            after: t(
+                "setup.asks.windows.after",
+                "If you chose Cancel by mistake, allow SoftPresenter in the Windows firewall's settings.",
+            ),
         }),
         System::Linux => None,
     }
@@ -694,7 +802,7 @@ fn permissions(ui: &mut egui::Ui, system: System) {
     title(ui, asks.title);
     say(ui, asks.intro);
     ui.add_space(10.0);
-    for (what, why) in asks.questions {
+    for (what, why) in &asks.questions {
         ui.label(RichText::new(*what).font(semibold(13.0)).color(TEXT));
         say(ui, why);
         ui.add_space(8.0);
@@ -703,14 +811,17 @@ fn permissions(ui: &mut egui::Ui, system: System) {
 }
 
 fn done(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
-    title(ui, "You're ready");
+    title(ui, t("setup.done.title", "You're ready"));
     say(
         ui,
-        "Click a slide to put it on screen, press the arrow keys or the space bar to go on, and Escape to clear. \
-         The Bible page looks passages up as you type, such as \"John 3 16\" or \"Ин 3:16\".",
+        t(
+            "setup.done.about",
+            "Click a slide to put it on screen, press the arrow keys or the space bar to go on, and Escape to clear. The Bible page looks passages up as you type, such as \"John 3 16\" or \"Ин 3:16\".",
+        ),
     );
     ui.add_space(12.0);
-    if !show.presentations().is_empty() && button(ui, "Show a Test Slide", false).clicked() {
+    if !show.presentations().is_empty() && button(ui, t("setup.done.test_slide", "Show a Test Slide"), false).clicked()
+    {
         commands.push(Command::GoTo(SlideRef { presentation: show.selected(), slide: 0 }));
         state.bible_open = false;
     }
@@ -788,7 +899,7 @@ mod tests {
         let one = [display(0, "DP-1", false)];
         assert!(audience_displays(&one, &[]).is_empty());
         assert!(audience_displays(&one, &[0]).is_empty());
-        let words = one_display_words(Some("DP-1"), false);
+        let words = with_language(Language::English, || one_display_words(Some("DP-1"), false));
         assert!(words.contains("(DP-1)") && words.contains("where you work") && words.contains("TV or projector"));
         assert!(!words.contains("NDI"), "{words}");
         assert!(one_display_words(None, true).contains("NDI"));
@@ -824,7 +935,10 @@ mod tests {
         let names = |list: Vec<(String, String)>| list.into_iter().map(|(name, _)| name).collect::<Vec<_>>();
         assert_eq!(names(audience_displays(&wayland, &[0])), ["HDMI-1"]);
         assert_eq!(names(audience_displays(&wayland, &[])), ["DP-1", "HDMI-1"]);
-        assert!(several_displays_words(Some("Built-in")).starts_with("The main display (Built-in) is kept"));
-        assert!(several_displays_words(None).starts_with("The display SoftPresenter's own window is on is kept"));
+        let (main, window) = with_language(Language::English, || {
+            (several_displays_words(Some("Built-in")), several_displays_words(None))
+        });
+        assert!(main.starts_with("The main display (Built-in) is kept"));
+        assert!(window.starts_with("The display SoftPresenter's own window is on is kept"));
     }
 }
