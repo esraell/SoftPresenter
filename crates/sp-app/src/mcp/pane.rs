@@ -37,12 +37,23 @@ pub struct View {
     drawn: Option<u64>,
     /// Scroll the page to its top when next drawn.
     pub reveal: bool,
-    /// Open Other apps when next drawn (a capture run's,
-    /// `SOFTPRESENTER_CAPTURE_PREFERENCES=mcp-apps`).
-    pub reveal_apps: bool,
+    /// The part of the page to open and bring into view when next drawn (a capture run's,
+    /// `SOFTPRESENTER_CAPTURE_PREFERENCES=mcp-tiles`, `mcp-apps` or `mcp-copied`).
+    pub show_part: Option<Part>,
     /// One tile for each company (Claude, ChatGPT, Gemini, Grok), then one for each other app
     /// (under More).
     tiles: Vec<Tile>,
+}
+
+/// A part of the page a capture run brings into view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Part {
+    /// The assistants' tiles (Connect one).
+    Tiles,
+    /// Other apps, opened.
+    OtherApps,
+    /// What gets copied, opened.
+    WhatIsCopied,
 }
 
 /// A tile: a company's apps, or one other app.
@@ -77,6 +88,8 @@ enum Click {
     Remove,
     /// Copy setup: the message to paste into the assistant.
     Copy,
+    /// Get Claude Code ↗: its page, in the browser.
+    Get,
 }
 
 impl View {
@@ -150,6 +163,10 @@ pub fn page(ui: &mut egui::Ui, view: &mut View) {
         None,
         |ui| level(ui, view),
     );
+    if view.show_part == Some(Part::Tiles) {
+        view.show_part = None;
+        ui.scroll_to_cursor(Some(egui::Align::TOP));
+    }
     parts::card(
         ui,
         t("mcp.connect.title", "Connect one"),
@@ -268,26 +285,32 @@ fn connect_one(ui: &mut egui::Ui, view: &mut View) {
     parts::said_line(ui, said, connect::internet_only_words());
     // The other apps SoftPresenter can add itself to.
     let others: Vec<usize> = (0..view.tiles.len()).filter(|at| view.tiles[*at].company.is_none()).collect();
-    let reveal = std::mem::take(&mut view.reveal_apps);
+    let reveal = view.show_part == Some(Part::OtherApps);
+    if reveal {
+        view.show_part = None;
+        ui.scroll_to_cursor(Some(egui::Align::TOP));
+    }
     let mut pressed = None;
     parts::fold(ui, "mcp other apps", t("mcp.other_apps", "Other apps"), reveal, |ui| {
+        // A row's keys 8 apart, as the design's rows have them.
+        const BETWEEN: f32 = 8.0;
         for at in &others {
             let look = tile_look(&view.tiles[*at], view.copied);
             // Add (or Remove, or Replace) where it applies, and Copy setup: the settings to add
-            // by hand, as these apps keep them.
+            // by hand, as these apps keep them. Each key as wide as its own words.
             let copy = t("mcp.copy_setup", "Copy setup");
-            let action = action_width(ui);
+            let widths: Vec<f32> = look.keys.iter().map(|(_, words)| parts::key_size(ui, words).x).collect();
             let copy_width = parts::key_size(ui, copy).x;
-            let size = vec2(look.keys.len() as f32 * (action + 6.0) + copy_width, 30.0);
+            let size = vec2(widths.iter().map(|wide| wide + BETWEEN).sum::<f32>() + copy_width, 30.0);
             parts::row(ui, &look.name, &look.state.1, size, |ui, place| {
                 let mut x = place.min.x;
-                for (click, words) in &look.keys {
-                    let rect = Rect::from_min_size(pos2(x, place.min.y), vec2(action, 30.0));
+                for ((click, words), wide) in look.keys.iter().zip(&widths) {
+                    let rect = Rect::from_min_size(pos2(x, place.min.y), vec2(*wide, 30.0));
                     let id = ui.scope_id().with(("other app", *at, *words));
                     if parts::key(ui, rect, id, words, *click == Click::Remove).clicked() {
                         pressed = Some((*at, *click));
                     }
-                    x += action + 6.0;
+                    x += wide + BETWEEN;
                 }
                 let rect = Rect::from_min_size(pos2(x, place.min.y), vec2(copy_width, 30.0));
                 if parts::key(ui, rect, ui.scope_id().with(("other app copy", *at)), copy, false).clicked() {
@@ -315,7 +338,12 @@ fn connect_one(ui: &mut egui::Ui, view: &mut View) {
     }
     // What Copy setup copies: the last one copied, or Claude's.
     let shown = view.shown.unwrap_or(Company::Claude);
-    let open = std::mem::take(&mut view.reveal_copied);
+    let asked = view.show_part == Some(Part::WhatIsCopied);
+    if asked {
+        view.show_part = None;
+        ui.scroll_to_cursor(Some(egui::Align::TOP));
+    }
+    let open = std::mem::take(&mut view.reveal_copied) || asked;
     parts::fold(ui, "mcp what gets copied", t("mcp.what_copied", "What gets copied"), open, |ui| {
         if let Some(program) = program.as_deref() {
             parts::code(ui, &setup_message(shown, program));
@@ -336,7 +364,7 @@ struct TileLook {
     keys: Vec<(Click, &'static str)>,
     /// Copy setup has just copied this tile's message.
     copied: bool,
-    /// Claude's tile while Claude Code isn't found here: a link to get it.
+    /// Claude's tile while Claude Code isn't found here: a key to its page.
     get_claude_code: bool,
 }
 
@@ -350,8 +378,7 @@ fn tile_look(tile: &Tile, copied: Option<Company>) -> TileLook {
     let state = if busy {
         (Tone::Plain, t("mcp.looking", "Looking\u{2026}").to_owned())
     } else if tile.found.is_empty() {
-        let apps: Vec<&str> = tile.apps.iter().map(|app| app.name()).collect();
-        (Tone::Plain, tf("mcp.for", "For {apps}", &[("apps", &connect::and_list(&apps))]))
+        (Tone::Plain, for_words(tile))
     } else if added {
         (Tone::Good, tf("mcp.added_to", "Added to {apps}", &[("apps", &connect::and_list(&names))]))
     } else if any(|s| matches!(s, Stands::Other { .. } | Stands::Trouble(_) | Stands::Added)) {
@@ -383,11 +410,36 @@ fn tile_look(tile: &Tile, copied: Option<Company>) -> TileLook {
     TileLook { name, company: tile.company, state, added, keys, copied, get_claude_code }
 }
 
-/// How wide an Add, Replace or Remove key is: as wide as the longest of the three, so nothing
-/// beside it moves when one becomes another.
-fn action_width(ui: &egui::Ui) -> f32 {
-    let words = [t("mcp.add", "Add"), t("mcp.replace", "Replace"), t("mcp.remove", "Remove")];
-    crate::studio::widest(ui, &words, &egui::FontId::proportional(12.5)) + 26.0
+/// What a tile says while none of its apps is on this computer, as the design words it: Claude's
+/// and ChatGPT's say "the desktop app" where there is one for this system; the others name their
+/// apps.
+fn for_words(tile: &Tile) -> String {
+    let desktop = cfg!(any(target_os = "macos", windows));
+    match tile.company {
+        Some(Company::Claude) if tile.apps.contains(&App::ClaudeDesktop) => {
+            t("mcp.for.claude", "For the desktop app or Claude Code").to_owned()
+        }
+        Some(Company::ChatGpt) if desktop => t("mcp.for.chatgpt", "For the desktop app or Codex").to_owned(),
+        Some(Company::ChatGpt) => tf("mcp.for", "For {apps}", &[("apps", "Codex")]),
+        _ => {
+            let apps: Vec<&str> = tile.apps.iter().map(|app| app.name()).collect();
+            tf("mcp.for", "For {apps}", &[("apps", &connect::and_list(&apps))])
+        }
+    }
+}
+
+/// The room between two of a tile's keys, across and down, as the design's.
+const KEYS_BETWEEN: f32 = 6.0;
+
+/// Get Claude Code's words, with the arrow of the design's keys that open a web page: their
+/// short form where the usual would make the key wider than `room` (a tile's inside).
+fn get_claude_code_words(ui: &egui::Ui, room: f32) -> String {
+    const ARROW: &str = " \u{2197}";
+    let font = egui::FontId::proportional(12.5);
+    let words_room = room - parts::key_size(ui, ARROW).x;
+    let (key, english) = crate::i18n::tk("mcp.get_claude_code", "Get Claude Code");
+    let words = crate::studio::within(ui, key, english, font, 0.0, words_room, false);
+    format!("{words}{ARROW}")
 }
 
 /// How wide Copy setup is: as wide as Copied with its light, or Copy setup, whichever is longer.
@@ -397,16 +449,35 @@ fn copy_width(ui: &egui::Ui) -> f32 {
     crate::studio::widest(ui, &[t("mcp.copy_setup", "Copy setup")], &font).max(copied) + 26.0
 }
 
-/// A tile's keys, row by row: those that apply, then Copy setup; side by side while they fit,
-/// else one above another. Each keeps the width of its longest wording.
-fn tile_keys(ui: &egui::Ui, look: &TileLook, room: f32) -> Vec<Vec<(Click, &'static str, f32)>> {
+/// A tile's keys, row by row: those that apply, then Copy setup, then on Claude's tile while
+/// Claude Code isn't here, Get Claude Code ↗; side by side while they fit, the rest on the next
+/// row, as the design's keys wrap. Each is as wide as its own words (Copy setup as the longer of
+/// Copy setup and Copied with its light).
+fn tile_keys(ui: &egui::Ui, look: &TileLook, room: f32) -> Vec<Vec<(Click, String, f32)>> {
     let copy = if look.copied { t("mcp.copied_key", "Copied") } else { t("mcp.copy_setup", "Copy setup") };
-    let action = action_width(ui);
-    let mut keys: Vec<(Click, &'static str, f32)> =
-        look.keys.iter().map(|(click, words)| (*click, *words, action)).collect();
-    keys.push((Click::Copy, copy, copy_width(ui)));
-    let wide: f32 = keys.iter().map(|(_, _, wide)| wide).sum::<f32>() + 6.0 * (keys.len() - 1) as f32;
-    if wide <= room { vec![keys] } else { keys.into_iter().map(|key| vec![key]).collect() }
+    let mut keys: Vec<(Click, String, f32)> =
+        look.keys.iter().map(|(click, words)| (*click, (*words).to_owned(), parts::key_size(ui, words).x)).collect();
+    keys.push((Click::Copy, copy.to_owned(), copy_width(ui)));
+    if look.get_claude_code {
+        let words = get_claude_code_words(ui, room);
+        let wide = parts::key_size(ui, &words).x;
+        keys.push((Click::Get, words, wide));
+    }
+    let mut rows: Vec<Vec<(Click, String, f32)>> = Vec::new();
+    let mut used = 0.0;
+    for key in keys {
+        match rows.last_mut() {
+            Some(row) if used + KEYS_BETWEEN + key.2 <= room => {
+                used += KEYS_BETWEEN + key.2;
+                row.push(key);
+            }
+            _ => {
+                used = key.2;
+                rows.push(vec![key]);
+            }
+        }
+    }
+    rows
 }
 
 /// How tall a tile must be at `width` for its words and keys.
@@ -419,8 +490,7 @@ fn tile_height(ui: &egui::Ui, look: &TileLook, width: f32) -> f32 {
     // Room for two lines of it whatever it says now, so a tile doesn't grow when it changes.
     let state_height = state.size().y.max(2.0 * state.size().y / state.rows.len().max(1) as f32);
     let rows = tile_keys(ui, look, text).len() as f32;
-    let link = if look.get_claude_code { 20.0 } else { 0.0 };
-    14.0 + 36.0 + 10.0 + name.size().y + 3.0 + state_height + link + 14.0 + rows * 30.0 + (rows - 1.0) * 6.0 + 14.0
+    14.0 + 36.0 + 10.0 + name.size().y + 3.0 + state_height + 14.0 + rows * 30.0 + (rows - 1.0) * KEYS_BETWEEN + 14.0
 }
 
 /// A company's tile in `rect`: its logo (its initials until there is one), its name, where
@@ -455,35 +525,29 @@ fn draw_tile(ui: &mut egui::Ui, rect: Rect, look: &TileLook, at: usize) -> Optio
         _ => TEXT_DIM,
     };
     let state = parts::words(ui, &look.state.1, egui::FontId::proportional(12.0), colour, 0.0, inner.max.x - x);
-    let state_height = state.size().y;
     ui.painter().galley(pos2(x, y), state, colour);
-    // Claude Code isn't here: where to get it.
-    if look.get_claude_code {
-        let words = t("mcp.get_claude_code", "Get Claude Code");
-        let galley = ui.painter().layout_no_wrap(words.to_owned(), egui::FontId::proportional(12.0), TEXT_DIM);
-        let place = Rect::from_min_size(pos2(inner.min.x, y + state_height + 4.0), galley.size());
-        let response = ui.interact(place, ui.scope_id().with(("get claude code", at)), Sense::click());
-        let ink = if response.hovered() { TEXT } else { TEXT_DIM };
-        ui.painter().galley(place.min, galley, ink);
-        ui.painter().hline(place.x_range(), place.max.y, egui::Stroke::new(1.0, ink.gamma_multiply(0.6)));
-        if response.on_hover_text(connect::GET_CLAUDE_CODE).clicked() {
-            ui.ctx().open_url(egui::OpenUrl::new_tab(connect::GET_CLAUDE_CODE));
-        }
-    }
     // The keys, from the foot up.
     let rows = tile_keys(ui, look, inner.width());
     let mut clicked = None;
-    let mut top = inner.max.y - rows.len() as f32 * 36.0 + 6.0;
+    let mut top = inner.max.y - rows.len() as f32 * (30.0 + KEYS_BETWEEN) + KEYS_BETWEEN;
     for row in rows {
         let mut x = inner.min.x;
         for (click, words, wide) in row {
             let place = Rect::from_min_size(pos2(x, top), vec2(wide, 30.0));
-            let id = ui.scope_id().with(("ai tile", at, words));
+            let id = ui.scope_id().with(("ai tile", at, click as u8));
+            x += wide + KEYS_BETWEEN;
             let response = if click == Click::Copy && look.copied {
-                parts::lit_key(ui, place, id, words)
+                parts::lit_key(ui, place, id, &words)
             } else {
-                parts::key(ui, place, id, words, click == Click::Remove)
+                parts::key(ui, place, id, &words, click == Click::Remove)
             };
+            // Claude Code isn't here: its page, where to get it.
+            if click == Click::Get {
+                if response.on_hover_text(connect::GET_CLAUDE_CODE).clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(connect::GET_CLAUDE_CODE));
+                }
+                continue;
+            }
             let hint = match click {
                 Click::Add => t(
                     "mcp.add.hint",
@@ -495,13 +559,13 @@ fn draw_tile(ui: &mut egui::Ui, rect: Rect, look: &TileLook, at: usize) -> Optio
                     "mcp.copy_setup.hint",
                     "Copies a message to paste into it: how to connect, and how to use SoftPresenter",
                 ),
+                Click::Get => connect::GET_CLAUDE_CODE,
             };
             if response.on_hover_text(hint).clicked() {
                 clicked = Some(click);
             }
-            x += wide + 6.0;
         }
-        top += 36.0;
+        top += 30.0 + KEYS_BETWEEN;
     }
     clicked
 }
@@ -519,8 +583,8 @@ fn logo_of(company: Company) -> Option<Logo> {
 
 /// Starts a click's work on the tile's own thread (an app's own command can take a moment).
 fn start_click(ctx: &egui::Context, tile: &mut Tile, program: &Path, click: Click) {
-    // Copy setup copies; it never changes an app's settings.
-    if click == Click::Copy {
+    // Copy setup copies and Get Claude Code opens a page; neither changes an app's settings.
+    if matches!(click, Click::Copy | Click::Get) {
         return;
     }
     let places: Vec<(App, Place)> = tile.found.iter().map(|(app, place, _)| (*app, place.clone())).collect();
@@ -529,7 +593,7 @@ fn start_click(ctx: &egui::Context, tile: &mut Tile, program: &Path, click: Clic
     tile.job = Some(on_a_thread(ctx, move || {
         let done = match click {
             Click::Add => connect::add_all(&places, &program, false),
-            Click::Copy => Vec::new(),
+            Click::Copy | Click::Get => Vec::new(),
             Click::Replace => connect::add_all(&places, &program, true),
             Click::Remove => connect::remove_ours(&places, &program),
         };
@@ -704,6 +768,45 @@ mod tests {
             assert!(crate::studio::tests::place_of(&drawn, words).is_some(), "{words}");
         }
         drawn.drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn a_tiles_keys_are_as_wide_as_their_words_and_share_a_row_where_they_fit() {
+        let ctx = crate::studio::tests::styled();
+        let look = |keys: Vec<(Click, &'static str)>, get_claude_code| TileLook {
+            name: "Claude".to_owned(),
+            company: Some(Company::Claude),
+            state: (Tone::Plain, String::new()),
+            added: false,
+            keys,
+            copied: false,
+            get_claude_code,
+        };
+        let mut checked = false;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let add = parts::key_size(ui, "Add").x;
+            assert!(add < parts::key_size(ui, "Replace").x, "Add is as wide as its own word");
+            // A tile at 1100 has 152 inside: Add and Copy setup side by side, as the design's.
+            let rows = tile_keys(ui, &look(vec![(Click::Add, "Add")], false), 152.0);
+            assert_eq!(rows.len(), 1, "{rows:?}");
+            assert_eq!(rows[0][0].2, add);
+            // Narrower, one above the other.
+            assert_eq!(tile_keys(ui, &look(vec![(Click::Add, "Add")], false), 120.0).len(), 2);
+            // Remove alone where it applies, and Get Claude Code ↗ a key of its own after Copy setup.
+            let rows = tile_keys(ui, &look(vec![(Click::Remove, "Remove")], true), 152.0);
+            let words: Vec<&str> = rows.iter().flatten().map(|(_, words, _)| words.as_str()).collect();
+            assert_eq!(words, ["Remove", "Copy setup", "Get Claude Code \u{2197}"]);
+            // No key is wider than the tile, in Spanish too (Get Claude Code takes its short form).
+            let spanish = crate::i18n::with_language(crate::i18n::Language::Spanish, || {
+                tile_keys(ui, &look(vec![(Click::Add, "A\u{f1}adir")], true), 152.0)
+            });
+            for (_, words, wide) in spanish.iter().flatten() {
+                assert!(*wide <= 152.0, "{words} is {wide} wide");
+            }
+            checked = true;
+        })
+        .drop_without_applying_deltas();
+        assert!(checked);
     }
 
     #[test]

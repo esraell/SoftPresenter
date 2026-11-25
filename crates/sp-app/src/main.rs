@@ -8907,10 +8907,17 @@ impl App {
                         state.preferences_pane = home::Pane::Integrations;
                         state.canva.open = true;
                     }
-                    // The same card scrolled on to its list of assistant apps.
-                    "mcp-apps" => {
+                    // Testing aid: AI assistants scrolled on to a part of the page: its tiles
+                    // (mcp-tiles), Other apps opened (mcp-apps), or What gets copied opened
+                    // (mcp-copied).
+                    "mcp-tiles" | "mcp-apps" | "mcp-copied" => {
+                        use crate::mcp::pane::Part;
                         state.preferences_pane = home::Pane::AiAssistants;
-                        state.mcp.reveal_apps = true;
+                        state.mcp.show_part = Some(match pane.as_str() {
+                            "mcp-tiles" => Part::Tiles,
+                            "mcp-apps" => Part::OtherApps,
+                            _ => Part::WhatIsCopied,
+                        });
                     }
                     // The songbooks' page, where the song catalog is offered.
                     "songbooks" => {
