@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::i18n::{t, tf};
+use sp_model::bounded_zip::{ZipLimits, ZipRefusal};
 use sp_model::{
     LARGEST_PRO_FILE, Presentation, decode_text, from_json, import_song_text, read_pro_file, rtf_to_text, to_json,
 };
@@ -38,6 +39,8 @@ pub const BUNDLE_ENDING: &str = crate::bundle::ENDING;
 /// SoftProjector's songbooks: its own database, or a songbook exported from it. Both are
 /// SQLite files holding many songs.
 pub const SONGBOOK_ENDINGS: [&str; 2] = ["sps", "sqlite"];
+/// Songbooks are passed around zipped; a zip is one when it holds a songbook.
+pub const SONGBOOK_ZIP_ENDING: &str = "zip";
 /// A song file is a few kilobytes; anything far bigger is not one, and isn't read into memory.
 const LARGEST_SONG_FILE: u64 = 4 * 1024 * 1024;
 
@@ -49,11 +52,123 @@ pub fn is_importable(path: &Path) -> bool {
         .chain(&[RICH_TEXT_ENDING, PRO_ENDING, BUNDLE_ENDING])
         .chain(&SONGBOOK_ENDINGS)
         .any(|ending| has_extension(path, ending))
+        || is_songbook_zip(path)
 }
 
-/// True for a file of many songs: a SoftProjector database or songbook.
+/// True for a file of many songs: a SoftProjector database or songbook, or a zip holding some.
 pub fn is_songbook(path: &Path) -> bool {
+    is_songbook_file(path) || is_songbook_zip(path)
+}
+
+/// True for a name with a songbook's own ending.
+fn is_songbook_file(path: &Path) -> bool {
     SONGBOOK_ENDINGS.iter().any(|ending| has_extension(path, ending))
+}
+
+/// True for a zip that lists a songbook among its files. Only files ending `.zip` are opened,
+/// and only their list of names is read.
+fn is_songbook_zip(path: &Path) -> bool {
+    has_extension(path, SONGBOOK_ZIP_ENDING) && songbooks_in_zip(path).is_some_and(|(_, books)| !books.is_empty())
+}
+
+/// How much is read of a zip that may hold songbooks: the largest songbooks there are unpack to
+/// four megabytes, and a church's whole database to a few dozen.
+const SONGBOOK_ZIP: ZipLimits =
+    ZipLimits { file: 256 * 1024 * 1024, entry: 256 * 1024 * 1024, unpacked: 256 * 1024 * 1024, entries: 2000 };
+
+/// A name inside a zip, as it was written: UTF-8 when its bytes are that, else the zip's own
+/// old encoding (code page 437), in which every byte is a letter or sign.
+fn zip_entry_name(raw: &[u8]) -> String {
+    /// The upper half of code page 437.
+    const UPPER: &str = "ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u{a0}";
+    match std::str::from_utf8(raw) {
+        Ok(name) => name.to_owned(),
+        Err(_) => raw
+            .iter()
+            .map(|byte| match byte.checked_sub(0x80) {
+                Some(upper) => UPPER.chars().nth(usize::from(upper)).unwrap_or(char::REPLACEMENT_CHARACTER),
+                None => char::from(*byte),
+            })
+            .collect(),
+    }
+}
+
+/// True for a name inside a zip that is a songbook's: a file with a songbook's ending, not a
+/// hidden one, and not one of the shadow files a Mac adds to a zip.
+fn is_songbook_entry(name: &str) -> bool {
+    let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    !file.starts_with('.') && !name.starts_with("__MACOSX/") && is_songbook_file(Path::new(file))
+}
+
+/// A zip open for reading.
+type ZipFile = zip::ZipArchive<std::io::BufReader<std::fs::File>>;
+
+/// The songbooks a zip holds: each one's place in the zip and its name. `None` when the file
+/// isn't a zip SoftPresenter looks into (too large, too many entries, damaged, or entries
+/// sharing their bytes), an empty list when it holds no songbook. Only the zip's list of names
+/// is read.
+fn songbooks_in_zip(path: &Path) -> Option<(ZipFile, Vec<(usize, String)>)> {
+    let file = std::fs::File::open(path).ok()?;
+    if file.metadata().ok()?.len() > SONGBOOK_ZIP.file {
+        return None;
+    }
+    let mut zip = zip::ZipArchive::new(std::io::BufReader::new(file)).ok()?;
+    if zip.len() > SONGBOOK_ZIP.entries || zip.has_overlapping_files().unwrap_or(true) {
+        return None;
+    }
+    let books = (0..zip.len())
+        .filter_map(|at| {
+            let entry = zip.by_index_raw(at).ok()?;
+            let name = zip_entry_name(entry.name_raw());
+            (!entry.is_dir() && is_songbook_entry(&name)).then_some((at, name))
+        })
+        .collect();
+    Some((zip, books))
+}
+
+/// The songs of every songbook in a zip (the songbooks SoftProjector offers for download come
+/// zipped). The zip is read with limits and nothing is unpacked to disk; a songbook in it that
+/// can't be read is said, and the others still come in.
+fn import_zipped_songbooks(path: &Path, name: &str) -> Result<Songbook, String> {
+    let not_songbook = || {
+        tf(
+            "notices.import.zip_no_songbook",
+            "{name} has no SoftProjector songbook in it that SoftPresenter can read.",
+            &[("name", name)],
+        )
+    };
+    let (mut zip, books) = songbooks_in_zip(path).filter(|(_, books)| !books.is_empty()).ok_or_else(not_songbook)?;
+    let mut all = Songbook { songs: Vec::new(), cautions: Vec::new() };
+    let mut room = SONGBOOK_ZIP.unpacked;
+    for (at, entry) in books {
+        let file = entry.rsplit(['/', '\\']).next().unwrap_or(&entry);
+        let inside = tf("notices.import.inside_zip", "{file} in {name}", &[("file", file), ("name", name)]);
+        let read = match sp_model::bounded_zip::read_entry(&mut zip, at, room.min(SONGBOOK_ZIP.entry)) {
+            Ok(bytes) => {
+                room -= bytes.len() as u64;
+                songbook_songs(std::io::Cursor::new(bytes), &inside)
+            }
+            Err(ZipRefusal::UnpacksTooMuch) => Err(tf(
+                "notices.import.zip_too_much",
+                "{name} unpacks to more than any songbook, so it wasn't read.",
+                &[("name", &inside)],
+            )),
+            Err(_) => Err(tf(
+                "notices.import.unreadable",
+                "{name} could not be read ({error}).",
+                &[("name", &inside), ("error", t("notices.import.zip_damaged", "the zip is damaged"))],
+            )),
+        };
+        match read {
+            Ok(songs) => all.songs.extend(songs),
+            Err(problem) => all.cautions.push(problem),
+        }
+    }
+    // Nothing came in: what went wrong is the answer.
+    if all.songs.is_empty() && !all.cautions.is_empty() {
+        return Err(all.cautions.join(" "));
+    }
+    Ok(all)
 }
 
 /// What a file of many songs gave: each song with the name of its songbook, and anything the
@@ -70,6 +185,9 @@ pub struct Songbook {
 /// same way on every system, and never writes.
 pub fn import_songbook(path: &Path) -> Result<Songbook, String> {
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    if has_extension(path, SONGBOOK_ZIP_ENDING) {
+        return import_zipped_songbooks(path, &name);
+    }
     let file = std::fs::File::open(path).map_err(|e| {
         tf(
             "notices.import.not_found",
@@ -167,6 +285,7 @@ pub fn song_file_endings() -> Vec<&'static str> {
     let mut endings = vec![SONG_EXTENSION, OLD_SONG_EXTENSION, PRO_ENDING];
     endings.extend(TEXT_ENDINGS.iter().filter(|ending| !matches!(**ending, "txt" | "text")));
     endings.extend(SONGBOOK_ENDINGS);
+    endings.push(SONGBOOK_ZIP_ENDING);
     endings
 }
 
@@ -229,7 +348,7 @@ pub fn import_file(path: &Path) -> Result<Presentation, String> {
         }
         return Err(tf(
             "notices.import.not_song_kind",
-            "{name} isn't a kind of file songs come in. Songs come from text, lyric and ChordPro files, rich text, Word and OpenDocument files, .pro and .proBundle files, .sps and .sqlite songbooks and SoftPresenter songs; PDFs, presentation files (.pptx, .ppsx, .key, .odp, .ppt, .pps) and folders of pictures come in as slides.",
+            "{name} isn't a kind of file songs come in. Songs come from text, lyric and ChordPro files, rich text, Word and OpenDocument files, .pro and .proBundle files, .sps and .sqlite songbooks (zipped or not) and SoftPresenter songs; PDFs, presentation files (.pptx, .ppsx, .key, .odp, .ppt, .pps) and folders of pictures come in as slides.",
             &[("name", &name)],
         ));
     }
@@ -544,12 +663,89 @@ mod tests {
     }
 
     #[test]
+    fn a_zip_of_songbooks_comes_in_as_its_songbooks() {
+        use std::io::Write;
+
+        use sp_model::songbook_examples::{DATABASE, SONGBOOK};
+        let dir = TempDir::new("songbook-zips");
+        let zip_of = |name: &str, entries: &[(&str, &[u8])]| {
+            let path = dir.0.join(name);
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+            let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            for (name, bytes) in entries {
+                zip.start_file(*name, options).unwrap();
+                zip.write_all(bytes).unwrap();
+            }
+            zip.finish().unwrap();
+            path
+        };
+        // Two songbooks, one in a folder, beside files that aren't: a Mac's shadow file, a
+        // hidden one, a note, and a file with a songbook's ending that isn't one.
+        let path = zip_of(
+            "Пісні.zip",
+            &[
+                ("Zkouška.sps", SONGBOOK),
+                ("__MACOSX/._Zkouška.sps", b"shadow"),
+                (".hidden.sps", b"hidden"),
+                ("Read me.txt", b"A note"),
+                ("Старі/spData.sqlite", DATABASE),
+                ("Broken.sps", b"not a songbook at all"),
+            ],
+        );
+        assert!(is_songbook(&path) && is_importable(&path));
+        assert_eq!(crate::file_drop::kind_of(&path), crate::file_drop::Kind::Song);
+        let all = import_songbook(&path).unwrap();
+        assert_eq!(all.songs.len(), 7 + 224);
+        assert_eq!(all.songs[1].0.title, "1. První píseň");
+        assert_eq!(all.songs[1].1.as_deref(), Some("Zpěvník pro zkoušku"));
+        assert!(
+            all.songs.iter().any(|(song, book)| song.title == "7. Ранок" && book.as_deref() == Some("Ранкові пісні"))
+        );
+        assert_eq!(all.cautions, ["Broken.sps in Пісні.zip isn't a SoftProjector songbook SoftPresenter can read."]);
+        // A zip of other things isn't taken for songs, and asked for anyway says why.
+        let other = zip_of("Photos.zip", &[("Sky.png", b"a picture"), ("Notes.txt", b"words")]);
+        assert!(!is_songbook(&other) && !is_importable(&other));
+        assert!(import_songbook(&other).err().unwrap().contains("Photos.zip has no SoftProjector songbook in it"));
+        let not_zip = dir.write("Not.zip", b"not a zip");
+        assert!(!is_songbook(&not_zip));
+        assert!(import_songbook(&not_zip).err().unwrap().contains("has no SoftProjector songbook"));
+        // A zip whose only songbook can't be read gives that as the problem.
+        let bad = zip_of("Bad.zip", &[("Cut.sps", &SONGBOOK[..5 * 1024])]);
+        assert!(is_songbook(&bad));
+        let problem = import_songbook(&bad).err().unwrap();
+        assert!(problem.starts_with("Cut.sps in Bad.zip could not be read (the file is cut short"), "{problem}");
+        // A zip inside a zip is not opened.
+        let inner = std::fs::read(&path).unwrap();
+        let nested = zip_of("Nested.zip", &[("Inner.sps", &inner)]);
+        assert!(import_songbook(&nested).err().unwrap().contains("the zip is damaged"));
+        // One songbook imports as itself when asked for as one song: it holds many.
+        assert!(import_file(&path).unwrap_err().contains("holds many songs"));
+    }
+
+    #[test]
+    fn a_name_inside_a_zip_reads_as_it_was_written() {
+        assert_eq!(zip_entry_name("Пісні/Збірка.sps".as_bytes()), "Пісні/Збірка.sps");
+        // Not UTF-8: the zip's own old encoding, in which every byte is something.
+        assert_eq!(zip_entry_name(b"Ges\x84nge f\x81r K\x94nig.sps"), "Gesänge für König.sps");
+        assert_eq!(zip_entry_name(&[0x80, 0xff, b'.', b's', b'p', b's']), "Ç\u{a0}.sps");
+        let all: Vec<u8> = (0..=255).collect();
+        assert_eq!(zip_entry_name(&all).chars().count(), 256);
+        assert!(is_songbook_entry("folder/Book.SPS") && is_songbook_entry("folder\\spData.sqlite"));
+        assert!(
+            !is_songbook_entry("__MACOSX/Book.sps")
+                && !is_songbook_entry("a/.Book.sps")
+                && !is_songbook_entry("Book.txt")
+        );
+    }
+
+    #[test]
     fn import_songs_kinds_of_file_take_every_ending_a_song_comes_in_once() {
         let mut every = vec![SONG_EXTENSION, OLD_SONG_EXTENSION, RICH_TEXT_ENDING, PRO_ENDING, crate::pack::ENDING];
         every.extend(TEXT_ENDINGS);
         every.extend(DOCUMENT_ENDINGS);
         every.extend(PRO_BUNDLE_ENDINGS);
         every.extend(SONGBOOK_ENDINGS);
+        every.push(SONGBOOK_ZIP_ENDING);
         let kinds = [song_file_endings(), bundle_endings(), words_endings()];
         for ending in &every {
             let found = kinds.iter().filter(|kind| kind.contains(ending)).count();

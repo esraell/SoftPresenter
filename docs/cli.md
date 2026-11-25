@@ -594,7 +594,7 @@ documents and `.proBundle` bundles (every song in the bundle, in its order, and 
 and videos their slides show, which go into the media bin, each once; the reply says how many
 pictures and videos came, names any a song shows that the bundle doesn't hold and everything
 in the bundle left out, with why, and a bundle over 64 MB is read in the background, with a
-job number); SoftProjector databases and songbooks. A `.pptx` becomes a presentation of
+job number); SoftProjector databases and songbooks, zipped or not. A `.pptx` becomes a presentation of
 editable slides (read from the file, no app started; add `--as pictures` for pictures of
 the slides instead, drawn by an app on the Mac that opens it, exactly as that app draws them); a
 `.ppt`, `.key` or `.odp` presentation, a PDF, or a folder of pictures becomes a presentation of

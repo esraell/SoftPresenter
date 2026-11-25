@@ -209,7 +209,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   number. A file that is cut short or damaged is refused in a sentence saying which, and a file
   that isn't a songbook says so. A database copied while SoftProjector had it open, with
   changes still waiting in a `-wal` or `-journal` file beside it, comes in from the database
-  alone, with a line saying its latest changes may be missing.
+  alone, with a line saying its latest changes may be missing. Songbooks are passed around
+  zipped, and a `.zip` that holds any (`.sps` or `.sqlite`, in folders or not) comes in the same
+  ways without being unpacked first: every songbook in it is imported, one that can't be read
+  is named with the reason while the others still come in, and a zip with no songbook in it is
+  not taken for songs. The zip is read with limits (its size, how many files it lists, how
+  much it unpacks to), nothing in it is written to disk, a zip inside it is not opened, and
+  names in it written before zips used UTF-8 read as they were written.
 - **Bringing a library across from ProPresenter 7.** File › Import Songs › A Library Folder… opens
   its Libraries folder; choose song documents, one library, or the folder of all of them. Each folder becomes a
   library of the same name. Each song keeps its groups, slides, arrangements (and the one
