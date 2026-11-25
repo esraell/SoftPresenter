@@ -987,11 +987,14 @@ fn show_key_held_back(state: &home::HomeState, ctx: &egui::Context, key: &Key) -
 /// the keyboard is the editor's, and only the keys that clear reach the show: off a Mac F1 to
 /// F6, and Escape only when it has nothing to do in the editor (`HomeState::escape_edits`:
 /// no words being typed, no name being retyped, nothing picked on the canvas, no drag, nothing
-/// open over the window). Space, the arrows, Home, End and the letters stay the editor's.
+/// open over the window), and never when it is held down (`repeat`): the press that let go of
+/// the picked box, or put back the words typed, must not go on to clear the screens as it
+/// repeats. Space, the arrows, Home, End and the letters stay the editor's.
 fn home_key_command(
     state: &home::HomeState,
     ctx: &egui::Context,
     key: &Key,
+    repeat: bool,
     show: &Show,
     f_keys: bool,
 ) -> Option<Command> {
@@ -1009,7 +1012,7 @@ fn home_key_command(
     }
     if state.edit_kind().is_some() {
         let clears = matches!(command, Command::ClearAll | Command::Clear(_));
-        if !clears || (escape && state.escape_edits(ctx)) {
+        if !clears || (escape && (repeat || state.escape_edits(ctx))) {
             return None;
         }
     }
@@ -10649,8 +10652,14 @@ impl ApplicationHandler<AppEvent> for App {
             && key.state == ElementState::Pressed
             && !self.held.super_key()
             && !self.held.control_key()
-            && let Some(command) =
-                home_key_command(&running.home_state, &running.egui_ctx, &key.logical_key, &self.show, keys::f_keys())
+            && let Some(command) = home_key_command(
+                &running.home_state,
+                &running.egui_ctx,
+                &key.logical_key,
+                key.repeat,
+                &self.show,
+                keys::f_keys(),
+            )
         {
             let logical = key.logical_key.clone();
             if !self.pick_key(&logical) {
@@ -11972,7 +11981,7 @@ mod tests {
         let show = Show::new(vec![Arc::new(song)]);
         let ctx = egui::Context::default();
         let named = Key::Named;
-        let key = |state: &home::HomeState, key: Key, f_keys| home_key_command(state, &ctx, &key, &show, f_keys);
+        let key = |state: &home::HomeState, key: Key, f_keys| home_key_command(state, &ctx, &key, false, &show, f_keys);
         let editing = EditDraft::of(&show, sp_engine::SlideRef { presentation: 0, slide: 0 });
         let mut state = home::HomeState { editing, ..home::HomeState::default() };
         assert!(state.editing.is_some());
@@ -12035,6 +12044,14 @@ mod tests {
         assert_eq!(key(&state, named(NamedKey::F3), true), Some(Command::Clear(Layer::Media)), "F3 still clears");
         egui::Popup::close_all(&ctx);
         assert_eq!(escape(&state), Some(Command::ClearAll), "nothing left for it to do");
+        // Held down, Escape repeats: the repeats never clear in the Edit view (the first press
+        // may have let go of a box, or put back words typed), and the F keys still do.
+        let held = |key: NamedKey| home_key_command(&state, &ctx, &Key::Named(key), true, &show, true);
+        assert_eq!(held(NamedKey::Escape), None, "a held Escape");
+        assert_eq!(held(NamedKey::F2), Some(Command::Clear(Layer::Slides)), "a held F2");
+        let service = home::HomeState::default();
+        let held_in_service = home_key_command(&service, &ctx, &Key::Named(NamedKey::Escape), true, &show, false);
+        assert_eq!(held_in_service, Some(Command::ClearAll), "the Service view as before");
         // A text box with the keyboard (an inspector field, a name) keeps every key, F keys too.
         let frame = |focus: bool| {
             ctx.run_ui(egui::RawInput::default(), |ui| {

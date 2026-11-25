@@ -133,7 +133,7 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
 | Key | Does |
 |---|---|
 | F1, F2, F3, F4, F5, F6 (off a Mac) | Clear all, slide, media, props, audio, messages, as in the Service view; not while a text box has the keyboard |
-| Escape | First whatever it does in the editor: puts back the words being typed in a box, keeps the old name of one being retyped, lets go of the picked objects, closes a menu, a question or the sheet adding a theme version, stops a drag. With none of those (`HomeState::escape_edits`), it clears all. On a Mac it is the one key that clears from the Edit view (one layer alone is cleared from the Service view) |
+| Escape | First whatever it does in the editor: puts back the words being typed in a box, keeps the old name of one being retyped, lets go of the picked objects, closes a menu, a question or the sheet adding a theme version, stops a drag. With none of those (`HomeState::escape_edits`), it clears all, but never as it repeats while held down. On a Mac it is the one key that clears from the Edit view (one layer alone is cleared from the Service view) |
 
 ## The Edit view (slides, themes, props, stage)
 

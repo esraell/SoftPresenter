@@ -779,7 +779,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   no words being typed in a box (Escape puts them back), no name being retyped, nothing picked
   on the canvas (Escape lets go of it), no menu, question or sheet open (Escape closes it) and
   no drag going on (Escape stops it). So a first Escape lets go of the picked object and a
-  second clears the screens. Space, the arrows, Home, End, Enter and the letters never run the
+  second clears the screens; holding Escape down never clears there, so the press that let go
+  of a box can't go on to clear as it repeats. Space, the arrows, Home, End, Enter and the letters never run the
   show from the Edit view. The Edit view has no preview or clear keys of its own (see the
   right column), so on a Mac Escape is the one way to clear from it, and it clears everything;
   to clear one layer, go to the Service view (Command-1) and use its key there.

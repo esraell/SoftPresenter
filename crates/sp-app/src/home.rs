@@ -11248,7 +11248,7 @@ mod tests {
         // picked or typed (`home_key_command` in main.rs, read before the window draws).
         let ctx = egui::Context::default();
         let key = |state: &HomeState, key: NamedKey, f_keys| {
-            crate::home_key_command(state, &ctx, &Pressed::Named(key), &show, f_keys)
+            crate::home_key_command(state, &ctx, &Pressed::Named(key), false, &show, f_keys)
         };
         assert_eq!(key(&state, NamedKey::F1, true), Some(Command::ClearAll));
         assert_eq!(key(&state, NamedKey::F2, true), Some(Command::Clear(Layer::Slides)));
