@@ -2,6 +2,7 @@
 
 mod cover;
 mod gpu;
+mod tap;
 pub use cover::{DisplayWatch, cover_display};
 pub use gpu::{GpuImport, GpuNext};
 
@@ -152,6 +153,8 @@ pub struct Player {
     parked: Arc<Mutex<Option<Parked>>>,
     looping: bool,
     ended: bool,
+    /// Its sound, tapped for the screens that send sound, when there are any (see `tap`).
+    sound: Option<tap::Tapped>,
 }
 
 /// A picture's pixel buffer set aside to be taken next (see [`Frames::next_texture`]).
@@ -200,6 +203,9 @@ impl Player {
         };
         // SAFETY: both objects are alive; an item takes any number of outputs.
         unsafe { item.addOutput(&output) };
+        // Its sound is listened in on only while a screen sends sound: otherwise the item is
+        // left exactly as it was before screens could.
+        let sound = crate::sound::listened().then(|| tap::Tapped::attach(&item)).flatten();
         // SAFETY: made on the main thread with a live item.
         let player = unsafe { AVPlayer::playerWithPlayerItem(Some(&item), mtm) };
         // At the end the player stays where it is, so it can be looped or left on its last picture.
@@ -215,6 +221,7 @@ impl Player {
             parked: Arc::default(),
             looping: false,
             ended: false,
+            sound,
         })
     }
 
@@ -239,6 +246,9 @@ impl Player {
     pub fn pause(&self) {
         // SAFETY: a plain call on a live object, on its thread.
         unsafe { self.player.pause() };
+        if let Some(sound) = &self.sound {
+            sound.flush();
+        }
     }
 
     pub fn playing(&self) -> bool {
@@ -248,6 +258,15 @@ impl Player {
 
     /// Goes to a time, in seconds from the start, exactly.
     pub fn seek(&mut self, to: f64) {
+        self.go_to(to);
+        if let Some(sound) = &self.sound {
+            sound.flush();
+        }
+    }
+
+    /// Goes to a time as [`Player::seek`] does, keeping the sound already handed to the screens
+    /// that send sound: for going round at the end, where all of it has been played.
+    fn go_to(&mut self, to: f64) {
         self.ended = false;
         // SAFETY: plain values; zero tolerance asks for the exact time.
         unsafe {
@@ -275,6 +294,9 @@ impl Player {
     pub fn set_volume(&self, volume: f32) {
         // SAFETY: a plain setter on a live object.
         unsafe { self.player.setVolume(volume.clamp(0.0, 1.0)) };
+        if let Some(sound) = &self.sound {
+            sound.set_gain(volume.clamp(0.0, 1.0));
+        }
     }
 
     /// True once a video that doesn't loop has played to its end.
@@ -303,10 +325,13 @@ impl Player {
         };
         let left = duration - self.position();
         if left <= 0.02 && self.playing() {
+            // Its last sound has been played, so what was handed to the screens that send
+            // sound is kept (a pause or a seek the operator asks for takes it back).
             if self.looping {
-                self.seek(0.0);
+                self.go_to(0.0);
             } else {
-                self.pause();
+                // SAFETY: a plain call on a live object, on its thread.
+                unsafe { self.player.pause() };
                 self.ended = true;
             }
             return Duration::from_millis(50);
@@ -327,6 +352,9 @@ impl Drop for Player {
             // The player lets go of its item, and the item of its output: left joined, the
             // system keeps some of each video's timing objects for as long as the app runs.
             self.item.removeOutput(&self.output);
+            if self.sound.is_some() {
+                self.item.setAudioMix(None);
+            }
             self.player.replaceCurrentItemWithPlayerItem(None);
         }
     }

@@ -293,7 +293,7 @@ struct SoundSource {
 
 /// Testing aid: SOFTPRESENTER_TRACE_SYNC prints, once a second, how far the sound and the
 /// pictures have got against the clock, to check they keep in step.
-fn tracing() -> bool {
+pub(crate) fn tracing() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("SOFTPRESENTER_TRACE_SYNC").is_some())
 }
@@ -467,7 +467,8 @@ pub struct Player {
     /// Something to say in the log once, such as that the graphics chip couldn't decode it.
     note: Option<String>,
     slot: Arc<Mutex<Slot>>,
-    stream: Option<rodio::OutputStream>,
+    /// The sound output, tapped for the screens that send sound (see [`crate::sound`]).
+    stream: Option<crate::sound::Output>,
     run: Option<Run>,
 }
 
@@ -477,16 +478,7 @@ impl Player {
     pub fn open(path: &Path, planes: bool) -> Result<Player, String> {
         tool("ffmpeg").ok_or_else(|| missing(path))?;
         let info = probe(path)?;
-        let stream = if info.sound {
-            rodio::OutputStreamBuilder::open_default_stream()
-                .map(|mut stream| {
-                    stream.log_on_drop(false);
-                    stream
-                })
-                .ok()
-        } else {
-            None
-        };
+        let stream = if info.sound { crate::sound::Output::open().ok() } else { None };
         let planes = info.colours.filter(|_| planes && !rgba_forced());
         // Planes take any size, odd sides too; one that fits is asked for as it is, so FFmpeg
         // has nothing to scale.

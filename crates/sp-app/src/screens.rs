@@ -184,6 +184,18 @@ pub struct Screen {
     /// a song's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<Uuid>,
+    /// For a screen sent over NDI, whether the sound the app plays (videos, audio playlists)
+    /// goes with its pictures. On unless switched off, so only "off" is written.
+    #[serde(default = "sound_on", skip_serializing_if = "is_on")]
+    pub sound: bool,
+}
+
+fn sound_on() -> bool {
+    true
+}
+
+fn is_on(on: &bool) -> bool {
+    *on
 }
 
 /// How an audience screen shows the show: which layers (a lobby screen might show only the
@@ -360,6 +372,7 @@ impl Screen {
             stage_layout: None,
             look: Look::default(),
             theme: None,
+            sound: true,
         }
     }
 
@@ -585,6 +598,25 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_screen_sends_sound_unless_switched_off_and_only_off_is_written() {
+        // A screen saved before sound could be sent sends it.
+        let old: Screen = serde_json::from_str(
+            r#"{"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e01","name":"Stream","output":{"ndi":"Sanctuary"}}"#,
+        )
+        .unwrap();
+        assert!(old.sound);
+        let mut stream = Screen::new("Stream".to_owned(), Output::Ndi("Sanctuary".to_owned()));
+        assert!(stream.sound);
+        assert!(!serde_json::to_string(&stream).unwrap().contains("sound"), "on is not written");
+        stream.sound = false;
+        let saved = serde_json::to_string(&stream).unwrap();
+        assert!(saved.contains(r#""sound":false"#), "{saved}");
+        let back: Screen = serde_json::from_str(&saved).unwrap();
+        assert!(!back.sound);
+        assert_eq!(back, stream);
+    }
 
     #[test]
     fn a_screen_without_a_look_shows_everything_and_a_look_survives_its_file() {

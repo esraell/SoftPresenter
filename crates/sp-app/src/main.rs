@@ -1535,6 +1535,8 @@ struct Running {
     retired: Vec<(Arc<Window>, Instant)>,
     /// The NDI names the output thread was last told to send under, by screen.
     ndi_sent: Vec<(Uuid, String)>,
+    /// The screens the output thread was last told send no sound over NDI.
+    ndi_silent_sent: Vec<Uuid>,
     /// The DeckLink devices, found on a thread of their own (none on a quiet run's own data,
     /// see `sync_screens`); the outputs the output thread was last told to play out of, by
     /// screen; and the screens whose output was playing when last looked at.
@@ -1992,6 +1994,7 @@ impl App {
             screen_windows: Vec::new(),
             retired: Vec::new(),
             ndi_sent: Vec::new(),
+            ndi_silent_sent: Vec::new(),
             // Looking for DeckLink devices may take a moment: on a thread of its own, which
             // wakes the window with what it found.
             decklink: Some(sp_decklink::Discovery::start({
@@ -8093,6 +8096,7 @@ impl App {
         let Running {
             output,
             ndi_sent,
+            ndi_silent_sent,
             identify_sent,
             home_state,
             looks_sent,
@@ -8161,6 +8165,16 @@ impl App {
             }
         }
         *ndi_sent = wanted;
+        // A video opened before an NDI source has started still hands its sound over.
+        sp_video::sound::expect(
+            list.iter().zip(&placed).any(|(screen, place)| screen.sound && matches!(place, Placed::Ndi(_))),
+        );
+        // Which NDI sources send the app's sound: all but those switched off.
+        let silent: Vec<Uuid> = list.iter().filter(|screen| !screen.sound).map(|screen| screen.id).collect();
+        if silent != *ndi_silent_sent {
+            output.send(OutputMsg::NdiSilent(silent.clone()));
+            *ndi_silent_sent = silent;
+        }
         // DeckLink: start, change and stop outputs.
         let wanted: Vec<(Uuid, screens::DeckLinkOut)> = list
             .iter()

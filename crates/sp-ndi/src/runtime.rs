@@ -90,6 +90,20 @@ const PROGRESSIVE: c_int = 1;
 /// `NDIlib_send_timecode_synthesize`: NDI makes the timecode.
 const SYNTHESIZE_TIMECODE: i64 = i64::MAX;
 
+/// `NDIlib_audio_frame_v2_t`: a block of sound, each channel's samples together (planar), as
+/// 32-bit floats.
+#[repr(C)]
+struct AudioFrame {
+    sample_rate: c_int,
+    no_channels: c_int,
+    no_samples: c_int,
+    timecode: i64,
+    data: *mut f32,
+    channel_stride_in_bytes: c_int,
+    metadata: *const c_char,
+    timestamp: i64,
+}
+
 /// `NDIlib_source_t`: a source's name and, in the second pointer, its address (which this app
 /// leaves to NDI).
 #[repr(C)]
@@ -153,6 +167,7 @@ type Initialize = unsafe extern "C" fn() -> bool;
 type SendCreateFn = unsafe extern "C" fn(*const SendCreate) -> *mut c_void;
 type SendDestroy = unsafe extern "C" fn(*mut c_void);
 type SendVideo = unsafe extern "C" fn(*mut c_void, *const VideoFrame);
+type SendAudio = unsafe extern "C" fn(*mut c_void, *const AudioFrame);
 type SendConnections = unsafe extern "C" fn(*mut c_void, u32) -> c_int;
 
 /// The runtime's functions this app uses, with the library they live in kept open for as long
@@ -167,6 +182,8 @@ pub struct Runtime {
     /// `NDIlib_send_get_no_connections`, if this runtime has it. Without it a source can't tell
     /// whether anyone is watching, and sends all the time.
     send_connections: Option<SendConnections>,
+    /// `NDIlib_send_send_audio_v2`, if this runtime has it. Without it a source is silent.
+    send_audio: Option<SendAudio>,
     /// The functions for finding and receiving, if this runtime has them all.
     receiving: Option<Receiving>,
 }
@@ -363,6 +380,9 @@ fn open(places: &[PathBuf]) -> Result<Runtime, String> {
     // `Processing.NDI.Send.h`. A runtime without it is still used; its sources send all the time.
     let send_connections =
         unsafe { library.get::<SendConnections>(b"NDIlib_send_get_no_connections\0") }.ok().map(|function| *function);
+    // SAFETY: as above: a function the runtime exports, read as its signature in
+    // `Processing.NDI.Send.h`. A runtime without it is still used; its sources are silent.
+    let send_audio = unsafe { library.get::<SendAudio>(b"NDIlib_send_send_audio_v2\0") }.ok().map(|function| *function);
     // SAFETY: as above: each is a function the runtime exports, read as its signature in
     // `Processing.NDI.Find.h` or `Processing.NDI.Recv.h`. A runtime without one of them still
     // sends; it can't receive.
@@ -393,6 +413,7 @@ fn open(places: &[PathBuf]) -> Result<Runtime, String> {
         send_destroy,
         send_video,
         send_connections,
+        send_audio,
         receiving,
     })
 }
@@ -464,6 +485,64 @@ impl Source {
         unsafe { (self.runtime.send_video)(self.instance, &frame) };
     }
 }
+
+impl Source {
+    /// Sends one block of sound: `planar` holds every channel's samples one channel after
+    /// another, each `planar.len() / channels` long, at `rate` samples a second. Returns at
+    /// once (the source doesn't pace its sound; whoever hands it over does, by the clock).
+    /// Its timecode is the time its first sample is heard, `heard`, as NDI counts time: in
+    /// 100 ns steps of the computer's clock since 1970, which is what NDI makes the pictures'
+    /// timecodes from as they are sent (and, its documentation says, goes on making them
+    /// from beside timecodes given for the sound). Given, not left to NDI: NDI's own are made
+    /// from when each block is handed over, and stay out by however long the thread handing
+    /// them over was once held up. Nothing is sent by a runtime too old to send sound, or
+    /// for a block that doesn't divide into its channels.
+    pub fn send_sound(&self, rate: u32, channels: u32, planar: &[f32], heard: std::time::SystemTime) {
+        let Some(send_audio) = self.runtime.send_audio else { return };
+        if channels == 0 || planar.is_empty() || !planar.len().is_multiple_of(channels as usize) {
+            return;
+        }
+        let each = planar.len() / channels as usize;
+        let (Ok(rate), Ok(channels), Ok(samples), Ok(stride)) = (
+            c_int::try_from(rate),
+            c_int::try_from(channels),
+            c_int::try_from(each),
+            c_int::try_from(each * size_of::<f32>()),
+        ) else {
+            return;
+        };
+        let since_1970 = heard.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+        let frame = AudioFrame {
+            sample_rate: rate,
+            no_channels: channels,
+            no_samples: samples,
+            timecode: i64::try_from(since_1970.as_nanos() / 100).unwrap_or(SYNTHESIZE_TIMECODE),
+            // NDI's frame holds a mutable pointer, but sending only reads through it.
+            data: planar.as_ptr().cast_mut(),
+            channel_stride_in_bytes: stride,
+            metadata: std::ptr::null(),
+            timestamp: 0,
+        };
+        // SAFETY: the instance is a live source from NDIlib_send_create; `frame` describes
+        // `planar` exactly (`channels` runs of `each` floats, `stride` bytes apart, checked
+        // above to fill it), and the send has copied the samples into NDI's own buffers when
+        // it returns, only reading them (see `send` for why the pointer isn't `const`). It may
+        // be called while another thread sends a picture on the same instance: see the `Sync`
+        // note below.
+        unsafe { send_audio(self.instance, &frame) };
+    }
+}
+
+// SAFETY: a source is a handle to an NDI sender, which NDI's SDK documentation says may be sent
+// "audio, video, or metadata frames […] at any time, off any thread, and in any order"
+// (Sending, after NDIlib_send_create), and whose connection count is likewise asked from any
+// thread. Nothing else is kept in it but the runtime (shared, never changed once opened) and
+// its name (never changed). So it may move to another thread, and two threads may use it at
+// once: one sending its pictures, another its sound. It is destroyed once, when the last of
+// them lets it go.
+unsafe impl Send for Source {}
+// SAFETY: as above.
+unsafe impl Sync for Source {}
 
 impl Drop for Source {
     fn drop(&mut self) {

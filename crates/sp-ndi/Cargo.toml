@@ -6,7 +6,7 @@ publish.workspace = true
 license.workspace = true
 
 [features]
-# Only for the two examples that look for and receive NDI sources (to check SoftPresenter's
+# Only for the examples that look for and receive NDI sources (to check SoftPresenter's
 # own): they use a third-party NDI library that needs the NDI SDK installed to build. Nothing
 # else uses it, so the app and its tests build without the SDK.
 sdk-examples = ["dep:grafton-ndi"]
@@ -23,6 +23,10 @@ required-features = ["sdk-examples"]
 
 [[example]]
 name = "receive"
+required-features = ["sdk-examples"]
+
+[[example]]
+name = "sync"
 required-features = ["sdk-examples"]
 
 # Calling into the NDI runtime needs `unsafe`; this crate allows it only in its `runtime`

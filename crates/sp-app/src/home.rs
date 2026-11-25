@@ -6204,6 +6204,18 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                         changed = true;
                     }
                     ui.end_row();
+
+                    ui.label(egui::RichText::new(t("screens.ndi.sound", "Sound")).color(TEXT_DIM));
+                    let mut sound = screen.sound;
+                    let hover = t(
+                        "screens.ndi.sound.hover",
+                        "The sound of videos and audio playlists goes out with this screen's picture, as loud as the speakers play it. Turn it off for a screen that should be silent.",
+                    );
+                    if ui.checkbox(&mut sound, t("screens.ndi.sound.send", "Send what plays")).on_hover_text(hover).changed() {
+                        state.screens[index].sound = sound;
+                        changed = true;
+                    }
+                    ui.end_row();
                 }
             });
         });

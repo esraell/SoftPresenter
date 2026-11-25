@@ -899,7 +899,7 @@ the usual ones.
 | Command | Does |
 |---|---|
 | `screen add audience\|stage NAME [on display NAME\|window\|ndi NAME\|decklink NAME\|automatic]` | A new screen (in a window unless told); a DeckLink output by its name or its number in `sp decklink` |
-| `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|decklink:NAME\|automatic\|off`, `mode=FORMAT` (a DeckLink screen's format: `1080i59.94`, `720p50`…), `keyer=off\|external\|internal` (a DeckLink card's keyer: fill and key on two connectors, or over the card's input), `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT`; for an audience screen `background=solid\|see-through`, `alpha=straight\|premultiplied` (how a see-through screen sends its soft edges; straight unless told), `key=SCREEN\|none` (shows that screen's key) |
+| `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|decklink:NAME\|automatic\|off`, `mode=FORMAT` (a DeckLink screen's format: `1080i59.94`, `720p50`…), `keyer=off\|external\|internal` (a DeckLink card's keyer: fill and key on two connectors, or over the card's input), `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT`; for an audience screen `background=solid\|see-through`, `alpha=straight\|premultiplied` (how a see-through screen sends its soft edges; straight unless told), `key=SCREEN\|none` (shows that screen's key); for a screen sent over NDI `sound=on\|off` (whether the sound the app plays goes out with its picture; on unless switched off) |
 | `screen delete SCREEN --yes` | Deletes a screen (there is always one) |
 | `settings set key=value…` | `transition=KIND[:SECONDS]`, `media_transition=…`, `copyright=never\|first\|last\|every`, `ccli_licence=DIGITS`, `continuous=on\|off`, `view=grid\|words\|table` (Words Only; `easy` too), `columns=1-12` |
 
@@ -1048,6 +1048,22 @@ key, on a second display or NDI name of the same kind:
     Lobby is solid; add background=see-through to send it see-through with that alpha.
     $ sp screen set "Stream key" key=none
     The screen Stream key: not a key.
+
+A screen sent over NDI sends the sound the app plays (videos, audio playlists) with its picture,
+unless it is switched off for that screen:
+
+    $ sp screen set Stream sound=off
+    The screen Stream: sound off.
+    $ sp screens
+      …
+      2. Stream: Sending as "Sanctuary" to 1 receiver; see-through, premultiplied alpha; no sound
+    $ sp screen set Stream sound=on
+    The screen Stream: sound on.
+    $ sp screen set "Screen 1" sound=off
+    The screen Screen 1: sound off, (sound goes out with a screen sent over NDI; this one isn't).
+
+In the JSON of `screens`, `sound` is `true` or `false` for a screen sent over NDI and null for
+any other.
 
 The JSON of `screens` gives each screen's `background` (`solid` or `see-through`), `alpha`
 (`straight`, `premultiplied`, or null), `key_of` (the name of the screen whose key it shows, or

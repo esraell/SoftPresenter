@@ -107,7 +107,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Sound effects.** Short cues that play over the main track. · M · Low
 - **Markers.** Points marked in a track or video; stage screens count down to the next one. · M · Low
 - **Audio bin extras.** Playlist folders, a filter, and how long each track and the whole playlist are. (started: renaming a track, putting the tracks in another order, and how many there are) · S · Low
-- **Audio over NDI and SDI.** A video's sound inside the NDI stream, for churches that stream from it. (started: NDI carries the picture only) · M · Low
+- **Audio over SDI.** What the app plays inside a DeckLink output's signal, as it is inside an NDI screen's. (started: NDI carries the sound; a DeckLink output the picture only) · M · Low
 - **Channel routing.** Up to 16 channels, a routing grid, and mute, solo and test for each channel. · L · Low
 - **Live audio inputs.** A mixer or microphone feed, switched on, off or automatically. · L · Low
 

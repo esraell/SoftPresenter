@@ -59,8 +59,8 @@ Website: [softpresenter.com](https://softpresenter.com)
 - **Congregations in two languages:** both languages on every song slide, and up to four Bible
   translations on one slide, lined up verse by verse.
 - **Worship teams and livestreams:** stage screens with the words now, the next slide, the clock
-  and a timer; any screen sent over NDI to streaming software or a video switcher, laid out its
-  own way if needed (a lower third for the stream).
+  and a timer; any screen sent over NDI, with the sound of what plays, to streaming software or
+  a video switcher, laid out its own way if needed (a lower third for the stream).
 - **Lobbies:** loops of pictures and videos before and after the service.
 
 ## What it does

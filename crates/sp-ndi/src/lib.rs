@@ -58,6 +58,18 @@
 //! - [`NdiOutput::show_shared`]: one picture for several sources, handed to each without
 //!   copying it.
 //!
+//! # Sound
+//!
+//! A source sends sound beside its pictures: [`NdiOutput::sound`] gives a [`Sound`] that any
+//! thread may hand blocks of samples to ([`Sound::play`]), stereo at 48,000 samples a second.
+//! They go out at once, on the thread that hands them over, never on the one sending the
+//! pictures (which waits for each picture's time, and would hold the sound up). Each block
+//! carries the time its sound is heard, by the computer's clock, which NDI makes the
+//! pictures' timecodes from too; so a receiver plays them in step, whether it goes by the
+//! timecodes or by when each arrives, as long as each block is handed over when its sound
+//! is due. Sound, like pictures, is only for
+//! somebody watching: [`Sound::wanted`] says whether anyone is.
+//!
 //! A source counts again, there and then, when it is handed a picture or told to forget while
 //! it believes nobody is watching: a receiver may have connected since the last count. If one
 //! has, the picture is sent to it rather than dropped, and no black picture is sent over what
@@ -179,6 +191,12 @@ enum Told {
     Forget(bool),
 }
 
+/// How many samples a second a source's sound has.
+pub const SOUND_RATE: u32 = 48_000;
+
+/// How many channels a source's sound has: left and right.
+pub const SOUND_CHANNELS: u32 = 2;
+
 /// What a source is doing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum State {
@@ -204,6 +222,31 @@ struct Shared {
     /// The longest one picture took to send, in microseconds, since it was last asked
     /// (`NdiOutput::longest_send`).
     longest_send: AtomicU64,
+    /// Where the source's sound goes while it runs: what its pictures go to, shared with
+    /// whichever thread hands over the sound.
+    sound: SoundTo,
+}
+
+/// Where a running source's sound goes; nowhere before it has started and once it has stopped.
+#[derive(Default)]
+struct SoundTo(Mutex<Option<Arc<dyn Sink>>>);
+
+impl std::fmt::Debug for SoundTo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.get().is_some() { "SoundTo(a source)" } else { "SoundTo(nothing)" })
+    }
+}
+
+impl SoundTo {
+    fn get(&self) -> Option<Arc<dyn Sink>> {
+        self.0.lock().ok().and_then(|to| to.clone())
+    }
+
+    fn set(&self, to: Option<Arc<dyn Sink>>) {
+        if let Ok(mut now) = self.0.lock() {
+            *now = to;
+        }
+    }
 }
 
 impl Shared {
@@ -213,6 +256,7 @@ impl Shared {
             receivers: AtomicU32::new(UNKNOWN),
             arrivals: AtomicU32::new(0),
             longest_send: AtomicU64::new(0),
+            sound: SoundTo::default(),
         }
     }
 
@@ -257,6 +301,34 @@ impl Watch {
     /// Never waits.
     pub fn receivers(&self) -> Option<u32> {
         self.0.receivers()
+    }
+}
+
+/// Where to hand a source's sound, from any thread. It outlives its source: once that has
+/// stopped, nobody wants the sound and what is handed over goes nowhere.
+#[derive(Clone, Debug)]
+pub struct Sound(Arc<Shared>);
+
+impl Sound {
+    /// Whether the source is running with somebody watching it (or can't count who is), so
+    /// that sound handed over would be sent. Never waits.
+    pub fn wanted(&self) -> bool {
+        self.0.receivers() != Some(0) && self.0.sound.get().is_some()
+    }
+
+    /// Sends one block of sound, now: `planar` is the left channel's samples and then the
+    /// right's, the same number of each, at [`SOUND_RATE`], and `heard` the time the first of
+    /// them is heard, which goes with the block as its timecode (the pictures' are the time
+    /// each is sent). Hand each block over when its sound is due: some receivers go by the
+    /// timecodes, others by when each arrives. Returns as soon as NDI has taken its copy;
+    /// nothing is sent while nobody is watching.
+    pub fn play(&self, planar: &[f32], heard: std::time::SystemTime) {
+        if self.0.receivers() == Some(0) {
+            return;
+        }
+        if let Some(sink) = self.0.sound.get() {
+            sink.sound(planar, heard);
+        }
     }
 }
 
@@ -324,6 +396,11 @@ impl NdiOutput {
         Watch(self.shared.clone())
     }
 
+    /// Where to hand the sound that goes with the source's pictures, from any thread.
+    pub fn sound(&self) -> Sound {
+        Sound(self.shared.clone())
+    }
+
     /// Hands over the picture to send from now on, sent as `sent` says. Never blocks, and
     /// never copies the pixels here (a change `sent` asks for is made on the source's own
     /// thread). A picture whose size and pixel count disagree is ignored, and so is one handed
@@ -389,13 +466,18 @@ pub fn installed() -> bool {
     runtime::locate().is_some()
 }
 
-/// Where a source's pictures go: NDI, or a stand-in in the tests.
-trait Sink {
+/// Where a source's pictures and sound go: NDI, or a stand-in in the tests. Its pictures are
+/// sent from the source's own thread and its sound from whichever thread hands that over, at
+/// the same time.
+trait Sink: Send + Sync {
     /// How many receivers are connected, or `None` when that can't be known. Never waits.
     fn receivers(&self) -> Option<u32>;
     /// Sends one picture, see-through with `alpha` (else solid); may wait until it is time for
     /// the next.
     fn send(&self, width: u32, height: u32, rgba: &[u8], alpha: bool);
+    /// Sends one block of sound, the left channel's samples and then the right's, at
+    /// [`SOUND_RATE`], the first of them heard at `heard`; never waits for its time.
+    fn sound(&self, planar: &[f32], heard: std::time::SystemTime);
 }
 
 impl Sink for runtime::Source {
@@ -405,6 +487,10 @@ impl Sink for runtime::Source {
 
     fn send(&self, width: u32, height: u32, rgba: &[u8], alpha: bool) {
         runtime::Source::send(self, width, height, rgba, alpha);
+    }
+
+    fn sound(&self, planar: &[f32], heard: std::time::SystemTime) {
+        self.send_sound(SOUND_RATE, SOUND_CHANNELS, planar, heard);
     }
 }
 
@@ -425,8 +511,13 @@ fn spawn<S: Sink + 'static>(
         .name("ndi".to_owned())
         .spawn(move || match open(&source) {
             Ok(sink) => {
+                let sink = Arc::new(sink);
+                theirs.sound.set(Some(sink.clone()));
                 theirs.set_state(State::Sending);
-                serve(&sink, &rx, &theirs, &mut wake);
+                serve(&*sink, &rx, &theirs, &mut wake);
+                // Sound handed over from now on goes nowhere; the source itself is taken down
+                // when a block being sent this moment, if there is one, has gone.
+                theirs.sound.set(None);
                 theirs.set_receivers(None);
             }
             Err(reason) => theirs.set_state(State::Failed(reason)),
@@ -1102,6 +1193,8 @@ mod tests {
         black: Sender<u32>,
         /// Every picture's bytes and whether it went see-through.
         bytes: Sender<(Vec<u8>, bool)>,
+        /// Every block of sound.
+        sound: Sender<Vec<f32>>,
     }
 
     impl Sink for Stand {
@@ -1120,6 +1213,10 @@ mod tests {
                 let _ = self.sent.send((width, rgba.as_ptr().addr()));
             }
         }
+
+        fn sound(&self, planar: &[f32], _heard: std::time::SystemTime) {
+            let _ = self.sound.send(planar.to_vec());
+        }
     }
 
     /// An output sending to a stand-in, with the count it gives and what it sent: each
@@ -1131,15 +1228,69 @@ mod tests {
         sent: Receiver<(u32, usize)>,
         black: Receiver<u32>,
         bytes: Receiver<(Vec<u8>, bool)>,
+        sound: Receiver<Vec<f32>>,
     }
 
     fn standing(receivers: u32, wake: impl FnMut() + Send + 'static) -> Standing {
         let receivers = Arc::new(AtomicU32::new(receivers));
         let ((sent_tx, sent), (black_tx, black), (bytes_tx, bytes)) = (channel(), channel(), channel());
+        let (sound_tx, sound) = channel();
         let theirs = receivers.clone();
-        let open = move |_: &str| Ok(Stand { receivers: theirs, sent: sent_tx, black: black_tx, bytes: bytes_tx });
+        let open = move |_: &str| {
+            Ok(Stand { receivers: theirs, sent: sent_tx, black: black_tx, bytes: bytes_tx, sound: sound_tx })
+        };
         let output = spawn("SoftPresenter test", open, wake).unwrap();
-        Standing { output, receivers, sent, black, bytes }
+        Standing { output, receivers, sent, black, bytes, sound }
+    }
+
+    /// Waits until the source has started and counted its receivers.
+    fn counted(source: &Standing) {
+        let began = Instant::now();
+        while source.output.state() != State::Sending || source.output.receivers().is_none() {
+            assert!(began.elapsed() < PATIENCE, "the source never started");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    #[test]
+    fn sound_goes_out_at_once_from_the_thread_that_hands_it_over_while_somebody_watches() {
+        let source = standing(1, || {});
+        let sound = source.output.sound();
+        counted(&source);
+        assert!(sound.wanted());
+        let block: Vec<f32> = (0..1920).map(|at| at as f32 / 1920.0).collect();
+        sound.play(&block, std::time::SystemTime::now());
+        // Already sent when `play` returns: no other thread is waited for.
+        assert_eq!(source.sound.try_recv().unwrap(), block);
+    }
+
+    #[test]
+    fn no_sound_is_sent_while_nobody_watches_or_once_the_source_has_stopped() {
+        let source = standing(0, || {});
+        let sound = source.output.sound();
+        counted(&source);
+        assert!(!sound.wanted());
+        sound.play(&[0.5; 1920], std::time::SystemTime::now());
+        assert!(source.sound.try_recv().is_err(), "nobody is watching");
+        // Somebody comes: the next count finds them.
+        source.receivers.store(2, Ordering::Relaxed);
+        let began = Instant::now();
+        while !sound.wanted() {
+            assert!(began.elapsed() < PATIENCE);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        sound.play(&[0.25; 1920], std::time::SystemTime::now());
+        assert_eq!(source.sound.try_recv().unwrap(), [0.25; 1920]);
+        // The source stops; the sound's handle is still held, and now leads nowhere.
+        let Standing { output, sound: heard, .. } = source;
+        drop(output);
+        let began = Instant::now();
+        while sound.wanted() {
+            assert!(began.elapsed() < PATIENCE);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        sound.play(&[0.75; 1920], std::time::SystemTime::now());
+        assert!(heard.try_recv().is_err());
     }
 
     #[test]

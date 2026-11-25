@@ -112,6 +112,9 @@ pub enum OutputMsg {
         id: Uuid,
         name: Option<String>,
     },
+    /// The screens whose NDI sources send no sound (switched off for them); every other NDI
+    /// source sends what the app plays beside its pictures.
+    NdiSilent(Vec<Uuid>),
     /// An NDI source has found that its count of receivers changed: the first receivers want a
     /// picture drawn for them, and a source the last one left is drawn for no longer. Sent by
     /// the sources' own threads.
@@ -613,6 +616,51 @@ fn ndi_count_needs_drawing(sources: &[NdiSeen], drawn_for: &[(Uuid, u32)], owed:
 /// so that a drawing may leave out the sources a video's new picture does not change.
 fn ndi_settled(sources: &[NdiSeen], drawn_for: &[(Uuid, u32)], well: bool) -> bool {
     well && !ndi_count_needs_drawing(sources, drawn_for, false)
+}
+
+/// The mix is made as NDI sources send it.
+const _: () = assert!(sp_ndi::SOUND_RATE == sp_video::sound::RATE);
+
+/// An NDI source being handed the app's sound, block by block, on the mix's thread.
+struct NdiSound {
+    to: sp_ndi::Sound,
+    name: String,
+    /// How many blocks in a row have had something to hear, or `None` while it is silent,
+    /// and how many silent ones have followed: for the log.
+    heard: std::sync::Mutex<(Option<u32>, u32)>,
+}
+
+impl sp_video::sound::Listener for NdiSound {
+    fn wanted(&self) -> bool {
+        self.to.wanted()
+    }
+
+    fn play(&self, planar: &[f32], heard: std::time::SystemTime) {
+        self.to.play(planar, heard);
+        // The log says when something is heard after a silence, and when a second's silence
+        // has followed it (a block is 20 ms), with how long the sound was.
+        let sounding = planar.iter().any(|sample| *sample != 0.0);
+        let Ok(mut heard) = self.heard.lock() else { return };
+        match (&mut *heard, sounding) {
+            ((None, _), true) => {
+                *heard = (Some(1), 0);
+                crate::applog::event("ndi", &format!("{}: sound is going out", self.name));
+            }
+            ((Some(blocks), quiet), true) => (*blocks, *quiet) = (*blocks + 1 + *quiet, 0),
+            ((Some(blocks), quiet), false) => {
+                *quiet += 1;
+                if *quiet >= 50 {
+                    let seconds = f64::from(*blocks) / 50.0;
+                    crate::applog::event(
+                        "ndi",
+                        &format!("{}: sound stopped after {seconds:.1} s (silence goes out)", self.name),
+                    );
+                    *heard = (None, 0);
+                }
+            }
+            ((None, _), false) => {}
+        }
+    }
 }
 
 /// Whether a picture is to be drawn for an NDI source. Not for one that could not start (NDI
@@ -1154,6 +1202,10 @@ struct Output {
     blend: sp_render::FadeBlend,
     /// The NDI sources that are switched on, and the texture their picture is drawn into.
     ndi: Vec<(Uuid, NdiOutput)>,
+    /// The screens whose NDI sources send no sound, and the sources being handed the app's
+    /// sound now: each for as long as its entry is kept.
+    ndi_silent: Vec<Uuid>,
+    ndi_sound: Vec<(Uuid, sp_video::sound::Listening)>,
     /// A way into this thread's own messages, a copy of which each NDI source is started with
     /// to say that its receivers have come or gone. (It keeps the channel open for as long as
     /// the thread runs, as the picture loader's copy does: the thread ends when it is told to
@@ -1315,6 +1367,8 @@ fn run(
         targets: Vec::new(),
         fading: None,
         ndi: Vec::new(),
+        ndi_silent: Vec::new(),
+        ndi_sound: Vec::new(),
         from_ndi,
         ndi_target: None,
         ndi_pending: Vec::new(),
@@ -1629,6 +1683,10 @@ fn run(
                 }
                 OutputMsg::Redraw => {}
                 OutputMsg::SetNdi { id, name } => output.set_ndi(id, name),
+                OutputMsg::NdiSilent(silent) => {
+                    output.ndi_silent = silent;
+                    output.set_ndi_sound();
+                }
                 OutputMsg::NdiReceivers => receivers_changed = true,
                 OutputMsg::SetDeckLink { id, wanted } => output.set_decklink(id, wanted),
                 OutputMsg::RemoveSurface(id) => {
@@ -1932,6 +1990,7 @@ impl Output {
     fn set_ndi(&mut self, id: Uuid, name: Option<String>) {
         // Stop the old source first, so a renamed one does not appear twice.
         self.ndi.retain(|(have, _)| *have != id);
+        self.ndi_sound.retain(|(have, _)| *have != id);
         // Starting never waits on NDI: the source starts on its own thread.
         let status = name.map(|name| {
             // Its thread says when its receivers come and go; it only passes the word on.
@@ -1948,6 +2007,7 @@ impl Output {
                 Err(reason) => NdiEntry::Refused(reason),
             }
         });
+        self.set_ndi_sound();
         if self.ndi.is_empty() && self.decklink.is_empty() {
             self.forget_readbacks();
         }
@@ -1963,6 +2023,19 @@ impl Output {
             shared.extend(status.map(|status| (id, status)));
         }
         self.held.since(Part::Locks, For::Nothing, locking);
+    }
+
+    /// Hands the app's sound to every NDI source but those switched silent, and stops handing
+    /// it to those. Never waits: the sound goes from the mix's own thread (`sp_video::sound`).
+    fn set_ndi_sound(&mut self) {
+        let silent = &self.ndi_silent;
+        self.ndi_sound.retain(|(id, _)| !silent.contains(id));
+        for (id, ndi) in &self.ndi {
+            if !silent.contains(id) && !self.ndi_sound.iter().any(|(have, _)| have == id) {
+                let listener = NdiSound { to: ndi.sound(), name: ndi.name().to_owned(), heard: Default::default() };
+                self.ndi_sound.push((*id, sp_video::sound::listen(listener)));
+            }
+        }
     }
 
     /// Nothing is read back for NDI or DeckLink any more: whatever such picture could not be

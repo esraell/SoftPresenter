@@ -11,6 +11,9 @@
 //! Web pages are drawn the same way: a [`WebPage`] made on the main thread, its pictures taken
 //! from a [`Frames`] (see the `web` module).
 //!
+//! Whatever plays sound here hands it to the [`sound`] module's mix as well, for the screens
+//! that send sound beside their pictures (NDI).
+//!
 //! This is the one crate in SoftPresenter that may use `unsafe` code, for calls into the
 //! system's frameworks, and only in its two macOS modules (`mac` for videos and pictures, with its
 //! `gpu` and `cover` parts, `web_mac` for web pages); each such call says why it is sound.
@@ -27,6 +30,8 @@ pub mod web;
 pub use web::WebPage;
 
 mod ffmpeg;
+
+pub mod sound;
 
 #[cfg(target_os = "macos")]
 pub use mac::{

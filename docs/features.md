@@ -1341,6 +1341,27 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   after saying what it will send where and waiting for yes ([cli.md](cli.md#checking-a-decklink-card)).
 - Stage screens for the people on stage: the words on screen now, the next slide's words, the
   time, a running timer and the stage message.
+- **Sound over NDI.** A screen sent over NDI sends what the app plays beside its picture: the
+  sound of videos (behind the words, in a box on a slide, on the Announcements layer) and the
+  audio playlists, crossfades and all, as loud as the speakers play it, so the operator's
+  mute and volume apply to both and a muted video is silent on the stream too. On unless
+  switched off: each NDI screen has **Sound: Send what plays** in the Screens window
+  (`sp screen set SCREEN sound=on|off`; `sp screens` says "no sound" for one switched off),
+  kept in `screens.json`. The sound is stereo at 48,000 samples a second, mixed once for all
+  NDI screens and sent in blocks of 20 ms, each at the moment its sound is heard and carrying
+  that time as its timecode, on the clock NDI stamps the pictures from; while a receiver is connected the blocks never stop
+  (silence when nothing plays), and with nobody watching nothing is mixed or sent. The
+  speakers' sound is untouched: the samples are copied on their way to the sound card (a
+  video the Mac's own player plays hands over the samples that player is about to play,
+  through an audio tap, only while a screen sends sound). The mix follows the sound card's
+  clock, so sound and pictures stay in step however long something plays; measured on a Mac
+  with a clip that beeps on a flash, the beep reaches a receiver within about a picture and a
+  half of its flash and does not move over minutes. Not sent: the sound of a web page in a
+  Web Page box (the system's web view plays it in a process of its own) and of an NDI Source
+  box (only its pictures are received). A video already playing with the Mac's own player
+  when the first NDI screen's sound is switched on sends its sound from the next time it is
+  put on screen. The log says `[ndi] NAME: sound is going out` when something is heard after
+  silence and `[ndi] NAME: sound stopped after N s (silence goes out)` a second after it ends.
 - A screen sent over NDI is drawn and sent only while someone is watching it. With no receiver
   connected it costs nothing; when one connects, the picture on the screens is drawn for it,
   and it has it within about a second, in the middle of a dissolve too. It is never shown a

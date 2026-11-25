@@ -1176,6 +1176,7 @@ Screens and settings
                                edges=L,T,R,B theme=THEME|main layout=STAGE-LAYOUT
                                background=solid|see-through alpha=straight|premultiplied
                                key=SCREEN|none (shows that screen's key: white where solid)
+                               sound=on|off (an NDI screen sends what the app plays; on)
   screen delete SCREEN --yes
   settings                     the choices kept between runs
   groups                       each group's colour, and the letter key that jumps to it
@@ -2287,6 +2288,9 @@ impl crate::App {
                 if let Some(background) = crate::screens::background_words(&state.screens, at) {
                     line.push_str(&format!("; {background}"));
                 }
+                if matches!(screen.output, crate::screens::Output::Ndi(_)) && !screen.sound {
+                    line.push_str("; no sound");
+                }
                 if let Some(trouble) = crate::screens::key_trouble(&state.screens, at, &shown) {
                     line.push_str(&format!(" ({trouble})"));
                 }
@@ -2319,6 +2323,7 @@ impl crate::App {
                     "background": if see_through.is_some() { "see-through" } else { "solid" },
                     "alpha": see_through.map(crate::screens::Alpha::name),
                     "key_of": key_of,
+                    "sound": matches!(screen.output, crate::screens::Output::Ndi(_)).then_some(screen.sound),
                     "key_trouble": crate::screens::key_trouble(&state.screens, at, &shown),
                 })
             })

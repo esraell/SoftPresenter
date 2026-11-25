@@ -224,7 +224,8 @@ pub struct Playing {
 /// Plays one track at a time. The sound output is opened the first time a track is played, so a
 /// computer that never plays audio never opens it.
 pub struct Player {
-    stream: Option<rodio::OutputStream>,
+    /// The sound output, tapped for the screens that send sound (see `sp_video::sound`).
+    stream: Option<sp_video::sound::Output>,
     sink: Option<rodio::Sink>,
     track: Option<(Uuid, Option<Duration>)>,
     volume: f32,
@@ -253,9 +254,8 @@ impl Player {
         }
         self.track = None;
         if self.stream.is_none() {
-            let mut stream = rodio::OutputStreamBuilder::open_default_stream()
+            let stream = sp_video::sound::Output::open()
                 .map_err(|e| format!("Could not open the computer's sound output: {e}"))?;
-            stream.log_on_drop(false);
             self.stream = Some(stream);
         }
         let Some(stream) = &self.stream else { return Err("No sound output.".to_owned()) };
