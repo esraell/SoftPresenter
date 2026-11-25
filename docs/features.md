@@ -806,7 +806,21 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   lets it play to its end, its name still shown; then, with Play through on, the playlist goes
   on as it now stands, from the place it had (back to the first only with Loop, if it was the
   last; with Play through off nothing follows a track taken out). The Audio key (off a Mac, F5
-  too) or Clear All stops it.
+  too) or Clear All stops it. What plays: MP3, AAC (`.m4a`, `.m4b`, a video's sound in `.mp4`),
+  FLAC, WAV, AIFF and Ogg Vorbis by the app itself, so they play where FFmpeg isn't installed;
+  everything else FFmpeg can read through the copy in the app (or one on the computer): Apple
+  Lossless (ALAC, as Music saves it), Opus, WMA, CAF, AC-3, MP2 and a `.mov`'s sound among them.
+  A file neither can play says why when it is played (and `sp audio add` warns, though it adds
+  it): one protected by Apple Music or the iTunes Store says so, rather than that it can't be
+  read. Each track is decoded a few seconds ahead of where it plays on a thread of its own, made
+  stereo at the sound card's rate there once (a windowed-sinc resampler; surround folded with its
+  centre and surrounds at -3 dB), and only taken by the sound card's thread, which never waits or
+  decodes; the next track is lined up three seconds before the end of the one playing, so it
+  starts on the frame after its last (or crossfades, equal in loudness all through), and a
+  track chosen, a jump in it, a pause, Stop and the volume all fade over a hundredth of a second.
+  A jump is heard within about 50 ms. Each minute something plays, the log says how many 5 ms
+  blocks went short because decoding fell behind (0 is right) and the least sound that was
+  ready ahead (`[audio] last minute: …`).
 - **Stage**: with more than one stage screen, a chooser of which (All stage screens to begin
   with); then every stage layout as a tile with a picture of what the stage would show in it
   now (drawn by the screens' renderer, again when the slide, the stage message or the clock's

@@ -597,6 +597,7 @@ pub struct Output {
     /// Kept open for as long as this is.
     _stream: rodio::OutputStream,
     mixer: rodio::mixer::Mixer,
+    rate: u32,
 }
 
 impl Output {
@@ -609,12 +610,18 @@ impl Output {
         let (channels, rate) = (stream.config().channel_count(), stream.config().sample_rate());
         let (mixer, mixed) = rodio::mixer::mixer(channels, rate);
         stream.mixer().add(Tap::new(mixed, channels, rate));
-        Ok(Output { _stream: stream, mixer })
+        Ok(Output { _stream: stream, mixer, rate })
     }
 
     /// Where to play: connect a `rodio::Sink` here.
     pub fn mixer(&self) -> &rodio::mixer::Mixer {
         &self.mixer
+    }
+
+    /// The sound card's rate: samples a second. A source made at this rate is played as it is,
+    /// with nothing converted on the sound card's thread.
+    pub fn rate(&self) -> u32 {
+        self.rate
     }
 }
 

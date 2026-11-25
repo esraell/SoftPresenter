@@ -467,11 +467,11 @@ deleted)".
 | Command | Does |
 |---|---|
 | `audio` | What plays, where it is in the track and how long the track is; Play through, Shuffle, Loop, the crossfade and the volume; then every track, numbered (`--json`: the tracks' names, as before; `status --json` has the player) |
-| `audio play TRACK`, `audio pause`, `audio stop`, `audio next`, `audio previous` | The audio player (next and previous stay in the playing track's playlist; next goes round to the first after the last, and with Shuffle to the next of this time round's order) |
+| `audio play TRACK`, `audio pause`, `audio stop`, `audio next`, `audio previous` | The audio player (next and previous stay in the playing track's playlist; next goes round to the first after the last, and with Shuffle to the next of this time round's order). A track that can't be played is refused with why (`ok: false`), and what played goes on |
 | `audio volume 0-100`, `audio shuffle on\|off`, `audio through on\|off`, `audio crossfade SECONDS` | Volume; a random order (each track once before any plays again) or the next track after one ends; a crossfade of 0 to 12 seconds |
 | `audio loop on\|off` | After the last track, the first again (with Shuffle, a fresh order); with Play through off, the same track again. Off, Play through stops after the last track |
 | `audio seek TIME` | Goes to a place in the track playing or paused: `1:23`, `83` (seconds), `+15` or `-15` from where it is (back past the start: the start). Past the end is refused, with the track's length |
-| `audio add FILE… [to PLAYLIST]` | Adds sound files |
+| `audio add FILE… [to PLAYLIST]` | Adds sound files: any that can't be played (by the app or FFmpeg) are added all the same, with a warning saying why |
 | `audio playlists`, `audio playlist new NAME`, `audio playlist delete NAME` | Audio playlists (deleting one, at once, leaves the files and `sp undo` puts it back; the last one stays; a track of it that is playing plays on to its end) |
 
     $ sp audio playlist new Walk-in
@@ -480,6 +480,8 @@ deleted)".
     Added to Walk-in: Welcome, two.
     $ sp audio play welcome
     Playing Welcome.
+    $ sp audio play bought
+    Bought is protected by Apple Music or the iTunes Store, and can't be played outside them.
     $ sp audio crossfade 4
     The next track fades in over the last 4 s of the one before.
     $ sp audio loop on

@@ -168,6 +168,147 @@ pub fn probe(path: &Path) -> Result<Info, String> {
     info_from(&json).ok_or_else(|| format!("{}: not a video SoftPresenter can open.", shown_name(path)))
 }
 
+/// FFmpeg asked to decode a file's sound from `from` seconds (going round and round with
+/// `looping`): stereo 32-bit floats at `rate` samples a second, to its output. The video
+/// player's sound and the audio player's tracks are both decoded this way.
+fn sound_command(ffmpeg: &Path, path: &Path, from: f64, looping: bool, rate: u32) -> Command {
+    let mut command = quiet(ffmpeg);
+    command.args(["-nostdin", "-hide_banner", "-loglevel", "error"]);
+    if looping {
+        command.args(["-stream_loop", "-1"]);
+    }
+    command.args(["-ss", &format!("{from:.3}"), "-i"]).arg(path).stdin(Stdio::null());
+    command
+        .args(["-vn", "-sn", "-ac", &CHANNELS.to_string(), "-ar", &rate.to_string(), "-f", "f32le", "pipe:1"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    command
+}
+
+/// A file's sound as FFmpeg decodes it: stereo 32-bit floats, read off its output a piece at a
+/// time, whole frames only.
+pub struct SoundReader {
+    out: std::process::ChildStdout,
+    bytes: Box<[u8]>,
+    carry: Vec<u8>,
+}
+
+/// The bytes of one stereo frame of 32-bit floats.
+const FRAME_BYTES: usize = 4 * CHANNELS as usize;
+
+impl SoundReader {
+    fn new(out: std::process::ChildStdout) -> SoundReader {
+        SoundReader { out, bytes: vec![0u8; 16384].into_boxed_slice(), carry: Vec::new() }
+    }
+
+    /// Reads what FFmpeg has decoded next onto the end of `samples`, left and right side by
+    /// side: how many samples were added, 0 once its sound has all been read. Waits for FFmpeg.
+    pub fn read(&mut self, samples: &mut Vec<f32>) -> std::io::Result<usize> {
+        loop {
+            let read = self.out.read(&mut self.bytes)?;
+            if read == 0 {
+                return Ok(0);
+            }
+            self.carry.extend_from_slice(&self.bytes[..read]);
+            let whole = self.carry.len() / FRAME_BYTES * FRAME_BYTES;
+            if whole == 0 {
+                continue;
+            }
+            let before = samples.len();
+            samples.extend(self.carry[..whole].as_chunks::<4>().0.iter().map(|four| f32::from_le_bytes(*four)));
+            self.carry.drain(..whole);
+            return Ok(samples.len() - before);
+        }
+    }
+}
+
+/// Starts FFmpeg decoding a file's sound from `from` seconds, stereo at `rate`: the program,
+/// to end when the sound is no longer wanted (which ends a read waiting on it), and its sound.
+pub fn decode_sound(path: &Path, from: f64, rate: u32) -> Result<(Child, SoundReader), String> {
+    let ffmpeg = tool("ffmpeg").ok_or_else(|| "FFmpeg isn't on this computer.".to_owned())?;
+    let mut child = sound_command(&ffmpeg, path, from.max(0.0), false, rate)
+        .spawn()
+        .map_err(|e| format!("FFmpeg could not be started: {e}"))?;
+    let out = child.stdout.take().ok_or_else(|| "FFmpeg could not be started.".to_owned())?;
+    Ok((child, SoundReader::new(out)))
+}
+
+/// What FFmpeg says a sound file is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SoundInfo {
+    /// Seconds, when known.
+    pub duration: Option<f64>,
+    /// FFmpeg's name for how the sound is coded ("alac", "opus", "wmav2"…).
+    pub codec: String,
+    pub channels: u32,
+    pub rate: u32,
+}
+
+/// Why FFmpeg can't play a sound file.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SoundProblem {
+    /// FFmpeg isn't on this computer.
+    NoFfmpeg,
+    /// It is locked to the shop it came from (Apple Music and the iTunes Store's FairPlay).
+    Protected,
+    /// It has no sound in it (a video with none, say).
+    NoSound,
+    /// FFmpeg can't read it: what FFmpeg says, or how it fell short.
+    Unreadable(String),
+}
+
+/// What FFmpeg (its `ffprobe`) says a sound file is, or why it can't be played.
+pub fn sound_info(path: &Path) -> Result<SoundInfo, SoundProblem> {
+    let ffprobe = tool("ffprobe").ok_or(SoundProblem::NoFfmpeg)?;
+    let out = quiet(ffprobe)
+        .args(["-v", "error", "-print_format", "json", "-show_streams", "-show_format"])
+        .arg(path)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| SoundProblem::Unreadable(format!("FFmpeg could not be started ({e})")))?;
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
+    // What it said, less the file's name it begins with.
+    let said = String::from_utf8_lossy(&out.stderr);
+    let said = said.lines().rev().map(str::trim).find(|line| !line.is_empty()).unwrap_or("");
+    let said = said.rsplit(": ").next().unwrap_or(said).to_owned();
+    sound_info_from(&json, &said)
+}
+
+/// Reads what ffprobe says of a sound file, as JSON, and the last thing it said wrong.
+fn sound_info_from(json: &serde_json::Value, said: &str) -> Result<SoundInfo, SoundProblem> {
+    let streams = json["streams"].as_array().map(Vec::as_slice).unwrap_or_default();
+    // Sound locked to its shop: Apple's FairPlay ("drms"; "drmi" for a video's), or common
+    // encryption's ("enca").
+    let locked = ["drms", "drmi", "enca", "drmz"];
+    if streams.iter().any(|stream| stream["codec_tag_string"].as_str().is_some_and(|tag| locked.contains(&tag))) {
+        return Err(SoundProblem::Protected);
+    }
+    let Some(sound) = streams.iter().find(|stream| stream["codec_type"] == "audio") else {
+        return Err(if streams.is_empty() {
+            SoundProblem::Unreadable(if said.is_empty() {
+                "not a kind of file FFmpeg knows".to_owned()
+            } else {
+                said.to_owned()
+            })
+        } else {
+            SoundProblem::NoSound
+        });
+    };
+    let codec = sound["codec_name"].as_str().unwrap_or("").to_owned();
+    if codec.is_empty() || codec == "none" {
+        let tag = sound["codec_tag_string"].as_str().unwrap_or("?");
+        return Err(SoundProblem::Unreadable(format!("FFmpeg has no decoder for its sound ({tag})")));
+    }
+    let seconds = |value: &serde_json::Value| value.as_str().and_then(|text| text.parse::<f64>().ok());
+    let duration = seconds(&sound["duration"])
+        .or_else(|| seconds(&json["format"]["duration"]))
+        .filter(|s| s.is_finite() && *s > 0.0);
+    let number = |value: &serde_json::Value| {
+        value.as_u64().or_else(|| value.as_str().and_then(|text| text.parse().ok())).unwrap_or(0) as u32
+    };
+    Ok(SoundInfo { duration, codec, channels: number(&sound["channels"]), rate: number(&sound["sample_rate"]) })
+}
+
 /// The size pictures are asked for in: within a box, keeping the shape, with even sides as
 /// the pixel formats need.
 fn fitted(info: &Info, max_w: u32, max_h: u32) -> (u32, u32) {
@@ -654,16 +795,13 @@ impl Player {
 
         // The sound: stereo at 48 kHz, into a queue the sound output drains.
         if let Some(stream) = self.stream.as_ref().filter(|_| self.info.sound) {
-            let mut sound_cmd = quiet(&ffmpeg);
-            start(&mut sound_cmd, self.looping);
-            sound_cmd
-                .args(["-vn", "-sn", "-ac", &CHANNELS.to_string(), "-ar", &RATE.to_string(), "-f", "f32le", "pipe:1"])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null());
-            let mut child = sound_cmd.spawn().map_err(|e| format!("FFmpeg could not be started: {e}"))?;
-            let Some(mut out) = child.stdout.take() else {
+            let mut child = sound_command(&ffmpeg, &self.path, from, self.looping, RATE)
+                .spawn()
+                .map_err(|e| format!("FFmpeg could not be started: {e}"))?;
+            let Some(out) = child.stdout.take() else {
                 return Err("FFmpeg could not be started.".to_owned());
             };
+            let mut out = SoundReader::new(out);
             run.children.push(child);
             let sound = Arc::new(Sound {
                 waiting: Mutex::new(VecDeque::with_capacity(SOUND_AHEAD)),
@@ -674,18 +812,13 @@ impl Player {
             let reader = sound.clone();
             let stop_a = stop.clone();
             run.threads.push(std::thread::spawn(move || {
-                let mut bytes = [0u8; 16384];
-                let mut carry: Vec<u8> = Vec::new();
+                let mut samples: Vec<f32> = Vec::new();
                 loop {
-                    let read = match out.read(&mut bytes) {
+                    samples.clear();
+                    match out.read(&mut samples) {
                         Ok(0) | Err(_) => break,
-                        Ok(read) => read,
-                    };
-                    carry.extend_from_slice(&bytes[..read]);
-                    let whole = carry.len() / 4 * 4;
-                    let samples: Vec<f32> =
-                        carry[..whole].as_chunks::<4>().0.iter().map(|four| f32::from_le_bytes(*four)).collect();
-                    carry.drain(..whole);
+                        Ok(_) => {}
+                    }
                     let Ok(mut waiting) = reader.waiting.lock() else { break };
                     // Held back while half a second is already waiting; FFmpeg then waits too.
                     let mut waiting = loop {
@@ -700,7 +833,7 @@ impl Player {
                             Err(_) => return,
                         }
                     };
-                    waiting.extend(samples);
+                    waiting.extend(samples.drain(..));
                 }
                 reader.done.store(true, Ordering::Relaxed);
             }));
@@ -940,6 +1073,78 @@ mod tests {
         assert_eq!(colours(serde_json::json!({"pix_fmt": "yuv420p", "color_space": "ycgco"})), None);
         assert_eq!(colours(serde_json::json!({"pix_fmt": "yuv420p", "color_space": "gbr"})), None);
         assert_eq!(colours(serde_json::json!({})), None, "a format FFmpeg doesn't name");
+    }
+
+    #[test]
+    fn what_ffprobe_says_of_a_sound_file_is_read_and_a_protected_one_is_known() {
+        let alac = serde_json::json!({
+            "streams": [{"codec_type": "audio", "codec_name": "alac", "codec_tag_string": "alac",
+                         "channels": 2, "sample_rate": "48000", "duration": "6.000000"}],
+            "format": {"duration": "6.000000"}
+        });
+        assert_eq!(
+            sound_info_from(&alac, ""),
+            Ok(SoundInfo { duration: Some(6.0), codec: "alac".to_owned(), channels: 2, rate: 48_000 })
+        );
+        // Bought from the iTunes Store or kept from Apple Music: FairPlay's sample entry.
+        let locked = serde_json::json!({
+            "streams": [{"codec_type": "audio", "codec_name": "aac", "codec_tag_string": "drms"}]
+        });
+        assert_eq!(sound_info_from(&locked, ""), Err(SoundProblem::Protected));
+        // A video with no sound, a file FFmpeg can't read (what it said), and a codec it lacks.
+        let silent = serde_json::json!({"streams": [{"codec_type": "video", "codec_name": "h264"}]});
+        assert_eq!(sound_info_from(&silent, ""), Err(SoundProblem::NoSound));
+        assert_eq!(
+            sound_info_from(&serde_json::json!({}), "Invalid data found when processing input"),
+            Err(SoundProblem::Unreadable("Invalid data found when processing input".to_owned()))
+        );
+        let unknown = serde_json::json!({"streams": [{"codec_type": "audio", "codec_tag_string": "xyzw"}]});
+        assert!(matches!(sound_info_from(&unknown, ""), Err(SoundProblem::Unreadable(said)) if said.contains("xyzw")));
+        // The length from the format when the stream doesn't say it.
+        let mp3 = serde_json::json!({
+            "streams": [{"codec_type": "audio", "codec_name": "mp3", "channels": 1, "sample_rate": "44100"}],
+            "format": {"duration": "183.5"}
+        });
+        assert_eq!(sound_info_from(&mp3, "").map(|info| info.duration), Ok(Some(183.5)));
+    }
+
+    /// FFmpeg decodes a sound file's sound to stereo at the rate asked, whole frames at a time,
+    /// from a place in it.
+    #[test]
+    fn a_sound_file_is_decoded_to_stereo_at_the_rate_asked() {
+        let Some(ffmpeg) = tool("ffmpeg") else {
+            eprintln!("FFmpeg isn't on this computer: decoding sound wasn't checked");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("softpresenter-sound-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("tone.wav");
+        // The app's own FFmpeg has no encoders but WAV's needs none: one second, mono.
+        let made = Command::new(&ffmpeg)
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=1000:duration=1:sample_rate=44100"])
+            .args(["-c:a", "pcm_f32le"])
+            .arg(&path)
+            .status();
+        if !made.is_ok_and(|status| status.success()) {
+            eprintln!("This FFmpeg can't make a test tone: decoding sound wasn't checked");
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        let info = sound_info(&path).expect("ffprobe reads it");
+        assert_eq!((info.channels, info.rate), (1, 44_100));
+        assert!(info.duration.is_some_and(|seconds| (seconds - 1.0).abs() < 0.01));
+        let (mut child, mut reader) = decode_sound(&path, 0.5, 48_000).expect("FFmpeg starts");
+        let mut samples = Vec::new();
+        while reader.read(&mut samples).unwrap() > 0 {}
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&dir);
+        // Half a second, stereo, at 48 kHz: the two sides the same.
+        assert_eq!(samples.len() % 2, 0);
+        let frames = samples.len() / 2;
+        assert!(frames.abs_diff(24_000) < 200, "{frames} frames");
+        assert!(samples.as_chunks::<2>().0.iter().all(|[left, right]| (left - right).abs() < 1e-6));
+        // The tone (at an eighth of full scale, less 3 dB in each side from one channel).
+        assert!(samples.iter().any(|sample| sample.abs() > 0.05));
     }
 
     #[test]

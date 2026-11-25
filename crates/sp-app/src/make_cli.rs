@@ -801,11 +801,26 @@ impl crate::App {
             None => state.audio.current.min(state.audio.playlists.len() - 1),
         };
         let names: Vec<String> = tracks.iter().map(|t| t.name.clone()).collect();
+        // Each is looked at as playing it would (several at once, FFmpeg's look being slower):
+        // one that can't be played is added all the same, and said.
+        let warnings: Vec<String> = tracks
+            .chunks(8)
+            .flat_map(|some| {
+                std::thread::scope(|scope| {
+                    let looks: Vec<_> =
+                        some.iter().map(|track| scope.spawn(|| crate::audio::check(&track.path).err())).collect();
+                    looks.into_iter().filter_map(|look| look.join().ok().flatten()).collect::<Vec<String>>()
+                })
+            })
+            .collect();
         state.audio.playlists[at].tracks.extend(tracks);
         state.audio_changed = true;
         let mut text = format!("Added to {}: {}.", state.audio.playlists[at].name, names.join(", "));
         if !refused.is_empty() {
             text.push_str(&format!(" Not added: {}.", refused.join("; ")));
+        }
+        for warning in warnings {
+            text.push_str(&format!(" Warning: {warning}"));
         }
         Ok(Reply::done(text))
     }
@@ -829,6 +844,7 @@ impl crate::App {
         let (id, name) = (next.id, next.name.clone());
         self.with_state(|state| state.audio_request = Some(crate::home::AudioRequest::Play(id)));
         self.handle_audio();
+        self.audio_outcome(id)?;
         Ok(Reply::done(format!("Playing {name}.")))
     }
 

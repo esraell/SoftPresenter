@@ -3225,6 +3225,10 @@ impl crate::App {
         };
         self.with_state(|state| state.audio_request = Some(request));
         self.handle_audio();
+        // A track that can't be played says so, rather than "Playing".
+        if let AudioRequest::Play(id) = request {
+            self.audio_outcome(id)?;
+        }
         Ok(Reply::done(done))
     }
 

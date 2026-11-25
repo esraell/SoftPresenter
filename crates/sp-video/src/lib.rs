@@ -30,6 +30,7 @@ pub mod web;
 pub use web::WebPage;
 
 mod ffmpeg;
+pub use ffmpeg::{SoundInfo, SoundProblem, SoundReader, decode_sound, sound_info};
 
 pub mod sound;
 
