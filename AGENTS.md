@@ -162,6 +162,14 @@ message.
   [docs/features.md](docs/features.md) in the same commit (and the README's one-line overview
   if a whole area changes). When a planned feature is built, take it off
   [docs/roadmap.md](docs/roadmap.md).
+- **So does the changelog.** Every change a church would notice adds one plain line under
+  `## Unreleased` in [CHANGELOG.md](CHANGELOG.md), in the same commit (the first takes the place
+  of "Nothing yet."). Write it for the volunteer running the service: what changed for them, with
+  no commit ids, code names or file names. A fix says what was wrong as they saw it ("Some
+  looping videos froze on their last picture instead of going round; they loop now.").
+  Internal work (tests, refactoring, testing aids, docs) adds no line. When a version is made,
+  its heading takes the place of Unreleased (`## 0.9.0 — 2026-11-27`) and a new Unreleased,
+  saying "Nothing yet.", goes on top.
 - **Words.** British spelling (colour, licence, behaviour). Plain words in the interface, the
   way a church volunteer would say them.
 

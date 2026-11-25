@@ -65,7 +65,7 @@ Website: [softpresenter.com](https://softpresenter.com)
 
 ## What it does
 
-The full list, area by area, is in [docs/features.md](docs/features.md). In short:
+The full list, area by area, is in [docs/features.md](docs/features.md), and what changed lately in [CHANGELOG.md](CHANGELOG.md). In short:
 
 - **Songs and slides.** Groups (Verse, Chorus, Bridge), arrangements, one-key jumps, playlists
   with headers, and a slide editor with text, shapes, pictures and video. Words can be styled
