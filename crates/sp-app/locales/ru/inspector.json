@@ -144,7 +144,7 @@
   "inspector.text.shape": "У фигуры нет текста. Её цвет и обводка — на вкладке «Фигура».",
   "inspector.text.selected": "ВЫБРАННЫЕ СЛОВА",
   "inspector.text.whole_box": "ВЕСЬ БЛОК",
-  "inspector.text.whole_box.note": "Выделите в нём слова, чтобы изменить только их",
+  "inspector.text.whole_box.note": "Выделите слова, чтобы менять только их",
   "inspector.text.copy_style": "Копировать стиль",
   "inspector.text.copy_style.hint": "Запомнить, как выглядит этот текст",
   "inspector.text.paste_style": "Вставить стиль",

@@ -39,7 +39,7 @@
   "mcp.copy_setup.hint": "Копирует сообщение, которое нужно туда вставить: как подключиться и как пользоваться SoftPresenter",
   "mcp.setup.file": "В {file}:",
   "mcp.setup.terminal": "В Терминале:",
-  "mcp.setup.codex": "В {file} или в приложении ChatGPT, в Настройки › MCP-серверы:",
+  "mcp.setup.codex": "В {file} или в приложении ChatGPT, в разделе Настройки › MCP-серверы:",
   "mcp.and": "{first} и {last}",
   "mcp.group.added": "Добавлено в {apps}.",
   "mcp.group.partly": "Добавлено в {added}; в {missing} пока нет.",

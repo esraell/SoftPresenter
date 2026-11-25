@@ -36,7 +36,7 @@
   "settings.screens.configure.key": "Настроить экраны ({key})",
   "settings.screens.stage_on": "Экраны для сцены",
   "settings.screens.identify": "Опознать",
-  "settings.screens.identify.stop": "Остановить опознание",
+  "settings.screens.identify.stop": "Остановить",
   "settings.screens.identify.hint": "Каждый экран показывает своё название и цвет. Это видят зал и трансляция.",
   "settings.screens.pattern": "Тестовая картинка",
   "settings.screens.pattern.off": "Нет",

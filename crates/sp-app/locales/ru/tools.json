@@ -23,7 +23,7 @@
   "tools.stage.sample.group": "Припев",
   "tools.stage.sample.message": "Заметка для сцены",
   "tools.stage.sample.notes_line": "Строка заметок {line}",
-  "tools.stage.layout.words_next": "Слова и следующий",
+  "tools.stage.layout.words_next": "Слова и далее",
   "tools.stage.layout.words_only": "Только слова",
   "tools.stage.layout.words_notes": "Слова и заметки",
   "tools.stage.layout.clock_timer": "Часы и таймер",

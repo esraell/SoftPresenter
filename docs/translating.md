@@ -182,7 +182,14 @@ means. The Ukrainian tables follow the same glossary, so the two read alike.
   Spanish does: those are the names the group keys (C for the chorus) and colours know.
 - **Short forms** (`.short`) where Russian runs long in a fixed room: the layer keys Сообщ. and
   Объявл., Ветхий З. and Новый З. in the Bible lists, Найти for the find box, Песни for All
-  Songs, and the rest of the rows the Spanish has.
+  Songs, Ещё for the Bible bar's Options when the bar is narrow, and the rest of the rows the
+  Spanish has.
+- **Words chosen to fit** (no short form is read there): the top bar's Audience and Stage keys
+  say Вкл and Выкл without the dot, so the find box keeps its room in a 1100-point window; the
+  sort row is Порядок; Identify's other wording in Settings › Screens is Остановить and the colour
+  bars are Полосы, so the check strip fits the Settings window's least width; Dissolve is Плавно
+  in the list too (the media strip's chip); the stage layout is Слова и далее; the media strip's
+  empty box and the inspector's note on the whole box are written short.
 
 | English | Russian |
 |---|---|
@@ -203,7 +210,7 @@ means. The Ukrainian tables follow the same glossary, so the two read alike.
 | stage screens / Stage (key and tab) / stage layout | экраны для сцены / Сцена / макет сцены |
 | the operator's window | окно оператора |
 | Clear / Clear All / take off the screens | Очистить / Очистить всё / убрать с экранов |
-| Show / Hide / On / Off | Показать / Скрыть / Вкл. / Выкл. |
+| Show / Hide / On / Off | Показать / Скрыть / Вкл. / Выкл. (the top bar's keys: Вкл / Выкл) |
 | layer keys | кнопки слоёв |
 | key (keyboard) / hot key | клавиша / горячая клавиша |
 | key (a video switcher's) / fill | ключ / заливка |
@@ -213,7 +220,7 @@ means. The Ukrainian tables follow the same glossary, so the two read alike.
 | messages / quick message / announcements | сообщения / быстрое сообщение / объявления |
 | timers / macros | таймеры / макросы |
 | theme / theme version / the usual look / template | тема / вариант темы / обычный вид / шаблон |
-| transition / Cut / Dissolve / Continuous | переход / Сразу / Плавно (in the list: Растворение) / Подряд |
+| transition / Cut / Dissolve / Continuous | переход / Сразу / Плавно / Подряд |
 | box (on a slide) / object / shape | блок / объект / фигура |
 | captions / test pattern | субтитры / тестовая картинка |
 | preview / live (on the screens) | предпросмотр / на экране |
@@ -230,7 +237,7 @@ means. The Ukrainian tables follow the same glossary, so the two read alike.
 | pick / picked | выбрать / выбранные |
 | Trash | Корзина |
 | Command line / terminal | Командная строка / терминал |
-| Identify / Stop identifying | Опознать / Остановить опознание |
+| Identify / Stop identifying | Опознать / Остановить (the setup: Остановить опознание) |
 
 ## Checking
 

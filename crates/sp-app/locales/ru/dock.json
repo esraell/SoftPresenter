@@ -1,5 +1,5 @@
 {
-  "_note": "Russian; see topbar.json. The bar under the slides: transitions (Cut is «Сразу», Dissolve on its key «Плавно»), Continuous («Подряд»), Undo, Redo, the slide views; the theme versions («варианты темы»).",
+  "_note": "Russian; see topbar.json. The bar under the slides: transitions (Cut is «Сразу», Dissolve «Плавно»), Continuous («Подряд»), Undo, Redo, the slide views; the theme versions («варианты темы»).",
   "dock.cut": "Сразу",
   "dock.cut.hint": "Слайды меняются мгновенно",
   "dock.dissolve": "Плавно",
@@ -28,7 +28,7 @@
   "dock.category.wipes": "Шторки",
   "dock.category.none": "Нет",
   "dock.transition.cut": "Сразу",
-  "dock.transition.dissolve": "Растворение",
+  "dock.transition.dissolve": "Плавно",
   "dock.transition.fade": "Затухание",
   "dock.transition.fade_black": "Через чёрный",
   "dock.transition.fade_white": "Через белый",
