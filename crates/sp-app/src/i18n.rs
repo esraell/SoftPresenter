@@ -428,18 +428,16 @@ fn remember_fixed(said: &'static str, english: &'static str) {
     if said == english {
         return;
     }
-    if let Ok(mut shadow) = shadow().try_lock()
-        && !shadow.fixed.contains_key(said)
-    {
+    let mut shadow = shadow().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !shadow.fixed.contains_key(said) {
         shadow.fixed.insert(said, english);
         shadow.sorted = None;
     }
 }
 
 fn remember_made(said: &str, english: impl FnOnce() -> String) {
-    if let Ok(mut shadow) = shadow().try_lock()
-        && !shadow.made.contains_key(said)
-    {
+    let mut shadow = shadow().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !shadow.made.contains_key(said) {
         let english = english();
         if english == said {
             return;
@@ -457,7 +455,9 @@ fn remember_made(said: &str, english: impl FnOnce() -> String) {
 /// part of a word, and never fewer than three letters). Names, song words and anything the app
 /// didn't say stay as they are. For the log and the command line's replies, which stay English.
 pub fn english_of(text: &str) -> String {
-    let Ok(mut shadow) = shadow().try_lock() else { return text.to_owned() };
+    // Waited for, not tried: the lock is only held while a translation is noted, and a
+    // try that failed left a line in the language set now and then (and a test flaky).
+    let mut shadow = shadow().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if shadow.fixed.is_empty() && shadow.made.is_empty() {
         return text.to_owned();
     }
