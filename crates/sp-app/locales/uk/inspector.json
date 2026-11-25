@@ -144,7 +144,7 @@
   "inspector.text.shape": "Фігура не має тексту. Її колір і контур — на вкладці «Фігура».",
   "inspector.text.selected": "ВИБРАНІ СЛОВА",
   "inspector.text.whole_box": "УСЕ ПОЛЕ",
-  "inspector.text.whole_box.note": "Виберіть у ньому слова, щоб змінити лише їх",
+  "inspector.text.whole_box.note": "Виділіть слова, щоб змінити лише їх",
   "inspector.text.copy_style": "Скопіювати стиль",
   "inspector.text.copy_style.hint": "Запамʼятати, як виглядає цей текст",
   "inspector.text.paste_style": "Вставити стиль",

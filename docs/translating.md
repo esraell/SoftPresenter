@@ -328,7 +328,7 @@ Glossary, shared with the Russian tables so the two read alike:
 | Edit view · Service view · Bible view | Редактор · Служіння · Біблія |
 | Edit (the verb) | Редагувати |
 | key (on the keyboard) | клавіша |
-| item (in a playlist) | елемент |
+| item (in a playlist) | пункт |
 | divider · header | розділювач · заголовок |
 | text box · shape · object | текстове поле · фігура · обʼєкт |
 | background | фон |
@@ -347,8 +347,8 @@ Glossary, shared with the Russian tables so the two read alike:
 | Next (the action) · the stage screens' NEXT · Go to Next | «Далі» · ДАЛІ · Перейти далі |
 | placeholder (a playlist item) | порожнє місце |
 | media strip · media bin · media playlist · audio playlist | смуга медіа · медіатека · медіасписок · аудіосписок |
-| Cut · Dissolve · Continuous | Миттєво · Розчинення · Підряд |
-| Page · Slides · Options (the Bible bar) | Сторінка · Слайди · Параметри (short: Стор., Опції) |
+| Cut · Dissolve · Continuous | Одразу · Плавно · Підряд (the Cut card in Settings: Миттєво) |
+| Page · Slides · Options (the Bible bar) | Сторінка · Слайди · Параметри (short: Стор., Ще) |
 | Identify · test pattern | Розпізнати · тестове зображення |
 | key · fill (a DeckLink keyer) | ключ · заповнення |
 | Screen Mirroring · Control Centre (Apple's own) | Відеодублювання · Центр керування |
